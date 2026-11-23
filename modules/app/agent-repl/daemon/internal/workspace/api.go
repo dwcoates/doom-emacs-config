@@ -7,6 +7,7 @@
 package workspace
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -437,14 +438,13 @@ type Verbs interface {
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
 	// request.
 	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
-	// CreateDeployMediator makes the deploy mediator NAME of the
-	// repository at REPODIR, unprompted and in remote control
+	// CreateMediator makes the standing mediator NAME of the repository at
+	// REPODIR on AGENT's model, unprompted and in remote control
 	// (deploychecks.go).
-	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployMediatorEffort picks the deploy mediator's effort and
-	// switches a live session to it without waiting on its turn
-	// (deploychecks.go).
-	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
+	CreateMediator(ctx context.Context, repoDir, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error)
+	// SetMediatorAgent puts a standing mediator on AGENT's model and effort
+	// before a brief (deploychecks.go).
+	SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
 	// live, making the fork it still owes: what a hand-off that finds the
 	// merge workspace a restart left behind needs before its pick can run.

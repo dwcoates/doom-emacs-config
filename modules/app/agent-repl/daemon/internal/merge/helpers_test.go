@@ -562,6 +562,28 @@ func (f *fakeDB) MarkMediatorBriefed(ctx context.Context, repo wsm.RepoKey) erro
 	return f.checks.MarkMediatorBriefed(ctx, repo)
 }
 
+func (f *fakeDB) StandingMediatorOf(ctx context.Context, role wsm.MediatorRole, repo wsm.RepoKey) (wsm.DeployMediator, bool, error) {
+	return f.checks.StandingMediatorOf(ctx, role, repo)
+}
+
+func (f *fakeDB) StandingMediatorRepoOf(ctx context.Context, role wsm.MediatorRole, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
+	if role == wsm.MediatorDeploy {
+		return f.MediatorRepoOf(ctx, ws)
+	}
+	return f.checks.StandingMediatorRepoOf(ctx, role, ws)
+}
+
+func (f *fakeDB) RecordStandingMediator(ctx context.Context, role wsm.MediatorRole, repo wsm.RepoKey, ws ids.WorkspaceID) error {
+	if role == wsm.MediatorDeploy {
+		return f.RecordDeployMediator(ctx, repo, ws)
+	}
+	return f.checks.RecordStandingMediator(ctx, role, repo, ws)
+}
+
+func (f *fakeDB) MarkStandingMediatorBriefed(ctx context.Context, role wsm.MediatorRole, repo wsm.RepoKey) error {
+	return f.checks.MarkStandingMediatorBriefed(ctx, role, repo)
+}
+
 func (f *fakeDB) MarkEscalationTold(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
 	return f.checks.MarkEscalationTold(ctx, repo, owed)
 }
@@ -5415,12 +5437,15 @@ type fakeDeployChecks struct {
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
 	effortErr error
+	// agents are the mediator configs every create and readying was given,
+	// in order.
+	agents []*repoconfigv1.MediatorAgent
 	// onEffort, when set, runs as the effort is set, before effortErr is
 	// answered: a test cuts the caller's context there.
 	onEffort func()
 }
 
-func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error {
+func (f *fakeDeployChecks) SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error {
 	_, standing, err := f.db.DeployMediatorOf(ctx, f.key())
 	if err != nil {
 		return err
@@ -5428,6 +5453,7 @@ func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.W
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.efforts = append(f.efforts, fmt.Sprintf("mediator:%s:standing=%v", ws, standing))
+	f.agents = append(f.agents, agent)
 	if f.onEffort != nil {
 		f.onEffort()
 	}
@@ -5448,7 +5474,10 @@ func (f *fakeDeployChecks) make(prefix, name string) (wsm.Workspace, error) {
 	return ws, nil
 }
 
-func (f *fakeDeployChecks) CreateDeployMediator(ctx context.Context, _, name string) (wsm.Workspace, error) {
+func (f *fakeDeployChecks) CreateMediator(ctx context.Context, _, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
+	f.mu.Lock()
+	f.agents = append(f.agents, agent)
+	f.mu.Unlock()
 	f.mu.Lock()
 	err := f.escalationErr
 	f.createCtxErrs = append(f.createCtxErrs, ctx.Err())

@@ -102,7 +102,7 @@ func owedCheck(t *testing.T, h *harness) *wsm.Mediation {
 func withMediator(t *testing.T, h *harness) {
 	t.Helper()
 	h.db.mu.Lock()
-	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: mediatorName, Repo: theRepository}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: deployRole.name, Repo: theRepository}
 	h.db.mu.Unlock()
 	if _, found, err := h.db.DeployMediatorOf(context.Background(), mediationKey(h)); err != nil || !found {
 		if err := h.db.RecordDeployMediator(context.Background(), mediationKey(h), "ws-fixer"); err != nil {
@@ -206,7 +206,7 @@ func TestARoundMakesTheQueuesMediatorAndTellsItUncompacted(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: one mediator made, which the undecided check is escalated to.
-	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != mediatorName {
+	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != deployRole.name {
 		t.Fatalf("made %v, want one mediator for the queue", h.checks.made)
 	}
 	for _, sub := range intakeSubmissions(h) {
@@ -258,7 +258,7 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 	// Assert: one mediator made and told of each deploy, its session never
 	// ended and nothing closed.
 	made := h.checks.made
-	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{mediatorName}) {
+	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{deployRole.name}) {
 		t.Fatalf("mediator told %d times, made %v; want the one mediator told of each deploy", len(intakeTellings(h)), made)
 	}
 	if len(h.stoppedSessions) != 0 || len(h.checks.closed) != 0 {

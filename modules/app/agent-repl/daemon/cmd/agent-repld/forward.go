@@ -1,6 +1,7 @@
 package main
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
 	"fmt"
@@ -405,20 +406,20 @@ func (f *verbsForwarder) letQueueThroughAfterBypassTurn(ctx context.Context, ws 
 // built after the merge orchestrator.
 type deployChecks struct{ f *verbsForwarder }
 
-func (d deployChecks) CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
-	verbs, err := d.f.bound("the merge queue made a deploy mediator")
+func (d deployChecks) CreateMediator(ctx context.Context, repoDir, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
+	verbs, err := d.f.bound("the merge queue made a standing mediator")
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return verbs.CreateDeployMediator(ctx, repoDir, name)
+	return verbs.CreateMediator(ctx, repoDir, name, agent)
 }
 
-func (d deployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error {
-	verbs, err := d.f.bound("the merge queue set the deploy mediator's effort")
+func (d deployChecks) SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error {
+	verbs, err := d.f.bound("the merge queue set a standing mediator's model and effort")
 	if err != nil {
 		return err
 	}
-	return verbs.SetDeployMediatorEffort(ctx, ws)
+	return verbs.SetMediatorAgent(ctx, ws, agent)
 }
 
 func (d deployChecks) Reopen(ctx context.Context, ws ids.WorkspaceID) error {

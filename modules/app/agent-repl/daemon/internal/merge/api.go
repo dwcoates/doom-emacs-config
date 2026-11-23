@@ -23,6 +23,7 @@
 package merge
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"fmt"
 	"strings"
@@ -902,13 +903,14 @@ type Deps struct {
 // DeployCheckWorkspaces is what the deploy checks need of the workspaces
 // (workspace.Verbs, bound after the queue is built).
 type DeployCheckWorkspaces interface {
-	// CreateDeployMediator makes a repository's deploy mediator, in sight,
-	// unprompted and in remote control.
-	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployMediatorEffort picks the deploy mediator's effort, which its
-	// session comes up at, and switches a live session to it without waiting
-	// on its turn; a shim absent, stood down or unreachable is no failure.
-	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
+	// CreateMediator makes a repository's standing mediator, in sight,
+	// unprompted, in remote control, on the model AGENT configures (the
+	// daemon's default when it names none).
+	CreateMediator(ctx context.Context, repoDir, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error)
+	// SetMediatorAgent records a standing mediator's model and picks its
+	// effort, which its session comes up at, and switches a live session to
+	// both; a shim absent, stood down or unreachable is no failure.
+	SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error
 	// Reopen opens a closed remediation workspace again, its worktree cut
 	// again on its branch at the main branch's tip.
 	Reopen(ctx context.Context, ws ids.WorkspaceID) error

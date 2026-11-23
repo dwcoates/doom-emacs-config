@@ -1,6 +1,7 @@
 package merge
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"encoding/json"
 	"errors"
@@ -209,6 +210,8 @@ func replacedOutcome(m wsm.ReplacedMediation) string {
 // checkedQueue is a registered repository whose deploys are checked.
 type checkedQueue struct {
 	registeredQueue
+	// config is the repository's lifecycle config as the queue was listed.
+	config *repoconfigv1.LifecycleConfig
 }
 
 // checkedQueues answers every registered repository whose lifecycle config
@@ -232,7 +235,7 @@ func (o *orchestrator) checkedQueues(ctx context.Context, op string) ([]checkedQ
 			continue
 		}
 		if cfg.GetDeployChecks() != nil {
-			out = append(out, checkedQueue{registeredQueue: q})
+			out = append(out, checkedQueue{registeredQueue: q, config: cfg})
 		}
 	}
 	return out, nil
@@ -455,7 +458,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		// not served reads it before that transition, and the pass its edge
 		// runs after it finds the mediator served.
 		fields := dlog.Context{"repo": string(q.key)}
-		mediator, standing, err := o.mediatorStanding(ctx, q.key)
+		mediator, standing, err := o.mediatorStanding(ctx, deployRole, q.key)
 		if err != nil {
 			if o.mediationFailed(ctx, fields, logsite.Msg("could not read whether this daemon serves the queue's deploy mediator; its check's round is not run, and the next pass runs it"), err) {
 				return
@@ -464,7 +467,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		}
 		served := standing == ServedHere
 		if served {
-			o.keepMediatorShown(ctx, q)
+			o.keepMediatorShown(ctx, deployRole, q)
 		}
 		o.surfaceFinish(ctx, q.key)
 		if m == nil {
@@ -778,7 +781,7 @@ func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Me
 		o.escalateNotRun(ctx, q, m, what, err, fields)
 		return
 	}
-	if _, merr := o.mediatorOf(ctx, q, fields); merr != nil {
+	if _, merr := o.mediatorOf(ctx, deployRole, q, fields); merr != nil {
 		o.deps.Log.Global().With(withField(withField(fields, "error", err.Error()), "mediator_error", merr.Error())).Error(opMediation,
 			"{what}; no deploy mediator could be found or made to escalate the check to, and the queue stays held for it", dlog.Context{"what": what})
 		return
@@ -833,18 +836,18 @@ func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, m wsm.Me
 // worktree under that turn.
 func (o *orchestrator) mediatorFor(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) (ids.WorkspaceID, error) {
 	if m.Prompted() {
-		mediator, err := o.mediatorOf(ctx, q, fields)
+		mediator, err := o.mediatorOf(ctx, deployRole, q, fields)
 		if err != nil {
 			return "", fmt.Errorf("merge: the queue's deploy mediator: %w", err)
 		}
 		return mediator.ws, nil
 	}
-	mediator, err := o.readyMediator(ctx, q, fields)
+	mediator, err := o.readyMediator(ctx, deployRole, q, fields)
 	if err != nil {
 		return "", fmt.Errorf("merge: the queue's deploy mediator: %w", err)
 	}
 	if !mediator.briefed {
-		o.markBriefed(ctx, q, fields)
+		o.markBriefed(ctx, deployRole, q, fields)
 	}
 	o.deps.Log.Global().Info(opMediation, "the deploy mediator takes the check", withField(fields, "mediator", string(mediator.ws)))
 	return mediator.ws, nil

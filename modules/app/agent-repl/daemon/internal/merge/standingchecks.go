@@ -10,9 +10,11 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/logsite"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 )
 
-// THE STANDING DEPLOY MEDIATOR (owner rulings, 2026-11-17). A repository
+// THE STANDING MEDIATORS. The deploy mediator (owner rulings, 2026-11-17):
+// a repository
 // whose queue checks its deploys keeps ONE workspace across every deploy,
 // never one per check: it checks each deploy, hidden; fixes what it
 // dispatches itself, in sight in its repository's section; and settles an
@@ -25,12 +27,52 @@ import (
 // (wsm.Workspace.Mediator). The daemon makes it only for a queue
 // that has none, and reopens it when the user closed it.
 
-// mediatorName is the slug a made mediator takes; the workspace verbs make
-// it under the daemon's own branch namespace (workspace.StandingBranch), so
-// no branch a person or an agent cut can hold it. A repository holds it
-// once; a closed mediator keeps it, and is reopened. A mediator recorded
-// before the namespace keeps the name it was made under.
-const mediatorName = "deploy-mediator"
+// mediatorRole is what tells one standing mediator from the other: the one
+// engine checks and briefs both (docs/investigations/
+// 2026-11-23-production-mediator-plan.md), and every way they differ is a
+// field here, never a branch on the role's name.
+type mediatorRole struct {
+	// role is the workspace's standing (wsm.Workspace.Mediator), and the
+	// table its record lives in.
+	role wsm.MediatorRole
+	// name is the slug a made mediator takes; the workspace verbs make it
+	// under the daemon's own branch namespace (workspace.StandingBranch), so
+	// no branch a person or an agent cut can hold it. A repository holds it
+	// once; a closed mediator keeps it, and is reopened. A mediator recorded
+	// before the namespace keeps the name it was made under.
+	name string
+	// agent is the section of a repository's lifecycle config that says how
+	// the role's mediator runs, nil when the role's checks are off.
+	agent func(*repoconfigv1.LifecycleConfig) (*repoconfigv1.MediatorAgent, bool)
+}
+
+// deployRole is the deploy mediator's: it checks each landing and holds the
+// queue until it decides.
+var deployRole = mediatorRole{
+	role: wsm.MediatorDeploy,
+	name: "deploy-mediator",
+	agent: func(cfg *repoconfigv1.LifecycleConfig) (*repoconfigv1.MediatorAgent, bool) {
+		return cfg.GetDeployChecks().GetAgent(), cfg.GetDeployChecks() != nil
+	},
+}
+
+// productionRole is the production mediator's: it reviews the span between
+// landings and dispatches children, holding nothing.
+var productionRole = mediatorRole{
+	role: wsm.MediatorProduction,
+	name: "production-mediator",
+	agent: func(cfg *repoconfigv1.LifecycleConfig) (*repoconfigv1.MediatorAgent, bool) {
+		return cfg.GetProductionChecks().GetAgent(), cfg.GetProductionChecks() != nil
+	},
+}
+
+// standingRoles is every standing mediator's role.
+var standingRoles = []mediatorRole{deployRole, productionRole}
+
+// roleFields is FIELDS naming R's role.
+func (r mediatorRole) roleFields(fields dlog.Context) dlog.Context {
+	return withField(fields, "role", string(r.role))
+}
 
 // standing is a queue's mediator, as a check finds it.
 type standing struct {
@@ -51,18 +93,18 @@ type standing struct {
 // mediator it was still adopting, the refresh was refused not_yet_adopted,
 // and the check was escalated to the user as one that could not run).
 
-// mediatorStanding answers queue REPO's recorded deploy mediator and this
+// mediatorStanding answers queue REPO's recorded mediator in role R and this
 // daemon's serving standing of it; a queue with none recorded answers no
 // mediator, served, since one made here (makeMediator) is owned from its
 // creation. A failed read is answered.
-func (o *orchestrator) mediatorStanding(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, ServingStanding, error) {
-	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, repo)
+func (o *orchestrator) mediatorStanding(ctx context.Context, r mediatorRole, repo wsm.RepoKey) (ids.WorkspaceID, ServingStanding, error) {
+	recorded, found, err := o.deps.DB.StandingMediatorOf(ctx, r.role, repo)
 	if err != nil || !found {
 		return "", ServedHere, err
 	}
 	standing, err := o.deps.Standing.ServingStanding(recorded.Workspace)
 	if err != nil {
-		return recorded.Workspace, ServedHere, fmt.Errorf("merge: the serving standing of the deploy mediator %s: %w", recorded.Workspace, err)
+		return recorded.Workspace, ServedHere, fmt.Errorf("merge: the serving standing of the %s mediator %s: %w", r.role, recorded.Workspace, err)
 	}
 	return recorded.Workspace, standing, nil
 }
@@ -80,10 +122,21 @@ func (o *orchestrator) mediatorStanding(ctx context.Context, repo wsm.RepoKey) (
 // lifetime (enterMediation), which the daemon's exit cuts.
 func (o *orchestrator) mediateAdopted(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
-	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
-	if err != nil {
-		o.mediationFailed(ctx, fields, logsite.Msg("could not read whether the adopted workspace is a deploy mediator; a round its adoption owes waits for the queue's next pass"), err)
-		return
+	var (
+		repo       wsm.RepoKey
+		isMediator bool
+	)
+	for _, r := range standingRoles {
+		var err error
+		repo, isMediator, err = o.deps.DB.StandingMediatorRepoOf(ctx, r.role, ws)
+		if err != nil {
+			o.mediationFailed(ctx, r.roleFields(fields), logsite.Msg("could not read whether the adopted workspace is a {role} mediator; a round its adoption owes waits for the queue's next pass"), err)
+			return
+		}
+		if isMediator {
+			fields = r.roleFields(fields)
+			break
+		}
 	}
 	if !isMediator {
 		finish, err := o.deps.DB.RemediationFinishOf(ctx, ws)
@@ -95,8 +148,10 @@ func (o *orchestrator) mediateAdopted(ctx context.Context, ws ids.WorkspaceID) {
 			return
 		}
 		repo = finish.Repo
+		// A remediation finish is the deploy mediator's work.
+		fields = deployRole.roleFields(fields)
 	}
-	o.deps.Log.Global().Info(opMediation, "this daemon adopted a deploy mediator; the mediation pass runs what it passed over while the mediator was not served here", withField(fields, "repo", string(repo)))
+	o.deps.Log.Global().Info(opMediation, "this daemon adopted a {role} mediator; the mediation pass runs what it passed over while the mediator was not served here", withField(fields, "repo", string(repo)))
 	o.mediateAgain(context.WithoutCancel(ctx))
 }
 
@@ -109,118 +164,123 @@ func (o *orchestrator) ServingWidened(ctx context.Context) {
 	o.mediateAgain(context.WithoutCancel(ctx))
 }
 
-// mediatorOf answers queue Q's standing mediator: the one recorded,
-// reopened when it was closed, or one made and recorded when the queue has
-// none (or the one recorded is gone from the registry).
-func (o *orchestrator) mediatorOf(ctx context.Context, q checkedQueue, fields dlog.Context) (standing, error) {
-	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q.key)
+// mediatorOf answers queue Q's standing mediator in role R: the one
+// recorded, reopened when it was closed, or one made and recorded when the
+// queue has none (or the one recorded is gone from the registry).
+func (o *orchestrator) mediatorOf(ctx context.Context, r mediatorRole, q checkedQueue, fields dlog.Context) (standing, error) {
+	fields = r.roleFields(fields)
+	recorded, found, err := o.deps.DB.StandingMediatorOf(ctx, r.role, q.key)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read the queue's deploy mediator", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "could not read the queue's {role} mediator", withField(fields, "error", err.Error()))
 		return standing{}, err
 	}
 	if found {
 		record, err := o.deps.DB.Workspace(ctx, recorded.Workspace)
 		switch {
 		case errors.Is(err, wsm.ErrNotFound):
-			o.deps.Log.Global().Info(opMediation, "the deploy mediator is gone from the registry; a new one is made", withField(fields, "gone", string(recorded.Workspace)))
+			o.deps.Log.Global().Info(opMediation, "the {role} mediator is gone from the registry; a new one is made", withField(fields, "gone", string(recorded.Workspace)))
 		case err != nil:
-			o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator", withField(withField(fields, "workspace", string(recorded.Workspace)), "error", err.Error()))
+			o.deps.Log.Global().Error(opMediation, "could not read the {role} mediator", withField(withField(fields, "workspace", string(recorded.Workspace)), "error", err.Error()))
 			return standing{}, err
 		case record.Closed:
 			if err := o.deps.DeployChecks.Reopen(ctx, recorded.Workspace); err != nil {
-				o.deps.Log.Global().Error(opMediation, "the deploy mediator could not be reopened", withField(withField(fields, "workspace", string(recorded.Workspace)), "error", err.Error()))
-				return standing{}, fmt.Errorf("merge: reopen the deploy mediator %s: %w", recorded.Workspace, err)
+				o.deps.Log.Global().Error(opMediation, "the {role} mediator could not be reopened", withField(withField(fields, "workspace", string(recorded.Workspace)), "error", err.Error()))
+				return standing{}, fmt.Errorf("merge: reopen the %s mediator %s: %w", r.role, recorded.Workspace, err)
 			}
-			o.deps.Log.Global().Info(opMediation, "reopened the deploy mediator", withField(fields, "workspace", string(recorded.Workspace)))
+			o.deps.Log.Global().Info(opMediation, "reopened the {role} mediator", withField(fields, "workspace", string(recorded.Workspace)))
 			return standing{ws: recorded.Workspace, briefed: recorded.Briefed}, nil
 		default:
 			return standing{ws: recorded.Workspace, briefed: recorded.Briefed}, nil
 		}
 	}
-	made, err := o.makeMediator(ctx, q, fields)
+	made, err := o.makeMediator(ctx, r, q, fields)
 	if err != nil {
 		return standing{}, err
 	}
 	return standing{ws: made}, nil
 }
 
-// makeMediator makes queue Q's mediator and records it, which its
-// session's landing reads and which makes its finish the daemon's to land
-// directly, whichever brief it works.
-func (o *orchestrator) makeMediator(ctx context.Context, q checkedQueue, fields dlog.Context) (ids.WorkspaceID, error) {
-	fields = withField(fields, "name", mediatorName)
-	made, err := o.deps.DeployChecks.CreateDeployMediator(ctx, q.repository.Dir, mediatorName)
+// makeMediator makes queue Q's mediator in role R and records it, which its
+// session's landing reads and which makes its finish the daemon's to land,
+// whichever brief it works.
+func (o *orchestrator) makeMediator(ctx context.Context, r mediatorRole, q checkedQueue, fields dlog.Context) (ids.WorkspaceID, error) {
+	fields = withField(r.roleFields(fields), "name", r.name)
+	agent, _ := r.agent(q.config)
+	made, err := o.deps.DeployChecks.CreateMediator(ctx, q.repository.Dir, r.name, agent)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator could not be made", withField(fields, "error", err.Error()))
-		return "", fmt.Errorf("merge: make the deploy mediator %s: %w", mediatorName, err)
+		o.deps.Log.Global().Error(opMediation, "the {role} mediator could not be made", withField(fields, "error", err.Error()))
+		return "", fmt.Errorf("merge: make the %s mediator %s: %w", r.role, r.name, err)
 	}
 	fields = withField(fields, "workspace", string(made.ID))
-	if err := o.deps.DB.RecordDeployMediator(ctx, q.key, made.ID); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator was made but could not be recorded", withField(fields, "error", err.Error()))
-		return "", fmt.Errorf("merge: record the deploy mediator %s: %w", made.ID, err)
+	if err := o.deps.DB.RecordStandingMediator(ctx, r.role, q.key, made.ID); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the {role} mediator was made but could not be recorded", withField(fields, "error", err.Error()))
+		return "", fmt.Errorf("merge: record the %s mediator %s: %w", r.role, made.ID, err)
 	}
-	o.deps.Log.Global().Info(opMediation, "made the queue's deploy mediator", fields)
+	o.deps.Log.Global().Info(opMediation, "made the queue's {role} mediator", fields)
 	return made.ID, nil
 }
 
-// readyMediator answers queue Q's mediator ready to be briefed: its worktree
-// at the main branch's tip (Refresh), at its effort, and shown, since it
-// stands in sight for good (owner ruling, 2026-11-19).
-func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, fields dlog.Context) (standing, error) {
-	mediator, err := o.mediatorOf(ctx, q, fields)
+// readyMediator answers queue Q's mediator in role R ready to be briefed: its
+// worktree at the main branch's tip (Refresh), on the model and effort its
+// repository configures, and shown, since it stands in sight for good (owner
+// ruling, 2026-11-19).
+func (o *orchestrator) readyMediator(ctx context.Context, r mediatorRole, q checkedQueue, fields dlog.Context) (standing, error) {
+	mediator, err := o.mediatorOf(ctx, r, q, fields)
 	if err != nil {
 		return standing{}, err
 	}
-	fields = withField(fields, "mediator", string(mediator.ws))
+	fields = withField(r.roleFields(fields), "mediator", string(mediator.ws))
 	if err := o.deps.DeployChecks.Refresh(ctx, mediator.ws); err != nil {
-		o.mediationFailed(ctx, fields, logsite.Msg("the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed"), err)
-		return standing{}, fmt.Errorf("merge: refresh the deploy mediator %s: %w", mediator.ws, err)
+		o.mediationFailed(ctx, fields, logsite.Msg("the {role} mediator's worktree could not be brought to the main branch's tip; it is not briefed"), err)
+		return standing{}, fmt.Errorf("merge: refresh the %s mediator %s: %w", r.role, mediator.ws, err)
 	}
-	// THE MEDIATOR IS RECORDED BEFORE ITS EFFORT IS PICKED, and so before
-	// the brief's delivery brings its session up at the pick: the session's
-	// landing reads the record.
-	if err := o.deps.DeployChecks.SetDeployMediatorEffort(ctx, mediator.ws); err != nil {
-		o.mediationFailed(ctx, fields, logsite.Msg("the deploy mediator's effort could not be set; it is not briefed"), err)
-		return standing{}, fmt.Errorf("merge: set the deploy mediator %s's effort: %w", mediator.ws, err)
+	// THE MEDIATOR IS RECORDED BEFORE ITS MODEL AND EFFORT ARE PICKED, and so
+	// before the brief's delivery brings its session up at the pick: the
+	// session's landing reads the record.
+	agent, _ := r.agent(q.config)
+	if err := o.deps.DeployChecks.SetMediatorAgent(ctx, mediator.ws, agent); err != nil {
+		o.mediationFailed(ctx, fields, logsite.Msg("the {role} mediator's model and effort could not be set; it is not briefed"), err)
+		return standing{}, fmt.Errorf("merge: set the %s mediator %s's model and effort: %w", r.role, mediator.ws, err)
 	}
-	if err := o.show(ctx, mediator, fields); err != nil {
+	if err := o.show(ctx, r, mediator, fields); err != nil {
 		return standing{}, err
 	}
 	return mediator, nil
 }
 
-// showMediator answers queue Q's mediator shown and nothing else readied:
-// the mediator that escalated in its own turn is mid-turn, so its worktree
-// holds its work and its effort is set (escalate).
-func (o *orchestrator) showMediator(ctx context.Context, q checkedQueue, fields dlog.Context) (standing, error) {
-	mediator, err := o.mediatorOf(ctx, q, fields)
+// showMediator answers queue Q's mediator in role R shown and nothing else
+// readied: the mediator that escalated in its own turn is mid-turn, so its
+// worktree holds its work and its effort is set (escalate).
+func (o *orchestrator) showMediator(ctx context.Context, r mediatorRole, q checkedQueue, fields dlog.Context) (standing, error) {
+	mediator, err := o.mediatorOf(ctx, r, q, fields)
 	if err != nil {
 		return standing{}, err
 	}
-	if err := o.show(ctx, mediator, withField(fields, "mediator", string(mediator.ws))); err != nil {
+	if err := o.show(ctx, r, mediator, withField(r.roleFields(fields), "mediator", string(mediator.ws))); err != nil {
 		return standing{}, err
 	}
 	return mediator, nil
 }
 
-// show puts MEDIATOR in sight for its brief, recording a failure at ERROR.
-func (o *orchestrator) show(ctx context.Context, mediator standing, fields dlog.Context) error {
+// show puts MEDIATOR, of role R, in sight for its brief, recording a failure
+// at ERROR.
+func (o *orchestrator) show(ctx context.Context, r mediatorRole, mediator standing, fields dlog.Context) error {
 	if err := o.deps.DeployChecks.Resume(ctx, mediator.ws); err != nil {
-		o.mediationFailed(ctx, fields, logsite.Msg("the deploy mediator could not be shown for its brief; it is not briefed"), err)
-		return fmt.Errorf("merge: show the deploy mediator %s: %w", mediator.ws, err)
+		o.mediationFailed(ctx, r.roleFields(fields), logsite.Msg("the {role} mediator could not be shown for its brief; it is not briefed"), err)
+		return fmt.Errorf("merge: show the %s mediator %s: %w", r.role, mediator.ws, err)
 	}
 	return nil
 }
 
-// keepMediatorShown shows queue Q's mediator whenever it is hidden: it
-// stands in its repository's section for good (owner ruling, 2026-11-19,
-// replacing 2026-11-17's sight only while at work), so a mediator an earlier
-// build hid, or the user hid, is shown again by the next pass.
-func (o *orchestrator) keepMediatorShown(ctx context.Context, q checkedQueue) {
-	fields := dlog.Context{"repo": string(q.key)}
-	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q.key)
+// keepMediatorShown shows queue Q's mediator in role R whenever it is
+// hidden: it stands in its repository's section for good (owner ruling,
+// 2026-11-19, replacing 2026-11-17's sight only while at work), so a mediator
+// an earlier build hid, or the user hid, is shown again by the next pass.
+func (o *orchestrator) keepMediatorShown(ctx context.Context, r mediatorRole, q checkedQueue) {
+	fields := r.roleFields(dlog.Context{"repo": string(q.key)})
+	recorded, found, err := o.deps.DB.StandingMediatorOf(ctx, r.role, q.key)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to keep it shown", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "could not read the {role} mediator to keep it shown", withField(fields, "error", err.Error()))
 		return
 	}
 	if !found {
@@ -230,7 +290,7 @@ func (o *orchestrator) keepMediatorShown(ctx context.Context, q checkedQueue) {
 	fields = withField(fields, "mediator", string(mediator))
 	record, err := o.deps.DB.Workspace(ctx, mediator)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator's workspace to keep it shown", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "could not read the {role} mediator's workspace to keep it shown", withField(fields, "error", err.Error()))
 		return
 	}
 	if !record.Hidden {
@@ -240,21 +300,21 @@ func (o *orchestrator) keepMediatorShown(ctx context.Context, q checkedQueue) {
 		// THE GATE PASSED (Mediate), BUT THE MEDIATOR MAY BE HANDED AWAY
 		// SINCE: a refusal on its standing is the daemon that serves it next
 		// to keep it shown.
-		if o.refusedOnStanding(fields, "keeping the hidden deploy mediator shown", err) {
+		if o.refusedOnStanding(fields, "keeping the hidden {role} mediator shown", err) {
 			return
 		}
-		o.deps.Log.Global().Error(opMediation, "the hidden deploy mediator could not be shown", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "the hidden {role} mediator could not be shown", withField(fields, "error", err.Error()))
 		return
 	}
-	o.deps.Log.Global().Info(opMediation, "showed the hidden deploy mediator; it stands in its repository's section for good", fields)
+	o.deps.Log.Global().Info(opMediation, "showed the hidden {role} mediator; it stands in its repository's section for good", fields)
 }
 
-// markBriefed records queue Q's mediator briefed, once its first brief is
-// submitted. A failure is recorded and left: the next brief states its work
-// in full again, which is no harm.
-func (o *orchestrator) markBriefed(ctx context.Context, q checkedQueue, fields dlog.Context) {
-	if err := o.deps.DB.MarkMediatorBriefed(ctx, q.key); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator was briefed but could not be recorded so; its next brief states its work in full again", withField(fields, "error", err.Error()))
+// markBriefed records queue Q's mediator in role R briefed, once its first
+// brief is submitted. A failure is recorded and left: the next brief states
+// its work in full again, which is no harm.
+func (o *orchestrator) markBriefed(ctx context.Context, r mediatorRole, q checkedQueue, fields dlog.Context) {
+	if err := o.deps.DB.MarkStandingMediatorBriefed(ctx, r.role, q.key); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the {role} mediator was briefed but could not be recorded so; its next brief states its work in full again", withField(r.roleFields(fields), "error", err.Error()))
 	}
 }
 
