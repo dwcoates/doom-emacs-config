@@ -94,7 +94,9 @@ func TestUpdateProductionMediationAnswersTheOrchestratorsRefusalsOnTheirArms(t *
 				return e.GetSiteOwned().GetSite().GetHex() == "0123456789ab" && e.GetSiteOwned().GetOpenChild().GetId() == "child-9"
 			}},
 		{name: "a site two children name", err: &merge.RefusalError{Arm: merge.ArmSiteOwned, Reason: "twice", Fields: map[string]any{"site": "0123456789ab", "index": 1}},
-			got: func(e *agentreplv1.UpdateProductionMediationError) bool { return e.GetSiteOwned().GetRepeatedInChild() == 1 }},
+			got: func(e *agentreplv1.UpdateProductionMediationError) bool {
+				return e.GetSiteOwned().GetRepeatedInChild() == 1
+			}},
 		{name: "a child refused", err: &merge.RefusalError{Arm: merge.ArmChildRefused, Reason: "the name is taken", Fields: map[string]any{"child": 0}},
 			got: func(e *agentreplv1.UpdateProductionMediationError) bool {
 				return e.GetChildRefused().GetDetail() == "the name is taken" && e.GetChildRefused().GetChild() == 0

@@ -256,12 +256,19 @@ func (o *orchestrator) checkedQueueOf(ctx context.Context, repo wsm.RepoKey) (ch
 	if err != nil {
 		return checkedQueue{}, false, err
 	}
+	q, found := queueKeyed(queues, repo)
+	return q, found, nil
+}
+
+// queueKeyed answers the queue of QUEUES keyed REPO, by sameQueue, and
+// whether one is. Every lookup of a listed queue by its key goes through it.
+func queueKeyed(queues []checkedQueue, repo wsm.RepoKey) (checkedQueue, bool) {
 	for _, q := range queues {
 		if sameQueue(q.key, repo) {
-			return q, true, nil
+			return q, true
 		}
 	}
-	return checkedQueue{}, false, nil
+	return checkedQueue{}, false
 }
 
 // sameQueue reports whether A and B key one queue: the store answers a key

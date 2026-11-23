@@ -687,13 +687,7 @@ func (o *orchestrator) toldProductionCheck(ctx context.Context, ws ids.Workspace
 	if err != nil {
 		return checkedQueue{}, wsm.ProductionCheck{}, err
 	}
-	var q checkedQueue
-	found := false
-	for _, candidate := range queues {
-		if sameQueue(candidate.key, repo) {
-			q, found = candidate, true
-		}
-	}
+	q, found := queueKeyed(queues, repo)
 	if !found {
 		o.deps.Log.Global().Warn(opProduction, "refused a production decision in a repository that checks its production no more", withField(fields, "repo", string(repo)))
 		return checkedQueue{}, wsm.ProductionCheck{}, refuse(ArmNoProductionCheckOwed, ws, "the repository checks its production no more")

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -2029,5 +2031,58 @@ func TestAMediatorWhoseStandingCannotBeReadRunsNoRound(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
 		Message: "could not read whether this daemon serves the queue's deploy mediator; its check's round is not run, and the next pass runs it"}); !ok {
 		t.Fatalf("records = %v, want the unread standing at ERROR", h.logs.Records())
+	}
+}
+
+func TestQueueKeyedFindsAListedQueueByItsKey(t *testing.T) {
+	a := checkedQueue{registeredQueue: registeredQueue{key: wsm.RepoKey(t.TempDir())}}
+	b := checkedQueue{registeredQueue: registeredQueue{key: wsm.RepoKey(t.TempDir())}}
+	cases := []struct {
+		name      string
+		repo      wsm.RepoKey
+		wantFound bool
+		want      checkedQueue
+	}{
+		{name: "a listed key finds its queue", repo: b.key, wantFound: true, want: b},
+		{name: "a key no queue has finds none", repo: wsm.RepoKey(t.TempDir())},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, found := queueKeyed([]checkedQueue{a, b}, tc.repo)
+
+			// Assert
+			if found != tc.wantFound || got.key != tc.want.key {
+				t.Fatalf("queueKeyed = (%v, %v), want (%v, %v)", got.key, found, tc.want.key, tc.wantFound)
+			}
+		})
+	}
+}
+
+func TestEveryListedQueueLookupGoesThroughQueueKeyed(t *testing.T) {
+	// Arrange: every merge source file but the helper's own.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act, Assert: no other code compares a listed queue's key by hand.
+	byHand := regexp.MustCompile(`sameQueue\(\w+\.key,`)
+	total := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := len(byHand.FindAllIndex(body, -1))
+		if n > 0 && file != "mediation.go" {
+			t.Fatalf("%s compares a listed queue's key by hand; use queueKeyed", file)
+		}
+		total += n
+	}
+	if total != 1 {
+		t.Fatalf("a listed queue's key is compared %d times, want once, inside queueKeyed", total)
 	}
 }
