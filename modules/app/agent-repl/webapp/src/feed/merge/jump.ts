@@ -195,7 +195,7 @@ function refuse(
     operation: `${site.operation}-refused`,
     context: { arm, workspace: workspace.id },
   }, { rpc, sentence });
-  host.append(drawRefusal(site, arm, sentence));
+  host.append(drawJumpRefusal(site, arm, sentence));
 }
 
 /**
@@ -208,11 +208,11 @@ function refuseTransport(host: HTMLElement, site: JumpSite, rpc: string, workspa
     operation: `${site.operation}-failed`,
     context: { workspace: workspace.id, cause: err },
   }, { rpc, err: String(err) });
-  host.append(drawRefusal(site, "transport", "the daemon could not be reached"));
+  host.append(drawJumpRefusal(site, "transport", "the daemon could not be reached"));
 }
 
 /** The refusal, inside the element that made the call. */
-function drawRefusal(site: JumpSite, arm: string, text: string): HTMLElement {
+export function drawJumpRefusal(site: JumpSite, arm: string, text: string): HTMLElement {
   const el = document.createElement("div");
   el.className = `refusal ${site.refusalClass}`;
   el.setAttribute("data-arm", arm);

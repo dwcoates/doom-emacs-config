@@ -269,7 +269,7 @@ describe("jumpForStanding", () => {
   });
 
   it("is the one choice of jump by standing: no caller picks between the two jumps itself", () => {
-    for (const file of ["feed/workspace-mentions.ts"]) {
+    for (const file of ["feed/workspace-mentions.ts", "feed/pull-request-owner.ts"]) {
       const source = codeOf(readFileSync(join(process.cwd(), "src", file), "utf8"));
       expect([source.includes("jumpForStanding("), source.includes("openAndJumpToWorkspace")], file).toEqual([true, false]);
     }

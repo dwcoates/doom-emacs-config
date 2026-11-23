@@ -14,6 +14,10 @@ import {
   type OpenExternalRequest,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
 import {
+  FindPullRequestOwnerResponseSchema,
+  type FindPullRequestOwnerRequest,
+} from "../../proto/gen/ts/agentrepl/v1/endpoint_find_pull_request_owner_pb";
+import {
   OpenInEditorErrorSchema,
   OpenInEditorResponseSchema,
   type OpenInEditorRequest,
@@ -58,6 +62,7 @@ interface Harness {
   ctx: AppContext;
   external: OpenExternalRequest[];
   editor: OpenInEditorRequest[];
+  owner: FindPullRequestOwnerRequest[];
 }
 
 /** What each fact-carrying arm must carry for its sentence to be complete. */
@@ -92,11 +97,19 @@ function harness(
   arm: "success" | "error" | "throw" = "success",
   cause = "invalidUrl",
   editorCause = "pathEscapesWorkspace",
+  ownerAnswer: "unowned" | "notPullRequest" = "unowned",
 ): Harness {
   const external: OpenExternalRequest[] = [];
   const editor: OpenInEditorRequest[] = [];
+  const owner: FindPullRequestOwnerRequest[] = [];
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
+      findPullRequestOwner: (req) => {
+        owner.push(req);
+        return create(FindPullRequestOwnerResponseSchema, {
+          result: { case: "success", value: { answer: { case: ownerAnswer, value: {} } } },
+        });
+      },
       openExternal: (req) => {
         external.push(req);
         if (arm === "throw") throw new ConnectError("gone", Code.Unavailable);
@@ -129,7 +142,7 @@ function harness(
     failures: SINK,
     composerEnabled: false,
   });
-  return { ctx, external, editor };
+  return { ctx, external, editor, owner };
 }
 
 /** A primary, unmodified click, as a user makes. */
@@ -970,6 +983,57 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
 
     // Assert.
     expect(external.map((r) => r.url)).toEqual(["https://example.test/x"]);
+    off();
+  });
+
+  /** A shift-click with MODIFIERS besides, on the prose link in ROOT. */
+  function shiftClick(root: HTMLElement, modifiers: MouseEventInit = {}): MouseEvent {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, shiftKey: true, ...modifiers });
+    root.querySelector("a")!.dispatchEvent(event);
+    return event;
+  }
+
+  const PULL_URL = "https://github.com/ChessCom/explanation-engine/pull/42";
+
+  it("asks the daemon for a shift-clicked link's owner instead of opening it, and cancels the click", async () => {
+    // Arrange.
+    const { ctx, external, owner } = harness();
+    const { root, off } = prose(ctx, renderMarkdown(`[the pull request](${PULL_URL})`));
+
+    // Act.
+    const event = shiftClick(root);
+    await settle();
+
+    // Assert.
+    expect([event.defaultPrevented, owner.map((r) => r.url), external]).toEqual([true, [PULL_URL], []]);
+    off();
+  });
+
+  it("opens a shift-clicked link that names no pull request as a plain click does", async () => {
+    // Arrange.
+    const { ctx, external, owner } = harness("success", "invalidUrl", "pathEscapesWorkspace", "notPullRequest");
+    const { root, off } = prose(ctx, renderMarkdown("[docs](https://example.test/x)"));
+
+    // Act.
+    shiftClick(root);
+    await settle();
+
+    // Assert.
+    expect([owner.map((r) => r.url), external.map((r) => r.url)]).toEqual([["https://example.test/x"], ["https://example.test/x"]]);
+    off();
+  });
+
+  it("opens a link shift-clicked with another modifier too, asking for no owner", async () => {
+    // Arrange.
+    const { ctx, external, owner } = harness();
+    const { root, off } = prose(ctx, renderMarkdown(`[the pull request](${PULL_URL})`));
+
+    // Act.
+    shiftClick(root, { metaKey: true });
+    await settle();
+
+    // Assert.
+    expect([owner, external.map((r) => r.url)]).toEqual([[], [PULL_URL]]);
     off();
   });
 

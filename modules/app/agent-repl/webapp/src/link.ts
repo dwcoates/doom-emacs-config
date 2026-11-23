@@ -77,6 +77,8 @@ import {
 import { requireCase, requireMessage, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
 import { feedRowId, feedRowOf } from "./feed/row-id.js";
+import { PULL_REQUEST_OWNER_JUMP, jumpToPullRequestOwner } from "./feed/pull-request-owner.js";
+import { guardMalformed } from "./rpc/guard.js";
 
 const log = createLogger("webapp.link");
 
@@ -317,6 +319,10 @@ function editorTargetContext(target: EditorTarget): Record<string, unknown> {
  * rpc a structured link makes. `renderEditorLink`'s anchor has no `href` at
  * all, so `a[href]` never selects it.
  *
+ * A SHIFT-CLICK ON A WEB LINK switches to the workspace that owns the pull
+ * request it names, rather than opening it (feed/pull-request-owner.ts); a
+ * web link naming no pull request opens as a plain click does.
+ *
  * FILE vs WEB IS THE SCHEME. http(s) is a web link and opens externally;
  * `file://` or a filesystem path is a local file and opens in the editor. A
  * scheme that is neither is left untouched (markdown emits only http(s)
@@ -410,6 +416,10 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
     // Cancel FIRST — a navigation would destroy the page a refusal draws on.
     event.preventDefault();
     event.stopPropagation();
+    if (isShiftClick(event)) {
+      void guardMalformed(ctx, PULL_REQUEST_OWNER_JUMP.operation, shiftClickWebLink(ctx, anchor, href));
+      return;
+    }
     void openExternal(ctx, anchor, href);
     return;
   }
@@ -450,6 +460,25 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
     operation: "link.prose-unroutable-scheme",
     context: { href },
   });
+}
+
+/**
+ * Whether a click is a plain shift-click: the primary button with shift and
+ * no other modifier, which on a pull request link switches to its owner.
+ */
+function isShiftClick(event: MouseEvent): boolean {
+  return event.button === 0 && event.shiftKey && !(event.metaKey || event.ctrlKey || event.altKey);
+}
+
+/**
+ * A shift-click on a web link in prose: the workspace owning the pull request
+ * it names is switched to (feed/pull-request-owner.ts), and a link naming no
+ * pull request opens as a plain click does.
+ */
+async function shiftClickWebLink(ctx: AppContext, anchor: HTMLElement, url: string): Promise<void> {
+  if ((await jumpToPullRequestOwner(ctx, anchor, url)) === "notPullRequest") {
+    await openExternal(ctx, anchor, url);
+  }
 }
 
 /**
