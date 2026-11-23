@@ -268,6 +268,11 @@ var cliNouns = map[string]map[string]cliCommand{
 	logsNoun: {
 		"sites": {usage: "sites -since WHEN [-until WHEN] [-level debug|info|warn|error]", run: logsSites},
 	},
+	productionMediationNoun: {
+		"decide":   {usage: "decide -summary TEXT", run: productionDecide},
+		"dispatch": {usage: "dispatch -summary TEXT (the children are JSON on stdin)", run: productionDispatch},
+		"fold":     {usage: "fold -folded CHILD -surviving CHILD", run: productionFold},
+	},
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},
 		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER] [-daemon ADDRESS]", run: runtimeRollOutLanding},
