@@ -691,11 +691,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// nowhere to open the page, so the renewer is not built and says so.
 	gnsRun := gnsauth.Runner(scripts)
 	var gnsRenewer *gnsauth.Renewer
-	if browser == nil {
-		log.Warn(opGNSAuth, "the GNS sign-in is not kept alive: the daemon has no browser to open its page in", dlog.Context{
+	switch {
+	case p.Contracts.Fake() || fakeShims():
+		// A daemon with its vendors mocked never reaches the real GNS, so it
+		// has no credential to keep alive.
+		log.Info(opGNSAuth, "the GNS sign-in is not kept alive: the daemon runs with its vendors mocked", dlog.Context{
+			"branch": "mocked",
+		})
+	case browser == nil:
+		log.Info(opGNSAuth, "the GNS sign-in is not kept alive: the daemon has no browser to open its page in", dlog.Context{
 			"branch": "no-browser",
 		})
-	} else {
+	default:
 		gnsRenewer, err = gnsauth.New(gnsauth.Deps{
 			Run: scripts, Dir: home, Open: browser,
 			WorkEmail: func(ctx context.Context) (string, error) {
@@ -2054,7 +2061,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "news_digest", Run: digest.Run},
 		{Name: "gns_auth", Run: func(ctx context.Context) error {
 			if gnsRenewer == nil {
-				// Built without a browser (opGNSAuth says so at boot): idle
+				// Built without a browser or under mocked vendors (opGNSAuth says so at boot): idle
 				// until the serving lifetime ends.
 				<-ctx.Done()
 				return ctx.Err()
