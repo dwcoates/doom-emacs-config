@@ -1205,6 +1205,14 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	if s.plane != planeLive {
 		s.replayTail[f.key] = rank.key
 	}
+	// THE REVISION IS STATED LAST, over every stamp above, so it is the row's
+	// whole content and an unchanged row compares equal below (rowrevision.go).
+	if err := stampRevision(snapshot); err != nil {
+		r.logger(s.id).Error("daemon.feed.row_revision_failed",
+			"a composed row could not be digested for its revision, so it is not published",
+			dlog.WithCause(dlog.Context{"feed": f.key, "row": id}, err))
+		return
+	}
 	quiet := r.noteBook(s, f, id, rank.key, !seen)
 	if seen && proto.Equal(existing, snapshot) {
 		// AN IDENTICAL ROW IS NOT A PUBLICATION. A repeated frame — a stream
