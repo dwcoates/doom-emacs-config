@@ -49,3 +49,20 @@ queue_drained:
 # stays set because a daemon built before that change requires it.
 deploy_checks:
   remediations_before_escalation: 4
+  # How the deploy mediator's session runs (repoconfig.v1.MediatorAgent):
+  # read at each brief, so an edit takes effect at the mediator's next one.
+  agent:
+    model: fable
+
+# The repository's PRODUCTION CHECKS
+# (repoconfig.v1.LifecycleConfig.production_checks;
+# docs/investigations/2026-11-23-production-mediator-plan.md). After each
+# deploy, the standing production mediator reviews what production logged
+# between the two landings before it, and hands each problem to a one-shot
+# child that lands at the front of the merge queue. It holds nothing. The
+# section's presence turns the checks on.
+production_checks:
+  # How the production mediator's session runs: read at each brief. Its
+  # children run on opus whatever it runs on.
+  agent:
+    model: fable
