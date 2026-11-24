@@ -10555,7 +10555,9 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    percent of), so inside it the lines' box starts at the column's right rail
    and reaches the feed's right edge, and the lines center in it. It stands in
    #feed-stamp, outside the scroll zone, so it never adds to the feed's
-   scrollable height (the zero-height slot rule it shares with #feed-jump). */
+   scrollable height (the zero-height slot rule it shares with #feed-jump).
+   Its grey is `--muted` a slight step darker, mixed toward black so it is
+   darker in either theme (owner request, 2026-11-24). */
 .feed-margin-stamp {
   position: absolute;
   box-sizing: border-box;
@@ -10567,12 +10569,22 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   white-space: nowrap;
   font-family: var(--serif-font-family);
   font-size: calc(var(--small-prose-font-rem) * 0.75rem * var(--feed-text-scale));
-  color: var(--muted);
+  color: color-mix(in srgb, var(--muted) 80%, #000000);
 }
 .feed-margin-stamp-lines {
   margin-left: calc(100% - var(--agent-rail-inset));
   width: calc(var(--agent-rail-inset) + var(--feed-pad-x));
   text-align: center;
+}
+/* BESIDE A RESPONSE, THE MARGIN STARTS WHERE THE RESPONSE CAN END (owner
+   request, 2026-11-24): a response hangs on the left rail and stops at the
+   one bubble width, short of the right rail prompts and tool cards reach, so
+   the lines' box starts at that width's end and the stamp centers in all of
+   the room the response leaves. Every response is measured by the cap, not
+   its own text, so the stamp stands in one place beside every response. */
+.feed-margin-stamp[data-row-role="response"] .feed-margin-stamp-lines {
+  margin-left: calc(var(--agent-rail-inset) + var(--bubble-max-width));
+  width: calc(100% + var(--feed-pad-x) - var(--agent-rail-inset) - var(--bubble-max-width));
 }
 .feed-margin-stamp[data-shown] {
   opacity: 1;
