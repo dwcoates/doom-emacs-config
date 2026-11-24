@@ -802,6 +802,43 @@ A DEBUG line (`agent-repl--log') is dropped."
     (should-not (gethash "id-alpha" agent-repl--webhost-pages))
     (should-not (gethash "id-alpha" agent-repl--webhost-gate-docks))))
 
+(ert-deftest agent-repl-test-wh-removing-a-held-page-answers-that-one-was-held ()
+  "A removal that drops a held page says so, so its caller reports the unload."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    ;; Act
+    (let ((dropped (agent-repl-webhost-remove "alpha")))
+      ;; Assert
+      (should dropped)
+      (should (= 1 (length (agent-repl-test-wh--sent "remove")))))))
+
+(ert-deftest agent-repl-test-wh-removing-with-nothing-held-sends-nothing ()
+  "A teardown of a workspace whose page is already gone calls nothing on the host."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
+                 (agent-repl-test--record-into logged)))
+        ;; Act
+        (let ((dropped (agent-repl-webhost-remove "alpha")))
+          ;; Assert
+          (should-not dropped)
+          (should-not (agent-repl-test-wh--sent "remove"))
+          (should (seq-some (lambda (text) (string-search "page-remove-skipped ws=alpha id=id-alpha cause=nothing-held" text))
+                            logged)))))))
+
+(ert-deftest agent-repl-test-wh-removing-a-gate-slot-alone-answers-no-page-held ()
+  "A removal that clears a gate slot with no page still calls the host but drops no page."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-set-gate-dock "alpha" 90)
+    ;; Act
+    (let ((dropped (agent-repl-webhost-remove "alpha")))
+      ;; Assert
+      (should-not dropped)
+      (should (= 1 (length (agent-repl-test-wh--sent "remove")))))))
+
 (ert-deftest agent-repl-test-wh-unloading-a-page-keeps-its-gate-slot ()
   "An unloaded page's workspace keeps its gate slot: the host draws the gate."
   ;; Arrange
