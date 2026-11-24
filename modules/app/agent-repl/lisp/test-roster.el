@@ -3450,6 +3450,36 @@ saying the roster had been asked for one and declined."
       ;; Act / Assert
       (should-not (agent-repl-roster-desired-tabs roster)))))
 
+(ert-deftest agent-repl-test-roster-open-entries-hold-every-open-row-a-tabless-one-included ()
+  "Every Open section row is an open entry, a not-visible one included; the Backlog's are not."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
+                                                 (agent-repl-test-roster--row "f" "f" :ready :visibility :not-visible))))
+                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready)))))
+      ;; Act
+      (let ((entries (agent-repl-roster-open-entries roster)))
+        ;; Assert
+        (should (equal (mapcar (lambda (entry) (list (plist-get entry :name) (plist-get (plist-get entry :ref) :id)))
+                               entries)
+                       '(("a" "a") ("f" "f"))))))))
+
+(ert-deftest agent-repl-test-roster-an-unheld-workspace-reads-its-interaction-off-its-row ()
+  "A workspace this editor holds no tab for still answers its interaction instant."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-roster-view (agent-repl-test-roster--roster
+                                   :sections (list (agent-repl-test-roster--section
+                                                    "repo" (list (agent-repl-test-roster--row "f" "f" :ready :visibility :not-visible)))))))
+      (cl-letf (((symbol-function 'agent-repl-roster-row-instant-ms)
+                 (lambda (row field) (and (eq field :last-interacted)
+                                          (equal (agent-repl-roster-row-id row) "f")
+                                          4242))))
+        ;; Act / Assert
+        (should (equal (agent-repl-roster-last-interacted-ms "f") 4242))))))
+
 (ert-deftest agent-repl-test-roster-a-collapsed-subsections-rows-have-no-tabs ()
   "A collapsed subsection's rows carry folded tabs and are not held, so they get no tabs."
   ;; Arrange

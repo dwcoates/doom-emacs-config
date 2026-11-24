@@ -53,12 +53,14 @@
 
 ;;;; ---- The reach ----
 
-(defun agent-repl--recency-reach (all drawn current)
+(defun agent-repl--recency-reach (all drawn current &optional reported)
   "Return each tab the walk reaches soonest from CURRENT, as (NAME ARM PRESSES).
-ALL is the ring in walk order and DRAWN its drawn subset, as the walk
-reads them (`agent-repl--ring-walk').  ARM is `:older' when `s-[' lands on
-NAME in fewer presses than `s-]', or as few, and `:newer' otherwise;
-PRESSES is that count, from 1.  CURRENT has no reach.  At most the
+ALL is the ring in walk order and DRAWN the subset a press may land on, as
+the walk reads them (`agent-repl--ring-walk').  ARM is `:older' when `s-['
+lands on NAME in fewer presses than `s-]', or as few, and `:newer'
+otherwise; PRESSES is that count, from 1.  CURRENT has no reach.  When
+REPORTED is given, only its names are answered, their presses still
+counted over every stop of DRAWN.  At most the
 `agent-repl-recency-reach-per-direction' nearest of each ARM are kept,
 nearest first, the older ones before the newer."
   (let* ((older (agent-repl--ring-walk all drawn current 1))
@@ -67,7 +69,8 @@ nearest first, the older ones before the newer."
           (cl-loop for name in older
                    for back from 1
                    for forward = (1+ (cl-position name newer :test #'equal))
-                   unless (equal name current)
+                   unless (or (equal name current)
+                              (and reported (not (member name reported))))
                    collect (if (<= back forward)
                                (list name :older back)
                              (list name :newer forward)))))
@@ -83,9 +86,11 @@ The start is the walk's own (`agent-repl--step-workspace'): the most
 recent request while one is unanswered, else the tab shown."
   (let ((current (or (agent-repl-host-pending-selection) (agent-repl--ws-current-name))))
     (and current
-         (agent-repl--recency-reach (agent-repl--recency-ring current)
-                                    (agent-repl--drawn-tab-names)
-                                    current))))
+         ;; EVERY WORKSPACE OF THE RING IS A STOP (`agent-repl--recency-walk'),
+         ;; so the presses count them all; only a drawn tab has a row whose
+         ;; gutter the sidebar draws, so only those are reported.
+         (let ((ring (agent-repl--recency-ring current)))
+           (agent-repl--recency-reach ring ring current (agent-repl--drawn-tab-names))))))
 
 (defun agent-repl--recency-reach-request (reaches)
   "Return the ReportRecencyReachRequest plist for REACHES.

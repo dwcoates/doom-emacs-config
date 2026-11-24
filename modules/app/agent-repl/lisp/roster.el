@@ -835,6 +835,31 @@ an undrawn one.  Merged and closed rows have none."
   (seq-filter (lambda (entry) (memq (plist-get entry :section) '(:repository :hidden)))
               walked))
 
+(defun agent-repl-roster-open-entries (&optional roster)
+  "Return every open workspace ROSTER lists, in the Open section\='s walk order.
+Each is a plist `(:name NAME :ref REF :row ROW)': NAME is the name its tab
+has or would have (`agent-repl-roster--tab-name', collisions resolved as
+the bar resolves them), REF its `WorkspaceRef'.  It holds EVERY row of the
+Open section, the ones this editor holds no tab for included: a workspace a
+fold hides is not visible and gets no tab (`agent-repl-roster-desired-tabs'),
+but the recency walk still reaches it (owner ruling, 2026-11-24).  ROSTER
+defaults to `agent-repl-roster-view'."
+  (let* ((walked (agent-repl-roster-walk (or roster agent-repl-roster-view)))
+         (collisions (agent-repl-roster--colliding-names
+                      (agent-repl-roster--tab-bar-entries walked))))
+    (mapcar (lambda (entry)
+              (let ((row (plist-get entry :row)))
+                (list :name (agent-repl-roster--tab-name entry collisions)
+                      :ref (agent-repl-roster-row-ref row)
+                      :row row)))
+            (seq-filter (lambda (entry) (eq (plist-get entry :section) :repository))
+                        walked))))
+
+(defun agent-repl-roster-open-entry-named (name)
+  "Return the open entry (`agent-repl-roster-open-entries') named NAME, or nil."
+  (seq-find (lambda (entry) (equal (plist-get entry :name) name))
+            (agent-repl-roster-open-entries)))
+
 (defun agent-repl-roster--misnumbered (entries)
   "Return the first of ENTRIES whose tab number is not its place, or nil.
 The daemon numbers the Open section's tabs 1..N in the very walk Emacs
@@ -1506,7 +1531,8 @@ row (`RosterThreadLastInteracted') for a chat thread, which the daemon
 fills from its own record of the user\='s interactions, so it survives an
 Emacs restart.  nil when the roster has neither row for WS or the user
 never interacted with it."
-  (let ((row (agent-repl-roster-row-for-ws ws)))
+  (let ((row (or (agent-repl-roster-row-for-ws ws)
+                 (plist-get (agent-repl-roster-open-entry-named ws) :row))))
     (if row
         (agent-repl-roster-row-instant-ms row :last-interacted)
       (let ((id (plist-get (agent-repl--ws-get ws :ref) :id)))

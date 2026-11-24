@@ -1835,22 +1835,28 @@ start from."
   (agent-repl--step-workspace 1 #'agent-repl--working-ring "working-cycle" 'cycle))
 
 (defun agent-repl--recency-ring (current)
-  "Return the drawn tabs, and CURRENT, most recently selected first.
-The ONE selection-recency order (`agent-repl-roster-selection-recency-order')
-over the drawn tabs (`agent-repl--drawn-tab-names'), so `s-[' and `s-]'
-reach exactly the tabs `s-{' and `s-}' do, and pass over a folded one.
-CURRENT joins the ring when it is not among them, so it still has a place
-to step from."
-  (let ((drawn (agent-repl--drawn-tab-names)))
+  "Return every open workspace, and CURRENT, most recently interacted first.
+The ONE recency order (`agent-repl-roster-selection-recency-order') over
+every workspace of the Open section (`agent-repl-roster-open-entries'),
+the ones a fold hides and this editor holds no tab for included: `s-[' and
+`s-]' reach a workspace that is not visible (owner ruling, 2026-11-24),
+which a step selects and so draws, and which returns to not visible once
+the walk moves on.  CURRENT joins the ring when it is not among them, so it
+still has a place to step from."
+  (let ((open (mapcar (lambda (entry) (plist-get entry :name))
+                      (and (fboundp 'agent-repl-roster-open-entries)
+                           (agent-repl-roster-open-entries)))))
     (agent-repl-roster-selection-recency-order
-     (if (or (null current) (member current drawn))
-         drawn
-       (append drawn (list current))))))
+     (if (or (null current) (member current open))
+         open
+       (append open (list current))))))
 
 (defun agent-repl--recency-walk (n)
-  "Switch N places along the selection history, positive being older.
-`s-[' and `s-]' are `s-{' and `s-}' over the recency order rather than the
-bar's (`agent-repl--recency-ring'), wrapping at both ends.
+  "Switch N places along the interaction history, positive being older.
+`s-[' and `s-]' walk the recency order (`agent-repl--recency-ring'),
+wrapping at both ends, and land on ANY workspace of it, not only a drawn
+tab: a step to a workspace this editor holds no tab for selects it through
+the daemon (`agent-repl-host-request-switch').
 
 A STEP IS NOT AN INTERACTION.  The switch is requested with the
 `recency-walk' trigger, so it stamps no interaction instant, and the walk\='s
@@ -1859,7 +1865,14 @@ The order therefore holds still under the walk, and the current
 workspace's place in it IS the walk's position: `s-[' pressed again lands
 one older, and `s-]' comes back toward the most recent, with no cursor to
 keep."
-  (agent-repl--step-workspace n #'agent-repl--recency-ring "recency-walk" 'recency-walk))
+  (agent-repl--step-workspace-to
+   n (lambda (current _drawn)
+       ;; A ring holding only CURRENT has nowhere to walk: a step that would
+       ;; land where it starts is no step.
+       (let* ((ring (agent-repl--recency-ring current))
+              (target (agent-repl--cycle-target ring ring current n)))
+         (unless (equal target current) target)))
+   "recency-walk" 'recency-walk))
 
 (defun agent-repl-switch-older ()
   "Switch to the workspace viewed before the current one, without recording a view.

@@ -1127,15 +1127,16 @@ whether the new-thread prompt ran, `logged' and `said'."
     (should (equal (agent-repl--roster-recent-names) '("w")))
     (should (equal (agent-repl--recent-workspace-and-thread-names) '("w" "chat/t")))))
 
-(ert-deftest agent-repl-test-commands-recency-walk-stays-on-the-drawn-tabs ()
-  "`s-[' and `s-]' walk the drawn tabs only: a thread interacted with last is no step."
-  (let ((history '("chat/t" "b" "a"))
+(ert-deftest agent-repl-test-commands-recency-ring-holds-every-open-workspace ()
+  "`s-[' and `s-]' walk every open workspace, an undrawn one included, and no thread."
+  (let ((history '("chat/t" "folded" "b" "a"))
         (agent-repl--recency-walk-origin nil))
-    (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b")))
+    (cl-letf (((symbol-function 'agent-repl-roster-open-entries)
+               (lambda (&optional _roster) (list '(:name "a") '(:name "b") '(:name "folded"))))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
               ((symbol-function 'agent-repl-roster-last-interacted-ms)
                (lambda (ws) (agent-repl-test-commands--history-ms history ws))))
-      (should (equal (agent-repl--recency-ring "a") '("a" "b"))))))
+      (should (equal (agent-repl--recency-ring "a") '("a" "folded" "b"))))))
 
 ;;;; ---- The jump to the workspace that most recently finished ----
 
@@ -1615,6 +1616,11 @@ the user interacted with, most recent first.  CURRENT is shown.  Binds
            (and history (not (equal ,current (car history))) (car history))))
      (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order)
                 (lambda () (cl-remove-if (lambda (name) (member name ,hidden)) ,tabs)))
+               ;; Every workspace of the Open section is open, HIDDEN (a fold
+               ;; hides it, so it holds no tab) included.
+               ((symbol-function 'agent-repl-roster-open-entries)
+                (lambda (&optional _roster)
+                  (mapcar (lambda (name) (list :name name :ref (list :id name))) ,tabs)))
                ((symbol-function 'agent-repl-roster-last-interacted-ms)
                 (lambda (ws) (agent-repl-test-commands--history-ms history ws)))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
@@ -1745,13 +1751,13 @@ the user interacted with, most recent first.  CURRENT is shown.  Binds
       ;; Assert
       (should (equal requests '(("b" recency-walk)))))))
 
-(ert-deftest agent-repl-test-commands-recency-walk-passes-over-a-hidden-tab ()
-  "A tab the bar does not draw is never a walk's landing."
+(ert-deftest agent-repl-test-commands-recency-walk-lands-on-a-workspace-a-fold-hides ()
+  "A workspace the bar does not draw is a walk's landing: a fold hiding it is no reason to skip it."
   (agent-repl-test-commands--with-history '("a" "hidden" "c") '("hidden") '("c" "hidden" "a") "c"
     ;; Act
     (agent-repl-switch-older)
     ;; Assert
-    (should (equal requests '(("a" recency-walk))))))
+    (should (equal requests '(("hidden" recency-walk))))))
 
 (ert-deftest agent-repl-test-commands-recency-walk-from-a-hidden-current-keeps-its-place ()
   "A current workspace whose tab is hidden still steps from its place in the history."
