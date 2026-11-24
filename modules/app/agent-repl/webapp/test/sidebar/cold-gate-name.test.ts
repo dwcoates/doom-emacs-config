@@ -82,7 +82,9 @@ describe("NONE_COLD_GATED", () => {
 // the Merge Queue section's line wear the one class, and the one rule paints
 // both alike.
 describe("the shared cold-gate style", () => {
-  const openRow = () => drawRosterRow(row({ id: "w1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R");
+  // A VIEWED row: an unviewed one keeps its status tone (owner request,
+  // 2026-11-23), so only a viewed row's struck name matches a queue line's.
+  const openRow = () => drawRosterRow(row({ id: "w1", status: { case: "coldGate", value: {} }, viewed: true }), sidebarContext(), "R");
   const queueLine = () =>
     drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1") }), REPOSITORY, sidebarContext(), "queue", new Set(["w1"]));
 
@@ -93,7 +95,7 @@ describe("the shared cold-gate style", () => {
     ]).toEqual([true, true]);
   });
 
-  it("paints an Open row's name and a merge queue line's name alike", () => {
+  it("paints a viewed Open row's name and a merge queue line's name alike", () => {
     const row = openRow();
     const line = queueLine();
     const open = paintOf(row, () => row.querySelector(":scope > .row > .name"));

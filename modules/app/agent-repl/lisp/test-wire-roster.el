@@ -2887,9 +2887,11 @@ its place and since it joined."
                           "\"standing\":{\"archived\":{}},\"visibility\":{\"notVisible\":{}}}]}"))
                  '(:new-thread "New thread"
                    :rows ((:thread (:id "t2" :dir "/z/b") :name "b" :summary "light" :current t
-                           :standing (:arm :open :value nil) :outline nil :visibility :selected)
+                           :standing (:arm :open :value nil) :outline nil :visibility :selected
+                           :last-interacted nil)
                           (:thread (:id "t1" :dir "/z/a") :name "a" :summary nil :current nil
-                           :standing (:arm :archived :value nil) :outline nil :visibility :not-visible))))))
+                           :standing (:arm :archived :value nil) :outline nil :visibility :not-visible
+                           :last-interacted nil))))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-a-threads-outline ()
   "A thread's outline decodes its breadcrumb and each row's place and counts."

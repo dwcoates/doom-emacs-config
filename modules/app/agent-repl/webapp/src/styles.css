@@ -7155,20 +7155,23 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .ws[data-opening="true"] > .row { cursor: default; }
 /* A COLD GATE STRIKES THE NAME (owner ruling, 2026-10-13): the workspace is
    parked on its cold gate's choice. The name alone, in every section, never
-   the mark or the when-column. ONE CLASS for a row's name and a merge queue
-   line's (src/sidebar/cold-gate-name.ts, owner request 2026-11-17). A ROW'S STRUCK NAME KEEPS ITS STATUS TONE UNTIL
-   THE ROW IS VIEWED (owner request, 2026-11-23), as every unviewed name does
-   (src/sidebar/name-tint.ts); viewed, it takes the dimmer grey, and the row's
-   selector keeps its weight over the viewed grey. A merge queue line draws no
-   status tone, so its struck name is always the dimmer grey. */
-#ws-sidebar .ws > .row > .name.cold-gated {
-  text-decoration: line-through;
-}
-#ws-sidebar .ws > .row > .name.cold-gated.viewed,
+   the mark or the when-column. ONE RULE for a row's name and a merge queue
+   line's (src/sidebar/cold-gate-name.ts, owner request 2026-11-17), both
+   struck in the dimmer grey by the one class; the row's selector keeps its
+   weight over a row name's viewed grey. */
+#ws-sidebar .ws > .row > .name.cold-gated,
 #ws-sidebar .sb-mq-name.cold-gated {
   --name-rest: color-mix(in srgb, var(--muted) 55%, transparent);
   text-decoration: line-through;
   color: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+/* AN UNVIEWED ROW'S STRUCK NAME KEEPS ITS STATUS TONE (owner request,
+   2026-11-23), as every unviewed name does (src/sidebar/name-tint.ts marks it
+   tinted); viewed, it falls back to the shared rule's dimmer grey. A merge
+   queue line is never tinted. */
+#ws-sidebar .ws > .row > .name.cold-gated.tinted {
+  --name-rest: var(--name-tone);
+  color: var(--name-tone);
 }
 /* THE NAME'S STATUS TONE (owner request, 2026-10-29): the row's tone class
    names the color a tinted name starts from (src/sidebar/name-tint.ts). A

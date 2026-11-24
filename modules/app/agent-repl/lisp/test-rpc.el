@@ -918,10 +918,10 @@ that has not adopted it."
                  (lambda (_conn _method _request send _fail) (funcall send 'named-conn)))
                 ((symbol-function 'agent-repl-connect-unary)
                  (lambda (conn &rest _) (setq transport-conn conn)))
-                ((symbol-function 'agent-repl-wire-encode-mark-workspace-viewed-request)
+                ((symbol-function 'agent-repl-wire-encode-report-user-interaction-request)
                  (lambda (_request) nil)))
         ;; Act
-        (agent-repl-rpc-mark-workspace-viewed 'asked-conn '(:workspace (:id "w")))))
+        (agent-repl-rpc-report-user-interaction 'asked-conn '(:workspace (:id "w")))))
     ;; Assert
     (should (eq transport-conn 'named-conn))))
 
@@ -935,10 +935,10 @@ that has not adopted it."
                    (funcall fail (list :kind :transport :message "no daemon"))))
                 ((symbol-function 'agent-repl-connect-unary)
                  (lambda (&rest _) (error "the transport must not be reached")))
-                ((symbol-function 'agent-repl-wire-encode-mark-workspace-viewed-request)
+                ((symbol-function 'agent-repl-wire-encode-report-user-interaction-request)
                  (lambda (_request) nil)))
         ;; Act
-        (agent-repl-rpc-mark-workspace-viewed 'conn '(:workspace (:id "w"))
+        (agent-repl-rpc-report-user-interaction 'conn '(:workspace (:id "w"))
                                               :on-failure (lambda (detail) (setq failed detail))))
       ;; Assert
       (should (equal failed (list :kind :transport :message "no daemon")))

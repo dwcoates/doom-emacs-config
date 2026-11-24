@@ -54,7 +54,8 @@ async function flush(): Promise<void> {
 }
 
 function input(kind: string = "wheel"): void {
-  box.dispatchEvent(new Event(kind, { bubbles: true }));
+  // A key is a KeyboardEvent, as the page's own key handlers expect of one.
+  box.dispatchEvent(kind === "keydown" ? new KeyboardEvent(kind, { bubbles: true, key: "PageDown" }) : new Event(kind, { bubbles: true }));
 }
 
 beforeEach(() => {

@@ -5468,24 +5468,21 @@ describe("the rail's marks", () => {
     expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
   });
 
-  it("strikes a cold-gated workspace's name and leaves its tone to the tint", () => {
+  it("strikes a cold-gated workspace's name", () => {
     // Arrange / Act
-    const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated") ?? "";
+    const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated");
 
-    // Assert: an unviewed cold gate keeps its status tone (owner request, 2026-11-23).
-    expect([/text-decoration:\s*line-through/.test(rule), /(?:^|;)\s*color:/.test(rule)]).toEqual([true, false]);
+    // Assert
+    expect(rule).toMatch(/text-decoration:\s*line-through/);
   });
 
-  it.each(["#ws-sidebar .ws > .row > .name.cold-gated.viewed", "#ws-sidebar .sb-mq-name.cold-gated"])(
-    "draws %s in the dimmer grey",
-    (selector) => {
-      // Arrange / Act
-      const rule = declarationsOf(selector);
+  it("keeps an unviewed cold-gated name in its status tone", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated.tinted");
 
-      // Assert
-      expect(rule).toMatch(/(?:^|;)\s*color:\s*color-mix\(in srgb, var\(--muted\) 55%, transparent\)/);
-    },
-  );
+    // Assert: owner request, 2026-11-23.
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*var\(--name-tone\)/);
+  });
 
   it("offers no click on a row still opening", () => {
     // Arrange / Act

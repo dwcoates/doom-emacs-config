@@ -90,6 +90,10 @@ The notices it hands its page are captured in
          (agent-repl-test-input--messages nil)
          (agent-repl-test-input--retries nil)
          (agent-repl-test-input--interactions nil)
+         ;; NO COMMAND RUNS around a test's own edits, whatever ran the
+         ;; suite, so the composer's typing hook reports only where a test
+         ;; binds `this-command' itself (`agent-repl--input-typed-on-change').
+         (this-command nil)
          (agent-repl-test-input--notices nil)
          (agent-repl-test-input--answer (agent-repl-test-input--turn-answer))
          (agent-repl-test-input--gate :open)
