@@ -22,16 +22,6 @@
  * the Emacs tab bar. Only the triangle folds it: the header's label renames
  * on a double-click, which a fold on every click would undo.
  *
- * A FOLDED SUBSECTION SAYS ITS WORKSPACES WORK (owner request, 2026-11-18):
- * while any of its rows, nested ones included, stands on a working arm
- * (`armWorks`), its NAME, never its count, breathes in that row's tone, as
- * the row's own name does. The header carries the breath whatever its fold,
- * and the stylesheet draws it only while the subsection is folded, so a fold
- * painted ahead of the daemon's push (`section-fold.ts`) shows it at once. A
- * push that changed only rows keeps the header (`roster.ts`'s row patch), so
- * the patch repaints the breath through the same `paintSubsectionWork`
- * (`roster.ts` `paintRepoSection`).
- *
  * WHAT DRAGS. In the open workspaces' repository sections only, which are the
  * ones whose order the tab bar walks:
  *
@@ -73,9 +63,6 @@ import { FOLDED_CLASS } from "./folded-class.js";
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterOpenRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { familyRows, pathedOpenRows } from "./entries.js";
-import { BREATHES_CLASS, NAME_INK_CLASS, drawNameInk } from "./name-ink.js";
-import { NAME_STEADY_CLASS } from "./name-tint.js";
-import { armWorks, rosterArmMark } from "./tones.js";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { childrenMatching, queryAll } from "../dom.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
@@ -202,7 +189,6 @@ export function drawRosterSubsection(
   const label = document.createElement("span");
   label.className = SUBSECTION_LABEL_CLASS;
   label.textContent = name;
-  paintSubsectionWork(label, u, path);
   const shown = drawSubsectionCount(u, path);
   if (bucket.case !== "named") throw new Error("invariant: a drawn subsection is a named one");
   const id = bucket.id;
@@ -278,49 +264,8 @@ export function paintSubsectionCount(element: HTMLElement, u: RosterSubsection, 
   return true;
 }
 
-/**
- * The tone class of the first of ROWS, depth-first in drawn order and nested
- * rows included, that stands on a working arm (`armWorks`), or null when
- * none does: what a folded subsection's name breathes in.
- */
-export function workingTone(rows: RosterOpenRows, path: string): string | null {
-  for (const top of pathedOpenRows(rows, path)) {
-    for (const at of familyRows(top.row, top.path)) {
-      const arm = requireCase(requireMessage(at.row.row, `${at.path}.row`).status, `${at.path}.row.status`).case;
-      if (armWorks(arm)) return rosterArmMark(arm).toneClass;
-    }
-  }
-  return null;
-}
-
-/** The attribute a subsection's name states the tone it breathes in on, while it does. */
-export const WORKING_TONE_ATTRIBUTE = "data-working-tone";
-
 /** The class of a subsection's name. */
 export const SUBSECTION_LABEL_CLASS = "sb-subsection-label";
-
-/**
- * Paint on LABEL, the drawn name of subsection U, the breath its working rows
- * give it (`workingTone`): the name held at that tone and breathing, with its
- * ink box (`name-ink.ts`), or still. A breath already drawn in the same tone
- * is kept as it is, so a repaint never restarts its loop.
- */
-export function paintSubsectionWork(label: HTMLElement, u: RosterSubsection, path: string): void {
-  const header = requireMessage(u.header, `${path}.header`);
-  const name = requireMessage(header.label, `${path}.header.label`).text;
-  const tone = workingTone(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`);
-  const drawn = label.getAttribute(WORKING_TONE_ATTRIBUTE);
-  if (drawn === tone) return;
-  if (drawn !== null) {
-    label.classList.remove(NAME_STEADY_CLASS, drawn, BREATHES_CLASS);
-    label.removeAttribute(WORKING_TONE_ATTRIBUTE);
-    for (const ink of [...label.children].filter((kid) => kid.classList.contains(NAME_INK_CLASS))) ink.remove();
-  }
-  if (tone === null) return;
-  label.classList.add(NAME_STEADY_CLASS, tone, BREATHES_CLASS);
-  label.setAttribute(WORKING_TONE_ATTRIBUTE, tone);
-  drawNameInk(label, name);
-}
 
 /**
  * The "+" in a repository section's header: it asks for a name and adds a

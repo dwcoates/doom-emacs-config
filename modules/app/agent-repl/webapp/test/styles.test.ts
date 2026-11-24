@@ -5312,48 +5312,17 @@ describe("the rail's marks", () => {
     expect([/isolation:\s*isolate/.test(box), /pointer-events:\s*none/.test(box), /mix-blend-mode:\s*plus-lighter/.test(peak)]).toEqual([true, true, true]);
   });
 
-  // A FOLDED SUBSECTION'S NAME BREATHES AS A ROW'S NAME DOES (owner request,
-  // 2026-11-18): each rule of the row name's held tone and breath lists the
-  // folded subsection's name too, so the two can never draw apart.
-  it.each([
-    ["the held tone", "#ws-sidebar .row .name.tinted", ".tinted"],
-    ["the breath's rest ink", "#ws-sidebar .row .name.tinted.breathes", ".tinted.breathes"],
-    ["the hidden own text", "#ws-sidebar .row .name.breathes", ".breathes"],
-    ["the ink box", "#ws-sidebar .row .name > .name-ink", " > .name-ink"],
-    ["the copies' text", "#ws-sidebar .row .name > .name-ink::before", " > .name-ink::before"],
-    ["the peak copy hidden at rest", "#ws-sidebar .row .name > .name-ink::after", " > .name-ink::after"],
-    ["the resting copy's loop", "#ws-sidebar .row .name.breathes > .name-ink::before", ".breathes > .name-ink::before"],
-    ["the peak copy's loop", "#ws-sidebar .row .name.breathes > .name-ink::after", ".breathes > .name-ink::after"],
-    ["the peak copy's tone", "#ws-sidebar .row .name.tinted.breathes > .name-ink::after", ".tinted.breathes > .name-ink::after"],
-  ])("draws %s of a folded subsection's name in the row name's own rule", (_part, rowSelector, suffix) => {
-    // Arrange
-    const folded = `#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label${suffix}`;
-
-    // Act
-    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(rowSelector) && r.selectors.includes(folded));
-
-    // Assert
-    expect(rule).toBeDefined();
-  });
-
-  // Only a FOLDED subsection's name breathes: every subsection-name breath
-  // rule is gated on the fold.
-  it("breathes no subsection name that is not folded", () => {
+  // A WORKING ROW NEVER TINTS ITS SUBSECTION'S NAME (owner request,
+  // 2026-11-24): no rule gives a subsection's name a tone, a held tint, a
+  // breath or an ink box.
+  it("tints and breathes no subsection name", () => {
     // Arrange / Act
-    const ungated = rulesOf(stylesheet)
+    const tinted = rulesOf(stylesheet)
       .flatMap((r) => r.selectors)
-      .filter((sel) => /\.sb-subsection-label[^,]*(\.breathes|\.tinted|\.name-ink)/.test(sel) && !sel.includes(".sb-subsection.folded"));
+      .filter((sel) => /\.sb-subsection-label[^,]*(\.tone-|\.breathes|\.tinted|\.name-ink)/.test(sel));
 
     // Assert
-    expect(ungated).toEqual([]);
-  });
-
-  it.each(["blue", "purple", "red", "turquoise", "yellow", "green"])("names the %s tone a subsection's name breathes in", (tone) => {
-    // Arrange / Act
-    const rule = declarationsOf(`#ws-sidebar .sb-subsection-label.tone-${tone}`) ?? "";
-
-    // Assert
-    expect(rule).toMatch(/--name-tone:/);
+    expect(tinted).toEqual([]);
   });
 
   // THE MARK STANDS STILL (owner request, 2026-10-14): the name breathes in
