@@ -37,3 +37,13 @@ Its brief names this file, and it is the mediator's to write.
   `elisp.commands.change-spec` expanded outside a file load; `lisp/commands.el`
   now passes the owner. Only a new line with different text or a growing count
   is a finding.
+- `elisp.page-report.held-without-reason`: logged for every page the running
+  Emacs held when `lisp/page-report.el` was first hot-loaded at the
+  2026-11-24T06:08Z deploy, because those pages were loaded before reasons
+  were recorded and the table started empty. It repeats on each host-stream
+  subscribe (each handover) for a page until that page is next loaded or
+  Emacs restarts. No code path can produce the state again: a cold start
+  loads every page through `agent-repl-page-unload-load`, and a hot reload
+  keeps the table. The contract's reason vocabulary has no arm for an
+  unrecorded reason, so the repair is seeding the table once in the running
+  Emacs or an Emacs restart, which is the owner's to allow.
