@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/workspace"
 )
 
 // TestOpenLoginAnswersTheConfigDir pins that the caller learns which account
@@ -356,10 +358,10 @@ func TestOpenInEditorAnswersAnUnknownMergeTestLog(t *testing.T) {
 	}
 }
 
-// TestALinkClickTellsTheEditorTheReaderFollowedALink pins that every link a
-// page follows, outward or into the editor, tells the workspace's host stream
-// first (link_followed), so Emacs counts the workspace viewed.
-func TestALinkClickTellsTheEditorTheReaderFollowedALink(t *testing.T) {
+// TestALinkClickRecordsTheUsersInteraction pins that every link a page
+// follows, outward or into the editor, is recorded as the user's interaction
+// with the workspace, so its row is viewed and most recent.
+func TestALinkClickRecordsTheUsersInteraction(t *testing.T) {
 	tests := []struct {
 		name  string
 		click func(h *harness) error
@@ -393,24 +395,24 @@ func TestALinkClickTellsTheEditorTheReaderFollowedALink(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
-			stream := holdHostStream(t, h)
+			holdHostStream(t, h)
 
 			// Act.
 			err := tt.click(h)
-			push := receiveHostEvent(t, stream)
 
 			// Assert.
 			if err != nil {
 				t.Fatalf("%s: %v", tt.name, err)
 			}
-			if push.GetLinkFollowed() == nil {
-				t.Fatalf("push = %v, want link_followed", push)
+			want := []interactionCall{{ws: testWorkspaceID, kind: workspace.InteractionLinkFollowed}}
+			if !slices.Equal(h.Verbs.interactions, want) {
+				t.Fatalf("interactions = %v, want %v", h.Verbs.interactions, want)
 			}
 		})
 	}
 }
 
-func TestOpenExternalStillOpensTheLinkAfterTellingTheEditor(t *testing.T) {
+func TestOpenExternalStillOpensTheLinkAfterRecordingTheInteraction(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	holdHostStream(t, h)
@@ -425,7 +427,7 @@ func TestOpenExternalStillOpensTheLinkAfterTellingTheEditor(t *testing.T) {
 	}
 }
 
-func TestALinkFollowedIsRecordedAtInfoNamingTheHostStreams(t *testing.T) {
+func TestALinkFollowedIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	log := dlog.NewTestLogger()
@@ -442,10 +444,9 @@ func TestALinkFollowedIsRecordedAtInfoNamingTheHostStreams(t *testing.T) {
 	}
 	for _, rec := range log.Records() {
 		if rec.Operation == "OpenExternal" && rec.Level == "info" &&
-			rec.Message == "told the editor the reader followed a link in the workspace's page" &&
-			rec.Context["host_streams"] == 1 {
+			rec.Message == "recorded the followed link as the user's interaction with the workspace" {
 			return
 		}
 	}
-	t.Fatalf("records = %+v, want the link followed at info naming one host stream", log.Records())
+	t.Fatalf("records = %+v, want the link followed at info", log.Records())
 }

@@ -67,6 +67,13 @@ type resolver struct {
 	// is released.
 	pendingResults []resultChange
 
+	// viewedChanges is told every change of a workspace's viewed fact, so the
+	// daemon keeps it durable (wsm.SetViewedStatus). nil tells nobody.
+	viewedChanges ViewedSink
+	// pendingViewed are the viewed changes a render found, reported after the
+	// lock is released.
+	pendingViewed []viewedChange
+
 	// statusChanges is told every instant a workspace's published status arm
 	// moves, so the daemon keeps it durable (wsm.SetStatusChangedAt). nil
 	// tells nobody.
@@ -128,6 +135,12 @@ type resolver struct {
 type resultChange struct {
 	ws     ids.WorkspaceID
 	result *wsm.TurnResult
+}
+
+// viewedChange is one workspace's changed viewed fact.
+type viewedChange struct {
+	ws  ids.WorkspaceID
+	arm string
 }
 
 // departure is one row a render moved onto a departure arm.
@@ -353,10 +366,12 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 		ready:         ready,
 		quiet:         quiet,
 		results:       r.pendingResults,
+		viewed:        r.pendingViewed,
 		statusChanges: r.pendingStatusChanges,
 		visibilities:  r.pendingVisibilities,
 	}
 	r.pendingResults = nil
+	r.pendingViewed = nil
 	r.pendingStatusChanges = nil
 	r.pendingVisibilities = nil
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
@@ -423,6 +438,9 @@ func (r *resolver) resolvePush(log dlog.Logger, cause string) *frontendv1.Roster
 func (r *resolver) report(batch []*mutation, out batchOutcome) {
 	for _, change := range out.results {
 		r.results(change.ws, change.result)
+	}
+	for _, change := range out.viewed {
+		r.viewedChanges(change.ws, change.arm)
 	}
 	for _, change := range out.statusChanges {
 		r.statusChanges(change.ws, change.at)
@@ -949,83 +967,35 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_selected",
 		logsite.Msg("the roster took the selection and cleared the workspace's attention marker"),
 		nil, func(*wsState) {
-			// THE SELECTION LEAVING A WORKSPACE ENDS ITS DWELL: the user is no
-			// longer looking at it, so a later return counts a fresh one
-			// rather than drawing this one's elapsed fade.
-			if previous := r.state.selected; previous != nil && *previous != ws {
-				r.state.workspace(*previous).dwell = nil
-			}
 			selected := ws
 			r.state.selected = &selected
 		})
 }
 
-// SetViewed records that the user has READ the last turn's result, which
-// draws the row PARTIAL — but only when the report lands on a TURN-END row
-// (done, interrupted or turn_failed), or on a VENDOR_BLOCKED row, whose block
-// a failed turn raised: viewing it reads that turn's result (owner ruling,
-// 2026-09-28), though the marker itself is still drawn only on a turn end.
-// It also reads an UNREAD result from an IDLE_ASYNC row, which live detached
-// work draws over that turn end (idleArm): the user viewing it is viewing the
-// finished turn.
-//
-// The editor is the only caller (MarkWorkspaceViewed): dwell is an editor
-// fact, and the editor reports it whatever the status. Whether it takes is
-// the roster's decision, made against the arm the row last PUBLISHED — the
-// one the user was looking at — under the same lock as the render this
-// mutation runs. A report on a turn-end row, or on an `idle_async` row over an
-// unread result, reads the result, and the row comes back PARTIAL on its
-// turn-end arm once detached work ends. A report on any other row is refused
-// and recorded, and changes nothing.
-// There is no companion lowering setter, deliberately: a new turn is what
-// makes the next result unread (startTurn, SetTurnEnded).
-func (r *resolver) SetViewed(ws ids.WorkspaceID) {
-	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_viewed",
-		logsite.Msg("the roster took the editor's viewed report; it reads the result only on a turn-end row"),
-		nil, func(s *wsState, log dlog.Logger) {
-			// THE VERDICT ENDS THE DWELL, whether or not it reads the result:
-			// the editor has stopped counting either way.
-			s.dwell = nil
-			if !s.lastArmSeen || !s.viewReadsResult(s.lastArm) {
-				log.Debug("daemon.sidebar.row_viewed_refused",
-					"the row is not on a turn-end arm, so the viewed report was dropped and the row stays FULL",
-					dlog.Context{"status": s.lastArm, "result": s.result.String()})
+// SetInteracted records the user's interaction with the workspace at AT: the
+// row is viewed on the arm it last PUBLISHED, the one the user interacted
+// with, under the same lock as the render this mutation runs, and AT is its
+// interaction recency. It takes on every arm (frontend.v1.RosterRowViewed).
+// An interaction before the row's first arm views nothing, and says so.
+func (r *resolver) SetInteracted(ws ids.WorkspaceID, at time.Time) {
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_interacted",
+		logsite.Msg("the roster took the user's interaction with the workspace"),
+		dlog.Context{"at": at.UTC()}, func(s *wsState, log dlog.Logger) {
+			was := s.viewedArm
+			if !s.interacted(at) {
+				if !s.lastArmSeen {
+					log.Info("daemon.sidebar.interaction_before_arm",
+						"the user interacted before the roster drew the row any status, so nothing is viewed yet", nil)
+					return
+				}
+				log.Debug("daemon.sidebar.interaction_restamped",
+					"the row was already viewed on its status; only its interaction instant moved", dlog.Context{"status": s.lastArm})
 				return
 			}
-			if s.result == resultRead {
-				return
-			}
-			log.Info("daemon.sidebar.result_read",
-				"the user viewed the turn-end row, so the last turn's result is read", dlog.Context{
-					"status":     s.lastArm,
-					"was":        s.result.String(),
-					"async_live": s.asyncLive(),
+			log.Info("daemon.sidebar.row_viewed",
+				"the user interacted with the workspace, so its row is viewed until its next status change", dlog.Context{
+					"status": s.viewedArm, "was": was,
 				})
-			s.result = resultRead
-			s.resultSettled = true
-		})
-}
-
-// SetViewDwell implements Resolver.
-func (r *resolver) SetViewDwell(ws ids.WorkspaceID, length time.Duration) {
-	r.mutateWorkspace(ws, "daemon.sidebar.set_view_dwell",
-		logsite.Msg("the roster took the editor's view dwell; the row carries it while it will recede the name"),
-		dlog.Context{"length_ms": length.Milliseconds()}, func(s *wsState) {
-			s.dwell = &viewDwell{startedAt: r.now(), length: length}
-		})
-}
-
-// StopViewDwell implements Resolver. Stopping a workspace with no dwell is a
-// success that changes nothing, so it publishes nothing.
-func (r *resolver) StopViewDwell(ws ids.WorkspaceID) {
-	r.mutateWorkspaceIf(ws, "daemon.sidebar.stop_view_dwell",
-		logsite.Msg("the roster ended the editor's view dwell before it completed"),
-		nil, func(s *wsState, _ dlog.Logger) bool {
-			if s.dwell == nil {
-				return false
-			}
-			s.dwell = nil
-			return true
 		})
 }
 
@@ -1131,9 +1101,13 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 	}
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn", logsite.Msg("the roster took the accepted turn"), ctx,
 		func(s *wsState, log dlog.Logger) {
-			if turn != nil && s.result == resultUnread {
-				log.Info("daemon.sidebar.result_unread_cleared",
-					"a new prompt started a turn, so the last turn's unread result no longer holds the row", nil)
+			if turn != nil && s.result == resultEnded {
+				log.Info("daemon.sidebar.result_cleared",
+					"a new prompt started a turn, so the last turn's end no longer holds the row", nil)
+			}
+			if turn != nil && s.dropRestoredViewed() {
+				log.Info("daemon.sidebar.viewed_restore_dropped",
+					"a new turn started before the row drew its restored viewed status, so it is not viewed", nil)
 			}
 			s.startTurn(turn)
 		})
@@ -1177,6 +1151,10 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn_ended", logsite.Msg("the roster took the turn's close"),
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			cut := contextCut(s.turn)
+			if s.dropRestoredViewed() {
+				log.Info("daemon.sidebar.viewed_restore_dropped",
+					"a turn ended before the row drew its restored viewed status, so it is not viewed", nil)
+			}
 			s.turn = nil
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = ""
@@ -1185,11 +1163,9 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			s.endAnswered = false
 			s.compacting = false
 			s.settleResult()
-			// A COMPLETED, INTERRUPTED or FAILED turn leaves a result the
-			// user has not read. A close this build does not know is a
-			// contract breach: it is recorded loudly and leaves no tracked
-			// result, and since it is still a NEW ending, a read state from
-			// before it does not carry over.
+			// A COMPLETED, INTERRUPTED or FAILED turn leaves a turn end the row
+			// reports. A close this build does not know is a contract breach:
+			// it is recorded loudly and leaves no tracked result.
 			fault, faultKnown := ladder.ResolveTurnFault(how, s.lastFailure)
 			if faultKnown {
 				s.turnFault = fault
@@ -1205,40 +1181,16 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 					})
 				return
 			}
-			// A CONTEXT CUT THAT SUCCEEDED HAS NOTHING TO READ (owner ruling,
-			// 2026-10-02): a /clear or a compaction the user asked for leaves no
-			// response, only the cut, so its `done` is read the moment it lands
-			// and the row is drawn PARTIAL on the very push that ends it — no
-			// dwell, so no editor timer is involved. A cut that was interrupted
-			// or failed is a result like any other turn's and stays unread.
-			if cut != "" && end == ladder.TurnEndDone {
-				s.result = resultRead
-				log.Info("daemon.sidebar.result_read_on_cut",
-					"a context cut completed, so its result is read at once and the row is drawn PARTIAL with no dwell", dlog.Context{
-						"act":        cut,
-						"status":     end.String(),
-						"async_live": s.asyncLive(),
-					})
-				return
-			}
-			// AN INTERRUPTED TURN IS READ THE MOMENT IT ENDS (owner ruling,
-			// 2026-10-13): the user stopped it, so there is nothing new to
-			// look at, and the row is drawn PARTIAL on the very push that
-			// ends it, in the sidebar and the tab bar alike.
-			if end == ladder.TurnEndInterrupted {
-				s.result = resultRead
-				log.Info("daemon.sidebar.result_read_on_interrupt",
-					"the turn was interrupted, so its result is read at once and the row is drawn PARTIAL with no dwell", dlog.Context{
-						"status":     end.String(),
-						"async_live": s.asyncLive(),
-					})
-				return
-			}
-			s.result = resultUnread
-			log.Info("daemon.sidebar.result_unread",
-				"the turn ended, so its result is unread until the user views the row", dlog.Context{
-					"status":     end.String(),
-					"async_live": s.asyncLive(),
+			// THE ROW IS NOT VIEWED BY ITS OWN END: the status change it makes
+			// lowers the viewed marker like any other, a completed /clear, a
+			// compaction and an interrupt included, and only the user's next
+			// interaction raises it (frontend.v1.RosterRowViewed).
+			s.result = resultEnded
+			log.Info("daemon.sidebar.result_ended",
+				"the turn ended, so the row reports its end until the next turn", dlog.Context{
+					"status":      end.String(),
+					"context_cut": cut,
+					"async_live":  s.asyncLive(),
 				})
 		})
 }
@@ -1570,7 +1522,7 @@ func (r *resolver) holdsNetworkFault(ws ids.WorkspaceID, id string) bool {
 
 // OnSignedIn takes a completed sign-in for the workspace's account root. When
 // the last turn failed on an account cause a sign-in cures, that failure is
-// answered: its fault and its block lift, its unread result is retired, and
+// answered: its fault and its block lift, its turn end is retired, and
 // the row draws `ready` until the next turn. Any other last turn is left
 // exactly as it stands.
 func (r *resolver) OnSignedIn(ws ids.WorkspaceID) {

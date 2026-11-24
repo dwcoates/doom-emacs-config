@@ -53,7 +53,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -95,7 +95,6 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawned       sql.NullInt64
 		created       int64
 		end           sql.NullString
-		read          bool
 		mergeOf       sql.NullString
 		request       sql.NullString
 		forkHead      sql.NullString
@@ -131,11 +130,13 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		owedFrom      sql.NullInt64
 		visitAt       sql.NullInt64
 		lastWork      sql.NullInt64
+		viewedStatus  sql.NullString
+		interacted    sql.NullInt64
 		landsInto     sql.NullString
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.DeployMediator, &ws.EmojiAck); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.DeployMediator, &ws.EmojiAck); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)
@@ -169,7 +170,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		if !result.valid() {
 			return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "result_end", Err: fmt.Errorf("unknown turn-end arm %q", end.String)}
 		}
-		ws.Result = &TurnResult{End: result, Read: read}
+		ws.Result = &TurnResult{End: result}
 	}
 	if spawned.Valid {
 		// A NON-POSITIVE RECORDED PID IS A CORRUPT ROW, never a silently
@@ -232,6 +233,13 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	ws.KeepaliveOwedFrom = optTime(owedFrom)
 	ws.SettingsVisitAt = optTime(visitAt)
 	ws.LastWorkAt = optTime(lastWork)
+	ws.InteractedAt = optTime(interacted)
+	if viewedStatus.Valid {
+		if viewedStatus.String == "" {
+			return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "viewed_status", Err: errors.New("a recorded viewed status names an arm")}
+		}
+		ws.ViewedStatus = viewedStatus.String
+	}
 	if awaiting.Valid {
 		id := WorkspaceID(awaiting.String)
 		ws.Awaiting = &id
@@ -1081,22 +1089,17 @@ func (s *store) SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 func (s *store) SetResult(ctx context.Context, id WorkspaceID, result *TurnResult) error {
 	const op = "daemon.wsm.set_result"
 	fields := dlog.Context{"workspace": string(id)}
-	var (
-		end  any
-		read bool
-	)
+	var end any
 	if result != nil {
 		if !result.End.valid() {
 			err := fmt.Errorf("wsm: unknown turn-end arm %q", result.End)
 			s.log.Error(op, "refused an undeclared turn-end arm", withError(fields, err))
 			return err
 		}
-		end, read = string(result.End), result.Read
-		fields["end"], fields["read"] = string(result.End), result.Read
+		end = string(result.End)
+		fields["end"] = string(result.End)
 	}
-	return s.setWorkspaceColumns(ctx, op, id, fields,
-		workspaceColumn{name: "result_end", value: end},
-		workspaceColumn{name: "result_read", value: read})
+	return s.setWorkspaceColumns(ctx, op, id, fields, workspaceColumn{name: "result_end", value: end})
 }
 
 // SetMergedAt records that the workspace's merge landed, and, when COMMITS is

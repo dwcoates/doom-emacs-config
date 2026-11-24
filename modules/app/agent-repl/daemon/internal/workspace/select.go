@@ -225,51 +225,42 @@ func (v *verbs) FollowStoredSelection(ctx context.Context) error {
 	return nil
 }
 
-// MarkViewed records that the user has SEEN the workspace, which reads the
-// last turn's result and draws its roster row PARTIAL (the name recedes; the
-// status dot keeps its colour) — only when the row is on a turn-end arm, done
-// or interrupted, which the roster decides (`sidebar.SetViewed`).
+// Interaction is how the user interacted with a workspace, for the record:
+// every kind has the same effect (RecordInteraction).
+type Interaction string
+
+// The interactions a workspace's interaction is recorded for: the three an
+// editor or a page reports (agentrepl.v1.UserInteraction), and the link a
+// reader followed in its page, which the daemon receives itself.
+const (
+	InteractionFeedScrolled  Interaction = "feed_scrolled"
+	InteractionComposerTyped Interaction = "composer_typed"
+	InteractionFeedNavigated Interaction = "feed_navigated"
+	InteractionLinkFollowed  Interaction = "link_followed"
+)
+
+// RecordInteraction records the user's interaction with the workspace, in
+// this order: the interaction instant is written durably first
+// (wsm.SetInteractedAt), so the recency the roster then states is one a
+// restart keeps, and the roster is told (Sidebar.SetInteracted), which draws
+// the row viewed on the status it stands on until its next status change.
 //
-// It does ONE thing, and the things it deliberately does NOT do are the point:
-// it writes no durable record, because the display mode is a view fact that
-// should not survive a restart; it does not revive a parked session, because
-// looking at something is not working on it; and it has no companion "unview"
-// verb, because the roster makes the next result unread itself when the next
-// turn ends. Idempotent — marking an already-viewed workspace changes nothing.
-func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
-	_, log, err := v.owned(ctx, "MarkWorkspaceViewed", ws)
+// It does not revive a parked session, because interacting with a page is not
+// prompting it, and it is idempotent: interacting again with a viewed
+// workspace only moves its instant.
+func (v *verbs) RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind Interaction) error {
+	_, log, err := v.owned(ctx, "ReportUserInteraction", ws)
 	if err != nil {
 		return err
 	}
-	log.Debug(opMarkViewed, "the user has seen the workspace; its row goes PARTIAL if it is on a turn-end arm", nil)
-	v.deps.Sidebar.SetViewed(ws)
-	return nil
-}
-
-// StartViewDwell records that the editor started counting the user's dwell
-// on the workspace. Like MarkViewed it is a view fact: no durable record, no
-// revival, and the roster alone decides whether the row draws it.
-func (v *verbs) StartViewDwell(ctx context.Context, ws ids.WorkspaceID, length time.Duration) error {
-	_, log, err := v.owned(ctx, "ReportViewDwell", ws)
-	if err != nil {
-		return err
+	at := v.now()
+	fields := dlog.Context{"interaction": string(kind), "at": at.UTC()}
+	if err := v.deps.DB.SetInteractedAt(ctx, ws, at); err != nil {
+		log.Error(opInteraction, "could not record the user's interaction instant", dlog.WithCause(fields, err))
+		return fmt.Errorf("record interaction with %q: %w", ws, err)
 	}
-	log.Debug(opViewDwell, "the editor started counting the user's dwell on the workspace", dlog.Context{
-		"dwell": "counting", "length_ms": length.Milliseconds(),
-	})
-	v.deps.Sidebar.SetViewDwell(ws, length)
-	return nil
-}
-
-// StopViewDwell records that the editor stopped counting the user's dwell on
-// the workspace before it completed.
-func (v *verbs) StopViewDwell(ctx context.Context, ws ids.WorkspaceID) error {
-	_, log, err := v.owned(ctx, "ReportViewDwell", ws)
-	if err != nil {
-		return err
-	}
-	log.Debug(opViewDwell, "the editor stopped counting the user's dwell on the workspace", dlog.Context{"dwell": "stopped"})
-	v.deps.Sidebar.StopViewDwell(ws)
+	log.Debug(opInteraction, "the user interacted with the workspace; its row is viewed until its next status change", fields)
+	v.deps.Sidebar.SetInteracted(ws, at)
 	return nil
 }
 

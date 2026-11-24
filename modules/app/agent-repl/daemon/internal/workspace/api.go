@@ -596,20 +596,12 @@ type Verbs interface {
 	// two disagree and nothing when they agree, under the same lock Select
 	// takes, so it can never interleave with a select's stamp and push.
 	FollowStoredSelection(ctx context.Context) error
-	// MarkViewed records that the user has SEEN this workspace: its roster row
-	// goes PARTIAL until its status changes, if and only if the row is DONE
-	// (the roster drops the report on any other status). Idempotent, and it
-	// touches no durable record — the mode is a view fact, not a workspace
-	// fact.
-	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
-	// StartViewDwell records that the editor started counting a dwell of
-	// LENGTH on this workspace, so the roster recedes its row's name over the
-	// dwell (frontend.v1.RosterRowViewDwell). LENGTH is positive; the server
-	// refuses any other before calling. Touches no durable record.
-	StartViewDwell(ctx context.Context, ws ids.WorkspaceID, length time.Duration) error
-	// StopViewDwell records that the editor stopped counting this
-	// workspace's dwell before it completed. Idempotent.
-	StopViewDwell(ctx context.Context, ws ids.WorkspaceID) error
+	// RecordInteraction records that the user interacted with this workspace
+	// (KIND names how): its interaction instant is stamped durably and the
+	// roster draws its row viewed until its next status change, on any status
+	// (sidebar.Resolver.SetInteracted). Idempotent, and it revives nothing:
+	// interacting with a workspace's page is not prompting it.
+	RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind Interaction) error
 	// SetPriority sets or clears the roster priority badge.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
 	// SetLink stores a link under its label and ownership, or relabels a

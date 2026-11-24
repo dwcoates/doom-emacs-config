@@ -651,137 +651,91 @@ func TestFollowStoredSelectionLogsTheFollowAtInfo(t *testing.T) {
 	}
 }
 
-// ---- View dwell ------------------------------------------------------------
+// ---- RecordInteraction -----------------------------------------------------
 
-func TestViewDwellReportsReachTheRoster(t *testing.T) {
-	cases := []struct {
-		name   string
-		report func(v Verbs) error
-		want   string
-	}{
-		{
-			name:   "a start hands the roster the dwell's length",
-			report: func(v Verbs) error { return v.StartViewDwell(context.Background(), "w1", 5*time.Second) },
-			want:   "start w1 5s",
-		},
-		{
-			name:   "a stop ends the roster's dwell",
-			report: func(v Verbs) error { return v.StopViewDwell(context.Background(), "w1") },
-			want:   "stop w1",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+func TestRecordInteractionStampsTheInstantThenTellsTheRoster(t *testing.T) {
+	kinds := []Interaction{InteractionFeedScrolled, InteractionComposerTyped, InteractionFeedNavigated, InteractionLinkFollowed}
+	for _, kind := range kinds {
+		t.Run(string(kind), func(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
 			f.workspace("w1", t.TempDir())
 
 			// Act.
-			if err := tc.report(f.verbs); err != nil {
-				t.Fatalf("report: %v", err)
+			if err := f.verbs.RecordInteraction(context.Background(), "w1", kind); err != nil {
+				t.Fatalf("RecordInteraction: %v", err)
 			}
 
-			// Assert.
-			if len(f.sidebar.dwells) != 1 || f.sidebar.dwells[0] != tc.want {
-				t.Fatalf("roster dwell reports = %v, want [%s]", f.sidebar.dwells, tc.want)
+			// Assert: every kind stamps the daemon clock's instant durably and
+			// tells the roster the same instant.
+			want := []interaction{{ws: "w1", at: fixedNow}}
+			if !slices.Equal(f.db.interactedAt, want) {
+				t.Fatalf("durable interaction instants = %v, want %v", f.db.interactedAt, want)
 			}
-		})
-	}
-}
-
-func TestViewDwellReportsRefuseAnUnknownWorkspace(t *testing.T) {
-	cases := []struct {
-		name   string
-		report func(v Verbs) error
-	}{
-		{name: "a start", report: func(v Verbs) error { return v.StartViewDwell(context.Background(), "nope", time.Second) }},
-		{name: "a stop", report: func(v Verbs) error { return v.StopViewDwell(context.Background(), "nope") }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			f := newFixture(t)
-
-			// Act.
-			err := tc.report(f.verbs)
-
-			// Assert: an unregistered workspace has no row to draw a dwell on.
-			if err == nil {
-				t.Fatal("the dwell report was accepted for a workspace the registry does not hold")
-			}
-			if len(f.sidebar.dwells) != 0 {
-				t.Fatalf("roster dwell reports = %v, want none for a refused report", f.sidebar.dwells)
+			if !slices.Equal(f.sidebar.interacted, want) {
+				t.Fatalf("roster interactions = %v, want %v", f.sidebar.interacted, want)
 			}
 		})
 	}
 }
 
-// ---- MarkViewed ------------------------------------------------------------
-
-func TestMarkViewedTellsTheRoster(t *testing.T) {
+func TestRecordInteractionSelectsNothing(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
-		t.Fatalf("MarkViewed: %v", err)
+	if err := f.verbs.RecordInteraction(context.Background(), "w1", InteractionFeedScrolled); err != nil {
+		t.Fatalf("RecordInteraction: %v", err)
 	}
+
+	// Assert: interacting with a workspace's page is not switching to it.
+	if f.db.current != nil {
+		t.Fatalf("current = %v, want RecordInteraction to have recorded no selection", f.db.current)
+	}
+}
+
+func TestRecordInteractionRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	err := f.verbs.RecordInteraction(context.Background(), "nope", InteractionFeedScrolled)
+
+	// Assert: an unregistered workspace has no row to view.
+	if err == nil {
+		t.Fatal("RecordInteraction() accepted a workspace the registry does not hold")
+	}
+	if len(f.db.interactedAt) != 0 || len(f.sidebar.interacted) != 0 {
+		t.Fatalf("durable %v, roster %v, want nothing recorded for a refused interaction", f.db.interactedAt, f.sidebar.interacted)
+	}
+}
+
+// TestRecordInteractionThatCannotRecordFailsLoudly pins the store failure: the
+// interaction answers the error, records it at ERROR with its kind, and tells
+// the roster nothing, so the row is never drawn viewed with no durable instant.
+func TestRecordInteractionThatCannotRecordFailsLoudly(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.interactedErr = errFake
+
+	// Act.
+	err := f.verbs.RecordInteraction(context.Background(), "w1", InteractionComposerTyped)
 
 	// Assert.
-	if len(f.sidebar.viewed) != 1 || f.sidebar.viewed[0] != "w1" {
-		t.Fatalf("roster viewed reports = %v, want w1 once", f.sidebar.viewed)
+	if !errors.Is(err, errFake) {
+		t.Fatalf("RecordInteraction error = %v, want it to wrap %v", err, errFake)
 	}
-}
-
-func TestMarkViewedWritesNoDurableRecord(t *testing.T) {
-	// Arrange: the display mode is a VIEW fact and must not outlive a restart.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-
-	// Act.
-	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
-		t.Fatalf("MarkViewed: %v", err)
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Message: "could not record the user's interaction instant"})
+	if !ok || rec.Level != "error" || rec.Operation != opInteraction {
+		t.Fatalf("the failed write's record = %+v (found %v), want an error under %s", rec, ok, opInteraction)
 	}
-
-	// Assert: looking at a workspace is not selecting it either.
-	if f.db.current != nil {
-		t.Fatalf("current = %v, want MarkViewed to have recorded no selection", f.db.current)
+	if rec.Context["interaction"] != "composer_typed" || rec.Context["cause"] == nil {
+		t.Fatalf("the failed write's context = %v, want its kind and cause", rec.Context)
 	}
-}
-
-func TestMarkViewedIsIdempotent(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-
-	// Act.
-	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
-		t.Fatalf("first MarkViewed: %v", err)
-	}
-	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
-		t.Fatalf("second MarkViewed: %v", err)
-	}
-
-	// Assert: a second report is a success that changes nothing downstream.
-	if len(f.sidebar.viewed) != 2 {
-		t.Fatalf("roster viewed reports = %v, want both reports forwarded", f.sidebar.viewed)
-	}
-}
-
-func TestMarkViewedRefusesAnUnknownWorkspace(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-
-	// Act.
-	err := f.verbs.MarkViewed(context.Background(), "nope")
-
-	// Assert: an unregistered workspace has no row to mark.
-	if err == nil {
-		t.Fatal("MarkViewed() accepted a workspace the registry does not hold")
-	}
-	if len(f.sidebar.viewed) != 0 {
-		t.Fatalf("roster viewed reports = %v, want none for a refused mark", f.sidebar.viewed)
+	if len(f.sidebar.interacted) != 0 {
+		t.Fatalf("roster interactions = %v, want none", f.sidebar.interacted)
 	}
 }
 

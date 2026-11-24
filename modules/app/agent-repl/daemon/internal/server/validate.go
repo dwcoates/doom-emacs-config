@@ -944,20 +944,14 @@ func validateSetWorkspacePriorityRequest(req *agentreplv1.SetWorkspacePriorityRe
 	return nil
 }
 
-// validateReportViewDwellRequest is ReportViewDwellRequest's base function: a
-// workspace and a dwell arm are both required, and a counting dwell's length
-// is positive.
-func validateReportViewDwellRequest(req *agentreplv1.ReportViewDwellRequest) *connect.Error {
+// validateReportUserInteractionRequest is ReportUserInteractionRequest's base
+// function: a workspace and the interaction's kind are both required.
+func validateReportUserInteractionRequest(req *agentreplv1.ReportUserInteractionRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
-	switch dwell := req.GetDwell().(type) {
-	case nil:
-		return invalid("dwell", "a dwell arm is required")
-	case *agentreplv1.ReportViewDwellRequest_Counting:
-		if dwell.Counting.GetLengthMs() <= 0 {
-			return invalid("dwell.counting.length_ms", "a counting dwell's length must be positive")
-		}
+	if req.GetInteraction().GetKind() == nil {
+		return invalid("interaction.kind", "the interaction's kind is required")
 	}
 	return nil
 }

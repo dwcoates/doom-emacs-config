@@ -75,17 +75,19 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	awaitRoster(t, f.d, roster, "done after the turn concludes", statusIs(func(row *frontendv1.RosterRow) bool { return row.GetDone() != nil }))
 
 	// Act / Assert: idle_async, FULL, as soon as detached work runs, without
-	// waiting for the user to view the unread result.
+	// waiting for the user to interact with the turn end.
 	pushDetachedShell(f.shim, "work-1", "sleep 1")
-	awaitRoster(t, f.d, roster, "idle_async with detached work over the unread result",
+	awaitRoster(t, f.d, roster, "idle_async with detached work over the turn end",
 		statusIs(func(row *frontendv1.RosterRow) bool { return row.GetIdleAsync() != nil && row.GetViewed() == nil }))
-	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.async_outranks_unread")
+	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.async_outranks_turn_end")
 
-	// Act / Assert: viewing the idle_async row reads the unread result.
-	// The row does not move, so no roster push comes: the roster's own
-	// record of the read is what proves the report took.
-	markViewed(t, f.d, f.ws)
-	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.result_read")
+	// Act / Assert: the user scrolling the idle_async row's feed draws it
+	// PARTIAL and stamps its interaction recency.
+	reportScrolled(t, f.d, f.ws)
+	awaitRoster(t, f.d, roster, "idle_async, viewed, after the user scrolled",
+		statusIs(func(row *frontendv1.RosterRow) bool {
+			return row.GetIdleAsync() != nil && row.GetViewed() != nil && row.GetLastInteracted() != nil
+		}))
 }
 
 // tabBarIDs lists the roster's tabs -- its open rows in the Open section's

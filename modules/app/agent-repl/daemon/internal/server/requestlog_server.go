@@ -747,18 +747,11 @@ func (s *requestLoggingServer) GetWorkspaceMemory(
 	return serveUnary(s, ctx, "GetWorkspaceMemory", req, s.server.GetWorkspaceMemory)
 }
 
-func (s *requestLoggingServer) MarkWorkspaceViewed(
+func (s *requestLoggingServer) ReportUserInteraction(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.MarkWorkspaceViewedRequest],
-) (*connect.Response[agentreplv1.MarkWorkspaceViewedResponse], error) {
-	return serveUnary(s, ctx, "MarkWorkspaceViewed", req, s.server.MarkWorkspaceViewed)
-}
-
-func (s *requestLoggingServer) ReportViewDwell(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.ReportViewDwellRequest],
-) (*connect.Response[agentreplv1.ReportViewDwellResponse], error) {
-	return serveUnary(s, ctx, "ReportViewDwell", req, s.server.ReportViewDwell)
+	req *connect.Request[agentreplv1.ReportUserInteractionRequest],
+) (*connect.Response[agentreplv1.ReportUserInteractionResponse], error) {
+	return serveUnary(s, ctx, "ReportUserInteraction", req, s.server.ReportUserInteraction)
 }
 
 func (s *requestLoggingServer) ReportRecencyReach(

@@ -1620,9 +1620,9 @@ func TestSetResultStoresTheLastTurnResult(t *testing.T) {
 		name string
 		want TurnResult
 	}{
-		{name: "an unread done", want: TurnResult{End: TurnResultDone}},
-		{name: "a read interrupted", want: TurnResult{End: TurnResultInterrupted, Read: true}},
-		{name: "an unread failed turn", want: TurnResult{End: TurnResultFailed}},
+		{name: "a done", want: TurnResult{End: TurnResultDone}},
+		{name: "an interrupted", want: TurnResult{End: TurnResultInterrupted}},
+		{name: "a failed turn", want: TurnResult{End: TurnResultFailed}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1651,7 +1651,7 @@ func TestSetResultClearsIt(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	if err := s.SetResult(context.Background(), ws.ID, &TurnResult{End: TurnResultDone, Read: true}); err != nil {
+	if err := s.SetResult(context.Background(), ws.ID, &TurnResult{End: TurnResultDone}); err != nil {
 		t.Fatalf("SetResult: %v", err)
 	}
 

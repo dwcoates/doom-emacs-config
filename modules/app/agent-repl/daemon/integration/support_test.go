@@ -664,16 +664,17 @@ func setPriority(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef, 
 	}
 }
 
-// markViewed reports that the user has seen ws, as the editor's dwell does.
-func markViewed(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
+// reportScrolled reports that the user scrolled ws's feed, as its page does.
+func reportScrolled(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
-	req := &agentreplv1.MarkWorkspaceViewedRequest{Workspace: ws}
-	resp, err := d.Client().MarkWorkspaceViewed(d.Ctx(), connect.NewRequest(req))
+	req := &agentreplv1.ReportUserInteractionRequest{Workspace: ws, Interaction: &agentreplv1.UserInteraction{
+		Kind: &agentreplv1.UserInteraction_FeedScrolled{FeedScrolled: &agentreplv1.UserInteractionFeedScrolled{}}}}
+	resp, err := d.Client().ReportUserInteraction(d.Ctx(), connect.NewRequest(req))
 	if err != nil {
-		t.Fatalf("MarkWorkspaceViewed(%s) = error %v, want a success", ws.GetId(), err)
+		t.Fatalf("ReportUserInteraction(%s) = error %v, want a success", ws.GetId(), err)
 	}
 	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("MarkWorkspaceViewed(%s) = %v, want a success", ws.GetId(), resp.Msg)
+		t.Fatalf("ReportUserInteraction(%s) = %v, want a success", ws.GetId(), resp.Msg)
 	}
 }
 

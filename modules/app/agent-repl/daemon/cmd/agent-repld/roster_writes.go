@@ -21,19 +21,25 @@ import (
 // and before the state client, so no change is lost.
 type rosterWrites struct {
 	results       *latestwrite.Writer[ids.WorkspaceID, *wsm.TurnResult]
+	viewed        *latestwrite.Writer[ids.WorkspaceID, string]
 	statusChanges *latestwrite.Writer[ids.WorkspaceID, time.Time]
 	visibilities  *latestwrite.Writer[ids.WorkspaceID, wsm.Visibility]
 }
 
-// newRosterWrites starts the writers behind the roster's three sinks: RESULTS,
-// STATUS CHANGES and VISIBILITY make the writes themselves (rosterResults,
-// rosterStatusChanges, rosterVisibility) and record their own failures.
-func newRosterWrites(results sidebar.ResultSink, statusChanges sidebar.StatusChangeSink, visibility func(ids.WorkspaceID, wsm.Visibility)) *rosterWrites {
+// newRosterWrites starts the writers behind the roster's four sinks: RESULTS,
+// VIEWED, STATUS CHANGES and VISIBILITY make the writes themselves
+// (rosterResults, rosterViewed, rosterStatusChanges, rosterVisibility) and
+// record their own failures.
+func newRosterWrites(results sidebar.ResultSink, viewed sidebar.ViewedSink, statusChanges sidebar.StatusChangeSink, visibility func(ids.WorkspaceID, wsm.Visibility)) *rosterWrites {
 	return &rosterWrites{
 		// THE NEWER RESULT IS THE ONE THAT STANDS: a result submitted later
 		// replaces one not yet written, as its write would have overwritten it.
 		results: latestwrite.New(func(ws ids.WorkspaceID, result *wsm.TurnResult) { results(ws, result) },
 			func(_, next *wsm.TurnResult) *wsm.TurnResult { return next }),
+		// THE NEWER VIEWED FACT IS THE ONE THAT STANDS, as a result is: the
+		// roster is its one author, and reports it in the order it changed.
+		viewed: latestwrite.New(func(ws ids.WorkspaceID, arm string) { viewed(ws, arm) },
+			func(_, next string) string { return next }),
 		// THE LATER INSTANT IS THE ONE THAT STANDS, as the write itself only
 		// moves forward (wsm.SetStatusChangedAt).
 		statusChanges: latestwrite.New(func(ws ids.WorkspaceID, at time.Time) { statusChanges(ws, at) },
@@ -50,6 +56,9 @@ func newRosterWrites(results sidebar.ResultSink, statusChanges sidebar.StatusCha
 
 // ResultSink is the roster's result sink: it submits the change and returns.
 func (w *rosterWrites) ResultSink() sidebar.ResultSink { return w.results.Submit }
+
+// ViewedSink is the roster's viewed sink: it submits the change and returns.
+func (w *rosterWrites) ViewedSink() sidebar.ViewedSink { return w.viewed.Submit }
 
 // StatusChangeSink is the roster's status change sink: it submits the change
 // and returns.
@@ -68,6 +77,7 @@ func (w *rosterWrites) VisibilitySink() sidebar.VisibilitySink {
 // Close writes every change still held and returns once every writer has.
 func (w *rosterWrites) Close() {
 	w.results.Close()
+	w.viewed.Close()
 	w.statusChanges.Close()
 	w.visibilities.Close()
 }

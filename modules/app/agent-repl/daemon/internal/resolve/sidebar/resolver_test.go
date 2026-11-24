@@ -409,7 +409,7 @@ func TestAViewIsPublishedBeforeAnotherChangeCanPublishItsOwn(t *testing.T) {
 			r.OnActivity(theWS, &conversationv1.AgentId{Value: "main"}, &conversationv1.AgentActivity{})
 		}))
 	rec := workspace(string(theWS), "one")
-	rec.Result = &wsm.TurnResult{End: wsm.TurnResultDone, Read: true}
+	rec.Result = &wsm.TurnResult{End: wsm.TurnResultDone}
 	r.SetRegistry(registry(rec))
 	r.OnLink(theWS, shimclient.LinkConnected)
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})

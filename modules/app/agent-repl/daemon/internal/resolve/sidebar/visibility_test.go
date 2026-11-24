@@ -221,7 +221,7 @@ func TestAFoldedWorkspaceWhoseResultIsReadIsNotVisible(t *testing.T) {
 	turnFinished(r, theWS)
 
 	// Act
-	r.SetViewed(theWS)
+	r.SetInteracted(theWS, epoch)
 
 	// Assert
 	if got := visibilities(t, r)[string(theWS)]; got != "not_visible" {

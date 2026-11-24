@@ -252,11 +252,9 @@ func parked(session *wsm.Session) bool {
 // footer's background arm, so the roster holds no awaiting fact of its own
 // and the two surfaces color an awaiting workspace alike by construction.
 //
-// THE BACKGROUND OUTRANKS AN UNREAD TURN END: a turn that ends with
-// background work still running draws `idle_async` at once, without waiting
-// for the user to read the result first. The result stays unread under it, so
-// the row returns FULL on its turn-end arm when the background ends, unless
-// the user read it meanwhile (SetViewed).
+// THE BACKGROUND OUTRANKS A TURN END: a turn that ends with background work
+// still running draws `idle_async` at once. The turn end stands under it, so
+// the row returns to its turn-end arm when the background ends.
 func idleArm(s *wsState, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
 	awaited := status.GetBackground().GetAwaiting()
 	switch {
@@ -264,9 +262,9 @@ func idleArm(s *wsState, session *wsm.Session, status *frontendv1.FooterStatus, 
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: no session was ever created", dlog.Context{"function": "status", "branch": "no session was ever created"})
 		return "none"
 	case s.asyncLive() || awaited != nil:
-		if s.resultUnreadNow() {
-			log.Debug("daemon.sidebar.async_outranks_unread",
-				"the workspace is in the background, so the row is idle_async at once though the last turn's result is unread",
+		if s.resultEndedNow() {
+			log.Debug("daemon.sidebar.async_outranks_turn_end",
+				"the workspace is in the background, so the row is idle_async at once over the last turn's end",
 				dlog.Context{"held": s.turnEndArm()})
 		}
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: the workspace is in the background", dlog.Context{
@@ -274,8 +272,8 @@ func idleArm(s *wsState, session *wsm.Session, status *frontendv1.FooterStatus, 
 			"async_live": s.asyncLive(), "awaiting": awaited.GetAwaitedName(),
 		})
 		return "idle_async"
-	case s.resultUnreadNow():
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case s.resultUnreadNow()", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
+	case s.resultEndedNow():
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case s.resultEndedNow()", dlog.Context{"function": "status", "branch": "case s.resultEndedNow()"})
 		return s.turnEndArm()
 	case s.turnEverRan && !s.endAnswered:
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case s.turnEverRan", dlog.Context{"function": "status", "branch": "case s.turnEverRan", "close": int(s.lastClose)})
@@ -308,7 +306,7 @@ func asyncMergingMarker(asyncMerging bool, arm string, log dlog.Logger) *fronten
 // the marker is the one extra fact the surfaces draw, inking the name in the
 // turn end's color while the dot or `[N]` keeps the background's yellow.
 func idleAsyncUnreadMarker(s *wsState, arm string, log dlog.Logger) *frontendv1.RosterRowIdleAsyncUnread {
-	if arm != "idle_async" || !s.resultUnreadNow() {
+	if arm != "idle_async" || !s.resultEndedNow() || s.viewedOn(arm) {
 		return nil
 	}
 	end := s.turnEndArm()

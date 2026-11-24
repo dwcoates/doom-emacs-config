@@ -513,7 +513,7 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 
 			// Act
 			if row.read {
-				s.roster.SetViewed(theWS)
+				s.roster.SetInteracted(theWS, epoch)
 			}
 
 			// Assert
@@ -587,7 +587,7 @@ func TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches(t *testing.T) {
 			s.footer.OnDetachedWork(theWS, agent("main"), work)
 			s.roster.OnDetachedWork(theWS, agent("main"), work)
 			s.closeTurn(wsm.CloseCompleted)
-			s.roster.SetViewed(theWS)
+			s.roster.SetInteracted(theWS, epoch)
 		}},
 		{name: "a self-scheduled wakeup where the footer reads idle", wantFooter: "waiting/wakeup", want: "ready", apply: func(t *testing.T, s *surfaces) {
 			wakeup := &conversationv1.AgentActivity{

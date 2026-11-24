@@ -551,12 +551,11 @@ type fakeVerbs struct {
 	selectEntered chan struct{}
 	selectLeft    chan struct{}
 
-	// markViewed records every workspace MarkWorkspaceViewed resolved onto the
-	// verb, so the handler's own resolution is what a test asserts.
-	markViewed    []ids.WorkspaceID
-	markViewedErr error
-	viewDwells    []viewDwellCall
-	viewDwellErr  error
+	// interactions records every interaction RecordInteraction was handed,
+	// so the handler's own resolution is what a test asserts;
+	// interactionErr is what it answers.
+	interactions   []interactionCall
+	interactionErr error
 	// hiddenSets records every SetWorkspaceHidden the verb received;
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
@@ -1046,27 +1045,15 @@ func (f *fakeVerbs) UpdateTask(_ context.Context, _ ids.TaskID, change wsm.TaskC
 	return nil
 }
 
-func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
-	f.markViewed = append(f.markViewed, ws)
-	return f.markViewedErr
+func (f *fakeVerbs) RecordInteraction(_ context.Context, ws ids.WorkspaceID, kind workspace.Interaction) error {
+	f.interactions = append(f.interactions, interactionCall{ws: ws, kind: kind})
+	return f.interactionErr
 }
 
-func (f *fakeVerbs) StartViewDwell(_ context.Context, ws ids.WorkspaceID, length time.Duration) error {
-	f.viewDwells = append(f.viewDwells, viewDwellCall{ws: ws, length: length})
-	return f.viewDwellErr
-}
-
-func (f *fakeVerbs) StopViewDwell(_ context.Context, ws ids.WorkspaceID) error {
-	f.viewDwells = append(f.viewDwells, viewDwellCall{ws: ws, stopped: true})
-	return f.viewDwellErr
-}
-
-// viewDwellCall is one dwell report the fake verbs took: a start of LENGTH, or
-// a stop.
-type viewDwellCall struct {
-	ws      ids.WorkspaceID
-	length  time.Duration
-	stopped bool
+// interactionCall is one interaction the fake verbs took.
+type interactionCall struct {
+	ws   ids.WorkspaceID
+	kind workspace.Interaction
 }
 
 // agentAPI is what the fake verbs answer, and record, for the agent API's

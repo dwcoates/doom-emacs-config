@@ -113,6 +113,17 @@ type Workspace struct {
 	// RecordWork alone (lastwork.go); nil when it never has. Every park reads
 	// it through IdleSince.
 	LastWorkAt *time.Time
+	// ViewedStatus is the roster status arm the user last interacted with the
+	// workspace on, while no status change has come since (SetViewedStatus);
+	// empty when the workspace is not viewed. The roster draws the row viewed
+	// exactly while this is its arm (frontend.v1.RosterRowViewed).
+	ViewedStatus string
+	// InteractedAt is when the user last interacted with the workspace
+	// (SetInteractedAt): the recency the roster states as
+	// frontend.v1.RosterRowLastInteracted. Nil when the user never has. It
+	// is not LastInteractedAt, a thread's latest selection, activity or
+	// creation, which orders the Chat app's threads.
+	InteractedAt *time.Time
 	// KeepaliveRunBeats is how many keep-alives the daemon has sent the
 	// workspace, for either of its conversations, since its last turn closed
 	// (keepaliverun.go): 0 once a turn closes. Derived on read.
@@ -284,8 +295,6 @@ type Workspace struct {
 type TurnResult struct {
 	// End is the turn-end arm the last turn resolved to.
 	End TurnResultEnd
-	// Read reports that the user has seen the result.
-	Read bool
 }
 
 // TurnResultEnd is a turn-end arm, spelled as the roster's status arm.

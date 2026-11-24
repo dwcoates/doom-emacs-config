@@ -25,7 +25,7 @@ func rosterResults(db resultWriter, log dlog.Logger) sidebar.ResultSink {
 		func(result *wsm.TurnResult) dlog.Context {
 			ctx := dlog.Context{"cleared": result == nil}
 			if result != nil {
-				ctx["end"], ctx["read"] = string(result.End), result.Read
+				ctx["end"] = string(result.End)
 			}
 			return ctx
 		})

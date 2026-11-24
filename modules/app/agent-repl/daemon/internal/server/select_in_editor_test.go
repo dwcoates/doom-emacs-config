@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -372,16 +373,14 @@ func TestSelectInEditorRecordsTheRelaysRevealAtInfo(t *testing.T) {
 	t.Fatalf("records = %+v, want the relay at info naming the reveal", log.Records())
 }
 
-func TestSelectInEditorFollowedFromAFeedTellsTheSourceAndRelaysTheSwitch(t *testing.T) {
+func TestSelectInEditorFollowedFromAFeedRecordsTheSourceAndRelaysTheSwitch(t *testing.T) {
 	// Arrange: the page's own workspace is the source and the target alike.
 	h := newHarness(t)
-	stream := holdHostStream(t, h)
 	w := holdEditor(h)
 
 	// Act.
 	_, err := h.Client.SelectInEditor(context.Background(),
 		connect.NewRequest(&agentreplv1.SelectInEditorRequest{Workspace: ref(), FollowedFrom: ref()}))
-	followed := receiveHostEvent(t, stream)
 	relayed := <-w.elisp
 	relayed.sent()
 
@@ -389,8 +388,9 @@ func TestSelectInEditorFollowedFromAFeedTellsTheSourceAndRelaysTheSwitch(t *test
 	if err != nil {
 		t.Fatalf("SelectInEditor: %v", err)
 	}
-	if followed.GetLinkFollowed() == nil || relayed.push.GetSelectRequested() == nil {
-		t.Fatalf("pushes = %v, %v, want link_followed on the host stream and select_requested to the editor", followed, relayed.push)
+	want := []interactionCall{{ws: testWorkspaceID, kind: workspace.InteractionLinkFollowed}}
+	if !slices.Equal(h.Verbs.interactions, want) || relayed.push.GetSelectRequested() == nil {
+		t.Fatalf("interactions = %v, push = %v, want the source's followed link recorded and select_requested to the editor", h.Verbs.interactions, relayed.push)
 	}
 }
 
