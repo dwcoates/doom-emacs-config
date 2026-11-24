@@ -36,14 +36,26 @@ const PageLeaveGrace = 10 * time.Second
 // viewed: the user just read it, and may well come back to it.
 const PageFirstViewGrace = 15 * time.Minute
 
-// ShimUnreadHold is how long after its turn ended a workspace whose result is
-// unread keeps its idle shim up, so a prompt in reply starts no shim.
-const ShimUnreadHold = 15 * time.Minute
+// ShimIdleHold is how long an idle shim stays up after the later of its
+// workspace's last turn end and the user's last interaction with it (owner
+// ruling, 2026-11-24): a turn that ends at 0:00 and is viewed at 0:05 parks at
+// 0:20 unless the user interacts again.
+const ShimIdleHold = 15 * time.Minute
+
+// PageAwayGrace is how long after the user switched away, or after it became
+// one, a one-shot or a synchronous merge keeps its page (owner ruling,
+// 2026-11-24).
+const PageAwayGrace = time.Minute
 
 // syncMergeArms are the status arms of a workspace in its own (synchronous)
 // merge: queued or running. Such a workspace holds its page only while the
-// user looks at it.
+// user looks at it, and for PageAwayGrace after.
 var syncMergeArms = map[string]bool{"merge_queued": true, "merging": true}
+
+// syncMergeActiveArm is the arm of a synchronous merge at an active step (a
+// rebase, its gate, a repair, a conflict resolution): its shim is held up.
+// Waiting in line (merge_queued) its merge parks it.
+const syncMergeActiveArm = "merging"
 
 // pageInputs is what one workspace's page verdict is derived from.
 type pageInputs struct {
@@ -52,8 +64,13 @@ type pageInputs struct {
 	// selected reports that the user is looking at it.
 	selected bool
 	// awayUnloaded reports a one-shot or a synchronous merge: its page is
-	// held only while selected.
+	// held only while selected, and for PageAwayGrace after awayFrom.
 	awayUnloaded bool
+	// awayFrom is the later of when the user left it and when it became a
+	// one-shot or entered its merge, nil when this daemon saw neither.
+	awayFrom *time.Time
+	// mergeActive reports a synchronous merge at an active step.
+	mergeActive bool
 	// oneShot reports a one-shot, whose shim keeps running whatever else
 	// holds.
 	oneShot bool
@@ -66,6 +83,8 @@ type pageInputs struct {
 	unread bool
 	// turnEndedAt is when its last turn ended, nil when none has.
 	turnEndedAt *time.Time
+	// interactedAt is when the user last interacted with it, nil when never.
+	interactedAt *time.Time
 	// leftAt is when the user last switched away from it, nil when this
 	// daemon never saw them do so.
 	leftAt *time.Time
@@ -83,6 +102,8 @@ func pageVerdict(in pageInputs, now time.Time) (bool, time.Time) {
 		return false, time.Time{}
 	case in.selected:
 		return true, time.Time{}
+	case in.awayUnloaded && in.awayFrom != nil:
+		return heldUntil(in.awayFrom.Add(PageAwayGrace), now)
 	case in.awayUnloaded:
 		return false, time.Time{}
 	case in.working:
@@ -102,42 +123,47 @@ func pageVerdict(in pageInputs, now time.Time) (bool, time.Time) {
 // up AT NOW (wsm.ShimHold), the first rule that holds deciding:
 //   - a workspace that is not visible holds none;
 //   - the selection, a working workspace, a standing mediator, a queue-bypass
-//     holder and a one-shot hold it for as long as that stands;
-//   - a synchronous merge holds none (its merge parks it while it waits in
-//     line and its steps bring it up, drain.Controller.MergeQueuedDown);
-//   - an unread result holds it for ShimUnreadHold after its turn ended;
-//   - a workspace the user left holds it as long as its page (PageLeaveGrace,
-//     or PageFirstViewGrace when that visit first viewed it);
-//   - any other holds none.
+//     holder, a one-shot, and a synchronous merge at an active step hold it
+//     for as long as that stands;
+//   - a synchronous merge waiting in line holds none (its merge parks it,
+//     drain.Controller.MergeQueuedDown);
+//   - any other holds it for ShimIdleHold after the later of its last turn's
+//     end and the user's last interaction with it.
+//
+// The selection holds a RUNNING shim up; nothing here starts a parked one. A
+// session brought up for a turn not yet closed is held by the cache keeper
+// itself, from its own row (wsm.Session.Initializing).
 func shimHoldOf(in pageInputs, now time.Time) wsm.ShimHold {
-	until := func(deadline time.Time) wsm.ShimHold {
-		if now.Before(deadline) {
-			return wsm.ShimHold{Until: deadline}
-		}
-		return wsm.ShimHold{}
-	}
 	switch {
 	case !in.visible:
 		return wsm.ShimHold{}
-	case in.selected, in.working, in.alwaysShown, in.oneShot:
+	case in.selected, in.working, in.alwaysShown, in.oneShot, in.mergeActive:
 		return wsm.ShimHold{Indefinite: true}
 	case in.awayUnloaded:
 		return wsm.ShimHold{}
-	case in.unread && in.turnEndedAt != nil:
-		return until(in.turnEndedAt.Add(ShimUnreadHold))
-	case in.unread:
-		return wsm.ShimHold{Indefinite: true}
-	case in.leftAt != nil:
-		return until(in.leftAt.Add(leaveGrace(in)))
-	default:
+	}
+	idle := laterOf(in.turnEndedAt, in.interactedAt)
+	if idle == nil {
 		return wsm.ShimHold{}
 	}
+	if deadline := idle.Add(ShimIdleHold); now.Before(deadline) {
+		return wsm.ShimHold{Until: deadline}
+	}
+	return wsm.ShimHold{}
 }
 
-// leaveGrace is how long after the user left it IN's workspace keeps its page
-// and its idle shim: PageFirstViewGrace when the visit left first viewed it,
-// else PageLeaveGrace. The page verdict and the shim hold both read it, so the
-// two halves of the allocation release a left workspace together.
+// laterOf answers the later of A and B, either nil when unknown; nil when
+// both are.
+func laterOf(a, b *time.Time) *time.Time {
+	if b != nil && (a == nil || b.After(*a)) {
+		return b
+	}
+	return a
+}
+
+// leaveGrace is how long after the user left it IN's workspace keeps its page:
+// PageFirstViewGrace when the visit left first viewed it, else
+// PageLeaveGrace.
 func leaveGrace(in pageInputs) time.Duration {
 	if in.leftFirstViewed {
 		return PageFirstViewGrace
@@ -243,10 +269,25 @@ func (r *resolver) ShimHold(ws ids.WorkspaceID) wsm.ShimHold {
 func (r *resolver) pageInputsOf(rec wsm.Workspace, rc rowContext, arm string) pageInputs {
 	s := r.state.workspace(rec.ID)
 	ended := s.lastTurnEnd(rec.LastTurnEndedAt)
+	selected := rc.selected != nil && *rc.selected == rec.ID
+	away := rec.OneShot || syncMergeArms[arm]
+	// WHEN IT BECAME A ONE-SHOT OR ENTERED ITS MERGE is when this roster first
+	// saw it so; the page's away grace runs from the later of that and the
+	// user's leaving.
+	switch {
+	case !away:
+		s.awaySince = nil
+	case s.awaySince == nil:
+		at := r.now()
+		s.awaySince = &at
+	}
 	return pageInputs{
 		visible:         r.state.visibility[rec.ID].Visible(),
-		selected:        rc.selected != nil && *rc.selected == rec.ID,
-		awayUnloaded:    rec.OneShot || syncMergeArms[arm],
+		selected:        selected,
+		awayUnloaded:    away,
+		awayFrom:        laterOf(s.awaySince, s.leftAt),
+		mergeActive:     arm == syncMergeActiveArm,
+		interactedAt:    laterOf(s.interactedAt, rec.InteractedAt),
 		oneShot:         rec.OneShot,
 		alwaysShown:     rec.AlwaysShown(),
 		working:         workingArms[arm] || arm == startingArm || arm == noSessionYetArm || rec.TopPriority(),

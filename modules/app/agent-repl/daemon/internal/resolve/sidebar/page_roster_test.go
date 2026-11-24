@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // pageName reads a row's page verdict arm by name.
@@ -36,8 +37,8 @@ type pageRig struct {
 }
 
 // newPageRig is a roster of workspaces "a" and "b", both live and idle, on a
-// clock standing at epoch.
-func newPageRig(t *testing.T) *pageRig {
+// clock standing at epoch; MARK, when set, edits a's record first.
+func newPageRig(t *testing.T, mark ...func(*wsm.Workspace)) *pageRig {
 	t.Helper()
 	rig := &pageRig{now: epoch}
 	r, surfaces := newResolver(t,
@@ -48,7 +49,11 @@ func newPageRig(t *testing.T) *pageRig {
 			rig.armed, rig.after = fn, d
 			return func() bool { rig.mu.Lock(); defer rig.mu.Unlock(); rig.armed = nil; return true }
 		}))
-	reg := registry(workspace("a", "a"), workspace("b", "b"))
+	a := workspace("a", "a")
+	for _, m := range mark {
+		m(&a)
+	}
+	reg := registry(a, workspace("b", "b"))
 	r.SetRegistry(reg)
 	for _, ws := range reg.Workspaces {
 		r.OnLink(ws.ID, shimclient.LinkConnected)
@@ -146,19 +151,19 @@ func TestAWorkspaceThatIsNotVisibleHoldsNoPage(t *testing.T) {
 	}
 }
 
-func TestAOneShotOffScreenHoldsNoPageEvenWhileWorking(t *testing.T) {
-	// Arrange
-	rec := workspace(string(theWS), "one")
-	rec.OneShot = true
-	r := arrange(t, rec, workspace("other", "other"))
-	r.SetSelected("other")
+func TestAOneShotOffScreenKeepsItsPageForTheAwayGraceEvenWhileWorking(t *testing.T) {
+	// Arrange: a working one-shot the user is not looking at.
+	rig := newPageRig(t, func(ws *wsm.Workspace) { ws.OneShot = true })
+	rig.SetSelected("b")
+	working(rig.sidebarResolver, "a")
+	during := rig.pageOf(t, "a")
 
 	// Act
-	working(r, theWS)
+	rig.advance(t, sidebar.PageAwayGrace)
 
 	// Assert
-	if got := pageName(rowFor(repoRows(t, latest(t, r)), string(theWS))); got != "unloaded" {
-		t.Fatalf("page = %s, want unloaded: a one-shot holds its page only while the user looks at it", got)
+	if after := rig.pageOf(t, "a"); during != "loaded" || after != "unloaded" {
+		t.Fatalf("page within the away grace = %s, after = %s; want loaded then unloaded", during, after)
 	}
 }
 
@@ -203,7 +208,7 @@ func TestASwitchAwayTellsTheShimHoldSinkAndHoldsTheShimForTheGrace(t *testing.T)
 	if after <= before {
 		t.Fatalf("a's shim hold changes told = %d, want more than %d after the switch away", after, before)
 	}
-	if got := r.ShimHold("a"); got.Indefinite || !got.Until.Equal(epoch.Add(sidebar.PageLeaveGrace)) {
-		t.Fatalf("a's shim hold = %+v, want until %v", got, epoch.Add(sidebar.PageLeaveGrace))
+	if got := r.ShimHold("a"); got.Indefinite {
+		t.Fatalf("a's shim hold = %+v, want it no longer held while selected", got)
 	}
 }

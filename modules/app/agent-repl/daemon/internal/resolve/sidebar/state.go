@@ -130,7 +130,10 @@ type wsState struct {
 	// until this roster saw them do so; leftFirstViewed reports that the visit
 	// left then first marked it viewed, and visitBeganViewed whether the
 	// current or last visit began viewed (page.go).
-	leftAt           *time.Time
+	leftAt *time.Time
+	// awaySince is when this roster first saw the workspace a one-shot or in
+	// its synchronous merge, nil while it is neither (pageInputsOf).
+	awaySince        *time.Time
 	leftFirstViewed  bool
 	visitBeganViewed bool
 	// turnEndedAt is when this roster saw the workspace's last turn end
@@ -425,11 +428,7 @@ func (s *wsState) interacted(at time.Time, exempt bool) bool {
 // nil when neither knows one. The view exemption and the allocation's clocks
 // all read it, so a daemon that did not see the end measures from the record.
 func (s *wsState) lastTurnEnd(recorded *time.Time) *time.Time {
-	ended := s.turnEndedAt
-	if recorded != nil && (ended == nil || recorded.After(*ended)) {
-		ended = recorded
-	}
-	return ended
+	return laterOf(s.turnEndedAt, recorded)
 }
 
 // ViewExemption is how long after a turn ends the user's interaction with the

@@ -22,6 +22,10 @@ func TestPageVerdict(t *testing.T) {
 			in: pageInputs{visible: true, selected: true, awayUnloaded: true}, wantLoaded: true},
 		{name: "a one-shot or sync merge off screen holds no page, even working",
 			in: pageInputs{visible: true, awayUnloaded: true, working: true}, wantLoaded: false},
+		{name: "a one-shot or sync merge keeps its page for the away grace",
+			in: pageInputs{visible: true, awayUnloaded: true, awayFrom: ago(20 * time.Second)}, wantLoaded: true, wantFlips: now.Add(PageAwayGrace - 20*time.Second)},
+		{name: "a one-shot or sync merge lets its page go after the away grace",
+			in: pageInputs{visible: true, awayUnloaded: true, awayFrom: ago(PageAwayGrace)}, wantLoaded: false},
 		{name: "a working workspace holds its page",
 			in: pageInputs{visible: true, working: true, leftAt: ago(time.Hour)}, wantLoaded: true},
 		{name: "an unread result holds its page inside the hour after its turn ended",
@@ -101,16 +105,17 @@ func TestShimHoldOf(t *testing.T) {
 		{name: "a working workspace holds it while working", in: pageInputs{visible: true, working: true}, want: wsm.ShimHold{Indefinite: true}},
 		{name: "a mediator or bypass holder always holds it", in: pageInputs{visible: true, alwaysShown: true}, want: wsm.ShimHold{Indefinite: true}},
 		{name: "a one-shot keeps running", in: pageInputs{visible: true, oneShot: true, awayUnloaded: true}, want: wsm.ShimHold{Indefinite: true}},
-		{name: "a sync merge holds none: its merge parks it", in: pageInputs{visible: true, awayUnloaded: true}, want: wsm.ShimHold{}},
-		{name: "an unread result holds it fifteen minutes after its turn",
-			in: pageInputs{visible: true, unread: true, turnEndedAt: ago(time.Minute)}, want: wsm.ShimHold{Until: now.Add(ShimUnreadHold - time.Minute)}},
-		{name: "an unread result past its fifteen minutes holds none",
-			in: pageInputs{visible: true, unread: true, turnEndedAt: ago(ShimUnreadHold)}, want: wsm.ShimHold{}},
-		{name: "a workspace left holds it for its page's grace",
-			in: pageInputs{visible: true, leftAt: ago(time.Second)}, want: wsm.ShimHold{Until: now.Add(PageLeaveGrace - time.Second)}},
-		{name: "a workspace left on its first view holds it for the first-view grace",
-			in: pageInputs{visible: true, leftAt: ago(time.Minute), leftFirstViewed: true}, want: wsm.ShimHold{Until: now.Add(PageFirstViewGrace - time.Minute)}},
-		{name: "an idle workspace never left holds none", in: pageInputs{visible: true}, want: wsm.ShimHold{}},
+		{name: "a sync merge at an active step holds it", in: pageInputs{visible: true, awayUnloaded: true, mergeActive: true}, want: wsm.ShimHold{Indefinite: true}},
+		{name: "a sync merge waiting in line holds none: its merge parks it", in: pageInputs{visible: true, awayUnloaded: true, turnEndedAt: ago(time.Second)}, want: wsm.ShimHold{}},
+		{name: "an idle workspace holds it fifteen minutes after its turn ended",
+			in: pageInputs{visible: true, turnEndedAt: ago(time.Minute)}, want: wsm.ShimHold{Until: now.Add(ShimIdleHold - time.Minute)}},
+		{name: "a later interaction moves the fifteen minutes",
+			in: pageInputs{visible: true, turnEndedAt: ago(10 * time.Minute), interactedAt: ago(5 * time.Minute)}, want: wsm.ShimHold{Until: now.Add(ShimIdleHold - 5*time.Minute)}},
+		{name: "an earlier interaction leaves the turn's end deciding",
+			in: pageInputs{visible: true, turnEndedAt: ago(time.Minute), interactedAt: ago(5 * time.Minute)}, want: wsm.ShimHold{Until: now.Add(ShimIdleHold - time.Minute)}},
+		{name: "past the fifteen minutes it holds none",
+			in: pageInputs{visible: true, turnEndedAt: ago(ShimIdleHold)}, want: wsm.ShimHold{}},
+		{name: "an idle workspace with no turn and no interaction holds none", in: pageInputs{visible: true}, want: wsm.ShimHold{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -120,6 +125,33 @@ func TestShimHoldOf(t *testing.T) {
 			// Assert
 			if got != tt.want {
 				t.Fatalf("shimHoldOf = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLaterOf(t *testing.T) {
+	early := time.UnixMilli(1_700_000_000_000)
+	late := early.Add(time.Minute)
+	tests := []struct {
+		name string
+		a, b *time.Time
+		want *time.Time
+	}{
+		{name: "neither known", want: nil},
+		{name: "only a", a: &early, want: &early},
+		{name: "only b", b: &early, want: &early},
+		{name: "b later", a: &early, b: &late, want: &late},
+		{name: "a later", a: &late, b: &early, want: &late},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := laterOf(tt.a, tt.b)
+
+			// Assert
+			if (got == nil) != (tt.want == nil) || (got != nil && !got.Equal(*tt.want)) {
+				t.Fatalf("laterOf = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -141,23 +173,6 @@ func TestLeaveGrace(t *testing.T) {
 				t.Fatalf("leaveGrace = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestTheAllocationsHalvesReleaseALeftWorkspaceTogether(t *testing.T) {
-	// Arrange: a workspace left at now, its grace not yet run.
-	now := time.UnixMilli(1_700_000_000_000)
-	for _, first := range []bool{false, true} {
-		in := pageInputs{visible: true, leftAt: &now, leftFirstViewed: first}
-
-		// Act
-		_, pageFlips := pageVerdict(in, now)
-		hold := shimHoldOf(in, now)
-
-		// Assert: one grace decides both.
-		if !pageFlips.Equal(hold.Until) || !pageFlips.Equal(now.Add(leaveGrace(in))) {
-			t.Fatalf("first view %v: page flips at %v, shim hold ends %v; want both at %v", first, pageFlips, hold.Until, now.Add(leaveGrace(in)))
-		}
 	}
 }
 
