@@ -270,31 +270,41 @@ func (s *store) AddWorkspaceLinkIfAbsent(ctx context.Context, id WorkspaceID, ur
 		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
 			return err
 		}
-		var held int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, url).Scan(&held); err != nil {
-			return err
-		}
-		if held > 0 {
-			return nil
-		}
-		shown, err := placeLinkInTx(ctx, tx, id, LinkSet{URL: url, Label: label})
-		if err != nil {
-			return err
-		}
-		var owner, repo, number any
-		if pullRequest != nil {
-			owner, repo, number = pullRequest.Owner, pullRequest.Repo, pullRequest.Number
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number, announces)
-			 VALUES (?, ?, ?, (SELECT COALESCE(MAX(set_seq), 0) + 1 FROM workspace_links WHERE workspace_id = ?), ?, 0, ?, ?, ?, NULL)`,
-			id, url, label, id, shown, owner, repo, number); err != nil {
-			return err
-		}
-		added = true
-		return nil
+		var err error
+		added, err = addReferenceLinkIfAbsentInTx(ctx, tx, id, url, label, pullRequest)
+		return err
 	})
 	return added, err
+}
+
+// addReferenceLinkIfAbsentInTx stores URL under LABEL as a reference link on
+// ID when ID holds no link to it, placed as any new reference is
+// (placeLinkInTx), and answers whether it stored the link. A link ID already
+// holds is left as it is, whatever its label or ownership. PULLREQUEST is the
+// pull request the url names, nil for any other url.
+func addReferenceLinkIfAbsentInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, url, label string, pullRequest *PullRequestKey) (bool, error) {
+	var held int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, url).Scan(&held); err != nil {
+		return false, err
+	}
+	if held > 0 {
+		return false, nil
+	}
+	shown, err := placeLinkInTx(ctx, tx, id, LinkSet{URL: url, Label: label})
+	if err != nil {
+		return false, err
+	}
+	var owner, repo, number any
+	if pullRequest != nil {
+		owner, repo, number = pullRequest.Owner, pullRequest.Repo, pullRequest.Number
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number, announces)
+		 VALUES (?, ?, ?, (SELECT COALESCE(MAX(set_seq), 0) + 1 FROM workspace_links WHERE workspace_id = ?), ?, 0, ?, ?, ?, NULL)`,
+		id, url, label, id, shown, owner, repo, number); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RemoveWorkspaceLink removes URL from ID's links, ending the subscription
