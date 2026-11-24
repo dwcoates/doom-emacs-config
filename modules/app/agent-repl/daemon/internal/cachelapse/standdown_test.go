@@ -706,3 +706,76 @@ func TestAHandoverDoesNotMoveTheParkInstant(t *testing.T) {
 		t.Fatalf("successor armed the park at %v, want its predecessor's %v", got, due)
 	}
 }
+
+// INVARIANT B: a hidden workspace's idle session is owned and parked at its
+// grace, whatever owns its stand-down: the lapse, with no lapse armed the
+// cold park, or the sweep.
+func TestAHiddenWorkspacesIdleSessionIsParked(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(h *harness)
+		wantOwner string
+	}{
+		{name: "its lapse armed", arrange: func(h *harness) { h.keeper.deadlines[theWorkspace] = lapseAt }, wantOwner: ownerLapse},
+		{name: "no lapse armed", arrange: func(h *harness) {}, wantOwner: ownerCold},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, hidden()).idle()
+			tt.arrange(h)
+
+			// Act
+			h.reconcile("the workspace was hidden, shown, selected or deselected")
+
+			// Assert
+			if got := h.keeper.owners[theWorkspace].owner; got != tt.wantOwner {
+				t.Fatalf("owner = %q, want %s", got, tt.wantOwner)
+			}
+			if parks := len(h.idleDowns) + len(h.coldDowns); parks != 1 {
+				t.Fatalf("idle parks %+v, cold parks %+v; want one park of the idle session", h.idleDowns, h.coldDowns)
+			}
+		})
+	}
+}
+
+func TestASessionTheSweepOwnsIsParkedAtItsGrace(t *testing.T) {
+	// Arrange: idle six hours with a warm cache, so the sweep owns it.
+	h := newHarness(t, warm()).workedAgo(6 * time.Hour)
+
+	// Act
+	h.reconcile("a session came up")
+
+	// Assert
+	if got := h.keeper.owners[theWorkspace].owner; got != ownerSweep {
+		t.Fatalf("owner = %q, want %s", got, ownerSweep)
+	}
+	if len(h.idleDowns) != 1 || !h.idleDowns[0].beat.Equal(now.Add(-6*time.Hour)) {
+		t.Fatalf("idle parks = %+v, want one idle since six hours ago", h.idleDowns)
+	}
+}
+
+// A WITHHELD STAND-DOWN IS ASKED AGAIN WHEN ITS REASON ENDS: a collapse the
+// drain withheld because the workspace was shown is settled there, and the
+// hide that ends the showing reconciles the keeper, which parks the idle
+// session at once.
+func TestAWithheldStandDownIsTakenOnceTheWorkspaceIsHiddenAgain(t *testing.T) {
+	// Arrange: shown, in view, then hidden again.
+	h := newHarness(t, selectedHidden()).idle()
+	h.reconcile("the workspace was hidden, shown, selected or deselected")
+	if len(h.idleDowns)+len(h.coldDowns) != 0 {
+		t.Fatalf("parks = %+v %+v, want none while in view", h.idleDowns, h.coldDowns)
+	}
+	rec := h.db.records[theWorkspace]
+	rec.Current = false
+	h.db.records[theWorkspace] = rec
+	h.keeper.deadlines[theWorkspace] = lapseAt
+
+	// Act
+	h.reconcile("the workspace was hidden, shown, selected or deselected")
+
+	// Assert
+	if len(h.idleDowns) != 1 || !h.idleDowns[0].beat.Equal(now.Add(-2*time.Hour)) {
+		t.Fatalf("idle parks = %+v, want one idle since two hours ago", h.idleDowns)
+	}
+}

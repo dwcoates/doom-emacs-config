@@ -1044,9 +1044,11 @@ func TestLapseDueLogsARecordThatCannotBeRead(t *testing.T) {
 }
 
 func TestRunTakesARecordedLapseWhenItComes(t *testing.T) {
-	// Arrange
+	// Arrange: idle past its grace, so no idle park is armed before the lapse.
 	rec := hidden()
 	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
+	worked := now.Add(-2 * time.Hour)
+	rec.LastWorkAt = &worked
 	h := newHarness(t, rec)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

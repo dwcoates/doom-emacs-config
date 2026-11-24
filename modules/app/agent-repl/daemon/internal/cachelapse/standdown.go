@@ -35,7 +35,14 @@ import (
 //   - the idle sweep, when the session will be idle past its cutoff first;
 //   - the cold park, when no beat is owed for any other reason: stood down
 //     once the session has been idle StandDownGrace (ownCold).
-
+//
+// WHICHEVER OWNS IT, A SESSION IS PARKED ONCE IT HAS BEEN IDLE
+// StandDownGrace (owner rule, 2026-11-23): the cycle, the lapse and the sweep
+// park it at its grace too (ownIdle, parkIdle), so a hidden workspace's
+// session waits neither for its cache's lapse nor for the sweep's cutoff of
+// hours. The grace is measured from the workspace's last real work
+// (wsm.Workspace.IdleSince), which no start, keep-alive or bounce moves.
+//
 // A session is LEFT UP, and owned by none, while the user is looking at it
 // or its remote control is on; the edge that ends either reconciles it
 // again. A busy session is the drain's to wait on: it never stands one down
@@ -130,8 +137,10 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 		k.ownIdle(ctx, log, record, beat, armed, wasArmed)
 	case record.LetsCacheLapse() && !queued && lapseArmed:
 		k.setStanding(log, ws, standing{owner: ownerLapse}, "its cache is left to lapse, and the lapse stands it down")
+		k.parkIdle(ctx, log, record, armed, wasArmed)
 	case nb == noBeatSweep:
 		k.setStanding(log, ws, standing{owner: ownerSweep}, why)
+		k.parkIdle(ctx, log, record, armed, wasArmed)
 	case nb == noBeatNoSession:
 		k.disown(log, ws)
 	default:
@@ -198,6 +207,19 @@ func (k *Keeper) ownIdle(ctx context.Context, log dlog.Logger, record wsm.Worksp
 	}
 	log.Debug(opOwner, "the session has been idle past its grace; it is parked until a minute before its next keep-alive", dlog.Context{"idle_since": since, "beat": beat})
 	k.deps.IdleDown(ws, since)
+}
+
+// parkIdle parks RECORD's session, owed no keep-alive, once it has been idle
+// StandDownGrace, and arms that instant until then (idleParksDue): the lapse's
+// and the sweep's sessions are parked at the same grace as every other's.
+// ARMED and WASARMED are ownCold's.
+func (k *Keeper) parkIdle(ctx context.Context, log dlog.Logger, record wsm.Workspace, armed time.Time, wasArmed bool) {
+	since, ok := k.idleSince(ctx, log, record)
+	if !ok || k.parkWaits(log, record.ID, since, armed, wasArmed) {
+		return
+	}
+	log.Debug(opOwner, "the session has been idle past its grace and owes no keep-alive; it is parked", dlog.Context{"idle_since": since})
+	k.deps.IdleDown(record.ID, since)
 }
 
 // idleSince answers when RECORD's workspace last did real work
