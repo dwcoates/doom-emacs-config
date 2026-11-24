@@ -135,7 +135,7 @@ func (k *Keeper) raiseGate(ctx context.Context, ws ids.WorkspaceID, now time.Tim
 		return
 	}
 	if !raised {
-		log.Info(opGate, "the workspace's projected cold gate is not raised: a turn runs or no session is held; the shim states the next projection when the cache moves",
+		log.Info(opGate, "the workspace's projected cold gate is not raised: a turn runs, no session is held, or its read is already paid for; the shim states the next projection when the cache moves",
 			dlog.Context{"due": projected.DueAt})
 		return
 	}

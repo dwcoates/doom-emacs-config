@@ -149,3 +149,90 @@ func TestAProjectedGateWhoseReadsFailIsRefusedAndLogged(t *testing.T) {
 		})
 	}
 }
+
+// projectedPayment is the payment for the read projectedCold names on
+// vendor-1, priced for MODEL.
+func projectedPayment(model string) wsm.ColdReadPayment {
+	return wsm.ColdReadPayment{VendorSessionID: "vendor-1", LastRequestAtMs: projectedCold().GetLastRequestAtMs(), Model: model, PaidAt: fixedNow}
+}
+
+func TestAProjectedGateIsNotRaisedForTheReadTheUserPaidFor(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	session := f.db.sessions[ws]
+	session.Model = "opus"
+	f.db.sessions[ws] = session
+	if err := f.db.PutColdReadPayment(context.Background(), ws, projectedPayment("opus")); err != nil {
+		t.Fatalf("seed the payment: %v", err)
+	}
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+
+	// Assert
+	if err != nil || raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want no raise for a paid read", raised, err)
+	}
+	if _, ok := f.fleet.ColdGate(ws); ok {
+		t.Fatal("a gate stands over the read the user already paid for")
+	}
+	if _, ok := f.db.gates[ws]; ok {
+		t.Fatal("a gate was recorded over the read the user already paid for")
+	}
+	if got, ok := f.db.coldPayment(ws); !ok || got != projectedPayment("opus") {
+		t.Fatalf("payment = %+v (found=%v), want it kept for the read it pays for", got, ok)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opColdGate,
+		Message: "the projected cold read is the one the user already paid for; no gate is raised"})
+	if !ok || record.Context["vendor_session_id"] != "vendor-1" || record.Context["last_request_at_ms"] != projectedCold().GetLastRequestAtMs() {
+		t.Fatalf("records = %+v, want the declined raise naming the paid read", f.log.logger.Records())
+	}
+}
+
+func TestAProjectedGateIsRaisedOverAPaymentForADifferentRead(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	session := f.db.sessions[ws]
+	session.Model = "opus"
+	f.db.sessions[ws] = session
+	stale := projectedPayment("opus")
+	stale.LastRequestAtMs--
+	if err := f.db.PutColdReadPayment(context.Background(), ws, stale); err != nil {
+		t.Fatalf("seed the payment: %v", err)
+	}
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+
+	// Assert
+	if err != nil || !raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the gate raised for a read nobody paid for", raised, err)
+	}
+	if _, ok := f.db.coldPayment(ws); ok {
+		t.Fatal("the spent payment still stands, want it dropped")
+	}
+}
+
+func TestAProjectedGateWhosePaymentCannotBeReadIsRefused(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.coldPaymentOfErr = errFake
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+
+	// Assert
+	if err == nil || raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the failed payment read surfaced", raised, err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opColdReadPayment,
+		Message: "the cold read payment could not be read; the bring-up is refused"}); !ok {
+		t.Fatalf("records = %+v, want the failed payment read recorded", f.log.logger.Records())
+	}
+	if _, ok := f.fleet.ColdGate(ws); ok {
+		t.Fatal("a gate stands, want none after a failed payment read")
+	}
+}
