@@ -55,7 +55,7 @@ func concludeFirstTurn(t *testing.T, f *fixture) {
 	// orphan at WARN (`closed the in-flight turns of a workspace with no
 	// session`).
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the first turn's durable close", func(r harness.LogRecord) bool {
-		return r.Operation == harness.OpTurnEnded && r.Message == "stamped the turn's close"
+		return r.Operation == harness.OpTurnEnded && r.Message == harness.TurnCloseStamped
 	})
 }
 

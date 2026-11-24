@@ -46,7 +46,7 @@ func settleParentNotice(t *testing.T, f *retargetFamily, unit string, n int) {
 	shim := f.d.Shim(f.parent)
 	shim.ExpectStartTurn()
 	pushConcludedTurn(shim, mainAgent, unit)
-	f.d.AwaitWorkspaceLogOperationCount(f.parent.GetDir(), harness.OpTurnEnded, n)
+	f.d.AwaitTurnsClosed(f.parent.GetDir(), n)
 }
 
 func TestAParentWithAnOpenChildIsNotClosed(t *testing.T) {
