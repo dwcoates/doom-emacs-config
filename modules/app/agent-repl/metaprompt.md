@@ -63,12 +63,22 @@
 
 - Operating on files outside the current project.
 
-### Never version control a conversation
+### Never version control personal or private data
 
-- NEVER commit a chat thread, an agent transcript, or any other record of a conversation, in any repository, ever.
-  - This covers zettel chats, agent-repl workspace transcripts, Claude Code session files (`projects/*.jsonl`, `history.jsonl`), and a session's prompts copied verbatim into a doc.
-  - A handoff or design doc states its conclusions in its own words and never pastes the conversation that reached them.
-- When a conversation is found tracked, untrack it at once, add its shape to the nearest `.gitignore`, and surface it before merging.
+- NEVER commit personal or private data, in any repository, ever (owner ruling, 2026-11-24).
+  - A repository may be public, or become public, and a commit stays in its history after the file is removed.
+- Personal or private data is any of these.
+  - A record of a conversation: a chat thread, an agent transcript, or a session's prompts.
+    - This covers zettel chats, agent-repl workspace transcripts, Claude Code session files (`projects/*.jsonl`, `history.jsonl`), prompt histories (`.claude-repl-history`), and prompts copied verbatim into a doc.
+    - A handoff or design doc states its conclusions in its own words and never pastes the conversation that reached them.
+  - A secret: an API key, a token, a password, a private key, or a credential file.
+  - An account's or tool's own config or state: `.claude.json` and its backups, `~/.claude/` or `~/.config/` trees copied in, a `.env` file, or a shell's environment.
+  - The value of an environment variable from a real machine, whether a secret or not.
+  - An identifier of a real person or account: their name, email, account or organization UUID, or home directory.
+    - Identifiers hidden inside opaque data count too, such as a signature whose bytes encode an organization's UUID.
+  - The contents of a workspace's state, store, or logs.
+- A test fixture recorded from a real session is scrubbed of all of the above before it is committed, through the repository's scrub tooling where it has one.
+- When such data is found tracked, untrack or scrub it at once, add its shape to the nearest `.gitignore`, and surface it before merging.
   - Removing it from the tip leaves it in git history, so tell me so and let me decide whether that history is rewritten.
 
 ## Testing

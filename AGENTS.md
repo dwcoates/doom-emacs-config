@@ -495,9 +495,9 @@ When adding or updating hooks/permissions that reference a home-relative path, u
 
 Compiled binaries and other build artifacts are never tracked in git: they are platform-specific, large, and rebuilt from source. A bare `go build` inside a package directory drops a binary named after that directory right there, so it is easy to stage by accident; `modules/app/agent-repl/daemon/.gitignore` lists the known spots. Before committing, check that `git status` shows no binary, and add any new build output location to the nearest `.gitignore` rather than committing it. (2026-10-01: three Mach-O binaries, the largest 42MB, had been committed under `daemon/` and were untracked.)
 
-## Never commit a conversation
+## Never commit personal or private data
 
-No chat thread, agent transcript or verbatim session prompt is ever tracked here; the rule is the metaprompt's "Never version control a conversation". The root `.gitignore` lists the shapes once found tracked (2026-11-10: a verbatim session-instructions doc and a `*.transcript.md` handoff were untracked).
+No conversation record, secret, account config, environment value or personal identifier is ever tracked here; the rule is the metaprompt's "Never version control personal or private data". The root `.gitignore` lists the shapes once found tracked (2026-11-10: a verbatim session-instructions doc and a `*.transcript.md` handoff were untracked).
 
 ## Cross-worktree code handoff — `git stash create`, not `push`
 

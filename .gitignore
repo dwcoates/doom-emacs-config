@@ -10,7 +10,7 @@ modules/app/agent-repl/skills/**/.last-update.json
 node_modules
 
 # Chat threads and agent transcripts are never version controlled (metaprompt
-# "Never version control a conversation").
+# "Never version control personal or private data").
 *.transcript.md
 docs/session-instructions/
 .claude-repl-history
