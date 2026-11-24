@@ -452,6 +452,10 @@
   - An owned pull request still open, closed unmerged, or no longer followed keeps the workspace open.
   - A repository's main workspace is never closed this way.
 - This holds only for a pull request stored as an owned link, as "Workspace links" requires of every pull request an agent makes.
+- The workspace learns its pull request's merge from that follow, never from a wait of its own.
+  - It never asks a skill to wait for the merge, such as `/create-or-update-pr --wait-for-merge`, and it still passes `--self-certified` and `--add-to-merge-queue`.
+  - A background wait left running on a merged pull request keeps the workspace from closing.
+  - A pull request it does not own is followed with `pr-subscribe` and the `state` and `merge_queue` events, per `/agent-repl-workspaces`.
 
 ## Tool rejections
 

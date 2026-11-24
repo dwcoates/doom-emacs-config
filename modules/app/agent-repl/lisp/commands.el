@@ -175,7 +175,10 @@
   '("commit" "--patch" "--self-certified" "--add-to-merge-queue" "--rebase")
   "Default flag list for the /create-or-update-pr slash command.
 `agent-repl-create-or-update-pr' joins these into the prompt, dropping
-any flag whose exclusion symbol appears in its EXCLUDED argument."
+any flag whose exclusion symbol appears in its EXCLUDED argument.
+The list never holds `--wait-for-merge': the workspace learns the
+merge from the daemon's follow of its owned pull request link, and a
+skill's background wait would outlive the merge and hold it open."
   :type '(repeat string)
   :group 'agent-repl)
 
