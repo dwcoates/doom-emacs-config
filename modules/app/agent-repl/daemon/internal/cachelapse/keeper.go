@@ -192,7 +192,7 @@ type Deps struct {
 	// none stands (workspace.Fleet.StandingColdGate). A session parked at the
 	// gate holds no cadence to project a lapse from, and its conversation is
 	// already cold, so the gate's facts are its lapse (gateLapse).
-	ColdGate   func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
+	ColdGate func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
 	// Hold answers until when WS's resource allocation holds its idle shim
 	// up (sidebar.Resolver.ShimHold): every idle park waits on it, and the
 	// roster tells the keeper of each change (ShimHoldChanged).

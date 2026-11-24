@@ -438,7 +438,7 @@ const testHoldAfterWork = 20 * time.Minute
 type harness struct {
 	// hold, when set, answers every workspace's shim hold in place of the
 	// default (testHoldAfterWork after its last work).
-	hold func(ids.WorkspaceID) wsm.ShimHold
+	hold   func(ids.WorkspaceID) wsm.ShimHold
 	keeper *Keeper
 	// why is the sessions' facts table the keeper mirrors its owners into.
 	why  *sessionwhy.Table
