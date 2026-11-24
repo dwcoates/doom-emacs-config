@@ -361,7 +361,7 @@ func TestEveryCheckedInBriefLoads(t *testing.T) {
 
 func TestTheRebaseConflictBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
-	want := []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
+	want := []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files", "after_give_up"}
 
 	// Act.
 	got, err := Load(repoPromptsDir, "merge-conflict-resolve")
@@ -425,7 +425,7 @@ func TestTheHookPromptBriefKeepsItsPlaceholderSet(t *testing.T) {
 
 func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
-	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests"}
+	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests", "after_give_up"}
 
 	// Act.
 	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")

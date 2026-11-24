@@ -152,7 +152,8 @@ func TestAFailedAsyncMergesWorkspaceHasItsSessionStoodDown(t *testing.T) {
 	t.Parallel()
 	// A hidden merge workspace runs only while its merge is queued
 	// (wsm.Workspace.Runs): once the merge has failed nothing is carried, and
-	// its session is stood down rather than left running unseen.
+	// the merge ends its session at once, forced, rather than leave it to a
+	// stand-down that waits for its turn to end (merge.orchestrator.endSession).
 	// Arrange: replaying the merge workspace's branch conflicts.
 	s := newSourcedRepo(t)
 	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
@@ -171,7 +172,7 @@ func TestAFailedAsyncMergesWorkspaceHasItsSessionStoodDown(t *testing.T) {
 	}
 
 	// Assert
-	s.d.AwaitShimLoggedRequest(mergeWS.GetDir(), harness.RPCHibernate, &shimv1.HibernateRequest{})
+	s.d.AwaitShimLoggedRequest(mergeWS.GetDir(), harness.RPCKillSession, &shimv1.KillSessionRequest{Force: true})
 }
 
 func TestAnAsyncInstructionStreamsItsAgentIntoTheResolvingTabAndThenLands(t *testing.T) {
