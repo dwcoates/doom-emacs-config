@@ -29479,7 +29479,9 @@ func (x *FeedMergeHookScriptTimedOut) GetTimeoutSeconds() uint32 {
 // queue (its bubble is busy merging).
 type FeedMergeQueue struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The entries ahead, front first.
+	// The entries ahead, front first. A landed merge whose deploy's check is
+	// still owed is the first, merging on its deploy tab since its deploying
+	// step began, until the check ends.
 	Ahead []*FeedMergeQueueEntry `protobuf:"bytes,1,rep,name=ahead,proto3" json:"ahead,omitempty"`
 	// This workspace's own entry.
 	Current *FeedMergeQueueEntry `protobuf:"bytes,2,opt,name=current,proto3" json:"current,omitempty"`

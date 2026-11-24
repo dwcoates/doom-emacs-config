@@ -14342,7 +14342,9 @@ export const FeedMergeHookScriptTimedOutSchema: GenMessage<FeedMergeHookScriptTi
  */
 export type FeedMergeQueue = Message<"frontend.v1.FeedMergeQueue"> & {
   /**
-   * The entries ahead, front first.
+   * The entries ahead, front first. A landed merge whose deploy's check is
+   * still owed is the first, merging on its deploy tab since its deploying
+   * step began, until the check ends.
    *
    * @generated from field: repeated frontend.v1.FeedMergeQueueEntry ahead = 1;
    */
