@@ -20,9 +20,9 @@ The settled rulings and their reasons are in
   - The one statement is `openRegion.fold` and `childrenFolded`
     (`daemon/internal/resolve/sidebar/taborder.go`); the tab bar, the
     visibility and the rows all read it.
-- A covered row is still drawn (surfaced) when it is a keeper: selected,
-  working, unread, starting, of priority P0.5 or P1, a standing mediator or a
-  queue-bypass holder. The rows above a surfaced row stay drawn too.
+- A covered row stays visible (surfaced) while it is selected, working,
+  unread, starting, of priority P0.5 or P1, a standing mediator or a
+  queue-bypass holder. The rows above a surfaced row stay visible too.
 - Each open row carries its standing as `frontend.v1.RosterOpenRow.fold_cover`
   (`uncovered`, `hidden`, `surfaced`). The stylesheet hides a row by its own
   `.covered` and `.surfaced` classes (`row.ts`, `styles.css`), never by
@@ -32,11 +32,20 @@ The settled rulings and their reasons are in
 
 ## Visibility
 
-- Visibility (`frontend.v1.RosterRowVisibility`, `wsm.Visibilities`) is
-  whether the user can see the workspace in the sidebar: an open row no fold
-  covers, a surfaced one, or the selection.
-- A workspace the recency walk lands on is selected, so it shows; it returns
-  to not visible once the user moves on.
+- A VISIBLE workspace is one that gets a number in the sidebar's Open
+  section (`frontend.v1.RosterOpenRowTab`, numbered by the daemon,
+  `daemon/internal/resolve/sidebar/taborder.go`). So it is an open workspace
+  that no fold has rendered invisible as inactive; a backlogged, closed or
+  merged workspace is never visible. The daemon states it on every row
+  (`frontend.v1.RosterRowVisibility`, derived by `wsm.Visibilities`).
+- Visibility closely corresponds to whether a workspace's allocations are
+  present: its page in the webapp, its shim, and Emacs's slot for it (its
+  top bar, its composer, its perspective). The selection is the one
+  workspace that holds them without being visible.
+- `SPC p p` is not limited to visible workspaces: it is the way to select a
+  workspace that is not visible, or not even open. A workspace it or the
+  recency walk lands on is selected, so it holds its allocations while
+  selected, and loses them when the user moves on unless it is visible.
 
 ## Workspace resource allocation
 

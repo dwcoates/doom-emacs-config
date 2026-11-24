@@ -820,6 +820,10 @@ known workspace, so it reads every page until the last."
 
 (defun agent-repl--switch-candidates (&optional all)
   "Return every KNOWN workspace the `SPC p p' switcher can land on.
+THE SWITCHER IS NOT LIMITED TO VISIBLE WORKSPACES: it is the way to
+select one that is not visible (one a fold hides, a backlogged one) or
+not even open (a closed or merged one).  Selecting it gives it its
+allocations while it is selected (webapp/src/sidebar/AGENTS.md).
 With ALL non-nil, every merged workspace is among them; otherwise only
 the merged pages `SPC p p' can offer from (`agent-repl--switch-merged-pages').
 

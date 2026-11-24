@@ -8,7 +8,10 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// A workspace's VISIBILITY is whether the user can see it, and it is THE ONE
+// A workspace's VISIBILITY is whether it gets a number in the sidebar's Open
+// section: an open workspace that no fold has rendered invisible as inactive
+// (webapp/src/sidebar/AGENTS.md, "Visibility"). The selection holds its
+// allocations without being visible, so Selected is the third value. It is THE ONE
 // FACT every per-workspace allocation is gated on (owner-settled,
 // 2026-11-21): the editor holds a perspective, a composer, a host stream and
 // a page for exactly the workspaces that are not NotVisible, the daemon
