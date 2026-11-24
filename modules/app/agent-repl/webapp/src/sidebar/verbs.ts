@@ -834,6 +834,8 @@ export function finishWorkspaceRefusal(cause: CauseOf<FinishWorkspaceError>): st
       return `no merge named ${cause.value.behind} is in the queue to go behind`;
     case "mergeOffQueue":
       return "this workspace's merge left the queue without landing and still stands; requeue or discard it in the merge queue";
+    case "placementConflictsWithStored":
+      return "this workspace was made to join the queue at a place of its own; finish it without naming another";
     default:
       return unreachableArm("FinishWorkspaceError.cause", cause.case);
   }
