@@ -237,7 +237,7 @@ func TestAFoldedWorkspaceWhoseResultIsReadIsNotVisible(t *testing.T) {
 	turnFinished(r, theWS)
 
 	// Act
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Assert
 	if got := visibilities(t, r)[string(theWS)]; got != "not_visible" {
@@ -709,12 +709,12 @@ func TestAResultReadIsCountedByWhatReadIt(t *testing.T) {
 	}{
 		{name: "an interaction that views the row", act: func(r sidebarResolver) {
 			turnFinished(r, theWS)
-			r.SetInteracted(theWS, epoch)
+			r.SetInteracted(theWS, afterExemption)
 		}, want: []sidebar.ResultReadBy{sidebar.ReadByInteraction}},
 		{name: "a repeat on a row already viewed is not counted again", act: func(r sidebarResolver) {
 			turnFinished(r, theWS)
-			r.SetInteracted(theWS, epoch)
-			r.SetInteracted(theWS, epoch.Add(time.Second))
+			r.SetInteracted(theWS, afterExemption)
+			r.SetInteracted(theWS, afterExemption.Add(time.Second))
 		}, want: []sidebar.ResultReadBy{sidebar.ReadByInteraction}},
 	}
 	for _, tt := range tests {

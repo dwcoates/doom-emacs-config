@@ -26,6 +26,11 @@ import (
 // assertion depends on wall-clock.
 var epoch = time.UnixMilli(1_700_000_000_000)
 
+// afterExemption is the instant a test's interaction is stamped at: past the
+// view exemption of a turn the test clock ended at epoch, so the interaction
+// views the row (sidebar.ViewExemption).
+var afterExemption = epoch.Add(sidebar.ViewExemption)
+
 // at is epoch plus d, addressable so it can be assigned to a *time.Time field.
 func at(d time.Duration) *time.Time {
 	t := epoch.Add(d)

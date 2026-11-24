@@ -1137,7 +1137,19 @@ func (r *resolver) SetInteracted(ws ids.WorkspaceID, at time.Time) {
 		dlog.Context{"at": at.UTC()}, func(s *wsState, log dlog.Logger) bool {
 			was := s.viewedArm
 			newest := r.newestInteracted(ws, s)
-			if !s.interacted(at) {
+			var recorded *time.Time
+			if rec, ok := r.state.record(ws); ok {
+				recorded = rec.LastTurnEndedAt
+			}
+			if ended, exempt := s.viewExempt(at, recorded); exempt {
+				s.interacted(at, true)
+				log.Info("daemon.sidebar.interaction_view_exempt",
+					"the user interacted within the view exemption of the last turn's end, so the row stays unread; the interaction counts toward recency", dlog.Context{
+						"turn_ended_at": ended.UTC(), "exemption": ViewExemption.String(), "reorders": !newest,
+					})
+				return !newest
+			}
+			if !s.interacted(at, false) {
 				if !s.lastArmSeen {
 					log.Info("daemon.sidebar.interaction_before_arm",
 						"the user interacted before the roster drew the row any status, so nothing is viewed yet", nil)
@@ -1353,6 +1365,8 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			s.retrying = ""
 			s.turnEverRan = true
 			s.lastClose = how
+			ended := r.now()
+			s.turnEndedAt = &ended
 			s.endAnswered = false
 			s.compacting = false
 			s.settleResult()
