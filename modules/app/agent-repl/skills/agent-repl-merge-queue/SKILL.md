@@ -330,6 +330,13 @@ Either kind:
     with `merge-queue mediation ignore -operation OP [-message TEXT] -why TEXT`
     and `merge-queue mediation unignore -operation OP [-message TEXT]`; a
     check whose window holds no other warning or error runs no mediator.
+  - The repository's production mediator, a sibling the `production_checks` in
+    `.agent-repl/lifecycle.yaml` turn on, reviews what production logged between
+    landings: it decides each span with `production-mediation decide -summary TEXT`
+    or `production-mediation dispatch -summary TEXT` (children as JSON on standard
+    input) and folds one child into another with
+    `production-mediation fold -folded WS -surviving WS`; its instructions are its
+    own metaprompt, `metaprompt-production-mediator.md`.
   - Refusals: `not_mediator` (not the workspace the check was told to) and
     `no_mediation_owed` (a fix is dispatched already). A dispatch is never
     refused for what the deploy holds.
