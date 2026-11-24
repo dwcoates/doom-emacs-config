@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"agent-repld/internal/wsm"
 )
@@ -301,5 +302,57 @@ func standFinish(t *testing.T, h *harness, repo wsm.RepoKey, step wsm.Remediatio
 			t.Fatalf("AdvanceRemediationFinish(%s -> %s) = (%v, %v)", from, to, moved, err)
 		}
 		from = to
+	}
+}
+
+func TestADeployHoldAnswersEveryHolder(t *testing.T) {
+	chainStart := deployStarted
+	finishStart := deployStarted.Add(time.Minute)
+	deployingSince := deployStarted.Add(-time.Minute)
+	check := &wsm.Mediation{ChainStartedAt: chainStart}
+	dispatched := &wsm.Mediation{ChainStartedAt: chainStart, Dispatched: true}
+	finish := &wsm.RemediationFinish{StartedAt: finishStart}
+	deploying := &wsm.DeployingMerge{DeployingSince: deployingSince}
+	tests := []struct {
+		name            string
+		hold            deployHold
+		wantQueue       bool
+		wantSpeculation bool
+		wantBy          string
+		wantSince       time.Time
+	}{
+		{name: "nothing holds"},
+		{name: "an owed check holds the head", hold: deployHold{check: check}, wantQueue: true, wantBy: heldByDeployCheck, wantSince: chainStart},
+		{name: "a dispatched check holds speculation too", hold: deployHold{check: dispatched}, wantQueue: true, wantSpeculation: true, wantBy: heldByDeployCheck, wantSince: chainStart},
+		{name: "a finish holds both", hold: deployHold{finish: finish}, wantQueue: true, wantSpeculation: true, wantBy: heldByRemediationFinish, wantSince: finishStart},
+		{name: "a landed merge alone holds the head and not speculation", hold: deployHold{deploying: deploying}, wantQueue: true, wantBy: heldByDeployingMerge, wantSince: deployingSince},
+		{name: "a check is named before a landed merge, held since the earlier", hold: deployHold{check: check, deploying: deploying}, wantQueue: true, wantBy: heldByDeployCheck, wantSince: deployingSince},
+		{name: "a finish is named before a landed merge", hold: deployHold{finish: finish, deploying: deploying}, wantQueue: true, wantSpeculation: true, wantBy: heldByRemediationFinish, wantSince: deployingSince},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			queue, speculation, by, since := tt.hold.holdsQueue(), tt.hold.holdsSpeculation(), tt.hold.heldBy(), tt.hold.since()
+
+			// Assert
+			if queue != tt.wantQueue || speculation != tt.wantSpeculation || by != tt.wantBy || !since.Equal(tt.wantSince) {
+				t.Fatalf("hold = (queue %v, speculation %v, by %q, since %v), want (%v, %v, %q, %v)",
+					queue, speculation, by, since, tt.wantQueue, tt.wantSpeculation, tt.wantBy, tt.wantSince)
+			}
+		})
+	}
+}
+
+func TestDeployHoldOfReadsTheLandedMergeStillDeploying(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	want := seedDeploying(t, h, mediationKey(h), true)
+
+	// Act
+	hold, err := h.o.deployHoldOf(context.Background(), mediationKey(h))
+
+	// Assert
+	if err != nil || hold.deploying == nil || hold.deploying.Workspace != want.Workspace {
+		t.Fatalf("deployHoldOf = (%+v, %v), want the landed merge %s holding", hold, err, want.Workspace)
 	}
 }

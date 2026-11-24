@@ -2400,18 +2400,19 @@ func TestTheMergeStillDeployingHeadsItsQueueUntilItsCheckEnds(t *testing.T) {
 		queue       sidebar.MergeQueue
 		wantHead    string
 		wantWaiting []string
+		wantBroken  bool
 	}{
 		{name: "alone, it heads its queue", wantHead: "landed",
 			queue: sidebar.MergeQueue{Deploying: deploying}},
 		{name: "the merges in line wait behind it", wantHead: "landed", wantWaiting: []string{"two"},
 			queue: sidebar.MergeQueue{Deploying: deploying, Workspaces: []ids.WorkspaceID{"w2"}, Line: []sidebar.QueueEntry{waiting}}},
-		{name: "a merge in line admitted already keeps the head", wantHead: "two",
+		{name: "a merge in line admitted beside it is a broken hold, and it still heads", wantHead: "landed", wantBroken: true,
 			queue: sidebar.MergeQueue{Deploying: deploying, Workspaces: []ids.WorkspaceID{"w2"}, Line: inLine("w2")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			r, _ := newResolver(t)
+			r, logs := newResolver(t)
 			r.SetMergeQueue(theRepo, tt.queue)
 
 			// Act
@@ -2432,6 +2433,12 @@ func TestTheMergeStillDeployingHeadsItsQueueUntilItsCheckEnds(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.wantWaiting) {
 				t.Fatalf("waiting = %v, want %v", got, tt.wantWaiting)
+			}
+			_, broken := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",
+				Message: "a merge in line was admitted while a landed merge still deploying held the head; the hold was broken",
+				Match:   func(r dlog.Record) bool { return r.Context["deploying"] == "w-landed" && r.Context["admitted"] == "w2" }})
+			if broken != tt.wantBroken {
+				t.Fatalf("broken hold recorded = %v, want %v: %+v", broken, tt.wantBroken, logs.Records())
 			}
 		})
 	}

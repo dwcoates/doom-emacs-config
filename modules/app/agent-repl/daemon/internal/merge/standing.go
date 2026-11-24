@@ -59,10 +59,12 @@ func (o *orchestrator) held(ctx context.Context, repo wsm.RepoKey, holds func(de
 const (
 	heldByDeployCheck       = "deploy_check"
 	heldByRemediationFinish = "remediation_finish"
+	heldByDeployingMerge    = "deploying_merge"
 )
 
 // deployHold is what holds one queue for its deploy mediator: the check its
-// last deploy owes, and the mediator's remediation finish standing. It is
+// last deploy owes, the mediator's remediation finish standing, and the
+// landed merge whose deploy's check is still to end (deployingstage.go). It is
 // read once (deployHoldOf) and answers both the hold (held) and its drawing
 // (the roster's paused queue), so the two can never disagree.
 //
@@ -80,6 +82,9 @@ type deployHold struct {
 	// finish is the oldest remediation finish holding the queue, nil for
 	// none.
 	finish *wsm.RemediationFinish
+	// deploying is the landed merge still deploying, nil for none. It holds
+	// the head from its landing's teardown, before its deploy owes the check.
+	deploying *wsm.DeployingMerge
 }
 
 // deployHoldOf reads what holds REPO's queue for its deploy mediator, in one
@@ -89,7 +94,7 @@ func (o *orchestrator) deployHoldOf(ctx context.Context, repo wsm.RepoKey) (depl
 	if err != nil {
 		return deployHold{}, err
 	}
-	out := deployHold{check: read.Mediation}
+	out := deployHold{check: read.Mediation, deploying: read.Deploying}
 	for i := range read.Finishes {
 		if finishHolds(read.Finishes[i].Step) {
 			out.finish = &read.Finishes[i]
@@ -110,7 +115,9 @@ func finishHolds(step wsm.RemediationStep) bool {
 }
 
 // holdsQueue reports whether H holds the queue's head.
-func (h deployHold) holdsQueue() bool { return h.check != nil || h.finish != nil }
+func (h deployHold) holdsQueue() bool {
+	return h.check != nil || h.finish != nil || h.deploying != nil
+}
 
 // holdsSpeculation reports whether H holds the speculative work behind the
 // head: a fix dispatched or finishing would make it stale.
@@ -119,20 +126,24 @@ func (h deployHold) holdsSpeculation() bool {
 }
 
 // heldBy names what holds the queue, a standing finish before a check (a
-// release of the check leaves the finish holding it), empty for nothing.
+// release of the check leaves the finish holding it), and a check before a
+// landed merge still deploying (whose deploy owes no check yet), empty for
+// nothing.
 func (h deployHold) heldBy() string {
 	switch {
 	case h.finish != nil:
 		return heldByRemediationFinish
 	case h.check != nil:
 		return heldByDeployCheck
+	case h.deploying != nil:
+		return heldByDeployingMerge
 	}
 	return ""
 }
 
 // since is when H began holding the queue: its check's chain's first owed
-// deploy, or its finish's first finish, whichever came first. Zero when H
-// holds nothing.
+// deploy, its finish's first finish, or its landed merge's deploying step,
+// whichever came first. Zero when H holds nothing.
 func (h deployHold) since() time.Time {
 	var out time.Time
 	if h.check != nil {
@@ -140,6 +151,9 @@ func (h deployHold) since() time.Time {
 	}
 	if h.finish != nil && (out.IsZero() || h.finish.StartedAt.Before(out)) {
 		out = h.finish.StartedAt
+	}
+	if h.deploying != nil && (out.IsZero() || h.deploying.DeployingSince.Before(out)) {
+		out = h.deploying.DeployingSince
 	}
 	return out
 }

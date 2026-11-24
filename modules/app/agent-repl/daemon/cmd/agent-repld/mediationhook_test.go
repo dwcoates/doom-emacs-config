@@ -29,6 +29,15 @@ type mediationOrchestrator struct {
 	calls []string
 	// oweErr fails every OweMediations.
 	oweErr error
+	// redeploys is how many checks were owed at each DeployUncheckedLandings.
+	redeploys []int
+}
+
+func (o *mediationOrchestrator) DeployUncheckedLandings(context.Context) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.redeploys = append(o.redeploys, len(o.owed))
+	return nil
 }
 
 func (o *mediationOrchestrator) ReleaseUnchangedDeploy(_ context.Context, at time.Time) error {
@@ -445,5 +454,52 @@ func TestADeathReapedAfterTheSettleIsOwedAtOnceWithItsRound(t *testing.T) {
 	want := []string{"ending crashed 2026-11-21T21:00:00Z", "mediate"}
 	if len(o.owed) != 1 || !o.owed[0].Equal(at) || !reflect.DeepEqual(o.calls, want) {
 		t.Fatalf("owed %v, calls %v; want the death owed at once and its round run", o.owed, o.calls)
+	}
+}
+
+func TestTheSettleDeploysTheUncheckedLandingsAfterOwingADeathsCheck(t *testing.T) {
+	tests := []struct {
+		name          string
+		deathReaped   bool
+		wantRedeploys []int
+	}{
+		{name: "a settle with no death asks once", wantRedeploys: []int{0}},
+		{name: "a settle owing a death asks once the death's check is owed", deathReaped: true, wantRedeploys: []int{1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			o := &mediationOrchestrator{mediated: make(chan struct{})}
+			h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+			h.bind(o)
+			if tt.deathReaped {
+				h.deathReaped()
+			}
+
+			// Act
+			h.servingSettled()
+
+			// Assert
+			o.mu.Lock()
+			defer o.mu.Unlock()
+			if !reflect.DeepEqual(o.redeploys, tt.wantRedeploys) {
+				t.Fatalf("redeploys asked with %v checks owed, want %v", o.redeploys, tt.wantRedeploys)
+			}
+		})
+	}
+}
+
+func TestASettleBeforeTheBindingIsRecordedAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: log}
+
+	// Act
+	h.servingSettled()
+
+	// Assert
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opMediationHook,
+		Match: func(r dlog.Record) bool { return r.Context["edge"] == "serving_settled" }}); !ok {
+		t.Fatalf("no ERROR record of the unbound settle: %+v", log.Records())
 	}
 }

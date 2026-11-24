@@ -807,8 +807,15 @@ type DB interface {
 	// for none.
 	DeployingMergeOf(ctx context.Context, repo RepoKey) (*DeployingMerge, error)
 	// EndDeployingMerge deletes and answers one queue's landed merge still
-	// deploying, nil for none.
-	EndDeployingMerge(ctx context.Context, repo RepoKey) (*DeployingMerge, error)
+	// deploying at a stage or later, nil for none.
+	EndDeployingMerge(ctx context.Context, repo RepoKey, from DeployingStage) (*DeployingMerge, error)
+	// CoverDeployingMerges marks every landed merge still deploying that no
+	// deploy covered yet covered by the deploy committing now, and answers
+	// how many it moved.
+	CoverDeployingMerges(ctx context.Context) (int, error)
+	// UncheckedDeployingMerges answers every landed merge still deploying
+	// whose deploy owes no check yet.
+	UncheckedDeployingMerges(ctx context.Context) ([]DeployingMerge, error)
 	// MediationOf answers the mediation one repository owes, nil for none.
 	MediationOf(ctx context.Context, repo RepoKey) (*Mediation, error)
 	// MarkMediationPrompted records that the mediator was told of the
@@ -825,8 +832,9 @@ type DB interface {
 	// longer the one owed.
 	EscalateMediation(ctx context.Context, repo RepoKey, owed time.Time, brief string) (bool, error)
 	MarkEscalationTold(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
-	// ReleaseMediation clears the mediation owed at OWED, if it still is.
-	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
+	// ReleaseMediation clears the mediation owed at OWED, if it still is, and
+	// ends the landed merge its deploy carries in the same write.
+	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (MediationRelease, error)
 	// DispatchMediation records a fix the mediator dispatched to itself for
 	// the mediation owed at OWED (mediation.go).
 	DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, turn FixerTurn) (bool, error)

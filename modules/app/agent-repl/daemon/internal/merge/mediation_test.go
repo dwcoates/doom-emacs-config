@@ -2075,3 +2075,25 @@ func TestEveryListedQueueLookupGoesThroughQueueKeyed(t *testing.T) {
 		t.Fatalf("a listed queue's key is compared %d times, want once, inside queueKeyed", total)
 	}
 }
+
+func TestHeldByWordsNamesEachHolder(t *testing.T) {
+	tests := []struct {
+		by   string
+		want string
+	}{
+		{by: heldByRemediationFinish, want: "the deploy mediator's remediation finish under way, until the mediator approves its deploy"},
+		{by: heldByDeployingMerge, want: "a landed merge whose deploy owes its check next"},
+		{by: heldByDeployCheck, want: "the check a newer deploy owes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.by, func(t *testing.T) {
+			// Act
+			got := heldByWords(tt.by)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("heldByWords(%q) = %q, want %q", tt.by, got, tt.want)
+			}
+		})
+	}
+}

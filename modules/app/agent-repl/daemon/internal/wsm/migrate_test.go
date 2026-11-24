@@ -1453,9 +1453,16 @@ func TestAJoinLeavesTheContractStepsAndTheTakeoverAppliesThem(t *testing.T) {
 // applied by the join, past the contract it owes, so the joined file holds
 // what the build reads while its incumbent still serves.
 func TestAJoinAppliesAnAdditiveStepPastAnOwedContract(t *testing.T) {
-	// Arrange: the second-to-last step is a contract, the last additive.
-	markStepsContract(t, 2)
-	markLastStepAdditive(t)
+	// Arrange: past this build's steps come a contract and an additive step
+	// apart from it. They are appended, never the real last two relabeled:
+	// a real step may depend on the one before it (2026-11-24: layout 206
+	// alters the table 205 creates, so relabeling 205 a contract left 206
+	// altering a table that did not exist), and a relabeled CREATE is no
+	// contract (TestAContractStepOnlyRemoves).
+	last := LayoutVersion
+	withSteps(t, append(slices.Clone(migrations),
+		migration{To: last + 1, Name: "join_probe_contract", Kind: MigrationContract, DDL: `DROP TABLE IF EXISTS join_probe_retired;`},
+		migration{To: last + 2, Name: "join_probe_additive", Kind: MigrationAdditive, DDL: `CREATE TABLE join_probe (id INTEGER PRIMARY KEY);`})...)
 	path := fixtureAt(t, LayoutVersion-2)
 
 	// Act: join, then serve alone.

@@ -32,6 +32,17 @@ func seedDeploying(t *testing.T, h *harness, repo wsm.RepoKey, timed bool) wsm.D
 	return m
 }
 
+// seedCovered seeds the landing as seedDeploying does and covers it by the
+// deploy committing now, so the next check owed is its own.
+func seedCovered(t *testing.T, h *harness, repo wsm.RepoKey, timed bool) wsm.DeployingMerge {
+	t.Helper()
+	m := seedDeploying(t, h, repo, timed)
+	if _, err := h.db.CoverDeployingMerges(context.Background()); err != nil {
+		t.Fatalf("CoverDeployingMerges: %v", err)
+	}
+	return m
+}
+
 // deployingOf reads queue REPO's merge still deploying.
 func deployingOf(t *testing.T, h *harness, repo wsm.RepoKey) *wsm.DeployingMerge {
 	t.Helper()
@@ -93,9 +104,9 @@ func TestAChecksEndEndsTheLandedMergesDeployingStage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := checked(t)
+			seedCovered(t, h, mediationKey(h), true)
 			owe(t, h)
 			withMediator(t, h)
-			seedDeploying(t, h, mediationKey(h), true)
 
 			// Act
 			tt.end(t, h)
@@ -117,8 +128,8 @@ func TestAChecksEndEndsTheLandedMergesDeployingStage(t *testing.T) {
 func TestANewerDeployReplacingTheCheckKeepsTheMergeDeploying(t *testing.T) {
 	// Arrange
 	h := checked(t)
+	want := seedCovered(t, h, mediationKey(h), true)
 	owe(t, h)
-	want := seedDeploying(t, h, mediationKey(h), true)
 
 	// Act
 	oweAt(t, h, deployStarted.Add(time.Minute))
@@ -135,9 +146,9 @@ func TestANewerDeployReplacingTheCheckKeepsTheMergeDeploying(t *testing.T) {
 func TestAnUntimedDeployingMergeEndsUnmeasured(t *testing.T) {
 	// Arrange
 	h := checked(t)
+	seedCovered(t, h, mediationKey(h), false)
 	owe(t, h)
 	withMediator(t, h)
-	seedDeploying(t, h, mediationKey(h), false)
 
 	// Act
 	if err := decideTold(h, Decision{Kind: MediationApprove, Summary: "fine"}); err != nil {
@@ -153,35 +164,39 @@ func TestAnUntimedDeployingMergeEndsUnmeasured(t *testing.T) {
 	}
 }
 
-func TestADeployingStageThatCannotBeEndedIsRecordedAndStays(t *testing.T) {
+func TestADeployingStageAnEscalationCannotEndHoldsUntilTheChecksRelease(t *testing.T) {
 	// Arrange
 	h := checked(t)
+	seedCovered(t, h, mediationKey(h), true)
 	owe(t, h)
 	withMediator(t, h)
-	seedDeploying(t, h, mediationKey(h), true)
 	h.db.mu.Lock()
 	h.db.deployingEndErr = errors.New("database is locked")
 	h.db.mu.Unlock()
 
 	// Act
-	if err := decideTold(h, Decision{Kind: MediationApprove, Summary: "fine"}); err != nil {
-		t.Fatalf("approve: %v", err)
+	if err := decideTold(h, Decision{Kind: MediationEscalate, Summary: "yours"}); err != nil {
+		t.Fatalf("escalate: %v", err)
+	}
+	h.db.mu.Lock()
+	h.db.deployingEndErr = nil
+	h.db.mu.Unlock()
+	held := deployingOf(t, h, mediationKey(h))
+	if err := h.o.ReleaseEscalation(context.Background(), theScope); err != nil {
+		t.Fatalf("ReleaseEscalation: %v", err)
 	}
 
 	// Assert
-	if owedCheck(t, h) != nil {
-		t.Fatal("the check was not released: ending the deploying stage must never hold the queue")
+	if held == nil {
+		t.Fatal("the deploying merge was dropped by the failed end, want it holding the head until the check's release")
 	}
-	if m := deployingOf(t, h, mediationKey(h)); m == nil {
-		t.Fatal("the deploying merge was dropped, want it kept for the next check's end")
-	}
-	if n := deployingSteps(h); n != 0 {
-		t.Fatalf("measured %d deploying steps, want none", n)
+	if m := deployingOf(t, h, mediationKey(h)); m != nil {
+		t.Fatalf("deploying merge %+v, want it ended in the check's release", m)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.deploying",
-		Message: "could not end the landed merge's deploying stage as its check ended; it is drawn deploying until the next check ends",
+		Message: "could not end the landed merge's deploying stage as its check ended; it holds the head until the check is released",
 		Match: func(r dlog.Record) bool {
-			return r.Context["outcome"] == MediationApproved && r.Context["error"] == "database is locked"
+			return r.Context["outcome"] == MediationEscalated && r.Context["error"] == "database is locked"
 		}}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR with its outcome and cause", h.logs.Records())
 	}
@@ -231,7 +246,8 @@ func TestALandingsTeardownSettlesItsDeployingStep(t *testing.T) {
 		{name: "an unchecked deploy's step is measured as the run leaves it", wantMeasured: 1},
 		{name: "a record that fails measures the step as the run leaves it", checks: true, recordErr: errors.New("database is locked"), wantMeasured: 1,
 			wantErrorLine: "could not record the landed merge as deploying until its check ends; its deploying step is measured to its run's end"},
-		{name: "a landing replacing an earlier one still deploying measures the earlier's", checks: true, seedReplaced: true, wantRecorded: true, wantMeasured: 1},
+		{name: "a landing replacing an earlier one still deploying measures the earlier's and records the broken hold", checks: true, seedReplaced: true, wantRecorded: true, wantMeasured: 1,
+			wantErrorLine: "a landing tore down while an earlier landed merge still deploying held its queue's head; the hold was broken"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,7 +255,17 @@ func TestALandingsTeardownSettlesItsDeployingStep(t *testing.T) {
 			h := newHarness(t)
 			landsOwnCheckout(t, h, tt.checks)
 			if tt.seedReplaced {
-				seedDeploying(t, h, h.repoKey(), true)
+				// The earlier landing stands only once the merge landed: before,
+				// it holds the head, and a running merge lands nothing under it.
+				h.db.mu.Lock()
+				h.db.beforeRelease = func(*fakeDB) {
+					m := wsm.DeployingMerge{Repo: h.repoKey(), Workspace: otherWorkspace, Lease: "lease-earlier", Credited: otherWorkspace, Name: "ws-two",
+						TargetDir: h.targetD, ActiveSince: deployingSince.Add(-time.Minute), DeployingSince: deployingSince, Timed: true}
+					if _, err := h.db.checks.RecordDeployingMerge(context.Background(), m); err != nil {
+						t.Errorf("RecordDeployingMerge: %v", err)
+					}
+				}
+				h.db.mu.Unlock()
 			}
 			h.db.mu.Lock()
 			h.db.deployingRecordErr = tt.recordErr
@@ -440,5 +466,258 @@ func TestEveryQueueTabDrawsTheMergeStillDeployingAhead(t *testing.T) {
 	if front.GetWorkspace().GetRef().GetId() != string(theWorkspace) || front.GetLabel().GetText() != m.Name || merging == nil ||
 		merging.GetActiveTab().GetText() != tabWord(TabDeploy) || merging.GetStageEnteredAtMs() != deployingSince.UnixMilli() || front.GetTarget().GetDir() != m.TargetDir {
 		t.Fatalf("front = %v, want the deploying merge on its deploy tab since its step began", front)
+	}
+}
+
+func TestALandingsTeardownHoldsTheHeadBeforeItsDeployOwesTheCheck(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landsOwnCheckout(t, h, true)
+	h.registerOther(otherWorkspace, "ws-two", "b")
+	enqueue(t, h)
+	enqueueWorkspace(t, h, otherWorkspace)
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the first merge failed: %v", err)
+	}
+
+	// Act: the pump the teardown kicked runs before the deploy's Building
+	// edge owes the check.
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert
+	if err != nil || ran {
+		t.Fatalf("pumpOnce = (%v, %v), want the landing still deploying to hold the head", ran, err)
+	}
+	entry, err := h.o.entryOf(context.Background(), h.repoKey(), otherWorkspace)
+	if err != nil || entry.Slot == wsm.MergeSlotHead {
+		t.Fatalf("the merge behind = (%+v, %v), want it waiting, not admitted", entry, err)
+	}
+}
+
+// queueHeldOf answers whether the harness's checked queue is held.
+func queueHeldOf(t *testing.T, h *harness) bool {
+	t.Helper()
+	held, err := h.o.queueHeld(context.Background(), mediationKey(h))
+	if err != nil {
+		t.Fatalf("queueHeld: %v", err)
+	}
+	return held
+}
+
+func TestTheLandedMergeHoldsTheHeadUntilTheCheckOfTheDeployCarryingItEnds(t *testing.T) {
+	approve := func(t *testing.T, h *harness) {
+		t.Helper()
+		withMediator(t, h)
+		if err := decideTold(h, Decision{Kind: MediationApprove, Summary: "fine"}); err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+	}
+	tests := []struct {
+		name         string
+		arrange      func(t *testing.T, h *harness)
+		wantHeld     bool
+		wantDeployed bool
+	}{
+		{name: "recorded, no deploy covered it", wantHeld: true, wantDeployed: true, arrange: func(t *testing.T, h *harness) {
+			seedDeploying(t, h, mediationKey(h), true)
+		}},
+		{name: "covered, its deploy owes no check yet", wantHeld: true, wantDeployed: true, arrange: func(t *testing.T, h *harness) {
+			seedCovered(t, h, mediationKey(h), true)
+		}},
+		{name: "its deploy's check owed and undecided", wantHeld: true, wantDeployed: true, arrange: func(t *testing.T, h *harness) {
+			seedCovered(t, h, mediationKey(h), true)
+			owe(t, h)
+		}},
+		{name: "an earlier deploy's check approved", wantHeld: true, wantDeployed: true, arrange: func(t *testing.T, h *harness) {
+			owe(t, h)
+			seedCovered(t, h, mediationKey(h), true)
+			approve(t, h)
+		}},
+		{name: "its deploy's check approved", arrange: func(t *testing.T, h *harness) {
+			seedCovered(t, h, mediationKey(h), true)
+			owe(t, h)
+			approve(t, h)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			tt.arrange(t, h)
+
+			// Act
+			held := queueHeldOf(t, h)
+
+			// Assert
+			if held != tt.wantHeld {
+				t.Fatalf("queue held = %v, want %v", held, tt.wantHeld)
+			}
+			if got := deployingOf(t, h, mediationKey(h)) != nil; got != tt.wantDeployed {
+				t.Fatalf("deploying merge standing = %v, want %v", got, tt.wantDeployed)
+			}
+		})
+	}
+}
+
+func TestAnEarlierChecksReleaseNamesTheLandedMergeThatStillHoldsTheHead(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	seedDeploying(t, h, mediationKey(h), true)
+	withMediator(t, h)
+
+	// Act
+	if err := decideTold(h, Decision{Kind: MediationApprove, Summary: "fine"}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	// Assert
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Match: func(r dlog.Record) bool {
+			return r.Context["held_by"] == heldByDeployingMerge && r.Context["holder"] == heldByWords(heldByDeployingMerge)
+		}}); !ok {
+		t.Fatalf("records = %v, want the release recorded as still held by the landed merge", h.logs.Records())
+	}
+}
+
+func TestARepositoryCheckingNoDeploysEndsOnlyACoveredLandedMerge(t *testing.T) {
+	tests := []struct {
+		name      string
+		seed      func(t *testing.T, h *harness, repo wsm.RepoKey, timed bool) wsm.DeployingMerge
+		wantEnded bool
+	}{
+		{name: "a merge its deploy covered ends unmediated", seed: seedCovered, wantEnded: true},
+		{name: "a merge no deploy covered yet holds on", seed: seedDeploying},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			tt.seed(t, h, mediationKey(h), true)
+			h.mu.Lock()
+			h.config.DeployChecks = nil
+			h.mu.Unlock()
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if ended := deployingOf(t, h, mediationKey(h)) == nil; ended != tt.wantEnded {
+				t.Fatalf("deploying merge ended = %v, want %v", ended, tt.wantEnded)
+			}
+			if tt.wantEnded != endedWith(h, MediationUnmediated) {
+				t.Fatalf("records = %v, want the stage ended unmediated = %v", h.logs.Records(), tt.wantEnded)
+			}
+		})
+	}
+}
+
+func TestDeployUncheckedLandingsCutByTheDaemonsExitIsNoFailure(t *testing.T) {
+	tests := []struct {
+		name        string
+		stopFirst   bool
+		wantMessage string
+		wantErr     bool
+	}{
+		{name: "a read the exit cuts is recorded as a cut", wantErr: true,
+			wantMessage: "the mediation was cut by the daemon's exit; the next boot's pass runs it again"},
+		{name: "a daemon already stopping runs nothing", stopFirst: true, wantMessage: mediationNotRun},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			seedDeploying(t, h, mediationKey(h), true)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			h.db.mu.Lock()
+			h.db.deployingReadErr = context.Canceled
+			h.db.mu.Unlock()
+			if tt.stopFirst {
+				h.o.stopMediation()
+			}
+
+			// Act
+			err := h.o.DeployUncheckedLandings(ctx)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DeployUncheckedLandings = %v, want error %v", err, tt.wantErr)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.deploying", Message: tt.wantMessage}); !ok {
+				t.Fatalf("records = %v, want %q at INFO", h.logs.Records(), tt.wantMessage)
+			}
+			if _, bad := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.deploying"}); bad {
+				t.Fatalf("records = %v, want no ERROR for a cut", h.logs.Records())
+			}
+			h.rollout.mu.Lock()
+			fired := h.rollout.fired
+			h.rollout.mu.Unlock()
+			if fired != 0 {
+				t.Fatalf("the rollout was told %d times, want none", fired)
+			}
+		})
+	}
+}
+
+func TestDeployUncheckedLandingsDeploysOnlyALandingWhoseDeployOwesNoCheck(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(t *testing.T, h *harness)
+		readErr   error
+		wantFired int
+		wantErr   bool
+	}{
+		{name: "no landed merge deploys nothing"},
+		{name: "a landing no deploy covered is deployed again", wantFired: 1, arrange: func(t *testing.T, h *harness) {
+			seedDeploying(t, h, mediationKey(h), true)
+		}},
+		{name: "a landing covered by a deploy that never owed its check is deployed again", wantFired: 1, arrange: func(t *testing.T, h *harness) {
+			seedCovered(t, h, mediationKey(h), true)
+		}},
+		{name: "a landing whose deploy owes its check waits for that check", arrange: func(t *testing.T, h *harness) {
+			seedCovered(t, h, mediationKey(h), true)
+			owe(t, h)
+		}},
+		{name: "an unreadable store deploys nothing and says so", readErr: errors.New("database is locked"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			if tt.arrange != nil {
+				tt.arrange(t, h)
+			}
+			h.db.mu.Lock()
+			h.db.deployingReadErr = tt.readErr
+			h.db.mu.Unlock()
+
+			// Act
+			err := h.o.DeployUncheckedLandings(context.Background())
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DeployUncheckedLandings = %v, want error %v", err, tt.wantErr)
+			}
+			h.rollout.mu.Lock()
+			fired := h.rollout.fired
+			h.rollout.mu.Unlock()
+			if fired != tt.wantFired {
+				t.Fatalf("the rollout was told %d times, want %d", fired, tt.wantFired)
+			}
+			if tt.wantFired > 0 {
+				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.deploying",
+					Message: "landed merges still deploying owe no check from a deploy; their landing is deployed again"}); !ok {
+					t.Fatalf("records = %v, want the redeploy recorded", h.logs.Records())
+				}
+			}
+			if tt.wantErr {
+				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.deploying",
+					Message: "could not read the landed merges whose deploy owes no check; they hold their queues' heads until a deploy checks them",
+					Match:   func(r dlog.Record) bool { return r.Context["error"] == "database is locked" }}); !ok {
+					t.Fatalf("records = %v, want the failed read at ERROR", h.logs.Records())
+				}
+			}
+		})
 	}
 }

@@ -302,6 +302,10 @@ type Orchestrator interface {
 	// OweMediations records that the deploy that started AT owes a check in
 	// every repository that checks its deploys (mediation.go).
 	OweMediations(ctx context.Context, at time.Time) error
+	// DeployUncheckedLandings deploys again the landing of every landed merge
+	// still deploying whose deploy owes no check yet, once this daemon serves
+	// (deployingstage.go).
+	DeployUncheckedLandings(ctx context.Context) error
 	// ReleaseUnchangedDeploy releases, unchecked, the check the deploy that
 	// began AT owes in every repository that checks its deploys, when that
 	// deploy changed nothing and the check began its own chain.

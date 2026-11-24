@@ -353,17 +353,20 @@ func (s *store) RemediationFinishes(ctx context.Context) ([]RemediationFinish, e
 }
 
 // DeployCheckHold is everything that may hold a queue for its deploy
-// mediator, read together: the check its last deploy owes, nil for none, and
-// every remediation finish of the queue, oldest first.
+// mediator, read together: the check its last deploy owes, nil for none,
+// every remediation finish of the queue, oldest first, and its landed merge
+// still deploying, nil for none.
 type DeployCheckHold struct {
 	Mediation *Mediation
 	Finishes  []RemediationFinish
+	Deploying *DeployingMerge
 }
 
-// DeployCheckHoldOf answers REPO's owed check and remediation finishes in ONE
-// snapshot of the store. Read apart, a finish that begins while its check is
-// approved could fall between the two reads, so that neither is seen and the
-// queue reads as held by nothing at an instant both stood.
+// DeployCheckHoldOf answers REPO's owed check, remediation finishes and landed
+// merge still deploying in ONE snapshot of the store. Read apart, a finish
+// that begins while its check is approved could fall between the two reads,
+// so that neither is seen and the queue reads as held by nothing at an
+// instant both stood.
 func (s *store) DeployCheckHoldOf(ctx context.Context, repo RepoKey) (DeployCheckHold, error) {
 	const op = "daemon.wsm.deploy_check_hold_of"
 	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
@@ -380,7 +383,11 @@ func (s *store) DeployCheckHoldOf(ctx context.Context, repo RepoKey) (DeployChec
 		if err != nil {
 			return err
 		}
-		out = DeployCheckHold{Mediation: m, Finishes: finishes}
+		deploying, err := scanDeployingMerge(tx.QueryRowContext(ctx, deployingMergeQuery+` WHERE repo_key = ?`, string(key)))
+		if err != nil {
+			return err
+		}
+		out = DeployCheckHold{Mediation: m, Finishes: finishes, Deploying: deploying}
 		return nil
 	})
 	if err != nil {
