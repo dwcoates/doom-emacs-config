@@ -121,6 +121,16 @@ func (v *verbs) Forget(ctx context.Context, ws ids.WorkspaceID) error {
 		return refuseMainWorktree(log, ws, others)
 	}
 
+	// NO START RUNS ACROSS THE FORGET (startfence.go): no start begins from
+	// here, the one under way is ended, and the forget goes on once it has
+	// returned, so whatever it spawned is held, and stood down below.
+	release, err := v.deps.Sessions.FenceStarts(ctx, ws)
+	if err != nil {
+		log.Error(opForget, "the workspace's start under way did not end; nothing was forgotten", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("forget %q: %w", ws, err)
+	}
+	defer release()
+
 	// THE SESSION GOES BEFORE THE ROW. `kill` is the same stand-down Nuke
 	// takes before it destroys, and for the same reason: once the row is gone
 	// no verb can name this workspace's shim again.
