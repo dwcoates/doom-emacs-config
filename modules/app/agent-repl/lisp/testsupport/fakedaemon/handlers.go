@@ -347,6 +347,10 @@ func (s *fakeServer) ReportPageUnloading(ctx context.Context, req *connect.Reque
 	return handleUnary[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse](ctx, s, "ReportPageUnloading", req.Msg)
 }
 
+func (s *fakeServer) ReportPageState(ctx context.Context, req *connect.Request[v1.ReportPageStateRequest]) (*connect.Response[v1.ReportPageStateResponse], error) {
+	return handleUnary[v1.ReportPageStateRequest, v1.ReportPageStateResponse](ctx, s, "ReportPageState", req.Msg)
+}
+
 func (s *fakeServer) GetMemoryOverview(ctx context.Context, req *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error) {
 	return handleUnary[v1.GetMemoryOverviewRequest, v1.GetMemoryOverviewResponse](ctx, s, "GetMemoryOverview", req.Msg)
 }

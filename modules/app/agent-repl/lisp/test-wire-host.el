@@ -275,6 +275,38 @@
                   #'agent-repl-wire-decode-report-user-interaction-response "{}")
                  '("ReportUserInteractionResponse" result "oneof is unset"))))
 
+;;;; ---- ReportPageState ----
+
+(ert-deftest agent-repl-test-wire-host-page-state-request-carries-each-report ()
+  "Each report arm carries the ref, its arm and its reason arm."
+  (dolist (case '(((:arm :loaded :value :shown) . "\"loaded\":{\"reason\":{\"shown\":{}}}")
+                  ((:arm :held :value :load-requested) . "\"held\":{\"reason\":{\"loadRequested\":{}}}")
+                  ((:arm :unloaded :value :dormant) . "\"unloaded\":{\"reason\":{\"dormant\":{}}}")
+                  ((:arm :not-held :value nil) . "\"notHeld\":{}")))
+    (should (equal (agent-repl-test-wire-host--quiet
+                     (json-serialize
+                      (agent-repl-wire-encode-report-page-state-request
+                       (list :workspace '(:id "ws-7" :dir "/w/fix") :report (car case)))))
+                   (concat "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}," (cdr case) "}")))))
+
+(ert-deftest agent-repl-test-wire-host-page-state-request-refuses-an-unknown-reason ()
+  "A reason the contract does not declare errors before send, never on the wire."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (condition-case err
+                       (progn (agent-repl-wire-encode-report-page-state-request
+                               '(:workspace (:id "ws-7" :dir "/w/fix")
+                                 :report (:arm :loaded :value :whim)))
+                              nil)
+                     (agent-repl-wire-error (cdr err))))
+                 '("ReportPageStateLoadReason" reason "unknown reason"))))
+
+(ert-deftest agent-repl-test-wire-host-page-state-response-decodes-success ()
+  "The success arm is the outcome."
+  (should (eq (plist-get (agent-repl-test-wire-host--decode
+                          #'agent-repl-wire-decode-report-page-state-response "{\"success\":{}}")
+                         :arm)
+              :success)))
+
 ;;;; ---- The workspace-subject verbs' one shape ----
 
 (ert-deftest agent-repl-test-wire-host-subject-response-names-its-messages-by-the-rpc ()

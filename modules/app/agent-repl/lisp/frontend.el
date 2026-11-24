@@ -133,7 +133,8 @@
 (declare-function agent-repl-page-unload-load "page-unload" (ws why))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
-(declare-function agent-repl-webhost-remove "webhost" (ws))
+(declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
+(declare-function agent-repl-page-report-unloaded "page-report" (ws why))
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
 (declare-function agent-repl-webhost-reload-page "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
@@ -373,7 +374,8 @@ such site calls this only once the daemon is told
 The kill path deliberately does NOT: tombstoning nils the plist keys
 itself, and the put would resurrect the record."
   (agent-repl--frontend-kill-webview buf)
-  (agent-repl-webhost-remove ws)
+  (when (agent-repl-webhost-remove ws)
+    (agent-repl-page-report-unloaded ws 'detached))
   (agent-repl--ws-put ws :frontend-buffer nil))
 
 ;;;; ---- Refreshing live webviews ----------------------------------------------
@@ -1719,7 +1721,8 @@ Tombstoning only nils the plist keys — without this WS's page (a live
 iframe holding open streams) would outlive the workspace in the host.
 Runs pre-tombstone, while `:frontend-buffer' is still readable."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (agent-repl-webhost-remove ws)
+    (when (agent-repl-webhost-remove ws)
+      (agent-repl-page-report-unloaded ws 'released))
     (if (buffer-live-p buf)
         (progn
           (agent-repl--log ws "frontend webview released on kill: {kill}" :kill (buffer-name buf))

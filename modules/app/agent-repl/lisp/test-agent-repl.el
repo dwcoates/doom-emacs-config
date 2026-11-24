@@ -72,6 +72,7 @@
   (load (expand-file-name "test-recency-reach.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
   (load (expand-file-name "test-open-progress.el" dir) nil t)
+  (load (expand-file-name "test-page-report.el" dir) nil t)
   (load (expand-file-name "test-page-unload.el" dir) nil t)
   (load (expand-file-name "test-panels.el" dir) nil t)
   (load (expand-file-name "test-persistent-wifi.el" dir) nil t)

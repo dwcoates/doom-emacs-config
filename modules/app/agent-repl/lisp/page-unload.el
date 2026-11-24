@@ -74,6 +74,8 @@
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
 (declare-function agent-repl-roster-dormant-p "roster" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
+(declare-function agent-repl-page-report-loaded "page-report" (ws why))
+(declare-function agent-repl-page-report-unloaded "page-report" (ws why))
 (defvar agent-repl-roster-update-functions)
 
 (defvar agent-repl-page-unload--shown nil
@@ -101,7 +103,8 @@ THE ONE PATH THAT LOADS A PAGE (see the commentary): every load is a
 show, a gate the user answered or asked past, a session come up for
 work, or a slot made while its page is wanted."
   (agent-repl--info ws "elisp.page-unload.loaded ws={ws} reason={why}" :ws ws :why why)
-  (agent-repl-webhost-ensure-page ws))
+  (prog1 (agent-repl-webhost-ensure-page ws)
+    (agent-repl-page-report-loaded ws why)))
 
 (defun agent-repl-page-unload-note-shown (ws)
   "Record that the host now shows WS's page.
@@ -140,7 +143,8 @@ showing WS loads the page again (`agent-repl-page-unload-note-shown')."
    (lambda () (agent-repl-page-unload--releasable-p ws))
    (lambda ()
      (agent-repl--info ws "elisp.page-unload.released ws={ws}" :ws ws)
-     (agent-repl-webhost-remove ws t))
+     (when (agent-repl-webhost-remove ws t)
+       (agent-repl-page-report-unloaded ws 'dormant)))
    (lambda (why)
      (agent-repl--info ws "elisp.page-unload.release-kept ws={ws} why={why}" :ws ws :why why))))
 

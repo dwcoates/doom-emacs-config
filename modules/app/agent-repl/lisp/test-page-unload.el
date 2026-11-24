@@ -109,6 +109,34 @@
   (seq-some (lambda (text) (seq-every-p (lambda (part) (string-search part text)) parts))
             agent-repl-test-pu--logged))
 
+;;;; ---- Page reports ----
+
+(ert-deftest agent-repl-test-pu-a-load-reports-its-reason ()
+  "The one load path tells the daemon why the page was loaded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (let ((loads nil))
+      (cl-letf (((symbol-function 'agent-repl-page-report-loaded)
+                 (lambda (ws why) (push (list ws why) loads))))
+        ;; Act
+        (agent-repl-page-unload-load "alpha" 'awake)
+        ;; Assert
+        (should (equal loads '(("alpha" awake))))))))
+
+(ert-deftest agent-repl-test-pu-a-dormant-release-reports-its-unload ()
+  "A page released dormant off screen is reported unloaded as dormant."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (let ((unloads nil))
+      (cl-letf (((symbol-function 'agent-repl-page-report-unloaded)
+                 (lambda (ws why) (push (list ws why) unloads))))
+        (push "alpha" agent-repl-test-pu--dormant)
+        (agent-repl-page-unload-note-shown "alpha")
+        ;; Act
+        (agent-repl-page-unload-note-shown "beta")
+        ;; Assert
+        (should (equal unloads '(("alpha" dormant))))))))
+
 ;;;; ---- The one announced drop ----
 
 (defun agent-repl-test-pu--announce (still)
