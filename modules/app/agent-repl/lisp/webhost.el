@@ -744,16 +744,37 @@ show, so the page can measure it."
   "Drop WS's page from the host, and everything held for it.
 UNLOADING keeps WS's gate slot: the webhost draws the gate itself, so an
 unloaded page's workspace still shows its gate at the composer's height
-\(webapp/src/host/gate.ts)."
+\(webapp/src/host/gate.ts).  Answers non-nil when a page was held and is
+now dropped, so the caller reports the unload
+\(`agent-repl-page-report-unloaded').
+
+A REMOVAL WITH NOTHING HELD SENDS NOTHING.  Every teardown of a workspace
+calls this, held page or not, so a workspace whose tab is torn down and
+revived over and over (a slot made with no page each time) wrote a
+`page-removed' record and a host call per teardown for a page already gone
+\(2026-11-23: 1,870 records in 90 minutes, 829 of them for one workspace
+that ensured a page 40 times).  The skip is recorded at DEBUG with its
+cause, so the teardown that asked stays visible."
   (when-let ((id (agent-repl--webhost-id ws)))
-    (remhash id agent-repl--webhost-pages)
-    (remhash id agent-repl--webhost-held-back)
-    (unless unloading (remhash id agent-repl--webhost-gate-docks))
-    (remhash id agent-repl--webhost-held-ingress)
-    (when (equal id agent-repl--webhost-shown)
-      (setq agent-repl--webhost-shown nil))
-    (agent-repl--info ws "elisp.webhost.page-removed ws={ws} id={id}" :ws ws :id id)
-    (agent-repl--webhost-call "remove" id)))
+    (let ((page (gethash id agent-repl--webhost-pages))
+          (held-back (gethash id agent-repl--webhost-held-back))
+          (dock (and (not unloading)
+                     (gethash id agent-repl--webhost-gate-docks)))
+          (ingress (gethash id agent-repl--webhost-held-ingress))
+          (shown (equal id agent-repl--webhost-shown)))
+      (if (not (or page held-back dock ingress shown))
+          (progn
+            (agent-repl--log ws "elisp.webhost.page-remove-skipped ws={ws} id={id} cause=nothing-held" :ws ws :id id)
+            nil)
+        (remhash id agent-repl--webhost-pages)
+        (remhash id agent-repl--webhost-held-back)
+        (unless unloading (remhash id agent-repl--webhost-gate-docks))
+        (remhash id agent-repl--webhost-held-ingress)
+        (when shown
+          (setq agent-repl--webhost-shown nil))
+        (agent-repl--info ws "elisp.webhost.page-removed ws={ws} id={id}" :ws ws :id id)
+        (agent-repl--webhost-call "remove" id)
+        (and page t)))))
 
 (defun agent-repl-webhost-shown-p (ws)
   "Non-nil when WS\='s page is the one the host shows."

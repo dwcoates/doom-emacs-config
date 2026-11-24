@@ -113,6 +113,7 @@ import "agentrepl/v1/endpoint_report_latencies.proto";
 import "agentrepl/v1/endpoint_report_vendor_spend.proto";
 import "agentrepl/v1/endpoint_report_page_drawn.proto";
 import "agentrepl/v1/endpoint_report_page_unloading.proto";
+import "agentrepl/v1/endpoint_report_page_state.proto";
 import "agentrepl/v1/endpoint_request_command_support.proto";
 import "agentrepl/v1/endpoint_request_new_thread.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
@@ -657,6 +658,11 @@ service AgentRepl {
   // awaits its web hop rather than drawing it broken. Idempotent. See
   // endpoint_report_page_unloading.proto.
   rpc ReportPageUnloading(ReportPageUnloadingRequest) returns (ReportPageUnloadingResponse);
+
+  // Emacs loaded or dropped this workspace's page, or restates whether it
+  // holds it, and why it was loaded: the daemon's page metrics and the
+  // sidebar's loaded-page count read it. See endpoint_report_page_state.proto.
+  rpc ReportPageState(ReportPageStateRequest) returns (ReportPageStateResponse);
 
   // Emacs gained or lost desktop focus; the daemon decides every desktop
   // banner on it, and a gain answers the newest held banner's workspace,

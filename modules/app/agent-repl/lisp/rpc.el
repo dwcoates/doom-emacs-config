@@ -77,6 +77,8 @@
 (declare-function agent-repl-wire-encode-report-user-interaction-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-report-user-interaction-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-page-unloading-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-report-page-state-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-report-page-state-response "wire-host" (alist))
 (declare-function agent-repl-wire-decode-report-page-unloading-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-adopt-host-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-adopt-host-workspace-response "wire-host" (alist))
@@ -452,6 +454,15 @@ The daemon then awaits the page's web hop instead of drawing its closing
 stream as a broken link, so an unloaded page never changes the
 workspace's status.  Emacs unloads only once this answers success.
 Idempotent.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-report-page-state
+  "ReportPageState"
+  agent-repl-wire-encode-report-page-state-request
+  agent-repl-wire-decode-report-page-state-response
+  "Tell the daemon whether the web view holds this workspace's page, and why.
+A load or an unload is counted once; a restatement of what stands is
+counted never.  The daemon's page metrics and the sidebar's loaded-page
+count read it.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-adopt-host-workspace
   "AdoptHostWorkspace"

@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/logsite"
@@ -341,6 +342,8 @@ func (m *queuedMerge) fields(fields dlog.Context) dlog.Context {
 func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat time.Time, reason standDownReason, merge *queuedMerge) (withheldOutcome, CycleOutcome) {
 	op := reason.op
 	fields := merge.fields(dlog.Context{"workspace": string(ws), "since": beat})
+	// THE HOLD IS THE LAST ATTEMPT'S: each attempt states its own afresh.
+	c.deps.Why.ClearHold(ws)
 	if err := ctx.Err(); err != nil {
 		c.log.Info(op, "the daemon is leaving; the stand-down is not taken", dlog.WithCause(fields, err))
 		return withheldPending, CycleOutcome{}
@@ -435,6 +438,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	case gateBusy, gateStarting, gateReviving:
 		log.Info(op, "the session is busy; its stand-down waits for it to fall free",
 			dlog.Merge(fields, dlog.Context{"gate": gate.String()}))
+		c.deps.Why.SetHold(ws, sessionwhy.HoldDeferredBusy)
 		return withheldPending, CycleOutcome{}
 	default:
 		log.Error(op, "the stand-down gate answered a value this stand-down cannot read; it is dropped",
@@ -447,7 +451,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	// stand-down is taken, and so no pre-beat restore is ever owed. The mode
 	// is read at the act, under its gate (park), so one turned off since the
 	// ask parks at the next beat as usual.
-	switch c.park(ctx, log, ws, fields, reason) {
+	switch c.park(ctx, log, ws, fields, reason, idleSince(record, session)) {
 	case parkDone:
 		return withheldSettled, CycleOutcome{Down: true, Why: reason.done.Template()}
 	case parkSpared:

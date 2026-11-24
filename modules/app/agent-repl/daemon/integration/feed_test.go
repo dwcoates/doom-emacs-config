@@ -1822,9 +1822,23 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 	f := newOpened(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_FEED_TAIL_RETENTION=1"}})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
 	f.d.ExpectWarnings("daemon.feed.tail_token_expired")
+	// THE WAIT FOR RESP-1 WATCHES FROM BEFORE ANYTHING IS PUBLISHED: with one
+	// row retained, a tail opened on a page from after the submit could
+	// already find its pin gone (more than one row published before it was
+	// accepted) and be refused, which is this test's subject, not its
+	// arrangement. Accepted first, the watch delivers each row live.
+	_, before := f.openFeed(nil)
+	changes := f.d.WatchFeedOn(f.d.Client(), before)
+	defer changes.Close()
+	wait, cancelWait := f.d.WaitCtx()
+	defer cancelWait()
+	changes.AwaitHeaders(t, wait, "the feed tail opened before the submit")
 	f.submit("go", "k-expire", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[0])
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[1])
+	harness.AwaitView(t, wait, changes, "resp-1's settled prose", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "first"
+	})
 	_, token := f.openFeedOnceCarrying("resp-1's settled prose", func(p *frontendv1.FeedPage) bool {
 		for _, r := range p.GetSuccess().GetRows() {
 			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "first" {

@@ -67,6 +67,7 @@
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-user-interaction "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-unloading "rpc" (conn request &rest keys))
+(declare-function agent-repl-page-report-restate "page-report" (ws))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-answer-editor-evaluation "rpc" (conn request &rest keys))
 (declare-function agent-repl-evaluate-text "evaluate" (text))
@@ -1220,8 +1221,9 @@ decision is recorded at INFO, as the roster's follow records its own."
                             :gcs (- gcs-done gcs)
                             :gc_ms (round (* 1000 (- gc-elapsed gc-seconds))))))))))
 
-(defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent)
+(defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent &optional extra)
   "Send workspace WS\='s ref through the workspace-subject verb RPC.
+EXTRA, a plist, rides the request beside the ref.
 OP is the verb\='s record slug (`elisp.host.<op>\=', `<op>-skipped\=',
 `<op>-refused\=', `<op>-unknown-arm\=', `<op>-failed\=').  ON-SUCCESS is
 called with no argument once the daemon answers success, and ON-NOT-SENT
@@ -1240,7 +1242,7 @@ Answers t when the call was made, nil when it was not."
      (t
       (agent-repl--log ws "elisp.host.{op} ws={ws} id={id}" :op op :ws ws :id (prin1-to-string (plist-get ref :id)))
       (funcall
-       rpc conn (list :workspace ref)
+       rpc conn (append (list :workspace ref) extra)
        :on-response
        (lambda (response)
          (pcase (plist-get response :arm)
@@ -1446,7 +1448,11 @@ tombstoned workspace), where it is the best name the record has."
                   (lambda ()
                     (let ((now (funcall current)))
                       (agent-repl--info now "elisp.host.subscribed ws={ws} method={method} id={id}"
-                                        :ws now :method (prin1-to-string "WatchHostWorkspace") :id (prin1-to-string id))))))
+                                        :ws now :method (prin1-to-string "WatchHostWorkspace") :id (prin1-to-string id))
+                      ;; THE DAEMON HOLDS THE PAGE STATE ONLY WHILE THIS
+                      ;; STREAM STANDS (endpoint_report_page_state.proto), so
+                      ;; it is restated on every subscribe.
+                      (agent-repl-page-report-restate now)))))
     (agent-repl-host--put ws :stream stream)
     (agent-repl--info ws "elisp.host.subscribe-opened ws={ws} id={id}" :ws ws :id (prin1-to-string (plist-get ref :id)))
     stream))

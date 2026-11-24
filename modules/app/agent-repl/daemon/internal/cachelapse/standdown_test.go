@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/wsm"
 )
 
@@ -777,5 +778,56 @@ func TestAWithheldStandDownIsTakenOnceTheWorkspaceIsHiddenAgain(t *testing.T) {
 	// Assert
 	if len(h.idleDowns) != 1 || !h.idleDowns[0].beat.Equal(now.Add(-2*time.Hour)) {
 		t.Fatalf("idle parks = %+v, want one idle since two hours ago", h.idleDowns)
+	}
+}
+
+func TestTheKeeperMirrorsTheSessionsStandingIntoTheFactsTable(t *testing.T) {
+	tests := []struct {
+		name    string
+		rec     wsm.Workspace
+		arrange func(h *harness)
+		want    sessionwhy.Facts
+	}{
+		{name: "the workspace the user is looking at", rec: knownCold(), arrange: func(h *harness) {
+			rec := h.db.records[theWorkspace]
+			rec.Current = true
+			h.db.records[theWorkspace] = rec
+		}, want: sessionwhy.Facts{Owner: sessionwhy.OwnerInView}},
+		{name: "a workspace in remote control", rec: knownCold(), arrange: func(h *harness) {
+			h.db.remote = map[ids.WorkspaceID]bool{theWorkspace: true}
+		}, want: sessionwhy.Facts{Owner: sessionwhy.OwnerRemoteControl}},
+		{name: "a cold park waiting out its grace", rec: knownCold(), arrange: func(*harness) {},
+			want: sessionwhy.Facts{Owner: sessionwhy.OwnerCold, ParkDue: now.Add(-10 * time.Minute).Add(StandDownGrace)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, tt.rec)
+			tt.arrange(h)
+
+			// Act
+			h.reconcile("a session came up")
+
+			// Assert
+			if got := h.why.Facts(theWorkspace); !got.ParkDue.Equal(tt.want.ParkDue) || got.Owner != tt.want.Owner || got.Hold != tt.want.Hold {
+				t.Fatalf("facts = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASessionNoLongerServedIsForgottenInTheFactsTable(t *testing.T) {
+	// Arrange
+	h := newHarness(t, knownCold())
+	h.reconcile("a session came up")
+	h.why.SetHold(theWorkspace, sessionwhy.HoldDeferredBusy)
+	h.serving = false
+
+	// Act
+	h.reconcile("the session went away")
+
+	// Assert
+	if got := h.why.Facts(theWorkspace); got != (sessionwhy.Facts{}) {
+		t.Fatalf("facts = %+v, want none for a session no shim serves", got)
 	}
 }

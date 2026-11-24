@@ -89,6 +89,89 @@ func TestEveryInputAnswersAVisibility(t *testing.T) {
 	}
 }
 
+func TestVisibilityReasons(t *testing.T) {
+	cases := []struct {
+		name   string
+		inputs []VisibilityInput
+		id     WorkspaceID
+		want   VisibilityReason
+	}{
+		{name: "a workspace that is not open has not_open",
+			inputs: []VisibilityInput{{ID: "a", Working: true}}, id: "a", want: ReasonNotOpen},
+		{name: "a covered idle read workspace has covered",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true}}, id: "a", want: ReasonCovered},
+		{name: "an open workspace no fold covers has uncovered",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Working: true, TopPriority: true}}, id: "a", want: ReasonUncovered},
+		{name: "a covered working workspace has covered_working before every later input",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Working: true, Unviewed: true, Starting: true, TopPriority: true}}, id: "a", want: ReasonCoveredWorking},
+		{name: "a covered unviewed workspace has covered_unviewed before starting and priority",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Unviewed: true, Starting: true, TopPriority: true}}, id: "a", want: ReasonCoveredUnviewed},
+		{name: "a covered starting workspace has covered_starting before priority",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Starting: true, TopPriority: true}}, id: "a", want: ReasonCoveredStarting},
+		{name: "a covered top-priority workspace has covered_top_priority",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, TopPriority: true}}, id: "a", want: ReasonCoveredTopPriority},
+		{name: "a covered parent visible only through its child has parent_of_visible",
+			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, Working: true}}, id: "p", want: ReasonParentOfVisible},
+		{name: "a covered parent with its own reason keeps it",
+			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true, Unviewed: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, Working: true}}, id: "p", want: ReasonCoveredUnviewed},
+		{name: "every ancestor of a visible covered workspace has parent_of_visible",
+			inputs: []VisibilityInput{{ID: "g", Open: true, Covered: true}, {ID: "p", Parent: under("g"), Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, Working: true}}, id: "g", want: ReasonParentOfVisible},
+		{name: "the parent of a covered selection has parent_of_visible",
+			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, Selected: true}}, id: "p", want: ReasonParentOfVisible},
+		{name: "the selection has selected whatever else holds",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Working: true, Selected: true}}, id: "a", want: ReasonSelected},
+		{name: "a selection that is not open has selected",
+			inputs: []VisibilityInput{{ID: "h", Selected: true}}, id: "h", want: ReasonSelected},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := VisibilityReasons(tc.inputs)[tc.id]
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("reason of %s = %v, want %v", tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEveryReasonDecidesTheVisibilityTheDerivationAnswers(t *testing.T) {
+	// Arrange
+	inputs := []VisibilityInput{
+		{ID: "n"}, {ID: "cv", Open: true, Covered: true}, {ID: "u", Open: true},
+		{ID: "w", Open: true, Covered: true, Working: true}, {ID: "p", Open: true, Covered: true},
+		{ID: "c", Parent: under("p"), Open: true, Covered: true, Unviewed: true}, {ID: "s", Open: true, Selected: true},
+	}
+
+	// Act
+	reasons, visibilities := VisibilityReasons(inputs), Visibilities(inputs)
+
+	// Assert
+	for id, r := range reasons {
+		if r.Visibility() != visibilities[id] {
+			t.Errorf("%s: reason %v decides %v, the derivation answered %v", id, r, r.Visibility(), visibilities[id])
+		}
+	}
+}
+
+func TestEveryVisibilityReasonHasItsOwnName(t *testing.T) {
+	// Arrange
+	seen := map[string]VisibilityReason{}
+
+	// Act and Assert
+	for _, r := range VisibilityReasonsAll {
+		name := r.String()
+		if other, dup := seen[name]; dup {
+			t.Fatalf("reasons %d and %d share the name %q", int(other), int(r), name)
+		}
+		seen[name] = r
+	}
+	if len(seen) != int(ReasonParentOfVisible)+1 {
+		t.Fatalf("VisibilityReasonsAll holds %d reasons, want every one of %d", len(seen), int(ReasonParentOfVisible)+1)
+	}
+}
+
 func TestAVisibilityRoundTripsThroughItsName(t *testing.T) {
 	for _, v := range []Visibility{NotVisible, UnselectedVisible, Selected} {
 		// Act

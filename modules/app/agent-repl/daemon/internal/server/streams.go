@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -14,6 +15,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/workspace"
@@ -1012,6 +1014,10 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	// stream or is retired here.
 	if host && delta < 0 && !hops.hostStream {
 		s.deps.Queue.EditorGone(ws)
+		// AND SO IS THE WORKSPACE'S PAGE STATE (pageheld): Emacs restates it
+		// on its next host subscribe, so no page stays counted that no web
+		// view holds.
+		s.deps.HeldPages.Forget(ws)
 	}
 
 	// INFO, NOT DEBUG: the participant set is what a handover's adoption
@@ -1056,6 +1062,84 @@ func (s *server) ReportPageUnloading(
 		Success: &agentreplv1.ReportPageUnloadingSuccess{},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// ReportPageState records whether Emacs's web view holds a workspace's page,
+// and why it was loaded, in the held-page table (pageheld): a load or an
+// unload counted once, a restatement counted never. The state lasts while the
+// workspace's host stream stands (holdParticipant forgets it).
+func (s *server) ReportPageState(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportPageStateRequest],
+) (*connect.Response[agentreplv1.ReportPageStateResponse], error) {
+	const rpc = "ReportPageState"
+	if err := validateReportPageStateRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.ReportPageStateResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	ws := subject.Record.ID
+	switch report := req.Msg.GetReport().(type) {
+	case *agentreplv1.ReportPageStateRequest_Loaded:
+		reason := pageLoadReason(report.Loaded.GetReason())
+		s.deps.HeldPages.Loaded(ws, reason)
+		subject.Log.Info(opPageState, "Emacs loaded the workspace's page", dlog.Context{"report": "loaded", "reason": string(reason)})
+	case *agentreplv1.ReportPageStateRequest_Unloaded:
+		reason := pageUnloadReason(report.Unloaded.GetReason())
+		s.deps.HeldPages.Unloaded(ws, reason)
+		subject.Log.Info(opPageState, "Emacs dropped the workspace's page", dlog.Context{"report": "unloaded", "reason": string(reason)})
+	case *agentreplv1.ReportPageStateRequest_Held:
+		reason := pageLoadReason(report.Held.GetReason())
+		s.deps.HeldPages.Held(ws, reason)
+		subject.Log.Debug(opPageState, "Emacs restated that it holds the workspace's page", dlog.Context{"report": "held", "reason": string(reason)})
+	case *agentreplv1.ReportPageStateRequest_NotHeld:
+		s.deps.HeldPages.Forget(ws)
+		subject.Log.Debug(opPageState, "Emacs restated that it holds no page of the workspace", dlog.Context{"report": "not_held"})
+	default:
+		// validateReportPageStateRequest refused an unset arm, and this build
+		// knows every arm the request declares.
+		panic(fmt.Sprintf("ReportPageState: unhandled report arm %T", report))
+	}
+	resp.Result = &agentreplv1.ReportPageStateResponse_Success{Success: &agentreplv1.ReportPageStateSuccess{}}
+	return connect.NewResponse(resp), nil
+}
+
+// opPageState is the operation every ReportPageState record is written under.
+const opPageState = "daemon.server.page_state"
+
+// pageLoadReason reads a validated load reason's arm.
+func pageLoadReason(r *agentreplv1.ReportPageStateLoadReason) pageheld.LoadReason {
+	switch arm := r.GetReason().(type) {
+	case *agentreplv1.ReportPageStateLoadReason_Shown:
+		return pageheld.LoadShown
+	case *agentreplv1.ReportPageStateLoadReason_Awake:
+		return pageheld.LoadAwake
+	case *agentreplv1.ReportPageStateLoadReason_Slot:
+		return pageheld.LoadSlot
+	case *agentreplv1.ReportPageStateLoadReason_LoadRequested:
+		return pageheld.LoadRequested
+	case *agentreplv1.ReportPageStateLoadReason_Ungated:
+		return pageheld.LoadUngated
+	default:
+		panic(fmt.Sprintf("ReportPageState: unhandled load reason arm %T", arm))
+	}
+}
+
+// pageUnloadReason reads a validated unload reason's arm.
+func pageUnloadReason(r *agentreplv1.ReportPageStateUnloadReason) pageheld.UnloadReason {
+	switch arm := r.GetReason().(type) {
+	case *agentreplv1.ReportPageStateUnloadReason_Dormant:
+		return pageheld.UnloadDormant
+	case *agentreplv1.ReportPageStateUnloadReason_Detached:
+		return pageheld.UnloadDetached
+	case *agentreplv1.ReportPageStateUnloadReason_Released:
+		return pageheld.UnloadReleased
+	default:
+		panic(fmt.Sprintf("ReportPageState: unhandled unload reason arm %T", arm))
+	}
 }
 
 // awaitPage records that WS holds no page on purpose, so its web hop is

@@ -4342,6 +4342,34 @@ could only be invented, and the link already holds the accepted successor."
       ;; Assert
       (should (agent-repl-test-host--logged-p :info "method=\"WatchHostWorkspace\"")))))
 
+(ert-deftest agent-repl-test-host-acceptance-restates-the-page ()
+  "The daemon accepting the watch is when the workspace's page state is restated."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((record (agent-repl-test-host--subscribe "ws-1"))
+          (restated nil))
+      (cl-letf (((symbol-function 'agent-repl-page-report-restate)
+                 (lambda (ws) (push ws restated))))
+        ;; Act
+        (funcall (plist-get record :on-open))
+        ;; Assert
+        (should (equal restated '("ws-1")))))))
+
+(ert-deftest agent-repl-test-host-a-subject-verb-carries-its-extra-fields ()
+  "A subject verb's extra plist rides the request beside the ref."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((sent nil))
+      ;; Act
+      (agent-repl-host--send-subject-verb
+       "ws-1" "page-state"
+       (lambda (_conn request &rest _keys) (setq sent request))
+       #'ignore #'ignore '(:report (:arm :not-held :value nil)))
+      ;; Assert
+      (should (equal (plist-get sent :report) '(:arm :not-held :value nil)))
+      (should (plist-get sent :workspace)))))
+
 ;;;; ---- Teardown ----
 
 (ert-deftest agent-repl-test-host-a-tombstoned-workspace-is-forgotten ()

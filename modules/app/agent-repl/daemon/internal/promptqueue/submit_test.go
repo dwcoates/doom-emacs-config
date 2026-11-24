@@ -588,6 +588,8 @@ func TestARevivalAStandDownCutShortIsRecordedAsOne(t *testing.T) {
 			message: "a stand-down this daemon ordered cut the revival short; the submission waits for the session's next bring-up", notLevel: "error"},
 		{name: "a shim that would not spawn is a failure", reviveErr: errors.New("the shim would not spawn"), level: "error",
 			message: "the revival failed; the submission cannot be delivered", notLevel: "info"},
+		{name: "a workspace forgotten while the revival ran is no failure", reviveErr: fmt.Errorf("claim serving: %w", wsm.ErrNotFound), level: "info",
+			message: "the workspace was forgotten while its revival ran; the submission cannot be delivered", notLevel: "error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

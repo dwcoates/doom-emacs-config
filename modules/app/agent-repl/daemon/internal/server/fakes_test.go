@@ -43,6 +43,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/opentabs"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/publish"
@@ -2617,6 +2618,10 @@ type harness struct {
 	LogSites  *fakeLogSites
 	// Latencies records what ReportLatencies accepts.
 	Latencies *fakeLatencies
+	// HeldPages is the held-page table ReportPageState writes, counting
+	// through PageCounts.
+	HeldPages  *pageheld.Table
+	PageCounts *fakePageCounts
 	// VendorSpend is what ReportVendorSpend recorded.
 	VendorSpend *fakeVendorSpend
 	RPCs        *fakeRPCs
@@ -2771,6 +2776,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		HiddenKeepalives: &fakeHiddenKeepalives{},
 		KeepLives:        &fakeKeepLives{},
 		Latencies:        &fakeLatencies{enabled: true},
+		PageCounts:       &fakePageCounts{},
 		VendorSpend:      &fakeVendorSpend{enabled: true},
 		RPCs:             &fakeRPCs{},
 		ReconnectRecords: &restarttimingtest.Recorder{},
@@ -2790,6 +2796,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		StallBeat:        &fakeStallBeat{},
 		Pages:            &fakeSupersededPages{},
 	}
+	h.HeldPages = pageheld.New(h.PageCounts)
 
 	opens, err := opentabs.New(h.OpenWorld.deps())
 	if err != nil {
@@ -2873,6 +2880,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ImageOrigin:       http.NotFoundHandler(),
 		ChessBoards:       h.ChessBoards,
 		Latencies:         h.Latencies,
+		HeldPages:         h.HeldPages,
 		VendorSpend:       h.VendorSpend,
 		RPCs:              h.RPCs,
 		Reconnects:        h.reconnects(),
@@ -3883,3 +3891,29 @@ func (f *fakeHotReload) WebviewReported(ws ids.WorkspaceID, build string) {
 }
 func (f *fakeHotReload) WebviewGone(ws ids.WorkspaceID) { f.record("webview_gone:" + string(ws)) }
 func (f *fakeHotReload) WebhostReported(build string)   { f.record("webhost:" + build) }
+
+// fakePageCounts records every page load and unload the held-page table
+// counted.
+type fakePageCounts struct {
+	mu      sync.Mutex
+	loads   []pageheld.LoadReason
+	unloads []pageheld.UnloadReason
+}
+
+func (f *fakePageCounts) CountPageLoad(r pageheld.LoadReason) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loads = append(f.loads, r)
+}
+
+func (f *fakePageCounts) CountPageUnload(r pageheld.UnloadReason) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unloads = append(f.unloads, r)
+}
+
+func (f *fakePageCounts) counted() ([]pageheld.LoadReason, []pageheld.UnloadReason) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pageheld.LoadReason(nil), f.loads...), append([]pageheld.UnloadReason(nil), f.unloads...)
+}

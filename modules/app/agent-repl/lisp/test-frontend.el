@@ -1111,6 +1111,41 @@ ANSWER is `reported' or `refused'.  `events' collects (report WS) and
          (unwind-protect (progn ,@body)
            (when (buffer-live-p buf) (kill-buffer buf)))))))
 
+(ert-deftest agent-repl-test-frontend-close-panel-reports-the-page-detached ()
+  "A closed panel's dropped page is reported unloaded as detached."
+  (agent-repl-test-frontend--closing-panel 'reported
+    (let ((unloads nil))
+      (cl-letf (((symbol-function 'agent-repl-page-report-unloaded)
+                 (lambda (ws why) (push (list ws why) unloads))))
+        ;; Act
+        (agent-repl-frontend-close-panel)
+        ;; Assert
+        (should (equal unloads '(("ws1" detached))))))))
+
+(ert-deftest agent-repl-test-frontend-releasing-a-workspace-reports-its-page-released ()
+  "A workspace released from the editor reports its held page unloaded as released."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((unloads nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-remove) (lambda (_ws &optional _u) t))
+                ((symbol-function 'agent-repl-page-report-unloaded)
+                 (lambda (ws why) (push (list ws why) unloads))))
+        ;; Act
+        (agent-repl--frontend-release-workspace-webview "ws1")
+        ;; Assert
+        (should (equal unloads '(("ws1" released))))))))
+
+(ert-deftest agent-repl-test-frontend-releasing-a-workspace-with-no-page-reports-nothing ()
+  "A workspace released with no page held reports no unload."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((unloads nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-remove) (lambda (_ws &optional _u) nil))
+                ((symbol-function 'agent-repl-page-report-unloaded)
+                 (lambda (ws why) (push (list ws why) unloads))))
+        ;; Act
+        (agent-repl--frontend-release-workspace-webview "ws1")
+        ;; Assert
+        (should-not unloads)))))
+
 (ert-deftest agent-repl-test-frontend-close-panel-kills-and-clears ()
   "close-panel kills the webview and clears its plist key."
   (agent-repl-test-frontend--closing-panel 'reported

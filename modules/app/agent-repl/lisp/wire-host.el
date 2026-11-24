@@ -1484,6 +1484,72 @@ Emacs's report that it is about to unload the workspace's page on purpose."
   "Decode VALUE as `ReportPageUnloadingResponse'.  THE ARM IS THE OUTCOME."
   (agent-repl-wire--decode-subject-response "ReportPageUnloading" value))
 
+;;;; ---- ReportPageState ----
+
+(defconst agent-repl-wire--page-load-reasons
+  '((:shown shown "ReportPageStateLoadShown")
+    (:awake awake "ReportPageStateLoadAwake")
+    (:slot slot "ReportPageStateLoadSlot")
+    (:load-requested loadRequested "ReportPageStateLoadRequested")
+    (:ungated ungated "ReportPageStateLoadUngated"))
+  "Every `ReportPageStateLoadReason' arm: (KEYWORD WIRE-KEY MESSAGE).")
+
+(defconst agent-repl-wire--page-unload-reasons
+  '((:dormant dormant "ReportPageStateUnloadDormant")
+    (:detached detached "ReportPageStateUnloadDetached")
+    (:released released "ReportPageStateUnloadReleased"))
+  "Every `ReportPageStateUnloadReason' arm: (KEYWORD WIRE-KEY MESSAGE).")
+
+(defun agent-repl-wire--encode-page-reason (message-name reasons reason)
+  "Encode REASON, a keyword of REASONS, as the reason oneof of MESSAGE-NAME."
+  (let ((arm (assq reason reasons)))
+    (unless arm
+      (agent-repl-wire--fail message-name 'reason "unknown reason"))
+    (agent-repl-wire--encoded
+     message-name
+     (list (cons (nth 1 arm) (agent-repl-wire--encode-empty (nth 2 arm) nil))))))
+
+(defun agent-repl-wire-encode-report-page-state-request-report (value)
+  "Encode `ReportPageStateRequest''s oneof `report' VALUE.
+VALUE is `(:arm ARM :value REASON)': ARM `:loaded' or `:held' with REASON
+a load reason (`:shown', `:awake', `:slot', `:load-requested', `:ungated'),
+`:unloaded' with REASON an unload reason (`:dormant', `:detached',
+`:released'), or `:not-held' with REASON nil."
+  (let ((load (lambda (message)
+                (lambda (reason)
+                  (agent-repl-wire--encoded
+                   message
+                   (list (cons 'reason (agent-repl-wire--encode-page-reason
+                                        "ReportPageStateLoadReason"
+                                        agent-repl-wire--page-load-reasons reason))))))))
+    (agent-repl-wire--encode-oneof
+     "ReportPageStateRequest" 'report value
+     `((:loaded loaded ,(funcall load "ReportPageStateLoaded"))
+       (:held held ,(funcall load "ReportPageStateHeld"))
+       (:unloaded unloaded
+                  ,(lambda (reason)
+                     (agent-repl-wire--encoded
+                      "ReportPageStateUnloaded"
+                      (list (cons 'reason (agent-repl-wire--encode-page-reason
+                                           "ReportPageStateUnloadReason"
+                                           agent-repl-wire--page-unload-reasons reason))))))
+       (:not-held notHeld ,(lambda (v) (agent-repl-wire--encode-empty "ReportPageStateNotHeld" v)))))))
+
+(defun agent-repl-wire-encode-report-page-state-request (value)
+  "Encode ReportPageStateRequest VALUE `(:workspace REF :report REPORT)'.
+Emacs's report of whether its web view holds the workspace's page, and
+why; REPORT is as `agent-repl-wire-encode-report-page-state-request-report'
+takes it."
+  (agent-repl-wire--require-fields "ReportPageStateRequest" value '(:workspace :report))
+  (agent-repl-wire--encoded
+   "ReportPageStateRequest"
+   (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
+         (agent-repl-wire-encode-report-page-state-request-report (plist-get value :report)))))
+
+(defun agent-repl-wire-decode-report-page-state-response (value)
+  "Decode VALUE as `ReportPageStateResponse'.  THE ARM IS THE OUTCOME."
+  (agent-repl-wire--decode-subject-response "ReportPageState" value))
+
 ;;;; ---- ReportUserInteraction ----
 
 (defun agent-repl-wire-encode-user-interaction (value)

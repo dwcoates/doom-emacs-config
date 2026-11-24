@@ -95,6 +95,13 @@ type resolver struct {
 	// nextPublication are told the revision of the next roster this resolver
 	// publishes, each once (NotifyNextPublication).
 	nextPublication []func(revision uint64)
+	// telemetry counts every workspace's visibility by its reason, every
+	// visibility change and every result read (WithVisibilityTelemetry); nil
+	// counts nothing.
+	telemetry VisibilityTelemetry
+	// reasonCounts is the last per-reason count handed to telemetry, so a
+	// render that changed none sets nothing.
+	reasonCounts map[wsm.VisibilityReason]int
 
 	// now is the clock a status change is stamped by (WithClock).
 	now func() time.Time
@@ -1006,6 +1013,7 @@ func (r *resolver) SetInteracted(ws ids.WorkspaceID, at time.Time) {
 				"the user interacted with the workspace, so its row is viewed until its next status change", dlog.Context{
 					"status": s.viewedArm, "was": was,
 				})
+			r.countResultRead(ReadByInteraction)
 			return true
 		})
 }

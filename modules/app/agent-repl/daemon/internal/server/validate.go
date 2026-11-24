@@ -956,6 +956,31 @@ func validateReportUserInteractionRequest(req *agentreplv1.ReportUserInteraction
 	return nil
 }
 
+// validateReportPageStateRequest is ReportPageStateRequest's base function:
+// a workspace, a report arm, and for every arm but not_held its reason arm.
+func validateReportPageStateRequest(req *agentreplv1.ReportPageStateRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	switch report := req.GetReport().(type) {
+	case nil:
+		return invalid("report", "a report arm is required")
+	case *agentreplv1.ReportPageStateRequest_Loaded:
+		if report.Loaded.GetReason().GetReason() == nil {
+			return invalid("report.loaded.reason", "a load reason arm is required")
+		}
+	case *agentreplv1.ReportPageStateRequest_Held:
+		if report.Held.GetReason().GetReason() == nil {
+			return invalid("report.held.reason", "a load reason arm is required")
+		}
+	case *agentreplv1.ReportPageStateRequest_Unloaded:
+		if report.Unloaded.GetReason().GetReason() == nil {
+			return invalid("report.unloaded.reason", "an unload reason arm is required")
+		}
+	}
+	return nil
+}
+
 // validateSetWorkspaceHiddenRequest is SetWorkspaceHiddenRequest's base
 // function: a workspace and the place asked for are both required.
 func validateSetWorkspaceHiddenRequest(req *agentreplv1.SetWorkspaceHiddenRequest) *connect.Error {
