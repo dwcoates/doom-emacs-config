@@ -2727,7 +2727,7 @@ build_group_staging() {
 # generator_stamp_of ID — the generator stamp build-frontend.sh writes when the
 # stub make's generator-id target answers ID.
 generator_stamp_of() {
-    printf '%s\n' "$1" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-40
+    printf '%s\n' "$1" | deploy_stamp_hash
 }
 
 # stamp_fresh_proto ROOT — record that the fixture's bindings were generated

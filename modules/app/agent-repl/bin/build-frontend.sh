@@ -972,7 +972,7 @@ proto_generator_id() {
         rm -f "$out"
         return 1
     fi
-    id="$({ shasum -a 256 2>/dev/null || sha256sum; } < "$out" | cut -c1-40)"
+    id="$(deploy_stamp_hash < "$out")"
     rm -f "$out"
     [ -n "$id" ] || return 1
     printf '%s\n' "$id"

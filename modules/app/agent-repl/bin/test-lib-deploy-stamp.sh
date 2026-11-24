@@ -458,6 +458,29 @@ test_every_go_system_is_listed_by_the_one_table() {
     fi
 }
 
+test_deploy_stamp_hash_is_the_first_40_hex_of_the_sha256() {
+    # "abc" has the well-known sha256 ba7816bf8f01cfea414140de5dae2223b00361a3...
+    local got
+    got="$(printf 'abc' | deploy_stamp_hash)"
+    if [ "$got" = "ba7816bf8f01cfea414140de5dae2223b00361a3" ]; then
+        pass "hash: deploy_stamp_hash is the first 40 hex digits of its input's sha256"
+    else
+        fail "hash: deploy_stamp_hash is the first 40 hex digits of its input's sha256" "got $got"
+    fi
+}
+
+test_deploy_stamp_hash_is_the_one_stamp_digest() {
+    # Every id a stamp records is hashed by deploy_stamp_hash: no script that
+    # writes or computes one spells the digest out for itself.
+    local hits
+    hits="$(grep -n 'cut -c1-40' "$THIS_DIR/lib-deploy-stamp.sh" "$THIS_DIR/build-frontend.sh" | grep -v '^[^:]*lib-deploy-stamp.sh:[0-9]*:    { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-40$' || true)"
+    if [ -z "$hits" ]; then
+        pass "hash: the stamp ids of lib-deploy-stamp.sh and build-frontend.sh are all hashed by deploy_stamp_hash"
+    else
+        fail "hash: the stamp ids of lib-deploy-stamp.sh and build-frontend.sh are all hashed by deploy_stamp_hash" "hand-rolled digests: $hits"
+    fi
+}
+
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
     "$t"
 done

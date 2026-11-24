@@ -402,6 +402,13 @@ deploy_stamp_source_id() {
     source_tree_id "$2" "${DEPLOY_STAMP_PATHSPEC[@]}"
 }
 
+# deploy_stamp_hash — echo the first 40 hex digits of the sha256 of standard
+# input: the one digest every id a stamp here records is made of (a source tree's,
+# the proto generators'), so two stamps can never be hashed two ways.
+deploy_stamp_hash() {
+    { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-40
+}
+
 # source_tree_id REPO_ROOT PATHSPEC... — echo a stable id for the CONTENT of
 # the given pathspec: a hash of the index entries (mode, blob sha, path), with
 # "-dirty" appended when the working tree disagrees with the index anywhere
@@ -418,7 +425,7 @@ source_tree_id() {
     command -v git >/dev/null 2>&1 || return 1
     listing="$(git -C "$repo" ls-files -s -- "$@" 2>/dev/null)" || return 1
     [ -n "$listing" ] || return 1
-    hash="$(printf '%s\n' "$listing" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-40)"
+    hash="$(printf '%s\n' "$listing" | deploy_stamp_hash)"
     [ -n "$hash" ] || return 1
     if [ -n "$(git -C "$repo" status --porcelain -- "$@" 2>/dev/null)" ]; then
         printf '%s-dirty\n' "$hash"
