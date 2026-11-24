@@ -608,3 +608,96 @@ func TestAStartlessShellsFailureTerminalRetiresItAsABashTerminal(t *testing.T) {
 		t.Fatalf("conclusion = %v, want %s", got, concludedBashTerminal)
 	}
 }
+
+func TestOnlyAnObservedEndIsWork(t *testing.T) {
+	tests := []struct {
+		why  conclusion
+		want bool
+	}{
+		{why: concludedUnitTerminal, want: true},
+		{why: concludedAgentTerminal, want: true},
+		{why: concludedBashTerminal, want: true},
+		{why: concludedMonitorTerminal, want: true},
+		{why: concludedLeftLevel, want: true},
+		{why: concludedQueryDied, want: false},
+		{why: concludedReconciled, want: false},
+		{why: concludedDeparted, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.why), func(t *testing.T) {
+			// Act.
+			got := tt.why.observedEnd()
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("observedEnd(%s) = %v, want %v", tt.why, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAConclusionNoRuleJudgesPanics(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("an unjudged conclusion did not panic")
+		}
+	}()
+
+	// Act.
+	conclusion("unjudged").observedEnd()
+}
+
+// drainFreeWork empties the free edges' workEnded values told so far.
+func (h *harness) drainFreeWork() {
+	h.w.dispatching.Wait()
+	for {
+		select {
+		case <-h.rec.freeWork:
+		default:
+			return
+		}
+	}
+}
+
+// A STALE ITEM RETIRED LATE IS NO WORK JUST DONE (2026-11-24 00:22:21,
+// retire-gns-sockets): a re-announcement retiring an item the daemon held
+// past its end says no work ended, so the idle clock stands.
+func TestAStaleItemsReconciliationSaysNoWorkEnded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+	h.relink(t)
+	h.drainFreeWork()
+
+	// Act.
+	h.reannounce(t, sessionStarted(""))
+
+	// Assert.
+	if h.freeWorkEnded(t) {
+		t.Fatal("a stale item's reconciliation said work ended")
+	}
+}
+
+func TestAShellsObservedTerminalSaysWorkEnded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	h.client.NextBashOpen(t)
+	h.quiet()
+	entry := h.shellWatchFor("w-1")
+	h.drainFreeWork()
+
+	// Act.
+	h.routeNow(func(w *watcher) {
+		w.routeBashLocked(entry, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}},
+		})
+	})
+
+	// Assert.
+	if !h.freeWorkEnded(t) {
+		t.Fatal("a shell's observed terminal said no work ended")
+	}
+}
