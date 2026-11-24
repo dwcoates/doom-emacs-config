@@ -238,18 +238,31 @@ func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out Detac
 // as its closer. Closing ends its request off the queue in the same write
 // (wsm.markClosedInTx), and keeps its worktree and branch, which the
 // handback names.
+//
+// EVERY END THAT DID NOT LAND ENDS THE MERGE'S SESSION FIRST (endSession),
+// an eviction's and a closed workspace's included, unless the user revealed
+// the workspace: the merge's agent has no work left, and the withheld
+// stand-down waits for its turn to end. A given-up merge's agent, forked from
+// its maker's conversation, once kept acting for three and a half minutes
+// after its merge ended, in its maker's worktree and on its maker's branches
+// (2026-11-24, deploy-check-admission-race).
 func (o *orchestrator) closeEnded(ctx context.Context, record wsm.Workspace, out DetachedOutcome) {
 	log := o.log(ctx, record.ID)
 	fields := dlog.Context{"workspace": string(record.ID), "name": record.Name, "outcome": out.Kind.String(), "cause": string(out.Cause)}
 	switch {
 	case out.Kind == DetachedLanded:
 		log.Debug(opCloseEnded, "the landed merge's workspace was closed by its landing", withField(fields, "closed", record.Closed))
+		return
+	case !record.Closed && !record.MergeHidden():
+		log.Info(opCloseEnded, "the ended merge's workspace was revealed to the user, and stays open for them", fields)
+		return
+	}
+	o.endSession(ctx, log, record.ID, fields)
+	switch {
 	case out.Cause == CauseUserDrop:
 		log.Info(opCloseEnded, "the evicted merge may still be requeued; its merge workspace stays until it is requeued or discarded", fields)
 	case record.Closed:
 		log.Info(opCloseEnded, "the ended merge's workspace is closed already", fields)
-	case !record.MergeHidden():
-		log.Info(opCloseEnded, "the ended merge's workspace was revealed to the user, and stays open for them", fields)
 	default:
 		if err := o.deps.DB.MarkClosed(ctx, record.ID, wsm.Closure{At: o.deps.Now(), By: wsm.CloseByDaemon}); err != nil {
 			log.Error(opCloseEnded, "could not close the hidden workspace of a merge that ended without landing; it stays open and hidden", withField(fields, "error", err.Error()))
@@ -260,6 +273,34 @@ func (o *orchestrator) closeEnded(ctx context.Context, record wsm.Workspace, out
 		// (stampClosed): nothing else republishes it.
 		o.republishRoster(ctx, log, opCloseEnded, logsite.Msg("could not republish the roster after closing an ended merge's workspace"), fields)
 	}
+}
+
+// endSession ends WS's session at once, the merge's agent's running turn with
+// it, for a merge that ended without landing, and records it under
+// opEndSession with FIELDS. Its starts are held across the stop, so no
+// relaunch in flight brings the agent back. The stop runs on a context its
+// caller's cancellation does not reach: an abandonment cancels the run whose
+// teardown settles here. A failed stop is an ERROR, and the close that
+// follows stands.
+func (o *orchestrator) endSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context) {
+	release := o.deps.HoldStarts(ws)
+	defer release()
+	if err := o.stopSessionForced(context.WithoutCancel(ctx), ws, shimlife.StandDownMergeEnded); err != nil {
+		log.Error(opEndSession, "could not end the session of a merge that ended without landing; its agent may still be acting", withField(fields, "error", err.Error()))
+		return
+	}
+	log.Info(opEndSession, "ended the session of a merge that ended without landing, interrupting any turn it ran", fields)
+}
+
+// opEndSession is every record of endSession.
+const opEndSession = "daemon.merge.end_session"
+
+// stopSessionForced ends WS's session at once, whatever turn it runs, stating
+// REASON as its stand-down. It is the package's ONE forced session stop: a
+// landed workspace's before its worktree goes (retireLandedWorktree), and an
+// unlanded merge's (endSession).
+func (o *orchestrator) stopSessionForced(ctx context.Context, ws ids.WorkspaceID, reason shimlife.StandDownReason) error {
+	return o.deps.StopSession(shimlife.WithStandDown(ctx, reason), ws, true)
 }
 
 // republishRoster republishes the roster's DURABLE half (Deps.PublishRegistry)
@@ -724,7 +765,7 @@ func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger
 	// was gone (2026-10-25, settings-page-land).
 	release := o.deps.HoldStarts(ws)
 	defer release()
-	if err := o.deps.StopSession(shimlife.WithStandDown(ctx, shimlife.StandDownLanded), ws, true); err != nil {
+	if err := o.stopSessionForced(ctx, ws, shimlife.StandDownLanded); err != nil {
 		log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
 			"workspace": string(ws), "worktree": dir, "force": true, "error": err.Error()})
 		return err

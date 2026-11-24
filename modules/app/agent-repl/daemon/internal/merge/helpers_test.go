@@ -3973,6 +3973,9 @@ type harness struct {
 	// stopReasons are the stand-down reasons the stops' contexts stated, ""
 	// for a stop that stated none.
 	stopReasons []shimlife.StandDownReason
+	// stopCtxErrs are the stops' contexts' errors, read at each stop: a stop
+	// made on a cancelled context reaches no shim.
+	stopCtxErrs []error
 	stopAt      int
 	stopErr     error
 	// occupancyReleases counts the occupancy guards dropped.
@@ -4381,8 +4384,8 @@ func newHarness(t *testing.T) *harness {
 	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
-	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
-	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests"}
+	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files", "after_give_up"}
+	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests", "after_give_up"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefRebaseCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefHookPrompt] = []string{"prompt"}
@@ -4475,6 +4478,7 @@ func (h *harness) deps() Deps {
 			h.stoppedSessions = append(h.stoppedSessions, ws)
 			h.stopForces = append(h.stopForces, force)
 			h.stopReasons = append(h.stopReasons, reason)
+			h.stopCtxErrs = append(h.stopCtxErrs, ctx.Err())
 			if h.stopAt == 0 {
 				h.stopAt = at
 			}
