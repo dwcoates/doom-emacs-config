@@ -417,6 +417,16 @@ function parseRuns(raw: string): Run[] {
 }
 
 /**
+ * Whether TAG, met while splitting marked-up text into units (words, or a
+ * word's characters), joins the last of the UNITS placed so far rather than
+ * riding on the next: a close tag with no text PENDING since that unit closes
+ * the element the unit's text is in, even when whitespace stands between them.
+ */
+export function closesLastUnit(tag: string, pending: string, units: number): boolean {
+  return tag.startsWith("</") && pending === "" && units > 0;
+}
+
+/**
  * Atom.subwords: split the atom into whitespace-delimited words, tracking the
  * open tag stack. Used only as the fallback for an atom too wide to fit a line
  * on its own; the tag stack lets each resulting line close and reopen whatever
@@ -440,9 +450,7 @@ function atomSubwords(a: Atom, escape: boolean): Subword[] {
   for (const r of a.runs) {
     if (r.isTag) {
       applyTag(stack, r.raw);
-      if (r.raw.startsWith("</") && pending === "" && result.length > 0) {
-        // A close tag separated from its text by whitespace still belongs to
-        // the word it closes, not to the word after it.
+      if (closesLastUnit(r.raw, pending, result.length)) {
         const last = result[result.length - 1];
         result[result.length - 1] = { raw: last.raw + r.raw, width: last.width, openAfter: [...stack] };
       } else {
@@ -678,7 +686,7 @@ function wordCharacters(word: string, stack: readonly string[]): WordCharacter[]
   let before: string[] = [...open];
   for (const r of parseRuns(word)) {
     if (r.isTag) {
-      if (r.raw.startsWith("</") && pending === "" && chars.length > 0) {
+      if (closesLastUnit(r.raw, pending, chars.length)) {
         chars[chars.length - 1].raw += r.raw;
       } else {
         if (pending === "") before = [...open];

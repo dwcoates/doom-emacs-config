@@ -4,6 +4,7 @@ import * as metapromptTree from "../src/metaprompt-tree.js";
 import {
   WIDE_CHAR_CLASS,
   boxWideChars,
+  closesLastUnit,
   formatTree,
   layoutTree,
   lineText,
@@ -888,6 +889,28 @@ describe("renderTreeHtml breaks a word too wide for a whole line between its cha
     const html = renderTreeHtml(graph([{ label: "1", text: "x" }, { parent: 0, label: "1.1", text: "WWWWWWWWWW" }]), identity, pxMeasure(160));
     // Assert
     expect(textsOf(html, "mp-content").slice(1)).toEqual(["WWWW", "WWWW", "WW"]);
+  });
+});
+
+describe("closesLastUnit", () => {
+  it.each([
+    { name: "joins a close tag with no text pending to the last unit", tag: "</a>", pending: "", units: 1, joins: true },
+    { name: "keeps a close tag with text pending in the pending unit", tag: "</a>", pending: "x", units: 1, joins: false },
+    { name: "keeps a close tag before any unit in the first unit", tag: "</a>", pending: "", units: 0, joins: false },
+    { name: "rides an open tag on the next unit", tag: '<a href="u">', pending: "", units: 1, joins: false },
+  ])("$name", ({ tag, pending, units, joins }) => {
+    // Act + Assert
+    expect(closesLastUnit(tag, pending, units)).toBe(joins);
+  });
+
+  it("is the rule both a word split and a character split place a close tag by", () => {
+    // Arrange — a close tag after a space (word split) and before a period (character split).
+    const URL = "https://example.com/abcdefghijklmnopqrstuvwxyz";
+    // Act
+    const words = wrap(`${R}\n└── 1.1 <b>alpha beta gamma </b>x`, 18);
+    const chars = renderTreeHtml(tree(`${R}\n└── 1.1 ${URL}.`), inline, columnMeasure(24));
+    // Assert — each line closes the element its own text is in.
+    expect([words.split("\n")[2] === "        <b>gamma</b> x", chars.includes("mnopqrstuvwxyz</a>.")]).toEqual([true, true]);
   });
 });
 

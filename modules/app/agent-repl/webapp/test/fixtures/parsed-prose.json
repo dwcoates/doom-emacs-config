@@ -3652,5 +3652,49 @@
         "markdown": "1 🎯 Root\n└── 1.1 aa🔧🔧🔧🔧🔧🔧🔧🔧🔧"
       }
     }
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 \u003cb\u003ealpha beta gamma \u003c/b\u003ex",
+    "prose": {
+      "blocks": [
+        {
+          "tree": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {
+                  "marker": {
+                    "text": "🎯"
+                  }
+                },
+                "label": {
+                  "text": "1"
+                },
+                "text": {
+                  "markdown": "Root"
+                }
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "1.1"
+                },
+                "text": {
+                  "markdown": "\u003cb\u003ealpha beta gamma \u003c/b\u003ex"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "source": {
+        "markdown": "1 🎯 Root\n└── 1.1 \u003cb\u003ealpha beta gamma \u003c/b\u003ex"
+      }
+    }
   }
 ]
