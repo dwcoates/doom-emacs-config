@@ -2845,19 +2845,21 @@ func TestRetireLandedWorktreeTearsDownALandedWorkspace(t *testing.T) {
 }
 
 // TestEveryForcedSessionStopGoesThroughStopSessionForced pins that the
-// queue's merges and a remediation's direct landing share the one teardown: a
+// queue's merges and a remediation's direct landing share the one teardown,
+// and that an unlanded merge's session end is the one other forced stop: a
 // forced session stop appears nowhere in the package's sources but
-// stopSessionForced, whose one caller is retireLandedWorktree.
+// stopSessionForced, whose callers are those two.
 func TestEveryForcedSessionStopGoesThroughStopSessionForced(t *testing.T) {
 	// Act
 	sites := sourcescan.SitesMatching(t, regexp.MustCompile(`\.StopSession\([^\n]*, true\)`))
 	callers := callersOf(t, "o.stopSessionForced(")
+	slices.Sort(callers)
 
 	// Assert
 	if !slices.Equal(sites, []string{"terminal.go"}) {
 		t.Fatalf("forced session stops at %v, want only stopSessionForced's", sites)
 	}
-	if want := []string{"terminal.go:retireLandedWorktree"}; !slices.Equal(callers, want) {
+	if want := []string{"terminal.go:endSession", "terminal.go:retireLandedWorktree"}; !slices.Equal(callers, want) {
 		t.Fatalf("stopSessionForced callers = %v, want %v", callers, want)
 	}
 }
@@ -2875,21 +2877,22 @@ func TestSettleClosesAnEndedAsyncMergesHiddenWorkspaceByItsEnd(t *testing.T) {
 		out       DetachedOutcome
 		arrange   func(ws *wsm.Workspace)
 		wantClose bool
+		wantStop  bool
 		wantMsg   string
 	}{
-		{name: "a failure closes it", out: DetachedOutcome{Kind: DetachedFailed, Summary: "it failed"}, wantClose: true,
+		{name: "a failure closes it", out: DetachedOutcome{Kind: DetachedFailed, Summary: "it failed"}, wantClose: true, wantStop: true,
 			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
-		{name: "a dequeue closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDequeue}, wantClose: true,
+		{name: "a dequeue closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDequeue}, wantClose: true, wantStop: true,
 			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
-		{name: "a drop behind a merge that did not land closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAheadDidNotLand}, wantClose: true,
+		{name: "a drop behind a merge that did not land closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAheadDidNotLand}, wantClose: true, wantStop: true,
 			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
-		{name: "a give-up closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAgentGaveUp}, wantClose: true,
+		{name: "a give-up closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAgentGaveUp}, wantClose: true, wantStop: true,
 			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
-		{name: "an eviction keeps it for a requeue", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDrop},
+		{name: "an eviction keeps it for a requeue", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDrop}, wantStop: true,
 			wantMsg: "the evicted merge may still be requeued; its merge workspace stays until it is requeued or discarded"},
 		{name: "a landing leaves it to the landing's own close", out: DetachedOutcome{Kind: DetachedLanded},
 			wantMsg: "the landed merge's workspace was closed by its landing"},
-		{name: "a workspace closed already is not closed again", out: DetachedOutcome{Kind: DetachedFailed},
+		{name: "a workspace closed already is not closed again", out: DetachedOutcome{Kind: DetachedFailed}, wantStop: true,
 			arrange: func(ws *wsm.Workspace) { ws.Closed = true },
 			wantMsg: "the ended merge's workspace is closed already"},
 		{name: "a workspace the user revealed stays open", out: DetachedOutcome{Kind: DetachedFailed},
@@ -2931,7 +2934,76 @@ func TestSettleClosesAnEndedAsyncMergesHiddenWorkspaceByItsEnd(t *testing.T) {
 			if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["outcome"] != tt.out.Kind.String() {
 				t.Fatalf("close record = %+v, %v; want %q naming the workspace and the outcome", record, ok, tt.wantMsg)
 			}
+			h.mu.Lock()
+			stopped := slices.Clone(h.stoppedSessions)
+			h.mu.Unlock()
+			if tt.wantStop && !slices.Equal(stopped, []ids.WorkspaceID{theMergeWorkspace}) {
+				t.Fatalf("sessions stopped = %v, want the merge workspace's", stopped)
+			}
+			if !tt.wantStop && len(stopped) != 0 {
+				t.Fatalf("sessions stopped = %v, want none", stopped)
+			}
 		})
+	}
+}
+
+// AN UNLANDED MERGE'S SESSION ENDS AT ONCE, ITS RUNNING TURN WITH IT: a forced
+// stop under the merge_ended stand-down, starts held across it, on a context
+// the abandoned run's cancellation does not reach, recorded with the end.
+func TestSettleOfAnUnlandedAsyncMergeEndsItsSessionAtOnce(t *testing.T) {
+	// Arrange: the caller's context is the abandoned run's, cancelled.
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	h.o.settle(ctx, theMergeWorkspace, DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAgentGaveUp})
+
+	// Assert
+	h.mu.Lock()
+	stopped, forces, reasons, ctxErrs, holds := slices.Clone(h.stoppedSessions), slices.Clone(h.stopForces),
+		slices.Clone(h.stopReasons), slices.Clone(h.stopCtxErrs), slices.Clone(h.startHolds)
+	stopAt := h.stopAt
+	h.mu.Unlock()
+	if !slices.Equal(stopped, []ids.WorkspaceID{theMergeWorkspace}) || !slices.Equal(forces, []bool{true}) ||
+		!slices.Equal(reasons, []shimlife.StandDownReason{shimlife.StandDownMergeEnded}) {
+		t.Fatalf("stops = %v forced %v for %v, want the merge workspace's one forced merge_ended stop", stopped, forces, reasons)
+	}
+	if ctxErrs[0] != nil {
+		t.Fatalf("the stop's context = %v, want one the run's cancellation does not reach", ctxErrs[0])
+	}
+	if len(holds) != 2 || holds[0].ws != theMergeWorkspace || holds[0].release || holds[0].at >= stopAt ||
+		!holds[1].release || holds[1].at <= stopAt {
+		t.Fatalf("start holds = %+v around the stop at %d, want one held across it", holds, stopAt)
+	}
+	record, ok := h.recordFor(dlog.LevelInfo, opEndSession)
+	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["cause"] != string(CauseAgentGaveUp) ||
+		record.Message != "ended the session of a merge that ended without landing, interrupting any turn it ran" {
+		t.Fatalf("end record = %+v, %v; want it naming the workspace and the cause", record, ok)
+	}
+}
+
+func TestASessionEndOfAnUnlandedMergeThatFailsIsAnErrorAndTheCloseStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	h.stopErr = errors.New("shim gone")
+
+	// Act
+	h.o.settle(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "it failed"})
+
+	// Assert
+	record, ok := h.recordFor(dlog.LevelError, opEndSession)
+	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["error"] != "shim gone" ||
+		record.Context["outcome"] != DetachedFailed.String() {
+		t.Fatalf("error record = %+v, %v; want one naming the workspace, the outcome and the cause", record, ok)
+	}
+	if _, ok := h.recordFor(dlog.LevelInfo, opEndSession); ok {
+		t.Fatal("a failed session end was also recorded as done")
+	}
+	if calls, closure := closesOf(h, theMergeWorkspace); calls != 1 || closure.By != wsm.CloseByDaemon {
+		t.Fatalf("closes = %d (%+v), want the close to stand", calls, closure)
 	}
 }
 

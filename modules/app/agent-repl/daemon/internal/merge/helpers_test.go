@@ -3973,6 +3973,9 @@ type harness struct {
 	// stopReasons are the stand-down reasons the stops' contexts stated, ""
 	// for a stop that stated none.
 	stopReasons []shimlife.StandDownReason
+	// stopCtxErrs are the stops' contexts' errors, read at each stop: a stop
+	// made on a cancelled context reaches no shim.
+	stopCtxErrs []error
 	stopAt      int
 	stopErr     error
 	// occupancyReleases counts the occupancy guards dropped.
@@ -4475,6 +4478,7 @@ func (h *harness) deps() Deps {
 			h.stoppedSessions = append(h.stoppedSessions, ws)
 			h.stopForces = append(h.stopForces, force)
 			h.stopReasons = append(h.stopReasons, reason)
+			h.stopCtxErrs = append(h.stopCtxErrs, ctx.Err())
 			if h.stopAt == 0 {
 				h.stopAt = at
 			}

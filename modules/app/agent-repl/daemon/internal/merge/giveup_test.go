@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -135,5 +136,41 @@ func TestRepairOriginsAreEveryRepairsOrigin(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("repairOrigins = %v, want %v", got, want)
+	}
+}
+
+// A GIVEN-UP ASYNC MERGE'S AGENT CANNOT KEEP ACTING: the give-up answers only
+// once the merge workspace's session has been ended, its repair turn with it
+// (2026-11-24: a given-up merge's agent worked on in its maker's worktree for
+// three and a half minutes while the stand-down waited for its turn to end).
+func TestGiveUpOfAnAsyncMergeEndsItsSessionBeforeItAnswers(t *testing.T) {
+	// Arrange: the merge's own agent runs a conflict resolution.
+	h := pickHarness(t)
+	if err := requestDetached(t, h, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	h.db.mu.Lock()
+	h.db.turns[theMergeWorkspace] = append(h.db.turns[theMergeWorkspace], wsm.Turn{ID: "turn-resolve", Workspace: theMergeWorkspace,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR.String()})
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.GiveUp(context.Background(), theMergeWorkspace, "the conflict needs a redesign")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("GiveUp = %v, want the merge given up", err)
+	}
+	h.mu.Lock()
+	stopped, forces, reasons := slices.Clone(h.stoppedSessions), slices.Clone(h.stopForces), slices.Clone(h.stopReasons)
+	h.mu.Unlock()
+	if !slices.Equal(stopped, []ids.WorkspaceID{theMergeWorkspace}) || !slices.Equal(forces, []bool{true}) ||
+		!slices.Equal(reasons, []shimlife.StandDownReason{shimlife.StandDownMergeEnded}) {
+		t.Fatalf("stops = %v forced %v for %v, want the merge workspace's session ended at once", stopped, forces, reasons)
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opEndSession,
+		Message: "ended the session of a merge that ended without landing, interrupting any turn it ran"})
+	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["cause"] != string(CauseAgentGaveUp) {
+		t.Fatalf("records = %v, want the session end recorded with the give-up's cause", h.logs.Records())
 	}
 }
