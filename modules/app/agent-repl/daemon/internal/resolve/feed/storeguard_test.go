@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -31,22 +32,14 @@ func (g storeGuard) check(what string) {
 		return
 	}
 	caller := "unknown"
-	if pc, _, line, ok := runtime.Caller(2); ok {
-		caller = functionAt(pc) + ":" + itoa(line)
+	// The caller is read through runtime.Callers, which names a function and
+	// a line and no file: a test never reads its compiled path (testdir).
+	var pcs [1]uintptr
+	if runtime.Callers(3, pcs[:]) == 1 {
+		frame, _ := runtime.CallersFrames(pcs[:]).Next()
+		caller = functionAt(frame.PC) + ":" + strconv.Itoa(frame.Line)
 	}
 	g.t.Errorf("%s was called while the resolver's mutex was held (from %s)", what, caller)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
 
 // guardStores wraps every store R reaches so a call under its mutex fails T.
