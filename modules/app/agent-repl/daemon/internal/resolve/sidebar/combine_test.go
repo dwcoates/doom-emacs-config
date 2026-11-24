@@ -319,6 +319,31 @@ func TestThePostingView(t *testing.T) {
 		}
 	})
 
+	t.Run("edges posted while a render runs are rendered together once", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+		fx.r.Posting().OnLink(wsB, shimclient.LinkConnected)
+		fx.r.Posting().OnLink(wsC, shimclient.LinkConnected)
+		fx.r.Posting().SetOpening(wsB, true)
+		for want := 1; want <= 3; want++ {
+			if depth := <-fx.queued; depth != want {
+				t.Fatalf("posted edge %d joined a queue of depth %d", want, depth)
+			}
+		}
+		mark := len(fx.surfaces.Records())
+
+		// Act
+		close(fx.gate.released)
+		<-leader
+		fx.r.Settle()
+
+		// Assert: the held render, then one render of all three edges.
+		if renders := rendersSince(t, fx.surfaces.Records(), mark).renders; renders != 2 {
+			t.Fatalf("the held render and three posted edges took %d renders, want 2", renders)
+		}
+	})
+
 	t.Run("the footer's status edge is posted", func(t *testing.T) {
 		// Arrange
 		fx := newCombineFixture(t)
