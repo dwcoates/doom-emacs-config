@@ -3,11 +3,12 @@ package wsm
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
+
+	"agent-repld/internal/sourcescan"
 )
 
 func TestRecordWork(t *testing.T) {
@@ -150,31 +151,11 @@ func TestWorkedSince(t *testing.T) {
 // (through advanceInstant), beside the layout's own DDL. A second writer is
 // a path that is not work reaching the idle clock.
 func TestLastWorkAtHasOneWriter(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	writes := regexp.MustCompile(`last_work_at\s*=|"last_work_at"`)
-	var found []string
-
 	// Act
-	for _, file := range files {
-		if filepath.Ext(file) != ".go" || regexp.MustCompile(`_test\.go$`).MatchString(file) {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", file, err)
-		}
-		for range writes.FindAllIndex(body, -1) {
-			found = append(found, file)
-		}
-	}
+	got := sourcescan.SitesMatching(t, regexp.MustCompile(`last_work_at\s*=|"last_work_at"`))
 
 	// Assert
-	want := []string{"lastwork.go", "lastwork.go"}
-	if len(found) != len(want) || found[0] != want[0] || found[1] != want[1] {
-		t.Fatalf("last_work_at is written in %v, want only lastwork.go's DDL backfill and RecordWork", found)
+	if want := []string{"lastwork.go", "lastwork.go"}; !slices.Equal(got, want) {
+		t.Fatalf("last_work_at is written in %v, want only lastwork.go's DDL backfill and RecordWork", got)
 	}
 }
