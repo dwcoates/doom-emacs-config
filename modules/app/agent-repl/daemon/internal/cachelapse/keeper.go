@@ -308,9 +308,6 @@ type edge struct {
 	parked *shimv1.SendKeepaliveSuccess
 	// failed is a failed keep-alive's account (edgeKeepaliveFailed).
 	failed *conversationv1.SessionKeepaliveFailed
-	// workEnded is a free edge's (edgeFree): work ended, rather than an
-	// attach coming up free.
-	workEnded bool
 	// down is how long the outage a network-restored edge ended stood
 	// (edgeNetworkRestored).
 	down time.Duration
@@ -489,22 +486,30 @@ func (k *Keeper) OnKeepaliveFailed(ws ids.WorkspaceID, failed *conversationv1.Se
 // beat that waited on the work goes out. WORKENDED is real work ending (a
 // real turn or live detached work), which moves the workspace's idle clock
 // (workEnded); an attach coming up free, or a keep-alive's own turn ending,
-// does not. It never blocks.
+// does not.
+//
+// THE IDLE CLOCK IS WRITTEN BEFORE THIS RETURNS, never from the queue. The
+// session watcher calls it in the free edge's dispatch, which the watcher's
+// close joins, and a forget or a nuke stops the session (closing its
+// watcher) before the row goes. So the write always finds the row. Queued,
+// it ran after a forget had removed the row (merge gate, 2026-11-24). The
+// cadence still goes through the queue, and that part never blocks.
 func (k *Keeper) SessionFree(ws ids.WorkspaceID, workEnded bool) {
-	k.enqueue(edge{ws: ws, kind: edgeFree, workEnded: workEnded, why: "the session fell free"})
+	if workEnded {
+		k.workEnded(ws)
+	}
+	k.enqueue(edge{ws: ws, kind: edgeFree, why: "the session fell free"})
 }
 
 // workEnded records that real work on WS ended now: the idle clock every park
 // measures its grace from moves (wsm.RecordWork), on the row, so a successor
-// reads the same instant. A write that fails is recorded at ERROR; the
-// session's park is then measured from its earlier work.
-func (k *Keeper) workEnded(ctx context.Context, ws ids.WorkspaceID) {
+// reads the same instant. It runs inside the session's lifetime (SessionFree),
+// so a row that is gone is a broken ordering, and every failure is recorded
+// at ERROR; the session's park is then measured from its earlier work.
+func (k *Keeper) workEnded(ws ids.WorkspaceID) {
 	at := k.deps.Clock.Now()
-	if err := k.deps.DB.RecordWork(ctx, ws, at, wsm.WorkEnded); err != nil {
-		log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
-		if !leaving(ctx, log, opOwner, "recording the work that ended", err) {
-			log.Error(opOwner, "could not record that the workspace's work ended; its park is measured from its earlier work", dlog.Context{"at": at, "cause": err.Error()})
-		}
+	if err := k.deps.DB.RecordWork(context.Background(), ws, at, wsm.WorkEnded); err != nil {
+		k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Error(opOwner, "could not record that the workspace's work ended; its park is measured from its earlier work", dlog.Context{"at": at, "cause": err.Error()})
 	}
 }
 
@@ -723,9 +728,6 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 		k.retireGateProjection(ctx, k.deps.Log.Global().With(dlog.Context{"workspace": string(e.ws)}), e.ws, "a cold gate was raised")
 		k.reconcile(ctx, e.ws, e.why)
 	case edgeFree:
-		if e.workEnded {
-			k.workEnded(ctx, e.ws)
-		}
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
 		k.restored(ctx, e.ws, e.err)
