@@ -1465,6 +1465,52 @@ func TestEndingThePageStreamsEndsEachPageInOrder(t *testing.T) {
 	}
 }
 
+// TestEndingThePageStreamsStartsNothingThatWasNotStarted pins the owner's
+// ruling of 2026-11-23: a handover picks up where things were left and starts
+// nothing new. Ending the page streams at the promotion ends only the pages
+// that held one, attaches no page, and opens no feed, for any workspace.
+func TestEndingThePageStreamsStartsNothingThatWasNotStarted(t *testing.T) {
+	tests := []struct {
+		name  string
+		pages []string
+	}{
+		{name: "a daemon holding no page", pages: nil},
+		{name: "a daemon holding one page", pages: []string{"page-1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var streams []*connect.ServerStreamForClient[agentreplv1.WatchPageResponse]
+			for _, page := range tt.pages {
+				streams = append(streams, attachPageStream(t, h, ctx, page))
+			}
+			srv := h.Server.(*server)
+
+			// Act
+			srv.EndPageStreams()
+			for _, stream := range streams {
+				if _, err := pageFramesToEnd(stream); err != nil {
+					t.Fatalf("the page's stream ended with %v, want a clean end", err)
+				}
+			}
+
+			// Assert
+			srv.mu.Lock()
+			held, present := len(srv.pages), len(srv.pagePresence)
+			srv.mu.Unlock()
+			if held != 0 || present != 0 {
+				t.Fatalf("pages held = %d, present = %d; want none left and none attached", held, present)
+			}
+			if h.Feed.openCalls != 0 {
+				t.Fatalf("feed opens = %d, want none", h.Feed.openCalls)
+			}
+		})
+	}
+}
+
 // TestAPageAttachingAfterThePageStreamsEndedIsEndedAtOnce pins that no page is
 // left on a daemon that no longer accepts: one whose request reached here
 // after the hand-off is attached and ended at once, to reattach where the
