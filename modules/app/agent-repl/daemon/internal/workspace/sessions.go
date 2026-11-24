@@ -457,6 +457,13 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
+	// fenced are the workspaces a forget is removing (FenceStarts): a start
+	// reads the mark under the start gate and begins nothing. Guarded by mu.
+	fenced map[ids.WorkspaceID]bool
+	// startCancels end the start under way of each workspace, scoped to that
+	// one start (start), so a forget can end it instead of waiting on it.
+	// Guarded by mu.
+	startCancels map[ids.WorkspaceID]context.CancelCauseFunc
 	// remoteControlGates serialize, per workspace, every read of the
 	// remote-control mode with the SetSessionRemoteControl that puts it in
 	// force (remotecontrol.go). The map is guarded by mu.
@@ -721,6 +728,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		reapedAt:           map[ids.WorkspaceID]time.Time{},
 		generation:         map[ids.WorkspaceID]int{},
 		startGates:         map[ids.WorkspaceID]*sync.Mutex{},
+		fenced:             map[ids.WorkspaceID]bool{},
+		startCancels:       map[ids.WorkspaceID]context.CancelCauseFunc{},
 		remoteControlGates: map[ids.WorkspaceID]*sync.Mutex{},
 		startSlots:         startSlotsOf(deps.StartSlots),
 		startsUnderWay:     map[ids.WorkspaceID]bool{},
@@ -1369,6 +1378,13 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	gate := f.startGate(ws)
 	gate.Lock()
 	defer gate.Unlock()
+	// A WORKSPACE BEING FORGOTTEN STARTS NOTHING, and the start under way
+	// can be ended by the forget rather than waited on (FenceStarts).
+	ctx, done, err := f.enterStart(ctx, ws)
+	if err != nil {
+		return err
+	}
+	defer done()
 	// A DEAD SHIM'S ROW IS RETIRED BEFORE LIVENESS IS JUDGED. The row outlives
 	// the process, so a bring-up that read map presence alone answered "already
 	// live" for a workspace whose shim was killed out from under the daemon —
@@ -1413,7 +1429,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	f.markStarting(ws, true)
 	defer f.markStarting(ws, false)
 	began := f.now()
-	err = f.startUp(ctx, ws, record, log, rebind)
+	err = endedByFence(ctx, ws, f.startUp(ctx, ws, record, log, rebind))
 	f.noteStartEnded(ws, err)
 	f.observeShimStart(ctx, ws, began, err)
 	return err

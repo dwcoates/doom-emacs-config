@@ -3174,6 +3174,13 @@ func (b *fakeBanners) Raise(ws ids.WorkspaceID, kind, text string) {
 
 // fakeSessions is a Sessions fleet.
 type fakeSessions struct {
+	// fences is every FenceStarts and its release, in order; onFence runs as
+	// the fence is granted (a start under way finishing first), onRelease as
+	// it is released; fenceErr answers FenceStarts.
+	fences    []string
+	onFence   func()
+	onRelease func()
+	fenceErr  error
 	// restates is every RestateRemoteControl's transition, also appended to
 	// restateSteps when set; restateErr answers each.
 	restates     []string
@@ -3381,6 +3388,22 @@ func (s *fakeSessions) StandingDown() bool { return s.standingDown }
 
 // Held answers a live session's shim, or a shim held with no session (held).
 func (s *fakeSessions) Held(ws ids.WorkspaceID) bool { return s.live[ws] || s.held[ws] }
+
+func (s *fakeSessions) FenceStarts(_ context.Context, ws ids.WorkspaceID) (func(), error) {
+	if s.fenceErr != nil {
+		return nil, s.fenceErr
+	}
+	if s.onFence != nil {
+		s.onFence()
+	}
+	s.fences = append(s.fences, "fence "+string(ws))
+	return func() {
+		if s.onRelease != nil {
+			s.onRelease()
+		}
+		s.fences = append(s.fences, "release "+string(ws))
+	}, nil
+}
 
 func (s *fakeSessions) ProbeForkPoint(_ context.Context, _ dlog.Logger, parent ids.WorkspaceID) error {
 	s.forkProbed = append(s.forkProbed, parent)

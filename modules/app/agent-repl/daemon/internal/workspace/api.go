@@ -1328,6 +1328,10 @@ type Sessions interface {
 	// Held reports whether a shim is held for the workspace, a session on it
 	// or not: what a teardown has to stand down.
 	Held(ws ids.WorkspaceID) bool
+	// FenceStarts fences the workspace's starts for a forget: none begins,
+	// the one under way is ended, and it returns once that one has returned,
+	// answering the fence's release (Fleet.FenceStarts).
+	FenceStarts(ctx context.Context, ws ids.WorkspaceID) (release func(), err error)
 	// SetEffort asks the workspace's shim for an effort level and, once it
 	// confirms, states the level in effect to the topbar.
 	SetEffort(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error

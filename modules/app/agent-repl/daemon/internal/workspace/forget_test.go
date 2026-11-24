@@ -292,6 +292,79 @@ func TestForgetStandsDownTheWorkspacesLiveSession(t *testing.T) {
 	}
 }
 
+// TestForgetFencesStartsUntilTheRecordIsGone pins that no start can spawn a
+// shim across a forget: the fence stands before the session is judged and is
+// released only once the row is gone.
+func TestForgetFencesStartsUntilTheRecordIsGone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	closedWorkspace(t, f, "w1")
+	rowAtRelease := true
+	f.fleet.onRelease = func() {
+		_, err := f.db.Workspace(context.Background(), "w1")
+		rowAtRelease = err == nil
+	}
+
+	// Act.
+	if err := f.verbs.Forget(context.Background(), "w1"); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert.
+	if want := []string{"fence w1", "release w1"}; len(f.fleet.fences) != 2 || f.fleet.fences[0] != want[0] || f.fleet.fences[1] != want[1] {
+		t.Fatalf("fences = %v, want %v", f.fleet.fences, want)
+	}
+	if rowAtRelease {
+		t.Fatal("the fence was released while the workspace's row still stood")
+	}
+}
+
+// TestForgetStandsDownTheShimTheStartUnderWayBroughtUp pins that the shim a
+// start under way spawned before the fence ended it is stood down.
+func TestForgetStandsDownTheShimTheStartUnderWayBroughtUp(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	closedWorkspace(t, f, "w1")
+	f.fleet.onFence = func() { f.fleet.live["w1"] = true }
+
+	// Act.
+	if err := f.verbs.Forget(context.Background(), "w1"); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.stopped) != 1 || f.fleet.stopped[0].WS != "w1" {
+		t.Fatalf("session stops = %+v, want the shim the start under way spawned stood down", f.fleet.stopped)
+	}
+}
+
+// TestForgetWhoseStartUnderWayWillNotEndForgetsNothingAndSaysSo pins the
+// fence's failure: the row stands and the cause is recorded at ERROR.
+func TestForgetWhoseStartUnderWayWillNotEndForgetsNothingAndSaysSo(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	closedWorkspace(t, f, "w1")
+	f.fleet.fenceErr = errors.New("the start under way did not return: context deadline exceeded")
+
+	// Act.
+	err := f.verbs.Forget(context.Background(), "w1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Forget = nil, want the fence's failure")
+	}
+	if _, rowErr := f.db.Workspace(context.Background(), "w1"); rowErr != nil {
+		t.Fatalf("the row = %v, want it standing after a forget that could not fence its starts", rowErr)
+	}
+	for _, record := range f.log.logger.Records() {
+		if record.Level == "error" && record.Operation == opForget &&
+			record.Message == "the workspace's start under way did not end; nothing was forgotten" {
+			return
+		}
+	}
+	t.Fatalf("no ERROR record names the fence's failure; records = %+v", f.log.logger.Records())
+}
+
 // TestForgetStopsNoSessionWhenNoneIsLive pins the other edge: a workspace with
 // no live session is forgotten without a stand-down.
 func TestForgetStopsNoSessionWhenNoneIsLive(t *testing.T) {
