@@ -111,9 +111,10 @@ export const BLOB_KEYS = ["signature", "data", "base64", "thumbnail"];
 
 /**
  * The personal values of the host a capture ran on: its home directory, the
- * account emails signed in there, and the names of the person running it.
+ * account emails signed in there, the account and organization UUIDs of those
+ * accounts, and the names of the person running it.
  */
-export const NO_PERSONAL_VALUES = Object.freeze({ home: "", emails: [], names: [] });
+export const NO_PERSONAL_VALUES = Object.freeze({ home: "", emails: [], accountIds: [], names: [] });
 
 /**
  * What a home directory becomes in a recording: a token naming no one, which
@@ -148,6 +149,37 @@ export function scrubbedEmail(i) {
   return `person${i + 1}@example.com`;
 }
 
+/**
+ * The UUID the i-th (0-based) personal account or organization id becomes:
+ * UUID-shaped, so a reader parsing it still parses, and naming no account.
+ */
+export function scrubbedAccountId(i) {
+  return `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+}
+
+/**
+ * The runs of base64 text that encode `text` wherever its bytes sit in a
+ * longer base64 stream: one run per byte alignment (0, 1 or 2 bytes after a
+ * 3-byte group starts). A run keeps only the characters `text`'s own bytes
+ * decide: the first group is dropped when bytes before `text` share it, and
+ * the last when bytes after it may. Each run is given in both the standard
+ * and the url-safe alphabet.
+ *
+ * A thinking signature is base64 whose bytes spell the signing organization's
+ * UUID, so the UUID shows nowhere as text: these runs are how it is found.
+ */
+export function base64Runs(text) {
+  const bytes = Buffer.from(text, "utf8");
+  const runs = [];
+  for (let align = 0; align < 3; align++) {
+    let run = Buffer.concat([Buffer.alloc(align), bytes]).toString("base64").replace(/=+$/, "");
+    if ((align + bytes.length) % 3 !== 0) run = run.slice(0, run.length - (run.length % 4 || 4));
+    if (align > 0) run = run.slice(4);
+    runs.push(run, run.replace(/\+/g, "-").replace(/\//g, "_"));
+  }
+  return runs;
+}
+
 /** Escape a literal for use inside a RegExp. */
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -167,7 +199,9 @@ const HELD_REPLACEMENT = new RegExp(`${HOLD_MARK}(\\d+)${HOLD_MARK}`, "g");
 /**
  * Replace every personal value inside a string.
  *
- * Order matters and is fixed: emails first (they contain names), then the home
+ * Order matters and is fixed: emails first (they contain names), then each
+ * account and organization UUID, as text and as the base64 runs that encode
+ * it ({@link base64Runs}), then the home
  * directory and its slug (they contain the login name), then each name as a
  * whole word, case-insensitively, longest first. A name keeps its leading
  * capital, so "Ann's" becomes "Someone's" and a login in a url becomes
@@ -184,6 +218,14 @@ export function scrubPersonal(text, personal = NO_PERSONAL_VALUES) {
   let out = text;
   personal.emails.forEach((email, i) => {
     out = out.replace(new RegExp(escapeRegExp(email), "gi"), () => hold(scrubbedEmail(i)));
+  });
+  personal.accountIds.forEach((id, i) => {
+    out = out.replace(new RegExp(escapeRegExp(id), "gi"), () => hold(scrubbedAccountId(i)));
+    const found = base64Runs(id.toLowerCase());
+    const replacements = base64Runs(scrubbedAccountId(i));
+    found.forEach((run, k) => {
+      out = out.split(run).join(hold(replacements[k]));
+    });
   });
   if (personal.home !== "") {
     out = out.split(personal.home).join(hold(HOME_TOKEN));

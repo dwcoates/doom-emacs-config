@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  base64Runs,
   BLOB_PREFIX_CHARS,
   MAX_STRING_CHARS,
   REDACTED,
@@ -25,8 +26,13 @@ import {
   expandHome,
   pathSlug,
   scrubPersonal,
+  scrubbedAccountId,
   scrubbedEmail,
 } from "./anonymize.mjs";
+
+// Fake account and organization UUIDs: no real account's.
+const ACCOUNT_ID = "11111111-2222-4333-8444-555555555555";
+const ORG_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 describe("isSecretKey", () => {
   const cases = [
@@ -254,6 +260,7 @@ describe("scrubPersonal", () => {
   const personal = {
     home: "/Users/annexample",
     emails: ["Ann.Example@mail.test", "ann@work.test"],
+    accountIds: [ACCOUNT_ID, ORG_ID],
     names: ["ann", "annexample", "Example"],
   };
   const cases = [
@@ -264,6 +271,9 @@ describe("scrubPersonal", () => {
     { name: "a capitalized name keeps its capital", text: "Ann's notes", want: "Someone's notes" },
     { name: "a lowercase name stays lowercase", text: "github.com/annexample", want: "github.com/someone" },
     { name: "a name inside a longer word is left alone", text: "annual", want: "annual" },
+    { name: "an account UUID becomes a numbered placeholder UUID", text: `acct ${ACCOUNT_ID}`, want: `acct ${scrubbedAccountId(0)}` },
+    { name: "an organization UUID becomes the next placeholder", text: `org ${ORG_ID}`, want: `org ${scrubbedAccountId(1)}` },
+    { name: "a UUID matches case-insensitively", text: ORG_ID.toUpperCase(), want: scrubbedAccountId(1) },
     { name: "text with no personal value is unchanged", text: "plain text", want: "plain text" },
   ];
   for (const tc of cases) {
@@ -271,6 +281,30 @@ describe("scrubPersonal", () => {
       expect(scrubPersonal(tc.text, personal)).toBe(tc.want);
     });
   }
+
+  // A signature-shaped blob: base64 of bytes that spell the UUID, ALIGN bytes
+  // into the stream, with bytes on both sides.
+  const encodedAt = (id, align) =>
+    Buffer.concat([Buffer.from("x".repeat(3 + align)), Buffer.from(id), Buffer.from("tail")]).toString("base64");
+  for (const align of [0, 1, 2]) {
+    it(`finds a UUID base64-encoded at byte alignment ${align}`, () => {
+      expect(scrubPersonal(encodedAt(ORG_ID, align), personal)).not.toBe(encodedAt(ORG_ID, align));
+    });
+
+    it(`leaves no run of the encoded UUID at alignment ${align}`, () => {
+      const scrubbed = scrubPersonal(encodedAt(ORG_ID, align), personal);
+      for (const run of base64Runs(ORG_ID)) expect(scrubbed).not.toContain(run);
+    });
+
+    it(`keeps the blob's length when scrubbing the encoded UUID at alignment ${align}`, () => {
+      expect(scrubPersonal(encodedAt(ORG_ID, align), personal)).toHaveLength(encodedAt(ORG_ID, align).length);
+    });
+  }
+
+  it("finds a UUID in url-safe base64", () => {
+    const blob = encodedAt(ORG_ID, 1).replace(/\+/g, "-").replace(/\//g, "_");
+    expect(scrubPersonal(blob, personal)).not.toBe(blob);
+  });
 
   it("scrubs nothing with no personal values", () => {
     expect(scrubPersonal("/Users/annexample Ann", NO_PERSONAL_VALUES)).toBe("/Users/annexample Ann");
@@ -280,6 +314,22 @@ describe("scrubPersonal", () => {
     const cwd = "/Users/annexample/proj";
     expect(pathSlug(scrubPersonal(cwd, personal))).toBe(scrubPersonal(pathSlug(cwd), personal));
   });
+});
+
+describe("base64Runs", () => {
+  it("gives a standard and a url-safe run for each of the three alignments", () => {
+    expect(base64Runs(ORG_ID)).toHaveLength(6);
+  });
+
+  for (const align of [0, 1, 2]) {
+    it(`gives a run found in any stream holding the text at alignment ${align}`, () => {
+      const run = base64Runs(ORG_ID)[2 * align];
+      for (const around of ["", "a", "bc", "def"]) {
+        const stream = Buffer.concat([Buffer.alloc(align + 3 * around.length, 7), Buffer.from(ORG_ID), Buffer.from(around)]);
+        expect(stream.toString("base64")).toContain(run);
+      }
+    });
+  }
 });
 
 describe("expandHome", () => {
@@ -293,14 +343,14 @@ describe("expandHome", () => {
   }
 
   it("undoes the home rule of scrubPersonal", () => {
-    const personal = { home: "/Users/bo", emails: [], names: [] };
+    const personal = { home: "/Users/bo", emails: [], accountIds: [], names: [] };
     const text = '{"cwd":"/Users/bo/p","dir":"-Users-bo-p"}';
     expect(expandHome(scrubPersonal(text, personal), "/Users/bo")).toBe(text);
   });
 });
 
 describe("the anonymizer applies scrubPersonal", () => {
-  const personal = { home: "/Users/ann", emails: [], names: ["ann"] };
+  const personal = { home: "/Users/ann", emails: [], accountIds: [], names: ["ann"] };
 
   it("to string values and to object keys", () => {
     expect(anonymize({ "/Users/ann/p": { who: "Ann" } }, undefined, personal)).toEqual({

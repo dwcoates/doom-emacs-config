@@ -13,7 +13,9 @@
  * matching (agent-shim/claude/shim/scripts/capture/anonymize.mjs's
  * scrubPersonal): the home directory and its vendor project slug, every
  * account email signed in under the usual account roots plus
- * $CAPTURE_PERSONAL_EMAILS, and every name in $CAPTURE_PERSONAL_NAMES. Names
+ * $CAPTURE_PERSONAL_EMAILS, the account and organization UUIDs of those
+ * accounts (as text, and base64-encoded at every byte alignment, as a thinking
+ * signature carries its organization's), and every name in $CAPTURE_PERSONAL_NAMES. Names
  * are opt-in here, unlike the capture scrub: a login or a git user name can be
  * an ordinary word ("runner", "test") that a source tree rightly contains.
  *
@@ -71,14 +73,23 @@ function main(argv, env) {
   }
   const root = path.resolve(argv[0] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), ".."));
   const host = personalValuesFromHost(env);
-  const personal = { home: host.home, emails: host.emails, names: envList(env.CAPTURE_PERSONAL_NAMES) };
+  const personal = {
+    home: host.home,
+    emails: host.emails,
+    accountIds: host.accountIds,
+    names: envList(env.CAPTURE_PERSONAL_NAMES),
+  };
   const found = [];
   const files = filesUnder(root);
   for (const rel of files) {
     if (scrubPersonal(rel, personal) !== rel) found.push(`${rel}: the path names a personal value`);
     const buf = readFileSync(path.join(root, rel));
     if (buf.includes(0)) continue;
-    buf.toString("utf8").split("\n").forEach((line, i) => {
+    // One scrub of the whole file first: almost every file is clean, and a
+    // scrub per line of a large recording costs several times one per file.
+    const text = buf.toString("utf8");
+    if (scrubPersonal(text, personal) === text) continue;
+    text.split("\n").forEach((line, i) => {
       if (line.startsWith("lineage_root:")) return;
       if (scrubPersonal(line, personal) !== line) found.push(`${rel}:${i + 1}`);
     });

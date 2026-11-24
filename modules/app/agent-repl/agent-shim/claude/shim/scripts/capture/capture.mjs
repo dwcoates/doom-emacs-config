@@ -627,22 +627,38 @@ export function envList(value) {
  * an account whose email cannot be read is an email the scrub would miss.
  */
 export function accountEmailIn(file) {
+  const email = oauthAccountIn(file)?.emailAddress;
+  return typeof email === "string" && email !== "" ? email : null;
+}
+
+/**
+ * The account and organization UUIDs a vendor identity file names: none when
+ * the file is absent or names neither. A file that exists but does not parse
+ * is an error, as for {@link accountEmailIn}.
+ */
+export function accountIdsIn(file) {
+  const account = oauthAccountIn(file);
+  return [account?.accountUuid, account?.organizationUuid].filter((id) => typeof id === "string" && id !== "");
+}
+
+/** The `oauthAccount` object of a vendor identity file, or `undefined` when the file is absent. */
+function oauthAccountIn(file) {
   let raw;
   try {
     raw = readFileSync(file, "utf8");
   } catch (err) {
-    if (err.code === "ENOENT") return null;
+    if (err.code === "ENOENT") return undefined;
     throw err;
   }
-  const email = JSON.parse(raw)?.oauthAccount?.emailAddress;
-  return typeof email === "string" && email !== "" ? email : null;
+  return JSON.parse(raw)?.oauthAccount;
 }
 
 /**
  * The personal values of whoever is running the capture, for the anonymizer's
  * scrub: the home directory; every account email signed in under the usual
  * account roots (and `configRoot`, when the run names one), plus
- * $CAPTURE_PERSONAL_EMAILS; and the login name, the home's last segment, every
+ * $CAPTURE_PERSONAL_EMAILS; the account and organization UUIDs of those same
+ * accounts; and the login name, the home's last segment, every
  * word of the global git user name, plus $CAPTURE_PERSONAL_NAMES. Name words
  * under three letters are left out: they match too much ordinary text.
  */
@@ -663,9 +679,11 @@ export function personalValuesFromHost(
   ];
   if (configRoot !== null) identityFiles.push(path.join(configRoot, ".claude.json"));
   const emails = new Set();
+  const accountIds = new Set();
   for (const file of identityFiles) {
     const email = accountEmailIn(file);
     if (email !== null) emails.add(email);
+    for (const id of accountIdsIn(file)) accountIds.add(id.toLowerCase());
   }
   for (const email of envList(env.CAPTURE_PERSONAL_EMAILS)) emails.add(email);
   const names = new Set([username, path.basename(home)]);
@@ -674,6 +692,7 @@ export function personalValuesFromHost(
   return {
     home,
     emails: [...emails],
+    accountIds: [...accountIds],
     names: [...names].filter((name) => name.length >= 3),
   };
 }

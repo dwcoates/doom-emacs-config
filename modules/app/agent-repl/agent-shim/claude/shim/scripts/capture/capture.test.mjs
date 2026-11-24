@@ -61,6 +61,7 @@ import {
   vendorChildPids,
   waitForVendorChildExit,
   accountEmailIn,
+  accountIdsIn,
   anonymizeMeta,
   copyTreeAnonymized,
   personalValuesFromHost,
@@ -1781,6 +1782,34 @@ describe("personal values", () => {
     expect(got.names).not.toContain("B");
   });
 
+  it("collects every account root's account and organization UUIDs, lowercased", () => {
+    const ids = (account, org) => JSON.stringify({ oauthAccount: { accountUuid: account, organizationUuid: org } });
+    const home = fakeHome({
+      ".claude.json": ids("11111111-2222-4333-8444-555555555555", "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"),
+      ".claude-chesscom/.claude.json": ids("66666666-7777-4888-8999-000000000000", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+    });
+    const got = personalValuesFromHost({}, { home, username: "login", gitUserName: () => "" });
+    expect(got.accountIds.sort()).toEqual([
+      "11111111-2222-4333-8444-555555555555",
+      "66666666-7777-4888-8999-000000000000",
+      "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    ]);
+  });
+
+  it("reads an identity file naming no UUIDs as no account ids", () => {
+    const home = fakeHome({ ".claude.json": identity("personal@host.test") });
+    expect(accountIdsIn(path.join(home, ".claude.json"))).toEqual([]);
+  });
+
+  it("reads an absent identity file as no account ids", () => {
+    expect(accountIdsIn(path.join(fakeHome({}), "missing.json"))).toEqual([]);
+  });
+
+  it("refuses an identity file that does not parse when reading account ids", () => {
+    const home = fakeHome({ ".claude.json": "{not json" });
+    expect(() => accountIdsIn(path.join(home, ".claude.json"))).toThrow();
+  });
+
   it("reads an absent identity file as no email", () => {
     expect(accountEmailIn(path.join(fakeHome({}), "missing.json"))).toBeNull();
   });
@@ -1792,7 +1821,7 @@ describe("personal values", () => {
 });
 
 describe("the capture writes scrub personal values", () => {
-  const personal = { home: "/Users/ann", emails: ["ann@host.test"], names: ["ann"] };
+  const personal = { home: "/Users/ann", emails: ["ann@host.test"], accountIds: [], names: ["ann"] };
 
   it("copyTreeAnonymized scrubs file names and contents", () => {
     const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-copy-")));
