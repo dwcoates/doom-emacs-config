@@ -155,6 +155,14 @@ type Suite struct {
 	// module) or whose verdict is not a function of its inputs (a latency
 	// measurement) is named here.
 	NeverReused string
+	// Builds are the build directories the suite's run writes, spelled as
+	// Path is, each ending in "/": a SwiftPM scratch path, whose build.db one
+	// build at a time may hold. EACH IS THE SUITE'S ALONE: Check refuses two
+	// suites declaring one directory, or one inside the other, since the
+	// scheduler runs any two suites at once. The proto suite's plugin build
+	// and the launcher suite once shared launcher/.build, and SwiftPM failed
+	// the second with "database is locked" (2026-11-24).
+	Builds []string
 }
 
 // Reuse is what a keyed suite's units read beyond what the runner derives for
@@ -326,7 +334,8 @@ var Suites = []Suite{
 	// contract from outside its package.
 	{Name: "launcher", Kind: Script, Path: "launcher/test.sh",
 		Reuse: &Reuse{Inputs: []string{"launcher/", "proto/gen/swift/", "proto/vocab/"},
-			Generated: []string{"launcher/.build/"}}},
+			Generated: []string{"launcher/.build/"}},
+		Builds: []string{"launcher/.build/"}},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/", ".")},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, NeverReused: "it walks the whole module for every personal value a tracked file may carry"},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: scripts(moduleScripts, "e2e/realtest/")},
@@ -483,8 +492,12 @@ var Suites = []Suite{
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, metapromptFiles...), Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/", "agent-shim/claude/shim/.typecheck-cache/"},
 			Units: shimUnitInputs}},
+	// Its check-generated builds protoc-gen-swift from the launcher's package
+	// into a scratch path of its own (proto/Makefile SWIFT_BUILD), never into
+	// the launcher suite's build directory.
 	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh",
-		NeverReused: "its isolation check walks the webapp's whole tree, its installed node_modules and build output included"},
+		NeverReused: "its isolation check walks the webapp's whole tree, its installed node_modules and build output included",
+		Builds:      []string{"proto/.build/"}},
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
 	// only in a coverage run, the one place those numbers are produced.
@@ -892,10 +905,11 @@ var NotSuites = map[string]string{
 // Check refuses a roster whose reuse declarations cannot be what they say:
 // a suite that declares neither its inputs (Reuse) nor why it never can be
 // reused (NeverReused), or both, and a suite whose declaration both lists a
-// unit's inputs and names that unit never reused. Every run starts with it,
-// so an undeclared suite fails loudly instead of silently always running.
+// unit's inputs and names that unit never reused. It refuses two suites
+// writing one build directory (Builds) too. Every run starts with it, so an
+// undeclared suite fails loudly instead of silently always running.
 func Check(suites []Suite) error {
-	var errs []error
+	errs := checkBuilds(suites)
 	for _, s := range suites {
 		never := strings.TrimSpace(s.NeverReused) != ""
 		switch {
@@ -930,6 +944,29 @@ func Check(suites []Suite) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// checkBuilds refuses a build directory that is not a directory ("/"-ended),
+// and two suites whose build directories are one, or one inside the other.
+func checkBuilds(suites []Suite) []error {
+	var errs []error
+	type owned struct{ suite, dir string }
+	var seen []owned
+	for _, s := range suites {
+		for _, dir := range s.Builds {
+			if !strings.HasSuffix(dir, "/") {
+				errs = append(errs, fmt.Errorf("roster: %s declares the build directory %q, which does not end in \"/\"", s.Name, dir))
+				continue
+			}
+			for _, o := range seen {
+				if o.suite != s.Name && (strings.HasPrefix(dir, o.dir) || strings.HasPrefix(o.dir, dir)) {
+					errs = append(errs, fmt.Errorf("roster: %s and %s both write the build directory %s (%s): a build directory is one suite's alone", o.suite, s.Name, dir, o.dir))
+				}
+			}
+			seen = append(seen, owned{s.Name, dir})
+		}
+	}
+	return errs
 }
 
 // Batching is the suite's batching: its own, or DefaultBatching.

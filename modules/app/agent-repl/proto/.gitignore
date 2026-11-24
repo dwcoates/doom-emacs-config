@@ -2,3 +2,6 @@
 # (bin/build-frontend.sh build_proto): build state, never a source.
 /.source-tree
 /.generators
+# SwiftPM's scratch path for protoc-gen-swift (Makefile SWIFT_BUILD): build
+# state, never a source.
+/.build/
