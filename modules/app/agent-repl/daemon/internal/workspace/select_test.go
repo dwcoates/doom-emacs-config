@@ -679,6 +679,26 @@ func TestRecordInteractionStampsTheInstantThenTellsTheRoster(t *testing.T) {
 	}
 }
 
+func TestRecordInteractionIsRecordedAtInfoWithItsKind(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.RecordInteraction(context.Background(), "w1", InteractionComposerTyped); err != nil {
+		t.Fatalf("RecordInteraction: %v", err)
+	}
+
+	// Assert.
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opInteraction})
+	if !ok {
+		t.Fatalf("no info %s record", opInteraction)
+	}
+	if got := rec.Context["interaction"]; got != string(InteractionComposerTyped) {
+		t.Fatalf("interaction = %v, want %s", got, InteractionComposerTyped)
+	}
+}
+
 func TestRecordInteractionSelectsNothing(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

@@ -259,7 +259,10 @@ func (v *verbs) RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind 
 		log.Error(opInteraction, "could not record the user's interaction instant", dlog.WithCause(fields, err))
 		return fmt.Errorf("record interaction with %q: %w", ws, err)
 	}
-	log.Debug(opInteraction, "the user interacted with the workspace; its row is viewed until its next turn", fields)
+	// EVERY INTERACTION IS RECORDED AT INFO: it orders the recency walk and
+	// marks the row viewed, so a walk that lands somewhere unexpected is read
+	// off these records.
+	log.Info(opInteraction, "the user interacted with the workspace; it counts toward recency and may view its row", fields)
 	v.deps.Sidebar.SetInteracted(ws, at)
 	return nil
 }
