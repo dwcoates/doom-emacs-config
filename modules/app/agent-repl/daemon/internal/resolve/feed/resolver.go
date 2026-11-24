@@ -18,7 +18,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/latestmodel"
-	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/pullrefs"
@@ -38,7 +37,7 @@ var errNotARow = errors.New("feed: this frame draws no row")
 type resolver struct {
 	deps Deps
 
-	mu         lockwatch.Mutex
+	mu         heldMutex
 	workspaces map[ids.WorkspaceID]*wsState
 	// tokens is the whole watch-token table: minting here is what makes a
 	// token opaque, foreign tokens detectable, and pinning exact.
@@ -720,11 +719,12 @@ func newResolver(deps Deps) (*resolver, error) {
 		pullKnown:         map[ids.WorkspaceID]*pullrefs.Known{},
 		responseLinksSeen: map[ids.WorkspaceID]map[string]bool{},
 	}
+	r.mu.report = &holdReport{log: deps.Log.Global(), now: deps.Now}
 	deps.Quiet.Follow(QuietViewName, r.followQuiet)
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
 	// record. It lives as long as the process and is never unwatched.
 	if deps.Stalls != nil {
-		deps.Stalls.Watch(&r.mu, stallLock, "", deps.Log.Global())
+		deps.Stalls.Watch(&r.mu.Mutex, stallLock, "", deps.Log.Global())
 	}
 	return r, nil
 }

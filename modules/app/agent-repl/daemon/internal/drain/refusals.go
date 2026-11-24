@@ -1,10 +1,9 @@
 package drain
 
 import (
-	"time"
-
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/ratewindow"
 )
 
 // refusalWindow is the rate-limited refusal record's state: one WARN per
@@ -18,11 +17,8 @@ import (
 type refusalWindow struct {
 	// total is every refusal since the controller came up.
 	total int
-	// suppressed is the refusals since the last emitted record.
-	suppressed int
-	// openedAt is when the current window began; zero before the first
-	// refusal, which is what makes the first one emit immediately.
-	openedAt time.Time
+	// window admits one record per RefusalWindow, the first at once.
+	window ratewindow.Window
 }
 
 // NoteRefusal records one refused or held submission under the drain lease.
@@ -31,19 +27,15 @@ func (c *controller) NoteRefusal(ws ids.WorkspaceID) {
 
 	c.mu.Lock()
 	c.refusals.total++
-	emit := c.refusals.openedAt.IsZero() || now.Sub(c.refusals.openedAt) >= c.deps.RefusalWindow
+	c.refusals.window.Every = c.deps.RefusalWindow
+	emit, suppressed := c.refusals.window.Admit(now)
+	total := c.refusals.total
+	c.mu.Unlock()
 	if !emit {
-		c.refusals.suppressed++
-		suppressed, total := c.refusals.suppressed, c.refusals.total
-		c.mu.Unlock()
 		c.log.Debug(opRefusal, "suppressed a drain refusal record inside the rate-limit window",
 			dlog.Context{"workspace": string(ws), "suppressed": suppressed, "total": total})
 		return
 	}
-	suppressed, total := c.refusals.suppressed, c.refusals.total
-	c.refusals.suppressed = 0
-	c.refusals.openedAt = now
-	c.mu.Unlock()
 
 	c.log.Warn(opRefusal, "a submission was refused or held under the drain lease", dlog.Context{
 		"workspace":  string(ws),

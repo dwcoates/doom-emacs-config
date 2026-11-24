@@ -728,6 +728,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/promptqueue":                {"daemon/"},
 	"internal/protoarm":                   {"daemon/"},
 	"internal/ratelimittest":              {"daemon/"},
+	"internal/ratewindow":                 {"daemon/"},
 	"internal/recordlock":                 {"daemon/"},
 	"internal/runecap":                    {"daemon/internal/"},
 	"internal/shellword":                  {"daemon/"},

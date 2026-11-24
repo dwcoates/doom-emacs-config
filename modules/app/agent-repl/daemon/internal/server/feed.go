@@ -60,6 +60,7 @@ func (s *server) OpenFeed(
 		return nil, err
 	}
 	resp := &agentreplv1.OpenFeedResponse{}
+	began := time.Now()
 	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return nil, failResolution(s.log, rpc, err)
@@ -83,11 +84,12 @@ func (s *server) OpenFeed(
 	s.rememberToken(token.GetValue(), subject.Record.ID, target)
 	// INFO: an open is a page's first paint waiting on the daemon, once per
 	// page load; its duration is half of what the page's own feed.open-answered
-	// record measures.
+	// record measures. resolve_ms is the workspace's resolution before it
+	// (its registry read), which `ms` does not count.
 	subject.Log.Info("daemon.server.open_feed", "opened a feed and minted its watch token",
 		dlog.Context{"token": token.GetValue(), "rows": len(page.GetSuccess().GetRows()),
 			"root": target.Root, "held": len(held.GetItems()),
-			"ms": time.Since(started).Milliseconds()})
+			"ms": time.Since(started).Milliseconds(), "resolve_ms": started.Sub(began).Milliseconds()})
 	resp.Result = &agentreplv1.OpenFeedResponse_Success{
 		Success: &agentreplv1.OpenFeedSuccess{Page: page, Watch: token, Held: held},
 	}
