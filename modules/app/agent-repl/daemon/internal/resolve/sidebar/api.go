@@ -369,9 +369,9 @@ type MergeQueue struct {
 	Mediation *QueueMediation
 	// Deploying is the queue's landed merge whose deploy's check is still
 	// owed, nil while none stands: drawn as the head, being worked on, until
-	// the check ends, with every merge in line drawn waiting behind it. A
-	// merge in line already admitted (one admitted as the landing's deploy
-	// began, before its check was owed) keeps the head.
+	// the check ends, with every merge in line drawn waiting behind it. It
+	// holds the queue's head from its landing's teardown (merge.deployHold),
+	// so no merge in line is admitted beside it.
 	Deploying *QueueEntry
 }
 

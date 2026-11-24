@@ -27,14 +27,15 @@ the repository's name.
 - WHY: the owner's request that the merge queue show one deploying stage from
   deploy start to the mediator's verdict.
 - CONSEQUENCES:
-  - The status's old claim of "at most one entry is running" no longer holds:
-    a merge admitted in the instant between the landing's teardown and the
-    deploy's `Building` edge (when the check becomes owed) runs beside the
-    deploying merge. The comment states it. The admission race itself is
-    unchanged by this work, since the task forbade changing advancement.
-  - In the roster, a front already admitted keeps the head in that same
-    instant, and the deploying merge is then not drawn there (it still is in
-    the status and the queue tabs). Accepted as a cost of having one head.
+  - The deploying merge holds the queue's head from its landing's teardown
+    (`merge.deployHold`, a later change on 2026-11-24): the teardown records
+    it before it kicks the queue's pump, so no merge is admitted between the
+    landing and the deploy's `Building` edge, when the check becomes owed.
+    Before that change a merge admitted in that instant ran beside the
+    deploying merge and kept the roster's head. The record's stage
+    (`wsm.DeployingStage`) ties it to the deploy that carries it: covered at
+    that deploy's commit, checked in the write that owes its check, and ended
+    in the write that releases the check.
   - The daemon keeps the deploying merge in the store
     (`wsm.DeployingMerge`, layout 205), because the deploy hands the daemon
     over to a successor, which draws the merge and ends it.

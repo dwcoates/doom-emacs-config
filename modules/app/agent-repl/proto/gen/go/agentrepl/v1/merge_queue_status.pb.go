@@ -43,9 +43,8 @@ const (
 // (repoconfig.v1.LifecycleConfig.deploy_checks) stays listed as running its
 // deploying step until the check ends: the deploy mediator approves,
 // escalates or dispatches, or the check is released without its word. It
-// stands at the front, ahead of the line; a merge admitted in the instant
-// between its deploy's start and the check being owed may run beside it, so
-// such a queue lists two running entries.
+// stands at the front, ahead of the line, and holds the queue's head from its
+// landing until then, so no merge of the line runs beside it.
 type MergeQueueStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The repository whose queue this is.

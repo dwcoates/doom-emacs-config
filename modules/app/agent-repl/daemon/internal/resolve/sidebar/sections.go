@@ -219,10 +219,16 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		})
 	}
 	// THE LANDED MERGE STILL DEPLOYING IS THE HEAD until its deploy's check
-	// ends, and every merge in line waits behind it, unless the front of the
-	// line was admitted already (MergeQueue.Deploying).
+	// ends, and every merge in line waits behind it (MergeQueue.Deploying).
+	// It holds the queue's head from its landing's teardown, so a front
+	// admitted beside it is a broken hold, recorded at ERROR and drawn
+	// behind it.
 	line := q.line
-	if d := q.deploying; d != nil && (len(line) == 0 || !line[0].Admitted) {
+	if d := q.deploying; d != nil {
+		if len(line) > 0 && line[0].Admitted {
+			log.Error(op, "a merge in line was admitted while a landed merge still deploying held the head; the hold was broken", dlog.Context{
+				"deploying": string(d.Workspace), "admitted": string(line[0].Workspace)})
+		}
 		line = append([]QueueEntry{*d}, line...)
 	}
 	if len(line) == 0 {
