@@ -682,6 +682,17 @@ func (f *mergeForwarder) ReviewQueues(ctx context.Context) error {
 	return m.ReviewQueues(ctx)
 }
 
+// ServingWidened is a takeover's edge, and nothing takes over before the
+// graph is whole: an unbound forwarder is a wiring defect, which the edge has
+// no error to answer with, so it panics.
+func (f *mergeForwarder) ServingWidened(ctx context.Context) {
+	m, err := f.mover()
+	if err != nil {
+		panic(err)
+	}
+	m.ServingWidened(ctx)
+}
+
 func (f *mergeForwarder) ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceID) error {
 	m, err := f.mover()
 	if err != nil {

@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"agent-repld/internal/dlog"
@@ -34,7 +35,8 @@ type mediationLife struct {
 	running int
 	// idle is closed when running falls to zero after a stop; nil otherwise.
 	idle chan struct{}
-	// handedOver is set when a handover cut a round (mediationFailed): the
+	// handedOver is set when a handover cut a round (mediationFailed), or a
+	// round was not run for a mediator handed away (mediatorNotServed): the
 	// successor runs it, and should the handover end with this daemon
 	// serving again, this daemon runs it again (resumeHandedOver).
 	handedOver bool
@@ -99,9 +101,11 @@ const mediationNotRun = "the mediations were not run: this daemon is stopping; t
 
 // mediationFailed records a pass's or a round's failure ERR and answers
 // whether it was a cut: at INFO when the daemon's exit (or the caller) cut
-// CTX under it, since the next boot's pass runs it again, or when a handover
+// CTX under it, since the next boot's pass runs it again, when a handover
 // took the mediator's session away (cutByHandover), since the daemon that
-// serves the queues next runs it again; and at ERROR as MESSAGE otherwise.
+// serves the queues next runs it again, or when a workspace verb refused on
+// the mediator's serving standing (mediatorNotServed); and at ERROR as
+// MESSAGE otherwise.
 func (o *orchestrator) mediationFailed(ctx context.Context, fields dlog.Context, message logsite.Message, err error) bool {
 	if o.mediationCut(ctx, fields, message.Template(), err) {
 		return true
@@ -112,8 +116,9 @@ func (o *orchestrator) mediationFailed(ctx context.Context, fields dlog.Context,
 
 // mediationCut is mediationFailed's cut half: it answers whether ERR, the
 // failure of what WHAT says, was the daemon's exit (or the caller) cutting
-// CTX, or a handover taking the mediator's session away (cutByHandover), and
-// records such a cut at INFO. Any other failure is left to the caller to
+// CTX, a handover taking the mediator's session away (cutByHandover), or a
+// workspace verb's refusal on the serving standing (Deps.StandingRefusal),
+// and records such a cut at INFO. Any other failure is left to the caller to
 // record.
 func (o *orchestrator) mediationCut(ctx context.Context, fields dlog.Context, what string, err error) bool {
 	if cutUnder(ctx, err) {
@@ -124,11 +129,58 @@ func (o *orchestrator) mediationCut(ctx context.Context, fields dlog.Context, wh
 		o.deps.Log.Global().Info(opMediation, mediationHandedOver, withField(withField(fields, "cut", what), "cause", err.Error()))
 		return true
 	}
-	return false
+	return o.refusedOnStanding(fields, what, err)
+}
+
+// refusedOnStanding answers whether ERR, the failure of what WHAT says, is a
+// workspace verb's refusal on the serving standing (Deps.StandingRefusal),
+// recording it as mediatorNotServed does. A VERB REFUSED SO AFTER THE PASS'S
+// GATE LET THE MEDIATION RUN (Mediate) is the gate's own outcome: the
+// outgoing daemon can hand the mediator away between the two, and a refusal
+// then is no failure.
+func (o *orchestrator) refusedOnStanding(fields dlog.Context, what string, err error) bool {
+	standing, refused := o.deps.StandingRefusal(err)
+	if !refused {
+		return false
+	}
+	o.mediatorNotServed(withField(withField(fields, "cut", what), "cause", err.Error()), standing)
+	return true
 }
 
 // mediationHandedOver is the record of a round a handover cut.
 const mediationHandedOver = "the mediation was cut by a handover; the daemon that serves the queues next runs it again"
+
+// The records of a mediation that ends because this daemon does not serve
+// the deploy mediator's workspace now, one per standing, each naming the
+// edge that runs it.
+const (
+	mediatorNotYetAdopted   = "this daemon has not adopted the deploy mediator yet; the mediation ends here deciding nothing and escalating nothing, and this daemon's adoption of the mediator runs it"
+	mediatorTransferredAway = "the deploy mediator is handed to a successor daemon; the mediation ends here deciding nothing and escalating nothing, and the successor runs it"
+)
+
+// mediatorNotServed records, with FIELDS, a mediation that ends because this
+// daemon does not serve the deploy mediator now (STANDING): its check stays
+// owed and its queue held exactly as before, and the edge on which a daemon
+// comes to serve the mediator runs it (mediateAdopted, ServingWidened).
+//
+// A MEDIATOR HANDED AWAY MARKS THE MEDIATION OWED A RERUN HERE, as a
+// handover's cut does (cutByHandover): should the handover end with this
+// daemon serving again, resumeHandedOver runs it.
+func (o *orchestrator) mediatorNotServed(fields dlog.Context, standing ServingStanding) {
+	fields = withField(fields, "standing", standing.String())
+	switch standing {
+	case NotYetAdopted:
+		o.deps.Log.Global().Info(opMediation, mediatorNotYetAdopted, fields)
+	case TransferringAway:
+		l := &o.mediationLife
+		l.mu.Lock()
+		l.handedOver = true
+		l.mu.Unlock()
+		o.deps.Log.Global().Info(opMediation, mediatorTransferredAway, fields)
+	default:
+		panic(fmt.Sprintf("merge: a mediation not served here at standing %v", standing))
+	}
+}
 
 // cutByHandover answers whether ERR is a handover's cut, marking the round
 // owed a rerun here should this daemon serve again: the mediator's session

@@ -505,6 +505,7 @@ func (d Deps) validate() error {
 	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
 	check(d.Standing != nil, "Standing")
+	check(d.StandingRefusal != nil, "StandingRefusal")
 	check(d.DeployChecks != nil, "DeployChecks")
 	check(d.ReadLogs != nil, "ReadLogs")
 	check(d.QueueEvents != nil, "QueueEvents")

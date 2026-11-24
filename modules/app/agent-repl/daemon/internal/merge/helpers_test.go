@@ -4410,9 +4410,10 @@ func (h *harness) deps() Deps {
 			h.interrupted = append(h.interrupted, ws)
 			return h.interruptRunning, h.interruptErr
 		},
-		Rollout:      h.rollout,
-		Standing:     h.standing,
-		DeployChecks: h.checks,
+		Rollout:         h.rollout,
+		Standing:        h.standing,
+		StandingRefusal: harnessStandingRefusal,
+		DeployChecks:    h.checks,
 		ReadLogs: func(_ context.Context, _ string, since, until time.Time) ([]LogRecord, error) {
 			// A WINDOW HOLDS A WARNING UNLESS A TEST SAYS OTHERWISE, so a
 			// round tells the mediator: a window with none releases the
@@ -5263,16 +5264,51 @@ func (h *harness) asyncRequestOf(ws ids.WorkspaceID) (wsm.AsyncMergeRequest, boo
 }
 
 // fakeStanding is the rollout controller's queue standing: whether the queue
-// may advance, the edge its change closes, and the workspaces not served.
+// may advance, the edge its change closes, the workspaces not served, and
+// each workspace's serving standing (served here unless a test says).
 type fakeStanding struct {
 	mu        sync.Mutex
 	serves    bool
 	changed   chan struct{}
 	notServed map[ids.WorkspaceID]bool
+	standings map[ids.WorkspaceID]ServingStanding
+	// standingErr fails every ServingStanding.
+	standingErr error
 }
 
 func newFakeStanding() *fakeStanding {
-	return &fakeStanding{serves: true, changed: make(chan struct{}), notServed: map[ids.WorkspaceID]bool{}}
+	return &fakeStanding{serves: true, changed: make(chan struct{}), notServed: map[ids.WorkspaceID]bool{}, standings: map[ids.WorkspaceID]ServingStanding{}}
+}
+
+func (f *fakeStanding) ServingStanding(ws ids.WorkspaceID) (ServingStanding, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.standings[ws], f.standingErr
+}
+
+// stand sets WS's serving standing.
+func (f *fakeStanding) stand(ws ids.WorkspaceID, standing ServingStanding) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.standings[ws] = standing
+}
+
+// standingRefused is a workspace verb's refusal on the serving standing, as
+// the harness's fakes answer one: the typed arm workspace.Refusal carries.
+type standingRefused struct{ standing ServingStanding }
+
+func (e *standingRefused) Error() string {
+	return "intended arm: RefreshDeployCheckError." + e.standing.String() + ": the workspace is not served here"
+}
+
+// harnessStandingRefusal is the harness's Deps.StandingRefusal: the standing
+// a standingRefused names, and false for any other error.
+func harnessStandingRefusal(err error) (ServingStanding, bool) {
+	var refused *standingRefused
+	if errors.As(err, &refused) {
+		return refused.standing, true
+	}
+	return ServedHere, false
 }
 
 func (f *fakeStanding) ServesQueue() bool {

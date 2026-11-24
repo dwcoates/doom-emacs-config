@@ -39,6 +39,76 @@ type standing struct {
 	briefed bool
 }
 
+// THE MEDIATOR IS SERVED WHERE ITS ROUND RUNS. A round of a queue's check,
+// and the pass's keeping its mediator shown and taking up its remediation
+// finish, touch the recorded mediator only on the daemon that serves its
+// workspace now: the workspace verbs refuse it anywhere else
+// (not_yet_adopted on a successor still adopting it, transferring_away on the
+// daemon that handed it on). The edge on which a daemon comes to serve the
+// mediator runs the pass again (mediateAdopted, ServingWidened), so no wait,
+// retry or timer stands between a handover and the round (2026-11-24 03:34Z:
+// a successor serving the queues from its first adoption ran a round on a
+// mediator it was still adopting, the refresh was refused not_yet_adopted,
+// and the check was escalated to the user as one that could not run).
+
+// mediatorStanding answers queue REPO's recorded deploy mediator and this
+// daemon's serving standing of it; a queue with none recorded answers no
+// mediator, served, since one made here (makeMediator) is owned from its
+// creation. A failed read is answered.
+func (o *orchestrator) mediatorStanding(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, ServingStanding, error) {
+	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, repo)
+	if err != nil || !found {
+		return "", ServedHere, err
+	}
+	standing, err := o.deps.Standing.ServingStanding(recorded.Workspace)
+	if err != nil {
+		return recorded.Workspace, ServedHere, fmt.Errorf("merge: the serving standing of the deploy mediator %s: %w", recorded.Workspace, err)
+	}
+	return recorded.Workspace, standing, nil
+}
+
+// mediateAdopted runs the mediation pass when WS, a workspace this daemon has
+// just come to serve (AdoptWorkspace, called after its standing turned
+// owned), is a queue's recorded deploy mediator or a remediation finish's
+// workspace: the pass then runs the rounds and takes up the finish it passed
+// over while WS was not served here (Mediate's gate). Any other workspace's
+// adoption runs no pass. A failed read is recorded, and the round waits for
+// the queue's next pass.
+//
+// THE PASS OUTLIVES THE ADOPTION'S CALLER: the rpc an adoption answers may
+// end before the pass does, and the pass is bounded by the mediation's
+// lifetime (enterMediation), which the daemon's exit cuts.
+func (o *orchestrator) mediateAdopted(ctx context.Context, ws ids.WorkspaceID) {
+	fields := dlog.Context{"workspace": string(ws)}
+	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
+	if err != nil {
+		o.mediationFailed(ctx, fields, logsite.Msg("could not read whether the adopted workspace is a deploy mediator; a round its adoption owes waits for the queue's next pass"), err)
+		return
+	}
+	if !isMediator {
+		finish, err := o.deps.DB.RemediationFinishOf(ctx, ws)
+		if err != nil {
+			o.mediationFailed(ctx, fields, logsite.Msg("could not read whether the adopted workspace has a remediation finish; a finish its adoption owes waits for the queue's next pass"), err)
+			return
+		}
+		if finish == nil {
+			return
+		}
+		repo = finish.Repo
+	}
+	o.deps.Log.Global().Info(opMediation, "this daemon adopted a deploy mediator; the mediation pass runs what it passed over while the mediator was not served here", withField(fields, "repo", string(repo)))
+	o.mediateAgain(context.WithoutCancel(ctx))
+}
+
+// ServingWidened implements Orchestrator: this daemon came to serve
+// workspaces no adoption of its own told it of (rollout.MergeMover), so the
+// mediation pass runs again for every round it passed over while their
+// mediators were not served here (Mediate's gate).
+func (o *orchestrator) ServingWidened(ctx context.Context) {
+	o.deps.Log.Global().Info(opMediation, "this daemon serves workspaces it did not adopt one by one; the mediation pass runs what it passed over while their mediators were not served here", nil)
+	o.mediateAgain(context.WithoutCancel(ctx))
+}
+
 // mediatorOf answers queue Q's standing mediator: the one recorded,
 // reopened when it was closed, or one made and recorded when the queue has
 // none (or the one recorded is gone from the registry).
@@ -167,6 +237,12 @@ func (o *orchestrator) keepMediatorShown(ctx context.Context, q checkedQueue) {
 		return
 	}
 	if err := o.deps.DeployChecks.Resume(ctx, mediator); err != nil {
+		// THE GATE PASSED (Mediate), BUT THE MEDIATOR MAY BE HANDED AWAY
+		// SINCE: a refusal on its standing is the daemon that serves it next
+		// to keep it shown.
+		if o.refusedOnStanding(fields, "keeping the hidden deploy mediator shown", err) {
+			return
+		}
 		o.deps.Log.Global().Error(opMediation, "the hidden deploy mediator could not be shown", withField(fields, "error", err.Error()))
 		return
 	}

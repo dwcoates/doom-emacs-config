@@ -1944,3 +1944,90 @@ func TestTheRosterLabelOfAQueueWhoseMediatorWasSentBackToFix(t *testing.T) {
 		})
 	}
 }
+
+func TestARoundWhoseMediatorIsNotServedHereEndsDecidingNothing(t *testing.T) {
+	tests := []struct {
+		name     string
+		standing ServingStanding
+	}{
+		{name: "a mediator this daemon has not adopted yet", standing: NotYetAdopted},
+		{name: "a mediator this daemon handed to a successor", standing: TransferringAway},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withMediator(t, h)
+			h.standing.stand("ws-fixer", tt.standing)
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert: nothing touched the mediator.
+			if len(h.checks.refreshed) != 0 || len(h.checks.resumed) != 0 || len(h.checks.reopened) != 0 || len(h.queue.submissions) != 0 {
+				t.Fatalf("refreshed %v, shown %v, reopened %v, submitted %d; want the mediator untouched",
+					h.checks.refreshed, h.checks.resumed, h.checks.reopened, len(h.queue.submissions))
+			}
+			assertNotServedHere(t, h, tt.standing)
+			if got := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: notServedMessage(tt.standing)}); len(got) != 1 {
+				t.Fatalf("records %v, want the round's end recorded once", got)
+			}
+		})
+	}
+}
+
+func TestARoundWhoseServedMediatorCannotBeRefreshedIsStillEscalated(t *testing.T) {
+	// Arrange: the mediator is served here, and its refresh fails for a
+	// reason that is no standing.
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	h.checks.refreshErr = errors.New("rebase conflicts")
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	assertRoundFailureEscalated(t, h, "the deploy mediator could not be found, made or readied for the check", "rebase conflicts")
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed"}); !ok {
+		t.Fatalf("records = %v, want the refresh's failure at ERROR", h.logs.Records())
+	}
+}
+
+func TestAQueueWithNoRecordedMediatorIsNotGated(t *testing.T) {
+	// Arrange: no mediator is recorded, and no standing can be read: the
+	// gate never asks one.
+	h := checked(t)
+	owe(t, h)
+	h.standing.standingErr = errors.New("no standing is read for a queue with no mediator")
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if made := checkWorkspacesMade(h); !slices.Equal(made, []string{mediatorName}) || len(intakeTellings(h)) != 1 {
+		t.Fatalf("made %v, told %d; want the mediator made and told", made, len(intakeTellings(h)))
+	}
+}
+
+func TestAMediatorWhoseStandingCannotBeReadRunsNoRound(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	h.standing.standingErr = errors.New("unrecognized standing")
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if len(h.checks.refreshed) != 0 || len(h.queue.submissions) != 0 {
+		t.Fatalf("refreshed %v, submitted %d; want no round", h.checks.refreshed, len(h.queue.submissions))
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not read whether this daemon serves the queue's deploy mediator; its check's round is not run, and the next pass runs it"}); !ok {
+		t.Fatalf("records = %v, want the unread standing at ERROR", h.logs.Records())
+	}
+}

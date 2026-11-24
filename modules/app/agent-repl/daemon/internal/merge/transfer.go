@@ -483,7 +483,18 @@ func (o *orchestrator) forgetMoved(ws ids.WorkspaceID) {
 // own per-entry recovery), and its async requests' hand-off re-armed. It is the successor's half of a handover, called
 // once the workspace is its own, and the incumbent's take-back of a transfer
 // that did not land.
+//
+// THE ADOPTION OF A DEPLOY MEDIATOR RUNS THE MEDIATION PASS (mediateAdopted)
+// once the merges are taken, whether or not they could be: its rounds were
+// not run here while it was not served (Mediate's gate).
 func (o *orchestrator) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
+	err := o.adoptMerges(ctx, ws)
+	o.mediateAdopted(ctx, ws)
+	return err
+}
+
+// adoptMerges is adoptWorkspace under WS's move lock.
+func (o *orchestrator) adoptMerges(ctx context.Context, ws ids.WorkspaceID) error {
 	unlock := o.lockMove(ws)
 	defer unlock()
 	return o.adoptWorkspace(ctx, ws)

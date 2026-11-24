@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -564,5 +565,171 @@ func TestRenderOccasionNamesTheDeployOrTheCrashTheCheckIsOf(t *testing.T) {
 				t.Fatalf("RenderOccasion = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMediatorStandingAnswersTheRecordedMediatorsStanding(t *testing.T) {
+	tests := []struct {
+		name         string
+		recorded     bool
+		standing     ServingStanding
+		standingErr  error
+		wantMediator ids.WorkspaceID
+		wantStanding ServingStanding
+		wantErr      bool
+	}{
+		{name: "a queue with no mediator recorded is served, its standing never read", standingErr: errors.New("never read"), wantStanding: ServedHere},
+		{name: "a recorded mediator served here", recorded: true, wantMediator: "ws-fixer", wantStanding: ServedHere},
+		{name: "a recorded mediator not adopted yet", recorded: true, standing: NotYetAdopted, wantMediator: "ws-fixer", wantStanding: NotYetAdopted},
+		{name: "a recorded mediator handed away", recorded: true, standing: TransferringAway, wantMediator: "ws-fixer", wantStanding: TransferringAway},
+		{name: "a recorded mediator whose standing cannot be read", recorded: true, standingErr: errors.New("unrecognized standing"), wantMediator: "ws-fixer", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			if tt.recorded {
+				withMediator(t, h)
+			}
+			h.standing.stand("ws-fixer", tt.standing)
+			h.standing.standingErr = tt.standingErr
+
+			// Act
+			mediator, standing, err := h.o.mediatorStanding(context.Background(), mediationKey(h))
+
+			// Assert
+			if mediator != tt.wantMediator || (err != nil) != tt.wantErr || (!tt.wantErr && standing != tt.wantStanding) {
+				t.Fatalf("mediatorStanding = (%q, %v, %v), want (%q, %v, error %v)", mediator, standing, err, tt.wantMediator, tt.wantStanding, tt.wantErr)
+			}
+		})
+	}
+}
+
+// mediatorPassedOver has a pass run while ws-fixer, the queue's recorded mediator,
+// is not adopted here, then has this daemon serve it.
+func mediatorPassedOver(t *testing.T, h *harness) {
+	t.Helper()
+	owe(t, h)
+	withMediator(t, h)
+	h.standing.stand("ws-fixer", NotYetAdopted)
+	h.o.Mediate(context.Background())
+	if len(h.checks.refreshed) != 0 || len(h.queue.submissions) != 0 {
+		t.Fatalf("refreshed %v, submitted %d; want the round passed over", h.checks.refreshed, len(h.queue.submissions))
+	}
+	h.standing.stand("ws-fixer", ServedHere)
+}
+
+func TestTheMediatorsAdoptionRunsTheRoundItsPassPassedOver(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	mediatorPassedOver(t, h)
+	decideInTurn(t, h, Decision{Kind: MediationApprove, Summary: "clean"})
+
+	// Act
+	if err := h.o.AdoptWorkspace(context.Background(), "ws-fixer"); err != nil {
+		t.Fatalf("AdoptWorkspace: %v", err)
+	}
+
+	// Assert: the round readied the mediator, briefed it, and its decision
+	// released the check.
+	if !slices.Equal(h.checks.refreshed, []ids.WorkspaceID{"ws-fixer"}) || len(intakeTellings(h)) != 1 || owedCheck(t, h) != nil {
+		t.Fatalf("refreshed %v, told %d, check %+v; want the mediator readied, briefed once and its check released",
+			h.checks.refreshed, len(intakeTellings(h)), owedCheck(t, h))
+	}
+}
+
+func TestAnAdoptionRunsThePassOnlyForAMediatorOrAFinishsWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		adopted  ids.WorkspaceID
+		finish   bool
+		wantPass bool
+	}{
+		{name: "the recorded mediator's adoption runs the pass", adopted: "ws-fixer", wantPass: true},
+		{name: "a remediation finish's workspace's adoption runs the pass", adopted: "ws-old", finish: true, wantPass: true},
+		{name: "any other workspace's adoption runs no pass", adopted: "ws-other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a pass that runs is seen by its record that this
+			// daemon does not serve the queues, and does nothing else.
+			h := checked(t)
+			withMediator(t, h)
+			if tt.finish {
+				if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-old", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.standing.serves = false
+
+			// Act
+			if err := h.o.AdoptWorkspace(context.Background(), tt.adopted); err != nil {
+				t.Fatalf("AdoptWorkspace: %v", err)
+			}
+
+			// Assert
+			_, ran := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "this daemon does not serve the queues; their checks are run by the daemon that does"})
+			_, said := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "this daemon adopted a deploy mediator; the mediation pass runs what it passed over while the mediator was not served here"})
+			if ran != tt.wantPass || said != tt.wantPass {
+				t.Fatalf("pass ran %v, said %v; want %v", ran, said, tt.wantPass)
+			}
+		})
+	}
+}
+
+func TestAnAdoptionWhoseMediatorCannotBeReadSaysSo(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	h.db.mu.Lock()
+	h.db.mediatorRepoErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.AdoptWorkspace(context.Background(), "ws-fixer")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptWorkspace = %v, want the merges taken all the same", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not read whether the adopted workspace is a deploy mediator; a round its adoption owes waits for the queue's next pass"}); !ok {
+		t.Fatalf("records = %v, want the unread mediator at ERROR", h.logs.Records())
+	}
+}
+
+func TestAHiddenMediatorHandedAwayBeforeItIsShownIsNoError(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	mediatorInSight(t, h, true)
+	h.checks.resumeErr = fmt.Errorf("resume: %w", &standingRefused{standing: TransferringAway})
+
+	// Act
+	h.o.keepMediatorShown(context.Background(), queueOf(t, h))
+
+	// Assert
+	if rec, errored := h.recordFor("error", opMediation); errored {
+		t.Fatalf("ERROR %+v, want none", rec)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: mediatorTransferredAway}); !ok {
+		t.Fatalf("records = %v, want the handed-away mediator at INFO", h.logs.Records())
+	}
+}
+
+func TestServingWidenedRunsTheMediationPass(t *testing.T) {
+	// Arrange: a pass that runs is seen by its record that this daemon does
+	// not serve the queues, and does nothing else.
+	h := checked(t)
+	h.standing.serves = false
+
+	// Act
+	h.o.ServingWidened(context.Background())
+
+	// Assert
+	if _, ran := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "this daemon does not serve the queues; their checks are run by the daemon that does"}); !ran {
+		t.Fatalf("records = %v, want the pass run", h.logs.Records())
 	}
 }
