@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -166,11 +167,25 @@ func (o *orchestrator) endUncheckedDeploying(ctx context.Context, repo wsm.RepoK
 // to cover and check it. A landing deployed already makes the deploy change
 // nothing, which releases its check (ReleaseUnchangedDeploy). A read that
 // fails is recorded at ERROR and answered: the merges hold their queues.
+//
+// IT RUNS INSIDE THE MEDIATION'S LIFETIME, as a pass does: the daemon's exit
+// cuts it and waits for it before the state client closes, a cut read is
+// recorded at INFO as a cut, never as a failure, and a daemon already
+// stopping runs nothing (the daemon that serves next asks again).
 func (o *orchestrator) DeployUncheckedLandings(ctx context.Context) error {
 	const op = "daemon.merge.deploying"
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(op, mediationNotRun, nil)
+		return nil
+	}
+	defer leave()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(life, cancel)()
 	unchecked, err := o.deps.DB.UncheckedDeployingMerges(ctx)
 	if err != nil {
-		o.deps.Log.Global().Error(op, "could not read the landed merges whose deploy owes no check; they hold their queues' heads until a deploy checks them", dlog.Context{"error": err.Error()})
+		o.mediationFailedUnder(ctx, op, nil, logsite.Msg("could not read the landed merges whose deploy owes no check; they hold their queues' heads until a deploy checks them"), err)
 		return err
 	}
 	if len(unchecked) == 0 {

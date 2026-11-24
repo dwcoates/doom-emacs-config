@@ -612,6 +612,54 @@ func TestARepositoryCheckingNoDeploysEndsOnlyACoveredLandedMerge(t *testing.T) {
 	}
 }
 
+func TestDeployUncheckedLandingsCutByTheDaemonsExitIsNoFailure(t *testing.T) {
+	tests := []struct {
+		name        string
+		stopFirst   bool
+		wantMessage string
+		wantErr     bool
+	}{
+		{name: "a read the exit cuts is recorded as a cut", wantErr: true,
+			wantMessage: "the mediation was cut by the daemon's exit; the next boot's pass runs it again"},
+		{name: "a daemon already stopping runs nothing", stopFirst: true, wantMessage: mediationNotRun},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			seedDeploying(t, h, mediationKey(h), true)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			h.db.mu.Lock()
+			h.db.deployingReadErr = context.Canceled
+			h.db.mu.Unlock()
+			if tt.stopFirst {
+				h.o.stopMediation()
+			}
+
+			// Act
+			err := h.o.DeployUncheckedLandings(ctx)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DeployUncheckedLandings = %v, want error %v", err, tt.wantErr)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.deploying", Message: tt.wantMessage}); !ok {
+				t.Fatalf("records = %v, want %q at INFO", h.logs.Records(), tt.wantMessage)
+			}
+			if _, bad := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.deploying"}); bad {
+				t.Fatalf("records = %v, want no ERROR for a cut", h.logs.Records())
+			}
+			h.rollout.mu.Lock()
+			fired := h.rollout.fired
+			h.rollout.mu.Unlock()
+			if fired != 0 {
+				t.Fatalf("the rollout was told %d times, want none", fired)
+			}
+		})
+	}
+}
+
 func TestDeployUncheckedLandingsDeploysOnlyALandingWhoseDeployOwesNoCheck(t *testing.T) {
 	tests := []struct {
 		name      string
