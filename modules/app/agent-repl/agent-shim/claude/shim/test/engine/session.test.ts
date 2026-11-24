@@ -34,7 +34,8 @@ import { contextCutUpsertKey } from "../../src/store/keys.js";
 import { compactionPrompt } from "../../src/engine/compaction.js";
 import { SUMMARY_PART_CHARS } from "../../src/engine/conversation-text.js";
 import { agentIdPath } from "../../src/engine/identity.js";
-import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
+import { settleable } from "../../src/engine/settleable.js";
+import { LockHeldError, LockHolderUnavailableError, workspaceLockKey, type LockRelease } from "../../src/locks.js";
 import { textSaid } from "../../src/engine/turn.js";
 import { saidContent } from "../../src/engine/said-content.js";
 import { KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
@@ -243,6 +244,8 @@ function harness(
     createQueryRejection?: unknown;
     /** Throw this exact value out of the SESSION claim, Error or not. */
     lockRefusal?: unknown;
+    /** The SESSION claim itself, in place of the recording one, for a suite whose subject is the claim's timing. */
+    acquireLock?: (sessionId: string) => LockRelease | Promise<LockRelease>;
     /** Throw this exact value out of the WORKSPACE claim, Error or not. */
     workspaceLockRefusal?: unknown;
     /** Build the engine with NO scheduler, the way a real session does. */
@@ -394,14 +397,14 @@ function harness(
     ...(options.withoutLockInjection === true
       ? {}
       : {
-          acquireLock: (sessionId: string): (() => void) => {
+          acquireLock: options.acquireLock ?? ((sessionId: string): (() => void) => {
             if (options.lockThrows === true) throw new LockHeldError("locked by another shim");
             if (options.lockRefusal !== undefined) throw options.lockRefusal;
             locks.push(sessionId);
             return () => {
               released.push(sessionId);
             };
-          },
+          }),
         }),
     // STUBBED LIKE THE SESSION CLAIM. The workspace lock moved into
     // StartSession, so a unit test that left it real would take a kernel lock
@@ -1285,6 +1288,276 @@ describe("StartSession, fresh", () => {
 
     expect(h.locks).toEqual([]);
     expect(h.workspaceLocks).toEqual([]);
+  });
+});
+
+/**
+ * A STARTSESSION THAT ARRIVES WHILE THIS SHIM'S OWN EARLIER START IS IN FLIGHT.
+ *
+ * GROUNDED, 2026-11-24T06:08Z: at a deploy handover the outgoing daemon
+ * abandoned a merge's StartSession and the next daemon asked again on the same
+ * shim while the first start was still opening. The second ran beside it,
+ * collided with the first start's own session lock, and was refused
+ * conversation_owned for an owner that did not exist, which failed the merge.
+ * Every start now waits out the one in flight.
+ */
+describe("a StartSession while this shim's own earlier start is in flight", () => {
+  const AMPLE = 60_000;
+  const WAITS = "StartSession waits for this shim's own earlier start, still in flight, to settle";
+  const waitedOut = (how: string): string => `StartSession waited out this shim's own earlier start, which ${how}`;
+  /** How long the test lets the first start stay in flight on the engine's clock. */
+  const HELD_MS = 250;
+
+  /**
+   * A session claim that answers as the kernel's flock does: a claim on an id
+   * already held throws LockHeldError, and is recorded as an overlap. HELD
+   * names ids another process holds from the outset.
+   */
+  function kernelSessionLock(held: string[] = []): {
+    acquire: (id: string) => LockRelease | Promise<LockRelease>;
+    claims: string[];
+    overlaps: string[];
+  } {
+    const holding = new Set(held);
+    const claims: string[] = [];
+    const overlaps: string[] = [];
+    return {
+      claims,
+      overlaps,
+      acquire: (id) => {
+        claims.push(id);
+        if (holding.has(id)) {
+          overlaps.push(id);
+          throw new LockHeldError(`vendor session ${id} is locked`);
+        }
+        holding.add(id);
+        return () => {
+          holding.delete(id);
+        };
+      },
+    };
+  }
+
+  /**
+   * A session claim whose FIRST claim stays pending until the test breaks it
+   * with a plain Error (a claim failure that is no owner, so the start
+   * throws); every later claim is granted at once.
+   */
+  function breakableFirstClaim(): {
+    acquire: (id: string) => LockRelease | Promise<LockRelease>;
+    asked: Promise<void>;
+    breakIt: () => void;
+  } {
+    const asked = settleable();
+    const broken = settleable();
+    let claims = 0;
+    return {
+      asked: asked.promise,
+      breakIt: () => {
+        broken.resolve();
+      },
+      acquire: async () => {
+        claims += 1;
+        if (claims === 1) {
+          asked.resolve();
+          await broken.promise;
+          throw new Error("the session claim broke");
+        }
+        return () => undefined;
+      },
+    };
+  }
+
+  /** A harness over a warm transcript for resume-1 whose FIRST query holds its live signal, on a clock the test moves. */
+  function inFlightHarness(acquireLock: (id: string) => LockRelease | Promise<LockRelease>): { h: Harness; clock: { now: number } } {
+    const clock = { now: 1_000_100 };
+    const h = harness({
+      clock: () => clock.now,
+      initTimeoutMs: AMPLE,
+      liveSignalTimeoutMs: AMPLE,
+      acquireLock,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.holdModels();
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    return { h, clock };
+  }
+
+  /**
+   * Start resume-1, wait until FIRST_IN_FLIGHT says it is under way, then ask
+   * again; resolves once the second start says it is waiting (or has already
+   * answered). ORDER records which answer came first.
+   */
+  async function secondWhileFirstInFlight(
+    h: Harness,
+    firstInFlight: () => Promise<unknown>,
+  ): Promise<{ first: Promise<shimv1.StartSessionResponse>; second: Promise<shimv1.StartSessionResponse>; order: string[]; mark: number }> {
+    const order: string[] = [];
+    const first = h.engine.startSession(resumeRequest("resume-1"));
+    void first.then(
+      () => order.push("first"),
+      () => order.push("first"),
+    );
+    await firstInFlight();
+    const mark = logSinkMark();
+    const second = h.engine.startSession(resumeRequest("resume-1"));
+    void second.then(() => order.push("second"));
+    // THE SECOND IS WAITING, or it answered beside the first, which is the
+    // defect each case then names by its own assertion.
+    await Promise.race([untilLogged(mark, (records) => records.some((record) => record.message === WAITS)), second]);
+    return { first, second, order, mark };
+  }
+
+  /** Let a start's query open the session: its init, then its held live signal. */
+  function openOn(query: ScriptedQuery): void {
+    query.emit(initMessage({ sessionId: "resume-1" }));
+    query.releaseModels();
+  }
+
+  /**
+   * Open the second start's own query. It is the session's first query when
+   * the first start never made one, which holds its live signal like any
+   * first query; releasing a query that holds none is a no-op.
+   */
+  async function openSecond(h: Harness, index: number): Promise<void> {
+    openOn((await untilQuery(h, index)).query);
+  }
+
+  /**
+   * The ways the first start settles: it opens the session, the vendor
+   * refuses its opening, or its session claim throws. Each says how to see
+   * it in flight, how to settle it, and which query the second's own start
+   * opens when it runs one.
+   */
+  const settlements = [
+    {
+      how: "started",
+      lock: () => ({ acquire: kernelSessionLock().acquire, first: (h: Harness) => untilQuery(h, 0), breakIt: () => undefined }),
+      settle: async (h: Harness): Promise<void> => {
+        openOn((await untilQuery(h, 0)).query);
+      },
+      secondQuery: undefined,
+    },
+    {
+      how: "refused",
+      lock: () => ({ acquire: kernelSessionLock().acquire, first: (h: Harness) => untilQuery(h, 0), breakIt: () => undefined }),
+      settle: async (h: Harness): Promise<void> => {
+        (await untilQuery(h, 0)).query.emit(errorResultMessage());
+      },
+      secondQuery: 1,
+    },
+    {
+      how: "failed",
+      lock: () => {
+        const claim = breakableFirstClaim();
+        return { acquire: claim.acquire, first: () => claim.asked, breakIt: claim.breakIt };
+      },
+      settle: (): Promise<void> => Promise.resolve(),
+      secondQuery: 0,
+    },
+  ] as const;
+
+  /** Run the scenario for one settlement, to both answers. */
+  async function bothAnswers(row: (typeof settlements)[number]): Promise<{
+    h: Harness;
+    first: PromiseSettledResult<shimv1.StartSessionResponse>;
+    second: shimv1.StartSessionResponse;
+    order: string[];
+    mark: number;
+  }> {
+    const lock = row.lock();
+    const { h, clock } = inFlightHarness(lock.acquire);
+    const { first, second, order, mark } = await secondWhileFirstInFlight(h, () => lock.first(h));
+    clock.now += HELD_MS;
+    lock.breakIt();
+    await row.settle(h);
+    const firstSettled = (await Promise.allSettled([first]))[0];
+    if (row.secondQuery !== undefined) await openSecond(h, row.secondQuery);
+    return { h, first: firstSettled, second: await second, order, mark };
+  }
+
+  it("answers the second StartSession only after the first has settled", async () => {
+    // Arrange, Act
+    const { order } = await bothAnswers(settlements[0]);
+
+    // Assert
+    expect(order).toEqual(["first", "second"]);
+  });
+
+  it("answers the second StartSession already_started when the first opened the session", async () => {
+    // Arrange, Act
+    const { second } = await bothAnswers(settlements[0]);
+
+    // Assert: never conversation_owned, which named an owner that did not exist.
+    expect(failureCause(second)).toBe("alreadyStarted");
+  });
+
+  it.each([settlements[1], settlements[2]])("runs the second StartSession's own start, which opens the session, when the first $how", async (row) => {
+    // Arrange, Act
+    const { second } = await bothAnswers(row);
+
+    // Assert
+    expect(second.result.case).toBe("success");
+  });
+
+  it.each([
+    { row: settlements[0], claims: ["resume-1"] },
+    { row: settlements[1], claims: ["resume-1", "resume-1"] },
+  ])("never claims the session lock while its own first start holds it, when the first $row.how", async ({ row, claims }) => {
+    // Arrange
+    const lock = kernelSessionLock();
+    const { h, clock } = inFlightHarness(lock.acquire);
+    const { first, second } = await secondWhileFirstInFlight(h, () => untilQuery(h, 0));
+
+    // Act
+    clock.now += HELD_MS;
+    await row.settle(h);
+    await first;
+    if (row.secondQuery !== undefined) await openSecond(h, row.secondQuery);
+    await second;
+
+    // Assert
+    expect({ claims: lock.claims, overlaps: lock.overlaps }).toEqual({ claims, overlaps: [] });
+  });
+
+  it("still answers conversation_owned when another process holds the session lock", async () => {
+    // Arrange
+    const lock = kernelSessionLock(["resume-1"]);
+    const { h } = inFlightHarness(lock.acquire);
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-1"));
+
+    // Assert
+    expect(failureCause(response)).toBe("conversationOwned");
+  });
+
+  it("records the wait's beginning at INFO, naming the start that waits", async () => {
+    // Arrange, Act
+    const { mark } = await bothAnswers(settlements[0]);
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message === WAITS);
+    expect({ level: record?.level, source: record?.context.source, asked: record?.context.asked_vendor_session_id }).toEqual({
+      level: "info",
+      source: "resume",
+      asked: "resume-1",
+    });
+  });
+
+  it.each(settlements)("records the wait's end at INFO, with how long it waited, when the first $how", async (row) => {
+    // Arrange, Act
+    const { mark } = await bothAnswers(row);
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message === waitedOut(row.how));
+    expect({
+      level: record?.level,
+      waited_ms: record?.context.waited_ms,
+      earlier_start: record?.context.earlier_start,
+      asked: record?.context.asked_vendor_session_id,
+    }).toEqual({ level: "info", waited_ms: HELD_MS, earlier_start: row.how, asked: "resume-1" });
   });
 });
 

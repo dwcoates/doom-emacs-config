@@ -130,6 +130,9 @@ and a transport failure or a held call is the batch\='s own."
 (defvar agent-repl-test-host--unloading-answer nil
   "What the stubbed ReportPageUnloading answers; see the harness.")
 
+(defvar agent-repl-test-host--page-state-answer nil
+  "What the stubbed ReportPageState answers; see the harness.")
+
 (defvar agent-repl-test-host--effects nil
   "W2-B surface calls, newest first: `(NAME . ARGS)'.")
 
@@ -285,6 +288,8 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--interaction-standing nil)
          (agent-repl-test-host--unloading-answer
           (list :response (list :arm :success :value nil)))
+         (agent-repl-test-host--page-state-answer
+          (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--evaluation-answer
@@ -321,6 +326,12 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (conn request &rest keys)
                   (push (list "ReportPageUnloading" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--unloading-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-rpc-report-page-state)
+                (lambda (conn request &rest keys)
+                  (push (list "ReportPageState" conn request) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer agent-repl-test-host--page-state-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
