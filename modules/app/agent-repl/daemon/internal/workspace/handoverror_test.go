@@ -43,3 +43,31 @@ func TestHandedOver(t *testing.T) {
 		})
 	}
 }
+
+func TestStandingRefusal(t *testing.T) {
+	cases := []struct {
+		name         string
+		err          error
+		wantStanding Standing
+		wantRefused  bool
+	}{
+		{name: "a transferring_away refusal", err: fmt.Errorf("refresh: %w", &Refusal{Arm: ArmTransferringAway}), wantStanding: StandingTransferringAway, wantRefused: true},
+		{name: "a not_yet_adopted refusal", err: fmt.Errorf("refresh: %w", &Refusal{Arm: ArmNotYetAdopted}), wantStanding: StandingNotYetAdopted, wantRefused: true},
+		{name: "any other refusal", err: &Refusal{Arm: ArmUnknownWorkspace}, wantStanding: StandingOwned},
+		{name: "a daemon exiting", err: fmt.Errorf("git: %w", context.Canceled), wantStanding: StandingOwned},
+		{name: "a workspace not yet adopted that no verb refused", err: fmt.Errorf("own: %w", rollout.ErrNotYetAdopted), wantStanding: StandingOwned},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the cases.
+
+			// Act.
+			standing, refused := StandingRefusal(tc.err)
+
+			// Assert.
+			if standing != tc.wantStanding || refused != tc.wantRefused {
+				t.Fatalf("StandingRefusal(%v) = (%v, %v), want (%v, %v)", tc.err, standing, refused, tc.wantStanding, tc.wantRefused)
+			}
+		})
+	}
+}
