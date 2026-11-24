@@ -6,6 +6,7 @@ import { boxRect, settableScrollTop } from "./dom-rect.js";
 import { captureLogRecords, type LogCapture } from "./log-capture.js";
 import { animationCensus, CENSUS_ANIMATION_NAMES, CENSUS_EVERY_MS, installPageCensus } from "../src/page-census.js";
 import type { After } from "../src/every.js";
+import { drawRootFeedShell } from "./root-feed-shell.js";
 
 let capture: LogCapture;
 let fire: () => void;
@@ -40,14 +41,16 @@ function place(el: Element, top: number, height: number): void {
 
 /** A 400px feed box over 2000px of content scrolled to SCROLL_TOP, with one 300px row at its top. */
 function blankFeed(scrollTop: number): void {
-  document.body.innerHTML = `<div id="feed-scroll"><main id="feed"><article data-feed-row="r"></article></main></div>`;
-  const box = document.getElementById("feed-scroll")!;
+  const { box, rows } = drawRootFeedShell();
+  const row = document.createElement("article");
+  row.setAttribute("data-feed-row", "r");
+  rows.append(row);
   place(box, 0, 400);
   settableScrollTop(box, scrollTop);
   Object.defineProperty(box, "scrollHeight", { value: 2000 });
   Object.defineProperty(box, "clientHeight", { value: 400 });
   place(document.getElementById("feed")!, -scrollTop, 2000);
-  place(document.querySelector("article")!, -scrollTop, 300);
+  place(row, -scrollTop, 300);
 }
 
 /** Put an element running each of NAMES in the page, as its computed style states it. */
