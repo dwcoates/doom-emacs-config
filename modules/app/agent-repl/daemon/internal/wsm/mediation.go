@@ -255,7 +255,12 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 			   mediation_fixer_turn = ?, mediation_fixer_brief = ?, mediation_fixer_origin = ?`,
 			key, nanos(at), version, nanos(chainStart), redeploys, carried, dispatchedAt, escalationBrief, escalationTold, nanos(landingStarted),
 			string(fixer.ID), fixer.Brief, fixer.Origin)
-		return err
+		if err != nil {
+			return err
+		}
+		// THE LANDED MERGE THIS DEPLOY COVERED IS CHECKED BY THIS CHECK, in
+		// the write that owes it (DeployingChecked).
+		return checkDeployingMergeInTx(ctx, tx, key)
 	})
 	if err != nil {
 		return nil, err
@@ -396,12 +401,42 @@ func (s *store) MarkEscalationTold(ctx context.Context, repo RepoKey, owed time.
 		`UPDATE merge_queue_repos SET mediation_escalation_told = 1 WHERE repo_key = ? AND mediation_owed_at = ? AND mediation_escalation_brief <> ''`)
 }
 
+// MediationRelease is what a check's release did: whether it released the
+// check, and the landed merge still deploying it ended with it, nil for none.
+type MediationRelease struct {
+	Released  bool
+	Deploying *DeployingMerge
+}
+
 // ReleaseMediation clears the mediation REPO owes when it is still the one
 // owed at OWED, answering whether it did: a decision on an older deploy
-// releases nothing a newer deploy owes.
-func (s *store) ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error) {
-	return s.mediationWrite(ctx, "daemon.wsm.release_mediation", repo, owed,
-		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_resumed_owed_at = NULL, mediation_window = '', mediation_window_start = NULL, mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_dispatched = 0, mediation_dispatched_at = NULL, mediation_escalation_brief = '', mediation_escalation_told = 0, mediation_fixer_turn = '', mediation_fixer_brief = '', mediation_fixer_origin = 0 WHERE repo_key = ? AND mediation_owed_at = ?`)
+// releases nothing a newer deploy owes. THE LANDED MERGE THE CHECK IS OWED OF
+// ENDS IN THE SAME WRITE (DeployingChecked), so a queue's head is never held
+// by a merge whose check was released.
+func (s *store) ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (MediationRelease, error) {
+	const op = "daemon.wsm.release_mediation"
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
+	if err != nil {
+		return MediationRelease{}, err
+	}
+	var out MediationRelease
+	err = s.write(ctx, op, dlog.Context{"repo": string(key), "owed_at": nanos(owed)}, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_resumed_owed_at = NULL, mediation_window = '', mediation_window_start = NULL, mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_dispatched = 0, mediation_dispatched_at = NULL, mediation_escalation_brief = '', mediation_escalation_told = 0, mediation_fixer_turn = '', mediation_fixer_brief = '', mediation_fixer_origin = 0 WHERE repo_key = ? AND mediation_owed_at = ?`,
+			key, nanos(owed))
+		if err != nil {
+			return err
+		}
+		if out.Released, err = touchedRow(res); err != nil || !out.Released {
+			return err
+		}
+		out.Deploying, err = endDeployingMergeInTx(ctx, tx, key, DeployingChecked)
+		return err
+	})
+	if err != nil {
+		return MediationRelease{}, err
+	}
+	return out, nil
 }
 
 // mediationWrite runs QUERY against the mediation of REPO owed at OWED, its

@@ -477,7 +477,7 @@ func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed t
 	return f.checks.EscalateMediation(ctx, repo, owed, brief)
 }
 
-func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
+func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (wsm.MediationRelease, error) {
 	f.mu.Lock()
 	hook, err := f.onRelease, f.mediationReleaseErr
 	f.mu.Unlock()
@@ -485,7 +485,7 @@ func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed ti
 		hook()
 	}
 	if err != nil {
-		return false, err
+		return wsm.MediationRelease{}, err
 	}
 	defer f.holdWritten()
 	return f.checks.ReleaseMediation(ctx, repo, owed)
@@ -511,14 +511,29 @@ func (f *fakeDB) DeployingMergeOf(ctx context.Context, repo wsm.RepoKey) (*wsm.D
 	return f.checks.DeployingMergeOf(ctx, repo)
 }
 
-func (f *fakeDB) EndDeployingMerge(ctx context.Context, repo wsm.RepoKey) (*wsm.DeployingMerge, error) {
+func (f *fakeDB) EndDeployingMerge(ctx context.Context, repo wsm.RepoKey, from wsm.DeployingStage) (*wsm.DeployingMerge, error) {
 	f.mu.Lock()
 	err := f.deployingEndErr
 	f.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	return f.checks.EndDeployingMerge(ctx, repo)
+	defer f.holdWritten()
+	return f.checks.EndDeployingMerge(ctx, repo, from)
+}
+
+func (f *fakeDB) CoverDeployingMerges(ctx context.Context) (int, error) {
+	return f.checks.CoverDeployingMerges(ctx)
+}
+
+func (f *fakeDB) UncheckedDeployingMerges(ctx context.Context) ([]wsm.DeployingMerge, error) {
+	f.mu.Lock()
+	err := f.deployingReadErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return f.checks.UncheckedDeployingMerges(ctx)
 }
 
 func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediation, error) {

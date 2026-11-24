@@ -113,8 +113,10 @@ func (h *mediationHook) deathReaped() {
 
 // servingSettled is told once this daemon owns everything it serves, at a
 // fresh boot's settle or a successor's takeover, and owes the check of every
-// death reaped before it (deathReaped), answering whether it owed one. Its
-// rounds are the caller's.
+// death reaped before it (deathReaped), answering whether it owed one. Then
+// it deploys again every landing whose deploy never owed its check
+// (merge.Orchestrator.DeployUncheckedLandings): the deploy a predecessor was
+// asked for died with it. Its rounds are the caller's.
 func (h *mediationHook) servingSettled() bool {
 	h.mu.Lock()
 	h.serving = true
@@ -123,6 +125,10 @@ func (h *mediationHook) servingSettled() bool {
 	h.mu.Unlock()
 	if owed {
 		h.crashed()
+	}
+	if o := h.bound("serving_settled"); o != nil {
+		// A read that fails is recorded by the orchestrator.
+		_ = o.DeployUncheckedLandings(h.ctx)
 	}
 	return owed
 }

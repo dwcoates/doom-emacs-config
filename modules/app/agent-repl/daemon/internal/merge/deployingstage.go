@@ -24,12 +24,23 @@ import (
 // record is durable (wsm.DeployingMerge), since the deploy replaces the
 // daemon that wrote it.
 //
-// THIS IS DRAWING AND MEASURING ONLY. The queue's hold on the check
-// (deployHold) decides when its head advances, and nothing here reads or
-// moves it.
+// THE RECORD HOLDS THE QUEUE'S HEAD (deployHold), TAKEN IN THE TEARDOWN'S
+// OWN STEP. The teardown records it before its run leaves the line and
+// before it kicks the queue's pump, so no admission can come between the
+// landing and its hold. The check its deploy owes is owed only at the
+// deploy's Building edge, asynchronously after the kick (2026-11-24: the pump
+// admitted the next merge in that instant, and the sidebar kept it as the
+// head while the landed merge's check ran). The record's stage
+// (wsm.DeployingStage) ties it to the deploy that carries it, so only that
+// deploy's check ends it, and its release ends it in the same write: the
+// head is held at every instant from the teardown to that check's end.
+//
+// A LANDING WHOSE DEPLOY NEVER OWED ITS CHECK is deployed again once a daemon
+// serves (DeployUncheckedLandings): the deploy its predecessor was asked for
+// is not carried across a restart, and nothing else would end the hold.
 //
 // THE STEP IS MEASURED ONCE (agentrepl_merge_step_seconds{step="deploying"}):
-// at the check's end when the deploy is checked (endDeployingMerge), at the
+// at the check's end when the deploy is checked (closeDeploying), at the
 // run's teardown otherwise (settleDeploying).
 
 // deployingSpan is a run's stretch on its deploying step: when it began and
@@ -75,7 +86,11 @@ func (r *run) settleDeploying(ctx context.Context, out outcome) {
 		r.o.observeDeploying(span)
 		return
 	}
+	// A LANDED MERGE STILL DEPLOYING HOLDS THE HEAD (deployHold), so no
+	// later landing tears down beside it: one replaced is a broken
+	// invariant, recorded at ERROR, and its stage is measured as superseded.
 	if replaced != nil {
+		r.o.log(ctx, r.ws).Error(op, "a landing tore down while an earlier landed merge still deploying held its queue's head; the hold was broken", withField(withField(fields, "replaced", string(replaced.Workspace)), "replaced_stage", replaced.Stage.String()))
 		r.o.closeDeploying(*replaced, MediationSuperseded)
 	}
 	r.o.log(ctx, r.ws).Info(op, "the landed merge is drawn deploying until its deploy's check ends", withField(withField(fields, "timed", m.Timed), "deploying_since", m.DeployingSince.UTC().Format(time.RFC3339Nano)))
@@ -109,20 +124,65 @@ func (r *run) deployingMerge(ctx context.Context, span deployingSpan) (wsm.Deplo
 	}, nil
 }
 
-// endDeployingMerge ends REPO's landed merge still deploying, if one stands,
-// as its deploy's check ended OUTCOME: its deploying step is measured to now.
-// A failure is recorded at ERROR: the merge stays drawn deploying until the
-// next check's end takes it.
+// endDeployingMerge ends REPO's landed merge still deploying whose deploy
+// owes the check that ended OUTCOME without being released (an escalation, a
+// dispatch): its deploying step is measured to now. A merge a later deploy
+// carries is left holding the head (wsm.DeployingChecked). A failure is
+// recorded at ERROR: the merge holds the head until the check's release ends
+// it in the release's own write (wsm.ReleaseMediation).
 func (o *orchestrator) endDeployingMerge(ctx context.Context, repo wsm.RepoKey, outcome string) {
-	m, err := o.deps.DB.EndDeployingMerge(ctx, repo)
+	m, err := o.deps.DB.EndDeployingMerge(ctx, repo, wsm.DeployingChecked)
 	if err != nil {
-		o.deps.Log.Global().Error("daemon.merge.deploying", "could not end the landed merge's deploying stage as its check ended; it is drawn deploying until the next check ends", dlog.Context{
+		o.deps.Log.Global().Error("daemon.merge.deploying", "could not end the landed merge's deploying stage as its check ended; it holds the head until the check is released", dlog.Context{
 			"repo": string(repo), "outcome": outcome, "error": err.Error()})
 		return
 	}
 	if m != nil {
 		o.closeDeploying(*m, outcome)
 	}
+}
+
+// endUncheckedDeploying ends REPO's landed merge still deploying once a
+// deploy covered it, REPO checking no deploys now: that deploy owes it no
+// check (OweMediations), so nothing else would end its hold. One no deploy
+// covered yet holds on: its deploy is still to commit. A queue whose merge
+// ended is republished and kicked.
+func (o *orchestrator) endUncheckedDeploying(ctx context.Context, repo wsm.RepoKey) error {
+	m, err := o.deps.DB.EndDeployingMerge(ctx, repo, wsm.DeployingCovered)
+	if err != nil || m == nil {
+		return err
+	}
+	o.closeDeploying(*m, MediationUnmediated)
+	o.republishMediation(ctx, repo)
+	o.kick(repo)
+	return nil
+}
+
+// DeployUncheckedLandings implements Orchestrator: every landed merge still
+// deploying whose deploy owes no check yet, read once this daemon serves, is
+// deployed again (Trigger.Landed). The deploy a predecessor was asked for
+// lives in that daemon only, so a restart between a landing and its deploy's
+// check would leave the merge holding its queue's head with no deploy coming
+// to cover and check it. A landing deployed already makes the deploy change
+// nothing, which releases its check (ReleaseUnchangedDeploy). A read that
+// fails is recorded at ERROR and answered: the merges hold their queues.
+func (o *orchestrator) DeployUncheckedLandings(ctx context.Context) error {
+	const op = "daemon.merge.deploying"
+	unchecked, err := o.deps.DB.UncheckedDeployingMerges(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the landed merges whose deploy owes no check; they hold their queues' heads until a deploy checks them", dlog.Context{"error": err.Error()})
+		return err
+	}
+	if len(unchecked) == 0 {
+		return nil
+	}
+	merges := make([]string, 0, len(unchecked))
+	for _, m := range unchecked {
+		merges = append(merges, fmt.Sprintf("%s:%s:%s", m.Repo, m.Workspace, m.Stage))
+	}
+	o.deps.Log.Global().Info(op, "landed merges still deploying owe no check from a deploy; their landing is deployed again", dlog.Context{"merges": merges})
+	o.deps.Rollout.Landed(ctx, nil)
+	return nil
 }
 
 // closeDeploying measures M's deploying step, when its record is timed, to

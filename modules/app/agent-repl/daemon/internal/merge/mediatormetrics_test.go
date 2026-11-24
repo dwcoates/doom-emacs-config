@@ -250,7 +250,7 @@ func TestALandedFinishCountsTheMediatorsRunByWhatItServed(t *testing.T) {
 			// A finish no dispatched check holds serves an escalation the
 			// user settles with the mediator.
 			if tt.escalation {
-				if released, err := h.db.ReleaseMediation(context.Background(), mediationKey(h), deployStarted); err != nil || !released {
+				if released, err := h.db.ReleaseMediation(context.Background(), mediationKey(h), deployStarted); err != nil || !released.Released {
 					t.Fatalf("ReleaseMediation = (%v, %v)", released, err)
 				}
 			}

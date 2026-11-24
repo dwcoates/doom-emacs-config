@@ -93,7 +93,7 @@ func TestReleaseMediationClearsOnlyTheMediationItNames(t *testing.T) {
 
 			// Assert
 			m, rerr := s.MediationOf(ctx, repo)
-			if err != nil || rerr != nil || released == tt.wantOwed || (m != nil) != tt.wantOwed {
+			if err != nil || rerr != nil || released.Released == tt.wantOwed || (m != nil) != tt.wantOwed {
 				t.Fatalf("released %v, owed %+v (%v, %v); want owed %v", released, m, err, rerr, tt.wantOwed)
 			}
 		})

@@ -1306,6 +1306,14 @@ type failingDB struct {
 	wsm.DB
 	oweErr, coverErr, owedErr, payErr error
 	coverLandingsErr, takeLandingsErr error
+	coverDeployingErr                 error
+}
+
+func (d failingDB) CoverDeployingMerges(ctx context.Context) (int, error) {
+	if d.coverDeployingErr != nil {
+		return 0, d.coverDeployingErr
+	}
+	return d.DB.CoverDeployingMerges(ctx)
 }
 
 func (d failingDB) CoverUndeployedLandings(ctx context.Context) (int, error) {
@@ -1475,6 +1483,45 @@ func TestCoverOwedThatFailsIsAnErrorRecordedWithItsCause(t *testing.T) {
 		t.Fatal("CoverOwed = nil, want the failure")
 	}
 	if r, ok := f.recordWith(dlog.LevelError, "could not mark the owed landing reports covered by the deploy; they wait for the next one"); !ok || r.Context["cause"] != "locked" {
+		t.Fatalf("the failure was not recorded at ERROR with its cause: %+v", f.logs.Records())
+	}
+}
+
+func TestCoverOwedCoversTheLandedMergesStillDeploying(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	repo := wsm.RepoKey(t.TempDir())
+	if _, err := f.db.RecordDeployingMerge(context.Background(), wsm.DeployingMerge{Repo: repo, Workspace: "ws-merge", Lease: "lease-1",
+		Credited: "ws-merge", Name: "sample-merge", TargetDir: "/w/doom", ActiveSince: time.Unix(1, 0), DeployingSince: time.Unix(2, 0)}); err != nil {
+		t.Fatalf("RecordDeployingMerge: %v", err)
+	}
+
+	// Act
+	err := f.svc.CoverOwed(context.Background())
+
+	// Assert
+	m, readErr := f.db.DeployingMergeOf(context.Background(), repo)
+	if err != nil || readErr != nil || m == nil || m.Stage != wsm.DeployingCovered {
+		t.Fatalf("CoverOwed = %v; deploying merge %+v, %v; want it covered", err, m, readErr)
+	}
+	if r, ok := f.recordWith(dlog.LevelInfo, "the deploy covers the landing reports owed before it"); !ok || r.Context["deploying_merges"] != 1 {
+		t.Fatalf("the cover was not recorded at INFO with the merges it covered: %+v", f.logs.Records())
+	}
+}
+
+func TestCoverOwedThatCannotCoverTheLandedMergesIsAnErrorRecordedWithItsCause(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.withDB(failingDB{DB: f.db, coverDeployingErr: errors.New("locked")})
+
+	// Act
+	err := f.svc.CoverOwed(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("CoverOwed = nil, want the failure")
+	}
+	if r, ok := f.recordWith(dlog.LevelError, "could not mark the landed merges still deploying covered by the deploy; they hold their queues until a deploy covers them"); !ok || r.Context["cause"] != "locked" {
 		t.Fatalf("the failure was not recorded at ERROR with its cause: %+v", f.logs.Records())
 	}
 }

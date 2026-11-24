@@ -564,6 +564,12 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 			}
 			continue
 		}
+		if err := o.endUncheckedDeploying(ctx, q.key); err != nil {
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, logsite.Msg("could not end the landed merge deploying in a repository that checks no deploys; it holds its queue until the next pass"), err) {
+				return
+			}
+			continue
+		}
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
 			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, logsite.Msg("could not read whether a repository that checks no deploys owes a check"), err) {
@@ -634,12 +640,17 @@ func owes(m *wsm.Mediation, owed time.Time) bool {
 // chain's last. It answers whether it released it; one a newer deploy
 // replaced, or a decision released already, is not.
 func (o *orchestrator) releaseCheck(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, outcome string) (bool, error) {
-	released, err := o.deps.DB.ReleaseMediation(ctx, repo, m.OwedAt)
-	if err != nil || !released {
+	release, err := o.deps.DB.ReleaseMediation(ctx, repo, m.OwedAt)
+	if err != nil || !release.Released {
 		return false, err
 	}
 	o.endChain(ctx, repo, m, outcome)
-	o.endDeployingMerge(ctx, repo, outcome)
+	// THE LANDED MERGE THE CHECK WAS OWED OF ENDED IN THE RELEASE'S OWN
+	// WRITE (wsm.ReleaseMediation), so the head is never held by it once
+	// the check is released; its stage is measured here.
+	if release.Deploying != nil {
+		o.closeDeploying(*release.Deploying, outcome)
+	}
 	// A CHECK RELEASED WITH NOTHING TO FIX IS QUIET: approved, or a deploy
 	// that changed nothing. It compacts the mediator only past
 	// QuietCheckCompactionTokens (noteQuietCheck).
@@ -1252,8 +1263,11 @@ func (o *orchestrator) releasedCheck(ctx context.Context, repo wsm.RepoKey, why 
 
 // heldByWords is how a record names what holds a queue (deployHold.heldBy).
 func heldByWords(by string) string {
-	if by == heldByRemediationFinish {
+	switch by {
+	case heldByRemediationFinish:
 		return "the deploy mediator's remediation finish under way, until the mediator approves its deploy"
+	case heldByDeployingMerge:
+		return "a landed merge whose deploy owes its check next"
 	}
 	return "the check a newer deploy owes"
 }

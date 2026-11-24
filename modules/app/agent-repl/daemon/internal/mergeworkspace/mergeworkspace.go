@@ -259,9 +259,11 @@ func compactsAfter(mergeWS wsm.Workspace, out merge.DetachedOutcome) bool {
 	return out.Kind == merge.DetachedLanded && mergeWS.MergeOf != nil && mergeWS.MergeOf.CompactAfter
 }
 
-// CoverOwed marks every owed report covered by the deploy committing now: what
-// that deploy builds carries every landing before this instant. A failure is
-// recorded and returned; the reports stay owed for the next deploy.
+// CoverOwed marks every owed report, every landing waiting for its deploy and
+// every landed merge still deploying covered by the deploy committing now:
+// what that deploy builds carries every landing before this instant. A
+// failure is recorded and returned; what was not covered waits for the next
+// deploy.
 func (s *Service) CoverOwed(ctx context.Context) error {
 	log := s.deps.Log.Global()
 	covered, err := s.deps.DB.CoverOwedHandBacks(ctx)
@@ -274,7 +276,15 @@ func (s *Service) CoverOwed(ctx context.Context) error {
 		log.Error(op, "could not mark the landings waiting for a deploy covered by it; the next deploy's notice names them", dlog.WithCause(dlog.Context{"covered": covered}, err))
 		return err
 	}
-	log.Info(op, "the deploy covers the landing reports owed before it", dlog.Context{"covered": covered, "landings": landings})
+	// THE LANDED MERGES STILL DEPLOYING ARE COVERED HERE TOO, after the
+	// deploy committed and before it reads the checkout: the check this
+	// deploy owes ends exactly the merges it carries (wsm.DeployingStage).
+	deploying, err := s.deps.DB.CoverDeployingMerges(ctx)
+	if err != nil {
+		log.Error(op, "could not mark the landed merges still deploying covered by the deploy; they hold their queues until a deploy covers them", dlog.WithCause(dlog.Context{"covered": covered, "landings": landings}, err))
+		return err
+	}
+	log.Info(op, "the deploy covers the landing reports owed before it", dlog.Context{"covered": covered, "landings": landings, "deploying_merges": deploying})
 	return nil
 }
 
