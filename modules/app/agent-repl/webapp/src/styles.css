@@ -797,6 +797,11 @@ body {
      that element's own containing block. Every rail margin reads it rather
      than restating the arithmetic. */
   --agent-rail-inset: calc((100% - var(--agent-bubble-cap)) / 2);
+  /* THE FEED'S SIDE PADDING: the gap between the feed's edge and #feed's
+     content box, whose width the column's cap is a percent of. Named because
+     the margin stamp (.feed-margin-stamp) adds it to the rail inset to span
+     the whole margin right of the column. */
+  --feed-pad-x: 1rem;
   /* THE SCROLLBAR RIDES THE INNER EDGE (same ruling): "ensure the scrollbar of
      the response bubble (and all bubbles, in fact) abuts (or close to) the
      right hand side of the bubble". A bubble's own right padding used to sit
@@ -2651,7 +2656,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 #feed {
   /* No bottom padding: the gap below the last row is the band's trailing
      spacer (#feed-scroll::after), which the held section also rests on. */
-  padding: 1rem 1rem 0;
+  padding: 1rem var(--feed-pad-x) 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -10552,21 +10557,31 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    the label's purple. */
 #ws-sidebar .repo.merged-section > .repo-head .sb-count[data-section-count] { color: var(--muted); }
 
-/* THE HOVERED ROW'S TIME AND AGE (src/feed/margin-stamp.ts; owner request,
-   2026-11-21): in the feed's right margin, level with the row, faded in and
-   out by opacity alone, never moved. On two lines (time, then age), in the
-   response bubbles' serif face, smaller than the thinking bubble's text. */
+/* THE HOVERED ROW'S TIME AND AGE (src/feed/margin-stamp.ts; owner requests,
+   2026-11-21 and 2026-11-23): in the feed's right margin, faded in and out by
+   opacity alone, never slid. On two lines (time, then age), in the response
+   bubbles' serif face, small and grey. Down, the script sets `top` to the
+   middle of the row's visible part, and the translate centers the stamp on
+   it. Across, the box spans #feed's content box (the width the column's cap
+   is a percent of), so inside it the lines' box starts at the column's right
+   rail and reaches the feed's right edge, and the lines center in it. */
 .feed-margin-stamp {
   position: absolute;
-  right: 0.75rem;
+  left: var(--feed-pad-x);
+  right: var(--feed-pad-x);
+  transform: translateY(-50%);
   opacity: 0;
   transition: opacity 0.15s ease;
   pointer-events: none;
   white-space: nowrap;
-  text-align: right;
   font-family: var(--serif-font-family);
-  font-size: calc(var(--small-prose-font-rem) * 0.85rem * var(--feed-text-scale));
-  color: var(--thinking-text);
+  font-size: calc(var(--small-prose-font-rem) * 0.75rem * var(--feed-text-scale));
+  color: var(--muted);
+}
+.feed-margin-stamp-lines {
+  margin-left: calc(100% - var(--agent-rail-inset));
+  width: calc(var(--agent-rail-inset) + var(--feed-pad-x));
+  text-align: center;
 }
 .feed-margin-stamp[data-shown] {
   opacity: 1;
