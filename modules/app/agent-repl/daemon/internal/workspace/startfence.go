@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/shimclient"
 )
 
@@ -80,14 +81,16 @@ func (f *Fleet) FenceStarts(ctx context.Context, ws ids.WorkspaceID) (release fu
 	gate := f.startGate(ws)
 	locked := make(chan struct{})
 	abandoned := make(chan struct{})
-	go func() {
+	// THE WAITER IS WORK IN FLIGHT until it takes the gate, abandoned or
+	// not: a fence given up still holds it until the start returns.
+	inflight.Go(func() {
 		gate.Lock()
 		select {
 		case locked <- struct{}{}:
 		case <-abandoned:
 			gate.Unlock()
 		}
-	}()
+	})
 	select {
 	case <-locked:
 		return func() {
