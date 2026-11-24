@@ -776,7 +776,7 @@ func TestACollapseThatLandsTheSelectionRecordsTheLandingAtInfo(t *testing.T) {
 	// Assert
 	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opFoldSubsection,
 		Message: "the collapse moved the selection off the folded subsection to the workspace selected before"})
-	if !ok || record.Context["from"] != "inside" || record.Context["by"] != string(sidebar.LandedByRecency) {
+	if !ok || record.Context["from"] != "inside" || record.Context["by"] != string(sidebar.LandedByRepository) {
 		t.Fatalf("no info record names the landing off the folded subsection; records = %+v", f.log.logger.Records())
 	}
 }

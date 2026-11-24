@@ -291,7 +291,7 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 					fmt.Sprintf("the %s holds the current workspace %q; collapsing it would stand that workspace down", spec.what, ws.ID),
 					false)
 			}
-			if err := v.landOffFold(ctx, log, spec, members, ws.ID); err != nil {
+			if err := v.landOffFold(ctx, log, spec, members, ws); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -307,18 +307,20 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 	return workspaces, members, nil
 }
 
-// landOffFold moves the selection off CURRENT, which the collapse SPEC is
-// about to fold away (its MEMBERS), to the workspace the user was on before
-// among the tabs the collapse leaves drawn (sidebar.LandingTarget, the
+// landOffFold moves the selection off FROM, the current workspace the
+// collapse SPEC is about to fold away (its MEMBERS), to the workspace
+// nearest it the user selected most recently among the tabs the collapse
+// leaves drawn (sidebar.LandingTarget, the
 // question the roster asks to decide whether a collapse may be asked). It runs
 // under the selection lock, which recordFold holds. With nowhere to land the
 // collapse is refused holds_current and the selection stands.
-func (v *verbs) landOffFold(ctx context.Context, log dlog.Logger, spec foldTabsSpec, members wsm.FoldMembers, current ids.WorkspaceID) error {
+func (v *verbs) landOffFold(ctx context.Context, log dlog.Logger, spec foldTabsSpec, members wsm.FoldMembers, from wsm.Workspace) error {
+	current := from.ID
 	reg, err := v.readRegistry(ctx, log, spec.op)
 	if err != nil {
 		return fmt.Errorf("fold %s %q: the registry could not be read to land off %q: %w", spec.what, spec.target, current, err)
 	}
-	target, by, found := sidebar.LandingTarget(sidebar.Tabs(reg, log), current, members)
+	target, by, found := sidebar.LandingTarget(reg, sidebar.Tabs(reg, log), from, members)
 	if !found {
 		return refuse(log, "UpdateSidebarView", ArmHoldsCurrent,
 			fmt.Sprintf("the %s holds the current workspace %q and no other open workspace is drawn to land on; collapsing it would stand that workspace down", spec.what, current),

@@ -1531,12 +1531,12 @@ func TestHidingTheCurrentWorkspaceLandsOnTheOneSelectedBeforeIt(t *testing.T) {
 	}
 	landed := false
 	for _, r := range f.log.logger.Records() {
-		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w4" && r.Context["hidden"] == "w3" && r.Context["by"] == string(sidebar.LandedByRecency) {
+		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w4" && r.Context["hidden"] == "w3" && r.Context["by"] == string(sidebar.LandedByRepository) {
 			landed = true
 		}
 	}
 	if !landed {
-		t.Fatalf("no info record names the recency landing; records = %+v", f.log.logger.Records())
+		t.Fatalf("no info record names the repository landing; records = %+v", f.log.logger.Records())
 	}
 }
 
