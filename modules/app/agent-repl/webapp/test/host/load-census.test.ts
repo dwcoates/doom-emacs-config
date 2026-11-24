@@ -8,6 +8,7 @@ import {
   CENSUS_EVERY_MS,
   STALL_PROBE_MS,
   STALL_THRESHOLD_MS,
+  heldFrames,
   installLoadCensus,
   summarize,
   type LoadCensus,
@@ -75,8 +76,13 @@ async function records(operation: string): Promise<Record<string, unknown>[]> {
     .map((record) => ({ level: record.level.case, message: record.message, ...(record.context ?? {}) }));
 }
 
-function install(): void {
-  census = installLoadCensus(document, {
+/** Let the frames observer's batch run. */
+async function observed(): Promise<void> {
+  await Promise.resolve();
+}
+
+function install(reportsFrames = false): void {
+  census = installLoadCensus(document, reportsFrames, {
     doc: document,
     now: () => clock,
     after: (fn, ms) => {
@@ -324,6 +330,147 @@ describe("the census", () => {
 
     // Assert
     expect(timers).toEqual([]);
+    expect(await records("webhost.census")).toEqual([]);
+  });
+
+  it("names no frames in the sidebar document's census", async () => {
+    // Arrange
+    addPage("a", 0);
+    install(false);
+
+    // Act
+    advance(CENSUS_EVERY_MS);
+
+    // Assert
+    const counts = await records("webhost.census");
+    expect(counts[0]).not.toHaveProperty("frames");
+    expect(counts[0]).not.toHaveProperty("trigger");
+  });
+});
+
+describe("heldFrames", () => {
+  it("names each workspace once, sorted, though a replaced page holds two frames", () => {
+    // Arrange
+    addPage("b", 0);
+    addPage("a", 0);
+    addPage("b", 0);
+
+    // Act
+    const frames = heldFrames(document);
+
+    // Assert
+    expect(frames).toEqual(["a", "b"]);
+  });
+
+  it("names none when no frame stands", () => {
+    // Act
+    const frames = heldFrames(document);
+
+    // Assert
+    expect(frames).toEqual([]);
+  });
+});
+
+describe("the host's frames", () => {
+  it("names the frames it holds in every census interval's record, as a tick", async () => {
+    // Arrange
+    addPage("b", 0);
+    addPage("a", 0, true);
+    install(true);
+
+    // Act
+    advance(CENSUS_EVERY_MS);
+
+    // Assert
+    const counts = await records("webhost.census");
+    expect(counts).toHaveLength(1);
+    expect(counts[0]?.frames).toEqual(["a", "b"]);
+    expect(counts[0]?.trigger).toBe("tick");
+  });
+
+  it("takes a census of its own when a frame is added", async () => {
+    // Arrange
+    install(true);
+
+    // Act
+    addPage("a", 0);
+    await observed();
+
+    // Assert
+    const counts = await records("webhost.census");
+    expect(counts).toHaveLength(1);
+    expect(counts[0]?.frames).toEqual(["a"]);
+    expect(counts[0]?.trigger).toBe("change");
+  });
+
+  it("takes a census of its own when a frame is removed", async () => {
+    // Arrange
+    const frame = addPage("a", 0);
+    install(true);
+
+    // Act
+    frame.remove();
+    await observed();
+
+    // Assert
+    const counts = await records("webhost.census");
+    expect(counts).toHaveLength(1);
+    expect(counts[0]?.frames).toEqual([]);
+    expect(counts[0]?.trigger).toBe("change");
+  });
+
+  it("takes one census for a batch of frames added in one task", async () => {
+    // Arrange
+    install(true);
+
+    // Act
+    addPage("a", 0);
+    addPage("b", 0);
+    await observed();
+
+    // Assert
+    const counts = await records("webhost.census");
+    expect(counts).toHaveLength(1);
+    expect(counts[0]?.frames).toEqual(["a", "b"]);
+  });
+
+  it("takes no census for a change that leaves the same workspaces held", async () => {
+    // Arrange
+    addPage("a", 0);
+    install(true);
+
+    // Act
+    addPage("a", 0);
+    document.body.append(document.createElement("div"));
+    await observed();
+
+    // Assert
+    expect(await records("webhost.census")).toEqual([]);
+  });
+
+  it("takes no census of a change in the sidebar document", async () => {
+    // Arrange
+    install(false);
+
+    // Act
+    addPage("a", 0);
+    await observed();
+
+    // Assert
+    expect(await records("webhost.census")).toEqual([]);
+  });
+
+  it("stops watching the frames when stopped", async () => {
+    // Arrange
+    install(true);
+
+    // Act
+    census?.stop();
+    census = null;
+    addPage("a", 0);
+    await observed();
+
+    // Assert
     expect(await records("webhost.census")).toEqual([]);
   });
 });

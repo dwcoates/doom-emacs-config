@@ -1014,9 +1014,9 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	// stream or is retired here.
 	if host && delta < 0 && !hops.hostStream {
 		s.deps.Queue.EditorGone(ws)
-		// AND SO IS THE WORKSPACE'S PAGE STATE (pageheld): Emacs restates it
-		// on its next host subscribe, so no page stays counted that no web
-		// view holds.
+		// AND SO IS EMACS'S REPORT OF THE WORKSPACE'S PAGE (pageheld): Emacs
+		// restates it on its next host subscribe. Which pages are counted
+		// held is the web host's census, scoped to its own page stream.
 		s.deps.HeldPages.Forget(ws)
 	}
 

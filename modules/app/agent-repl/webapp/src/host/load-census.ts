@@ -15,6 +15,13 @@
  * and the size of its own document, which holds the rail.
  *
  * - THE CENSUS: every CENSUS_EVERY_MS, that state.
+ * - THE FRAMES IT HOLDS (the host document only, `reportsFrames`): every
+ *   census names the workspaces it holds a frame for (`frames`), and a change
+ *   to them is a census of its own (`trigger: change`), so the daemon counts
+ *   the pages the web view truly holds and compares them with what Emacs
+ *   reports it asked for (daemon/internal/pageheld). Emacs's own table is what
+ *   it asked the host to hold: a call made while no host stood, a reload that
+ *   retired every frame, or a call the host failed leaves the two apart.
  * - THE STALL PROBE: a heartbeat on a clock the main thread cannot delay (a
  *   worker's) posts a message to the main thread every STALL_PROBE_MS; a
  *   message delivered STALL_THRESHOLD_MS or more after it was sent means the
@@ -31,7 +38,7 @@ import { CENSUS_EVERY_MS } from "../page-census.js";
 import { every, pageAfter, type After } from "../every.js";
 import { workerHeartbeat, type Heartbeat } from "./stall-heartbeat.js";
 import { FRAME_SHOWN_ATTRIBUTE, FRAME_WORKSPACE_ATTRIBUTE } from "./host.js";
-import { queryAll } from "../dom.js";
+import { pageMutationObserver, queryAll } from "../dom.js";
 
 const log = createLogger("webapp.host.load-census");
 
@@ -60,6 +67,22 @@ export function summarize(doc: Document): CensusSummary {
   };
 }
 
+/**
+ * Every workspace DOC holds a frame for, once each and sorted: a page being
+ * replaced holds two frames for one workspace until the fresh one draws.
+ */
+export function heldFrames(doc: Document): string[] {
+  const ids = new Set<string>();
+  for (const frame of queryAll<HTMLIFrameElement>(doc, `iframe[${FRAME_WORKSPACE_ATTRIBUTE}]`)) {
+    const id = frame.getAttribute(FRAME_WORKSPACE_ATTRIBUTE);
+    if (id !== null && id !== "") ids.add(id);
+  }
+  return [...ids].sort();
+}
+
+/** Why a census was taken: its period came round, or the frames changed. */
+export type CensusTrigger = "tick" | "change";
+
 /** What the census needs from its environment, injectable for tests. */
 export interface LoadCensusEnv {
   readonly doc: Document;
@@ -75,9 +98,14 @@ export interface LoadCensus {
   stop(): void;
 }
 
-/** Install the census and the stall probe on the webhost's DOC. */
+/**
+ * Install the census and the stall probe on the webhost's DOC. REPORTS_FRAMES
+ * is set for the host document alone, which holds the workspaces' frames; the
+ * sidebar document holds none.
+ */
 export function installLoadCensus(
   doc: Document,
+  reportsFrames: boolean,
   env: LoadCensusEnv = {
     doc,
     now: () => performance.now(),
@@ -112,18 +140,37 @@ export function installLoadCensus(
     }, { late });
   });
 
-  const stopCensus = every(after, CENSUS_EVERY_MS, () => {
+  const census = (trigger: CensusTrigger): void => {
     const { pages, ...summary } = summarize(env.doc);
+    const frames = reportsFrames ? { frames: heldFrames(env.doc), trigger } : {};
     log.info("the webhost holds {pages} pages; its own document holds {dom_nodes} elements", {
       operation: "webhost.census",
-      context: { ...summary },
+      context: { ...summary, ...frames },
     }, { pages, dom_nodes: summary.host.dom_nodes });
-  });
+  };
+  const stopCensus = every(after, CENSUS_EVERY_MS, () => census("tick"));
+
+  // A CHANGE TO THE FRAMES IS A CENSUS OF ITS OWN, so the daemon's count
+  // follows a load or an unload at once rather than at the next period. The
+  // host appends every frame to its body (host.ts `frameParent`); one task's
+  // changes (a replay's many frames) arrive as one batch, so one census. The
+  // observer is the page's own (dom.ts), disconnected as the document hides.
+  let lastFrames = reportsFrames ? heldFrames(env.doc).join("\n") : "";
+  const observer = reportsFrames
+    ? pageMutationObserver(env.doc, () => {
+        const now = heldFrames(env.doc).join("\n");
+        if (now === lastFrames) return;
+        lastFrames = now;
+        census("change");
+      })
+    : null;
+  observer?.observe(env.doc.body, { childList: true });
 
   return {
     stop(): void {
       stopProbe();
       stopCensus();
+      observer?.disconnect();
       env.doc.removeEventListener("visibilitychange", onVisibility);
     },
   };

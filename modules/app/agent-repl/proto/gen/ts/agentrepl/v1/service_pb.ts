@@ -1568,7 +1568,8 @@ export const AgentRepl: GenService<{
   /**
    * Emacs loaded or dropped this workspace's page, or restates whether it
    * holds it, and why it was loaded: the daemon's page metrics and the
-   * sidebar's loaded-page count read it. See endpoint_report_page_state.proto.
+   * sidebar's loaded-page count read the reason, and compare what Emacs
+   * reports with the web host's frames. See endpoint_report_page_state.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.ReportPageState
    */

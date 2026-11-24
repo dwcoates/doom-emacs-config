@@ -14,13 +14,15 @@ import (
 	"agentrepl/logging/causelog"
 )
 
-// The page series: which pages Emacs's web view holds now, why each was
-// loaded and what its workspace's session is doing, read from the held-page
-// table (pageheld) when scraped; and every page load and unload Emacs
-// reported, by reason.
+// The page series: which pages Emacs's web view holds now (the frames the web
+// host reports), why each was loaded (Emacs's report, or `unreported`) and
+// what its workspace's session is doing, read from the held-page table
+// (pageheld) when scraped; and every page load and unload Emacs reported, by
+// reason.
 const (
 	// PagesLoadedName is how many pages the web view holds now, by the reason
-	// each was loaded and its workspace's session state.
+	// each was loaded and its workspace's session state: the frames the web
+	// host reports, each labelled with Emacs's reason or `unreported`.
 	PagesLoadedName = "agentrepl_pages_loaded"
 	// PageLoadsName counts every page load Emacs reported, by reason.
 	PageLoadsName = "agentrepl_page_loads_total"
@@ -164,7 +166,7 @@ func (s *Surface) RegisterPages(pages *pageheld.Table, census sessionwhy.Census,
 	}
 	c := &pagesCollector{
 		pages: pages, census: census, recorded: recorded, log: s.log,
-		loaded: prometheus.NewDesc(PagesLoadedName, "Pages Emacs's web view holds now, by the reason each was loaded and its workspace's session state.", []string{"reason", "session"}, nil),
+		loaded: prometheus.NewDesc(PagesLoadedName, "Pages Emacs's web view holds now, as the web host reports its frames, by the reason Emacs gave for each load (or unreported) and its workspace's session state.", []string{"reason", "session"}, nil),
 	}
 	if err := s.srv.Registry().Register(c); err != nil {
 		return fmt.Errorf("runtimemetrics: register the loaded-pages collector: %w", err)

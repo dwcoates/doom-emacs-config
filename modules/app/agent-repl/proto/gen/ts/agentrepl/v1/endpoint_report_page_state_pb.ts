@@ -9,7 +9,16 @@
 // ELIGIBLE and never says whether the page is held. This report is how the
 // daemon's metrics (agentrepl_pages_loaded, agentrepl_page_loads_total,
 // agentrepl_page_unloads_total) and the sidebar's count of loaded pages learn
-// which pages the web view actually holds.
+// why each page was loaded and what Emacs asked the web view to hold.
+//
+// THE WEB HOST'S FRAMES ARE THE TRUTH OF WHICH PAGES ARE HELD. Emacs records a
+// page held before the host has it (a call made while no host stands waits for
+// the host's replay, and a host reload retires every frame until it), and a
+// host call that failed leaves the host short of what Emacs asked. So the
+// counts read the frames the web host's census names (webapp/src/host/
+// load-census.ts, `webhost.census` `frames`), each labelled with the reason
+// this report gave, and the daemon records any disagreement between the two
+// that stands (daemon/internal/pageheld).
 //
 // THE STATE IS SCOPED TO THE WORKSPACE'S HOST STREAM. The daemon holds what
 // this report says only while a WatchHostWorkspace stream of the workspace

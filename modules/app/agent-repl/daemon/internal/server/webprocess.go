@@ -75,7 +75,8 @@ func (s *server) observePageCensus(log dlog.Logger, ws ids.WorkspaceID, record *
 }
 
 // observeWebhostCensus hands a webhost document's census to the stall beat,
-// recording one it cannot read at ERROR.
+// recording one it cannot read at ERROR, and the host document's frames to the
+// held-page table (observeHostFrames).
 func (s *server) observeWebhostCensus(record *agentreplv1.ClientLogRecord) {
 	if record.GetOperation() != webhostCensusOperation {
 		return
@@ -86,6 +87,94 @@ func (s *server) observeWebhostCensus(record *agentreplv1.ClientLogRecord) {
 		return
 	}
 	s.deps.StallBeat.Census(stallbeat.Document{Kind: stallbeat.KindWebhost, Name: doc}, at, c)
+	if doc == hostDocument {
+		s.observeHostFrames(record)
+	}
+}
+
+// hostDocument is the webhost document that holds every workspace's frame
+// (webapp/src/host/document.ts); the sidebar document holds none.
+const hostDocument = "host"
+
+// opHostFrames is the operation every record of the host's frames against
+// Emacs's report is written under.
+const opHostFrames = "daemon.server.host_frames"
+
+// observeHostFrames hands the frames the host document's census names to the
+// held-page table, the truth of which pages the web view holds, and records
+// each disagreement with Emacs's report that begins standing, at WARN once per
+// cause with both sets, and its clearing at INFO.
+//
+// A census with no `frames` is a host of a build older than the report, which
+// a deploy reloads onto the build it serves: recorded at DEBUG, the table
+// keeps what it had. So is a census from a document whose page stream does
+// not stand here (it ended, or the document dialed another daemon): the table
+// takes no frames nobody's stream scopes. A `connection_id`, `frames` or
+// `trigger` that cannot be read is the census's defect, at ERROR.
+func (s *server) observeHostFrames(record *agentreplv1.ClientLogRecord) {
+	fields := record.GetContext().AsMap()
+	if _, stated := fields["frames"]; !stated {
+		s.log.Debug(opHostFrames, "the host's census names no frames: a host of an older build", dlog.Context{"timestamp": record.GetTimestamp()})
+		return
+	}
+	conn, frames, tick, err := hostFramesOf(fields)
+	if err != nil {
+		unreadableCensus(s.log, record, err)
+		return
+	}
+	check, taken := s.deps.HeldPages.HostReported(conn, frames, tick)
+	if !taken {
+		s.log.Debug(opHostFrames, "the host's census came from a document whose page stream does not stand here; its frames are not taken",
+			dlog.Context{"connection_id": conn, "timestamp": record.GetTimestamp()})
+		return
+	}
+	for _, d := range check.Began {
+		s.log.Warn(opHostFrames, "the pages the web host holds and the pages Emacs reports holding disagree; the count follows the host", dlog.Context{
+			"cause": string(d.Cause), "workspaces": workspaceNames(d.Workspaces),
+			"host_frames": workspaceNames(d.Host), "emacs_pages": workspaceNames(d.Emacs),
+		})
+	}
+	for _, cause := range check.Cleared {
+		s.log.Info(opHostFrames, "the web host's frames and Emacs's report agree again", dlog.Context{"cause": string(cause)})
+	}
+}
+
+// hostFramesOf answers a host census's document connection, its frames and
+// whether it was a tick.
+func hostFramesOf(fields map[string]any) (string, []ids.WorkspaceID, bool, error) {
+	conn, ok := fields["connection_id"].(string)
+	if !ok || conn == "" {
+		return "", nil, false, fmt.Errorf("connection_id is %#v, not a document's connection", fields["connection_id"])
+	}
+	raw, ok := fields["frames"].([]any)
+	if !ok {
+		return "", nil, false, fmt.Errorf("frames is %#v, not a list of workspaces", fields["frames"])
+	}
+	frames := make([]ids.WorkspaceID, 0, len(raw))
+	for _, v := range raw {
+		id, ok := v.(string)
+		if !ok || id == "" {
+			return "", nil, false, fmt.Errorf("frames holds %#v, not a workspace id", v)
+		}
+		frames = append(frames, ids.WorkspaceID(id))
+	}
+	switch trigger := fields["trigger"]; trigger {
+	case "tick":
+		return conn, frames, true, nil
+	case "change":
+		return conn, frames, false, nil
+	default:
+		return "", nil, false, fmt.Errorf("trigger is %#v, not tick or change", trigger)
+	}
+}
+
+// workspaceNames answers WSS as strings, for a record's context.
+func workspaceNames(wss []ids.WorkspaceID) []string {
+	out := make([]string, len(wss))
+	for i, ws := range wss {
+		out[i] = string(ws)
+	}
+	return out
 }
 
 // unreadableCensus records a census that could not be read on LOG, the

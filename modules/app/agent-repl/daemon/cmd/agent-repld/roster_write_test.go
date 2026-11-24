@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 	"agentrepl/logging/logsite"
 )
 
@@ -18,6 +20,28 @@ import (
 type recordedWrite struct {
 	ws ids.WorkspaceID
 	v  int
+}
+
+func TestRosterWriteRecordsAWriteForAForgottenWorkspaceAtInfo(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := rosterWrite(log, "daemon.cmd.test_write", logsite.Msg("could not keep the test value durable"),
+		func(context.Context, ids.WorkspaceID, int) error {
+			return fmt.Errorf("wsm: workspace ws-1: %w", wsm.ErrNotFound)
+		},
+		func(v int) dlog.Context { return dlog.Context{"value": v} })
+
+	// Act
+	sink("ws-1", 7)
+
+	// Assert
+	if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError}); found {
+		t.Fatalf("records = %+v, want no ERROR for a forgotten workspace", log.Records())
+	}
+	record, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.cmd.test_write"})
+	if !found || record.Context["workspace"] != "ws-1" || record.Context["value"] != 7 || record.Context["cause"] == nil {
+		t.Fatalf("records = %+v, want an INFO record naming the workspace, the cause and the change", log.Records())
+	}
 }
 
 func TestRosterWrite(t *testing.T) {

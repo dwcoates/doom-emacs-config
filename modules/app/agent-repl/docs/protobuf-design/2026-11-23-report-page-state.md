@@ -60,3 +60,33 @@ carried forward with `ReportPageUnloading`'s refusal arms), then the one shape.
   `lisp/page-report.el`.
 
 Obviated-declaration sweep: nothing; the change only adds.
+
+## 2026-11-24: the web host's frames are the count
+
+Emacs's table (`agent-repl--webhost-pages`) is what it asked the host to hold,
+and it runs ahead of the host: a call made while no host stands is replayed only
+when the host loads, a host reload retires every frame until that replay, and a
+host call that failed leaves the host short. So `agentrepl_pages_loaded` and the
+sidebar's count read the frames the web host's census names, labelled with this
+report's reason (`unreported` for a frame Emacs reports no load of).
+
+- NO NEW CONTRACT: the host document's `webhost.census` record, which the daemon
+  already reads for the stall beat, gains `frames` (the workspace ids it holds
+  a frame for, once each) and `trigger` (`tick` at every census interval,
+  `change` when its frames change). The record's context stays untyped; the
+  daemon reads the two fields as it reads the census's size.
+- SCOPED TO THE HOST DOCUMENT'S PAGE STREAM, for the reason this record gives
+  for scoping Emacs's report: the table takes a census only from a document
+  whose `WatchPage` stream stands, and forgets its frames when that stream ends.
+- THE COMPARISON: a disagreement is recorded at WARN once per way it runs
+  (`host_only`, `emacs_only`), with both sets, when it stands at two
+  consecutive ticks with no Emacs report of the workspace between them, and its
+  clearing at INFO. The two parties report on separate connections, so a load
+  in flight shows one ahead of the other for the length of a report; that it
+  takes a whole census period to pass for a disagreement makes a false record
+  unlikely rather than impossible (accepted: the record is a diagnostic, and
+  the count itself follows the host either way).
+- IMPLEMENTATION: `pageheld.Table` (`HostAttached`, `HostGone`,
+  `HostReported`, `Snapshot`, `Reported`); `server.observeHostFrames`
+  (`daemon/internal/server/webprocess.go`); `server.holdWebhostPage` scopes the
+  frames; `webapp/src/host/load-census.ts` (`heldFrames`, `reportsFrames`).

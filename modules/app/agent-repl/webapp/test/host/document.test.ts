@@ -158,6 +158,27 @@ describe("startWebhostDocument", () => {
     expect(installedOn).toEqual([document]);
   });
 
+  it.each([
+    { document: "host" as const, reportsFrames: true },
+    { document: "sidebar" as const, reportsFrames: false },
+  ])("has the $document document's census report frames: $reportsFrames", ({ document: which, reportsFrames }) => {
+    // Arrange
+    const reported: boolean[] = [];
+    const made = quietWebhostRuntime(which).runtime;
+
+    // Act
+    started = startWebhostDocument(made, document, window, {
+      installCensus: (_doc, frames) => {
+        reported.push(frames);
+        return { stop: () => undefined };
+      },
+      webappBuild: () => "Web1",
+    });
+
+    // Assert
+    expect(reported).toEqual([reportsFrames]);
+  });
+
   it("ends, its requests aborted and its load census stopped, when it unloads for good", () => {
     // Arrange
     let stopped = 0;

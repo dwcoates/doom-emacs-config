@@ -1044,7 +1044,8 @@ type AgentReplClient interface {
 	ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error)
 	// Emacs loaded or dropped this workspace's page, or restates whether it
 	// holds it, and why it was loaded: the daemon's page metrics and the
-	// sidebar's loaded-page count read it. See endpoint_report_page_state.proto.
+	// sidebar's loaded-page count read the reason, and compare what Emacs
+	// reports with the web host's frames. See endpoint_report_page_state.proto.
 	ReportPageState(context.Context, *connect.Request[v1.ReportPageStateRequest]) (*connect.Response[v1.ReportPageStateResponse], error)
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it, and a gain answers the newest held banner's workspace,
@@ -3751,7 +3752,8 @@ type AgentReplHandler interface {
 	ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error)
 	// Emacs loaded or dropped this workspace's page, or restates whether it
 	// holds it, and why it was loaded: the daemon's page metrics and the
-	// sidebar's loaded-page count read it. See endpoint_report_page_state.proto.
+	// sidebar's loaded-page count read the reason, and compare what Emacs
+	// reports with the web host's frames. See endpoint_report_page_state.proto.
 	ReportPageState(context.Context, *connect.Request[v1.ReportPageStateRequest]) (*connect.Response[v1.ReportPageStateResponse], error)
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it, and a gain answers the newest held banner's workspace,

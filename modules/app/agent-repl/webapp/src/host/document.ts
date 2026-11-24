@@ -86,7 +86,7 @@ export function startWebhostRuntime(
 /** What the start may have injected, for a suite that drives it. */
 export interface WebhostDocumentDeps {
   /** Install the load census; the real one times the document itself. */
-  installCensus?: (doc: Document) => LoadCensus;
+  installCensus?: (doc: Document, reportsFrames: boolean) => LoadCensus;
   /** A client for the daemon at an address; one on that daemon's host origin when absent. */
   clientAt?: (address: string) => AgentReplClient;
   /** The webapp build the document was loaded from; read off its own entry script when absent. */
@@ -136,8 +136,9 @@ export function startWebhostDocument(
   const { connectionId, client, daemon } = runtime;
   const failures = createLocalFailures();
   // THE LOAD THE DOCUMENT PUTS ON ITS WEB PROCESS (load-census.ts), once its
-  // records have somewhere to go.
-  const census = (deps.installCensus ?? installLoadCensus)(doc);
+  // records have somewhere to go. The host document's census also names the
+  // workspaces it holds frames for; the sidebar holds none.
+  const census = (deps.installCensus ?? installLoadCensus)(doc, runtime.document === "host");
   // Text in either document copies and selects exactly as it does in a page.
   installTextAffordances(doc);
   // THE DOCUMENT STATES ITS BUILD AND ITS HOST'S RELOAD GENERATION on its

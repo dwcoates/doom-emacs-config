@@ -11,6 +11,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/stallbeat"
 )
 
@@ -254,4 +255,256 @@ func TestAWorkspaceSubscriptionTellsTheSupersededPageTracker(t *testing.T) {
 			}
 		})
 	}
+}
+
+// hostConn is the connection of the host document the frame tests attach.
+const hostConn = "webhost-host-1"
+
+// hostCensus is the host document's census naming FRAMES, taken for TRIGGER.
+func hostCensus(t *testing.T, frames []any, trigger string) *connect.Request[agentreplv1.ClientLogRequest] {
+	return webhostRecord(t, "webhost.census", censusStamp, map[string]any{
+		"webhost_document": "host", "connection_id": hostConn, "pages": len(frames),
+		"host": map[string]any{"dom_nodes": 1, "feed_rows": 0}, "frames": frames, "trigger": trigger,
+	})
+}
+
+// attachHost holds the host document's page stream on H for the test's
+// length, answering its release.
+func attachHost(t *testing.T, h *harness) func() {
+	t.Helper()
+	release := h.Server.(*server).holdWebhostPage(hostConn, &agentreplv1.WebhostPage{WebappBuild: "Web1"})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			release()
+		}
+	})
+	return func() { released = true; release() }
+}
+
+func TestAHostCensusIsTakenOnlyWhileItsDocumentsPageStreamStands(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+
+	// Act
+	if _, err := h.Client.ClientLog(context.Background(), hostCensus(t, []any{"a"}, "change")); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert
+	if got := h.HeldPages.Snapshot(); len(got) != 0 {
+		t.Fatalf("held pages = %v, want none from a document with no page stream", got)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.server.host_frames"})
+	if !ok || rec.Context["connection_id"] != hostConn {
+		t.Fatalf("records = %+v, want a debug record naming the connection", log.Records())
+	}
+}
+
+func TestTheHostsFramesGoWithItsPageStream(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	release := attachHost(t, h)
+	if _, err := h.Client.ClientLog(context.Background(), hostCensus(t, []any{"a"}, "change")); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Act
+	release()
+
+	// Assert
+	if got := h.HeldPages.Snapshot(); len(got) != 0 {
+		t.Fatalf("held pages = %v, want none once the host's stream ended", got)
+	}
+}
+
+func TestTheHostsCensusSetsTheHeldPages(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	attachHost(t, h)
+
+	// Act
+	if _, err := h.Client.ClientLog(context.Background(), hostCensus(t, []any{"a", "b"}, "change")); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert
+	got := h.HeldPages.Snapshot()
+	if len(got) != 2 || got["a"] != pageheld.LoadUnreported || got["b"] != pageheld.LoadUnreported {
+		t.Fatalf("held pages = %v, want a and b held, unreported", got)
+	}
+}
+
+func TestTheSidebarsCensusSetsNoHeldPages(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	attachHost(t, h)
+
+	// Act
+	if _, err := h.Client.ClientLog(context.Background(), webhostRecord(t, "webhost.census", censusStamp, map[string]any{
+		"webhost_document": "sidebar", "connection_id": hostConn, "pages": 0, "host": map[string]any{"dom_nodes": 1, "feed_rows": 0},
+		"frames": []any{"a"}, "trigger": "tick",
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert
+	if got := h.HeldPages.Snapshot(); len(got) != 0 {
+		t.Fatalf("held pages = %v, want none from the sidebar's census", got)
+	}
+}
+
+func TestAHostCensusWithNoFramesIsAnOlderBuildRecordedAtDebug(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	attachHost(t, h)
+	if _, err := h.Client.ClientLog(context.Background(), hostCensus(t, []any{"a"}, "change")); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Act
+	if _, err := h.Client.ClientLog(context.Background(), webhostRecord(t, "webhost.census", censusStamp, map[string]any{
+		"webhost_document": "host", "connection_id": hostConn, "pages": 1, "host": map[string]any{"dom_nodes": 1, "feed_rows": 0},
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert
+	if got := h.HeldPages.Snapshot(); len(got) != 1 {
+		t.Fatalf("held pages = %v, want the last frames kept", got)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.server.host_frames"}); !ok {
+		t.Fatalf("records = %+v, want a debug record of the census with no frames", log.Records())
+	}
+}
+
+func TestAHostCensusWhoseFramesCannotBeReadIsRecordedAndSetsNothing(t *testing.T) {
+	blank := ""
+	tests := []struct {
+		name string
+		// conn is the census's connection_id: hostConn when unset, none when
+		// noConn.
+		conn    *string
+		noConn  bool
+		frames  any
+		trigger any
+	}{
+		{name: "no connection", noConn: true, frames: []any{"a"}, trigger: "tick"},
+		{name: "a blank connection", conn: &blank, frames: []any{"a"}, trigger: "tick"},
+		{name: "frames that are not a list", frames: "a", trigger: "tick"},
+		{name: "a frame that is not a workspace id", frames: []any{"a", 7}, trigger: "tick"},
+		{name: "a blank frame", frames: []any{""}, trigger: "tick"},
+		{name: "a trigger that is neither tick nor change", frames: []any{"a"}, trigger: "later"},
+		{name: "no trigger", frames: []any{"a"}, trigger: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			attachHost(t, h)
+			ctx := map[string]any{
+				"webhost_document": "host", "pages": 1, "host": map[string]any{"dom_nodes": 1, "feed_rows": 0},
+				"frames": tt.frames,
+			}
+			switch {
+			case tt.noConn:
+			case tt.conn != nil:
+				ctx["connection_id"] = *tt.conn
+			default:
+				ctx["connection_id"] = hostConn
+			}
+			if tt.trigger != nil {
+				ctx["trigger"] = tt.trigger
+			}
+
+			// Act
+			if _, err := h.Client.ClientLog(context.Background(), webhostRecord(t, "webhost.census", censusStamp, ctx)); err != nil {
+				t.Fatalf("ClientLog: %v", err)
+			}
+
+			// Assert
+			if got := h.HeldPages.Snapshot(); len(got) != 0 {
+				t.Fatalf("held pages = %v, want none", got)
+			}
+			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.server.census_unreadable"})
+			if !ok || rec.Context["cause"] == nil {
+				t.Fatalf("records = %+v, want an error naming the cause", log.Records())
+			}
+		})
+	}
+}
+
+func TestADisagreementThatStandsIsRecordedOnceAtWarnWithBothSets(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	attachHost(t, h)
+	h.HeldPages.Held("a", pageheld.LoadShown)
+	h.HeldPages.Held("gone", pageheld.LoadSlot)
+	tick := func() {
+		if _, err := h.Client.ClientLog(context.Background(), hostCensus(t, []any{"a"}, "tick")); err != nil {
+			t.Fatalf("ClientLog: %v", err)
+		}
+	}
+
+	// Act
+	tick()
+	tick()
+	tick()
+
+	// Assert
+	var warns []dlog.Record
+	for _, rec := range log.Records() {
+		if rec.Level == "warn" && rec.Operation == "daemon.server.host_frames" {
+			warns = append(warns, rec)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("warns = %+v, want one for the one standing cause", warns)
+	}
+	c := warns[0].Context
+	if c["cause"] != "emacs_only" || !sameNames(c["workspaces"], "gone") || !sameNames(c["host_frames"], "a") ||
+		!sameNames(c["emacs_pages"], "a", "gone") {
+		t.Fatalf("warn context = %+v, want the cause, the workspaces and both sets", c)
+	}
+}
+
+func TestADisagreementThatClearsIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	attachHost(t, h)
+	for range 2 {
+		if _, err := h.Client.ClientLog(context.Background(), hostCensus(t, []any{"a"}, "tick")); err != nil {
+			t.Fatalf("ClientLog: %v", err)
+		}
+	}
+
+	// Act
+	if _, err := h.Client.ClientLog(context.Background(), hostCensus(t, []any{}, "tick")); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.server.host_frames"})
+	if !ok || rec.Context["cause"] != "host_only" {
+		t.Fatalf("records = %+v, want an info record of host_only clearing", log.Records())
+	}
+}
+
+// sameNames reports whether V, a record's list of workspaces, is exactly WANT.
+func sameNames(v any, want ...string) bool {
+	got, ok := v.([]string)
+	if !ok || len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
