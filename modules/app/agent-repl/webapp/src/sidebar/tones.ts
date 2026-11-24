@@ -259,23 +259,3 @@ export function armMotion(arm: RosterStatusCase): MarkMotion {
       return "still";
   }
 }
-
-/**
- * Whether ARM is a turn at work: the arms whose row's name breathes in the
- * working red (`render-colors.json#roster_status`). A FOLDED SUBSECTION SAYS
- * ONE OF ITS WORKSPACES WORKS (owner request, 2026-11-18): its name breathes
- * in that row's tone (`subsections.ts`), so a fold never hides that work is
- * running under it.
- */
-export function armWorks(arm: RosterStatusCase): boolean {
-  switch (arm) {
-    case "submitting":
-    case "thinking":
-    case "vendorSilent":
-    case "clearing":
-    case "compacting":
-      return true;
-    default:
-      return false;
-  }
-}

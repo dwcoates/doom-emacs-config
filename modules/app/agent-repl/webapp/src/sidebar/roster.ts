@@ -98,13 +98,10 @@ import {
   drawRosterSubsection,
   installArrangeDrag,
   paintSubsectionCount,
-  paintSubsectionWork,
   REPOSITORY_ATTRIBUTE,
   requireDrawnBucket,
   stampBucket,
   SUBSECTION_CLASS,
-  SUBSECTION_HEAD_CLASS,
-  SUBSECTION_LABEL_CLASS,
   subsectionBucket,
   type ArrangeRefs,
 } from "./subsections.js";
@@ -675,10 +672,9 @@ function sameButHiddenRows(a: RosterHiddenSection, b: RosterHiddenSection): bool
 /**
  * Paint on a drawn repository section ELEMENT what the wire U changes on the
  * boxes a row patch keeps: on the section and each of its subsections,
- * whether it holds the current workspace, and on each subsection's name the
- * breath its working rows give it (`paintSubsectionWork`). A drawn section
- * whose subsections differ from U's is a broken invariant: a section whose
- * subsections changed is drawn anew, never patched.
+ * whether it holds the current workspace, and the counts their headers draw.
+ * A drawn section whose subsections differ from U's is a broken invariant: a
+ * section whose subsections changed is drawn anew, never patched.
  */
 export function paintRepoSection(element: HTMLElement, u: RosterRepoSection, path: string): number {
   paintHoldsCurrent(element, drawRosterHoldsCurrent(u.fold, `${path}.fold`));
@@ -691,9 +687,6 @@ export function paintRepoSection(element: HTMLElement, u: RosterRepoSection, pat
   wire.forEach(({ subsection: sub, path: subPath }, index) => {
     requireDrawnBucket(drawn[index], subsectionBucket(sub, subPath), subPath);
     paintHoldsCurrent(drawn[index], drawRosterHoldsCurrent(sub.fold, `${subPath}.fold`));
-    const label = drawn[index].querySelector<HTMLElement>(`:scope > .${SUBSECTION_HEAD_CLASS} > .${SUBSECTION_LABEL_CLASS}`);
-    if (label === null) throw new Error(`invariant: ${subPath}: a drawn subsection has its name`);
-    paintSubsectionWork(label, sub, subPath);
     if (paintSubsectionCount(drawn[index], sub, subPath)) repainted += 1;
   });
   return repainted;
