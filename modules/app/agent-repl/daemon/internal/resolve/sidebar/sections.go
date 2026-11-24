@@ -74,12 +74,12 @@ func (r *resolver) repositoryView(repos []openRepo, orphans map[ids.RepoID][]wsm
 				Header:   openHeader(region.subsection.Name, regionCount),
 				OpenRows: rows,
 			}
-			setSubsectionFold(sub, region.subsection.Folded, holdsCurrent(tabs, current, wsm.SubsectionMembers(region.subsection.ID)))
+			setSubsectionFold(sub, region.subsection.Folded, holdsCurrent(r.state.reg, tabs, current, wsm.SubsectionMembers(region.subsection.ID)))
 			section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Subsection{Subsection: sub}})
 		}
 		addOpenCount(shown, count)
 		section.Header = openHeader(placed.repo.Name, count)
-		setRepoFold(section, placed.repo.Folded, holdsCurrent(tabs, current, wsm.RepositoryMembers(filed, placed.repo.ID)))
+		setRepoFold(section, placed.repo.Folded, holdsCurrent(r.state.reg, tabs, current, wsm.RepositoryMembers(filed, placed.repo.ID)))
 		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)
@@ -683,11 +683,11 @@ func repoKey(repo wsm.Repository) *frontendv1.RosterRepoKey {
 // current workspace is otherwise allowed, and the daemon's fold verb moves the
 // selection to that landing, asking LandingTarget the same question by the
 // same membership (wsm.FoldMembers).
-func holdsCurrent(tabs []Tab, current *wsm.Workspace, members wsm.FoldMembers) bool {
+func holdsCurrent(reg Registry, tabs []Tab, current *wsm.Workspace, members wsm.FoldMembers) bool {
 	if !members.HoldsCurrent(current) {
 		return false
 	}
-	_, _, lands := LandingTarget(tabs, current.ID, members)
+	_, _, lands := LandingTarget(reg, tabs, *current, members)
 	return !lands
 }
 

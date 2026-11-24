@@ -672,7 +672,7 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 	workspaces.AppSwitcher = r.appSwitcher()
 	workspaces.Threads = r.threadSection(lists.threads)
 	workspaces.ColdGates = r.coldGates()
-	if cur := r.currentWorkspace(); cur != nil {
+	if cur := r.currentWorkspace(reg, tabsOf(repos)); cur != nil {
 		workspaces.Current = cur
 	}
 	if v := r.state.version; v != nil {
@@ -741,13 +741,19 @@ func (r *resolver) rowFacts(ws wsm.Workspace, rc rowContext, log dlog.Logger) {
 
 // currentWorkspace resolves the roster's selection, or nil when nothing is
 // selected. It is stated by IDENTITY, never by a display name, because names
-// collide across repositories.
-func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
+// collide across repositories. Its departure landing is read off TABS, the
+// bar REG draws.
+func (r *resolver) currentWorkspace(reg Registry, tabs []Tab) *frontendv1.RosterCurrentWorkspace {
 	ws := r.selectedWorkspace()
 	if ws == nil {
 		return nil
 	}
 	out := &frontendv1.RosterCurrentWorkspace{Workspace: ws.Ref()}
+	// THE CLOSE'S LANDING IS THE DAEMON'S RULE (LandingTarget), so the
+	// editor's teardown lands where a hide or a fold would.
+	if landing, _, found := LandingTarget(reg, tabs, *ws, nil); found {
+		out.DepartureLanding = landing.Ref()
+	}
 	if st := r.state.stamp; st != nil && st.ws == ws.ID {
 		out.SelectionId = st.stamp.ID
 		if at := st.stamp.SwitchStartedAt; at != nil {

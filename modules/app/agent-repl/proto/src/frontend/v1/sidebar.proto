@@ -1105,6 +1105,14 @@ message RosterCurrentWorkspace {
   // (agentrepl.v1.ReportedLatencyKind.REPORTED_LATENCY_KIND_SWITCH_SIDEBAR).
   // Unset when the select carried none.
   optional int64 switch_started_at_ms = 3;
+  // WHERE THE USER LANDS WHEN THE SELECTED WORKSPACE LEAVES THE TAB BAR by a
+  // close: the drawn tab nearest it the user selected most recently — its
+  // ancestors, then its subsection, then its repository, then its
+  // repository's main workspace, then any repository (owner request,
+  // 2026-11-24). The daemon's hide and fold landings take the same rule, so
+  // the editor's close lands where they would. Unset when no other tab is
+  // drawn.
+  optional workspace.v1.WorkspaceRef departure_landing = 4;
 }
 
 

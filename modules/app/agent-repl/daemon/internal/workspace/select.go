@@ -388,9 +388,9 @@ func (v *verbs) BacklogColdGate(ctx context.Context, ws ids.WorkspaceID, gateLap
 }
 
 // landAfterHiding moves the user, when they stand on the workspace just
-// hidden, to the workspace they selected before it (owner request,
-// 2026-10-20, superseding the tab-bar neighbour of 2026-10-14): the most
-// recently selected tab the bar still draws (hideLandingTarget). The select is
+// hidden, to the drawn tab nearest it they selected most recently
+// (sidebar.LandingTarget: its ancestors, then its subsection, then its
+// repository, then its repository's main workspace). The select is
 // conditional on the hidden workspace still being current, under the
 // selection lock, so a switch the user made meanwhile stands. With no other
 // drawn tab the selection stays where it is, and the record says so.
@@ -403,7 +403,13 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 	// run's drawn tabs, so the candidates (and, among never-selected ones,
 	// the neighbours) are read off the bar as it stood with the workspace
 	// still shown.
-	target, by, found := hideLandingTarget(sidebar.Tabs(asShown(reg, hidden), log), hidden)
+	shown := asShown(reg, hidden)
+	at := slices.IndexFunc(shown.Workspaces, func(ws wsm.Workspace) bool { return ws.ID == hidden })
+	if at < 0 {
+		log.Error(opSetHidden, "the registry does not carry the workspace just hidden", nil)
+		return fmt.Errorf("land after hiding %q: the registry does not carry it", hidden)
+	}
+	target, by, found := sidebar.LandingTarget(shown, sidebar.Tabs(shown, log), shown.Workspaces[at], nil)
 	if !found {
 		log.Info(opSetHidden, "the tab bar draws no other workspace beside the hidden one; the selection stays", nil)
 		return nil
@@ -440,55 +446,6 @@ func asShown(reg sidebar.Registry, ws ids.WorkspaceID) sidebar.Registry {
 		}
 	}
 	return reg
-}
-
-// hideLanding names which rule chose a hide's landing, for the record.
-type hideLanding string
-
-const (
-	// landedByRecency: the most recently selected drawn tab.
-	landedByRecency hideLanding = "recency"
-	// landedByNeighbour: no other drawn tab was ever selected, so the
-	// nearest drawn tab left of the hidden one, else right of it.
-	landedByNeighbour hideLanding = "neighbour"
-)
-
-// hideLandingTarget picks where hiding HIDDEN lands the user among TABS, the
-// tab bar in registry order (sidebar.Tabs): the drawn tab other than HIDDEN
-// selected most recently (wsm.Workspace.LastSelectedAt), the one the user
-// was on before. Tab order decides only when no other drawn tab was ever
-// selected: the nearest drawn tab left of HIDDEN's own, else the nearest to
-// its right. It answers false when HIDDEN has no tab, or no other tab is
-// drawn.
-func hideLandingTarget(tabs []sidebar.Tab, hidden ids.WorkspaceID) (wsm.Workspace, hideLanding, bool) {
-	at := slices.IndexFunc(tabs, func(t sidebar.Tab) bool { return t.Workspace.ID == hidden })
-	if at < 0 {
-		return wsm.Workspace{}, "", false
-	}
-	var recent *wsm.Workspace
-	for i := range tabs {
-		ws := &tabs[i].Workspace
-		if i == at || tabs[i].Withheld != wsm.Drawn || ws.LastSelectedAt == nil {
-			continue
-		}
-		if recent == nil || ws.LastSelectedAt.After(*recent.LastSelectedAt) {
-			recent = ws
-		}
-	}
-	if recent != nil {
-		return *recent, landedByRecency, true
-	}
-	for i := at - 1; i >= 0; i-- {
-		if tabs[i].Withheld == wsm.Drawn {
-			return tabs[i].Workspace, landedByNeighbour, true
-		}
-	}
-	for i := at + 1; i < len(tabs); i++ {
-		if tabs[i].Withheld == wsm.Drawn {
-			return tabs[i].Workspace, landedByNeighbour, true
-		}
-	}
-	return wsm.Workspace{}, "", false
 }
 
 // RevealMergeWorkspace draws a hidden merge workspace in the tab bar and the

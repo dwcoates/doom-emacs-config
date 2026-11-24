@@ -454,6 +454,49 @@ whose calls are the observation."
     ;; Act / Assert
     (should-not (agent-repl-roster-repository-of "m" roster))))
 
+;;; --- The current workspace's departure landing
+
+(defmacro agent-repl-test-roster--with-departure (current landing live &rest body)
+  "Run BODY with the roster selecting CURRENT, naming LANDING its departure landing.
+CURRENT and LANDING are ref ids (LANDING nil for none); LIVE is an alist of
+each ref id that has a live tab here to its name."
+  (declare (indent 3))
+  `(let ((agent-repl-roster-view
+          (list :current (list :workspace (list :id ,current :dir "/w/current")
+                               :departure-landing (and ,landing (list :id ,landing :dir "/w/landing"))))))
+     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+                (lambda (id) (cdr (assoc id ,live)))))
+       (agent-repl-test-roster--with-refs '(("gone" . (:id "gone-id")) ("other" . (:id "other-id")))
+         ,@body))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-names-the-landings-tab ()
+  "The selected workspace's departure landing answers the landing's tab name."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" "parent-id" '(("parent-id" . "parent"))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster-departure-landing "gone") "parent"))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-is-nil-for-a-workspace-not-selected ()
+  "The roster states the landing for its selection only, so another workspace has none."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" "parent-id" '(("parent-id" . "parent"))
+    ;; Act / Assert
+    (should-not (agent-repl-roster-departure-landing "other"))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-is-nil-when-the-roster-names-none ()
+  "A roster naming no landing (no other tab drawn) answers nil."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" nil '(("parent-id" . "parent"))
+    ;; Act / Assert
+    (should-not (agent-repl-roster-departure-landing "gone"))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-is-nil-when-the-landing-has-no-tab ()
+  "A landing with no live tab here answers nil."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" "parent-id" nil
+    ;; Act / Assert
+    (should-not (agent-repl-roster-departure-landing "gone"))))
+
 ;;; --- A workspace's repository, by its name
 
 (defmacro agent-repl-test-roster--with-refs (refs &rest body)
@@ -822,10 +865,10 @@ area came up on the fallback buffer."
     ;; Assert
     (should (equal (car agent-repl-test-roster--switched) "second"))))
 
-(ert-deftest agent-repl-test-roster-merged-current-tab-lands-on-the-previously-selected ()
+(ert-deftest agent-repl-test-roster-merged-current-tab-lands-on-the-departure-landing ()
   "An IMPLICIT close -- the daemon closing a workspace after its merge lands --
-of the tab the user stands on lands them on the workspace interacted with
-before it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
+of the tab the user stands on lands them on the daemon's departure landing,
+not the first tab: one rule for every close (owner request, 2026-11-24)."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-apply
@@ -835,9 +878,9 @@ before it, not the first tab: one rule for every close (owner ruling, 2026-09-30
                                     (agent-repl-test-roster--row "b" "second" :ready)
                                     (agent-repl-test-roster--row "c" "third" :ready))))))
     (setq agent-repl-test-roster--current-name "third")
-    (let ((instants '(("third" . 300) ("second" . 200) ("first" . 100))))
-      (cl-letf (((symbol-function 'agent-repl-roster-last-interacted-ms)
-                 (lambda (ws) (cdr (assoc ws instants))))
+    (progn
+      (cl-letf (((symbol-function 'agent-repl-roster-departure-landing)
+                 (lambda (ws) (and (equal ws "third") "second")))
                 ((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
                 ((symbol-function 'agent-repl--ws-all-names)
                  (lambda () '("first" "second" "third")))
@@ -1112,9 +1155,10 @@ naming its own row field, so no accessor hand-rolls a divergent read."
                        "repo" (list (agent-repl-test-roster--row "a" "first" :ready))))))
     (should-not (agent-repl-roster-last-selected-ms "first"))))
 
-(ert-deftest agent-repl-test-roster-merged-current-tab-lands-by-the-durable-instant-after-restart ()
-  "After an Emacs restart the session history holds only the closing tab, and
-the landing is the workspace the roster says was interacted with most recently."
+(ert-deftest agent-repl-test-roster-merged-current-tab-lands-on-the-departure-landing-over-interaction-recency ()
+  "The daemon's departure landing decides a merged close, not the roster's
+interaction instants: a workspace interacted with more recently is passed
+over for the landing the daemon names."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-apply
@@ -1128,7 +1172,9 @@ the landing is the workspace the roster says was interacted with most recently."
                                                :last-interacted '(:at-ms 1000)))))))
     (setq agent-repl-test-roster--current-name "third")
     (progn
-      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+      (cl-letf (((symbol-function 'agent-repl-roster-departure-landing)
+                 (lambda (ws) (and (equal ws "third") "first")))
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
                 ((symbol-function 'agent-repl--ws-all-names)
                  (lambda () '("first" "second" "third")))
                 ((symbol-function 'agent-repl--ws-list-names)
@@ -1144,7 +1190,7 @@ the landing is the workspace the roster says was interacted with most recently."
           :merged (list (plist-put (agent-repl-test-roster--row "c" "third" :merged :closed t)
                                    :last-interacted '(:at-ms 1000)))))))
     ;; Assert
-    (should (equal agent-repl-test-roster--switched '("second")))))
+    (should (equal agent-repl-test-roster--switched '("first")))))
 
 (ert-deftest agent-repl-test-roster-teardown-goes-through-land-then-kill ()
   "The roster's tab teardown uses the ONE teardown order
