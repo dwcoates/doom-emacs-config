@@ -88,7 +88,10 @@ passed; every other flag keeps its default.
   `--watch-buffer` stay at their defaults.
 - `com.agentrepl.shim-claude-sidecar` — `--store-socket` (the same store
   socket), `--config-roots` (the Claude config roots whose transcripts and
-  spools are observed), `--spool-root`, and `--state-dir` (`~/.claude-emacs`,
+  spools are observed: `~/.claude` and the work account's root, which a
+  deploy renders from the daemon's own `-multi-repo-config-dir`, never from
+  its inherited environment, `deploy.ScriptRequirements.WorkConfigRoot`),
+  `--spool-root`, and `--state-dir` (`~/.claude-emacs`,
   the state root holding the shim's identity records — how a rotated vendor
   session id resolves to the conversation's original one), and
   `--metrics-root` (`~/.cache/agent-repl/metrics`). `--log`,

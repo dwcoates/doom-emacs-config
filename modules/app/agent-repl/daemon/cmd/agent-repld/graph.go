@@ -1516,6 +1516,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		WifiTools:      wifiConfig.Tools,
 		Surfaces:       p.Surfaces,
 		Checkout:       paths.Checkout,
+		WorkConfigRoot: p.Opts.multiRepoConfigDir,
 		ShimMain:       paths.ShimMain,
 		WebappDist:     paths.WebappDist,
 		StateDir:       p.Layout.Dir(),
