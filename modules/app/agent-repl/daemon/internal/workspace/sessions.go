@@ -3543,6 +3543,13 @@ func (f *Fleet) recordEnded(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	return recordShimEnded(ctx, log, f.deps.DB, opBringUp, ws, kind, detail, f.now())
 }
 
+// RecordEndedUnlessHeld records the end of WS's session for a caller outside
+// the fleet (a takeover repairing a record that read running), unless the
+// fleet holds a session for WS (recordEnded).
+func (f *Fleet) RecordEndedUnlessHeld(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kind, detail string) error {
+	return f.recordEnded(ctx, log, ws, kind, detail, func(*live) bool { return false })
+}
+
 // recordDeath records the death of CLIENT's shim, which its watcher saw go
 // with nothing stopping it, unless a newer session holds the workspace.
 func (f *Fleet) recordDeath(ws ids.WorkspaceID, client shimclient.Client) {

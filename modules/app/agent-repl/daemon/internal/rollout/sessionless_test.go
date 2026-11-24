@@ -175,6 +175,9 @@ func TestBringUpSessionlessLeavesARecordThatReadsRunningHiddenOrNot(t *testing.T
 			// Arrange
 			h := newHarness(t)
 			ws, _ := h.workspace(t)
+			h.fleet.mu.Lock()
+			delete(h.fleet.live, ws)
+			h.fleet.mu.Unlock()
 			record := sessionlessRecord(t, h, ws)
 			tc.arrange(t, h, record)
 
@@ -201,7 +204,7 @@ func TestAStaleRecordWhoseEndCannotBeRecordedIsNotStartedAtError(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	record := sessionlessRecord(t, h, ws)
-	h.c.deps.DB = coldGatedDB{DB: h.db, terminalErr: errFake}
+	h.fleet.terminalErr = errFake
 
 	// Act
 	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
@@ -371,14 +374,6 @@ type coldGatedDB struct {
 	wsm.DB
 	gated       []wsm.WorkspaceID
 	sessionsErr error
-	terminalErr error
-}
-
-func (d coldGatedDB) SetSessionTerminal(ctx context.Context, ws wsm.WorkspaceID, terminal wsm.SessionTerminal) error {
-	if d.terminalErr != nil {
-		return d.terminalErr
-	}
-	return d.DB.SetSessionTerminal(ctx, ws, terminal)
 }
 
 func (d coldGatedDB) ColdGateWorkspaces(ctx context.Context) ([]wsm.WorkspaceID, error) {
@@ -421,5 +416,27 @@ func TestBringUpSessionlessDoesNotStartAShimThatWasNotUp(t *testing.T) {
 				t.Fatalf("started = %v, want nothing for a shim that was not up", got)
 			}
 		})
+	}
+}
+
+// TestAStaleRecordOfAWorkspaceARevivalHoldsIsNotRepaired pins the repair's
+// ordering: a session the fleet holds by the time the repair runs (a prompt
+// drained during the adoption revived it) keeps its record running.
+func TestAStaleRecordOfAWorkspaceARevivalHoldsIsNotRepaired(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record := sessionlessRecord(t, h, ws)
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+
+	// Assert
+	session, _, err := h.db.Session(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if session.Terminal != nil {
+		t.Fatalf("terminal = %+v, want the held session's record left running", session.Terminal)
 	}
 }

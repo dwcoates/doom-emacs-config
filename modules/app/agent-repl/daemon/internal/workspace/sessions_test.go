@@ -5292,3 +5292,36 @@ func TestAStopRecordsTheDetailItsCallerStated(t *testing.T) {
 		t.Fatalf("terminal = %+v, want the park with the caller's detail", terminal)
 	}
 }
+
+func TestRecordEndedUnlessHeldRecordsOnlyForAWorkspaceTheFleetDoesNotHold(t *testing.T) {
+	cases := []struct {
+		name string
+		held bool
+	}{
+		{name: "a workspace with no session held", held: false},
+		{name: "a workspace a session holds", held: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if tc.held {
+				if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+					t.Fatalf("Start: %v", err)
+				}
+			}
+
+			// Act
+			err := f.fleet.RecordEndedUnlessHeld(context.Background(), f.log.logger, ws.ID, wsm.TerminalParked, "stale: the record read running")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RecordEndedUnlessHeld: %v", err)
+			}
+			if _, recorded := f.db.terminals[ws.ID]; recorded == tc.held {
+				t.Fatalf("recorded = %v, want it recorded only when no session holds the workspace", recorded)
+			}
+		})
+	}
+}

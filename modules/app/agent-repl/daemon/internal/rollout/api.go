@@ -771,6 +771,11 @@ type ShimFleet interface {
 	// Client answers the workspace's current shim client, false when none is
 	// up.
 	Client(ws ids.WorkspaceID) (shimclient.Client, bool)
+	// RecordEndedUnlessHeld records the end of the workspace's session, as
+	// KIND with DETAIL, unless the fleet holds a session for it, the check
+	// and the write one step under the lock that orders every terminal write
+	// against the fleet's map (workspace.Fleet.terminalMu).
+	RecordEndedUnlessHeld(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kind, detail string) error
 	// Prelaunch brings up a NEW shim for the workspace on a fresh socket,
 	// INERT BY CONSTRUCTION: connected but with no session started, so it
 	// coexists with the old one indefinitely.

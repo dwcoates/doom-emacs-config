@@ -118,8 +118,10 @@ func (c *controller) takeoverSplit(ctx context.Context, pending []wsm.Workspace,
 // and starts nothing: the next takeover repairs it again, and a prompt brings
 // the workspace up meanwhile.
 func (c *controller) recordStale(ctx context.Context, ws wsm.Workspace, fields dlog.Context) {
-	terminal := wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: staleDetail, At: c.deps.Clock.Now()}
-	if err := c.deps.DB.SetSessionTerminal(ctx, ws.ID, terminal); err != nil {
+	// THROUGH THE FLEET, under the lock that orders it against a session's
+	// clear: a prompt drained during the adoption may revive the workspace
+	// meanwhile, and its session's record must never read parked.
+	if err := c.deps.Shims.RecordEndedUnlessHeld(ctx, c.log.With(fields), ws.ID, wsm.TerminalParked, staleDetail); err != nil {
 		c.log.Error(opBringUp, "could not record the end of a session whose record read running with no shim behind it; it is not started",
 			dlog.WithCause(fields, err))
 	}
