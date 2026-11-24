@@ -3,6 +3,8 @@ package sidebar
 import (
 	"testing"
 	"time"
+
+	"agent-repld/internal/wsm"
 )
 
 func TestPageVerdict(t *testing.T) {
@@ -81,6 +83,43 @@ func TestADepartureRecordsWhetherTheVisitFirstViewedTheWorkspace(t *testing.T) {
 			// Assert
 			if s.leftFirstViewed != tt.want || s.leftAt == nil || !s.leftAt.Equal(left) {
 				t.Fatalf("leftFirstViewed = %v, leftAt = %v; want %v at %v", s.leftFirstViewed, s.leftAt, tt.want, left)
+			}
+		})
+	}
+}
+
+func TestShimHoldOf(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	ago := func(d time.Duration) *time.Time { at := now.Add(-d); return &at }
+	tests := []struct {
+		name string
+		in   pageInputs
+		want wsm.ShimHold
+	}{
+		{name: "a workspace that is not visible holds none", in: pageInputs{working: true}, want: wsm.ShimHold{}},
+		{name: "the selection holds it while selected", in: pageInputs{visible: true, selected: true}, want: wsm.ShimHold{Indefinite: true}},
+		{name: "a working workspace holds it while working", in: pageInputs{visible: true, working: true}, want: wsm.ShimHold{Indefinite: true}},
+		{name: "a mediator or bypass holder always holds it", in: pageInputs{visible: true, alwaysShown: true}, want: wsm.ShimHold{Indefinite: true}},
+		{name: "a one-shot keeps running", in: pageInputs{visible: true, oneShot: true, awayUnloaded: true}, want: wsm.ShimHold{Indefinite: true}},
+		{name: "a sync merge holds none: its merge parks it", in: pageInputs{visible: true, awayUnloaded: true}, want: wsm.ShimHold{}},
+		{name: "an unread result holds it fifteen minutes after its turn",
+			in: pageInputs{visible: true, unread: true, turnEndedAt: ago(time.Minute)}, want: wsm.ShimHold{Until: now.Add(ShimUnreadHold - time.Minute)}},
+		{name: "an unread result past its fifteen minutes holds none",
+			in: pageInputs{visible: true, unread: true, turnEndedAt: ago(ShimUnreadHold)}, want: wsm.ShimHold{}},
+		{name: "a workspace left holds it for its page's grace",
+			in: pageInputs{visible: true, leftAt: ago(time.Second)}, want: wsm.ShimHold{Until: now.Add(PageLeaveGrace - time.Second)}},
+		{name: "a workspace left on its first view holds it for the first-view grace",
+			in: pageInputs{visible: true, leftAt: ago(time.Minute), leftFirstViewed: true}, want: wsm.ShimHold{Until: now.Add(PageFirstViewGrace - time.Minute)}},
+		{name: "an idle workspace never left holds none", in: pageInputs{visible: true}, want: wsm.ShimHold{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := shimHoldOf(tt.in, now)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("shimHoldOf = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

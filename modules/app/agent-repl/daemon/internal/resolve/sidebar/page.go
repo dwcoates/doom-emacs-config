@@ -36,6 +36,10 @@ const PageLeaveGrace = 10 * time.Second
 // viewed: the user just read it, and may well come back to it.
 const PageFirstViewGrace = 15 * time.Minute
 
+// ShimUnreadHold is how long after its turn ended a workspace whose result is
+// unread keeps its idle shim up, so a prompt in reply starts no shim.
+const ShimUnreadHold = 15 * time.Minute
+
 // syncMergeArms are the status arms of a workspace in its own (synchronous)
 // merge: queued or running. Such a workspace holds its page only while the
 // user looks at it.
@@ -50,6 +54,12 @@ type pageInputs struct {
 	// awayUnloaded reports a one-shot or a synchronous merge: its page is
 	// held only while selected.
 	awayUnloaded bool
+	// oneShot reports a one-shot, whose shim keeps running whatever else
+	// holds.
+	oneShot bool
+	// alwaysShown reports a standing mediator or a queue-bypass holder, which
+	// always runs.
+	alwaysShown bool
 	// working reports a working, starting or top-priority workspace.
 	working bool
 	// unread reports a turn end whose result the user has not read.
@@ -89,6 +99,46 @@ func pageVerdict(in pageInputs, now time.Time) (bool, time.Time) {
 		return heldUntil(in.leftAt.Add(grace), now)
 	default:
 		return false, time.Time{}
+	}
+}
+
+// shimHoldOf answers until when IN's resource allocation holds its idle shim
+// up AT NOW (wsm.ShimHold), the first rule that holds deciding:
+//   - a workspace that is not visible holds none;
+//   - the selection, a working workspace, a standing mediator, a queue-bypass
+//     holder and a one-shot hold it for as long as that stands;
+//   - a synchronous merge holds none (its merge parks it while it waits in
+//     line and its steps bring it up, drain.Controller.MergeQueuedDown);
+//   - an unread result holds it for ShimUnreadHold after its turn ended;
+//   - a workspace the user left holds it as long as its page (PageLeaveGrace,
+//     or PageFirstViewGrace when that visit first viewed it);
+//   - any other holds none.
+func shimHoldOf(in pageInputs, now time.Time) wsm.ShimHold {
+	until := func(deadline time.Time) wsm.ShimHold {
+		if now.Before(deadline) {
+			return wsm.ShimHold{Until: deadline}
+		}
+		return wsm.ShimHold{}
+	}
+	switch {
+	case !in.visible:
+		return wsm.ShimHold{}
+	case in.selected, in.working, in.alwaysShown, in.oneShot:
+		return wsm.ShimHold{Indefinite: true}
+	case in.awayUnloaded:
+		return wsm.ShimHold{}
+	case in.unread && in.turnEndedAt != nil:
+		return until(in.turnEndedAt.Add(ShimUnreadHold))
+	case in.unread:
+		return wsm.ShimHold{Indefinite: true}
+	case in.leftAt != nil:
+		grace := PageLeaveGrace
+		if in.leftFirstViewed {
+			grace = PageFirstViewGrace
+		}
+		return until(in.leftAt.Add(grace))
+	default:
+		return wsm.ShimHold{}
 	}
 }
 
@@ -146,6 +196,43 @@ func (r *resolver) resolvePages(rc rowContext, arms map[ids.WorkspaceID]string) 
 	}
 	r.state.page = pages
 	r.armPageClock(next, now)
+	r.resolveShimHolds(rc, arms, now)
+}
+
+// resolveShimHolds derives every registry workspace's shim hold for this
+// render, keeps it for ShimHold, and collects every workspace whose hold
+// changed since the last render, reported to the shim-hold sink off the lock.
+// The caller holds r.mu.
+func (r *resolver) resolveShimHolds(rc rowContext, arms map[ids.WorkspaceID]string, now time.Time) {
+	holds := make(map[ids.WorkspaceID]wsm.ShimHold, len(r.state.reg.Workspaces))
+	for _, rec := range r.state.reg.Workspaces {
+		hold := shimHoldOf(r.pageInputsOf(rec, rc, arms[rec.ID]), now)
+		holds[rec.ID] = hold
+		if was, seen := r.state.shimHold[rec.ID]; !seen || was != hold {
+			r.pendingShimHolds = append(r.pendingShimHolds, rec.ID)
+		}
+	}
+	r.state.shimHold = holds
+}
+
+// ShimHoldSink is told every workspace whose shim hold changed, once per
+// combined commit, off the resolver's lock; it returns at once. The cache
+// keeper reconciles the workspace's stand-down by it.
+type ShimHoldSink func(ws ids.WorkspaceID)
+
+// WithShimHoldSink installs the sink the resolver tells its shim hold
+// changes.
+func WithShimHoldSink(sink ShimHoldSink) Option {
+	return func(r *resolver) { r.shimHolds = sink }
+}
+
+// ShimHold answers workspace WS's shim hold as the last render derived it. A
+// workspace no render has derived holds nothing: its idle shim parks.
+func (r *resolver) ShimHold(ws ids.WorkspaceID) wsm.ShimHold {
+	r.awaitApplied()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state.shimHold[ws]
 }
 
 // pageInputsOf states REC's page inputs on ARM, its status arm this render.
@@ -160,6 +247,8 @@ func (r *resolver) pageInputsOf(rec wsm.Workspace, rc rowContext, arm string) pa
 		visible:         r.state.visibility[rec.ID].Visible(),
 		selected:        rc.selected != nil && *rc.selected == rec.ID,
 		awayUnloaded:    rec.OneShot || syncMergeArms[arm],
+		oneShot:         rec.OneShot,
+		alwaysShown:     rec.AlwaysShown(),
 		working:         workingArms[arm] || arm == startingArm || arm == noSessionYetArm || rec.TopPriority(),
 		unread:          isTurnEndArm(arm) && !s.viewed(),
 		turnEndedAt:     ended,

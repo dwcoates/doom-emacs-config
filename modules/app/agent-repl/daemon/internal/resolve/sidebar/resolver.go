@@ -100,6 +100,11 @@ type core struct {
 	// pendingVisibilities are the visibility changes a render found, reported
 	// after the lock is released.
 	pendingVisibilities map[ids.WorkspaceID]wsm.Visibility
+	// pendingShimHolds are the workspaces whose shim hold a render changed,
+	// reported after the lock is released; shimHolds is told them
+	// (WithShimHoldSink), nil telling nobody.
+	pendingShimHolds []ids.WorkspaceID
+	shimHolds        ShimHoldSink
 	// visibilityMoves are the visibility changes the commit's renders found,
 	// recorded once the commit knows the roster that carries them
 	// (recordVisibilityMoves).
@@ -452,11 +457,13 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 		viewed:        r.pendingViewed,
 		statusChanges: r.pendingStatusChanges,
 		visibilities:  r.pendingVisibilities,
+		shimHolds:     r.pendingShimHolds,
 	}
 	r.pendingResults = nil
 	r.pendingViewed = nil
 	r.pendingStatusChanges = nil
 	r.pendingVisibilities = nil
+	r.pendingShimHolds = nil
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -530,6 +537,11 @@ func (r *resolver) report(batch []*mutation, out batchOutcome) {
 	}
 	if len(out.visibilities) > 0 {
 		r.visibilities(out.visibilities)
+	}
+	if r.shimHolds != nil {
+		for _, ws := range out.shimHolds {
+			r.shimHolds(ws)
+		}
 	}
 	if !out.applied {
 		return

@@ -39,7 +39,7 @@ const (
 	// SettingsVisit is a session a settings pick started, no turn run since.
 	SettingsVisit Reason = "settings_visit"
 	// ParkGrace is an idle session whose park waits out its grace
-	// (cachelapse.StandDownGrace after its last work).
+	// (until its shim hold ends, wsm.ShimHold).
 	ParkGrace Reason = "park_grace"
 	// Keepalive is a session up for its keep-alive: restored for the beat, or
 	// awaiting the beat's answer.

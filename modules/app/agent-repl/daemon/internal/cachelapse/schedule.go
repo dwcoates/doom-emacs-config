@@ -38,14 +38,6 @@ const (
 	// window with an eight-minute margin against a slow turn. Deps.Interval
 	// carries it, or a test run's compressed cadence (IntervalFromEnv).
 	KeepaliveInterval = 52 * time.Minute
-	// StandDownGrace is how long a session must have been idle before it is
-	// parked: the user prompts with no shim start for twenty minutes after
-	// the work ends (owner ruling, 2026-11-23, which shortens the one
-	// interval of 2026-10-26). The idle park (ownIdle) and the cold park
-	// (ownCold) take it once it runs out, and a beat keeps up a session that
-	// fell free less than it ago. It is NOT the beat cadence (Deps.Interval),
-	// so a test run's compressed cadence never cycles its sessions down.
-	StandDownGrace = 20 * time.Minute
 	// RestoreLead is how long before its beat a parked session is restored.
 	// A shim that takes longer than this to start is a defect of its own
 	// (owner ruling, 2026-10-26).
@@ -85,10 +77,10 @@ func (k *Keeper) schedule(ctx context.Context, ws ids.WorkspaceID, why string) {
 	log.Debug(opDrive, "armed the workspace's next keep-alive", dlog.Context{"due": due, "parked": parked})
 }
 
-// withinGraceRule is why a beat sent within StandDownGrace of the
-// workspace's last real work leaves its shim up: the beat's record and a
+// withinGraceRule is why a beat sent while the workspace's resource
+// allocation holds its shim up leaves the shim up: the beat's record and a
 // keep-live run's answer both state it.
-const withinGraceRule = "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive"
+const withinGraceRule = "the workspace's resource allocation holds its shim up; the shim stays up until its hold ends"
 
 // beatPlan is when a workspace's next beat is due, and what it beats.
 type beatPlan struct {
@@ -437,14 +429,13 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			log.Error(opDrive, "could not record the keep-alive that was sent; this daemon times the next beat from it, a successor from the turn before it",
 				dlog.WithCause(fields, err))
 		}
-		// THE GRACE RUNS FROM THE WORK, NOT ONLY FROM THE TURN (owner rulings,
-		// 2026-10-26 and 2026-11-23): the user prompts with no shim start for
-		// StandDownGrace after the workspace last did real work. A beat that
-		// comes sooner, because detached work ended after the turn, goes out
-		// and leaves the shim up; the next one stands it down. The keep-alive's
-		// own turn is no work, so it never extends the grace.
+		// THE RESOURCE ALLOCATION DECIDES WHETHER THE SHIM STAYS UP (owner
+		// rulings, 2026-11-24; Deps.Hold): a beat that goes out while the
+		// workspace's hold stands leaves the shim up; the next edge after the
+		// hold ends stands it down. The keep-alive's own turn is no work, so it
+		// never extends the hold.
 		idleSince := plan.idleSince
-		withinGrace := now.Sub(idleSince) < StandDownGrace
+		withinGrace := k.deps.Hold(ws).HoldsAt(now)
 		// A KEEP-LIVE RUN AWAITS THE ANSWER EITHER WAY, and a session it
 		// started is stood down after it whatever its grace.
 		running, standDown := k.keepLiveSent(ws, withinGrace)

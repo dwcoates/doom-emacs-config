@@ -87,7 +87,7 @@ const (
 	// the switch away from its workspace with no prompt run since.
 	StandDownSettingsVisit StandDownReason = "settings_visit"
 	// StandDownIdle is a session parked once it has been idle
-	// cachelapse.StandDownGrace, between its keep-alives.
+	// its shim hold (wsm.ShimHold), between its keep-alives.
 	StandDownIdle StandDownReason = "idle"
 	// StandDownCacheCold is an idle session parked the moment its cache was
 	// known cold, so no keep-alive would ever stand it down.

@@ -492,6 +492,9 @@ type rosterState struct {
 	// page is every workspace's page verdict as the last render derived it
 	// (resolvePages): true when the editor holds its page.
 	page map[ids.WorkspaceID]bool
+	// shimHold is every workspace's shim hold as the last render derived it
+	// (resolveShimHolds).
+	shimHold map[ids.WorkspaceID]wsm.ShimHold
 	// regSeen reports whether any registry has been installed. Nothing
 	// publishes before one: the roster is a view OF the registry, and a roster
 	// built from live frames alone would name no workspaces.

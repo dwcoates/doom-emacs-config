@@ -430,7 +430,15 @@ func (f *fakeStandDowns) StandDownWithheld(ws ids.WorkspaceID, trigger drain.Wit
 	f.stood <- ws
 }
 
+// testHoldAfterWork is the hold the harness's roster states by default: the
+// idle shim held up until twenty minutes after the workspace last did real
+// work, so the parking tests run against a hold whose end they can time.
+const testHoldAfterWork = 20 * time.Minute
+
 type harness struct {
+	// hold, when set, answers every workspace's shim hold in place of the
+	// default (testHoldAfterWork after its last work).
+	hold func(ids.WorkspaceID) wsm.ShimHold
 	keeper *Keeper
 	// why is the sessions' facts table the keeper mirrors its owners into.
 	why  *sessionwhy.Table
@@ -496,7 +504,7 @@ type restoreCall struct {
 }
 
 // lastWorked is when every fixture workspace last did real work: ten minutes
-// before now, inside StandDownGrace (wsm.Workspace.LastWorkAt).
+// before now, inside the harness's default hold (testHoldAfterWork).
 func lastWorked() *time.Time {
 	at := now.Add(-10 * time.Minute)
 	return &at
@@ -573,6 +581,15 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		},
 		ColdGate: func(ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
 			return h.gate, h.gate != nil
+		},
+		Hold: func(ws ids.WorkspaceID) wsm.ShimHold {
+			if h.hold != nil {
+				return h.hold(ws)
+			}
+			h.db.mu.Lock()
+			rec := h.db.records[ws]
+			h.db.mu.Unlock()
+			return wsm.ShimHold{Until: rec.IdleSince().Add(testHoldAfterWork)}
 		},
 		StandDowns:      h.standDowns,
 		PublishRegistry: func(context.Context) error { h.publishes++; return nil },
@@ -662,6 +679,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			DB:              &fakeDB{},
 			Shim:            func(ids.WorkspaceID) (Keepalives, bool) { return nil, false },
 			ColdGate:        func(ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return nil, false },
+			Hold:            func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{} },
 			StandDowns:      &fakeStandDowns{},
 			PublishRegistry: func(context.Context) error { return nil },
 			Interval:        KeepaliveInterval,
@@ -688,6 +706,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "state client", strip: func(d *Deps) { d.DB = nil }},
 		{name: "shim fleet", strip: func(d *Deps) { d.Shim = nil }},
 		{name: "standing cold gates", strip: func(d *Deps) { d.ColdGate = nil }},
+		{name: "shim holds", strip: func(d *Deps) { d.Hold = nil }},
 		{name: "stand-downs", strip: func(d *Deps) { d.StandDowns = nil }},
 		{name: "republish", strip: func(d *Deps) { d.PublishRegistry = nil }},
 		{name: "keep-alive interval", strip: func(d *Deps) { d.Interval = 0 }},

@@ -521,6 +521,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// status edge. The roster is built after the footer (it takes the footer
 	// as its status source), so the edge rides a forwarder bound once it is.
 	statusChanged := &statusChangedForwarder{log: log}
+	shimHolds := &shimHoldForwarder{log: log}
 	// A DEPLOY'S EDGES REACH THE DEPLOY MEDIATION: its start owes a
 	// mediation, and its end (here or in a successor) runs the rounds. Every
 	// main turn's spend reaches it too, which meters the mediator's turns.
@@ -617,6 +618,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		sidebar.WithViewedSink(rosterDurable.ViewedSink()),
 		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
 		sidebar.WithVisibilitySink(rosterDurable.VisibilitySink()),
+		// THE SHIM HOLD REACHES THE CACHE KEEPER, built after the roster, so
+		// late-bound (shimHoldForwarder).
+		sidebar.WithShimHoldSink(shimHolds.ShimHoldChanged),
 		sidebar.WithVisibilityTelemetry(p.Metrics),
 		sidebar.WithQuiet(viewGate))
 	if err != nil {
@@ -992,6 +996,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// would dereference it (the 2026-11-11 boot loop).
 		Parked:   lateParkedKeepalive(p.Surfaces.Global(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil }),
 		ColdGate: func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
+		Hold:     sidebarResolver.ShimHold,
 		StandDowns: standDownsFunc(func(ws ids.WorkspaceID, trigger drain.WithheldTrigger) {
 			drainController.StandDownWithheld(ws, trigger)
 		}),
@@ -1045,6 +1050,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
 	}
 	lifecycle.caches = cacheKeeper
+	shimHolds.bind(cacheKeeper)
 	// A LONG OUTAGE PULLS THE NEAR KEEP-ALIVES FORWARD (cachelapse.outage.go):
 	// the restore edge tells the keeper how long the network was down.
 	network.OnRestored(func(outage netstate.Outage) { cacheKeeper.NetworkRestored(outage.Duration()) })

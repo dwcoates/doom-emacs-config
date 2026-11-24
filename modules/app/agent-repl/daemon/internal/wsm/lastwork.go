@@ -10,7 +10,7 @@ import (
 )
 
 // THE IDLE CLOCK IS ONE DURABLE FACT, MOVED ONLY BY REAL WORK (owner rule,
-// 2026-11-23: a session is parked after StandDownGrace of inactivity, and
+// 2026-11-23: a session was parked after twenty minutes of inactivity, and
 // that timer is not reset by deploys or by keep-alives).
 //
 // last_work_at is the one instant every park reads (cachelapse.Keeper's cold

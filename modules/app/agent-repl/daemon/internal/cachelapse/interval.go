@@ -18,7 +18,7 @@ import (
 // (AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS) did this until the shim stopped
 // scheduling beats, and is gone with it.
 //
-// ONLY THE CADENCE IS COMPRESSED. StandDownGrace and RestoreLead keep their
+// ONLY THE CADENCE IS COMPRESSED. The shim hold and RestoreLead keep their
 // production values, so a test world's beats never cycle its session down:
 // what the suite observes is a run of beats on one live shim.
 const EnvTestKeepaliveInterval = "AGENT_REPL_TEST_KEEPALIVE_INTERVAL"

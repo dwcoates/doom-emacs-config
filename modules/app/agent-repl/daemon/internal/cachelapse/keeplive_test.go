@@ -243,7 +243,7 @@ func TestAnAlreadyUpWorkspaceIsBeatenAndLeftToTheOrdinaryRules(t *testing.T) {
 		wantDowns int
 	}{
 		{name: "within its grace it stays up with no stand-down asked", workedAgo: ptr(time.Minute),
-			wantRule: "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive"},
+			wantRule: "the workspace's resource allocation holds its shim up; the shim stays up until its hold ends"},
 		{name: "past its grace the stand-down's own rule keeps it up", outcome: &drain.CycleOutcome{Why: "remote control is on; the shim stays up for claude.ai"},
 			wantRule: "remote control is on; the shim stays up for claude.ai", wantDowns: 1},
 	}
@@ -251,7 +251,7 @@ func TestAnAlreadyUpWorkspaceIsBeatenAndLeftToTheOrdinaryRules(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := keepLiveHarness(t)
-			h.workedAgo(StandDownGrace + time.Minute)
+			h.workedAgo(testHoldAfterWork + time.Minute)
 			if tt.workedAgo != nil {
 				h.workedAgo(*tt.workedAgo)
 			}

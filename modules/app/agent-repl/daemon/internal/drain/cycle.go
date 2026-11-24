@@ -184,7 +184,7 @@ var cycleReason = standDownReason{
 // 2026-11-23). The keep-alive cycle stood a session down only once its next
 // beat had gone out, 52 minutes after its last turn, so an idle shim and its
 // vendor child held ~350MB for most of every hour. The cache keeper now asks
-// for this park once the session has been idle cachelapse.StandDownGrace
+// for this park once the workspace's shim hold ends (wsm.ShimHold)
 // (cachelapse.Keeper.ownIdle), under the keep-alive cycle's rules; the keeper
 // still restores it a minute before each beat it owes, and the beat's own
 // stand-down parks it again after.

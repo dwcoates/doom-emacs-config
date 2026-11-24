@@ -270,7 +270,7 @@ func TestASentBeatSoonAfterTheLastWorkLeavesTheShimUp(t *testing.T) {
 func TestASentBeatTheGraceAfterTheLastWorkAwaitsItsAnswerToStandItDown(t *testing.T) {
 	// Arrange
 	h := dueHarness(t, sent())
-	h.workedAgo(StandDownGrace)
+	h.workedAgo(testHoldAfterWork)
 	h.keeper.beats[theWorkspace] = now
 
 	// Act

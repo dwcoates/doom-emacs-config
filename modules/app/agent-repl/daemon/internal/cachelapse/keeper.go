@@ -193,6 +193,10 @@ type Deps struct {
 	// gate holds no cadence to project a lapse from, and its conversation is
 	// already cold, so the gate's facts are its lapse (gateLapse).
 	ColdGate   func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
+	// Hold answers until when WS's resource allocation holds its idle shim
+	// up (sidebar.Resolver.ShimHold): every idle park waits on it, and the
+	// roster tells the keeper of each change (ShimHoldChanged).
+	Hold       func(ws ids.WorkspaceID) wsm.ShimHold
 	StandDowns StandDowns
 	// PublishRegistry republishes the roster's durable half, which is where
 	// a recorded projection and a lapse reach the hidden section.
@@ -223,7 +227,7 @@ type Deps struct {
 	// that started it at SINCE having ended (drain.Controller.VisitDown).
 	VisitDown func(ws ids.WorkspaceID, since time.Time)
 	// IdleDown asks for WS's session to be parked, idle since SINCE for
-	// StandDownGrace between its keep-alives (drain.Controller.IdleDown).
+	// until its shim hold ends, between its keep-alives (drain.Controller.IdleDown).
 	IdleDown func(ws ids.WorkspaceID, since time.Time)
 	// Restore brings a session the keep-alive cycle parked back up, calling
 	// DONE once with how its start ended. It returns at once.
@@ -380,7 +384,7 @@ type Keeper struct {
 	// owned by Run alone.
 	owners map[ids.WorkspaceID]standing
 	// idleDue is when each session the cold park or the keep-alive cycle
-	// owns has been idle StandDownGrace, armed until then (standdown.go);
+	// owns ends its shim hold, armed until then (standdown.go);
 	// owned by Run alone.
 	idleDue map[ids.WorkspaceID]time.Time
 	// early is each workspace's beat a long outage's end pulled forward, with
@@ -404,6 +408,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the shim fleet")
 	case deps.ColdGate == nil:
 		return nil, errors.New("cachelapse: the keeper needs the standing cold gates")
+	case deps.Hold == nil:
+		return nil, errors.New("cachelapse: the keeper needs the shim holds")
 	case deps.StandDowns == nil:
 		return nil, errors.New("cachelapse: the keeper needs the withheld stand-downs")
 	case deps.PublishRegistry == nil:

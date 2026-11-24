@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/shimclient"
 )
@@ -172,5 +173,37 @@ func TestAWorkingWorkspaceOffScreenHoldsItsPage(t *testing.T) {
 	// Assert
 	if got := pageName(rowFor(repoRows(t, latest(t, r)), string(theWS))); got != "loaded" {
 		t.Fatalf("page = %s, want loaded", got)
+	}
+}
+
+func TestASwitchAwayTellsTheShimHoldSinkAndHoldsTheShimForTheGrace(t *testing.T) {
+	// Arrange
+	var mu sync.Mutex
+	told := map[string]int{}
+	r, _ := newResolver(t, sidebar.WithShimHoldSink(func(ws ids.WorkspaceID) {
+		mu.Lock()
+		defer mu.Unlock()
+		told[string(ws)]++
+	}))
+	reg := registry(workspace("a", "a"), workspace("b", "b"))
+	r.SetRegistry(reg)
+	liveRegistry(r, reg)
+	r.SetSelected("a")
+	mu.Lock()
+	before := told["a"]
+	mu.Unlock()
+
+	// Act
+	r.SetSelected("b")
+
+	// Assert
+	mu.Lock()
+	after := told["a"]
+	mu.Unlock()
+	if after <= before {
+		t.Fatalf("a's shim hold changes told = %d, want more than %d after the switch away", after, before)
+	}
+	if got := r.ShimHold("a"); got.Indefinite || !got.Until.Equal(epoch.Add(sidebar.PageLeaveGrace)) {
+		t.Fatalf("a's shim hold = %+v, want until %v", got, epoch.Add(sidebar.PageLeaveGrace))
 	}
 }

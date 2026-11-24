@@ -1,5 +1,7 @@
 package wsm
 
+import "time"
+
 // Withholding is whether, and why, the editor's tab bar withholds an open
 // workspace's tab. It is THE ONE STATEMENT of a workspace's visibility: the
 // roster's tab bar draws it, and the daemon decides from it which workspaces
@@ -175,3 +177,24 @@ func isTopPriority(p Priority) bool { return p == PriorityP05 || p == PriorityP1
 // keeps it visible under every fold (VisibilityInput.TopPriority). A fold
 // therefore never stands such a workspace down (foldTabs, ResumeFolded).
 func (ws Workspace) TopPriority() bool { return ws.Priority != nil && isTopPriority(*ws.Priority) }
+
+// ShimHold is until when a workspace's resource allocation holds its IDLE
+// shim up: the shim half of workspace resource allocation (owner rulings,
+// 2026-11-24), which the roster derives beside the page verdict and the cache
+// keeper parks by. A busy session is never parked by it; it says only how
+// long an idle one waits. The zero value holds nothing: an idle session is
+// parked at once.
+type ShimHold struct {
+	// Indefinite holds the shim up for as long as what decided it stands (the
+	// selection, work, a mediator, a queue-bypass holder, a one-shot); the
+	// roster reports the change that ends it.
+	Indefinite bool
+	// Until holds the shim up before this instant, when Indefinite is not
+	// set; zero holds nothing.
+	Until time.Time
+}
+
+// HoldsAt reports whether the hold keeps an idle shim up at NOW.
+func (h ShimHold) HoldsAt(now time.Time) bool {
+	return h.Indefinite || now.Before(h.Until)
+}

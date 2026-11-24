@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agent-repld/internal/cachelapse"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
@@ -650,6 +651,25 @@ func (f *statusChangedForwarder) StatusChanged(ws ids.WorkspaceID) {
 		return
 	}
 	roster.FooterStatusChanged(ws)
+}
+
+// shimHoldForwarder carries the roster's shim hold changes to the cache
+// keeper, which is built after the roster.
+type shimHoldForwarder struct {
+	lateBound[*cachelapse.Keeper]
+	log dlog.Logger
+}
+
+// ShimHoldChanged tells the keeper workspace WS's shim hold moved.
+func (f *shimHoldForwarder) ShimHoldChanged(ws ids.WorkspaceID) {
+	keeper, ok := f.load()
+	if !ok {
+		f.log.Error("daemon.cmd.shim_hold_changed", "a shim hold moved before the cache keeper was wired; its stand-down was not reconciled", dlog.Context{
+			"workspace": string(ws), "invariant_violation": "the cache keeper is bound before any roster render",
+		})
+		return
+	}
+	keeper.ShimHoldChanged(ws)
 }
 
 // mergeTarget is what the merge forwarder hands on to: the orchestrator's
