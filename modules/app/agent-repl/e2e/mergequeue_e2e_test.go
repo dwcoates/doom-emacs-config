@@ -376,6 +376,10 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// rebinds its fixture's `d` field after the bounce.
 	w.Daemon = d2
 	d2.AwaitRunLogOperation("daemon.merge.recover")
+	// The sweep that puts the turn back runs after that record, so wait for
+	// its own record in the workspace's log (the resubmission) before reading
+	// the feed: reading at once raced the sweep and saw only the original.
+	w.AwaitWorkspaceLogOperationCount(child.GetDir(), "daemon.merge.recover_displaced", 1)
 
 	// Assert: the boot sweep resubmitted the displaced turn EXACTLY ONCE,
 	// carrying its own words, on a turn id of its own. The merge never
