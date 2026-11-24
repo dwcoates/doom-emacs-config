@@ -600,18 +600,21 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 ### A short response is plain prose, never a tree
 
-- A response that fits in three to five SHORT sentences, or two to three lines of text, is a brief, normal reply.
+- A response is plain prose only when it is BOTH short AND less involved, and every other response is a tree.
+  - Both tests must pass, so failing either one makes the response a tree.
+  - When in doubt, the response is a tree.
+- Short means it fits in three to five SHORT sentences, or two to three lines of text.
   - Anything longer is a tree, whatever the turn behind it, so a reply of some twenty lines of prose is never short (owner ruling, 2026-11-18).
-  - It has no `Response (...)` header line, no tree, no numbering, no summary branch, and no emoji prefixes.
-  - Examples are a quick explanation of an unclear point in a previous response, a one-line answer, and a digest of a notification the workspace received.
-- The tree below is for the response to a long turn that involved non-trivial work.
-  - A response that is short on content stays short, even when the turn behind it was long.
-  - A response that carries a fix, a question, a memory proposal, or several findings is no longer short, and gets the tree.
-- Every other rule of the response behavior section still applies to a short response (inline code, full paths, hyperlinked pull requests, and the rest).
+  - Length is the response's own length, never the turn's, so a long reply to a light turn is still a tree.
+- Less involved means the response carries a single point and nothing for the user to act on.
+  - A response that carries a fix, a change made, a question, a memory proposal, several findings, or an analysis is involved, and gets the tree however few lines it takes.
+  - Examples of less involved are a quick explanation of an unclear point in a previous response, a one-line answer, and a digest of a notification the workspace received.
+- A plain-prose response has no `Response (...)` header line, no tree, no numbering, no summary branch, and no emoji prefixes.
+- Every other rule of the response behavior section still applies to a plain-prose response (inline code, full paths, hyperlinked pull requests, and the rest).
 
 ### The response IS a single TLDR tree
 
-- The ENTIRE response to a long, non-trivial turn should itself be a TLDR tree (see TLDR spec below), so there is no separate prose body to be terse about.
+- The ENTIRE response, unless it is plain prose per the section above, MUST itself be a TLDR tree (see TLDR spec below), so there is no separate prose body to be terse about.
   - The tree IS the whole response from its first line to its last.
   - There is no separate prose body.
   - There is no separate 'Response TLDR' section appended outside the tree, because the tree has wholly replaced both.

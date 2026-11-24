@@ -517,7 +517,24 @@ describe("this repository's committed metaprompt", () => {
     // Arrange
     const text = readMetaprompt(homeOnThisRepository()) ?? "";
     // Assert — owner ruling 2026-11-18: twenty lines of prose is a tree.
-    expect(text).toContain("A response that fits in three to five SHORT sentences, or two to three lines of text, is a brief, normal reply.");
+    expect(text).toContain("Short means it fits in three to five SHORT sentences, or two to three lines of text.");
+  });
+
+  it("keeps a reply as plain prose only when it is both short and less involved", () => {
+    // Arrange
+    const text = readMetaprompt(homeOnThisRepository()) ?? "";
+    // Assert
+    expect(text).toContain("A response is plain prose only when it is BOTH short AND less involved, and every other response is a tree.");
+    expect(text).toContain("Length is the response's own length, never the turn's, so a long reply to a light turn is still a tree.");
+    expect(text).toContain("The ENTIRE response, unless it is plain prose per the section above, MUST itself be a TLDR tree");
+  });
+
+  it("no longer exempts a response from the tree by how light its turn was", () => {
+    // Arrange
+    const text = readMetaprompt(homeOnThisRepository()) ?? "";
+    // Assert
+    expect(text).not.toContain("The tree below is for the response to a long turn that involved non-trivial work.");
+    expect(text).not.toContain("The ENTIRE response to a long, non-trivial turn should itself be a TLDR tree");
   });
 
   it("requires a shell command to be one runnable block fenced as bash", () => {
