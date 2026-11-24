@@ -181,8 +181,10 @@ func (s *store) WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]Workspace
 // shown reference, if any is shown. A shown link, and a reference relabeled,
 // keep their placement. In the same transaction an owned pull
 // request takes SET.Subscribe when ID holds no subscription to it, and a link
-// no longer owned ends the subscription its ownership took. It answers every
-// link ID now holds, read in the same transaction.
+// no longer owned ends the subscription its ownership took, and every
+// workspace following ID is subscribed to an owned pull request's merge
+// (followedpullrequests.go). It answers every link ID now holds, read in the
+// same transaction.
 func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSet) ([]WorkspaceLink, error) {
 	const op = "daemon.wsm.set_workspace_link"
 	url, label := set.URL, set.Label
@@ -202,7 +204,10 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 		s.log.Error(op, "refused a link its caller should never have made: it names no url or no label", withError(fields, err))
 		return nil, err
 	}
-	var out []WorkspaceLink
+	var (
+		out         []WorkspaceLink
+		followedPRs []FollowedPullRequest
+	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
 			return err
@@ -245,9 +250,17 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 		if err := s.followLinkInTx(ctx, tx, id, set); err != nil {
 			return err
 		}
+		if set.Owned && set.PullRequest != nil {
+			if followedPRs, err = followOwnedPullRequestByFollowersInTx(ctx, tx, id, *set.PullRequest, nowUTC()); err != nil {
+				return err
+			}
+		}
 		out, err = linksOf(ctx, tx, id)
 		return err
 	})
+	if err == nil {
+		s.logFollowedPullRequests(op, followedPRs)
+	}
 	return out, err
 }
 
@@ -270,31 +283,41 @@ func (s *store) AddWorkspaceLinkIfAbsent(ctx context.Context, id WorkspaceID, ur
 		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
 			return err
 		}
-		var held int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, url).Scan(&held); err != nil {
-			return err
-		}
-		if held > 0 {
-			return nil
-		}
-		shown, err := placeLinkInTx(ctx, tx, id, LinkSet{URL: url, Label: label})
-		if err != nil {
-			return err
-		}
-		var owner, repo, number any
-		if pullRequest != nil {
-			owner, repo, number = pullRequest.Owner, pullRequest.Repo, pullRequest.Number
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number, announces)
-			 VALUES (?, ?, ?, (SELECT COALESCE(MAX(set_seq), 0) + 1 FROM workspace_links WHERE workspace_id = ?), ?, 0, ?, ?, ?, NULL)`,
-			id, url, label, id, shown, owner, repo, number); err != nil {
-			return err
-		}
-		added = true
-		return nil
+		var err error
+		added, err = addReferenceLinkIfAbsentInTx(ctx, tx, id, url, label, pullRequest)
+		return err
 	})
 	return added, err
+}
+
+// addReferenceLinkIfAbsentInTx stores URL under LABEL as a reference link on
+// ID when ID holds no link to it, placed as any new reference is
+// (placeLinkInTx), and answers whether it stored the link. A link ID already
+// holds is left as it is, whatever its label or ownership. PULLREQUEST is the
+// pull request the url names, nil for any other url.
+func addReferenceLinkIfAbsentInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, url, label string, pullRequest *PullRequestKey) (bool, error) {
+	var held int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, url).Scan(&held); err != nil {
+		return false, err
+	}
+	if held > 0 {
+		return false, nil
+	}
+	shown, err := placeLinkInTx(ctx, tx, id, LinkSet{URL: url, Label: label})
+	if err != nil {
+		return false, err
+	}
+	var owner, repo, number any
+	if pullRequest != nil {
+		owner, repo, number = pullRequest.Owner, pullRequest.Repo, pullRequest.Number
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number, announces)
+		 VALUES (?, ?, ?, (SELECT COALESCE(MAX(set_seq), 0) + 1 FROM workspace_links WHERE workspace_id = ?), ?, 0, ?, ?, ?, NULL)`,
+		id, url, label, id, shown, owner, repo, number); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RemoveWorkspaceLink removes URL from ID's links, ending the subscription
@@ -505,17 +528,8 @@ func (s *store) followLinkInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, 
 		return ownHeldSubscriptionInTx(ctx, tx, id, *set.PullRequest)
 	}
 	sub := *set.Subscribe
-	var ended, mergeSHA any
-	if sub.Ended != nil {
-		ended = "closed"
-		if sub.Ended.Merged {
-			ended, mergeSHA = "merged", sub.Ended.MergeSHA
-		}
-	}
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told, ended, ended_merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(subscriber, owner, repo, number) DO NOTHING`,
-		id, sub.PullRequest.Owner, sub.PullRequest.Repo, sub.PullRequest.Number, int64(sub.Events), string(PullRequestOriginOwnedLink), nanos(sub.SubscribedAt), sub.Told, ended, mergeSHA)
+	sub.Subscriber, sub.Origin = id, PullRequestOriginOwnedLink
+	_, err := insertPullRequestSubscriptionIfAbsentInTx(ctx, tx, sub)
 	return err
 }
 

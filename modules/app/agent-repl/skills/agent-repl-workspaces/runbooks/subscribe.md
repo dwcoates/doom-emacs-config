@@ -27,6 +27,17 @@
   behind your turns lists every change since the last one you were told,
   oldest first, and its status is WS as it stands when the notice is made.
 
+- A SUBSCRIPTION TO WS FOLLOWS THE MERGE OF EVERY PULL REQUEST WS OWNS,
+  whatever its events. The daemon subscribes this workspace to each one WS
+  owns when the subscription is taken, and to each one WS stores as owned
+  while it is followed, and stores each as this workspace's reference link
+  under WS's label. Such a follow (origin `followed_workspace`, event
+  `merged`) tells the merge alone, or the close as the pull request's end,
+  never its comments, checks or merge-queue progress. A link or a
+  subscription this workspace already held to the pull request is left as
+  it is. `workspace unsubscribe WS` does not end the follows already taken;
+  `pr-unsubscribe` ends one.
+
 - TURN-END SUBSCRIPTIONS (`-events turn_ended`) ARE THE TIGHTEST LEVEL, and
   nothing grants one automatically, not even `create -relationship child`:
   each notice wakes this workspace's agent at the end of every turn of WS.

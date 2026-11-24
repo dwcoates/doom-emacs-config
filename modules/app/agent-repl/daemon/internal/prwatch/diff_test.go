@@ -6,6 +6,8 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/wsm"
 )
 
 // kinds names each activity's arm, in order.
@@ -196,5 +198,34 @@ func TestDecodeToldRefusesAnUnreadableSnapshot(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("decodeTold = nil, want refused")
+	}
+}
+
+func TestEventsOfAnActivityAnswersWhatTellsIt(t *testing.T) {
+	stateChanged := func(state *agentreplv1.PullRequestState) *agentreplv1.PullRequestActivity {
+		return &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_StateChanged{StateChanged: &agentreplv1.PullRequestActivityStateChanged{State: state}}}
+	}
+	tests := []struct {
+		name     string
+		activity *agentreplv1.PullRequestActivity
+		want     wsm.PullRequestEvents
+	}{
+		{name: "a merge is told to state and to merged", activity: stateChanged(&agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Merged{Merged: &agentreplv1.PullRequestStateMerged{}}}),
+			want: wsm.NewPullRequestEvents(wsm.PullRequestEventState, wsm.PullRequestEventMerged)},
+		{name: "a close is told to state alone", activity: stateChanged(&agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Closed{Closed: &agentreplv1.PullRequestStateClosed{}}}),
+			want: wsm.NewPullRequestEvents(wsm.PullRequestEventState)},
+		{name: "a comment is told to comment alone", activity: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_Comment{Comment: &agentreplv1.PullRequestActivityComment{}}},
+			want: wsm.NewPullRequestEvents(wsm.PullRequestEventComment)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := eventsOf(tt.activity)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("eventsOf = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }

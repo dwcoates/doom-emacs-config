@@ -327,6 +327,9 @@ type fakeDB struct {
 	linkSets []wsm.LinkSet
 	// prSubs answers WorkspacePullRequestSubscriptions.
 	prSubs map[ids.WorkspaceID][]wsm.PullRequestSubscription
+	// subscribers answers WorkspaceSubscribers, and subscribersErr fails it.
+	subscribers    map[ids.WorkspaceID][]wsm.WorkspaceSubscription
+	subscribersErr error
 	// setNameErr fails SetName; listWorkspacesErrAfterRename becomes
 	// listWorkspacesErr once SetName writes, for a test that fails only the
 	// reads after a rename is recorded.
@@ -1010,6 +1013,15 @@ func (d *fakeDB) SetAwaiting(_ context.Context, id ids.WorkspaceID, awaited *ids
 	ws.Awaiting = awaited
 	d.workspaces[id] = ws
 	return nil
+}
+
+// WorkspaceSubscribers answers the workspace's followers; subscribersErr
+// fails it.
+func (d *fakeDB) WorkspaceSubscribers(_ context.Context, followed ids.WorkspaceID) ([]wsm.WorkspaceSubscription, error) {
+	if d.subscribersErr != nil {
+		return nil, d.subscribersErr
+	}
+	return slices.Clone(d.subscribers[followed]), nil
 }
 
 // WorkspaceLinks answers the workspace's stored links; linksReadErr fails it.

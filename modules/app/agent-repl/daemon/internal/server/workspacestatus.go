@@ -85,6 +85,12 @@ func (s *server) SubscribeWorkspace(
 	case err != nil:
 		return nil, fail(log, rpc, fmt.Errorf("record the subscription of %s to %s: %w", subscriber.Record.ID, followed.Record.ID, err))
 	}
+	// THE SUBSCRIPTION MAY HAVE TAKEN THE FOLLOWED WORKSPACE'S PULL REQUESTS
+	// as the subscriber's reference links (wsm.SubscribeWorkspace), which its
+	// topbar and row draw.
+	if err := s.deps.Verbs.RepublishLinks(ctx, subscriber.Record.ID); err != nil {
+		return nil, fail(log, rpc, err)
+	}
 	status, err := s.deps.Verbs.Status(ctx, followed.Record.ID)
 	if err != nil {
 		return answer(resp, s.answerRefusal(log, rpc, resp, err, followedRenames))

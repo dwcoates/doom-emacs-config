@@ -49,9 +49,47 @@ type PullRequestFollower interface {
 // an announced url it does not hold is refused unknown_announced_link. An
 // owned GNS subpage of a GNS page the workspace already owns is refused
 // subpage_of_owned_link (wsm.SubpageOfOwnedLinkError), nothing stored. It
-// answers every link the workspace then holds.
+// answers every link the workspace then holds. Every workspace following
+// WS is subscribed to an owned pull request's merge in the same write
+// (wsm.SetWorkspaceLink), and its links are republished.
 func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool, announces string) ([]wsm.WorkspaceLink, error) {
 	fields := dlog.Context{"url": url, "label": label, "owned": owned, "announces": announces}
+	links, err := v.setLink(ctx, ws, url, label, owned, announces, fields)
+	if err != nil || !owned {
+		return links, err
+	}
+	if _, ok := prwatch.ParseURL(url); !ok {
+		return links, nil
+	}
+	if err := v.republishFollowersLinks(ctx, ws); err != nil {
+		return nil, err
+	}
+	return links, nil
+}
+
+// republishFollowersLinks republishes the links of every workspace following
+// WS (RepublishLinks), which a pull request WS stored owned may have reached
+// (wsm.SetWorkspaceLink).
+func (v *verbs) republishFollowersLinks(ctx context.Context, ws ids.WorkspaceID) error {
+	_, log, err := v.record(ctx, rpcChangeWorkspaceLinks, ws)
+	if err != nil {
+		return err
+	}
+	subs, err := v.deps.DB.WorkspaceSubscribers(ctx, ws)
+	if err != nil {
+		log.Error(opRepublishLinks, "could not read the workspace's followers to republish their links", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("read the followers of %q: %w", ws, err)
+	}
+	for _, sub := range subs {
+		if err := v.RepublishLinks(ctx, sub.Subscriber); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setLink is SetLink's write and its own workspace's republish.
+func (v *verbs) setLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool, announces string, fields dlog.Context) ([]wsm.WorkspaceLink, error) {
 	return v.changeLinks(ctx, ws, fields, logsite.Msg("set a link"), func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		if err := externalbrowser.Validate(url); err != nil {
 			return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmInvalidLink,

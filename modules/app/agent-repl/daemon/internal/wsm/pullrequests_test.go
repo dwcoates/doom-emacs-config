@@ -2,8 +2,11 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,7 +68,8 @@ func TestPullRequestEventsAreASet(t *testing.T) {
 		wantValid bool
 		wantName  string
 	}{
-		{name: "every event", set: AllPullRequestEvents(), wantValid: true, wantName: "comment,review,review_comment,state,checks,merge_queue"},
+		{name: "every event", set: AllPullRequestEvents(), wantValid: true, wantName: "comment,review,review_comment,state,checks,merge_queue,merged"},
+		{name: "the merge alone is a member", set: NewPullRequestEvents(PullRequestEventMerged), wantValid: true, wantName: "merged"},
 		{name: "the merge queue is a member", set: NewPullRequestEvents(PullRequestEventMergeQueue, PullRequestEventState), wantValid: true, wantName: "state,merge_queue"},
 		{name: "a repeat is one member", set: NewPullRequestEvents(PullRequestEventChecks, PullRequestEventChecks), wantValid: true, wantName: "checks"},
 		{name: "no event", set: NewPullRequestEvents(), wantValid: false},
@@ -79,6 +83,51 @@ func TestPullRequestEventsAreASet(t *testing.T) {
 			}
 			if tt.wantValid && tt.set.String() != tt.wantName {
 				t.Fatalf("String = %q, want %q", tt.set.String(), tt.wantName)
+			}
+		})
+	}
+}
+
+func TestPullRequestEventsOverlap(t *testing.T) {
+	tests := []struct {
+		name  string
+		set   PullRequestEvents
+		other PullRequestEvents
+		want  bool
+	}{
+		{name: "a shared member", set: NewPullRequestEvents(PullRequestEventMerged, PullRequestEventChecks), other: NewPullRequestEvents(PullRequestEventState, PullRequestEventMerged), want: true},
+		{name: "no shared member", set: NewPullRequestEvents(PullRequestEventMerged), other: NewPullRequestEvents(PullRequestEventState), want: false},
+		{name: "an empty set", set: NewPullRequestEvents(PullRequestEventMerged), other: NewPullRequestEvents(), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.set.Overlaps(tt.other)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("%s.Overlaps(%s) = %v, want %v", tt.set, tt.other, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPullRequestOriginsAreDeclared(t *testing.T) {
+	tests := []struct {
+		origin PullRequestOrigin
+		want   bool
+	}{
+		{origin: PullRequestOriginOwnedLink, want: true},
+		{origin: PullRequestOriginRequested, want: true},
+		{origin: PullRequestOriginFollowedWorkspace, want: true},
+		{origin: "", want: false},
+		{origin: "inherited", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.origin), func(t *testing.T) {
+			// Assert
+			if got := tt.origin.Valid(); got != tt.want {
+				t.Fatalf("PullRequestOrigin(%q).Valid() = %v, want %v", tt.origin, got, tt.want)
 			}
 		})
 	}
@@ -522,5 +571,72 @@ func TestAnOwnedLinkToAnEndedPullRequestIsRecordedEnded(t *testing.T) {
 	live, err := s.LivePullRequestSubscriptions(context.Background())
 	if err != nil || len(live) != 0 || links[0].Follow == nil || !reflect.DeepEqual(links[0].Follow.Ended, set.Subscribe.Ended) {
 		t.Fatalf("links = %+v, live %v (%v); want the link's follow ended by the merge and nothing polled", links, live, err)
+	}
+}
+
+func TestInsertPullRequestSubscriptionIfAbsentInTx(t *testing.T) {
+	merged := requested("", "told", PullRequestEventState)
+	merged.Ended = &PullRequestEnd{Merged: true, MergeSHA: "sha"}
+	tests := []struct {
+		name      string
+		held      bool
+		sub       func(ws WorkspaceID) PullRequestSubscription
+		wantTaken bool
+		want      func(ws WorkspaceID) PullRequestSubscription
+	}{
+		{name: "an absent subscription is recorded", sub: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "told", PullRequestEventMerged) },
+			wantTaken: true, want: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "told", PullRequestEventMerged) }},
+		{name: "an ended subscription is recorded ended", sub: func(ws WorkspaceID) PullRequestSubscription { m := merged; m.Subscriber = ws; return m },
+			wantTaken: true, want: func(ws WorkspaceID) PullRequestSubscription { m := merged; m.Subscriber = ws; return m }},
+		{name: "a held subscription is left as it is", held: true, sub: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "other", PullRequestEventMerged) },
+			want: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "held", PullRequestEventComment) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s).ID
+			if tt.held {
+				mustSubscribePR(t, s, requested(ws, "held", PullRequestEventComment))
+			}
+
+			// Act
+			var taken bool
+			err := s.write(context.Background(), "test", nil, func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				taken, err = insertPullRequestSubscriptionIfAbsentInTx(ctx, tx, tt.sub(ws))
+				return err
+			})
+
+			// Assert
+			if err != nil || taken != tt.wantTaken {
+				t.Fatalf("insertPullRequestSubscriptionIfAbsentInTx = %v, %v; want taken %v", taken, err, tt.wantTaken)
+			}
+			if got := subsOf(t, s, ws); !reflect.DeepEqual(got, []PullRequestSubscription{tt.want(ws)}) {
+				t.Fatalf("subscriptions = %+v, want %+v", got, tt.want(ws))
+			}
+		})
+	}
+}
+
+// TestPullRequestSubscriptionsAreInsertedIfAbsentThroughOneHelper pins that a
+// subscription taken without replacing a held one is written through
+// insertPullRequestSubscriptionIfAbsentInTx, so a hand-rolled copy of its
+// statement fails here.
+func TestPullRequestSubscriptionsAreInsertedIfAbsentThroughOneHelper(t *testing.T) {
+	for _, file := range []string{"workspacelinks.go", "followedpullrequests.go"} {
+		t.Run(file, func(t *testing.T) {
+			// Arrange
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read %s: %v", file, err)
+			}
+			src := string(raw)
+
+			// Act / Assert
+			if !strings.Contains(src, "insertPullRequestSubscriptionIfAbsentInTx(") || strings.Contains(src, "INSERT INTO pull_request_subscriptions") {
+				t.Fatalf("%s inserts a pull-request subscription without insertPullRequestSubscriptionIfAbsentInTx", file)
+			}
+		})
 	}
 }

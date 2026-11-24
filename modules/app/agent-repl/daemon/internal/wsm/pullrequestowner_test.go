@@ -168,18 +168,25 @@ func TestTheOnePullRequestOwnerStepKeepsTheEarliestOwner(t *testing.T) {
 	if subs := subsOf(t, s, second.ID); len(subs) != 1 || subs[0].Origin != PullRequestOriginRequested {
 		t.Fatalf("the later owner's subscriptions = %+v, want one demoted to requested", subs)
 	}
-	if subs := subsOf(t, s, third.ID); len(subs) != 1 || subs[0].Origin != PullRequestOriginOwnedLink || subs[0].Events != AllPullRequestEvents()|NewPullRequestEvents(PullRequestEventComment) {
+	if subs := subsOf(t, s, third.ID); len(subs) != 1 || subs[0].Origin != PullRequestOriginOwnedLink || subs[0].Events != eventsAtTheOwnerStep()|NewPullRequestEvents(PullRequestEventComment) {
 		t.Fatalf("the link owner's subscriptions = %+v, want its requested one owned, asking for every event", subs)
 	}
 }
 
-func TestTheOnePullRequestOwnerStepSpellsEveryEvent(t *testing.T) {
-	// Arrange, Act
-	all := int64(AllPullRequestEvents())
+// eventsAtTheOwnerStep is every event declared when the layout-111 step ran:
+// every event but those declared after it, which a shipped step's literal
+// never gains.
+func eventsAtTheOwnerStep() PullRequestEvents {
+	return AllPullRequestEvents() &^ NewPullRequestEvents(PullRequestEventMerged)
+}
 
-	// Assert: the step's literal is every event's bits.
+func TestTheOnePullRequestOwnerStepSpellsEveryEventDeclaredWhenItRan(t *testing.T) {
+	// Arrange, Act
+	all := int64(eventsAtTheOwnerStep())
+
+	// Assert: the step's literal is the bits of every event it knew.
 	if all != 126 {
-		t.Fatalf("AllPullRequestEvents() = %d, but onePullRequestOwnerDDL spells 126; update the step", all)
+		t.Fatalf("every event declared at layout 111 = %d, but onePullRequestOwnerDDL spells 126", all)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -445,6 +446,64 @@ func TestSetLinkFollowsAnOwnedPullRequest(t *testing.T) {
 				t.Errorf("subscription = %+v, want every event for the owned link, from the watcher's first read", set.Subscribe)
 			}
 		})
+	}
+}
+
+func TestSetLinkRepublishesTheLinksOfTheWorkspacesFollowers(t *testing.T) {
+	prURL := "https://github.com/ChessCom/explanation-engine/pull/42"
+	tests := []struct {
+		name  string
+		url   string
+		owned bool
+		want  []ids.WorkspaceID
+	}{
+		{name: "an owned pull request republishes every follower", url: prURL, owned: true, want: []ids.WorkspaceID{"w1", "w2", "w3"}},
+		{name: "a referenced pull request republishes only its workspace", url: prURL, want: []ids.WorkspaceID{"w1"}},
+		{name: "an owned link that is no pull request republishes only its workspace", url: docLink.URL, owned: true, want: []ids.WorkspaceID{"w1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			for _, ws := range []ids.WorkspaceID{"w1", "w2", "w3"} {
+				f.workspace(ws, t.TempDir())
+			}
+			f.db.subscribers = map[ids.WorkspaceID][]wsm.WorkspaceSubscription{"w1": {{Subscriber: "w2", Followed: "w1"}, {Subscriber: "w3", Followed: "w1"}}}
+
+			// Act.
+			_, err := f.verbs.SetLink(context.Background(), "w1", tt.url, "The pull request", tt.owned, "")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SetLink: %v", err)
+			}
+			var got []ids.WorkspaceID
+			for _, told := range f.sidebar.openOwned {
+				got = append(got, told.WS)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("republished %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetLinkFailsLoudlyWhenTheFollowersCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.subscribersErr = errors.New("the subscriptions are unreadable")
+
+	// Act.
+	_, err := f.verbs.SetLink(context.Background(), "w1", "https://github.com/ChessCom/explanation-engine/pull/42", "The pull request", true, "")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the subscriptions are unreadable") {
+		t.Fatalf("SetLink = %v, want the followers' read failure", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.workspace.republish_links",
+		Message: "could not read the workspace's followers to republish their links"}); !ok {
+		t.Error("no error record of the followers' read failure")
 	}
 }
 

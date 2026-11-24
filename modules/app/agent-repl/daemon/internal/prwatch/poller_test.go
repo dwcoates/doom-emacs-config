@@ -83,6 +83,49 @@ func TestAMergeIsToldAndEndsTheSubscription(t *testing.T) {
 	}
 }
 
+func TestASubscriptionToTheMergeIsToldTheMergeAlone(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.gh.set(pathPull(), pullJSON("open", true, false, "head1"))
+	r.subscribeAs(t, wsm.PullRequestOriginFollowedWorkspace, wsm.PullRequestEventMerged)
+	r.gh.set(pathPull(), pullJSON("open", false, false, "head1"))
+	r.gh.set(pathComments(), mustJSON([]any{commentJSONOf(11, "alice", "please rename it", t0, t0, nil)}))
+
+	// Act
+	r.tick()
+	r.tick()
+	readyTold := r.told()
+	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
+	r.tick()
+	r.tick()
+
+	// Assert
+	if len(readyTold) != 0 {
+		t.Fatalf("told = %q before the merge, want nothing: neither the readiness nor the comment", readyTold)
+	}
+	told := r.told()
+	if len(told) != 1 || !contains(told[0], "The pull request was merged by @dodge, as commit mergesha0000") || !contains(told[0], endedSentence) || contains(told[0], "please rename it") {
+		t.Fatalf("told = %q, want the merge and the subscription's end alone, once", told)
+	}
+}
+
+func TestASubscriptionToTheMergeIsToldACloseOnlyAsItsEnd(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribeAs(t, wsm.PullRequestOriginFollowedWorkspace, wsm.PullRequestEventMerged)
+	r.gh.set(pathPull(), pullJSON("closed", false, false, "head1"))
+
+	// Act
+	r.tick()
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !contains(told[0], endedSentence) || contains(told[0], "The pull request was closed without merging") {
+		t.Fatalf("told = %q, want the subscription's end alone", told)
+	}
+}
+
 func TestAFailingReadIsToldToNobodyAndWhatItMissedIsTold(t *testing.T) {
 	// Arrange
 	r := newRig(t)

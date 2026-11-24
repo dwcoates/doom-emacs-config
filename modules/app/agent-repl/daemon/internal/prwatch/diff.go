@@ -224,6 +224,16 @@ type timedActivity struct {
 	activity *agentreplv1.PullRequestActivity
 }
 
+// eventsOf is the events any one of which a subscription asks for to be
+// told A: a merge is told to STATE and to MERGED alike.
+func eventsOf(a *agentreplv1.PullRequestActivity) wsm.PullRequestEvents {
+	e := eventOf(a)
+	if e == wsm.PullRequestEventState && a.GetStateChanged().GetState().GetMerged() != nil {
+		return wsm.NewPullRequestEvents(e, wsm.PullRequestEventMerged)
+	}
+	return wsm.NewPullRequestEvents(e)
+}
+
 // eventOf is the activity kind a subscription asks for to be told A.
 func eventOf(a *agentreplv1.PullRequestActivity) wsm.PullRequestEvent {
 	switch arm := a.GetActivity().(type) {

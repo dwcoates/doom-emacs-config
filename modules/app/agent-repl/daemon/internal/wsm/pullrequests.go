@@ -100,10 +100,13 @@ const (
 	PullRequestEventState
 	PullRequestEventChecks
 	PullRequestEventMergeQueue
+	// PullRequestEventMerged is the pull request's merge alone, of all
+	// PullRequestEventState tells.
+	PullRequestEventMerged
 )
 
 // pullRequestEvents is every declared event, in order.
-var pullRequestEvents = []PullRequestEvent{PullRequestEventComment, PullRequestEventReview, PullRequestEventReviewComment, PullRequestEventState, PullRequestEventChecks, PullRequestEventMergeQueue}
+var pullRequestEvents = []PullRequestEvent{PullRequestEventComment, PullRequestEventReview, PullRequestEventReviewComment, PullRequestEventState, PullRequestEventChecks, PullRequestEventMergeQueue, PullRequestEventMerged}
 
 // String names the event in records.
 func (e PullRequestEvent) String() string {
@@ -120,6 +123,8 @@ func (e PullRequestEvent) String() string {
 		return "checks"
 	case PullRequestEventMergeQueue:
 		return "merge_queue"
+	case PullRequestEventMerged:
+		return "merged"
 	}
 	return fmt.Sprintf("PullRequestEvent(%d)", int(e))
 }
@@ -142,6 +147,10 @@ func AllPullRequestEvents() PullRequestEvents { return NewPullRequestEvents(pull
 
 // Has reports whether E is a member.
 func (s PullRequestEvents) Has(e PullRequestEvent) bool { return s&(1<<uint(e)) != 0 }
+
+// Overlaps reports whether S and OTHER share a member: whether a subscription
+// asking for S is told an activity OTHER names every event of.
+func (s PullRequestEvents) Overlaps(other PullRequestEvents) bool { return s&other != 0 }
 
 // Valid reports whether the set is non-empty and holds only declared events.
 func (s PullRequestEvents) Valid() bool {
@@ -178,7 +187,20 @@ const (
 	PullRequestOriginOwnedLink PullRequestOrigin = "owned_link"
 	// PullRequestOriginRequested is a subscription SubscribePullRequest took.
 	PullRequestOriginRequested PullRequestOrigin = "requested"
+	// PullRequestOriginFollowedWorkspace is a subscription the daemon took to
+	// the owned pull request of a workspace the subscriber follows
+	// (followedPullRequestsInTx), for its merge alone.
+	PullRequestOriginFollowedWorkspace PullRequestOrigin = "followed_workspace"
 )
+
+// Valid reports whether the origin is a declared one.
+func (o PullRequestOrigin) Valid() bool {
+	switch o {
+	case PullRequestOriginOwnedLink, PullRequestOriginRequested, PullRequestOriginFollowedWorkspace:
+		return true
+	}
+	return false
+}
 
 // PullRequestEnd is how a followed pull request ended.
 type PullRequestEnd struct {
@@ -249,7 +271,7 @@ const pullRequestColumns = `subscriber, owner, repo, number, events, origin, sub
 func (s *store) SubscribePullRequest(ctx context.Context, sub PullRequestSubscription) (bool, error) {
 	const op = "daemon.wsm.subscribe_pull_request"
 	fields := dlog.Context{"subscriber": string(sub.Subscriber), "pull_request": sub.PullRequest.String(), "events": sub.Events.String(), "origin": string(sub.Origin)}
-	if !sub.Events.Valid() || !sub.PullRequest.Valid() || (sub.Origin != PullRequestOriginOwnedLink && sub.Origin != PullRequestOriginRequested) {
+	if !sub.Events.Valid() || !sub.PullRequest.Valid() || !sub.Origin.Valid() {
 		err := fmt.Errorf("wsm: pull-request subscription of %s to %s: events %b, origin %q", sub.Subscriber, sub.PullRequest, uint32(sub.Events), sub.Origin)
 		s.log.Error(op, "refused a pull-request subscription its caller should never have made", withError(fields, err))
 		return false, err
@@ -460,6 +482,27 @@ func ParsePullRequestKey(text string) (PullRequestKey, error) {
 	return key, nil
 }
 
+// insertPullRequestSubscriptionIfAbsentInTx records SUB, ended when its Ended
+// is set, unless its subscriber already holds a subscription to its pull
+// request, which is left as it is, and answers whether it recorded it.
+func insertPullRequestSubscriptionIfAbsentInTx(ctx context.Context, tx *sql.Tx, sub PullRequestSubscription) (bool, error) {
+	var ended, mergeSHA any
+	if sub.Ended != nil {
+		ended = "closed"
+		if sub.Ended.Merged {
+			ended, mergeSHA = "merged", sub.Ended.MergeSHA
+		}
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told, ended, ended_merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(subscriber, owner, repo, number) DO NOTHING`,
+		sub.Subscriber, sub.PullRequest.Owner, sub.PullRequest.Repo, sub.PullRequest.Number, int64(sub.Events), string(sub.Origin), nanos(sub.SubscribedAt), sub.Told, ended, mergeSHA)
+	if err != nil {
+		return false, err
+	}
+	return touchedRow(res)
+}
+
 // deletePullRequestSubscription deletes SUBSCRIBER's subscription to PR, of
 // ORIGIN when ORIGIN is set (any origin otherwise), answering whether one
 // stood.
@@ -508,7 +551,7 @@ func scanPullRequestSubscription(row interface{ Scan(...any) error }) (PullReque
 		return sub, fmt.Errorf("wsm: pull-request subscription of %s to %s holds undeclared events %b", sub.Subscriber, sub.PullRequest, events)
 	}
 	sub.Origin = PullRequestOrigin(origin)
-	if sub.Origin != PullRequestOriginOwnedLink && sub.Origin != PullRequestOriginRequested {
+	if !sub.Origin.Valid() {
 		return sub, fmt.Errorf("wsm: pull-request subscription of %s to %s holds undeclared origin %q", sub.Subscriber, sub.PullRequest, origin)
 	}
 	sub.SubscribedAt = fromNanos(at)

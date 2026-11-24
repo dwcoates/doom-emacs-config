@@ -89,6 +89,10 @@ enum PullRequestNoticeEvent {
   // CI run on its merge group commit reached its outcome. Its landing is told
   // by STATE, as any merge is.
   PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE = 6;
+  // The pull request merged, and nothing else STATE tells: no close,
+  // reopen or readiness. A subscription asking for this alone is told only
+  // the merge, and, as every subscription is, the pull request's end.
+  PULL_REQUEST_NOTICE_EVENT_MERGED = 7;
 }
 
 // How a subscription came to be. THE ARM IS THE ORIGIN.
@@ -101,6 +105,17 @@ message PullRequestSubscriptionOrigin {
     // A caller asked through SubscribePullRequest. Only an unsubscribe, the
     // subscriber's close, or the pull request's end ends it.
     PullRequestSubscriptionOriginRequested requested = 2;
+    // The subscriber follows the workspace that owns the pull request
+    // (SubscribeWorkspace), and the daemon subscribed it to the pull
+    // request's merge alone (PULL_REQUEST_NOTICE_EVENT_MERGED). It is taken
+    // when the subscription to the workspace is taken while the workspace
+    // owns the pull request, or when the followed workspace stores the pull
+    // request as an owned link while it is followed, and the pull request is
+    // stored as a reference link of the subscriber's in the same write. A
+    // subscription the subscriber already holds to the pull request is never
+    // changed. Only an unsubscribe, the subscriber's close, or the pull
+    // request's end ends it.
+    PullRequestSubscriptionOriginFollowedWorkspace followed_workspace = 3;
   }
 }
 
@@ -109,6 +124,10 @@ message PullRequestSubscriptionOriginOwnedLink {}
 
 // Taken by SubscribePullRequest. DELIBERATELY EMPTY: the arm is the origin.
 message PullRequestSubscriptionOriginRequested {}
+
+// Taken for the owned pull request of a followed workspace. DELIBERATELY
+// EMPTY: the arm is the origin.
+message PullRequestSubscriptionOriginFollowedWorkspace {}
 
 // Whether the daemon's reads of a followed pull request succeed. THE ARM IS
 // THE HEALTH. A failing subscription is still read on schedule; there is no
