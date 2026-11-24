@@ -803,7 +803,7 @@ type AgentReplClient interface {
 	// recently merged or created first: the rows no roster stream carries. See
 	// endpoint_list_merged_workspaces.proto.
 	ListMergedWorkspaces(context.Context, *connect.Request[v1.ListMergedWorkspacesRequest]) (*connect.Response[v1.ListMergedWorkspacesResponse], error)
-	// agent-repl's memory as a whole, for the version's hover. See
+	// agent-repl's memory as a whole, for the version's popup. See
 	// endpoint_get_memory_overview.proto.
 	GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error)
 	// One workspace's memory, for its row's hover. See
@@ -3528,7 +3528,7 @@ type AgentReplHandler interface {
 	// recently merged or created first: the rows no roster stream carries. See
 	// endpoint_list_merged_workspaces.proto.
 	ListMergedWorkspaces(context.Context, *connect.Request[v1.ListMergedWorkspacesRequest]) (*connect.Response[v1.ListMergedWorkspacesResponse], error)
-	// agent-repl's memory as a whole, for the version's hover. See
+	// agent-repl's memory as a whole, for the version's popup. See
 	// endpoint_get_memory_overview.proto.
 	GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error)
 	// One workspace's memory, for its row's hover. See

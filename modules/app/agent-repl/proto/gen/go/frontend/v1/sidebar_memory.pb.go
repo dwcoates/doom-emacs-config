@@ -1,7 +1,7 @@
 // sidebar_memory.proto — THE RAIL'S TWO MEMORY POPUPS, resolved by the daemon
 // and drawn verbatim (owner request, 2026-10-29).
 //
-// THE VERSION'S HOVER says what agent-repl holds in memory taken as a whole,
+// THE VERSION'S POPUP says what agent-repl holds in memory taken as a whole,
 // naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
 // what that one workspace holds. Every figure is MEASURED: the daemon's
 // process collector (procmetrics) samples each process's physical footprint,
@@ -10,12 +10,12 @@
 // page eligible, so a visible workspace whose page is unloaded counts as not
 // loaded. Each count is read from the one fact the matching metric reads
 // (agentrepl_workspaces_visible, agentrepl_sessions_up,
-// agentrepl_pages_loaded), so the hover and the metrics never disagree.
+// agentrepl_pages_loaded), so the popups and the metrics never disagree.
 // Nothing here is estimated: the workspace pages share one WebKit web content
 // process, which reports one footprint for all of them, so no per-page byte
 // figure exists to draw and none is served.
 //
-// FETCHED ON HOVER, NOT PUSHED. The figures move every sample, so they ride no
+// FETCHED WHILE OPEN, NOT PUSHED. The figures move every sample, so they ride no
 // roster push (a whole-roster push per sample would redraw every row and
 // decode in Emacs every two seconds); the page asks for them when the popup
 // opens (agentrepl.v1 GetMemoryOverview, GetWorkspaceMemory) and again while it
@@ -44,7 +44,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// The version hover's popup: one line per element, top to bottom. Fields 1
+// The version's popup: one line per element, top to bottom. Fields 1
 // (`pages`) and 3 (`agents`) are RETIRED: their counts and footprints are the
 // `workspaces` entry's lines.
 type SidebarMemoryOverview struct {

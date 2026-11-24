@@ -1,5 +1,5 @@
 // endpoint_get_memory_overview.proto — GetMemoryOverview: agent-repl's memory
-// as a whole, for the rail's version hover. SIDEBAR section.
+// as a whole, for the rail's version popup. SIDEBAR section.
 //
 // A PULL, asked when the popup opens and again while it stays open: the
 // figures move every sample and ride no push (frontend.v1
