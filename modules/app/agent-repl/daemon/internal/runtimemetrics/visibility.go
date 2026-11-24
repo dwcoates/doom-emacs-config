@@ -1,8 +1,6 @@
 package runtimemetrics
 
 import (
-	"fmt"
-
 	"github.com/prometheus/client_golang/prometheus"
 
 	"agent-repld/internal/resolve/sidebar"
@@ -33,8 +31,8 @@ type visibilityTelemetry struct {
 	visible  *prometheus.GaugeVec
 	changes  *prometheus.CounterVec
 	read     *prometheus.CounterVec
-	byReason map[wsm.VisibilityReason]prometheus.Gauge
-	byReader map[sidebar.ResultReadBy]prometheus.Counter
+	byReason closedVocab[wsm.VisibilityReason, prometheus.Gauge]
+	byReader closedVocab[sidebar.ResultReadBy, prometheus.Counter]
 }
 
 func newVisibilityTelemetry() visibilityTelemetry {
@@ -48,15 +46,13 @@ func newVisibilityTelemetry() visibilityTelemetry {
 		read: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: ResultsReadName, Help: "Last turn results made read, by what read them.",
 		}, []string{"by"}),
-		byReason: map[wsm.VisibilityReason]prometheus.Gauge{},
-		byReader: map[sidebar.ResultReadBy]prometheus.Counter{},
 	}
-	for _, r := range wsm.VisibilityReasonsAll {
-		t.byReason[r] = t.visible.WithLabelValues(r.Visibility().String(), r.String())
-	}
-	for _, by := range sidebar.ResultReadersAll {
-		t.byReader[by] = t.read.WithLabelValues(string(by))
-	}
+	t.byReason = newClosedVocab(WorkspacesVisibleName, wsm.VisibilityReasonsAll, func(r wsm.VisibilityReason) prometheus.Gauge {
+		return t.visible.WithLabelValues(r.Visibility().String(), r.String())
+	})
+	t.byReader = newClosedVocab(ResultsReadName, sidebar.ResultReadersAll, func(by sidebar.ResultReadBy) prometheus.Counter {
+		return t.read.WithLabelValues(string(by))
+	})
 	return t
 }
 
@@ -68,11 +64,7 @@ func (s *Surface) SetVisibilityCounts(counts map[wsm.VisibilityReason]int) {
 		return
 	}
 	for r, n := range counts {
-		g, ok := s.visibility.byReason[r]
-		if !ok {
-			panic(fmt.Sprintf("runtimemetrics: a visibility count names reason %d, which wsm.VisibilityReasonsAll does not hold", int(r)))
-		}
-		g.Set(float64(n))
+		s.visibility.byReason.of(r).Set(float64(n))
 	}
 }
 
@@ -92,9 +84,5 @@ func (s *Surface) CountResultRead(by sidebar.ResultReadBy) {
 	if s == nil {
 		return
 	}
-	c, ok := s.visibility.byReader[by]
-	if !ok {
-		panic(fmt.Sprintf("runtimemetrics: a result read names reader %q, which sidebar.ResultReadersAll does not hold", by))
-	}
-	c.Inc()
+	s.visibility.byReader.of(by).Inc()
 }

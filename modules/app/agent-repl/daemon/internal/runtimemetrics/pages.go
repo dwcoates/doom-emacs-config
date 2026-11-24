@@ -48,8 +48,8 @@ const (
 // resolved once so a count is one atomic add.
 type pageTelemetry struct {
 	loads, unloads *prometheus.CounterVec
-	byLoad         map[pageheld.LoadReason]prometheus.Counter
-	byUnload       map[pageheld.UnloadReason]prometheus.Counter
+	byLoad         closedVocab[pageheld.LoadReason, prometheus.Counter]
+	byUnload       closedVocab[pageheld.UnloadReason, prometheus.Counter]
 }
 
 func newPageTelemetry() pageTelemetry {
@@ -60,15 +60,13 @@ func newPageTelemetry() pageTelemetry {
 		unloads: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: PageUnloadsName, Help: "Page unloads Emacs reported, by the reason each was dropped.",
 		}, []string{"reason"}),
-		byLoad:   map[pageheld.LoadReason]prometheus.Counter{},
-		byUnload: map[pageheld.UnloadReason]prometheus.Counter{},
 	}
-	for _, r := range pageheld.LoadReasons {
-		t.byLoad[r] = t.loads.WithLabelValues(string(r))
-	}
-	for _, r := range pageheld.UnloadReasons {
-		t.byUnload[r] = t.unloads.WithLabelValues(string(r))
-	}
+	t.byLoad = newClosedVocab(PageLoadsName, pageheld.LoadReasons, func(r pageheld.LoadReason) prometheus.Counter {
+		return t.loads.WithLabelValues(string(r))
+	})
+	t.byUnload = newClosedVocab(PageUnloadsName, pageheld.UnloadReasons, func(r pageheld.UnloadReason) prometheus.Counter {
+		return t.unloads.WithLabelValues(string(r))
+	})
 	return t
 }
 
@@ -78,11 +76,7 @@ func (s *Surface) CountPageLoad(reason pageheld.LoadReason) {
 	if s == nil {
 		return
 	}
-	c, ok := s.pages.byLoad[reason]
-	if !ok {
-		panic(fmt.Sprintf("runtimemetrics: a page load names reason %q, which pageheld.LoadReasons does not hold", reason))
-	}
-	c.Inc()
+	s.pages.byLoad.of(reason).Inc()
 }
 
 // CountPageUnload implements pageheld.Telemetry. The off surface records
@@ -91,11 +85,7 @@ func (s *Surface) CountPageUnload(reason pageheld.UnloadReason) {
 	if s == nil {
 		return
 	}
-	c, ok := s.pages.byUnload[reason]
-	if !ok {
-		panic(fmt.Sprintf("runtimemetrics: a page unload names reason %q, which pageheld.UnloadReasons does not hold", reason))
-	}
-	c.Inc()
+	s.pages.byUnload.of(reason).Inc()
 }
 
 // SessionRecorded answers whether WS has a session on record, read for a
