@@ -222,17 +222,17 @@ func TestConnUseNamesAtMostTheHeaviestCallers(t *testing.T) {
 }
 
 // TestFramesPastNamesTheCallersBeyondTheInsideFrames pins framesPast: the
-// leading frames the predicate calls inside are passed over, and the next two
-// are named innermost first.
+// leading frames the predicate calls inside are passed over, and the next
+// callerFramesNamed are named innermost first.
 func TestFramesPastNamesTheCallersBeyondTheInsideFrames(t *testing.T) {
 	// Arrange: the store side is one helper deep; the caller side is another.
 	// Act
 	got := framesCallerSide()
 
 	// Assert
-	want := "wsm.framesCallerSide<-wsm.TestFramesPastNamesTheCallersBeyondTheInsideFrames"
-	if got != want {
-		t.Fatalf("framesPast = %q, want %q", got, want)
+	want := "wsm.framesCallerSide<-wsm.TestFramesPastNamesTheCallersBeyondTheInsideFrames<-testing.tRunner"
+	if !strings.HasPrefix(got, want) || strings.Count(got, "<-") != callerFramesNamed-1 {
+		t.Fatalf("framesPast = %q, want %d frames starting %q", got, callerFramesNamed, want)
 	}
 }
 
