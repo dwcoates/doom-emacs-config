@@ -392,7 +392,7 @@ func (v *verbs) recordBinding(ctx context.Context, log dlog.Logger, ws ids.Works
 		return fmt.Errorf("bind %q: read the session record: %w", ws, err)
 	}
 	if !found {
-		session = wsm.Session{Workspace: ws, StartedAt: v.now(), LastEngagementAt: v.now()}
+		session = wsm.Session{Workspace: ws, StartedAt: v.now()}
 	}
 	if session.HostSessionID == "" {
 		session.HostSessionID = wsm.NewHostSessionID()

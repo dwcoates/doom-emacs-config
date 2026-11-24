@@ -3550,10 +3550,15 @@ pids, the views told, the roster republished):
   keeper owes no keep-alive past it, so a park past the cutoff carries none.
   `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` overrides it for tests; its name
   predates the one park and is kept so an existing setting still holds. The
-  cutoff is measured on the ENGAGEMENT clock (`wsm.Session.LastEngagementAt`),
-  which only a turn somebody asked for moves, never on the cache clock a
-  keep-alive moves: measured on the cache clock, a pinged session would never
-  have been idle at all.
+  cutoff is measured on the IDLE CLOCK (`wsm.Workspace.LastWorkAt`, written
+  by `wsm.RecordWork` alone), which only real work moves: a prompt the user
+  or another agent sent being delivered, a real turn or live detached work
+  ending. A session start, a keep-alive and its turn, a deploy's bounce and a
+  successor's adoption never move it, and never the cache clock a keep-alive
+  moves: measured on the cache clock, a pinged session would never have been
+  idle at all. The cache keeper's cold and idle parks measure their
+  `StandDownGrace` from the same instant, whichever owns the session
+  (`daemon/internal/wsm/lastwork.go`).
 
 ONLY A PROMPT, A SETTINGS PICK, A KEEP-ALIVE RESTORE, A COLD GATE'S ANSWER OR
 A RESTART BRINGS A SHIM UP (owner rulings, 2026-10-28): a look, a select, an

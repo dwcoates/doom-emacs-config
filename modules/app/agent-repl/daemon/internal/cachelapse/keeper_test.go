@@ -45,6 +45,9 @@ type fakeDB struct {
 	projectedErr error
 	// keepaliveErr fails SetLastKeepalive.
 	keepaliveErr error
+	// works are the RecordWork writes' causes, in order; workErr fails them.
+	works   []wsm.WorkCause
+	workErr error
 	// queued are the workspaces with an entry standing in a merge queue;
 	// queuesErr fails the queues' read.
 	queued []ids.WorkspaceID
@@ -338,6 +341,26 @@ func (f *fakeDB) AddKeepaliveRunSpend(_ context.Context, _ wsm.WorkspaceID, spen
 	return !f.spendRefused, nil
 }
 
+// RecordWork moves the record's idle clock forward, as wsm.RecordWork does,
+// and keeps each write; workErr fails it.
+func (f *fakeDB) RecordWork(_ context.Context, id wsm.WorkspaceID, at time.Time, cause wsm.WorkCause) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.workErr != nil {
+		return f.workErr
+	}
+	rec, ok := f.records[id]
+	if !ok {
+		return wsm.ErrNotFound
+	}
+	if rec.LastWorkAt == nil || at.After(*rec.LastWorkAt) {
+		rec.LastWorkAt = &at
+	}
+	f.records[id] = rec
+	f.works = append(f.works, cause)
+	return nil
+}
+
 func (f *fakeDB) SetLastKeepalive(_ context.Context, id wsm.WorkspaceID, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -469,22 +492,29 @@ type restoreCall struct {
 	done func(error)
 }
 
+// lastWorked is when every fixture workspace last did real work: ten minutes
+// before now, inside StandDownGrace (wsm.Workspace.LastWorkAt).
+func lastWorked() *time.Time {
+	at := now.Add(-10 * time.Minute)
+	return &at
+}
+
 func hidden() wsm.Workspace {
 	at := now.Add(-time.Hour)
-	return wsm.Workspace{ID: theWorkspace, Hidden: true, HiddenAt: &at}
+	return wsm.Workspace{ID: theWorkspace, Hidden: true, HiddenAt: &at, LastWorkAt: lastWorked()}
 }
 
 func visible() wsm.Workspace {
-	return wsm.Workspace{ID: theWorkspace}
+	return wsm.Workspace{ID: theWorkspace, LastWorkAt: lastWorked()}
 }
 
 func closed() wsm.Workspace {
-	return wsm.Workspace{ID: theWorkspace, Closed: true}
+	return wsm.Workspace{ID: theWorkspace, Closed: true, LastWorkAt: lastWorked()}
 }
 
 // mergeWorkspace is a hidden merge workspace.
 func mergeWorkspace() wsm.Workspace {
-	return wsm.Workspace{ID: theWorkspace, MergeOf: &wsm.MergeOrigin{}}
+	return wsm.Workspace{ID: theWorkspace, MergeOf: &wsm.MergeOrigin{}, LastWorkAt: lastWorked()}
 }
 
 // selectedHidden is a hidden workspace the user is looking at.
@@ -494,9 +524,18 @@ func selectedHidden() wsm.Workspace {
 	return rec
 }
 
-// liveSession is a live session engaged ten minutes before now.
+// workedAgo makes the harness workspace's last real work AGO before now.
+func (h *harness) workedAgo(ago time.Duration) *harness {
+	at := now.Add(-ago)
+	rec := h.db.records[theWorkspace]
+	rec.LastWorkAt = &at
+	h.db.records[theWorkspace] = rec
+	return h
+}
+
+// liveSession is a live session started two hours before now.
 func liveSession(ws ids.WorkspaceID) wsm.Session {
-	return wsm.Session{Workspace: ws, StartedAt: now.Add(-2 * time.Hour), LastEngagementAt: now.Add(-10 * time.Minute)}
+	return wsm.Session{Workspace: ws, StartedAt: now.Add(-2 * time.Hour)}
 }
 
 func newHarness(t *testing.T, rec wsm.Workspace) *harness {
@@ -804,6 +843,9 @@ func TestRecordReadsAnUnnamedVerdictAsUngated(t *testing.T) {
 func beatable(rec wsm.Workspace, turnAgo time.Duration) wsm.Workspace {
 	ended := now.Add(-turnAgo)
 	rec.LastTurnEndedAt = &ended
+	// A REAL TURN'S END IS WORK: the free edge after it records it
+	// (Keeper.workEnded).
+	rec.LastWorkAt = &ended
 	return rec
 }
 

@@ -242,8 +242,8 @@ func (c *controller) MergeQueuedDown(ws ids.WorkspaceID, repo wsm.RepoKey, ledge
 	c.askDownFor(ws, c.deps.Clock.Now(), mergeQueuedReason, &queuedMerge{repo: repo, ledger: ledger}, nil)
 }
 
-// askDown asks for WS's stand-down for REASON unless a real turn has run
-// since BEAT. A later ask replaces the earlier one's instant and reason; DONE,
+// askDown asks for WS's stand-down for REASON unless the workspace has done
+// real work since BEAT (wsm.Workspace.WorkedSince). A later ask replaces the earlier one's instant and reason; DONE,
 // when given, joins the asks told how it settles.
 func (c *controller) askDown(ws ids.WorkspaceID, beat time.Time, reason standDownReason, done func(CycleOutcome)) {
 	c.askDownFor(ws, beat, reason, nil, done)
@@ -419,9 +419,12 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 			log.Info(op, "the merge no longer waits in line; the park is not taken", fields)
 			return withheldSettled, CycleOutcome{Why: "the merge no longer waits in line; the park is not taken"}
 		}
-	} else if ended, turned := record.TurnedSince(beat); turned {
+	} else if worked, did := record.WorkedSince(beat); did {
+		// REAL WORK, NOT ANY TURN'S CLOSE: a turn a bounce orphaned closes at
+		// the bounce, and a keep-alive's own turn is no work (wsm lastwork.go),
+		// so neither keeps a session up past its stand-down.
 		log.Info(op, "a real turn ran since; the session is kept up",
-			dlog.Merge(fields, dlog.Context{"turn_ended_at": ended}))
+			dlog.Merge(fields, dlog.Context{"worked_at": worked}))
 		return withheldSettled, CycleOutcome{Why: "a real turn ran since; the session is kept up"}
 	}
 	switch gate := c.gate(ws); gate {

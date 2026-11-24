@@ -35,7 +35,7 @@ import (
 //   - the idle sweep, when the session will be idle past its cutoff first;
 //   - the cold park, when no beat is owed for any other reason: stood down
 //     once the session has been idle StandDownGrace (ownCold).
-//
+
 // A session is LEFT UP, and owned by none, while the user is looking at it
 // or its remote control is on; the edge that ends either reconciles it
 // again. A busy session is the drain's to wait on: it never stands one down
@@ -115,13 +115,13 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 		return
 	}
 	if since := record.SettingsVisitAt; since != nil {
-		ended, turned := record.TurnedSince(*since)
-		if !turned {
+		worked, did := record.WorkedSince(*since)
+		if !did {
 			k.setStanding(log, ws, standing{owner: ownerVisit}, "a settings pick started its shim and no turn has run since")
 			k.deps.VisitDown(ws, *since)
 			return
 		}
-		k.endVisit(ctx, log, ws, *since, "a real turn ran since the settings pick", dlog.Context{"turn_ended_at": ended})
+		k.endVisit(ctx, log, ws, *since, "a real turn ran since the settings pick", dlog.Context{"worked_at": worked})
 	}
 	_, lapseArmed := k.deadlines[ws]
 	switch {
@@ -147,9 +147,10 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 // 2026-11-23): the user prompts with no shim start for StandDownGrace after
 // the work. A session that came up cold for a reason -- a new workspace's
 // first prompt on its way, a cold gate's answer re-opening the session the
-// user asked for -- is not parked under it; one adopted after hours idle is
-// parked at once. The engagement and the turn's end are on the rows, so a
-// successor arms the same instant. The parks the keeper takes the moment it
+// user asked for -- is not parked under it, since that prompt's delivery is
+// work; one adopted or started after hours idle is parked at once. The
+// instant is on the row (wsm.Workspace.LastWorkAt), so a successor arms the
+// same one. The parks the keeper takes the moment it
 // learns the cache cold (a gate raised, a beat judged lapsed) are not this
 // one, and take no grace. ARMED is the instant armed before this decision,
 // when WASARMED, so its wait is recorded at INFO only when it moves.
@@ -199,16 +200,17 @@ func (k *Keeper) ownIdle(ctx context.Context, log dlog.Logger, record wsm.Worksp
 	k.deps.IdleDown(ws, since)
 }
 
-// idleSince answers when RECORD's session last fell idle: the latest of its
-// last engagement (its start, never engaged), its last turn's end, and the
-// instant it last fell free as this keeper saw it. False when the session
-// cannot be read (recorded at ERROR) or is gone (disowned).
+// idleSince answers when RECORD's workspace last did real work
+// (wsm.Workspace.IdleSince): the one durable instant every park measures its
+// grace from, which no session start, keep-alive or bounce moves, so a
+// successor reads the same one. False when the session is gone (disowned) or
+// cannot be read (recorded at ERROR).
 func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Workspace) (time.Time, bool) {
 	ws := record.ID
-	session, found, err := k.deps.DB.Session(ctx, ws)
+	_, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
-		if !leaving(ctx, log, opOwner, "reading the session's engagement", err) {
-			log.Error(opOwner, "could not read the session's engagement; its idle park is not armed", dlog.Context{"cause": err.Error()})
+		if !leaving(ctx, log, opOwner, "reading the workspace's session", err) {
+			log.Error(opOwner, "could not read the workspace's session; its idle park is not armed", dlog.Context{"cause": err.Error()})
 		}
 		return time.Time{}, false
 	}
@@ -216,17 +218,7 @@ func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Work
 		k.disown(log, ws)
 		return time.Time{}, false
 	}
-	since := session.LastEngagementAt
-	if since.IsZero() {
-		since = session.StartedAt
-	}
-	if ended := record.LastTurnEndedAt; ended != nil && ended.After(since) {
-		since = *ended
-	}
-	if free, freed := k.freeSince[ws]; freed && free.After(since) {
-		since = free
-	}
-	return since, true
+	return record.IdleSince(), true
 }
 
 // parkWaits arms WS's idle park at SINCE plus StandDownGrace when that is

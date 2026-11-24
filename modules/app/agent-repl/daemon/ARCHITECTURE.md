@@ -227,7 +227,7 @@ type DB interface {
   PutCreationJob(CreationJob) error; CreationJob(id WorkspaceID) (CreationJob, bool, error)
   // session facts
   PutSession(Session) error; Session(id WorkspaceID) (Session, bool, error)
-  SetSessionTerminal(id WorkspaceID, t SessionTerminal) error; TouchEngagement(id WorkspaceID, at time.Time) error
+  SetSessionTerminal(id WorkspaceID, t SessionTerminal) error; RecordWork(id WorkspaceID, at time.Time, cause WorkCause) error  // the idle clock's one writer
   // occupancy lease (policy metadata; the in-memory mutex is shimclient's)
   AcquireLease(id WorkspaceID, holder LeaseHolder, policy LeasePolicy) (Lease, error)  // refuses if held
   ReleaseLease(leaseID LeaseID) error; Lease(id WorkspaceID) (Lease, bool, error); SetLeasePolicy(leaseID LeaseID, p LeasePolicy) error

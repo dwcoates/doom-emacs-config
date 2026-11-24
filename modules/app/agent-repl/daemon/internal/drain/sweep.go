@@ -73,7 +73,10 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the workspace has no session to park", fields)
 			continue
 		}
-		idle := now.Sub(session.LastEngagementAt)
+		// THE IDLE CLOCK IS THE WORKSPACE'S LAST REAL WORK (wsm.Workspace.
+		// IdleSince), which no session start, keep-alive or bounce moves.
+		worked := ws.IdleSince()
+		idle := now.Sub(worked)
 		fields["idle"] = idle.String()
 		// A SESSION ALREADY PARKED STAYS AS IT IS. There is one park, so a park
 		// past the cutoff is no deeper than one inside it; the cache keeper owes
@@ -83,8 +86,8 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 				dlog.Merge(fields, dlog.Context{"terminal_kind": session.Terminal.Kind}))
 			continue
 		}
-		if now.Before(bringup.IdleHorizon(c.deps.IdleCutoff, session.LastEngagementAt, enqueued, queuedHere)) {
-			log.Debug(opSweep, "the session was engaged inside the cutoff", fields)
+		if now.Before(bringup.IdleHorizon(c.deps.IdleCutoff, worked, enqueued, queuedHere)) {
+			log.Debug(opSweep, "the workspace did real work inside the cutoff", fields)
 			continue
 		}
 		switch gate := c.gate(ws.ID); gate {

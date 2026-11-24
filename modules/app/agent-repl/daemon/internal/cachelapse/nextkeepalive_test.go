@@ -94,8 +94,8 @@ func TestAParkPastTheCutoffIsStatedNone(t *testing.T) {
 	// Arrange: the park the idle sweep leaves; a beat was stated before.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 	s := parkedSession(theWorkspace)
-	s.LastEngagementAt = now.Add(-6 * time.Hour)
 	h.db.sessions[theWorkspace] = s
+	h.workedAgo(6 * time.Hour)
 	h.keeper.stated[theWorkspace] = now.Add(KeepaliveInterval)
 
 	// Act

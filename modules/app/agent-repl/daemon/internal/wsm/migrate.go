@@ -368,6 +368,9 @@ var migrations = []migration{
 	{To: 195, Name: "slack_threads", Kind: MigrationAdditive, DDL: slackThreadsDDL},
 	// IT IS ADDITIVE: a new nullable column the previous build never names.
 	{To: 196, Name: "sessions_keepalive_restored_at", Kind: MigrationAdditive, DDL: sessionsKeepaliveRestoredAtDDL},
+	// IT IS ADDITIVE: a new nullable column the previous build never names,
+	// filled from last_activity_at.
+	{To: 197, Name: "workspaces_last_work_at", Kind: MigrationAdditive, DDL: lastWorkDDL},
 }
 
 // sessionsKeepaliveRestoredAtDDL is the layout-196 addition: when a

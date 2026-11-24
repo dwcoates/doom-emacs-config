@@ -97,6 +97,9 @@ type beatPlan struct {
 	// parked reports that the workspace's parked conversation owes beats,
 	// and none of its keep-alives is out (parked.go).
 	parked bool
+	// idleSince is when the workspace last did real work, as the record the
+	// plan was read from says (wsm.Workspace.IdleSince).
+	idleSince time.Time
 }
 
 // beatDue answers when WS's next keep-alive is due and whether its session is
@@ -233,11 +236,8 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if k.forcing(ws) {
 		plan.due = k.deps.Clock.Now()
 	}
-	engaged := session.LastEngagementAt
-	if engaged.IsZero() {
-		engaged = session.StartedAt
-	}
-	if k.deps.IdleCutoff > 0 && bringup.IdleHorizon(k.deps.IdleCutoff, engaged, queuedAt, queued).Before(plan.due) {
+	plan.idleSince = record.IdleSince()
+	if k.deps.IdleCutoff > 0 && bringup.IdleHorizon(k.deps.IdleCutoff, plan.idleSince, queuedAt, queued).Before(plan.due) {
 		return none(noBeatSweep, "it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
 	k.owesAgain(ctx, log, record)
@@ -432,13 +432,14 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			log.Error(opDrive, "could not record the keep-alive that was sent; this daemon times the next beat from it, a successor from the turn before it",
 				dlog.WithCause(fields, err))
 		}
-		// AN HOUR'S GRACE AFTER THE WORK, NOT ONLY AFTER THE TURN (owner
-		// ruling, 2026-10-26): the user prompts with no shim start for about
-		// an interval after the session last fell free. A beat that comes
-		// sooner, because detached work ended after the turn, goes out and
-		// leaves the shim up; the next one stands it down.
-		free, freed := k.freeSince[ws]
-		withinGrace := freed && now.Sub(free) < StandDownGrace
+		// THE GRACE RUNS FROM THE WORK, NOT ONLY FROM THE TURN (owner rulings,
+		// 2026-10-26 and 2026-11-23): the user prompts with no shim start for
+		// StandDownGrace after the workspace last did real work. A beat that
+		// comes sooner, because detached work ended after the turn, goes out
+		// and leaves the shim up; the next one stands it down. The keep-alive's
+		// own turn is no work, so it never extends the grace.
+		idleSince := plan.idleSince
+		withinGrace := now.Sub(idleSince) < StandDownGrace
 		// A KEEP-LIVE RUN AWAITS THE ANSWER EITHER WAY, and a session it
 		// started is stood down after it whatever its grace.
 		running, standDown := k.keepLiveSent(ws, withinGrace)
@@ -446,8 +447,8 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		case running:
 			k.awaitAnswer(log, ws, now, fields, !standDown)
 		case withinGrace:
-			log.Info(opDrive, "the session fell free less than an interval ago; the shim stays up until the next keep-alive",
-				dlog.Merge(fields, dlog.Context{"free_since": free}))
+			log.Info(opDrive, "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive",
+				dlog.Merge(fields, dlog.Context{"idle_since": idleSince}))
 		default:
 			// NEVER UNDER ITS OWN KEEP-ALIVE (answer.go): the stand-down waits
 			// for the vendor's answer.

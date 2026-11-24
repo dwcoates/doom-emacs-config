@@ -99,13 +99,13 @@ func TestScheduleArmsNoBeat(t *testing.T) {
 		}},
 		{name: "when the session is parked past the cutoff by the beat", arrange: func(h *harness) {
 			s := parkedSession(theWorkspace)
-			s.LastEngagementAt = now.Add(-6 * time.Hour)
 			h.db.sessions[theWorkspace] = s
+			h.workedAgo(6 * time.Hour)
 		}},
 		{name: "when it will be idle past the cutoff by the beat", arrange: func(h *harness) {
 			s := liveSession(theWorkspace)
-			s.LastEngagementAt = now.Add(-6 * time.Hour)
 			h.db.sessions[theWorkspace] = s
+			h.workedAgo(6 * time.Hour)
 		}},
 	}
 	for _, tt := range tests {
@@ -252,10 +252,10 @@ func TestScheduleTimesTheBeatFromARecordedKeepalive(t *testing.T) {
 	}
 }
 
-func TestASentBeatSoonAfterTheSessionFellFreeLeavesTheShimUp(t *testing.T) {
+func TestASentBeatSoonAfterTheLastWorkLeavesTheShimUp(t *testing.T) {
 	// Arrange: detached work ended ten minutes ago, long after the turn.
 	h := dueHarness(t, sent())
-	h.keeper.freeSince[theWorkspace] = now.Add(-10 * time.Minute)
+	h.workedAgo(10 * time.Minute)
 	h.keeper.beats[theWorkspace] = now
 
 	// Act
@@ -267,10 +267,10 @@ func TestASentBeatSoonAfterTheSessionFellFreeLeavesTheShimUp(t *testing.T) {
 	}
 }
 
-func TestASentBeatTheGraceAfterTheSessionFellFreeAwaitsItsAnswerToStandItDown(t *testing.T) {
+func TestASentBeatTheGraceAfterTheLastWorkAwaitsItsAnswerToStandItDown(t *testing.T) {
 	// Arrange
 	h := dueHarness(t, sent())
-	h.keeper.freeSince[theWorkspace] = now.Add(-StandDownGrace)
+	h.workedAgo(StandDownGrace)
 	h.keeper.beats[theWorkspace] = now
 
 	// Act
@@ -325,7 +325,7 @@ func TestACompressedIntervalTimesTheBeats(t *testing.T) {
 			h := newHarness(t, beatable(visible(), 10*time.Minute))
 			h.keeper.deps.Interval = 100 * time.Millisecond
 			h.shim.answer = sent()
-			h.keeper.freeSince[theWorkspace] = now.Add(-time.Second)
+			h.workedAgo(time.Second)
 
 			// Act
 			tt.act(h)
@@ -352,7 +352,7 @@ func TestABusyBeatIsArmedAnIntervalOn(t *testing.T) {
 	}
 }
 
-func TestTheFreeEdgeStampsWhenTheSessionFellFree(t *testing.T) {
+func TestTheFreeEdgeAfterWorkRecordsTheWorkOnTheRow(t *testing.T) {
 	// Arrange
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 
@@ -360,8 +360,29 @@ func TestTheFreeEdgeStampsWhenTheSessionFellFree(t *testing.T) {
 	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, workEnded: true, why: "test"})
 
 	// Assert
-	if got := h.keeper.freeSince[theWorkspace]; !got.Equal(now) {
-		t.Fatalf("freeSince = %v, want %v", got, now)
+	if got := h.db.records[theWorkspace].LastWorkAt; got == nil || !got.Equal(now) {
+		t.Fatalf("last work = %v, want %v", got, now)
+	}
+	if len(h.db.works) != 1 || h.db.works[0] != wsm.WorkEnded {
+		t.Fatalf("work writes = %v, want one of work ended", h.db.works)
+	}
+}
+
+func TestAWorkEndThatCannotBeRecordedIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	h.db.workErr = errors.New("store unreachable")
+	before := h.db.records[theWorkspace].LastWorkAt
+
+	// Act
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, workEnded: true, why: "test"})
+
+	// Assert
+	if !h.found(dlog.RecordQuery{Level: "error", Operation: opOwner, Message: "could not record that the workspace's work ended; its park is measured from its earlier work"}) {
+		t.Fatal("the lost work end was not recorded at error")
+	}
+	if got := h.db.records[theWorkspace].LastWorkAt; got == nil || !got.Equal(*before) {
+		t.Fatalf("last work = %v, want the earlier %v", got, before)
 	}
 }
 
@@ -376,8 +397,8 @@ func TestAnAttachComingUpFreeStampsNothing(t *testing.T) {
 	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "test"})
 
 	// Assert
-	if got, stamped := h.keeper.freeSince[theWorkspace]; stamped {
-		t.Fatalf("freeSince = %v, want nothing stamped for an attach", got)
+	if len(h.db.works) != 0 {
+		t.Fatalf("work writes = %v, want nothing recorded for an attach", h.db.works)
 	}
 }
 
@@ -867,8 +888,8 @@ func TestScheduleBeatsAQueuedSessionIdlePastTheCutoff(t *testing.T) {
 	// idle sweep keeps a queued session warm, so its beats go on.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 	s := liveSession(theWorkspace)
-	s.LastEngagementAt = now.Add(-6 * time.Hour)
 	h.db.sessions[theWorkspace] = s
+	h.workedAgo(6 * time.Hour)
 	h.db.queued = []ids.WorkspaceID{theWorkspace}
 
 	// Act
@@ -885,8 +906,8 @@ func TestScheduleOwesNoBeatToAQueuedSessionIdlePastTwiceTheCutoff(t *testing.T) 
 	// session is kept warm for, so the sweep parks it before the beat.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 	s := liveSession(theWorkspace)
-	s.LastEngagementAt = now.Add(-12 * time.Hour)
 	h.db.sessions[theWorkspace] = s
+	h.workedAgo(12 * time.Hour)
 	h.db.queued = []ids.WorkspaceID{theWorkspace}
 
 	// Act
@@ -903,8 +924,8 @@ func TestScheduleBeatsASessionIdleTwiceTheCutoffWhoseMergeJoinedItsQueueSince(t 
 	// count from joining the queue.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 	s := liveSession(theWorkspace)
-	s.LastEngagementAt = now.Add(-12 * time.Hour)
 	h.db.sessions[theWorkspace] = s
+	h.workedAgo(12 * time.Hour)
 	h.db.queued = []ids.WorkspaceID{theWorkspace}
 	h.db.queuedAt = now.Add(-time.Hour)
 

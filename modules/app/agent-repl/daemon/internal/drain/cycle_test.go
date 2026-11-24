@@ -270,13 +270,14 @@ func TestAVisitStandDownSkipsASessionATurnRanOnSinceThePick(t *testing.T) {
 	}
 }
 
-// A BRING-UP'S OWN ENGAGEMENT STAMP IS NO TURN: a settings pick's revival
-// stamps the session's engagement after the pick (2026-11-20, 25 visits kept
-// up with no turn run), and the visit still ends.
-func TestAVisitStandDownStandsDownASessionOnlyItsBringUpEngaged(t *testing.T) {
+// A BRING-UP IS NO WORK: a settings pick's revival records the session's
+// start after the pick (2026-11-20, 25 visits kept up with no turn run), and
+// the visit still ends, since a start never moves the idle clock.
+func TestAVisitStandDownStandsDownASessionOnlyItsBringUpStarted(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.workspace(t, beatAfter.Add(2*time.Second))
+	ws := h.workspace(t, instant)
+	h.restarted(t, ws, beatAfter.Add(2*time.Second))
 
 	// Act
 	h.c.VisitDown(ws, beatAfter)
@@ -284,7 +285,25 @@ func TestAVisitStandDownStandsDownASessionOnlyItsBringUpEngaged(t *testing.T) {
 	// Assert
 	killed := h.stand.Killed()
 	if len(killed) != 1 || killed[0].Life != shimlife.StandDownSettingsVisit {
-		t.Fatalf("kills = %+v, want the visit's stand-down despite the bring-up's stamp", killed)
+		t.Fatalf("kills = %+v, want the visit's stand-down despite the bring-up", killed)
+	}
+}
+
+// A TURN A BOUNCE ORPHANED IS NO WORK: it closes at the bounce, after the
+// ask, and the idle park is taken all the same (invariant A, 2026-11-23).
+func TestAnIdleParkIsTakenOverATurnABounceOrphanedSinceTheAsk(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.turnCut(t, ws, beatAfter.Add(time.Minute), wsm.CloseKilled)
+
+	// Act
+	h.c.IdleDown(ws, beatAfter)
+
+	// Assert
+	killed := h.stand.Killed()
+	if len(killed) != 1 {
+		t.Fatalf("kills = %+v, want the idle park despite the orphaned turn's close", killed)
 	}
 }
 

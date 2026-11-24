@@ -1606,7 +1606,7 @@ func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 	if err := h.db.PutSession(context.Background(), wsm.Session{
 		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID),
 		VendorSessionID: "vendor-" + string(ws.ID), ConfigDir: dir,
-		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+		Model: "opus", PermissionMode: "default", StartedAt: instant,
 		ShimPID: &pid,
 	}); err != nil {
 		t.Fatalf("PutSession: %v", err)

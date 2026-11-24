@@ -154,3 +154,30 @@ func TestTheVendorsActivityIsRecordedAsAStateTransition(t *testing.T) {
 	}
 	t.Fatal("no state-transition record of the vendor falling busy")
 }
+
+// A KEEP-ALIVE'S OWN TURN IS NO WORK (owner rule, 2026-11-23): the shim runs
+// it as a vendor turn the daemon serves no turn for, so the vendor's busy
+// stretch alone ends in a free edge that says no work ended, and the idle
+// clock a park measures from stands.
+func TestAVendorBusyStretchWithNoTurnOrDetachedWorkSaysNoWorkEnded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: activityStarted(activityIdle())})
+	h.quiet()
+	h.pushActivity(t, activityBusy())
+	h.drainFrees()
+	for drained := false; !drained; {
+		select {
+		case <-h.rec.freeWork:
+		default:
+			drained = true
+		}
+	}
+
+	// Act.
+	h.pushActivity(t, activityIdle())
+
+	// Assert.
+	if h.freeWorkEnded(t) {
+		t.Fatal("a keep-alive's vendor-busy stretch said work ended")
+	}
+}

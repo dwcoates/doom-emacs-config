@@ -20,6 +20,7 @@ func warm() wsm.Workspace {
 	rec := visible()
 	ended := now.Add(-10 * time.Minute)
 	rec.LastTurnEndedAt = &ended
+	rec.LastWorkAt = &ended
 	return rec
 }
 
@@ -29,6 +30,7 @@ func idleWarm() wsm.Workspace {
 	rec := visible()
 	ended := now.Add(-2 * time.Hour)
 	rec.LastTurnEndedAt = &ended
+	rec.LastWorkAt = &ended
 	return rec
 }
 
@@ -47,14 +49,13 @@ func visited(rec wsm.Workspace) wsm.Workspace {
 	return rec
 }
 
-// idle makes the harness session engaged, and its last turn end, two hours
-// ago, past the idle grace; a cache marked cold at that turn stays so.
+// idle makes the harness workspace's last work, and its last turn end, two
+// hours ago, past the idle grace; a cache marked cold at that turn stays so.
 func (h *harness) idle() *harness {
 	ago := now.Add(-2 * time.Hour)
-	session := liveSession(theWorkspace)
-	session.LastEngagementAt = ago
-	h.db.sessions[theWorkspace] = session
+	h.db.sessions[theWorkspace] = liveSession(theWorkspace)
 	rec := h.db.records[theWorkspace]
+	rec.LastWorkAt = &ago
 	if ended := rec.LastTurnEndedAt; ended != nil {
 		if cold := rec.CacheColdTurnAt; cold != nil && cold.Equal(*ended) {
 			rec.CacheColdTurnAt = &ago
@@ -118,7 +119,12 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 			h.db.records[theWorkspace] = hidden()
 			h.keeper.deadlines[theWorkspace] = lapseAt
 		}, want: ownerLapse},
-		{name: "a hidden workspace with no lapse armed", arrange: func(h *harness) { h.db.records[theWorkspace] = hidden() }, want: ownerCold},
+		{name: "a hidden workspace with no lapse armed", arrange: func(h *harness) {
+			rec := hidden()
+			worked := now.Add(-2 * time.Hour)
+			rec.LastWorkAt = &worked
+			h.db.records[theWorkspace] = rec
+		}, want: ownerCold},
 		{name: "a closed workspace whose last beat is spent", arrange: func(h *harness) {
 			rec := idleWarm()
 			rec.Closed = true
@@ -126,10 +132,10 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 			h.db.records[theWorkspace] = rec
 		}, want: ownerCold},
 		{name: "a session idle past the cutoff before its beat", arrange: func(h *harness) {
-			h.db.records[theWorkspace] = warm()
-			session := liveSession(theWorkspace)
-			session.LastEngagementAt = now.Add(-6 * time.Hour)
-			h.db.sessions[theWorkspace] = session
+			rec := warm()
+			worked := now.Add(-6 * time.Hour)
+			rec.LastWorkAt = &worked
+			h.db.records[theWorkspace] = rec
 		}, want: ownerSweep},
 	}
 	for _, tt := range tests {
@@ -254,15 +260,16 @@ func TestARevivalThatOnlyDeliversHeldPromptsIsNoRealTurn(t *testing.T) {
 		arrange   func(h *harness)
 		wantVisit bool
 	}{
-		{name: "the bring-up stamped the session's engagement after the pick", arrange: func(h *harness) {
+		{name: "the bring-up started the session after the pick", arrange: func(h *harness) {
 			session := liveSession(theWorkspace)
-			session.LastEngagementAt = visitAt.Add(2 * time.Second)
+			session.StartedAt = visitAt.Add(2 * time.Second)
 			h.db.sessions[theWorkspace] = session
 		}, wantVisit: true},
 		{name: "a delivered prompt's turn closed after the pick", arrange: func(h *harness) {
 			rec := h.db.records[theWorkspace]
 			ended := visitAt.Add(30 * time.Second)
 			rec.LastTurnEndedAt = &ended
+			rec.LastWorkAt = &ended
 			h.db.records[theWorkspace] = rec
 		}},
 	}
@@ -291,6 +298,7 @@ func TestARealTurnHandsTheVisitsSessionToTheCycle(t *testing.T) {
 	rec := visited(warm())
 	ended := visitAt.Add(30 * time.Second)
 	rec.LastTurnEndedAt = &ended
+	rec.LastWorkAt = &ended
 	h := newHarness(t, rec)
 
 	// Act
@@ -432,15 +440,15 @@ func TestASessionNoShimServesHasNoOwner(t *testing.T) {
 	}
 }
 
-func TestTheColdParkWaitsOutTheGraceAfterAnEngagement(t *testing.T) {
-	// Arrange: a cold session engaged ten minutes ago, as a cold gate's
-	// answer or a new workspace's start leaves it.
+func TestTheColdParkWaitsOutTheGraceAfterTheLastWork(t *testing.T) {
+	// Arrange: a cold workspace that last worked ten minutes ago, as a cold
+	// gate's answer or a new workspace's first prompt leaves it.
 	h := newHarness(t, knownCold())
 	h.reconcile("a session came up")
 	if len(h.coldDowns) != 0 {
 		t.Fatalf("cold parks = %+v, want none inside the grace", h.coldDowns)
 	}
-	due := liveSession(theWorkspace).LastEngagementAt.Add(StandDownGrace)
+	due := lastWorked().Add(StandDownGrace)
 	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) {
 		t.Fatalf("cold park armed at %v, want %v", got, due)
 	}
@@ -465,6 +473,7 @@ func TestATurnDuringTheGraceHandsTheParkToTheIdlePark(t *testing.T) {
 	rec := h.db.records[theWorkspace]
 	ended := now.Add(time.Minute)
 	rec.LastTurnEndedAt = &ended
+	rec.LastWorkAt = &ended
 	h.db.records[theWorkspace] = rec
 	h.clock.Set(now.Add(2 * time.Minute))
 
@@ -498,16 +507,15 @@ func TestAColdParkWhoseEngagementCannotBeReadIsAnError(t *testing.T) {
 	}
 }
 
-// idleFor makes the harness workspace's last turn, and its session's
-// engagement, end AGO before now, its cache warm.
+// idleFor makes the harness workspace's last turn, and its last work, end
+// AGO before now, its cache warm.
 func (h *harness) idleFor(ago time.Duration) *harness {
 	at := now.Add(-ago)
 	rec := h.db.records[theWorkspace]
 	rec.LastTurnEndedAt = &at
+	rec.LastWorkAt = &at
 	h.db.records[theWorkspace] = rec
-	session := liveSession(theWorkspace)
-	session.LastEngagementAt = at
-	h.db.sessions[theWorkspace] = session
+	h.db.sessions[theWorkspace] = liveSession(theWorkspace)
 	return h
 }
 
@@ -562,12 +570,12 @@ func TestAnIdleParkWaitsOutTheGraceAfterTheTurn(t *testing.T) {
 	}
 }
 
-func TestAnIdleParkIsMeasuredFromTheLatestOfTheEngagementAndTheTurnsEnd(t *testing.T) {
-	// Arrange: engaged 30 minutes ago, its turn ending 5 minutes ago.
+func TestAnIdleParkIsMeasuredFromTheLastWork(t *testing.T) {
+	// Arrange: a turn 30 minutes ago, and work ending 5 minutes ago.
 	h := newHarness(t, visible()).idleFor(30 * time.Minute)
 	ended := now.Add(-5 * time.Minute)
 	rec := h.db.records[theWorkspace]
-	rec.LastTurnEndedAt = &ended
+	rec.LastWorkAt = &ended
 	h.db.records[theWorkspace] = rec
 
 	// Act
@@ -584,11 +592,12 @@ func TestAnIdleParkIsMeasuredFromTheLatestOfTheEngagementAndTheTurnsEnd(t *testi
 
 func TestAnIdleParkWhoseGraceRunsIntoTheRestoreLeadIsLeftToTheBeat(t *testing.T) {
 	// Arrange: a keep-alive 45 minutes ago puts the beat 7 minutes off, and
-	// an engagement 5 minutes ago puts the grace 15 minutes off.
+	// work 5 minutes ago puts the grace 15 minutes off.
 	h := newHarness(t, visible()).idleFor(2 * time.Hour).keptAliveAgo(45 * time.Minute)
-	session := h.db.sessions[theWorkspace]
-	session.LastEngagementAt = now.Add(-5 * time.Minute)
-	h.db.sessions[theWorkspace] = session
+	rec := h.db.records[theWorkspace]
+	worked := now.Add(-5 * time.Minute)
+	rec.LastWorkAt = &worked
+	h.db.records[theWorkspace] = rec
 
 	// Act
 	h.reconcile("a session came up")
@@ -641,7 +650,59 @@ func TestAnIdleParkWhoseSessionCannotBeReadIsAnError(t *testing.T) {
 	if len(h.idleDowns) != 0 {
 		t.Fatalf("idle parks = %+v, want none on an unread session", h.idleDowns)
 	}
-	if !h.found(dlog.RecordQuery{Level: "error", Operation: opOwner, Message: "could not read the session's engagement; its idle park is not armed"}) {
+	if !h.found(dlog.RecordQuery{Level: "error", Operation: opOwner, Message: "could not read the workspace's session; its idle park is not armed"}) {
 		t.Fatal("the unread session was not recorded at error")
+	}
+}
+
+// INVARIANT A (owner rule, 2026-11-23): the idle clock is the workspace's
+// last real work, which a keep-alive cycle never moves: its restore's start,
+// its turn's free edge (which says no work ended) and the reconciles they
+// raise leave the park measured from the same instant.
+func TestAKeepaliveCycleDoesNotMoveTheParkInstant(t *testing.T) {
+	// Arrange: idle five minutes, so the park waits its grace.
+	h := newHarness(t, visible()).idleFor(5 * time.Minute)
+	h.reconcile("a turn's close was recorded")
+	due := h.keeper.idleDue[theWorkspace]
+	restored := liveSession(theWorkspace)
+	restored.StartedAt = now
+	restored.KeepaliveRestoredAt = &now
+	h.db.sessions[theWorkspace] = restored
+
+	// Act
+	h.reconcile("a session came up")
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "the keep-alive's turn ended"})
+
+	// Assert
+	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) || !due.Equal(now.Add(-5*time.Minute).Add(StandDownGrace)) {
+		t.Fatalf("idle park armed at %v after the cycle, want the unmoved %v", got, due)
+	}
+	if len(h.db.works) != 0 {
+		t.Fatalf("work writes = %v, want none for a keep-alive cycle", h.db.works)
+	}
+}
+
+// A successor reads the instant its predecessor parks from, so a deploy's
+// handover and the takeover start it makes cannot change when a session
+// parks.
+func TestAHandoverDoesNotMoveTheParkInstant(t *testing.T) {
+	// Arrange
+	h := newHarness(t, visible()).idleFor(5 * time.Minute)
+	h.reconcile("the daemon started")
+	due := h.keeper.idleDue[theWorkspace]
+	adopted := liveSession(theWorkspace)
+	adopted.StartedAt = now
+	h.db.sessions[theWorkspace] = adopted
+	successor, err := New(h.keeper.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Act
+	successor.apply(context.Background(), edge{ws: theWorkspace, why: "the daemon started"})
+
+	// Assert
+	if got := successor.idleDue[theWorkspace]; !got.Equal(due) {
+		t.Fatalf("successor armed the park at %v, want its predecessor's %v", got, due)
 	}
 }

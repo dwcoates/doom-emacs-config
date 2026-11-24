@@ -113,6 +113,9 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was sent: the
 	// beat's half of the cache clock (wsm.Workspace.CacheClock).
 	SetLastKeepalive(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
+	// RecordWork moves a workspace's idle clock: real work ended
+	// (wsm.RecordWork, workEnded).
+	RecordWork(ctx context.Context, id wsm.WorkspaceID, at time.Time, cause wsm.WorkCause) error
 	// EndKeepaliveRun and AddKeepaliveRunSpend record a keep-alive run's end
 	// and its spend (wsm keepaliverun.go, runspend.go).
 	EndKeepaliveRun(ctx context.Context, id wsm.WorkspaceID, ending wsm.KeepaliveRunEnding) (wsm.KeepaliveRun, bool, error)
@@ -342,10 +345,6 @@ type Keeper struct {
 	// record's own copy (wsm.Workspace.LastKeepaliveAt) held in memory too,
 	// so a write that failed cannot time the next beat from before it.
 	sent map[ids.WorkspaceID]time.Time
-	// freeSince is when each session last fell free (no turn, no live
-	// detached work), as this Keeper saw it. A beat stands a session down
-	// only once it has been free StandDownGrace (owner ruling, 2026-10-26).
-	freeSince map[ids.WorkspaceID]time.Time
 	// answering is each workspace whose stand-down awaits its keep-alive's
 	// answer, with when that keep-alive was sent, and answerBy when the
 	// stand-down is taken without one (answer.go); both owned by Run alone.
@@ -447,7 +446,6 @@ func New(deps Deps) (*Keeper, error) {
 		restores:  map[ids.WorkspaceID]time.Time{},
 		restoring: map[ids.WorkspaceID]bool{},
 		sent:      map[ids.WorkspaceID]time.Time{},
-		freeSince: map[ids.WorkspaceID]time.Time{},
 		answering: map[ids.WorkspaceID]time.Time{},
 		answerBy:  map[ids.WorkspaceID]time.Time{},
 
@@ -482,10 +480,26 @@ func (k *Keeper) OnKeepaliveFailed(ws ids.WorkspaceID, failed *conversationv1.Se
 
 // SessionFree is WS's session falling free (no turn, no live detached work):
 // its next beat is timed afresh from the cache clock its turns moved, and a
-// beat that waited on the work goes out. WORKENDED restarts the hour of grace
-// before a stand-down; an attach coming up free does not. It never blocks.
+// beat that waited on the work goes out. WORKENDED is real work ending (a
+// real turn or live detached work), which moves the workspace's idle clock
+// (workEnded); an attach coming up free, or a keep-alive's own turn ending,
+// does not. It never blocks.
 func (k *Keeper) SessionFree(ws ids.WorkspaceID, workEnded bool) {
 	k.enqueue(edge{ws: ws, kind: edgeFree, workEnded: workEnded, why: "the session fell free"})
+}
+
+// workEnded records that real work on WS ended now: the idle clock every park
+// measures its grace from moves (wsm.RecordWork), on the row, so a successor
+// reads the same instant. A write that fails is recorded at ERROR; the
+// session's park is then measured from its earlier work.
+func (k *Keeper) workEnded(ctx context.Context, ws ids.WorkspaceID) {
+	at := k.deps.Clock.Now()
+	if err := k.deps.DB.RecordWork(ctx, ws, at, wsm.WorkEnded); err != nil {
+		log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+		if !leaving(ctx, log, opOwner, "recording the work that ended", err) {
+			log.Error(opOwner, "could not record that the workspace's work ended; its park is measured from its earlier work", dlog.Context{"at": at, "cause": err.Error()})
+		}
+	}
 }
 
 // TurnClosed is a turn's close on WS, already on the record
@@ -704,7 +718,7 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 		k.reconcile(ctx, e.ws, e.why)
 	case edgeFree:
 		if e.workEnded {
-			k.freeSince[e.ws] = k.deps.Clock.Now()
+			k.workEnded(ctx, e.ws)
 		}
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
@@ -833,7 +847,6 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.beats, ws)
 	delete(k.restores, ws)
 	delete(k.sent, ws)
-	delete(k.freeSince, ws)
 	delete(k.parkedRetry, ws)
 	delete(k.owners, ws)
 	delete(k.idleDue, ws)

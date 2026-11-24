@@ -1119,7 +1119,7 @@ func TestForgetDeletesEveryDependentRecord(t *testing.T) {
 	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, CreatedAt: instant}); err != nil {
 		t.Fatalf("PutCreationJob: %v", err)
 	}
-	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 

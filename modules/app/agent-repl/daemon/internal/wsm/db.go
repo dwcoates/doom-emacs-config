@@ -284,8 +284,9 @@ type DB interface {
 	// session row has nothing to retire and is not a refusal; a deleted
 	// session is never resurrected.
 	ClearSessionTerminal(ctx context.Context, id WorkspaceID) error
-	// TouchEngagement records last engagement — the idle sweep's input.
-	TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error
+	// RecordWork is the one write of a workspace's idle clock: real work of
+	// a cause happened at an instant (lastwork.go).
+	RecordWork(ctx context.Context, id WorkspaceID, at time.Time, cause WorkCause) error
 	// SetShimPID records, or clears with nil, the pid of the shim process
 	// serving a workspace's session. The rollout's intent manifest names it.
 	SetShimPID(ctx context.Context, id WorkspaceID, pid *int) error

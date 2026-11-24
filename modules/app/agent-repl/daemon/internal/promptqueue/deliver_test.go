@@ -432,7 +432,7 @@ func (f *failingPutTurn) PutTurn(context.Context, wsm.Turn) error {
 // the idle sweep measures hibernation eligibility from it, so a session nothing
 // stamps is hibernated out from under an active user — and a session revived by
 // a prompt is hibernated again before that prompt's turn has run.
-func TestDeliveringAPromptStampsTheSessionsEngagement(t *testing.T) {
+func TestDeliveringAPromptRecordsTheWorkspacesWork(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -442,23 +442,40 @@ func TestDeliveringAPromptStampsTheSessionsEngagement(t *testing.T) {
 	}
 
 	// Assert
-	if h.db.engagements != 1 {
-		t.Fatalf("engagement stamps = %d, want exactly one for the delivered prompt", h.db.engagements)
+	if h.db.works != 1 || h.db.workCause != wsm.WorkPromptDelivered {
+		t.Fatalf("work stamps = %d of cause %q, want exactly one prompt delivery", h.db.works, h.db.workCause)
 	}
 }
 
-func TestTheEngagementStampOutlivesASubmitterThatLeft(t *testing.T) {
+func TestTheWorkStampOutlivesASubmitterThatLeft(t *testing.T) {
 	// Arrange: the delivery happened, and its submitter has since left.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	// Act
-	h.q.touchEngagement(ctx, "ws-1", dlog.NewTestLogger())
+	h.q.recordWork(ctx, "ws-1", dlog.NewTestLogger())
 
 	// Assert
-	if h.db.engagements != 1 || h.db.engagementCtxErr != nil {
-		t.Fatalf("stamps = %d written under %v, want one written under a live context", h.db.engagements, h.db.engagementCtxErr)
+	if h.db.works != 1 || h.db.workCtxErr != nil {
+		t.Fatalf("stamps = %d written under %v, want one written under a live context", h.db.works, h.db.workCtxErr)
+	}
+}
+
+func TestAWorkStampThatCannotBeWrittenIsAnErrorAndTheDeliveryStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.workErr = errors.New("disk full")
+
+	// Act
+	disposition, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err != nil || !disposition.Delivered {
+		t.Fatalf("Submit = %+v, %v; want the prompt delivered", disposition, err)
+	}
+	if !logged(h.log.Records(), "error", opDeliver, "could not record the delivered prompt as the workspace's last work; its session may be parked early") {
+		t.Fatalf("the lost work stamp was not recorded at error: %v", h.log.Records())
 	}
 }
 

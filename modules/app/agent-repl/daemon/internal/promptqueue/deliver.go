@@ -159,7 +159,7 @@ func (q *queue) acceptOpenedTurn(ctx context.Context, sub Submission, success *s
 	// The shim TOOK the turn: the `submitting` window is over.
 	q.ackTurn(sub.WS)
 	handOver(sub.WS, success, watcher)
-	q.touchEngagement(ctx, sub.WS, log)
+	q.recordWork(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the shim", dlog.Context{
 		"agent": success.GetPrompt().GetAgent().GetValue(),
 	})
@@ -207,7 +207,7 @@ func (q *queue) deliverToAgent(ctx context.Context, d *delivery, sub Submission,
 		})
 		return Disposition{}, fmt.Errorf("prompt agent %q on %q: %w", agent.GetValue(), sub.WS, err)
 	}
-	q.touchEngagement(ctx, sub.WS, log)
+	q.recordWork(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the addressed agent", dlog.Context{"agent": agent.GetValue()})
 	return Disposition{Delivered: true}, nil
 }
@@ -319,23 +319,25 @@ func causedByMergeQueue(origin string) bool {
 	return mergeQueueOrigins[origin]
 }
 
-// touchEngagement records that the user just engaged this session. IT IS WHAT
-// THE IDLE SWEEP MEASURES: without it every session's engagement stands still
-// at whatever the record was created with, so an actively used workspace is
-// hibernated out from under its user — and a session revived BY a prompt is
-// hibernated again before the prompt's own turn has run.
+// recordWork records that a prompt the user or another agent sent was just
+// delivered: real work, which moves the workspace's idle clock
+// (wsm.RecordWork). IT IS WHAT EVERY PARK MEASURES: without it an actively
+// used workspace is parked out from under its user, and a session revived BY
+// a prompt is parked again before the prompt's own turn has run. A
+// keep-alive's prompt never comes through the queue, so it never moves the
+// clock.
 //
-// A failure to record it is a warning, never the submission's failure: the
-// prompt was delivered, and the worst a lost stamp costs is one early
-// hibernation.
+// A failure to record it is an ERROR, never the submission's failure: the
+// prompt was delivered, and the worst a lost stamp costs is one early park.
 //
 // THE STAMP OUTLIVES ITS CALLER. It follows a delivery that already happened,
 // so a submitter that leaves now (a merge suspended mid-step, its run's
 // context cut) does not take the stamp with it.
-func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
-	if err := q.deps.DB.TouchEngagement(context.WithoutCancel(ctx), ws, q.deps.Now()); err != nil {
-		log.Warn(opDeliver, "could not record the session's engagement",
-			dlog.Context{"cause": err.Error()})
+func (q *queue) recordWork(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+	at := q.deps.Now()
+	if err := q.deps.DB.RecordWork(context.WithoutCancel(ctx), ws, at, wsm.WorkPromptDelivered); err != nil {
+		log.Error(opDeliver, "could not record the delivered prompt as the workspace's last work; its session may be parked early",
+			dlog.Context{"at": at, "cause": err.Error()})
 	}
 }
 
