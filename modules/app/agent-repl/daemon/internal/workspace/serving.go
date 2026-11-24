@@ -54,6 +54,15 @@ func (f *Fleet) claimServing(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		})
 		return fmt.Errorf("workspace: claim serving for %q: %w", ws, err)
 	}
+	if err != nil && errors.Is(context.Cause(ctx), ErrWorkspaceForgotten) {
+		// A START THE FORGET'S FENCE ENDED cancels its claim with it: the
+		// forget owns the outcome, as it does a row already gone above, and
+		// the caller ends the bring-up on the wrapped ErrWorkspaceForgotten.
+		log.Info(opServing, "the forget ended this start before its serving ownership was claimed; nothing is served", dlog.Context{
+			"workspace": string(ws), "instance": string(f.deps.Instance), "cause": err.Error(),
+		})
+		return fmt.Errorf("workspace: claim serving for %q: %w: %w", ws, ErrWorkspaceForgotten, err)
+	}
 	if err != nil {
 		log.Error(opServing, "could not claim the workspace's serving ownership for a session this daemon now holds", dlog.Context{
 			"workspace": string(ws), "instance": string(f.deps.Instance), "cause": err.Error(),
