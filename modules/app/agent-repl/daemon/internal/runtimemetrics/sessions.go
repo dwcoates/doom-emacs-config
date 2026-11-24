@@ -18,8 +18,8 @@ const (
 	// (sessionwhy.Reason) and its workspace; summed by reason it is how many
 	// sessions each reason holds up.
 	SessionsUpName = "agentrepl_sessions_up"
-	// IdleBeforeParkName is how long each session the drain parked stood up
-	// idle, from the later of its last real turn's end and its own start, by
+	// IdleBeforeParkName is how long each session the drain parked stood
+	// idle, from its workspace's last real work (wsm.Workspace.IdleSince), by
 	// the stand-down reason it was parked for (shimlife.StandDownReason).
 	IdleBeforeParkName = "agentrepl_session_idle_before_park_seconds"
 )

@@ -115,7 +115,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 				dlog.Merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
 			continue
 		}
-		switch outcome := c.park(ctx, log, ws.ID, fields, c.idleReason(), idleSince(ws, session)); outcome {
+		switch outcome := c.park(ctx, log, ws.ID, fields, c.idleReason(), ws.IdleSince()); outcome {
 		case parkDone:
 			c.clearRetry(ws.ID)
 			parked = append(parked, ws.ID)
@@ -349,33 +349,24 @@ type ParkTelemetry interface {
 	ObserveIdleBeforePark(reason shimlife.StandDownReason, idle time.Duration)
 }
 
-// idleSince answers when SESSION, the workspace RECORD's, began standing up
-// idle: the later of its last turn's end and its own start (a session
-// restored after its work idles only from its start). Every caller of park
-// has both from the reads that decided the park, so nothing is read after it.
-func idleSince(record wsm.Workspace, session wsm.Session) time.Time {
-	since := session.StartedAt
-	if ended := record.LastTurnEndedAt; ended != nil && ended.After(since) {
-		since = *ended
-	}
-	return since
-}
-
 // observeIdleBeforePark records how long the session just parked for WHY
-// stood up idle, from SINCE (idleSince) to now. A zero SINCE is a session
-// with neither a start nor a turn end on record, a broken invariant recorded
-// at ERROR; the park stands.
+// stood idle, from SINCE to now: the workspace's last real work
+// (wsm.Workspace.IdleSince, the clock every park's grace is measured from,
+// which no session start, keep-alive or bounce moves). Every caller of park
+// holds the workspace from the reads that decided the park, so nothing is read
+// after it. A zero SINCE is a workspace with neither work nor a creation on
+// record, a broken invariant recorded at ERROR; the park stands.
 func (c *controller) observeIdleBeforePark(log dlog.Logger, fields dlog.Context, why standDownReason, since time.Time) {
 	if c.deps.Parks == nil {
 		return
 	}
 	if since.IsZero() {
-		log.Error(why.op, "the parked session has neither a start nor a turn end on record; its idle time before the park is not observed",
-			dlog.Merge(fields, dlog.Context{"invariant_violation": "a parked session has a start on record"}))
+		log.Error(why.op, "the parked workspace has neither work nor a creation on record; its idle time before the park is not observed",
+			dlog.Merge(fields, dlog.Context{"invariant_violation": "a parked workspace has a creation on record"}))
 		return
 	}
 	idle := c.deps.Clock.Now().Sub(since)
-	log.Debug(why.op, "observed how long the parked session stood up idle", dlog.Merge(fields, dlog.Context{"idle_since": since, "idle": idle.String()}))
+	log.Debug(why.op, "observed how long the parked session stood idle", dlog.Merge(fields, dlog.Context{"idle_since": since, "idle": idle.String()}))
 	c.deps.Parks.ObserveIdleBeforePark(why.life, idle)
 }
 
