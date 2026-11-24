@@ -99,10 +99,34 @@ if [ "${#sources[@]}" -eq 0 ]; then
     exit 2
 fi
 
-# One awk pass. Comments are stripped with the same carry-across-lines logic the
-# durable-isolation gate uses, so "mentioned in prose" and "imported in code"
-# cannot disagree about what counts as code.
-violations="$(
+# ONLY A FILE NAMING ONE OF THE PACKAGES CAN VIOLATE, so a fixed-string grep
+# picks those files out before the awk pass reads anything. The awk reports a
+# line only when its code (the line minus its comments) contains one of the
+# three strings, and such a line contains it before stripping too, so a file the
+# grep passes over holds no violation: the answer is the same, by construction.
+# Measured 2026-11-23 over the daemon and the webapp (3702 sources): the awk
+# pass over every source took 1.6s and was all of a deploy's unchanged proto
+# step but its startup; the byte-wise (LC_ALL=C) grep takes 0.1s. A grep that
+# cannot read a file exits 2, which fails the gate rather than passing it.
+candidate_list="$(mktemp "${TMPDIR:-/tmp}/conversation-isolation.XXXXXX")"
+trap 'rm -f "$candidate_list"' EXIT
+grep_status=0
+LC_ALL=C grep -lF --null -e "$GO_PKG" -e "$PROTO_PKG" -e "$WRITE_PKG" -- "${sources[@]}" > "$candidate_list" || grep_status=$?
+if [ "$grep_status" -gt 1 ]; then
+    printf 'conversation-isolation: grep could not scan the sources under %s (exit %d) — the gate cannot answer\n' "${FORBIDDEN_ROOTS[*]}" "$grep_status" >&2
+    exit 2
+fi
+candidates=()
+while IFS= read -r -d '' f; do
+    candidates+=("$f")
+done < "$candidate_list"
+
+# One awk pass over the candidates, and none when there are none (awk handed
+# no file reads its standard input). Comments are stripped with the same
+# carry-across-lines logic the durable-isolation gate uses, so "mentioned in
+# prose" and "imported in code" cannot disagree about what counts as code.
+violations=""
+[ "${#candidates[@]}" -eq 0 ] || violations="$(
     awk -v proto_pkg="$PROTO_PKG" -v go_pkg="$GO_PKG" -v write_pkg="$WRITE_PKG" -v root="$ROOT/" '
     function strip(line,   out, p, b, l) {
         out = ""
@@ -138,7 +162,7 @@ violations="$(
         }
     }
     END { exit 0 }
-    ' "${sources[@]}"
+    ' "${candidates[@]}"
 )"
 
 # INVARIANT I8 — THE DAEMON'S VIEW OF THE STORE IS READ-ONLY (owner ruling,

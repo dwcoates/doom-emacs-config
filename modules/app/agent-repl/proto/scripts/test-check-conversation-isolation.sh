@@ -145,6 +145,50 @@ func Block() {}
 EOF
 expect 0 "a mention inside a block comment is accepted" "$root"
 
+# THE FIXED-STRING PREFILTER. Only the files a grep finds naming a package
+# reach the awk pass, so these rows hold it to the pass's own answers: the
+# file and line a violation is reported at, a name grep must hand over intact,
+# a tree with no candidate at all, and a source grep cannot read.
+root="$(newFixture prefilter-location)"
+cat >>"$root/daemon/internal/frontend/plane.go" <<'EOF'
+package frontend
+
+// The second line names store/v1 in prose only.
+import internalv1 "agentrepl/proto/store/v1"
+EOF
+out="$("$CHECK" "$root" 2>&1)"
+if grep -qx 'daemon/internal/frontend/plane.go:4: IMPORTS the conversation-shimside package' <<<"$out" &&
+       [ "$(grep -c 'IMPORTS' <<<"$out")" -eq 1 ]; then
+    printf 'ok a prefiltered violation is reported at its own file and line, and its prose is not\n'
+else
+    printf 'FAIL a prefiltered violation is reported at its own file and line, and its prose is not\n%s\n' "$out" >&2
+    failures=$((failures + 1))
+fi
+
+root="$(newFixture prefilter-spaced-name)"
+cat >>"$root/daemon/internal/frontend/odd name.go" <<'EOF'
+package frontend
+
+import internalv1 "agentrepl/proto/store/v1"
+EOF
+expect 1 "an import in a file whose name holds a space is refused" "$root"
+
+root="$(newFixture prefilter-no-candidates)"
+out="$(printf 'import internalv1 "agentrepl/proto/store/v1"\n' | "$CHECK" "$root" 2>&1)"
+status=$?
+if [ "$status" -eq 0 ]; then
+    printf 'ok a tree with no candidate file passes without reading standard input\n'
+else
+    printf 'FAIL a tree with no candidate file passes without reading standard input (exit %d)\n%s\n' "$status" "$out" >&2
+    failures=$((failures + 1))
+fi
+
+root="$(newFixture prefilter-unreadable)"
+printf 'package frontend\n' >"$root/daemon/internal/frontend/locked.go"
+chmod 000 "$root/daemon/internal/frontend/locked.go"
+expect 2 "a source the grep cannot read fails the gate rather than passing it" "$root"
+chmod 644 "$root/daemon/internal/frontend/locked.go"
+
 root="$(newFixture storeread-store-import)"
 cat >>"$root/proto/src/storeread/v1/service.proto" <<'EOF'
 import "store/v1/endpoint_write_batch.proto";
