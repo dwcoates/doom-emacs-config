@@ -755,7 +755,7 @@ from the restored splitscreen layout rather than from the full-frame one."
       (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration)
-                 (lambda (_cfg) (push 'restore order)))
+                 (lambda (_cfg &rest _) (push 'restore order)))
                 ((symbol-function 'agent-repl--hide-panels)
                  (lambda () (push 'hide order))))
         (agent-repl--on-simple-close)
@@ -777,7 +777,7 @@ from the restored splitscreen layout rather than from the full-frame one."
     (let ((restore-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration)
-                 (lambda (_cfg) (cl-incf restore-called))))
+                 (lambda (_cfg &rest _) (cl-incf restore-called))))
         ;; No :fullscreen-config set on test-ws.
         (agent-repl--on-simple-close)
         (should (= 0 restore-called))))))
@@ -832,7 +832,7 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
     (let ((restored nil))
       (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
       (cl-letf (((symbol-function 'set-window-configuration)
-                 (lambda (cfg) (setq restored cfg))))
+                 (lambda (cfg &rest _) (setq restored cfg))))
         (should (agent-repl--restore-fullscreen-config "test-ws"))
         (should (eq restored 'saved-config))
         (should-not (agent-repl--ws-get "test-ws" :fullscreen-config))))))
@@ -842,7 +842,7 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
   (agent-repl-test--with-clean-state
     (let ((restore-called 0))
       (cl-letf (((symbol-function 'set-window-configuration)
-                 (lambda (_cfg) (cl-incf restore-called))))
+                 (lambda (_cfg &rest _) (cl-incf restore-called))))
         (should-not (agent-repl--restore-fullscreen-config "test-ws"))
         (should (= 0 restore-called))))))
 
@@ -878,7 +878,7 @@ putting the landing back over whatever the user does next."
               (set-window-buffer (split-window (selected-window) nil 'above)
                                  (get-buffer-create "*stale-user-work*"))
               (cl-letf (((symbol-function 'set-window-configuration)
-                         (lambda (cfg) (setq restored cfg))))
+                         (lambda (cfg &rest _) (setq restored cfg))))
                 ;; Assert
                 (should-not (agent-repl--restore-fullscreen-config "test-ws"))
                 (should-not restored)
@@ -914,7 +914,7 @@ one the configuration was recorded from and the close must restore it."
               (delete-other-windows)
               (should-not (get-buffer-window view-buf))
               (cl-letf (((symbol-function 'set-window-configuration)
-                         (lambda (cfg) (setq restored cfg))))
+                         (lambda (cfg &rest _) (setq restored cfg))))
                 ;; Assert
                 (should (agent-repl--restore-fullscreen-config "test-ws"))
                 (should (eq restored 'saved-config)))))
@@ -952,7 +952,7 @@ the hardened composer window alive — that protection is what the
   "restore-fullscreen-config returns nil when WS is nil."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'set-window-configuration)
-               (lambda (_cfg) (error "should not restore"))))
+               (lambda (_cfg &rest _) (error "should not restore"))))
       (should-not (agent-repl--restore-fullscreen-config nil)))))
 
 ;;;; ---- Tests: simple-hide-and-preserve-status ----
@@ -3127,7 +3127,7 @@ back."
       (switch-to-buffer (get-buffer-create "*other*"))
       (unwind-protect
           (cl-letf (((symbol-function 'set-window-configuration)
-                     (lambda (cfg) (when (eq cfg fake-config) (setq restore-called t)))))
+                     (lambda (cfg &rest _) (when (eq cfg fake-config) (setq restore-called t)))))
             (agent-repl-fullscreen-and-focus)
             (should restore-called)
             (should-not agent-repl--window-fullscreen-config))
