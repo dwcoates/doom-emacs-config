@@ -547,6 +547,12 @@ type MergeMover interface {
 	// it once the outgoing daemon is gone: a queue change that daemon made
 	// while both served (a resume) reached only its own pump.
 	ReviewQueues(ctx context.Context) error
+	// ServingWidened tells the merge queue this daemon now serves workspaces
+	// no adoption of its own told it of (AdoptWorkspace): joining mode's end
+	// at the takeover, and the stragglers marked owned. Its deploy mediation
+	// runs again for the rounds it passed over while their mediators were
+	// not served here.
+	ServingWidened(ctx context.Context)
 	// ReturnPausedMerges puts the workspace's merge a handover paused back
 	// at its place in line: the workspace waits on this daemon for its work
 	// to end, and its merge must not hold the queue the successor serves.

@@ -627,3 +627,19 @@ func TestAnAdoptionWhoseMediatorCannotBeReadSaysSo(t *testing.T) {
 		t.Fatalf("records = %v, want the unread mediator at ERROR", h.logs.Records())
 	}
 }
+
+func TestServingWidenedRunsTheMediationPass(t *testing.T) {
+	// Arrange: a pass that runs is seen by its record that this daemon does
+	// not serve the queues, and does nothing else.
+	h := checked(t)
+	h.standing.serves = false
+
+	// Act
+	h.o.ServingWidened(context.Background())
+
+	// Assert
+	if _, ran := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "this daemon does not serve the queues; their checks are run by the daemon that does"}); !ran {
+		t.Fatalf("records = %v, want the pass run", h.logs.Records())
+	}
+}

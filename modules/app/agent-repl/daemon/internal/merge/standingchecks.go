@@ -72,6 +72,15 @@ func (o *orchestrator) mediateAdopted(ctx context.Context, ws ids.WorkspaceID) {
 	o.mediateAgain(context.WithoutCancel(ctx))
 }
 
+// ServingWidened implements Orchestrator: this daemon came to serve
+// workspaces no adoption of its own told it of (rollout.MergeMover), so the
+// mediation pass runs again for every round it passed over while their
+// mediators were not served here (Mediate's gate).
+func (o *orchestrator) ServingWidened(ctx context.Context) {
+	o.deps.Log.Global().Info(opMediation, "this daemon serves workspaces it did not adopt one by one; the mediation pass runs what it passed over while their mediators were not served here", nil)
+	o.mediateAgain(context.WithoutCancel(ctx))
+}
+
 // mediatorOf answers queue Q's standing mediator: the one recorded,
 // reopened when it was closed, or one made and recorded when the queue has
 // none (or the one recorded is gone from the registry).

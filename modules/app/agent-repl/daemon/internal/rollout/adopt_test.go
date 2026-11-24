@@ -3105,3 +3105,55 @@ func TestJoinAdoptsTheViewedWorkspaceBeforeTheRest(t *testing.T) {
 		}
 	}
 }
+
+func TestTheTakeoverTellsTheMergeQueueOfWhatItMadeOwnedOnceItIsOwned(t *testing.T) {
+	tests := []struct {
+		name string
+		// elder, when set, runs an older daemon through the takeover, which
+		// ends when the test closes its release.
+		elder bool
+		// want is each ServingWidened told: the standings of FIRST, handed
+		// here and never adopted, and SECOND, in no manifest, as it is told.
+		want [][2]Standing
+	}{
+		{name: "with no elder, once joining mode ended and the stragglers are owned",
+			want: [][2]Standing{{StandingOwned, StandingOwned}}},
+		{name: "with an elder, at the takeover and again once the stragglers are owned after it ended", elder: true,
+			want: [][2]Standing{{StandingNotYetAdopted, StandingOwned}, {StandingOwned, StandingOwned}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			release := make(chan struct{})
+			var opts []func(*Deps)
+			if tt.elder {
+				opts = append(opts, withElder(release))
+			}
+			h := newHarness(t, opts...)
+			first, second := joinedWithOneOfTwo(t, h)
+			var mu sync.Mutex
+			var told [][2]Standing
+			h.merges.widened = func() {
+				mu.Lock()
+				defer mu.Unlock()
+				told = append(told, [2]Standing{h.c.Standing(first), h.c.Standing(second)})
+			}
+
+			// Act
+			h.incumbentExits()
+			<-h.c.tookOverSignal()
+			if tt.elder {
+				close(release)
+				<-h.c.eldersGoneSignal()
+			}
+			h.c.stragglerAdoptions.Wait()
+
+			// Assert
+			mu.Lock()
+			defer mu.Unlock()
+			if !slices.Equal(told, tt.want) {
+				t.Fatalf("ServingWidened told at standings %v, want %v", told, tt.want)
+			}
+		})
+	}
+}

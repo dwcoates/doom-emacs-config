@@ -363,6 +363,9 @@ type Orchestrator interface {
 	// The adoption of a deploy mediator also runs the mediation pass, for
 	// the rounds it was not served here for (mediateAdopted).
 	AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error
+	// ServingWidened runs the mediation pass once this daemon serves
+	// workspaces no adoption of its own told it of (rollout.MergeMover).
+	ServingWidened(ctx context.Context)
 	// ReturnPausedMerges puts every merge of WS a handover paused back at
 	// its place in line, dropping its merge lease and progress: WS waits on
 	// this daemon for its work to end, and its merge must not hold the

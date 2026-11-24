@@ -336,6 +336,10 @@ func (m *recordingMover) ReviewQueues(context.Context) error {
 	return nil
 }
 
+func (m *recordingMover) ServingWidened(context.Context) {
+	m.calls = append(m.calls, "serving_widened")
+}
+
 func (m *recordingMover) ReturnPausedMerges(_ context.Context, ws ids.WorkspaceID) error {
 	m.calls = append(m.calls, "return_paused "+string(ws))
 	return nil
@@ -492,6 +496,45 @@ func TestAnUnboundMergeForwarderPanicsOnTheDrain(t *testing.T) {
 
 	// Act.
 	f.Drain(context.Background())
+}
+
+func TestTheMergeForwarderCarriesServingWidened(t *testing.T) {
+	cases := []struct {
+		name      string
+		bound     bool
+		want      []string
+		wantPanic bool
+	}{
+		{name: "bound, to the orchestrator", bound: true, want: []string{"serving_widened"}},
+		{name: "unbound, a wiring defect that panics", wantPanic: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := &mergeForwarder{}
+			target := &recordingMover{}
+			if tc.bound {
+				f.bind(target)
+			}
+			defer func() {
+				// Assert.
+				got := recover()
+				if tc.wantPanic {
+					err, ok := got.(error)
+					if !ok || !errors.Is(err, errMergeMoverUnbound) {
+						t.Fatalf("recovered %v, want a panic carrying errMergeMoverUnbound", got)
+					}
+					return
+				}
+				if got != nil || !reflect.DeepEqual(target.calls, tc.want) {
+					t.Fatalf("recovered %v, calls = %v, want %v", got, target.calls, tc.want)
+				}
+			}()
+
+			// Act.
+			f.ServingWidened(context.Background())
+		})
+	}
 }
 
 // publishingVerbs is a workspace.Verbs whose only live method is the roster

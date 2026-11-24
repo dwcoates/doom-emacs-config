@@ -1408,6 +1408,14 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	if err := c.deps.Merges.ReviewQueues(c.lifetime(context.Background())); err != nil {
 		c.log.Error(opAdopt, "the merge queues could not be read again at the takeover; a queue change the outgoing daemon made waits for its queue's next change", dlog.WithCause(fields, err))
 	}
+	// THE WORKSPACES THE TAKEOVER MADE OWNED ARE TOLD TO THE MERGE QUEUE,
+	// after they are owned: joining mode ended above, and with no elder the
+	// stragglers were marked owned (lastDaemonsDuties), neither through an
+	// adoption that tells the queue of its workspace (adopt's AdoptWorkspace).
+	// A deploy mediation round the queue passed over while such a mediator
+	// was not_yet_adopted here runs now. With elders, the stragglers are told
+	// once they are owned (afterElders).
+	c.deps.Merges.ServingWidened(c.lifetime(context.Background()))
 	// THE CREATES THE OUTGOING DAEMON HELD FOR THE NETWORK ARE THIS DAEMON'S
 	// NOW: it is gone, so none of them can run there, and each resumes here on
 	// the network's restoration under its own key and pending ref.
@@ -1495,6 +1503,10 @@ func (c *controller) afterElders(elders []string, promoted bool, fields dlog.Con
 		dlog.Merge(fields, dlog.Context{"elders": elders}))
 	var stragglers sync.WaitGroup
 	c.lastDaemonsDuties(promoted, &stragglers, fields)
+	// THE STRAGGLERS JUST MARKED OWNED ARE TOLD TO THE MERGE QUEUE, as the
+	// takeover tells it of the rest (becomeIncumbent): one whose adoption
+	// fails never reaches its own AdoptWorkspace.
+	c.deps.Merges.ServingWidened(lifetime)
 	c.recoverQueuedCreates(fields)
 	stragglers.Wait()
 	c.mu.Lock()
