@@ -448,7 +448,7 @@ func renderOpenChildren(names map[ids.WorkspaceID]string, children []wsm.Product
 	}
 	var b strings.Builder
 	for _, child := range children {
-		fmt.Fprintf(&b, "\n- `%s` (%s): %s", names[child.Workspace], child.Kind, strings.Join(child.Sites, ", "))
+		b.WriteString(fmt.Sprintf("\n- `%s` (%s): %s", names[child.Workspace], child.Kind, strings.Join(child.Sites, ", ")))
 	}
 	return b.String()
 }
@@ -573,8 +573,8 @@ func ignored(site logsites.Site, kinds []wsm.IgnoredRecordKind) bool {
 // template, counts and one sample.
 func RenderProductionSites(sites ProductionSites, c wsm.ProductionCheck) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Production span %s to %s, compared with %s.\n", c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339), sites.Baseline)
-	fmt.Fprintf(&b, "Left out: %d sites open children own, %d sites of ignored kinds.\n", sites.Owned, sites.Ignored)
+	b.WriteString(fmt.Sprintf("Production span %s to %s, compared with %s.\n", c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339), sites.Baseline))
+	b.WriteString(fmt.Sprintf("Left out: %d sites open children own, %d sites of ignored kinds.\n", sites.Owned, sites.Ignored))
 	ordered := append([]logsites.Site(nil), sites.New...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		if (ordered[i].Level == "error") != (ordered[j].Level == "error") {
@@ -582,23 +582,23 @@ func RenderProductionSites(sites ProductionSites, c wsm.ProductionCheck) string 
 		}
 		return ordered[i].Count > ordered[j].Count
 	})
-	fmt.Fprintf(&b, "\n## New sites (%d)\n", len(ordered))
+	b.WriteString(fmt.Sprintf("\n## New sites (%d)\n", len(ordered)))
 	for _, site := range ordered {
 		renderSite(&b, site)
 	}
-	fmt.Fprintf(&b, "\n## Sites that fired again after their fix landed (%d)\n", len(sites.Refired))
+	b.WriteString(fmt.Sprintf("\n## Sites that fired again after their fix landed (%d)\n", len(sites.Refired)))
 	for _, r := range sites.Refired {
 		renderSite(&b, r.Site)
-		fmt.Fprintf(&b, "  fixed: %s by %s\n", r.FixedAt.UTC().Format(time.RFC3339), r.FixedBy)
+		b.WriteString(fmt.Sprintf("  fixed: %s by %s\n", r.FixedAt.UTC().Format(time.RFC3339), r.FixedBy))
 	}
 	return b.String()
 }
 
 // renderSite writes one site of the site file.
 func renderSite(b *strings.Builder, site logsites.Site) {
-	fmt.Fprintf(b, "\n%s %s %s x%d, first %s, last %s\n", site.Level, site.Runtime, site.Key, site.Count,
-		site.FirstSeen.UTC().Format(time.RFC3339), site.LastSeen.UTC().Format(time.RFC3339))
-	fmt.Fprintf(b, "  template: %s\n  operation: %s\n  sample: %s\n  context: %s\n", site.Template, site.Operation, site.SampleMessage, site.SampleContext)
+	b.WriteString(fmt.Sprintf("\n%s %s %s x%d, first %s, last %s\n", site.Level, site.Runtime, site.Key, site.Count,
+		site.FirstSeen.UTC().Format(time.RFC3339), site.LastSeen.UTC().Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("  template: %s\n  operation: %s\n  sample: %s\n  context: %s\n", site.Template, site.Operation, site.SampleMessage, site.SampleContext))
 }
 
 // DecideProduction implements Orchestrator: production mediator WS decides
@@ -809,18 +809,18 @@ func slugWords(text string, n int) string {
 func (o *orchestrator) childCommission(mediator ids.WorkspaceID, names []string, i int, child ProductionChildRequest) (string, error) {
 	var findings strings.Builder
 	for _, f := range child.Findings {
-		fmt.Fprintf(&findings, "\n- %s", f.Statement)
+		findings.WriteString(fmt.Sprintf("\n- %s", f.Statement))
 		if len(f.Sites) > 0 {
-			fmt.Fprintf(&findings, "\n  - Log sites: %s", strings.Join(f.Sites, ", "))
+			findings.WriteString(fmt.Sprintf("\n  - Log sites: %s", strings.Join(f.Sites, ", ")))
 		}
 		for _, e := range f.Evidence {
-			fmt.Fprintf(&findings, "\n  - Evidence: %s", e)
+			findings.WriteString(fmt.Sprintf("\n  - Evidence: %s", e))
 		}
 	}
 	var siblings strings.Builder
 	for j, name := range names {
 		if j != i {
-			fmt.Fprintf(&siblings, "\n- `%s`", name)
+			siblings.WriteString(fmt.Sprintf("\n- `%s`", name))
 		}
 	}
 	if siblings.Len() == 0 {
