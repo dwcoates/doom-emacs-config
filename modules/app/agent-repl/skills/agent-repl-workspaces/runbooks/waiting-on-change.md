@@ -6,10 +6,11 @@
   - The pull request is known: `workspace pr-subscribe here -pr URL -events
     state,merge_queue`. Act when the `state` notice says it merged.
   - The pull request is not opened yet: `workspace subscribe OTHER -events
-    pull_request,closed`, naming OTHER by its workspace name, in any
-    repository. On the `pull_request` notice, `pr-subscribe` to the pull
-    request it names, then `workspace unsubscribe OTHER` if nothing else is
-    needed from it. `workspace status OTHER` shows the pull requests it
+    closed`, naming OTHER by its workspace name, in any repository. The
+    daemon follows the merge of every pull request OTHER owns or comes to
+    own for this workspace (`subscribe.md`), so its merge is told without a
+    `pr-subscribe`; add `merge_queue` progress by `pr-subscribe` only when
+    the work needs it. `workspace status OTHER` shows the pull requests it
     already owns under `links`.
   - A change landing through agent-repl's own merge queue (no pull request)
     is told by `workspace subscribe OTHER` (the default lifecycle bundle

@@ -13,9 +13,10 @@
   - `workspace pr-subscriptions WS` lists the pull requests the workspace
     follows, each with its health.
   - `workspace pr-subscribe WS -pr URL|#N|OWNER/REPO#N [-events
-    comment,review,review_comment,state,checks,merge_queue]` and
+    comment,review,review_comment,state,checks,merge_queue,merged]` and
     `workspace pr-unsubscribe WS -pr URL|OWNER/REPO#N` follow a pull request
-    in any GitHub repository.
+    in any GitHub repository. `merged` tells only the merge; `state` tells
+    it too, along with a close, a reopen and readiness for review.
   - An agent whose work waits on a pull request merging, owned or not,
     follows it with `workspace pr-subscribe here -pr URL -events
     state,merge_queue` and NEVER polls GitHub by hand: no `gh pr view` loops,
