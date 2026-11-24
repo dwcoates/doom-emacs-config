@@ -155,6 +155,7 @@ import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
 import { recordTimestampMs } from "../convert/place.js";
 import { compactionIdField, compactionTracker, fastModeUpdate } from "../convert/session-updates.js";
 import { SerialProbe } from "./serial-probe.js";
+import { InFlight } from "./in-flight.js";
 import { planUsageUpdate } from "../convert/plan-usage.js";
 import { backupTranscript } from "./backup.js";
 import {
@@ -1149,7 +1150,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   let parked: ParkedBridge | undefined;
   /** The HoldParkedBridge opening under way, which every later call waits out. */
-  let parkedOpening: Promise<void> | undefined;
+  const parkedOpening = new InFlight<void>();
   /** The workspace's name, as StartSession stated it; unset until then. */
   let workspaceName: string | undefined;
   /**
@@ -6305,7 +6306,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const model = summarizer.model?.name ?? "";
     const context = { use: use.case, vendor_session_id: use.value.vendorSessionId, requested_model: model, scope: summarizer.scope };
-    if (started || (use.case === "compact" && (parked !== undefined || parkedOpening !== undefined))) {
+    if (started || (use.case === "compact" && (parked !== undefined || parkedOpening.settling !== undefined))) {
       const detail = started
         ? "this shim already started its session; a summary is asked before the start"
         : "this shim holds a parked conversation's bridge, whose vendor process holds the conversation open";
@@ -7697,7 +7698,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * first, so a start never runs beside the bridge's own.
    */
   async function startSessionAsked(request: shimv1.StartSessionRequest): Promise<shimv1.StartSessionResponse> {
-    if (parkedOpening !== undefined) await parkedOpening;
+    const opening = parkedOpening.settling;
+    if (opening !== undefined) await opening;
     if (parked !== undefined) return promoteParked(parked, request);
     return startSession(request);
   }
@@ -7767,7 +7769,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     request: shimv1.HoldParkedBridgeRequest,
     signal: AbortSignal,
   ): AsyncIterable<shimv1.HoldParkedBridgeResponse> {
-    if (parkedOpening !== undefined) await parkedOpening;
+    const opening = parkedOpening.settling;
+    if (opening !== undefined) await opening;
     const start = request.start;
     const remote = request.remoteControl;
     if (start === undefined || start.source.case !== "resume" || remote === undefined) {
@@ -7796,17 +7799,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       });
       return;
     }
-    let opened!: () => void;
-    parkedOpening = new Promise<void>((resolve) => {
-      opened = resolve;
-    });
-    let outcome: { readonly kind: "open"; readonly bridge: ParkedBridge } | { readonly kind: "refused"; readonly refusal: ParkedBridgeRefusal };
-    try {
-      outcome = await openParked(start, remote);
-    } finally {
-      parkedOpening = undefined;
-      opened();
-    }
+    const outcome = await parkedOpening.run(
+      () => openParked(start, remote),
+      () => undefined,
+    );
     if (outcome.kind === "refused") {
       yield refusingParkedBridge(outcome.refusal);
       return;
