@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -358,10 +359,20 @@ func (q *queue) watchLocks(ws ids.WorkspaceID, log dlog.Logger) {
 	q.deps.Stalls.Watch(&s.verdicts, stallVerdictsLock, ws, log)
 }
 
-// logger resolves a workspace's durable logger. Failing to resolve the
-// workspace is an invariant violation, never a reason to write globally.
+// logger resolves a workspace's durable logger. Failing to read the
+// workspace is an invariant violation, never a reason to write globally. A
+// workspace the registry no longer holds is an ordinary schedule, recorded at
+// INFO and refused all the same: a submission can race the workspace's
+// forget (a relaunch resubmitting the turn its dead shim displaced while the
+// workspace is being forgotten).
 func (q *queue) logger(ctx context.Context, ws ids.WorkspaceID) (dlog.Logger, error) {
 	record, err := q.deps.DB.Workspace(ctx, ws)
+	if errors.Is(err, wsm.ErrNotFound) {
+		q.deps.Log.Global().Info(opSubmit, "the workspace is no longer registered; its submission is refused", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+		return nil, fmt.Errorf("resolve workspace %q: %w", ws, err)
+	}
 	if err != nil {
 		q.deps.Log.Global().Error(opSubmit, "could not resolve the workspace", dlog.Context{
 			"workspace": string(ws), "cause": err.Error(),

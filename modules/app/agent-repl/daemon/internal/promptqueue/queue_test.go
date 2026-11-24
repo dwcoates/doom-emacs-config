@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"go/ast"
 	"reflect"
 	"regexp"
@@ -359,5 +360,30 @@ func TestEveryQueueOrderingGoesThroughInQueueOrder(t *testing.T) {
 	// Assert
 	if len(sites) != 0 {
 		t.Fatalf("held prompts sorted outside inQueueOrder: %v", sites)
+	}
+}
+
+func TestASubmissionToAForgottenWorkspaceIsRefusedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.workspaceErr = wsm.ErrNotFound
+	h.db.mu.Unlock()
+
+	// Act
+	_, err := h.q.Submit(context.Background(), submission("t1", "after the forget"))
+
+	// Assert
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Fatalf("Submit = %v, want the forgotten workspace refused", err)
+	}
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing delivered", started)
+	}
+	if !logged(h.log.Records(), "info", opSubmit, "the workspace is no longer registered; its submission is refused") {
+		t.Fatalf("records = %+v, want the refusal at info", h.log.Records())
+	}
+	if logged(h.log.Records(), "error", opSubmit, "could not resolve the workspace") {
+		t.Fatalf("records = %+v, want no ERROR for a forgotten workspace", h.log.Records())
 	}
 }
