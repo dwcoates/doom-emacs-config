@@ -189,19 +189,48 @@ func (r *resolver) answerFaultLine(why string) string {
 // composed from `why` by answerFaultLine, so the strip stays terse and the log
 // stays readable without either wording the other.
 func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why string, message logsite.Message) {
-	log := r.logger(s.id)
-	if why != whyStalled && r.answerVerdictRecorded(s, turn, unit, why) {
-		log.Info("daemon.feed.final_answer_verdict_recorded",
-			"a turn's answer did not land, and the fault record already holds that verdict; its terminal arriving again raises nothing new",
-			dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": s.plane.String()})
-		return
-	}
 	// THE PLANE AND THE ANSWER'S DRAWN ROW ARE THE DIAGNOSIS: a terminal
 	// replayed from history ahead of the response it names, and a response
-	// drawn under another id, read the same from `why` alone.
+	// drawn under another id, read the same from `why` alone. Both are read
+	// as the verdict is reached, not once the record has answered.
 	_, drawn := s.answerRows[unit]
+	verdict := answerVerdict{turn: turn, unit: unit, why: why, plane: s.plane, drawn: drawn, message: message}
+	if why == whyStalled || r.deps.Faults == nil {
+		r.raiseAnswerFaultJudged(s, verdict, false)
+		return
+	}
+	// THE RECORD IS ASKED OFF THE LOCK (storework.go), and the verdict is
+	// raised, or not, under it once the answer is in.
+	ws, log := s.id, r.logger(s.id)
+	r.afterUnlock(func(hold storeHold) {
+		recorded := r.answerVerdictRecorded(log, ws, turn, unit, why)
+		hold.settle(func() { r.raiseAnswerFaultJudged(r.state(ws), verdict, recorded) })
+	})
+}
+
+// answerVerdict is one turn's unresolved answer as raiseAnswerFault reached
+// it: the turn, its unit and why, the store plane it was reached on, and
+// whether the answer's row had been drawn.
+type answerVerdict struct {
+	turn, unit, why string
+	plane           rowPlane
+	drawn           bool
+	message         logsite.Message
+}
+
+// raiseAnswerFaultJudged is raiseAnswerFault once the fault record has said
+// whether it already holds VERDICT (RECORDED). Called with r.mu held.
+func (r *resolver) raiseAnswerFaultJudged(s *wsState, verdict answerVerdict, recorded bool) {
+	turn, unit, why, message := verdict.turn, verdict.unit, verdict.why, verdict.message
+	log := r.logger(s.id)
+	if recorded {
+		log.Info("daemon.feed.final_answer_verdict_recorded",
+			"a turn's answer did not land, and the fault record already holds that verdict; its terminal arriving again raises nothing new",
+			dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": verdict.plane.String()})
+		return
+	}
 	log.Log(dlog.LevelError, "daemon.feed.final_answer_unresolved", message,
-		dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": s.plane.String(), "answer_row_known": drawn})
+		dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": verdict.plane.String(), "answer_row_known": verdict.drawn})
 	if s.answerFault != nil && s.answerFault.why == why && s.answerFault.unit == unit {
 		log.Debug("daemon.feed.final_answer_fault_already_standing",
 			"the same final-answer fault already stands; the record and its age are left alone",
@@ -218,39 +247,48 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why string, message 
 	}
 	ws := s.id
 	line := r.answerFaultLine(why)
-	openedAt := r.deps.Now()
-	id, err := r.deps.Faults.OpenFault(context.Background(), wsm.Fault{
-		Workspace: &ws,
-		Kind:      health.KindFinalAnswerUnresolved,
-		Detail:    message.Template(),
-		Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why, "detail": line},
-		OpenedAt:  openedAt,
+	fault := &answerFaultState{why: why, unit: unit, openedAt: r.deps.Now()}
+	s.answerFault = fault
+	// THE FAULT IS OPENED OFF THE LOCK (storework.go). Its id is set by the
+	// open, and a later close of it is queued behind the open, so it reads
+	// the id the open set. An open that fails leaves no fault standing.
+	r.afterUnlock(func(hold storeHold) {
+		id, err := r.deps.Faults.OpenFault(context.Background(), wsm.Fault{
+			Workspace: &ws,
+			Kind:      health.KindFinalAnswerUnresolved,
+			Detail:    message.Template(),
+			Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why, "detail": line},
+			OpenedAt:  fault.openedAt,
+		})
+		if err != nil {
+			log.Error("daemon.feed.final_answer_fault_unopenable",
+				"the final-answer fault could not be recorded; the footer carries no line for it",
+				dlog.Context{"turn": turn, "unit": unit, "why": why, "cause": err.Error()})
+			hold.settle(func() {
+				if s := r.state(ws); s.answerFault == fault {
+					s.answerFault = nil
+				}
+			})
+			return
+		}
+		fault.id = id
 	})
-	if err != nil {
-		log.Error("daemon.feed.final_answer_fault_unopenable",
-			"the final-answer fault could not be recorded; the footer carries no line for it",
-			dlog.Context{"turn": turn, "unit": unit, "why": why, "cause": err.Error()})
-		return
-	}
-	s.answerFault = &answerFaultState{id: id, why: why, unit: unit, openedAt: openedAt}
 }
 
 // answerVerdictRecorded answers whether the fault record already holds this
 // verdict: a final-answer fault of this workspace raised about the same turn,
 // unit and reason, open or long resolved, by this daemon or any before it. A
 // record that cannot be read answers false, so the verdict is raised rather
-// than dropped on a read that failed; the failure itself is ERROR.
-func (r *resolver) answerVerdictRecorded(s *wsState, turn, unit, why string) bool {
-	if r.deps.Faults == nil {
-		return false
-	}
+// than dropped on a read that failed; the failure itself is ERROR. It runs off
+// the lock (raiseAnswerFault).
+func (r *resolver) answerVerdictRecorded(log dlog.Logger, ws ids.WorkspaceID, turn, unit, why string) bool {
 	recorded, err := r.deps.Faults.FaultRecorded(context.Background(), wsm.FaultMatch{
-		Workspace: s.id,
+		Workspace: ws,
 		Kind:      health.KindFinalAnswerUnresolved,
 		Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why},
 	})
 	if err != nil {
-		r.logger(s.id).Error("daemon.feed.final_answer_record_unreadable",
+		log.Error("daemon.feed.final_answer_record_unreadable",
 			"the fault record could not say whether a turn's verdict was already raised; it is raised as new",
 			dlog.Context{"turn": turn, "unit": unit, "why": why, "cause": err.Error()})
 		return false
@@ -262,7 +300,9 @@ func (r *resolver) answerVerdictRecorded(s *wsState, turn, unit, why string) boo
 // on the recovery edge that ended it. The close goes through the health
 // package's one door (health.CloseFaultOn), which refuses an edge the kind
 // does not declare and records the close at INFO; a close that fails is ERROR
-// there, and the footer may keep drawing the fault.
+// there, and the footer may keep drawing the fault. It runs off the lock,
+// queued behind the fault's open (storework.go); a fault whose open failed
+// was never recorded, and has nothing to close.
 func (r *resolver) closeAnswerFault(s *wsState, edge health.Edge, because string) {
 	fault := s.answerFault
 	if fault == nil {
@@ -273,13 +313,19 @@ func (r *resolver) closeAnswerFault(s *wsState, edge health.Edge, because string
 		return
 	}
 	ws := s.id
-	health.CloseFaultOn(context.Background(), r.deps.Faults,
-		r.logger(s.id).With(dlog.Context{"why": fault.why, "because": because}), edge, wsm.Fault{
+	log := r.logger(s.id).With(dlog.Context{"why": fault.why, "because": because})
+	at := r.deps.Now()
+	r.afterUnlock(func(storeHold) {
+		if fault.id == "" {
+			return
+		}
+		health.CloseFaultOn(context.Background(), r.deps.Faults, log, edge, wsm.Fault{
 			ID:        fault.id,
 			Workspace: &ws,
 			Kind:      health.KindFinalAnswerUnresolved,
 			OpenedAt:  fault.openedAt,
-		}, r.deps.Now())
+		}, at)
+	})
 }
 
 // clearStalledAnswerFault retracts a standing fault ONLY when it is the stall
@@ -327,9 +373,13 @@ func (r *resolver) liveTurnStarted(s *wsState, turn ids.TurnID) {
 		return
 	}
 	ws := s.id
-	health.CloseOnEdge(context.Background(), r.deps.Faults,
-		r.logger(s.id).With(dlog.Context{"turn": string(turn)}), health.EdgeTurnStarted,
-		health.EdgeScope{Workspace: &ws}, r.deps.Now())
+	log := r.logger(s.id).With(dlog.Context{"turn": string(turn)})
+	at := r.deps.Now()
+	// THE CLOSES RUN OFF THE LOCK (storework.go).
+	r.afterUnlock(func(storeHold) {
+		health.CloseOnEdge(context.Background(), r.deps.Faults, log, health.EdgeTurnStarted,
+			health.EdgeScope{Workspace: &ws}, at)
+	})
 }
 
 // armAnswerStall starts (or restarts) one response fold's stall window. Every

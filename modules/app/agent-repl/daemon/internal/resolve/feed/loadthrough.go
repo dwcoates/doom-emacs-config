@@ -33,6 +33,7 @@ var ErrTargetNotFound = errors.New("feed: the walk reached the conversation's st
 // source is up to read the next one from, and EMIT's own error when the page
 // could not be handed over. Pages already handed over stay loaded either way.
 func (r *resolver) LoadThrough(ctx context.Context, ws ids.WorkspaceID, oldestHeld *string, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error) {
+	r.prime(ws)
 	mu := r.loadMu(ws)
 	mu.Lock()
 	defer mu.Unlock()
@@ -117,5 +118,6 @@ func (r *resolver) targetServed(ws ids.WorkspaceID, feed feedid.Feed, w *walk, t
 // page delivers it, so it is a pushed load (loadPushed). False when nothing
 // older can be loaded.
 func (r *resolver) LoadOlder(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	r.prime(ws)
 	return r.loadPushed(ctx, ws, feedid.Feed{Root: true}, false)
 }

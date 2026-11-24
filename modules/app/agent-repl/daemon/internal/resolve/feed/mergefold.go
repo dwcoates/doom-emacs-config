@@ -138,6 +138,7 @@ func (r *resolver) resettleRestoredMergeFold(s *wsState, row *frontendv1.FeedRow
 // workspace's root feed and restates the row with it. False is a row that is
 // not a merge head this daemon holds.
 func (r *resolver) SetMergeFold(ws ids.WorkspaceID, id *frontendv1.FeedId, folded bool) bool {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]

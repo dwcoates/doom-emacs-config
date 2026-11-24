@@ -109,9 +109,18 @@ func (r *resolver) signedInRow(s *wsState, f *feedState, row *frontendv1.FeedRow
 // says only that recording failed (logged at ERROR and raised on the topbar
 // here), so a daemon restart would draw those failures again.
 func (r *resolver) OnSignedIn(ws ids.WorkspaceID) error {
+	r.prime(ws)
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.state(ws)
+	outcome := r.answerSignIn(r.state(ws))
+	// THE RECORD RUNS AS THE LOCK IS RELEASED (storework.go), so its outcome
+	// is read after it.
+	r.mu.Unlock()
+	return outcome.err
+}
+
+// answerSignIn answers S's sign-in failures and queues their record. Called
+// with r.mu held.
+func (r *resolver) answerSignIn(s *wsState) *storeOutcome {
 	answer := turnAnswer{
 		op:       opSignedIn,
 		names:    answeredBySignIn,
@@ -142,13 +151,13 @@ func (r *resolver) logSignInAnswer(s *wsState, addr feedid.Feed, id string, row 
 
 // restoreSignedIn loads the workspace's answered turns when a process first
 // builds its feed state, before any row is drawn.
-func (r *resolver) restoreSignedIn(s *wsState) {
+func (r *resolver) restoreSignedIn(s *wsState, primed *primedWorkspace) {
 	if r.deps.SignedIn == nil {
 		return
 	}
 	r.restoreTurnSet(s, turnSetRestore{
 		op:      opSignedInRestore,
-		load:    r.deps.SignedIn.SignedInTurns,
+		read:    primed.turnSets[turnSetSignedIn],
 		failed:  logsite.Msg("the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again"),
 		warning: "answered sign-in failures could not be loaded and may be drawn again",
 		loaded:  logsite.Msg("the workspace's sign-in-answered turns were loaded; their failures are not drawn"),

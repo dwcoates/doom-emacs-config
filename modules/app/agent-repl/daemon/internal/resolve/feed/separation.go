@@ -53,6 +53,7 @@ func (r *resolver) clearTurnFor(s *wsState, pointer *conversationv1.HistoryPoint
 // in place with the "context cleared" subtext. Its label is empty until then:
 // the bar without the subtext is exactly the not-yet-confirmed state.
 func (r *resolver) OnClearReceived(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -89,6 +90,7 @@ func (r *resolver) OnClearReceived(ws ids.WorkspaceID, turn ids.TurnID) {
 // exist until the shim compacts, so the bar appears when the shim confirms the
 // cut rather than on receipt.
 func (r *resolver) OnCompactReceived(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -103,6 +105,7 @@ func (r *resolver) OnCompactReceived(ws ids.WorkspaceID, turn ids.TurnID) {
 // drew none) and forgets the turn, so no phantom bar is left and the feed
 // recovers to exactly what it showed before.
 func (r *resolver) OnContextCutAborted(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

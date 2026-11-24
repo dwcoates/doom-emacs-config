@@ -547,6 +547,7 @@ func (v *verbs) nameMainWorktree(ctx context.Context, log dlog.Logger, repo wsm.
 		return false, fmt.Errorf("name the main worktree %q: %w", repo.Dir, err)
 	}
 	log.Info(opRegister, "renamed the repository's main workspace to its rule name", fields)
+	v.deps.Feed.SetWorkspaceName(main.ID, name)
 	return true, nil
 }
 

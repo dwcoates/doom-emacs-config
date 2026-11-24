@@ -203,6 +203,7 @@ func TestAMessageNamingNoSenderTaskIsRecordedAtErrorAndDrawnUnnamed(t *testing.T
 func TestALookupWithNoMainAgentToScopeItIsRecordedAtErrorAndAsksNothing(t *testing.T) {
 	// Arrange: a workspace whose main agent no watcher named.
 	h := newHarness(t)
+	h.resolver.prime(otherWorkspace)
 	h.resolver.mu.Lock()
 	s := h.resolver.state(otherWorkspace)
 

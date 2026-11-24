@@ -26,6 +26,10 @@ const unnamedWorkspaceSender = "another workspace"
 // SenderTurn records the workspace whose agent sent TURN's prompt, nil for a
 // prompt no agent sent.
 func (r *resolver) SenderTurn(ws ids.WorkspaceID, turn ids.TurnID, sender *ids.WorkspaceID) {
+	r.prime(ws)
+	if sender != nil {
+		r.readNames(*sender)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.state(ws).senderTurn(turn, sender)
@@ -51,6 +55,7 @@ func (s *wsState) senderTurn(turn ids.TurnID, sender *ids.WorkspaceID) {
 // sending workspace for a prompt of origin PROMPT_ORIGIN_AGENT_SENT, nil for
 // every other origin, whose prompt is the user-prompt row.
 func (r *resolver) PromptHeader(ws ids.WorkspaceID, turn ids.TurnID, origin conversationv1.PromptOrigin) *frontendv1.FeedAgentPromptAddress {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.promptHeader(r.state(ws), turn, origin)
@@ -133,6 +138,7 @@ type SentFate struct {
 // SentPrompt draws the row SENDER's feed shows for a prompt its agent sent
 // to the workspace named RECIPIENT, under the send's idempotency KEY.
 func (r *resolver) SentPrompt(sender ids.WorkspaceID, recipient, key string, said *conversationv1.UserSaid, fate SentFate) {
+	r.prime(sender)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(sender)

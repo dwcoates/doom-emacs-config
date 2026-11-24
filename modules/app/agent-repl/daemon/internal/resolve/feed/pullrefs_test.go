@@ -463,16 +463,21 @@ func TestTheKnownPullRequestsLoadRecordsHowLongItsReadTook(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: the read takes 300ms on the harness clock.
+			// Arrange: the read, made as a workspace is primed (prime.go),
+			// takes 300ms on the harness clock.
 			store := newFakePullReferences()
 			if tt.known {
-				store.refs[testWorkspace] = []pullrefs.Ref{gns613}
+				store.refs[otherWorkspace] = []pullrefs.Ref{gns613}
 			}
 			h := newDurableHarness(t, durableStores{pullReferences: store})
 			store.inLoad = func() { h.nowMs += 300 }
 
-			// Act.
-			settleResponseAs(h, "unit-1", "a response")
+			// Act: the workspace is primed, and its known pull requests are
+			// installed under the lock.
+			h.resolver.prime(otherWorkspace)
+			h.resolver.mu.Lock()
+			h.resolver.knownPulls(otherWorkspace)
+			h.resolver.mu.Unlock()
 
 			// Assert.
 			if !h.hasRecordWith(tt.level, opPullReferencesRestore, "read_ms", int64(300)) {

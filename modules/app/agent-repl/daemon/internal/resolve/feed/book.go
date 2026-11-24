@@ -517,6 +517,7 @@ func (r *resolver) mainAgentID(ws ids.WorkspaceID) *conversationv1.AgentId {
 // lockedLogger resolves a workspace's logger under the resolver's mutex, for a
 // caller that does not hold it.
 func (r *resolver) lockedLogger(ws ids.WorkspaceID) dlog.Logger {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.logger(ws)
@@ -551,6 +552,7 @@ func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId)
 // gate, a vendor start being retried), so a reader is never left on the rows
 // the daemon made itself while the conversation sits in the store.
 func (r *resolver) SourceUp(ws ids.WorkspaceID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -577,6 +579,7 @@ func (r *resolver) SourceUp(ws ids.WorkspaceID) {
 // live entries draw the conversation from its first row; once one has, the
 // next open reads the newest page (liveSince), which by then the store holds.
 func (r *resolver) NoteFreshBook(ws ids.WorkspaceID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -628,6 +631,7 @@ func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feed
 
 // ReadNewest implements Resolver.
 func (r *resolver) ReadNewest(ctx context.Context, ws ids.WorkspaceID) error {
+	r.prime(ws)
 	read, err := r.loadPushedSourced(ctx, ws, feedid.Feed{Root: true}, true)
 	if err != nil {
 		r.lockedLogger(ws).Info("daemon.feed.read_newest_failed",

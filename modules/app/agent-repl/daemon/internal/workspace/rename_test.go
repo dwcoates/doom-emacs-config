@@ -42,6 +42,9 @@ func renamePublished(f *fixture, registriesBefore int) []string {
 	if len(f.merge.relabeled) != 0 {
 		published = append(published, "merge queue")
 	}
+	if len(f.feed.names) != 0 {
+		published = append(published, "feed")
+	}
 	return published
 }
 
@@ -73,6 +76,9 @@ func TestSetNameRecordsTheNameAndRepublishesEverySurface(t *testing.T) {
 	}
 	if !slices.Equal(f.merge.relabeled, []ids.WorkspaceID{"w1"}) {
 		t.Errorf("merge relabels = %v, want [w1]", f.merge.relabeled)
+	}
+	if !slices.Equal(f.feed.names, []fakeFeedName{{ws: "w1", name: "better-name"}}) {
+		t.Errorf("feed names = %v, want w1 named better-name", f.feed.names)
 	}
 	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opSetName})
 	if !ok || r.Message != "renamed the workspace" || r.Context["name"] != "better-name" || r.Context["previous"] != "sample" || r.Context["branch"] != "ABC/sample" {

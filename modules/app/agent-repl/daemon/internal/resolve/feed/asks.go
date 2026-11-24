@@ -18,6 +18,7 @@ import (
 // card drew, so an abandoned settle built from it restates that batch; a
 // consent ask carries its identity alone, which is also the gated call's.
 func (r *resolver) AsksStanding(ws ids.WorkspaceID) []*conversationv1.SessionOpenAsk {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	open := openAsks(r.state(ws))

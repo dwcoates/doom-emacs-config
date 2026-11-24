@@ -82,6 +82,7 @@ func (r *resolver) rootFeedState(ws ids.WorkspaceID) *feedState {
 // entry answering it targets in a prompt not yet sent that replies to REPLY
 // (nil for none), or nil where it targets nothing (entryTarget).
 func (r *resolver) ComposerTargets(ws ids.WorkspaceID, reply *frontendv1.FeedId, labels []string) []*frontendv1.FeedId {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	targets := make([]*frontendv1.FeedId, len(labels))
@@ -101,6 +102,7 @@ func (r *resolver) ComposerTargets(ws ids.WorkspaceID, reply *frontendv1.FeedId,
 // node labelled LABEL, as last published: the node a reader clicks in the
 // feed to answer it.
 func (r *resolver) ResponseNode(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) bool {
+	r.prime(ws)
 	_, ok := r.rootRowText(ws, id, func(row *frontendv1.FeedRow) (string, bool) {
 		return "", responseLabels(row)[label]
 	})
@@ -140,6 +142,7 @@ func (w NeighborWay) String() string {
 // replying to REPLY). ok is false when the label targets no response or its
 // node has no such neighbor.
 func (r *resolver) EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, way NeighborWay) (string, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	f := r.rootFeedState(ws)

@@ -263,6 +263,7 @@ type restartWatch struct {
 // on which every agent-repl-fault ending drawn before it learns the restart
 // that followed it worked.
 func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -293,6 +294,7 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 // SetAccount installs the account the workspace's session spends as: the
 // logged-in email, "" when the root is logged out.
 func (r *resolver) SetAccount(ws ids.WorkspaceID, email string) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

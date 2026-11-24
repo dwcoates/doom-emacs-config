@@ -91,6 +91,7 @@ func mainAgentOf(ws ids.WorkspaceID) *conversationv1.AgentId {
 // rootRowsOf answers WS's root feed rows, in order.
 func (h *harness) rootRowsOf(ws ids.WorkspaceID) []*frontendv1.FeedRow {
 	h.t.Helper()
+	h.resolver.prime(ws)
 	h.resolver.mu.Lock()
 	defer h.resolver.mu.Unlock()
 	f := h.resolver.feed(h.resolver.state(ws), feedid.Feed{Root: true})
@@ -117,7 +118,23 @@ func twoWorkspaces(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
 	h.names[testWorkspace] = "fix-flaky"
+	// THE HARNESS PRIMED ws-1 UNNAMED, so its name comes as a rename's push
+	// (names.go); the other workspace is primed named.
+	h.resolver.SetWorkspaceName(testWorkspace, "fix-flaky")
 	h.names[otherWorkspace] = "review-bot"
+	h.resolver.OnMainAgent(otherWorkspace, otherMainAgent())
+	return h
+}
+
+// twoWorkspacesWithAnUnreadableName is twoWorkspaces whose other workspace's
+// name cannot be read from the registry: its read, made as it is primed,
+// fails with CAUSE.
+func twoWorkspacesWithAnUnreadableName(t *testing.T, cause error) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.names[testWorkspace] = "fix-flaky"
+	h.resolver.SetWorkspaceName(testWorkspace, "fix-flaky")
+	h.nameErr = cause
 	h.resolver.OnMainAgent(otherWorkspace, otherMainAgent())
 	return h
 }
@@ -317,9 +334,8 @@ func TestALookupWithNoShimToAskIsRecordedAtInfo(t *testing.T) {
 
 func TestAWorkspaceNameThatCannotBeReadDrawsTheEndUnresolved(t *testing.T) {
 	// Arrange.
-	h := twoWorkspaces(t)
+	h := twoWorkspacesWithAnUnreadableName(t, errors.New("database is locked"))
 	h.peerSend(testWorkspace, "unit-1", "review-bot-3a", "m-1")
-	h.nameErr = errors.New("database is locked")
 
 	// Act.
 	h.peerReceived(otherWorkspace, "p1", "fix-flaky-5e", "m-1")
@@ -332,9 +348,8 @@ func TestAWorkspaceNameThatCannotBeReadDrawsTheEndUnresolved(t *testing.T) {
 
 func TestAWorkspaceNameThatCannotBeReadIsRecordedAtError(t *testing.T) {
 	// Arrange.
-	h := twoWorkspaces(t)
+	h := twoWorkspacesWithAnUnreadableName(t, errors.New("database is locked"))
 	h.peerSend(testWorkspace, "unit-1", "review-bot-3a", "m-1")
-	h.nameErr = errors.New("database is locked")
 
 	// Act.
 	h.peerReceived(otherWorkspace, "p1", "fix-flaky-5e", "m-1")

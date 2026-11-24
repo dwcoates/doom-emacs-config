@@ -52,7 +52,7 @@ func (r *resolver) drawForkPoint(s *wsState, agent *conversationv1.AgentId, segm
 // from, "" when it cannot be named (the read is recorded at ERROR). Called
 // with r.mu held.
 func (r *resolver) forkSourceName(s *wsState, source ids.WorkspaceID) string {
-	name, _ := r.namedWorkspace(source, s.id, nameRead{
+	name, _ := r.namedWorkspace(source, s.id, nameRecords{
 		failedKey: "daemon.feed.fork_source_name_failed",
 		emptyKey:  "daemon.feed.fork_source_name_empty",
 		failed:    logsite.Msg("the workspace a fork's inherited context came from could not be named; the fork-point divider names no workspace and links nothing"),

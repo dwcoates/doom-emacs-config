@@ -142,6 +142,7 @@ func openState(served *questionState) *frontendv1.FeedQuestionOpen {
 // EditQuestionDraft applies one edit to a standing batch's draft, re-publishes
 // the card, and reports whether the batch is now answered and claimed.
 func (r *resolver) EditQuestionDraft(ws ids.WorkspaceID, ask string, edit QuestionEdit) (QuestionDraftOutcome, error) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -184,6 +185,7 @@ func (r *resolver) EditQuestionDraft(ws ids.WorkspaceID, ask string, edit Questi
 // delivery failed: the draft stands as it was, so the next edit that leaves it
 // answered delivers it again.
 func (r *resolver) ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -208,6 +210,7 @@ func (r *resolver) ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string) {
 // by a delivery in flight is not standing for this purpose: its answers are
 // already on their way.
 func (r *resolver) StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (StandingAsk, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

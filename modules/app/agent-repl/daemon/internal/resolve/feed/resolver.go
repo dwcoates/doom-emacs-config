@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -12,7 +13,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -39,6 +39,12 @@ type resolver struct {
 
 	mu         heldMutex
 	workspaces map[ids.WorkspaceID]*wsState
+	// primes is each workspace's facts read off the mutex (prime.go), keyed
+	// by workspace: a sync.Map, because it is read and filled without mu.
+	primes sync.Map
+	// names is every workspace's display name read off the mutex
+	// (names.go), keyed by workspace.
+	names sync.Map
 	// tokens is the whole watch-token table: minting here is what makes a
 	// token opaque, foreign tokens detectable, and pinning exact.
 	tokens map[string]*watchToken
@@ -720,6 +726,7 @@ func newResolver(deps Deps) (*resolver, error) {
 		responseLinksSeen: map[ids.WorkspaceID]map[string]bool{},
 	}
 	r.mu.report = &holdReport{log: deps.Log.Global(), now: deps.Now}
+	r.mu.owner = r
 	deps.Quiet.Follow(QuietViewName, r.followQuiet)
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
 	// record. It lives as long as the process and is never unwatched.
@@ -732,51 +739,23 @@ func newResolver(deps Deps) (*resolver, error) {
 // stallLock is how the stall watchdog names the resolver's mutex.
 const stallLock = "feed.resolver"
 
-// logger resolves a workspace's durable logger. Failing to resolve the
-// workspace is an INVARIANT VIOLATION, recorded once at ERROR against the
-// global surface — the record is about the resolution failing, not about the
-// workspace, which is why it is the one thing that may be global.
+// logger answers a workspace's durable logger, as prime resolved it
+// (prime.go resolveLogger). A logger resolved for good is cached; one a
+// cancelled registry read left on the global surface is not, so the next
+// prime resolves it again.
 func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
 	// A CACHED LOGGER IS NO EVENT: it was the feed's most frequent record
 	// (some 50 per workspace switch, 2026-10-15).
 	if l, ok := r.loggers[ws]; ok {
 		return l
 	}
-	global := r.deps.Log.Global()
-	dir, err := r.deps.WorkspaceDir(ws)
-	if err != nil {
-		if ctxend.Is(err) {
-			// THE DAEMON IS GOING AWAY, and the workspace lookup runs under
-			// the daemon's own context. A cancelled read is that shutdown, not
-			// an unresolvable workspace: it is recorded at INFO, and the global
-			// fallback is NOT cached, so a resolver that outlives the
-			// cancellation still routes the workspace's records to its own
-			// sink rather than to the global one forever.
-			global.Info("daemon.feed.workspace_lookup_cancelled",
-				"a workspace's log sink was not resolved; the daemon's context was cancelled",
-				dlog.Context{"workspace": string(ws), "cause": err.Error()})
-			return global
-		}
-		global.Error("daemon.feed.workspace_unresolved",
-			"the feed resolver could not resolve a workspace's log sink; its records are unroutable",
-			dlog.Context{"workspace": string(ws), "cause": err.Error()})
-		r.loggers[ws] = global
-		return global
+	entry := r.primedFor(ws)
+	entry.mu.Lock()
+	l, keep := entry.log, entry.logCached
+	entry.mu.Unlock()
+	if keep {
+		r.loggers[ws] = l
 	}
-	// A WORKSPACE WHOSE DIRECTORY IS GONE IS ORDINARY, not a broken sink: its
-	// feed is still rendered (2026-11-18: a closed workspace's boot restore
-	// recorded an ERROR that the footer then teed onto a strip it never
-	// bound), and its records go to the central sink (dlog.WorkspaceUnlessGone).
-	l, err := dlog.WorkspaceUnlessGone(r.deps.Log, dir)
-	if err != nil {
-		global.Error("daemon.feed.workspace_sink_unavailable",
-			"the feed resolver could not open a workspace's log sink; its records are unroutable",
-			dlog.Context{"workspace": string(ws), "dir": dir, "cause": err.Error()})
-		r.loggers[ws] = global
-		return global
-	}
-	l = l.With(dlog.Context{"workspace": string(ws)})
-	r.loggers[ws] = l
 	return l
 }
 
@@ -787,12 +766,15 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: ok", dlog.Context{"function": "feed", "condition": "ok"})
 		return s
 	}
+	// THE RESTORES INSTALL WHAT PRIME READ (prime.go): nothing is read here,
+	// under the mutex.
+	entry := r.primedFor(ws)
 	s = newWSState(ws, r.deps.Now())
 	r.workspaces[ws] = s
-	r.restoreDurable(s)
-	r.restoreRolledBack(s)
-	r.restoreSignedIn(s)
-	r.restoreReconnected(s)
+	r.restoreDurable(s, entry)
+	r.restoreRolledBack(s, entry)
+	r.restoreSignedIn(s, entry)
+	r.restoreReconnected(s, entry)
 	return s
 }
 
@@ -1612,6 +1594,7 @@ func (r *resolver) rowID(ws ids.WorkspaceID, addr feedid.Feed, key feedid.RowKey
 // already recorded: only a turn the prompt queue records while it stands takes
 // it (turnaddress.go).
 func (r *resolver) SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1628,6 +1611,7 @@ func (r *resolver) SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.Out
 // OutputAddress answers a copy of the address standing for one workspace's
 // session output, nil when none stands.
 func (r *resolver) OutputAddress(ws ids.WorkspaceID) *sessionwatcher.OutputAddress {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -1644,6 +1628,7 @@ func (r *resolver) OutputAddress(ws ids.WorkspaceID) *sessionwatcher.OutputAddre
 // be, so the two are ONE row rather than a copy the turn's draw can never
 // replace.
 func (r *resolver) UpsertAtTurnAddress(ws ids.WorkspaceID, turn ids.TurnID, key feedid.RowKey, row *frontendv1.FeedRow) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1657,6 +1642,7 @@ func (r *resolver) UpsertAtTurnAddress(ws ids.WorkspaceID, turn ids.TurnID, key 
 
 // UpsertSynthesized upserts a daemon-synthesized row on the named feed.
 func (r *resolver) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1671,6 +1657,7 @@ func (r *resolver) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *
 // two publications of one row can never be recorded out of the order they
 // were published in.
 func (r *resolver) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1685,6 +1672,7 @@ func (r *resolver) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *fron
 // stays there on every publication through this method. Its next publication
 // through UpsertDurable settles it where it stands, once and for good.
 func (r *resolver) UpsertDurablePinned(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1698,14 +1686,39 @@ func (r *resolver) UpsertDurablePinned(ws ids.WorkspaceID, feed feedid.Feed, row
 // at the key it was published with — and when this publication settled a
 // pinned row, recorded as moving from its pin key (wsm.DurableFeedRow
 // .SettledFrom). Called with r.mu held.
+//
+// A ROW THIS DAEMON NEVER DREW IS DRAWN WHERE THE STORE RECORDS IT, and the
+// store's rank is read off the lock (storework.go): the row is drawn once
+// the lock is released, after the read, by the same caller before it
+// returns. Every caller draws it last in its hold.
 func (r *resolver) upsertDurable(s *wsState, at placement, row *frontendv1.FeedRow) {
+	f, id := r.feed(s, at.feed), row.GetId().GetValue()
+	if _, seen := f.rank[id]; seen || r.deps.DurableRows == nil || at.inherit != nil {
+		r.drawDurable(s, at, row)
+		return
+	}
+	ws := s.id
+	r.afterUnlock(func(hold storeHold) {
+		var read rankRead
+		read.plane, read.key, read.found, read.err = r.deps.DurableRows.DurableFeedRowRank(context.Background(), ws, id)
+		hold.settle(func() {
+			s := r.state(ws)
+			placed := at
+			if _, seen := r.feed(s, at.feed).rank[id]; !seen {
+				placed = r.recordedRank(s, r.feed(s, at.feed), id, at, read)
+			}
+			r.drawDurable(s, placed, row)
+		})
+	})
+}
+
+// drawDurable publishes durable ROW at AT and records it. Called with r.mu
+// held.
+func (r *resolver) drawDurable(s *wsState, at placement, row *frontendv1.FeedRow) {
 	// A MERGE HEAD'S FOLD IS SETTLED HERE, AND ONLY IN mergefold.go.
 	r.settleMergeFold(s, at.feed, row)
 	f, id := r.feed(s, at.feed), row.GetId().GetValue()
 	prior, seen := f.rank[id]
-	if !seen {
-		at = r.recordedRank(s, f, id, at)
-	}
 	r.upsert(s, at, row, true)
 	settledFrom := ""
 	if seen && isPinKey(prior.key) && f.rank[id].key != prior.key {
@@ -1717,6 +1730,7 @@ func (r *resolver) upsertDurable(s *wsState, at placement, row *frontendv1.FeedR
 // UpsertCommandPanel mints a NON-DURABLE root-feed row carrying a recognized
 // command's panel.
 func (r *resolver) UpsertCommandPanel(ws ids.WorkspaceID, panel *frontendv1.FeedCommandPanel) *frontendv1.FeedId {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1732,6 +1746,7 @@ func (r *resolver) UpsertCommandPanel(ws ids.WorkspaceID, panel *frontendv1.Feed
 
 // UpsertCommandRefused mints a NON-DURABLE root-feed refusal card.
 func (r *resolver) UpsertCommandRefused(ws ids.WorkspaceID, command, reason string, addSupport bool) *frontendv1.FeedId {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1764,6 +1779,7 @@ func (r *resolver) synthID(s *wsState, addr feedid.Feed) *frontendv1.FeedId {
 
 // RetireRow removes a synthesized row whose reason to exist ended.
 func (r *resolver) RetireRow(ws ids.WorkspaceID, feed feedid.Feed, id *frontendv1.FeedId) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1775,6 +1791,7 @@ func (r *resolver) RetireRow(ws ids.WorkspaceID, feed feedid.Feed, id *frontendv
 
 // StandingFor answers a permission row's held standing token.
 func (r *resolver) StandingFor(ws ids.WorkspaceID, id *frontendv1.FeedId) (*conversationv1.AgentPermissionStanding, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1789,6 +1806,7 @@ func (r *resolver) StandingFor(ws ids.WorkspaceID, id *frontendv1.FeedId) (*conv
 // The ANSWER VERB is the caller: a client sends back only the ask's identity,
 // and the agent it must be delivered to lives nowhere else.
 func (r *resolver) ServedPermission(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentPermissionStanding, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1804,6 +1822,7 @@ func (r *resolver) ServedPermission(ws ids.WorkspaceID, ask string) (*conversati
 // agent that is blocked on it and the batch as served. It reports false when
 // this workspace drew no such ask.
 func (r *resolver) ServedQuestion(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentQuestionBatch, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -1817,6 +1836,7 @@ func (r *resolver) ServedQuestion(ws ids.WorkspaceID, ask string) (*conversation
 
 // MintSubFeedHead records a bubble row's sub-feed and its crumb label.
 func (r *resolver) MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, headFeed feedid.Feed, sub feedid.Feed, label string) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

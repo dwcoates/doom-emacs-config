@@ -102,13 +102,16 @@ func (v *verbs) nameTaken(ctx context.Context, log dlog.Logger, name string, hol
 //   - the topbar's workspace-name line;
 //   - the host view, whose naming slug names the workspace's Emacs buffers;
 //   - the footer's awaiting line of every workspace that awaits WS;
-//   - the merge queues WS stands in.
+//   - the merge queues WS stands in;
+//   - the feed, whose rows naming WS draw its name (feed.Resolver
+//     SetWorkspaceName).
 //
 // The rename is recorded before any of these runs, so a surface that cannot
 // be republished is recorded at ERROR by its owner and the rest still are.
 func (v *verbs) publishRename(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, name string) {
 	v.republishRegistry(ctx, log, opSetName)
 	v.deps.Topbar.SetName(ws, name)
+	v.deps.Feed.SetWorkspaceName(ws, name)
 	v.deps.Host.PublishHostWorkspace(ws)
 	v.relabelAwaiters(ctx, log, ws, name)
 	if err := v.deps.Merge.Relabel(ctx, ws); err != nil {

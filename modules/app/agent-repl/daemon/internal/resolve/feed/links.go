@@ -22,6 +22,7 @@ func (r *resolver) drawLinks(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse,
 // (drawLinks), for a settled text drawn outside the resolver: the prompt
 // queue's mirror of an accepted prompt.
 func (r *resolver) DrawLinks(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.drawLinks(ws, parsed, false)

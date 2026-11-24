@@ -46,6 +46,7 @@ type CardText struct {
 // added later is quotable with no rule of its own. A miss (false) is a feedid
 // that does not decode, or names no row of a feed this resolver holds for WS.
 func (r *resolver) CardText(ws ids.WorkspaceID, row *frontendv1.FeedId) (CardText, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ref, err := r.deps.Decode(row)

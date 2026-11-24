@@ -62,6 +62,7 @@ func (r *resolver) reconnectedRow(s *wsState, f *feedState, row *frontendv1.Feed
 // NetworkFaultOpened takes a network fault standing for the workspace, by its
 // record id.
 func (r *resolver) NetworkFaultOpened(ws ids.WorkspaceID, id string) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -77,6 +78,7 @@ func (r *resolver) NetworkFaultOpened(ws ids.WorkspaceID, id string) {
 // removal always happens; a recording that fails is logged at ERROR and
 // raised on the topbar, since a daemon restart would draw those cards again.
 func (r *resolver) NetworkFaultClosed(ws ids.WorkspaceID, id string) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -107,9 +109,9 @@ func (r *resolver) NetworkFaultClosed(ws ids.WorkspaceID, id string) {
 	if r.deps.Reconnected != nil {
 		answer.record = r.deps.Reconnected.RecordReconnectedTurns
 	}
-	// The recording's failure is already logged and raised, and the fault
-	// sink this edge comes from has no caller to return it to.
-	_ = r.answerTurns(s, answer)
+	// The recording's failure is logged and raised where it runs, and the
+	// fault sink this edge comes from has no caller to return it to.
+	r.answerTurns(s, answer)
 }
 
 // answerLateUnreachable answers ROW, a turn's ending about to be drawn, when it
@@ -132,26 +134,32 @@ func (r *resolver) answerLateUnreachable(s *wsState, row *frontendv1.FeedRow) {
 	s.reconnected[turn] = true
 	log := r.logger(s.id)
 	fields := dlog.Context{"turn": string(turn), "failed_at_ms": endedAt, "network_back_at_ms": s.networkBackAtMs}
-	if r.deps.Reconnected != nil {
-		if err := r.deps.Reconnected.RecordReconnectedTurns(context.Background(), s.id, []ids.TurnID{turn}); err != nil {
-			fields["error"] = err.Error()
-			log.Error(opReconnected, "a late connection-failed card the network's return answered was not drawn but could not be recorded; a daemon restart will draw it again", fields)
-			r.raiseWarning(s, opReconnected, fmt.Sprintf("an answered connection failure could not be saved and will reappear after a daemon restart: %v", err))
-			return
-		}
+	answered := func() {
+		log.Info(opReconnected, "a connection-failed card that failed before the network came back arrived late; it was answered and not drawn", fields)
 	}
-	log.Info(opReconnected, "a connection-failed card that failed before the network came back arrived late; it was answered and not drawn", fields)
+	if r.deps.Reconnected == nil {
+		answered()
+		return
+	}
+	ws := s.id
+	r.writeAfterUnlock(func(ctx context.Context) error {
+		return r.deps.Reconnected.RecordReconnectedTurns(ctx, ws, []ids.TurnID{turn})
+	}, func(err error) {
+		fields["error"] = err.Error()
+		log.Error(opReconnected, "a late connection-failed card the network's return answered was not drawn but could not be recorded; a daemon restart will draw it again", fields)
+		r.raiseWarningFor(ws, opReconnected, fmt.Sprintf("an answered connection failure could not be saved and will reappear after a daemon restart: %v", err))
+	}, answered)
 }
 
 // restoreReconnected loads the workspace's reconnection-answered turns when a
 // process first builds its feed state, before any row is drawn.
-func (r *resolver) restoreReconnected(s *wsState) {
+func (r *resolver) restoreReconnected(s *wsState, primed *primedWorkspace) {
 	if r.deps.Reconnected == nil {
 		return
 	}
 	r.restoreTurnSet(s, turnSetRestore{
 		op:      opReconnectedRestore,
-		load:    r.deps.Reconnected.ReconnectedTurns,
+		read:    primed.turnSets[turnSetReconnected],
 		failed:  logsite.Msg("the workspace's reconnection-answered turns could not be loaded; their connection-failed cards may be drawn again"),
 		warning: "answered connection failures could not be loaded and may be drawn again",
 		loaded:  logsite.Msg("the workspace's reconnection-answered turns were loaded; their connection-failed cards are not drawn"),

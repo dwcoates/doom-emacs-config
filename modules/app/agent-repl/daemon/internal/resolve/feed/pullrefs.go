@@ -32,6 +32,7 @@ const (
 // references link into, nil for none. It lives beside the workspaces' states
 // rather than on one, so a reset that empties the feed keeps it.
 func (r *resolver) SetPullTarget(ws ids.WorkspaceID, target *pullrefs.Target) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.setPullTarget(ws, target)
@@ -69,10 +70,10 @@ func (r *resolver) knownPulls(ws ids.WorkspaceID) *pullrefs.Known {
 	}
 	var refs []pullrefs.Ref
 	if r.deps.PullReferences != nil {
-		asked := r.deps.Now()
-		loaded, err := r.deps.PullReferences.PullReferences(context.Background(), ws)
-		// THE READ IS TIMED: it is made under the resolver's mutex.
-		readMs := r.deps.Now().Sub(asked).Milliseconds()
+		// THE READ WAS MADE BY PRIME, off the lock (prime.go); it is timed
+		// there.
+		primed := r.primedFor(ws)
+		loaded, err, readMs := primed.pulls, primed.pullsErr, primed.pullsRead.Milliseconds()
 		switch {
 		case err != nil:
 			r.logger(ws).Error(opPullReferencesRestore,
@@ -104,17 +105,22 @@ func (r *resolver) learnPulls(ws ids.WorkspaceID, known *pullrefs.Known, refs []
 			continue
 		}
 		fields := dlog.Context{"owner": ref.Owner, "repo": ref.Repo, "number": ref.Number}
-		if r.deps.PullReferences != nil {
-			if err := r.deps.PullReferences.RecordPullReference(context.Background(), ws, ref, r.deps.Now()); err != nil {
+		log := r.logger(ws)
+		learned := func() { log.Debug(opPullReferences, "learned a pull request the workspace's text named", fields) }
+		if r.deps.PullReferences == nil {
+			learned()
+			continue
+		}
+		// THE RECORD RUNS OFF THE LOCK (storework.go).
+		at := r.deps.Now()
+		r.writeAfterUnlock(func(ctx context.Context) error { return r.deps.PullReferences.RecordPullReference(ctx, ws, ref, at) },
+			func(err error) {
 				fields["error"] = err.Error()
-				r.logger(ws).Error(opPullReferences,
+				log.Error(opPullReferences,
 					"a pull request the workspace's text named could not be recorded; a daemon restart will not know it", fields)
 				r.raiseWarningFor(ws, opPullReferences,
 					fmt.Sprintf("a pull request this workspace named could not be saved, so its references may link to the wrong repository after a restart: %v", err))
-				continue
-			}
-		}
-		r.logger(ws).Debug(opPullReferences, "learned a pull request the workspace's text named", fields)
+			}, learned)
 	}
 }
 

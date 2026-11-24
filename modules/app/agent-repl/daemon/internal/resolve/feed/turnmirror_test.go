@@ -34,6 +34,7 @@ func mirroredTurn(h *harness, turn ids.TurnID, mirror *wsm.MirrorAddress) {
 
 // rowsOf answers one feed's rows of workspace WS in order.
 func rowsOf(r *resolver, ws ids.WorkspaceID, feed feedid.Feed) []*frontendv1.FeedRow {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	f := r.feed(r.state(ws), feed)

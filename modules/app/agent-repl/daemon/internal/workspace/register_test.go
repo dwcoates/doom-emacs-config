@@ -1388,6 +1388,9 @@ func TestEnsureMainWorktreesRenamesAMainWorkspaceRegisteredBeforeTheRule(t *test
 	if len(f.sidebar.registries) != 1 {
 		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
 	}
+	if !slices.Equal(f.feed.names, []fakeFeedName{{ws: "ws-held", name: "main (held)"}}) {
+		t.Fatalf("feed names = %v, want ws-held named main (held)", f.feed.names)
+	}
 }
 
 func TestEnsureMainWorktreesLeavesAnAlreadyRuleNamedMainWorkspaceAlone(t *testing.T) {

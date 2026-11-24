@@ -32,6 +32,7 @@ const opHostAsk = "daemon.feed.host_ask"
 // workspace's entry whole and never edits one, so the answer is shared rather
 // than copied, and no caller may edit it.
 func (r *resolver) HostAsk(ws ids.WorkspaceID) *agentreplv1.HostAsk {
+	r.prime(ws)
 	r.askMu.Lock()
 	defer r.askMu.Unlock()
 	return r.hostAsks[ws]

@@ -51,6 +51,7 @@ type LineageSegment struct {
 // states it at every bring-up, before a reader can page past the workspace's
 // own book.
 func (r *resolver) NoteLineage(ws ids.WorkspaceID, segments []LineageSegment) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

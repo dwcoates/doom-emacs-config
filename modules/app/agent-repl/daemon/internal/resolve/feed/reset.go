@@ -86,6 +86,7 @@ const opWorkspaceReset = "daemon.feed.workspace_reset"
 //     reset answers "nothing older" rather than the refusal a dropped walk
 //     would make of it.
 func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

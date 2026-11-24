@@ -77,13 +77,29 @@ func (r *resolver) rootFeed(s *wsState) *feedState {
 
 // SetHeldPrompts installs a workspace's standing holds, whole, and publishes
 // the section when that changed it.
+// heldSenders is every workspace HELD's prompts were sent by, whose names
+// their headers draw (names.go).
+func heldSenders(held []wsm.HeldPrompt) []ids.WorkspaceID {
+	var out []ids.WorkspaceID
+	for _, h := range held {
+		if h.SentBy != nil {
+			out = append(out, *h.SentBy)
+		}
+	}
+	return out
+}
+
 func (r *resolver) SetHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt) {
+	r.prime(ws)
+	r.readNames(heldSenders(held)...)
 	r.installHeld(ws, held, nil)
 }
 
 // FoldHeldPrompts installs a workspace's standing holds, whole, in the change
 // FOLD made, and publishes the section naming the fold.
 func (r *resolver) FoldHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt, fold holds.Fold) {
+	r.prime(ws)
+	r.readNames(heldSenders(held)...)
 	r.installHeld(ws, held, []holds.Fold{fold})
 }
 
@@ -102,6 +118,7 @@ func (r *resolver) installHeld(ws ids.WorkspaceID, held []wsm.HeldPrompt, folds 
 
 // SetEditing names the held prompt being edited, or clears it with "".
 func (r *resolver) SetEditing(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -113,12 +130,14 @@ func (r *resolver) SetEditing(ws ids.WorkspaceID, turn ids.TurnID) {
 // SetShimLoading says whether a start of the workspace's shim is under way,
 // which badges the prompts held for its session.
 func (r *resolver) SetShimLoading(ws ids.WorkspaceID, loading bool) {
+	r.prime(ws)
 	r.setShimStart(ws, func(h *heldState) { h.loading = loading })
 }
 
 // SetRelaunching says whether the start under way relaunches a shim that
 // died, which badges the prompts held for its session.
 func (r *resolver) SetRelaunching(ws ids.WorkspaceID, relaunching bool) {
+	r.prime(ws)
 	r.setShimStart(ws, func(h *heldState) { h.relaunching = relaunching })
 }
 
@@ -266,6 +285,7 @@ func holdStands(held []wsm.HeldPrompt, turn ids.TurnID) bool {
 // and publishes the section when that changed it. A claim or a settlement of
 // an entry no longer stated is forgotten with it.
 func (r *resolver) SetIngressPending(ws ids.WorkspaceID, entries []holds.IngressEntry) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -293,6 +313,7 @@ func (r *resolver) SetIngressPending(ws ids.WorkspaceID, entries []holds.Ingress
 // changes nothing drawn by itself: the entry leaves the section in the
 // publication that draws the turn.
 func (r *resolver) ClaimIngress(ws ids.WorkspaceID, key string, turn ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -305,6 +326,7 @@ func (r *resolver) ClaimIngress(ws ids.WorkspaceID, key string, turn ids.TurnID)
 // DropIngress removes the ingress entry KEY, which the queue answered, and
 // publishes the section when that changed it.
 func (r *resolver) DropIngress(ws ids.WorkspaceID, key string) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
