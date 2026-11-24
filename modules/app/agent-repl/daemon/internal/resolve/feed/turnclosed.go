@@ -31,6 +31,7 @@ import (
 // OnTurnClosed draws the ending of a turn the door just closed, unless the
 // feed already drew one.
 func (r *resolver) OnTurnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.RecordedClose) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

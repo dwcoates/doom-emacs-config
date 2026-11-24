@@ -44,6 +44,7 @@ import (
 // TestAnOpeningWithTurnHeadsReadsOneStorePage and
 // TestAnOpeningStartsAtTheNewestCut.
 func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
+	r.prime(ws)
 	return r.walkPage(ctx, ws, feed, &walk{top: true}, true)
 }
 
@@ -51,6 +52,7 @@ func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 // before OLDESTHELD, the order key of the oldest row the reader holds, read on
 // the spot when the daemon does not hold it.
 func (r *resolver) OlderPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, oldestHeld string) (*frontendv1.FeedPage, error) {
+	r.prime(ws)
 	page, _, _, err := r.walkPage(ctx, ws, feed, &walk{oldest: &oldestHeld}, false)
 	return page, err
 }

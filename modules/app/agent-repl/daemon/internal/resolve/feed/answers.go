@@ -158,6 +158,7 @@ func (r *resolver) restateAnswers(s *wsState, addr feedid.Feed, why string) {
 // prompt, the prompt holds no entry answering LABEL, or the entry answers no
 // response.
 func (r *resolver) EntryTarget(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (*frontendv1.FeedId, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	f := r.rootFeedState(ws)

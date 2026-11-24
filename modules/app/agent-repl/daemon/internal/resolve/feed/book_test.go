@@ -215,7 +215,7 @@ func (f *fakeHistory) lastRead() historyRead {
 
 // withHistory wires the fake store in as the resolver's history source.
 func (h *harness) withHistory(f *fakeHistory) *fakeHistory {
-	h.resolver.deps.History = f
+	h.resolver.deps.History = guardedHistory{storeGuard{t: h.t, r: h.resolver}, f}
 	return f
 }
 

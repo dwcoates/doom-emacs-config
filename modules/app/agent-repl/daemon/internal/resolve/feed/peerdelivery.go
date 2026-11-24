@@ -175,7 +175,7 @@ func (r *resolver) workspaceOfSession(session string) ids.WorkspaceID {
 // workspace drawing the row, and the row draws that end unresolved. Called
 // with r.mu held.
 func (r *resolver) workspaceName(ws, from ids.WorkspaceID) (string, bool) {
-	return r.namedWorkspace(ws, from, nameRead{
+	return r.namedWorkspace(ws, from, nameRecords{
 		failedKey: "daemon.feed.peer_workspace_name_failed",
 		emptyKey:  "daemon.feed.peer_workspace_name_empty",
 		failed:    logsite.Msg("the workspace at the other end of an agent-to-agent message could not be named; its row draws that end unresolved"),
@@ -183,8 +183,8 @@ func (r *resolver) workspaceName(ws, from ids.WorkspaceID) (string, bool) {
 	})
 }
 
-// nameRead words the records of one kind of workspace-name read.
-type nameRead struct {
+// nameRecords words the records of one kind of workspace-name read.
+type nameRecords struct {
 	failedKey, emptyKey string
 	// failed and empty are the records' whole sentences, each the caller's
 	// own: which workspace was being named, and what its row does without
@@ -193,14 +193,15 @@ type nameRead struct {
 }
 
 // namedWorkspace is WS's display name, or reports none known. A name that
-// cannot be read, or is empty, is recorded at ERROR against FROM, the
-// workspace drawing the row, under the keys and words of READ. Called with
-// r.mu held.
-func (r *resolver) namedWorkspace(ws, from ids.WorkspaceID, read nameRead) (string, bool) {
+// could not be read, or is empty, is recorded at ERROR against FROM, the
+// workspace drawing the row, under the keys and words of READ. The name was
+// read before the lock (names.go); a workspace drawn whose name was never
+// read is an invariant violation that panics. Called with r.mu held.
+func (r *resolver) namedWorkspace(ws, from ids.WorkspaceID, read nameRecords) (string, bool) {
 	if r.deps.WorkspaceName == nil {
 		return "", false
 	}
-	name, err := r.deps.WorkspaceName(ws)
+	name, err := r.knownName(ws)
 	if err != nil {
 		r.logger(from).Log(dlog.LevelError, read.failedKey,
 			read.failed,

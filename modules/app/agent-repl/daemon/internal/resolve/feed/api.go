@@ -156,6 +156,10 @@ type Resolver interface {
 	// verbs install it as they bind the workspace's views, before anything
 	// is drawn for it.
 	SetPullTarget(ws ids.WorkspaceID, target *pullrefs.Target)
+	// SetWorkspaceName records WS's new display NAME, which every later row
+	// naming WS draws (names.go): a rename's push, so the feed never reads a
+	// name under its lock.
+	SetWorkspaceName(ws ids.WorkspaceID, name string)
 	// DrawLinks draws a settled text's links as the workspace's feed draws
 	// its own (links.go): every link without inline code markers, and its
 	// pull request references linked to the pull requests its text named

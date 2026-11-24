@@ -14,6 +14,7 @@ const RecentFinalResponses = 2
 // RecentCodeSpans answers the distinct inline code spans of the workspace's
 // last RecentFinalResponses final responses (codespans.Extract), newest first.
 func (r *resolver) RecentCodeSpans(ws ids.WorkspaceID) []string {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]

@@ -54,6 +54,7 @@ func (t *tail) Publications(ctx context.Context) (<-chan Publication, func()) {
 // Tail opens the live row stream for one feed, pinned to the token minted by
 // the OpenFeed that served this reader's page.
 func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, token *agentreplv1.FeedWatchToken) (Tail, error) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log := r.logger(ws)

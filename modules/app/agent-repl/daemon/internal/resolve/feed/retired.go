@@ -30,6 +30,7 @@ import (
 // ending it, are judged against those facts, and withdrawing them would report
 // a healthy session's later rows as naming a turn nobody opened.
 func (r *resolver) OnPromptRetired(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -44,6 +45,7 @@ func (r *resolver) OnPromptRetired(ws ids.WorkspaceID, prompt *conversationv1.Ag
 // OnPeerMessageRetired removes the row OnPeerMessage drew for a retired peer
 // message: the peer bubble or the hand-back badge, which share one id.
 func (r *resolver) OnPeerMessageRetired(ws ids.WorkspaceID, peer *conversationv1.PeerMessage) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -91,6 +93,7 @@ func (r *resolver) retireEntryRows(s *wsState, kind, key string, keys ...feedid.
 // when the turn ends, so a retirement arriving after the terminal finds no
 // line, and the drawn headline is not re-composed.
 func (r *resolver) OnApiErrorRetired(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

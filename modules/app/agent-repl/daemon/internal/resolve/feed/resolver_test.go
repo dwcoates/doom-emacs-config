@@ -360,6 +360,7 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 		t.Fatalf("newResolver: %v", err)
 	}
 	h.resolver = resolver
+	guardStores(t, resolver)
 	// THE SESSION WATCHER NAMES THE MAIN AGENT before it routes a frame, and
 	// the harness stands in for it: nothing else puts an agent on the root.
 	h.resolver.OnMainAgent(testWorkspace, mainAgent())
@@ -522,6 +523,7 @@ func (h *harness) rowByID(feed feedid.Feed, id string) *frontendv1.FeedRow {
 
 // feedRows answers one feed's rows in order, for any resolver a test holds.
 func feedRows(r *resolver, feed feedid.Feed) []*frontendv1.FeedRow {
+	r.prime(testWorkspace)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(testWorkspace)
@@ -663,7 +665,8 @@ func TestUnresolvableWorkspaceIsRecordedAsAnInvariantViolation(t *testing.T) {
 		t.Fatalf("newResolver: %v", err)
 	}
 
-	// Act.
+	// Act: the sink is resolved as the workspace is primed (prime.go).
+	r.prime(testWorkspace)
 	r.mu.Lock()
 	r.logger(testWorkspace)
 	r.mu.Unlock()
@@ -694,7 +697,8 @@ func TestAWorkspaceWhoseDirectoryIsGoneLogsCentrallyWithNoError(t *testing.T) {
 		t.Fatalf("newResolver: %v", err)
 	}
 
-	// Act.
+	// Act: the sink is resolved as the workspace is primed (prime.go).
+	r.prime(testWorkspace)
 	r.mu.Lock()
 	got := r.logger(testWorkspace)
 	r.mu.Unlock()
@@ -762,7 +766,8 @@ func TestAWorkspaceLookupFailureIsClassifiedByItsCause(t *testing.T) {
 				t.Fatalf("newResolver: %v", err)
 			}
 
-			// Act.
+			// Act: the sink is resolved as the workspace is primed (prime.go).
+			r.prime(testWorkspace)
 			r.mu.Lock()
 			r.logger(testWorkspace)
 			_, cached := r.loggers[testWorkspace]
@@ -1322,6 +1327,7 @@ func TestEachWorkspaceHoldsItsOwnFeedUniverse(t *testing.T) {
 	if rows := h.rows(rootFeed()); len(rows) != 1 {
 		t.Fatalf("ws-1 rows = %d, want 1", len(rows))
 	}
+	h.resolver.prime(other)
 	h.resolver.mu.Lock()
 	otherRows := len(h.resolver.feed(h.resolver.state(other), rootFeed()).order)
 	h.resolver.mu.Unlock()
@@ -1442,7 +1448,8 @@ func TestFeedTestsLookUpRowsThroughTheSharedHelper(t *testing.T) {
 
 func TestARemovedDirectoryIsRoutedThroughWorkspaceUnlessGoneAlone(t *testing.T) {
 	// Arrange
-	b, err := os.ReadFile("resolver.go")
+	// THE SINK IS RESOLVED AS THE WORKSPACE IS PRIMED (prime.go).
+	b, err := os.ReadFile("prime.go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1451,6 +1458,6 @@ func TestARemovedDirectoryIsRoutedThroughWorkspaceUnlessGoneAlone(t *testing.T) 
 	// Act, Assert: the shared helper is taken, and no hand-rolled branch on
 	// the removed directory stands beside it.
 	if !strings.Contains(src, "dlog.WorkspaceUnlessGone(") || strings.Contains(src, "dlog.ErrWorkspaceDirGone") {
-		t.Fatal("resolver.go does not route a removed directory through dlog.WorkspaceUnlessGone alone")
+		t.Fatal("prime.go does not route a removed directory through dlog.WorkspaceUnlessGone alone")
 	}
 }

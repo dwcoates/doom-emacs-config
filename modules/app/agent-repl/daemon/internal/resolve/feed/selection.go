@@ -132,6 +132,7 @@ func (r *resolver) restampFinalAnswer(s *wsState, id *frontendv1.FeedId, unit st
 // it without racing later conclusions. An empty slice is a workspace with no
 // final responses yet, never an error.
 func (r *resolver) FinalResponses(ws ids.WorkspaceID) []*frontendv1.FeedId {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -175,6 +176,7 @@ type TurnBoundary struct {
 // is not a row a reader can step to, so the walk leaves it out. Empty is
 // "nothing to step to", never an error.
 func (r *resolver) TurnBoundaries(ws ids.WorkspaceID) []TurnBoundary {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -218,6 +220,7 @@ type RowText struct {
 // names no selectable row of this workspace's root feed — the caller's to
 // refuse, never to paper over with an empty text.
 func (r *resolver) SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool) {
+	r.prime(ws)
 	return r.rootRowText(ws, id, selectableMarkdown)
 }
 
@@ -226,6 +229,7 @@ func (r *resolver) SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (Ro
 // can quote, though the reader never selects it. A miss (false) is a feedid
 // that names no landed bubble of this workspace's root feed.
 func (r *resolver) BubbleText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool) {
+	r.prime(ws)
 	return r.rootRowText(ws, id, bubbleMarkdown)
 }
 

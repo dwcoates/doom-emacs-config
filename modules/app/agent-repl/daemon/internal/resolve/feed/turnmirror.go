@@ -31,6 +31,7 @@ import (
 // drawn at too; nil withdraws it. Like SetOutputAddress it moves no row: only
 // a turn the prompt queue records while it stands takes it.
 func (r *resolver) SetOutputMirror(ws ids.WorkspaceID, m *wsm.MirrorAddress) {
+	r.prime(ws, mirrorWorkspace(m))
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -45,6 +46,7 @@ func (r *resolver) SetOutputMirror(ws ids.WorkspaceID, m *wsm.MirrorAddress) {
 // OutputMirror answers a copy of the mirror standing for one workspace, nil
 // when none stands.
 func (r *resolver) OutputMirror(ws ids.WorkspaceID) *wsm.MirrorAddress {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -56,6 +58,7 @@ func (r *resolver) OutputMirror(ws ids.WorkspaceID) *wsm.MirrorAddress {
 
 // MirrorTurn records the mirror one turn is also drawn at, nil for none.
 func (r *resolver) MirrorTurn(ws ids.WorkspaceID, turn ids.TurnID, m *wsm.MirrorAddress) {
+	r.prime(ws, mirrorWorkspace(m))
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.state(ws).mirrorTurn(turn, m)
@@ -63,6 +66,16 @@ func (r *resolver) MirrorTurn(ws ids.WorkspaceID, turn ids.TurnID, m *wsm.Mirror
 		r.logger(ws).Debug("daemon.feed.turn_mirror", "the feed took the mirror a turn is also drawn at", dlog.Context{
 			"turn": string(turn), "mirror_workspace": string(m.Workspace), "feed": r.feedKey(m.Workspace, m.Feed)})
 	}
+}
+
+// mirrorWorkspace is the workspace mirror M draws in, "" for none: the second
+// workspace an entry point naming a mirror primes (prime.go), since its rows
+// are drawn there.
+func mirrorWorkspace(m *wsm.MirrorAddress) ids.WorkspaceID {
+	if m == nil {
+		return ""
+	}
+	return m.Workspace
 }
 
 // mirrorTurn stores a copy of TURN's mirror, or forgets it when it has none.

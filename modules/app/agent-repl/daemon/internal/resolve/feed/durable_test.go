@@ -121,6 +121,7 @@ func daemonOverWith(t *testing.T, store DurableRows, adjust func(*Deps)) (*resol
 	if err != nil {
 		t.Fatalf("newResolver: %v", err)
 	}
+	guardStores(t, r)
 	return r, log
 }
 

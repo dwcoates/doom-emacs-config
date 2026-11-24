@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -13,9 +12,10 @@ import (
 
 // DURABLE TURN SETS (turnsets.go): every set loads through restoreTurnSet.
 
-// testRestore is a turnSetRestore over LOAD, with recognizable messages.
-func testRestore(load func(context.Context, ids.WorkspaceID) ([]ids.TurnID, error)) turnSetRestore {
-	return turnSetRestore{op: "daemon.feed.test_restore", load: load, failed: logsite.Msg("failed"), warning: "warned", loaded: logsite.Msg("loaded")}
+// testRestore is a turnSetRestore of the set READ, with recognizable
+// messages.
+func testRestore(read primedTurnSet) turnSetRestore {
+	return turnSetRestore{op: "daemon.feed.test_restore", read: read, failed: logsite.Msg("failed"), warning: "warned", loaded: logsite.Msg("loaded")}
 }
 
 func TestRestoreTurnSet(t *testing.T) {
@@ -38,7 +38,7 @@ func TestRestoreTurnSet(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			into := map[ids.TurnID]bool{"pre": true}
-			restore := testRestore(func(context.Context, ids.WorkspaceID) ([]ids.TurnID, error) { return tc.turns, tc.err })
+			restore := testRestore(primedTurnSet{turns: tc.turns, err: tc.err})
 			h.resolver.mu.Lock()
 			s := h.resolver.state(testWorkspace)
 
@@ -161,9 +161,10 @@ func TestAnswerTurns(t *testing.T) {
 			s := h.resolver.state(testWorkspace)
 			answer := testAnswer(s, store)
 
-			// Act
-			err := h.resolver.answerTurns(s, answer)
+			// Act: the record runs as the lock is released (storework.go).
+			outcome := h.resolver.answerTurns(s, answer)
 			h.resolver.mu.Unlock()
+			err := outcome.err
 
 			// Assert
 			if (err != nil) != tc.wantErr {

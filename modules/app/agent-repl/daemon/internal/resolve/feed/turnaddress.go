@@ -27,6 +27,7 @@ import (
 // AddressTurn records the address TURN draws at; nil draws it on the root
 // feed.
 func (r *resolver) AddressTurn(ws ids.WorkspaceID, turn ids.TurnID, addr *sessionwatcher.OutputAddress) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

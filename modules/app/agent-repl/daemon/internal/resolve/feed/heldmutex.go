@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -43,24 +44,67 @@ type heldMutex struct {
 	by    [1]uintptr
 	// report is told of every hold past lockHoldBudget, after the release.
 	report *holdReport
+	// held is set for as long as the mutex is held, so the store's guard can
+	// tell a call made under it (Held).
+	held atomic.Bool
+	// pending is the store work the current hold queued (afterUnlock),
+	// touched only by the goroutine holding the mutex.
+	pending []storeStep
+	// owner is the resolver the queued work runs for, and queue the one
+	// queue it runs on (storework.go).
+	owner *resolver
+	queue storeQueue
 }
 
 // Lock locks m and notes when, and by whom.
 func (m *heldMutex) Lock() {
 	m.Mutex.Lock()
+	m.held.Store(true)
 	m.taken = m.report.now()
 	runtime.Callers(2, m.by[:])
 }
 
-// Unlock unlocks m and reports the hold when it ran past its budget.
+// Unlock unlocks m, reports the hold when it ran past its budget, and runs
+// the store work the hold queued, in release order, before it returns
+// (storework.go).
 func (m *heldMutex) Unlock() {
+	batch := m.release()
+	if batch != nil {
+		m.queue.submit(m.owner, batch)
+	}
+}
+
+// unlockInDrain is Unlock for a hold a queued step's settle took: the work
+// it queued joins the drain already running, which runs it next, instead of
+// being waited on by the drainer itself.
+func (m *heldMutex) unlockInDrain() {
+	if batch := m.release(); batch != nil {
+		m.queue.enqueue(batch)
+	}
+}
+
+// release ends the hold and answers the store work it queued as a batch, nil
+// when it queued none.
+func (m *heldMutex) release() *storeBatch {
 	held := m.report.now().Sub(m.taken)
 	by := m.by[0]
+	var batch *storeBatch
+	if len(m.pending) > 0 {
+		batch = &storeBatch{steps: m.pending, done: make(chan struct{})}
+		m.pending = nil
+	}
+	m.held.Store(false)
 	m.Mutex.Unlock()
 	if held >= lockHoldBudget {
 		m.report.held(held, by)
 	}
+	return batch
 }
+
+// Held reports whether the mutex is held right now, by anyone. THE RESOLVER
+// NEVER HOLDS IT ACROSS A STATE-DATABASE CALL (storewrites.go): the feed
+// test harness's database fakes fail a test that calls them while it is held.
+func (m *heldMutex) Held() bool { return m.held.Load() }
 
 // holdReport records the resolver mutex's long holds, at most one record per
 // lockHoldEvery.

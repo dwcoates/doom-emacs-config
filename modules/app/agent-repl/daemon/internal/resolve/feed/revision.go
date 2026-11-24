@@ -38,6 +38,7 @@ type RevisableResponse struct {
 // response (a prompt, an interim, a notice, a bubble still arriving, a row
 // that has left the feed).
 func (r *resolver) RevisableFinalResponse(ws ids.WorkspaceID, row *frontendv1.FeedId) (RevisableResponse, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -55,6 +56,7 @@ func (r *resolver) RevisableFinalResponse(ws ids.WorkspaceID, row *frontendv1.Fe
 // (pending, failed, or nil once it is neither) and restates the row with it.
 // False is a row that is no drawn response of this workspace.
 func (r *resolver) SetResponseRevision(ws ids.WorkspaceID, row *frontendv1.FeedId, state *frontendv1.FeedResponseRevision) bool {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -79,6 +81,7 @@ func (r *resolver) SetResponseRevision(ws ids.WorkspaceID, row *frontendv1.FeedI
 // OnResponseRevision is the response_revision page line, live: the revised
 // prose is typed out over the bubble at the response's reveal pace.
 func (r *resolver) OnResponseRevision(ws ids.WorkspaceID, agent *conversationv1.AgentId, revision *conversationv1.AgentResponseRevision) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.applyRevision(r.state(ws), agent, revision, true)

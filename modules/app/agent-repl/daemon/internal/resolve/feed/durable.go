@@ -23,7 +23,9 @@ const opDurable = "daemon.feed.durable"
 // recordDurable writes one durable row, as just published and at its order key,
 // through to Deps.DurableRows. SETTLEDFROM is the pin key the row stood at
 // before this publication settled it, empty for every other publication. The
-// caller holds the lock.
+// row is encoded under the lock, as published, and written once the lock is
+// released, in the order the holds released (storework.go). The caller holds
+// the lock.
 //
 // A FAILED RECORD IS AN ERROR, AND THE ROW STANDS: it is drawn for every reader
 // of this daemon, and only a new daemon would miss it.
@@ -34,34 +36,38 @@ func (r *resolver) recordDurable(s *wsState, feed feedid.Feed, id, settledFrom s
 	f := r.feed(s, feed)
 	published, rank := f.rows[id], f.rank[id]
 	fields := dlog.Context{"feed": f.key, "row": id, "key": rank.key, "settled_from": settledFrom}
+	log := r.logger(s.id)
 	encoded, err := proto.Marshal(published)
 	if err != nil {
 		fields["cause"] = err.Error()
-		r.logger(s.id).Error(opDurable, "a durable row could not be encoded; a new daemon will not draw it", fields)
+		log.Error(opDurable, "a durable row could not be encoded; a new daemon will not draw it", fields)
 		return
 	}
-	if err := r.deps.DurableRows.PutDurableFeedRow(context.Background(), wsm.DurableFeedRow{
+	row := wsm.DurableFeedRow{
 		Workspace: s.id, RowID: id, Plane: int(rank.plane), OrderKey: rank.key, SettledFrom: settledFrom, Row: encoded,
-	}); err != nil {
-		fields["cause"] = err.Error()
-		r.logger(s.id).Error(opDurable, "a durable row could not be recorded; a new daemon will not draw it", fields)
 	}
+	r.writeAfterUnlock(func(ctx context.Context) error { return r.deps.DurableRows.PutDurableFeedRow(ctx, row) },
+		func(err error) {
+			fields["cause"] = err.Error()
+			log.Error(opDurable, "a durable row could not be recorded; a new daemon will not draw it", fields)
+		}, nil)
 }
 
 // restoreDurable draws a workspace's recorded durable rows again, each on its
 // own feed and at the order key it was first drawn at, so the rows stand where
 // they stood before this daemon. It runs once, as the workspace's feed state is
-// born. The caller holds the lock.
+// born, from the rows PRIMED read off the lock (prime.go). The caller holds
+// the lock.
 //
 // A ROW THAT CANNOT BE READ BACK IS AN ERROR and is drawn nowhere; the others
 // are still drawn.
-func (r *resolver) restoreDurable(s *wsState) {
+func (r *resolver) restoreDurable(s *wsState, primed *primedWorkspace) {
 	undecodable := logsite.Msg("a durable row could not be decoded and is drawn nowhere")
 	if r.deps.DurableRows == nil {
 		return
 	}
 	log := r.logger(s.id)
-	rows, err := r.deps.DurableRows.DurableFeedRows(context.Background(), s.id)
+	rows, err := primed.durable, primed.durableErr
 	if err != nil {
 		log.Error(opDurable, "the durable rows could not be read; none is drawn again", dlog.Context{"cause": err.Error()})
 		return
@@ -114,15 +120,18 @@ func (r *resolver) restoreDurable(s *wsState) {
 }
 
 // forgetDurable drops a workspace's recorded durable rows, as a reset drops
-// the rows themselves. The caller holds the lock.
+// the rows themselves, once the lock is released (storework.go). The caller
+// holds the lock.
 func (r *resolver) forgetDurable(ws ids.WorkspaceID) {
 	if r.deps.DurableRows == nil {
 		return
 	}
-	if err := r.deps.DurableRows.ClearDurableFeedRows(context.Background(), ws); err != nil {
-		r.logger(ws).Error(opDurable, "the durable rows could not be forgotten; a new daemon would draw the reset conversation's rows again",
-			dlog.Context{"cause": err.Error()})
-	}
+	log := r.logger(ws)
+	r.writeAfterUnlock(func(ctx context.Context) error { return r.deps.DurableRows.ClearDurableFeedRows(ctx, ws) },
+		func(err error) {
+			log.Error(opDurable, "the durable rows could not be forgotten; a new daemon would draw the reset conversation's rows again",
+				dlog.Context{"cause": err.Error()})
+		}, nil)
 }
 
 // reserveOrder advances a feed's key counters past a key restored into it, so
@@ -174,37 +183,43 @@ func retiredMergeTab(row *frontendv1.FeedRow) bool {
 	return tab != nil && tab.GetKind() == nil
 }
 
+// rankRead is the store's answer for where one durable row is recorded
+// (DurableRows.DurableFeedRowRank), read off the lock.
+type rankRead struct {
+	plane int
+	key   string
+	found bool
+	err   error
+}
+
 // recordedRank is AT for the first draw in this daemon of durable row ID on
-// feed F: the rank the store records it at, when it records it. A ROW'S ORDER
-// KEY IS FIXED FOR ITS WHOLE LIFE (wsm.PutDurableFeedRow), but this daemon's
-// memory of it is only what it restored as the workspace's feed state was
-// born, and another daemon may record the row after that (a handover: both
-// daemons write for the workspace until its transfer lands). Drawn at a key
-// of its own, the row's record was refused and a new daemon never drew it
-// again (2026-11-16, merge-queue-active-clock's merge head, 46 times). A read
-// that fails is an ERROR, and the row is drawn at a key of its own, whose
-// record the store refuses if it disagrees. The caller holds the lock.
-func (r *resolver) recordedRank(s *wsState, f *feedState, id string, at placement) placement {
-	if r.deps.DurableRows == nil || at.inherit != nil {
-		return at
-	}
+// feed F: the rank the store records it at (READ), when it records it. A
+// ROW'S ORDER KEY IS FIXED FOR ITS WHOLE LIFE (wsm.PutDurableFeedRow), but
+// this daemon's memory of it is only what it restored as the workspace's feed
+// state was born, and another daemon may record the row after that (a
+// handover: both daemons write for the workspace until its transfer lands).
+// Drawn at a key of its own, the row's record was refused and a new daemon
+// never drew it again (2026-11-16, merge-queue-active-clock's merge head, 46
+// times). A read that failed is an ERROR, and the row is drawn at a key of
+// its own, whose record the store refuses if it disagrees. The caller holds
+// the lock; the read was made before it was taken (upsertDurable).
+func (r *resolver) recordedRank(s *wsState, f *feedState, id string, at placement, read rankRead) placement {
 	fields := dlog.Context{"row": id}
-	plane, key, found, err := r.deps.DurableRows.DurableFeedRowRank(context.Background(), s.id, id)
-	if err != nil {
-		fields["cause"] = err.Error()
+	if read.err != nil {
+		fields["cause"] = read.err.Error()
 		r.logger(s.id).Error(opDurable, "could not read where a durable row is recorded; it is drawn at a key of its own", fields)
 		return at
 	}
-	if !found {
+	if !read.found {
 		return at
 	}
-	if err := reserveOrder(f, key); err != nil {
-		fields["cause"], fields["key"] = err.Error(), key
+	if err := reserveOrder(f, read.key); err != nil {
+		fields["cause"], fields["key"] = err.Error(), read.key
 		r.logger(s.id).Error(opDurable, "a durable row's recorded order key cannot be read; it is drawn at a key of its own", fields)
 		return at
 	}
-	r.logger(s.id).Info(opDurable, "a durable row this daemon never drew is drawn where the store records it", withKey(fields, key))
-	at.inherit = &rowRank{plane: rowPlane(plane), key: key}
+	r.logger(s.id).Info(opDurable, "a durable row this daemon never drew is drawn where the store records it", withKey(fields, read.key))
+	at.inherit = &rowRank{plane: rowPlane(read.plane), key: read.key}
 	return at
 }
 

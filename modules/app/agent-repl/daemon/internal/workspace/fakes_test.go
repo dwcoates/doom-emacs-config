@@ -2698,9 +2698,18 @@ func awaitRecord(t *testing.T, f *fixture, level, operation string) {
 // synchronization device: every wait returns the moment its record lands.
 const recordDeadline = 5 * time.Second
 
+// fakeFeedName is one SetWorkspaceName a fakeFeed was told.
+type fakeFeedName struct {
+	ws   ids.WorkspaceID
+	name string
+}
+
 // fakeFeed is a feed.Resolver that records the rows it was given.
 type fakeFeed struct {
 	feed.Resolver
+
+	// names is every SetWorkspaceName, in order.
+	names []fakeFeedName
 
 	synthesized []*frontendv1.FeedRow
 	// retired is every row retired, in order.
@@ -2794,6 +2803,10 @@ func (f *fakeFeed) RetireRow(_ ids.WorkspaceID, _ feedid.Feed, id *frontendv1.Fe
 }
 
 // ResetWorkspace records the emptying and lets a test observe the moment.
+func (f *fakeFeed) SetWorkspaceName(ws ids.WorkspaceID, name string) {
+	f.names = append(f.names, fakeFeedName{ws: ws, name: name})
+}
+
 func (f *fakeFeed) ResetWorkspace(ws ids.WorkspaceID, _ string) {
 	f.resets = append(f.resets, ws)
 	if f.onReset != nil {

@@ -48,6 +48,7 @@ type RollbackTarget struct {
 // RollbackTarget answers what rolling back to just before the prompt ROW
 // drops; false when ROW is not a prompt a rollback can reach (RollbackPrompts).
 func (r *resolver) RollbackTarget(ws ids.WorkspaceID, row *frontendv1.FeedId) (RollbackTarget, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -105,6 +106,7 @@ func (r *resolver) rollbackPrompts(s *wsState) []rollbackPrompt {
 
 // RollbackPrompts answers the prompt rows a rollback can reach, oldest first.
 func (r *resolver) RollbackPrompts(ws ids.WorkspaceID) []*frontendv1.FeedId {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -137,6 +139,7 @@ type RollbackChoice struct {
 // RollbackChoices answers the prompts a rollback can reach, oldest first, each
 // with the context figure that stood before it.
 func (r *resolver) RollbackChoices(ws ids.WorkspaceID) []RollbackChoice {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -171,6 +174,7 @@ func (r *resolver) RollbackChoices(ws ids.WorkspaceID) []RollbackChoice {
 // feed's bottom whatever it belongs to, so none of those counts. False when
 // ROW is not on the root feed.
 func (r *resolver) PromptFollowed(ws ids.WorkspaceID, row *frontendv1.FeedId) bool {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -198,6 +202,7 @@ func (r *resolver) PromptFollowed(ws ids.WorkspaceID, row *frontendv1.FeedId) bo
 // the feed began watching WS at or after AT, or never has: what was drawn
 // before it was watching is unknown to it, so it is never taken as absent.
 func (r *resolver) AnsweredSince(ws ids.WorkspaceID, at time.Time) bool {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
@@ -237,13 +242,19 @@ func answersPrompt(row *frontendv1.FeedRow) bool {
 // ERROR and raised on the topbar here), so a daemon restart would draw the
 // turns again.
 func (r *resolver) RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error {
+	r.prime(ws)
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.rollBackTurnsLocked(r.state(ws), ws, turns)
+	outcome := r.rollBackTurnsLocked(r.state(ws), ws, turns)
+	// THE RECORD RUNS AS THE LOCK IS RELEASED (storework.go), so its outcome
+	// is read after it.
+	r.mu.Unlock()
+	return outcome.err
 }
 
-// rollBackTurnsLocked is RollBackTurns under the resolver's lock.
-func (r *resolver) rollBackTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []ids.TurnID) error {
+// rollBackTurnsLocked is RollBackTurns under the resolver's lock: the turns
+// leave the feed now, and their record is queued, its outcome known once the
+// lock is released.
+func (r *resolver) rollBackTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []ids.TurnID) *storeOutcome {
 	for _, turn := range turns {
 		s.rolledBack[turn] = true
 		delete(s.rollingBack, turn)
@@ -260,18 +271,19 @@ func (r *resolver) rollBackTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []i
 	s.finalAnswers = keepDrawn(s, s.finalAnswers)
 	log := r.logger(ws)
 	fields := dlog.Context{"turns": len(turns), "first": firstTurn(turns), "retired": retired}
-	if r.deps.RolledBack != nil {
-		if err := r.deps.RolledBack.RecordRolledBackTurns(context.Background(), ws, turns); err != nil {
+	recorded := func() { log.Info(opRollbackApply, "rolled-back turns were removed from the feed and recorded", fields) }
+	if r.deps.RolledBack == nil {
+		recorded()
+		return &storeOutcome{}
+	}
+	return r.writeAfterUnlock(func(ctx context.Context) error { return r.deps.RolledBack.RecordRolledBackTurns(ctx, ws, turns) },
+		func(err error) {
 			fields["error"] = err.Error()
 			log.Error(opRollbackApply,
 				"rolled-back turns were removed from the feed but could not be recorded; a daemon restart will draw them again", fields)
-			r.raiseWarning(s, opRollbackApply,
+			r.raiseWarningFor(ws, opRollbackApply,
 				fmt.Sprintf("the rolled-back prompts could not be saved and will reappear after a daemon restart: %v", err))
-			return err
-		}
-	}
-	log.Info(opRollbackApply, "rolled-back turns were removed from the feed and recorded", fields)
-	return nil
+		}, recorded)
 }
 
 // withheldRow is a row of a turn being rolled back, kept undrawn until the
@@ -290,6 +302,7 @@ type withheldRow struct {
 // Every hold ends in exactly one of RollBackTurns (the rows are dropped) or
 // ReleaseTurns (the rows are drawn).
 func (r *resolver) HoldTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -303,6 +316,7 @@ func (r *resolver) HoldTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
 // ReleaseTurns ends the hold on TURNS for a rollback that did not happen: the
 // rows withheld meanwhile are drawn, in the order they arrived.
 func (r *resolver) ReleaseTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.releaseTurnsLocked(r.state(ws), ws, turns)
@@ -338,6 +352,7 @@ func (r *resolver) releaseTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []id
 // retired; the settle retires it for good (RollBackTurns) or draws it again
 // where it stood (ReleaseTurns). A row that cannot be snapshotted stays drawn.
 func (r *resolver) WithholdDrawnTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -493,13 +508,13 @@ func (r *resolver) rolledBackRow(s *wsState, f *feedState, row *frontendv1.FeedR
 
 // restoreRolledBack loads the workspace's rolled-back turns when a process
 // first builds its feed state, before any row is drawn.
-func (r *resolver) restoreRolledBack(s *wsState) {
+func (r *resolver) restoreRolledBack(s *wsState, primed *primedWorkspace) {
 	if r.deps.RolledBack == nil {
 		return
 	}
 	r.restoreTurnSet(s, turnSetRestore{
 		op:      opRollbackRestore,
-		load:    r.deps.RolledBack.RolledBackTurns,
+		read:    primed.turnSets[turnSetRolledBack],
 		failed:  logsite.Msg("the workspace's rolled-back turns could not be loaded; their rows may be drawn again"),
 		warning: "rolled-back prompts could not be loaded and may be drawn again",
 		loaded:  logsite.Msg("the workspace's rolled-back turns were loaded; their rows are not drawn"),
@@ -512,6 +527,7 @@ func (r *resolver) restoreRolledBack(s *wsState) {
 // its call's card), so monitors are not counted, though the rollback stops
 // them too.
 func (r *resolver) LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]

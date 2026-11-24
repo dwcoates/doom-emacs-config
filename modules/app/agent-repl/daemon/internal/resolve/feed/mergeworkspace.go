@@ -29,14 +29,20 @@ const removedSwitchLabel = "merge workspace removed"
 // reaper may already have removed, so neither its log sink nor its footer
 // binding exists (0.439.2: workspace_sink_unavailable and
 // footer.unbound_workspace for agent-repl-theme-update).
-func (r *resolver) MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, removedAtMS int64) int {
+//
+// IT PRIMES NOTHING (prime.go): a workspace whose feed is held was primed when
+// it first was, and one whose feed is not is restated off the lock, in the
+// queue's order (storework.go), the count answered once it has run.
+func (r *resolver) MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, removedAtMS int64) (marked int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, held := r.workspaces[ws]
 	if !held {
-		return r.markDurableMergeWorkspaceRemoved(ws, mergeWS, removedAtMS)
+		if r.deps.DurableRows != nil {
+			r.afterUnlock(func(storeHold) { marked = r.markDurableMergeWorkspaceRemoved(ws, mergeWS, removedAtMS) })
+		}
+		return 0
 	}
-	marked := 0
 	r.eachStoredRow(s, func(addr feedid.Feed, f *feedState, id string, stored *frontendv1.FeedRow) {
 		if !switchesTo(stored, mergeWS) {
 			return
@@ -64,8 +70,8 @@ func (r *resolver) MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, remove
 
 // markDurableMergeWorkspaceRemoved restates, in WS's durable record alone,
 // every recorded row whose switch takes the user to MERGEWS as removed at
-// REMOVEDATMS, and answers how many rows it restated. The caller holds the
-// lock and holds no feed state for WS.
+// REMOVEDATMS, and answers how many rows it restated. It runs off the lock,
+// as a queued step (storework.go), for a WS no feed state is held for.
 //
 // ITS RECORDS GO TO THE GLOBAL LOG, naming the workspace: the workspace's own
 // sink lives in its directory, which a closed workspace may no longer have.

@@ -80,6 +80,7 @@ func erroredLine(errored *frontendv1.FeedTurnEndedErrored) string {
 // is a turn whose ending was not drawn live in this feed: a /clear whose
 // divider stands in for its terminal, or a feed that never saw the turn.
 func (r *resolver) TakeTurnEnding(ws ids.WorkspaceID, turn ids.TurnID) (TurnEnding, bool) {
+	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]

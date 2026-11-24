@@ -22,8 +22,8 @@ import (
 type turnSetRestore struct {
 	// op is the operation the load's records carry, and the warning's key.
 	op string
-	// load reads the workspace's set from the store.
-	load func(context.Context, ids.WorkspaceID) ([]ids.TurnID, error)
+	// read is the workspace's set as prime read it from the store.
+	read primedTurnSet
 	// failed is the ERROR record's message for a load that failed.
 	failed logsite.Message
 	// warning is the topbar's line for a load that failed.
@@ -32,11 +32,11 @@ type turnSetRestore struct {
 	loaded logsite.Message
 }
 
-// restoreTurnSet loads RESTORE's set into INTO. A load that fails is logged at
+// restoreTurnSet installs RESTORE's set, read by prime, into INTO. A load that fails is logged at
 // ERROR and raised on the topbar, and leaves INTO as it was: the set's rows
 // may be drawn again, which the warning says.
 func (r *resolver) restoreTurnSet(s *wsState, restore turnSetRestore, into map[ids.TurnID]bool) {
-	turns, err := restore.load(context.Background(), s.id)
+	turns, err := restore.read.turns, restore.read.err
 	if err != nil {
 		r.logger(s.id).Log(dlog.LevelError, restore.op, restore.failed, dlog.Context{"error": err.Error()})
 		r.raiseWarning(s, restore.op, restore.warning)
@@ -84,7 +84,7 @@ type turnAnswer struct {
 // recorded so a later process refuses them too. The removal always happens;
 // a recording that fails is logged at ERROR, raised on the topbar, and
 // returned, since a daemon restart would draw those rows again.
-func (r *resolver) answerTurns(s *wsState, answer turnAnswer) error {
+func (r *resolver) answerTurns(s *wsState, answer turnAnswer) *storeOutcome {
 	log := r.logger(s.id)
 	var turns []ids.TurnID
 	r.eachStoredRow(s, func(_ feedid.Feed, _ *feedState, _ string, row *frontendv1.FeedRow) {
@@ -98,7 +98,7 @@ func (r *resolver) answerTurns(s *wsState, answer turnAnswer) error {
 	}
 	if len(turns) == 0 {
 		log.Log(dlog.LevelDebug, answer.op, answer.nothing, fields)
-		return nil
+		return &storeOutcome{}
 	}
 	for _, turn := range turns {
 		answer.into[turn] = true
@@ -113,14 +113,18 @@ func (r *resolver) answerTurns(s *wsState, answer turnAnswer) error {
 		}
 	})
 	fields["turns"], fields["first"], fields["retired"] = len(turns), firstTurn(turns), retired
-	if answer.record != nil {
-		if err := answer.record(context.Background(), s.id, turns); err != nil {
+	answered := func() { log.Log(dlog.LevelInfo, answer.op, answer.answered, fields) }
+	if answer.record == nil {
+		answered()
+		return &storeOutcome{}
+	}
+	// THE ANSWER IS RECORDED OFF THE LOCK (storework.go); its outcome is
+	// known once the caller's hold is released.
+	ws := s.id
+	return r.writeAfterUnlock(func(ctx context.Context) error { return answer.record(ctx, ws, turns) },
+		func(err error) {
 			fields["error"] = err.Error()
 			log.Log(dlog.LevelError, answer.op, answer.failed, fields)
-			r.raiseWarning(s, answer.op, fmt.Sprintf("%s: %v", answer.warning, err))
-			return err
-		}
-	}
-	log.Log(dlog.LevelInfo, answer.op, answer.answered, fields)
-	return nil
+			r.raiseWarningFor(ws, answer.op, fmt.Sprintf("%s: %v", answer.warning, err))
+		}, answered)
 }
