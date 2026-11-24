@@ -18,7 +18,7 @@ func forkedPair(t *testing.T, s *store) (parent, child Workspace) {
 	ctx := context.Background()
 	parent, child = testWorkspace(t, s), testWorkspace(t, s)
 	instant := time.Unix(1_700_000_000, 0)
-	if err := s.PutSession(ctx, Session{Workspace: child.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(ctx, Session{Workspace: child.ID, HostSessionID: "host-1", StartedAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 	if err := s.PutPendingFork(ctx, PendingFork{Workspace: child.ID, Parent: parent.ID}); err != nil {
@@ -198,7 +198,7 @@ func TestLineageWalksEveryGenerationNearestFirst(t *testing.T) {
 	}
 	child := testWorkspace(t, s)
 	instant := time.Unix(1_700_000_000, 0)
-	if err := s.PutSession(ctx, Session{Workspace: child.ID, HostSessionID: "h", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(ctx, Session{Workspace: child.ID, HostSessionID: "h", StartedAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 	if err := s.PutPendingFork(ctx, PendingFork{Workspace: child.ID, Parent: parent.ID}); err != nil {
@@ -240,7 +240,7 @@ func TestLineageRefusesACycle(t *testing.T) {
 	a, b := testWorkspace(t, s), testWorkspace(t, s)
 	instant := time.Unix(1_700_000_000, 0)
 	for ws, conv := range map[WorkspaceID]string{a.ID: "va", b.ID: "vb"} {
-		if err := s.PutSession(context.Background(), Session{Workspace: ws, HostSessionID: "h", VendorSessionID: conv, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		if err := s.PutSession(context.Background(), Session{Workspace: ws, HostSessionID: "h", VendorSessionID: conv, StartedAt: instant}); err != nil {
 			t.Fatalf("PutSession: %v", err)
 		}
 	}
@@ -292,7 +292,7 @@ func TestBindSessionForgetsAnOwedForkAndKeepsAMadeForksLineage(t *testing.T) {
 			instant := time.Unix(1_700_000_000, 0)
 
 			// Act
-			err := s.BindSession(context.Background(), Session{Workspace: child.ID, HostSessionID: "h", VendorSessionID: "chosen", StartedAt: instant, LastEngagementAt: instant}, nil)
+			err := s.BindSession(context.Background(), Session{Workspace: child.ID, HostSessionID: "h", VendorSessionID: "chosen", StartedAt: instant}, nil)
 
 			// Assert
 			if err != nil {
@@ -328,7 +328,7 @@ func TestABindBackOntoAForkedConversationDrawsItsLineageAgain(t *testing.T) {
 		t.Fatalf("ResolveFork: %v", err)
 	}
 	instant := time.Unix(1_700_000_000, 0)
-	away := Session{Workspace: child.ID, HostSessionID: "h", VendorSessionID: "v-other", StartedAt: instant, LastEngagementAt: instant}
+	away := Session{Workspace: child.ID, HostSessionID: "h", VendorSessionID: "v-other", StartedAt: instant}
 	if err := s.BindSession(ctx, away, nil); err != nil {
 		t.Fatalf("BindSession away: %v", err)
 	}
@@ -404,7 +404,7 @@ func ownForkStore(t *testing.T) (*store, *dlog.TestLogger, Workspace) {
 	instant := time.Unix(1_700_000_000, 0)
 	if err := s.PutSession(context.Background(), Session{
 		Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-queue", ConfigDir: "/root",
-		StartedAt: instant, LastEngagementAt: instant,
+		StartedAt: instant,
 	}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}

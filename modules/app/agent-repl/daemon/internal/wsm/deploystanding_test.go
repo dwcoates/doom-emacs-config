@@ -172,7 +172,7 @@ func TestOweCompaction(t *testing.T) {
 			s, _ := testStore(t)
 			ctx := context.Background()
 			ws := testWorkspace(t, s)
-			sess := Session{Workspace: ws.ID, HostSessionID: "h", VendorSessionID: tt.vendor, StartedAt: instant, LastEngagementAt: instant}
+			sess := Session{Workspace: ws.ID, HostSessionID: "h", VendorSessionID: tt.vendor, StartedAt: instant}
 			if err := s.BindSession(ctx, sess, tt.owedFirst); err != nil {
 				t.Fatal(err)
 			}

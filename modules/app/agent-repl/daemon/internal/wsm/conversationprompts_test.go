@@ -29,7 +29,7 @@ func forkedAt(t *testing.T, s *store, parent, child WorkspaceID, through int64, 
 	t.Helper()
 	ctx := context.Background()
 	instant := time.Unix(1_700_000_000, 0)
-	if err := s.PutSession(ctx, Session{Workspace: child, HostSessionID: "h-" + string(child), StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(ctx, Session{Workspace: child, HostSessionID: "h-" + string(child), StartedAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 	if err := s.PutPendingFork(ctx, PendingFork{Workspace: child, Parent: parent}); err != nil {

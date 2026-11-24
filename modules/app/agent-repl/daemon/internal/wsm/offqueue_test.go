@@ -614,7 +614,7 @@ func TestRequeueOffQueueMergeRecordsTheSessionsModelInTheSameWrite(t *testing.T)
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
-	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "h", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "h", StartedAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 	offQueued(t, s, repo, ws.ID)

@@ -734,16 +734,16 @@ func (h *harness) liveVisibility(ws ids.WorkspaceID) wsm.Visibility {
 	}})[ws]
 }
 
-// workspace registers one workspace with a live session engaged at engagedAt,
+// workspace registers one workspace with a live session whose workspace last worked at workedAt,
 // on its own repository's main checkout.
 //
 // IT IS A REPOSITORY'S MAIN WORKTREE, whose remote control is on by default
 // (wsm.RemoteControl), so the mode is RECORDED OFF: every stand-down test
 // stands for an ordinary workspace, and a test about the default arranges a
 // main worktree that keeps it (mainWorktree).
-func (h *harness) workspace(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
+func (h *harness) workspace(t *testing.T, workedAt time.Time) ids.WorkspaceID {
 	t.Helper()
-	ws := h.mainWorktree(t, engagedAt)
+	ws := h.mainWorktree(t, workedAt)
 	if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOff); err != nil {
 		t.Fatalf("SetRemoteControlMode: %v", err)
 	}
@@ -751,30 +751,30 @@ func (h *harness) workspace(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
 }
 
 // mainWorktree registers a repository's main worktree workspace with a live
-// session engaged at engagedAt, its remote control left at the default: on.
-func (h *harness) mainWorktree(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
+// session whose workspace last worked at workedAt, its remote control left at the default: on.
+func (h *harness) mainWorktree(t *testing.T, workedAt time.Time) ids.WorkspaceID {
 	t.Helper()
 	dir := t.TempDir()
-	return h.sessioned(t, dir, dir, engagedAt)
+	return h.sessioned(t, dir, dir, workedAt)
 }
 
 // linkedWorkspace registers one workspace with a live session engaged at
-// engagedAt on a LINKED worktree of a repository whose main checkout it
+// workedAt on a LINKED worktree of a repository whose main checkout it
 // registers first, session-less: the shape of every created workspace, and
 // the only one a one-shot can be (wsm.ErrMainWorkspaceOneShot).
-func (h *harness) linkedWorkspace(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
+func (h *harness) linkedWorkspace(t *testing.T, workedAt time.Time) ids.WorkspaceID {
 	t.Helper()
 	main := h.bare(t)
 	record, err := h.db.Workspace(context.Background(), main)
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	return h.sessioned(t, t.TempDir(), record.Dir, engagedAt)
+	return h.sessioned(t, t.TempDir(), record.Dir, workedAt)
 }
 
 // sessioned registers the workspace at dir, in the repository whose main
-// checkout is repoDir, with a live session engaged at engagedAt.
-func (h *harness) sessioned(t *testing.T, dir, repoDir string, engagedAt time.Time) ids.WorkspaceID {
+// checkout is repoDir, with a live session whose workspace last worked at workedAt.
+func (h *harness) sessioned(t *testing.T, dir, repoDir string, workedAt time.Time) ids.WorkspaceID {
 	t.Helper()
 	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{
 		Name: filepath.Base(dir), Branch: "feature", ParentBranch: "master", RepoDir: repoDir,
@@ -786,24 +786,52 @@ func (h *harness) sessioned(t *testing.T, dir, repoDir string, engagedAt time.Ti
 	if err := h.db.PutSession(context.Background(), wsm.Session{
 		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID),
 		VendorSessionID: "vendor-" + string(ws.ID), ConfigDir: dir,
-		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: engagedAt,
+		Model: "opus", PermissionMode: "default", StartedAt: instant,
 		ShimPID: &pid,
 	}); err != nil {
 		t.Fatalf("PutSession: %v", err)
+	}
+	if err := h.db.RecordWork(context.Background(), ws.ID, workedAt, wsm.WorkEnded); err != nil {
+		t.Fatalf("RecordWork: %v", err)
 	}
 	h.freeness.SetFree(ws.ID, true)
 	return ws.ID
 }
 
-// turnClosed records one real turn of WS, closed at ENDED: the turn clock a
-// stand-down reads (turnedSince).
+// turnClosed records one real turn of WS, closed at ENDED, and the work its
+// end recorded (the session watcher's free edge, through the cache keeper):
+// the idle clock a stand-down reads (wsm.Workspace.WorkedSince).
 func (h *harness) turnClosed(t *testing.T, ws ids.WorkspaceID, ended time.Time) {
+	t.Helper()
+	h.turnCut(t, ws, ended, wsm.CloseCompleted)
+	if err := h.db.RecordWork(context.Background(), ws, ended, wsm.WorkEnded); err != nil {
+		t.Fatalf("RecordWork: %v", err)
+	}
+}
+
+// restarted records a bring-up of WS's session at AT, as every start does
+// (workspace.Fleet.recordFacts): the session row rewritten, no work recorded.
+func (h *harness) restarted(t *testing.T, ws ids.WorkspaceID, at time.Time) {
+	t.Helper()
+	session, found, err := h.db.Session(context.Background(), ws)
+	if err != nil || !found {
+		t.Fatalf("Session = %v, %v; want the workspace's session", found, err)
+	}
+	session.StartedAt = at
+	if err := h.db.PutSession(context.Background(), session); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+}
+
+// turnCut records one turn of WS closed at ENDED as HOW, with no work
+// recorded: a turn a bounce orphaned (wsm.Store.CloseOrphans) closes so.
+func (h *harness) turnCut(t *testing.T, ws ids.WorkspaceID, ended time.Time, how wsm.TurnClose) {
 	t.Helper()
 	turn := wsm.NewTurnID()
 	if err := h.db.PutTurn(context.Background(), wsm.Turn{ID: turn, Workspace: ws, Text: "go on", Origin: "webapp", StartedAt: ended.Add(-time.Second)}); err != nil {
 		t.Fatalf("PutTurn: %v", err)
 	}
-	if err := h.db.CloseTurn(context.Background(), turn, ended, wsm.CloseCompleted); err != nil {
+	if err := h.db.CloseTurn(context.Background(), turn, ended, how); err != nil {
 		t.Fatalf("CloseTurn: %v", err)
 	}
 }

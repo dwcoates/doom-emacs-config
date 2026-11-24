@@ -297,7 +297,7 @@ func (q *queue) sendJoinLocked(ctx context.Context, d *delivery, sub Submission,
 	}
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageAfterToolCall})
 	handOver(sub.WS, success, watcher)
-	q.touchEngagement(ctx, sub.WS, log)
+	q.recordWork(ctx, sub.WS, log)
 	log.Info(opJoin, "sent the prompt to join the running turn after its current tool call; nothing was interrupted", dlog.Context{"cause": cause})
 	return joinSendSent, nil
 }

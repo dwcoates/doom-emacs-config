@@ -564,9 +564,10 @@ func (s *store) AcceptIdempotencyKey(ctx context.Context, id WorkspaceID, key st
 
 // CloseOrphans closes every turn without a terminal in ONE transaction and
 // reports what it closed. Held prompts on the workspace are left exactly as
-// they are — holds survive a shutdown — and the session's engagement is stamped
+// they are — holds survive a shutdown — and the owed resumptions are recorded
 // in the same transaction, so a crash mid-teardown can never leave half the
-// bookkeeping done.
+// bookkeeping done. The workspace's idle clock is not moved: a cut is no work
+// (lastwork.go).
 //
 // A TURN STILL OPEN HERE WAS CUT, NOT LOST (owner ruling, 2026-10-30). It was
 // running when its session went away under it -- a bounce, a forced deploy, a
@@ -616,9 +617,6 @@ func (s *store) CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time, 
 			}
 			closed = append(closed, t.ID)
 			how[t.ID] = kind
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_engagement_at = ? WHERE workspace_id = ?`, nanos(at), id); err != nil {
-			return err
 		}
 		report = OrphanReport{Turns: closed, How: how, At: at.UTC()}
 		return nil

@@ -237,13 +237,13 @@ func TestAKeepLiveOnABusySessionSendsNothingAndStopsNothing(t *testing.T) {
 func TestAnAlreadyUpWorkspaceIsBeatenAndLeftToTheOrdinaryRules(t *testing.T) {
 	tests := []struct {
 		name      string
-		freeSince *time.Time
+		workedAgo *time.Duration
 		outcome   *drain.CycleOutcome
 		wantRule  string
 		wantDowns int
 	}{
-		{name: "within its grace it stays up with no stand-down asked", freeSince: ptr(now.Add(-time.Minute)),
-			wantRule: "the session fell free less than an interval ago; the shim stays up until the next keep-alive"},
+		{name: "within its grace it stays up with no stand-down asked", workedAgo: ptr(time.Minute),
+			wantRule: "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive"},
 		{name: "past its grace the stand-down's own rule keeps it up", outcome: &drain.CycleOutcome{Why: "remote control is on; the shim stays up for claude.ai"},
 			wantRule: "remote control is on; the shim stays up for claude.ai", wantDowns: 1},
 	}
@@ -251,8 +251,9 @@ func TestAnAlreadyUpWorkspaceIsBeatenAndLeftToTheOrdinaryRules(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := keepLiveHarness(t)
-			if tt.freeSince != nil {
-				h.keeper.freeSince[theWorkspace] = *tt.freeSince
+			h.workedAgo(StandDownGrace + time.Minute)
+			if tt.workedAgo != nil {
+				h.workedAgo(*tt.workedAgo)
 			}
 
 			// Act
@@ -404,7 +405,7 @@ func TestASecondKeepLiveJoinsTheRunUnderWay(t *testing.T) {
 func TestAKeepLiveEndsWithTheBeatTimedFromTheClockAgain(t *testing.T) {
 	// Arrange
 	h := keepLiveHarness(t)
-	h.keeper.freeSince[theWorkspace] = now.Add(-time.Minute)
+	h.workedAgo(time.Minute)
 	h.keepLive()
 
 	// Act

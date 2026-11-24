@@ -197,6 +197,12 @@ type watcher struct {
 	// attaching is a pure attach's starting busy, which no judgement has
 	// found work under yet: its edge tells OnFree no work ended.
 	attaching bool
+	// worked is a busy stretch that held real work: a turn this daemon serves
+	// or live detached work. A busy stretch of the vendor's alone (a
+	// keep-alive's own turn, which the daemon serves no turn for) is no work,
+	// so its edge tells OnFree no work ended and the idle clock stands
+	// (wsm lastwork.go).
+	worked bool
 	// turnWaiters are the standing AwaitTurnEnd calls, keyed by the turn.
 	turnWaiters map[ids.TurnID][]chan turnEnd
 	// pendingTurnEnds are the turn ends recorded under mu and not yet handed

@@ -3356,7 +3356,10 @@ func (f *Fleet) recordBook(ctx context.Context, log dlog.Logger, ws ids.Workspac
 
 // recordFacts persists the session facts that outlive one shim process: the
 // vendor identity, the config dir it was spawned under, and the model and mode
-// in force. The shim pid and the shim's build are LOGGED rather than persisted,
+// in force. A START IS NO WORK: the workspace's idle clock
+// (wsm.Workspace.LastWorkAt) is not the session row's, so a keep-alive's
+// restore, a deploy's start or a takeover recorded here never moves when the
+// session parks. The shim pid and the shim's build are LOGGED rather than persisted,
 // because both belong to the process rather than to the session.
 func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, previous wsm.Session, started *conversationv1.SessionStarted, configDir, hostSessionID string, pid int) error {
 	now := f.now()
@@ -3372,7 +3375,6 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		Model:             recordedModel(previous.Model, started),
 		PermissionMode:    permissionModeName(started.GetPermissionMode()),
 		StartedAt:         previous.StartedAt,
-		LastEngagementAt:  now,
 	}
 	// A KEEP-ALIVE'S RESTORE IS RECORDED AS ONE, so every view tells a
 	// session up only for its keep-alive (dormant, wsm.Session.Dormant) from

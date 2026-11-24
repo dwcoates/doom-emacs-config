@@ -56,10 +56,13 @@ type fakeDB struct {
 
 	mu sync.Mutex
 
-	// engagements counts the delivery-time engagement stamps, and
-	// engagementCtxErr is the context error the last one was written under.
-	engagements      int
-	engagementCtxErr error
+	// works counts the delivery-time work stamps (RecordWork), workCtxErr is
+	// the context error the last one was written under, workCause its cause,
+	// and workErr what every RecordWork answers.
+	works      int
+	workCtxErr error
+	workCause  wsm.WorkCause
+	workErr    error
 
 	// owedCalls is every debt OweResumption was asked to record, claimed or
 	// not, and oweErr is what it answers.
@@ -167,13 +170,14 @@ func newFakeDB() *fakeDB {
 	}
 }
 
-// TouchEngagement records the engagement stamp every delivery writes.
-func (d *fakeDB) TouchEngagement(ctx context.Context, _ ids.WorkspaceID, _ time.Time) error {
+// RecordWork records the work stamp every delivery writes.
+func (d *fakeDB) RecordWork(ctx context.Context, _ ids.WorkspaceID, _ time.Time, cause wsm.WorkCause) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.engagements++
-	d.engagementCtxErr = ctx.Err()
-	return nil
+	d.works++
+	d.workCtxErr = ctx.Err()
+	d.workCause = cause
+	return d.workErr
 }
 
 func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {

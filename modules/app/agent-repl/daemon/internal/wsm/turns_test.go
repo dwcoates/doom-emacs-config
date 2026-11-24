@@ -423,28 +423,31 @@ func TestCloseOrphansTheUserOrderedOwesNothing(t *testing.T) {
 	}
 }
 
-func TestCloseOrphansStampsEngagement(t *testing.T) {
-	// Arrange
+func TestCloseOrphansLeavesTheIdleClock(t *testing.T) {
+	// Arrange — a cut is no work: a deploy's bounce never moves the instant
+	// a session is parked from (lastwork.go).
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
+	if err := s.RecordWork(context.Background(), ws.ID, instant, WorkPromptDelivered); err != nil {
+		t.Fatalf("RecordWork: %v", err)
+	}
 	openTurn(t, s, ws.ID)
-	at := instant.Add(time.Hour)
 
 	// Act
-	if _, err := s.CloseOrphans(context.Background(), ws.ID, at, ResumeCut); err != nil {
+	if _, err := s.CloseOrphans(context.Background(), ws.ID, instant.Add(time.Hour), ResumeCut); err != nil {
 		t.Fatalf("CloseOrphans: %v", err)
 	}
 
 	// Assert
-	session, _, err := s.Session(context.Background(), ws.ID)
+	got, err := s.Workspace(context.Background(), ws.ID)
 	if err != nil {
-		t.Fatalf("Session: %v", err)
+		t.Fatalf("Workspace: %v", err)
 	}
-	if !session.LastEngagementAt.Equal(at) {
-		t.Fatalf("last engagement = %v, want %v", session.LastEngagementAt, at)
+	if got.LastWorkAt == nil || !got.LastWorkAt.Equal(instant) {
+		t.Fatalf("last work = %v, want the untouched %v", got.LastWorkAt, instant)
 	}
 }
 
@@ -475,7 +478,7 @@ func TestCloseOrphansIsOneTransaction(t *testing.T) {
 	// crash mid-teardown can never leave half the bookkeeping done.
 	s, log := testStore(t)
 	ws := testWorkspace(t, s)
-	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 	sound := openTurn(t, s, ws.ID)
@@ -496,12 +499,12 @@ func TestCloseOrphansIsOneTransaction(t *testing.T) {
 	if !isNull(t, s, `SELECT closed_at FROM turns WHERE id = ?`, sound) {
 		t.Fatalf("the sound turn was closed despite the aborted transaction")
 	}
-	session, _, err := s.Session(context.Background(), ws.ID)
+	owed, err := s.OwedTurns(context.Background(), ws.ID)
 	if err != nil {
-		t.Fatalf("Session: %v", err)
+		t.Fatalf("OwedTurns: %v", err)
 	}
-	if !session.LastEngagementAt.Equal(instant) {
-		t.Fatalf("engagement = %v, want the untouched %v", session.LastEngagementAt, instant)
+	if len(owed) != 0 {
+		t.Fatalf("owed turns = %v, want none recorded by the aborted transaction", owed)
 	}
 	if !loggedOperation(log, "daemon.wsm.close_orphans", "error") {
 		t.Fatalf("the aborted teardown was not logged at error: %v", log.Records())

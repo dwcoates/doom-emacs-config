@@ -108,6 +108,11 @@ type Workspace struct {
 	// SettingsVisitAt is when a settings pick started the workspace's shim,
 	// set while that visit stands (settingsvisit.go); nil otherwise.
 	SettingsVisitAt *time.Time
+	// LastWorkAt is THE IDLE CLOCK: when the workspace last did real work (a
+	// prompt delivered, a real turn or live detached work ending), written by
+	// RecordWork alone (lastwork.go); nil when it never has. Every park reads
+	// it through IdleSince.
+	LastWorkAt *time.Time
 	// KeepaliveRunBeats is how many keep-alives the daemon has sent the
 	// workspace, for either of its conversations, since its last turn closed
 	// (keepaliverun.go): 0 once a turn closes. Derived on read.
@@ -576,8 +581,6 @@ type Session struct {
 	PermissionMode string
 	// StartedAt is when the session was first started.
 	StartedAt time.Time
-	// LastEngagementAt is the idle sweep's input.
-	LastEngagementAt time.Time
 	// KeepaliveRestoredAt is when a keep-alive's restore last brought the
 	// session up (shimlife.StartKeepalive), nil when the bring-up that last
 	// recorded the session had another cause. A session up only for its
