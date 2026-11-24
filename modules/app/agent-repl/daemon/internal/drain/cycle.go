@@ -73,7 +73,9 @@ var visitReason = standDownReason{
 // ruling, 2026-11-23): the daemon raises a gate from the shim's projection the
 // moment the cache lapses, over a session that may still run on its shim, and
 // the gate's answer spawns the shim it resumes through, which refuses while
-// another runs the conversation. The park is otherwise a cold park's.
+// another runs the conversation. In remote control the park is taken all the
+// same, and the gate then holds its bridge (remoteBridges). The park is
+// otherwise a cold park's.
 
 // opCold is the operation a cold cache's stand-down records under.
 const opCold = "daemon.drain.cold_park"
@@ -95,7 +97,7 @@ var coldGateReason = standDownReason{
 	done:    logsite.Msg("parked an idle session whose cold gate was raised"),
 	life:    shimlife.StandDownColdGate,
 	trigger: "cold_gate_park",
-	remote:  remoteSpares,
+	remote:  remoteBridges,
 	atGate:  true,
 }
 

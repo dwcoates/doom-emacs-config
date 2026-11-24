@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -147,5 +149,145 @@ func TestAProjectedGateWhoseReadsFailIsRefusedAndLogged(t *testing.T) {
 				t.Fatal("a gate stands, want none after a failed read")
 			}
 		})
+	}
+}
+
+// projectedPayment is the payment for the read projectedCold names on
+// vendor-1, priced for MODEL.
+func projectedPayment(model string) wsm.ColdReadPayment {
+	return wsm.ColdReadPayment{VendorSessionID: "vendor-1", LastRequestAtMs: projectedCold().GetLastRequestAtMs(), Model: model, PaidAt: fixedNow}
+}
+
+func TestAProjectedGateIsNotRaisedForTheReadTheUserPaidFor(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	session := f.db.sessions[ws]
+	session.Model = "opus"
+	f.db.sessions[ws] = session
+	if err := f.db.PutColdReadPayment(context.Background(), ws, projectedPayment("opus")); err != nil {
+		t.Fatalf("seed the payment: %v", err)
+	}
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+
+	// Assert
+	if err != nil || raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want no raise for a paid read", raised, err)
+	}
+	if _, ok := f.fleet.ColdGate(ws); ok {
+		t.Fatal("a gate stands over the read the user already paid for")
+	}
+	if _, ok := f.db.gates[ws]; ok {
+		t.Fatal("a gate was recorded over the read the user already paid for")
+	}
+	if got, ok := f.db.coldPayment(ws); !ok || got != projectedPayment("opus") {
+		t.Fatalf("payment = %+v (found=%v), want it kept for the read it pays for", got, ok)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opColdGate,
+		Message: "the projected cold read is the one the user already paid for; no gate is raised"})
+	if !ok || record.Context["vendor_session_id"] != "vendor-1" || record.Context["last_request_at_ms"] != projectedCold().GetLastRequestAtMs() {
+		t.Fatalf("records = %+v, want the declined raise naming the paid read", f.log.logger.Records())
+	}
+}
+
+func TestAProjectedGateIsRaisedOverAPaymentForADifferentRead(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	session := f.db.sessions[ws]
+	session.Model = "opus"
+	f.db.sessions[ws] = session
+	stale := projectedPayment("opus")
+	stale.LastRequestAtMs--
+	if err := f.db.PutColdReadPayment(context.Background(), ws, stale); err != nil {
+		t.Fatalf("seed the payment: %v", err)
+	}
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+
+	// Assert
+	if err != nil || !raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the gate raised for a read nobody paid for", raised, err)
+	}
+	if _, ok := f.db.coldPayment(ws); ok {
+		t.Fatal("the spent payment still stands, want it dropped")
+	}
+}
+
+func TestAProjectedGateWhosePaymentCannotBeReadIsRefused(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.coldPaymentOfErr = errFake
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+
+	// Assert
+	if err == nil || raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the failed payment read surfaced", raised, err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opColdReadPayment,
+		Message: "the cold read payment could not be read; the bring-up is refused"}); !ok {
+		t.Fatalf("records = %+v, want the failed payment read recorded", f.log.logger.Records())
+	}
+	if _, ok := f.fleet.ColdGate(ws); ok {
+		t.Fatal("a gate stands, want none after a failed payment read")
+	}
+}
+
+func TestAProjectedGateInRemoteControlWithNoShimSpawnsTheShimThatHoldsItsBridge(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.setRemote(ws, wsm.RemoteControl{On: true})
+	f.client.bridgeFrames = make(chan *shimv1.HoldParkedBridgeResponse)
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+	f.client.bridgeFrames <- openedFrame("bridge-1")
+	settled(t, f)
+
+	// Assert
+	if err != nil || !raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the gate raised", raised, err)
+	}
+	if len(f.supervisor.spawns) != 1 || len(f.client.bridges) != 1 || len(f.client.requests) != 0 {
+		t.Fatalf("spawns %d, bridges %d, starts %d; want one shim spawned for the bridge and no session started",
+			len(f.supervisor.spawns), len(f.client.bridges), len(f.client.requests))
+	}
+}
+
+func TestAProjectedGateOverARunningSessionInRemoteControlLeavesTheBridgeToItsPark(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.db.setRemote(ws, wsm.RemoteControl{On: true})
+	spawned := len(f.supervisor.spawns)
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+	if !f.fleet.DrainStarts(time.Minute) {
+		t.Fatal("the fleet's detached work did not finish")
+	}
+
+	// Assert
+	if err != nil || !raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the gate raised", raised, err)
+	}
+	if len(f.supervisor.spawns) != spawned || len(f.client.bridges) != 0 {
+		t.Fatalf("spawns %d (were %d), bridges %d; want no shim spawned beside the running session", len(f.supervisor.spawns), spawned, len(f.client.bridges))
+	}
+	if _, ok := bridgeRecord(f, "info", "the gate stands over a session still running; its park bridges the gate"); !ok {
+		t.Fatalf("records = %+v, want the bridge left to the park", f.log.logger.Records())
+	}
+	if _, ok := bridgeRecord(f, "error", "could not spawn the shim that holds the parked workspace's bridge"); ok {
+		t.Fatal("the bridge was attempted beside the running session")
 	}
 }

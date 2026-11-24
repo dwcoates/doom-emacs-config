@@ -273,6 +273,15 @@ const (
 	// (owner ruling, 2026-11-09): a session nobody, on this machine or on
 	// claude.ai, engaged for the whole cutoff is parked like any other.
 	remoteParks
+	// remoteBridges: the session is parked all the same, and its standing
+	// gate then holds the parked conversation's bridge (Deps.BridgeGate).
+	// Only a cold gate's park: claude.ai reaches a gated workspace through
+	// that bridge (workspace/parkedbridge.go), and a session spared at its
+	// gate left every answer refused, since the answer's resume finds a
+	// shim already running the conversation (2026-11-23 19:59:20,
+	// merge-queue-stall-triage: two compact answers in a row refused
+	// no_session, the gate standing again after each).
+	remoteBridges
 )
 
 // String names the policy for a record.
@@ -282,6 +291,8 @@ func (p remotePolicy) String() string {
 		return "spares"
 	case remoteParks:
 		return "parks"
+	case remoteBridges:
+		return "bridges"
 	default:
 		return fmt.Sprintf("remotePolicy(%d)", int(p))
 	}
@@ -370,7 +381,7 @@ func (c *controller) observeIdleBeforePark(log dlog.Logger, fields dlog.Context,
 
 // parkOnce is park's one attempt, before its hold and its observation.
 func (c *controller) parkOnce(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) parkOutcome {
-	if why.remote != remoteSpares && why.remote != remoteParks {
+	if why.remote != remoteSpares && why.remote != remoteParks && why.remote != remoteBridges {
 		panic(fmt.Sprintf("drain: the %s stand-down names no remote-control policy (%s)", why.op, why.remote))
 	}
 	fields = dlog.Merge(fields, dlog.Context{"trigger": why.trigger})
@@ -549,6 +560,11 @@ func (c *controller) parkOnce(ctx context.Context, log dlog.Logger, ws ids.Works
 		}
 	}
 	log.Log(dlog.LevelInfo, why.op, why.done, fields)
+	if remote.On && why.remote == remoteBridges {
+		// THE BRIDGE COMES AFTER THE PARK IS RECORDED, so the shim it spawns
+		// finds the conversation free; the fleet holds it detached.
+		c.deps.BridgeGate(ctx, ws)
+	}
 	return parkDone
 }
 

@@ -1917,8 +1917,8 @@ func allReasons(c *controller) []standDownReason {
 
 // EVERY STAND-DOWN PATH GOES THROUGH THE ONE GATE: the shim is stood down,
 // and the mode read, only in park, and every reason park is handed names
-// its trigger and a remote-control policy, which only the idle sweep's lets
-// park a session in remote control.
+// its trigger and a remote-control policy, which only the idle sweep's and a
+// cold gate's let park a session in remote control.
 func TestEveryStandDownPathGoesThroughTheRemoteControlGate(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -1951,8 +1951,11 @@ func TestEveryStandDownPathGoesThroughTheRemoteControlGate(t *testing.T) {
 			t.Errorf("the %s reason names no trigger", reason.op)
 		}
 		want := remoteSpares
-		if reason.op == opSweep {
+		switch {
+		case reason.op == opSweep:
 			want = remoteParks
+		case reason.atGate:
+			want = remoteBridges
 		}
 		if reason.remote != want {
 			t.Errorf("the %s reason's remote-control policy = %s, want %s", reason.op, reason.remote, want)
@@ -2113,5 +2116,20 @@ func TestAParkWithNoIdleStartObservesNothingAndSaysSo(t *testing.T) {
 	record := recordWith(t, h, opSweep, "the parked session has neither a start nor a turn end on record; its idle time before the park is not observed")
 	if record.Level != "error" || record.Context["invariant_violation"] == nil {
 		t.Fatalf("record = %+v, want an ERROR naming the broken invariant", record)
+	}
+}
+
+func TestNewRefusesWithoutAColdGateBridge(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.c.deps
+	deps.BridgeGate = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "cold gate's bridge") {
+		t.Fatalf("New = %v, want the missing cold gate bridge refused", err)
 	}
 }

@@ -242,6 +242,10 @@ type Deps struct {
 	// goroutine, as WS's work, on a lifetime the daemon's exit ends and joins
 	// (workspace.Fleet.Detach). Required.
 	Detach func(ws ids.WorkspaceID, run func(context.Context))
+	// BridgeGate gives WS's standing cold gate the shim holding its parked
+	// conversation's bridge, once a cold gate's park of a workspace in remote
+	// control is recorded (workspace.Fleet.BridgeGate). Required.
+	BridgeGate func(ctx context.Context, ws ids.WorkspaceID)
 	// Clock is the controller's view of time, injected so a schedule's deadline
 	// and the sweep's cadence are assertable without a real one.
 	Clock Clock
@@ -453,6 +457,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Detach == nil {
 		return nil, errors.New("drain: a detached lifetime is required")
+	}
+	if deps.BridgeGate == nil {
+		return nil, errors.New("drain: a cold gate's bridge is required")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}

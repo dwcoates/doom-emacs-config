@@ -216,7 +216,8 @@ type Deps struct {
 	ColdDown func(ws ids.WorkspaceID, since time.Time, atGate bool)
 	// RaiseGate raises WS's cold gate from COLD, the facts its shim projected,
 	// with no shim started (workspace.Fleet.RaiseProjectedGate), answering
-	// whether it did: false when a turn runs or no session is held.
+	// whether it did: false when a turn runs, no session is held, or the
+	// projected read is the one the user already paid for.
 	RaiseGate func(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (bool, error)
 	// VisitDown asks for WS's session to be stood down, the settings pick
 	// that started it at SINCE having ended (drain.Controller.VisitDown).
