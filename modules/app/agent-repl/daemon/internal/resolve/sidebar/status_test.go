@@ -1603,10 +1603,10 @@ func TestTheResultAndViewedTransitionsAreRecorded(t *testing.T) {
 		{name: "a new prompt clears a failed result", how: wsm.CloseFailed, act: func(r sidebarResolver) {
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 		}, operation: "daemon.sidebar.result_cleared"},
-		{name: "a status change lowers the viewed marker", how: wsm.CloseCompleted, act: func(r sidebarResolver) {
+		{name: "a new turn lowers the viewed marker", how: wsm.CloseCompleted, act: func(r sidebarResolver) {
 			r.SetInteracted(theWS, epoch)
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-		}, operation: "daemon.sidebar.row_viewed_cleared"},
+		}, operation: "daemon.sidebar.viewed_cleared_by_turn"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

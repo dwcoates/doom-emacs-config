@@ -164,7 +164,7 @@ func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[id
 		return wsm.VisibilityInput{
 			ID:          id,
 			Working:     workingArms[arm],
-			Unviewed:    isTurnEndArm(arm) && !s.viewedOn(arm),
+			Unviewed:    isTurnEndArm(arm) && !s.viewed(),
 			Starting:    arm == startingArm || arm == noSessionYetArm,
 			TopPriority: topPriority[id],
 			Selected:    rc.selected != nil && *rc.selected == id,

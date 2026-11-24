@@ -1079,7 +1079,7 @@ func TestATurnsEndIsRecordedNamingItsContextCut(t *testing.T) {
 	t.Fatal("no daemon.sidebar.result_ended record naming the clear")
 }
 
-func TestTheBackgroundEndingLowersTheViewedMarker(t *testing.T) {
+func TestTheBackgroundEndingLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange: the user interacted with the idle_async row.
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1098,8 +1098,8 @@ func TestTheBackgroundEndingLowersTheViewedMarker(t *testing.T) {
 	if got := statusName(row); got != "done" {
 		t.Fatalf("status = %q, want done", got)
 	}
-	if got := row.GetViewed(); got != nil {
-		t.Fatalf("viewed = %v, want unset: idle_async to done is a status change", got)
+	if got := row.GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want it standing: only another turn lowers the marker")
 	}
 }
 
@@ -1336,7 +1336,7 @@ func TestRevivingMarkerIsPerRow(t *testing.T) {
 	}
 }
 
-func TestALinkBlipLowersTheViewedMarker(t *testing.T) {
+func TestALinkBlipLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange: a done row the user has interacted with.
 	r := finished(t, arrange(t))
 	r.SetInteracted(theWS, epoch)
@@ -1345,14 +1345,32 @@ func TestALinkBlipLowersTheViewedMarker(t *testing.T) {
 	// Act: the route comes back.
 	r.OnLink(theWS, shimclient.LinkConnected)
 
-	// Assert: done to severed and back are two status changes, so the row is
-	// FULL until the user interacts again.
+	// Assert: done to severed and back is no turn, so the row stays PARTIAL.
 	row := onlyRow(t, r)
 	if got := statusName(row); got != "done" {
 		t.Fatalf("status = %q, want done — the arrangement did not restore the link", got)
 	}
-	if got := row.GetViewed(); got != nil {
-		t.Fatalf("viewed = %v, want unset after the blip's status changes", got)
+	if got := row.GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want it standing after the blip: only another turn lowers it")
+	}
+}
+
+func TestAnInteractionDuringATurnIsLoweredByThatTurnsEnd(t *testing.T) {
+	// Arrange: the user scrolls a running turn.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.AckTurn(theWS)
+	r.SetInteracted(theWS, epoch)
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want the running row viewed — the arrangement did not interact")
+	}
+
+	// Act: the turn ends.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert: its result is one the user has not read.
+	if got := onlyRow(t, r).GetViewed(); got != nil {
+		t.Fatalf("viewed = %v, want unset: a turn's end lowers the marker", got)
 	}
 }
 

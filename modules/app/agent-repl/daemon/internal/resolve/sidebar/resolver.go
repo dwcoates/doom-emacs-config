@@ -1144,13 +1144,13 @@ func (r *resolver) SetInteracted(ws ids.WorkspaceID, at time.Time) {
 					return !newest
 				}
 				log.Debug("daemon.sidebar.interaction_restamped",
-					"the row was already viewed on its status; only its interaction instant moved", dlog.Context{
+					"the row was already viewed; only its interaction instant moved", dlog.Context{
 						"status": s.lastArm, "reorders": !newest,
 					})
 				return !newest
 			}
 			log.Info("daemon.sidebar.row_viewed",
-				"the user interacted with the workspace, so its row is viewed until its next status change", dlog.Context{
+				"the user interacted with the workspace, so its row is viewed until its next turn", dlog.Context{
 					"status": s.viewedArm, "was": was,
 				})
 			r.countResultRead(ReadByInteraction)
@@ -1298,9 +1298,9 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 				log.Info("daemon.sidebar.result_cleared",
 					"a new prompt started a turn, so the last turn's end no longer holds the row", nil)
 			}
-			if turn != nil && s.dropRestoredViewed() {
-				log.Info("daemon.sidebar.viewed_restore_dropped",
-					"a new turn started before the row drew its restored viewed status, so it is not viewed", nil)
+			if turn != nil && s.clearViewedForTurn() {
+				log.Info("daemon.sidebar.viewed_cleared_by_turn",
+					"a new turn started, so the row is no longer viewed", dlog.Context{"edge": "start"})
 			}
 			s.startTurn(turn)
 		})
@@ -1344,9 +1344,9 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn_ended", logsite.Msg("the roster took the turn's close"),
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			cut := contextCut(s.turn)
-			if s.dropRestoredViewed() {
-				log.Info("daemon.sidebar.viewed_restore_dropped",
-					"a turn ended before the row drew its restored viewed status, so it is not viewed", nil)
+			if s.clearViewedForTurn() {
+				log.Info("daemon.sidebar.viewed_cleared_by_turn",
+					"the turn ended, so the row is no longer viewed", dlog.Context{"edge": "end"})
 			}
 			s.turn = nil
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
@@ -1374,8 +1374,8 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 					})
 				return
 			}
-			// THE ROW IS NOT VIEWED BY ITS OWN END: the status change it makes
-			// lowers the viewed marker like any other, a completed /clear, a
+			// THE ROW IS NOT VIEWED BY ITS OWN END: a turn's end lowers the
+			// viewed marker (clearViewedForTurn, above), a completed /clear, a
 			// compaction and an interrupt included, and only the user's next
 			// interaction raises it (frontend.v1.RosterRowViewed).
 			s.result = resultEnded

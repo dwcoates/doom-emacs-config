@@ -319,7 +319,7 @@ func asyncMergingMarker(asyncMerging bool, arm string, log dlog.Logger) *fronten
 // the marker is the one extra fact the surfaces draw, inking the name in the
 // turn end's color while the dot or `[N]` keeps the background's yellow.
 func idleAsyncUnreadMarker(s *wsState, arm string, log dlog.Logger) *frontendv1.RosterRowIdleAsyncUnread {
-	if arm != "idle_async" || !s.resultEndedNow() || s.viewedOn(arm) {
+	if arm != "idle_async" || !s.resultEndedNow() || s.viewed() {
 		return nil
 	}
 	end := s.turnEndArm()

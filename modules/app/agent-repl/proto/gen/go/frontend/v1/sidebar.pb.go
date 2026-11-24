@@ -3676,8 +3676,8 @@ func (*RosterRowAttention) Descriptor() ([]byte, []int) {
 // because the tab-bar entry and this row are two drawings of ONE mode and may
 // never disagree.
 //
-// PARTIAL means "you have interacted with this workspace since its status last
-// changed". The marker changes nothing about the lifecycle: the status dot
+// PARTIAL means "you have interacted with this workspace since its last turn
+// started or ended". The marker changes nothing about the lifecycle: the status dot
 // keeps its colour in either mode, and only the row's NAME text recedes to
 // the muted colour while the marker stands. FULL draws the name in the status
 // colour.
@@ -3687,15 +3687,17 @@ func (*RosterRowAttention) Descriptor() ([]byte, []int) {
 // feed with the editor's keys, or following a link in its page. Selecting the
 // workspace, or looking at it for any length of time, raises nothing.
 //
-// EVERY STATUS CHANGE LOWERS IT, on any arm, and no status is exempt from
-// either edge: a running turn the user scrolls is PARTIAL until its next
-// status change, and a finished one is FULL until the user interacts with it.
+// ONLY ANOTHER TURN LOWERS IT: a turn's start or its end. Any other status
+// change leaves it standing, so a workspace whose session parks, revives,
+// loses and regains its link, or is folded away and back stays PARTIAL. A
+// running turn the user scrolls is PARTIAL until that turn ends, and a
+// finished one is FULL until the user interacts with it.
 // A workspace that is working stays VISIBLE whatever this marker says
 // (RosterRowVisibility), so being PARTIAL never unloads a running workspace.
 //
-// THE DAEMON DERIVES IT, in the same render as the row's `status`, from the
-// arm the user last interacted on: the marker stands exactly while that is the
-// row's arm and no status change has come since. It is durable, so a restart
+// THE DAEMON DERIVES IT, in the same render as the row's `status`: the marker
+// stands exactly while the user has interacted since the last turn edge. It
+// is durable, so a restart
 // of the daemon draws the row as it stood. A client draws it as it arrives,
 // with no rule of its own.
 type RosterRowViewed struct {
@@ -3756,8 +3758,7 @@ func (*RosterRowViewed) Descriptor() ([]byte, []int) {
 // (agentrepl.v1.ReportUserInteraction) draws the row PARTIAL, as
 // RosterRowViewed states, and the next push omits this marker, so the whole
 // row draws the background's yellow. Like every viewed marker it is lowered
-// by the row's next status change; a new turn resets the result and this
-// marker with it. The daemon resolves the marker in the
+// by the next turn, which resets the result and this marker with it. The daemon resolves the marker in the
 // same render as `status`, so a client draws it as it arrives, with no rule
 // of its own; a row carrying it on any arm but `idle_async` is a contract
 // breach.

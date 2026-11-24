@@ -113,28 +113,22 @@ type wsState struct {
 	// sink. A render whose result differs reports it (resolver.row).
 	persisted *wsm.TurnResult
 
-	// viewedArm is the VIEWED FACT: the status arm the user last interacted
-	// with the workspace on (SetInteracted), empty when the workspace is not
-	// viewed. The row's viewed (PARTIAL) marker is DERIVED from it
-	// (`viewedOn`). Every status change clears it (resolver.row), on any arm:
-	// the user has not interacted with what the row now shows.
+	// viewedArm is the VIEWED FACT: the status arm the user's interaction
+	// viewed the workspace on (SetInteracted), empty when the workspace is not
+	// viewed. The row's viewed (PARTIAL) marker is DERIVED from it (`viewed`).
+	// ONLY ANOTHER TURN CLEARS IT (owner ruling, 2026-11-24): a turn's start
+	// or its end (clearViewedForTurn), never any other status change, so a
+	// session that parks, revives, blips its link or is folded away and back
+	// keeps the row viewed. The arm is kept as evidence of what was viewed.
 	viewedArm string
 	// persistedViewed is the viewed arm the durable record holds, as far as
 	// this resolver knows; a render whose viewed arm differs reports it
 	// (noteViewed).
 	persistedViewed string
 	// viewedSettled reports that the viewed fact has been decided: by a live
-	// interaction or status change, or by seeding it ONCE from the durable
-	// record (restoreViewed).
+	// interaction or turn, or by seeding it ONCE from the durable record
+	// (restoreViewed).
 	viewedSettled bool
-	// viewedRestored reports a viewed arm seeded from the durable record that
-	// the row has not drawn yet. A booting row passes through the arms of its
-	// bring-up (none, init) before it settles, and none of them is a status
-	// change the user missed, so a restored fact waits for its own arm rather
-	// than being lowered by them; it becomes live the first time the row draws
-	// it (resolver.row). A turn the daemon accepts or closes meanwhile is a
-	// real change, and drops it (dropRestoredViewed).
-	viewedRestored bool
 	// interactedAt is when the user last interacted with the workspace, as
 	// this resolver heard it (SetInteracted); nil until it has. The row
 	// states the later of it and the durable record's.
@@ -301,11 +295,8 @@ func (s *wsState) restoreResult(rec wsm.Workspace) bool {
 }
 
 // restoreViewed seeds the viewed fact ONCE from the workspace's durable
-// record, while no live interaction or status change has decided it, so a
-// daemon that did not see the user's interaction draws the row viewed as it
-// stood. The arm it seeds is still only drawn while it is the row's arm
-// (viewedOn), and the first arm this resolver publishes clears it when it is
-// another (resolver.row).
+// record, while no live interaction or turn has decided it, so a daemon that
+// did not see the user's interaction draws the row viewed as it stood.
 func (s *wsState) restoreViewed(rec wsm.Workspace) {
 	if s.viewedSettled {
 		return
@@ -313,17 +304,16 @@ func (s *wsState) restoreViewed(rec wsm.Workspace) {
 	s.viewedSettled = true
 	s.viewedArm = rec.ViewedStatus
 	s.persistedViewed = rec.ViewedStatus
-	s.viewedRestored = rec.ViewedStatus != ""
 }
 
-// dropRestoredViewed drops a restored viewed fact the row has not drawn yet:
-// a turn accepted or closed since the restore is a status change the user did
-// not interact with. It answers whether it dropped one.
-func (s *wsState) dropRestoredViewed() bool {
-	if !s.viewedRestored {
+// clearViewedForTurn clears the viewed fact because a turn started or ended:
+// the one change the user has not seen yet. It answers whether the row was
+// viewed.
+func (s *wsState) clearViewedForTurn() bool {
+	s.viewedSettled = true
+	if s.viewedArm == "" {
 		return false
 	}
-	s.viewedRestored = false
 	s.viewedArm = ""
 	return true
 }
@@ -388,15 +378,13 @@ func (s *wsState) noteArm(arm string) (string, bool) {
 	return previous, changed
 }
 
-// viewedOn reports whether a row on arm draws the viewed (PARTIAL) marker. It
-// is DERIVED, never stored: the marker stands exactly when arm is the arm the
-// user last interacted with the workspace on, and no status change has come
-// since (the change clears the fact, resolver.row). Every arm can be viewed:
-// "you have interacted with this since it last changed" is as true of a
-// running turn as of a finished one, and a working workspace stays visible
-// whatever this says (visibility.go).
-func (s *wsState) viewedOn(arm string) bool {
-	return s.viewedArm != "" && s.viewedArm == arm
+// viewed reports whether the row draws the viewed (PARTIAL) marker: the user
+// interacted with the workspace since its last turn started or ended. Every
+// arm can be viewed: "you have interacted with this since its last turn" is as
+// true of a running turn as of a finished one, and a working workspace stays
+// visible whatever this says (visibility.go).
+func (s *wsState) viewed() bool {
+	return s.viewedArm != ""
 }
 
 // interacted records that the user interacted with the workspace at AT, on
@@ -408,11 +396,7 @@ func (s *wsState) interacted(at time.Time) bool {
 		s.interactedAt = &at
 	}
 	s.viewedSettled = true
-	if !s.lastArmSeen {
-		return false
-	}
-	s.viewedRestored = false
-	if s.viewedArm == s.lastArm {
+	if !s.lastArmSeen || s.viewedArm != "" {
 		return false
 	}
 	s.viewedArm = s.lastArm

@@ -243,7 +243,7 @@ const (
 // this order: the interaction instant is written durably first
 // (wsm.SetInteractedAt), so the recency the roster then states is one a
 // restart keeps, and the roster is told (Sidebar.SetInteracted), which draws
-// the row viewed on the status it stands on until its next status change.
+// the row viewed until its next turn starts or ends.
 //
 // It does not revive a parked session, because interacting with a page is not
 // prompting it, and it is idempotent: interacting again with a viewed
@@ -259,7 +259,7 @@ func (v *verbs) RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind 
 		log.Error(opInteraction, "could not record the user's interaction instant", dlog.WithCause(fields, err))
 		return fmt.Errorf("record interaction with %q: %w", ws, err)
 	}
-	log.Debug(opInteraction, "the user interacted with the workspace; its row is viewed until its next status change", fields)
+	log.Debug(opInteraction, "the user interacted with the workspace; its row is viewed until its next turn", fields)
 	v.deps.Sidebar.SetInteracted(ws, at)
 	return nil
 }

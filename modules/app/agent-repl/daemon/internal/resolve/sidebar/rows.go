@@ -98,7 +98,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		if !s.lastArmSeen {
 			armName = statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
 		}
-		wasViewed = s.viewedOn(armName)
+		wasViewed = s.viewed()
 	} else {
 		// THE ARM WAS DECIDED BEFORE ANY ROW (resolveArms), so the visibility
 		// the rows are numbered by read the same arm this row draws.
@@ -114,28 +114,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		// THE MARKER IS DERIVED FROM THE VIEWED FACT, in the same breath as
 		// the status, so the row's display mode cannot lag its status by a
 		// push (`wsState.viewedOn`).
-		wasViewed = s.lastArmSeen && s.viewedOn(s.lastArm)
+		wasViewed = s.viewed()
 		var previousArm string
 		previousArm, armChanged = s.noteArm(armName)
-		// EVERY STATUS CHANGE LOWERS THE VIEWED MARKER, on any arm: the user
-		// has not interacted with what the row now shows. A fact the durable
-		// record seeded is the one exception until the row first draws its
-		// arm (wsState.viewedRestored): the bring-up's arms before it are no
-		// change the user missed.
-		if s.viewedRestored && armName == s.viewedArm {
-			s.viewedRestored = false
-			rowLog.Info("daemon.sidebar.viewed_restored",
-				"the row drew the status the user last interacted on before this daemon, so it is viewed as it stood", dlog.Context{
-					"status": armName,
-				})
-		} else if s.viewedArm != "" && !s.viewedRestored && armChanged {
-			rowLog.Debug("daemon.sidebar.row_viewed_cleared",
-				"the row's status changed, so it is no longer viewed and is drawn FULL", dlog.Context{
-					"status": armName, "viewed_on": s.viewedArm,
-				})
-			s.viewedArm = ""
-			s.viewedSettled = true
-		}
 		r.noteViewed(rec.ID, s, !mirrored, rowLog)
 		if armChanged {
 			r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
@@ -156,7 +137,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if !r.readOnly {
 		r.stats.rowsBuilt++
 	}
-	viewed := s.viewedOn(armName)
+	viewed := s.viewed()
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
 	detachedLive := s.asyncLive()

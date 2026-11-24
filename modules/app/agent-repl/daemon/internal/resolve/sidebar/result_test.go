@@ -134,7 +134,7 @@ func viewedResolver(t *testing.T, stored *wsm.TurnResult, viewed string) (sideba
 	return r, reports
 }
 
-func TestARestoredViewedFactDrawsTheRowOnlyOnItsOwnArm(t *testing.T) {
+func TestARestoredViewedFactDrawsTheRowViewedWhateverItsArm(t *testing.T) {
 	tests := []struct {
 		name        string
 		viewed      string
@@ -142,7 +142,7 @@ func TestARestoredViewedFactDrawsTheRowOnlyOnItsOwnArm(t *testing.T) {
 		wantReports []viewedReport
 	}{
 		{name: "viewed on the arm the row draws is PARTIAL", viewed: "done", wantViewed: true},
-		{name: "viewed on another arm is FULL while the row has not drawn it", viewed: "thinking"},
+		{name: "viewed on another arm is PARTIAL: only a turn lowers it", viewed: "thinking", wantViewed: true},
 		{name: "no durable fact is FULL", viewed: ""},
 	}
 	for _, tt := range tests {
@@ -165,7 +165,7 @@ func TestARestoredViewedFactDrawsTheRowOnlyOnItsOwnArm(t *testing.T) {
 	}
 }
 
-func TestTheViewedFactIsReportedWhenSetAndWhenAStatusChangeClearsIt(t *testing.T) {
+func TestTheViewedFactIsReportedWhenSetAndWhenATurnClearsIt(t *testing.T) {
 	// Arrange.
 	r, reports := viewedResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone}, "")
 

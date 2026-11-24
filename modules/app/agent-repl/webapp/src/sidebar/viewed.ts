@@ -4,7 +4,7 @@
  * THE MODE IS THE CONTRACT, not a decoration. `frontend.v1.RosterRowViewed`
  * states it once, for every surface that draws a workspace: ABSENT is FULL and
  * PRESENT is PARTIAL, and PARTIAL means "you have interacted with this
- * workspace since its status last changed". The Emacs tab-bar implements the same two
+ * workspace since its last turn started or ended". The Emacs tab-bar implements the same two
  * words off the same message — full is the whole `[N] <name>` entry in the
  * status colour, partial is the bracket alone — and a divergence between the
  * two surfaces is a defect rather than a taste difference.
@@ -21,8 +21,8 @@
  * the user's interactions (agentrepl.v1.ReportUserInteraction) in the same
  * render that resolves the row's status, so every push carries a status and
  * a marker that already agree. This end keeps no memory and applies no rule of
- * its own: every status change arrives FULL on the very push that changes the
- * status, and only the user's next interaction draws it PARTIAL again.
+ * its own: a turn's start or end arrives FULL on the very push that carries it,
+ * and only the user's next interaction draws it PARTIAL again.
  */
 import { createLogger } from "../log.js";
 
