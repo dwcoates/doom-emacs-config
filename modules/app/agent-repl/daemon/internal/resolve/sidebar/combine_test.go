@@ -228,3 +228,148 @@ func TestTheCombinedCommit(t *testing.T) {
 		}
 	})
 }
+
+func TestThePostingView(t *testing.T) {
+	t.Run("a posted change returns while a render holds the roster's lock", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+
+		// Act: returns only because it waits for nothing.
+		fx.r.Posting().SetBringingUp(wsB, true)
+
+		// Assert
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the posted change joined a queue of depth %d, want 1", depth)
+		}
+		close(fx.gate.released)
+		<-leader
+		fx.r.Settle()
+		if row, _, ok := fx.r.Row(wsB); !ok || availabilityName(row) != "pending" {
+			t.Fatalf("the posted change was not published once the held render ended")
+		}
+	})
+
+	t.Run("a posted change with no batch under way is led on its own", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+
+		// Act
+		fx.r.Posting().SetBringingUp(wsB, true)
+		fx.r.Settle()
+
+		// Assert
+		if row, _, ok := fx.r.Row(wsB); !ok || availabilityName(row) != "pending" {
+			t.Fatalf("the posted change was not published")
+		}
+	})
+
+	t.Run("posted and committed changes are applied in the order they were queued", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+		fx.r.Posting().SetOpening(wsC, true)
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the posted change joined a queue of depth %d, want 1", depth)
+		}
+		committed := make(chan struct{})
+		go func() {
+			defer close(committed)
+			fx.r.SetOpening(wsC, false)
+		}()
+		if depth := <-fx.queued; depth != 2 {
+			t.Fatalf("the committed change joined a queue of depth %d, want 2", depth)
+		}
+
+		// Act
+		close(fx.gate.released)
+		<-leader
+		<-committed
+
+		// Assert
+		if row, _, ok := fx.r.Row(wsC); !ok || row.GetOpening() != nil {
+			t.Fatalf("the row draws the posted change over the committed one queued after it")
+		}
+	})
+
+	t.Run("a read waits for every change posted before it", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+		fx.r.Posting().SetBringingUp(wsC, true)
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the posted change joined a queue of depth %d, want 1", depth)
+		}
+		read := make(chan *frontendv1.RosterRow, 1)
+		go func() {
+			row, _, _ := fx.r.Row(wsC)
+			read <- row
+		}()
+		if depth := <-fx.queued; depth != 2 {
+			t.Fatalf("the read joined a queue of depth %d, want 2", depth)
+		}
+
+		// Act
+		close(fx.gate.released)
+		<-leader
+
+		// Assert
+		if row := <-read; availabilityName(row) != "pending" {
+			t.Fatalf("the read answered availability %q, want the posted change's pending", availabilityName(row))
+		}
+	})
+
+	t.Run("the footer's status edge is posted", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+
+		// Act: returns only because it waits for nothing.
+		fx.r.FooterStatusChanged(wsB)
+
+		// Assert
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the footer's status edge joined a queue of depth %d, want 1", depth)
+		}
+		close(fx.gate.released)
+		<-leader
+	})
+}
+
+func TestSettleWaitsForTheReportOfEveryBatchBeforeIt(t *testing.T) {
+	// Arrange: the status-change sink holds the first report it is handed.
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	reported := false
+	fx := newCombineFixture(t, sidebar.WithStatusChangeSink(func(ids.WorkspaceID, time.Time) {
+		held := false
+		once.Do(func() { held = true })
+		if !held {
+			return
+		}
+		close(entered)
+		<-release
+		mu.Lock()
+		reported = true
+		mu.Unlock()
+	}))
+	fx.r.Posting().SetOpening(wsB, true)
+	<-entered
+
+	// Act
+	settled := make(chan struct{})
+	go func() {
+		defer close(settled)
+		fx.r.Settle()
+	}()
+	close(release)
+	<-settled
+
+	// Assert
+	mu.Lock()
+	defer mu.Unlock()
+	if !reported {
+		t.Fatal("Settle returned before the batch before it was reported")
+	}
+}

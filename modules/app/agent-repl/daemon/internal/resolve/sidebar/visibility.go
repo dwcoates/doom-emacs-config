@@ -333,6 +333,7 @@ func visibilityOf(v wsm.Visibility) *frontendv1.RosterRowVisibility {
 // until the first render. A workspace the registry does not carry is
 // NotVisible.
 func (r *resolver) Visibility(ws ids.WorkspaceID) wsm.Visibility {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if v, derived := r.state.visibility[ws]; derived {

@@ -215,6 +215,7 @@ func mergedSummary(newest []wsm.Workspace, since time.Time) *frontendv1.RosterMe
 
 // MergedPage implements Resolver.
 func (r *resolver) MergedPage(q MergedPageQuery) (MergedPage, error) {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.state.regSeen || r.last == nil {
@@ -261,6 +262,7 @@ func (r *resolver) MergedPage(q MergedPageQuery) (MergedPage, error) {
 // MergedRows implements Resolver: every merged workspace's row as a page
 // resolves it, in registry order, and the last push, under one lock.
 func (r *resolver) MergedRows() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool) {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.state.regSeen || r.last == nil {

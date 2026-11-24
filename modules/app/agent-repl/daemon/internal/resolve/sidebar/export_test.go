@@ -47,9 +47,11 @@ var OpenCount = openCount
 // that has rendered nothing yet, as a daemon that just booted or joined is
 // until its first render.
 func UnrenderedHolding(workspaces ...wsm.Workspace) Resolver {
-	r := &resolver{state: newRosterState()}
-	r.state.reg.Workspaces = workspaces
-	return r
+	c := &core{state: newRosterState()}
+	c.initQueue()
+	c.state.reg.Workspaces = workspaces
+	c.state.index = indexRegistry(c.state.reg)
+	return c.commitView()
 }
 
 // IndexedRecord answers rosterState.record for WS in a roster holding REG.

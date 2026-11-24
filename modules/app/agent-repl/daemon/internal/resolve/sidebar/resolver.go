@@ -30,10 +30,22 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// resolver is the roster resolver. ONE accumulation and ONE topic serve every
-// webview: the roster is editor-global, so there is nothing to key by
-// workspace except the live half of each row.
+// resolver is the roster resolver: a view of its one core. The view New
+// answers commits each change and waits for the roster carrying it; the
+// posting view (Posting) queues each change and returns at once. Both views
+// share the core's one queue, so their changes are applied in the order they
+// were queued, whichever view queued them (combine.go).
 type resolver struct {
+	*core
+	// posting is set on the posting view: its changes are queued and never
+	// waited for (commit).
+	posting bool
+}
+
+// core is the roster resolver's state. ONE accumulation and ONE topic serve
+// every webview: the roster is editor-global, so there is nothing to key by
+// workspace except the live half of each row.
+type core struct {
 	colors vocab.RenderColors
 	log    dlog.Surfaces
 	// footer is the one resolver of a workspace's status, which every row
@@ -135,6 +147,12 @@ type resolver struct {
 	qmu       sync.Mutex
 	queue     []*mutation
 	combining bool
+	// batches counts the batches led, each batch's sequence number; reporting
+	// are those still being reported, and reported is told each time one
+	// ends (Settle). Under qmu.
+	batches   uint64
+	reporting map[uint64]struct{}
+	reported  *sync.Cond
 	// onQueued is the tests' one look at the queue: told its depth each time
 	// a change joins it, under qmu. nil outside a test.
 	onQueued func(depth int)
@@ -178,10 +196,12 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStat
 	if err := assertTables(colors); err != nil {
 		return nil, fmt.Errorf("sidebar resolver refuses to serve an unpainted state: %w", err)
 	}
-	return &resolver{
+	c := &core{
 		colors: colors, log: log, footer: footer, state: newRosterState(),
 		now: time.Now,
-	}, nil
+	}
+	c.initQueue()
+	return c.commitView(), nil
 }
 
 // assertTables checks the roster_status table row for row against the
@@ -196,8 +216,12 @@ func assertTables(colors vocab.RenderColors) error {
 	return colors.AssertMergeGlyphArms(vocab.RosterMergeArms())
 }
 
-// FooterStatusChanged redraws the roster on the footer's status edge, in line,
-// so the row shows the footer's new status before the edge returns.
+// FooterStatusChanged redraws the roster on the footer's status edge. It is
+// POSTED, whichever view it is called on: the footer tells it from inside a
+// session watcher's own edges, under that watcher's lock (combine.go), so it
+// queues the change behind every change queued before it and returns without
+// waiting for the render. A read of the roster after it sees it
+// (awaitApplied).
 //
 // THE LOCK ORDER IS ROSTER, THEN FOOTER. A render holds the roster's lock and
 // reads the footer's status under the footer's; the footer tells this edge
@@ -205,7 +229,7 @@ func assertTables(colors vocab.RenderColors) error {
 // it while the roster's lock is held — a roster warning teed onto the strip,
 // which moves the activity line alone (footer.mutateLine).
 func (r *resolver) FooterStatusChanged(ws ids.WorkspaceID) {
-	r.mutateWorkspace(ws, "daemon.sidebar.footer_status_changed", logsite.Msg("the roster re-projected the footer's status"),
+	r.core.postingView().mutateWorkspace(ws, "daemon.sidebar.footer_status_changed", logsite.Msg("the roster re-projected the footer's status"),
 		nil, func(*wsState) {})
 }
 
@@ -885,6 +909,7 @@ func stampContext(ctx dlog.Context, stamp SelectStamp) dlog.Context {
 // Selected answers the roster's selection, read under the lock every mutation
 // takes, so it is never a selection half-installed.
 func (r *resolver) Selected() (ids.WorkspaceID, bool) {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.state.selected == nil {

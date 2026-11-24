@@ -26,6 +26,14 @@ import (
 // view its edges out of order, and an Unlock returns only once every edge its
 // own hold queued has reached its view, exactly as a call made under the
 // lock had.
+//
+// THE ROSTER IS TOLD THROUGH ITS POSTING VIEW (cmd/agent-repld graph.go), so
+// a roster edge only takes its place in the roster's queue and the delivery
+// lock is never held across a roster render (sidebar combine.go's lock
+// order): on 2026-11-23 a handover's successor fired the stall on this lock
+// twice, each delivery waiting on renders of a 1,529-workspace roster. A
+// topbar edge still takes the topbar's own lock, which renders the one
+// workspace's strip and calls into no other resolver's commit.
 
 // viewLockName is how the stall watchdog names the view-delivery lock.
 const viewLockName = "sessionwatcher.views"
