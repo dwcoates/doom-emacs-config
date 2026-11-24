@@ -92,11 +92,7 @@ func pageVerdict(in pageInputs, now time.Time) (bool, time.Time) {
 	case in.unread:
 		return true, time.Time{}
 	case in.leftAt != nil:
-		grace := PageLeaveGrace
-		if in.leftFirstViewed {
-			grace = PageFirstViewGrace
-		}
-		return heldUntil(in.leftAt.Add(grace), now)
+		return heldUntil(in.leftAt.Add(leaveGrace(in)), now)
 	default:
 		return false, time.Time{}
 	}
@@ -132,14 +128,21 @@ func shimHoldOf(in pageInputs, now time.Time) wsm.ShimHold {
 	case in.unread:
 		return wsm.ShimHold{Indefinite: true}
 	case in.leftAt != nil:
-		grace := PageLeaveGrace
-		if in.leftFirstViewed {
-			grace = PageFirstViewGrace
-		}
-		return until(in.leftAt.Add(grace))
+		return until(in.leftAt.Add(leaveGrace(in)))
 	default:
 		return wsm.ShimHold{}
 	}
+}
+
+// leaveGrace is how long after the user left it IN's workspace keeps its page
+// and its idle shim: PageFirstViewGrace when the visit left first viewed it,
+// else PageLeaveGrace. The page verdict and the shim hold both read it, so the
+// two halves of the allocation release a left workspace together.
+func leaveGrace(in pageInputs) time.Duration {
+	if in.leftFirstViewed {
+		return PageFirstViewGrace
+	}
+	return PageLeaveGrace
 }
 
 // heldUntil answers a verdict held until DEADLINE: loaded, flipping at
@@ -239,10 +242,7 @@ func (r *resolver) ShimHold(ws ids.WorkspaceID) wsm.ShimHold {
 // The caller holds r.mu.
 func (r *resolver) pageInputsOf(rec wsm.Workspace, rc rowContext, arm string) pageInputs {
 	s := r.state.workspace(rec.ID)
-	ended := s.turnEndedAt
-	if rec.LastTurnEndedAt != nil && (ended == nil || rec.LastTurnEndedAt.After(*ended)) {
-		ended = rec.LastTurnEndedAt
-	}
+	ended := s.lastTurnEnd(rec.LastTurnEndedAt)
 	return pageInputs{
 		visible:         r.state.visibility[rec.ID].Visible(),
 		selected:        rc.selected != nil && *rc.selected == rec.ID,

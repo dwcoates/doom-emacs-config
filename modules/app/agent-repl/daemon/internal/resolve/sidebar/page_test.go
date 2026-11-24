@@ -124,3 +124,70 @@ func TestShimHoldOf(t *testing.T) {
 		})
 	}
 }
+
+func TestLeaveGrace(t *testing.T) {
+	tests := []struct {
+		name string
+		in   pageInputs
+		want time.Duration
+	}{
+		{name: "a visit that first viewed the workspace keeps it for the first-view grace", in: pageInputs{leftFirstViewed: true}, want: PageFirstViewGrace},
+		{name: "any other visit keeps it for the leave grace", in: pageInputs{}, want: PageLeaveGrace},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := leaveGrace(tt.in); got != tt.want {
+				t.Fatalf("leaveGrace = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheAllocationsHalvesReleaseALeftWorkspaceTogether(t *testing.T) {
+	// Arrange: a workspace left at now, its grace not yet run.
+	now := time.UnixMilli(1_700_000_000_000)
+	for _, first := range []bool{false, true} {
+		in := pageInputs{visible: true, leftAt: &now, leftFirstViewed: first}
+
+		// Act
+		_, pageFlips := pageVerdict(in, now)
+		hold := shimHoldOf(in, now)
+
+		// Assert: one grace decides both.
+		if !pageFlips.Equal(hold.Until) || !pageFlips.Equal(now.Add(leaveGrace(in))) {
+			t.Fatalf("first view %v: page flips at %v, shim hold ends %v; want both at %v", first, pageFlips, hold.Until, now.Add(leaveGrace(in)))
+		}
+	}
+}
+
+func TestLastTurnEnd(t *testing.T) {
+	early := time.UnixMilli(1_700_000_000_000)
+	late := early.Add(time.Minute)
+	tests := []struct {
+		name     string
+		seen     *time.Time
+		recorded *time.Time
+		want     *time.Time
+	}{
+		{name: "neither knows an end", want: nil},
+		{name: "only this roster saw it", seen: &early, want: &early},
+		{name: "only the record holds it", recorded: &early, want: &early},
+		{name: "the later of the two wins, the record's", seen: &early, recorded: &late, want: &late},
+		{name: "the later of the two wins, the roster's", seen: &late, recorded: &early, want: &late},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := &wsState{turnEndedAt: tt.seen}
+
+			// Act
+			got := s.lastTurnEnd(tt.recorded)
+
+			// Assert
+			if (got == nil) != (tt.want == nil) || (got != nil && !got.Equal(*tt.want)) {
+				t.Fatalf("lastTurnEnd = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

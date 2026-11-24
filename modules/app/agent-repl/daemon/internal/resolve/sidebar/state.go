@@ -419,6 +419,18 @@ func (s *wsState) interacted(at time.Time, exempt bool) bool {
 	return true
 }
 
+// lastTurnEnd answers when the workspace's last turn ended: the later of the
+// end this roster saw (s.turnEndedAt) and the durable record's (RECORDED),
+// nil when neither knows one. The view exemption and the allocation's clocks
+// all read it, so a daemon that did not see the end measures from the record.
+func (s *wsState) lastTurnEnd(recorded *time.Time) *time.Time {
+	ended := s.turnEndedAt
+	if recorded != nil && (ended == nil || recorded.After(*ended)) {
+		ended = recorded
+	}
+	return ended
+}
+
 // ViewExemption is how long after a turn ends the user's interaction with the
 // workspace marks nothing viewed (owner ruling, 2026-11-24): a result read in
 // the minutes after it lands stays unread, so a fold keeps drawing it and its
@@ -434,10 +446,7 @@ func (s *wsState) viewExempt(at time.Time, recorded *time.Time) (time.Time, bool
 	if s.turn != nil {
 		return time.Time{}, false
 	}
-	ended := s.turnEndedAt
-	if recorded != nil && (ended == nil || recorded.After(*ended)) {
-		ended = recorded
-	}
+	ended := s.lastTurnEnd(recorded)
 	if ended == nil || at.Before(*ended) {
 		return time.Time{}, false
 	}
