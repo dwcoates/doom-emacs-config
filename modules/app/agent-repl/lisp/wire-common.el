@@ -818,7 +818,7 @@ no client ever sends them.")
     "PROMPT_ORIGIN_PULL_REQUEST_NOTICE" "PROMPT_ORIGIN_FINISH_HOOK"
     "PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE" "PROMPT_ORIGIN_DEPLOY_MEDIATION"
     "PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE"
-    "PROMPT_ORIGIN_SLACK_THREAD_NOTICE")
+    "PROMPT_ORIGIN_SLACK_THREAD_NOTICE" "PROMPT_ORIGIN_PRODUCTION_MEDIATION")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a

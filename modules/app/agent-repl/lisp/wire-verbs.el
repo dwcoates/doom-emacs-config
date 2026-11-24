@@ -2117,12 +2117,22 @@ CAUSE is the arm of MergeQueueStatusOffQueueCause as a keyword (such as
                         agent-repl-wire-verbs--off-queue-cause-arms))
                :arm))))))
 
+(defun agent-repl-wire-decode-finish-workspace-placement-conflicts-with-stored (json)
+  "Decode FinishWorkspacePlacementConflictsWithStored from JSON.
+Answers (:stored STORED :requested REQUESTED), each the MergeQueuePlacement
+as the wire carried it: the placement stored when the one-shot was made,
+and the other one the finish named.  Nothing was recorded."
+  (let ((message "FinishWorkspacePlacementConflictsWithStored"))
+    (agent-repl-wire-verbs--check-keys message json '(stored requested))
+    (list :stored (alist-get 'stored json)
+          :requested (alist-get 'requested json))))
+
 (defun agent-repl-wire-decode-finish-workspace-error (json)
   "Decode FinishWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "FinishWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine mergeOffQueue))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine mergeOffQueue placementConflictsWithStored))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -2144,7 +2154,9 @@ arm this codec does not know is refused as an unknown field."
                  (list 'placementBehindNotInLine :placement-behind-not-in-line
                        #'agent-repl-wire-decode-merge-queue-placement-behind-not-in-line)
                  (list 'mergeOffQueue :merge-off-queue
-                       #'agent-repl-wire-decode-finish-workspace-merge-off-queue))))))
+                       #'agent-repl-wire-decode-finish-workspace-merge-off-queue)
+                 (list 'placementConflictsWithStored :placement-conflicts-with-stored
+                       #'agent-repl-wire-decode-finish-workspace-placement-conflicts-with-stored))))))
 
 (defun agent-repl-wire-decode-finish-workspace-response-success (json)
   "Decode FinishWorkspaceResponse's `success' arm from JSON."
