@@ -757,6 +757,9 @@ The input window underlines misspelled words as you type.
 - It asks for the commission alone, and the daemon names the workspace.
   - `SPC TAB C-o` asks for the model too.
 - It is cut from the repository's primary branch and merges back into it.
+- It appears in its repository's "One-shots" subsection, already filed there when it first shows in the sidebar.
+  - The daemon creates the subsection with the first such one-shot, and removes it once its last workspace is closed, killed, nuked, landed or dragged out.
+  - Only one-shots you start with `SPC TAB o`, `SPC TAB M-o` or `SPC TAB O` join it, never a one-shot a workspace's agent creates.
 - What happens when the work is done is the repository's own deploy, in `.agent-repl/lifecycle.yaml` at its main checkout.
   - agent-repl's deploy tests the branch, lands it on master one deploy at a time, and rolls out what landed.
 
@@ -975,6 +978,7 @@ The top bar's phone chip, on the left after the account and just left of the wif
     - Its workspaces return to the repository where the subsection stood.
   - Closing, killing or nuking the last open workspace in a subsection removes the subsection too.
     - A subsection emptied any other way, such as by dragging its last workspace out, stays until you remove it.
+    - The "One-shots" subsection and a subsection an agent created go however their last workspace leaves.
   - A subsection's workspaces are indented under its header.
 - **Drag a workspace's row to move it.**
   - Drop it among the repository's own rows, just above a subsection included, or into any of its subsections, an empty one included.

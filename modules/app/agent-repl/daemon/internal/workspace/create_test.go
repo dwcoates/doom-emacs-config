@@ -3004,6 +3004,9 @@ func TestCreatePlacesTheNoteBetweenAOneShotsWordsAndItsDirective(t *testing.T) {
 	spec := standardSpec(t, f)
 	withSubsection(f)
 	spec.OneShot = true
+	// An agent's one-shot files itself; the user's is filed into the
+	// one-shots subsection instead (TestAUserOneShotIsBornInTheOneShotsSubsection).
+	spec.Requester = requesterIn(t, f, spec.RepoDir)
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {

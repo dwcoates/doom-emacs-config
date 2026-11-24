@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -55,12 +56,34 @@ func (p CreatePlacement) facts(creator wsm.WorkspaceID) wsm.RegisterPlacement {
 // registerPlacement is the placement of the spec as RegisterFacts carries it, nil when
 // the create places nothing. validatePlacement has already required the
 // requester a placement needs.
+//
+// A ONE-SHOT THE USER DISPATCHED IS FILED BY THE DAEMON into its repository's
+// one-shots subsection (userOneShot, wsm.RegisterPlacement.OneShots), so it is
+// in the subsection the moment it is drawn, and its agent is never asked to
+// file itself.
 func (s CreateSpec) registerPlacement() *wsm.RegisterPlacement {
+	if s.userOneShot() {
+		if s.Placement != nil {
+			panic(fmt.Sprintf("workspace: a one-shot the user dispatched carries a placement of its own: %+v", *s.Placement))
+		}
+		return &wsm.RegisterPlacement{OneShots: true}
+	}
 	if s.Placement == nil {
 		return nil
 	}
 	facts := s.Placement.facts(*s.Requester)
 	return &facts
+}
+
+// userOneShot reports whether the create is a TOP-LEVEL ONE-SHOT THE USER
+// DISPATCHED (`SPC TAB o', `SPC TAB O', `SPC TAB M-o'): no workspace's agent
+// asked for it, it has no parent, it carries no merge, and no other system
+// (the Slack emoji acknowledger) originated it. Only such a one-shot joins
+// the one-shots subsection; a one-shot an agent creates is filed by that
+// agent, or sits wherever its owner does.
+func (s CreateSpec) userOneShot() bool {
+	return s.OneShot && s.Requester == nil && s.Parent == nil && s.MergeOf == nil &&
+		s.originator == lifecycleconfig.OriginatorUserOrWorkspace
 }
 
 // validatePlacement refuses a placement the create's own shape cannot carry,
@@ -92,10 +115,11 @@ func validatePlacement(log dlog.Logger, spec CreateSpec) error {
 // transaction judges it again with the same code (wsm.checkPlacement), so a
 // registry that moved in between refuses there with the same arm.
 func (v *verbs) checkPlacement(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string) error {
-	if spec.Placement == nil {
+	placement := spec.registerPlacement()
+	if placement == nil {
 		return nil
 	}
-	err := v.deps.DB.RefusePlacement(ctx, repoDir, *spec.registerPlacement(), spec.Parent, spec.MergeOf != nil)
+	err := v.deps.DB.RefusePlacement(ctx, repoDir, *placement, spec.Parent, spec.MergeOf != nil)
 	if err == nil {
 		return nil
 	}

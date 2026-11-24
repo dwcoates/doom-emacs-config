@@ -1240,9 +1240,11 @@ func (s CreateSpec) forkedElsewhere() bool {
 // into one of its repository's subsections (BriefSubsectionPlacement). Only a
 // ROOT is: a family never splits across subsections, so a child sits wherever
 // its root does, and placing it would move its whole family; a merge
-// workspace's own brief says what it is.
+// workspace's own brief says what it is. A root the create already files
+// (registerPlacement), by its creator or into the one-shots subsection, is
+// not asked either.
 func (s CreateSpec) filesItself() bool {
-	return s.Placement == nil && filesItself(s.Parent, s.MergeOf != nil)
+	return s.registerPlacement() == nil && filesItself(s.Parent, s.MergeOf != nil)
 }
 
 // filesItself is the one rule of which workspace is asked to file itself
