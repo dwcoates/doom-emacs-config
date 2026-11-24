@@ -1,6 +1,7 @@
 package sessionwatcher
 
 import (
+	"fmt"
 	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -116,6 +117,22 @@ func (w *watcher) liveHandleLocked(handle string) (*liveItem, bool) {
 // good, tears the item's watch down whatever state it is in, and records the
 // retirement; it reports whether the item was live, and the caller republishes
 // the set when it was.
+// observedEnd reports whether a conclusion is the work's own end, seen on its
+// stream or the live level: real work ending, which moves the idle clock
+// (wsm lastwork.go). A retirement for an end the daemon missed (reconciled),
+// a departed shim's set, or the vendor process dying is no observed end, so a
+// stale item retired late never reads as work just done.
+func (c conclusion) observedEnd() bool {
+	switch c {
+	case concludedUnitTerminal, concludedAgentTerminal, concludedBashTerminal, concludedMonitorTerminal, concludedLeftLevel:
+		return true
+	case concludedQueryDied, concludedReconciled, concludedDeparted:
+		return false
+	default:
+		panic(fmt.Sprintf("sessionwatcher: conclusion %q is not judged for whether it ends work", string(c)))
+	}
+}
+
 func (w *watcher) concludeLocked(handle string, why conclusion) bool {
 	// A PENDING ITEM CONCLUDES LIKE ANY OTHER: the level named it before its
 	// announcement arrived, and its terminal can arrive first too. It retires
@@ -134,6 +151,9 @@ func (w *watcher) concludeLocked(handle string, why conclusion) bool {
 	}
 	delete(w.live, handle)
 	w.retireLocked(handle, item.kind)
+	if why.observedEnd() {
+		w.worked = true
+	}
 	watch := "none"
 	switch item.kind {
 	case kindSubagent:

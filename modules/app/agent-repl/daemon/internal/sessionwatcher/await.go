@@ -312,9 +312,11 @@ func (w *watcher) signalFreenessLocked() {
 		if w.started {
 			w.attaching = false
 		}
-		// ONLY A TURN OR DETACHED WORK IS WORK: the vendor busy alone is a
-		// keep-alive's own turn, or a vendor turn the daemon serves none for.
-		if w.turn != nil || !w.liveWorkLocked().Empty() {
+		// ONLY A TURN OR DETACHED WORK SEEN TO END IS WORK: the vendor busy
+		// alone is a keep-alive's own turn, or a vendor turn the daemon serves
+		// none for; detached work marks the stretch where its end is observed
+		// (concludeLocked).
+		if w.turn != nil {
 			w.worked = true
 		}
 		return
