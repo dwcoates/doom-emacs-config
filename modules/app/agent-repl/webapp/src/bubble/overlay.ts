@@ -21,6 +21,7 @@
  */
 import { createControl } from "../control.js";
 import { createLogger } from "../log.js";
+import { BUBBLE_ROLE_ATTRIBUTE, BUBBLE_SELECTOR } from "./draw.js";
 
 const log = createLogger("webapp.bubble.overlay");
 
@@ -32,8 +33,6 @@ export const BUBBLE_OVERLAY_HOST_CLASS = "expand-overlay";
 export const BUBBLE_OVERLAY_PANEL_CLASS = "expand-pane";
 export const BUBBLE_OVERLAY_CLOSE_ATTRIBUTE = "data-bubble-overlay-close";
 
-/** The selector of a bubble the overlay can expand. */
-const BUBBLE_SELECTOR = ".bubble[data-role]";
 const BODY_SELECTOR = ".bubble-body";
 
 /** What the page holds of the overlay. */
@@ -62,11 +61,11 @@ export function mountBubbleOverlay(doc: Document, feedScroll: HTMLElement): Bubb
   };
 
   const open = (bubble: Element, body: Element): void => {
-    const role = bubble.getAttribute("data-role") ?? "";
+    const role = bubble.getAttribute(BUBBLE_ROLE_ATTRIBUTE) ?? "";
     const panel = doc.createElement("div");
     panel.className = BUBBLE_OVERLAY_PANEL_CLASS;
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("data-role", role);
+    panel.setAttribute(BUBBLE_ROLE_ATTRIBUTE, role);
     panel.append(body.cloneNode(true));
     const control = createControl();
     control.className = "expand-close";

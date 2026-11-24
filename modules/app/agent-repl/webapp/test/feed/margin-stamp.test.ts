@@ -6,14 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTicker } from "../../src/clock.js";
 import { fireResize } from "../resize-observer.js";
 import type { HoverStamp } from "../../src/feed/hover-stamp.js";
+import { FEED_ROW_ATTRIBUTE } from "../../src/feed/row-id.js";
 import {
   MARGIN_STAMP_CLASS,
   MARGIN_STAMP_LINES_CLASS,
+  MARGIN_STAMP_ROW_ROLE,
   MARGIN_STAMP_SHOWN,
   marginClockTime,
   marginStampCenter,
   marginStampLines,
   mountMarginStamp,
+  rowBubbleRole,
 } from "../../src/feed/margin-stamp.js";
 
 const NOW = 1_000_000_000;
@@ -90,6 +93,39 @@ describe("marginStampCenter", () => {
     const placed = marginStampCenter(row, view, 40);
     // Assert
     expect(placed).toBeNull();
+  });
+});
+
+/** A feed row element holding HTML. */
+function feedRow(html: string): HTMLElement {
+  const row = document.createElement("article");
+  row.setAttribute(FEED_ROW_ATTRIBUTE, "r");
+  row.innerHTML = html;
+  return row;
+}
+
+describe("rowBubbleRole", () => {
+  it.each([
+    ["a row drawing a response bubble", `<div class="bubble" data-role="response"></div>`, "response"],
+    ["a row drawing a prompt bubble", `<div><div class="bubble" data-role="prompt"></div></div>`, "prompt"],
+    ["a row drawing no bubble", `<div class="tool-card"></div>`, null],
+    [
+      "a row whose only bubble is a nested row's",
+      `<div data-feed-row="n"><div class="bubble" data-role="response"></div></div>`,
+      null,
+    ],
+    [
+      "a row drawing its own bubble after a nested row's",
+      `<div data-feed-row="n"><div class="bubble" data-role="response"></div></div><div class="bubble" data-role="prompt"></div>`,
+      "prompt",
+    ],
+  ])("reads %s", (_name, html, role) => {
+    // Arrange
+    const row = feedRow(html);
+    // Act
+    const read = rowBubbleRole(row);
+    // Assert
+    expect(read).toBe(role);
   });
 });
 
@@ -258,6 +294,41 @@ describe("mountMarginStamp", () => {
     // Assert
     expect(el.style.top).toBe(top);
     expect(() => fireResize(parent)).toThrow("no ResizeObserver is watching");
+  });
+
+  it("wears the role of a response row's bubble", () => {
+    // Arrange
+    const { margin, el } = mounted();
+    const row = feedRow(`<div class="bubble" data-role="response"></div>`);
+    placeAt(row, 200, 300);
+    // Act
+    margin.show(stamp(NOW - 1000), row);
+    // Assert
+    expect(el.getAttribute(MARGIN_STAMP_ROW_ROLE)).toBe("response");
+  });
+
+  it("drops the role beside a row with no bubble of its own", () => {
+    // Arrange
+    const { row, margin, el } = mounted();
+    const response = feedRow(`<div class="bubble" data-role="response"></div>`);
+    placeAt(response, 200, 300);
+    margin.show(stamp(NOW - 1000), response);
+    // Act
+    margin.show(stamp(NOW - 1000), row);
+    // Assert
+    expect(el.hasAttribute(MARGIN_STAMP_ROW_ROLE)).toBe(false);
+  });
+
+  it("keeps the role while fading out, so it fades where it stood", () => {
+    // Arrange
+    const { margin, el } = mounted();
+    const row = feedRow(`<div class="bubble" data-role="response"></div>`);
+    placeAt(row, 200, 300);
+    margin.show(stamp(NOW - 1000), row);
+    // Act
+    margin.show(null, null);
+    // Assert
+    expect([el.hasAttribute(MARGIN_STAMP_SHOWN), el.getAttribute(MARGIN_STAMP_ROW_ROLE)]).toEqual([false, "response"]);
   });
 
   it("removes its element on dispose", () => {

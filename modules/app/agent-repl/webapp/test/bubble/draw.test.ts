@@ -17,6 +17,7 @@ import {
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_MORE_FADE,
   BUBBLE_ROLE_ATTRIBUTE,
+  BUBBLE_SELECTOR,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANTS,
   BUBBLE_UNCAPPED,
@@ -62,6 +63,13 @@ describe("drawBubble: role and variant", () => {
     const { bubble } = drawBubble(spec(variant));
     // Assert
     expect(bubble.getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe(BUBBLE_VARIANTS[variant]);
+  });
+
+  it.each(VARIANTS)("draws the %s variant as a bubble the one bubble selector finds", (variant) => {
+    // Arrange / Act
+    const { bubble } = drawBubble(spec(variant));
+    // Assert
+    expect(bubble.matches(BUBBLE_SELECTOR)).toBe(true);
   });
 
   it.each(VARIANTS)("stamps the %s variant itself on the bubble", (variant) => {

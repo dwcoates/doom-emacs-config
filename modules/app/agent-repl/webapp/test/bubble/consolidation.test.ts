@@ -51,6 +51,10 @@ describe("every blue and purple bubble is built by drawBubble", () => {
     expect(sourcesMatching(/\bBUBBLE_CLASS\s*=|(?<!case:?\s*)["']bubble["']/)).toEqual(["bubble/draw.ts"]);
   });
 
+  it("spells the bubble selector only there", () => {
+    expect(sourcesMatching(/\.bubble\[data-role\]|["']data-role["']/)).toEqual(["bubble/draw.ts"]);
+  });
+
   it("hangs a scroll box only there", () => {
     expect(sourcesMatching(/\bbubbleBox\(/)).toEqual(["bubble/draw.ts", "feed/bubble-scroll.ts"]);
   });
