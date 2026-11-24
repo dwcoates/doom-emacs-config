@@ -73,6 +73,10 @@ type deployerParams struct {
 	LauncherSocket string
 	// Checkout is the agent-repl module root the daemon was deployed from.
 	Checkout string
+	// WorkConfigRoot is the work account's config root this daemon routes
+	// sessions to (its -multi-repo-config-dir), which the requirements
+	// script renders the sidecar's roots from (deploy.ScriptRequirements).
+	WorkConfigRoot string
 	// ShimMain and WebappDist are where the daemon runs the shim bundle and
 	// serves the webapp from.
 	ShimMain, WebappDist string
@@ -260,7 +264,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 	if err != nil {
 		return nil, nil, err
 	}
-	requirements := deploy.ScriptRequirements{ModuleRoot: p.Checkout, Script: p.Getenv(envRequirementsScript), Runner: p.Runner}
+	requirements := deploy.ScriptRequirements{ModuleRoot: p.Checkout, WorkConfigRoot: p.WorkConfigRoot, Script: p.Getenv(envRequirementsScript), Runner: p.Runner}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, nil, fmt.Errorf("agent-repld: the home directory a holder's control socket expands against: %w", err)

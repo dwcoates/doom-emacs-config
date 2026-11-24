@@ -55,9 +55,26 @@ func toolExited(binary string, args []string, code int, out string) error {
 // install uses, so a deploy and an install can never write different
 // definitions. Restarter.Define is its Define, and the holder ensure's
 // install (holderensure.Ensurer.Install) is its EnsureHolder.
+//
+// THE ROOTS IT RENDERS ARE THE ROOTS THIS DAEMON ROUTES SESSIONS TO. The
+// script names every Claude config root a session runs under
+// (`{claude-config-roots}`, the sidecar's --config-roots) from
+// MULTI_REPO_CONFIG_DIR, and the daemon's own environment never carries it:
+// Emacs hands the work account's root to the daemon as a flag. Inherited, the
+// variable was empty, so every deploy rendered the sidecar watching
+// ~/.claude alone, and from 2026-11-21 no transcript of a session on the work
+// account was read: its shells' claims were never attributed, their spools
+// never read, their terminals never written, and their sessions held busy
+// for hours (2026-11-23). So every run states the variable from
+// WorkConfigRoot, and an inherited value can never decide the roots.
 type ScriptRequirements struct {
 	// ModuleRoot is the checkout holding bin/requirements.sh.
 	ModuleRoot string
+	// WorkConfigRoot is the work account's config root this daemon routes
+	// the workspaces under the multi-repo root to (its
+	// -multi-repo-config-dir, account.Roots.MultiRepo), handed to every run
+	// as MULTI_REPO_CONFIG_DIR; empty when the daemon routes none there.
+	WorkConfigRoot string
 	// Script runs in place of ModuleRoot's bin/requirements.sh when set: a
 	// harness's stand-in, so no test writes or loads a real definition.
 	Script string
@@ -77,11 +94,19 @@ func (d ScriptRequirements) EnsureHolder(ctx context.Context, id string) error {
 	return d.run(ctx, "ensure-holder", id)
 }
 
-// run runs `requirements.sh VERB ARG` in ModuleRoot.
+// envBinary states a run's environment ahead of the script it runs.
+const envBinary = "/usr/bin/env"
+
+// workConfigRootEnv is the script's name for the work account's config root
+// (bin/requirements.sh claude_config_roots).
+const workConfigRootEnv = "MULTI_REPO_CONFIG_DIR"
+
+// run runs `requirements.sh VERB ARG` in ModuleRoot, with
+// MULTI_REPO_CONFIG_DIR stated as WorkConfigRoot.
 func (d ScriptRequirements) run(ctx context.Context, verb, arg string) error {
 	script := d.Script
 	if script == "" {
 		script = filepath.Join(d.ModuleRoot, "bin", "requirements.sh")
 	}
-	return mustTool(ctx, d.Runner, d.ModuleRoot, script, verb, arg)
+	return mustTool(ctx, d.Runner, d.ModuleRoot, envBinary, workConfigRootEnv+"="+d.WorkConfigRoot, script, verb, arg)
 }

@@ -61,6 +61,28 @@ func (s *sidecar) noteUnclaimedShell(target discover.Target) {
 	s.unclaimedShells[target.TaskID] = target.Path
 }
 
+// Why a held shell spool's store claim could not claim it (claimWaits).
+const (
+	// claimWaitUnrecorded: no book holds the run's launching call yet.
+	claimWaitUnrecorded = "launch_unrecorded"
+	// claimWaitUnattributed: the book holding it is no transcript this
+	// reader attributed.
+	claimWaitUnattributed = "book_unattributed"
+)
+
+// claimWait records that TASKID's claim waits for REASON, and answers BOUND
+// carrying the reason at the level its record is written at: INFO when the
+// wait begins or its reason changes, DEBUG while it stands, so a claim held
+// for hours is stated once and never once per pass.
+func (s *sidecar) claimWait(bound *logging.Bound, taskID, reason string) *logging.Bound {
+	level := "info"
+	if s.claimWaits[taskID] == reason {
+		level = "debug"
+	}
+	s.claimWaits[taskID] = reason
+	return bound.With(logging.Context{Reason: reason, Level: level})
+}
+
 // claimHeldShells asks the store for the claims of every held shell spool and
 // observes each claim this reader can attribute. It runs before the pass's
 // targets are resolved, so a spool claimed here is read this pass.
@@ -90,14 +112,19 @@ func (s *sidecar) claimHeldShells() {
 			Path: s.unclaimedShells[taskID],
 		})
 		if owner == "" {
-			bound.LogVerbose("the shim claimed this spool, but its launching call is not on record in any book yet; it stays held", nil)
+			s.claimWait(bound, taskID, claimWaitUnrecorded).Log("the shim claimed this spool, but its launching call is not on record in any book yet; it stays held", nil)
 			continue
 		}
 		at, ok := s.attributedBooks[owner]
 		if !ok {
-			bound.LogVerbose("the shim claimed this spool for book {owner}, whose transcript this reader has not attributed yet; it stays held", logging.Values{"owner": owner})
+			// A BOOK NO WATCHED TRANSCRIPT ATTRIBUTES is a transcript this
+			// reader does not read: a config root missing from --config-roots
+			// left every shell of the work account's sessions held, unread
+			// and live in the record for hours (2026-11-23).
+			s.claimWait(bound, taskID, claimWaitUnattributed).Log("the shim claimed this spool for book {owner}, whose transcript this reader has not attributed yet; it stays held", logging.Values{"owner": owner})
 			continue
 		}
+		delete(s.claimWaits, taskID)
 		bound.Log("the shim's claim names this held spool's run; it is claimed as that run's spawn", nil)
 		// No launch instant: a claimed spool exists and is read, so its run is
 		// concluded from it, never as a pre-boot run with no spool.

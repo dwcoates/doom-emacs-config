@@ -90,7 +90,7 @@ func newTestHooks() *testHooks {
 		Windows:  th.windows,
 		// A TEST DECLARES NO HOLDER, so its daemon never installs one: it
 		// takes from the test's own holder (testHolder).
-		Holders: func(dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+		Holders: func(dlog.Logger, string) ([]holderensure.Holder, func(context.Context, string) error, error) {
 			return nil, func(context.Context, string) error { return errors.New("a test daemon installs no holder") }, nil
 		},
 		Graph: func(context.Context, process) (*graph, error) {
@@ -168,7 +168,9 @@ func TestRunWithNoHolderFlagTakesTheDeclaredHolder(t *testing.T) {
 	root := shortRoot(t)
 	control := testHolder(t)
 	th := newTestHooks()
-	th.hooks.Holders = func(dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+	var workRoot string
+	th.hooks.Holders = func(_ dlog.Logger, root string) ([]holderensure.Holder, func(context.Context, string) error, error) {
+		workRoot = root
 		return []holderensure.Holder{{ID: holderensure.DaemonHolder, Control: control}}, func(context.Context, string) error {
 			return errors.New("a serving holder is never installed")
 		}, nil
@@ -178,11 +180,16 @@ func TestRunWithNoHolderFlagTakesTheDeclaredHolder(t *testing.T) {
 	t.Setenv(dlog.LevelEnvironment, "info")
 
 	// Act
-	err := run(context.Background(), options{stateDir: root}, th.hooks)
+	err := run(context.Background(), options{stateDir: root, multiRepoConfigDir: "/w/.claude-work"}, th.hooks)
 
 	// Assert
 	if !errors.Is(err, errServed) {
 		t.Fatalf("run = %v, want the spine to reach its serve hook on the declared holder", err)
+	}
+	// THE INSTALLER RUNS WITH THE DAEMON'S OWN WORK ROOT
+	// (deploy.ScriptRequirements.WorkConfigRoot), never an inherited one.
+	if workRoot != "/w/.claude-work" {
+		t.Fatalf("holder installer's work root = %q, want the daemon's -multi-repo-config-dir", workRoot)
 	}
 }
 

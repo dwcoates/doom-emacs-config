@@ -107,6 +107,10 @@ func TestEveryServiceManagerReportsAFailedVerbTheSameWay(t *testing.T) {
 	}
 }
 
+// workEnv is the environment every script run states ahead of the script:
+// the daemon's work account root (ScriptRequirements.WorkConfigRoot).
+const workEnv = "/usr/bin/env MULTI_REPO_CONFIG_DIR=/w/.claude-work"
+
 func TestScriptRequirementsRunsItsVerbInTheModuleRoot(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -116,21 +120,25 @@ func TestScriptRequirementsRunsItsVerbInTheModuleRoot(t *testing.T) {
 		wantErr string
 	}{
 		{name: "a define's zero exit writes the definition", run: func(r ScriptRequirements) error { return r.Define(context.Background(), TestsLabel) },
-			argv: "/m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
+			argv: workEnv + " /m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
 		{name: "a define's non-zero exit is a failure in the script's words", run: func(r ScriptRequirements) error { return r.Define(context.Background(), TestsLabel) },
-			argv: "/m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{out: "define-service: no service entry", code: 1},
+			argv: workEnv + " /m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{out: "define-service: no service entry", code: 1},
 			wantErr: "requirements.sh define-service com.agentrepl.tests exited 1: define-service: no service entry"},
 		{name: "a define that could not run is a failure", run: func(r ScriptRequirements) error { return r.Define(context.Background(), TestsLabel) },
-			argv: "/m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{err: errors.New("exec: not found")},
+			argv: workEnv + " /m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{err: errors.New("exec: not found")},
 			wantErr: "exec: not found"},
 		{name: "a stand-in script runs in place of the checkout's", run: func(r ScriptRequirements) error {
 			r.Script = "/fake/requirements.sh"
 			return r.Define(context.Background(), TestsLabel)
-		}, argv: "/fake/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
+		}, argv: workEnv + " /fake/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
+		{name: "a daemon routing no work root states the root empty, never an inherited one", run: func(r ScriptRequirements) error {
+			r.WorkConfigRoot = ""
+			return r.Define(context.Background(), TestsLabel)
+		}, argv: "/usr/bin/env MULTI_REPO_CONFIG_DIR= /m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
 		{name: "a holder ensure's zero exit loads the holder", run: func(r ScriptRequirements) error { return r.EnsureHolder(context.Background(), "socket-holder-store") },
-			argv: "/m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{code: 0}},
+			argv: workEnv + " /m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{code: 0}},
 		{name: "a holder ensure's non-zero exit is a failure in the script's words", run: func(r ScriptRequirements) error { return r.EnsureHolder(context.Background(), "socket-holder-store") },
-			argv: "/m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{out: "install: bootstrap failed", code: 1},
+			argv: workEnv + " /m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{out: "install: bootstrap failed", code: 1},
 			wantErr: "requirements.sh ensure-holder socket-holder-store exited 1: install: bootstrap failed"},
 	}
 	for _, tc := range cases {
@@ -139,7 +147,7 @@ func TestScriptRequirementsRunsItsVerbInTheModuleRoot(t *testing.T) {
 			runner := &scriptedRunner{answers: map[string]runAnswer{tc.argv: tc.answer}}
 
 			// Act
-			err := tc.run(ScriptRequirements{ModuleRoot: "/m", Runner: runner})
+			err := tc.run(ScriptRequirements{ModuleRoot: "/m", WorkConfigRoot: "/w/.claude-work", Runner: runner})
 
 			// Assert
 			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {

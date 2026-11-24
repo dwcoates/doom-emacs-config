@@ -123,7 +123,9 @@ type hooks struct {
 	// and the installer that brings one up (holderensure). REQUIRED.
 	// Production reads the checkout this binary was deployed from; a test
 	// declares none, so a test daemon never installs a holder.
-	Holders func(log dlog.Logger) (holders []holderensure.Holder, install func(ctx context.Context, id string) error, err error)
+	// WORKROOT is the daemon's work account config root, which the installer
+	// is run with (deploy.ScriptRequirements.WorkConfigRoot).
+	Holders func(log dlog.Logger, workRoot string) (holders []holderensure.Holder, install func(ctx context.Context, id string) error, err error)
 }
 
 // productionHooks are the real seams.
@@ -143,7 +145,7 @@ func productionHooks() hooks {
 // declaredHolders reads the socket holders the requirements of the checkout
 // this binary was deployed from declare, and answers its installer
 // (bin/requirements.sh ensure-holder, run in that checkout).
-func declaredHolders(log dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+func declaredHolders(log dlog.Logger, workRoot string) ([]holderensure.Holder, func(context.Context, string) error, error) {
 	root, err := checkout.Root(mustExecutable())
 	if err != nil {
 		return nil, nil, fmt.Errorf("agent-repld: the checkout whose requirements declare the socket holders: %w", err)
@@ -160,7 +162,7 @@ func declaredHolders(log dlog.Logger) ([]holderensure.Holder, func(context.Conte
 	if err != nil {
 		return nil, nil, fmt.Errorf("agent-repld: the runner the holder installer runs on: %w", err)
 	}
-	return holders, deploy.ScriptRequirements{ModuleRoot: root, Runner: runner}.EnsureHolder, nil
+	return holders, deploy.ScriptRequirements{ModuleRoot: root, WorkConfigRoot: workRoot, Runner: runner}.EnsureHolder, nil
 }
 
 // run is the daemon's boot spine, in the settled order:
@@ -397,7 +399,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// THE HOLDER IS THE ONE ITS REQUIREMENT DECLARES unless --holder names
 	// another (a test's own), so a successor spawned from an incumbent's argv
 	// that predates the flag still reaches it.
-	holders, installHolder, err := h.Holders(log)
+	holders, installHolder, err := h.Holders(log, opts.multiRepoConfigDir)
 	if err != nil {
 		log.Error("daemon.cmd.holder", "the socket holders the requirements declare could not be read", dlog.Context{
 			"state_root": layout.Dir(), "error": err.Error()})
