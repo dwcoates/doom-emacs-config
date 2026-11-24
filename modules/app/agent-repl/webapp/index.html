@@ -81,6 +81,12 @@
         <section id="ask-tray" data-component="ask-tray" hidden></section>
       </div>
 
+      <!-- The hovered row's time and age (src/feed/margin-stamp.ts): no height
+           of its own, so the stamp it holds stands over the feed's right
+           margin without taking part in the column's layout, and outside the
+           scroll zone, so it never adds to the feed's scrollable height. -->
+      <div id="feed-stamp" data-component="feed-stamp"></div>
+
       <!-- The jump-to-tail control's slot (src/feed/jump-to-tail.ts): no
            height of its own, so the control it holds floats over the feed's
            bottom edge without taking part in the column's layout, and outside

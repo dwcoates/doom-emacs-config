@@ -5374,7 +5374,8 @@ html[data-page-unshown] {
    translucent disc with a thin chevron, muted until hovered; it fades and
    rises in while the reader is more than a page above the tail, and takes no
    pointer while hidden. Under every overlay (z-index 40 and up). */
-#feed-jump {
+#feed-jump,
+#feed-stamp {
   flex: none;
   position: relative;
   height: 0;
@@ -10549,13 +10550,16 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    opacity alone, never slid. On two lines (time, then age), in the response
    bubbles' serif face, small and grey. Down, the script sets `top` to the
    middle of the row's visible part, and the translate centers the stamp on
-   it. Across, the box spans #feed's content box (the width the column's cap
-   is a percent of), so inside it the lines' box starts at the column's right
-   rail and reaches the feed's right edge, and the lines center in it. */
+   it. Across, the script spans the box over the feed's client area, and its
+   padding leaves #feed's content box (the width the column's cap is a
+   percent of), so inside it the lines' box starts at the column's right rail
+   and reaches the feed's right edge, and the lines center in it. It stands in
+   #feed-stamp, outside the scroll zone, so it never adds to the feed's
+   scrollable height (the zero-height slot rule it shares with #feed-jump). */
 .feed-margin-stamp {
   position: absolute;
-  left: var(--feed-pad-x);
-  right: var(--feed-pad-x);
+  box-sizing: border-box;
+  padding: 0 var(--feed-pad-x);
   transform: translateY(-50%);
   opacity: 0;
   transition: opacity 0.15s ease;
