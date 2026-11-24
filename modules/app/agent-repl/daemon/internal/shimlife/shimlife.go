@@ -103,6 +103,8 @@ type startKey struct{}
 
 type standDownKey struct{}
 
+type standDownDetailKey struct{}
+
 // WithStart answers CTX carrying the start cause C.
 func WithStart(ctx context.Context, c StartCause) context.Context {
 	return context.WithValue(ctx, startKey{}, c)
@@ -124,4 +126,19 @@ func WithStandDown(ctx context.Context, r StandDownReason) context.Context {
 func StandDownOf(ctx context.Context) (StandDownReason, bool) {
 	r, ok := ctx.Value(standDownKey{}).(StandDownReason)
 	return r, ok
+}
+
+// WithStandDownDetail answers CTX carrying DETAIL, the stand-down's own
+// account of itself: the session's end the fleet records for the stop names
+// it (workspace.Fleet.recordStopEnded), so the caller that ordered the stop
+// never writes that end a second time.
+func WithStandDownDetail(ctx context.Context, detail string) context.Context {
+	return context.WithValue(ctx, standDownDetailKey{}, detail)
+}
+
+// StandDownDetailOf answers the stand-down detail CTX carries, false when it
+// carries none.
+func StandDownDetailOf(ctx context.Context) (string, bool) {
+	d, ok := ctx.Value(standDownDetailKey{}).(string)
+	return d, ok
 }

@@ -50,3 +50,26 @@ func TestTheStandDownReasonRidesTheContext(t *testing.T) {
 		})
 	}
 }
+
+func TestTheStandDownDetailRidesTheContext(t *testing.T) {
+	cases := []struct {
+		name   string
+		ctx    context.Context
+		want   string
+		stated bool
+	}{
+		{name: "a stated detail", ctx: WithStandDownDetail(context.Background(), "parked after its idle grace"), want: "parked after its idle grace", stated: true},
+		{name: "no detail", ctx: context.Background()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, stated := StandDownDetailOf(tc.ctx)
+
+			// Assert
+			if got != tc.want || stated != tc.stated {
+				t.Fatalf("StandDownDetailOf = %q, %v; want %q, %v", got, stated, tc.want, tc.stated)
+			}
+		})
+	}
+}

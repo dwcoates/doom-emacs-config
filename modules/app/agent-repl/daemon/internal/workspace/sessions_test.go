@@ -5272,3 +5272,23 @@ func TestAShimThatIsGoneRecordsItsSessionsEnd(t *testing.T) {
 		})
 	}
 }
+
+func TestAStopRecordsTheDetailItsCallerStated(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	ctx := shimlife.WithStandDownDetail(shimlife.WithStandDown(context.Background(), shimlife.StandDownIdle), "parked after its idle grace")
+
+	// Act
+	if err := f.fleet.Stop(ctx, ws.ID, false); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Assert
+	if terminal := f.db.terminals[ws.ID]; terminal.Kind != wsm.TerminalParked || terminal.Detail != "parked after its idle grace" {
+		t.Fatalf("terminal = %+v, want the park with the caller's detail", terminal)
+	}
+}

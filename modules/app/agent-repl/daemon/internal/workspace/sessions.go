@@ -3484,7 +3484,8 @@ func killErrOf(ws ids.WorkspaceID, err error) error {
 // recordStopEnded records the end of WS's shim for the ordered stop CTX names
 // the reason of (shimEndTerminal), on a context its caller's end cannot
 // cancel: the record is the workspace's own accounting, owed once the shim is
-// gone. WHY is the stop's own account of itself.
+// gone. The detail is the caller's (shimlife.WithStandDownDetail) when it
+// stated one, else the stand-down reason and WHY, the stop's own account.
 func (f *Fleet) recordStopEnded(ctx context.Context, ws ids.WorkspaceID, why string) error {
 	reason, stated := shimlife.StandDownOf(ctx)
 	if !stated {
@@ -3495,7 +3496,11 @@ func (f *Fleet) recordStopEnded(ctx context.Context, ws ids.WorkspaceID, why str
 		return nil
 	}
 	log := f.logFor(ctx, ws).With(dlog.Context{"stand_down": string(reason)})
-	return f.recordEnded(context.WithoutCancel(ctx), log, ws, kind, string(reason)+": "+why, nil)
+	detail := string(reason) + ": " + why
+	if stated, ok := shimlife.StandDownDetailOf(ctx); ok {
+		detail = stated
+	}
+	return f.recordEnded(context.WithoutCancel(ctx), log, ws, kind, detail, nil)
 }
 
 // clearTerminal retires WS's terminal record for a client the caller has

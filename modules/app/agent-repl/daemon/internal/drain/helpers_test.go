@@ -1,6 +1,7 @@
 package drain
 
 import (
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
@@ -214,6 +215,12 @@ func (f *fakeFreeness) Awaited() []ids.WorkspaceID {
 // fakeStand is the shim contact the sweep makes.
 type fakeStand struct {
 	mu sync.Mutex
+	// db is where a stand-down that leaves no shim records the park, as the
+	// fleet's stop does (workspace/terminalrecord.go), with the detail the
+	// sweep stated; nil records nothing.
+	db wsm.DB
+	// at stamps each recorded park.
+	at func() time.Time
 	// answer is the Hibernate answer per workspace; the zero value is success.
 	answer map[ids.WorkspaceID]*shimv1.HibernateResponse
 	// hibernateErr fails the directive itself.
@@ -340,6 +347,12 @@ func (s *fakeStand) KillSession(ctx context.Context, ws ids.WorkspaceID, force b
 	if s.wedge || s.wedgeKill || s.wedgeKillOnWS[ws] {
 		<-ctx.Done()
 		return ctx.Err()
+	}
+	if s.db != nil && (err == nil || errors.Is(err, shimclient.ErrSIGKILLed)) {
+		detail, _ := shimlife.StandDownDetailOf(ctx)
+		if werr := s.db.SetSessionTerminal(context.WithoutCancel(ctx), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: detail, At: s.at()}); werr != nil {
+			return werr
+		}
 	}
 	return err
 }
@@ -643,6 +656,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		log:       log,
 		exits:     make(chan struct{}, 4),
 	}
+	h.stand.db, h.stand.at = db, h.clock.Now
 	deps := Deps{
 		DB:            db,
 		IdleCutoff:    time.Hour,

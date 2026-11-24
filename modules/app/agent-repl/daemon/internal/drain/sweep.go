@@ -424,7 +424,10 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		return parkFailed
 	}
 
-	standDown, cancelStandDown := context.WithTimeout(shimlife.WithStandDown(ctx, why.life), c.deps.StandBound)
+	// THE FLEET RECORDS THE PARK, under the lock that orders it against the
+	// next session's clear (workspace/terminalrecord.go); the sweep hands it
+	// the park's own account.
+	standDown, cancelStandDown := context.WithTimeout(shimlife.WithStandDownDetail(shimlife.WithStandDown(ctx, why.life), why.detail), c.deps.StandBound)
 	err = c.deps.Stand.KillSession(standDown, ws, false)
 	cancelStandDown()
 	switch {
@@ -443,14 +446,6 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		return parkFailed
 	}
 
-	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
-		Kind:   wsm.TerminalParked,
-		Detail: why.detail,
-		At:     c.deps.Clock.Now(),
-	}); err != nil {
-		log.Error(why.op, "could not record the park", dlog.WithCause(fields, err))
-		return parkFailed
-	}
 	// The shim is gone, so the pid the intent manifest would name is gone with
 	// it. A pid left behind would make the next reconciliation read a dead
 	// session as preserved.
