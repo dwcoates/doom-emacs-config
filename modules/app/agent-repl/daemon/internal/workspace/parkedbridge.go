@@ -78,11 +78,12 @@ func (f *Fleet) settleGateShim(ctx context.Context, ws ids.WorkspaceID) {
 	f.gateShim(ctx, ws, f.standDownAtGate)
 }
 
-// bridgeGateInRemoteControl bridges WS's standing gate when its remote
+// BridgeGate bridges WS's standing gate when its remote
 // control is on, and leaves its shim as it is otherwise: it is for the paths
 // that keep a gate's shim held (a relaunch the shim answered cold, a carried
-// gate raised over an adopted shim).
-func (f *Fleet) bridgeGateInRemoteControl(ctx context.Context, ws ids.WorkspaceID) {
+// gate raised over an adopted shim) and for the park of a session a gate was
+// raised over (drain.Deps.BridgeGate).
+func (f *Fleet) BridgeGate(ctx context.Context, ws ids.WorkspaceID) {
 	f.gateShim(ctx, ws, func(context.Context, ids.WorkspaceID) {})
 }
 
@@ -154,6 +155,14 @@ func (f *Fleet) bridgedShimAtGate(ctx context.Context, log dlog.Logger, ws ids.W
 		return nil, nil, "", false
 	}
 	vendorSessionID := standing.served.VendorSessionID
+	// A GATE RAISED OVER A SESSION STILL RUNNING (Fleet.RaiseProjectedGate)
+	// is bridged by that session's park, once the conversation is free
+	// (drain.Deps.BridgeGate): a shim spawned beside it would only adopt the
+	// running one and be refused.
+	if f.sessionStarted(ws) {
+		log.Info(opParkedBridge, "the gate stands over a session still running; its park bridges the gate", dlog.Context{"vendor_session_id": vendorSessionID})
+		return nil, nil, "", false
+	}
 	if held, ok := f.idleHeldForAnswer(ws); ok && held.bridged {
 		log.Debug(opParkedBridge, "the gate's shim already holds its bridge", dlog.Context{"shim_pid": held.client.PID()})
 		return nil, nil, "", false

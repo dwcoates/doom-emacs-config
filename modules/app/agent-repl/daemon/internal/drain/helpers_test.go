@@ -624,9 +624,11 @@ type harness struct {
 	merges *fakeMerges
 	// visibility overrides liveVisibility's derivation, by workspace.
 	visibility map[ids.WorkspaceID]wsm.Visibility
-	t          *testing.T
-	log        *dlog.TestSurfaces
-	exits      chan struct{}
+	// bridged is every workspace Deps.BridgeGate was handed, in order.
+	bridged []ids.WorkspaceID
+	t       *testing.T
+	log     *dlog.TestSurfaces
+	exits   chan struct{}
 }
 
 // newHarness builds a controller over a real (in-memory) WSM store —
@@ -686,9 +688,10 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		// A WITHHELD STAND-DOWN RUNS IN LINE in tests, so its outcome is
 		// settled when the call returns; a test that needs it parked
 		// overrides this.
-		Detach: func(_ ids.WorkspaceID, run func(context.Context)) { run(context.Background()) },
-		Clock:  h.clock,
-		Log:    log,
+		Detach:     func(_ ids.WorkspaceID, run func(context.Context)) { run(context.Background()) },
+		BridgeGate: func(_ context.Context, ws ids.WorkspaceID) { h.bridged = append(h.bridged, ws) },
+		Clock:      h.clock,
+		Log:        log,
 	}
 	h.spawns.witness = func() int { return len(h.stand.Killed()) }
 	h.merges.witness = func() int { return len(h.stand.Killed()) }

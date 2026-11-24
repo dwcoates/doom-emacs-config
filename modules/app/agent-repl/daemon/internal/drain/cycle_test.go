@@ -3,6 +3,7 @@ package drain
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -478,6 +479,64 @@ func TestAColdGateStandDownParksTheSessionForItsOwnReason(t *testing.T) {
 	}
 	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != coldGateReason.detail {
 		t.Fatalf("terminal = %+v, want the one park with the cold gate's detail", term)
+	}
+}
+
+// A COLD GATE'S PARK IN REMOTE CONTROL IS TAKEN, AND BRIDGES THE GATE: a
+// session spared at its gate left every answer refused.
+func TestAColdGateStandDownInRemoteControlParksAndBridgesTheGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.remoteControlOn(t)
+
+	// Act
+	h.c.ColdDown(ws, beatAfter, true)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 1 || killed[0].Life != shimlife.StandDownColdGate {
+		t.Fatalf("kills = %+v, want the session in remote control parked behind its gate", killed)
+	}
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != coldGateReason.detail {
+		t.Fatalf("terminal = %+v, want the one park with the cold gate's detail", term)
+	}
+	if !slices.Equal(h.bridged, []ids.WorkspaceID{ws}) {
+		t.Fatalf("bridged = %v, want the gate bridged once after its park", h.bridged)
+	}
+	record := recordWith(t, h, opCold, "parked an idle session whose cold gate was raised")
+	if record.Context["remote_control"] != true || record.Context["remote_control_policy"] != "bridges" {
+		t.Fatalf("record = %+v, want the park naming remote control on and the bridging policy", record)
+	}
+}
+
+func TestAColdGateStandDownOutOfRemoteControlBridgesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+
+	// Act
+	h.c.ColdDown(ws, beatAfter, true)
+
+	// Assert
+	if len(h.stand.Killed()) != 1 || len(h.bridged) != 0 {
+		t.Fatalf("kills = %+v, bridged = %v; want the park alone", h.stand.Killed(), h.bridged)
+	}
+}
+
+func TestAColdGateStandDownThatFailsBridgesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.remoteControlOn(t)
+	h.stand.failKill(ws, errFake)
+
+	// Act
+	h.c.ColdDown(ws, beatAfter, true)
+
+	// Assert
+	if len(h.bridged) != 0 {
+		t.Fatalf("bridged = %v, want no bridge beside a session the park could not stand down", h.bridged)
+	}
+	if record := recordWith(t, h, opCold, "the graceful stand-down failed after the hibernate ack; deferring"); record.Level != "error" {
+		t.Fatalf("record = %+v, want the failed stand-down at error", record)
 	}
 }
 

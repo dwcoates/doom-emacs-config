@@ -79,5 +79,11 @@ func (f *Fleet) RaiseProjectedGate(ctx context.Context, ws ids.WorkspaceID, proj
 	f.recordGate(ctx, log, ws, wsm.ColdGateRecord{VendorSessionID: session.VendorSessionID, Cold: cold, ConfigDir: configDir})
 	log.Info(opColdGate, "raised the workspace's cold gate from its shim's projection; no session is started until it is answered",
 		dlog.Context{"vendor_session_id": session.VendorSessionID, "context_tokens": cold.GetContextTokens()})
+	// WHAT THE GATE KEEPS OF ITS SHIM IS SETTLED AS AT EVERY RAISE
+	// (parkedbridge.go): an idle shim is stood down, or holds the bridge in
+	// remote control, as does a workspace with no shim at all. A session
+	// still running is left to its park (cachelapse.Keeper.ColdGateRaised),
+	// which bridges the gate once the conversation is free.
+	f.settleGateShim(ctx, ws)
 	return true, nil
 }

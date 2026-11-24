@@ -1643,7 +1643,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A WITHHELD WORKSPACE'S STAND-DOWN runs on the fleet's detached
 		// lifetime, which the exit ends and joins.
 		Detach: fleet.Detach,
-		Log:    p.Surfaces,
+		// A COLD GATE'S PARK IN REMOTE CONTROL hands the gate its bridge.
+		BridgeGate: fleet.BridgeGate,
+		Log:        p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the drain controller: %w", err)

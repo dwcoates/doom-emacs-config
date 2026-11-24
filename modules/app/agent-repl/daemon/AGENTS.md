@@ -1933,12 +1933,17 @@ prompt was sent. Now:
   shim build that states no last request, retires it. Boot re-arms the rows.
 - **At the instant the daemon raises the gate itself** (`Fleet.RaiseProjectedGate`),
   with no shim started, over a visible workspace with no gate standing, no turn
-  and a recorded conversation; the requested model is the session's. The sidebar,
+  and a recorded conversation; the requested model is the session's. A read
+  the user already paid for (`wsm.ColdReadPayment`) is never raised again: the
+  pay answer sends no request, so its session restates the same lapsed read. The sidebar,
   footer and composer dock draw it as any gate. A hidden or closed workspace
   keeps its lapse (`Keeper.lapse`); a declined raise waits for the next projection.
 - **The session is parked at the gate whether or not the user is looking**
   (`drain.Controller.ColdDown` with `atGate`), because the answer's resume
-  refuses while a shim still runs the conversation.
+  refuses while a shim still runs the conversation. In remote control too: the
+  park is taken, and the gate then holds the parked conversation's bridge
+  (`drain.Deps.BridgeGate`, `remoteBridges`), as every gate in remote control
+  does (`parkedbridge.go`).
 
 ## A prompt waits at the cold gate, and nothing that waits on a session is left unheld
 

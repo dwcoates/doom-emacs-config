@@ -1308,7 +1308,7 @@ func (f *Fleet) RaiseCarriedColdGate(ctx context.Context, ws ids.WorkspaceID, co
 		return fmt.Errorf("workspace: raise the carried cold gate of %q: read the session record: %w", ws, err)
 	}
 	f.standCarriedColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
-	f.bridgeGateInRemoteControl(ctx, ws)
+	f.BridgeGate(ctx, ws)
 	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opFleetRollout,
 		"raised the carried cold gate over the adopted parked shim; the gate stands on this daemon", dlog.Context{
 			"vendor_session_id": session.VendorSessionID,
@@ -1385,7 +1385,7 @@ func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conve
 	// The relaunched shim was spawned under spawnRootFor (Prelaunch), so the
 	// gate serves that account's menu.
 	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session), RaiseJudged)
-	f.bridgeGateInRemoteControl(context.Background(), ws)
+	f.BridgeGate(context.Background(), ws)
 	return nil
 }
 

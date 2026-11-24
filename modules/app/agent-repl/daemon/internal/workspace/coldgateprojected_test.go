@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -234,5 +236,58 @@ func TestAProjectedGateWhosePaymentCannotBeReadIsRefused(t *testing.T) {
 	}
 	if _, ok := f.fleet.ColdGate(ws); ok {
 		t.Fatal("a gate stands, want none after a failed payment read")
+	}
+}
+
+func TestAProjectedGateInRemoteControlWithNoShimSpawnsTheShimThatHoldsItsBridge(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.setRemote(ws, wsm.RemoteControl{On: true})
+	f.client.bridgeFrames = make(chan *shimv1.HoldParkedBridgeResponse)
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+	f.client.bridgeFrames <- openedFrame("bridge-1")
+	settled(t, f)
+
+	// Assert
+	if err != nil || !raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the gate raised", raised, err)
+	}
+	if len(f.supervisor.spawns) != 1 || len(f.client.bridges) != 1 || len(f.client.requests) != 0 {
+		t.Fatalf("spawns %d, bridges %d, starts %d; want one shim spawned for the bridge and no session started",
+			len(f.supervisor.spawns), len(f.client.bridges), len(f.client.requests))
+	}
+}
+
+func TestAProjectedGateOverARunningSessionInRemoteControlLeavesTheBridgeToItsPark(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.db.setRemote(ws, wsm.RemoteControl{On: true})
+	spawned := len(f.supervisor.spawns)
+
+	// Act
+	raised, err := f.fleet.RaiseProjectedGate(context.Background(), ws, projectedCold())
+	if !f.fleet.DrainStarts(time.Minute) {
+		t.Fatal("the fleet's detached work did not finish")
+	}
+
+	// Assert
+	if err != nil || !raised {
+		t.Fatalf("RaiseProjectedGate = %v, %v; want the gate raised", raised, err)
+	}
+	if len(f.supervisor.spawns) != spawned || len(f.client.bridges) != 0 {
+		t.Fatalf("spawns %d (were %d), bridges %d; want no shim spawned beside the running session", len(f.supervisor.spawns), spawned, len(f.client.bridges))
+	}
+	if _, ok := bridgeRecord(f, "info", "the gate stands over a session still running; its park bridges the gate"); !ok {
+		t.Fatalf("records = %+v, want the bridge left to the park", f.log.logger.Records())
+	}
+	if _, ok := bridgeRecord(f, "error", "could not spawn the shim that holds the parked workspace's bridge"); ok {
+		t.Fatal("the bridge was attempted beside the running session")
 	}
 }
