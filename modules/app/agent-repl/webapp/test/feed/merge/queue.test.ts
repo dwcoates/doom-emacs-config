@@ -713,10 +713,10 @@ describe("a press on a waiting row drags it among the waiting", () => {
     const waiting = ["next", "mine", "after"].map((name) => rowNamed(table, name));
     const refs = new Map(waiting.map((row, i) => [row, { id: ["next", "mine", "after"][i], dir: "" }]));
     const spec = queueEntryDrag(rc, arrangeOf(panel), table, waiting[1].querySelector(".merge-queue-label"), refs as never);
-    expect([spec?.kind, spec?.item, spec?.box, spec?.lists(), spec?.itemsOf(table), spec?.scroller]).toEqual([
+    expect([spec?.kind, spec?.item, spec?.boxes, spec?.lists(), spec?.itemsOf(table), spec?.scroller]).toEqual([
       QUEUE_DRAG_KIND,
       waiting[1],
-      table,
+      [table],
       [table],
       waiting,
       undefined,

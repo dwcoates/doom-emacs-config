@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The drag's click guard. See src/drag.ts.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listAt, swallowTheNextClick } from "../src/drag.js";
+import { DRAG_THRESHOLD_PX, listAt, pressToDrag, REARRANGED_ATTRIBUTE, swallowTheNextClick, type DragHost, type DragSpec } from "../src/drag.js";
 import { settleOwedDragClick } from "./drag-pointer.js";
 import { boxRect } from "./dom-rect.js";
 
@@ -121,5 +121,55 @@ describe("listAt", () => {
   it("refuses a drag with no list to land in", () => {
     // Act / Assert
     expect(() => listAt([], 10, own)).toThrow(/invariant/);
+  });
+});
+
+describe("lifting an item", () => {
+  /** A host whose hold is recorded, its copy's layer in the document. */
+  function host(): { arrange: DragHost; held: string[] } {
+    const held: string[] = [];
+    const layer = document.createElement("div");
+    document.body.appendChild(layer);
+    return { arrange: { hold: { drag: () => held.push("drag"), cancel: () => held.push("cancel") }, layer }, held };
+  }
+
+  /** A list holding one item, in the document, and a spec dragging that item with BOXES. */
+  function oneItem(boxes: (list: HTMLElement) => HTMLElement[]): { spec: DragSpec; list: HTMLElement } {
+    const list = document.createElement("div");
+    const item = document.createElement("div");
+    list.appendChild(item);
+    document.body.appendChild(list);
+    return { list, spec: { kind: "test", item, boxes: boxes(list), lists: () => [list], itemsOf: (l) => [...l.children] as HTMLElement[], dropped: () => {} } };
+  }
+
+  /** Press SPEC's item and move past the threshold, so it lifts. */
+  function lift(arrange: DragHost, spec: DragSpec): void {
+    pressToDrag(arrange, spec, new PointerEvent("pointerdown", { clientX: 0, clientY: 0, pointerId: 1, isPrimary: true }));
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 0, clientY: DRAG_THRESHOLD_PX + 1, pointerId: 1 }));
+  }
+
+  it("marks every box the item may move through, so the next draw keeps none of them", () => {
+    // Arrange
+    const { arrange } = host();
+    const other = document.createElement("section");
+    const { spec, list } = oneItem((l) => [l, other]);
+
+    // Act
+    lift(arrange, spec);
+    const marked = [list, other].map((box) => box.getAttribute(REARRANGED_ATTRIBUTE));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    // Assert
+    expect(marked).toEqual(["true", "true"]);
+  });
+
+  it("refuses a spec that names no box at the press, before holding the drawing", () => {
+    // Arrange
+    const { arrange, held } = host();
+    const { spec } = oneItem(() => []);
+
+    // Act / Assert
+    expect(() => lift(arrange, spec)).toThrow("invariant: a test drag names the box it rearranges");
+    expect(held).toEqual([]);
   });
 });

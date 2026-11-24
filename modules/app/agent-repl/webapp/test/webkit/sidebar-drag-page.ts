@@ -60,7 +60,7 @@ window.sidebarDragPage = {
         {
           kind: "row",
           item,
-          box: list,
+          boxes: [list],
           scroller: host,
           lists: () => [list],
           itemsOf: (l) => Array.from(l.children) as HTMLElement[],

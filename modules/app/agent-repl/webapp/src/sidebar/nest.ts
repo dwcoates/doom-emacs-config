@@ -1,6 +1,8 @@
 /**
  * nest — a workspace row dropped onto another row becomes that workspace's
- * CHILD (agentrepl.v1 SetWorkspaceParent, the `child_of` arm).
+ * CHILD (agentrepl.v1 SetWorkspaceParent, the `child_of` arm), and a nested
+ * row dropped among the top-level rows becomes TOP-LEVEL there (the
+ * `top_level` arm, then the placement the drop asked for).
  *
  * THE DROP IS THE RETARGET'S REQUEST, never a local reparent. Who a
  * workspace's parent is is durable daemon state, and the daemon tells the
@@ -12,6 +14,13 @@
  * THE DROP IS HELD LIKE AN ARRANGEMENT (`arrange.ts` `sendHeld`): the page
  * keeps the row where the drop put it until a push at or above the revision
  * the daemon answered (`SetWorkspaceParentSuccess.roster_revision`) arrives.
+ *
+ * A DROP AT THE TOP LEVEL IS TWO ASKS UNDER ONE HOLD (`sendHeldSteps`). The
+ * retarget leaves the freed workspace where its old family was filed, and
+ * only a placement can stand it where it was dropped. The placement is asked
+ * only once the retarget took: asked before it, it would place the family's
+ * root, the old parent, instead. A refused placement leaves the workspace
+ * top-level where the daemon filed it, its refusal drawn.
  */
 import { create } from "@bufbuild/protobuf";
 import {
@@ -25,7 +34,7 @@ import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_
 import { createLogger } from "../log.js";
 import { parentNotOpenSentence } from "../rpc/family-refusal.js";
 import { unreachableArm } from "../rpc/strict.js";
-import { sendHeld, successRevision } from "./arrange.js";
+import { arrangementVerb, heldStep, sendHeldSteps, successRevision, type ArrangeChange, type HeldVerb } from "./arrange.js";
 import type { SidebarContext } from "./context.js";
 import type { CauseOf } from "./verbs.js";
 
@@ -36,6 +45,14 @@ export function buildNestRequest(workspace: WorkspaceRef, parent: WorkspaceRef):
   return create(SetWorkspaceParentRequestSchema, {
     workspace,
     parent: { case: "childOf", value: { parent } },
+  });
+}
+
+/** SetWorkspaceParent making WORKSPACE top-level, its landing kept. */
+export function buildUnnestRequest(workspace: WorkspaceRef): SetWorkspaceParentRequest {
+  return create(SetWorkspaceParentRequestSchema, {
+    workspace,
+    parent: { case: "topLevel", value: {} },
   });
 }
 
@@ -67,6 +84,18 @@ export function setWorkspaceParentRefusal(cause: CauseOf<SetWorkspaceParentError
   }
 }
 
+/** The held verb asking SetWorkspaceParent for REQUEST, its refusal recorded with CONTEXT. */
+function parentVerb(request: SetWorkspaceParentRequest, context: Record<string, unknown>): HeldVerb<SetWorkspaceParentResponse> {
+  return {
+    rpc: "SetWorkspaceParent",
+    call: (client) => client.setWorkspaceParent(request),
+    schema: SetWorkspaceParentResponseSchema,
+    refusalText: (cause) => setWorkspaceParentRefusal(cause as CauseOf<SetWorkspaceParentError>),
+    revision: successRevision,
+    context,
+  };
+}
+
 /**
  * Ask the daemon to make WORKSPACE a child of PARENT, with CONTROL the element
  * a refusal is drawn beside, holding the page's drawing until the answered
@@ -80,12 +109,28 @@ export async function sendNest(
 ): Promise<boolean> {
   const context = { workspace: workspace.id, parent: parent.id };
   log.info("nesting a workspace under the one it was dropped onto", { operation: "sidebar.nest.send", context });
-  return sendHeld<SetWorkspaceParentResponse>(sc, control, {
-    rpc: "SetWorkspaceParent",
-    call: (client) => client.setWorkspaceParent(buildNestRequest(workspace, parent)),
-    schema: SetWorkspaceParentResponseSchema,
-    refusalText: (cause) => setWorkspaceParentRefusal(cause as CauseOf<SetWorkspaceParentError>),
-    revision: successRevision,
-    context,
-  });
+  return sendHeldSteps(sc, control, [heldStep(parentVerb(buildNestRequest(workspace, parent), context))]);
+}
+
+/**
+ * Ask the daemon to make WORKSPACE top-level and then to stand it as
+ * PLACEMENT says, a `placeWorkspace` of WORKSPACE itself, under one hold (see
+ * the file comment), with CONTROL the element a refusal is drawn beside.
+ * Answers whether both took.
+ */
+export async function sendUnnest(
+  sc: SidebarContext,
+  control: HTMLElement,
+  workspace: WorkspaceRef,
+  placement: ArrangeChange,
+): Promise<boolean> {
+  if (placement?.case !== "placeWorkspace" || placement.value.workspace?.id !== workspace.id) {
+    throw new Error("invariant: a workspace made top-level is placed by a placement of itself");
+  }
+  const context = { workspace: workspace.id, into: placement.value.into?.case, at: placement.value.at?.case };
+  log.info("making a nested workspace top-level where it was dropped", { operation: "sidebar.nest.unnest", context });
+  return sendHeldSteps(sc, control, [
+    heldStep(parentVerb(buildUnnestRequest(workspace), context)),
+    heldStep(arrangementVerb(placement)),
+  ]);
 }

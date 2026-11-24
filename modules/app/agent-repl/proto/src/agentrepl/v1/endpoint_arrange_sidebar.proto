@@ -178,9 +178,9 @@ message ArrangeMoveRepositoryBlock {
   }
 }
 
-// Reorder one CHILD among its parent's children: the drag of a nested row,
-// which lifts that row and its own descendants and offers only its parent's
-// children as a place to drop. A child never leaves its parent this way: no
+// Reorder one CHILD among its parent's children: a nested row's drag dropped
+// among its own siblings (a drop elsewhere retargets it instead,
+// SetWorkspaceParent). A child never leaves its parent this way: no
 // re-parenting, no going top-level, no subsection (ArrangePlaceWorkspace is
 // the family-level move, and a top-level workspace is refused here). The new
 // order is the children's `place`, so the sidebar and the tab bar both follow.

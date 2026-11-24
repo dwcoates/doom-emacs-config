@@ -12,10 +12,14 @@ import type { RosterStreams } from "../../src/sidebar/roster-streams.js";
 import {
   arrangeSidebarRefusal,
   buildArrangeSidebarRequest,
+  arrangementVerb,
   createArrangeHold,
+  heldStep,
   sendArrangement,
   sendHeld,
+  sendHeldSteps,
   successRevision,
+  type HeldStep,
 } from "../../src/sidebar/arrange.js";
 import { spyLog } from "../log-spy.js";
 import { appContext, roster, sidebarContext } from "./harness.js";
@@ -177,6 +181,126 @@ describe("sending a held verb", () => {
       .filter((file) => file.endsWith(".ts"))
       .flatMap((file) => (readFileSync(path.join(dir, file), "utf8").match(/hold\.await\(\)/g) ?? []).map(() => file));
     expect(awaiting).toEqual(["arrange.ts"]);
+  });
+});
+
+describe("sending held steps", () => {
+  /** A context whose hold is recorded, drawn at revision 6, its ArrangeSidebar answering each of RESPONSES in turn. */
+  function stepsContext(responses: Parameters<typeof create<typeof ArrangeSidebarResponseSchema>>[1][]) {
+    const asked: ArrangeSidebarRequest[] = [];
+    const sc = sidebarContext(
+      appContext({
+        arrangeSidebar: (request) => {
+          asked.push(request);
+          const response = responses[asked.length - 1];
+          if (response === undefined) throw new Error("test: no answer left for this ask");
+          return create(ArrangeSidebarResponseSchema, response);
+        },
+      }),
+    );
+    const drawn: number[] = [];
+    sc.arrange.hold = createArrangeHold((roster) => drawn.push(Number(roster.revision)));
+    sc.arrange.hold.offer(at(6));
+    const host = document.createElement("div");
+    host.appendChild(sc.arrange.status);
+    return { sc, asked, drawn, host };
+  }
+
+  /** A step deleting subsection ID. */
+  const step = (id: string): HeldStep => heldStep(arrangementVerb({ case: "deleteSubsection", value: { subsection: { id } } }));
+  const success = (revision: bigint) => ({ result: { case: "success" as const, value: { rosterRevision: revision } } });
+  const refusal = { result: { case: "error" as const, value: { cause: { case: "blankName" as const, value: {} } } } };
+  const subsectionOf = (request: ArrangeSidebarRequest): string | undefined =>
+    request.change.case === "deleteSubsection" ? request.change.value.subsection?.id : undefined;
+
+  it("asks every step in order and holds the drawing until the last step's revision", async () => {
+    // Arrange
+    const { sc, asked, drawn } = stepsContext([success(7n), success(8n)]);
+
+    // Act
+    const took = await sendHeldSteps(sc, sc.arrange.status, [step("one"), step("two")]);
+    sc.arrange.hold.offer(at(7));
+    const heldAtTheFirst = sc.arrange.hold.holding();
+    sc.arrange.hold.offer(at(8));
+
+    // Assert
+    expect([took, asked.map(subsectionOf), heldAtTheFirst, drawn, sc.arrange.hold.holding()]).toEqual([
+      true,
+      ["one", "two"],
+      true,
+      [6, 8],
+      false,
+    ]);
+  });
+
+  it("never asks a step after one that was refused, and answers false", async () => {
+    // Arrange
+    const { sc, asked, host } = stepsContext([refusal, success(8n)]);
+
+    // Act
+    const took = await sendHeldSteps(sc, sc.arrange.status, [step("one"), step("two")]);
+
+    // Assert
+    expect([took, asked.map(subsectionOf), host.querySelector('.refusal[data-arm="blankName"]') !== null, sc.arrange.hold.holding()]).toEqual([
+      false,
+      ["one"],
+      true,
+      false,
+    ]);
+  });
+
+  it("holds until an earlier step's revision when a later step is refused", async () => {
+    // Arrange
+    const { sc, drawn } = stepsContext([success(7n), refusal]);
+
+    // Act
+    const took = await sendHeldSteps(sc, sc.arrange.status, [step("one"), step("two")]);
+    const held = sc.arrange.hold.holding();
+    sc.arrange.hold.offer(at(7));
+
+    // Assert
+    expect([took, held, drawn, sc.arrange.hold.holding()]).toEqual([false, true, [6, 7], false]);
+  });
+
+  it("refuses a sequence of no steps, leaving the hold alone", async () => {
+    // Arrange
+    const { sc } = stepsContext([]);
+
+    // Act / Assert
+    await expect(sendHeldSteps(sc, sc.arrange.status, [])).rejects.toThrow("invariant: a held sequence asks at least one step");
+    expect(sc.arrange.hold.holding()).toBe(false);
+  });
+
+  it("is what sendHeld asks through, so a held verb has one way to fire", () => {
+    // Arrange
+    const source = codeOf(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/sidebar/arrange.ts"), "utf8"));
+
+    // Act
+    const fired = source.match(/fireVerb\(/g) ?? [];
+
+    // Assert
+    expect([fired.length, /return sendHeldSteps\(sc, control, \[heldStep\(verb\)\]\)/.test(source)]).toEqual([1, true]);
+  });
+});
+
+describe("the arrangement verb", () => {
+  it("asks ArrangeSidebar for the change and reads the revision its success names", async () => {
+    // Arrange
+    const asked: ArrangeSidebarRequest[] = [];
+    const sc = sidebarContext(
+      appContext({
+        arrangeSidebar: (request) => {
+          asked.push(request);
+          return create(ArrangeSidebarResponseSchema, { result: { case: "success", value: { rosterRevision: 4n } } });
+        },
+      }),
+    );
+
+    // Act
+    const outcome = await heldStep(arrangementVerb({ case: "deleteSubsection", value: { subsection: { id: "sub-1" } } })).fire(sc, sc.arrange.status);
+
+    // Assert
+    expect([outcome, asked.map((request) => request.change.case)]).toEqual([{ took: true, revision: 4n }, ["deleteSubsection"]]);
   });
 });
 

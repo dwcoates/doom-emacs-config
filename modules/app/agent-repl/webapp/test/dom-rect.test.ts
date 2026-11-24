@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { boxRect, settableScrollTop } from "./dom-rect.js";
+import { boxAt, boxRect, settableScrollTop } from "./dom-rect.js";
 import { codeUnder } from "./files-under.js";
 
 describe("boxRect", () => {
@@ -41,6 +41,42 @@ describe("boxRect", () => {
     const handRolled = [...suites].filter(([path, code]) => path !== "dom-rect.ts" && /toJSON:\s*\(\)\s*=>/.test(code)).map(([path]) => path);
     // Assert
     expect(handRolled).toEqual([]);
+  });
+});
+
+describe("boxAt", () => {
+  it("gives the element the box from its top down by its height, 200 wide", () => {
+    // Arrange
+    const el = document.createElement("div");
+
+    // Act
+    boxAt(el, 40, 20);
+
+    // Assert
+    const { top, bottom, left, width } = el.getBoundingClientRect();
+    expect([top, bottom, left, width]).toEqual([40, 60, 0, 200]);
+  });
+
+  it("replaces a box given earlier", () => {
+    // Arrange
+    const el = document.createElement("div");
+    boxAt(el, 0, 10);
+
+    // Act
+    boxAt(el, 5, 15);
+
+    // Assert
+    expect(el.getBoundingClientRect().bottom).toBe(20);
+  });
+
+  it("is how the sidebar's drag suite fixes one element's box: no copy of its own", () => {
+    // Arrange
+    const suites = codeUnder(dirname(fileURLToPath(import.meta.url)));
+    // Act
+    const code = suites.get("sidebar/subsections.test.ts") ?? "";
+    const handRolled = code.match(/defineProperty\(el, "getBoundingClientRect", \{ configurable: true, value: \(\) => boxRect\(\{ top/g) ?? [];
+    // Assert
+    expect([code.includes("boxAt("), handRolled.length]).toEqual([true, 0]);
   });
 });
 

@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -57,10 +60,11 @@ import {
   settleOwedDragClick,
   sidebarContext,
 } from "./harness.js";
-import { boxRect } from "../dom-rect.js";
+import { boxAt, boxRect } from "../dom-rect.js";
 import { withRepositoryBlocks } from "../roster-families.js";
 import type { RosterOpenRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { REPOSITORY_BLOCK_CLASS } from "../../src/sidebar/row.js";
+import { codeOf } from "../source-text.js";
 
 /**
  * Every ArrangeSidebar and SetWorkspaceParent request the daemon received,
@@ -137,7 +141,7 @@ function layOut(list: HTMLElement, top: number, lines = false): void {
     return y;
   };
   const box = (y: number, h: number): DOMRect => boxRect({ top: y, height: h, width: 200 });
-  for (const el of [list, ...queryAll<HTMLElement>(list, ".rows, [data-roster-row], [data-repository], .sb-subsection, .sb-subsection-head")]) {
+  for (const el of [list, ...queryAll<HTMLElement>(list, `.rows, [data-roster-row], [data-repository], .sb-subsection, .sb-subsection-head${lines ? ", .kids" : ""}`)]) {
     Object.defineProperty(el, "getBoundingClientRect", {
       configurable: true,
       value: () => box(topOf(el), el === list ? Math.max(ROW_HEIGHT, height(el)) : el.classList.contains("sb-subsection-head") ? ROW_HEIGHT : height(el)),
@@ -846,11 +850,6 @@ describe("dragging a repository block", () => {
     return roster({ repos: [section, repoSection({ id: "repo-2" }), repoSection({ id: "repo-3" })] });
   }
 
-  /** Give EL the box TOP..TOP+HEIGHT. */
-  function boxAt(el: Element, top: number, height: number): void {
-    Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top, height, width: 200 }) });
-  }
-
   /** P's family box and its two blocks, laid out: o at 20, the repo-2 block at 40, the repo-3 block at 70. */
   function layOutP(pane: HTMLElement): { kids: HTMLElement; blocks: HTMLElement[] } {
     const kids = pane.querySelector("[data-roster-row='p'] > .kids") as HTMLElement;
@@ -976,14 +975,12 @@ describe("a nested row", () => {
   /** Lay a's box of nested rows out under a's line at 20: k1 at 20, k2 at 40 (g at 60), k3 at 80. */
   function layOutKids(pane: HTMLElement): HTMLElement {
     const kids = pane.querySelector("[data-roster-row='a'] > .kids") as HTMLElement;
-    const at = (el: Element, top: number, height: number): void =>
-      void Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top, height, width: 200 }) });
-    at(kids, 20, 80);
-    at(pane.querySelector("[data-roster-row='k1']")!, 20, 20);
-    at(pane.querySelector("[data-roster-row='k2']")!, 40, 40);
-    at(pane.querySelector("[data-roster-row='g']")!, 60, 20);
-    at(pane.querySelector("[data-roster-row='k3']")!, 80, 20);
-    for (const id of ["k1", "k2", "g", "k3"]) at(rowLine(pane, id), Number(pane.querySelector(`[data-roster-row='${id}']`)!.getBoundingClientRect().top), 20);
+    boxAt(kids, 20, 80);
+    boxAt(pane.querySelector("[data-roster-row='k1']")!, 20, 20);
+    boxAt(pane.querySelector("[data-roster-row='k2']")!, 40, 40);
+    boxAt(pane.querySelector("[data-roster-row='g']")!, 60, 20);
+    boxAt(pane.querySelector("[data-roster-row='k3']")!, 80, 20);
+    for (const id of ["k1", "k2", "g", "k3"]) boxAt(rowLine(pane, id), Number(pane.querySelector(`[data-roster-row='${id}']`)!.getBoundingClientRect().top), 20);
     return kids;
   }
 
@@ -1048,17 +1045,191 @@ describe("a nested row", () => {
     expect([lifted, childMove(sent)]).toEqual([true, ["k2", "before:k1"]]);
   });
 
-  it("is offered no list but its parent's children: never a bucket or another row's nest", async () => {
-    // Arrange: b, a top-level row, sits below a's family.
-    const { sc, sent, nested } = arranged();
-    const pane = mount(familyRoster(), sc);
-    layOutKids(pane);
+  /** The top-level retargets NESTED asked for, by workspace. */
+  function freed(nested: SetWorkspaceParentRequest[]): (string | undefined)[] {
+    return nested.filter((request) => request.parent.case === "topLevel").map((request) => request.workspace?.id);
+  }
 
-    // Act: k1 dropped far below a's family, over b.
-    await drag(rowLine(pane, "k1"), 25, 400);
+  /** The placement SENT asked for: the workspace, where, and before what. */
+  function placed(sent: ArrangeSidebarRequest[]): [string | undefined, string, string] | null {
+    const change = sent[0]?.change;
+    if (change?.case !== "placeWorkspace") return null;
+    const { into, at } = change.value;
+    return [
+      change.value.workspace?.id,
+      into.case === "subsection" ? `subsection:${into.value.id}` : String(into.case),
+      at.case === "before" || at.case === "beforeSubsection" ? `${at.case}:${at.value.id}` : String(at.case),
+    ];
+  }
+
+  /** familyRoster laid out by its lines: a 0 to 20, k1 20, k2 40 (g 60), k3 80, b 100 to 120. */
+  function laidOutFamily(setParent?: () => SetWorkspaceParentResponse): ReturnType<typeof arranged> & { pane: HTMLElement } {
+    const made = arranged(setParent);
+    const pane = mount(familyRoster(), made.sc);
+    layOut(sectionList(pane), 0, true);
+    return { ...made, pane };
+  }
+
+  it("leaves its parent for the top level, standing where it was dropped among the top-level rows", async () => {
+    // Arrange
+    const { pane, sent, nested } = laidOutFamily();
+
+    // Act: k1 dropped on b's line's top quarter.
+    await drag(rowLine(pane, "k1"), 25, 103);
 
     // Assert
-    expect([childMove(sent), nested, sent.length]).toEqual([["k1", "end"], [], 1]);
+    expect([freed(nested), placed(sent), sent.length]).toEqual([["k1"], ["k1", "noSubsection", "before:b"], 1]);
+  });
+
+  it("asks the placement only after the retarget, so it places the freed workspace and not its old family", async () => {
+    // Arrange
+    const order: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        arrangeSidebar: () => {
+          order.push("arrangeSidebar");
+          return create(ArrangeSidebarResponseSchema, { result: { case: "success", value: { rosterRevision: 2n } } });
+        },
+        setWorkspaceParent: () => {
+          order.push("setWorkspaceParent");
+          return create(SetWorkspaceParentResponseSchema, { result: { case: "success", value: { rosterRevision: 1n } } });
+        },
+      }),
+    );
+    const pane = mount(familyRoster(), sc);
+    layOut(sectionList(pane), 0, true);
+
+    // Act
+    await drag(rowLine(pane, "k1"), 25, 103);
+
+    // Assert
+    expect(order).toEqual(["setWorkspaceParent", "arrangeSidebar"]);
+  });
+
+  it("never nests under its own parent: over the parent's line it stands top-level just before the parent", async () => {
+    // Arrange
+    const { pane, sent, nested } = laidOutFamily();
+
+    // Act: k1 dropped on the middle of a's line.
+    await drag(rowLine(pane, "k1"), 25, 10);
+
+    // Assert
+    expect([freed(nested), placed(sent)]).toEqual([["k1"], ["k1", "noSubsection", "before:a"]]);
+  });
+
+  it.each([
+    { name: "another top-level row", to: 110, want: ["k1", "b"] },
+    { name: "a sibling", to: 90, want: ["k1", "k3"] },
+  ])("becomes the child of $name whose line's middle it was dropped on", async ({ to, want }) => {
+    // Arrange
+    const { pane, sent, nested } = laidOutFamily();
+
+    // Act
+    await drag(rowLine(pane, "k1"), 25, to);
+
+    // Assert
+    const request = nested[0];
+    expect([
+      request?.parent.case === "childOf" ? [request.workspace?.id, request.parent.value.parent?.id] : null,
+      nested.length,
+      sent.length,
+    ]).toEqual([want, 1, 0]);
+  });
+
+  it("never nests under its own descendants", async () => {
+    // Arrange
+    const { pane, nested } = laidOutFamily();
+    const g = pane.querySelector("[data-roster-row='g']") as HTMLElement;
+
+    // Act: k2 held over the middle of its own child g's line.
+    pointer("pointerdown", rowLine(pane, "k2"), 45);
+    pointer("pointermove", window, 46);
+    pointer("pointermove", window, 70);
+    const gLit = g.classList.contains(DROP_TARGET_CLASS);
+    pointer("pointerup", window, 70);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert
+    expect([gLit, nested.filter((request) => request.parent.case === "childOf")]).toEqual([false, []]);
+  });
+
+  it("leaves its parent for a subsection, standing there top-level", async () => {
+    // Arrange -- a 0 to 40 (k1 20 to 40), b 40 to 60, [foo: x]: foo's header 60, x 80 to 100.
+    const { sc, sent, nested } = arranged();
+    const pane = mount(
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: [row({ id: "a", children: [row({ id: "k1" })] }), row({ id: "b" })],
+            subsections: [{ id: "foo", rows: [row({ id: "x" })] }],
+          }),
+        ],
+      }),
+      sc,
+    );
+    layOut(sectionList(pane), 0, true);
+    const foo = pane.querySelector("[data-subsection='foo']") as HTMLElement;
+
+    // Act: k1 held on x's line's top quarter, then dropped there.
+    pointer("pointerdown", rowLine(pane, "k1"), 25);
+    pointer("pointermove", window, 26);
+    pointer("pointermove", window, 82);
+    const fooLit = foo.classList.contains(DROP_TARGET_CLASS);
+    pointer("pointerup", window, 82);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert
+    expect([fooLit, freed(nested), placed(sent)]).toEqual([true, ["k1"], ["k1", "subsection:foo", "before:x"]]);
+  });
+
+  it("asks no placement when the retarget to the top level is refused, and draws the refusal", async () => {
+    // Arrange
+    const { pane, sc, sent, nested } = laidOutFamily(() =>
+      create(SetWorkspaceParentResponseSchema, { result: { case: "error", value: { cause: { case: "coldGate", value: {} } } } }),
+    );
+
+    // Act
+    await drag(rowLine(pane, "k1"), 25, 103);
+
+    // Assert
+    expect([
+      freed(nested),
+      sent.length,
+      sc.arrange.status.parentElement?.querySelector(".refusal")?.getAttribute("data-arm"),
+      sc.arrange.hold.holding(),
+    ]).toEqual([["k1"], 0, "coldGate", false]);
+  });
+
+  it("goes top-level in its own repository's section when it is a child of another repository, marking both sections", async () => {
+    // Arrange -- repo-1's p (0 to 60) holds a repo-2 block (20 to 60) of b1 (40 to 60); repo-2's section holds z at 200.
+    const { sc, sent, nested } = arranged();
+    const section = repoSection({ id: "repo-1", rows: [row({ id: "p" })] });
+    const top = section.entries[0]?.entry;
+    if (top?.case !== "row") throw new Error("test: a top-level row entry");
+    withRepositoryBlocks(top.value, [{ repo: "repo-2", rows: [row({ id: "b1" })] }]);
+    const pane = mount(roster({ repos: [section, repoSection({ id: "repo-2", rows: [row({ id: "z" })] })] }), sc);
+    boxAt(sectionList(pane), 0, 60);
+    boxAt(pane.querySelector("[data-roster-row='p']")!, 0, 60);
+    boxAt(rowLine(pane, "p"), 0, 20);
+    boxAt(pane.querySelector(`.${REPOSITORY_BLOCK_CLASS}`)!, 20, 40);
+    boxAt(pane.querySelector("[data-roster-row='b1']")!, 40, 20);
+    boxAt(rowLine(pane, "b1"), 40, 20);
+    boxAt(sectionList(pane, "repo-2"), 200, 20);
+    boxAt(pane.querySelector("[data-roster-row='z']")!, 200, 20);
+    boxAt(rowLine(pane, "z"), 200, 20);
+    const sections = ["repo-1", "repo-2"].map((id) => pane.querySelector(`[data-repository='${id}']`) as HTMLElement);
+
+    // Act: b1 dropped on z's line's top quarter.
+    pointer("pointerdown", rowLine(pane, "b1"), 45);
+    pointer("pointermove", window, 46);
+    pointer("pointermove", window, 202);
+    const marked = sections.map((el) => el.hasAttribute(REARRANGED_ATTRIBUTE));
+    pointer("pointerup", window, 202);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert
+    expect([marked, freed(nested), placed(sent)]).toEqual([[true, true], ["b1"], ["b1", "noSubsection", "before:z"]]);
   });
 
   it("leaves a press on a top-level row lifting its own whole family", () => {
@@ -1076,6 +1247,20 @@ describe("a nested row", () => {
 
     // Assert
     expect(slot).toBe("a");
+  });
+});
+
+describe("the placement a dropped row asks for", () => {
+  it("is built in one place, so the top-level row's drop and the freed child's drop ask the same shape", () => {
+    // Arrange
+    const source = codeOf(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/sidebar/subsections.ts"), "utf8"));
+
+    // Act
+    const built = source.match(/case: "placeWorkspace"/g) ?? [];
+    const asked = source.match(/placement\(workspace, l, before, refs\)/g) ?? [];
+
+    // Assert
+    expect([built.length, asked.length]).toEqual([1, 2]);
   });
 });
 

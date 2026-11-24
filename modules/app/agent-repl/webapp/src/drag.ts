@@ -39,10 +39,12 @@
  * sends.
  *
  * A LIFTED BOX IS NEVER KEPT BY THE NEXT DRAW. The drag moves elements inside
- * a drawn section, so that section's DOM no longer matches the wire it was
- * drawn from. Lifting marks the box (`REARRANGED_ATTRIBUTE`) and the roster
- * drawer redraws a marked box from its wire whatever the push says, so a
- * refused or cancelled drag can never leave a rearranged section on screen.
+ * drawn sections, so their DOM no longer matches the wire it was drawn from.
+ * Lifting marks every box the item may move through (`DragSpec.boxes`,
+ * `REARRANGED_ATTRIBUTE`: a nested row going top-level in its own
+ * repository's section moves through two) and the roster drawer redraws a
+ * marked box from its wire whatever the push says, so a refused or cancelled
+ * drag can never leave a rearranged section on screen.
  *
  * A DRAG SELECTS NO TEXT. While the page's root wears `DRAGGING_CLASS` the
  * stylesheet makes nothing selectable, so WebKit cannot sweep a selection
@@ -116,8 +118,8 @@ export interface DragSpec {
   kind: string;
   /** The element that moves. */
   item: HTMLElement;
-  /** The drawn box the drag rearranges, which the next draw must not keep. */
-  box: HTMLElement;
+  /** The drawn boxes the drag may rearrange, which the next draw must not keep. At least one. */
+  boxes: HTMLElement[];
   /** The region the item scrolls in, which follows the pointer near its edges; none follows when unsaid. */
   scroller?: HTMLElement;
   /** The lists the item may be dropped into, read when it lifts. */
@@ -178,6 +180,7 @@ export function swallowTheNextClick(win: Window): void {
  * the threshold, or lets go first and the press stays an ordinary click.
  */
 export function pressToDrag(arrange: DragHost, spec: DragSpec, down: PointerEvent): void {
+  if (spec.boxes.length === 0) throw new Error(`invariant: a ${spec.kind} drag names the box it rearranges`);
   const win = windowOf(spec.item);
   const startX = down.clientX;
   const startY = down.clientY;
@@ -233,7 +236,7 @@ function lift(arrange: DragHost, spec: DragSpec, down: PointerEvent): Lifted {
   const lists = spec.lists();
   if (!lists.includes(parent)) throw new Error(`invariant: a ${spec.kind} item's own list is one it may be dropped into`);
   arrange.hold.drag();
-  spec.box.setAttribute(REARRANGED_ATTRIBUTE, "true");
+  for (const box of spec.boxes) box.setAttribute(REARRANGED_ATTRIBUTE, "true");
   // WHAT THE PRESS SELECTED BEFORE THE THRESHOLD goes; DRAGGING_CLASS keeps more from coming (file comment).
   item.ownerDocument.getSelection()?.removeAllRanges();
   log.debug("lifted an item to drag it", { operation: "drag.lift", context: { kind: spec.kind } });
