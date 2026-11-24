@@ -96,6 +96,112 @@ type VisibilityInput struct {
 	Selected bool
 }
 
+// VisibilityReason is WHY a workspace has its visibility: the one rule of
+// the derivation (VisibilityReasons) that decided it. Every workspace has
+// exactly one, so the workspaces counted by reason add up to the workspaces
+// counted by visibility. Its String is the metrics' closed label vocabulary
+// (agentrepl_workspaces_visible{reason}).
+type VisibilityReason int
+
+// The visibility reasons, in the PRECEDENCE the derivation applies when
+// several of a workspace's inputs hold: the first that holds is its reason.
+const (
+	// ReasonNotOpen is a workspace that is no Open section row (hidden,
+	// closed, a hidden merge workspace, a thread) and not the selection: not
+	// visible.
+	ReasonNotOpen VisibilityReason = iota
+	// ReasonCovered is an Open workspace a fold covers with nothing that
+	// keeps it visible: not visible.
+	ReasonCovered
+	// ReasonSelected is the user's selection, whatever else holds: Selected.
+	ReasonSelected
+	// ReasonUncovered is an Open workspace no fold covers.
+	ReasonUncovered
+	// ReasonCoveredWorking is a covered workspace a turn or detached work runs
+	// in, or that asks the user something.
+	ReasonCoveredWorking
+	// ReasonCoveredUnviewed is a covered workspace whose last result is unread.
+	ReasonCoveredUnviewed
+	// ReasonCoveredStarting is a covered workspace whose session is booting
+	// or not yet created.
+	ReasonCoveredStarting
+	// ReasonCoveredTopPriority is a covered workspace of priority P0.5 or P1.
+	ReasonCoveredTopPriority
+	// ReasonParentOfVisible is a covered workspace none of whose own inputs
+	// keeps it visible, visible only because a workspace under it is (the
+	// selection included): the unbroken chain of rows above every visible one.
+	ReasonParentOfVisible
+)
+
+// VisibilityReasonsAll is every reason, in precedence order, for a caller
+// that states a value for each (a gauge set to 0 for a reason none holds).
+var VisibilityReasonsAll = []VisibilityReason{
+	ReasonNotOpen, ReasonCovered, ReasonSelected, ReasonUncovered, ReasonCoveredWorking,
+	ReasonCoveredUnviewed, ReasonCoveredStarting, ReasonCoveredTopPriority, ReasonParentOfVisible,
+}
+
+// String names the reason as the metrics label it.
+func (r VisibilityReason) String() string {
+	switch r {
+	case ReasonNotOpen:
+		return "not_open"
+	case ReasonCovered:
+		return "covered"
+	case ReasonSelected:
+		return "selected"
+	case ReasonUncovered:
+		return "uncovered"
+	case ReasonCoveredWorking:
+		return "covered_working"
+	case ReasonCoveredUnviewed:
+		return "covered_unviewed"
+	case ReasonCoveredStarting:
+		return "covered_starting"
+	case ReasonCoveredTopPriority:
+		return "covered_top_priority"
+	case ReasonParentOfVisible:
+		return "parent_of_visible"
+	default:
+		return fmt.Sprintf("visibility_reason(%d)", int(r))
+	}
+}
+
+// Visibility answers the visibility the reason decides.
+func (r VisibilityReason) Visibility() Visibility {
+	switch r {
+	case ReasonNotOpen, ReasonCovered:
+		return NotVisible
+	case ReasonSelected:
+		return Selected
+	case ReasonUncovered, ReasonCoveredWorking, ReasonCoveredUnviewed, ReasonCoveredStarting,
+		ReasonCoveredTopPriority, ReasonParentOfVisible:
+		return UnselectedVisible
+	default:
+		panic(fmt.Sprintf("wsm: visibility reason %d decides no visibility", int(r)))
+	}
+}
+
+// ownReason answers the reason IN's own inputs give it, before any chain or
+// selection: the first of the precedence that holds.
+func ownReason(in VisibilityInput) VisibilityReason {
+	switch {
+	case !in.Open:
+		return ReasonNotOpen
+	case !in.Covered:
+		return ReasonUncovered
+	case in.Working:
+		return ReasonCoveredWorking
+	case in.Unviewed:
+		return ReasonCoveredUnviewed
+	case in.Starting:
+		return ReasonCoveredStarting
+	case in.TopPriority:
+		return ReasonCoveredTopPriority
+	default:
+		return ReasonCovered
+	}
+}
+
 // Visibilities derives every workspace's visibility from INPUTS, THE ONE
 // DERIVATION (owner-settled, 2026-11-21):
 //
@@ -110,30 +216,47 @@ type VisibilityInput struct {
 //   - the selection is Selected, whatever the rules above say.
 //
 // Every input's workspace answers; a parent the inputs do not carry ends the
-// chain there.
+// chain there. It is the visibility of each workspace's reason
+// (VisibilityReasons), so the two can never disagree.
 func Visibilities(inputs []VisibilityInput) map[WorkspaceID]Visibility {
+	reasons := VisibilityReasons(inputs)
+	out := make(map[WorkspaceID]Visibility, len(reasons))
+	for id, r := range reasons {
+		out[id] = r.Visibility()
+	}
+	return out
+}
+
+// VisibilityReasons derives every workspace's visibility reason from INPUTS
+// by the rules Visibilities states. A workspace whose own inputs keep it
+// visible has that reason (ownReason's precedence); a covered one visible
+// only through the chain above a visible workspace is ReasonParentOfVisible;
+// the selection is ReasonSelected.
+func VisibilityReasons(inputs []VisibilityInput) map[WorkspaceID]VisibilityReason {
 	byID := make(map[WorkspaceID]VisibilityInput, len(inputs))
-	out := make(map[WorkspaceID]Visibility, len(inputs))
+	out := make(map[WorkspaceID]VisibilityReason, len(inputs))
 	for _, in := range inputs {
 		byID[in.ID] = in
-		out[in.ID] = NotVisible
+		out[in.ID] = ownReason(in)
 	}
-	mark := func(id WorkspaceID) {
-		for {
+	// mark makes every Open workspace from PARENT up the chain visible: one
+	// covered with no reason of its own is visible as a parent. The chain
+	// ends at a workspace that is not Open, or not carried, or already
+	// visible (whose own chain was marked when it was).
+	mark := func(parent *WorkspaceID) {
+		for parent != nil {
+			id := *parent
 			in, ok := byID[id]
-			if !ok || !in.Open || out[id] == UnselectedVisible {
+			if !ok || !in.Open || out[id].Visibility().Visible() {
 				return
 			}
-			out[id] = UnselectedVisible
-			if in.Parent == nil {
-				return
-			}
-			id = *in.Parent
+			out[id] = ReasonParentOfVisible
+			parent = in.Parent
 		}
 	}
 	for _, in := range inputs {
-		if in.Open && (!in.Covered || in.Working || in.Unviewed || in.Starting || in.TopPriority) {
-			mark(in.ID)
+		if out[in.ID].Visibility().Visible() {
+			mark(in.Parent)
 		}
 	}
 	for _, in := range inputs {
@@ -142,10 +265,8 @@ func Visibilities(inputs []VisibilityInput) map[WorkspaceID]Visibility {
 		}
 		// THE SELECTION'S PARENTS ARE VISIBLE TOO: the selection is a kind
 		// of visible, so the chain above it is unbroken.
-		if in.Parent != nil {
-			mark(*in.Parent)
-		}
-		out[in.ID] = Selected
+		mark(in.Parent)
+		out[in.ID] = ReasonSelected
 	}
 	return out
 }
