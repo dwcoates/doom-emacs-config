@@ -60,3 +60,61 @@ server-driven UI).
   near line 1045 and the reduced-motion copy near line 5190) become rules
   keyed on the row's own class. `webapp/src/sidebar/row.ts`,
   `fold-fade.ts` and `open-count.ts` read the arm.
+
+## Workspace resource allocation: the settled rules
+
+Workspace resource allocation is whether a workspace has its page loaded and
+its shim unparked. The owner's rulings of 2026-11-24, as this change builds
+them. Each clock is a product rule, not a bound on an operation.
+
+### Shown (the sidebar's visibility)
+
+- A row is shown when it is a keeper (selected, working, unread, starting,
+  priority P0.5 or P1, a deploy mediator, or in queue bypass mode), when its
+  nearest container is unfolded and itself shown, or when a row beneath it is
+  shown. Mediators and queue-bypass workspaces are shown whatever folds them.
+- A subsection with members always draws its header.
+- A switch to a workspace that is not shown (the recency walk reaches it)
+  selects it, so it is shown while selected, and returns to not shown when the
+  user moves on.
+
+### Page
+
+- Not shown: never loaded.
+- Selected: loaded.
+- A one-shot, or a workspace in a synchronous merge, that is not selected:
+  unloaded at once on becoming one, and at once when the user switches away
+  from it.
+- Working (starting and top priority count as working): loaded.
+- Unread: loaded until one hour after its turn ended.
+- Viewed: unloaded 10 seconds after the user switches away, except when the
+  visit being left is the one that first marked it viewed; then 15 minutes.
+  (Assumption: the 15 minutes run from the switch away, so a long first visit
+  still keeps the page for 15 minutes after it.)
+
+### Shim
+
+- Not shown: parked, except the named exceptions below.
+- Selected and working: running.
+- Deploy mediators and queue-bypass workspaces: always running.
+- A synchronous merge: parked while it waits in the queue; unparked for
+  keep-alive beats and while it rebases, runs its gate, repairs tests or
+  resolves conflicts; parked again when it waits again.
+- Unread: running until 15 minutes after its turn ended, then parked.
+- Viewed and idle: parked when its page unloads.
+- Backlogged, closed, killed or nuked: its running turn is interrupted, its
+  page unloads at once, and its shim parks after one more full keep-alive
+  tick.
+
+### Viewed
+
+- Only another turn (its start or its end) lowers the viewed marker.
+- An interaction within 10 minutes of a turn's end marks nothing viewed; it
+  still counts toward recency.
+- The recency walk orders by interactions alone, and reaches every open
+  workspace.
+
+### Naming
+
+- The section the sidebar labels "Backlog" is BACKLOGGED in code and harness,
+  never "hidden", which reads as "not visible".
