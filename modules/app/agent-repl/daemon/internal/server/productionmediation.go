@@ -165,7 +165,7 @@ func validateUpdateProductionMediationRequest(req *agentreplv1.UpdateProductionM
 		case *agentreplv1.ProductionMediationDecision_NothingToDo:
 			return nil
 		case *agentreplv1.ProductionMediationDecision_Dispatch:
-			return validateProductionDispatch(d.GetDispatch())
+			return validateProductionChildren(d.GetDispatch().GetChildren())
 		}
 		return invalid("decide.decision", "a decision is nothing_to_do or dispatch")
 	case *agentreplv1.UpdateProductionMediationRequest_Fold:
@@ -177,14 +177,14 @@ func validateUpdateProductionMediationRequest(req *agentreplv1.UpdateProductionM
 	return invalid("action", "a production mediation names its action: decide or fold")
 }
 
-// validateProductionDispatch refuses a dispatch D that names no child, or a
-// child with no kind, no finding, a blank statement, no evidence, or a
-// malformed site key.
-func validateProductionDispatch(d *agentreplv1.ProductionMediationDispatch) *connect.Error {
-	if len(d.GetChildren()) == 0 {
+// validateProductionChildren refuses a dispatch's CHILDREN when they are
+// none, or when a child has no kind, no finding, a blank statement, no
+// evidence, or a malformed site key.
+func validateProductionChildren(children []*agentreplv1.ProductionChild) *connect.Error {
+	if len(children) == 0 {
 		return invalid("decide.dispatch.children", "a dispatch names at least one child")
 	}
-	for i, child := range d.GetChildren() {
+	for i, child := range children {
 		field := fmt.Sprintf("decide.dispatch.children[%d]", i)
 		if child.GetWork() == nil {
 			return invalid(field+".work", "a child is a remediation or an investigation")

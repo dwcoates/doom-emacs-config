@@ -12,10 +12,12 @@ import (
 
 // childGetters reads the generated Go code under GENERATED and answers every
 // getter that returns a message whose children are NO TREE of its own kind:
-// the getter's name, mapped to true when every message it returns is such
-// a list (a refusal's child workspaces, a status's child refs). A message whose
-// GetChildren answers more of itself (a roster row, an arranged workspace) is
-// a tree, which only rosterwalk walks.
+// the getter's name, mapped to true when a message it returns is such a list
+// (a refusal's child workspaces, a status's child refs, a dispatch's
+// children) and none is a tree. A message with no GetChildren at all cannot
+// be the receiver of a GetChildren call that compiles, so it decides nothing.
+// A message whose GetChildren answers more of itself (a roster row, an
+// arranged workspace) is a tree, which only rosterwalk walks.
 func childGetters(t *testing.T, generated string) map[string]bool {
 	t.Helper()
 	trees, lists := map[string]bool{}, map[string]bool{}
@@ -56,13 +58,12 @@ func childGetters(t *testing.T, generated string) map[string]bool {
 	}
 	out := map[string]bool{}
 	for getter, types := range returns {
-		all := true
+		list, tree := false, false
 		for _, ty := range types {
-			if !lists[ty] || trees[ty] {
-				all = false
-			}
+			list = list || lists[ty]
+			tree = tree || trees[ty]
 		}
-		if all {
+		if list && !tree {
 			out[getter] = true
 		}
 	}
@@ -149,7 +150,9 @@ func TestChildGettersReadsTheGeneratedCode(t *testing.T) {
 	got := childGetters(t, generated)
 
 	// Assert: the refusals' child lists are lists; a roster row's getter is not.
-	for _, list := range []string{"GetHasOpenChildren", "GetHasChildren"} {
+	// GetDispatch also answers the deploy mediation's dispatch, which has no
+	// children, so it is a list getter by the production dispatch's.
+	for _, list := range []string{"GetHasOpenChildren", "GetHasChildren", "GetDispatch"} {
 		if !got[list] {
 			t.Errorf("%s is not read as a getter of a child list; got %v", list, got)
 		}
