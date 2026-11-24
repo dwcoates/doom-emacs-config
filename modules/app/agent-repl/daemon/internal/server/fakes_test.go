@@ -1928,8 +1928,8 @@ type fakeLogin struct {
 	// watchEntered, when set, is told each Watch call as it begins, and the
 	// call then waits for its context to end: a watch held before it accepts.
 	watchEntered chan struct{}
-	sendErr     error
-	closeErr    error
+	sendErr      error
+	closeErr     error
 }
 
 func (f *fakeLogin) Open(context.Context, ids.WorkspaceID) (string, error) {

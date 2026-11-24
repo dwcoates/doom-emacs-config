@@ -1,5 +1,6 @@
 // Shared arrangement for the topbar suites: a context whose rpcs a test
 // scripts, and a reveal layer over a host with the anchors already present.
+import { onTestFinished } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -79,6 +80,10 @@ export function topbarContext(
   const host = document.createElement("div");
   document.body.replaceChildren(host);
   const reveals = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
+  // THE LAYER'S DOCUMENT LISTENERS GO WITH ITS TEST: left standing, a reveal a
+  // test opened closes on a later file's click, after the logger it writes to
+  // was reset, and throws there.
+  onTestFinished(() => reveals.dispose());
   return { host, tc: { ctx, reveals, openLogin, localFailures } };
 }
 

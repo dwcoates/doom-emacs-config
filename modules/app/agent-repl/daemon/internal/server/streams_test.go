@@ -802,11 +802,17 @@ func TestServeThenEndFollowsACleanBodyWithTheEnding(t *testing.T) {
 func TestEveryEndingStreamServesThroughServeThenEnd(t *testing.T) {
 	// Act.
 	sites := sourcescan.Sites(t, "\tendStandingStream(s, ")
+	sends := sourcescan.Sites(t, "\tsendStandingEnding(")
 
-	// Assert.
-	want := []string{"page.go", "streams.go", "streams.go"}
+	// Assert: the lifetime's ending is serveThenEnd's and the host stream's;
+	// the page's drain sends its ending through the one sender at the exit
+	// and at the hand-off to the successor alike.
+	want := []string{"streams.go", "streams.go"}
 	if !slices.Equal(sites, want) {
-		t.Fatalf("endStandingStream call sites = %v, want %v (the page's drain, serveThenEnd, the host stream)", sites, want)
+		t.Fatalf("endStandingStream call sites = %v, want %v (serveThenEnd, the host stream)", sites, want)
+	}
+	if wantSends := []string{"page.go", "streams.go"}; !slices.Equal(sends, wantSends) {
+		t.Fatalf("sendStandingEnding call sites = %v, want %v (the page's drain, endStandingStream)", sends, wantSends)
 	}
 }
 

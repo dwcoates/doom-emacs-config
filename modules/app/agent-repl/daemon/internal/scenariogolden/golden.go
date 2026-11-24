@@ -249,10 +249,15 @@ func Normalize(t *testing.T, rows []*frontendv1.FeedRow, turn, ws string, instan
 		if err != nil {
 			t.Fatalf("encode a feed row: %v", err)
 		}
-		var v any
+		var v map[string]any
 		if err := json.Unmarshal(raw, &v); err != nil {
 			t.Fatalf("decode a feed row: %v", err)
 		}
+		// A ROW'S REVISION IS A DIGEST OF EVERY OTHER FIELD (FeedRow.revision),
+		// the run's own turn, ids and instants included, so it differs between
+		// two projections of the same frames and pins nothing the golden's
+		// other fields do not; its own guarantees are the feed resolver's tests.
+		delete(v, "revision")
 		all = append(all, v)
 	}
 	ids, orders := map[string]string{}, map[string]string{}

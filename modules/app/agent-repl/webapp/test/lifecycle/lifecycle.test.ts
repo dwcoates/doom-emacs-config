@@ -754,8 +754,8 @@ describe("startLifecycle: the handover", () => {
     await settle();
     handle.dispose();
     // ASSERT: read off the entry tag `beforeEach` above wrote into the
-    // document, on the first open and on the re-homed one alike.
-    expect(state.webRequests).toEqual([{ webappBuild: "testbuild" }, { webappBuild: "testbuild" }]);
+    // document. The adoption reopens nothing, so the one open is the only one.
+    expect(state.webRequests).toEqual([{ webappBuild: "testbuild" }]);
   });
 
   it("quiesces the page on another build, so nothing more is sent on this client", async () => {

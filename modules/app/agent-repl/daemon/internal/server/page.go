@@ -927,11 +927,7 @@ func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Cont
 				return
 			}
 		case <-drained:
-			if err := out.Send(pageEnding()); err != nil {
-				s.log.Log(dlog.LevelDebug, rpc, clientGone,
-					dlog.Context{"page": page.id, "cause": err.Error()})
-				return
-			}
+			sendStandingEnding(rpc, s.log, out, pageEnding())
 			s.log.Debug(rpc, "the page's subscriptions sent their last frames; the page was told the daemon is standing down",
 				dlog.Context{"page": page.id})
 			return
