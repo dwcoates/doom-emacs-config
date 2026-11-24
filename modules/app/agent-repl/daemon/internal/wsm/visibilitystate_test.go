@@ -110,6 +110,8 @@ func TestVisibilityReasons(t *testing.T) {
 			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Starting: true, TopPriority: true}}, id: "a", want: ReasonCoveredStarting},
 		{name: "a covered top-priority workspace has covered_top_priority",
 			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, TopPriority: true}}, id: "a", want: ReasonCoveredTopPriority},
+		{name: "a covered mediator or bypass holder has covered_always_shown",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, AlwaysShown: true}}, id: "a", want: ReasonCoveredAlwaysShown},
 		{name: "a covered parent visible only through its child has parent_of_visible",
 			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, Working: true}}, id: "p", want: ReasonParentOfVisible},
 		{name: "a covered parent with its own reason keeps it",

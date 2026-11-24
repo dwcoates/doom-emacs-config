@@ -64,7 +64,8 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, visibility, ` +
 	mediatorRoleColumn + `, ` +
 	emojiAckColumn + `, ` +
-	`COALESCE((SELECT creation_jobs.finish_placement FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id), '')`
+	`COALESCE((SELECT creation_jobs.finish_placement FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id), ''), ` +
+	`EXISTS (SELECT 1 FROM queue_bypass_holders WHERE queue_bypass_holders.workspace_id = workspaces.id)`
 
 // mediatorRoleColumn derives Mediator: the standing mediator the workspace is
 // recorded as, spelled as a MediatorRole.
@@ -144,7 +145,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)

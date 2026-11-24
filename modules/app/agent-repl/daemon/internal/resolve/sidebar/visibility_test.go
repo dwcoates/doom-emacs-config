@@ -873,3 +873,30 @@ func TestEveryOpenRowStatesItsFoldCover(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAlwaysShownWorkspaceIsVisibleUnderAFold(t *testing.T) {
+	tests := []struct {
+		name string
+		mark func(ws *wsm.Workspace)
+	}{
+		{name: "a deploy mediator", mark: func(ws *wsm.Workspace) { ws.Mediator = wsm.MediatorDeploy }},
+		{name: "a queue-bypass holder", mark: func(ws *wsm.Workspace) { ws.QueueBypassHeld = true }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reg := foldedOne()
+			tt.mark(&reg.Workspaces[0])
+			r := arrange(t)
+			r.SetRegistry(reg)
+
+			// Act
+			liveRegistry(r, reg)
+
+			// Assert
+			if got := visibilities(t, r)[string(theWS)]; got != "unselected_visible" {
+				t.Fatalf("visibility = %s, want unselected_visible: a fold never hides it", got)
+			}
+		})
+	}
+}

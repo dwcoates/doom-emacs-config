@@ -146,7 +146,7 @@ func (ws Workspace) LetsCacheLapse() bool {
 // always has its session. The rest of this rule adds the workspaces that run
 // while nobody can see them.
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
-	if ws.Visibility.Visible() || mergeQueued || ws.IsMediator() {
+	if ws.Visibility.Visible() || mergeQueued || ws.AlwaysShown() {
 		return true
 	}
 	if ws.MergeHidden() {

@@ -164,6 +164,9 @@ type Workspace struct {
 	// create (CreationJob.FinishPlacement); the zero value when its finish
 	// names its own.
 	FinishPlacement FinishPlacement
+	// QueueBypassHeld reports that the workspace holds its repository's queue
+	// bypass mode (queue_bypass_holders), derived on read.
+	QueueBypassHeld bool
 	// Mediator is the standing mediator the workspace is, if any: its
 	// repository's deploy mediator (deploy_mediators) or production mediator
 	// (production_mediators). A mediator runs and is kept warm like any open
@@ -1768,6 +1771,12 @@ const (
 	// reviews the span between landings and dispatches children.
 	MediatorProduction MediatorRole = "production"
 )
+
+// AlwaysShown reports whether the workspace is shown and run whatever folds
+// it (owner ruling, 2026-11-24): a standing mediator, or the holder of its
+// repository's queue bypass mode. Both work for the whole repository, so a
+// fold that hid them would hide work the user relies on.
+func (w Workspace) AlwaysShown() bool { return w.IsMediator() || w.QueueBypassHeld }
 
 // IsMediator reports whether the workspace is one of its repository's
 // standing mediators.

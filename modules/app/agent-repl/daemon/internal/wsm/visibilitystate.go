@@ -94,6 +94,9 @@ type VisibilityInput struct {
 	// TopPriority reports whether it has priority P0.5 or P1
 	// (Workspace.TopPriority).
 	TopPriority bool
+	// AlwaysShown reports whether it is a standing mediator or holds its
+	// repository's queue bypass mode (Workspace.AlwaysShown).
+	AlwaysShown bool
 	// Selected reports whether it is the user's selection.
 	Selected bool
 }
@@ -129,6 +132,9 @@ const (
 	ReasonCoveredStarting
 	// ReasonCoveredTopPriority is a covered workspace of priority P0.5 or P1.
 	ReasonCoveredTopPriority
+	// ReasonCoveredAlwaysShown is a covered standing mediator or queue-bypass
+	// holder, which a fold never hides (Workspace.AlwaysShown).
+	ReasonCoveredAlwaysShown
 	// ReasonParentOfVisible is a covered workspace none of whose own inputs
 	// keeps it visible, visible only because a workspace under it is (the
 	// selection included): the unbroken chain of rows above every visible one.
@@ -139,7 +145,7 @@ const (
 // that states a value for each (a gauge set to 0 for a reason none holds).
 var VisibilityReasonsAll = []VisibilityReason{
 	ReasonNotOpen, ReasonCovered, ReasonSelected, ReasonUncovered, ReasonCoveredWorking,
-	ReasonCoveredUnviewed, ReasonCoveredStarting, ReasonCoveredTopPriority, ReasonParentOfVisible,
+	ReasonCoveredUnviewed, ReasonCoveredStarting, ReasonCoveredTopPriority, ReasonCoveredAlwaysShown, ReasonParentOfVisible,
 }
 
 // String names the reason as the metrics label it.
@@ -161,6 +167,8 @@ func (r VisibilityReason) String() string {
 		return "covered_starting"
 	case ReasonCoveredTopPriority:
 		return "covered_top_priority"
+	case ReasonCoveredAlwaysShown:
+		return "covered_always_shown"
 	case ReasonParentOfVisible:
 		return "parent_of_visible"
 	default:
@@ -176,7 +184,7 @@ func (r VisibilityReason) Visibility() Visibility {
 	case ReasonSelected:
 		return Selected
 	case ReasonUncovered, ReasonCoveredWorking, ReasonCoveredUnviewed, ReasonCoveredStarting,
-		ReasonCoveredTopPriority, ReasonParentOfVisible:
+		ReasonCoveredTopPriority, ReasonCoveredAlwaysShown, ReasonParentOfVisible:
 		return UnselectedVisible
 	default:
 		panic(fmt.Sprintf("wsm: visibility reason %d decides no visibility", int(r)))
@@ -199,6 +207,8 @@ func ownReason(in VisibilityInput) VisibilityReason {
 		return ReasonCoveredStarting
 	case in.TopPriority:
 		return ReasonCoveredTopPriority
+	case in.AlwaysShown:
+		return ReasonCoveredAlwaysShown
 	default:
 		return ReasonCovered
 	}
@@ -213,7 +223,8 @@ func ownReason(in VisibilityInput) VisibilityReason {
 //     subsection, and every child of an uncovered, unfolded parent);
 //   - one a fold covers, at any depth, is visible when it is Working,
 //     Unviewed or Starting, and an Open workspace of priority P0.5 or P1
-//     (TopPriority) is always visible, whatever covers it;
+//     (TopPriority), a standing mediator or a queue-bypass holder
+//     (AlwaysShown) is always visible, whatever covers it;
 //   - the parent of a visible workspace is visible, recursively, so every
 //     visible workspace has an unbroken chain of rows above it;
 //   - the selection is Selected, whatever the rules above say.

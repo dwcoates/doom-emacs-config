@@ -363,3 +363,45 @@ func TestTheMigrationAddsTheLiftColumn(t *testing.T) {
 		t.Fatalf("lifted_remote_control exists %d times after the migration, want 1", got)
 	}
 }
+
+func TestTheWorkspaceRecordStatesItsQueueBypassHold(t *testing.T) {
+	tests := []struct {
+		name    string
+		take    bool
+		release bool
+		want    bool
+	}{
+		{name: "a workspace holding no mode is not held", want: false},
+		{name: "the holder's record says it holds the mode", take: true, want: true},
+		{name: "a released hold is no longer stated", take: true, release: true, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testLinkedWorktree(t, s)
+			ctx := context.Background()
+			if tt.take {
+				if err := s.TakeQueueBypass(ctx, ws.ID, instant); err != nil {
+					t.Fatalf("TakeQueueBypass: %v", err)
+				}
+			}
+			if tt.release {
+				if err := s.ReleaseQueueBypass(ctx, ws.ID); err != nil {
+					t.Fatalf("ReleaseQueueBypass: %v", err)
+				}
+			}
+
+			// Act
+			got, err := s.Workspace(ctx, ws.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if got.QueueBypassHeld != tt.want || got.AlwaysShown() != tt.want {
+				t.Fatalf("QueueBypassHeld = %v, AlwaysShown = %v; want %v", got.QueueBypassHeld, got.AlwaysShown(), tt.want)
+			}
+		})
+	}
+}

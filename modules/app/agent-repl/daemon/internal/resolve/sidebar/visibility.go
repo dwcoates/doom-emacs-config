@@ -155,8 +155,10 @@ func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[id
 	inputs := make([]wsm.VisibilityInput, 0, len(r.state.reg.Workspaces))
 	seen := make(map[ids.WorkspaceID]bool, len(r.state.reg.Workspaces))
 	topPriority := make(map[ids.WorkspaceID]bool, len(r.state.reg.Workspaces))
+	alwaysShown := make(map[ids.WorkspaceID]bool, len(r.state.reg.Workspaces))
 	for _, rec := range r.state.reg.Workspaces {
 		topPriority[rec.ID] = rec.TopPriority()
+		alwaysShown[rec.ID] = rec.AlwaysShown()
 	}
 	input := func(id ids.WorkspaceID) wsm.VisibilityInput {
 		arm := arms[id]
@@ -167,6 +169,7 @@ func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[id
 			Unviewed:    isTurnEndArm(arm) && !s.viewed(),
 			Starting:    arm == startingArm || arm == noSessionYetArm,
 			TopPriority: topPriority[id],
+			AlwaysShown: alwaysShown[id],
 			Selected:    rc.selected != nil && *rc.selected == id,
 		}
 	}
@@ -278,6 +281,7 @@ func (r *resolver) recordVisibilityMoves(revision uint64, published bool) {
 			"unviewed":     m.in.Unviewed,
 			"starting":     m.in.Starting,
 			"top_priority": m.in.TopPriority,
+			"always_shown": m.in.AlwaysShown,
 			"selected":     m.in.Selected,
 			"published":    published,
 		}
