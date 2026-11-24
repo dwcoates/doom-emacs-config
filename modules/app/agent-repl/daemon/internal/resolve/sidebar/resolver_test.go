@@ -1029,18 +1029,23 @@ func TestOnActivityRendersOnlyWhenItChangesTheRowsFacts(t *testing.T) {
 // the central sink naming it, and nothing records an invariant violation
 // (TestALateFactsRefusalIsOfferedAgainMidWork, 2026-11-13).
 func TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary(t *testing.T) {
-	// Arrange: the workspace's directory can host no sink.
-	r := arrange(t)
-	r.surfaces.BindWorkspaceIDs(func(string) (string, error) {
+	// Arrange: the workspace's directory can host no sink from the first
+	// resolve, as a reaped worktree is: the real surfaces stat a directory
+	// once, so a sink that resolved never stops resolving, and the roster
+	// keeps the sink it resolved (kept.go).
+	r, surfaces := newResolver(t)
+	surfaces.BindWorkspaceIDs(func(string) (string, error) {
 		return "", errors.New("the worktree was reaped")
 	})
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
 
 	// Act: a fact that moves the row's status arm.
 	r.OnLink(theWS, shimclient.LinkConnected)
 
 	// Assert.
 	var routed bool
-	for _, rec := range r.surfaces.Records() {
+	r.Settle()
+	for _, rec := range surfaces.Records() {
 		if _, ok := rec.Context["invariant_violation"]; ok {
 			t.Fatalf("record %s carries an invariant violation: %+v", rec.Operation, rec.Context)
 		}
@@ -1049,7 +1054,7 @@ func TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary(t *te
 		}
 	}
 	if !routed {
-		t.Fatalf("records = %+v, want the arm change on the central sink naming the workspace", r.surfaces.Records())
+		t.Fatalf("records = %+v, want the arm change on the central sink naming the workspace", surfaces.Records())
 	}
 }
 

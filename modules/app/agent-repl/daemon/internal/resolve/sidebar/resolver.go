@@ -229,8 +229,19 @@ func assertTables(colors vocab.RenderColors) error {
 // it while the roster's lock is held — a roster warning teed onto the strip,
 // which moves the activity line alone (footer.mutateLine).
 func (r *resolver) FooterStatusChanged(ws ids.WorkspaceID) {
-	r.core.postingView().mutateWorkspace(ws, "daemon.sidebar.footer_status_changed", logsite.Msg("the roster re-projected the footer's status"),
-		nil, func(*wsState) {})
+	//
+	// IT IS NOT A WORKSPACE-SCOPED CHANGE: the footer serves workspaces the
+	// roster's registry may not carry yet, so the edge is recorded on the
+	// global sink naming the workspace, and moves that workspace's kept facts
+	// itself (kept.go).
+	r.core.postingView().commit(&mutation{
+		operation: "daemon.sidebar.footer_status_changed", message: logsite.Msg("the roster re-projected the footer's status"),
+		ctx: dlog.Context{"workspace_id": string(ws)}, log: r.log.Global(), touchesOwn: true,
+		apply: func(dlog.Logger) bool {
+			r.state.touch(ws)
+			return true
+		},
+	})
 }
 
 // Topic is the one editor-global roster publication.

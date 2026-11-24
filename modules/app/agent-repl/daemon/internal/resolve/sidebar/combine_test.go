@@ -51,9 +51,11 @@ func (g *gatedFooter) arm() {
 }
 
 // combineFixture is a roster over three registered workspaces whose next
-// render can be held, with the queue's depth reported on queued.
+// render can be held, with the queue's depth reported on queued, and the
+// revision of its first push, read before anything reported to queued.
 type combineFixture struct {
 	r        sidebar.Resolver
+	revision uint64
 	gate     *gatedFooter
 	surfaces *dlog.TestSurfaces
 	queued   chan int
@@ -83,9 +85,12 @@ func newCombineFixture(t *testing.T, opts ...sidebar.Option) *combineFixture {
 		t.Fatalf("sidebar.New: %v", err)
 	}
 	r.SetRegistry(registry(workspace(string(wsA), "a"), workspace(string(wsB), "b"), workspace(string(wsC), "c")))
+	// READ BEFORE THE HOOK: a read settles the roster, whose barrier joins
+	// the queue too.
+	revision := latestPush(t, r).GetRevision()
 	queued := make(chan int, 16)
 	sidebar.SetOnQueued(r, func(depth int) { queued <- depth })
-	return &combineFixture{r: r, gate: gate, surfaces: surfaces, queued: queued}
+	return &combineFixture{r: r, revision: revision, gate: gate, surfaces: surfaces, queued: queued}
 }
 
 // holdRender starts change on its own goroutine with the next render held at
@@ -129,7 +134,7 @@ func TestTheCombinedCommit(t *testing.T) {
 	t.Run("changes queued while a render runs are published by one further render", func(t *testing.T) {
 		// Arrange
 		fx := newCombineFixture(t)
-		before := latestPush(t, fx.r).GetRevision()
+		before := fx.revision
 		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
 		waiters := fx.queueBehind(t,
 			func() { fx.r.SetBringingUp(wsB, true) },
