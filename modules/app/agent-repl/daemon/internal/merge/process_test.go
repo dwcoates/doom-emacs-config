@@ -3157,3 +3157,53 @@ func TestEveryFixingAttemptsBriefRunsTheWorkspacesRecordedCases(t *testing.T) {
 		})
 	}
 }
+
+// BOTH REPAIR BRIEFS SAY WHAT A GIVE-UP LEAVES THEIR AGENT, through the one
+// sentence afterGiveUp composes: an async merge's agent that its work ends
+// with its session and never moves to its maker's branch or worktree, and a
+// merge in place's that its workspace is handed back.
+func TestEveryRepairBriefSaysWhatAGiveUpLeavesItsAgent(t *testing.T) {
+	tests := []struct {
+		name  string
+		async bool
+		brief string
+		want  string
+	}{
+		{name: "a conflict resolution in a merge workspace", async: true, brief: BriefConflictResolve, want: afterGiveUpAsync},
+		{name: "a fixing attempt in a merge workspace", async: true, brief: BriefTestFailureResolve, want: afterGiveUpAsync},
+		{name: "a conflict resolution in place", brief: BriefConflictResolve, want: afterGiveUpInPlace},
+		{name: "a fixing attempt in place", brief: BriefTestFailureResolve, want: afterGiveUpInPlace},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			brief, err := LoadBrief(filepath.Join("..", "..", "..", "prompts"), tt.brief)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.o.deps.Briefs = func(_ string, values map[string]string) (string, error) { return brief.Splice(values) }
+			r := failingTestsRun(t, h)
+			if tt.async {
+				h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+				r.ws = theMergeWorkspace
+			}
+
+			// Act
+			var text string
+			if tt.brief == BriefConflictResolve {
+				text, err = r.conflictBrief(gitclient.Commit{SHA: "abc1234", Subject: "x"}, []string{"a.go"}, "master")
+			} else {
+				text, err = r.fixBrief(1, []string{"daemon"}, "/logs/x.log", "tail", "the failing tests", "master")
+			}
+
+			// Assert
+			if err != nil || !strings.Contains(text, tt.want) {
+				t.Fatalf("brief (%v):\n%s\nwant it to say %q", err, text, tt.want)
+			}
+			if other := map[string]string{afterGiveUpAsync: afterGiveUpInPlace, afterGiveUpInPlace: afterGiveUpAsync}[tt.want]; strings.Contains(text, other) {
+				t.Fatalf("brief:\n%s\nalso says %q", text, other)
+			}
+		})
+	}
+}

@@ -931,12 +931,33 @@ func (r *run) conflictBrief(commit gitclient.Commit, files []string, targetBranc
 		"worktree_dir":     r.subject.dir,
 		"target_branch":    r.briefTarget(targetBranch),
 		"conflicted_files": strings.Join(files, ", "),
+		"after_give_up":    r.afterGiveUp(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("merge: composing the conflict brief: %w", err)
 	}
 	return text, nil
 }
+
+// afterGiveUp is what a repair brief says becomes of its agent once it gives
+// the merge up. It is the ONE home of that sentence, which both repair briefs
+// splice in: an async merge's own merge workspace ends its session at once
+// (endSession), and a merge in place hands its workspace back.
+func (r *run) afterGiveUp() string {
+	if _, async := r.o.requesterOf(r.ws); async {
+		return afterGiveUpAsync
+	}
+	return afterGiveUpInPlace
+}
+
+const (
+	// afterGiveUpAsync is afterGiveUp's sentence in a merge workspace of its
+	// own, forked from its maker's conversation.
+	afterGiveUpAsync = "Giving up ends this merge workspace's session at once, and your work with it. Your work is only ever this merge's, in this worktree: never carry it on in the branch or the worktree of the workspace this one was forked from."
+	// afterGiveUpInPlace is afterGiveUp's sentence in the workspace whose
+	// own branch the merge lands.
+	afterGiveUpInPlace = "The workspace is yours again."
+)
 
 // conflictSettled reads the conflict resolution's end: the failed outcome when
 // it gave up, or a new rebasing round the rebase continues in.
@@ -1296,6 +1317,7 @@ func (r *run) fixBrief(attempt int, suites []string, archive, tail, failingTests
 		"max_attempts":       fmt.Sprintf("%d", MaxFixAttempts),
 		"failing_tests_file": filepath.Join(r.subject.dir, FailingTestsFile),
 		"failing_tests":      failingTests,
+		"after_give_up":      r.afterGiveUp(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("merge: composing the test-failure brief: %w", err)

@@ -4384,8 +4384,8 @@ func newHarness(t *testing.T) *harness {
 	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
-	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
-	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests"}
+	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files", "after_give_up"}
+	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests", "after_give_up"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefRebaseCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefHookPrompt] = []string{"prompt"}

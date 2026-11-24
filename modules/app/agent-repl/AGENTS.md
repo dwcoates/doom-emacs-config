@@ -1513,7 +1513,14 @@ like an improvement still needs that conversation. Code:
   workspace running no repair turn is refused `no_repair_turn`. The briefs
   (`prompts/merge-conflict-resolve.md`, `prompts/merge-test-failure-resolve.md`)
   forbid leaving a repair broken, unresolved or uncommitted to make the merge
-  fail.
+  fail, and say what the give-up leaves the agent (`run.afterGiveUp`).
+- **An async merge that ends without landing ends its session at once.** A
+  give-up, a failure, a dequeue, a drop or an eviction force-stops its merge
+  workspace's session, the running turn with it (`orchestrator.endSession`,
+  under `daemon.merge.end_session`, from `settle`), before a give-up answers:
+  its agent, forked from its maker's conversation, has no work left, and the
+  withheld stand-down would wait for the turn to end. A merge workspace the
+  user revealed is theirs, and keeps its session.
 - **A rebase never fails on uncommitted changes it meets.** When the
   worktree is dirty at the rebase's clean check, or git refuses to start the
   rebase over changes (`gitclient.ErrDirtyWorktree`), the merge keeps its
