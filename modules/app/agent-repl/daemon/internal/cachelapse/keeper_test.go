@@ -433,9 +433,9 @@ func (f *fakeStandDowns) StandDownWithheld(ws ids.WorkspaceID, trigger drain.Wit
 type harness struct {
 	keeper *Keeper
 	// why is the sessions' facts table the keeper mirrors its owners into.
-	why    *sessionwhy.Table
-	db     *fakeDB
-	shim   *fakeShim
+	why  *sessionwhy.Table
+	db   *fakeDB
+	shim *fakeShim
 	// shims, when set, is the shim serving each workspace; a workspace absent
 	// from it is served by none.
 	shims   map[ids.WorkspaceID]*fakeShim

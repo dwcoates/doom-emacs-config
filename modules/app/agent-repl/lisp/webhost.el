@@ -745,7 +745,8 @@ show, so the page can measure it."
 UNLOADING keeps WS's gate slot: the webhost draws the gate itself, so an
 unloaded page's workspace still shows its gate at the composer's height
 \(webapp/src/host/gate.ts).  Answers non-nil when a page was held and is
-now dropped, so the caller reports the unload (`agent-repl-page-report-unloaded').
+now dropped, so the caller reports the unload
+\(`agent-repl-page-report-unloaded').
 
 A REMOVAL WITH NOTHING HELD SENDS NOTHING.  Every teardown of a workspace
 calls this, held page or not, so a workspace whose tab is torn down and
@@ -757,7 +758,8 @@ cause, so the teardown that asked stays visible."
   (when-let ((id (agent-repl--webhost-id ws)))
     (let ((page (gethash id agent-repl--webhost-pages))
           (held-back (gethash id agent-repl--webhost-held-back))
-          (dock (and (not unloading) (gethash id agent-repl--webhost-gate-docks)))
+          (dock (and (not unloading)
+                     (gethash id agent-repl--webhost-gate-docks)))
           (ingress (gethash id agent-repl--webhost-held-ingress))
           (shown (equal id agent-repl--webhost-shown)))
       (if (not (or page held-back dock ingress shown))
