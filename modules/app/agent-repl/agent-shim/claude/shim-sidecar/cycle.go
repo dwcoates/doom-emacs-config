@@ -354,6 +354,10 @@ type sidecar struct {
 	// store claim a spool (claims.go).
 	attributedBooks map[string]bookAttribution
 	unclaimedShells map[string]string
+	// claimWaits is why each held shell spool's store claim last could not
+	// claim it, by task id, so the wait is stated at INFO when it begins or
+	// changes and only verbosely while it stands (claims.go).
+	claimWaits map[string]string
 
 	nextAttemptAt  time.Time
 	attempting     bool
@@ -471,6 +475,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		firstCWDPending:    map[string]time.Time{},
 		attributedBooks:    map[string]bookAttribution{},
 		unclaimedShells:    map[string]string{},
+		claimWaits:         map[string]string{},
 		rotationHeld:       map[string]discover.Target{},
 		lockHeld:           livelock.Held,
 		active:             map[string]string{},

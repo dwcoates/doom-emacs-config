@@ -181,3 +181,80 @@ func TestAStoreThatCannotAnswerClaimsIsReportedAndClaimsNothing(t *testing.T) {
 	}
 	h.requireOnce(t, "storeclient-shell-run-claims", "error")
 }
+
+// A CLAIM'S WAIT IS STATED ONCE, AT INFO, WHEN IT BEGINS OR ITS REASON
+// CHANGES (2026-11-23): six shells of the work account's sessions waited for
+// hours on books no watched transcript attributed, and every pass said so
+// only verbosely, so nothing in the logs showed why their runs stayed live.
+func TestAShellClaimsWaitIsStatedAtInfoOnlyWhenItBeginsOrChanges(t *testing.T) {
+	tests := []struct {
+		name       string
+		owners     []string
+		wantInfos  []string
+		wantDebugs int
+	}{
+		{name: "a wait on an unattributed book, asked twice", owners: []string{"agent-elsewhere", "agent-elsewhere"},
+			wantInfos: []string{claimWaitUnattributed}, wantDebugs: 1},
+		{name: "a wait on an unrecorded launch, asked twice", owners: []string{"", ""},
+			wantInfos: []string{claimWaitUnrecorded}, wantDebugs: 1},
+		{name: "a wait whose reason changes is stated again", owners: []string{"", "agent-elsewhere"},
+			wantInfos: []string{claimWaitUnrecorded, claimWaitUnattributed}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			store := &fakeStore{claims: []*storev1.ShellRunClaimed{shellClaim(tt.owners[0])}}
+			h, _ := claimsHarness(t, store)
+
+			// Act.
+			for _, owner := range tt.owners {
+				store.claims = []*storev1.ShellRunClaimed{shellClaim(owner)}
+				h.sc.rescan()
+			}
+
+			// Assert.
+			var infos []string
+			debugs := 0
+			for _, rec := range h.records(t) {
+				if rec.Operation != "shell-run-claim" {
+					continue
+				}
+				switch rec.Level {
+				case "info":
+					reason, _ := rec.Context["reason"].(string)
+					infos = append(infos, reason)
+				case "debug":
+					debugs++
+				}
+			}
+			if len(infos) != len(tt.wantInfos) || debugs != tt.wantDebugs {
+				t.Fatalf("info reasons %v and %d debug records, want %v and %d", infos, debugs, tt.wantInfos, tt.wantDebugs)
+			}
+			for i := range infos {
+				if infos[i] != tt.wantInfos[i] {
+					t.Fatalf("info reasons = %v, want %v", infos, tt.wantInfos)
+				}
+			}
+		})
+	}
+}
+
+func TestAClaimedSpoolForgetsItsWait(t *testing.T) {
+	// Arrange: the claim waits on an unattributed book, then names the
+	// session's own.
+	store := &fakeStore{claims: []*storev1.ShellRunClaimed{shellClaim("agent-elsewhere")}}
+	h, spool := claimsHarness(t, store)
+	h.sc.rescan()
+	store.claims = []*storev1.ShellRunClaimed{shellClaim("sess-1")}
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert.
+	if _, watched := h.sc.watchers[spool]; !watched {
+		t.Fatal("the claimed spool was not read")
+	}
+	if reason, waiting := h.sc.claimWaits["b1"]; waiting {
+		t.Fatalf("claim wait = %q after the claim, want none", reason)
+	}
+}
