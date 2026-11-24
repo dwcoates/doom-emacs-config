@@ -262,6 +262,13 @@ func (o *orchestrator) closeEnded(ctx context.Context, record wsm.Workspace, out
 	}
 }
 
+// stopSessionForced ends WS's session at once, whatever turn it runs, stating
+// REASON as its stand-down. It is the package's ONE forced session stop: a
+// landed workspace's before its worktree goes (retireLandedWorktree).
+func (o *orchestrator) stopSessionForced(ctx context.Context, ws ids.WorkspaceID, reason shimlife.StandDownReason) error {
+	return o.deps.StopSession(shimlife.WithStandDown(ctx, reason), ws, true)
+}
+
 // republishRoster republishes the roster's DURABLE half (Deps.PublishRegistry)
 // after a write it is composed from (a close, merged_at, a one-shot mark),
 // which nothing else republishes. A failure is recorded under OP at ERROR as
@@ -724,7 +731,7 @@ func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger
 	// was gone (2026-10-25, settings-page-land).
 	release := o.deps.HoldStarts(ws)
 	defer release()
-	if err := o.deps.StopSession(shimlife.WithStandDown(ctx, shimlife.StandDownLanded), ws, true); err != nil {
+	if err := o.stopSessionForced(ctx, ws, shimlife.StandDownLanded); err != nil {
 		log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
 			"workspace": string(ws), "worktree": dir, "force": true, "error": err.Error()})
 		return err

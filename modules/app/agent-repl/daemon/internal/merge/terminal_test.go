@@ -2844,16 +2844,21 @@ func TestRetireLandedWorktreeTearsDownALandedWorkspace(t *testing.T) {
 	}
 }
 
-// TestEveryLandedTeardownGoesThroughRetireLandedWorktree pins that the
-// queue's merges and a remediation's direct landing share the one teardown:
-// a forced session stop appears nowhere in the package's sources but there.
-func TestEveryLandedTeardownGoesThroughRetireLandedWorktree(t *testing.T) {
+// TestEveryForcedSessionStopGoesThroughStopSessionForced pins that the
+// queue's merges and a remediation's direct landing share the one teardown: a
+// forced session stop appears nowhere in the package's sources but
+// stopSessionForced, whose one caller is retireLandedWorktree.
+func TestEveryForcedSessionStopGoesThroughStopSessionForced(t *testing.T) {
 	// Act
 	sites := sourcescan.SitesMatching(t, regexp.MustCompile(`\.StopSession\([^\n]*, true\)`))
+	callers := callersOf(t, "o.stopSessionForced(")
 
 	// Assert
 	if !slices.Equal(sites, []string{"terminal.go"}) {
-		t.Fatalf("forced session stops at %v, want only retireLandedWorktree's", sites)
+		t.Fatalf("forced session stops at %v, want only stopSessionForced's", sites)
+	}
+	if want := []string{"terminal.go:retireLandedWorktree"}; !slices.Equal(callers, want) {
+		t.Fatalf("stopSessionForced callers = %v, want %v", callers, want)
 	}
 }
 
