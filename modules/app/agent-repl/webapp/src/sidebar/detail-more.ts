@@ -97,20 +97,36 @@ function entryPanel(entry: HTMLElement): HTMLElement {
  * in the popup.
  */
 export function detailsPanel(detail: HTMLElement): HTMLElement {
+  return childPopup(detail, DETAILS_LABEL);
+}
+
+/**
+ * DETAIL's one child popup, its entry, reading LABEL, drawn at the panel's
+ * bottom the first time it is asked for: the row panel's "details" entry, and
+ * the version hover's "workspaces" entry, drawn and opened alike. The entry is
+ * hidden until `syncDetailsEntry` finds a fact in the popup.
+ */
+export function childPopup(detail: HTMLElement, label: string): HTMLElement {
   const existing = detailsEntry(detail);
   if (existing !== null) return entryPanel(existing);
   const entry = document.createElement("div");
   entry.className = DETAILS_ENTRY_CLASS;
   entry.tabIndex = 0;
   entry.hidden = true;
-  const label = document.createElement("span");
-  label.className = "detail-more-label";
-  label.textContent = DETAILS_LABEL;
+  const text = document.createElement("span");
+  text.className = "detail-more-label";
+  text.textContent = label;
   const sub = document.createElement("div");
   sub.className = DETAILS_PANEL_CLASS;
-  entry.append(label, sub);
+  entry.append(text, sub);
   detail.appendChild(entry);
   return sub;
+}
+
+/** Set the words of DETAIL's child popup entry to LABEL. Nothing while it has no entry. */
+export function labelChildPopup(detail: HTMLElement, label: string): void {
+  const text = detailsEntry(detail)?.querySelector<HTMLElement>(":scope > .detail-more-label");
+  if (text !== null && text !== undefined) text.textContent = label;
 }
 
 /** Draw DETAIL's details entry exactly while its popup states at least one fact. */
