@@ -12,7 +12,7 @@
  * Positions are in the scroll box's content coordinates (0 is the top of what
  * it scrolls), so they compare directly with `scroll_top`.
  */
-import { FEED_ROW_ATTRIBUTE } from "./feed/row-id.js";
+import { FEED_ROW_ATTRIBUTE, ROOT_ROWS_SELECTOR } from "./feed/row-id.js";
 
 /** How many of the feed's last root rows the geometry describes. */
 export const GEOMETRY_TAIL_ROWS = 3;
@@ -34,7 +34,7 @@ export interface FeedGeometry {
   readonly scroll_top: number;
   readonly scroll_height: number;
   readonly client_height: number;
-  /** The root rows of `#feed`. */
+  /** The root rows of `#feed`, in its row list (`ROOT_ROWS_SELECTOR`). */
   readonly root_rows: number;
   /** How many of them meet the viewport. */
   readonly rows_in_view: number;
@@ -64,7 +64,9 @@ export function feedGeometry(doc: Document): FeedGeometry | null {
       display: style.display,
     };
   };
-  const rows = [...feed.children].filter((el) => el.hasAttribute(FEED_ROW_ATTRIBUTE));
+  // A feed whose row list is not drawn yet holds no rows.
+  const list = feed.querySelector(ROOT_ROWS_SELECTOR);
+  const rows = list === null ? [] : [...list.children].filter((el) => el.hasAttribute(FEED_ROW_ATTRIBUTE));
   const viewTop = boxTop;
   const viewBottom = boxTop + box.clientHeight;
   const inView = rows.filter((row) => {

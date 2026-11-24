@@ -122,7 +122,7 @@ import {
 import { tick, stopTicking } from "./ticking.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import { queryAll } from "../dom.js";
-import { FEED_ROW_SELECTOR } from "./row-id.js";
+import { FEED_ROW_SELECTOR, ROOT_ROWS_SELECTOR } from "./row-id.js";
 
 const log = createLogger("webapp.feed.feed");
 
@@ -1232,9 +1232,6 @@ export function mountFeed(
     walkHold?.dispose();
   }
 }
-
-/** Where the root feed's body draws its rows: the row list in the body mount. */
-const ROOT_ROWS_SELECTOR = ":scope > .feed-body > .feed-rows";
 
 /**
  * The root feed's row list inside HOST. The body mounts it when the root

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { boxRect, settableScrollTop } from "./dom-rect.js";
 import { blankView, feedGeometry, GEOMETRY_TAIL_ROWS, type FeedGeometry } from "../src/feed-geometry.js";
+import { drawRootFeedShell } from "./root-feed-shell.js";
 
 /** Give EL a laid-out box at TOP (viewport coordinates) of HEIGHT. */
 function place(el: Element, top: number, height: number): void {
@@ -11,25 +12,23 @@ function place(el: Element, top: number, height: number): void {
 }
 
 /** The app's feed shell: a scroll box at viewport top 100, CLIENT tall, scrolled to SCROLL_TOP of SCROLL_HEIGHT. */
-function shell(scrollTop: number, scrollHeight: number, client: number): { box: HTMLElement; feed: HTMLElement } {
-  document.body.innerHTML = `<div id="feed-scroll"><main id="feed"></main><section id="hold-tray"></section></div>`;
-  const box = document.getElementById("feed-scroll")!;
-  const feed = document.getElementById("feed")!;
+function shell(scrollTop: number, scrollHeight: number, client: number): { box: HTMLElement; feed: HTMLElement; rows: HTMLElement } {
+  const { box, feed, rows } = drawRootFeedShell(`<section id="hold-tray"></section>`);
   place(box, 100, client);
   settableScrollTop(box, scrollTop);
   Object.defineProperty(box, "scrollHeight", { value: scrollHeight });
   Object.defineProperty(box, "clientHeight", { value: client });
   place(feed, 100 - scrollTop, scrollHeight);
   place(document.getElementById("hold-tray")!, 100 - scrollTop + scrollHeight, 0);
-  return { box, feed };
+  return { box, feed, rows };
 }
 
-/** A root row of FEED at content offset TOP, HEIGHT tall, with the box scrolled to SCROLL_TOP. */
-function row(feed: HTMLElement, scrollTop: number, top: number, height: number): HTMLElement {
+/** A root row drawn in the row list ROWS at content offset TOP, HEIGHT tall, with the box scrolled to SCROLL_TOP. */
+function row(rows: HTMLElement, scrollTop: number, top: number, height: number): HTMLElement {
   const el = document.createElement("article");
   el.className = "feed-item";
   el.setAttribute("data-feed-row", `r${top}`);
-  feed.append(el);
+  rows.append(el);
   place(el, 100 - scrollTop + top, height);
   return el;
 }
@@ -69,10 +68,10 @@ describe("feedGeometry", () => {
 
   it("counts the root rows that meet the viewport", () => {
     // Arrange
-    const { feed } = shell(500, 2000, 400);
-    row(feed, 500, 0, 300);
-    row(feed, 500, 450, 100);
-    row(feed, 500, 850, 100);
+    const { rows } = shell(500, 2000, 400);
+    row(rows, 500, 0, 300);
+    row(rows, 500, 450, 100);
+    row(rows, 500, 850, 100);
 
     // Act
     const g = geometry();
@@ -81,11 +80,48 @@ describe("feedGeometry", () => {
     expect(g).toMatchObject({ root_rows: 3, rows_in_view: 2 });
   });
 
+  it("counts the rows drawn in the feed's row list, inside its body mount", () => {
+    // Arrange
+    const { rows } = shell(0, 2000, 400);
+    row(rows, 0, 0, 100);
+    row(rows, 0, 100, 100);
+
+    // Act
+    const g = geometry();
+
+    // Assert
+    expect(g).toMatchObject({ root_rows: 2, rows_in_view: 2 });
+  });
+
+  it("does not count a row drawn outside the feed's row list", () => {
+    // Arrange
+    const { feed } = shell(0, 2000, 400);
+    row(feed, 0, 0, 100);
+
+    // Act
+    const g = geometry();
+
+    // Assert
+    expect(g).toMatchObject({ root_rows: 0, rows_in_view: 0 });
+  });
+
+  it("counts no rows while the feed's row list is not drawn", () => {
+    // Arrange
+    const { feed } = shell(0, 2000, 400);
+    feed.replaceChildren();
+
+    // Act
+    const g = geometry();
+
+    // Assert
+    expect(g).toMatchObject({ root_rows: 0, rows_in_view: 0 });
+  });
+
   it("does not count a row that only touches the viewport's edge", () => {
     // Arrange
-    const { feed } = shell(500, 2000, 400);
-    row(feed, 500, 400, 100);
-    row(feed, 500, 900, 100);
+    const { rows } = shell(500, 2000, 400);
+    row(rows, 500, 400, 100);
+    row(rows, 500, 900, 100);
 
     // Act
     const g = geometry();
@@ -96,8 +132,8 @@ describe("feedGeometry", () => {
 
   it("describes the last rows in content coordinates", () => {
     // Arrange
-    const { feed } = shell(500, 2000, 400);
-    for (let i = 0; i < GEOMETRY_TAIL_ROWS + 1; i++) row(feed, 500, i * 100, 50);
+    const { rows } = shell(500, 2000, 400);
+    for (let i = 0; i < GEOMETRY_TAIL_ROWS + 1; i++) row(rows, 500, i * 100, 50);
 
     // Act
     const g = geometry();
@@ -128,8 +164,8 @@ describe("feedGeometry", () => {
 describe("blankView", () => {
   it("is a feed holding rows with none in view", () => {
     // Arrange
-    const { feed } = shell(1500, 2000, 400);
-    row(feed, 1500, 0, 300);
+    const { rows } = shell(1500, 2000, 400);
+    row(rows, 1500, 0, 300);
 
     // Act
     const blank = blankView(geometry());
@@ -140,8 +176,8 @@ describe("blankView", () => {
 
   it("is no blank view while a row is in view", () => {
     // Arrange
-    const { feed } = shell(0, 2000, 400);
-    row(feed, 0, 0, 300);
+    const { rows } = shell(0, 2000, 400);
+    row(rows, 0, 0, 300);
 
     // Act
     const blank = blankView(geometry());
@@ -163,8 +199,8 @@ describe("blankView", () => {
 
   it("is no blank view for a box with no height", () => {
     // Arrange
-    const { feed } = shell(0, 0, 0);
-    row(feed, 0, 0, 300);
+    const { rows } = shell(0, 0, 0);
+    row(rows, 0, 0, 300);
 
     // Act
     const blank = blankView(geometry());
