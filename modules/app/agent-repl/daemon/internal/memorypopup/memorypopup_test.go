@@ -41,11 +41,19 @@ type pageCounts struct{}
 func (pageCounts) CountPageLoad(pageheld.LoadReason)     {}
 func (pageCounts) CountPageUnload(pageheld.UnloadReason) {}
 
-// heldPages answers a table holding a page for each of HELD.
+// webHost is the connection of the web host document the tables attach.
+const webHost = "host-1"
+
+// heldPages answers a table whose web host holds a frame for each of HELD,
+// as Emacs reports too.
 func heldPages(held ...ids.WorkspaceID) *pageheld.Table {
 	table := pageheld.New(pageCounts{})
 	for _, ws := range held {
 		table.Held(ws, pageheld.LoadShown)
+	}
+	table.HostAttached(webHost)
+	if _, taken := table.HostReported(webHost, held, false); !taken {
+		panic("memorypopup test: the attached host's census was not taken")
 	}
 	return table
 }
@@ -318,6 +326,23 @@ func TestAVisibleWorkspaceWithItsPageUnloadedCountsNoPage(t *testing.T) {
 	// Assert
 	if out.GetWorkspaces().GetPages().GetLoaded() != 0 || page.GetNotLoaded() == nil {
 		t.Fatalf("pages = %v, page = %v; want no page loaded for a visible workspace whose page is unloaded", out.GetWorkspaces().GetPages(), page)
+	}
+}
+
+func TestAPageEmacsReportsThatTheHostDoesNotHoldIsNotLoaded(t *testing.T) {
+	// Arrange: Emacs reports b's page held, and the web host holds no frame of
+	// it.
+	pages := heldPages()
+	pages.Held("b", pageheld.LoadShown)
+	p := newPopupsWith(t, sampled(map[procmetrics.Group]uint64{}), census(), pages)
+
+	// Act
+	out, _ := p.Overview(everyOpen)
+	page := p.Workspace("b").GetPage()
+
+	// Assert
+	if out.GetWorkspaces().GetPages().GetLoaded() != 0 || page.GetNotLoaded() == nil {
+		t.Fatalf("pages = %v, page = %v; want none loaded: the host's frames are the truth", out.GetWorkspaces().GetPages(), page)
 	}
 }
 
