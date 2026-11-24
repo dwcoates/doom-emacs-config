@@ -44,7 +44,6 @@
 package e2e
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,9 +113,17 @@ func dbShellHead(row *frontendv1.FeedRow, commandSubstring string) *frontendv1.F
 // its tail) until the shell HEAD whose command contains `commandSubstring`
 // reaches a state `accept` takes, and answers that head's ROW — the row, not
 // only the shell, because its FeedId is the address of the bubble's body.
+//
+// EVERY HELPER HERE BOUNDS ITS OWN WAIT (w.WaitCtx), never a context its
+// caller hands it: harness.DefaultTimeout bounds ONE wait, and a step that
+// spent one context on its live head, its first line, its settle and its
+// last line charged the settle for every wait before it. Under the gate's
+// load that ran TestSubagents/BashDetachedStartAndComplete's settle out of
+// its bound (5.001s granted of 6.731s wall, 2026-11-24) though no single
+// wait was slow.
 func dbAwaitShellHead(
 	t *testing.T,
-	ctx context.Context,
+	w *stack.World,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
 	commandSubstring, what string,
@@ -139,6 +146,8 @@ func dbAwaitShellHead(
 	if found != nil && check(found) {
 		return found
 	}
+	ctx, cancel := w.WaitCtx()
+	defer cancel()
 	return harness.AwaitView(t, ctx, stream, what+" ("+commandSubstring+")", check)
 }
 
@@ -165,7 +174,7 @@ func dbOpenShellBody(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef,
 // carries `spoolSubstring`, and answers the whole spool text as drawn.
 func dbAwaitShellSpool(
 	t *testing.T,
-	ctx context.Context,
+	w *stack.World,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
 	spoolSubstring string,
@@ -185,6 +194,8 @@ func dbAwaitShellSpool(
 			return spool
 		}
 	}
+	ctx, cancel := w.WaitCtx()
+	defer cancel()
 	harness.AwaitView(t, ctx, stream, "the shell bubble's spool body carrying "+spoolSubstring, check)
 	return spool
 }
@@ -200,7 +211,6 @@ func dbAwaitShellSpool(
 // spool the settling push drew.
 func dbAwaitSettledShell(
 	t *testing.T,
-	ctx context.Context,
 	w *stack.World,
 	ws *workspacev1.WorkspaceRef,
 	initial []*frontendv1.FeedRow,
@@ -210,11 +220,11 @@ func dbAwaitSettledShell(
 	spoolSubstring string,
 ) (head *frontendv1.FeedShell, spool string) {
 	t.Helper()
-	row := dbAwaitShellHead(t, ctx, initial, stream, commandSubstring, "a settled detached shell head",
+	row := dbAwaitShellHead(t, w, initial, stream, commandSubstring, "a settled detached shell head",
 		func(sh *frontendv1.FeedShell) bool { return sh.GetSettled() != nil && settled(sh.GetSettled()) })
 	bodyInitial, body := dbOpenShellBody(t, w, ws, row)
 	defer body.Close()
-	return row.GetShellHead(), dbAwaitShellSpool(t, ctx, bodyInitial, body, spoolSubstring)
+	return row.GetShellHead(), dbAwaitShellSpool(t, w, bodyInitial, body, spoolSubstring)
 }
 
 // dbExitedZero is the ordinary successful-shell-exit predicate every
@@ -230,7 +240,7 @@ func dbExitedZero(s *frontendv1.FeedShellSettled) bool {
 // (#35-38 never detach at all).
 func dbAwaitSimpleToolCall(
 	t *testing.T,
-	ctx context.Context,
+	w *stack.World,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
 	toolName, inputSubstring string,
@@ -253,6 +263,8 @@ func dbAwaitSimpleToolCall(
 			return call.GetReturned()
 		}
 	}
+	ctx, cancel := w.WaitCtx()
+	defer cancel()
 	row := harness.AwaitView(t, ctx, stream, "a "+toolName+" tool call to return", check)
 	return row.GetActivity().GetSimpleToolCall().GetReturned()
 }
@@ -296,9 +308,6 @@ func testBashDetachedStartAndComplete(t *testing.T) {
 	turn := stack.SubmitPrompt(t, w, ws, "!bash-detach")
 	stack.AwaitTurnEnded(t, w, ws, turn)
 
-	ctx, cancel := w.WaitCtx()
-	defer cancel()
-
 	// BASH_DETACH's default command (no !bash-detach args): "for i in 1 2 3;
 	// do echo line-$i; sleep 1; done" — matched by a substring stable across
 	// the exact loop body.
@@ -308,11 +317,11 @@ func testBashDetachedStartAndComplete(t *testing.T) {
 	// and its body already carries the first line — incremental spool growth
 	// (the real sidecar tailing the real spool file the fake wrote) under a
 	// head that has not settled.
-	head := dbAwaitShellHead(t, ctx, initial, stream, command, "the live detached shell head",
+	head := dbAwaitShellHead(t, w, initial, stream, command, "the live detached shell head",
 		func(sh *frontendv1.FeedShell) bool { return sh.GetLive() != nil })
 	bodyInitial, body := dbOpenShellBody(t, w, ws, head)
 	defer body.Close()
-	if got := dbAwaitShellSpool(t, ctx, bodyInitial, body, "line-1"); strings.Contains(got, "line-3") {
+	if got := dbAwaitShellSpool(t, w, bodyInitial, body, "line-1"); strings.Contains(got, "line-3") {
 		t.Fatalf("the parked run's spool body = %q already carries line-3; the detach gate did not hold the run", got)
 	}
 
@@ -323,13 +332,13 @@ func testBashDetachedStartAndComplete(t *testing.T) {
 
 	// Assert: the head settles with exit 0, and the body grows to the last
 	// line the scenario appended.
-	settled := dbAwaitShellHead(t, ctx, nil, stream, command, "the detached shell head settled with exit 0",
+	settled := dbAwaitShellHead(t, w, nil, stream, command, "the detached shell head settled with exit 0",
 		func(sh *frontendv1.FeedShell) bool { return sh.GetSettled() != nil && dbExitedZero(sh.GetSettled()) })
 	if settled.GetId().GetValue() != head.GetId().GetValue() {
 		t.Errorf("the settled head is row %q, want the live head's own row %q: a settle re-pushes ONE head",
 			settled.GetId().GetValue(), head.GetId().GetValue())
 	}
-	dbAwaitShellSpool(t, ctx, nil, body, "line-3")
+	dbAwaitShellSpool(t, w, nil, body, "line-3")
 }
 
 // dbDetachGatePathEnv is the fake vendor's detach gate
@@ -385,14 +394,11 @@ func testBashDetachExplicitPoll(t *testing.T) {
 	turn := stack.SubmitPrompt(t, w, ws, "!bash-detach-poll")
 	stack.AwaitTurnEnded(t, w, ws, turn)
 
-	ctx, cancel := w.WaitCtx()
-	defer cancel()
-
 	// BASH_DETACH_POLL's default command (no args): "tail -f build.log"; the
 	// spool's last appended line before EXIT=0 is "done".
 	// The body is awaited carrying "done": a settled head alone would not say
 	// the spool's last line was ever drawn.
-	dbAwaitSettledShell(t, ctx, w, ws, initial, feedStream, "tail -f build.log", dbExitedZero, "done")
+	dbAwaitSettledShell(t, w, ws, initial, feedStream, "tail -f build.log", dbExitedZero, "done")
 
 	// The settled shell above is ordered AFTER both polls were converted, so
 	// every topbar view the exempt drop could ever have provoked has already
@@ -440,14 +446,11 @@ func testBashForegroundCompleted(t *testing.T) {
 	turn := stack.SubmitPrompt(t, w, ws, "!bash")
 	stack.AwaitTurnEnded(t, w, ws, turn)
 
-	ctx, cancel := w.WaitCtx()
-	defer cancel()
-
 	// BASH's default command (no !bash args): "pwd; ls | head", stdout
 	// "one\ntwo\n" — a COMPLETED command is drawn succeeded regardless of its
 	// exit code (daemon/internal/resolve/feed/toolcall.go's bashOutcomeText:
 	// "case *conversationv1.AgentBashSuccess_Completed: return true, ...").
-	returned := dbAwaitSimpleToolCall(t, ctx, initial, stream, "Bash", "pwd; ls | head",
+	returned := dbAwaitSimpleToolCall(t, w, initial, stream, "Bash", "pwd; ls | head",
 		func(r *frontendv1.FeedToolCallReturned) bool { return r.GetSucceeded() != nil })
 	if returned == nil {
 		t.Fatalf("no Bash tool call returned within %s", stack.DefaultTimeout)
