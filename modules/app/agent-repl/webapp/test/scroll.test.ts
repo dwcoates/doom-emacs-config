@@ -3891,7 +3891,9 @@ describe("TailFollow: folding the feed's last bubble", () => {
     f.tail.readerClicked(bubble);
     // Act — the collapse; the box clamps with the shrink.
     f.h[3] -= 300;
-    f.box.scrollTop = f.box.scrollTop;
+    // Writing the box's own position back runs its clamp against the shrunk content.
+    const parked = f.box.scrollTop;
+    f.box.scrollTop = parked;
     f.scroll();
     f.resize();
     // Assert — the feed's end sits at the viewport's bottom.
