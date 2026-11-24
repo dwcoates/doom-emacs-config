@@ -24,10 +24,8 @@
 package composermentions
 
 import (
-	"cmp"
 	"context"
 	"fmt"
-	"slices"
 	"sync"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -35,6 +33,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/recency"
 	"agent-repld/internal/wsm"
 )
 
@@ -210,19 +209,7 @@ func (r record) put(kind wsm.ComposerMentionKind, name string, at int64) bool {
 // most recently mentioned first, a tie by name.
 func (r record) view() *agentreplv1.HostWorkspaceMentions {
 	return &agentreplv1.HostWorkspaceMentions{
-		Commands:   newestFirst(r[wsm.ComposerMentionCommand]),
-		Workspaces: newestFirst(r[wsm.ComposerMentionWorkspace]),
+		Commands:   recency.NewestFirst(r[wsm.ComposerMentionCommand]),
+		Workspaces: recency.NewestFirst(r[wsm.ComposerMentionWorkspace]),
 	}
-}
-
-// newestFirst answers NAMES's keys, the latest instant first, a tie by name.
-func newestFirst(names map[string]int64) []string {
-	out := make([]string, 0, len(names))
-	for name := range names {
-		out = append(out, name)
-	}
-	slices.SortFunc(out, func(a, b string) int {
-		return cmp.Or(cmp.Compare(names[b], names[a]), cmp.Compare(a, b))
-	})
-	return out
 }
