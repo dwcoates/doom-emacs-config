@@ -2,8 +2,6 @@ package wsm
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -63,11 +61,5 @@ func (s *store) SetViewedStatus(ctx context.Context, id WorkspaceID, arm string)
 func (s *store) SetInteractedAt(ctx context.Context, id WorkspaceID, at time.Time) error {
 	const op = "daemon.wsm.set_interacted_at"
 	fields := dlog.Context{"workspace": string(id), "last_interacted_at": at}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := advanceInstant(ctx, tx, "last_interacted_at", id, at)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
-	})
+	return s.writeAdvancedInstant(ctx, op, fields, "last_interacted_at", id, at)
 }

@@ -93,6 +93,21 @@ func bumpLastActivity(ctx context.Context, tx *sql.Tx, id WorkspaceID, at time.T
 	return err
 }
 
+// writeAdvancedInstant is the one write of a workspace instant that only moves
+// forward and names a workspace that must exist: COLUMN advanced to AT
+// (advanceInstant), and an id that matched no row refused as ErrNotFound
+// (requireOneRow). The status change instant and the interaction instant both
+// write through it, so neither can drift from the other's rule.
+func (s *store) writeAdvancedInstant(ctx context.Context, op string, fields dlog.Context, column string, id WorkspaceID, at time.Time) error {
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := advanceInstant(ctx, tx, column, id, at)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
+	})
+}
+
 // advanceInstant advances one workspace's instant COLUMN to at, in the
 // caller's transaction, and ONLY EVER FORWARD: `MAX(existing, at)` leaves a
 // later recorded instant standing, and a NULL one reads as 0 through COALESCE

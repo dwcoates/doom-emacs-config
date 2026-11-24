@@ -3,6 +3,9 @@ package wsm
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,5 +72,74 @@ func TestAdvanceInstantAffectsNoRowForAnUnknownWorkspace(t *testing.T) {
 	}
 	if affected != 0 {
 		t.Fatalf("rows affected = %d, want 0", affected)
+	}
+}
+
+func TestWriteAdvancedInstantMovesOnlyForwardAndRefusesAnUnknownWorkspace(t *testing.T) {
+	earlier := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
+	later := earlier.Add(time.Minute)
+	tests := []struct {
+		name    string
+		known   bool
+		writes  []time.Time
+		want    time.Time
+		wantErr error
+	}{
+		{name: "a later write moves the instant", known: true, writes: []time.Time{earlier, later}, want: later},
+		{name: "an earlier write leaves it", known: true, writes: []time.Time{later, earlier}, want: later},
+		{name: "an unknown workspace is refused", writes: []time.Time{earlier}, wantErr: ErrNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx := context.Background()
+			s, _ := testStore(t)
+			id := WorkspaceID("absent")
+			if tt.known {
+				id = testWorkspace(t, s).ID
+			}
+
+			// Act
+			var err error
+			for _, at := range tt.writes {
+				err = s.writeAdvancedInstant(ctx, "test.advance", nil, "last_interacted_at", id, at)
+			}
+
+			// Assert
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("writeAdvancedInstant = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			got, rerr := s.Workspace(ctx, id)
+			if err != nil || rerr != nil {
+				t.Fatalf("write = %v, read = %v", err, rerr)
+			}
+			if got.InteractedAt == nil || !got.InteractedAt.Equal(tt.want) {
+				t.Fatalf("instant = %v, want %v", got.InteractedAt, tt.want)
+			}
+		})
+	}
+}
+
+// TestTheWorkspaceInstantWritersShareWriteAdvancedInstant pins that the status
+// change and interaction instants are written through the one helper, so a
+// hand-rolled copy of its statement or its existence check fails here.
+func TestTheWorkspaceInstantWritersShareWriteAdvancedInstant(t *testing.T) {
+	for _, file := range []string{"statuschanged.go", "interaction.go"} {
+		t.Run(file, func(t *testing.T) {
+			// Arrange
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read %s: %v", file, err)
+			}
+			src := string(raw)
+
+			// Act / Assert
+			if !strings.Contains(src, "s.writeAdvancedInstant(") || strings.Contains(src, "advanceInstant(ctx, tx,") {
+				t.Fatalf("%s writes an instant without writeAdvancedInstant", file)
+			}
+		})
 	}
 }

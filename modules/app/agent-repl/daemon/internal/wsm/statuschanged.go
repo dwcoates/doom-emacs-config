@@ -2,8 +2,6 @@ package wsm
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -54,13 +52,7 @@ func (s *store) SetStatusChangedAt(ctx context.Context, id WorkspaceID, at time.
 
 // writeStatusChangedAt is the instant's one write.
 func (s *store) writeStatusChangedAt(ctx context.Context, op string, fields dlog.Context, id WorkspaceID, at time.Time) error {
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := advanceInstant(ctx, tx, "status_changed_at", id, at)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
-	})
+	return s.writeAdvancedInstant(ctx, op, fields, "status_changed_at", id, at)
 }
 
 // holdStatusChangeLocked keeps at as id's latest held instant. The caller
