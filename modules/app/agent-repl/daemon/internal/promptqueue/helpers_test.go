@@ -1851,18 +1851,21 @@ type harness struct {
 	standDowns atomic.Uint64
 	// statErr is what reading any workspace directory answers.
 	statErr error
-	q       *queue
-	db      *fakeDB
-	sender  *fakeSender
-	watcher *fakeWatcher
-	feed    *fakeFeed
-	footer  *fakeFooter
-	sidebar *fakeSidebar
-	edges   *fakeEdges
-	leases  *fakeLeases
-	holds   *fakeHolds
-	judge   *scriptedJudge
-	network *fakeNetwork
+	// bounceEnds is told each bounce end the queue reports (Deps.BounceEnded),
+	// with whether the queue still read the workspace bouncing as it did.
+	bounceEnds *bounceEndRecorder
+	q          *queue
+	db         *fakeDB
+	sender     *fakeSender
+	watcher    *fakeWatcher
+	feed       *fakeFeed
+	footer     *fakeFooter
+	sidebar    *fakeSidebar
+	edges      *fakeEdges
+	leases     *fakeLeases
+	holds      *fakeHolds
+	judge      *scriptedJudge
+	network    *fakeNetwork
 	// elapsed advances the queue's clock past instant; zero unless a test
 	// moves it (the classifier's measured latency).
 	elapsed atomic.Int64
@@ -1921,6 +1924,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
 		db:          newFakeDB(),
+		bounceEnds:  newBounceEndRecorder(),
 		sender:      newFakeSender(),
 		watcher:     &fakeWatcher{},
 		feed:        &fakeFeed{},
@@ -1979,6 +1983,9 @@ func newHarness(t *testing.T) *harness {
 		SessionAbsent:   func(ids.WorkspaceID) bool { return h.sessionAbsent },
 		StandingDown:    h.standingDown.Load,
 		StandDowns:      func(ids.WorkspaceID) uint64 { return h.standDowns.Load() },
+		BounceEnded: func(ws ids.WorkspaceID) {
+			h.bounceEnds.note(ws, h.q.Bouncing(ws))
+		},
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
 		},
@@ -2236,4 +2243,53 @@ func (d *fakeDB) arrivalWaits(t *testing.T) []wsm.ArrivalWait {
 		t.Fatalf("ArrivalWaits: %v", err)
 	}
 	return waits
+}
+
+// bounceEndRecorder records each bounce end the queue reports, and signals the
+// first one unread, so a test awaits the report rather than polling for it.
+type bounceEndRecorder struct {
+	mu     sync.Mutex
+	ends   []bounceEnd
+	signal chan struct{}
+}
+
+// bounceEnd is one reported bounce end.
+type bounceEnd struct {
+	ws ids.WorkspaceID
+	// stillBouncing is what Bouncing answered when the end was reported.
+	stillBouncing bool
+}
+
+func newBounceEndRecorder() *bounceEndRecorder {
+	return &bounceEndRecorder{signal: make(chan struct{}, 1)}
+}
+
+func (r *bounceEndRecorder) note(ws ids.WorkspaceID, stillBouncing bool) {
+	r.mu.Lock()
+	r.ends = append(r.ends, bounceEnd{ws: ws, stillBouncing: stillBouncing})
+	r.mu.Unlock()
+	select {
+	case r.signal <- struct{}{}:
+	default:
+	}
+}
+
+// await waits for a reported end, failing the test past BOUND.
+func (r *bounceEndRecorder) await(t *testing.T, bound time.Duration) []bounceEnd {
+	t.Helper()
+	select {
+	case <-r.signal:
+	case <-time.After(bound):
+		t.Fatalf("no bounce end was reported within %v", bound)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bounceEnd(nil), r.ends...)
+}
+
+// reported answers every end reported so far.
+func (r *bounceEndRecorder) reported() []bounceEnd {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bounceEnd(nil), r.ends...)
 }
