@@ -598,10 +598,9 @@ func (o *orchestrator) ReviewQueues(ctx context.Context) error {
 		return fmt.Errorf("merge: review the queues: %w", err)
 	}
 	repos := make([]string, 0, len(queues))
-	for repo := range queues {
+	for _, repo := range queueRepos(queues) {
 		repos = append(repos, string(repo))
 	}
-	sort.Strings(repos)
 	// A MERGE NO HANDOVER GAVE THIS DAEMON IS TAKEN HERE. A workspace with no
 	// session and no serving row of the outgoing daemon's (a hidden merge
 	// workspace) is never transferred, so its merge ran on there until that

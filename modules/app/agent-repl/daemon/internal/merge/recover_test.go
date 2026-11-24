@@ -1285,3 +1285,58 @@ func TestPublishRosterQueuesFailsLoudlyOnAFailedRead(t *testing.T) {
 		t.Fatalf("the roster was told %d queues after a failed read", h.sidebar.toldCount()-toldBefore)
 	}
 }
+
+// TestQueueReposAnswersEveryRepositoryInKeyOrder pins the one order every walk
+// over all the merge queues takes.
+func TestQueueReposAnswersEveryRepositoryInKeyOrder(t *testing.T) {
+	cases := []struct {
+		name   string
+		queues map[wsm.RepoKey][]wsm.MergeQueueEntry
+		want   []wsm.RepoKey
+	}{
+		{name: "no queue answers none", queues: nil, want: []wsm.RepoKey{}},
+		{name: "every repository in key order", queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/b": nil, "/a": {{Workspace: "ws-1"}}, "/c": nil}, want: []wsm.RepoKey{"/a", "/b", "/c"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := queueRepos(tc.queues)
+
+			// Assert
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("queueRepos = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEveryWalkOverAllTheQueuesTakesQueueRepos pins that no walk over all
+// the merge queues builds its own list of their repositories: queueRepos is
+// the one range over the map in the package.
+func TestEveryWalkOverAllTheQueuesTakesQueueRepos(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act
+	var ranges []string
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for range strings.Count(string(source), "for repo := range queues {") {
+			ranges = append(ranges, file)
+		}
+	}
+
+	// Assert
+	if !slices.Equal(ranges, []string{"recover.go"}) {
+		t.Fatalf("ranges over all the queues in %v, want only queueRepos's in recover.go", ranges)
+	}
+}

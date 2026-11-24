@@ -401,10 +401,7 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 	if err != nil {
 		return nil, err
 	}
-	keys := make([]wsm.RepoKey, 0, len(queues))
-	for repo := range queues {
-		keys = append(keys, repo)
-	}
+	keys := queueRepos(queues)
 	if len(keys) == 0 {
 		return nil, o.refuseNoopPause(op, paused, logsite.Msg("refused a pause change with no queue to change"), "no repository has a merge queue to resume", "no repository has a merge queue to pause")
 	}
