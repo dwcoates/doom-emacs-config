@@ -1352,3 +1352,71 @@ func TestAClosedMediatorsFinishLeavesTheQueueHeldOnlyByWhatOwesADecision(t *test
 		})
 	}
 }
+
+// landedFinish records ws-fixer's finish landed before a restart, its deploy
+// begun since: the finish a pass takes up deploys it.
+func landedFinish(t *testing.T, h *harness) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationLanding, deployStarted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", tipAfter, nil, deployStarted.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.OweMediation(ctx, mediationKey(h), deployStarted.Add(time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAFinishIsTakenUpOnlyWhereItsWorkspaceIsServed(t *testing.T) {
+	tests := []struct {
+		name     string
+		standing ServingStanding
+	}{
+		{name: "a finish whose workspace this daemon has not adopted yet", standing: NotYetAdopted},
+		{name: "a finish whose workspace this daemon handed to a successor", standing: TransferringAway},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			landedFinish(t, h)
+			h.standing.stand("ws-fixer", tt.standing)
+
+			// Act
+			h.o.resumeRemediationFinishes(context.Background())
+
+			// Assert
+			if f := finishOf(t, h); f == nil || f.Step != wsm.RemediationDeploying {
+				t.Fatalf("finish %+v, want it left deploying, where it stood", f)
+			}
+			rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: notServedMessage(tt.standing)})
+			if !ok || rec.Context["workspace"] != "ws-fixer" || rec.Context["standing"] != tt.standing.String() || rec.Context["finish_step"] != string(wsm.RemediationDeploying) {
+				t.Fatalf("records = %v, want the finish passed over at INFO, naming its workspace, standing and step", h.logs.Records())
+			}
+		})
+	}
+}
+
+func TestAFinishPassedOverIsTakenUpByItsWorkspacesAdoption(t *testing.T) {
+	// Arrange
+	h := finishing(t)
+	landedFinish(t, h)
+	h.standing.stand("ws-fixer", NotYetAdopted)
+	h.o.resumeRemediationFinishes(context.Background())
+	h.standing.stand("ws-fixer", ServedHere)
+
+	// Act
+	if err := h.o.AdoptWorkspace(context.Background(), "ws-fixer"); err != nil {
+		t.Fatalf("AdoptWorkspace: %v", err)
+	}
+
+	// Assert
+	if f := finishOf(t, h); f == nil || f.Step != wsm.RemediationDeployed {
+		t.Fatalf("finish %+v, want it taken up and deployed", f)
+	}
+}

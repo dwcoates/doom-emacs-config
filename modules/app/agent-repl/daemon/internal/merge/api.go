@@ -872,6 +872,10 @@ type Deps struct {
 	// Standing is whether this daemon may advance its queues across a
 	// handover, and which workspaces it serves (rollout.Controller).
 	Standing Standing
+	// StandingRefusal answers the serving standing a workspace verb refused
+	// ERR on, from its typed transferring_away and not_yet_adopted arms
+	// (workspace.StandingRefusal), and false for any other error. REQUIRED.
+	StandingRefusal func(err error) (ServingStanding, bool)
 	// DeployChecks makes, reopens and closes the deploy checks' workspaces
 	// (workspace.Verbs). REQUIRED.
 	DeployChecks DeployCheckWorkspaces
@@ -1141,4 +1145,38 @@ type Standing interface {
 	ServesQueue() bool
 	QueueChanged() <-chan struct{}
 	ServesWorkspace(ws ids.WorkspaceID) bool
+	// ServingStanding answers WS's serving standing on this daemon: the one
+	// every workspace verb refuses on (workspace.Ownership, read from
+	// rollout.Controller.Standing). It is not ServesWorkspace, which answers
+	// true while joining for a workspace outside the manifest that the verbs
+	// refuse as not_yet_adopted. An unrecognized standing is answered as an
+	// error.
+	ServingStanding(ws ids.WorkspaceID) (ServingStanding, error)
+}
+
+// ServingStanding is a workspace's serving standing on this daemon, as the
+// workspace verbs refuse on it.
+type ServingStanding int
+
+const (
+	// ServedHere: this daemon serves the workspace.
+	ServedHere ServingStanding = iota
+	// TransferringAway: this daemon handed the workspace to a successor.
+	TransferringAway
+	// NotYetAdopted: the workspace was handed to this daemon, which has not
+	// adopted it yet.
+	NotYetAdopted
+)
+
+// String names a standing for a record, in the verbs' arm spelling.
+func (s ServingStanding) String() string {
+	switch s {
+	case ServedHere:
+		return "owned"
+	case TransferringAway:
+		return "transferring_away"
+	case NotYetAdopted:
+		return "not_yet_adopted"
+	}
+	return fmt.Sprintf("ServingStanding(%d)", int(s))
 }

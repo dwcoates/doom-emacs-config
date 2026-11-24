@@ -252,10 +252,24 @@ func (o *orchestrator) resumeRemediationFinishes(ctx context.Context) {
 		return
 	}
 	for _, f := range finishes {
+		fields := dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo)}
+		// A FINISH IS TAKEN UP ONLY WHERE ITS MEDIATOR IS SERVED, as a round
+		// is (Mediate): it shows and briefs the mediator, and settling one it
+		// stopped escalates through it. The mediator's adoption here takes it
+		// up (mediateAdopted).
+		standing, err := o.deps.Standing.ServingStanding(f.Workspace)
+		if err != nil {
+			o.mediationFailed(ctx, fields, logsite.Msg("could not read whether this daemon serves the remediation's workspace; its finish is not taken up, and the next pass takes it up"), err)
+			continue
+		}
+		if standing != ServedHere {
+			o.mediatorNotServed(withField(fields, "finish_step", string(f.Step)), standing)
+			continue
+		}
 		// A FINISH SENT BACK TO FIX WHOSE MEDIATOR STOPPED while no daemon
 		// served the queues has no turn's end left to settle it.
 		if f.Step == wsm.RemediationFixing {
-			o.settleStoppedFix(ctx, f.Repo, f.Workspace, dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo)})
+			o.settleStoppedFix(ctx, f.Repo, f.Workspace, fields)
 			continue
 		}
 		o.startRemediationFinish(f, false)

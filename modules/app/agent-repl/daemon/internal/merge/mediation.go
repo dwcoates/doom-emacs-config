@@ -405,9 +405,12 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 }
 
 // Mediate implements Orchestrator: runs a round for every check owed and not
-// yet awaited here, and takes up every remediation finish a restart cut
+// yet awaited here whose deploy mediator this daemon serves, and takes up
+// every remediation finish a restart cut whose workspace it serves
 // (remediationfinish.go). A daemon that may not advance its queues runs
-// none; its successor's takeover calls this again.
+// none; its successor's takeover calls this again. A round or finish passed
+// over for its mediator is run by the edge on which this daemon comes to
+// serve it (mediateAdopted, ServingWidened).
 func (o *orchestrator) Mediate(ctx context.Context) {
 	notRun := logsite.Msg(mediationNotRun)
 	if !o.deps.Standing.ServesQueue() {
@@ -441,9 +444,37 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 			}
 			continue
 		}
-		o.keepMediatorShown(ctx, q)
+		// THE ROUND RUNS ONLY WHERE ITS MEDIATOR IS SERVED (standingchecks.go),
+		// asked before anything touches it, by the predicate the workspace
+		// verbs refuse on. NO ROUND IS LOST TO IT: a daemon comes to serve a
+		// workspace only by a transition to owned that is made before the
+		// edge telling the merge queue of it (rollout's adopt, the
+		// stragglers' adoption and joining mode's end at the takeover, the
+		// take-back of a transfer), and that edge runs this pass again
+		// (mediateAdopted, ServingWidened). So a gate that reads the mediator
+		// not served reads it before that transition, and the pass its edge
+		// runs after it finds the mediator served.
+		fields := dlog.Context{"repo": string(q.key)}
+		mediator, standing, err := o.mediatorStanding(ctx, q.key)
+		if err != nil {
+			if o.mediationFailed(ctx, fields, logsite.Msg("could not read whether this daemon serves the queue's deploy mediator; its check's round is not run, and the next pass runs it"), err) {
+				return
+			}
+			continue
+		}
+		served := standing == ServedHere
+		if served {
+			o.keepMediatorShown(ctx, q)
+		}
 		o.surfaceFinish(ctx, q.key)
 		if m == nil {
+			if !served {
+				o.deps.Log.Global().Debug(opMediation, "this daemon does not serve the queue's deploy mediator now; the daemon that serves it keeps it shown", withField(withField(fields, "mediator", string(mediator)), "standing", standing.String()))
+			}
+			continue
+		}
+		if !served {
+			o.mediatorNotServed(withField(withField(fields, "mediator", string(mediator)), "deploy_started", m.OwedAt.UTC().Format(time.RFC3339Nano)), standing)
 			continue
 		}
 		// A ROUND OUTLIVES THE PASS, NOT THE DAEMON: it runs under the
@@ -729,7 +760,9 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 //
 // A ROUND THE DAEMON'S EXIT OR A HANDOVER CUT IS NO FAILURE: the daemon that
 // serves the queues next runs it again (mediationCut), so it is not
-// escalated.
+// escalated. Nor is a workspace verb's refusal on the mediator's serving
+// standing, which a handover can bring about after the pass's gate let the
+// round run (mediatorNotServed).
 //
 // THE CHECK IS ESCALATED ONLY TO A RECORDED MEDIATOR: a check held past its
 // rollout names its mediator (owedFrom), and the user's notice opens it

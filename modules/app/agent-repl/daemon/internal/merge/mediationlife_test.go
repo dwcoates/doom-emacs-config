@@ -250,3 +250,99 @@ func TestARoundAHandoverCutRunsAgainOnlyWhenThisDaemonServesAgain(t *testing.T) 
 		})
 	}
 }
+
+// notServedMessage is the record of a mediation that ends because this
+// daemon does not serve the mediator at STANDING.
+func notServedMessage(standing ServingStanding) string {
+	if standing == TransferringAway {
+		return mediatorTransferredAway
+	}
+	return mediatorNotYetAdopted
+}
+
+// assertNotServedHere asserts that a round whose mediator ws-fixer this daemon
+// does not serve at STANDING ended deciding nothing and escalating nothing:
+// the check still owed and untold, nobody notified, no ERROR recorded, and
+// one INFO record naming the repository, the mediator and the standing.
+func assertNotServedHere(t *testing.T, h *harness, standing ServingStanding) {
+	t.Helper()
+	if m := owedCheck(t, h); m == nil || m.Prompted() || m.Escalated() || m.Dispatched {
+		t.Fatalf("check %+v, want it still owed, untold and undecided", m)
+	}
+	if len(h.banners.seen()) != 0 {
+		t.Fatalf("banners %v, want nobody notified", h.banners.seen())
+	}
+	if rec, errored := h.recordFor("error", opMediation); errored {
+		t.Fatalf("ERROR %+v, want none", rec)
+	}
+	got := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: notServedMessage(standing)})
+	if len(got) == 0 {
+		t.Fatalf("records = %v, want the round's end at INFO", h.logs.Records())
+	}
+	rec := got[0]
+	if rec.Context["repo"] != string(mediationKey(h)) || rec.Context["mediator"] != "ws-fixer" || rec.Context["standing"] != standing.String() {
+		t.Fatalf("record %+v, want it to name the repository, the mediator and the standing %v", rec, standing)
+	}
+}
+
+func TestAVerbRefusedOnTheMediatorsStandingAfterTheGateIsNoFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		standing ServingStanding
+	}{
+		{name: "a refresh refused not_yet_adopted", standing: NotYetAdopted},
+		{name: "a refresh refused transferring_away", standing: TransferringAway},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the gate finds the mediator served, and the refresh is
+			// then refused on its standing.
+			h := checked(t)
+			owe(t, h)
+			withMediator(t, h)
+			h.checks.refreshErr = fmt.Errorf("refresh: %w", &standingRefused{standing: tt.standing})
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if len(h.checks.refreshed) != 1 {
+				t.Fatalf("refreshed %v, want the gate passed and the refresh asked once", h.checks.refreshed)
+			}
+			assertNotServedHere(t, h, tt.standing)
+		})
+	}
+}
+
+func TestAMediatorNotServedHereIsRunAgainHereOnlyWhenHandedAway(t *testing.T) {
+	tests := []struct {
+		name      string
+		standing  ServingStanding
+		wantRerun bool
+	}{
+		{name: "a mediator handed to a successor is run again should this daemon serve the queues again", standing: TransferringAway, wantRerun: true},
+		{name: "a mediator not adopted yet waits for its adoption, not for the queues", standing: NotYetAdopted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withMediator(t, h)
+			h.standing.stand("ws-fixer", tt.standing)
+			h.o.Mediate(context.Background())
+			h.standing.set(false)
+
+			// Act: the handover ends with this daemon serving again.
+			h.standing.set(true)
+			h.o.followStandingOnce(context.Background(), false)
+
+			// Assert
+			_, reran := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "this daemon serves the queues again after a handover cut a mediation round; the round runs again"})
+			if reran != tt.wantRerun {
+				t.Fatalf("reran %v, want %v", reran, tt.wantRerun)
+			}
+		})
+	}
+}
