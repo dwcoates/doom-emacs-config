@@ -900,6 +900,12 @@ func (s *sequence) join(ctx context.Context, log dlog.Logger) error {
 		log.Debug("daemon.boot.join", "this daemon is the incumbent; nothing to join", nil)
 		return nil
 	}
+	// THE ROSTER KNOWS EVERY MERGE QUEUE BEFORE THE FIRST ADOPTION: a row
+	// adopted is drawn from this daemon's own facts from then on, and its
+	// merge is one of them (merge.Orchestrator.PublishRosterQueues).
+	if err := s.deps.Merge.PublishRosterQueues(ctx); err != nil {
+		return fmt.Errorf("boot: tell the roster the merge queues before joining: %w", err)
+	}
 	if err := s.deps.Rollout.Join(ctx); err != nil {
 		log.Error("daemon.boot.join", "the joining daemon could not take over", dlog.Context{
 			"incumbent": s.deps.JoiningAddress,

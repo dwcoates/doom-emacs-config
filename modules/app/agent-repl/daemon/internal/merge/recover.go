@@ -777,3 +777,25 @@ func (o *orchestrator) sweepOrphanedState(ctx context.Context) {
 			"progress_records": swept.ProgressRecords, "rounds_closed": len(swept.ClosedRounds), "leases_released": len(swept.ReleasedLeases)})
 	}
 }
+
+// PublishRosterQueues implements Orchestrator.
+func (o *orchestrator) PublishRosterQueues(ctx context.Context) error {
+	queues, err := o.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error("daemon.merge.roster_queues", "could not read the merge queues, so the roster is not told them before adoption",
+			dlog.Context{"error": err.Error()})
+		return fmt.Errorf("merge: read the merge queues for the roster: %w", err)
+	}
+	repos := make([]wsm.RepoKey, 0, len(queues))
+	for repo := range queues {
+		repos = append(repos, repo)
+	}
+	sort.Slice(repos, func(i, j int) bool { return repos[i] < repos[j] })
+	for _, repo := range repos {
+		o.publishRosterQueue(ctx, repo)
+	}
+	o.publishOffQueue(ctx)
+	o.deps.Log.Global().Info("daemon.merge.roster_queues", "told the roster every merge queue before adopting any workspace",
+		dlog.Context{"repositories": len(repos)})
+	return nil
+}
