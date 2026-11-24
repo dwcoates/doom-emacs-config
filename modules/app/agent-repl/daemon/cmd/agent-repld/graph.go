@@ -605,6 +605,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		sidebar.WithViewedSink(rosterDurable.ViewedSink()),
 		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
 		sidebar.WithVisibilitySink(rosterDurable.VisibilitySink()),
+		sidebar.WithVisibilityTelemetry(p.Metrics),
 		sidebar.WithQuiet(viewGate))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the sidebar resolver: %w", err)

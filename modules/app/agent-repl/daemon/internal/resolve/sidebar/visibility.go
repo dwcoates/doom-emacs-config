@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"maps"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -52,6 +54,53 @@ type VisibilitySink func(changes map[ids.WorkspaceID]wsm.Visibility)
 // changes.
 func WithVisibilitySink(sink VisibilitySink) Option {
 	return func(r *resolver) { r.visibilities = sink }
+}
+
+// VisibilityTelemetry is where the roster counts why each workspace is
+// visible (runtimemetrics.Surface). Every method is a handful of atomic
+// metric updates, called under the resolver's lock, so it never blocks.
+type VisibilityTelemetry interface {
+	// SetVisibilityCounts states how many workspaces stand under each reason
+	// now, every reason named (0 for one none has).
+	SetVisibilityCounts(counts map[wsm.VisibilityReason]int)
+	// CountVisibilityChange counts one workspace's visibility changing from
+	// FROM to TO, under REASON, the new visibility's reason.
+	CountVisibilityChange(from, to wsm.Visibility, reason wsm.VisibilityReason)
+	// CountResultRead counts one last turn's result made read, by what read
+	// it (ResultReadBy).
+	CountResultRead(by ResultReadBy)
+}
+
+// ResultReadBy is what made a workspace's last turn result read: the closed
+// vocabulary agentrepl_workspace_results_read_total counts by.
+type ResultReadBy string
+
+// The readers of a result.
+const (
+	// ReadByEditorView is the editor's viewed report (MarkWorkspaceViewed):
+	// the user looked at the turn-end row for the view dwell.
+	ReadByEditorView ResultReadBy = "editor_view"
+	// ReadByContextCut is a /clear or compaction that completed, read the
+	// moment it lands: it leaves no response to read.
+	ReadByContextCut ResultReadBy = "context_cut"
+	// ReadByInterrupt is a turn the user interrupted, read the moment it ends.
+	ReadByInterrupt ResultReadBy = "interrupted"
+)
+
+// ResultReadersAll is every reader, for a caller that serves each from 0.
+var ResultReadersAll = []ResultReadBy{ReadByEditorView, ReadByContextCut, ReadByInterrupt}
+
+// WithVisibilityTelemetry installs where the resolver counts visibilities,
+// their changes and the results read.
+func WithVisibilityTelemetry(t VisibilityTelemetry) Option {
+	return func(r *resolver) { r.telemetry = t }
+}
+
+// countResultRead counts one result read BY. The caller holds r.mu.
+func (r *resolver) countResultRead(by ResultReadBy) {
+	if r.telemetry != nil {
+		r.telemetry.CountResultRead(by)
+	}
 }
 
 // resolveArms answers every registry workspace's status arm, once per render,
@@ -145,12 +194,17 @@ func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[id
 // knows the roster it reaches (recordVisibilityMoves). The caller holds r.mu.
 func (r *resolver) resolveVisibility(repos []openRepo, rc rowContext, arms map[ids.WorkspaceID]string) {
 	inputs := r.visibilityInputs(repos, rc, arms)
-	derived := wsm.Visibilities(inputs)
+	reasons := wsm.VisibilityReasons(inputs)
+	derived := make(map[ids.WorkspaceID]wsm.Visibility, len(reasons))
+	for id, reason := range reasons {
+		derived[id] = reason.Visibility()
+	}
 	inputOf := make(map[ids.WorkspaceID]wsm.VisibilityInput, len(inputs))
 	for _, in := range inputs {
 		inputOf[in.ID] = in
 	}
 	r.state.visibility = derived
+	r.countReasons(reasons)
 	if r.state.visibilityKept == nil {
 		r.state.visibilityKept = map[ids.WorkspaceID]wsm.Visibility{}
 	}
@@ -166,8 +220,11 @@ func (r *resolver) resolveVisibility(repos []openRepo, rc rowContext, arms map[i
 		}
 		r.state.visibilityKept[rec.ID] = v
 		r.visibilityMoves = append(r.visibilityMoves, visibilityMove{
-			ws: rec.ID, to: v, from: kept, in: inputOf[rec.ID], arm: arms[rec.ID], cause: rc.causeOf(rec.ID),
+			ws: rec.ID, to: v, from: kept, reason: reasons[rec.ID], in: inputOf[rec.ID], arm: arms[rec.ID], cause: rc.causeOf(rec.ID),
 		})
+		if r.telemetry != nil {
+			r.telemetry.CountVisibilityChange(kept, v, reasons[rec.ID])
+		}
 		if r.visibilities == nil {
 			continue
 		}
@@ -184,9 +241,11 @@ func (r *resolver) resolveVisibility(repos []openRepo, rc rowContext, arms map[i
 type visibilityMove struct {
 	ws       ids.WorkspaceID
 	to, from wsm.Visibility
-	in       wsm.VisibilityInput
-	arm      string
-	cause    string
+	// reason is the rule of the derivation that decided TO.
+	reason wsm.VisibilityReason
+	in     wsm.VisibilityInput
+	arm    string
+	cause  string
 }
 
 // recordVisibilityMoves records every visibility change the commit's renders
@@ -203,6 +262,7 @@ func (r *resolver) recordVisibilityMoves(revision uint64, published bool) {
 		ctx := dlog.Context{
 			"visibility":   m.to.String(),
 			"previous":     m.from.String(),
+			"reason":       m.reason.String(),
 			"cause":        m.cause,
 			"arm":          m.arm,
 			"open":         m.in.Open,
@@ -223,6 +283,27 @@ func (r *resolver) recordVisibilityMoves(revision uint64, published bool) {
 		r.logFor(m.ws).Info("daemon.sidebar.visibility_changed", "the roster derived a new visibility for the workspace", ctx)
 	}
 	r.visibilityMoves = nil
+}
+
+// countReasons hands telemetry how many registry workspaces stand under
+// each reason, when that changed since the last render. The caller holds
+// r.mu.
+func (r *resolver) countReasons(reasons map[ids.WorkspaceID]wsm.VisibilityReason) {
+	if r.telemetry == nil {
+		return
+	}
+	counts := make(map[wsm.VisibilityReason]int, len(wsm.VisibilityReasonsAll))
+	for _, reason := range wsm.VisibilityReasonsAll {
+		counts[reason] = 0
+	}
+	for _, rec := range r.state.reg.Workspaces {
+		counts[reasons[rec.ID]]++
+	}
+	if maps.Equal(counts, r.reasonCounts) {
+		return
+	}
+	r.reasonCounts = counts
+	r.telemetry.SetVisibilityCounts(counts)
 }
 
 // visibilityOf answers V on the wire.

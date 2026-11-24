@@ -565,3 +565,144 @@ func TestACommitThatPublishesNothingTellsNoNextPublication(t *testing.T) {
 		t.Fatalf("told = %v, want nothing for a roster not published", told)
 	}
 }
+
+// visibilityTelemetry records what the resolver tells its visibility
+// telemetry.
+type visibilityTelemetry struct {
+	mu      sync.Mutex
+	counts  []map[wsm.VisibilityReason]int
+	changes []string
+	reads   []sidebar.ResultReadBy
+}
+
+func (v *visibilityTelemetry) SetVisibilityCounts(counts map[wsm.VisibilityReason]int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.counts = append(v.counts, counts)
+}
+
+func (v *visibilityTelemetry) CountVisibilityChange(from, to wsm.Visibility, reason wsm.VisibilityReason) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.changes = append(v.changes, from.String()+">"+to.String()+":"+reason.String())
+}
+
+func (v *visibilityTelemetry) CountResultRead(by sidebar.ResultReadBy) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.reads = append(v.reads, by)
+}
+
+func (v *visibilityTelemetry) last() map[wsm.VisibilityReason]int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if len(v.counts) == 0 {
+		return nil
+	}
+	return v.counts[len(v.counts)-1]
+}
+
+func TestTheVisibilityCountsNameEveryWorkspacesReason(t *testing.T) {
+	// Arrange
+	tel := &visibilityTelemetry{}
+	plain, surfaces := newResolver(t, sidebar.WithVisibilityTelemetry(tel))
+	r := sidebarResolver{Resolver: plain, surfaces: surfaces}
+	reg := foldedOne()
+	reg.Workspaces = append(reg.Workspaces, workspace("w2", "two"))
+	reg.Workspaces[1].Repo = reg.Workspaces[0].Repo
+
+	// Act: the folded workspace works, the other is idle under the same fold.
+	r.SetRegistry(reg)
+	liveRegistry(r, reg)
+	working(r, theWS)
+
+	// Assert
+	got := tel.last()
+	if got[wsm.ReasonCoveredWorking] != 1 || got[wsm.ReasonCovered] != 1 || len(got) != len(wsm.VisibilityReasonsAll) {
+		t.Fatalf("counts = %v, want one covered_working, one covered, every reason named", got)
+	}
+}
+
+func TestAnUnchangedVisibilityCountIsNotSetAgain(t *testing.T) {
+	// Arrange
+	tel := &visibilityTelemetry{}
+	r, _ := newResolver(t, sidebar.WithVisibilityTelemetry(tel))
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	before := len(tel.counts)
+
+	// Act
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+
+	// Assert
+	if len(tel.counts) != before {
+		t.Fatalf("counts were set %d more times for a render that changed none", len(tel.counts)-before)
+	}
+}
+
+func TestEveryVisibilityChangeIsCountedWithItsReason(t *testing.T) {
+	// Arrange
+	tel := &visibilityTelemetry{}
+	r, _ := newResolver(t, sidebar.WithVisibilityTelemetry(tel))
+
+	// Act: drawn first, then folded away while idle.
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	liveRegistry(r, registry(workspace(string(theWS), "one")))
+	r.SetRegistry(foldedOne())
+	liveRegistry(r, foldedOne())
+
+	// Assert
+	want := []string{"not_visible>unselected_visible:uncovered", "unselected_visible>not_visible:covered"}
+	if len(tel.changes) != 2 || tel.changes[0] != want[0] || tel.changes[1] != want[1] {
+		t.Fatalf("changes = %v, want %v", tel.changes, want)
+	}
+}
+
+func TestAResultReadIsCountedByWhatReadIt(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(r sidebarResolver)
+		want sidebar.ResultReadBy
+	}{
+		{name: "the editor's viewed report", act: func(r sidebarResolver) {
+			turnFinished(r, theWS)
+			r.SetViewed(theWS)
+		}, want: sidebar.ReadByEditorView},
+		{name: "an interrupted turn", act: func(r sidebarResolver) {
+			working(r, theWS)
+			r.SetTurnEnded(theWS, wsm.CloseKilled)
+		}, want: sidebar.ReadByInterrupt},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			tel := &visibilityTelemetry{}
+			plain, surfaces := newResolver(t, sidebar.WithVisibilityTelemetry(tel))
+			r := sidebarResolver{Resolver: plain, surfaces: surfaces}
+			r.SetRegistry(registry(workspace(string(theWS), "one")))
+
+			// Act
+			tt.act(r)
+
+			// Assert
+			if len(tel.reads) != 1 || tel.reads[0] != tt.want {
+				t.Fatalf("reads = %v, want one %s", tel.reads, tt.want)
+			}
+		})
+	}
+}
+
+func TestAVisibilityChangeRecordNamesItsReason(t *testing.T) {
+	// Arrange
+	r, surfaces := newResolver(t)
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	liveRegistry(r, registry(workspace(string(theWS), "one")))
+
+	// Act: folded away while idle.
+	r.SetRegistry(foldedOne())
+
+	// Assert
+	recs := visibilityRecords(surfaces, theWS)
+	if len(recs) == 0 || recs[len(recs)-1].Context["reason"] != "covered" {
+		t.Fatalf("visibility records = %v, want the last naming reason covered", recs)
+	}
+}
