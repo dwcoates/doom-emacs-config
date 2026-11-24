@@ -827,7 +827,8 @@ NOT MOVE WITH A PAGE: they follow the link (`agent-repl-webhost-follow-daemon').
                (agent-repl--webhost-downtime-args id))
       ;; A RE-POINTED PAGE KEEPS THE REASON IT WAS LOADED FOR: it is the same
       ;; page, held at the daemon WS moved to.
-      (plist-put (gethash id agent-repl--webhost-pages) :url url)
+      (puthash id (list :url url :why (agent-repl-webhost-page-reason ws))
+               agent-repl--webhost-pages)
       (apply #'agent-repl--webhost-call "ensure" id url nil started
                (agent-repl--webhost-downtime-args id)))
     (agent-repl--info ws "elisp.webhost.page-reloaded ws={ws} id={id}" :ws ws :id id)
