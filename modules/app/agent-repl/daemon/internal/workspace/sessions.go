@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/account"
 	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/changesignal"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/headless"
@@ -2956,6 +2957,15 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		// only the record says which of the two happened.
 		if errors.Is(err, shimclient.ErrStandDownOrdered) {
 			log.Info(opBringUp, "the StartSession call ended in a stand-down this daemon ordered",
+				dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("start session for %q: %w", ws, err)
+		}
+		// A START ITS CALLER WENT AWAY FROM IS NOT A FAILED START either: the
+		// daemon's exit, or a teardown that forgot the workspace, ended the
+		// bring-up's context before the shim answered. The shim client has
+		// stated the abandoned call; the start still stops.
+		if ctxend.Is(err) && ctx.Err() != nil {
+			log.Info(opBringUp, "the StartSession call was abandoned: the bring-up's caller went away before the shim answered",
 				dlog.Context{"cause": err.Error()})
 			return nil, fmt.Errorf("start session for %q: %w", ws, err)
 		}

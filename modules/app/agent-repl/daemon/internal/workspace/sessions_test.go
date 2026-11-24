@@ -3207,6 +3207,66 @@ func TestTheStartBoundDoesNotSpeakForTheCallersOwnCancellation(t *testing.T) {
 	}
 }
 
+// TestAStartItsCallerAbandonedIsNoFailedStart: a bring-up whose caller went
+// away (the daemon's exit, a teardown that forgot the workspace) is stated at
+// INFO, never as the ERROR of a start the shim failed.
+func TestAStartItsCallerAbandonedIsNoFailedStart(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-caller-left")
+	f.fleet.startBound = time.Minute
+	entered := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	settled := make(chan error, 1)
+	go func() { settled <- f.fleet.Start(ctx, ws.ID) }()
+	<-entered
+
+	// Act.
+	cancel()
+
+	// Assert.
+	if err := <-settled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start = %v, want the caller's cancellation answered", err)
+	}
+	var abandoned bool
+	for _, r := range f.log.logger.Records() {
+		if r.Operation != opBringUp {
+			continue
+		}
+		if r.Message == "the StartSession call failed" {
+			t.Fatalf("an abandoned start was recorded as a failed one: %+v", r)
+		}
+		if strings.Contains(r.Message, "the StartSession call was abandoned") {
+			abandoned = r.Level == "info"
+		}
+	}
+	if !abandoned {
+		t.Fatalf("records = %+v, want the abandoned start at info", f.log.logger.Records())
+	}
+}
+
+// TestAStartSessionCallThatFailsWhileItsCallerWaitsIsAnError: a call that
+// fails with its caller still there is the failed start's ERROR.
+func TestAStartSessionCallThatFailsWhileItsCallerWaitsIsAnError(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.startErr = errors.New("the shim hung up")
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opBringUp && r.Message == "the StartSession call failed" && r.Level == "error" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the failed start at error", f.log.logger.Records())
+}
+
 // ---------------------------------------------------------------------------
 // The compaction phases a remediated re-open relays.
 //
