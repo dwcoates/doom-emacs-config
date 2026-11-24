@@ -542,14 +542,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("-repository <repository> -relationship child -parent here -lands-into main -context fork");
   });
 
-  it("forbids version controlling any conversation, in any repository", () => {
+  it("forbids version controlling any personal or private data, in any repository", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readMetaprompt(home) ?? "";
     // Assert
-    expect(text).toContain("NEVER commit a chat thread, an agent transcript, or any other record of a conversation, in any repository, ever.");
+    expect(text).toContain("NEVER commit personal or private data, in any repository, ever");
+    expect(text).toContain("A record of a conversation: a chat thread, an agent transcript, or a session's prompts.");
     expect(text).toContain("zettel chats, agent-repl workspace transcripts, Claude Code session files");
+    expect(text).toContain("A secret: an API key, a token, a password, a private key, or a credential file.");
+    expect(text).toContain("The value of an environment variable from a real machine, whether a secret or not.");
+    expect(text).toContain("An identifier of a real person or account");
   });
 
   it("points a main workspace at its standing notice rather than restating how it dispatches work", () => {
