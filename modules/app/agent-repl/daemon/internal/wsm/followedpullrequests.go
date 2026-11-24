@@ -76,14 +76,8 @@ func followOwnedPullRequestsInTx(ctx context.Context, tx *sql.Tx, subscriber, fo
 		if _, err := addReferenceLinkIfAbsentInTx(ctx, tx, subscriber, link.url, link.label, &link.pr); err != nil {
 			return nil, err
 		}
-		res, err := tx.ExecContext(ctx,
-			`INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told) VALUES (?, ?, ?, ?, ?, ?, ?, '')
-			 ON CONFLICT(subscriber, owner, repo, number) DO NOTHING`,
-			subscriber, link.pr.Owner, link.pr.Repo, link.pr.Number, int64(followedPullRequestEvents()), string(PullRequestOriginFollowedWorkspace), nanos(at))
-		if err != nil {
-			return nil, err
-		}
-		taken, err := touchedRow(res)
+		taken, err := insertPullRequestSubscriptionIfAbsentInTx(ctx, tx, PullRequestSubscription{Subscriber: subscriber, PullRequest: link.pr,
+			Events: followedPullRequestEvents(), Origin: PullRequestOriginFollowedWorkspace, SubscribedAt: at})
 		if err != nil {
 			return nil, err
 		}

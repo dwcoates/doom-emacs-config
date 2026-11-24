@@ -528,17 +528,8 @@ func (s *store) followLinkInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, 
 		return ownHeldSubscriptionInTx(ctx, tx, id, *set.PullRequest)
 	}
 	sub := *set.Subscribe
-	var ended, mergeSHA any
-	if sub.Ended != nil {
-		ended = "closed"
-		if sub.Ended.Merged {
-			ended, mergeSHA = "merged", sub.Ended.MergeSHA
-		}
-	}
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told, ended, ended_merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(subscriber, owner, repo, number) DO NOTHING`,
-		id, sub.PullRequest.Owner, sub.PullRequest.Repo, sub.PullRequest.Number, int64(sub.Events), string(PullRequestOriginOwnedLink), nanos(sub.SubscribedAt), sub.Told, ended, mergeSHA)
+	sub.Subscriber, sub.Origin = id, PullRequestOriginOwnedLink
+	_, err := insertPullRequestSubscriptionIfAbsentInTx(ctx, tx, sub)
 	return err
 }
 

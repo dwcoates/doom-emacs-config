@@ -482,6 +482,27 @@ func ParsePullRequestKey(text string) (PullRequestKey, error) {
 	return key, nil
 }
 
+// insertPullRequestSubscriptionIfAbsentInTx records SUB, ended when its Ended
+// is set, unless its subscriber already holds a subscription to its pull
+// request, which is left as it is, and answers whether it recorded it.
+func insertPullRequestSubscriptionIfAbsentInTx(ctx context.Context, tx *sql.Tx, sub PullRequestSubscription) (bool, error) {
+	var ended, mergeSHA any
+	if sub.Ended != nil {
+		ended = "closed"
+		if sub.Ended.Merged {
+			ended, mergeSHA = "merged", sub.Ended.MergeSHA
+		}
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told, ended, ended_merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(subscriber, owner, repo, number) DO NOTHING`,
+		sub.Subscriber, sub.PullRequest.Owner, sub.PullRequest.Repo, sub.PullRequest.Number, int64(sub.Events), string(sub.Origin), nanos(sub.SubscribedAt), sub.Told, ended, mergeSHA)
+	if err != nil {
+		return false, err
+	}
+	return touchedRow(res)
+}
+
 // deletePullRequestSubscription deletes SUBSCRIBER's subscription to PR, of
 // ORIGIN when ORIGIN is set (any origin otherwise), answering whether one
 // stood.

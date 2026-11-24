@@ -2,8 +2,11 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -568,5 +571,72 @@ func TestAnOwnedLinkToAnEndedPullRequestIsRecordedEnded(t *testing.T) {
 	live, err := s.LivePullRequestSubscriptions(context.Background())
 	if err != nil || len(live) != 0 || links[0].Follow == nil || !reflect.DeepEqual(links[0].Follow.Ended, set.Subscribe.Ended) {
 		t.Fatalf("links = %+v, live %v (%v); want the link's follow ended by the merge and nothing polled", links, live, err)
+	}
+}
+
+func TestInsertPullRequestSubscriptionIfAbsentInTx(t *testing.T) {
+	merged := requested("", "told", PullRequestEventState)
+	merged.Ended = &PullRequestEnd{Merged: true, MergeSHA: "sha"}
+	tests := []struct {
+		name      string
+		held      bool
+		sub       func(ws WorkspaceID) PullRequestSubscription
+		wantTaken bool
+		want      func(ws WorkspaceID) PullRequestSubscription
+	}{
+		{name: "an absent subscription is recorded", sub: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "told", PullRequestEventMerged) },
+			wantTaken: true, want: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "told", PullRequestEventMerged) }},
+		{name: "an ended subscription is recorded ended", sub: func(ws WorkspaceID) PullRequestSubscription { m := merged; m.Subscriber = ws; return m },
+			wantTaken: true, want: func(ws WorkspaceID) PullRequestSubscription { m := merged; m.Subscriber = ws; return m }},
+		{name: "a held subscription is left as it is", held: true, sub: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "other", PullRequestEventMerged) },
+			want: func(ws WorkspaceID) PullRequestSubscription { return requested(ws, "held", PullRequestEventComment) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s).ID
+			if tt.held {
+				mustSubscribePR(t, s, requested(ws, "held", PullRequestEventComment))
+			}
+
+			// Act
+			var taken bool
+			err := s.write(context.Background(), "test", nil, func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				taken, err = insertPullRequestSubscriptionIfAbsentInTx(ctx, tx, tt.sub(ws))
+				return err
+			})
+
+			// Assert
+			if err != nil || taken != tt.wantTaken {
+				t.Fatalf("insertPullRequestSubscriptionIfAbsentInTx = %v, %v; want taken %v", taken, err, tt.wantTaken)
+			}
+			if got := subsOf(t, s, ws); !reflect.DeepEqual(got, []PullRequestSubscription{tt.want(ws)}) {
+				t.Fatalf("subscriptions = %+v, want %+v", got, tt.want(ws))
+			}
+		})
+	}
+}
+
+// TestPullRequestSubscriptionsAreInsertedIfAbsentThroughOneHelper pins that a
+// subscription taken without replacing a held one is written through
+// insertPullRequestSubscriptionIfAbsentInTx, so a hand-rolled copy of its
+// statement fails here.
+func TestPullRequestSubscriptionsAreInsertedIfAbsentThroughOneHelper(t *testing.T) {
+	for _, file := range []string{"workspacelinks.go", "followedpullrequests.go"} {
+		t.Run(file, func(t *testing.T) {
+			// Arrange
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read %s: %v", file, err)
+			}
+			src := string(raw)
+
+			// Act / Assert
+			if !strings.Contains(src, "insertPullRequestSubscriptionIfAbsentInTx(") || strings.Contains(src, "INSERT INTO pull_request_subscriptions") {
+				t.Fatalf("%s inserts a pull-request subscription without insertPullRequestSubscriptionIfAbsentInTx", file)
+			}
+		})
 	}
 }
