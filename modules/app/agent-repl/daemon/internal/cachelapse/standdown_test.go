@@ -879,3 +879,33 @@ func TestAShimHoldChangeReconcilesTheWorkspace(t *testing.T) {
 		t.Fatalf("cold parks = %+v, want one once the hold ended", h.coldDowns)
 	}
 }
+
+func TestASessionBroughtUpForWorkIsNeverParkedBeforeItsTurnCloses(t *testing.T) {
+	tests := []struct {
+		name       string
+		upAgo      time.Duration
+		wantParked bool
+	}{
+		{name: "brought up for work after its last turn closed, it waits for the next close", upAgo: time.Second},
+		{name: "brought up for work before its last turn closed, it follows the ordinary hold", upAgo: 3 * time.Hour, wantParked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: no roster hold at all, which alone would park it.
+			h := newHarness(t, knownCold())
+			h.hold = func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{} }
+			s := liveSession(theWorkspace)
+			up := now.Add(-tt.upAgo)
+			s.WorkBroughtUpAt = &up
+			h.db.sessions[theWorkspace] = s
+
+			// Act
+			h.reconcile("a session came up")
+
+			// Assert
+			if parked := len(h.coldDowns) == 1; parked != tt.wantParked {
+				t.Fatalf("cold parks = %+v, want parked %v", h.coldDowns, tt.wantParked)
+			}
+		})
+	}
+}

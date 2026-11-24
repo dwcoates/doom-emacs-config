@@ -611,6 +611,12 @@ type Session struct {
 	// recorded the session had another cause. It is kept as evidence of why
 	// the session last came up.
 	KeepaliveRestoredAt *time.Time
+	// WorkBroughtUpAt is when a bring-up for work last brought the session up
+	// (shimlife.StartCause.ForWork), nil when the bring-up that last recorded
+	// the session was not for work (a keep-alive's restore, a boot's or a
+	// takeover's adoption, a settings pick). The session is INITIALIZING from
+	// it until a turn closes after it (Initializing).
+	WorkBroughtUpAt *time.Time
 	// ShimPID is the pid of the shim process serving this session, nil when no
 	// shim is up. It exists because the ROLLOUT's stand-down INTENT MANIFEST
 	// names a pid per session, and the incoming daemon reconciles that pid
@@ -643,6 +649,20 @@ type Session struct {
 // read it to know a workspace they must bring back. One authority, on the
 // type that carries it.
 const TerminalParked = "parked"
+
+// Initializing reports whether the session was brought up for work that has
+// not finished yet (owner ruling, 2026-11-24): a bring-up for work recorded it
+// (WorkBroughtUpAt), it is not parked or dead, and no turn of the workspace
+// has closed since (LASTTURNENDED, the workspace's latest turn close, nil for
+// none). From the bring-up until that turn's close the session is never
+// parked: the turn's start makes it working, and its close starts the idle
+// hold, so no instant lies between initializing and working.
+func (s Session) Initializing(lastTurnEnded *time.Time) bool {
+	if s.Terminal != nil || s.WorkBroughtUpAt == nil {
+		return false
+	}
+	return lastTurnEnded == nil || !lastTurnEnded.After(*s.WorkBroughtUpAt)
+}
 
 // Parked reports whether this session was stood down ON PURPOSE while idle
 // and comes back on the next prompt, settings pick or keep-alive restore. It

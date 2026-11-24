@@ -138,6 +138,10 @@ CREATE TABLE sessions (
   -- bring-up that last recorded it had another cause. See
   -- sessionsKeepaliveRestoredAtDDL.
   keepalive_restored_at INTEGER,
+  -- When a bring-up for work last brought the session up, NULL when the
+  -- bring-up that last recorded it was not for work. See
+  -- sessionsWorkBroughtUpAtDDL.
+  work_brought_up_at INTEGER,
   terminal_kind      TEXT,
   terminal_detail    TEXT,
   terminal_at        INTEGER

@@ -3412,8 +3412,15 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	}
 	// A KEEP-ALIVE'S RESTORE IS RECORDED AS ONE, as evidence of why the
 	// session came up; any other bring-up's record clears it.
-	if cause, _ := shimlife.StartOf(ctx); cause == shimlife.StartKeepalive {
+	cause, _ := shimlife.StartOf(ctx)
+	if cause == shimlife.StartKeepalive {
 		next.KeepaliveRestoredAt = &now
+	}
+	// A BRING-UP FOR WORK IS RECORDED AS ONE, so the cache keeper never parks
+	// the session before the turn it came up for has closed
+	// (wsm.Session.Initializing); any other bring-up's record clears it.
+	if cause.ForWork() {
+		next.WorkBroughtUpAt = &now
 	}
 	f.noteSDKVersion(log, started.GetRuntime().GetSdkVersion())
 	if next.StartedAt.IsZero() {

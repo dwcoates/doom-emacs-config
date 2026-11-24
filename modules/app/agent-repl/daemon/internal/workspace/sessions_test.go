@@ -5234,6 +5234,39 @@ func TestABringUpRecordsWhetherAKeepalivesRestoreMadeIt(t *testing.T) {
 	}
 }
 
+func TestABringUpRecordsWhetherItWasForWork(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause shimlife.StartCause
+		want  bool
+	}{
+		{name: "a prompt", cause: shimlife.StartPrompt, want: true},
+		{name: "a keep-alive's restore", cause: shimlife.StartKeepalive, want: false},
+		{name: "a boot's adoption", cause: shimlife.StartBoot, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+
+			// Act.
+			if err := f.fleet.Start(shimlife.WithStart(context.Background(), tt.cause), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			session, found, err := f.db.Session(context.Background(), ws.ID)
+			if err != nil || !found {
+				t.Fatalf("Session = (%v, %v)", found, err)
+			}
+			if got := session.WorkBroughtUpAt != nil; got != tt.want {
+				t.Fatalf("recorded as a bring-up for work = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestAStopRecordsTheShimsEndOnTheSessionRecord pins the ended-shim
 // invariant's ordered half (terminalrecord.go): every stop that leaves no
 // shim behind records the session's end, except the daemon's own exit and a

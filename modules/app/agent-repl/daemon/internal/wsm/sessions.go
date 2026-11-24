@@ -18,17 +18,22 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 		started  int64
 		pid      sql.NullInt64
 		restored sql.NullInt64
+		work     sql.NullInt64
 		kind     sql.NullString
 		detail   sql.NullString
 		at       sql.NullInt64
 	)
-	if err := row.Scan(&s.Workspace, &s.HostSessionID, &s.VendorSessionID, &s.ConfigDir, &s.SelectedConfigDir, &s.Model, &s.PermissionMode, &started, &pid, &restored, &kind, &detail, &at); err != nil {
+	if err := row.Scan(&s.Workspace, &s.HostSessionID, &s.VendorSessionID, &s.ConfigDir, &s.SelectedConfigDir, &s.Model, &s.PermissionMode, &started, &pid, &restored, &work, &kind, &detail, &at); err != nil {
 		return Session{}, err
 	}
 	s.StartedAt = fromNanos(started)
 	if restored.Valid {
 		at := fromNanos(restored.Int64)
 		s.KeepaliveRestoredAt = &at
+	}
+	if work.Valid {
+		at := fromNanos(work.Int64)
+		s.WorkBroughtUpAt = &at
 	}
 	if pid.Valid {
 		if pid.Int64 <= 0 {
@@ -200,12 +205,16 @@ func putSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 		tAt            any
 		pid            any
 		restored       any
+		work           any
 	)
 	if sess.Terminal != nil {
 		tKind, tDetail, tAt = sess.Terminal.Kind, sess.Terminal.Detail, nanos(sess.Terminal.At)
 	}
 	if sess.KeepaliveRestoredAt != nil {
 		restored = nanos(*sess.KeepaliveRestoredAt)
+	}
+	if sess.WorkBroughtUpAt != nil {
+		work = nanos(*sess.WorkBroughtUpAt)
 	}
 	if sess.ShimPID != nil {
 		if *sess.ShimPID <= 0 {
@@ -219,8 +228,8 @@ func putSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 	// still reads the row; no write moves it after that, and nothing in this
 	// build reads it.
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, keepalive_restored_at, terminal_kind, terminal_detail, terminal_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, keepalive_restored_at, work_brought_up_at, terminal_kind, terminal_detail, terminal_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(workspace_id) DO UPDATE SET
 		   host_session_id = excluded.host_session_id,
 		   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir,
@@ -228,10 +237,11 @@ func putSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 		   permission_mode = excluded.permission_mode, started_at = excluded.started_at,
 		   shim_pid = excluded.shim_pid,
 		   keepalive_restored_at = excluded.keepalive_restored_at,
+		   work_brought_up_at = excluded.work_brought_up_at,
 		   terminal_kind = excluded.terminal_kind,
 		   terminal_detail = excluded.terminal_detail, terminal_at = excluded.terminal_at`,
 		sess.Workspace, sess.HostSessionID, sess.VendorSessionID, sess.ConfigDir, sess.SelectedConfigDir, sess.Model, sess.PermissionMode,
-		nanos(sess.StartedAt), nanos(sess.StartedAt), pid, restored, tKind, tDetail, tAt)
+		nanos(sess.StartedAt), nanos(sess.StartedAt), pid, restored, work, tKind, tDetail, tAt)
 	return err
 }
 
@@ -262,7 +272,7 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 
 // sessionSelectColumns is the one column list every session read scans, in
 // scanSession's order, so the single and the bulk read cannot drift apart.
-const sessionSelectColumns = `workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, shim_pid, keepalive_restored_at, terminal_kind, terminal_detail, terminal_at`
+const sessionSelectColumns = `workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, shim_pid, keepalive_restored_at, work_brought_up_at, terminal_kind, terminal_detail, terminal_at`
 
 // Sessions loads every workspace's session in ONE read, ordered by workspace.
 //

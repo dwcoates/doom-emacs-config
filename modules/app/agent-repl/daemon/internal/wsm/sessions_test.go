@@ -847,3 +847,64 @@ func TestPutSessionRoundTripsTheKeepaliveRestore(t *testing.T) {
 		})
 	}
 }
+
+func TestPutSessionRoundTripsTheWorkBringUp(t *testing.T) {
+	tests := []struct {
+		name string
+		work *time.Time
+	}{
+		{name: "a bring-up for work", work: &instant},
+		{name: "a bring-up for no work", work: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			session := Session{
+				Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+				Model: "opus", PermissionMode: "default", StartedAt: instant,
+				WorkBroughtUpAt: tt.work,
+			}
+
+			// Act
+			if err := s.PutSession(context.Background(), session); err != nil {
+				t.Fatalf("PutSession: %v", err)
+			}
+			got, _, err := s.Session(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Session: %v", err)
+			}
+			if (got.WorkBroughtUpAt == nil) != (tt.work == nil) || (tt.work != nil && !got.WorkBroughtUpAt.Equal(*tt.work)) {
+				t.Fatalf("work bring-up = %v, want %v", got.WorkBroughtUpAt, tt.work)
+			}
+		})
+	}
+}
+
+func TestSessionInitializing(t *testing.T) {
+	up := instant
+	before, after := up.Add(-time.Minute), up.Add(time.Minute)
+	tests := []struct {
+		name  string
+		s     Session
+		ended *time.Time
+		want  bool
+	}{
+		{name: "brought up for work with no turn closed since is initializing", s: Session{WorkBroughtUpAt: &up}, ended: &before, want: true},
+		{name: "brought up for work on a workspace with no turn ever closed is initializing", s: Session{WorkBroughtUpAt: &up}, want: true},
+		{name: "a turn closed since the bring-up ends it", s: Session{WorkBroughtUpAt: &up}, ended: &after, want: false},
+		{name: "a bring-up for no work is not initializing", s: Session{}, want: false},
+		{name: "a parked session is not initializing", s: Session{WorkBroughtUpAt: &up, Terminal: &SessionTerminal{Kind: TerminalParked}}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := tt.s.Initializing(tt.ended); got != tt.want {
+				t.Fatalf("Initializing = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

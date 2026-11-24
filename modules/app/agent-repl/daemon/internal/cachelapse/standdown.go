@@ -166,12 +166,12 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 // one, and take no grace. ARMED is the instant armed before this decision,
 // when WASARMED, so its wait is recorded at INFO only when it moves.
 func (k *Keeper) ownCold(ctx context.Context, log dlog.Logger, record wsm.Workspace, why string, armed time.Time, wasArmed bool) {
-	since, ok := k.idleSince(ctx, log, record)
+	since, hold, ok := k.idleSince(ctx, log, record)
 	if !ok {
 		return
 	}
 	k.setStanding(log, record.ID, standing{owner: ownerCold}, why)
-	if k.parkWaits(log, record.ID, since, armed, wasArmed) {
+	if k.parkWaits(log, record.ID, hold, since, armed, wasArmed) {
 		return
 	}
 	k.parkCold(record.ID, k.deps.Clock.Now(), why, false)
@@ -196,17 +196,17 @@ func (k *Keeper) ownIdle(ctx context.Context, log dlog.Logger, record wsm.Worksp
 	if _, awaiting := k.answering[ws]; awaiting {
 		return
 	}
-	since, ok := k.idleSince(ctx, log, record)
+	since, hold, ok := k.idleSince(ctx, log, record)
 	if !ok {
 		return
 	}
 	// A HOLD THAT ENDS ONLY INSIDE THE BEAT'S RESTORE LEAD IS LEFT TO THE
 	// BEAT'S STAND-DOWN, and one that holds while its cause stands is never
 	// parked under it.
-	if hold := k.deps.Hold(ws); hold.Indefinite || !hold.Until.Before(restoreAt) {
+	if hold.Indefinite || !hold.Until.Before(restoreAt) {
 		return
 	}
-	if k.parkWaits(log, ws, since, armed, wasArmed) {
+	if k.parkWaits(log, ws, hold, since, armed, wasArmed) {
 		return
 	}
 	if !k.deps.Clock.Now().Before(restoreAt) {
@@ -221,8 +221,8 @@ func (k *Keeper) ownIdle(ctx context.Context, log dlog.Logger, record wsm.Worksp
 // sweep's sessions are parked at the same hold as every other's.
 // ARMED and WASARMED are ownCold's.
 func (k *Keeper) parkIdle(ctx context.Context, log dlog.Logger, record wsm.Workspace, armed time.Time, wasArmed bool) {
-	since, ok := k.idleSince(ctx, log, record)
-	if !ok || k.parkWaits(log, record.ID, since, armed, wasArmed) {
+	since, hold, ok := k.idleSince(ctx, log, record)
+	if !ok || k.parkWaits(log, record.ID, hold, since, armed, wasArmed) {
 		return
 	}
 	log.Debug(opOwner, "the session has been idle past its grace and owes no keep-alive; it is parked", dlog.Context{"idle_since": since})
@@ -230,34 +230,44 @@ func (k *Keeper) parkIdle(ctx context.Context, log dlog.Logger, record wsm.Works
 }
 
 // idleSince answers when RECORD's workspace last did real work
-// (wsm.Workspace.IdleSince): the one durable instant every park measures its
-// grace from, which no session start, keep-alive or bounce moves, so a
-// successor reads the same one. False when the session is gone (disowned) or
-// cannot be read (recorded at ERROR).
-func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Workspace) (time.Time, bool) {
+// (wsm.Workspace.IdleSince), for the record, and until when its idle shim is
+// held up (shimHold). False when the session is gone (disowned) or cannot be
+// read (recorded at ERROR).
+func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Workspace) (time.Time, wsm.ShimHold, bool) {
 	ws := record.ID
-	_, found, err := k.deps.DB.Session(ctx, ws)
+	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
 		if !leaving(ctx, log, opOwner, "reading the workspace's session", err) {
 			log.Error(opOwner, "could not read the workspace's session; its idle park is not armed", dlog.Context{"cause": err.Error()})
 		}
-		return time.Time{}, false
+		return time.Time{}, wsm.ShimHold{}, false
 	}
 	if !found {
 		k.disown(log, ws)
-		return time.Time{}, false
+		return time.Time{}, wsm.ShimHold{}, false
 	}
-	return record.IdleSince(), true
+	return record.IdleSince(), k.shimHold(record, session), true
 }
 
-// parkWaits arms WS's idle park at the instant its resource allocation stops
-// holding its idle shim up (Deps.Hold), when that is still to come, answering
-// true; a hold for as long as what decided it stands arms nothing, since the
-// roster tells the keeper when it ends (ShimHoldChanged). SINCE is when the
-// session last did real work, for the record. The wait is recorded at INFO
-// only when the armed instant moved from ARMED (WASARMED).
-func (k *Keeper) parkWaits(log dlog.Logger, ws ids.WorkspaceID, since, armed time.Time, wasArmed bool) bool {
-	hold := k.deps.Hold(ws)
+// shimHold answers until when RECORD's idle SESSION is held up. A session
+// brought up for a turn that has not closed yet is INITIALIZING and held for
+// as long as that stands, read from its own durable row
+// (wsm.Session.Initializing), so no roster render can lag it; every other
+// session is held as the roster's resource allocation says (Deps.Hold).
+func (k *Keeper) shimHold(record wsm.Workspace, session wsm.Session) wsm.ShimHold {
+	if session.Initializing(record.LastTurnEndedAt) {
+		return wsm.ShimHold{Indefinite: true}
+	}
+	return k.deps.Hold(record.ID)
+}
+
+// parkWaits arms WS's idle park at the instant HOLD stops holding its idle
+// shim up (shimHold), when that is still to come, answering true; a hold for
+// as long as what decided it stands arms nothing, since its end reaches the
+// keeper as an edge (ShimHoldChanged, TurnClosed). SINCE is when the session
+// last did real work, for the record. The wait is recorded at INFO only when
+// the armed instant moved from ARMED (WASARMED).
+func (k *Keeper) parkWaits(log dlog.Logger, ws ids.WorkspaceID, hold wsm.ShimHold, since, armed time.Time, wasArmed bool) bool {
 	now := k.deps.Clock.Now()
 	if hold.Indefinite {
 		log.Debug(opOwner, "the session's resource allocation holds it up while what decided it stands; its park waits", dlog.Context{"idle_since": since})

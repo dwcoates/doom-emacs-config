@@ -55,6 +55,23 @@ const (
 	StartUnstated StartCause = "unstated"
 )
 
+// ForWork reports whether a start of this cause brings the session up for a
+// turn it is about to run (owner ruling, 2026-11-24): a prompt, a cold gate's
+// answer, a create's or a fork's first prompt, a thread's question, a merge
+// step or an owed compaction. Such a session is initializing until that turn
+// closes (wsm.Session.Initializing) and is never parked meanwhile. A
+// keep-alive's restore, a boot's or a takeover's adoption, a relaunch, the
+// restart verb, a rebind, a swap and a settings pick run no turn of their own,
+// so their sessions follow the ordinary holds.
+func (c StartCause) ForWork() bool {
+	switch c {
+	case StartPrompt, StartColdGateAnswer, StartCreate, StartFork, StartThread, StartMerge, StartCompaction:
+		return true
+	default:
+		return false
+	}
+}
+
 // StandDownReason is why a shim is stood down on purpose.
 type StandDownReason string
 
