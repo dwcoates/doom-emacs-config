@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -2061,24 +2060,14 @@ func TestQueueKeyedFindsAListedQueueByItsKey(t *testing.T) {
 
 func TestEveryListedQueueLookupGoesThroughQueueKeyed(t *testing.T) {
 	// Arrange: every merge source file but the helper's own.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Act, Assert: no other code compares a listed queue's key by hand.
 	byHand := regexp.MustCompile(`sameQueue\(\w+\.key,`)
 	total := 0
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		n := len(byHand.FindAllIndex(body, -1))
-		if n > 0 && file != "mediation.go" {
-			t.Fatalf("%s compares a listed queue's key by hand; use queueKeyed", file)
+
+	// Act, Assert: no other code compares a listed queue's key by hand.
+	for _, file := range sourcescan.Production(t) {
+		n := len(byHand.FindAllIndex(file.Source, -1))
+		if n > 0 && file.Name != "mediation.go" {
+			t.Fatalf("%s compares a listed queue's key by hand; use queueKeyed", file.Name)
 		}
 		total += n
 	}

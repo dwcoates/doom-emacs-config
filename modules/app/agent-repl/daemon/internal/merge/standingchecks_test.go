@@ -706,7 +706,7 @@ func TestAnAdoptionRunsThePassOnlyForAMediatorOrAFinishsWorkspace(t *testing.T) 
 			_, ran := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
 				Message: "this daemon does not serve the queues; their checks are run by the daemon that does"})
 			_, said := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
-				Message: "this daemon adopted a deploy mediator; the mediation pass runs what it passed over while the mediator was not served here"})
+				Message: "this daemon adopted a mediator; the mediation pass runs what it passed over while the mediator was not served here"})
 			if ran != tt.wantPass || said != tt.wantPass {
 				t.Fatalf("pass ran %v, said %v; want %v", ran, said, tt.wantPass)
 			}
