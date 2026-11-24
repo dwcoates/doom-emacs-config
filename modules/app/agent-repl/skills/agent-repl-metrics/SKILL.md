@@ -22,6 +22,7 @@ Answers performance questions about agent-repl from stored history: what a laten
 | `spend [window] [by] [selector]` | Price-weighted vendor spend over the last `window` (as `restarts` reads it; default 1 day), one line per value of `by` (default `workspace`; also `model`, `account`, `cause`, `agent`, `subagent_type`, `cache_outcome`, `cold_reason`, `kind`, `context`), most first, with its share, calls, tokens and, for a workspace, its peak context bucket. `selector` narrows the series (`cache_outcome="cold_rewrite"`). |
 | `spend-over <hours> <step>` | Price-weighted spend per `step` (`1h`, `1d`) over the last `hours`. |
 | `keepalive-runs [window]` | Keep-alive runs that ended in `window`, by how each ended: runs, mean keep-alives, weighted spend. |
+| `why` | Why every visible workspace is visible, every page loaded and every session up, now: three tables. |
 | `query <promql>` | Evaluate PromQL now. |
 | `add <what>` | Add a metric for `what`, per step 4. |
 | (none) | Run `status`, then answer the user's question with the steps below. |
@@ -44,6 +45,7 @@ Answers performance questions about agent-repl from stored history: what a laten
   - e. When a restart phase got slow: call `<skill_base_dir>/run.sh --restart-by-version <restart> <phase> [days]`.
   - f. The merge queue or its deploy checks: call `<skill_base_dir>/run.sh --query <promql>` with the matching recipe below, or `--range <promql> <hours> <step>` for it over time.
   - f2. Vendor token spending: call `<skill_base_dir>/run.sh --spend [window] [by] [selector]`, `--spend-over <hours> <step>` or `--keepalive-runs [window]` with the recipe below.
+  - f3. "Why are N workspaces visible, N pages loaded, N sessions up": call `<skill_base_dir>/run.sh --why`. The sessions table names each session's workspace by id; resolve each to its name (`agent-repld workspace status <id>`) before reporting it. For any of the three over time, `--range` its series (`agentrepl_workspaces_visible`, `agentrepl_pages_loaded`, `agentrepl_sessions_up`) or read its counters (`agentrepl_visibility_changes_total`, `agentrepl_page_loads_total`, `agentrepl_page_unloads_total`, `agentrepl_shim_stand_downs_total`, `agentrepl_shim_start_seconds_count`, `agentrepl_session_idle_before_park_seconds`) per `CATALOG.md`.
   - g. Anything else: read `<skill_base_dir>/CATALOG.md` (or call `<skill_base_dir>/run.sh --catalog` for what the running runtimes expose) to find the metric, then `--query <promql>`, or `--range <promql> <hours> <step>` for a series over time.
   - React to every verb above:
     - `EXIT CODE 0:` the answer is printed as a table. Continue to step 2.

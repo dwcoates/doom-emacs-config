@@ -51,6 +51,12 @@
 #                                    (default 1d), by how each ended: runs,
 #                                    mean keep-alives per run, and their
 #                                    price-weighted spend.
+#   --why                            Three tables, now: why each visible
+#                                    workspace is visible (visibility,
+#                                    reason, count), why each page is loaded
+#                                    (reason, session state, count), and why
+#                                    each session is up (reason, count, the
+#                                    workspace ids), each most first.
 #
 # Exit codes:
 #   0  printed what the verb answers
@@ -58,7 +64,7 @@
 #      --catalog: no runtime advertises a metrics surface
 #      --query / --range / --latency-by-version / --process-trend /
 #      --restarts / --restart-by-version / --spend / --spend-over /
-#      --keepalive-runs: no series
+#      --keepalive-runs / --why: no series
 #      --first-version-over: no version went over (the versions seen are
 #      printed)
 #   2  script/usage error, or the metrics store refused the query
@@ -389,8 +395,28 @@ case "${1:-}" in
 %s
 ' "$lines"
     ;;
+  --why)
+    visible="$(promql_data query 'sum by (visibility, reason) (agentrepl_workspaces_visible{visibility!="not_visible"})')" || exit 2
+    pages="$(promql_data query 'sum by (reason, session) (agentrepl_pages_loaded)')" || exit 2
+    sessions="$(promql_data query 'agentrepl_sessions_up')" || exit 2
+    [ "$(jq -n --argjson v "$visible" --argjson p "$pages" --argjson s "$sessions" '($v | length) + ($p | length) + ($s | length)')" -gt 0 ] || exit 1
+    jq -rn --argjson v "$visible" '
+      [$v[] | {k: "\(.metric.visibility)\t\(.metric.reason)", n: (.value[1] | tonumber)} | select(.n > 0)] as $rows
+      | "# why \($rows | map(.n) | add // 0) workspaces are visible\nvisibility\treason\tworkspaces",
+        ($rows | sort_by(-.n)[] | "\(.k)\t\(.n)")' || die "could not read the visibility series"
+    printf '\n'
+    jq -rn --argjson p "$pages" '
+      [$p[] | {k: "\(.metric.reason)\t\(.metric.session)", n: (.value[1] | tonumber)}] as $rows
+      | "# why \($rows | map(.n) | add // 0) pages are loaded\nreason\tsession\tpages",
+        ($rows | sort_by(-.n)[] | "\(.k)\t\(.n)")' || die "could not read the page series"
+    printf '\n'
+    jq -rn --argjson s "$sessions" '
+      [$s[] | {r: .metric.reason, w: .metric.workspace}] | group_by(.r) | map({r: .[0].r, n: length, ws: (map(.w) | join(","))}) as $rows
+      | "# why \($rows | map(.n) | add // 0) sessions are up\nreason\tsessions\tworkspaces",
+        ($rows | sort_by(-.n)[] | "\(.r)\t\(.n)\t\(.ws)")' || die "could not read the session series"
+    ;;
   *)
-    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days] | --restarts [window] | --restart-by-version <restart> <phase> [days] | --spend [window] [by] [selector] | --spend-over <hours> <step> | --keepalive-runs [window]\n' >&2
+    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days] | --restarts [window] | --restart-by-version <restart> <phase> [days] | --spend [window] [by] [selector] | --spend-over <hours> <step> | --keepalive-runs [window] | --why\n' >&2
     exit 1
     ;;
 esac
