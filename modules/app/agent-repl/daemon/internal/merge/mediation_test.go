@@ -54,8 +54,9 @@ func checked(t *testing.T) *harness {
 func mediationKey(h *harness) wsm.RepoKey { return scopedKey(h) }
 
 // fixDeploysAt makes the deploy at AT the fix's: the mediator's finish
-// lands just before it, so its deploy replaces the dispatched check
-// (wsm.OweMediation ends a dispatch only at its fix's deploy).
+// lands just before it and that deploy covers the landing, so its deploy
+// replaces the dispatched check (wsm.OweMediation ends a dispatch only at its
+// fix's deploy).
 func fixDeploysAt(t *testing.T, h *harness, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -72,6 +73,10 @@ func fixDeploysAt(t *testing.T, h *harness, at time.Time) {
 	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", "abc123", nil, landed); err != nil {
 		t.Fatalf("RecordRemediationLanded: %v", err)
 	}
+	// THE FIX'S DEPLOY COMMITS OVER ITS LANDING before it owes its check.
+	if _, err := h.db.CoverDeployingLandings(ctx); err != nil {
+		t.Fatalf("CoverDeployingLandings: %v", err)
+	}
 	oweAt(t, h, at)
 }
 
@@ -80,6 +85,15 @@ func oweAt(t *testing.T, h *harness, at time.Time) {
 	t.Helper()
 	if err := h.o.OweMediations(context.Background(), at); err != nil {
 		t.Fatalf("OweMediations: %v", err)
+	}
+}
+
+// coverLandings covers every landing still deploying, as the commit of the
+// deploy that carries them does (wsm.CoverDeployingLandings).
+func coverLandings(t *testing.T, h *harness) {
+	t.Helper()
+	if _, err := h.db.CoverDeployingLandings(context.Background()); err != nil {
+		t.Fatalf("CoverDeployingLandings: %v", err)
 	}
 }
 

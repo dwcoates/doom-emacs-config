@@ -304,14 +304,21 @@ func finishDeploying(t *testing.T, s *store, repo RepoKey, ws WorkspaceID, lande
 }
 
 // fixDeploysAt makes the deploy at AT the fix's: remedy's finish lands just
-// before it, so its deploy replaces the dispatched mediation.
+// before it and that deploy covers the landing, so its deploy replaces the
+// dispatched mediation and moves the finish to deployed in the same write.
 func fixDeploysAt(t *testing.T, s *store, repo RepoKey, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
 	finishDeploying(t, s, repo, "remedy", at.Add(-time.Second))
+	coverLandings(t, s)
 	oweAt(t, s, repo, at)
-	if _, err := s.AdvanceRemediationFinish(ctx, "remedy", RemediationDeploying, RemediationDeployed, at); err != nil {
-		t.Fatalf("AdvanceRemediationFinish: %v", err)
+}
+
+// coverLandings covers every landing still deploying, as a deploy's commit
+// does.
+func coverLandings(t *testing.T, s *store) {
+	t.Helper()
+	if _, err := s.CoverDeployingLandings(context.Background()); err != nil {
+		t.Fatalf("CoverDeployingLandings: %v", err)
 	}
 }
 
@@ -467,6 +474,7 @@ func TestAReplacedDispatchedMediationSaysWhetherItsDispatchCarriesOn(t *testing.
 				if _, err := s.RecordRemediationLanded(ctx, "remedy", "abc123", nil, landed); err != nil {
 					t.Fatal(err)
 				}
+				coverLandings(t, s)
 			}
 
 			// Act

@@ -365,6 +365,7 @@ func TestTheMediatorsOwnFixDeployingEndsItsEscalation(t *testing.T) {
 	if _, err := h.db.RecordRemediationLanded(ctx, esc, tipAfter, nil, landed); err != nil {
 		t.Fatal(err)
 	}
+	coverLandings(t, h)
 
 	// Act: the mediator's fix deploys.
 	oweAt(t, h, deployStarted.Add(time.Minute))

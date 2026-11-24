@@ -568,3 +568,117 @@ func workspaceStrings(ws []WorkspaceID) []string {
 	}
 	return out
 }
+
+// finishCovered reads WS's finish's step and covered flag.
+func finishCovered(t *testing.T, s DB, ws WorkspaceID) (RemediationStep, bool) {
+	t.Helper()
+	f, err := s.RemediationFinishOf(context.Background(), ws)
+	if err != nil || f == nil {
+		t.Fatalf("RemediationFinishOf = (%+v, %v), want one", f, err)
+	}
+	return f.Step, f.Covered
+}
+
+func TestADeploysCommitCoversOnlyAFinishDeploying(t *testing.T) {
+	tests := []struct {
+		name         string
+		deploying    bool
+		wantCovered  bool
+		wantFinishes int
+	}{
+		{name: "a finish deploying is covered", deploying: true, wantCovered: true, wantFinishes: 1},
+		{name: "a finish still gating is not"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			if tt.deploying {
+				finishDeploying(t, s, repo, "remedy", instant)
+			} else {
+				beginFinish(t, s, repo, instant, nil)
+			}
+
+			// Act
+			got, err := s.CoverDeployingLandings(context.Background())
+
+			// Assert
+			_, covered := finishCovered(t, s, "remedy")
+			if err != nil || got.Finishes != tt.wantFinishes || covered != tt.wantCovered {
+				t.Fatalf("CoverDeployingLandings = (%+v, %v), covered %v; want %d finishes, covered %v", got, err, covered, tt.wantFinishes, tt.wantCovered)
+			}
+		})
+	}
+}
+
+func TestOwingACheckDeploysOnlyTheFinishItsDeployCovered(t *testing.T) {
+	tests := []struct {
+		name     string
+		covered  bool
+		wantStep RemediationStep
+	}{
+		{name: "a covered finish is deployed at the check's deploy", covered: true, wantStep: RemediationDeployed},
+		{name: "a finish its deploy did not cover keeps deploying", wantStep: RemediationDeploying},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			finishDeploying(t, s, repo, "remedy", instant)
+			if tt.covered {
+				coverLandings(t, s)
+			}
+			at := instant.Add(time.Minute)
+
+			// Act
+			_, err := s.OweMediation(context.Background(), repo, at, "")
+
+			// Assert
+			f, readErr := s.RemediationFinishOf(context.Background(), "remedy")
+			if err != nil || readErr != nil || f == nil || f.Step != tt.wantStep {
+				t.Fatalf("OweMediation = %v; finish (%+v, %v), want step %s", err, f, readErr, tt.wantStep)
+			}
+			if tt.wantStep == RemediationDeployed && !f.StepAt.Equal(at) {
+				t.Fatalf("deployed at %v, want the check's deploy %v", f.StepAt, at)
+			}
+		})
+	}
+}
+
+func TestALandingClearsTheFinishsCover(t *testing.T) {
+	// Arrange: an earlier landing was covered, and the finish was sent
+	// back to gate and lands again.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	finishDeploying(t, s, repo, "remedy", instant)
+	coverLandings(t, s)
+	oweAt(t, s, repo, instant.Add(time.Minute))
+
+	// Act
+	finishDeploying(t, s, repo, "remedy", instant.Add(2*time.Minute))
+
+	// Assert
+	if step, covered := finishCovered(t, s, "remedy"); step != RemediationDeploying || covered {
+		t.Fatalf("finish at %s covered %v, want deploying and uncovered", step, covered)
+	}
+}
+
+func TestTheMigrationReadsAnEarlierDeployingFinishAsUncovered(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 206)
+	execRaw(t, path, `INSERT INTO deploy_remediation_finishes (workspace_id, repo_key, step, step_at, started_at) VALUES ('remedy', '/w/doom', 'deploying', 1, 1)`)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-206 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	if step, covered := finishCovered(t, handle, "remedy"); step != RemediationDeploying || covered {
+		t.Fatalf("finish at %s covered %v, want deploying and uncovered", step, covered)
+	}
+}

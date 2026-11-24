@@ -31,7 +31,7 @@ import (
 // own:
 //
 //   - DeployingLanded: recorded; no deploy has committed over it yet.
-//   - DeployingCovered: a deploy committed over it (CoverDeployingMerges, at
+//   - DeployingCovered: a deploy committed over it (CoverDeployingLandings, at
 //     the deploy's commit, before it reads the checkout), so that deploy's
 //     build carries the landing.
 //   - DeployingChecked: the covering deploy owes its check (OweMediation
@@ -226,25 +226,42 @@ func endDeployingMergeInTx(ctx context.Context, tx *sql.Tx, key RepoKey, from De
 		`DELETE FROM deploying_merges WHERE repo_key = ? AND stage >= ? RETURNING `+deployingMergeColumns, string(key), int(from)))
 }
 
-// CoverDeployingMerges moves every deploying merge no deploy covered yet to
-// DeployingCovered: the deploy committing now carries it. It answers how
-// many it moved. The deploy calls it after it committed and before it reads
-// the checkout, so a row recorded before the call names a landing on the
-// checkout that deploy builds, and one recorded after waits for the deploy
-// its own landing asks for.
-func (s *store) CoverDeployingMerges(ctx context.Context) (int, error) {
-	const op = "daemon.wsm.cover_deploying_merges"
-	covered := 0
+// CoveredLandings is what a deploy's commit covered: the landed merges still
+// deploying it moved to DeployingCovered, and the remediation finishes
+// deploying it marked covered.
+type CoveredLandings struct {
+	Merges, Finishes int
+}
+
+// CoverDeployingLandings marks every landing still waiting for the deploy
+// that carries it covered by the deploy committing now, in one write: each
+// landed merge still deploying no deploy covered yet moves to
+// DeployingCovered, and each remediation finish deploying is marked covered
+// (RemediationFinish.Covered). The deploy calls it after it committed and
+// before it reads the checkout, so a landing recorded before the call is on
+// the checkout that deploy builds, and one recorded after waits for the
+// deploy its own landing asks for.
+func (s *store) CoverDeployingLandings(ctx context.Context) (CoveredLandings, error) {
+	const op = "daemon.wsm.cover_deploying_landings"
+	var out CoveredLandings
 	err := s.write(ctx, op, nil, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE deploying_merges SET stage = ? WHERE stage = ?`, int(DeployingCovered), int(DeployingLanded))
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		covered = int(n)
+		merges, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		res, err = tx.ExecContext(ctx, `UPDATE deploy_remediation_finishes SET covered = 1 WHERE step = ? AND covered = 0`, string(RemediationDeploying))
+		if err != nil {
+			return err
+		}
+		finishes, err := res.RowsAffected()
+		out = CoveredLandings{Merges: int(merges), Finishes: int(finishes)}
 		return err
 	})
-	return covered, err
+	return out, err
 }
 
 // UncheckedDeployingMerges answers every deploying merge whose deploy owes no
