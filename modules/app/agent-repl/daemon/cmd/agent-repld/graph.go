@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/coldbacklog"
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/composermentions"
+	"agent-repld/internal/composerselections"
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/deployedversion"
@@ -767,6 +768,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the composer mentions: %w", err)
+	}
+
+	// THE COMPOSER SELECTIONS: every candidate the reader took from a
+	// composer's completion, which orders the Emacs composer's completions
+	// (the most recently taken first). Reported by Emacs, kept durably, and
+	// served to Emacs on every host stream.
+	selections, err := composerselections.New(ctx, composerselections.Deps{Store: p.DB, Now: time.Now, Log: log})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the composer selections: %w", err)
 	}
 
 	// EVERY HEADLESS CALL ABOUT A WORKSPACE runs under that workspace's
@@ -2199,6 +2209,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			SlashCommands:     slashCommands,
 			SlackChannels:     slackChannels,
 			Mentions:          mentions,
+			Selections:        selections,
 			DB:                p.DB,
 			Prompts:           handler,
 			Queue:             queue,

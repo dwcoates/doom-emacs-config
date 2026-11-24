@@ -303,6 +303,23 @@ func validateAdjustFeedTextScaleRequest(req *agentreplv1.AdjustFeedTextScaleRequ
 	return nil
 }
 
+// validateReportComposerSelectionRequest is ReportComposerSelectionRequest's
+// base function: a selection of a known kind, naming something.
+func validateReportComposerSelectionRequest(req *agentreplv1.ReportComposerSelectionRequest) *connect.Error {
+	sel := req.GetSelection()
+	if sel == nil {
+		return invalid("selection", "a composer selection is required")
+	}
+	_, name, ok := composerSelectionOf(sel)
+	if !ok {
+		return invalid("selection.kind", "a composer selection's kind is required")
+	}
+	if name == "" {
+		return invalid("selection.kind.name", "a composer selection names a candidate")
+	}
+	return nil
+}
+
 // validateRequestCommandSupportRequest is RequestCommandSupportRequest's base
 // function.
 func validateRequestCommandSupportRequest(req *agentreplv1.RequestCommandSupportRequest) *connect.Error {
