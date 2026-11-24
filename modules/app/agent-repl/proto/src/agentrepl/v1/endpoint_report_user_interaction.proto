@@ -1,0 +1,127 @@
+// endpoint_report_user_interaction.proto — ReportUserInteraction: the user
+// interacted with this workspace. HOST section.
+//
+// THE ONE INPUT TO VIEWED AND TO RECENCY. A workspace is viewed exactly when
+// the user has interacted with it since its status last changed, and the
+// recency walk orders workspaces by when the user last interacted with each.
+// The daemon derives both from this report alone
+// (frontend.v1.RosterRowViewed, frontend.v1.RosterRowLastInteracted); a
+// client reports the fact and decides neither.
+//
+// ONLY THE USER'S OWN ACTS ARE REPORTED. A scroll the page makes itself
+// (following new output, revealing a row, a jump), text the editor inserts
+// itself (a restored draft, a completion's fill), and a switch to the
+// workspace are no interaction, and a client never reports them. Looking at a
+// workspace for any length of time is not an interaction either: there is no
+// dwell.
+//
+// TWO SENDERS. The page that draws the workspace's feed reports the reader's
+// own scrolling of it; the editor reports typing in the workspace's composer
+// and moving through its feed with the editor's keys. A link the reader
+// follows in the page needs no report: the daemon receives the click itself
+// (OpenExternal, OpenInEditor, SelectInEditor's `followed_from`) and records
+// it as an interaction there.
+//
+// IDEMPOTENT, and cheap to repeat: an interaction with a workspace that is
+// already viewed and already the most recent re-stamps its instant and
+// changes nothing a client draws. A sender still coalesces a burst (one
+// report per gesture, not per wheel event).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportUserInteractionRequest {
+  // The workspace the user interacted with.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // What the user did. Every kind has the same effect; the kind is carried
+  // so the daemon's record names what made the workspace viewed.
+  UserInteraction interaction = 2;
+}
+
+// THE KIND OF THE USER'S ACT, one arm per act a sender can observe. Always
+// set: an unset kind is a malformed request, refused as InvalidArgument.
+message UserInteraction {
+  // The one act this report is about.
+  oneof kind {
+    // The reader scrolled the workspace's feed in its page: a wheel or a
+    // touch on it, a drag of its scroll bar, or a scrolling key while the
+    // feed has focus.
+    UserInteractionFeedScrolled feed_scrolled = 1;
+    // The user typed into the workspace's composer: an edit the editor's
+    // command loop made for a command the user ran.
+    UserInteractionComposerTyped composer_typed = 2;
+    // The user moved through the workspace's feed with the editor's keys
+    // (agentrepl.v1.SelectFeedRow sent for a command the user ran).
+    UserInteractionFeedNavigated feed_navigated = 3;
+  }
+}
+
+// The reader scrolled the feed. Empty: the arm is the act.
+message UserInteractionFeedScrolled {}
+
+// The user typed into the composer. Empty: the arm is the act.
+message UserInteractionComposerTyped {}
+
+// The user moved through the feed with the editor's keys. Empty: the arm is
+// the act.
+message UserInteractionFeedNavigated {}
+
+// THE ARM IS THE OUTCOME.
+message ReportUserInteractionResponse {
+  oneof result {
+    ReportUserInteractionSuccess success = 1;
+    ReportUserInteractionError error = 2;
+  }
+}
+
+// Recorded; the roster stream carries the row's viewed marker and its
+// interaction instant.
+message ReportUserInteractionSuccess {}
+
+// Arms derived from the daemon's refusal sites, exactly SelectWorkspace's:
+// this verb resolves the same subject through the same guard.
+// Validation failures (unset field, blank string, unset kind) are Connect
+// InvalidArgument, never an arm.
+message ReportUserInteractionError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ReportUserInteractionUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ReportUserInteractionWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ReportUserInteractionTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ReportUserInteractionNotYetAdopted not_yet_adopted = 4;
+  }
+}
+
+// The workspace id is not in the daemon's registry. Empty: the arm is the
+// refusal.
+message ReportUserInteractionUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's.
+message ReportUserInteractionWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message ReportUserInteractionTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+message ReportUserInteractionNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. A client reports
+  // there in the meantime. UNSET when no live daemon serves the workspace (a
+  // takeover after the incumbent died), in which case the report is dropped:
+  // the user's next interaction reports again.
+  optional string address = 1;
+}

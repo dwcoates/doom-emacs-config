@@ -103,7 +103,7 @@ export const ReportPageUnloadingSuccessSchema: GenMessage<ReportPageUnloadingSuc
   messageDesc(file_agentrepl_v1_endpoint_report_page_unloading, 2);
 
 /**
- * Arms derived from the daemon's refusal sites, exactly MarkWorkspaceViewed's:
+ * Arms derived from the daemon's refusal sites, exactly ReportUserInteraction's:
  * this verb resolves the same subject through the same guard.
  * Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
  *

@@ -211,7 +211,7 @@ func (*ReportPageUnloadingSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_report_page_unloading_proto_rawDescGZIP(), []int{2}
 }
 
-// Arms derived from the daemon's refusal sites, exactly MarkWorkspaceViewed's:
+// Arms derived from the daemon's refusal sites, exactly ReportUserInteraction's:
 // this verb resolves the same subject through the same guard.
 // Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
 type ReportPageUnloadingError struct {
