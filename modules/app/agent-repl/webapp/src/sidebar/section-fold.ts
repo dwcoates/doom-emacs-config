@@ -73,7 +73,7 @@ function flashCurrentRow(section: HTMLElement): void {
  * gesture asks nothing and flashes the selected row, as the daemon refuses
  * such a collapse too. Selecting a workspace in a collapsed section opens
  * nothing: the roster draws that workspace alone inside the fold while it is
- * the selection (`frontend.v1.RosterOpenRow.surfaced`).
+ * the selection (`frontend.v1.RosterOpenRow.fold_cover`).
  */
 export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTarget): FoldGesture {
   return (section, control) => {

@@ -622,9 +622,8 @@ func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc 
 	// covers is drawn inside the fold (wsm.Visibilities): the bar and the
 	// sidebar draw exactly the workspaces the editor holds.
 	drawn := r.state.visibility[node.ws.ID].Visible()
-	surfaced := folded && drawn
 	out := &frontendv1.RosterOpenRow{
-		Row: r.row(node.ws, rc, log), Tab: numbers.tab(!drawn), Surfaced: surfaced,
+		Row: r.row(node.ws, rc, log), Tab: numbers.tab(!drawn), FoldCover: foldCoverOf(folded, drawn),
 		RecencyGutter: r.recencyGutter(node.ws.ID),
 	}
 	// THE CHILDREN FOLD COVERS EVERY CHILD, the own-repository ones and every
@@ -1007,5 +1006,20 @@ func sectionHeader(label string, count int) *frontendv1.RosterSectionHeader {
 	return &frontendv1.RosterSectionHeader{
 		Label: &frontendv1.RosterLabel{Text: label},
 		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(count)},
+	}
+}
+
+// foldCoverOf states an open row's standing under the folds: uncovered when
+// no fold covers it (FOLDED false), else surfaced when it is drawn anyway
+// (DRAWN, its visibility) and hidden when it is not. It is THE ONE spelling of
+// the arm, so the sidebar never re-derives coverage from the folds it draws.
+func foldCoverOf(folded, drawn bool) *frontendv1.RosterOpenRowFoldCover {
+	switch {
+	case !folded:
+		return &frontendv1.RosterOpenRowFoldCover{Cover: &frontendv1.RosterOpenRowFoldCover_Uncovered{Uncovered: &frontendv1.RosterOpenRowFoldCoverUncovered{}}}
+	case drawn:
+		return &frontendv1.RosterOpenRowFoldCover{Cover: &frontendv1.RosterOpenRowFoldCover_Surfaced{Surfaced: &frontendv1.RosterOpenRowFoldCoverSurfaced{}}}
+	default:
+		return &frontendv1.RosterOpenRowFoldCover{Cover: &frontendv1.RosterOpenRowFoldCover_Hidden{Hidden: &frontendv1.RosterOpenRowFoldCoverHidden{}}}
 	}
 }

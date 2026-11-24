@@ -255,8 +255,9 @@ func TestAVisibleRowUnderAFoldHasANumberedSurfacedTab(t *testing.T) {
 
 	// Assert
 	row := rosterwalk.FlattenOpen(rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0]))[0]
-	if _, numbered := row.GetTab().GetTab().(*frontendv1.RosterOpenRowTab_Numbered); !numbered || !row.GetSurfaced() {
-		t.Fatalf("tab = %v surfaced = %v, want a numbered tab drawn inside the fold", row.GetTab(), row.GetSurfaced())
+	_, surfaced := row.GetFoldCover().GetCover().(*frontendv1.RosterOpenRowFoldCover_Surfaced)
+	if _, numbered := row.GetTab().GetTab().(*frontendv1.RosterOpenRowTab_Numbered); !numbered || !surfaced {
+		t.Fatalf("tab = %v fold cover = %v, want a numbered tab drawn inside the fold", row.GetTab(), row.GetFoldCover())
 	}
 }
 
@@ -822,5 +823,53 @@ func TestAFoldedSubsectionsWorkingGrandchildIsVisibleWithItsChain(t *testing.T) 
 		if got[id] != "unselected_visible" {
 			t.Errorf("%s visibility = %s, want unselected_visible: a working grandchild keeps its chain drawn", id, got[id])
 		}
+	}
+}
+
+// foldCoverName reads an open row's fold cover arm by name.
+func foldCoverName(row *frontendv1.RosterOpenRow) string {
+	switch row.GetFoldCover().GetCover().(type) {
+	case *frontendv1.RosterOpenRowFoldCover_Uncovered:
+		return "uncovered"
+	case *frontendv1.RosterOpenRowFoldCover_Hidden:
+		return "hidden"
+	case *frontendv1.RosterOpenRowFoldCover_Surfaced:
+		return "surfaced"
+	default:
+		return "unset"
+	}
+}
+
+func TestEveryOpenRowStatesItsFoldCover(t *testing.T) {
+	tests := []struct {
+		name    string
+		folded  bool
+		working bool
+		wantArm string
+	}{
+		{name: "a row no fold covers is uncovered", folded: false, wantArm: "uncovered"},
+		{name: "an idle row a fold covers is hidden", folded: true, wantArm: "hidden"},
+		{name: "a working row a fold covers is surfaced", folded: true, working: true, wantArm: "surfaced"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reg := registry(workspace(string(theWS), "one"))
+			reg.Repositories[0].Folded = tt.folded
+			r := arrange(t)
+			r.SetRegistry(reg)
+			liveRegistry(r, reg)
+
+			// Act
+			if tt.working {
+				working(r, theWS)
+			}
+
+			// Assert
+			row := rosterwalk.FlattenOpen(rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0]))[0]
+			if got := foldCoverName(row); got != tt.wantArm {
+				t.Fatalf("fold cover = %s, want %s", got, tt.wantArm)
+			}
+		})
 	}
 }

@@ -146,15 +146,13 @@ describe("the fold fade", () => {
 });
 
 describe("the fold fade's styling", () => {
-  const FOLDS = String.raw`#ws-sidebar :is\(\.repo\.folded \.rows, \.sb-subsection\.folded > \.rows, \.ws\.folded > \.kids\)`;
-
-  it("fades a fading row's own line, inside a fold only", () => {
-    expect(stylesheet).toMatch(new RegExp(`${FOLDS} \\.ws\\.fold-fading > :not\\(\\.kids\\)`));
+  it("fades a fading row's own line, a covered row's only", () => {
+    expect(stylesheet).toMatch(/#ws-sidebar \.ws\.covered\.fold-fading > :not\(\.kids\)/);
   });
 
-  it("fades a block divider heading only fading rows with them", () => {
+  it("fades a block divider heading only covered, fading rows with them", () => {
     expect(stylesheet).toMatch(
-      new RegExp(`${FOLDS} \\.sb-repo-block:not\\(:has\\(\\.surfaced:not\\(\\.fold-fading\\)\\)\\) > \\.sb-repo-divider \\{\\s*animation: ws-fold-fade var\\(--fold-fade-duration`),
+      /#ws-sidebar \.sb-repo-block:not\(:has\(\.ws:not\(\.covered\)\)\):not\(:has\(\.surfaced:not\(\.fold-fading\)\)\) > \.sb-repo-divider \{\s*animation: ws-fold-fade var\(--fold-fade-duration/,
     );
   });
 

@@ -6310,24 +6310,31 @@ describe("the bubble content's right inset", () => {
  * (src/sidebar/subsections.ts, src/drag.ts).
  */
 describe("the repository's subsections and the drag", () => {
-  it("folds a repository's subsections away with it, their list being its rows, unless a surfaced row stands in them", () => {
-    expect(declarationsOf("#ws-sidebar .repo.folded .rows:not(:has(.surfaced))")).toMatch(/display:\s*none/);
+  it("hides a covered row that neither is surfaced nor holds a surfaced row", () => {
+    expect(declarationsOf("#ws-sidebar .ws.covered:not(.surfaced):not(:has(.surfaced))")).toMatch(/display:\s*none/);
   });
 
-  // The three folds' shared rule lists its selectors inside `:is(...)`, whose
-  // commas the rule parser would split, so it is read off the stylesheet text.
-  const FOLDED_ROWS = String.raw`#ws-sidebar :is\(\.repo\.folded \.rows, \.sb-subsection\.folded > \.rows, \.ws\.folded > \.kids\)`;
-
-  it("hides every row of a fold that a surfaced row does not stand in or above", () => {
-    expect(stylesheet).toMatch(new RegExp(`${FOLDED_ROWS} \\.ws:not\\(\\.surfaced\\):not\\(:has\\(\\.surfaced\\)\\)\\s*\\{\\s*display:\\s*none`));
+  it("keeps only the kids box of a covered row standing between a fold and a surfaced row", () => {
+    expect(declarationsOf("#ws-sidebar .ws.covered:not(.surfaced):has(.surfaced) > :not(.kids)")).toMatch(/display:\s*none/);
   });
 
-  it("keeps only the kids box of a row standing between a fold and a surfaced row", () => {
-    expect(stylesheet).toMatch(new RegExp(`${FOLDED_ROWS} \\.ws:not\\(\\.surfaced\\):has\\(\\.surfaced\\) > :not\\(\\.kids\\)\\s*\\{\\s*display:\\s*none`));
+  it("folds a repository block away with its divider when every row in it is covered and none surfaced", () => {
+    expect(declarationsOf("#ws-sidebar .sb-repo-block:not(:has(.ws:not(.covered))):not(:has(.surfaced))")).toMatch(/display:\s*none/);
   });
 
-  it("folds a repository block away with its divider unless a surfaced row stands in it", () => {
-    expect(stylesheet).toMatch(new RegExp(`${FOLDED_ROWS} \\.sb-repo-block:not\\(:has\\(\\.surfaced\\)\\)\\s*\\{\\s*display:\\s*none`));
+  it("hides a folded band's whole body, and never a repository section's", () => {
+    expect(declarationsOf("#ws-sidebar .repo.folded:not(.repo-section) > .rows")).toMatch(/display:\s*none/);
+  });
+
+  it("never hides a row, subsection or header by the folds drawn around it, only by the row's own fold cover", () => {
+    // Arrange: every rule whose declarations hide something.
+    const hiding = rulesOf(stylesheet).filter((rule) => /display:\s*none/.test(rule.declarations));
+
+    // Act: the selectors that reach into a repository section's rows through its fold.
+    const derived = hiding.flatMap((rule) => rule.selectors).filter((selector) => /\.repo\.folded \.rows|\.sb-subsection:not\(:has\(\.surfaced\)\)/.test(selector));
+
+    // Assert
+    expect(derived).toEqual([]);
   });
 
   it("folds a collapsed subsection's and a folded row's children away unless a surfaced row stands in them", () => {

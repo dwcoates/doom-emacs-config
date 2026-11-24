@@ -10,6 +10,7 @@
  */
 import type {
   RosterOpenRowChildrenFold,
+  RosterOpenRowFoldCover,
   RosterOpenRowRepositoryBlock,
   RosterOpenRowTab,
   RosterRow,
@@ -43,11 +44,11 @@ export interface RowFamily {
    */
   childrenFold?: RosterOpenRowChildrenFold;
   /**
-   * Whether the row is drawn although a fold covers it: its workspace started
-   * a turn under the fold and the turn is running
-   * (frontend.v1.RosterOpenRow.surfaced).
+   * An open row's standing under the folds: uncovered, hidden by a fold, or
+   * drawn although a fold covers it (frontend.v1.RosterOpenRow.fold_cover).
+   * Always set on an open row; the other lists carry none.
    */
-  surfaced?: boolean;
+  foldCover?: RosterOpenRowFoldCover;
   /** An open row's tab: its number, or folded (frontend.v1.RosterOpenRow.tab). */
   tab?: RosterOpenRowTab;
 }

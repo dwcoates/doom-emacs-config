@@ -1221,20 +1221,48 @@ gutter the sidebar draws, from the reach Emacs itself reported
                    '((older :older agent-repl-wire-decode-roster-open-row-recency-gutter-older)
                      (newer :newer agent-repl-wire-decode-roster-open-row-recency-gutter-newer)))))))
 
+;; Every arm of `RosterOpenRowFoldCover' is an empty message: the arm is the
+;; row's standing under the folds.
+(defun agent-repl-wire-decode-roster-open-row-fold-cover-uncovered (value)
+  "Decode VALUE as the empty message `RosterOpenRowFoldCoverUncovered'."
+  (agent-repl-wire--decode-empty "RosterOpenRowFoldCoverUncovered" value))
+
+(defun agent-repl-wire-decode-roster-open-row-fold-cover-hidden (value)
+  "Decode VALUE as the empty message `RosterOpenRowFoldCoverHidden'."
+  (agent-repl-wire--decode-empty "RosterOpenRowFoldCoverHidden" value))
+
+(defun agent-repl-wire-decode-roster-open-row-fold-cover-surfaced (value)
+  "Decode VALUE as the empty message `RosterOpenRowFoldCoverSurfaced'."
+  (agent-repl-wire--decode-empty "RosterOpenRowFoldCoverSurfaced" value))
+
+(defun agent-repl-wire-decode-roster-open-row-fold-cover (value)
+  "Decode VALUE as `RosterOpenRowFoldCover', a plist `(:cover ARM)'.
+`:uncovered' rows no fold covers; `:hidden' rows a fold covers and hides;
+`:surfaced' rows a fold covers and draws anyway."
+  (let ((object (agent-repl-wire--object "RosterOpenRowFoldCover" value)))
+    (agent-repl-wire--check-keys "RosterOpenRowFoldCover" object '(uncovered hidden surfaced))
+    (agent-repl-wire--decoded
+     "RosterOpenRowFoldCover"
+     (list :cover (agent-repl-wire--decode-oneof
+                   "RosterOpenRowFoldCover" 'cover object
+                   '((uncovered :uncovered agent-repl-wire-decode-roster-open-row-fold-cover-uncovered)
+                     (hidden :hidden agent-repl-wire-decode-roster-open-row-fold-cover-hidden)
+                     (surfaced :surfaced agent-repl-wire-decode-roster-open-row-fold-cover-surfaced)))))))
+
 (defun agent-repl-wire-decode-roster-open-row (value)
   "Decode VALUE as `RosterOpenRow'.
 The plist is `(:row ROW :tab TAB :children ROWS :repository-blocks BLOCKS
-:children-fold FOLD :surfaced BOOL :recency-gutter GUTTER)'.  CHILDREN are
+:children-fold FOLD :fold-cover COVER :recency-gutter GUTTER)'.  CHILDREN are
 the row's open children of its own repository, each itself an open row, in
 drawn order; BLOCKS are
 its children of other repositories, one `RosterOpenRowRepositoryBlock' per
 repository, drawn after CHILDREN.  FOLD is set exactly when the row has a
-child of either kind, and folds them all.  SURFACED is true for a row drawn
-inside a fold that covers it (a running turn, or the selection).  GUTTER is
+child of either kind, and folds them all.  COVER is the row's standing under
+the folds (`agent-repl-wire-decode-roster-open-row-fold-cover').  GUTTER is
 the recency gutter (`agent-repl-wire-decode-roster-open-row-recency-gutter'),
 nil when the recency walk reaches no tab of the row soon."
   (let ((object (agent-repl-wire--object "RosterOpenRow" value)))
-    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryBlocks childrenFold surfaced recencyGutter))
+    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryBlocks childrenFold foldCover recencyGutter))
     (agent-repl-wire--decoded
      "RosterOpenRow"
      (list :row (agent-repl-wire--decode-message
@@ -1249,7 +1277,9 @@ nil when the recency walk reaches no tab of the row soon."
            :children-fold (agent-repl-wire--decode-optional-message
                            "RosterOpenRow" 'childrenFold object
                            #'agent-repl-wire-decode-roster-open-row-children-fold)
-           :surfaced (agent-repl-wire--decode-bool "RosterOpenRow" 'surfaced object)
+           :fold-cover (agent-repl-wire--decode-message
+                        "RosterOpenRow" 'foldCover object
+                        #'agent-repl-wire-decode-roster-open-row-fold-cover)
            :recency-gutter (agent-repl-wire--decode-optional-message
                             "RosterOpenRow" 'recencyGutter object
                             #'agent-repl-wire-decode-roster-open-row-recency-gutter)))))

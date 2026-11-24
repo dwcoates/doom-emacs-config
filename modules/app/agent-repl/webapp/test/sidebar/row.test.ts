@@ -16,7 +16,7 @@ import {
   type RosterOpenRow,
   type RosterRowWhenSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { withRepositoryBlocks } from "../roster-families.js";
+import { withCover, withRepositoryBlocks } from "../roster-families.js";
 import { liveElapsedClock, liveElapsedReading } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { drawNamePrefix } from "../../src/name-prefix.js";
@@ -49,6 +49,7 @@ import {
   DIVIDER_MAIN_WORKSPACE_ATTRIBUTE,
   REPOSITORY_BLOCK_ATTRIBUTE,
   REPOSITORY_BLOCK_CLASS,
+  COVERED_ROW_CLASS,
   SURFACED_ROW_CLASS,
   REPOSITORY_DIVIDER_CLASS,
   drawRosterOpenRowRepositoryBlock,
@@ -1052,23 +1053,47 @@ describe("the family", () => {
     expect(drawn.querySelector(".kids [data-roster-row='ws-2']")).not.toBeNull();
   });
 
-  it("marks a surfaced row so the stylesheet draws it inside its fold", () => {
-    const surfaced = openRow(row({ id: "ws-1" }));
-    surfaced.surfaced = true;
+  it("marks a surfaced row covered and surfaced so the stylesheet draws it inside its fold", () => {
+    // Arrange
+    const surfaced = withCover(openRow(row({ id: "ws-1" })), "surfaced");
+
+    // Act
     const drawn = drawRosterFamily(surfaced, sidebarContext(), "R");
-    expect(drawn.classList.contains(SURFACED_ROW_CLASS)).toBe(true);
+
+    // Assert
+    expect([drawn.classList.contains(COVERED_ROW_CLASS), drawn.classList.contains(SURFACED_ROW_CLASS)]).toEqual([true, true]);
   });
 
-  it("marks no row surfaced unless the wire says so", () => {
+  it("marks a hidden row covered and not surfaced so the stylesheet hides it", () => {
+    // Arrange
+    const hidden = withCover(openRow(row({ id: "ws-1" })), "hidden");
+
+    // Act
+    const drawn = drawRosterFamily(hidden, sidebarContext(), "R");
+
+    // Assert
+    expect([drawn.classList.contains(COVERED_ROW_CLASS), drawn.classList.contains(SURFACED_ROW_CLASS)]).toEqual([true, false]);
+  });
+
+  it("marks an uncovered row neither covered nor surfaced", () => {
+    // Act
     const drawn = drawRosterFamily(openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sidebarContext(), "R");
-    expect(drawn.classList.contains(SURFACED_ROW_CLASS)).toBe(false);
-    expect(drawn.querySelector(`.${SURFACED_ROW_CLASS}`)).toBeNull();
+
+    // Assert
+    expect(drawn.classList.contains(COVERED_ROW_CLASS)).toBe(false);
+    expect(drawn.querySelector(`.${COVERED_ROW_CLASS}, .${SURFACED_ROW_CLASS}`)).toBeNull();
   });
 
   it("marks a surfaced child and none of its siblings", () => {
+    // Arrange
     const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] }));
-    family.children[1].surfaced = true;
+    withCover(family.children[0], "hidden");
+    withCover(family.children[1], "surfaced");
+
+    // Act
     const drawn = drawRosterFamily(family, sidebarContext(), "R");
+
+    // Assert
     expect(drawn.querySelector("[data-roster-row='ws-3']")!.classList.contains(SURFACED_ROW_CLASS)).toBe(true);
     expect(drawn.querySelector("[data-roster-row='ws-2']")!.classList.contains(SURFACED_ROW_CLASS)).toBe(false);
   });
@@ -1078,13 +1103,34 @@ describe("the family", () => {
     const applied: Array<[string, boolean]> = [];
     const sc = { ...sidebarContext(), foldFade: { apply: (id: string, _row: HTMLElement, surfaced: boolean) => applied.push([id, surfaced]) } };
     const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] }));
-    family.children[0].surfaced = true;
+    withCover(family.children[0], "surfaced");
 
     // Act
     drawRosterFamily(family, sc, "R");
 
     // Assert
     expect(applied.sort()).toEqual([["ws-1", false], ["ws-2", true]]);
+  });
+
+  it("refuses an open row naming no fold cover as a malformed view", () => {
+    // Arrange
+    const bad = openRow(row({ id: "ws-1" }));
+    bad.foldCover = undefined;
+
+    // Act + Assert
+    expect(() => drawRosterFamily(bad, sidebarContext(), "R")).toThrow(/R\.fold_cover/);
+  });
+
+  it("draws a band's row, which carries no fold cover, uncovered", () => {
+    // Arrange
+    const banded = openRow(row({ id: "ws-1" }));
+    banded.foldCover = undefined;
+
+    // Act
+    const drawn = drawRosterFamily(banded, sidebarContext(), "R", "hidden");
+
+    // Assert
+    expect(drawn.classList.contains(COVERED_ROW_CLASS)).toBe(false);
   });
 
   it("refuses a list row naming no row as a malformed view", () => {

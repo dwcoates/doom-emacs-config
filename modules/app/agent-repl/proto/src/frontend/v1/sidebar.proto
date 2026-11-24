@@ -528,22 +528,55 @@ message RosterOpenRow {
   // block holds at least one row. Their tabs follow `children`'s, block by
   // block. Empty when every child is of the row's own repository.
   repeated RosterOpenRowRepositoryBlock repository_blocks = 6;
-  // WHETHER A FOLD COVERS THE ROW AND THE ROW IS DRAWN ANYWAY. DAEMON-HELD:
-  // the workspace started a turn while a fold hid it (its repository's, its
-  // subsection's, or an ancestor's `children_fold`) and the turn is still
-  // running, or it is the workspace the user is on. The fold stays collapsed
-  // and hides every other row under it; this one is drawn, and its `tab` is
-  // numbered, not folded. It ends with the turn and when the user switches away
-  // from it; folding the section again does not end it. False on a row no
-  // fold covers and on a row the fold hides.
-  bool surfaced = 7;
+  // `surfaced` (field 7, a bool) is RETIRED and reserved: the row's standing
+  // under the folds is `fold_cover`.
+  reserved 7;
+  reserved "surfaced";
   // The row's RECENCY GUTTER: the bar drawn left of its tab number when
   // Emacs's recency walk reaches the tab in few presses. SET exactly when
   // the connected Emacs reported a reach for the workspace
   // (agentrepl.v1.ReportRecencyReach); UNSET otherwise. At most six rows
   // carry each direction.
   optional RosterOpenRowRecencyGutter recency_gutter = 8;
+  // THE ROW'S STANDING UNDER THE FOLDS. DAEMON-HELD, always set: the daemon
+  // alone decides which fold covers a row, so the sidebar draws or hides the
+  // row by this arm and never re-derives coverage from the folds it draws.
+  RosterOpenRowFoldCover fold_cover = 9;
 }
+
+// WHETHER A FOLD COVERS AN OPEN ROW, and if it does, whether the row is drawn
+// anyway. A fold means "what is under this is not pertinent now": ONLY THE
+// NEAREST CONTAINER'S FOLD covers a top-level row (its subsection's when it
+// sits in one, else its repository section's), so an unfolded subsection in a
+// collapsed repository section shows every top-level row it holds; and an
+// ancestor's children fold covers every row beneath it, at every depth. Each
+// child of a covered row is covered too.
+message RosterOpenRowFoldCover {
+  // The row's standing; exactly one arm is set, and an unset oneof is
+  // malformed.
+  oneof cover {
+    // No fold covers the row: it is drawn as an open row is.
+    RosterOpenRowFoldCoverUncovered uncovered = 1;
+    // A fold covers the row and the sidebar does not draw it. Its tab is
+    // folded off the tab bar (RosterOpenRowTab).
+    RosterOpenRowFoldCoverHidden hidden = 2;
+    // A fold covers the row and it is drawn anyway: the workspace works,
+    // holds a result the user has not read, is starting, has priority P0.5 or
+    // P1, is the selection, or stands above a row drawn for one of those
+    // reasons. Its tab is numbered. The fold stays collapsed and hides every
+    // other row under it.
+    RosterOpenRowFoldCoverSurfaced surfaced = 3;
+  }
+}
+
+// No fold covers the row. Empty: the arm is the state.
+message RosterOpenRowFoldCoverUncovered {}
+
+// A fold covers the row and hides it. Empty: the arm is the state.
+message RosterOpenRowFoldCoverHidden {}
+
+// A fold covers the row and it is drawn anyway. Empty: the arm is the state.
+message RosterOpenRowFoldCoverSurfaced {}
 
 // THE RECENCY GUTTER: which chord of the recency walk reaches the row's tab
 // in fewer presses, and how many. Emacs resolves it with the walk's own

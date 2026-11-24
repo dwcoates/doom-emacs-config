@@ -1150,8 +1150,9 @@ message."
 ;;;; ---- The lists' rows ----
 
 (defun agent-repl-test-wire-roster--open-row (tab &rest children)
-  "Return a `RosterOpenRow' JSON with TAB (a JSON member) and CHILDREN."
-  (format "{\"row\":%s,\"tab\":{%s},\"children\":[%s]}"
+  "Return a `RosterOpenRow' JSON with TAB (a JSON member) and CHILDREN.
+The row is uncovered: no fold covers it."
+  (format "{\"row\":%s,\"tab\":{%s},\"foldCover\":{\"uncovered\":{}},\"children\":[%s]}"
           (agent-repl-test-wire-roster--row "\"ready\":{}") tab
           (mapconcat #'identity children ",")))
 
@@ -1180,17 +1181,31 @@ message."
                             :tab)
                  '(:tab (:arm :folded :value nil)))))
 
-(ert-deftest agent-repl-test-wire-roster-open-row-decodes-the-surfaced-mark ()
-  "A row drawn inside a fold that covers it says so; any other row does not."
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-an-uncovered-fold-cover ()
+  "A row no fold covers decodes onto the uncovered arm."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-open-row
+                             (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}"))
+                            :fold-cover)
+                 '(:cover (:arm :uncovered :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-a-surfaced-fold-cover ()
+  "A row a fold covers and draws anyway decodes onto the surfaced arm."
   (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))
-    (should (equal (list (plist-get (agent-repl-test-wire-roster--decode
-                                     #'agent-repl-wire-decode-roster-open-row
-                                     (concat (substring open 0 -1) ",\"surfaced\":true}"))
-                                    :surfaced)
-                         (plist-get (agent-repl-test-wire-roster--decode
-                                     #'agent-repl-wire-decode-roster-open-row open)
-                                    :surfaced))
-                   '(t nil)))))
+    (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                               #'agent-repl-wire-decode-roster-open-row
+                               (replace-regexp-in-string "\"uncovered\"" "\"surfaced\"" open t t))
+                              :fold-cover)
+                   '(:cover (:arm :surfaced :value nil))))))
+
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-a-hidden-fold-cover ()
+  "A row a fold covers and hides decodes onto the hidden arm."
+  (let ((open (agent-repl-test-wire-roster--open-row "\"folded\":{}")))
+    (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                               #'agent-repl-wire-decode-roster-open-row
+                               (replace-regexp-in-string "\"uncovered\"" "\"hidden\"" open t t))
+                              :fold-cover)
+                   '(:cover (:arm :hidden :value nil))))))
 
 (ert-deftest agent-repl-test-wire-roster-open-row-decodes-its-recency-gutter ()
   "A row the recency walk reaches decodes its chord and presses."
@@ -1216,13 +1231,21 @@ message."
                          (concat (substring open 0 -1) ",\"recencyGutter\":{}}")))
                    "RosterOpenRowRecencyGutter"))))
 
-(ert-deftest agent-repl-test-wire-roster-a-non-boolean-surfaced-mark-is-a-breach ()
-  "The surfaced mark is a boolean; anything else is a breach."
+(ert-deftest agent-repl-test-wire-roster-an-open-row-without-a-fold-cover-is-a-breach ()
+  "Every open row states its fold cover; an absent one is a breach."
   (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))
     (should (equal (agent-repl-test-wire-roster--breach
                     #'agent-repl-wire-decode-roster-open-row
-                    (concat (substring open 0 -1) ",\"surfaced\":\"yes\"}"))
-                   '("RosterOpenRow" surfaced "expected a boolean")))))
+                    (replace-regexp-in-string ",\"foldCover\":{\"uncovered\":{}}" "" open t t))
+                   '("RosterOpenRow" foldCover "required message field is absent")))))
+
+(ert-deftest agent-repl-test-wire-roster-a-fold-cover-on-no-arm-is-a-breach ()
+  "A fold cover naming no arm is a breach, never a silent absence."
+  (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))
+    (should (equal (car (agent-repl-test-wire-roster--breach
+                         #'agent-repl-wire-decode-roster-open-row
+                         (replace-regexp-in-string "{\"uncovered\":{}}" "{}" open t t)))
+                   "RosterOpenRowFoldCover"))))
 
 (ert-deftest agent-repl-test-wire-roster-an-open-row-without-a-tab-is-a-breach ()
   "Every open row has a tab; an unset tab is a breach."
@@ -1241,7 +1264,7 @@ message."
   (let* ((child (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":2}"))
          (decoded (agent-repl-test-wire-roster--decode
                    #'agent-repl-wire-decode-roster-open-row
-                   (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":1}},\"repositoryBlocks\":[%s]}"
+                   (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":1}},\"foldCover\":{\"uncovered\":{}},\"repositoryBlocks\":[%s]}"
                            (agent-repl-test-wire-roster--row "\"ready\":{}")
                            (agent-repl-test-wire-roster--block "repo-2" "beta" child))))
          (block (car (plist-get decoded :repository-blocks))))
@@ -1304,7 +1327,7 @@ message."
                    (:fold (:arm :expanded :value (:collapse (:arm :holds-current :value nil)))))))
     (let ((decoded (agent-repl-test-wire-roster--decode
                     #'agent-repl-wire-decode-roster-open-row
-                    (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":1}},\"childrenFold\":%s}"
+                    (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":1}},\"foldCover\":{\"uncovered\":{}},\"childrenFold\":%s}"
                             (agent-repl-test-wire-roster--row "\"ready\":{}") (car case)))))
       (should (equal (plist-get decoded :children-fold) (cadr case))))))
 

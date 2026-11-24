@@ -126,18 +126,51 @@ const log = createLogger("webapp.sidebar.row");
 /** Draw FAMILY, a row of one list and its family, at PATH (`drawRosterRow`). */
 export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
   const drawn = drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family, path, family.childrenFold);
-  if (family.surfaced === true) drawn.classList.add(SURFACED_ROW_CLASS);
+  const cover = foldCoverOf(family, place, path);
+  if (cover !== "uncovered") drawn.classList.add(COVERED_ROW_CLASS);
+  if (cover === "surfaced") drawn.classList.add(SURFACED_ROW_CLASS);
   const id = drawn.getAttribute("data-roster-row");
   if (id === null) throw new Error(`${path}.row: a drawn row names its workspace`);
-  sc.foldFade.apply(id, drawn, family.surfaced === true);
+  sc.foldFade.apply(id, drawn, cover === "surfaced");
   return drawn;
 }
 
+/** An open row's standing under the folds (frontend.v1.RosterOpenRowFoldCover's arm). */
+export type FoldCover = "uncovered" | "hidden" | "surfaced";
+
 /**
- * The class of a row drawn inside a fold that covers it
- * (frontend.v1.RosterOpenRow.surfaced): the stylesheet hides every other row
- * of the fold, and a row of its family that stands between the fold and it
- * keeps only its `.kids` box.
+ * FAMILY's standing under the folds, drawn in PLACE at PATH. THE DAEMON
+ * DECIDES IT (frontend.v1.RosterOpenRow.fold_cover): the sidebar never
+ * re-derives which fold covers a row from the folds it draws. Every open row
+ * carries it, so an open row without one is malformed; a row of another list
+ * has no fold over it.
+ */
+export function foldCoverOf(family: RowFamily, place: RowPlace, path: string): FoldCover {
+  if (place !== "grouping") return "uncovered";
+  const arm = requireCase(requireMessage(family.foldCover, `${path}.fold_cover`).cover, `${path}.fold_cover.cover`);
+  switch (arm.case) {
+    case "uncovered":
+    case "hidden":
+    case "surfaced":
+      return arm.case;
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(`${path}.fold_cover.cover`, other.case);
+    }
+  }
+}
+
+/**
+ * The class of a row a fold covers (frontend.v1.RosterOpenRowFoldCover's
+ * `hidden` and `surfaced` arms): the stylesheet hides it unless it, or a row
+ * beneath it, is surfaced.
+ */
+export const COVERED_ROW_CLASS = "covered";
+
+/**
+ * The class of a row drawn inside a fold that covers it (the `surfaced` arm):
+ * the stylesheet draws it, and a covered row of its family that stands
+ * between the fold and it keeps only its `.kids` box.
  */
 export const SURFACED_ROW_CLASS = "surfaced";
 

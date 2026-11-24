@@ -14,6 +14,7 @@ import {
   RosterHiddenRowSchema,
   RosterOpenRowRepositoryBlockSchema,
   RosterOpenRowSchema,
+  RosterOpenRowFoldCoverSchema,
   RosterOpenRowTabSchema,
   RosterRepoEntrySchema,
   type RosterHiddenRow,
@@ -34,14 +35,22 @@ export function withFamily(row: RosterRow, children: readonly RosterRow[]): Rost
 
 /**
  * ROW as an open row, its family nested as open rows. Its tab is FOLDED until
- * `numberTabs` numbers it, as the daemon does, in the Open section's walk.
+ * `numberTabs` numbers it, as the daemon does, in the Open section's walk. No
+ * fold covers it (frontend.v1.RosterOpenRow.fold_cover) until a test says so.
  */
 export function openRow(row: RosterRow): RosterOpenRow {
   return create(RosterOpenRowSchema, {
     row,
     tab: { tab: { case: "folded", value: {} } },
+    foldCover: { cover: { case: "uncovered", value: {} } },
     children: (familyOf.get(row) ?? []).map(openRow),
   });
+}
+
+/** OPEN with its fold cover set to ARM (frontend.v1.RosterOpenRow.fold_cover). Answers OPEN. */
+export function withCover(open: RosterOpenRow, arm: "uncovered" | "hidden" | "surfaced"): RosterOpenRow {
+  open.foldCover = create(RosterOpenRowFoldCoverSchema, { cover: { case: arm, value: {} } });
+  return open;
 }
 
 /** One repository block a test open row carries: its repository's id, its divider's name, its rows. */
