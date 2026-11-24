@@ -1478,6 +1478,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StartSession:            fleet.Start,
 		BringingUp:              bringingUp,
 		Replacing:               replacing,
+		FactsSettled:            sidebarResolver.SettleFacts,
 		// THE FOLDS' STAND-DOWNS ARE DERIVED AGAIN once this daemon owns what
 		// it serves: their waits lived in the previous daemon's memory alone.
 		// The drain controller is built after this one, so it is read at the
@@ -1492,6 +1493,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// settle runs the rounds after (settleThenMediate); a successor's
 		// takeover runs them here.
 		ServingSettled: func(ctx context.Context) {
+			// EVERY ROW IS DRAWN FROM THIS DAEMON'S OWN FACTS once it serves
+			// all it serves (sidebar carry.go).
+			sidebarResolver.SettleAllFacts()
 			drainController.ResumeFolded(ctx)
 			if mediation.servingSettled() && p.Opts.joining != "" {
 				mediation.rounds()

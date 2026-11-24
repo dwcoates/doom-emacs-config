@@ -146,6 +146,14 @@ type wsState struct {
 	// bringingUp reports a bring-up of this workspace's session under way
 	// (SetBringingUp). It is what holds the row's availability at `pending`.
 	bringingUp bool
+	// carried is the incumbent's arm a JOINING daemon keeps drawing for a row
+	// the mirror let go of, until the row's own facts are settled (carry.go);
+	// empty when nothing is carried.
+	carried string
+	// settleAsked reports that the adoption declared the row's facts in
+	// (SettleFacts, SettleAllFacts): the carried arm is let go once no
+	// bring-up of the row stands either.
+	settleAsked bool
 	// replacing reports a relaunch replacing the session's shim
 	// (SetReplacing), whose stand-down's dead link leaves the session live.
 	replacing bool

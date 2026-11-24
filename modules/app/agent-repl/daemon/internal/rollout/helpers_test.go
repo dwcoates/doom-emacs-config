@@ -1487,6 +1487,9 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 			return h.startErr[ws]
 		},
 		ServingSettled: func(context.Context) { h.servingSettled <- struct{}{} },
+		FactsSettled: func(ws ids.WorkspaceID) {
+			order.record("facts_settled")
+		},
 		Replacing: func(ws ids.WorkspaceID, replacing bool) {
 			order.record(fmt.Sprintf("replacing:%v", replacing))
 			h.mu.Lock()

@@ -417,6 +417,10 @@ type Deps struct {
 	// ended, so the stand-down's dead link is never drawn as a fault.
 	// Required.
 	Replacing func(ws ids.WorkspaceID, replacing bool)
+	// FactsSettled declares a workspace's own facts in
+	// (sidebar.Resolver.SettleFacts): an adoption calls it once the rest of
+	// it, past ownership, has run. Required.
+	FactsSettled func(ws ids.WorkspaceID)
 	// ServingSettled is told once this daemon owns every workspace it serves
 	// and the sessions it started are up: at a fresh boot's settle
 	// (SettleBoot) and once a successor's takeover settled. What a previous
@@ -925,6 +929,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.BringingUp == nil {
 		return nil, errors.New("rollout: the bring-up marker is required; a workspace whose session is starting must not read as usable")
+	}
+	if deps.FactsSettled == nil {
+		return nil, errors.New("rollout: the facts-settled declaration is required; a successor must not draw an adopted row from facts it has not taken")
 	}
 	if deps.Replacing == nil {
 		return nil, errors.New("rollout: the replacement fact is required; a relaunch's stand-down must not read as a dead session")

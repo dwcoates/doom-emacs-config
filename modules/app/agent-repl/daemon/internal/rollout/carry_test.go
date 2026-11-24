@@ -1772,3 +1772,36 @@ func deref(hold *ids.LeaseID) string {
 	}
 	return fmt.Sprintf("%q", *hold)
 }
+
+// An adoption declares the row's facts in only once it has taken back its
+// merges, and does so whether the take-back succeeded or failed: the roster
+// keeps the incumbent's arm for the row until then (sidebar carry.go).
+func TestAnAdoptionSettlesTheRowsFactsOnlyAfterItsMerges(t *testing.T) {
+	cases := []struct {
+		name     string
+		adoptErr error
+	}{
+		{name: "merges taken back", adoptErr: nil},
+		{name: "merges that could not be taken back", adoptErr: errors.New("queue unreadable")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.merges.adoptErr = tc.adoptErr
+			carryFor(t, h, ws, Carry{MidWork: false})
+
+			// Act
+			arm(t, h, ws, Participants{})
+			h.awaitAdoptionEnded(t, ws)
+
+			// Assert
+			taken := h.order.Taken()
+			merges, settled := indexOf(taken, "adopt_merges"), indexOf(taken, "facts_settled")
+			if merges < 0 || settled < merges || countOf(taken, "facts_settled") != 1 {
+				t.Fatalf("steps = %v, want the facts settled once, after the merges were taken back", taken)
+			}
+		})
+	}
+}

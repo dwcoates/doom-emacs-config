@@ -1171,7 +1171,10 @@ func (r *resolver) newestInteracted(ws ids.WorkspaceID, s *wsState) bool {
 func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_bringing_up",
 		logsite.Msg("the roster took whether a bring-up is under way"),
-		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
+		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) {
+			s.bringingUp = bringingUp
+			r.releaseCarry(ws, s)
+		})
 }
 
 // SetReplacing implements Resolver.
@@ -1197,6 +1200,7 @@ func (r *resolver) SetIncumbentArms(arms map[ids.WorkspaceID]string) {
 			if maps.Equal(r.state.incumbentArms, copied) {
 				return false
 			}
+			r.carryLetGo(r.state.incumbentArms, copied)
 			r.state.incumbentArms = copied
 			return true
 		})
