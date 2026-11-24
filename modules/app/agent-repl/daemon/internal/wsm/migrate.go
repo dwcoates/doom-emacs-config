@@ -380,6 +380,9 @@ var migrations = []migration{
 	{To: 201, Name: "production_checks", Kind: MigrationAdditive, DDL: productionChecksDDL},
 	// IT IS ADDITIVE: a defaulted column the previous build never names.
 	{To: 202, Name: "finish_placements", Kind: MigrationAdditive, DDL: finishPlacementsDDL},
+	// IT IS ADDITIVE: a defaulted column and an index the previous build
+	// never names.
+	{To: 203, Name: "one_shots_subsection", Kind: MigrationAdditive, DDL: oneShotsSubsectionDDL},
 }
 
 // sessionsKeepaliveRestoredAtDDL is the layout-196 addition: when a

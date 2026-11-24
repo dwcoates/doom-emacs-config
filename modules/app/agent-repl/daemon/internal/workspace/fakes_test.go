@@ -806,6 +806,16 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 		case p.New != nil:
 			sub.Name, sub.CreatedBy = p.New.Name, &p.CreatedBy
 			d.subsections = append(d.subsections, sub)
+		case p.OneShots:
+			sub.Name, sub.OneShots = wsm.OneShotsSubsectionName, true
+			for _, existing := range d.subsections {
+				if existing.Repo == ws.Repo && existing.OneShots {
+					sub = existing
+				}
+			}
+			if sub.ID == "sub-born" {
+				d.subsections = append(d.subsections, sub)
+			}
 		default:
 			for _, existing := range d.subsections {
 				if existing.Repo == ws.Repo && existing.Name == p.Into {

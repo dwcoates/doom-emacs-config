@@ -803,13 +803,13 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 		s.writeEnded(err, op, logsite.Msg("refused the write"), withError(fields, err))
 		return err
 	}
-	// EVERY WRITE LEAVES NO EMPTY AGENT-CREATED SUBSECTION behind it
-	// (agentsubsections.go), whichever way it emptied one.
-	pruned, err := pruneEmptyAgentSubsections(ctx, tx)
+	// EVERY WRITE LEAVES NO EMPTY AGENT-CREATED OR ONE-SHOTS SUBSECTION
+	// behind it (agentsubsections.go), whichever way it emptied one.
+	pruned, err := pruneEmptySubsections(ctx, tx)
 	if err != nil {
 		s.endTx(tx, op, fields)
-		wrapped := fmt.Errorf("wsm: remove the agent-created subsections left empty: %w", err)
-		s.writeEnded(err, op, logsite.Msg("could not remove the agent-created subsections the write left empty"), withError(fields, wrapped))
+		wrapped := fmt.Errorf("wsm: remove the subsections left empty: %w", err)
+		s.writeEnded(err, op, logsite.Msg("could not remove the agent-created and one-shots subsections the write left empty"), withError(fields, wrapped))
 		return wrapped
 	}
 	if err := committed(ctx, tx.Commit()); err != nil {

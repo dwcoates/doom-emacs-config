@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -100,14 +102,22 @@ func TestACreateWithoutAPlacementStillFilesItself(t *testing.T) {
 		name      string
 		placement *CreatePlacement
 		want      bool
+
+		oneShot bool
 	}{
 		{name: "no placement", placement: nil, want: true},
 		{name: "a placement", placement: &CreatePlacement{Subsection: "x"}, want: false},
+		{name: "a user's one-shot, filed into the one-shots subsection", placement: nil, oneShot: true, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			spec := CreateSpec{Placement: tt.placement}
+			spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
+			spec.Placement, spec.OneShot = tt.placement, tt.oneShot
+			if tt.placement != nil {
+				requester := ids.WorkspaceID("w-requester")
+				spec.Requester = &requester
+			}
 
 			// Act
 			got := spec.filesItself()
@@ -313,4 +323,91 @@ func TestCreateUndoesItselfWhenTheRegistryRefusesThePlacementAtRegister(t *testi
 	if len(operationRecords(f, dlog.LevelInfo, opRefusal)) != 1 {
 		t.Fatalf("want one INFO %s record, got %+v", opRefusal, f.log.logger.Records())
 	}
+}
+
+func TestAUserOneShotIsBornInTheOneShotsSubsection(t *testing.T) {
+	// Arrange -- the repository has a subsection, so a root would be asked
+	// to file itself.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	placementBrief(f)
+	spec := standardSpec(t, f)
+	withSubsection(f)
+	spec.OneShot = true
+
+	// Act
+	created, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	facts := registeredFactsOf(f, created.ID)
+	if facts == nil || facts.Placement == nil || *facts.Placement != (wsm.RegisterPlacement{OneShots: true}) {
+		t.Fatalf("registered facts = %+v, want the placement into the one-shots subsection", facts)
+	}
+	if len(f.db.placementChecks) != 1 || !f.db.placementChecks[0].OneShots {
+		t.Fatalf("placement checks = %+v, want the one-shots placement asked about before the worktree", f.db.placementChecks)
+	}
+	if created.Subsection == nil {
+		t.Fatal("the created record has no subsection, want it born in the one-shots subsection")
+	}
+	if got := sentText(f); strings.Contains(got, "PLACE") {
+		t.Fatalf("the first message = %q, want no filing note: the daemon filed the one-shot", got)
+	}
+}
+
+func TestOnlyATopLevelOneShotTheUserDispatchedJoinsTheOneShotsSubsection(t *testing.T) {
+	requester, parent := ids.WorkspaceID("w-requester"), ids.WorkspaceID("w-parent")
+	tests := []struct {
+		name       string
+		originator lifecycleconfig.Originator
+		change     func(s *CreateSpec)
+		want       bool
+	}{
+		{name: "the user's top-level one-shot", originator: lifecycleconfig.OriginatorUserOrWorkspace, want: true},
+		{name: "not a one-shot", originator: lifecycleconfig.OriginatorUserOrWorkspace,
+			change: func(s *CreateSpec) { s.OneShot = false }},
+		{name: "an agent's one-shot", originator: lifecycleconfig.OriginatorUserOrWorkspace,
+			change: func(s *CreateSpec) { s.Requester = &requester }},
+		{name: "a child one-shot", originator: lifecycleconfig.OriginatorUserOrWorkspace,
+			change: func(s *CreateSpec) { s.Parent = &parent }},
+		{name: "a merge workspace", originator: lifecycleconfig.OriginatorUserOrWorkspace,
+			change: func(s *CreateSpec) { s.MergeOf = &wsm.MergeOrigin{Requester: requester} }},
+		{name: "the Slack emoji acknowledger's one-shot", originator: lifecycleconfig.OriginatorEmojiAck},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			spec := NewCreateSpec(tt.originator)
+			spec.OneShot = true
+			if tt.change != nil {
+				tt.change(&spec)
+			}
+
+			// Act
+			got := spec.registerPlacement()
+
+			// Assert
+			if joins := got != nil && got.OneShots; joins != tt.want {
+				t.Fatalf("registerPlacement = %+v, want joining the one-shots subsection %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAUserOneShotCarryingAPlacementOfItsOwnPanics(t *testing.T) {
+	// Arrange
+	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
+	spec.OneShot = true
+	spec.Placement = &CreatePlacement{Subsection: "x"}
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("registerPlacement did not panic")
+		}
+	}()
+
+	// Act
+	spec.registerPlacement()
 }

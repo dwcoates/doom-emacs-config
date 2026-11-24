@@ -17,6 +17,10 @@ import (
 // delete returns them. A subsection the user created carries no creator and
 // survives empty, unless the user's own close empties it (usercloses.go).
 //
+// THE DAEMON'S ONE-SHOTS SUBSECTION LASTS THE SAME WAY (oneshotssubsection.go):
+// the prune below removes every subsection that lasts only while it has a
+// constituent (emptyPrunedSubsectionsQuery), an agent's or the one-shots one.
+//
 // THE REMOVAL RIDES EVERY WRITE (writeTx), not the writes someone remembered
 // could empty a subsection: a close, a merge, a placement, a retarget and a
 // forget all commit through the one transaction path, which removes every
@@ -32,8 +36,9 @@ const agentSubsectionsDDL = `
 ALTER TABLE subsections ADD COLUMN created_by TEXT;
 `
 
-// opPruneAgentSubsection records each agent-created subsection a write left
-// empty and so removed.
+// opPruneAgentSubsection records each subsection that lasts only while it has
+// a constituent (an agent's, or the one-shots one) a write left empty and so
+// removed.
 const opPruneAgentSubsection = "daemon.wsm.prune_agent_subsection"
 
 // ErrNoOpenConstituent refuses an agent-created subsection none of whose
@@ -47,13 +52,17 @@ var ErrNoOpenConstituent = errors.New("wsm: an agent-created subsection would ha
 const emptySubsectionsQuery = `SELECT ` + subsectionColumns + ` FROM subsections
 WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE NOT workspaces.closed AND ` + rootSubsectionColumn + ` = subsections.id)`
 
-// emptyAgentSubsectionsQuery selects every agent-created subsection no open
-// workspace sits in.
-const emptyAgentSubsectionsQuery = emptySubsectionsQuery + ` AND created_by IS NOT NULL`
+// prunedSubsectionCondition holds of every subsection that lasts only while it
+// has a constituent: one an agent created, and the one-shots subsection.
+const prunedSubsectionCondition = `(created_by IS NOT NULL OR one_shots)`
+
+// emptyPrunedSubsectionsQuery selects every subsection that lasts only while
+// it has a constituent and that no open workspace sits in.
+const emptyPrunedSubsectionsQuery = emptySubsectionsQuery + ` AND ` + prunedSubsectionCondition
 
 // emptyUserSubsectionsQuery selects every subsection the user created that no
 // open workspace sits in: the ones the user's close removes (usercloses.go).
-const emptyUserSubsectionsQuery = emptySubsectionsQuery + ` AND created_by IS NULL`
+const emptyUserSubsectionsQuery = emptySubsectionsQuery + ` AND NOT ` + prunedSubsectionCondition
 
 // CreateAgentSubsection records a subsection named NAME (trimmed), created by
 // workspace CREATOR's agent, after the members' repository's other
@@ -91,7 +100,7 @@ func (s *store) CreateAgentSubsection(ctx context.Context, creator WorkspaceID, 
 		if err := scanWorkspaceRow(ctx, tx, root, "repo_id", &out.Repo); err != nil {
 			return err
 		}
-		return fileIntoNewAgentSubsection(ctx, tx, &out, members)
+		return fileIntoNewPrunedSubsection(ctx, tx, &out, members)
 	})
 	if err != nil {
 		return Subsection{}, err
@@ -99,20 +108,20 @@ func (s *store) CreateAgentSubsection(ctx context.Context, creator WorkspaceID, 
 	return out, nil
 }
 
-// fileIntoNewAgentSubsection records SUB (an agent-created subsection with
-// its Repo set) after its repository's other subsections and places the
-// families of MEMBERS in it, inside TX: the one write behind an agent's
-// subsection create and a register that files its workspace into a new
-// subsection. A subsection none of whose members is open is
-// ErrNoOpenConstituent.
-func fileIntoNewAgentSubsection(ctx context.Context, tx *sql.Tx, sub *Subsection, members []WorkspaceID) error {
+// fileIntoNewPrunedSubsection records SUB (an agent-created subsection, or
+// the one-shots one, with its Repo set) after its repository's other
+// subsections and places the families of MEMBERS in it, inside TX: the one
+// write behind an agent's subsection create and a register that files its
+// workspace into a new subsection. A subsection none of whose members is open
+// is ErrNoOpenConstituent.
+func fileIntoNewPrunedSubsection(ctx context.Context, tx *sql.Tx, sub *Subsection, members []WorkspaceID) error {
 	if err := insertSubsection(ctx, tx, sub); err != nil {
 		return err
 	}
 	if err := placeFamilies(ctx, tx, members, &sub.ID, AtEnd{}); err != nil {
 		return err
 	}
-	empty, err := listRows(ctx, tx, emptyAgentSubsectionsQuery+` AND id = ?`, scanSubsection, sub.ID)
+	empty, err := listRows(ctx, tx, emptyPrunedSubsectionsQuery+` AND id = ?`, scanSubsection, sub.ID)
 	if err != nil {
 		return err
 	}
@@ -122,11 +131,11 @@ func fileIntoNewAgentSubsection(ctx context.Context, tx *sql.Tx, sub *Subsection
 	return nil
 }
 
-// pruneEmptyAgentSubsections removes, inside TX, every agent-created
-// subsection no open workspace sits in, and answers them for the record the
-// commit makes.
-func pruneEmptyAgentSubsections(ctx context.Context, tx *sql.Tx) ([]Subsection, error) {
-	empty, err := listRows(ctx, tx, emptyAgentSubsectionsQuery, scanSubsection)
+// pruneEmptySubsections removes, inside TX, every subsection that lasts only
+// while it has a constituent and that no open workspace sits in, and answers
+// them for the record the commit makes.
+func pruneEmptySubsections(ctx context.Context, tx *sql.Tx) ([]Subsection, error) {
+	empty, err := listRows(ctx, tx, emptyPrunedSubsectionsQuery, scanSubsection)
 	if err != nil {
 		return nil, err
 	}
@@ -138,13 +147,17 @@ func pruneEmptyAgentSubsections(ctx context.Context, tx *sql.Tx) ([]Subsection, 
 	return empty, nil
 }
 
-// recordPruned records each agent-created subsection the write OP removed,
-// once its commit landed.
+// recordPruned records each subsection the write OP removed, once its commit
+// landed.
 func (s *store) recordPruned(op string, pruned []Subsection) {
 	for _, sub := range pruned {
-		s.log.Info(opPruneAgentSubsection, "removed an agent-created subsection the write left with no open workspace", dlog.Context{
+		fields := dlog.Context{
 			"subsection": string(sub.ID), "name": sub.Name, "repo_id": string(sub.Repo),
-			"created_by": string(*sub.CreatedBy), "write": op,
-		})
+			"one_shots": sub.OneShots, "write": op,
+		}
+		if sub.CreatedBy != nil {
+			fields["created_by"] = string(*sub.CreatedBy)
+		}
+		s.log.Info(opPruneAgentSubsection, "removed a subsection that lasts only while it has a constituent, as the write left it with no open workspace", fields)
 	}
 }

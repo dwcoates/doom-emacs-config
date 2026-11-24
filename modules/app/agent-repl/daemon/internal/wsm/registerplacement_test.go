@@ -186,6 +186,10 @@ func refusalCases() []placementRefusalCase {
 			parent := creator.ID
 			return RegisterFacts{Parent: &parent, Placement: newWith(creator, "x")}, ErrPlacementOnChild
 		}, check: func(t *testing.T, err error) {}},
+		{name: "a child filed into the one-shots subsection", arrange: func(t *testing.T, s *store, repoDir string, creator Workspace) (RegisterFacts, error) {
+			parent := creator.ID
+			return RegisterFacts{Parent: &parent, Placement: &RegisterPlacement{OneShots: true}}, ErrPlacementOnChild
+		}, check: func(t *testing.T, err error) {}},
 		{name: "a merge workspace", arrange: func(t *testing.T, s *store, repoDir string, creator Workspace) (RegisterFacts, error) {
 			return RegisterFacts{MergeOf: &MergeOrigin{Requester: creator.ID, Request: NewDetachedMergeID()}, Placement: newWith(creator, "x")}, ErrPlacementOnMerge
 		}, check: func(t *testing.T, err error) {}},
@@ -362,6 +366,8 @@ func TestAPlacementNamingBothOrNeitherTargetPanics(t *testing.T) {
 		{name: "neither", placement: RegisterPlacement{}},
 		{name: "both", placement: RegisterPlacement{Into: "a", New: &NewSubsectionPlacement{Name: "b"}, CreatedBy: "ws"}},
 		{name: "a new subsection with no creator", placement: RegisterPlacement{New: &NewSubsectionPlacement{Name: "b"}}},
+		{name: "the one-shots subsection and an existing one", placement: RegisterPlacement{Into: "a", OneShots: true}},
+		{name: "the one-shots subsection with a creator", placement: RegisterPlacement{OneShots: true, CreatedBy: "ws"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
