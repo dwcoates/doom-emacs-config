@@ -155,6 +155,10 @@ type Deps struct {
 	// SEAM ADDITION (recorded in the report): workspace.Ownership reports the
 	// STANDING but carries no address, and the arm has nowhere else to get one.
 	SuccessorAddress func() string
+	// KnownAccountRoots answers the account roots the daemon knows
+	// (account.Resolver.Roots), which FindWorkspaces checks a login named by
+	// its root against.
+	KnownAccountRoots func() []string
 	// IncumbentAddress answers the address of the daemon that serves a
 	// workspace this joining daemon has not adopted yet, which is
 	// `not_yet_adopted{address}`'s only field: the client views and acts on
@@ -653,6 +657,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("an ownership source")
 	case deps.SuccessorAddress == nil:
 		return nil, missing("a successor address source")
+	case deps.KnownAccountRoots == nil:
+		return nil, missing("a known account roots source")
 	case deps.IncumbentAddress == nil:
 		return nil, missing("an incumbent address source")
 	case deps.SharedAddress == nil:

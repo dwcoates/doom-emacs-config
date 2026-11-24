@@ -14,6 +14,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
@@ -75,6 +76,15 @@ func findHarness(t *testing.T, opts ...option) *harness {
 		"ws-landed": {ID: "ws-landed", Repo: repo.ID, Dir: "/src/landed", Name: "landed-one", Branch: "landed-one", CreatedAt: created, Closed: true, MergedAt: &merged},
 	}
 	h.DB.summaries = map[ids.WorkspaceID]string{"ws-open": "Fix the footer"}
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{
+		"ws-open":   {Workspace: "ws-open", ConfigDir: "/home/.claude-work"},
+		"ws-landed": {Workspace: "ws-landed", ConfigDir: "/home/.claude"},
+	}
+	h.DB.turnStarts = []wsm.TurnStart{
+		{Workspace: "ws-landed", StartedAt: time.UnixMilli(2_000), Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		{Workspace: "ws-open", StartedAt: time.UnixMilli(8_000), Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT},
+		{Workspace: "ws-open", StartedAt: time.UnixMilli(9_000), Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT},
+	}
 	h.Sidebar.topic.Publish(findRoster(thinking))
 	h.Sidebar.merged = []*frontendv1.RosterRow{landedRow()}
 	return h
@@ -102,6 +112,27 @@ func TestFindWorkspacesAnswersEveryMatchWithItsSummary(t *testing.T) {
 	}
 	if landed.GetName() != "landed-one" || landed.Summary != nil || landed.GetStanding().GetLanded().GetLandedAtMs() != 5_000 || landed.GetCreatedAtMs() != 1_000 {
 		t.Fatalf("second = %v, want the landed workspace with no summary", landed)
+	}
+}
+
+func TestFindWorkspacesAnswersEachWorkspacesConfigDirAndLastAgentTurn(t *testing.T) {
+	// Arrange
+	h := findHarness(t)
+	h.DB.workspaces["ws-new"] = wsm.Workspace{ID: "ws-new", Repo: "repo-1", Dir: "/src/new", Name: "new-one", CreatedAt: time.UnixMilli(500)}
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FindWorkspaces: %v", err)
+	}
+	got := foundByName(resp)
+	if open := got["open-one"]; open.GetConfigDir() != "/home/.claude-work" || open.GetLastTurnAtMs() != 8_000 {
+		t.Fatalf("open = %v, want the work root and its last agent turn at 8000, not its compaction", open)
+	}
+	if fresh := got["new-one"]; fresh == nil || fresh.ConfigDir != nil || fresh.LastTurnAtMs != nil {
+		t.Fatalf("new = %v, want no config dir and no last turn", fresh)
 	}
 }
 
@@ -142,6 +173,9 @@ func TestFindWorkspacesMapsTheRequestOntoTheQuery(t *testing.T) {
 		{name: "a window after the landing", req: &agentreplv1.FindWorkspacesRequest{Window: &agentreplv1.FindWorkspacesWindow{SinceMs: ptrTo(int64(6_000))}}, want: []string{"open-one"}},
 		{name: "a window before the creation", req: &agentreplv1.FindWorkspacesRequest{Window: &agentreplv1.FindWorkspacesWindow{UntilMs: ptrTo(int64(500))}}, want: nil},
 		{name: "text over the summary", req: &agentreplv1.FindWorkspacesRequest{Text: ptrTo("FOOTER")}, want: []string{"open-one"}},
+		{name: "a turn window", req: &agentreplv1.FindWorkspacesRequest{Turned: &agentreplv1.FindWorkspacesTurnWindow{SinceMs: ptrTo(int64(1_000)), UntilMs: ptrTo(int64(3_000))}}, want: []string{"landed-one"}},
+		{name: "a turn window holding only a compaction", req: &agentreplv1.FindWorkspacesRequest{Turned: &agentreplv1.FindWorkspacesTurnWindow{SinceMs: ptrTo(int64(8_500))}}, want: nil},
+		{name: "a turn window until alone", req: &agentreplv1.FindWorkspacesRequest{Turned: &agentreplv1.FindWorkspacesTurnWindow{UntilMs: ptrTo(int64(8_000))}}, want: []string{"open-one", "landed-one"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -322,6 +356,7 @@ func TestFindWorkspacesRefusesAMalformedRequest(t *testing.T) {
 		{name: "a zero limit", req: &agentreplv1.FindWorkspacesRequest{Limit: ptrTo(uint32(0))}},
 		{name: "a creator ref naming no workspace", req: &agentreplv1.FindWorkspacesRequest{CreatedBy: &workspacev1.WorkspaceRef{}}},
 		{name: "a caller ref naming no workspace", req: &agentreplv1.FindWorkspacesRequest{Caller: &workspacev1.WorkspaceRef{}}},
+		{name: "a reversed turn window", req: &agentreplv1.FindWorkspacesRequest{Turned: &agentreplv1.FindWorkspacesTurnWindow{SinceMs: ptrTo(int64(2)), UntilMs: ptrTo(int64(1))}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -348,6 +383,8 @@ func TestFindWorkspacesFailsAndRecordsAFailedRead(t *testing.T) {
 		{name: "the registry", edit: func(d *fakeDB) { d.readRegistryErr = errors.New("disk gone") }, cause: "read the registry: disk gone"},
 		{name: "the summaries", edit: func(d *fakeDB) { d.summariesErr = errors.New("disk gone") }, cause: "list the workspace summaries: disk gone"},
 		{name: "the vendor titles", edit: func(d *fakeDB) { d.titlesErr = errors.New("disk gone") }, cause: "list the vendor titles: disk gone"},
+		{name: "the sessions", edit: func(d *fakeDB) { d.sessionErr = errors.New("disk gone") }, cause: "list the sessions: disk gone"},
+		{name: "the turn starts", edit: func(d *fakeDB) { d.turnStartsErr = errors.New("disk gone") }, cause: "list the turn starts: disk gone"},
 		{name: "a workspace of an unregistered repository", edit: func(d *fakeDB) {
 			d.workspaces["ws-orphan"] = wsm.Workspace{ID: "ws-orphan", Repo: "repo-gone", Name: "orphan"}
 		}, cause: "workspacefind: workspace ws-orphan names repository repo-gone, which the registry does not hold"},
@@ -645,6 +682,73 @@ func TestFindWorkspacesByLoginKeepsItsRepositoriesAndTheirChildren(t *testing.T)
 	}
 }
 
+// loginRoot is a login narrowing naming the account root ROOT.
+func loginRoot(root string) *agentreplv1.FindWorkspacesLogin {
+	return &agentreplv1.FindWorkspacesLogin{Login: &agentreplv1.FindWorkspacesLogin_AccountRoot{AccountRoot: root}}
+}
+
+// TestFindWorkspacesByLoginRootMatchesTheLoginItsWorkspaceWouldName pins that
+// naming a login by its root answers exactly what naming it by one of its
+// workspaces does: one meaning of a login, two ways to name it.
+func TestFindWorkspacesByLoginRootMatchesTheLoginItsWorkspaceWouldName(t *testing.T) {
+	tests := []struct {
+		name string
+		root string
+		ref  *workspacev1.WorkspaceRef
+		want []string
+	}{
+		{name: "the work root", root: "/home/.claude-work", ref: &workspacev1.WorkspaceRef{Id: "ws-open"},
+			want: []string{"child-one", "landed-one", "open-one"}},
+		{name: "the default root", root: defaultAccountRoot, ref: &workspacev1.WorkspaceRef{Id: "ws-child"},
+			want: []string{"child-one", "personal-one"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := loginHarness(t)
+			names := func(resp *connect.Response[agentreplv1.FindWorkspacesResponse]) []string {
+				var got []string
+				for name := range foundByName(resp) {
+					got = append(got, name)
+				}
+				sort.Strings(got)
+				return got
+			}
+
+			// Act
+			byRoot, rootErr := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Login: loginRoot(tt.root)}))
+			byWorkspace, wsErr := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Login: loginOf(tt.ref)}))
+
+			// Assert
+			if rootErr != nil || wsErr != nil {
+				t.Fatalf("FindWorkspaces: %v, %v", rootErr, wsErr)
+			}
+			if got := names(byRoot); !reflect.DeepEqual(got, tt.want) || !reflect.DeepEqual(got, names(byWorkspace)) {
+				t.Fatalf("by root %v, by workspace %v; want both %v", got, names(byWorkspace), tt.want)
+			}
+		})
+	}
+}
+
+func TestFindWorkspacesByAnUnknownLoginRootIsAnAnswer(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := loginHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Login: loginRoot("/home/.claude-gone")}))
+
+	// Assert
+	unknown := resp.Msg.GetError().GetUnknownLoginRoot()
+	if err != nil || unknown == nil || !reflect.DeepEqual(unknown.GetKnown(), h.KnownAccountRoots) {
+		t.Fatalf("FindWorkspaces = %v, %v; want unknown_login_root naming the known roots %v", resp, err, h.KnownAccountRoots)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "FindWorkspaces"})
+	if !ok || rec.Context["arm"] != "unknown_login_root" || !strings.Contains(fmt.Sprint(rec.Context["reason"]), "/home/.claude-gone") {
+		t.Fatalf("INFO record = %v (%v), want the unknown_login_root refusal naming the root", rec.Context, ok)
+	}
+}
+
 func TestFindWorkspacesByTheLoginOfAnUnknownWorkspaceIsAnAnswer(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
@@ -671,6 +775,7 @@ func TestFindWorkspacesRefusesAMalformedLogin(t *testing.T) {
 	}{
 		{name: "a login with no arm", login: &agentreplv1.FindWorkspacesLogin{}},
 		{name: "a login naming an empty workspace ref", login: loginOf(&workspacev1.WorkspaceRef{})},
+		{name: "a login naming a blank root", login: loginRoot(" ")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

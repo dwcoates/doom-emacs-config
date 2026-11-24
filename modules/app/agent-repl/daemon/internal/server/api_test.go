@@ -32,6 +32,23 @@ func TestNewRefusesAMissingDependency(t *testing.T) {
 
 // TestNewRefusesAMissingRetarget pins that the retarget operation is
 // required: SetWorkspaceParent has no other way to change a merge target.
+// TestNewRefusesMissingKnownAccountRoots pins that the known account roots
+// are required: FindWorkspaces could not tell an unknown root from one no
+// repository is routed to.
+func TestNewRefusesMissingKnownAccountRoots(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	deps := h.withoutDep(func(d *Deps) { d.KnownAccountRoots = nil })
+
+	// Act.
+	_, err := New(deps)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "a known account roots source") {
+		t.Fatalf("New = %v, want the refusal naming the known account roots source", err)
+	}
+}
+
 func TestNewRefusesAMissingRetarget(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

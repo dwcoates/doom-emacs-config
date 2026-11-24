@@ -137,6 +137,9 @@ type Resolver interface {
 	IsMultiRepo(configDir string) bool
 	// Read loads one config root's account facts from its .claude.json.
 	Read(ctx context.Context, configDir string) (Account, error)
+	// Roots are the account roots the daemon knows, default first and
+	// deduplicated: the roots Roster reads, without reading them.
+	Roots() []string
 	// Roster is both roots' accounts, for the topbar's account display.
 	Roster(ctx context.Context) ([]Account, error)
 	// FindTranscript locates a vendor session's transcript, probing the routed

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/wsm"
 )
 
@@ -52,6 +54,40 @@ type Query struct {
 	// routed to one login) plus the direct children of those workspaces, in
 	// any repository. nil narrows nothing; an empty set keeps nothing.
 	LoginRepos map[wsm.RepoID]bool
+	// Turned keeps only workspaces that had an agent turn inside it.
+	Turned *TurnWindow
+}
+
+// TurnWindow is a window an agent turn's start must fall in, both ends
+// inclusive; a nil end is open-ended.
+type TurnWindow struct {
+	// Since is the window's start.
+	Since *time.Time
+	// Until is the window's end.
+	Until *time.Time
+}
+
+// contains reports whether AT falls inside W.
+func (w TurnWindow) contains(at time.Time) bool {
+	return (w.Since == nil || !at.Before(*w.Since)) && (w.Until == nil || !at.After(*w.Until))
+}
+
+// Records are what a find filters: the registry's rows and the facts kept
+// beside them, read by the caller.
+type Records struct {
+	// Workspaces are every registered workspace.
+	Workspaces []wsm.Workspace
+	// Repositories are every registered repository.
+	Repositories []wsm.Repository
+	// Summaries are each workspace's words (Summaries).
+	Summaries map[wsm.WorkspaceID]string
+	// Drawn is how the roster draws each workspace (Placements).
+	Drawn map[wsm.WorkspaceID]Drawn
+	// Sessions are the session records by workspace, which say the config dir
+	// each runs under.
+	Sessions map[wsm.WorkspaceID]wsm.Session
+	// Turns are every recorded turn's start.
+	Turns []wsm.TurnStart
 }
 
 // Found is one workspace a find answered.
@@ -68,6 +104,12 @@ type Found struct {
 	// Roster is how the roster draws the workspace, nil when it draws no row
 	// of it in its open, hidden or recently merged section.
 	Roster *Drawn
+	// ConfigDir is the Claude config dir the workspace's session last came up
+	// under, nil when it never came up.
+	ConfigDir *string
+	// LastTurnAt is when the workspace's last agent turn started, nil when it
+	// never took one.
+	LastTurnAt *time.Time
 }
 
 // Result is a find's answer.
@@ -124,22 +166,58 @@ func Summaries(summaries, titles map[wsm.WorkspaceID]string) map[wsm.WorkspaceID
 	return out
 }
 
-// Find answers the agent workspaces among WORKSPACES that match Q, each with
-// its repository from REPOSITORIES, its summary from SUMMARIES and how the
-// roster draws it from DRAWN (Placements). A workspace
-// whose repository REPOSITORIES does not hold is an invariant violation (the
-// registry's foreign key forbids it) and fails the find.
-func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries map[wsm.WorkspaceID]string, drawn map[wsm.WorkspaceID]Drawn, q Query) (Result, error) {
-	repos := make(map[wsm.RepoID]wsm.Repository, len(repositories))
-	for _, repo := range repositories {
+// IsAgentTurn reports whether TURN set the agent working: its origin starts an
+// agent turn (promptorigin.StartsAgentTurn), and its text is no session
+// command the daemon acts on itself, such as a typed /compact or /clear
+// (prompthandler.RecognizeText).
+func IsAgentTurn(turn wsm.TurnStart) bool {
+	return promptorigin.StartsAgentTurn(turn.Origin) && prompthandler.RecognizeText(turn.CommandText) == prompthandler.RecognizedNone
+}
+
+// agentTurns is one workspace's agent turns, as a find reads them.
+type agentTurns struct {
+	// last is the latest agent turn's start.
+	last time.Time
+	// inWindow reports whether any agent turn started inside the query's turn
+	// window.
+	inWindow bool
+}
+
+// agentTurnsOf indexes TURNS' agent turns by workspace, matching each against
+// WINDOW when one is set.
+func agentTurnsOf(turns []wsm.TurnStart, window *TurnWindow) map[wsm.WorkspaceID]agentTurns {
+	out := make(map[wsm.WorkspaceID]agentTurns)
+	for _, turn := range turns {
+		if !IsAgentTurn(turn) {
+			continue
+		}
+		got := out[turn.Workspace]
+		if turn.StartedAt.After(got.last) {
+			got.last = turn.StartedAt
+		}
+		got.inWindow = got.inWindow || (window != nil && window.contains(turn.StartedAt))
+		out[turn.Workspace] = got
+	}
+	return out
+}
+
+// Find answers the agent workspaces among IN's that match Q, each with its
+// repository, its summary, how the roster draws it, its config dir and its
+// last agent turn. A workspace whose repository IN does not hold is an
+// invariant violation (the registry's foreign key forbids it) and fails the
+// find.
+func Find(in Records, q Query) (Result, error) {
+	repos := make(map[wsm.RepoID]wsm.Repository, len(in.Repositories))
+	for _, repo := range in.Repositories {
 		repos[repo.ID] = repo
 	}
-	byID := make(map[wsm.WorkspaceID]wsm.Workspace, len(workspaces))
-	for _, ws := range workspaces {
+	byID := make(map[wsm.WorkspaceID]wsm.Workspace, len(in.Workspaces))
+	for _, ws := range in.Workspaces {
 		byID[ws.ID] = ws
 	}
+	turns := agentTurnsOf(in.Turns, q.Turned)
 	var matched []Found
-	for _, ws := range workspaces {
+	for _, ws := range in.Workspaces {
 		if !IsAgentWorkspace(ws) {
 			continue
 		}
@@ -148,13 +226,24 @@ func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries m
 			return Result{}, fmt.Errorf("workspacefind: workspace %s names repository %s, which the registry does not hold", ws.ID, ws.Repo)
 		}
 		found := Found{Workspace: ws, Repository: repo, LastActiveAt: LastActiveAt(ws)}
-		if summary, ok := summaries[ws.ID]; ok {
+		if summary, ok := in.Summaries[ws.ID]; ok {
 			found.Summary = &summary
 		}
-		if d, ok := drawn[ws.ID]; ok {
+		if d, ok := in.Drawn[ws.ID]; ok {
 			found.Roster = &d
 		}
-		if matches(found, q) && ofLogin(ws, byID, q.LoginRepos) {
+		// A SESSION ROW CAN PRECEDE ITS FIRST BRING-UP (a root chosen before
+		// the workspace ever came up), and records no root until then.
+		if session, ok := in.Sessions[ws.ID]; ok && session.ConfigDir != "" {
+			dir := session.ConfigDir
+			found.ConfigDir = &dir
+		}
+		agent, turned := turns[ws.ID]
+		if turned {
+			last := agent.last
+			found.LastTurnAt = &last
+		}
+		if matches(found, q, agent.inWindow) && ofLogin(ws, byID, q.LoginRepos) {
 			matched = append(matched, found)
 		}
 	}
@@ -176,8 +265,9 @@ func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries m
 	return out, nil
 }
 
-// matches reports whether F meets every criterion Q sets.
-func matches(f Found, q Query) bool {
+// matches reports whether F meets every criterion Q sets but its login,
+// TURNED being whether one of its agent turns started inside Q's turn window.
+func matches(f Found, q Query, turned bool) bool {
 	ws := f.Workspace
 	if q.Repository != nil && ws.Repo != *q.Repository {
 		return false
@@ -198,6 +288,9 @@ func matches(f Found, q Query) bool {
 		return false
 	}
 	if q.OnRoster && f.Roster == nil {
+		return false
+	}
+	if q.Turned != nil && !turned {
 		return false
 	}
 	return true

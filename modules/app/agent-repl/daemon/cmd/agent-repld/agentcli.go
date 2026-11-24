@@ -29,6 +29,7 @@ import (
 	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/agentverbs"
+	"agent-repld/internal/dirpath"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/prioritywire"
@@ -112,6 +113,9 @@ type cliDeps struct {
 	mintKey func(prefix string) (string, error)
 	// now is the current instant, which a relative time flag counts back from.
 	now func() time.Time
+	// home answers the user's home directory, which a leading `~/` in a path
+	// flag names.
+	home func() (string, error)
 	// stdin is what a verb reading its input from standard input reads (a
 	// deploy intake's dispatched problems).
 	stdin io.Reader
@@ -135,6 +139,7 @@ func productionCLIDeps() cliDeps {
 		isWorktreeRoot: isWorktreeRoot,
 		mintKey:        prompthandler.MintKey,
 		now:            time.Now,
+		home:           os.UserHomeDir,
 		stdin:          os.Stdin,
 	}
 }
@@ -203,8 +208,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"compact":                {usage: agentverbs.CompactUsage, run: workspaceCompact},
 		"model":                  {usage: agentverbs.ModelUsage, run: workspaceModel},
 		"status":                 {usage: "status WS", run: workspaceStatus},
-		"list":                   {usage: "list [-login here|WS]", run: workspaceList},
-		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
+		"list":                   {usage: "list [-login here|WS | -login-root ROOT]", run: workspaceList},
+		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-turned-since WHEN] [-turned-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-login here|WS | -login-root ROOT] [-limit N|-all]", run: workspaceFind},
 		"subscribe":              {usage: "subscribe WS -events " + allNoticeEvents, run: workspaceSubscribe},
 		"unsubscribe":            {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"pr-subscribe":           {usage: "pr-subscribe WS -pr URL|#N|OWNER/REPO#N [-events " + allPullRequestEvents + "]", run: workspacePullRequestSubscribe},
@@ -1785,6 +1790,9 @@ func workspaceFind(c *cliCall, args []string) int {
 	standing := fs.String("standing", "", "only workspaces open, closed (landed or not), or landed")
 	text := fs.String("text", "", "only workspaces whose name, branch or summary contains TEXT, case-insensitively")
 	createdBy := fs.String("created-by", "", "only workspaces whose creation WS's agent asked for")
+	turnedSince := fs.String("turned-since", "", "only workspaces with an agent turn that started at or after WHEN, spelled as -since is")
+	turnedUntil := fs.String("turned-until", "", "only workspaces with an agent turn that started at or before WHEN, spelled as -since is")
+	login := loginFlags(fs)
 	limit := fs.Int("limit", defaultFindLimit, "answer at most N workspaces")
 	all := fs.Bool("all", false, "answer every match, with no limit")
 	positionals, ok := c.parse(fs, args)
@@ -1808,10 +1816,12 @@ func workspaceFind(c *cliCall, args []string) int {
 		req.Limit = &n
 	}
 	window := &agentreplv1.FindWorkspacesWindow{}
+	turned := &agentreplv1.FindWorkspacesTurnWindow{}
 	for _, bound := range []struct {
 		flag, value string
 		into        **int64
-	}{{"since", *since, &window.SinceMs}, {"until", *until, &window.UntilMs}} {
+	}{{"since", *since, &window.SinceMs}, {"until", *until, &window.UntilMs},
+		{"turned-since", *turnedSince, &turned.SinceMs}, {"turned-until", *turnedUntil, &turned.UntilMs}} {
 		if bound.value == "" {
 			continue
 		}
@@ -1823,6 +1833,9 @@ func workspaceFind(c *cliCall, args []string) int {
 	}
 	if window.SinceMs != nil || window.UntilMs != nil {
 		req.Window = window
+	}
+	if turned.SinceMs != nil || turned.UntilMs != nil {
+		req.Turned = turned
 	}
 	switch *standing {
 	case "":
@@ -1854,10 +1867,65 @@ func workspaceFind(c *cliCall, args []string) int {
 	if req.Caller, ok = c.callerIfAny(); !ok {
 		return exitFailure
 	}
+	if req.Login, ok = c.loginOf(login); !ok {
+		return exitFailure
+	}
 	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.FindWorkspacesResponse) (string, error) {
 		return describeFindRefusal(msg.GetError())
 	})
+}
+
+// loginFlagValues are the two ways `workspace find` and `workspace list` name
+// a login (agentrepl.v1.FindWorkspacesLogin), one per arm.
+type loginFlagValues struct {
+	// ofWorkspace is -login: here, or a workspace's name or directory.
+	ofWorkspace *string
+	// root is -login-root: the login's account root.
+	root *string
+}
+
+// loginFlags declares -login and -login-root on FS.
+func loginFlags(fs *flag.FlagSet) loginFlagValues {
+	return loginFlagValues{
+		ofWorkspace: fs.String("login", "", "only the workspaces of this workspace's login (here, or a name or directory), plus their children"),
+		root:        fs.String("login-root", "", "only the workspaces of the login whose account root is ROOT (such as ~/.claude-chesscom), plus their children"),
+	}
+}
+
+// loginOf reads the login V names, nil when neither flag is set. Setting both
+// fails the call as a usage error, and so does a root that is not an
+// absolute path once a leading `~/` is expanded. A workspace is resolved
+// against the dialed daemon, so the call must have dialed.
+func (c *cliCall) loginOf(v loginFlagValues) (*agentreplv1.FindWorkspacesLogin, bool) {
+	switch {
+	case *v.ofWorkspace != "" && *v.root != "":
+		c.usageFailed("-login and -login-root are exclusive")
+		return nil, false
+	case *v.ofWorkspace != "":
+		ref, ok := c.named(*v.ofWorkspace)
+		if !ok {
+			return nil, false
+		}
+		return &agentreplv1.FindWorkspacesLogin{Login: &agentreplv1.FindWorkspacesLogin_OfWorkspace{OfWorkspace: ref}}, true
+	case *v.root != "":
+		home := ""
+		if strings.HasPrefix(*v.root, "~") {
+			dir, err := c.deps.home()
+			if err != nil {
+				c.usageFailed("-login-root: resolve the home directory: %v", err)
+				return nil, false
+			}
+			home = dir
+		}
+		root, err := dirpath.Absolute(*v.root, home)
+		if err != nil {
+			c.usageFailed("-login-root: %v", err)
+			return nil, false
+		}
+		return &agentreplv1.FindWorkspacesLogin{Login: &agentreplv1.FindWorkspacesLogin_AccountRoot{AccountRoot: root}}, true
+	}
+	return nil, true
 }
 
 // whenFlag reads time flag -FLAG's VALUE (parseWhen) as epoch ms, a value
@@ -2011,7 +2079,7 @@ func (c *cliCall) subsectionNamed(arranged *agentreplv1.ArrangedRepository, name
 // caller's own record. `status WS` reads one in full.
 func workspaceList(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	login := fs.String("login", "", "only the workspaces of this workspace's login (here, or a name or directory), plus their children")
+	login := loginFlags(fs)
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
@@ -2027,12 +2095,8 @@ func workspaceList(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	req := &agentreplv1.FindWorkspacesRequest{OnRoster: &agentreplv1.FindWorkspacesOnRoster{}, Caller: caller}
-	if *login != "" {
-		ref, ok := c.named(*login)
-		if !ok {
-			return exitFailure
-		}
-		req.Login = &agentreplv1.FindWorkspacesLogin{Login: &agentreplv1.FindWorkspacesLogin_OfWorkspace{OfWorkspace: ref}}
+	if req.Login, ok = c.loginOf(login); !ok {
+		return exitFailure
 	}
 	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
 	if err != nil || resp.Msg.GetError() != nil {

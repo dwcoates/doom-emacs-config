@@ -1,7 +1,9 @@
 # Finding workspaces, open or closed
 
 - `workspace find [-repository here|DIR] [-since WHEN] [-until WHEN]
-  [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]` lists the
+  [-turned-since WHEN] [-turned-until WHEN] [-standing open|closed|landed]
+  [-text TEXT] [-created-by WS] [-login here|WS | -login-root ROOT]
+  [-limit N|-all]` lists the
   workspaces the daemon's registry holds, OPEN OR CLOSED (including ones
   closed long ago that the roster no longer shows), each with its name,
   branch, repository, its summary (the one-sentence task summary the
@@ -9,9 +11,25 @@
   last active, whether it is open, closed or landed, its `createdBy` and,
   for a child, its `parent`, most recently active first. Each record also
   carries `roster` (section and live status `arm`) when the sidebar draws the
-  workspace, and `calling` true for the caller's own record. WHEN is an age (`90m`, `36h`, `7d`), a date (`2026-10-20`) or
+  workspace, `calling` true for the caller's own record, `configDir` and
+  `lastTurnAtMs` (both read as `workspace list` documents them). WHEN is an age (`90m`, `36h`, `7d`), a date (`2026-10-20`) or
   an RFC 3339 instant: `-since` keeps workspaces active at or after WHEN,
-  `-until` keeps workspaces created at or before WHEN. `-text` matches name,
+  `-until` keeps workspaces created at or before WHEN. `-since` matches any
+  activity (a close, a landing, a turn's end). `-turned-since WHEN` and
+  `-turned-until WHEN` instead keep only workspaces with at least one AGENT
+  TURN that started at or after / at or before WHEN (both inclusive, either
+  alone is open-ended on the other side, WHEN spelled as for `-since`). An
+  agent turn is a prompt the user sent (editor, webapp or claude.ai), a prompt
+  another workspace's agent sent, a daemon brief or notice, or a turn the
+  vendor started on its own. A compaction or `/clear` (typed or the daemon's),
+  any other session command the daemon acts on itself, and a restart's
+  re-drive of an interrupted turn are not, and neither is a gate answer,
+  rename or status change. `-login` and `-login-root` narrow to one login as
+  `workspace list` documents them; a `-login-root` the daemon does not know is
+  refused (exit refused) with a plain-English line on stderr naming the roots
+  it knows, never an empty answer. Every filter combines with the others (all
+  must hold), e.g. `-login-root ~/.claude-chesscom -turned-since 24h` finds
+  the work login's workspaces that actually worked in the last day. `-text` matches name,
   branch or summary case-insensitively. `-created-by WS` (`-created-by here`)
   keeps only the workspaces WS's agent asked for: the way a workspace
   accounts for every workspace it made, open or closed, when its conversation

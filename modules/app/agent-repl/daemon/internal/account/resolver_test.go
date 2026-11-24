@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"agent-repld/internal/account"
@@ -533,6 +534,31 @@ func TestIsMultiRepo(t *testing.T) {
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("IsMultiRepo(%q) = %v, want %v", tc.configDir, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRootsAreTheKnownRootsDefaultFirstAndDeduplicated(t *testing.T) {
+	tests := []struct {
+		name  string
+		roots account.Roots
+		want  []string
+	}{
+		{name: "two roots, default first", roots: account.Roots{Default: "/roots/default", MultiRepo: "/roots/multi"}, want: []string{"/roots/default", "/roots/multi"}},
+		{name: "one root configured twice is one", roots: account.Roots{Default: "/roots/one", MultiRepo: "/roots/one"}, want: []string{"/roots/one"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newResolver(t, tt.roots)
+
+			// Act
+			got := r.Roots()
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("Roots() = %v, want %v", got, tt.want)
 			}
 		})
 	}

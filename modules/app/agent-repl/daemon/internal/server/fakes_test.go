@@ -211,6 +211,10 @@ type fakeDB struct {
 	sessions map[ids.WorkspaceID]wsm.Session
 	// sessionErr fails every session read.
 	sessionErr error
+	// turnStarts are the recorded turn starts TurnStarts answers;
+	// turnStartsErr fails that read.
+	turnStarts    []wsm.TurnStart
+	turnStartsErr error
 	// creationJobs are the creation jobs CreationJob answers, by workspace;
 	// creationJobErr fails every creation-job read.
 	creationJobs   map[ids.WorkspaceID]wsm.CreationJob
@@ -253,6 +257,27 @@ func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bo
 	}
 	session, ok := f.sessions[id]
 	return session, ok, nil
+}
+
+// Sessions answers every seeded session, by workspace, or sessionErr.
+func (f *fakeDB) Sessions(context.Context) ([]wsm.Session, error) {
+	if f.sessionErr != nil {
+		return nil, f.sessionErr
+	}
+	out := make([]wsm.Session, 0, len(f.sessions))
+	for _, session := range f.sessions {
+		out = append(out, session)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Workspace < out[j].Workspace })
+	return out, nil
+}
+
+// TurnStarts answers the seeded turn starts, or turnStartsErr.
+func (f *fakeDB) TurnStarts(context.Context) ([]wsm.TurnStart, error) {
+	if f.turnStartsErr != nil {
+		return nil, f.turnStartsErr
+	}
+	return f.turnStarts, nil
 }
 
 func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.CreationJob, bool, error) {
@@ -2561,6 +2586,9 @@ type harness struct {
 	// (Deps.AccountRootFor); a directory it does not name is routed to
 	// defaultAccountRoot.
 	AccountRoots map[string]string
+	// KnownAccountRoots is what the surface's KnownAccountRoots dependency
+	// answers.
+	KnownAccountRoots []string
 	// IncumbentAddress is what the surface's IncumbentAddress dependency
 	// answers: the daemon serving what a joining daemon has not adopted, or
 	// empty when none does.
@@ -2774,8 +2802,9 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	}
 
 	h := &harness{
-		t:                t,
-		IncumbentAddress: "127.0.0.1:8888",
+		t:                 t,
+		IncumbentAddress:  "127.0.0.1:8888",
+		KnownAccountRoots: []string{defaultAccountRoot, "/home/.claude-work"},
 		DB: &fakeDB{workspaces: map[ids.WorkspaceID]wsm.Workspace{
 			testWorkspaceID: {ID: testWorkspaceID, Dir: testWorkspaceDir, Name: "test"},
 		}},
@@ -2848,35 +2877,36 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		h.Notices = &briefprompttest.Meter{}
 	}
 	deps := Deps{
-		AccountRootFor:   h.accountRootFor,
-		Notices:          h.Notices,
-		DeployConfig:     lifecycleconfig.OnDisk{},
-		Tests:            h.Tests,
-		SubagentMakers:   h.Makers,
-		DB:               h.DB,
-		Prompts:          h.Prompts,
-		Queue:            h.Queue,
-		HeldRollback:     h.Queue,
-		Verbs:            h.Verbs,
-		PullRequests:     h.PRs,
-		Slack:            h.Slack,
-		Remotes:          h.Remotes,
-		Retarget:         h.Retarget,
-		Merge:            h.Merge,
-		Drain:            h.Drain,
-		Rollout:          h.Rollout,
-		Deploy:           h.Deployer,
-		Health:           h.Health,
-		SessionFacts:     h.Facts,
-		SlashCommands:    h.SlashCommands,
-		SlackChannels:    h.SlackChannels,
-		Mentions:         h.Mentions,
-		Login:            h.Login,
-		Ownership:        h.Ownership,
-		SuccessorAddress: func() string { return "127.0.0.1:9999" },
-		IncumbentAddress: func() string { return h.IncumbentAddress },
-		Forward:          h2cclient.Client(),
-		SharedAddress:    func() string { return h.SharedAddress },
+		AccountRootFor:    h.accountRootFor,
+		Notices:           h.Notices,
+		DeployConfig:      lifecycleconfig.OnDisk{},
+		Tests:             h.Tests,
+		SubagentMakers:    h.Makers,
+		DB:                h.DB,
+		Prompts:           h.Prompts,
+		Queue:             h.Queue,
+		HeldRollback:      h.Queue,
+		Verbs:             h.Verbs,
+		PullRequests:      h.PRs,
+		Slack:             h.Slack,
+		Remotes:           h.Remotes,
+		Retarget:          h.Retarget,
+		Merge:             h.Merge,
+		Drain:             h.Drain,
+		Rollout:           h.Rollout,
+		Deploy:            h.Deployer,
+		Health:            h.Health,
+		SessionFacts:      h.Facts,
+		SlashCommands:     h.SlashCommands,
+		SlackChannels:     h.SlackChannels,
+		Mentions:          h.Mentions,
+		Login:             h.Login,
+		Ownership:         h.Ownership,
+		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
+		IncumbentAddress:  func() string { return h.IncumbentAddress },
+		KnownAccountRoots: func() []string { return h.KnownAccountRoots },
+		Forward:           h2cclient.Client(),
+		SharedAddress:     func() string { return h.SharedAddress },
 		ServingElsewhere: func(context.Context, ids.WorkspaceID) (string, bool, error) {
 			return h.ServingElsewhere, h.ServingElsewhere != "", nil
 		},

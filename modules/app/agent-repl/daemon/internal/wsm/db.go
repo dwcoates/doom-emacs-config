@@ -406,6 +406,9 @@ type DB interface {
 	// workspace's OWN work. A fork's feed reads it to tell the conversation it
 	// inherited from the turns it ran itself.
 	RecordedTurns(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]bool, error)
+	// TurnStarts loads every recorded turn's start and origin, with its text
+	// only when it may be a slash command (turnstarts.go).
+	TurnStarts(ctx context.Context) ([]TurnStart, error)
 	// OpenTurns loads a workspace's turns that have no terminal.
 	OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error)
 	// HasTurns reports whether a workspace has EVER recorded a turn, open or

@@ -243,3 +243,25 @@ func TestRecognizeLeavesANearMissOfAClearAliasAPrompt(t *testing.T) {
 		})
 	}
 }
+
+func TestRecognizeTextAnswersRecognizesKind(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "a context cut", text: "/compact keep the plan"},
+		{name: "a panel", text: "/status"},
+		{name: "a refused command", text: "/help"},
+		{name: "ordinary prose", text: "please fix the failing test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act
+			got := RecognizeText(tt.text)
+			// Assert
+			if want := recognize(tt.text).kind; got != want {
+				t.Fatalf("RecognizeText(%q) = %s, want %s", tt.text, recognitionName(got), recognitionName(want))
+			}
+		})
+	}
+}

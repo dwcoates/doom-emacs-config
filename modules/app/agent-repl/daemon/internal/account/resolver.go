@@ -324,7 +324,7 @@ func (r *resolver) Read(ctx context.Context, configDir string) (Account, error) 
 // absent when it is merely unreadable.
 func (r *resolver) Roster(ctx context.Context) ([]Account, error) {
 	out := make([]Account, 0, 2)
-	for _, dir := range r.rosterRoots() {
+	for _, dir := range r.Roots() {
 		acct, err := r.Read(ctx, dir)
 		if err != nil {
 			r.log.Error("daemon.account.roster", "account roster failed", dlog.Context{
@@ -343,9 +343,9 @@ func (r *resolver) Roster(ctx context.Context) ([]Account, error) {
 	return out, nil
 }
 
-// rosterRoots is the two roots, deduplicated: one root configured twice is one
-// account, not two rows drawing the same address.
-func (r *resolver) rosterRoots() []string {
+// Roots implements Resolver: the two roots, deduplicated, since one root
+// configured twice is one account, not two rows drawing the same address.
+func (r *resolver) Roots() []string {
 	if r.roots.Default == r.roots.MultiRepo {
 		return []string{r.roots.Default}
 	}

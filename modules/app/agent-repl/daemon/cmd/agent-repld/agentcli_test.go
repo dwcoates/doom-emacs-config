@@ -381,10 +381,20 @@ type cliFixture struct {
 	// worktrees are the git worktrees' roots beyond the workspaces' own
 	// directories, every one of which is a root.
 	worktrees []string
+	// home answers the user's home directory; nil answers /home/u.
+	home func() (string, error)
 }
 
 // cliNow is the instant the fixture's commands read as now.
 var cliNow = time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+
+// homeDir is the fixture's cliDeps.home: home when set, else /home/u.
+func (f *cliFixture) homeDir() (string, error) {
+	if f.home != nil {
+		return f.home()
+	}
+	return "/home/u", nil
+}
 
 func newCLIFixture() *cliFixture {
 	return &cliFixture{client: &cliClient{}, cwd: "/wt/caller/src"}
@@ -456,6 +466,7 @@ func (f *cliFixture) run(noun string, args ...string) int {
 		isWorktreeRoot: worktreeRoots(append(rowDirs(append(cliRows(), f.unrostered...)), f.worktrees...)...),
 		mintKey:        func(prefix string) (string, error) { return prefix + "-1", nil },
 		now:            func() time.Time { return cliNow },
+		home:           f.homeDir,
 		stdin:          strings.NewReader(f.stdin),
 	}
 	return runNoun(context.Background(), noun, args, deps, &f.out, &f.errOut)
@@ -3298,7 +3309,8 @@ func TestFindSendsEveryNarrowingItNames(t *testing.T) {
 		check func(*agentreplv1.FindWorkspacesRequest) bool
 	}{
 		{name: "nothing named sends the default limit and nothing else", args: nil, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
-			return r.GetLimit() == defaultFindLimit && r.Repository == nil && r.Window == nil && r.Standing == nil && r.Text == nil && r.CreatedBy == nil
+			return r.GetLimit() == defaultFindLimit && r.Repository == nil && r.Window == nil && r.Standing == nil && r.Text == nil && r.CreatedBy == nil &&
+				r.Login == nil && r.Turned == nil
 		}},
 		{name: "-all sends no limit", args: []string{"-all"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.Limit == nil }},
 		{name: "-limit", args: []string{"-limit", "3"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetLimit() == 3 }},
@@ -3323,6 +3335,27 @@ func TestFindSendsEveryNarrowingItNames(t *testing.T) {
 		}},
 		{name: "the calling workspace is named the caller", args: nil, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
 			return r.GetCaller().GetId() == "ws-caller" && r.OnRoster == nil
+		}},
+		{name: "-turned-since alone", args: []string{"-turned-since", "36h"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetTurned().GetSinceMs() == cliNow.Add(-36*time.Hour).UnixMilli() && r.GetTurned().UntilMs == nil && r.Window == nil
+		}},
+		{name: "-turned-until alone", args: []string{"-turned-until", "2026-10-20"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetTurned().GetUntilMs() == time.Date(2026, 10, 20, 0, 0, 0, 0, time.Local).UnixMilli() && r.GetTurned().SinceMs == nil
+		}},
+		{name: "-turned-since and -turned-until together", args: []string{"-turned-since", "2026-10-20T08:00:00Z", "-turned-until", "2026-10-21T08:00:00Z"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetTurned().GetSinceMs() == time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC).UnixMilli() && r.GetTurned().GetUntilMs() == time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC).UnixMilli()
+		}},
+		{name: "-login here names the caller's login", args: []string{"-login", "here"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetLogin().GetOfWorkspace().GetId() == "ws-caller"
+		}},
+		{name: "-login-root expands a leading ~/", args: []string{"-login-root", "~/.claude-chesscom"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetLogin().GetAccountRoot() == "/home/u/.claude-chesscom"
+		}},
+		{name: "-login-root ~ alone is the home directory", args: []string{"-login-root", "~"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetLogin().GetAccountRoot() == "/home/u"
+		}},
+		{name: "-login-root sends an absolute root verbatim", args: []string{"-login-root", "/roots/.claude"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetLogin().GetAccountRoot() == "/roots/.claude"
 		}},
 	}
 	for _, tt := range tests {
@@ -3394,6 +3427,11 @@ func TestFindRefusesAMalformedCommandBeforeCallingTheDaemon(t *testing.T) {
 		{name: "a zero limit", args: []string{"-limit", "0"}, want: "-limit is at least 1"},
 		{name: "an unknown standing", args: []string{"-standing", "merged"}, want: `-standing is open, closed or landed, not "merged"`},
 		{name: "an unreadable since", args: []string{"-since", "last week"}, want: `-since: "last week" is no age`},
+		{name: "an unreadable turned-since", args: []string{"-turned-since", "yesterday"}, want: `-turned-since: "yesterday" is no age`},
+		{name: "an unreadable turned-until", args: []string{"-turned-until", "soon"}, want: `-turned-until: "soon" is no age`},
+		{name: "a relative login root", args: []string{"-login-root", ".claude"}, want: `-login-root: dirpath: ".claude" is not an absolute path`},
+		{name: "another user's login root", args: []string{"-login-root", "~other/.claude"}, want: `-login-root: dirpath: "~other/.claude" names another user's home directory`},
+		{name: "-login with -login-root", args: []string{"-login", "here", "-login-root", "/roots/.claude"}, want: "-login and -login-root are exclusive"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -4317,6 +4355,34 @@ func TestListLoginNamesTheWorkspaceWhoseLoginItNarrowsTo(t *testing.T) {
 				t.Fatalf("exit %d, sent %v; want the roster narrowed to the login of %s", code, req, tt.want)
 			}
 		})
+	}
+}
+
+func TestListLoginRootNamesTheLoginByItsRoot(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "list", "-login-root", "~/.claude-chesscom")
+
+	// Assert
+	req := only[*agentreplv1.FindWorkspacesRequest](t, f)
+	if code != exitSuccess || req.OnRoster == nil || req.GetLogin().GetAccountRoot() != "/home/u/.claude-chesscom" {
+		t.Fatalf("exit %d, sent %v; want the roster narrowed to the login of the expanded root", code, req)
+	}
+}
+
+func TestFindReportsAnUnresolvableLoginRootBeforeCallingTheDaemon(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.home = func() (string, error) { return "", errors.New("$HOME is not defined") }
+
+	// Act
+	code := f.run(workspaceNoun, "find", "-login-root", "~/.claude")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "-login-root: resolve the home directory: $HOME is not defined") || len(f.client.requests) != 0 {
+		t.Fatalf("exit %d, stderr %q, %d request(s); want the -login-root failure and no call", code, f.errOut.String(), len(f.client.requests))
 	}
 }
 
