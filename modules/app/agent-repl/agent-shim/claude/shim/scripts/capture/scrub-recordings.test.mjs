@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { scrubTree } from "./scrub-recordings.mjs";
 
-const personal = { home: "/Users/ann", emails: ["ann@host.test"], names: ["ann"] };
+const personal = { home: "/Users/ann", emails: ["ann@host.test"], accountIds: [], names: ["ann"] };
 
 /** A recordings tree holding the given files (relative path -> text). */
 function tree(files) {

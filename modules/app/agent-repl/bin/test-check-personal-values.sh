@@ -20,7 +20,11 @@ TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 FAKE_HOME="$TMP/home-ann"
 mkdir -p "$FAKE_HOME"
-printf '{"oauthAccount":{"emailAddress":"ann@host.test"}}' >"$FAKE_HOME/.claude.json"
+# Fake account and organization UUIDs: no real account's.
+FAKE_ACCOUNT_ID=11111111-2222-4333-8444-555555555555
+FAKE_ORG_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee
+printf '{"oauthAccount":{"emailAddress":"ann@host.test","accountUuid":"%s","organizationUuid":"%s"}}' \
+    "$FAKE_ACCOUNT_ID" "$FAKE_ORG_ID" >"$FAKE_HOME/.claude.json"
 # shellcheck source=lib-harness-report.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
@@ -89,6 +93,39 @@ test_account_email_fails() {
     report "an account email signed in under the home fails, in any case" $c $ok
 }
 
+test_account_uuid_fails() {
+    local c=account-uuid ok=0
+    file $c a.json "{\"accountUuid\":\"$FAKE_ACCOUNT_ID\"}"
+    act $c
+    [ "$RUN_RC" -eq 1 ] && grep -q 'a.json:1' "$TMP/$c.stderr" && ok=1
+    report "an account UUID signed in under the home fails" $c $ok
+}
+
+test_organization_uuid_fails() {
+    local c=org-uuid ok=0
+    file $c a.json "{\"organizationUuid\":\"$FAKE_ORG_ID\"}"
+    act $c
+    [ "$RUN_RC" -eq 1 ] && grep -q 'a.json:1' "$TMP/$c.stderr" && ok=1
+    report "an organization UUID signed in under the home fails" $c $ok
+}
+
+# base64_at prints base64 of the organization UUID's bytes, ALIGN bytes past a
+# 3-byte group's start, between other bytes: how a thinking signature holds it.
+base64_at() { # ALIGN
+    printf 'xxx%s%s-tail' "$(printf '%*s' "$1" '' | tr ' ' y)" "$FAKE_ORG_ID" | base64 | tr -d '\n'
+}
+
+test_base64_organization_uuid_fails_at_every_alignment() {
+    local align
+    for align in 0 1 2; do
+        local c=org-b64-$align ok=0
+        file $c s.jsonl "{\"signature\":\"$(base64_at "$align")\"}"
+        act $c
+        [ "$RUN_RC" -eq 1 ] && grep -q 's.jsonl:1' "$TMP/$c.stderr" && ok=1
+        report "an organization UUID base64-encoded at byte alignment $align fails" $c $ok
+    done
+}
+
 test_names_are_opt_in() {
     local c=names ok=0 unset_rc
     file $c a.md 'Annabel asked Ann'
@@ -155,6 +192,9 @@ test_clean_tree_passes
 test_home_path_fails_naming_the_line
 test_home_slug_in_a_path_fails
 test_account_email_fails
+test_account_uuid_fails
+test_organization_uuid_fails
+test_base64_organization_uuid_fails_at_every_alignment
 test_names_are_opt_in
 test_docs_reports_are_skipped_but_the_user_guide_is_not
 test_build_caches_are_skipped
