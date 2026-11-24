@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"agent-repld/internal/changesignal"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 )
@@ -104,9 +105,9 @@ type adoptionOrder struct {
 
 	mu      sync.Mutex
 	entries map[ids.WorkspaceID]*orderEntry
-	// changed is closed and replaced at every state change, waking every
-	// admission that waits.
-	changed chan struct{}
+	// changed announces every state change, waking every admission that
+	// waits; it is taken and notified under mu.
+	changed changesignal.Signal
 	// owned counts the ordered adoptions that reached ownership, so each
 	// names its place among them.
 	owned int
@@ -119,7 +120,7 @@ type orderEntry struct {
 }
 
 func newAdoptionOrder(log dlog.Logger) *adoptionOrder {
-	return &adoptionOrder{log: log, entries: map[ids.WorkspaceID]*orderEntry{}, changed: make(chan struct{})}
+	return &adoptionOrder{log: log, entries: map[ids.WorkspaceID]*orderEntry{}}
 }
 
 // register orders RANKS' adoptions, each pending, and records the order.
@@ -171,7 +172,7 @@ func (o *adoptionOrder) admit(ctx context.Context, ws ids.WorkspaceID) error {
 			o.mu.Unlock()
 			return nil
 		}
-		changed := o.changed
+		changed := o.changed.Changed()
 		o.mu.Unlock()
 		o.log.Debug(opAdopt, "the adoption waits for a higher-ranked adoption", dlog.Context{
 			"workspace": string(ws), "adoption_rank": e.rank.String(), "behind": string(blocker),
@@ -232,6 +233,5 @@ func (o *adoptionOrder) blockerLocked(rank adoptionRank) (ids.WorkspaceID, bool)
 
 // broadcastLocked wakes every waiting admission. Called with mu held.
 func (o *adoptionOrder) broadcastLocked() {
-	close(o.changed)
-	o.changed = make(chan struct{})
+	o.changed.Notify()
 }

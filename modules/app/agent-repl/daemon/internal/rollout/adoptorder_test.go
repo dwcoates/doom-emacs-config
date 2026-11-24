@@ -48,7 +48,7 @@ func awaitState(t *testing.T, o *adoptionOrder, ws ids.WorkspaceID, state orderS
 	for {
 		o.mu.Lock()
 		e, ok := o.entries[ws]
-		changed := o.changed
+		changed := o.changed.Changed()
 		o.mu.Unlock()
 		if ok && e.state == state {
 			return

@@ -841,12 +841,24 @@ func TestRegistryWorkspaceAnswersTheRecord(t *testing.T) {
 	}
 }
 
-// TestEveryResolutionReadGoesThroughRegistryWorkspace fails a resolution that
-// reads the registry on its own, outside the gate Close takes.
-func TestEveryResolutionReadGoesThroughRegistryWorkspace(t *testing.T) {
-	cases := []struct{ file, function string }{
-		{"refuse.go", "resolveRegistered"},
-		{"requestlog.go", "beginRequest"},
+// TestEveryResolutionReadGoesThroughTheRegistryGate fails a resolution that
+// reads the registry on its own, outside the gate Close takes: each reads the
+// workspace's head through its shared helper (registryHead, or
+// resolutionHead, which takes the boundary's handed read or reads through
+// registryHead), never the state client directly.
+func TestEveryResolutionReadGoesThroughTheRegistryGate(t *testing.T) {
+	// readsInside marks the helpers the read itself is written in: their read
+	// of the state client is the closure they hand readRegistryValue.
+	cases := []struct {
+		file, function, helper string
+		readsInside            bool
+	}{
+		{"refuse.go", "resolveRegistered", "s.resolutionHead(", false},
+		{"requestlog.go", "beginRequest", "s.registryHead(", false},
+		{"refuse.go", "resolutionHead", "s.registryHead(", false},
+		{"refuse.go", "registryHead", "readRegistryValue(", true},
+		{"refuse.go", "registryWorkspace", "readRegistryValue(", true},
+		{"refuse.go", "readRegistryValue", "s.readRegistry(", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.function, func(t *testing.T) {
@@ -871,12 +883,12 @@ func TestEveryResolutionReadGoesThroughRegistryWorkspace(t *testing.T) {
 			}
 
 			// Act.
-			direct := strings.Contains(body, "s.deps.DB.Workspace(")
-			shared := strings.Contains(body, "s.registryWorkspace(")
+			direct := !tc.readsInside && (strings.Contains(body, "s.deps.DB.Workspace(") || strings.Contains(body, "s.deps.DB.WorkspaceHead("))
+			shared := strings.Contains(body, tc.helper)
 
 			// Assert.
 			if direct || !shared {
-				t.Fatalf("%s: direct registry read %v, shared helper %v; its registry read must go through registryWorkspace", tc.function, direct, shared)
+				t.Fatalf("%s: direct registry read %v, shared helper %v; its registry read must go through %s", tc.function, direct, shared, tc.helper)
 			}
 		})
 	}
