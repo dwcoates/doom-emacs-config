@@ -14,7 +14,7 @@
  * selection's centering (feed-view.ts).
  */
 import { createLogger } from "../log.js";
-import { bubbleNodeRevealed, centerOffset, elementsSpan, nearestEdgeOffset, type VerticalSpan } from "../scroll.js";
+import { bubbleNodeRevealed, centerOffset, elementsSpan, nearestEdgeOffset, spanIntersection, type VerticalSpan } from "../scroll.js";
 import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
 
 const log = createLogger("webapp.feed.node-reveal");
@@ -63,7 +63,7 @@ export function revealInBubbles(lines: readonly HTMLElement[], what: string, pla
   let visible = elementsSpan(lines) as VerticalSpan;
   for (const box of boxes) {
     const view = box.getBoundingClientRect();
-    visible = { top: Math.max(visible.top, view.top), bottom: Math.min(visible.bottom, view.bottom) };
+    visible = spanIntersection(visible, { top: view.top, bottom: view.bottom });
   }
   return visible;
 }
