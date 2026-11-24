@@ -41,6 +41,10 @@ type requestBoundary struct {
 	requestID  string
 	workspace  string
 	started    time.Time
+	// head is the workspace's head the boundary read, which the request's
+	// resolution takes instead of reading it again (handedHead); nil when the
+	// boundary read none.
+	head *handedHead
 }
 
 func (s *server) beginRequest(
@@ -50,6 +54,7 @@ func (s *server) beginRequest(
 	msg proto.Message,
 ) (requestBoundary, error) {
 	log := s.log
+	var head *handedHead
 	workspaceIDText := requestWorkspaceID(msg)
 	if workspaceIDText != "" {
 		workspaceID := ids.WorkspaceID(workspaceIDText)
@@ -67,11 +72,12 @@ func (s *server) beginRequest(
 			// left the state client free to close in between, and a ClientLog
 			// arriving during a drain's exit met "sql: database is closed" at
 			// ERROR here.
-			record, ended, err := s.registryWorkspace(ctx, workspaceID)
+			record, ended, err := s.registryHead(ctx, workspaceID)
 			switch {
 			case ended:
 				log = log.With(dlog.Context{"workspace_id": workspaceIDText, "workspace_owned": false})
 			case err == nil:
+				head = &handedHead{head: record}
 				// THE BOUNDARY NEVER FAILS A REQUEST OVER ITS OWN LOGGING. A
 				// workspace whose directory is a scratch path or has been
 				// deleted resolves to the central sink with the workspace
@@ -105,6 +111,7 @@ func (s *server) beginRequest(
 		requestID:  headerValue,
 		workspace:  workspaceIDText,
 		started:    time.Now(),
+		head:       head,
 	}, nil
 }
 

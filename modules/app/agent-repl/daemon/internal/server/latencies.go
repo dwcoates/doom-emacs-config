@@ -88,7 +88,7 @@ func (s *server) ReportLatencies(
 		if _, decided := known[id]; decided {
 			continue
 		}
-		record, ended, err := s.registryWorkspace(ctx, id)
+		record, ended, err := s.registryHead(ctx, id)
 		switch {
 		case ended:
 			s.log.Info(rpc, "refused a request that arrived while the daemon was shutting down", dlog.Context{"workspace": string(id)})

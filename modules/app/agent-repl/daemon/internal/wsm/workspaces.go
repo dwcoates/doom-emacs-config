@@ -142,11 +142,8 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "visibility", Err: err}
 	}
 	ws.Visibility = v
-	switch WorkspaceKind(kind) {
-	case WorkspaceKindRepository, WorkspaceKindThread:
-		ws.Kind = WorkspaceKind(kind)
-	default:
-		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "kind", Err: fmt.Errorf("unknown workspace kind %q", kind)}
+	if ws.Kind, err = decodeWorkspaceKind(ws.ID, kind); err != nil {
+		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_of", Err: errors.New("a merge workspace records both its requester and its request")}

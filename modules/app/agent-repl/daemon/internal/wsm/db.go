@@ -62,6 +62,9 @@ type DB interface {
 	RegisterThread(ctx context.Context, dir, name string) (Workspace, error)
 	// Workspace loads one workspace by id.
 	Workspace(ctx context.Context, id WorkspaceID) (Workspace, error)
+	// WorkspaceHead loads one workspace's head by id: its own columns alone,
+	// which a request is resolved by (WorkspaceHead).
+	WorkspaceHead(ctx context.Context, id WorkspaceID) (WorkspaceHead, error)
 	// WorkspaceByDir loads one workspace by its normalized worktree directory.
 	WorkspaceByDir(ctx context.Context, dir string) (Workspace, error)
 	// ListWorkspaces loads every workspace, all-or-nothing.

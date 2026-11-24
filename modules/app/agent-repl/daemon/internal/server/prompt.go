@@ -64,8 +64,18 @@ func (s *server) SubmitPrompt(
 		return answer(resp, s.refuse(subject.Log, rpc, resp, *senderRefused))
 	}
 	// AN AGENT NEVER BROADCASTS TO THE FLEET (fanout.go): checked before
-	// anything is drawn or delivered, so a refused send wakes nobody.
-	if senderRecord != nil && !s.fanOut.admit(senderRecord, &subject.Record, req.Msg.GetAsUser(), s.now()) {
+	// anything is drawn or delivered, so a refused send wakes nobody. The
+	// check reads the recipient's whole row: whom it names is no part of its
+	// head.
+	admitted := true
+	if senderRecord != nil {
+		recipient, err := s.wholeRow(ctx, subject)
+		if err != nil {
+			return nil, failResolution(subject.Log, rpc, err)
+		}
+		admitted = s.fanOut.admit(senderRecord, &recipient, req.Msg.GetAsUser(), s.now())
+	}
+	if !admitted {
 		r := s.fanOutRefusal()
 		s.drawSent(sentPrompt{sentBy: sentBy, recipient: subject.Record.Name, key: req.Msg.GetIdempotencyKey(), said: req.Msg.GetSaid()},
 			feed.SentFate{Refused: &r.Reason})

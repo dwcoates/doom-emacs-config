@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
@@ -1307,4 +1308,99 @@ func TestABareNoSessionRefusalIsAnInvariantBreak(t *testing.T) {
 
 	// Act.
 	surface.asRefusal(promptqueue.ErrNoSession)
+}
+
+// TestARequestReadsItsWorkspaceOnce pins the one read: the boundary reads the
+// workspace's head and hands it to the request's resolution, which reads
+// nothing more, and no part of either reads the whole row.
+func TestARequestReadsItsWorkspaceOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	err := clientLogOnce(h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog = %v", err)
+	}
+	if heads, rows := h.DB.headReads.Load(), h.DB.rowReads.Load(); heads != 1 || rows != 0 {
+		t.Fatalf("reads = %d heads and %d whole rows, want one head and no whole row", heads, rows)
+	}
+}
+
+func TestAHandedHeadIsTakenOnceForItsOwnWorkspace(t *testing.T) {
+	head := wsm.WorkspaceHead{ID: testWorkspaceID, Dir: "/repo/ws"}
+	tests := []struct {
+		name      string
+		handed    bool
+		id        ids.WorkspaceID
+		takenOnce bool
+		wantOK    bool
+	}{
+		{name: "nothing handed is nothing taken", handed: false, id: testWorkspaceID},
+		{name: "the handed head is taken for its workspace", handed: true, id: testWorkspaceID, wantOK: true},
+		{name: "another workspace takes nothing", handed: true, id: "another-workspace"},
+		{name: "a head already taken is not taken again", handed: true, id: testWorkspaceID, takenOnce: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			ctx := context.Background()
+			if tt.handed {
+				ctx = requestBoundary{head: &handedHead{head: head}}.handOver(ctx)
+			}
+			if tt.takenOnce {
+				takeHandedHead(ctx, tt.id)
+			}
+
+			// Act.
+			got, ok := takeHandedHead(ctx, tt.id)
+
+			// Assert.
+			if ok != tt.wantOK {
+				t.Fatalf("taken = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && got != head {
+				t.Fatalf("head = %+v, want %+v", got, head)
+			}
+		})
+	}
+}
+
+func TestWholeRowReadsTheWorkspacesWholeRow(t *testing.T) {
+	tests := []struct {
+		name     string
+		arrange  func(h *harness)
+		wantCode connect.Code
+		wantErr  bool
+	}{
+		{name: "a registered workspace's row is answered", arrange: func(*harness) {}},
+		{name: "a failed read is an error", arrange: func(h *harness) { h.DB.workspaceErr = errors.New("the database is gone") }, wantErr: true},
+		{name: "a read after close is unavailable", arrange: func(h *harness) {
+			h.Server.(*server).registryClosed = true
+		}, wantErr: true, wantCode: connect.CodeUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.arrange(h)
+			subject := resolved{Record: wsm.WorkspaceHead{ID: testWorkspaceID}}
+
+			// Act.
+			record, err := h.Server.(*server).wholeRow(context.Background(), subject)
+
+			// Assert.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("wholeRow = %v, want error %v", err, tt.wantErr)
+			}
+			if tt.wantCode != 0 && connect.CodeOf(err) != tt.wantCode {
+				t.Fatalf("wholeRow code = %v, want %v", connect.CodeOf(err), tt.wantCode)
+			}
+			if !tt.wantErr && (record.ID != testWorkspaceID || h.DB.rowReads.Load() != 1) {
+				t.Fatalf("wholeRow = %+v after %d reads, want the workspace's row from one read", record, h.DB.rowReads.Load())
+			}
+		})
+	}
 }
