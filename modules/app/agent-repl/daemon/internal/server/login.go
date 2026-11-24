@@ -185,8 +185,8 @@ func (s *server) CloseLogin(
 }
 
 // OpenExternal opens a clicked link in the pinned external browser profile.
-// The click is a link the reader followed in the workspace's page, which its
-// editor is told first (pushLinkFollowed).
+// The click is a link the reader followed in the workspace's page, which is recorded first
+// as the user's interaction with it (recordLinkFollowed).
 func (s *server) OpenExternal(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.OpenExternalRequest],
@@ -200,7 +200,7 @@ func (s *server) OpenExternal(
 	if done {
 		return answer(resp, cerr)
 	}
-	s.pushLinkFollowed(subject.Log, rpc, subject.Record.ID)
+	s.recordLinkFollowed(ctx, subject.Log, rpc, subject.Record.ID)
 	if err := s.deps.Verbs.OpenExternal(ctx, subject.Record.ID, req.Msg.GetUrl()); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
@@ -213,7 +213,7 @@ func (s *server) OpenExternal(
 // OpenInEditor RELAYS a web link click onto the workspace's host stream. The
 // daemon validates the workspace and opens nothing itself: no ack, no command
 // loop. Every target is a link the reader followed in the workspace's page,
-// which its editor is told first (pushLinkFollowed).
+// which is recorded first as the user's interaction with it (recordLinkFollowed).
 func (s *server) OpenInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.OpenInEditorRequest],
@@ -227,7 +227,7 @@ func (s *server) OpenInEditor(
 	if done {
 		return answer(resp, cerr)
 	}
-	s.pushLinkFollowed(subject.Log, rpc, subject.Record.ID)
+	s.recordLinkFollowed(ctx, subject.Log, rpc, subject.Record.ID)
 	switch target := req.Msg.GetTarget().(type) {
 	case *agentreplv1.OpenInEditorRequest_WorkspaceFile:
 		var line *uint32

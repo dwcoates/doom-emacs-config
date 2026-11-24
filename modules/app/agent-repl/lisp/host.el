@@ -47,8 +47,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--input-buffer-name "core")
-(declare-function agent-repl--keep-visit "agent-repl-workspace" (name))
-(declare-function agent-repl--tab-view-on-link-followed "status" (ws))
+(declare-function agent-repl-roster-interaction-standing-p "roster" (ws))
 (declare-function agent-repl--input-selection-changed "input" (ws))
 (declare-function agent-repl-link-successor-pending-p "daemon-link")
 (declare-function agent-repl-link-successor-at "daemon-link")
@@ -66,8 +65,7 @@
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-register-workspaces "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-report-view-dwell "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-report-user-interaction "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-unloading "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-answer-editor-evaluation "rpc" (conn request &rest keys))
@@ -210,7 +208,7 @@ and this is the one that owns THIS workspace.  Nil when WS has none yet.
 
 A CONNECTION KNOWN DEAD IS NEVER ANSWERED.  Regression, 2026-09-27: a
 daemon exited without transferring a workspace, the link was promoted
-onto its successor, and every SelectWorkspace and MarkWorkspaceViewed for
+onto its successor, and every SelectWorkspace and ReportUserInteraction for
 that workspace kept going to the dead daemon\='s address
 \(`elisp.connect.call-on-closed-connection') while its webview stayed on
 the dead origin.  A dead recorded connection starts WS\='s reattach onto
@@ -1037,6 +1035,7 @@ picks the workspace again on the daemon that serves now."
              name (if handover "the daemon was handing over" keyword))))
 
 (defvar agent-repl--recency-walk-landing)
+(defvar agent-repl--recency-walk-origin)
 (declare-function agent-repl--end-recency-walk "agent-repl-workspace" (log-ws reason))
 
 (defvar agent-repl-host-last-request nil
@@ -1108,10 +1107,10 @@ its first tab is Emacs's own.
 
 THE `recency-walk' TRIGGER KEEPS THE SELECTION HISTORY: a step of the walk
 \(`agent-repl-switch-older', `agent-repl-switch-newer') is not a choice, so
-the daemon leaves the last-selected instant standing and Emacs records no
-visit (`agent-repl--recency-walk-landing').  Every other trigger is a
-choice, and ends any walk the frame stood in, recording the landing the
-walk stopped on as a visit (`agent-repl--end-recency-walk').
+the daemon leaves the last-selected instant standing, and the walk\='s first
+step records where it started (`agent-repl--recency-walk-origin'), which
+leads the recency order while the walk runs.  Every other trigger is a
+choice, and ends any walk the frame stood in (`agent-repl--end-recency-walk').
 
 A request that cannot be sent is LOUD: a switch the user asked for that
 goes nowhere is reported in the echo area and at WARN, never dropped.
@@ -1121,10 +1120,13 @@ Answers t when the request was sent or queued, nil otherwise."
          (started (unless (eq trigger 'startup)
                     (agent-repl-host--count-editor-switch ws trigger))))
     ;; Set BEFORE the frame moves: the move's own activation reads it.  A
-    ;; choice ends the walk first, recording the landing the user stopped on
-    ;; as the visit before this one (`agent-repl--end-recency-walk').
+    ;; walk's first step records where it started; a choice ends the walk
+    ;; first (`agent-repl--end-recency-walk').
     (if walk
-        (setq agent-repl--recency-walk-landing ws)
+        (progn
+          (unless agent-repl--recency-walk-landing
+            (setq agent-repl--recency-walk-origin shown))
+          (setq agent-repl--recency-walk-landing ws))
       (agent-repl--end-recency-walk ws trigger))
     (setq agent-repl-host-last-request (cons ws (float-time)))
     (agent-repl--info ws "elisp.host.switch-requested ws={ws} trigger={trigger} shown={shown} pending={pending}"
@@ -1272,72 +1274,47 @@ The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
      (funcall on-reported))
    on-not-reported))
 
-(defun agent-repl-host-mark-viewed (ws)
-  "Tell the daemon the user has now SEEN workspace WS.
-The editor half of the FULL/PARTIAL display mode: the tab bar has just
-demoted WS\='s tab to PARTIAL after the view dwell, and this is what puts
-the same mode on the workspace\='s sidebar row, so the two surfaces never
-disagree about what the user has seen.
+(defun agent-repl-host-report-interaction (ws kind)
+  "Tell the daemon the user interacted with workspace WS, KIND naming how.
+KIND is `:composer-typed' or `:feed-navigated': the acts Emacs sees (the
+page reports the user\='s scrolling itself).  The daemon draws WS\='s row
+viewed on the status it stands on and stamps its interaction recency
+\(`agent-repl-rpc-report-user-interaction').
 
-FIRE AND FORGET, and deliberately: the mode is presentation, the daemon
-clears it itself on the row\='s next status change, and a workspace whose
-report never lands simply keeps a FULL sidebar row until the next one
-does.  So a refusal is RECORDED and nothing is retried or rolled back —
-there is no local state to roll back to.
+A REPORT THAT WOULD CHANGE NOTHING IS NOT SENT: when the roster already
+draws WS viewed and as the workspace interacted with most recently
+\(`agent-repl-roster-interaction-standing-p'), another keystroke tells
+the daemon nothing new.  And ONE REPORT IS IN FLIGHT PER WORKSPACE: an
+interaction made while WS\='s report is unanswered is the same news, so
+it is dropped, not held.
 
-Answers nil without calling anything when WS has no ref or no connection
-yet: an unregistered workspace has no row to mark."
-  (agent-repl-host--send-subject-verb
-   ws "mark-viewed" #'agent-repl-rpc-mark-workspace-viewed
-   (lambda () (agent-repl--log ws "elisp.host.marked-viewed ws={ws}" :ws ws))
-   #'ignore))
-
-(defun agent-repl-host-report-view-dwell (ws dwell)
-  "Tell the daemon Emacs started, or stopped, counting the view dwell on WS.
-DWELL is `(:arm :counting :value (:length-ms MS))' or
-`(:arm :stopped :value nil)', as `agent-repl-rpc-report-view-dwell'
-encodes it.  The roster carries a counting dwell on WS\='s row while it
-will draw the row PARTIAL, so the sidebar fades the row\='s name over the
-dwell rather than flipping it when `agent-repl-host-mark-viewed' lands.
-
-ONE REPORT IN FLIGHT PER WORKSPACE (endpoint_report_view_dwell.proto).
-Two reports in flight at once could be served out of order, and a stop
-served after the count that followed it would end a dwell still running.
-So a report made while WS\='s last one is unanswered is only HELD, as
-`:view-dwell-wanted', and the answer to the one in flight sends whatever
-is wanted then, if it is not what was sent: each report is a fresh
-plist, so a later count of the same length is still sent, and a held
-report a later one replaced is never sent at all.
-
-FIRE AND FORGET otherwise, like `agent-repl-host-mark-viewed': the dwell
-is presentation, every outcome is recorded by
+FIRE AND FORGET otherwise: every outcome is recorded by
 `agent-repl-host--send-subject-verb', and a report that never lands
-leaves the sidebar flipping the name at the dwell\='s end, as it did
-before the report existed."
-  (agent-repl-host--put ws :view-dwell-wanted dwell)
-  (unless (plist-get (agent-repl-host--entry ws) :view-dwell-in-flight)
-    (agent-repl-host--send-view-dwell ws)))
-
-(defun agent-repl-host--send-view-dwell (ws)
-  "Send WS\='s wanted view-dwell report, the one report in flight for WS.
-Its answer, whatever it is, sends the report wanted by then when that is
-not the one just sent (`agent-repl-host-report-view-dwell')."
-  (let ((dwell (plist-get (agent-repl-host--entry ws) :view-dwell-wanted)))
-    (agent-repl-host--put ws :view-dwell-in-flight t)
-    (let ((answered
-           (lambda ()
-             (agent-repl-host--put ws :view-dwell-in-flight nil)
-             (unless (eq (plist-get (agent-repl-host--entry ws) :view-dwell-wanted) dwell)
-               (agent-repl-host--send-view-dwell ws)))))
+leaves the row as it was until the user\='s next interaction."
+  ;; THE USER ACTING ON THE WORKSPACE A RECENCY WALK STANDS ON ENDS THE WALK:
+  ;; they stopped there (`agent-repl--end-recency-walk').
+  (when (equal ws agent-repl--recency-walk-landing)
+    (agent-repl--end-recency-walk ws "interaction"))
+  (cond
+   ;; Both skips run per keystroke, so they are hot-path records.
+   ((agent-repl-roster-interaction-standing-p ws)
+    (agent-repl--log-verbose ws "elisp.host.interaction-standing ws={ws} kind={kind}" :ws ws :kind (prin1-to-string kind)))
+   ((plist-get (agent-repl-host--entry ws) :interaction-in-flight)
+    (agent-repl--log-verbose ws "elisp.host.interaction-in-flight ws={ws} kind={kind}" :ws ws :kind (prin1-to-string kind)))
+   (t
+    ;; THE MARK STANDS BEFORE THE CALL, so an answer however soon it comes
+    ;; (or a report never sent) is what lowers it.
+    (agent-repl-host--put ws :interaction-in-flight t)
+    (let ((answered (lambda () (agent-repl-host--put ws :interaction-in-flight nil))))
       (agent-repl-host--send-subject-verb
-       ws "view-dwell"
+       ws "interaction"
        (lambda (conn request &rest args)
-         (apply #'agent-repl-rpc-report-view-dwell conn
-                (append request (list :dwell dwell)) args))
+         (apply #'agent-repl-rpc-report-user-interaction conn
+                (append request (list :interaction kind)) args))
        (lambda ()
-         (agent-repl--log ws "elisp.host.view-dwell-reported ws={ws} dwell={dwell}" :ws ws :dwell (prin1-to-string (plist-get dwell :arm)))
+         (agent-repl--log ws "elisp.host.interaction-reported ws={ws} kind={kind}" :ws ws :kind (prin1-to-string kind))
          (funcall answered))
-       answered))))
+       answered)))))
 
 (defun agent-repl-host--on-workspace-activated (&rest _)
   "Tell the daemon about a perspective activation Emacs made on its own.
@@ -1694,7 +1671,6 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
     (:response-text-highlighted (agent-repl-host--reply-target-picked ws "response-text-highlighted"))
     (:load-page-requested (agent-repl-host--load-page-requested ws))
-    (:link-followed (agent-repl-host--link-followed ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
     (:response-question (agent-repl-host--response-question ws value))
     (:transferred (agent-repl-host--transferred ws value))
@@ -1877,21 +1853,6 @@ can be a workspace this editor does not hold.  An event, never replayed,
 so a reconnect never switches."
   (agent-repl--info (agent-repl-host--target-scope ref) "elisp.host.select-requested id={id}" :id (plist-get ref :id))
   (agent-repl-host-request-switch-ref ref 'sidebar))
-
-;;;; ---- A link followed in a page ----
-
-(defun agent-repl-host--link-followed (ws)
-  "Count WS viewed: the reader followed a link in WS\='s page.
-The daemon tells WS\='s host stream of every link its page follows (an
-outward link, an editor link, a feed\='s jump to another workspace), and
-following one is proof the page was read.  So WS counts as viewed both
-ways the view dwell would have counted it: its visit enters the selection
-history however short it was (`agent-repl--keep-visit'), and its row goes
-PARTIAL (`agent-repl--tab-view-on-link-followed').  An event, never
-replayed, so a reconnect counts nothing."
-  (agent-repl--info ws "elisp.host.link-followed ws={ws}" :ws ws)
-  (agent-repl--keep-visit ws)
-  (agent-repl--tab-view-on-link-followed ws))
 
 ;;;; ---- The load button ----
 
@@ -2362,7 +2323,7 @@ the successor was already in flight when the old stream ended planned."
 ;; in that window reached a daemon that had not adopted WS yet and was
 ;; refused `not_yet_adopted', and what it reported was lost: in the
 ;; 2026-11-13 14:42 deploy, ReportPageUnloading,
-;; MarkWorkspaceViewed and SelectWorkspace for the four workspaces with a
+;; ReportUserInteraction and SelectWorkspace for the four workspaces with a
 ;; loaded page, 1-3s before their adopt was answered (24 WARN records at the
 ;; successor).  So every async unary call goes through ONE gate
 ;; \=(`agent-repl-host-gate-call', from rpc.el\='s `agent-repl-rpc--unary'):

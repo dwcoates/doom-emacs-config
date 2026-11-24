@@ -355,12 +355,8 @@ func (s *fakeServer) GetWorkspaceMemory(ctx context.Context, req *connect.Reques
 	return handleUnary[v1.GetWorkspaceMemoryRequest, v1.GetWorkspaceMemoryResponse](ctx, s, "GetWorkspaceMemory", req.Msg)
 }
 
-func (s *fakeServer) MarkWorkspaceViewed(ctx context.Context, req *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
-	return handleUnary[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](ctx, s, "MarkWorkspaceViewed", req.Msg)
-}
-
-func (s *fakeServer) ReportViewDwell(ctx context.Context, req *connect.Request[v1.ReportViewDwellRequest]) (*connect.Response[v1.ReportViewDwellResponse], error) {
-	return handleUnary[v1.ReportViewDwellRequest, v1.ReportViewDwellResponse](ctx, s, "ReportViewDwell", req.Msg)
+func (s *fakeServer) ReportUserInteraction(ctx context.Context, req *connect.Request[v1.ReportUserInteractionRequest]) (*connect.Response[v1.ReportUserInteractionResponse], error) {
+	return handleUnary[v1.ReportUserInteractionRequest, v1.ReportUserInteractionResponse](ctx, s, "ReportUserInteraction", req.Msg)
 }
 
 func (s *fakeServer) ReportEditorFocus(ctx context.Context, req *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {

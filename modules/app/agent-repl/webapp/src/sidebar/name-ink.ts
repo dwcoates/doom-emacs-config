@@ -12,17 +12,13 @@
  *
  * - THE BREATH is a crossfade. The name's own text rests in the breath's rest
  *   ink, and a copy in its peak ink fades in and out on top of it.
- * - THE VIEW DWELL is a crossfade too (`view-dwell.ts`): a copy in the
- *   name's own colour fades out as a copy in the viewed grey fades in, once,
- *   over the dwell.
  * - THE SHIMMER is a mask carried by a `transform`. The ink box, as wide as
  *   the old mask, carries the band across the name, and the copies inside it
  *   move back by the same amount, so the text stands still while the band
  *   passes. The name's own text is hidden while the shimmer draws it.
  *
  * The copies are the ink box's `::before` (the resting ink, drawn only while
- * reviving or viewing) and `::after` (the peak ink, drawn only while
- * breathing, or the viewed grey while viewing), whose
+ * reviving) and `::after` (the peak ink, drawn only while breathing), whose
  * text is the box's `data-name`. Generated text is no part of the name's
  * `textContent`, so search (`search.ts`) still reads the name alone, and the
  * box is `aria-hidden`, so a reader of the accessibility tree reads the name
@@ -34,7 +30,6 @@
  */
 import { REVIVING_CLASS } from "./reviving.js";
 import { decorativeElement } from "../dom.js";
-import { VIEW_DWELL_CLASS } from "./view-dwell.js";
 
 /** The class of the box holding a name's animated copies. */
 export const NAME_INK_CLASS = "name-ink";
@@ -46,7 +41,7 @@ export const NAME_INK_TEXT_ATTRIBUTE = "data-name";
 export const BREATHES_CLASS = "breathes";
 
 /** The classes of a name whose looping animation the ink box carries. */
-export const NAME_INK_MOTIONS: readonly string[] = [BREATHES_CLASS, REVIVING_CLASS, VIEW_DWELL_CLASS];
+export const NAME_INK_MOTIONS: readonly string[] = [BREATHES_CLASS, REVIVING_CLASS];
 
 /**
  * Give LABEL, whose text is NAME, the ink box its looping animations move,

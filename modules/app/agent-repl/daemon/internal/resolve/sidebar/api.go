@@ -185,25 +185,14 @@ type Resolver interface {
 	// in registry order, with the last push, both under one lock, so no
 	// workspace is in both. False before any push.
 	MergedRows() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool)
-	// SetViewed records that the user has READ the last turn's result — the
-	// editor's report that the user has now SEEN this workspace. It takes
-	// only on a turn-end row (done, interrupted or turn_failed), or on an
-	// idle_async row over an unread turn end; a report on any other arm is
-	// dropped. A read result draws the row PARTIAL whenever it stands on its
-	// turn-end arm. There is no lowering setter: the next turn is what makes
-	// a new result unread.
-	SetViewed(ws ids.WorkspaceID)
-	// SetViewDwell records that the editor started counting a dwell of
-	// LENGTH on the workspace, as of the roster's clock now, replacing any
-	// standing one. The row carries it (frontend.v1.RosterRowViewDwell) only
-	// while the dwell will recede the row's name: the row is selected, on a
-	// turn-end arm, with its result unread. A viewed report (SetViewed), a
-	// stop (StopViewDwell), the selection leaving the workspace and a status
-	// change each end it. LENGTH is positive: the caller refuses any other.
-	SetViewDwell(ws ids.WorkspaceID, length time.Duration)
-	// StopViewDwell ends the workspace's standing dwell, if any: the editor
-	// stopped counting it before it completed.
-	StopViewDwell(ws ids.WorkspaceID)
+	// SetInteracted records that the user interacted with the workspace AT
+	// (agentrepl.v1.ReportUserInteraction, or a link followed in its page):
+	// the row is drawn viewed (frontend.v1.RosterRowViewed) on the arm it
+	// stands on now, until its next status change, and AT becomes the row's
+	// interaction recency (frontend.v1.RosterRowLastInteracted). It takes on
+	// every arm; there is no lowering setter, because a status change is what
+	// lowers the viewed marker.
+	SetInteracted(ws ids.WorkspaceID, at time.Time)
 	// SetStateUnreported installs, or lifts, the fact that a shim taken back
 	// after a failed handover has not re-reported its session state: the
 	// degraded rung, drawn `degraded`.
@@ -491,12 +480,19 @@ func New(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStatus, opts
 }
 
 // ResultSink is told every change of a workspace's last turn result: how its
-// last turn ended and whether the user has seen it, nil when none stands. The
+// last turn ended, nil when none stands. The
 // daemon keeps it durable (wsm.SetResult), so a daemon that did not see the
 // turn end draws the row as it stood. It is called off the resolver's lock,
 // in the report every caller of a combined commit waits for, so it returns at
 // once: the daemon's only submits the change (rosterWrites).
 type ResultSink func(ws ids.WorkspaceID, result *wsm.TurnResult)
+
+// ViewedSink is told every change of a workspace's viewed fact: the status arm
+// the user last interacted with it on, empty when it is not viewed. The daemon
+// keeps it durable (wsm.SetViewedStatus), so a restart draws the row viewed as
+// it stood. It is called off the resolver's lock, in the same report, and
+// returns at once just as the ResultSink does.
+type ViewedSink func(ws ids.WorkspaceID, arm string)
 
 // StatusChangeSink is told every instant a workspace's published status arm
 // moves. The daemon keeps it durable (wsm.SetStatusChangedAt), so a daemon
@@ -523,6 +519,11 @@ func WithQuiet(g *viewquiet.Gate) Option {
 		r.quiet = g
 		g.Follow(QuietViewName, r.followQuiet)
 	}
+}
+
+// WithViewedSink installs the sink the resolver tells its viewed changes.
+func WithViewedSink(sink ViewedSink) Option {
+	return func(r *resolver) { r.viewedChanges = sink }
 }
 
 // WithStatusChangeSink installs the sink the resolver tells its status changes.

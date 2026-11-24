@@ -2491,10 +2491,12 @@ describe("the unread turn end under an idle_async row", () => {
     inRail(drawn, () => cascadedValue(drawn.querySelector(selector) as HTMLElement, "color"));
   const idle = { case: "idleAsync", value: {} } as const;
 
+  // An unviewed idle_async row's name wears the background's tone, resting at
+  // its dark breath since the background breathes (name-tint.ts).
   it.each([
-    { name: "an unread done leaves the name greyscale", end: "done", want: "var(--repo-head-expanded)" },
-    { name: "an unread interrupted leaves the name greyscale", end: "interrupted", want: "var(--repo-head-expanded)" },
-    { name: "an unread failed turn leaves the name greyscale", end: "turnFailed", want: "var(--repo-head-expanded)" },
+    { name: "an unread done leaves the name in the background's tone", end: "done", want: "var(--name-dark)" },
+    { name: "an unread interrupted leaves the name in the background's tone", end: "interrupted", want: "var(--name-dark)" },
+    { name: "an unread failed turn leaves the name in the background's tone", end: "turnFailed", want: "var(--name-dark)" },
   ] as const)("$name", ({ end, want }) => {
     // Arrange, Act.
     const drawn = drawRosterRow(
@@ -2520,12 +2522,12 @@ describe("the unread turn end under an idle_async row", () => {
     expect(paintOf(drawn, ":scope > .row > .st")).toBe("var(--async)");
   });
 
-  it("leaves a read idle_async row's name greyscale", () => {
+  it("leaves a viewed idle_async row's name at the viewed grey", () => {
     // Arrange, Act.
-    const drawn = drawRosterRow(row({ id: "ws-1", status: idle }), sidebarContext(), "R");
+    const drawn = drawRosterRow(row({ id: "ws-1", status: idle, viewed: true }), sidebarContext(), "R");
 
     // Assert.
-    expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--repo-head-expanded)");
+    expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--muted)");
     expect(drawn.hasAttribute("data-unread-turn-end")).toBe(false);
   });
 
@@ -2576,40 +2578,6 @@ describe("the row's display mode", () => {
     // Assert.
     const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
     expect(name.classList.contains("viewed")).toBe(false);
-  });
-
-  it("recedes the NAME over the view dwell from where the dwell has got to", () => {
-    // Arrange: two of five seconds already dwelt.
-    const viewDwell = { startedAtMs: BigInt(NOW - 2_000), lengthMs: 5_000n };
-
-    // Act.
-    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, viewDwell }), sidebarContext(), "R");
-
-    // Assert.
-    const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
-    expect([
-      name.classList.contains("viewing"),
-      name.style.getPropertyValue("--name-view-dwell"),
-      name.style.getPropertyValue("--name-view-dwell-delay"),
-      name.querySelectorAll(":scope > .name-ink").length,
-    ]).toEqual([true, "5000ms", "-2000ms", 1]);
-  });
-
-  it("draws no view dwell on a row that carries none", () => {
-    // Arrange, Act.
-    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R");
-
-    // Assert.
-    const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
-    expect([name.classList.contains("viewing"), name.querySelectorAll(":scope > .name-ink").length]).toEqual([false, 0]);
-  });
-
-  it("refuses a view dwell on a row already viewed", () => {
-    // Arrange.
-    const bad = row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true, viewDwell: { startedAtMs: BigInt(NOW), lengthMs: 5_000n } });
-
-    // Act, Assert.
-    expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
   });
 
   it("marks the whole row PARTIAL for the hook contract", () => {
@@ -2693,7 +2661,7 @@ describe("the row's display mode", () => {
       const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
 
       // Assert.
-      expect([name.classList.contains("tinted"), name.classList.contains("tone-purple"), name.classList.contains("fading")]).toEqual([true, true, false]);
+      expect([name.classList.contains("tinted"), name.classList.contains("tone-purple")]).toEqual([true, true]);
     });
 
     it("leaves an async-merging row's name off the merge's purple", () => {
@@ -2706,41 +2674,61 @@ describe("the row's display mode", () => {
       const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
 
       // Assert.
-      expect([name.classList.contains("tone-purple"), name.classList.contains("fading")]).toEqual([false, true]);
+      expect([name.classList.contains("tone-purple"), name.classList.contains("tinted")]).toEqual([false, true]);
     });
 
-    it("starts an ended turn's name fading from the time the turn ended", () => {
+    it("holds an ended turn's name at its tone however long ago it ended", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } } }), sidebarContext(), "R");
       const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
 
       // Assert.
-      expect([name.classList.contains("fading"), name.style.getPropertyValue("--name-fade-delay")]).toEqual([true, expect.stringMatching(/^-\d+ms$/)]);
+      expect([name.classList.contains("tinted"), name.getAttribute("style")]).toEqual([true, null]);
     });
 
-    it("draws a viewed row's name at the viewed grey rather than fading it", () => {
+    it("draws a viewed row's name at the viewed grey, untinted", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true, when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } } }), sidebarContext(), "R");
       const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
 
       // Assert.
-      expect([name.classList.contains("viewed"), name.classList.contains("fading"), name.style.getPropertyValue("--name-fade-delay")]).toEqual([true, false, ""]);
+      expect([name.classList.contains("viewed"), name.classList.contains("tinted")]).toEqual([true, false]);
     });
 
-    it("paints an unviewed row's name in the repository headers' ink", () => {
+    it("holds a cold-gated row's struck name at its tone until it is viewed", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R");
+      const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
+
+      // Assert.
+      expect([name.classList.contains("cold-gated"), name.classList.contains("tinted")]).toEqual([true, true]);
+    });
+
+    it("paints an unviewed row's name in its status tone", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R");
+
+      // Assert.
+      expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--name-tone)");
+    });
+
+    it("paints a toneless unviewed row's name in the repository headers' ink", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "none", value: {} } }), sidebarContext(), "R");
 
       // Assert.
       expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--repo-head-expanded)");
     });
 
-    it.each([true, false])("paints a cold-gate name dimmer than muted when viewed is %s", (viewed) => {
+    it.each([
+      { viewed: false, want: "var(--name-tone)" },
+      { viewed: true, want: "color-mix(in srgb, var(--muted) 55%, transparent)" },
+    ])("paints a cold-gate name $want when viewed is $viewed", ({ viewed, want }) => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} }, viewed }), sidebarContext(), "R");
 
       // Assert.
-      expect(paintOf(drawn, ":scope > .row > .name")).toBe("color-mix(in srgb, var(--muted) 55%, transparent)");
+      expect(paintOf(drawn, ":scope > .row > .name")).toBe(want);
     });
 
     it("leaves an unviewed child's dot green under a viewed parent", () => {

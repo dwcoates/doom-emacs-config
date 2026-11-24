@@ -25,7 +25,7 @@ func TestRosterResultsWritesEachReportedResult(t *testing.T) {
 		name   string
 		result *wsm.TurnResult
 	}{
-		{name: "a result", result: &wsm.TurnResult{End: wsm.TurnResultDone, Read: true}},
+		{name: "a result", result: &wsm.TurnResult{End: wsm.TurnResultDone}},
 		{name: "a cleared result", result: nil},
 	}
 	for _, tt := range tests {

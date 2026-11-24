@@ -1060,17 +1060,17 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - With no aunt that way, they step to this workspace's own previous or next sibling instead.
   - A top-level workspace has no parent, so it steps to its sibling, the top-level workspace before or after it in its repository.
   - Neither wraps at the ends.
-- **`s-[` and `s-]` step through the tabs in the order you last viewed them.**
-  - `s-[` goes to the workspace you viewed before this one, and pressed again to the one before that.
-  - `s-]` goes back toward the one you viewed most recently.
+- **`s-[` and `s-]` step through the tabs in the order you last worked in them.**
+  - Working in a workspace means scrolling its feed, typing in its composer, stepping through its feed with `M-s-k` or `M-s-j`, or following a link in its page.
+  - `s-[` goes to the workspace you worked in before this one, and pressed again to the one before that.
+  - `s-]` goes back toward the one you worked in most recently.
   - Both wrap at the ends, as `s-{` and `s-}` do.
-  - Stepping with them does not count as viewing, so the order holds still while you step through it.
-  - Any other switch, a tab click, `M-1`, `s-{`, `SPC p p` or an agent's switch, counts as viewing the workspace it lands on.
-  - That switch also counts the workspace you stopped stepping on as viewed, so `s-[` from the new workspace goes back to it.
-- **Following a link in a workspace's page counts that workspace as viewed at once.**
-  - A link opened in the browser, a file or log opened in Emacs, a run control, and a jump to another workspace from the feed all count.
-  - Its sidebar row and tab dim as they do after you have looked at a finished turn for a few seconds.
-  - It takes its place in the `s-[` order however briefly you were on it, so `s-[` from the workspace a jump landed on goes back to it.
+  - Switching to a workspace, by any means, does not move it in the order: only working in it does.
+  - While you step, the workspace you started from stays first, so `s-]` walks back to it.
+- **A workspace's name keeps its status color until you work in it.**
+  - Its sidebar row's name and its tab's name dim the moment you scroll its feed, type in its composer, step through its feed or follow a link in its page.
+  - Looking at it, for any length of time, does not dim it.
+  - The next change of its status brings the color back.
 - **A colored bar left of a sidebar row's tab number shows how few presses of `s-[` or `s-]` reach it.**
   - Orange means `s-[` reaches it in fewer presses, purple means `s-]` does.
   - The bar is brightest at one press and dimmer at two.

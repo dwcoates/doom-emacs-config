@@ -325,12 +325,9 @@ const (
 	// AgentReplSelectWorkspaceProcedure is the fully-qualified name of the AgentRepl's SelectWorkspace
 	// RPC.
 	AgentReplSelectWorkspaceProcedure = "/agentrepl.v1.AgentRepl/SelectWorkspace"
-	// AgentReplMarkWorkspaceViewedProcedure is the fully-qualified name of the AgentRepl's
-	// MarkWorkspaceViewed RPC.
-	AgentReplMarkWorkspaceViewedProcedure = "/agentrepl.v1.AgentRepl/MarkWorkspaceViewed"
-	// AgentReplReportViewDwellProcedure is the fully-qualified name of the AgentRepl's ReportViewDwell
-	// RPC.
-	AgentReplReportViewDwellProcedure = "/agentrepl.v1.AgentRepl/ReportViewDwell"
+	// AgentReplReportUserInteractionProcedure is the fully-qualified name of the AgentRepl's
+	// ReportUserInteraction RPC.
+	AgentReplReportUserInteractionProcedure = "/agentrepl.v1.AgentRepl/ReportUserInteraction"
 	// AgentReplReportPageUnloadingProcedure is the fully-qualified name of the AgentRepl's
 	// ReportPageUnloading RPC.
 	AgentReplReportPageUnloadingProcedure = "/agentrepl.v1.AgentRepl/ReportPageUnloading"
@@ -625,8 +622,7 @@ var (
 	agentReplRegisterWorkspaceMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplRegisterWorkspacesMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspaces")
 	agentReplSelectWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
-	agentReplMarkWorkspaceViewedMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
-	agentReplReportViewDwellMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ReportViewDwell")
+	agentReplReportUserInteractionMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ReportUserInteraction")
 	agentReplReportPageUnloadingMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ReportPageUnloading")
 	agentReplReportEditorFocusMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
 	agentReplReportRecencyReachMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("ReportRecencyReach")
@@ -1029,13 +1025,11 @@ type AgentReplClient interface {
 	// The user switched to this workspace in the editor; idempotent. See
 	// endpoint_select_workspace.proto.
 	SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error)
-	// The user has now SEEN this workspace: its row goes PARTIAL until its
-	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
-	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
-	// The editor started or stopped counting the user's dwell on this
-	// workspace, so the sidebar recedes the row's name over the dwell rather
-	// than at its end. See endpoint_report_view_dwell.proto.
-	ReportViewDwell(context.Context, *connect.Request[v1.ReportViewDwellRequest]) (*connect.Response[v1.ReportViewDwellResponse], error)
+	// The user interacted with this workspace (scrolled its feed, typed in its
+	// composer, moved through its feed with the editor's keys): the one input
+	// the daemon derives viewed and recency from; idempotent. See
+	// endpoint_report_user_interaction.proto.
+	ReportUserInteraction(context.Context, *connect.Request[v1.ReportUserInteractionRequest]) (*connect.Response[v1.ReportUserInteractionResponse], error)
 	// Emacs is about to unload this workspace's page on purpose; the daemon
 	// awaits its web hop rather than drawing it broken. Idempotent. See
 	// endpoint_report_page_unloading.proto.
@@ -1914,16 +1908,10 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSelectWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		markWorkspaceViewed: connect.NewClient[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](
+		reportUserInteraction: connect.NewClient[v1.ReportUserInteractionRequest, v1.ReportUserInteractionResponse](
 			httpClient,
-			baseURL+AgentReplMarkWorkspaceViewedProcedure,
-			connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		reportViewDwell: connect.NewClient[v1.ReportViewDwellRequest, v1.ReportViewDwellResponse](
-			httpClient,
-			baseURL+AgentReplReportViewDwellProcedure,
-			connect.WithSchema(agentReplReportViewDwellMethodDescriptor),
+			baseURL+AgentReplReportUserInteractionProcedure,
+			connect.WithSchema(agentReplReportUserInteractionMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		reportPageUnloading: connect.NewClient[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse](
@@ -2447,8 +2435,7 @@ type agentReplClient struct {
 	registerWorkspace                  *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	registerWorkspaces                 *connect.Client[v1.RegisterWorkspacesRequest, v1.RegisterWorkspacesResponse]
 	selectWorkspace                    *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
-	markWorkspaceViewed                *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
-	reportViewDwell                    *connect.Client[v1.ReportViewDwellRequest, v1.ReportViewDwellResponse]
+	reportUserInteraction              *connect.Client[v1.ReportUserInteractionRequest, v1.ReportUserInteractionResponse]
 	reportPageUnloading                *connect.Client[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse]
 	reportEditorFocus                  *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
 	reportRecencyReach                 *connect.Client[v1.ReportRecencyReachRequest, v1.ReportRecencyReachResponse]
@@ -3042,14 +3029,9 @@ func (c *agentReplClient) SelectWorkspace(ctx context.Context, req *connect.Requ
 	return c.selectWorkspace.CallUnary(ctx, req)
 }
 
-// MarkWorkspaceViewed calls agentrepl.v1.AgentRepl.MarkWorkspaceViewed.
-func (c *agentReplClient) MarkWorkspaceViewed(ctx context.Context, req *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
-	return c.markWorkspaceViewed.CallUnary(ctx, req)
-}
-
-// ReportViewDwell calls agentrepl.v1.AgentRepl.ReportViewDwell.
-func (c *agentReplClient) ReportViewDwell(ctx context.Context, req *connect.Request[v1.ReportViewDwellRequest]) (*connect.Response[v1.ReportViewDwellResponse], error) {
-	return c.reportViewDwell.CallUnary(ctx, req)
+// ReportUserInteraction calls agentrepl.v1.AgentRepl.ReportUserInteraction.
+func (c *agentReplClient) ReportUserInteraction(ctx context.Context, req *connect.Request[v1.ReportUserInteractionRequest]) (*connect.Response[v1.ReportUserInteractionResponse], error) {
+	return c.reportUserInteraction.CallUnary(ctx, req)
 }
 
 // ReportPageUnloading calls agentrepl.v1.AgentRepl.ReportPageUnloading.
@@ -3717,13 +3699,11 @@ type AgentReplHandler interface {
 	// The user switched to this workspace in the editor; idempotent. See
 	// endpoint_select_workspace.proto.
 	SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error)
-	// The user has now SEEN this workspace: its row goes PARTIAL until its
-	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
-	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
-	// The editor started or stopped counting the user's dwell on this
-	// workspace, so the sidebar recedes the row's name over the dwell rather
-	// than at its end. See endpoint_report_view_dwell.proto.
-	ReportViewDwell(context.Context, *connect.Request[v1.ReportViewDwellRequest]) (*connect.Response[v1.ReportViewDwellResponse], error)
+	// The user interacted with this workspace (scrolled its feed, typed in its
+	// composer, moved through its feed with the editor's keys): the one input
+	// the daemon derives viewed and recency from; idempotent. See
+	// endpoint_report_user_interaction.proto.
+	ReportUserInteraction(context.Context, *connect.Request[v1.ReportUserInteractionRequest]) (*connect.Response[v1.ReportUserInteractionResponse], error)
 	// Emacs is about to unload this workspace's page on purpose; the daemon
 	// awaits its web hop rather than drawing it broken. Idempotent. See
 	// endpoint_report_page_unloading.proto.
@@ -4598,16 +4578,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSelectWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplMarkWorkspaceViewedHandler := connect.NewUnaryHandler(
-		AgentReplMarkWorkspaceViewedProcedure,
-		svc.MarkWorkspaceViewed,
-		connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	agentReplReportViewDwellHandler := connect.NewUnaryHandler(
-		AgentReplReportViewDwellProcedure,
-		svc.ReportViewDwell,
-		connect.WithSchema(agentReplReportViewDwellMethodDescriptor),
+	agentReplReportUserInteractionHandler := connect.NewUnaryHandler(
+		AgentReplReportUserInteractionProcedure,
+		svc.ReportUserInteraction,
+		connect.WithSchema(agentReplReportUserInteractionMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplReportPageUnloadingHandler := connect.NewUnaryHandler(
@@ -5233,10 +5207,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplRegisterWorkspacesHandler.ServeHTTP(w, r)
 		case AgentReplSelectWorkspaceProcedure:
 			agentReplSelectWorkspaceHandler.ServeHTTP(w, r)
-		case AgentReplMarkWorkspaceViewedProcedure:
-			agentReplMarkWorkspaceViewedHandler.ServeHTTP(w, r)
-		case AgentReplReportViewDwellProcedure:
-			agentReplReportViewDwellHandler.ServeHTTP(w, r)
+		case AgentReplReportUserInteractionProcedure:
+			agentReplReportUserInteractionHandler.ServeHTTP(w, r)
 		case AgentReplReportPageUnloadingProcedure:
 			agentReplReportPageUnloadingHandler.ServeHTTP(w, r)
 		case AgentReplReportEditorFocusProcedure:
@@ -5798,12 +5770,8 @@ func (UnimplementedAgentReplHandler) SelectWorkspace(context.Context, *connect.R
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectWorkspace is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.MarkWorkspaceViewed is not implemented"))
-}
-
-func (UnimplementedAgentReplHandler) ReportViewDwell(context.Context, *connect.Request[v1.ReportViewDwellRequest]) (*connect.Response[v1.ReportViewDwellResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportViewDwell is not implemented"))
+func (UnimplementedAgentReplHandler) ReportUserInteraction(context.Context, *connect.Request[v1.ReportUserInteractionRequest]) (*connect.Response[v1.ReportUserInteractionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportUserInteraction is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error) {

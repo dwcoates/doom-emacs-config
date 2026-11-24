@@ -1018,21 +1018,21 @@ func (s *server) pushSelectRequested(ref *workspacev1.WorkspaceRef) int {
 	}, everyEditor, nil)
 }
 
-// pushLinkFollowed pushes link_followed onto WS's host stream: the reader
-// followed a link in WS's page (OpenExternal, OpenInEditor, or SelectInEditor's
-// followed_from), and Emacs counts WS viewed. It is pushed BEFORE the click's
-// own action, so a relay the action makes onto the same stream reaches Emacs
-// after it. RPC names the click's rpc for the record, which names how many
-// host streams heard it: none is a page whose editor holds no stream, and
-// nothing is owed then.
-func (s *server) pushLinkFollowed(log dlog.Logger, rpc string, ws ids.WorkspaceID) {
-	heard := s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
-		Push: &agentreplv1.WatchHostWorkspaceResponse_LinkFollowed{
-			LinkFollowed: &agentreplv1.HostWorkspaceLinkFollowed{},
-		},
-	})
-	log.Info(rpc, "told the editor the reader followed a link in the workspace's page",
-		dlog.Context{"host_streams": heard})
+// recordLinkFollowed records that the reader followed a link in WS's page
+// (OpenExternal, OpenInEditor, or SelectInEditor's followed_from) as the
+// user's interaction with WS (workspace.Verbs.RecordInteraction): following a
+// link is the user acting on the page, so WS is viewed and most recent. It is
+// recorded BEFORE the click's own action, so a switch the click makes lands
+// after it. A recording that fails was recorded by the verb that failed; the
+// click's own action goes ahead regardless, and this notes it. RPC names the
+// click's rpc for the record.
+func (s *server) recordLinkFollowed(ctx context.Context, log dlog.Logger, rpc string, ws ids.WorkspaceID) {
+	if err := s.deps.Verbs.RecordInteraction(ctx, ws, workspace.InteractionLinkFollowed); err != nil {
+		log.Info(rpc, "the followed link was not recorded as the user's interaction; the click goes ahead",
+			dlog.Context{"cause": err.Error()})
+		return
+	}
+	log.Info(rpc, "recorded the followed link as the user's interaction with the workspace", nil)
 }
 
 // pushLoadPageRequested pushes load_page_requested onto the workspace's host

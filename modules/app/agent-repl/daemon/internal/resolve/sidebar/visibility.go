@@ -70,6 +70,7 @@ func (r *resolver) resolveArms(rc rowContext) (arms, judged map[ids.WorkspaceID]
 					"end": s.restoredEnd, "result": s.result.String(),
 				})
 		}
+		s.restoreViewed(rec)
 		if arm, mirrored := r.state.incumbentArms[rec.ID]; mirrored {
 			// A ROW THIS JOINING DAEMON HAS NOT ADOPTED YET DRAWS THE
 			// INCUMBENT'S OWN ARM. This daemon's footer state for the workspace

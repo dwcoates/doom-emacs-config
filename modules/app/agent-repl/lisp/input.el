@@ -78,7 +78,7 @@
 (require 'color)
 
 (declare-function agent-repl--ws-put "workspace" (ws key val))
-(declare-function agent-repl--note-visit-prompted "workspace" (ws))
+(declare-function agent-repl-host-report-interaction "host" (ws kind))
 (defvar agent-repl--prompt-queue-drain-origin)
 (declare-function agent-repl-webhost-composer-used "webhost" ())
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
@@ -451,6 +451,9 @@ nothing, since the transient it raised lapses on its own."
   ;; Intentionally unlogged: `after-change-functions' runs per keystroke, so
   ;; logging it would overwhelm the durable input/send lifecycle diagnostics.
   (add-hook 'after-change-functions #'agent-repl--history-on-change nil t)
+  ;; AN EDIT THE USER MAKES IS THEIR INTERACTION WITH THE WORKSPACE
+  ;; (`agent-repl--input-typed-on-change'); per keystroke, so unlogged here.
+  (add-hook 'after-change-functions #'agent-repl--input-typed-on-change nil t)
   ;; A WORD STARTING WITH `/' completes against the workspace's runtime,
   ;; and a known one is marked purple (command-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-command-completion-at-point nil t)
@@ -469,6 +472,18 @@ nothing, since the transient it raised lapses on its own."
   ;; in the sidebar or a page (`agent-repl-webhost-composer-used').
   (add-hook 'post-command-hook #'agent-repl-webhost-composer-used nil t)
 )
+
+(defun agent-repl--input-typed-on-change (&rest _)
+  "Report the composer edit just made as the user\='s interaction with it.
+An edit made for a command the user ran (`this-command' non-nil) is the
+user typing into the workspace\='s composer: a key, a paste, a history
+recall, an undo.  Text the editor inserts by itself (a restored draft, a
+held prompt put back, an answer the daemon pushed) runs under no command,
+and reports nothing.  `agent-repl-host-report-interaction' sends only what
+the roster does not already say, so a run of keys costs one report."
+  (when this-command
+    (when-let* ((ws (agent-repl--buffer-owner (current-buffer))))
+      (agent-repl-host-report-interaction ws :composer-typed))))
 
 (defun agent-repl--input-buffer (ws)
   "Return WS's live input buffer, or nil."
@@ -1185,10 +1200,13 @@ its kind says so."
 
 (defun agent-repl--input-select-step (direction)
   "Step the current workspace's selection through the turn boundaries.
-DIRECTION is `:older' or `:newer'."
-  (agent-repl--input-select-feed-row
-   (agent-repl--ws-current-name)
-   (list :arm :turn-boundary :value (list :direction direction))))
+DIRECTION is `:older' or `:newer'.  The step is the user moving through
+the workspace\='s feed with the editor\='s keys, so it is reported as
+their interaction with it (`agent-repl-host-report-interaction')."
+  (let ((ws (agent-repl--ws-current-name)))
+    (agent-repl-host-report-interaction ws :feed-navigated)
+    (agent-repl--input-select-feed-row
+     ws (list :arm :turn-boundary :value (list :direction direction)))))
 
 (defun agent-repl-turn-boundary-select-prev ()
   "Select the PREVIOUS (older) prompt or final response, moving up the feed.
@@ -2646,12 +2664,12 @@ Returns the submission's idempotency key, or nil when nothing was sent."
                 nil)
             (when from-buffer
               (agent-repl--ws-put ws :composer-prompted-at (float-time)))
-            ;; A PROMPT THE USER SENDS MAKES THE SELECTION A VISIT AT ONCE
-            ;; (`agent-repl--note-visit-prompted').  A queue drain is the
-            ;; editor sending a prompt written earlier, not the user writing
-            ;; to the workspace now, so it records nothing.
+            ;; A PROMPT THE USER SENDS IS THEIR INTERACTION WITH THE
+            ;; WORKSPACE (`agent-repl-host-report-interaction').  A queue
+            ;; drain is the editor sending a prompt written earlier, not the
+            ;; user writing to the workspace now, so it reports nothing.
             (unless (eq origin agent-repl--prompt-queue-drain-origin)
-              (agent-repl--note-visit-prompted ws))
+              (agent-repl-host-report-interaction ws :composer-typed))
             (agent-repl--kickoff-prompt-summary ws raw)
             ;; `(null prompt)' is the one fact that says the words came out
             ;; of the composer.  A from-buffer submission clears the composer

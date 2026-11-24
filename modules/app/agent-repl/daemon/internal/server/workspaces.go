@@ -1208,7 +1208,7 @@ func (s *server) SelectWorkspace(
 // select, exactly as SelectWorkspace reveals it.
 //
 // A FEED'S JUMP (followed_from) is a link the reader followed in that
-// workspace's page, which its editor is told first (pushLinkFollowed).
+// workspace's page, which is recorded first as the user's interaction with it (recordLinkFollowed).
 func (s *server) SelectInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SelectInEditorRequest],
@@ -1226,7 +1226,7 @@ func (s *server) SelectInEditor(
 		if done {
 			return answer(resp, cerr)
 		}
-		s.pushLinkFollowed(source.Log, rpc, source.Record.ID)
+		s.recordLinkFollowed(ctx, source.Log, rpc, source.Record.ID)
 	}
 	reveal := req.Msg.GetReveal()
 	if heard := s.pushSelectRequested(subject.Record.Ref()); heard > 0 {
@@ -1344,65 +1344,47 @@ func (s *server) selectSubject(
 	return &agentreplv1.SelectWorkspaceSuccess{RosterRevision: s.deps.Sidebar.Revision()}, nil
 }
 
-// MarkWorkspaceViewed records that the user has SEEN this workspace, which
-// reads the last turn's result and draws its roster row PARTIAL on its
-// turn-end arm until the next turn — if the row is done or interrupted; on any
-// other status the roster drops the report. It is idempotent, and it is the
-// editor's verb: dwell is an editor fact.
-func (s *server) MarkWorkspaceViewed(
+// ReportUserInteraction records that the user interacted with this workspace:
+// its row is viewed until its next status change, on any status, and its
+// interaction instant is the recency the editor's walk orders by. It is
+// idempotent, and its senders are the editor and the workspace's page, which
+// each report only the user's own acts.
+func (s *server) ReportUserInteraction(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.MarkWorkspaceViewedRequest],
-) (*connect.Response[agentreplv1.MarkWorkspaceViewedResponse], error) {
-	const rpc = "MarkWorkspaceViewed"
-	resp := &agentreplv1.MarkWorkspaceViewedResponse{}
+	req *connect.Request[agentreplv1.ReportUserInteractionRequest],
+) (*connect.Response[agentreplv1.ReportUserInteractionResponse], error) {
+	const rpc = "ReportUserInteraction"
+	if err := validateReportUserInteractionRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.ReportUserInteractionResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.MarkViewed(ctx, subject.Record.ID); err != nil {
+	if err := s.deps.Verbs.RecordInteraction(ctx, subject.Record.ID, interactionOf(req.Msg.GetInteraction())); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	resp.Result = &agentreplv1.MarkWorkspaceViewedResponse_Success{
-		Success: &agentreplv1.MarkWorkspaceViewedSuccess{},
+	resp.Result = &agentreplv1.ReportUserInteractionResponse_Success{
+		Success: &agentreplv1.ReportUserInteractionSuccess{},
 	}
 	return connect.NewResponse(resp), nil
 }
 
-// ReportViewDwell records that the editor started, or stopped, counting the
-// user's dwell on this workspace, so the roster recedes the row's name over
-// the dwell rather than at its end. It is the editor's verb, like
-// MarkWorkspaceViewed: dwell is an editor fact.
-func (s *server) ReportViewDwell(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.ReportViewDwellRequest],
-) (*connect.Response[agentreplv1.ReportViewDwellResponse], error) {
-	const rpc = "ReportViewDwell"
-	if err := validateReportViewDwellRequest(req.Msg); err != nil {
-		return nil, err
-	}
-	resp := &agentreplv1.ReportViewDwellResponse{}
-	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
-	if done {
-		return answer(resp, cerr)
-	}
-	var err error
-	switch dwell := req.Msg.GetDwell().(type) {
-	case *agentreplv1.ReportViewDwellRequest_Counting:
-		err = s.deps.Verbs.StartViewDwell(ctx, subject.Record.ID, time.Duration(dwell.Counting.GetLengthMs())*time.Millisecond)
-	case *agentreplv1.ReportViewDwellRequest_Stopped:
-		err = s.deps.Verbs.StopViewDwell(ctx, subject.Record.ID)
+// interactionOf names the kind of the user's interaction for the record. The
+// request's kind is validated set (validateReportUserInteractionRequest), and
+// this build knows every arm the message declares.
+func interactionOf(u *agentreplv1.UserInteraction) workspace.Interaction {
+	switch kind := u.GetKind().(type) {
+	case *agentreplv1.UserInteraction_FeedScrolled:
+		return workspace.InteractionFeedScrolled
+	case *agentreplv1.UserInteraction_ComposerTyped:
+		return workspace.InteractionComposerTyped
+	case *agentreplv1.UserInteraction_FeedNavigated:
+		return workspace.InteractionFeedNavigated
 	default:
-		// validateReportViewDwellRequest refused an unset arm, and this build
-		// knows every arm the request declares.
-		panic(fmt.Sprintf("ReportViewDwell: unhandled dwell arm %T", dwell))
+		panic(fmt.Sprintf("ReportUserInteraction: unhandled interaction arm %T", kind))
 	}
-	if err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
-	}
-	resp.Result = &agentreplv1.ReportViewDwellResponse_Success{
-		Success: &agentreplv1.ReportViewDwellSuccess{},
-	}
-	return connect.NewResponse(resp), nil
 }
 
 // SetWorkspacePriority sets or clears the roster's ordering priority. An unset

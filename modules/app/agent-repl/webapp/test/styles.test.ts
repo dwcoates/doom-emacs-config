@@ -2057,8 +2057,6 @@ describe("the reviving shimmer's stylesheet contract", () => {
     "#ws-sidebar .row .name.reviving > .name-ink::before",
     "#ws-sidebar .row .name.breathes.reviving > .name-ink::before",
     "#ws-sidebar .row .name.breathes.reviving > .name-ink::after",
-    "#ws-sidebar .row .name.viewing.reviving > .name-ink::before",
-    "#ws-sidebar .row .name.viewing.reviving > .name-ink::after",
   ])("moves %s back on the band's own timing", (selector) => {
     // Arrange / Act
     const decls = rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))?.declarations ?? "";
@@ -2078,7 +2076,7 @@ describe("the reviving shimmer's stylesheet contract", () => {
     const inside = mediaBodies("prefers-reduced-motion: no-preference").reduce((n, body) => n + shimmer(body), 0);
 
     // Assert
-    expect([shimmer(stylesheet), inside]).toEqual([inside, 7]);
+    expect([shimmer(stylesheet), inside]).toEqual([inside, 5]);
   });
 
   it("leaves nothing of the shimmer to undo under prefers-reduced-motion: reduce", () => {
@@ -5247,45 +5245,15 @@ describe("the rail's search toggle", () => {
   });
 });
 
-describe("the view dwell's crossfade", () => {
-  it.each([
-    ["the grey copy fades in", "#ws-sidebar .row .name.viewing > .name-ink::after", "name-view-dwell-in"],
-    ["the name's own copy fades out", "#ws-sidebar .row .name.viewing > .name-ink::before", "name-view-dwell-out"],
-    ["a reviving name's grey copy fades in", "#ws-sidebar .row .name.viewing.reviving > .name-ink::after", "name-view-dwell-in"],
-    ["a reviving name's own copy fades out", "#ws-sidebar .row .name.viewing.reviving > .name-ink::before", "name-view-dwell-out"],
-  ])("%s once over the dwell, holding its last frame", (_copy, selector, keyframes) => {
-    // Arrange / Act
-    const decls = rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))?.declarations ?? "";
-
-    // Assert
-    expect(decls).toContain(`${keyframes} var(--name-view-dwell) linear var(--name-view-dwell-delay, 0s) 1 both`);
+describe("no name fades or recedes on a timer", () => {
+  it.each(["name-fade", "name-view-dwell-in", "name-view-dwell-out"])("declares no %s keyframes", (name) => {
+    // Arrange / Act / Assert
+    expect(stylesheet).not.toMatch(new RegExp(`@keyframes ${name}\\b`));
   });
 
-  it("draws the grey copy in the viewed grey, added to the name's own copy", () => {
-    // Arrange / Act
-    const decls = ownDeclarationsOf("#ws-sidebar .row .name.viewing > .name-ink::after") ?? "";
-
-    // Assert
-    expect([/display:\s*block/.test(decls), /color:\s*var\(--muted\)/.test(decls), /mix-blend-mode:\s*plus-lighter/.test(decls)]).toEqual([true, true, true]);
-  });
-
-  it("hides a receding name's own text while its copies draw it", () => {
-    // Arrange / Act
-    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .row .name.viewing"))?.declarations ?? "";
-
-    // Assert
-    expect([/-webkit-text-fill-color:\s*transparent/.test(rule), /text-decoration-color:\s*transparent/.test(rule)]).toEqual([true, true]);
-  });
-
-  it.each([
-    ["name-view-dwell-in", "0", "1"],
-    ["name-view-dwell-out", "1", "0"],
-  ])("runs %s from opacity %s to %s", (name, from, to) => {
-    // Arrange / Act
-    const body = keyframesOf(name);
-
-    // Assert
-    expect([new RegExp(`from\\s*\\{\\s*opacity:\\s*${from};`).test(body), new RegExp(`to\\s*\\{\\s*opacity:\\s*${to};`).test(body)]).toEqual([true, true]);
+  it.each(["#ws-sidebar .row .name.fading", "#ws-sidebar .row .name.viewing"])("draws no %s rule", (selector) => {
+    // Arrange / Act / Assert
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes(selector))).toBe(false);
   });
 });
 
@@ -5500,12 +5468,20 @@ describe("the rail's marks", () => {
     expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
   });
 
-  it("strikes a cold-gated workspace's name and nothing else", () => {
+  it("strikes a cold-gated workspace's name", () => {
     // Arrange / Act
     const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated");
 
     // Assert
     expect(rule).toMatch(/text-decoration:\s*line-through/);
+  });
+
+  it("keeps an unviewed cold-gated name in its status tone", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated.tinted");
+
+    // Assert: owner request, 2026-11-23.
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*var\(--name-tone\)/);
   });
 
   it("offers no click on a row still opening", () => {
@@ -7042,17 +7018,6 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
     expect(decls).toMatch(/color:\s*var\(--name-tone\)/);
   });
 
-  it("fades a fading name from its tone to its resting grey over the 20 minute hold and 10 minute fade, from minus the time since the turn ended", () => {
-    // Arrange / Act
-    const decls = ruleFor("#ws-sidebar .row .name.fading");
-    const keyframes = keyframesOf("name-fade");
-
-    // Assert
-    expect(decls).toMatch(/animation:\s*name-fade var\(--name-fade\) linear var\(--name-fade-delay, 0s\) 1 both/);
-    expect(stylesheet).not.toMatch(/--name-fade:/);
-    expect(keyframes.replace(/\s+/g, " ")).toMatch(/0%, 66\.667% \{ color: var\(--name-tone\); \}.*100% \{ color: var\(--name-rest\); \}/);
-  });
-
   it.each([
     ["an unviewed name", "#ws-sidebar .row .name", "--repo-head-expanded"],
     ["a viewed name", "#ws-sidebar .row .name.viewed", "--muted"],
@@ -7062,18 +7027,6 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
 
     // Assert
     expect(decls).toMatch(new RegExp(`--name-rest:\\s*var\\(${token}\\)`));
-  });
-
-  it("holds the tone for the first two thirds of the window, then accelerates (owner request, 2026-11-08)", () => {
-    // Arrange
-    const keyframes = keyframesOf("name-fade");
-    const remaining = [...keyframes.matchAll(/(\d+(?:\.\d+)?)% \{ color: color-mix\(in srgb, var\(--name-tone\) ([\d.]+)%/g)].map((m) => [Number(m[1]), Number(m[2])]);
-
-    // Act
-    const steps = remaining.slice(1).map(([, tone], i) => remaining[i][1] - tone);
-
-    // Assert — the tone only falls after the hold, and each step is larger than the last.
-    expect([remaining[0][0] > 66.667, steps.every((step, i) => i === 0 || step > steps[i - 1])]).toEqual([true, true]);
   });
 
   it("breathes a colored name both darker and brighter about its tone", () => {

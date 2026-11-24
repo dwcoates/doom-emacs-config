@@ -94,17 +94,33 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		}
 		_, mirrored := r.state.incumbentArms[rec.ID]
 		r.noteResult(rec.ID, s, rowLog)
-		// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
-		// status, so the row's display mode cannot lag its status by a push
-		// and a read result is never drawn as unread (`wsState.viewedOn`).
+		// THE MARKER IS DERIVED FROM THE VIEWED FACT, in the same breath as
+		// the status, so the row's display mode cannot lag its status by a
+		// push (`wsState.viewedOn`).
 		wasViewed = s.lastArmSeen && s.viewedOn(s.lastArm)
 		var previousArm string
 		previousArm, armChanged = s.noteArm(armName)
+		// EVERY STATUS CHANGE LOWERS THE VIEWED MARKER, on any arm: the user
+		// has not interacted with what the row now shows. A fact the durable
+		// record seeded is the one exception until the row first draws its
+		// arm (wsState.viewedRestored): the bring-up's arms before it are no
+		// change the user missed.
+		if s.viewedRestored && armName == s.viewedArm {
+			s.viewedRestored = false
+			rowLog.Info("daemon.sidebar.viewed_restored",
+				"the row drew the status the user last interacted on before this daemon, so it is viewed as it stood", dlog.Context{
+					"status": armName,
+				})
+		} else if s.viewedArm != "" && !s.viewedRestored && armChanged {
+			rowLog.Debug("daemon.sidebar.row_viewed_cleared",
+				"the row's status changed, so it is no longer viewed and is drawn FULL", dlog.Context{
+					"status": armName, "viewed_on": s.viewedArm,
+				})
+			s.viewedArm = ""
+			s.viewedSettled = true
+		}
+		r.noteViewed(rec.ID, s, !mirrored, rowLog)
 		if armChanged {
-			// A STATUS CHANGE ENDS THE DWELL: the row's name returns to its
-			// unviewed colour, and an editor still viewing the workspace
-			// counts a fresh dwell against the new status.
-			s.dwell = nil
 			r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
 			r.noteStatusChange(rec.ID, s, !mirrored)
 			if departureArm(armName) {
@@ -125,28 +141,15 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 
 	if !r.readOnly {
 		rowLog.Debug("daemon.sidebar.row", "the roster resolved a row", dlog.Context{
-			"status":   armName,
-			"current":  current,
-			"closed":   closed,
-			"viewed":   viewed,
-			"result":   s.result.String(),
-			"reviving": s.reviving,
-			// The editor chooses its dwell threshold from this fact.
+			"status":        armName,
+			"current":       current,
+			"closed":        closed,
+			"viewed":        viewed,
+			"result":        s.result.String(),
+			"reviving":      s.reviving,
 			"detached_live": detachedLive,
+			"was_viewed":    wasViewed,
 		})
-		switch {
-		case wasViewed && !viewed:
-			rowLog.Debug("daemon.sidebar.row_viewed_cleared",
-				"the row left its read turn-end state, so it is drawn FULL", dlog.Context{
-					"status": armName,
-					"result": s.result.String(),
-				})
-		case armChanged && !wasViewed && viewed:
-			rowLog.Debug("daemon.sidebar.row_viewed_restored",
-				"the row returned to its turn-end arm with the result already read, so it is drawn PARTIAL", dlog.Context{
-					"status": armName,
-				})
-		}
 	}
 	r.assertArm(armName, rowLog)
 
@@ -180,12 +183,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if viewed {
 		out.Viewed = &frontendv1.RosterRowViewed{}
 	}
-	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowViewDwell` states it:
-	// set while the editor's dwell will recede the selected row's name.
-	out.ViewDwell = s.viewDwellOn(armName, current)
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowIdleAsyncUnread` states
-	// it: set while the row is idle_async over an unread turn end, resolved from
-	// the same read fact as the viewed marker above.
+	// it: set while the row is idle_async over a turn end the user has not
+	// interacted with, resolved from the same viewed fact as the marker above.
 	out.IdleAsyncUnread = idleAsyncUnreadMarker(s, armName, rowLog)
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowReviving` states it: set
 	// while the revival is in flight, omitted otherwise.
@@ -239,6 +239,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// editor's jump to the most recent workspace), and it survives a restart
 	// of every client because it is WSM's. Unset when never selected.
 	out.LastSelected = lastSelected(rec)
+	out.LastInteracted = lastInteracted(rec, s)
 	// THE DURABLE TURN-END INSTANT, for ordering only: the editor's jump to
 	// the workspace that most recently finished ranks by it. Unset when no
 	// turn of the workspace has closed.
@@ -283,6 +284,30 @@ func availability(s *wsState) *frontendv1.RosterRowAvailability {
 		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Available{
 			Available: &frontendv1.RosterRowAvailabilityAvailable{}}}
 	}
+}
+
+// interactedAt resolves a workspace's interaction recency: the later of the
+// instant this resolver heard (SetInteracted) and the durable record's, or nil
+// for a workspace the user never interacted with. It is the ONE reading every
+// row that states the recency takes (lastInteracted, the thread rows), and S
+// may be nil for a workspace this resolver holds no facts of.
+func interactedAt(rec wsm.Workspace, s *wsState) *time.Time {
+	at := rec.InteractedAt
+	if s != nil && s.interactedAt != nil && (at == nil || s.interactedAt.After(*at)) {
+		at = s.interactedAt
+	}
+	return at
+}
+
+// lastInteracted states a workspace row's interaction recency (interactedAt),
+// nil for a workspace the user never interacted with. Like lastSelected it is
+// never drawn.
+func lastInteracted(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowLastInteracted {
+	at := interactedAt(rec, s)
+	if at == nil {
+		return nil
+	}
+	return &frontendv1.RosterRowLastInteracted{AtMs: at.UnixMilli()}
 }
 
 // lastSelected resolves the row's durable selection instant, or nil for a
@@ -562,6 +587,24 @@ func (r *resolver) noteResult(ws ids.WorkspaceID, s *wsState, log dlog.Logger) {
 		"result": s.result.String(), "end": s.turnEndArm(),
 	})
 	r.pendingResults = append(r.pendingResults, resultChange{ws: ws, result: snapshot})
+}
+
+// noteViewed queues a report of the workspace's viewed fact when it differs
+// from what the durable record holds, for mutate to hand the viewed sink once
+// the lock is released. A MIRRORED row's fact is not durable here, as its
+// status change is not (noteStatusChange): the incumbent is its writer.
+func (r *resolver) noteViewed(ws ids.WorkspaceID, s *wsState, durable bool, log dlog.Logger) {
+	if s.viewedArm == s.persistedViewed || !durable {
+		return
+	}
+	s.persistedViewed = s.viewedArm
+	if r.viewedChanges == nil {
+		return
+	}
+	log.Debug("daemon.sidebar.viewed_changed", "the viewed fact changed; the durable record is told", dlog.Context{
+		"viewed_on": s.viewedArm,
+	})
+	r.pendingViewed = append(r.pendingViewed, viewedChange{ws: ws, arm: s.viewedArm})
 }
 
 // noteStatusChange stamps the workspace's live status change instant at the

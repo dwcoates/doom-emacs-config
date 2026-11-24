@@ -597,10 +597,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// waits on the state database's one connection.
 	// SO IS EVERY WORKSPACE'S VISIBILITY: a boot and a deploy read it before
 	// they allocate anything (wsm.Workspace.Visibility).
-	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterStatusChanges(p.DB, p.Surfaces.Global()),
+	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterViewed(p.DB, p.Surfaces.Global()),
+		rosterStatusChanges(p.DB, p.Surfaces.Global()),
 		rosterVisibility(p.DB, p.Surfaces.Global()))
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
 		sidebar.WithResultSink(rosterDurable.ResultSink()),
+		sidebar.WithViewedSink(rosterDurable.ViewedSink()),
 		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
 		sidebar.WithVisibilitySink(rosterDurable.VisibilitySink()),
 		sidebar.WithQuiet(viewGate))

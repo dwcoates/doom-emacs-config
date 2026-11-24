@@ -229,85 +229,51 @@
                   #'agent-repl-wire-decode-select-workspace-response "{}")
                  '("SelectWorkspaceResponse" result "oneof is unset"))))
 
-;;;; ---- MarkWorkspaceViewed ----
+;;;; ---- ReportUserInteraction ----
 
-(ert-deftest agent-repl-test-wire-host-mark-viewed-request-echoes-the-ref ()
-  "MarkWorkspaceViewed echoes the daemon-minted ref, never a path it built."
-  (should (equal (agent-repl-test-wire-host--quiet
-                   (json-serialize
-                    (agent-repl-wire-encode-mark-workspace-viewed-request
-                     '(:workspace (:id "ws-7" :dir "/w/fix")))))
-                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+(ert-deftest agent-repl-test-wire-host-user-interaction-request-carries-each-kind ()
+  "Each interaction kind is its own empty arm, beside the echoed ref."
+  (dolist (case '((:feed-scrolled "feedScrolled")
+                  (:composer-typed "composerTyped")
+                  (:feed-navigated "feedNavigated")))
+    (should (equal (agent-repl-test-wire-host--quiet
+                     (json-serialize
+                      (agent-repl-wire-encode-report-user-interaction-request
+                       (list :workspace '(:id "ws-7" :dir "/w/fix") :interaction (car case)))))
+                   (format "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},\"interaction\":{\"%s\":{}}}"
+                           (cadr case))))))
 
-(ert-deftest agent-repl-test-wire-host-mark-viewed-request-without-a-ref-is-refused ()
+(ert-deftest agent-repl-test-wire-host-user-interaction-request-refuses-an-unknown-kind ()
+  "A kind the contract does not name errors before send, never on the wire."
+  (should (equal (car (agent-repl-test-wire-host--quiet
+                       (condition-case err
+                           (progn (agent-repl-wire-encode-report-user-interaction-request
+                                   '(:workspace (:id "ws-7" :dir "/w/fix") :interaction :stared))
+                                  nil)
+                         (agent-repl-wire-error (cdr err)))))
+                 "UserInteraction")))
+
+(ert-deftest agent-repl-test-wire-host-user-interaction-request-without-a-kind-is-refused ()
   "An incomplete request errors before send, never on the wire."
   (should (equal (agent-repl-test-wire-host--quiet
                    (condition-case err
-                       (progn (agent-repl-wire-encode-mark-workspace-viewed-request nil) nil)
-                     (agent-repl-wire-error (cdr err))))
-                 '("MarkWorkspaceViewedRequest" workspace
-                   "required message field is absent"))))
-
-(ert-deftest agent-repl-test-wire-host-mark-viewed-success-is-empty ()
-  "Marked; the roster stream carries the row's viewed marker."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-mark-workspace-viewed-response "{\"success\":{}}")
-                 '(:arm :success :value nil))))
-
-(ert-deftest agent-repl-test-wire-host-mark-viewed-error-arm-decodes ()
-  "The error arm decodes to its keyword with the cause the daemon named."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-mark-workspace-viewed-response
-                  "{\"error\":{\"unknownWorkspace\":{}}}")
-                 '(:arm :error
-                   :value (:cause (:arm :unknown-workspace :value nil))))))
-
-(ert-deftest agent-repl-test-wire-host-mark-viewed-unset-result-is-a-breach ()
-  "A MarkWorkspaceViewed response with no arm is a breach."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-mark-workspace-viewed-response "{}")
-                 '("MarkWorkspaceViewedResponse" result "oneof is unset"))))
-
-;;;; ---- ReportViewDwell ----
-
-(ert-deftest agent-repl-test-wire-host-view-dwell-request-carries-a-counting-dwell ()
-  "A counting report carries the ref and the dwell's length."
-  (should (equal (agent-repl-test-wire-host--quiet
-                   (json-serialize
-                    (agent-repl-wire-encode-report-view-dwell-request
-                     '(:workspace (:id "ws-7" :dir "/w/fix")
-                       :dwell (:arm :counting :value (:length-ms 5000))))))
-                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},\"counting\":{\"lengthMs\":5000}}")))
-
-(ert-deftest agent-repl-test-wire-host-view-dwell-request-carries-a-stopped-dwell ()
-  "A stopped report carries the ref and the empty arm."
-  (should (equal (agent-repl-test-wire-host--quiet
-                   (json-serialize
-                    (agent-repl-wire-encode-report-view-dwell-request
-                     '(:workspace (:id "ws-7" :dir "/w/fix")
-                       :dwell (:arm :stopped :value nil)))))
-                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},\"stopped\":{}}")))
-
-(ert-deftest agent-repl-test-wire-host-view-dwell-request-refuses-a-length-that-is-not-positive ()
-  "A counting dwell of no length errors before send, never on the wire."
-  (should (equal (agent-repl-test-wire-host--quiet
-                   (condition-case err
-                       (progn (agent-repl-wire-encode-report-view-dwell-request
-                               '(:workspace (:id "ws-7" :dir "/w/fix")
-                                 :dwell (:arm :counting :value (:length-ms 0))))
-                              nil)
-                     (agent-repl-wire-error (cdr err))))
-                 '("ReportViewDwellCounting" length_ms "expected a positive integer"))))
-
-(ert-deftest agent-repl-test-wire-host-view-dwell-request-without-a-dwell-is-refused ()
-  "An incomplete request errors before send, never on the wire."
-  (should (equal (agent-repl-test-wire-host--quiet
-                   (condition-case err
-                       (progn (agent-repl-wire-encode-report-view-dwell-request
+                       (progn (agent-repl-wire-encode-report-user-interaction-request
                                '(:workspace (:id "ws-7" :dir "/w/fix")))
                               nil)
                      (agent-repl-wire-error (cdr err))))
-                 '("ReportViewDwellRequest" dwell "required message field is absent"))))
+                 '("ReportUserInteractionRequest" interaction "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-user-interaction-success-is-empty ()
+  "Recorded; the roster stream carries the row's viewed marker and recency."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-user-interaction-response "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-user-interaction-unset-result-is-a-breach ()
+  "A ReportUserInteraction response with no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-report-user-interaction-response "{}")
+                 '("ReportUserInteractionResponse" result "oneof is unset"))))
 
 ;;;; ---- The workspace-subject verbs' one shape ----
 
@@ -327,7 +293,7 @@
                  "SomeVerbError")))
 
 (ert-deftest agent-repl-test-wire-host-every-subject-verb-shares-the-one-codec ()
-  "MarkWorkspaceViewed and ReportPageUnloading decode every answer identically.
+  "ReportUserInteraction and ReportPageUnloading decode every answer identically.
 A hand-rolled copy of either would drift from the shared shape and fail here."
   (dolist (json '("{\"success\":{}}"
                   "{\"error\":{\"unknownWorkspace\":{}}}"
@@ -335,11 +301,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   "{\"error\":{\"transferringAway\":{\"address\":\"a\"}}}"
                   "{\"error\":{\"notYetAdopted\":{}}}"))
     (should (equal (agent-repl-test-wire-host--decode
-                    #'agent-repl-wire-decode-mark-workspace-viewed-response json)
-                   (agent-repl-test-wire-host--decode
-                    #'agent-repl-wire-decode-report-page-unloading-response json)))
-    (should (equal (agent-repl-test-wire-host--decode
-                    #'agent-repl-wire-decode-report-view-dwell-response json)
+                    #'agent-repl-wire-decode-report-user-interaction-response json)
                    (agent-repl-test-wire-host--decode
                     #'agent-repl-wire-decode-report-page-unloading-response json)))))
 
@@ -450,7 +412,6 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"mentionTargets\":{}}" :mention-targets)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"loadPageRequested\":{}}" :load-page-requested)
-                      (list "{\"linkFollowed\":{}}" :link-followed)
                       (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)
                       (list "{\"chatTextHighlighted\":{}}" :chat-text-highlighted)
                       (list "{\"responseTextHighlighted\":{}}" :response-text-highlighted)
@@ -912,22 +873,6 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   (concat "{\"workspace\":" agent-repl-test-wire-host--ref-json ",\"row\":\"r\"}"))
                  '("DaemonWorkspaceSelectRequested" row "unknown field"))))
 
-;;;; ---- The link-followed push ----
-
-(ert-deftest agent-repl-test-wire-host-link-followed-decodes-empty ()
-  "The link-followed push is empty: presence is the fact, and the stream names the workspace."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-watch-host-workspace-response
-                  "{\"linkFollowed\":{}}")
-                 '(:arm :link-followed :value nil))))
-
-(ert-deftest agent-repl-test-wire-host-link-followed-refuses-a-field ()
-  "A field on the empty link-followed message is refused, not ignored."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-link-followed
-                  "{\"url\":\"u\"}")
-                 '("HostWorkspaceLinkFollowed" url "unknown field"))))
-
 ;;;; ---- The load button push ----
 
 (ert-deftest agent-repl-test-wire-host-load-page-requested-decodes-empty ()
@@ -1001,6 +946,14 @@ each is refused there as an unknown field."
                     #'agent-repl-wire-decode-watch-host-workspace-response
                     (format "{\"%s\":{}}" arm))
                    (list "WatchHostWorkspaceResponse" arm "unknown field")))))
+
+(ert-deftest agent-repl-test-wire-host-retired-link-followed-arm-is-refused ()
+  "The retired `linkFollowed' push is refused as an unknown field: the daemon
+records a followed link as the user\='s interaction itself."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"linkFollowed\":{}}")
+                 '("WatchHostWorkspaceResponse" linkFollowed "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-retired-notification-arm-is-refused ()
   "The retired `notification' push is refused as an unknown field."
@@ -1982,7 +1935,7 @@ OpenTabs streams."
                              "openInEditor" "openCommitLog" "runInTerminal" "ending" "selection"
                              "finalResponseClicked" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
-                             "responseQuestion" "mentions" "mentionTargets" "linkFollowed")
+                             "responseQuestion" "mentions" "mentionTargets")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

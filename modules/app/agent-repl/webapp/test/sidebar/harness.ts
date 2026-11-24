@@ -288,8 +288,6 @@ export function row(init: {
   idleAsyncUnread?: MessageInitShape<typeof RosterRowSchema>["idleAsyncUnread"];
   /** The REVIVING marker: present while the daemon revives this workspace. */
   reviving?: boolean;
-  /** The VIEW-DWELL marker, epoch ms; omitted = no dwell counting. */
-  viewDwell?: { startedAtMs: bigint; lengthMs: bigint };
   /** The ONE-SHOT mark's outcome; omitted = the workspace is no one-shot. */
   oneShot?: boolean;
   opening?: boolean;
@@ -333,7 +331,6 @@ export function row(init: {
     ...(init.viewed === true ? { viewed: {} } : {}),
     ...(init.idleAsyncUnread === undefined ? {} : { idleAsyncUnread: init.idleAsyncUnread }),
     ...(init.reviving === true ? { reviving: {} } : {}),
-    ...(init.viewDwell === undefined ? {} : { viewDwell: init.viewDwell }),
     ...(init.oneShot === true ? { oneShot: {} } : {}),
     ...(init.opening === true ? { opening: {} } : {}),
     ...(init.asyncMerging === true ? { asyncMerging: {} } : {}),

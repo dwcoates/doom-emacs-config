@@ -372,7 +372,11 @@ type fakeDB struct {
 	keepSelectedErr error
 	// selectErr fails Select.
 	selectErr error
-	forgotten []ids.WorkspaceID
+	// interactedAt are the interaction instants SetInteractedAt recorded, in
+	// order; interactedErr fails it.
+	interactedAt  []interaction
+	interactedErr error
+	forgotten     []ids.WorkspaceID
 	// forgetReport is what Forget answers, and forgetErr makes it fail; the
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
@@ -1244,6 +1248,25 @@ func (d *fakeDB) SetCurrentKeepingLastSelected(_ context.Context, id ids.Workspa
 	d.keptHistorySelects = append(d.keptHistorySelects, id)
 	d.keptHistoryAt = append(d.keptHistoryAt, at)
 	return nil
+}
+
+// SetInteractedAt records the interaction instant, or fails with
+// interactedErr, as WSM refuses an unknown workspace.
+func (d *fakeDB) SetInteractedAt(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	if d.interactedErr != nil {
+		return d.interactedErr
+	}
+	if _, ok := d.workspaces[id]; !ok {
+		return fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	d.interactedAt = append(d.interactedAt, interaction{ws: id, at: at})
+	return nil
+}
+
+// interaction is one interaction a fake was told: its workspace and instant.
+type interaction struct {
+	ws ids.WorkspaceID
+	at time.Time
 }
 
 // Select is WSM's one-transaction select over the fake's own selection
@@ -2962,10 +2985,8 @@ type fakeSidebar struct {
 	mu         sync.Mutex
 	registries []sidebar.Registry
 	selected   []ids.WorkspaceID
-	viewed     []ids.WorkspaceID
-	// dwells records every view-dwell report, in order: "start <ws> <length>"
-	// or "stop <ws>".
-	dwells []string
+	// interacted records every interaction the roster was told, in order.
+	interacted []interaction
 	// reviving records every REVIVING edge, in order.
 	reviving []revivingEdge
 	// calls records the ORDER the resolver was told things in, which is what
@@ -3059,23 +3080,11 @@ func (s *fakeSidebar) Selected() (ids.WorkspaceID, bool) {
 	return s.selected[len(s.selected)-1], true
 }
 
-func (s *fakeSidebar) SetViewDwell(ws ids.WorkspaceID, length time.Duration) {
+func (s *fakeSidebar) SetInteracted(ws ids.WorkspaceID, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.dwells = append(s.dwells, fmt.Sprintf("start %s %s", ws, length))
-}
-
-func (s *fakeSidebar) StopViewDwell(ws ids.WorkspaceID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.dwells = append(s.dwells, fmt.Sprintf("stop %s", ws))
-}
-
-func (s *fakeSidebar) SetViewed(ws ids.WorkspaceID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.viewed = append(s.viewed, ws)
-	s.calls = append(s.calls, "viewed")
+	s.interacted = append(s.interacted, interaction{ws: ws, at: at})
+	s.calls = append(s.calls, "interacted")
 }
 
 func (s *fakeSidebar) SetReviving(ws ids.WorkspaceID, reviving bool) {

@@ -3,26 +3,26 @@
  *
  * THE MODE IS THE CONTRACT, not a decoration. `frontend.v1.RosterRowViewed`
  * states it once, for every surface that draws a workspace: ABSENT is FULL and
- * PRESENT is PARTIAL, and PARTIAL means "you have already read this
- * workspace's last turn result". The Emacs tab-bar implements the same two
+ * PRESENT is PARTIAL, and PARTIAL means "you have interacted with this
+ * workspace since its status last changed". The Emacs tab-bar implements the same two
  * words off the same message — full is the whole `[N] <name>` entry in the
  * status colour, partial is the bracket alone — and a divergence between the
  * two surfaces is a defect rather than a taste difference.
  *
  * WHAT THIS DRAWS, AND WHAT IT LEAVES ALONE. In partial mode the row's NAME
- * text recedes to the muted colour and nothing else changes: the status dot
+ * text recedes to the muted colour, where in full mode it wears its status
+ * tone (`name-tint.ts`), and nothing else changes: the status dot
  * keeps its tone (owner ruling, 2026-10-13: a viewed done workspace is green
  * like any other), and the badges, the when-column and the highlight are
  * untouched. The mode says what the user has seen; it never says what the
  * workspace is doing, and the dot is the thing that says that.
  *
  * THE WIRE'S MARKER IS THE WHOLE ANSWER. The daemon derives the marker from
- * the workspace's read-result fact in the same render that resolves the
- * row's status, so every push carries a status and a marker that already
- * agree. This end keeps no memory and applies no rule of its own: a row that
- * comes back from `idle_async` to a turn end whose result the user has
- * already read arrives PARTIAL on the very push that changes its status, and
- * drawing it FULL there would claim an unread result that is not.
+ * the user's interactions (agentrepl.v1.ReportUserInteraction) in the same
+ * render that resolves the row's status, so every push carries a status and
+ * a marker that already agree. This end keeps no memory and applies no rule of
+ * its own: every status change arrives FULL on the very push that changes the
+ * status, and only the user's next interaction draws it PARTIAL again.
  */
 import { createLogger } from "../log.js";
 

@@ -1480,147 +1480,118 @@ func TestSetWorkspaceParentRefusesAMalformedRequest(t *testing.T) {
 	}
 }
 
-// ---- MarkWorkspaceViewed ---------------------------------------------------
-// TestMarkWorkspaceViewedAnswersSuccess pins the editor's viewed report
-// reaching the verb with the id the registry resolved.
-func TestMarkWorkspaceViewedAnswersSuccess(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	// Act.
-	resp, err := h.Client.MarkWorkspaceViewed(context.Background(),
-		connect.NewRequest(&agentreplv1.MarkWorkspaceViewedRequest{Workspace: ref()}))
-	// Assert.
-	if err != nil {
-		t.Fatalf("MarkWorkspaceViewed: %v", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
-	}
-	if len(h.Verbs.markViewed) != 1 || h.Verbs.markViewed[0] != testWorkspaceID {
-		t.Fatalf("marked = %v, want the resolved workspace once", h.Verbs.markViewed)
-	}
-}
+// ---- ReportUserInteraction -------------------------------------------------
 
-// TestMarkWorkspaceViewedRefusesAnUnknownWorkspace pins that an id the registry
-// does not hold answers the unknown_workspace arm rather than a transport error.
-func TestMarkWorkspaceViewedRefusesAnUnknownWorkspace(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	// Act.
-	resp, err := h.Client.MarkWorkspaceViewed(context.Background(),
-		connect.NewRequest(&agentreplv1.MarkWorkspaceViewedRequest{
-			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
-		}))
-	// Assert.
-	if err != nil {
-		t.Fatalf("MarkWorkspaceViewed: %v", err)
-	}
-	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
-		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
-	}
-	if len(h.Verbs.markViewed) != 0 {
-		t.Fatalf("marked = %v, want nothing marked for an unknown workspace", h.Verbs.markViewed)
-	}
-}
-
-// ---- ReportViewDwell -------------------------------------------------------
-
-// TestReportViewDwellHandsEachArmToItsVerb pins that a counting report starts
-// the dwell at its length and a stopped report stops it, each on the resolved
-// workspace.
-func TestReportViewDwellHandsEachArmToItsVerb(t *testing.T) {
+// TestReportUserInteractionHandsEachKindToTheVerb pins every interaction kind
+// reaching the verb, named, with the id the registry resolved.
+func TestReportUserInteractionHandsEachKindToTheVerb(t *testing.T) {
 	cases := []struct {
 		name string
-		req  *agentreplv1.ReportViewDwellRequest
-		want viewDwellCall
+		kind *agentreplv1.UserInteraction
+		want workspace.Interaction
 	}{
-		{
-			name: "counting starts the dwell at its length",
-			req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Counting{
-				Counting: &agentreplv1.ReportViewDwellCounting{LengthMs: 5000},
-			}},
-			want: viewDwellCall{ws: testWorkspaceID, length: 5 * time.Second},
-		},
-		{
-			name: "stopped stops the dwell",
-			req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Stopped{
-				Stopped: &agentreplv1.ReportViewDwellStopped{},
-			}},
-			want: viewDwellCall{ws: testWorkspaceID, stopped: true},
-		},
+		{name: "feed scrolled", want: workspace.InteractionFeedScrolled, kind: &agentreplv1.UserInteraction{
+			Kind: &agentreplv1.UserInteraction_FeedScrolled{FeedScrolled: &agentreplv1.UserInteractionFeedScrolled{}}}},
+		{name: "composer typed", want: workspace.InteractionComposerTyped, kind: &agentreplv1.UserInteraction{
+			Kind: &agentreplv1.UserInteraction_ComposerTyped{ComposerTyped: &agentreplv1.UserInteractionComposerTyped{}}}},
+		{name: "feed navigated", want: workspace.InteractionFeedNavigated, kind: &agentreplv1.UserInteraction{
+			Kind: &agentreplv1.UserInteraction_FeedNavigated{FeedNavigated: &agentreplv1.UserInteractionFeedNavigated{}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
+
 			// Act.
-			resp, err := h.Client.ReportViewDwell(context.Background(), connect.NewRequest(tc.req))
+			resp, err := h.Client.ReportUserInteraction(context.Background(), connect.NewRequest(
+				&agentreplv1.ReportUserInteractionRequest{Workspace: ref(), Interaction: tc.kind}))
+
 			// Assert.
 			if err != nil {
-				t.Fatalf("ReportViewDwell: %v", err)
+				t.Fatalf("ReportUserInteraction: %v", err)
 			}
 			if resp.Msg.GetSuccess() == nil {
 				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
 			}
-			if len(h.Verbs.viewDwells) != 1 || h.Verbs.viewDwells[0] != tc.want {
-				t.Fatalf("dwell calls = %+v, want exactly %+v", h.Verbs.viewDwells, tc.want)
+			want := []interactionCall{{ws: testWorkspaceID, kind: tc.want}}
+			if !slices.Equal(h.Verbs.interactions, want) {
+				t.Fatalf("interactions = %v, want %v", h.Verbs.interactions, want)
 			}
 		})
 	}
 }
 
-// TestReportViewDwellRefusesAMalformedRequest pins that an unset dwell arm and
-// a counting dwell without a positive length are InvalidArgument, and reach no
-// verb.
-func TestReportViewDwellRefusesAMalformedRequest(t *testing.T) {
+// TestReportUserInteractionRefusesAnUnsetKind pins that a request naming no
+// interaction is InvalidArgument and reaches no verb.
+func TestReportUserInteractionRefusesAnUnsetKind(t *testing.T) {
 	cases := []struct {
-		name string
-		req  *agentreplv1.ReportViewDwellRequest
+		name        string
+		interaction *agentreplv1.UserInteraction
 	}{
-		{name: "an unset dwell arm", req: &agentreplv1.ReportViewDwellRequest{Workspace: ref()}},
-		{name: "a zero length", req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Counting{
-			Counting: &agentreplv1.ReportViewDwellCounting{},
-		}}},
-		{name: "a negative length", req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Counting{
-			Counting: &agentreplv1.ReportViewDwellCounting{LengthMs: -1},
-		}}},
+		{name: "no interaction", interaction: nil},
+		{name: "an interaction with no kind", interaction: &agentreplv1.UserInteraction{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
+
 			// Act.
-			_, err := h.Client.ReportViewDwell(context.Background(), connect.NewRequest(tc.req))
+			_, err := h.Client.ReportUserInteraction(context.Background(), connect.NewRequest(
+				&agentreplv1.ReportUserInteractionRequest{Workspace: ref(), Interaction: tc.interaction}))
+
 			// Assert.
 			if connect.CodeOf(err) != connect.CodeInvalidArgument {
-				t.Fatalf("err = %v, want InvalidArgument", err)
+				t.Fatalf("error = %v, want InvalidArgument", err)
 			}
-			if len(h.Verbs.viewDwells) != 0 {
-				t.Fatalf("dwell calls = %+v, want none for a malformed request", h.Verbs.viewDwells)
+			if len(h.Verbs.interactions) != 0 {
+				t.Fatalf("interactions = %v, want none for a malformed request", h.Verbs.interactions)
 			}
 		})
 	}
 }
 
-// TestReportViewDwellRefusesAnUnknownWorkspace pins that an id the registry
-// does not hold answers the unknown_workspace arm rather than a transport error.
-func TestReportViewDwellRefusesAnUnknownWorkspace(t *testing.T) {
+// TestReportUserInteractionRefusesAnUnknownWorkspace pins that an id the
+// registry does not hold answers the unknown_workspace arm rather than a
+// transport error.
+func TestReportUserInteractionRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+
 	// Act.
-	resp, err := h.Client.ReportViewDwell(context.Background(), connect.NewRequest(&agentreplv1.ReportViewDwellRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
-		Dwell:     &agentreplv1.ReportViewDwellRequest_Stopped{Stopped: &agentreplv1.ReportViewDwellStopped{}},
+	resp, err := h.Client.ReportUserInteraction(context.Background(), connect.NewRequest(&agentreplv1.ReportUserInteractionRequest{
+		Workspace:   &workspacev1.WorkspaceRef{Id: "ws-nope"},
+		Interaction: &agentreplv1.UserInteraction{Kind: &agentreplv1.UserInteraction_FeedScrolled{FeedScrolled: &agentreplv1.UserInteractionFeedScrolled{}}},
 	}))
+
 	// Assert.
 	if err != nil {
-		t.Fatalf("ReportViewDwell: %v", err)
+		t.Fatalf("ReportUserInteraction: %v", err)
 	}
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
-	if len(h.Verbs.viewDwells) != 0 {
-		t.Fatalf("dwell calls = %+v, want none for an unknown workspace", h.Verbs.viewDwells)
+	if len(h.Verbs.interactions) != 0 {
+		t.Fatalf("interactions = %v, want none for an unknown workspace", h.Verbs.interactions)
+	}
+}
+
+// TestReportUserInteractionAnswersTheVerbsRefusal pins a refused interaction
+// answering its refusal rather than success.
+func TestReportUserInteractionAnswersTheVerbsRefusal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.interactionErr = errors.New("the store is gone")
+
+	// Act.
+	resp, err := h.Client.ReportUserInteraction(context.Background(), connect.NewRequest(&agentreplv1.ReportUserInteractionRequest{
+		Workspace:   ref(),
+		Interaction: &agentreplv1.UserInteraction{Kind: &agentreplv1.UserInteraction_ComposerTyped{ComposerTyped: &agentreplv1.UserInteractionComposerTyped{}}},
+	}))
+
+	// Assert.
+	if err == nil && resp.Msg.GetSuccess() != nil {
+		t.Fatalf("result = %v, want the refusal, not success", resp.Msg.GetResult())
 	}
 }
 

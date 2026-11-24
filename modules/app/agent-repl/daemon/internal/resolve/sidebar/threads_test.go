@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/ids"
@@ -236,5 +238,44 @@ func TestATakenBackOutlineLeavesTheRow(t *testing.T) {
 	// Assert
 	if row := latest(t, r).GetThreads().GetRows()[0]; row.Outline != nil {
 		t.Fatalf("outline = %v, want none", row.Outline)
+	}
+}
+
+func TestAThreadRowStatesItsInteractionRecency(t *testing.T) {
+	later := *at(2 * time.Minute)
+	cases := []struct {
+		name    string
+		durable *time.Time
+		live    *time.Time
+		want    *frontendv1.RosterThreadLastInteracted
+	}{
+		{name: "never interacted states none"},
+		{name: "the durable instant alone", durable: at(time.Minute), want: &frontendv1.RosterThreadLastInteracted{AtMs: at(time.Minute).UnixMilli()}},
+		{name: "a live interaction newer than the durable one, on the next publish", durable: at(time.Minute), live: &later, want: &frontendv1.RosterThreadLastInteracted{AtMs: later.UnixMilli()}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			th := thread("t-1", "why", at(time.Minute))
+			th.InteractedAt = tc.durable
+			r.SetRegistry(withThreads(th))
+
+			// Act: an interaction that reorders nothing publishes nothing, so
+			// the next publish (a summary landing) is where the row states it.
+			if tc.live != nil {
+				r.SetInteracted("t-1", *tc.live)
+				r.SetSummary("t-1", "a summary")
+			}
+
+			// Assert
+			rows := latest(t, r).GetThreads().GetRows()
+			if len(rows) != 1 {
+				t.Fatalf("thread rows = %v, want the one thread", rows)
+			}
+			if got := rows[0].GetLastInteracted(); !proto.Equal(got, tc.want) {
+				t.Fatalf("last_interacted = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

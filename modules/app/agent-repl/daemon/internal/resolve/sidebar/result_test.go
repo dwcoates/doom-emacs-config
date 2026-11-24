@@ -1,7 +1,9 @@
 package sidebar_test
 
 import (
+	"slices"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -42,11 +44,10 @@ func TestARestoredResultDrawsTheRowAsItStood(t *testing.T) {
 		name       string
 		stored     *wsm.TurnResult
 		wantStatus string
-		wantViewed bool
 	}{
-		{name: "an unread done is FULL done", stored: &wsm.TurnResult{End: wsm.TurnResultDone}, wantStatus: "done"},
-		{name: "a read interrupted is PARTIAL interrupted", stored: &wsm.TurnResult{End: wsm.TurnResultInterrupted, Read: true}, wantStatus: "interrupted", wantViewed: true},
-		{name: "an unread failed turn is FULL turn_failed", stored: &wsm.TurnResult{End: wsm.TurnResultFailed}, wantStatus: "turn_failed"},
+		{name: "a done is done", stored: &wsm.TurnResult{End: wsm.TurnResultDone}, wantStatus: "done"},
+		{name: "an interrupted is interrupted", stored: &wsm.TurnResult{End: wsm.TurnResultInterrupted}, wantStatus: "interrupted"},
+		{name: "a failed turn is turn_failed", stored: &wsm.TurnResult{End: wsm.TurnResultFailed}, wantStatus: "turn_failed"},
 		{name: "no stored result is ready", stored: nil, wantStatus: "ready"},
 	}
 	for _, tt := range tests {
@@ -54,13 +55,13 @@ func TestARestoredResultDrawsTheRowAsItStood(t *testing.T) {
 			// Arrange / Act: a daemon that did not see the turn end.
 			r, reports := resultResolver(t, tt.stored)
 
-			// Assert.
+			// Assert: nobody interacted with it, so it is FULL.
 			row := onlyRow(t, r)
 			if got := statusName(row); got != tt.wantStatus {
 				t.Fatalf("status = %q, want %q", got, tt.wantStatus)
 			}
-			if got := row.GetViewed() != nil; got != tt.wantViewed {
-				t.Fatalf("viewed = %v, want %v", got, tt.wantViewed)
+			if row.GetViewed() != nil {
+				t.Fatalf("viewed = %v, want unset with no durable viewed fact", row.GetViewed())
 			}
 			if len(*reports) != 0 {
 				t.Fatalf("reports = %+v, want none: a restored result is already durable", *reports)
@@ -69,17 +70,17 @@ func TestARestoredResultDrawsTheRowAsItStood(t *testing.T) {
 	}
 }
 
-func TestATurnEndIsReportedUnreadThenRead(t *testing.T) {
+func TestATurnEndIsReportedOnceAndAnInteractionReportsNoResult(t *testing.T) {
 	// Arrange.
 	r, reports := resultResolver(t, nil)
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Act.
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetViewed(theWS)
+	r.SetInteracted(theWS, epoch)
 
-	// Assert.
-	want := []wsm.TurnResult{{End: wsm.TurnResultDone}, {End: wsm.TurnResultDone, Read: true}}
+	// Assert: the result is how the turn ended; viewing it is another fact.
+	want := []wsm.TurnResult{{End: wsm.TurnResultDone}}
 	if len(*reports) != len(want) {
 		t.Fatalf("reports = %+v, want %v", *reports, want)
 	}
@@ -92,7 +93,7 @@ func TestATurnEndIsReportedUnreadThenRead(t *testing.T) {
 
 func TestANewTurnRetiresTheRestoredResultAndReportsItGone(t *testing.T) {
 	// Arrange.
-	r, reports := resultResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone, Read: true})
+	r, reports := resultResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone})
 
 	// Act.
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -106,19 +107,91 @@ func TestANewTurnRetiresTheRestoredResultAndReportsItGone(t *testing.T) {
 	}
 }
 
-func TestARestoredResultIsViewedLikeALiveOne(t *testing.T) {
-	// Arrange.
-	r, reports := resultResolver(t, &wsm.TurnResult{End: wsm.TurnResultInterrupted})
+// ---- the viewed fact outlives the daemon that saw the interaction ----
 
-	// Act.
-	r.SetViewed(theWS)
+// viewedReport is one call of the viewed sink.
+type viewedReport struct {
+	ws  ids.WorkspaceID
+	arm string
+}
+
+// viewedResolver builds a live resolver whose one workspace's durable record
+// holds the turn end STORED and the viewed arm VIEWED, recording every viewed
+// fact it reports.
+func viewedResolver(t *testing.T, stored *wsm.TurnResult, viewed string) (sidebar.Resolver, *[]viewedReport) {
+	t.Helper()
+	reports := &[]viewedReport{}
+	r, _ := newResolver(t, sidebar.WithViewedSink(
+		func(ws ids.WorkspaceID, arm string) {
+			*reports = append(*reports, viewedReport{ws: ws, arm: arm})
+		}))
+	rec := workspace(string(theWS), "one")
+	rec.Result = stored
+	rec.ViewedStatus = viewed
+	r.SetRegistry(registry(rec))
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+	return r, reports
+}
+
+func TestARestoredViewedFactDrawsTheRowOnlyOnItsOwnArm(t *testing.T) {
+	tests := []struct {
+		name        string
+		viewed      string
+		wantViewed  bool
+		wantReports []viewedReport
+	}{
+		{name: "viewed on the arm the row draws is PARTIAL", viewed: "done", wantViewed: true},
+		{name: "viewed on another arm is FULL while the row has not drawn it", viewed: "thinking"},
+		{name: "no durable fact is FULL", viewed: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act: a daemon that did not see the interaction.
+			r, reports := viewedResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone}, tt.viewed)
+
+			// Assert.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != "done" {
+				t.Fatalf("status = %q, want done", got)
+			}
+			if got := row.GetViewed() != nil; got != tt.wantViewed {
+				t.Fatalf("viewed = %v, want %v", got, tt.wantViewed)
+			}
+			if !slices.Equal(*reports, tt.wantReports) {
+				t.Fatalf("viewed reports = %+v, want %+v", *reports, tt.wantReports)
+			}
+		})
+	}
+}
+
+func TestTheViewedFactIsReportedWhenSetAndWhenAStatusChangeClearsIt(t *testing.T) {
+	// Arrange.
+	r, reports := viewedResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone}, "")
+
+	// Act: the user interacts, then a new turn starts.
+	r.SetInteracted(theWS, epoch)
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Assert.
-	if onlyRow(t, r).GetViewed() == nil {
-		t.Fatal("viewed = none, want the restored interrupted row PARTIAL once viewed")
+	want := []viewedReport{{ws: theWS, arm: "done"}, {ws: theWS, arm: ""}}
+	if !slices.Equal(*reports, want) {
+		t.Fatalf("viewed reports = %+v, want %+v", *reports, want)
 	}
-	if len(*reports) != 1 || (*reports)[0].result == nil || !(*reports)[0].result.Read {
-		t.Fatalf("reports = %+v, want the read reported once", *reports)
+}
+
+func TestARepeatedInteractionReportsTheViewedFactOnce(t *testing.T) {
+	// Arrange.
+	r, reports := viewedResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone}, "")
+	r.SetInteracted(theWS, epoch)
+
+	// Act.
+	r.SetInteracted(theWS, epoch.Add(time.Second))
+
+	// Assert: the durable record already holds the arm.
+	want := []viewedReport{{ws: theWS, arm: "done"}}
+	if !slices.Equal(*reports, want) {
+		t.Fatalf("viewed reports = %+v, want %+v", *reports, want)
 	}
 }
 
@@ -137,5 +210,62 @@ func TestALiveTurnBeforeTheRegistryIsNotOverwrittenByTheRecord(t *testing.T) {
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "thinking" {
 		t.Fatalf("status = %q, want thinking: the live turn outranks the stored result", got)
+	}
+}
+
+func TestARestoredViewedFactWaitsOutTheBringUpsArms(t *testing.T) {
+	// Arrange: the registry arrives before the shim's link, so the row draws
+	// the bring-up's arms first, as a booting daemon does.
+	reports := &[]viewedReport{}
+	r, _ := newResolver(t, sidebar.WithViewedSink(func(ws ids.WorkspaceID, arm string) {
+		*reports = append(*reports, viewedReport{ws: ws, arm: arm})
+	}))
+	rec := workspace(string(theWS), "one")
+	rec.Result = &wsm.TurnResult{End: wsm.TurnResultDone}
+	rec.ViewedStatus = "done"
+	r.SetRegistry(registry(rec))
+	r.OnLink(theWS, shimclient.LinkDialing)
+
+	// Act: the link connects and the row settles on its restored done.
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Assert.
+	row := onlyRow(t, r)
+	if got := statusName(row); got != "done" {
+		t.Fatalf("status = %q, want done", got)
+	}
+	if row.GetViewed() == nil {
+		t.Fatal("viewed = unset, want the restored fact standing once the row reached its arm")
+	}
+	if len(*reports) != 0 {
+		t.Fatalf("viewed reports = %+v, want none: the bring-up's arms lowered nothing", *reports)
+	}
+}
+
+func TestATurnBeforeTheRestoredArmDropsTheRestoredViewedFact(t *testing.T) {
+	// Arrange: the row is still bringing up when a prompt is accepted.
+	reports := &[]viewedReport{}
+	r, _ := newResolver(t, sidebar.WithViewedSink(func(ws ids.WorkspaceID, arm string) {
+		*reports = append(*reports, viewedReport{ws: ws, arm: arm})
+	}))
+	rec := workspace(string(theWS), "one")
+	rec.Result = &wsm.TurnResult{End: wsm.TurnResultDone}
+	rec.ViewedStatus = "done"
+	r.SetRegistry(registry(rec))
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Act: that turn ends on done, the arm the fact was restored for.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert: the new done is a result the user has not interacted with.
+	if got := onlyRow(t, r).GetViewed(); got != nil {
+		t.Fatalf("viewed = %v, want unset after a new turn", got)
+	}
+	want := []viewedReport{{ws: theWS, arm: ""}}
+	if !slices.Equal(*reports, want) {
+		t.Fatalf("viewed reports = %+v, want the restored fact cleared once", *reports)
 	}
 }

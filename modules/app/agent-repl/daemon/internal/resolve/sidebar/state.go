@@ -93,24 +93,16 @@ type wsState struct {
 	// session; a rate-limit event sets vendorBlocked to whether any stands.
 	rateLimits ladder.RateLimitRejections
 
-	// result is the READ STATE of the last turn's result: whether the user
-	// has seen it yet. It is a FACT about the workspace, not a display mode,
-	// and it outlives every arm change that is not a new result: detached work
-	// starting or ending, a link blip, a merge. The row's viewed (PARTIAL)
-	// marker is DERIVED from it (`viewedOn`), so a read result can never be
-	// drawn as unread and an unread one never as read.
-	//
-	// SET to unread when a turn COMPLETES, is INTERRUPTED or FAILS
-	// (SetTurnEnded) — except a /clear or a compaction that completes, which
-	// leaves nothing to read and is set to read on the spot (contextCut),
-	// set to read when the editor reports the user has seen the row on its
-	// turn-end arm (SetViewed), and reset to none by a new turn (startTurn) —
-	// a new prompt is the user moving on.
+	// result is whether a turn end stands as the row's last result: SET when
+	// a turn COMPLETES, is INTERRUPTED or FAILS (SetTurnEnded), and reset to
+	// none by a new turn (startTurn) — a new prompt is the user moving on. It
+	// is what holds the row on its turn-end arm, and what the `idle_async`
+	// row's unread-turn-end marker names.
 	result resultState
 	// resultSettled reports that the result has been decided by this
-	// resolver: by a live turn event (a turn starting, ending, or being
-	// viewed), or by seeding it ONCE from the durable record (restoreResult).
-	// A durable record is read only while nothing live has spoken.
+	// resolver: by a live turn event (a turn starting or ending), or by
+	// seeding it ONCE from the durable record (restoreResult). A durable
+	// record is read only while nothing live has spoken.
 	resultSettled bool
 	// restoredEnd is the turn-end arm seeded from the durable record, drawn in
 	// place of the one lastClose resolves to until a turn of this resolver's
@@ -120,11 +112,33 @@ type wsState struct {
 	// resolver knows: what it seeded from, or last reported through the result
 	// sink. A render whose result differs reports it (resolver.row).
 	persisted *wsm.TurnResult
-	// dwell is the editor's view dwell counting on this workspace, nil when
-	// none is (SetViewDwell). It is drawn only while it will recede the
-	// row's name (viewDwellOn), and ended by a viewed report, a stop, the
-	// selection leaving the workspace or a status change.
-	dwell *viewDwell
+
+	// viewedArm is the VIEWED FACT: the status arm the user last interacted
+	// with the workspace on (SetInteracted), empty when the workspace is not
+	// viewed. The row's viewed (PARTIAL) marker is DERIVED from it
+	// (`viewedOn`). Every status change clears it (resolver.row), on any arm:
+	// the user has not interacted with what the row now shows.
+	viewedArm string
+	// persistedViewed is the viewed arm the durable record holds, as far as
+	// this resolver knows; a render whose viewed arm differs reports it
+	// (noteViewed).
+	persistedViewed string
+	// viewedSettled reports that the viewed fact has been decided: by a live
+	// interaction or status change, or by seeding it ONCE from the durable
+	// record (restoreViewed).
+	viewedSettled bool
+	// viewedRestored reports a viewed arm seeded from the durable record that
+	// the row has not drawn yet. A booting row passes through the arms of its
+	// bring-up (none, init) before it settles, and none of them is a status
+	// change the user missed, so a restored fact waits for its own arm rather
+	// than being lowered by them; it becomes live the first time the row draws
+	// it (resolver.row). A turn the daemon accepts or closes meanwhile is a
+	// real change, and drops it (dropRestoredViewed).
+	viewedRestored bool
+	// interactedAt is when the user last interacted with the workspace, as
+	// this resolver heard it (SetInteracted); nil until it has. The row
+	// states the later of it and the durable record's.
+	interactedAt *time.Time
 	// reviving reports a revival of this workspace's parked session in
 	// flight (SetReviving). It is a marker beside the status, never an arm:
 	// it neither changes the arm nor clears the viewed marker.
@@ -175,21 +189,17 @@ type wsState struct {
 	outline *frontendv1.RosterThreadOutline
 }
 
-// resultState is the read state of the last turn's result.
+// resultState is whether a turn end stands as the row's last result.
 type resultState int
 
 const (
-	// resultNone: no result stands whose read state the roster tracks — no
-	// turn has ended since the last prompt, or the last close was one this
-	// build does not know.
+	// resultNone: no turn end stands — no turn has ended since the last
+	// prompt, or the last close was one this build does not know.
 	resultNone resultState = iota
-	// resultUnread: the last turn COMPLETED, was INTERRUPTED or FAILED and
-	// the user has not seen it. An unread result holds the row on its turn-end
-	// arm, except while detached work runs, which draws `idle_async` over it.
-	resultUnread
-	// resultRead: the user has seen the turn-end row since the last turn
-	// ended. A turn-end row whose result is read is drawn PARTIAL.
-	resultRead
+	// resultEnded: the last turn COMPLETED, was INTERRUPTED or FAILED. It
+	// holds the row on its turn-end arm, except while detached work runs,
+	// which draws `idle_async` over it.
+	resultEnded
 )
 
 // String names a result state, for the record.
@@ -197,10 +207,8 @@ func (r resultState) String() string {
 	switch r {
 	case resultNone:
 		return "none"
-	case resultUnread:
-		return "unread"
-	case resultRead:
-		return "read"
+	case resultEnded:
+		return "ended"
 	default:
 		return "unknown"
 	}
@@ -247,8 +255,8 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	// spawned it is still running, and only the watcher knows when it ends.
 	s.detached = map[string]struct{}{}
 	s.permissions = map[string]struct{}{}
-	// A new prompt is the user moving on: whatever the last turn left, read
-	// or not, is no longer the result the row reports.
+	// A new prompt is the user moving on: whatever the last turn left is no
+	// longer the result the row reports.
 	s.result = resultNone
 	s.settleResult()
 }
@@ -277,10 +285,35 @@ func (s *wsState) restoreResult(rec wsm.Workspace) bool {
 	s.persisted = &restored
 	s.turnEverRan = true
 	s.restoredEnd = string(restored.End)
-	s.result = resultUnread
-	if restored.Read {
-		s.result = resultRead
+	s.result = resultEnded
+	return true
+}
+
+// restoreViewed seeds the viewed fact ONCE from the workspace's durable
+// record, while no live interaction or status change has decided it, so a
+// daemon that did not see the user's interaction draws the row viewed as it
+// stood. The arm it seeds is still only drawn while it is the row's arm
+// (viewedOn), and the first arm this resolver publishes clears it when it is
+// another (resolver.row).
+func (s *wsState) restoreViewed(rec wsm.Workspace) {
+	if s.viewedSettled {
+		return
 	}
+	s.viewedSettled = true
+	s.viewedArm = rec.ViewedStatus
+	s.persistedViewed = rec.ViewedStatus
+	s.viewedRestored = rec.ViewedStatus != ""
+}
+
+// dropRestoredViewed drops a restored viewed fact the row has not drawn yet:
+// a turn accepted or closed since the restore is a status change the user did
+// not interact with. It answers whether it dropped one.
+func (s *wsState) dropRestoredViewed() bool {
+	if !s.viewedRestored {
+		return false
+	}
+	s.viewedRestored = false
+	s.viewedArm = ""
 	return true
 }
 
@@ -290,7 +323,7 @@ func (s *wsState) resultSnapshot() *wsm.TurnResult {
 	if s.result == resultNone {
 		return nil
 	}
-	return &wsm.TurnResult{End: wsm.TurnResultEnd(s.turnEndArm()), Read: s.result == resultRead}
+	return &wsm.TurnResult{End: wsm.TurnResultEnd(s.turnEndArm())}
 }
 
 // sameResult reports whether two durable results are the same.
@@ -302,11 +335,10 @@ func sameResult(a, b *wsm.TurnResult) bool {
 }
 
 // The three TURN-END arms: how the last turn ended, once nothing more urgent
-// stands. They are the only arms that report a RESULT, so they are the only
-// arms a result can be unread or read on, and the only arms the viewed marker
-// may stand on. `ladder.ResolveTurnEnd` is the one table from a close to its arm, and
-// `isTurnEndArm` is the one predicate every site asks, so a completion, an
-// interruption and a failure can never drift apart on the read rule.
+// stands. They are the only arms that report a RESULT. `ladder.ResolveTurnEnd`
+// is the one table from a close to its arm, and `isTurnEndArm` is the one
+// predicate every site asks, so a completion, an interruption and a failure
+// can never drift apart.
 const (
 	armDone        = "done"
 	armInterrupted = "interrupted"
@@ -316,24 +348,6 @@ const (
 // isTurnEndArm reports whether arm is one of the three turn-end arms.
 func isTurnEndArm(arm string) bool {
 	return arm == armDone || arm == armInterrupted || arm == armTurnFailed
-}
-
-// readsResult reports whether a viewed report on arm READS the last turn's
-// result: a turn-end arm, or an arm a failed turn raised that stands over that
-// turn's end — `vendor_blocked` until the block or the turn fault lifts (owner
-// rulings, 2026-09-28 and 2026-10-06), `turn_died` until the next turn. The
-// PARTIAL marker is still drawn on a turn end alone (viewedOn).
-func readsResult(arm string) bool {
-	return isTurnEndArm(arm) || arm == "vendor_blocked" || arm == "turn_died"
-}
-
-// viewReadsResult reports whether a viewed report on arm READS the last
-// turn's result: every arm readsResult names, and `idle_async` while the
-// result is unread, because live detached work draws that arm in place of the
-// unread turn end (idleArm). The user viewing that row is viewing the
-// finished turn, so the row comes back PARTIAL when the work ends.
-func (s *wsState) viewReadsResult(arm string) bool {
-	return readsResult(arm) || (arm == "idle_async" && s.resultUnreadNow())
 }
 
 // turnEndArm names the turn-end arm the last close resolves to, through
@@ -363,54 +377,41 @@ func (s *wsState) noteArm(arm string) (string, bool) {
 	return previous, changed
 }
 
-// viewDwell is one dwell the editor is counting: when the roster took the
-// report, and how long the editor counts.
-type viewDwell struct {
-	startedAt time.Time
-	length    time.Duration
-}
-
-// viewDwellOn answers the row's view-dwell marker on arm, nil when it draws
-// none. It is DERIVED like viewedOn: the marker stands exactly while a dwell
-// counts on the selected row and its completion would draw the row PARTIAL,
-// which is a turn-end arm with the result still unread. A dwell the viewed
-// marker would not follow is never drawn, so the name never fades toward a
-// grey it will not keep.
-func (s *wsState) viewDwellOn(arm string, selected bool) *frontendv1.RosterRowViewDwell {
-	if s.dwell == nil || !selected || !isTurnEndArm(arm) || s.result != resultUnread {
-		return nil
-	}
-	return &frontendv1.RosterRowViewDwell{
-		StartedAtMs: s.dwell.startedAt.UnixMilli(),
-		LengthMs:    s.dwell.length.Milliseconds(),
-	}
-}
-
 // viewedOn reports whether a row on arm draws the viewed (PARTIAL) marker. It
-// is DERIVED, never stored: the marker stands exactly when the row is on a
-// turn-end arm and the last turn's result is read.
-//
-// VIEWED IS TURN-END-ONLY. "You have already seen this" is a claim about a
-// FINISHED turn's result; every other arm is live work (thinking, a
-// permission ask, detached work) or an exceptional state (severed, dead,
-// vendor_blocked, a merge conflict) that must never be drawn deprioritized,
-// however long the user has looked at it. So PARTIAL is unrepresentable on
-// any other row.
-//
-// Deriving it from the read FACT is what keeps a read result read across an
-// arm change that is not a new result: a turn-end row the user saw, which
-// goes to `idle_async` while detached work runs, comes back PARTIAL when that
-// work ends rather than FULL — a full row claiming a result nobody has read.
-// A NEW result is a new turn, and the turn's start and end are what reset the
-// fact (startTurn, SetTurnEnded), so new activity is still drawn FULL.
+// is DERIVED, never stored: the marker stands exactly when arm is the arm the
+// user last interacted with the workspace on, and no status change has come
+// since (the change clears the fact, resolver.row). Every arm can be viewed:
+// "you have interacted with this since it last changed" is as true of a
+// running turn as of a finished one, and a working workspace stays visible
+// whatever this says (visibility.go).
 func (s *wsState) viewedOn(arm string) bool {
-	return isTurnEndArm(arm) && s.result == resultRead
+	return s.viewedArm != "" && s.viewedArm == arm
 }
 
-// resultUnreadNow reports whether the last turn's result is unread, which
-// holds the row on its turn-end arm once no detached work runs.
-func (s *wsState) resultUnreadNow() bool {
-	return s.result == resultUnread
+// interacted records that the user interacted with the workspace at AT, on
+// the arm the row draws now. It answers whether the viewed fact changed. An
+// interaction before any arm has been published views nothing: there is no
+// row the user could have interacted with.
+func (s *wsState) interacted(at time.Time) bool {
+	if s.interactedAt == nil || at.After(*s.interactedAt) {
+		s.interactedAt = &at
+	}
+	s.viewedSettled = true
+	if !s.lastArmSeen {
+		return false
+	}
+	s.viewedRestored = false
+	if s.viewedArm == s.lastArm {
+		return false
+	}
+	s.viewedArm = s.lastArm
+	return true
+}
+
+// resultEndedNow reports whether a turn end stands, which holds the row on
+// its turn-end arm once no detached work runs.
+func (s *wsState) resultEndedNow() bool {
+	return s.result == resultEnded
 }
 
 // asyncLive reports whether detached work is running right now. The watcher's

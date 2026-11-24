@@ -377,7 +377,7 @@ no-op while it is set:
 
 (defun agent-repl-vocab-read (file &rest keys)
   "The value at KEYS in the shared vocabulary FILE under proto/vocab/.
-FILE is the file\='s name, e.g. \"name-fade.json\"; each of KEYS names one
+FILE is the file\='s name, e.g. \"image-thumbnail.json\"; each of KEYS names one
 object member deeper.  The files are checked in, so a missing member is a
 broken contract and signals."
   (let ((value (with-temp-buffer

@@ -64,10 +64,10 @@ type SelectInEditorRequest struct {
 	Reveal *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
 	// THE WORKSPACE WHOSE FEED LINK MADE THE CLICK: a feed's jump to another
 	// workspace (a mention, a merge bubble's switch, a merge step's target)
-	// names the page it was clicked in. The daemon tells that workspace's host
-	// stream the reader followed a link in it
-	// (WatchHostWorkspaceResponse.link_followed) before either route switches,
-	// so Emacs counts it viewed. Unset for a rail row or a thread, which are no
+	// names the page it was clicked in. The daemon records the click as the
+	// user's interaction with that workspace (the effect of
+	// ReportUserInteraction) before either route switches, so it is viewed and
+	// most recent. Unset for a rail row or a thread, which are no
 	// workspace's page. Resolved as `workspace` is, and refused with the same
 	// arms.
 	FollowedFrom  *v1.WorkspaceRef `protobuf:"bytes,3,opt,name=followed_from,json=followedFrom,proto3,oneof" json:"followed_from,omitempty"`

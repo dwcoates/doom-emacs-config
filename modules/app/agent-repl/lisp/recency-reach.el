@@ -8,8 +8,10 @@
 ;; (newer) does, the full color at one press and more muted with each press
 ;; after it.  At most the two nearest each way wear one.
 ;;
-;; EMACS OWNS THE WALK'S ORDER (its selection history, filtered by each
-;; visit's dwell), so Emacs computes the reach and the daemon only draws it
+;; THE WALK'S ORDER IS THE DAEMON'S INTERACTION RECENCY, led by the walk's
+;; origin, which Emacs reads off the roster
+;; (`agent-repl-roster-selection-recency-order'); the presses depend on
+;; which tabs Emacs draws, so Emacs computes the reach and the daemon only draws it
 ;; (agentrepl.v1.ReportRecencyReach).  The presses are counted with the
 ;; walk's own stepping (`agent-repl--ring-walk') over the walk's own ring
 ;; (`agent-repl--recency-ring') from where the next press starts, so a bar

@@ -62,6 +62,7 @@ type batchOutcome struct {
 	ready         bool
 	quiet         bool
 	results       []resultChange
+	viewed        []viewedChange
 	statusChanges []statusChange
 	visibilities  map[ids.WorkspaceID]wsm.Visibility
 }

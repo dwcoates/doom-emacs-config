@@ -226,6 +226,12 @@ type DB interface {
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.
 	SetResult(ctx context.Context, id WorkspaceID, result *TurnResult) error
+	// SetViewedStatus records the status arm the user is viewing the
+	// workspace on, or clears it when ARM is empty (interaction.go).
+	SetViewedStatus(ctx context.Context, id WorkspaceID, arm string) error
+	// SetInteractedAt advances the instant the user last interacted with the
+	// workspace (interaction.go).
+	SetInteractedAt(ctx context.Context, id WorkspaceID, at time.Time) error
 	// SetStatusChangedAt advances the instant the roster's status arm for the
 	// workspace last moved; it never moves backward (see statuschanged.go).
 	SetStatusChangedAt(ctx context.Context, id WorkspaceID, at time.Time) error

@@ -10,11 +10,12 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// heldSinks are the roster's three writes, recorded, and held mid-write on
+// heldSinks are the roster's four writes, recorded, and held mid-write on
 // their gate for the first workspace named "ws-held" until it is closed.
 type heldSinks struct {
 	mu       sync.Mutex
 	results  []*wsm.TurnResult
+	viewed   []string
 	statuses []time.Time
 	visible  []wsm.Visibility
 	gate     chan struct{}
@@ -22,7 +23,7 @@ type heldSinks struct {
 }
 
 func newHeldSinks() *heldSinks {
-	return &heldSinks{gate: make(chan struct{}), entered: make(chan struct{}, 3)}
+	return &heldSinks{gate: make(chan struct{}), entered: make(chan struct{}, 4)}
 }
 
 func (h *heldSinks) hold(ws ids.WorkspaceID) bool {
@@ -41,6 +42,15 @@ func (h *heldSinks) result(ws ids.WorkspaceID, result *wsm.TurnResult) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.results = append(h.results, result)
+}
+
+func (h *heldSinks) viewedArm(ws ids.WorkspaceID, arm string) {
+	if h.hold(ws) {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.viewed = append(h.viewed, arm)
 }
 
 func (h *heldSinks) status(ws ids.WorkspaceID, at time.Time) {
@@ -63,7 +73,7 @@ func (h *heldSinks) visibility(ws ids.WorkspaceID, v wsm.Visibility) {
 
 // writes is the roster's writes over SINKS.
 func (h *heldSinks) writes() *rosterWrites {
-	return newRosterWrites(h.result, h.status, h.visibility)
+	return newRosterWrites(h.result, h.viewedArm, h.status, h.visibility)
 }
 
 func TestRosterWritesReturnWhileTheWriteIsHeld(t *testing.T) {
@@ -72,6 +82,7 @@ func TestRosterWritesReturnWhileTheWriteIsHeld(t *testing.T) {
 		submit func(w *rosterWrites)
 	}{
 		{name: "a result", submit: func(w *rosterWrites) { w.ResultSink()("ws-held", &wsm.TurnResult{End: "completed"}) }},
+		{name: "a viewed fact", submit: func(w *rosterWrites) { w.ViewedSink()("ws-held", "done") }},
 		{name: "a status change", submit: func(w *rosterWrites) { w.StatusChangeSink()("ws-held", statusChangeInstant) }},
 		{name: "a visibility", submit: func(w *rosterWrites) {
 			w.VisibilitySink()(map[ids.WorkspaceID]wsm.Visibility{"ws-held": wsm.NotVisible})
@@ -112,6 +123,26 @@ func TestRosterWritesKeepTheNewerResult(t *testing.T) {
 	// Assert
 	if !reflect.DeepEqual(sinks.results, []*wsm.TurnResult{second}) {
 		t.Fatalf("results written = %v, want only the newer one", sinks.results)
+	}
+}
+
+func TestRosterWritesKeepTheNewerViewedFact(t *testing.T) {
+	// Arrange: a write is held, so two viewed facts of one workspace wait
+	// behind it.
+	sinks := newHeldSinks()
+	w := sinks.writes()
+	w.ViewedSink()("ws-held", "")
+	<-sinks.entered
+
+	// Act: the row was viewed on `done`, then its status changed.
+	w.ViewedSink()("ws-1", "done")
+	w.ViewedSink()("ws-1", "")
+	close(sinks.gate)
+	w.Close()
+
+	// Assert: the cleared fact is the one that stands.
+	if !reflect.DeepEqual(sinks.viewed, []string{""}) {
+		t.Fatalf("viewed facts written = %q, want only the newer, cleared one", sinks.viewed)
 	}
 }
 
