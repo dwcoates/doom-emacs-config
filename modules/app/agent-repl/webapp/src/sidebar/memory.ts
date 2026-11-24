@@ -25,12 +25,21 @@ import { GetMemoryOverviewResponseSchema } from "../../../proto/gen/ts/agentrepl
 import { GetWorkspaceMemoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_workspace_memory_pb";
 import type {
   SidebarMemoryOverview,
+  SidebarMemoryWorkspaces,
   SidebarWorkspaceMemory,
   SidebarWorkspaceMemoryPage,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_memory_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { SidebarContext } from "./context.js";
-import { detailsPanel, requireFactHome, syncDetailsEntry } from "./detail-more.js";
+import {
+  childPopup,
+  detailsPanel,
+  labelChildPopup,
+  placeDetailsPanel,
+  requireFactHome,
+  syncDetailsEntry,
+  wireDetailsEntry,
+} from "./detail-more.js";
 import { contextAt, handoverAddress, isHandoverArm } from "./handover.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
@@ -63,15 +72,9 @@ export function formatBlocked(ms: bigint | number): string {
   return `${(n / 1000).toFixed(1)} s`;
 }
 
-/** The version hover's lines, as (label, value) pairs in drawn order. */
+/** The version hover's lines below its workspaces entry, as (label, value) pairs in drawn order. */
 export function overviewLines(u: SidebarMemoryOverview, path: string): Array<[string, string]> {
   const lines: Array<[string, string]> = [];
-  const pages = requireMessage(u.pages, `${path}.pages`);
-  const pageCount = `${pages.loaded} of ${pages.loaded + pages.notLoaded} loaded`;
-  lines.push([
-    "pages",
-    pages.footprintBytes === undefined ? `no web view · ${pageCount}` : `${formatBytes(pages.footprintBytes)} · ${pageCount}`,
-  ]);
   const strain = requireMessage(u.strain, `${path}.strain`);
   const minutes = Math.round(strain.windowSeconds / 60);
   lines.push([
@@ -80,20 +83,6 @@ export function overviewLines(u: SidebarMemoryOverview, path: string): Array<[st
       ? `none in the last ${minutes} min`
       : `${strain.stalls}, ${formatBlocked(strain.blockedMs)} blocked in the last ${minutes} min`,
   ]);
-  const agents = requireCase(requireMessage(u.agents, `${path}.agents`).state, `${path}.agents.state`);
-  switch (agents.case) {
-    case "none":
-      lines.push(["agents", "none running"]);
-      break;
-    case "running":
-      lines.push([
-        "agents",
-        `${agents.value.count} running · ${formatBytes(agents.value.footprintBytes)} (${formatBytes(agents.value.averageBytes)} each)`,
-      ]);
-      break;
-    default:
-      return unreachableArm(`${path}.agents.state`, String((agents as { case: unknown }).case));
-  }
   for (const process of u.processes) {
     lines.push([process.label, process.footprintBytes === undefined ? "not running" : formatBytes(process.footprintBytes)]);
   }
@@ -101,10 +90,45 @@ export function overviewLines(u: SidebarMemoryOverview, path: string): Array<[st
   return lines;
 }
 
+/** The label of the version hover's workspaces entry. */
+export const WORKSPACES_LABEL = "workspaces";
+
+/** The workspaces entry's words: the three counts in short form. */
+export function workspacesSummary(u: SidebarMemoryWorkspaces, path: string): string {
+  const visible = requireMessage(u.visible, `${path}.visible`);
+  const shims = requireMessage(u.shims, `${path}.shims`);
+  const pages = requireMessage(u.pages, `${path}.pages`);
+  return `${WORKSPACES_LABEL} · ${visible.visible} visible · ${shims.up} shims · ${pages.loaded} webpages`;
+}
+
 /**
- * The page line of a workspace hover. A page is loaded exactly while its
- * workspace is visible (frontend.v1.RosterRowVisibility), so a loaded page
- * says only that.
+ * The workspaces entry's child popup lines, as (label, value) pairs in drawn
+ * order. A count of visible workspaces is never called loaded: only the web
+ * view's pages are.
+ */
+export function workspacesLines(u: SidebarMemoryWorkspaces, path: string): Array<[string, string]> {
+  const visible = requireMessage(u.visible, `${path}.visible`);
+  const shims = requireMessage(u.shims, `${path}.shims`);
+  const pages = requireMessage(u.pages, `${path}.pages`);
+  return [
+    ["workspaces visible", `${visible.visible} of ${visible.open} open`],
+    [
+      "workspace shims",
+      shims.footprintBytes === undefined || shims.averageBytes === undefined
+        ? `${shims.up} up`
+        : `${shims.up} up · ${formatBytes(shims.footprintBytes)} (${formatBytes(shims.averageBytes)} each)`,
+    ],
+    [
+      "workspace loaded webpages",
+      pages.footprintBytes === undefined ? `${pages.loaded} · no web view` : `${pages.loaded} · ${formatBytes(pages.footprintBytes)}`,
+    ],
+  ];
+}
+
+/**
+ * The page line of a workspace hover: whether the web view holds the page.
+ * Visibility only makes a page eligible, so a visible workspace's page may
+ * be not loaded.
  */
 export function pageLine(u: SidebarWorkspaceMemoryPage, path: string): string {
   const state = requireCase(u.state, `${path}.state`);
@@ -112,7 +136,7 @@ export function pageLine(u: SidebarWorkspaceMemoryPage, path: string): string {
     case "notLoaded":
       return "not loaded";
     case "loaded":
-      return "loaded, held while visible";
+      return "loaded";
     default:
       return unreachableArm(`${path}.state`, String((state as { case: unknown }).case));
   }
@@ -177,6 +201,42 @@ function refreshWhileOpen(ctx: DaemonContext, fetch: () => void): () => void {
   });
 }
 
+/** The version panel's lines, below its workspaces entry. */
+const OVERVIEW_LINES_CLASS = "lines";
+
+/** PANEL's lines block, which every fill replaces. */
+function overviewBlock(panel: HTMLElement): HTMLElement {
+  const block = panel.querySelector<HTMLElement>(`:scope > .${OVERVIEW_LINES_CLASS}`);
+  if (block === null) {
+    throw new Error("agent-repl: the version hover's panel has no lines block");
+  }
+  return block;
+}
+
+/**
+ * Draw a measured overview U into PANEL: its workspaces entry first (the row
+ * panel's details mechanism, detail-more.ts), whose child popup holds the
+ * three counts, then the other lines.
+ */
+export function fillOverview(panel: HTMLElement, u: SidebarMemoryOverview, path: string): void {
+  const workspaces = requireMessage(u.workspaces, `${path}.workspaces`);
+  const sub = childPopup(panel, WORKSPACES_LABEL);
+  const entry = sub.parentElement;
+  if (entry !== null && panel.firstElementChild !== entry) panel.prepend(entry);
+  labelChildPopup(panel, workspacesSummary(workspaces, `${path}.workspaces`));
+  fillLines(sub, workspacesLines(workspaces, `${path}.workspaces`));
+  syncDetailsEntry(panel);
+  fillLines(overviewBlock(panel), overviewLines(u, path));
+}
+
+/** Draw NOTE into PANEL in place of the figures, its workspaces entry hidden. */
+function fillOverviewNote(panel: HTMLElement, note: string): void {
+  const entry = panel.querySelector<HTMLElement>(":scope > .detail-more > .detail-sub");
+  entry?.replaceChildren();
+  syncDetailsEntry(panel);
+  fillNote(overviewBlock(panel), note);
+}
+
 /** Ask for the overview and draw it into PANEL. */
 async function fetchOverview(ctx: DaemonContext, panel: HTMLElement): Promise<void> {
   const resp = await callUnary(
@@ -190,9 +250,9 @@ async function fetchOverview(ctx: DaemonContext, panel: HTMLElement): Promise<vo
     case "success": {
       const outcome = requireCase(result.value.outcome, "GetMemoryOverviewSuccess.outcome");
       if (outcome.case === "measured") {
-        fillLines(panel, overviewLines(outcome.value, "GetMemoryOverviewSuccess.measured"));
+        fillOverview(panel, outcome.value, "GetMemoryOverviewSuccess.measured");
       } else if (outcome.case === "notYetMeasured") {
-        fillNote(panel, "not measured yet");
+        fillOverviewNote(panel, "not measured yet");
       } else {
         unreachableArm("GetMemoryOverviewSuccess.outcome", String((outcome as { case: unknown }).case));
       }
@@ -207,7 +267,7 @@ async function fetchOverview(ctx: DaemonContext, panel: HTMLElement): Promise<vo
         operation: "sidebar.memory.overview-failed",
         context: { reason: cause.value.reason },
       });
-      fillNote(panel, cause.value.reason);
+      fillOverviewNote(panel, cause.value.reason);
       return;
     }
     default:
@@ -323,7 +383,15 @@ export function installVersionHover(
   const mirror = options.mirror ?? null;
   const panel = document.createElement("div");
   panel.className = `detail ${MEMORY_PANEL_CLASS}`;
+  const lines = document.createElement("div");
+  lines.className = OVERVIEW_LINES_CLASS;
+  panel.appendChild(lines);
   rail.appendChild(panel);
+  // THE WORKSPACES ENTRY OPENS ITS CHILD POPUP as a row panel's details entry
+  // does (detail-more.ts); over the feed the mirror wires its copy itself.
+  wireDetailsEntry(panel, () => {
+    placeDetailsPanel(panel, (el) => el.getBoundingClientRect(), viewportOf());
+  });
   let stop: (() => void) | null = null;
   let over = 0;
   /** Close the panel; RELEASE when its own gesture closed it, not the dropdowns. */
@@ -338,7 +406,7 @@ export function installVersionHover(
   const open = (): void => {
     // The version's click opened its notices (notices.ts): the hover stays shut under them.
     if (stop !== null || suppressed()) return;
-    fillNote(panel, "measuring…");
+    fillOverviewNote(panel, "measuring…");
     panel.classList.add("open");
     // REGISTERED BEFORE IT IS MIRRORED: the row panel it closes takes its
     // copy off the feed first.

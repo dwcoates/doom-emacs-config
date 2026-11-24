@@ -5,8 +5,12 @@
 // naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
 // what that one workspace holds. Every figure is MEASURED: the daemon's
 // process collector (procmetrics) samples each process's physical footprint,
-// and a workspace's page is loaded exactly while it is visible
-// (frontend.v1.RosterRowVisibility).
+// and a workspace's page is loaded exactly while Emacs's web view holds it, as
+// Emacs reports it (agentrepl.v1 ReportPageState): visibility only makes a
+// page eligible, so a visible workspace whose page is unloaded counts as not
+// loaded. Each count is read from the one fact the matching metric reads
+// (agentrepl_workspaces_visible, agentrepl_sessions_up,
+// agentrepl_pages_loaded), so the hover and the metrics never disagree.
 // Nothing here is estimated: the workspace pages share one WebKit web content
 // process, which reports one footprint for all of them, so no per-page byte
 // figure exists to draw and none is served.
@@ -40,15 +44,17 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// The version hover's popup: one line per element, top to bottom.
+// The version hover's popup: one line per element, top to bottom. Fields 1
+// (`pages`) and 3 (`agents`) are RETIRED: their counts and footprints are the
+// `workspaces` entry's lines.
 type SidebarMemoryOverview struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The shared workspace-page process and how many pages it holds.
-	Pages *SidebarMemoryPages `protobuf:"bytes,1,opt,name=pages,proto3" json:"pages,omitempty"`
-	// How hard that process is struggling: its main-thread stalls of late.
+	// The workspaces entry, drawn first, whose hover opens a child popup of its
+	// three counts.
+	Workspaces *SidebarMemoryWorkspaces `protobuf:"bytes,6,opt,name=workspaces,proto3" json:"workspaces,omitempty"`
+	// How hard the workspace-page process is struggling: its main-thread stalls
+	// of late.
 	Strain *SidebarMemoryStrain `protobuf:"bytes,2,opt,name=strain,proto3" json:"strain,omitempty"`
-	// The workspaces' shims, together.
-	Agents *SidebarMemoryAgents `protobuf:"bytes,3,opt,name=agents,proto3" json:"agents,omitempty"`
 	// Each other agent-repl process the daemon measures, in the daemon's drawn
 	// order: the daemon, Emacs, the store, the sidecar. A process not running
 	// is still listed, drawn as not running.
@@ -89,9 +95,9 @@ func (*SidebarMemoryOverview) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *SidebarMemoryOverview) GetPages() *SidebarMemoryPages {
+func (x *SidebarMemoryOverview) GetWorkspaces() *SidebarMemoryWorkspaces {
 	if x != nil {
-		return x.Pages
+		return x.Workspaces
 	}
 	return nil
 }
@@ -99,13 +105,6 @@ func (x *SidebarMemoryOverview) GetPages() *SidebarMemoryPages {
 func (x *SidebarMemoryOverview) GetStrain() *SidebarMemoryStrain {
 	if x != nil {
 		return x.Strain
-	}
-	return nil
-}
-
-func (x *SidebarMemoryOverview) GetAgents() *SidebarMemoryAgents {
-	if x != nil {
-		return x.Agents
 	}
 	return nil
 }
@@ -124,36 +123,35 @@ func (x *SidebarMemoryOverview) GetTotal() *SidebarMemoryTotal {
 	return nil
 }
 
-// The workspace pages' one WebKit web content process.
-type SidebarMemoryPages struct {
+// The workspaces entry and its child popup: how many workspaces the user can
+// see, how many have a shim up, and how many have a page in the web view.
+type SidebarMemoryWorkspaces struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Its physical footprint, compressed and swapped memory included. UNSET
-	// when the collector found no such process (no web view is open).
-	FootprintBytes *uint64 `protobuf:"varint,1,opt,name=footprint_bytes,json=footprintBytes,proto3,oneof" json:"footprint_bytes,omitempty"`
-	// How many open workspaces' pages it holds now.
-	Loaded uint32 `protobuf:"varint,2,opt,name=loaded,proto3" json:"loaded,omitempty"`
-	// How many open workspaces have no page held (page-unload.el unloaded it,
-	// or never loaded it): drawn as "of N" beside `loaded`, so the two together
-	// are every open workspace Emacs has reported.
-	NotLoaded     uint32 `protobuf:"varint,3,opt,name=not_loaded,json=notLoaded,proto3" json:"not_loaded,omitempty"`
+	// The child popup's first line: the visible workspaces, out of the open
+	// ones.
+	Visible *SidebarMemoryWorkspacesVisible `protobuf:"bytes,1,opt,name=visible,proto3" json:"visible,omitempty"`
+	// Its second line: the workspaces with a shim up.
+	Shims *SidebarMemoryWorkspacesShims `protobuf:"bytes,2,opt,name=shims,proto3" json:"shims,omitempty"`
+	// Its third line: the workspaces whose page the web view holds.
+	Pages         *SidebarMemoryWorkspacesPages `protobuf:"bytes,3,opt,name=pages,proto3" json:"pages,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SidebarMemoryPages) Reset() {
-	*x = SidebarMemoryPages{}
+func (x *SidebarMemoryWorkspaces) Reset() {
+	*x = SidebarMemoryWorkspaces{}
 	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SidebarMemoryPages) String() string {
+func (x *SidebarMemoryWorkspaces) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SidebarMemoryPages) ProtoMessage() {}
+func (*SidebarMemoryWorkspaces) ProtoMessage() {}
 
-func (x *SidebarMemoryPages) ProtoReflect() protoreflect.Message {
+func (x *SidebarMemoryWorkspaces) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -165,28 +163,209 @@ func (x *SidebarMemoryPages) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SidebarMemoryPages.ProtoReflect.Descriptor instead.
-func (*SidebarMemoryPages) Descriptor() ([]byte, []int) {
+// Deprecated: Use SidebarMemoryWorkspaces.ProtoReflect.Descriptor instead.
+func (*SidebarMemoryWorkspaces) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *SidebarMemoryPages) GetFootprintBytes() uint64 {
+func (x *SidebarMemoryWorkspaces) GetVisible() *SidebarMemoryWorkspacesVisible {
+	if x != nil {
+		return x.Visible
+	}
+	return nil
+}
+
+func (x *SidebarMemoryWorkspaces) GetShims() *SidebarMemoryWorkspacesShims {
+	if x != nil {
+		return x.Shims
+	}
+	return nil
+}
+
+func (x *SidebarMemoryWorkspaces) GetPages() *SidebarMemoryWorkspacesPages {
+	if x != nil {
+		return x.Pages
+	}
+	return nil
+}
+
+// The visible workspaces: those whose visibility is selected or
+// unselected_visible (wsm.Workspace.Visibility), out of the open ones.
+type SidebarMemoryWorkspacesVisible struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many open workspaces are visible.
+	Visible uint32 `protobuf:"varint,1,opt,name=visible,proto3" json:"visible,omitempty"`
+	// How many workspaces are open (not hidden, not closed).
+	Open          uint32 `protobuf:"varint,2,opt,name=open,proto3" json:"open,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SidebarMemoryWorkspacesVisible) Reset() {
+	*x = SidebarMemoryWorkspacesVisible{}
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SidebarMemoryWorkspacesVisible) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SidebarMemoryWorkspacesVisible) ProtoMessage() {}
+
+func (x *SidebarMemoryWorkspacesVisible) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SidebarMemoryWorkspacesVisible.ProtoReflect.Descriptor instead.
+func (*SidebarMemoryWorkspacesVisible) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SidebarMemoryWorkspacesVisible) GetVisible() uint32 {
+	if x != nil {
+		return x.Visible
+	}
+	return 0
+}
+
+func (x *SidebarMemoryWorkspacesVisible) GetOpen() uint32 {
+	if x != nil {
+		return x.Open
+	}
+	return 0
+}
+
+// The workspaces with a shim up (not parked), the sessions
+// agentrepl_sessions_up counts, whether or not they are visible.
+type SidebarMemoryWorkspacesShims struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many shims are up.
+	Up uint32 `protobuf:"varint,1,opt,name=up,proto3" json:"up,omitempty"`
+	// Their physical footprints, their vendor children included, summed. UNSET
+	// when the collector measured none.
+	FootprintBytes *uint64 `protobuf:"varint,2,opt,name=footprint_bytes,json=footprintBytes,proto3,oneof" json:"footprint_bytes,omitempty"`
+	// That sum over the shims measured, rounded down: resolved here so no
+	// client divides. Set exactly when `footprint_bytes` is.
+	AverageBytes  *uint64 `protobuf:"varint,3,opt,name=average_bytes,json=averageBytes,proto3,oneof" json:"average_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SidebarMemoryWorkspacesShims) Reset() {
+	*x = SidebarMemoryWorkspacesShims{}
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SidebarMemoryWorkspacesShims) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SidebarMemoryWorkspacesShims) ProtoMessage() {}
+
+func (x *SidebarMemoryWorkspacesShims) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SidebarMemoryWorkspacesShims.ProtoReflect.Descriptor instead.
+func (*SidebarMemoryWorkspacesShims) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SidebarMemoryWorkspacesShims) GetUp() uint32 {
+	if x != nil {
+		return x.Up
+	}
+	return 0
+}
+
+func (x *SidebarMemoryWorkspacesShims) GetFootprintBytes() uint64 {
 	if x != nil && x.FootprintBytes != nil {
 		return *x.FootprintBytes
 	}
 	return 0
 }
 
-func (x *SidebarMemoryPages) GetLoaded() uint32 {
+func (x *SidebarMemoryWorkspacesShims) GetAverageBytes() uint64 {
+	if x != nil && x.AverageBytes != nil {
+		return *x.AverageBytes
+	}
+	return 0
+}
+
+// The workspaces whose page the web view holds now (agentrepl_pages_loaded),
+// never the ones whose visibility only makes a page eligible.
+type SidebarMemoryWorkspacesPages struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many pages the web view holds.
+	Loaded uint32 `protobuf:"varint,1,opt,name=loaded,proto3" json:"loaded,omitempty"`
+	// The physical footprint of the one WebKit web content process every page
+	// shares, compressed and swapped memory included. UNSET when the collector
+	// found no such process (no web view is open).
+	FootprintBytes *uint64 `protobuf:"varint,2,opt,name=footprint_bytes,json=footprintBytes,proto3,oneof" json:"footprint_bytes,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SidebarMemoryWorkspacesPages) Reset() {
+	*x = SidebarMemoryWorkspacesPages{}
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SidebarMemoryWorkspacesPages) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SidebarMemoryWorkspacesPages) ProtoMessage() {}
+
+func (x *SidebarMemoryWorkspacesPages) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SidebarMemoryWorkspacesPages.ProtoReflect.Descriptor instead.
+func (*SidebarMemoryWorkspacesPages) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SidebarMemoryWorkspacesPages) GetLoaded() uint32 {
 	if x != nil {
 		return x.Loaded
 	}
 	return 0
 }
 
-func (x *SidebarMemoryPages) GetNotLoaded() uint32 {
-	if x != nil {
-		return x.NotLoaded
+func (x *SidebarMemoryWorkspacesPages) GetFootprintBytes() uint64 {
+	if x != nil && x.FootprintBytes != nil {
+		return *x.FootprintBytes
 	}
 	return 0
 }
@@ -208,7 +387,7 @@ type SidebarMemoryStrain struct {
 
 func (x *SidebarMemoryStrain) Reset() {
 	*x = SidebarMemoryStrain{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[2]
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -220,7 +399,7 @@ func (x *SidebarMemoryStrain) String() string {
 func (*SidebarMemoryStrain) ProtoMessage() {}
 
 func (x *SidebarMemoryStrain) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[2]
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -233,7 +412,7 @@ func (x *SidebarMemoryStrain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SidebarMemoryStrain.ProtoReflect.Descriptor instead.
 func (*SidebarMemoryStrain) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{2}
+	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SidebarMemoryStrain) GetStalls() uint32 {
@@ -253,194 +432,6 @@ func (x *SidebarMemoryStrain) GetBlockedMs() uint64 {
 func (x *SidebarMemoryStrain) GetWindowSeconds() uint32 {
 	if x != nil {
 		return x.WindowSeconds
-	}
-	return 0
-}
-
-// The workspaces' shims, together.
-type SidebarMemoryAgents struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whether any shim runs: an average over none is no figure at all.
-	//
-	// Types that are valid to be assigned to State:
-	//
-	//	*SidebarMemoryAgents_None
-	//	*SidebarMemoryAgents_Running
-	State         isSidebarMemoryAgents_State `protobuf_oneof:"state"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarMemoryAgents) Reset() {
-	*x = SidebarMemoryAgents{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarMemoryAgents) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarMemoryAgents) ProtoMessage() {}
-
-func (x *SidebarMemoryAgents) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarMemoryAgents.ProtoReflect.Descriptor instead.
-func (*SidebarMemoryAgents) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *SidebarMemoryAgents) GetState() isSidebarMemoryAgents_State {
-	if x != nil {
-		return x.State
-	}
-	return nil
-}
-
-func (x *SidebarMemoryAgents) GetNone() *SidebarMemoryAgentsNone {
-	if x != nil {
-		if x, ok := x.State.(*SidebarMemoryAgents_None); ok {
-			return x.None
-		}
-	}
-	return nil
-}
-
-func (x *SidebarMemoryAgents) GetRunning() *SidebarMemoryAgentsRunning {
-	if x != nil {
-		if x, ok := x.State.(*SidebarMemoryAgents_Running); ok {
-			return x.Running
-		}
-	}
-	return nil
-}
-
-type isSidebarMemoryAgents_State interface {
-	isSidebarMemoryAgents_State()
-}
-
-type SidebarMemoryAgents_None struct {
-	// No workspace's shim is running.
-	None *SidebarMemoryAgentsNone `protobuf:"bytes,1,opt,name=none,proto3,oneof"`
-}
-
-type SidebarMemoryAgents_Running struct {
-	// At least one is.
-	Running *SidebarMemoryAgentsRunning `protobuf:"bytes,2,opt,name=running,proto3,oneof"`
-}
-
-func (*SidebarMemoryAgents_None) isSidebarMemoryAgents_State() {}
-
-func (*SidebarMemoryAgents_Running) isSidebarMemoryAgents_State() {}
-
-// No workspace's shim is running. Empty: presence is the fact.
-type SidebarMemoryAgentsNone struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarMemoryAgentsNone) Reset() {
-	*x = SidebarMemoryAgentsNone{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarMemoryAgentsNone) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarMemoryAgentsNone) ProtoMessage() {}
-
-func (x *SidebarMemoryAgentsNone) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarMemoryAgentsNone.ProtoReflect.Descriptor instead.
-func (*SidebarMemoryAgentsNone) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{4}
-}
-
-// The running shims' figures.
-type SidebarMemoryAgentsRunning struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// How many shims run.
-	Count uint32 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
-	// Their footprints, summed.
-	FootprintBytes uint64 `protobuf:"varint,2,opt,name=footprint_bytes,json=footprintBytes,proto3" json:"footprint_bytes,omitempty"`
-	// That sum over `count`, rounded down: resolved here so no client divides.
-	AverageBytes  uint64 `protobuf:"varint,3,opt,name=average_bytes,json=averageBytes,proto3" json:"average_bytes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarMemoryAgentsRunning) Reset() {
-	*x = SidebarMemoryAgentsRunning{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarMemoryAgentsRunning) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarMemoryAgentsRunning) ProtoMessage() {}
-
-func (x *SidebarMemoryAgentsRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarMemoryAgentsRunning.ProtoReflect.Descriptor instead.
-func (*SidebarMemoryAgentsRunning) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *SidebarMemoryAgentsRunning) GetCount() uint32 {
-	if x != nil {
-		return x.Count
-	}
-	return 0
-}
-
-func (x *SidebarMemoryAgentsRunning) GetFootprintBytes() uint64 {
-	if x != nil {
-		return x.FootprintBytes
-	}
-	return 0
-}
-
-func (x *SidebarMemoryAgentsRunning) GetAverageBytes() uint64 {
-	if x != nil {
-		return x.AverageBytes
 	}
 	return 0
 }
@@ -502,8 +493,8 @@ func (x *SidebarMemoryProcess) GetFootprintBytes() uint64 {
 	return 0
 }
 
-// Every measured agent-repl process together: the pages, the shims and every
-// listed process.
+// Every measured agent-repl process together: the pages' process, the shims
+// and every listed process.
 type SidebarMemoryTotal struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The sum of every footprint above.
@@ -554,8 +545,8 @@ type SidebarWorkspaceMemory struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace's shim.
 	Agent *SidebarWorkspaceMemoryAgent `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
-	// The workspace's page, as its visibility decides it
-	// (frontend.v1.RosterRowVisibility). Always set.
+	// The workspace's page, as Emacs's web view holds it (agentrepl.v1
+	// ReportPageState). Always set.
 	Page          *SidebarWorkspaceMemoryPage `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -779,8 +770,10 @@ func (*SidebarWorkspaceMemoryAgentNotRunning) Descriptor() ([]byte, []int) {
 // The workspace's page.
 type SidebarWorkspaceMemoryPage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whether the page is loaded: exactly while the workspace is visible
-	// (frontend.v1.RosterRowVisibility), and let go once it is not.
+	// Whether the web view holds the page. Visibility makes a page eligible;
+	// Emacs loads it when the workspace is shown, its session comes up for
+	// work, or its slot is made while it is wanted, and unloads it when its
+	// session goes dormant off screen or it stops being visible.
 	//
 	// Types that are valid to be assigned to State:
 	//
@@ -851,12 +844,12 @@ type isSidebarWorkspaceMemoryPage_State interface {
 }
 
 type SidebarWorkspaceMemoryPage_Loaded struct {
-	// It is loaded, held while the workspace is visible.
+	// The web view holds it.
 	Loaded *SidebarWorkspaceMemoryPageLoaded `protobuf:"bytes,1,opt,name=loaded,proto3,oneof"`
 }
 
 type SidebarWorkspaceMemoryPage_NotLoaded struct {
-	// It is not loaded: the workspace is not visible.
+	// The web view does not hold it, visible or not.
 	NotLoaded *SidebarWorkspaceMemoryPageNotLoaded `protobuf:"bytes,2,opt,name=not_loaded,json=notLoaded,proto3,oneof"`
 }
 
@@ -864,9 +857,8 @@ func (*SidebarWorkspaceMemoryPage_Loaded) isSidebarWorkspaceMemoryPage_State() {
 
 func (*SidebarWorkspaceMemoryPage_NotLoaded) isSidebarWorkspaceMemoryPage_State() {}
 
-// The page is loaded, held while the workspace is visible. Empty: presence is
-// the fact. Field 1 (`release`) is RETIRED: a page is let go when its
-// workspace stops being visible, and by no other rule.
+// The web view holds the page. Empty: presence is the fact. Field 1
+// (`release`) is RETIRED.
 type SidebarWorkspaceMemoryPageLoaded struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -944,33 +936,36 @@ var File_frontend_v1_sidebar_memory_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_sidebar_memory_proto_rawDesc = "" +
 	"\n" +
-	" frontend/v1/sidebar_memory.proto\x12\vfrontend.v1\"\xba\x02\n" +
-	"\x15SidebarMemoryOverview\x125\n" +
-	"\x05pages\x18\x01 \x01(\v2\x1f.frontend.v1.SidebarMemoryPagesR\x05pages\x128\n" +
-	"\x06strain\x18\x02 \x01(\v2 .frontend.v1.SidebarMemoryStrainR\x06strain\x128\n" +
-	"\x06agents\x18\x03 \x01(\v2 .frontend.v1.SidebarMemoryAgentsR\x06agents\x12?\n" +
-	"\tprocesses\x18\x04 \x03(\v2!.frontend.v1.SidebarMemoryProcessR\tprocesses\x125\n" +
-	"\x05total\x18\x05 \x01(\v2\x1f.frontend.v1.SidebarMemoryTotalR\x05total\"\x8d\x01\n" +
-	"\x12SidebarMemoryPages\x12,\n" +
-	"\x0ffootprint_bytes\x18\x01 \x01(\x04H\x00R\x0efootprintBytes\x88\x01\x01\x12\x16\n" +
-	"\x06loaded\x18\x02 \x01(\rR\x06loaded\x12\x1d\n" +
+	" frontend/v1/sidebar_memory.proto\x12\vfrontend.v1\"\xaa\x02\n" +
+	"\x15SidebarMemoryOverview\x12D\n" +
 	"\n" +
-	"not_loaded\x18\x03 \x01(\rR\tnotLoadedB\x12\n" +
+	"workspaces\x18\x06 \x01(\v2$.frontend.v1.SidebarMemoryWorkspacesR\n" +
+	"workspaces\x128\n" +
+	"\x06strain\x18\x02 \x01(\v2 .frontend.v1.SidebarMemoryStrainR\x06strain\x12?\n" +
+	"\tprocesses\x18\x04 \x03(\v2!.frontend.v1.SidebarMemoryProcessR\tprocesses\x125\n" +
+	"\x05total\x18\x05 \x01(\v2\x1f.frontend.v1.SidebarMemoryTotalR\x05totalJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04R\x05pagesR\x06agents\"\xe2\x01\n" +
+	"\x17SidebarMemoryWorkspaces\x12E\n" +
+	"\avisible\x18\x01 \x01(\v2+.frontend.v1.SidebarMemoryWorkspacesVisibleR\avisible\x12?\n" +
+	"\x05shims\x18\x02 \x01(\v2).frontend.v1.SidebarMemoryWorkspacesShimsR\x05shims\x12?\n" +
+	"\x05pages\x18\x03 \x01(\v2).frontend.v1.SidebarMemoryWorkspacesPagesR\x05pages\"N\n" +
+	"\x1eSidebarMemoryWorkspacesVisible\x12\x18\n" +
+	"\avisible\x18\x01 \x01(\rR\avisible\x12\x12\n" +
+	"\x04open\x18\x02 \x01(\rR\x04open\"\xac\x01\n" +
+	"\x1cSidebarMemoryWorkspacesShims\x12\x0e\n" +
+	"\x02up\x18\x01 \x01(\rR\x02up\x12,\n" +
+	"\x0ffootprint_bytes\x18\x02 \x01(\x04H\x00R\x0efootprintBytes\x88\x01\x01\x12(\n" +
+	"\raverage_bytes\x18\x03 \x01(\x04H\x01R\faverageBytes\x88\x01\x01B\x12\n" +
+	"\x10_footprint_bytesB\x10\n" +
+	"\x0e_average_bytes\"x\n" +
+	"\x1cSidebarMemoryWorkspacesPages\x12\x16\n" +
+	"\x06loaded\x18\x01 \x01(\rR\x06loaded\x12,\n" +
+	"\x0ffootprint_bytes\x18\x02 \x01(\x04H\x00R\x0efootprintBytes\x88\x01\x01B\x12\n" +
 	"\x10_footprint_bytes\"s\n" +
 	"\x13SidebarMemoryStrain\x12\x16\n" +
 	"\x06stalls\x18\x01 \x01(\rR\x06stalls\x12\x1d\n" +
 	"\n" +
 	"blocked_ms\x18\x02 \x01(\x04R\tblockedMs\x12%\n" +
-	"\x0ewindow_seconds\x18\x03 \x01(\rR\rwindowSeconds\"\x9f\x01\n" +
-	"\x13SidebarMemoryAgents\x12:\n" +
-	"\x04none\x18\x01 \x01(\v2$.frontend.v1.SidebarMemoryAgentsNoneH\x00R\x04none\x12C\n" +
-	"\arunning\x18\x02 \x01(\v2'.frontend.v1.SidebarMemoryAgentsRunningH\x00R\arunningB\a\n" +
-	"\x05state\"\x19\n" +
-	"\x17SidebarMemoryAgentsNone\"\x80\x01\n" +
-	"\x1aSidebarMemoryAgentsRunning\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\rR\x05count\x12'\n" +
-	"\x0ffootprint_bytes\x18\x02 \x01(\x04R\x0efootprintBytes\x12#\n" +
-	"\raverage_bytes\x18\x03 \x01(\x04R\faverageBytes\"n\n" +
+	"\x0ewindow_seconds\x18\x03 \x01(\rR\rwindowSeconds\"n\n" +
 	"\x14SidebarMemoryProcess\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12,\n" +
 	"\x0ffootprint_bytes\x18\x02 \x01(\x04H\x00R\x0efootprintBytes\x88\x01\x01B\x12\n" +
@@ -1012,11 +1007,11 @@ func file_frontend_v1_sidebar_memory_proto_rawDescGZIP() []byte {
 var file_frontend_v1_sidebar_memory_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_frontend_v1_sidebar_memory_proto_goTypes = []any{
 	(*SidebarMemoryOverview)(nil),                 // 0: frontend.v1.SidebarMemoryOverview
-	(*SidebarMemoryPages)(nil),                    // 1: frontend.v1.SidebarMemoryPages
-	(*SidebarMemoryStrain)(nil),                   // 2: frontend.v1.SidebarMemoryStrain
-	(*SidebarMemoryAgents)(nil),                   // 3: frontend.v1.SidebarMemoryAgents
-	(*SidebarMemoryAgentsNone)(nil),               // 4: frontend.v1.SidebarMemoryAgentsNone
-	(*SidebarMemoryAgentsRunning)(nil),            // 5: frontend.v1.SidebarMemoryAgentsRunning
+	(*SidebarMemoryWorkspaces)(nil),               // 1: frontend.v1.SidebarMemoryWorkspaces
+	(*SidebarMemoryWorkspacesVisible)(nil),        // 2: frontend.v1.SidebarMemoryWorkspacesVisible
+	(*SidebarMemoryWorkspacesShims)(nil),          // 3: frontend.v1.SidebarMemoryWorkspacesShims
+	(*SidebarMemoryWorkspacesPages)(nil),          // 4: frontend.v1.SidebarMemoryWorkspacesPages
+	(*SidebarMemoryStrain)(nil),                   // 5: frontend.v1.SidebarMemoryStrain
 	(*SidebarMemoryProcess)(nil),                  // 6: frontend.v1.SidebarMemoryProcess
 	(*SidebarMemoryTotal)(nil),                    // 7: frontend.v1.SidebarMemoryTotal
 	(*SidebarWorkspaceMemory)(nil),                // 8: frontend.v1.SidebarWorkspaceMemory
@@ -1028,13 +1023,13 @@ var file_frontend_v1_sidebar_memory_proto_goTypes = []any{
 	(*SidebarWorkspaceMemoryPageNotLoaded)(nil),   // 14: frontend.v1.SidebarWorkspaceMemoryPageNotLoaded
 }
 var file_frontend_v1_sidebar_memory_proto_depIdxs = []int32{
-	1,  // 0: frontend.v1.SidebarMemoryOverview.pages:type_name -> frontend.v1.SidebarMemoryPages
-	2,  // 1: frontend.v1.SidebarMemoryOverview.strain:type_name -> frontend.v1.SidebarMemoryStrain
-	3,  // 2: frontend.v1.SidebarMemoryOverview.agents:type_name -> frontend.v1.SidebarMemoryAgents
-	6,  // 3: frontend.v1.SidebarMemoryOverview.processes:type_name -> frontend.v1.SidebarMemoryProcess
-	7,  // 4: frontend.v1.SidebarMemoryOverview.total:type_name -> frontend.v1.SidebarMemoryTotal
-	4,  // 5: frontend.v1.SidebarMemoryAgents.none:type_name -> frontend.v1.SidebarMemoryAgentsNone
-	5,  // 6: frontend.v1.SidebarMemoryAgents.running:type_name -> frontend.v1.SidebarMemoryAgentsRunning
+	1,  // 0: frontend.v1.SidebarMemoryOverview.workspaces:type_name -> frontend.v1.SidebarMemoryWorkspaces
+	5,  // 1: frontend.v1.SidebarMemoryOverview.strain:type_name -> frontend.v1.SidebarMemoryStrain
+	6,  // 2: frontend.v1.SidebarMemoryOverview.processes:type_name -> frontend.v1.SidebarMemoryProcess
+	7,  // 3: frontend.v1.SidebarMemoryOverview.total:type_name -> frontend.v1.SidebarMemoryTotal
+	2,  // 4: frontend.v1.SidebarMemoryWorkspaces.visible:type_name -> frontend.v1.SidebarMemoryWorkspacesVisible
+	3,  // 5: frontend.v1.SidebarMemoryWorkspaces.shims:type_name -> frontend.v1.SidebarMemoryWorkspacesShims
+	4,  // 6: frontend.v1.SidebarMemoryWorkspaces.pages:type_name -> frontend.v1.SidebarMemoryWorkspacesPages
 	9,  // 7: frontend.v1.SidebarWorkspaceMemory.agent:type_name -> frontend.v1.SidebarWorkspaceMemoryAgent
 	12, // 8: frontend.v1.SidebarWorkspaceMemory.page:type_name -> frontend.v1.SidebarWorkspaceMemoryPage
 	10, // 9: frontend.v1.SidebarWorkspaceMemoryAgent.running:type_name -> frontend.v1.SidebarWorkspaceMemoryAgentRunning
@@ -1053,11 +1048,8 @@ func file_frontend_v1_sidebar_memory_proto_init() {
 	if File_frontend_v1_sidebar_memory_proto != nil {
 		return
 	}
-	file_frontend_v1_sidebar_memory_proto_msgTypes[1].OneofWrappers = []any{}
-	file_frontend_v1_sidebar_memory_proto_msgTypes[3].OneofWrappers = []any{
-		(*SidebarMemoryAgents_None)(nil),
-		(*SidebarMemoryAgents_Running)(nil),
-	}
+	file_frontend_v1_sidebar_memory_proto_msgTypes[3].OneofWrappers = []any{}
+	file_frontend_v1_sidebar_memory_proto_msgTypes[4].OneofWrappers = []any{}
 	file_frontend_v1_sidebar_memory_proto_msgTypes[6].OneofWrappers = []any{}
 	file_frontend_v1_sidebar_memory_proto_msgTypes[9].OneofWrappers = []any{
 		(*SidebarWorkspaceMemoryAgent_Running)(nil),

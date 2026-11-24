@@ -5,9 +5,13 @@
 //
 // EVERY FIGURE IS MEASURED. The process collector's latest sample
 // (procmetrics.Collector.Latest) gives each process group's physical
-// footprint, the stall detector (stallbeat) the page process's recent stalls,
-// and each workspace's visibility (wsm.Visibility) whether its page is
-// loaded: the editor loads exactly the visible workspaces' pages.
+// footprint and the stall detector (stallbeat) the page process's recent
+// stalls. EVERY COUNT READS THE ONE FACT ITS METRIC READS, so the hover and
+// the metrics never disagree: a workspace is visible by its visibility
+// (wsm.Visibility, agentrepl_workspaces_visible), a shim is up by the
+// sessions census (sessionwhy.Census, agentrepl_sessions_up), and a page is
+// loaded exactly while Emacs's web view holds it (pageheld.Table,
+// agentrepl_pages_loaded): visibility only makes a page eligible.
 // Nothing is estimated: the pages share one web content process, so no
 // per-page byte figure exists, and none is served.
 package memorypopup
@@ -19,7 +23,9 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/procmetrics"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/wsm"
 )
 
@@ -37,9 +43,13 @@ type Deps struct {
 	StallWindow time.Duration
 	// Running answers whether a workspace's shim runs.
 	Running func(ws ids.WorkspaceID) bool
-	// Visibility answers a workspace's visibility, which decides whether its
-	// page is loaded.
+	// Visibility answers a workspace's visibility.
 	Visibility func(ws ids.WorkspaceID) wsm.Visibility
+	// Census answers why each session this daemon holds up is up: its
+	// workspaces are the shims up.
+	Census sessionwhy.Census
+	// Pages holds which workspaces' pages Emacs's web view holds.
+	Pages *pageheld.Table
 	// Now is the clock the stall window is read against.
 	Now func() time.Time
 }
@@ -51,8 +61,9 @@ type Popups struct {
 
 // New builds the popups.
 func New(deps Deps) (*Popups, error) {
-	if deps.Processes == nil || deps.Stalls == nil || deps.StallWindow <= 0 || deps.Running == nil || deps.Visibility == nil || deps.Now == nil {
-		return nil, errors.New("memorypopup: the collector, the stall detector and its window, the shim presence, the visibility and a clock are required")
+	if deps.Processes == nil || deps.Stalls == nil || deps.StallWindow <= 0 || deps.Running == nil || deps.Visibility == nil ||
+		deps.Census.Live == nil || deps.Census.Work == nil || deps.Census.Now == nil || deps.Pages == nil || deps.Now == nil {
+		return nil, errors.New("memorypopup: the collector, the stall detector and its window, the shim presence, the visibility, the sessions census, the held pages and a clock are required")
 	}
 	return &Popups{deps: deps}, nil
 }
@@ -82,8 +93,7 @@ func isShim(process string) bool {
 }
 
 // Overview answers the version hover's popup, nil when no sample has run yet.
-// OPEN are the open workspaces, whose pages are counted loaded or not by
-// their visibility.
+// OPEN are the open workspaces, out of which the visible ones are counted.
 func (p *Popups) Overview(open []ids.WorkspaceID) (*frontendv1.SidebarMemoryOverview, error) {
 	snap, sampled := p.deps.Processes.Latest()
 	if !sampled {
@@ -95,42 +105,26 @@ func (p *Popups) Overview(open []ids.WorkspaceID) (*frontendv1.SidebarMemoryOver
 	out := &frontendv1.SidebarMemoryOverview{}
 	var total uint64
 
-	pages := &frontendv1.SidebarMemoryPages{}
+	visible := &frontendv1.SidebarMemoryWorkspacesVisible{Open: uint32(len(open))}
+	for _, ws := range open {
+		if p.deps.Visibility(ws).Visible() {
+			visible.Visible++
+		}
+	}
+	pages := &frontendv1.SidebarMemoryWorkspacesPages{Loaded: uint32(len(p.deps.Pages.Snapshot()))}
 	if bytes, ok := sumOf(snap, procmetrics.ProcessWebKitWebContent); ok {
 		pages.FootprintBytes = &bytes
 		total += bytes
 	}
-	for _, ws := range open {
-		if p.deps.Visibility(ws).Visible() {
-			pages.Loaded++
-		} else {
-			pages.NotLoaded++
-		}
+	shims := p.shimsUp(snap)
+	if shims.FootprintBytes != nil {
+		total += *shims.FootprintBytes
 	}
-	out.Pages = pages
+	out.Workspaces = &frontendv1.SidebarMemoryWorkspaces{Visible: visible, Shims: shims, Pages: pages}
 
 	stalls, blocked := p.deps.Stalls.Recent(p.deps.Now())
 	out.Strain = &frontendv1.SidebarMemoryStrain{
 		Stalls: uint32(stalls), BlockedMs: uint64(blocked), WindowSeconds: uint32(p.deps.StallWindow / time.Second),
-	}
-
-	shims := map[string]uint64{}
-	for g, bytes := range snap.Footprints {
-		if isShim(g.Process) {
-			shims[g.Workspace] += bytes
-		}
-	}
-	if len(shims) == 0 {
-		out.Agents = &frontendv1.SidebarMemoryAgents{State: &frontendv1.SidebarMemoryAgents_None{None: &frontendv1.SidebarMemoryAgentsNone{}}}
-	} else {
-		var sum uint64
-		for _, bytes := range shims {
-			sum += bytes
-		}
-		total += sum
-		out.Agents = &frontendv1.SidebarMemoryAgents{State: &frontendv1.SidebarMemoryAgents_Running{Running: &frontendv1.SidebarMemoryAgentsRunning{
-			Count: uint32(len(shims)), FootprintBytes: sum, AverageBytes: sum / uint64(len(shims)),
-		}}}
 	}
 
 	for _, l := range listed {
@@ -151,6 +145,32 @@ func (p *Popups) Overview(open []ids.WorkspaceID) (*frontendv1.SidebarMemoryOver
 	}
 	out.Total = &frontendv1.SidebarMemoryTotal{FootprintBytes: total}
 	return out, nil
+}
+
+// shimsUp answers the shims line: every session the census holds up, and the
+// footprints SNAP measured of those shims.
+func (p *Popups) shimsUp(snap procmetrics.Snapshot) *frontendv1.SidebarMemoryWorkspacesShims {
+	up := p.deps.Census.Up()
+	out := &frontendv1.SidebarMemoryWorkspacesShims{Up: uint32(len(up))}
+	measured := map[string]uint64{}
+	for g, bytes := range snap.Footprints {
+		if !isShim(g.Process) {
+			continue
+		}
+		if _, held := up[ids.WorkspaceID(g.Workspace)]; held {
+			measured[g.Workspace] += bytes
+		}
+	}
+	if len(measured) == 0 {
+		return out
+	}
+	var sum uint64
+	for _, bytes := range measured {
+		sum += bytes
+	}
+	average := sum / uint64(len(measured))
+	out.FootprintBytes, out.AverageBytes = &sum, &average
+	return out
 }
 
 // sumOf sums every live group of PROCESS in SNAP, false when none is live.
@@ -188,14 +208,15 @@ func (p *Popups) Workspace(ws ids.WorkspaceID) *frontendv1.SidebarWorkspaceMemor
 	} else {
 		out.Agent = &frontendv1.SidebarWorkspaceMemoryAgent{State: &frontendv1.SidebarWorkspaceMemoryAgent_NotRunning{NotRunning: &frontendv1.SidebarWorkspaceMemoryAgentNotRunning{}}}
 	}
-	out.Page = pageOf(p.deps.Visibility(ws))
+	_, held := p.deps.Pages.Snapshot()[ws]
+	out.Page = pageOf(held)
 	return out
 }
 
-// pageOf answers the hover's page line for a workspace of visibility V: its
-// page is loaded exactly while it is visible.
-func pageOf(v wsm.Visibility) *frontendv1.SidebarWorkspaceMemoryPage {
-	if !v.Visible() {
+// pageOf answers the hover's page line for a workspace whose page the web
+// view holds (HELD) or not.
+func pageOf(held bool) *frontendv1.SidebarWorkspaceMemoryPage {
+	if !held {
 		return &frontendv1.SidebarWorkspaceMemoryPage{State: &frontendv1.SidebarWorkspaceMemoryPage_NotLoaded{NotLoaded: &frontendv1.SidebarWorkspaceMemoryPageNotLoaded{}}}
 	}
 	return &frontendv1.SidebarWorkspaceMemoryPage{State: &frontendv1.SidebarWorkspaceMemoryPage_Loaded{Loaded: &frontendv1.SidebarWorkspaceMemoryPageLoaded{}}}

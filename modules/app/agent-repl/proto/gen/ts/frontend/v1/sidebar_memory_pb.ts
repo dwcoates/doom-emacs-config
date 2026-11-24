@@ -5,8 +5,12 @@
 // naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
 // what that one workspace holds. Every figure is MEASURED: the daemon's
 // process collector (procmetrics) samples each process's physical footprint,
-// and a workspace's page is loaded exactly while it is visible
-// (frontend.v1.RosterRowVisibility).
+// and a workspace's page is loaded exactly while Emacs's web view holds it, as
+// Emacs reports it (agentrepl.v1 ReportPageState): visibility only makes a
+// page eligible, so a visible workspace whose page is unloaded counts as not
+// loaded. Each count is read from the one fact the matching metric reads
+// (agentrepl_workspaces_visible, agentrepl_sessions_up,
+// agentrepl_pages_loaded), so the hover and the metrics never disagree.
 // Nothing here is estimated: the workspace pages share one WebKit web content
 // process, which reports one footprint for all of them, so no per-page byte
 // figure exists to draw and none is served.
@@ -29,34 +33,31 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/sidebar_memory.proto.
  */
 export const file_frontend_v1_sidebar_memory: GenFile = /*@__PURE__*/
-  fileDesc("CiBmcm9udGVuZC92MS9zaWRlYmFyX21lbW9yeS5wcm90bxILZnJvbnRlbmQudjEikQIKFVNpZGViYXJNZW1vcnlPdmVydmlldxIuCgVwYWdlcxgBIAEoCzIfLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlQYWdlcxIwCgZzdHJhaW4YAiABKAsyIC5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5U3RyYWluEjAKBmFnZW50cxgDIAEoCzIgLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlBZ2VudHMSNAoJcHJvY2Vzc2VzGAQgAygLMiEuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeVByb2Nlc3MSLgoFdG90YWwYBSABKAsyHy5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5VG90YWwiagoSU2lkZWJhck1lbW9yeVBhZ2VzEhwKD2Zvb3RwcmludF9ieXRlcxgBIAEoBEgAiAEBEg4KBmxvYWRlZBgCIAEoDRISCgpub3RfbG9hZGVkGAMgASgNQhIKEF9mb290cHJpbnRfYnl0ZXMiUQoTU2lkZWJhck1lbW9yeVN0cmFpbhIOCgZzdGFsbHMYASABKA0SEgoKYmxvY2tlZF9tcxgCIAEoBBIWCg53aW5kb3dfc2Vjb25kcxgDIAEoDSKQAQoTU2lkZWJhck1lbW9yeUFnZW50cxI0CgRub25lGAEgASgLMiQuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeUFnZW50c05vbmVIABI6CgdydW5uaW5nGAIgASgLMicuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeUFnZW50c1J1bm5pbmdIAEIHCgVzdGF0ZSIZChdTaWRlYmFyTWVtb3J5QWdlbnRzTm9uZSJbChpTaWRlYmFyTWVtb3J5QWdlbnRzUnVubmluZxINCgVjb3VudBgBIAEoDRIXCg9mb290cHJpbnRfYnl0ZXMYAiABKAQSFQoNYXZlcmFnZV9ieXRlcxgDIAEoBCJXChRTaWRlYmFyTWVtb3J5UHJvY2VzcxINCgVsYWJlbBgBIAEoCRIcCg9mb290cHJpbnRfYnl0ZXMYAiABKARIAIgBAUISChBfZm9vdHByaW50X2J5dGVzIi0KElNpZGViYXJNZW1vcnlUb3RhbBIXCg9mb290cHJpbnRfYnl0ZXMYASABKAQiiAEKFlNpZGViYXJXb3Jrc3BhY2VNZW1vcnkSNwoFYWdlbnQYASABKAsyKC5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnQSNQoEcGFnZRgCIAEoCzInLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlIrUBChtTaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnQSQgoHcnVubmluZxgBIAEoCzIvLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudFJ1bm5pbmdIABJJCgtub3RfcnVubmluZxgCIAEoCzIyLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudE5vdFJ1bm5pbmdIAEIHCgVzdGF0ZSJWCiJTaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnRSdW5uaW5nEhwKD2Zvb3RwcmludF9ieXRlcxgBIAEoBEgAiAEBQhIKEF9mb290cHJpbnRfYnl0ZXMiJwolU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50Tm90UnVubmluZyKuAQoaU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2USPwoGbG9hZGVkGAEgASgLMi0uZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VMb2FkZWRIABJGCgpub3RfbG9hZGVkGAIgASgLMjAuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VOb3RMb2FkZWRIAEIHCgVzdGF0ZSIxCiBTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZUxvYWRlZEoECAEQAlIHcmVsZWFzZSIlCiNTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZU5vdExvYWRlZEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z");
+  fileDesc("CiBmcm9udGVuZC92MS9zaWRlYmFyX21lbW9yeS5wcm90bxILZnJvbnRlbmQudjEihAIKFVNpZGViYXJNZW1vcnlPdmVydmlldxI4Cgp3b3Jrc3BhY2VzGAYgASgLMiQuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeVdvcmtzcGFjZXMSMAoGc3RyYWluGAIgASgLMiAuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeVN0cmFpbhI0Cglwcm9jZXNzZXMYBCADKAsyIS5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5UHJvY2VzcxIuCgV0b3RhbBgFIAEoCzIfLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlUb3RhbEoECAEQAkoECAMQBFIFcGFnZXNSBmFnZW50cyLLAQoXU2lkZWJhck1lbW9yeVdvcmtzcGFjZXMSPAoHdmlzaWJsZRgBIAEoCzIrLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzVmlzaWJsZRI4CgVzaGltcxgCIAEoCzIpLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzU2hpbXMSOAoFcGFnZXMYAyABKAsyKS5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5V29ya3NwYWNlc1BhZ2VzIj8KHlNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzVmlzaWJsZRIPCgd2aXNpYmxlGAEgASgNEgwKBG9wZW4YAiABKA0iigEKHFNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzU2hpbXMSCgoCdXAYASABKA0SHAoPZm9vdHByaW50X2J5dGVzGAIgASgESACIAQESGgoNYXZlcmFnZV9ieXRlcxgDIAEoBEgBiAEBQhIKEF9mb290cHJpbnRfYnl0ZXNCEAoOX2F2ZXJhZ2VfYnl0ZXMiYAocU2lkZWJhck1lbW9yeVdvcmtzcGFjZXNQYWdlcxIOCgZsb2FkZWQYASABKA0SHAoPZm9vdHByaW50X2J5dGVzGAIgASgESACIAQFCEgoQX2Zvb3RwcmludF9ieXRlcyJRChNTaWRlYmFyTWVtb3J5U3RyYWluEg4KBnN0YWxscxgBIAEoDRISCgpibG9ja2VkX21zGAIgASgEEhYKDndpbmRvd19zZWNvbmRzGAMgASgNIlcKFFNpZGViYXJNZW1vcnlQcm9jZXNzEg0KBWxhYmVsGAEgASgJEhwKD2Zvb3RwcmludF9ieXRlcxgCIAEoBEgAiAEBQhIKEF9mb290cHJpbnRfYnl0ZXMiLQoSU2lkZWJhck1lbW9yeVRvdGFsEhcKD2Zvb3RwcmludF9ieXRlcxgBIAEoBCKIAQoWU2lkZWJhcldvcmtzcGFjZU1lbW9yeRI3CgVhZ2VudBgBIAEoCzIoLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudBI1CgRwYWdlGAIgASgLMicuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2UitQEKG1NpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudBJCCgdydW5uaW5nGAEgASgLMi8uZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50UnVubmluZ0gAEkkKC25vdF9ydW5uaW5nGAIgASgLMjIuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50Tm90UnVubmluZ0gAQgcKBXN0YXRlIlYKIlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudFJ1bm5pbmcSHAoPZm9vdHByaW50X2J5dGVzGAEgASgESACIAQFCEgoQX2Zvb3RwcmludF9ieXRlcyInCiVTaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnROb3RSdW5uaW5nIq4BChpTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZRI/CgZsb2FkZWQYASABKAsyLS5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZUxvYWRlZEgAEkYKCm5vdF9sb2FkZWQYAiABKAsyMC5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZU5vdExvYWRlZEgAQgcKBXN0YXRlIjEKIFNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlTG9hZGVkSgQIARACUgdyZWxlYXNlIiUKI1NpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlTm90TG9hZGVkQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
 
 /**
- * The version hover's popup: one line per element, top to bottom.
+ * The version hover's popup: one line per element, top to bottom. Fields 1
+ * (`pages`) and 3 (`agents`) are RETIRED: their counts and footprints are the
+ * `workspaces` entry's lines.
  *
  * @generated from message frontend.v1.SidebarMemoryOverview
  */
 export type SidebarMemoryOverview = Message<"frontend.v1.SidebarMemoryOverview"> & {
   /**
-   * The shared workspace-page process and how many pages it holds.
+   * The workspaces entry, drawn first, whose hover opens a child popup of its
+   * three counts.
    *
-   * @generated from field: frontend.v1.SidebarMemoryPages pages = 1;
+   * @generated from field: frontend.v1.SidebarMemoryWorkspaces workspaces = 6;
    */
-  pages?: SidebarMemoryPages | undefined;
+  workspaces?: SidebarMemoryWorkspaces | undefined;
 
   /**
-   * How hard that process is struggling: its main-thread stalls of late.
+   * How hard the workspace-page process is struggling: its main-thread stalls
+   * of late.
    *
    * @generated from field: frontend.v1.SidebarMemoryStrain strain = 2;
    */
   strain?: SidebarMemoryStrain | undefined;
-
-  /**
-   * The workspaces' shims, together.
-   *
-   * @generated from field: frontend.v1.SidebarMemoryAgents agents = 3;
-   */
-  agents?: SidebarMemoryAgents | undefined;
 
   /**
    * Each other agent-repl process the daemon measures, in the daemon's drawn
@@ -83,42 +84,139 @@ export const SidebarMemoryOverviewSchema: GenMessage<SidebarMemoryOverview> = /*
   messageDesc(file_frontend_v1_sidebar_memory, 0);
 
 /**
- * The workspace pages' one WebKit web content process.
+ * The workspaces entry and its child popup: how many workspaces the user can
+ * see, how many have a shim up, and how many have a page in the web view.
  *
- * @generated from message frontend.v1.SidebarMemoryPages
+ * @generated from message frontend.v1.SidebarMemoryWorkspaces
  */
-export type SidebarMemoryPages = Message<"frontend.v1.SidebarMemoryPages"> & {
+export type SidebarMemoryWorkspaces = Message<"frontend.v1.SidebarMemoryWorkspaces"> & {
   /**
-   * Its physical footprint, compressed and swapped memory included. UNSET
-   * when the collector found no such process (no web view is open).
+   * The child popup's first line: the visible workspaces, out of the open
+   * ones.
    *
-   * @generated from field: optional uint64 footprint_bytes = 1;
+   * @generated from field: frontend.v1.SidebarMemoryWorkspacesVisible visible = 1;
+   */
+  visible?: SidebarMemoryWorkspacesVisible | undefined;
+
+  /**
+   * Its second line: the workspaces with a shim up.
+   *
+   * @generated from field: frontend.v1.SidebarMemoryWorkspacesShims shims = 2;
+   */
+  shims?: SidebarMemoryWorkspacesShims | undefined;
+
+  /**
+   * Its third line: the workspaces whose page the web view holds.
+   *
+   * @generated from field: frontend.v1.SidebarMemoryWorkspacesPages pages = 3;
+   */
+  pages?: SidebarMemoryWorkspacesPages | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.SidebarMemoryWorkspaces.
+ * Use `create(SidebarMemoryWorkspacesSchema)` to create a new message.
+ */
+export const SidebarMemoryWorkspacesSchema: GenMessage<SidebarMemoryWorkspaces> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_sidebar_memory, 1);
+
+/**
+ * The visible workspaces: those whose visibility is selected or
+ * unselected_visible (wsm.Workspace.Visibility), out of the open ones.
+ *
+ * @generated from message frontend.v1.SidebarMemoryWorkspacesVisible
+ */
+export type SidebarMemoryWorkspacesVisible = Message<"frontend.v1.SidebarMemoryWorkspacesVisible"> & {
+  /**
+   * How many open workspaces are visible.
+   *
+   * @generated from field: uint32 visible = 1;
+   */
+  visible: number;
+
+  /**
+   * How many workspaces are open (not hidden, not closed).
+   *
+   * @generated from field: uint32 open = 2;
+   */
+  open: number;
+};
+
+/**
+ * Describes the message frontend.v1.SidebarMemoryWorkspacesVisible.
+ * Use `create(SidebarMemoryWorkspacesVisibleSchema)` to create a new message.
+ */
+export const SidebarMemoryWorkspacesVisibleSchema: GenMessage<SidebarMemoryWorkspacesVisible> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_sidebar_memory, 2);
+
+/**
+ * The workspaces with a shim up (not parked), the sessions
+ * agentrepl_sessions_up counts, whether or not they are visible.
+ *
+ * @generated from message frontend.v1.SidebarMemoryWorkspacesShims
+ */
+export type SidebarMemoryWorkspacesShims = Message<"frontend.v1.SidebarMemoryWorkspacesShims"> & {
+  /**
+   * How many shims are up.
+   *
+   * @generated from field: uint32 up = 1;
+   */
+  up: number;
+
+  /**
+   * Their physical footprints, their vendor children included, summed. UNSET
+   * when the collector measured none.
+   *
+   * @generated from field: optional uint64 footprint_bytes = 2;
    */
   footprintBytes?: bigint | undefined;
 
   /**
-   * How many open workspaces' pages it holds now.
+   * That sum over the shims measured, rounded down: resolved here so no
+   * client divides. Set exactly when `footprint_bytes` is.
    *
-   * @generated from field: uint32 loaded = 2;
+   * @generated from field: optional uint64 average_bytes = 3;
+   */
+  averageBytes?: bigint | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.SidebarMemoryWorkspacesShims.
+ * Use `create(SidebarMemoryWorkspacesShimsSchema)` to create a new message.
+ */
+export const SidebarMemoryWorkspacesShimsSchema: GenMessage<SidebarMemoryWorkspacesShims> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_sidebar_memory, 3);
+
+/**
+ * The workspaces whose page the web view holds now (agentrepl_pages_loaded),
+ * never the ones whose visibility only makes a page eligible.
+ *
+ * @generated from message frontend.v1.SidebarMemoryWorkspacesPages
+ */
+export type SidebarMemoryWorkspacesPages = Message<"frontend.v1.SidebarMemoryWorkspacesPages"> & {
+  /**
+   * How many pages the web view holds.
+   *
+   * @generated from field: uint32 loaded = 1;
    */
   loaded: number;
 
   /**
-   * How many open workspaces have no page held (page-unload.el unloaded it,
-   * or never loaded it): drawn as "of N" beside `loaded`, so the two together
-   * are every open workspace Emacs has reported.
+   * The physical footprint of the one WebKit web content process every page
+   * shares, compressed and swapped memory included. UNSET when the collector
+   * found no such process (no web view is open).
    *
-   * @generated from field: uint32 not_loaded = 3;
+   * @generated from field: optional uint64 footprint_bytes = 2;
    */
-  notLoaded: number;
+  footprintBytes?: bigint | undefined;
 };
 
 /**
- * Describes the message frontend.v1.SidebarMemoryPages.
- * Use `create(SidebarMemoryPagesSchema)` to create a new message.
+ * Describes the message frontend.v1.SidebarMemoryWorkspacesPages.
+ * Use `create(SidebarMemoryWorkspacesPagesSchema)` to create a new message.
  */
-export const SidebarMemoryPagesSchema: GenMessage<SidebarMemoryPages> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 1);
+export const SidebarMemoryWorkspacesPagesSchema: GenMessage<SidebarMemoryWorkspacesPages> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_sidebar_memory, 4);
 
 /**
  * The page process's main-thread stalls in the daemon's stall window: the lag
@@ -155,93 +253,6 @@ export type SidebarMemoryStrain = Message<"frontend.v1.SidebarMemoryStrain"> & {
  * Use `create(SidebarMemoryStrainSchema)` to create a new message.
  */
 export const SidebarMemoryStrainSchema: GenMessage<SidebarMemoryStrain> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 2);
-
-/**
- * The workspaces' shims, together.
- *
- * @generated from message frontend.v1.SidebarMemoryAgents
- */
-export type SidebarMemoryAgents = Message<"frontend.v1.SidebarMemoryAgents"> & {
-  /**
-   * Whether any shim runs: an average over none is no figure at all.
-   *
-   * @generated from oneof frontend.v1.SidebarMemoryAgents.state
-   */
-  state: {
-    /**
-     * No workspace's shim is running.
-     *
-     * @generated from field: frontend.v1.SidebarMemoryAgentsNone none = 1;
-     */
-    value: SidebarMemoryAgentsNone;
-    case: "none";
-  } | {
-    /**
-     * At least one is.
-     *
-     * @generated from field: frontend.v1.SidebarMemoryAgentsRunning running = 2;
-     */
-    value: SidebarMemoryAgentsRunning;
-    case: "running";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message frontend.v1.SidebarMemoryAgents.
- * Use `create(SidebarMemoryAgentsSchema)` to create a new message.
- */
-export const SidebarMemoryAgentsSchema: GenMessage<SidebarMemoryAgents> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 3);
-
-/**
- * No workspace's shim is running. Empty: presence is the fact.
- *
- * @generated from message frontend.v1.SidebarMemoryAgentsNone
- */
-export type SidebarMemoryAgentsNone = Message<"frontend.v1.SidebarMemoryAgentsNone"> & {
-};
-
-/**
- * Describes the message frontend.v1.SidebarMemoryAgentsNone.
- * Use `create(SidebarMemoryAgentsNoneSchema)` to create a new message.
- */
-export const SidebarMemoryAgentsNoneSchema: GenMessage<SidebarMemoryAgentsNone> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 4);
-
-/**
- * The running shims' figures.
- *
- * @generated from message frontend.v1.SidebarMemoryAgentsRunning
- */
-export type SidebarMemoryAgentsRunning = Message<"frontend.v1.SidebarMemoryAgentsRunning"> & {
-  /**
-   * How many shims run.
-   *
-   * @generated from field: uint32 count = 1;
-   */
-  count: number;
-
-  /**
-   * Their footprints, summed.
-   *
-   * @generated from field: uint64 footprint_bytes = 2;
-   */
-  footprintBytes: bigint;
-
-  /**
-   * That sum over `count`, rounded down: resolved here so no client divides.
-   *
-   * @generated from field: uint64 average_bytes = 3;
-   */
-  averageBytes: bigint;
-};
-
-/**
- * Describes the message frontend.v1.SidebarMemoryAgentsRunning.
- * Use `create(SidebarMemoryAgentsRunningSchema)` to create a new message.
- */
-export const SidebarMemoryAgentsRunningSchema: GenMessage<SidebarMemoryAgentsRunning> = /*@__PURE__*/
   messageDesc(file_frontend_v1_sidebar_memory, 5);
 
 /**
@@ -275,8 +286,8 @@ export const SidebarMemoryProcessSchema: GenMessage<SidebarMemoryProcess> = /*@_
   messageDesc(file_frontend_v1_sidebar_memory, 6);
 
 /**
- * Every measured agent-repl process together: the pages, the shims and every
- * listed process.
+ * Every measured agent-repl process together: the pages' process, the shims
+ * and every listed process.
  *
  * @generated from message frontend.v1.SidebarMemoryTotal
  */
@@ -310,8 +321,8 @@ export type SidebarWorkspaceMemory = Message<"frontend.v1.SidebarWorkspaceMemory
   agent?: SidebarWorkspaceMemoryAgent | undefined;
 
   /**
-   * The workspace's page, as its visibility decides it
-   * (frontend.v1.RosterRowVisibility). Always set.
+   * The workspace's page, as Emacs's web view holds it (agentrepl.v1
+   * ReportPageState). Always set.
    *
    * @generated from field: frontend.v1.SidebarWorkspaceMemoryPage page = 2;
    */
@@ -406,14 +417,16 @@ export const SidebarWorkspaceMemoryAgentNotRunningSchema: GenMessage<SidebarWork
  */
 export type SidebarWorkspaceMemoryPage = Message<"frontend.v1.SidebarWorkspaceMemoryPage"> & {
   /**
-   * Whether the page is loaded: exactly while the workspace is visible
-   * (frontend.v1.RosterRowVisibility), and let go once it is not.
+   * Whether the web view holds the page. Visibility makes a page eligible;
+   * Emacs loads it when the workspace is shown, its session comes up for
+   * work, or its slot is made while it is wanted, and unloads it when its
+   * session goes dormant off screen or it stops being visible.
    *
    * @generated from oneof frontend.v1.SidebarWorkspaceMemoryPage.state
    */
   state: {
     /**
-     * It is loaded, held while the workspace is visible.
+     * The web view holds it.
      *
      * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageLoaded loaded = 1;
      */
@@ -421,7 +434,7 @@ export type SidebarWorkspaceMemoryPage = Message<"frontend.v1.SidebarWorkspaceMe
     case: "loaded";
   } | {
     /**
-     * It is not loaded: the workspace is not visible.
+     * The web view does not hold it, visible or not.
      *
      * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageNotLoaded not_loaded = 2;
      */
@@ -438,9 +451,8 @@ export const SidebarWorkspaceMemoryPageSchema: GenMessage<SidebarWorkspaceMemory
   messageDesc(file_frontend_v1_sidebar_memory, 12);
 
 /**
- * The page is loaded, held while the workspace is visible. Empty: presence is
- * the fact. Field 1 (`release`) is RETIRED: a page is let go when its
- * workspace stops being visible, and by no other rule.
+ * The web view holds the page. Empty: presence is the fact. Field 1
+ * (`release`) is RETIRED.
  *
  * @generated from message frontend.v1.SidebarWorkspaceMemoryPageLoaded
  */
