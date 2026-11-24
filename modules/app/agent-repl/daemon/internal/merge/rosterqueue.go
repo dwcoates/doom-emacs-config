@@ -282,6 +282,16 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 		return
 	}
 	queue.Mediation = mediation
+	deploying, err := o.deps.DB.DeployingMergeOf(ctx, repo)
+	if err == nil && deploying != nil {
+		queue.Deploying, err = o.rosterDeploying(ctx, *deploying)
+	}
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read the landed merge still deploying, so the roster is not told the queue"),
+			logsite.Msg("the deploying merge's read ended when its context was cancelled; the roster is not told the queue"),
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
+	}
 	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "held_by": hold.heldBy(), "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.noteOrder(repo, queue)
@@ -352,7 +362,7 @@ func (o *orchestrator) publishOffQueueLocked(ctx context.Context) {
 func (o *orchestrator) asyncRequesters(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) ([]ids.WorkspaceID, error) {
 	var out []ids.WorkspaceID
 	for _, entry := range entries {
-		c, err := o.creditOf(ctx, entry)
+		c, err := o.creditOf(ctx, entry.Workspace)
 		if err != nil {
 			return nil, err
 		}
@@ -381,23 +391,25 @@ type credit struct {
 	// asyncName is an async merge's own name (sidebar.QueueEntry.AsyncName),
 	// empty for a sync merge.
 	asyncName string
+	// name is the name of the workspace the merge runs in.
+	name string
 }
 
-// creditOf answers how the roster credits the merge ENTRY stands for: a
+// creditOf answers how the roster credits the merge running in WS: a
 // merge workspace is credited to its requester and named by its own name, and
 // every other merge is credited to the workspace it runs in, under that
 // workspace's name. It is the one place
 // the roster's credit is decided, so the async-merging marker and the merge
 // queue view never disagree on who a merge is drawn as.
-func (o *orchestrator) creditOf(ctx context.Context, entry wsm.MergeQueueEntry) (credit, error) {
-	record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
+func (o *orchestrator) creditOf(ctx context.Context, ws ids.WorkspaceID) (credit, error) {
+	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return credit{}, err
 	}
 	if record.MergeOf != nil {
-		return credit{workspace: record.MergeOf.Requester, async: true, asyncName: record.Name}, nil
+		return credit{workspace: record.MergeOf.Requester, async: true, asyncName: record.Name, name: record.Name}, nil
 	}
-	return credit{workspace: entry.Workspace}, nil
+	return credit{workspace: ws, name: record.Name}, nil
 }
 
 // rosterLine answers the merges of LINE as the roster draws them, front
@@ -409,7 +421,7 @@ func (o *orchestrator) creditOf(ctx context.Context, entry wsm.MergeQueueEntry) 
 func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed, queueHeld bool) ([]sidebar.QueueEntry, error) {
 	out := make([]sidebar.QueueEntry, 0, len(line))
 	for i, entry := range line {
-		c, err := o.creditOf(ctx, entry)
+		c, err := o.creditOf(ctx, entry.Workspace)
 		if err != nil {
 			return nil, err
 		}

@@ -418,3 +418,25 @@ func TestGetMergeQueueStatusCountsTheQueueFromItsEntries(t *testing.T) {
 		t.Fatalf("size %v disagrees with %d entries and %d off the queue", size, len(status.GetEntries()), len(status.GetOffQueue()))
 	}
 }
+
+func TestMergeQueueStatusOfListsTheMergeStillDeployingFirst(t *testing.T) {
+	// Arrange
+	status := merge.QueueStatus{Repository: wsm.Repository{ID: "r1", Dir: "/r"},
+		Deploying: &merge.QueueMember{Workspace: "ws-landed", Name: "landed", Branch: "agent/landed", Started: true, Step: footer.StepDeploying}}
+	status.Queue.Members = []merge.QueueMember{{Workspace: "ws-next", Name: "next", Branch: "agent/next"}}
+
+	// Act
+	got := mergeQueueStatusOf(status)
+
+	// Assert
+	entries := got.GetEntries()
+	if len(entries) != 2 || entries[0].GetWorkspace().GetId() != "ws-landed" || entries[0].GetStage().GetRunning().GetStepDescription() != footer.StepDeploying.Words() {
+		t.Fatalf("entries = %v, want the landed merge first, running its deploying step", entries)
+	}
+	if entries[1].GetWorkspace().GetId() != "ws-next" || entries[1].GetStage().GetWaiting() == nil {
+		t.Fatalf("entries = %v, want the next merge waiting behind it", entries)
+	}
+	if size := got.GetSize(); size.GetRunning() != 1 || size.GetWaiting() != 1 || size.GetInQueue() != 2 {
+		t.Fatalf("size = %v, want one running and one waiting", size)
+	}
+}

@@ -223,6 +223,10 @@ type run struct {
 	// stepAt is when the current step began, which the merges waiting behind
 	// this one date their "enqueued" line by.
 	stepAt time.Time
+	// deploying is the run's span on its deploying step, set when the step
+	// is left (timeStep) and measured once at its teardown, or handed to its
+	// deploy's check (deployingstage.go). Guarded by mu.
+	deploying deployingSpan
 	// tree is the current attempt's scratch tree, empty between attempts.
 	tree string
 	// attempts counts the scratch trees made, one per committing attempt.

@@ -582,6 +582,9 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	// only an evicted one stands off the queue to be requeued. A RUN TAKEN OFF
 	// AT ITS WORKSPACE'S COLD GATE leaves it only to stand at its own place
 	// again, waiting and skipped, under a new bubble (coldgate.go).
+	// THE LANDING DEPLOYING IS RECORDED BEFORE IT LEAVES ITS LINE, so the
+	// queue draws it in one place or the other at every instant.
+	r.settleDeploying(ctx, out)
 	requeued := out.abandoned.requeues()
 	var ledger ids.LeaseID
 	if requeued {

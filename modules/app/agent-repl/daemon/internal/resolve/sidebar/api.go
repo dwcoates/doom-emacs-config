@@ -367,6 +367,12 @@ type MergeQueue struct {
 	// Mediation is the deploy mediation the queue waits on, nil while no
 	// deploy owes one (frontend.v1.RosterRepoMergeQueue.mediation).
 	Mediation *QueueMediation
+	// Deploying is the queue's landed merge whose deploy's check is still
+	// owed, nil while none stands: drawn as the head, being worked on, until
+	// the check ends, with every merge in line drawn waiting behind it. A
+	// merge in line already admitted (one admitted as the landing's deploy
+	// began, before its check was owed) keeps the head.
+	Deploying *QueueEntry
 }
 
 // LineWorkspaces answers the workspace each merge in line runs in, front

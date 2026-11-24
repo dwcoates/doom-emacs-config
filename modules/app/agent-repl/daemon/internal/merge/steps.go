@@ -62,6 +62,15 @@ func (r *run) timeStep(step footer.MergeStep, began, now time.Time) {
 	if step == "" || began.IsZero() {
 		return
 	}
+	// THE DEPLOYING STEP IS MEASURED ONCE, AT THE TEARDOWN: to the check's
+	// verdict when its deploy is checked, to the step's end otherwise
+	// (deployingstage.go).
+	if step == footer.StepDeploying {
+		r.mu.Lock()
+		r.deploying = deployingSpan{began: began, left: now}
+		r.mu.Unlock()
+		return
+	}
 	r.o.deps.Meter.ObserveMergeStep(string(step), now.Sub(began))
 }
 

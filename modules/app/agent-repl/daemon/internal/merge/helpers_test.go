@@ -131,6 +131,11 @@ type fakeDB struct {
 	landingOpened time.Time
 	// endingErr fails RecordMediationEnding.
 	endingErr error
+	// deployingRecordErr fails RecordDeployingMerge, deployingReadErr
+	// DeployingMergeOf, and deployingEndErr EndDeployingMerge.
+	deployingRecordErr error
+	deployingReadErr   error
+	deployingEndErr    error
 	// mediatorRecordErr fails RecordDeployMediator.
 	mediatorRecordErr error
 	mediationErr      error
@@ -484,6 +489,36 @@ func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed ti
 	}
 	defer f.holdWritten()
 	return f.checks.ReleaseMediation(ctx, repo, owed)
+}
+
+func (f *fakeDB) RecordDeployingMerge(ctx context.Context, m wsm.DeployingMerge) (*wsm.DeployingMerge, error) {
+	f.mu.Lock()
+	err := f.deployingRecordErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return f.checks.RecordDeployingMerge(ctx, m)
+}
+
+func (f *fakeDB) DeployingMergeOf(ctx context.Context, repo wsm.RepoKey) (*wsm.DeployingMerge, error) {
+	f.mu.Lock()
+	err := f.deployingReadErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return f.checks.DeployingMergeOf(ctx, repo)
+}
+
+func (f *fakeDB) EndDeployingMerge(ctx context.Context, repo wsm.RepoKey) (*wsm.DeployingMerge, error) {
+	f.mu.Lock()
+	err := f.deployingEndErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return f.checks.EndDeployingMerge(ctx, repo)
 }
 
 func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediation, error) {

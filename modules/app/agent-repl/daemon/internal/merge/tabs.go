@@ -612,6 +612,11 @@ func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, view que
 	if view.paused {
 		snap.Paused = &frontendv1.FeedMergeQueuePaused{}
 	}
+	// THE LANDED MERGE STILL DEPLOYING IS AHEAD OF EVERY MERGE IN LINE until
+	// its deploy's check ends (deployingstage.go).
+	if view.deploying != nil {
+		snap.Ahead = append(snap.Ahead, view.deploying)
+	}
 	seenSelf := false
 	for i, entry := range entries {
 		row := &frontendv1.FeedMergeQueueEntry{

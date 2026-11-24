@@ -2391,3 +2391,48 @@ func TestTheWaitingMergesAreNumberedInTheOrderTheQueueReports(t *testing.T) {
 		})
 	}
 }
+
+func TestTheMergeStillDeployingHeadsItsQueueUntilItsCheckEnds(t *testing.T) {
+	deploying := &sidebar.QueueEntry{Workspace: "w-landed", Credited: "w-landed", Admitted: true, Clock: activeClock(1)}
+	waiting := sidebar.QueueEntry{Workspace: "w2", Credited: "w2", Clock: waitingClock(1, 0)}
+	tests := []struct {
+		name        string
+		queue       sidebar.MergeQueue
+		wantHead    string
+		wantWaiting []string
+	}{
+		{name: "alone, it heads its queue", wantHead: "landed",
+			queue: sidebar.MergeQueue{Deploying: deploying}},
+		{name: "the merges in line wait behind it", wantHead: "landed", wantWaiting: []string{"two"},
+			queue: sidebar.MergeQueue{Deploying: deploying, Workspaces: []ids.WorkspaceID{"w2"}, Line: []sidebar.QueueEntry{waiting}}},
+		{name: "a merge in line admitted already keeps the head", wantHead: "two",
+			queue: sidebar.MergeQueue{Deploying: deploying, Workspaces: []ids.WorkspaceID{"w2"}, Line: inLine("w2")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			r.SetMergeQueue(theRepo, tt.queue)
+
+			// Act
+			r.SetRegistry(queueView(workspace("w-landed", "landed"), workspace("w2", "two")))
+
+			// Assert
+			groups := queuedGroups(latestPush(t, r))
+			if len(groups) != 1 {
+				t.Fatalf("queue groups = %v, want the queue listed", groups)
+			}
+			queue := groups[0].GetQueue()
+			if got := queue.GetHead().GetSubject().GetName(); got != tt.wantHead {
+				t.Fatalf("head = %q, want %q", got, tt.wantHead)
+			}
+			var got []string
+			for _, w := range queue.GetWaiting() {
+				got = append(got, w.GetSubject().GetName())
+			}
+			if !slices.Equal(got, tt.wantWaiting) {
+				t.Fatalf("waiting = %v, want %v", got, tt.wantWaiting)
+			}
+		})
+	}
+}

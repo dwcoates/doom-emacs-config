@@ -1343,6 +1343,9 @@ type queueView struct {
 	targets   map[ids.WorkspaceID]string
 	bubbles   map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble
 	standings []*frontendv1.FeedMergeQueueEntry
+	// deploying is the landed merge still deploying, drawn ahead of the
+	// line (deployingTabEntry); nil for none.
+	deploying *frontendv1.FeedMergeQueueEntry
 }
 
 // viewQueue resolves the queue view of one repository's in-line entries.
@@ -1386,6 +1389,15 @@ func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries 
 		return queueView{}, err
 	}
 	view.standings = standings
+	deploying, err := o.deps.DB.DeployingMergeOf(ctx, repo)
+	if err != nil {
+		return queueView{}, fmt.Errorf("merge: read the merge still deploying in %s: %w", repo, err)
+	}
+	if deploying != nil {
+		if view.deploying, err = o.deployingTabEntry(ctx, *deploying); err != nil {
+			return queueView{}, fmt.Errorf("merge: resolve the merge still deploying in %s: %w", repo, err)
+		}
+	}
 	return view, nil
 }
 
