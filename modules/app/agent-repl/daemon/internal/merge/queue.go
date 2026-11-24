@@ -18,7 +18,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/refusalarm"
@@ -1420,7 +1419,7 @@ func (o *orchestrator) asyncMergeBubble(ctx context.Context, ws, requester ids.W
 			dlog.Context{"workspace": string(ws), "requester": string(requester)})
 		return bubble, nil
 	}
-	bubble.Row = feedid.Encode(headRef(requester, lease))
+	bubble.Row = headFeedID(requester, lease)
 	return bubble, nil
 }
 

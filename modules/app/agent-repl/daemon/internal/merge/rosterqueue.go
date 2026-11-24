@@ -11,7 +11,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -471,7 +470,7 @@ func rosterRepair(slot wsm.MergeSlot) sidebar.QueueRepair {
 // bubble is drawn in (bubbleOf): what a click on the merge in the roster's
 // queue reveals.
 func (o *orchestrator) bubbleHeadID(ws ids.WorkspaceID, lease ids.LeaseID) *frontendv1.FeedId {
-	return feedid.Encode(headRef(o.bubbleOf(ws).ws, lease))
+	return headFeedID(o.bubbleOf(ws).ws, lease)
 }
 
 // ledgerStages answers the stages of the merge running in WS under LEASE, read

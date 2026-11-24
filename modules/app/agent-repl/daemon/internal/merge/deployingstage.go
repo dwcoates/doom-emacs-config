@@ -9,7 +9,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -168,7 +167,7 @@ func (o *orchestrator) rosterDeploying(ctx context.Context, m wsm.DeployingMerge
 		Workspace: m.Workspace,
 		Credited:  m.Credited,
 		Async:     m.Async,
-		Reveal:    feedid.Encode(headRef(m.Credited, m.Lease)),
+		Reveal:    headFeedID(m.Credited, m.Lease),
 		Admitted:  true,
 		Stages:    rosterStages(deployingView(view)),
 		Clock:     wsm.MergeClock{Phase: wsm.MergeClockActive, Since: m.ActiveSince},
@@ -211,7 +210,7 @@ func (o *orchestrator) deployingTabEntry(ctx context.Context, m wsm.DeployingMer
 		if err != nil {
 			return nil, err
 		}
-		out.Bubble = &frontendv1.FeedMergeQueueBubble{Requester: requester.Ref(), Row: feedid.Encode(headRef(m.Credited, m.Lease))}
+		out.Bubble = &frontendv1.FeedMergeQueueBubble{Requester: requester.Ref(), Row: headFeedID(m.Credited, m.Lease)}
 	}
 	return out, nil
 }

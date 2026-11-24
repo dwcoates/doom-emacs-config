@@ -180,7 +180,9 @@ func TestADeployingStageThatCannotBeEndedIsRecordedAndStays(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.deploying",
 		Message: "could not end the landed merge's deploying stage as its check ended; it is drawn deploying until the next check ends",
-		Match:   func(r dlog.Record) bool { return r.Context["outcome"] == MediationApproved && r.Context["error"] == "database is locked" }}); !ok {
+		Match: func(r dlog.Record) bool {
+			return r.Context["outcome"] == MediationApproved && r.Context["error"] == "database is locked"
+		}}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR with its outcome and cause", h.logs.Records())
 	}
 }

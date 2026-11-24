@@ -11,7 +11,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/landedbranch"
@@ -1623,7 +1622,7 @@ func (o *orchestrator) closeReleasedBubble(ctx context.Context, ws ids.Workspace
 		return
 	}
 	at := o.bubbleOf(ws)
-	if !o.deps.Feed.SetMergeFold(at.ws, feedid.Encode(headRef(at.ws, lease)), true) {
+	if !o.deps.Feed.SetMergeFold(at.ws, headFeedID(at.ws, lease), true) {
 		o.log(ctx, ws).Error(op, "a released merge's bubble could not be closed: its head is not in the feed", dlog.Context{
 			"workspace": string(ws), "bubble_workspace": string(at.ws), "lease": string(lease), "cause": string(cause)})
 		return

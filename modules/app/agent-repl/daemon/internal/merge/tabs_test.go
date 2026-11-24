@@ -2,11 +2,15 @@ package merge
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -764,5 +768,52 @@ func TestRestateLiveHeadRestatesOnlyALiveHead(t *testing.T) {
 				t.Fatalf("drawn=%v live=%v marked=%v restated=%d, want drawn=%v live=%v", drawn, live, marked, restated, tt.wantDrawn, tt.wantLive)
 			}
 		})
+	}
+}
+
+func TestHeadFeedIDDecodesToTheBubblesHead(t *testing.T) {
+	// Arrange
+	want := headRef(theWorkspace, "lease-1")
+
+	// Act
+	got, err := feedid.Decode(headFeedID(theWorkspace, "lease-1"))
+
+	// Assert
+	if err != nil || got != want {
+		t.Fatalf("Decode(headFeedID) = (%+v, %v), want %+v", got, err, want)
+	}
+}
+
+// TestEveryHeadRowIDGoesThroughHeadFeedID fails when a production file of
+// this package spells a bubble head's row id by hand instead of headFeedID.
+func TestEveryHeadRowIDGoesThroughHeadFeedID(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	var handRolled []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := strings.Count(string(src), "feedid.Encode(headRef(")
+		if f == "tabs.go" {
+			n-- // headFeedID's own body
+		}
+		if n > 0 {
+			handRolled = append(handRolled, f)
+		}
+	}
+
+	// Assert
+	if len(handRolled) != 0 {
+		t.Fatalf("files %v encode a head row id by hand, want headFeedID", handRolled)
 	}
 }
