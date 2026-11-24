@@ -67,8 +67,14 @@ func openingOver(s *wsState, arm string) string {
 // workspace kept visible only by its unread turn end lost its visibility the
 // moment its tab began to open, its tab was torn down, the open ended, and
 // it was visible again, hundreds of times a minute.
+//
+// A CLOSED WORKSPACE WHOSE SESSION IS PARKED IS INACTIVE too. A park counts as
+// live only because a prompt brings it back (wsState.live), and nothing
+// prompts a closed workspace; since every ordered stop records a park
+// (a81ce54cb8), a landed workspace's stopped shim otherwise drew the footer's
+// dead link as `dead` once its session record arrived.
 func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, now time.Time, log dlog.Logger) string {
-	if !s.live(session) && rec.Closed {
+	if rec.Closed && (!s.live(session) || parked(session)) {
 		return "inactive"
 	}
 	if hiddenColdGate(rec, now) {

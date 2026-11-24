@@ -536,6 +536,48 @@ func TestRowIsNotInactiveWhenClosedWithASessionStillLive(t *testing.T) {
 	}
 }
 
+func TestRowIsInactiveWhenClosedWithItsSessionParked(t *testing.T) {
+	// Arrange: a landed workspace, its shim stopped, its session recorded
+	// parked, as every ordered stop records it.
+	closed := workspace(string(theWS), "one")
+	closed.Closed = true
+	r := live(t, arrange(t, closed))
+	r.OnLink(theWS, shimclient.LinkDead)
+	reg := registry(closed)
+	reg.Sessions = []wsm.Session{{
+		Workspace: theWS,
+		Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalParked, At: epoch},
+	}}
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert: nothing prompts a closed workspace back, so its park runs nothing.
+	if got := statusName(onlyRow(t, r)); got != "inactive" {
+		t.Fatalf("status = %q, want inactive", got)
+	}
+}
+
+func TestRowIsNotInactiveWhenOpenWithItsSessionParked(t *testing.T) {
+	// Arrange: an open workspace's park is one a prompt brings back.
+	open := workspace(string(theWS), "one")
+	r := live(t, arrange(t, open))
+	r.OnLink(theWS, shimclient.LinkDead)
+	reg := registry(open)
+	reg.Sessions = []wsm.Session{{
+		Workspace: theWS,
+		Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalParked, At: epoch},
+	}}
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	if got := statusName(onlyRow(t, r)); got == "inactive" {
+		t.Fatal("an open workspace's parked session read inactive")
+	}
+}
+
 func TestMergeStateNoneLeavesTheSessionLifecycleStanding(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
