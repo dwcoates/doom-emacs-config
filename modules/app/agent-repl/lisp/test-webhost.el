@@ -668,16 +668,77 @@ A DEBUG line (`agent-repl--log') is dropped."
   ;; Arrange
   (agent-repl-test-wh--with-host
     ;; Act
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     ;; Assert
-    (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:1/"))))
+    (should (equal (agent-repl--webhost-page-url "id-alpha") "http://ws-alpha.localhost:1/"))))
+
+;;;; ---- The reason a page was loaded for ----
+
+(ert-deftest agent-repl-test-wh-a-held-page-keeps-the-reason-it-was-loaded-for ()
+  "The reason a page is loaded for is kept with the page itself."
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-ensure-page "alpha" 'awake)
+    ;; Assert
+    (should (eq (agent-repl-webhost-page-reason "alpha") 'awake))))
+
+(ert-deftest agent-repl-test-wh-a-page-loaded-again-holds-its-latest-reason ()
+  "A held page loaded again, for another reason, holds the newer reason."
+  (agent-repl-test-wh--with-host
+    ;; Arrange
+    (agent-repl-webhost-ensure-page "alpha" 'slot)
+    ;; Act
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
+    ;; Assert
+    (should (eq (agent-repl-webhost-page-reason "alpha") 'shown))))
+
+(ert-deftest agent-repl-test-wh-a-page-re-pointed-by-a-handover-keeps-its-reason ()
+  "A handover re-points a held page at the successor; the page keeps its reason.
+2026-11-24 06:21: seven held pages restated on the successor's host
+streams with no reason (elisp.page-report.held-without-reason)."
+  (agent-repl-test-wh--with-host
+    ;; Arrange
+    (agent-repl-webhost-ensure-page "alpha" 'slot)
+    (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
+               (lambda (_ws) "http://ws-alpha.localhost:2/"))
+              ((symbol-function 'agent-repl-host-conn)
+               (let ((successor (agent-repl-test-wh--conn "127.0.0.1:2"))) (lambda (_ws) successor))))
+      ;; Act
+      (agent-repl-webhost-reload-page "alpha"))
+    ;; Assert
+    (should (equal (agent-repl--webhost-page-url "id-alpha") "http://ws-alpha.localhost:2/"))
+    (should (eq (agent-repl-webhost-page-reason "alpha") 'slot))))
+
+(ert-deftest agent-repl-test-wh-a-removed-page-holds-no-reason ()
+  "A page dropped from the host takes its reason with it."
+  (agent-repl-test-wh--with-host
+    ;; Arrange
+    (agent-repl-webhost-ensure-page "alpha" 'awake)
+    ;; Act
+    (agent-repl-webhost-remove "alpha" t)
+    ;; Assert
+    (should-not (agent-repl-webhost-page-reason "alpha"))))
+
+(ert-deftest agent-repl-test-wh-reloading-a-page-not-held-is-an-error ()
+  "A reload of a page the host does not hold is a defect: ERROR, signalled, nothing held."
+  (agent-repl-test-wh--with-host
+    (let (errors)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
+                 (agent-repl-test--record-into errors)))
+        ;; Act
+        (should-error (agent-repl-webhost-reload-page "alpha")))
+      ;; Assert
+      (should (seq-some (lambda (text) (string-search "reload-unheld ws=alpha" text)) errors))
+      (should-not (gethash "id-alpha" agent-repl--webhost-pages))
+      (should-not (agent-repl-test-wh--sent "ensure"))
+      (should-not (agent-repl-test-wh--sent "reload")))))
 
 (ert-deftest agent-repl-test-wh-ensuring-a-page-asks-the-host ()
   "The host is told to hold the page."
   ;; Arrange
   (agent-repl-test-wh--with-host
     ;; Act
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "ensure"))))))
 
@@ -689,8 +750,8 @@ A DEBUG line (`agent-repl--log') is dropped."
       (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act
-        (agent-repl-webhost-ensure-page "alpha")
-        (agent-repl-webhost-ensure-page "alpha"))
+        (agent-repl-webhost-ensure-page "alpha" 'shown)
+        (agent-repl-webhost-ensure-page "alpha" 'shown))
       ;; Assert
       (should (= 1 (seq-count (lambda (text) (string-search "page-ensured" text)) logged))))))
 
@@ -794,7 +855,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   "A removed page is no longer held, nor its state kept."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-set-gate-dock "alpha" 90)
     ;; Act
     (agent-repl-webhost-remove "alpha")
@@ -806,7 +867,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   "A removal that drops a held page says so, so its caller reports the unload."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     ;; Act
     (let ((dropped (agent-repl-webhost-remove "alpha")))
       ;; Assert
@@ -843,7 +904,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   "An unloaded page's workspace keeps its gate slot: the host draws the gate."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-set-gate-dock "alpha" 90)
     ;; Act
     (agent-repl-webhost-remove "alpha" 'unloading)
@@ -865,7 +926,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   "The host is meant to hold a page that was ensured."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     ;; Act / Assert
     (should (agent-repl-webhost-has-page-p "alpha"))))
 
@@ -873,7 +934,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   "A page whose URL did not move is reloaded in place."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     ;; Act
     (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
       (agent-repl-webhost-reload-page "alpha"))
@@ -885,7 +946,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   "A handover moves the URL; the page is pointed at the new one, with the reload's start."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
                (lambda (_ws) "http://ws-alpha.localhost:2/"))
               ((symbol-function 'agent-repl-host-conn)
@@ -894,7 +955,7 @@ A DEBUG line (`agent-repl--log') is dropped."
       ;; Act
       (agent-repl-webhost-reload-page "alpha"))
     ;; Assert
-    (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:2/"))
+    (should (equal (agent-repl--webhost-page-url "id-alpha") "http://ws-alpha.localhost:2/"))
     (should (equal (cadr (agent-repl-test-wh--sent "ensure"))
                    (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:2/" nil 1700000000500)))))
 
@@ -904,7 +965,7 @@ A DEBUG line (`agent-repl--log') is dropped."
 pointed the host and the sidebar back at it, and it had exited 240ms before."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
     (let ((reloaded nil)
           (leaving (agent-repl-test-wh--conn "127.0.0.1:3")))
@@ -917,7 +978,7 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
       ;; Assert
       (should (null reloaded))
       (should-not (agent-repl-test-wh--sent "setDaemon"))
-      (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:3/"))
+      (should (equal (agent-repl--webhost-page-url "id-alpha") "http://ws-alpha.localhost:3/"))
       (should (= 2 (length (agent-repl-test-wh--sent "ensure")))))))
 
 (ert-deftest agent-repl-test-wh-a-handover-moves-the-hosts-calls-to-the-successor ()
@@ -941,7 +1002,7 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
   "After the handover moved the host, a page still on the daemon being left moves nothing back."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
     (let ((successor (agent-repl-test-wh--conn "127.0.0.1:2")))
       (setq agent-repl-test-wh--successor successor)
@@ -1071,7 +1132,7 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
   "A page moved onto the daemon the host already talks to is re-pointed, the host left alone."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (setq agent-repl--webhost-url "http://host.localhost:2/?host=1")
     (let ((reloaded nil)
           (successor (agent-repl-test-wh--conn "127.0.0.1:2")))
@@ -1264,8 +1325,8 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
   "A loaded host starts empty, so every page is handed to it again, in time."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
+    (agent-repl-webhost-ensure-page "beta" 'shown)
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (agent-repl-test-wh--load "load-committed")
@@ -1276,8 +1337,8 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
   "The shown page is ensured plainly and shown; every other page is ensured in turn."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
+    (agent-repl-webhost-ensure-page "beta" 'shown)
     (agent-repl-webhost-show "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
@@ -1291,8 +1352,8 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
   "A replay after a reload hands every page the reload's start, then forgets it."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
+    (agent-repl-webhost-ensure-page "beta" 'shown)
     (agent-repl-webhost-show "alpha")
     (setq agent-repl-test-wh--calls nil
           agent-repl--webhost-reload-started-ms 1700000000500)
@@ -1328,7 +1389,7 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
 The current tab's page, not shown here, is the nearest of all."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (dolist (ws '("a" "b" "c" "d" "e")) (agent-repl-webhost-ensure-page ws))
+    (dolist (ws '("a" "b" "c" "d" "e")) (agent-repl-webhost-ensure-page ws 'shown))
     (setq agent-repl-test-wh--calls nil)
     (agent-repl-test-wh--with-order '("a" "b" "c" "d" "e") "c"
       ;; Act
@@ -1390,7 +1451,7 @@ The current tab's page, not shown here, is the nearest of all."
   "A page whose workspace waits on its adopt is ensured plainly, out of every lane."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (dolist (ws '("a" "b" "c")) (agent-repl-webhost-ensure-page ws))
+    (dolist (ws '("a" "b" "c")) (agent-repl-webhost-ensure-page ws 'shown))
     (setq agent-repl-test-wh--calls nil)
     (agent-repl-test-wh--with-order '("a" "b" "c") "a"
       (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (ws) (equal ws "c"))))
@@ -1404,7 +1465,7 @@ The current tab's page, not shown here, is the nearest of all."
   "A load records how many pages it loaded at once for their adopts."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (let ((logged nil))
       (agent-repl-test-wh--with-order '("alpha") nil
         (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (_ws) t))
@@ -1419,7 +1480,7 @@ The current tab's page, not shown here, is the nearest of all."
   "A load records how many pages it handed over in turn."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
@@ -1432,7 +1493,7 @@ The current tab's page, not shown here, is the nearest of all."
   "A loaded host shows the page Emacs stands on again."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-show "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
@@ -1487,7 +1548,7 @@ The current tab's page, not shown here, is the nearest of all."
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-hold-back "alpha")
     ;; Act
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     ;; Assert
     (should-not (agent-repl-webhost-held-back-p "alpha"))))
 
@@ -1683,7 +1744,7 @@ The current tab's page, not shown here, is the nearest of all."
   "A loaded host gets every page's gate slot again."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-set-gate-dock "alpha" 90)
     (agent-repl-webhost-set-held-ingress "alpha" [])
     (setq agent-repl-test-wh--calls nil)
@@ -1697,7 +1758,7 @@ The current tab's page, not shown here, is the nearest of all."
   "A loaded host gets the gate slot of a workspace whose page is unloaded."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-set-gate-dock "alpha" 90)
     (agent-repl-webhost-remove "alpha" 'unloading)
     (setq agent-repl-test-wh--calls nil)
@@ -1712,7 +1773,7 @@ The current tab's page, not shown here, is the nearest of all."
                   ("load-committed" . 1) ("load-finished" . 0)))
     ;; Arrange
     (agent-repl-test-wh--with-host
-      (agent-repl-webhost-ensure-page "alpha")
+      (agent-repl-webhost-ensure-page "alpha" 'shown)
       (setq agent-repl-test-wh--calls nil)
       ;; Act
       (agent-repl-test-wh--load (car case))
@@ -1723,7 +1784,7 @@ The current tab's page, not shown here, is the nearest of all."
   "Only a load replays."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (let ((last-input-event '(xwidget-event host-xwidget decide-policy)))
@@ -1757,7 +1818,7 @@ The current tab's page, not shown here, is the nearest of all."
   "The watch reads the load's status off the event and replays at its commit."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (setq agent-repl-test-wh--calls nil)
     (let ((props nil))
       (cl-letf (((symbol-function 'xwidget-get) (lambda (_xw prop) (plist-get props prop)))
@@ -2228,8 +2289,8 @@ host that has not reloaded yet from one that ignored its reload."
 and seven rows drew severed on every webapp deploy."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
+    (agent-repl-webhost-ensure-page "beta" 'shown)
     (let (order)
       (cl-letf (((symbol-function 'agent-repl-host-report-page-unloading)
                  (lambda (ws on-reported _n) (push (list 'report ws) order) (funcall on-reported)))
@@ -2244,8 +2305,8 @@ and seven rows drew severed on every webapp deploy."
   "The retire waits for the last report's answer."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
+    (agent-repl-webhost-ensure-page "beta" 'shown)
     (let (pending)
       (cl-letf (((symbol-function 'agent-repl-host-report-page-unloading)
                  (lambda (_ws on-reported _n) (push on-reported pending))))
@@ -2261,7 +2322,7 @@ and seven rows drew severed on every webapp deploy."
   "A report that did not land is recorded, and the host still retires."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (let (infos)
       (cl-letf (((symbol-function 'agent-repl-host-report-page-unloading)
                  (lambda (_ws _on-reported on-not-reported) (funcall on-not-reported)))
@@ -2308,7 +2369,7 @@ and seven rows drew severed on every webapp deploy."
 (ert-deftest agent-repl-test-wh-a-host-that-strays-replays-no-page-into-the-site ()
   "Nothing is replayed into the site the host strayed to."
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (setq agent-repl-test-wh--calls nil)
     (agent-repl-test-wh--with-committed-uri "https://github.com/x/y/pull/1"
       ;; Act
@@ -2348,7 +2409,7 @@ and seven rows drew severed on every webapp deploy."
 (ert-deftest agent-repl-test-wh-the-blank-document-replays-no-page ()
   "The blank document is not the host's page: nothing is replayed into it."
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (setq agent-repl-test-wh--calls nil)
     (agent-repl-test-wh--with-committed-uri "about:blank"
       ;; Act
@@ -2383,7 +2444,7 @@ and seven rows drew severed on every webapp deploy."
   "THE START OF `viewed_downtime' rides the reload of the page the user is viewing."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-show "alpha")
     (agent-repl-test-wh--with-walk-start 1700000000400
       ;; Act
@@ -2397,7 +2458,7 @@ and seven rows drew severed on every webapp deploy."
   "A handover re-points the page at the successor; the ensure carries the downtime start."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-show "alpha")
     (agent-repl-test-wh--with-walk-start 1700000000400
       ;; Act
@@ -2414,7 +2475,7 @@ and seven rows drew severed on every webapp deploy."
   "A replay after a host reload loads the shown page with the start its walk carries."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-show "alpha")
     (agent-repl-test-wh--with-walk-start 1700000000400
       (setq agent-repl-test-wh--calls nil)
@@ -2429,7 +2490,7 @@ and seven rows drew severed on every webapp deploy."
   "A later load of the page carries no start: the walk gave it up once."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-show "alpha")
     (agent-repl-test-wh--with-walk-start 1700000000400
       (agent-repl-webhost-reload-page "alpha")
@@ -2445,7 +2506,7 @@ and seven rows drew severed on every webapp deploy."
   "A load that no outage preceded asks for no downtime."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-show "alpha")
     (agent-repl-test-wh--with-walk-start nil
       ;; Act
@@ -2459,7 +2520,7 @@ and seven rows drew severed on every webapp deploy."
   "The start answered for the workspace the user is viewing is the instant of the call."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
     (agent-repl-webhost-show "alpha")
     ;; Act
     (let ((started (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000400)))
@@ -2471,8 +2532,8 @@ and seven rows drew severed on every webapp deploy."
   "Only the shown page's workspace is the one whose downtime the user feels."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-ensure-page "alpha" 'shown)
+    (agent-repl-webhost-ensure-page "beta" 'shown)
     (agent-repl-webhost-show "beta")
     ;; Act / Assert
     (should (null (agent-repl-webhost-downtime-start "alpha")))))

@@ -89,7 +89,7 @@
                           (push ws agent-repl-test-pu--dropped)
                           (setq agent-repl-test-pu--pages (delete ws agent-repl-test-pu--pages))))
                        ((symbol-function 'agent-repl-webhost-ensure-page)
-                        (lambda (ws)
+                        (lambda (ws _why)
                           (push (list 'ensure ws) agent-repl-test-pu--events)
                           (setq agent-repl-test-pu--held-back (delete ws agent-repl-test-pu--held-back))
                           (cl-pushnew ws agent-repl-test-pu--pages :test #'equal)))
@@ -122,6 +122,35 @@
         (agent-repl-page-unload-load "alpha" 'awake)
         ;; Assert
         (should (equal loads '(("alpha" awake))))))))
+
+(ert-deftest agent-repl-test-pu-a-load-holds-the-page-with-its-reason ()
+  "The one load path hands the host the reason, kept with the page itself."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (let ((held nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-ensure-page)
+                 (lambda (ws why) (push (list ws why) held)))
+                ((symbol-function 'agent-repl-page-report-loaded) #'ignore))
+        ;; Act
+        (agent-repl-page-unload-load "alpha" 'slot)
+        ;; Assert
+        (should (equal held '(("alpha" slot))))))))
+
+(ert-deftest agent-repl-test-pu-a-load-for-an-unknown-reason-holds-nothing ()
+  "A load for a reason no load path names signals before any page is held."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (let ((held nil)
+          (errors nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-ensure-page)
+                 (lambda (ws why) (push (list ws why) held)))
+                ((symbol-function 'agent-repl--emit-error)
+                 (agent-repl-test--record-into errors)))
+        ;; Act
+        (should-error (agent-repl-page-unload-load "alpha" 'whim))
+        ;; Assert
+        (should-not held)
+        (should (seq-some (lambda (text) (string-search "unknown-reason ws=alpha why=whim" text)) errors))))))
 
 (ert-deftest agent-repl-test-pu-a-dormant-release-reports-its-unload ()
   "A page released dormant off screen is reported unloaded as dormant."

@@ -127,7 +127,7 @@ test is the mount's own binding of the slot to its workspace."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'agent-repl-webhost-ensure) (lambda () 'host-xwidget))
              ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
-             ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (_ws) "id"))
+             ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (_ws _why) "id"))
              ((symbol-function 'agent-repl--frontend-adopt-webview-buffer) (lambda (&rest _) nil))
              ((symbol-function 'agent-repl--align-buffer-to-ws-dir) (lambda (&rest _) nil))
              ((symbol-function 'agent-repl--frontend-make-slot-buffer) (lambda (_name _xw) ,slot)))
@@ -168,7 +168,7 @@ test is the mount's own binding of the slot to its workspace."
   `(let ((held nil))
      (cl-letf (((symbol-function 'agent-repl-page-unload-wanted-p) (lambda (_ws) ,wanted))
                ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (ws) (member ws held)))
-               ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (ws) (push ws held))))
+               ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (ws _why) (push ws held))))
        ,@body)))
 
 (ert-deftest agent-repl-test-frontend-ensure-webview-holds-a-wanted-page-in-the-host ()
