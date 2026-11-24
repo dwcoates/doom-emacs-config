@@ -733,6 +733,77 @@ streams with no reason (elisp.page-report.held-without-reason)."
       (should-not (agent-repl-test-wh--sent "ensure"))
       (should-not (agent-repl-test-wh--sent "reload")))))
 
+;;;; ---- Page entries held before reasons were kept ----
+
+(defmacro agent-repl-test-wh--with-old-entries (entries shown wanted &rest body)
+  "Run BODY over a page table holding ENTRIES, (ID . URL) each, in the old shape.
+SHOWN is the id the host shows; WANTED lists the workspaces whose page is wanted.
+Every ERROR record is collected into `errors'."
+  (declare (indent 3))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl--webhost-shown ,shown)
+           (errors nil))
+       (dolist (entry ,entries) (puthash (car entry) (cdr entry) agent-repl--webhost-pages))
+       (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+                  (lambda (id) (and (string-prefix-p "id-" id) (substring id 3))))
+                 ((symbol-function 'agent-repl-page-unload-wanted-p)
+                  (lambda (ws) (and (member ws ,wanted) t)))
+                 ((symbol-function 'agent-repl--emit-error)
+                  (agent-repl-test--record-into errors)))
+         ,@body))))
+
+(ert-deftest agent-repl-test-wh-loading-the-code-converts-every-old-page-entry ()
+  "Loading webhost.el over bare-URL entries leaves each in the new shape with a reason.
+A running Emacs hot-loads the code over its own pages; no ERROR is recorded."
+  (agent-repl-test-wh--with-old-entries
+      '(("id-alpha" . "http://ws-alpha.localhost:1/")
+        ("id-beta" . "http://ws-beta.localhost:1/")
+        ("id-gamma" . "http://ws-gamma.localhost:1/"))
+      "id-alpha" '("beta")
+    ;; Act
+    (load (expand-file-name "webhost.el" agent-repl-test-wh--lisp-dir) nil t)
+    ;; Assert
+    (should (equal (gethash "id-alpha" agent-repl--webhost-pages) '(:url "http://ws-alpha.localhost:1/" :why shown)))
+    (should (equal (gethash "id-beta" agent-repl--webhost-pages) '(:url "http://ws-beta.localhost:1/" :why slot)))
+    (should (equal (gethash "id-gamma" agent-repl--webhost-pages)
+                   '(:url "http://ws-gamma.localhost:1/" :why held-before-reasons)))
+    (should-not errors)))
+
+(ert-deftest agent-repl-test-wh-converting-names-the-reason-the-workspace-shows-now ()
+  "Each old entry takes the reason its workspace's state shows: shown, wanted, or neither."
+  (dolist (case '(("the page the host shows" "id-alpha" ("alpha") shown)
+                  ("a page off screen whose page is wanted" nil ("alpha") slot)
+                  ("a page neither shown nor wanted" nil nil held-before-reasons)))
+    (agent-repl-test-wh--with-old-entries '(("id-alpha" . "http://ws-alpha.localhost:1/")) (nth 1 case) (nth 2 case)
+      ;; Act
+      (agent-repl--webhost-migrate-page-entries)
+      ;; Assert
+      (should (equal (list (car case) (plist-get (gethash "id-alpha" agent-repl--webhost-pages) :why))
+                     (list (car case) (nth 3 case)))))))
+
+(ert-deftest agent-repl-test-wh-converting-leaves-entries-in-the-new-shape-alone ()
+  "An entry already holding its reason is not converted, nor recorded."
+  (agent-repl-test-wh--with-old-entries nil nil nil
+    (let ((logged nil))
+      (puthash "id-alpha" (list :url "http://ws-alpha.localhost:1/" :why 'awake) agent-repl--webhost-pages)
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
+        ;; Act
+        (agent-repl--webhost-migrate-page-entries))
+      ;; Assert
+      (should (equal (gethash "id-alpha" agent-repl--webhost-pages) '(:url "http://ws-alpha.localhost:1/" :why awake)))
+      (should-not (seq-some (lambda (text) (string-search "page-entry-converted" text)) logged)))))
+
+(ert-deftest agent-repl-test-wh-converting-records-each-entry-at-info ()
+  "Each converted entry is recorded at INFO with its reason."
+  (agent-repl-test-wh--with-old-entries '(("id-alpha" . "http://ws-alpha.localhost:1/")) nil nil
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
+        ;; Act
+        (agent-repl--webhost-migrate-page-entries))
+      ;; Assert
+      (should (seq-some (lambda (text) (string-search "page-entry-converted id=id-alpha why=held-before-reasons" text))
+                        logged)))))
+
 (ert-deftest agent-repl-test-wh-ensuring-a-page-asks-the-host ()
   "The host is told to hold the page."
   ;; Arrange

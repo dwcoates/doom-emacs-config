@@ -28,6 +28,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -2188,6 +2189,24 @@ func TestReportPageStateRecordsEachArm(t *testing.T) {
 					held, loads, unloads, tt.wantHeld, tt.wantLoads, tt.wantUnloads)
 			}
 		})
+	}
+}
+
+func TestARestatedPageHeldBeforeReasonsIsHeldUnderItsOwnReason(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	reason := &agentreplv1.ReportPageStateLoadReason{Reason: &agentreplv1.ReportPageStateLoadReason_HeldBeforeReasons{HeldBeforeReasons: &agentreplv1.ReportPageStateLoadHeldBeforeReasons{}}}
+	req := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: reason}}}
+
+	// Act.
+	resp := reportPageState(t, h, req)
+
+	// Assert.
+	if resp.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.GetResult())
+	}
+	if got := h.HeldPages.Reported()[testWorkspaceID]; got != pageheld.LoadHeldBeforeReasons {
+		t.Fatalf("held reason = %q, want %q", got, pageheld.LoadHeldBeforeReasons)
 	}
 }
 

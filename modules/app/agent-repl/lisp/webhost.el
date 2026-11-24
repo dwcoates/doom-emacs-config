@@ -62,6 +62,7 @@
 (declare-function agent-repl--frontend-kill-webview "frontend" (buf))
 (declare-function agent-repl-frontend-webview-url "frontend" (ws))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
+(declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
 (declare-function agent-repl-page-unload-note-shown "page-unload" (ws))
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl--ws-current-name "workspace" ())
@@ -1211,6 +1212,41 @@ the host was last reloaded onto is already met."
     (agent-repl-webhost-reload)
     (setq agent-repl--webhost-build build)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build={build}" :build build)))
+
+;;;; ---- Page entries held before reasons were kept ----
+
+(defun agent-repl--webhost-held-page-reason (id)
+  "The reason page ID's workspace holds its page now, by the load rules.
+`shown' when the host shows it, `slot' when its page is wanted
+\(`agent-repl-page-unload-wanted-p'), and `held-before-reasons' when no
+load rule explains it."
+  (let ((ws (agent-repl--ws-by-ref-id id)))
+    (cond
+     ((equal id agent-repl--webhost-shown) 'shown)
+     ((and ws (agent-repl-page-unload-wanted-p ws)) 'slot)
+     (t 'held-before-reasons))))
+
+(defun agent-repl--webhost-migrate-page-entries ()
+  "Convert every page entry held as a bare URL into (:url URL :why WHY), once.
+A RUNNING EMACS HOT-LOADS THIS FILE OVER ITS OWN STATE: the pages it held
+before each page kept its reason are bare URLs, and a restatement of one
+found no reason (2026-11-24 06:21, seven held-without-reason ERRORs at a
+handover).  Each is given the reason its workspace's state shows now
+\(`agent-repl--webhost-held-page-reason').  A fresh Emacs holds no page
+when this runs, so it converts nothing."
+  (let (converted)
+    (maphash (lambda (id page)
+               (when (stringp page)
+                 (push (cons id (list :url page :why (agent-repl--webhost-held-page-reason id)))
+                       converted)))
+             agent-repl--webhost-pages)
+    (pcase-dolist (`(,id . ,entry) converted)
+      (puthash id entry agent-repl--webhost-pages)
+      (agent-repl--info agent-repl--webhost-central
+                        "elisp.webhost.page-entry-converted id={id} why={why}"
+                        :id id :why (plist-get entry :why)))))
+
+(agent-repl--webhost-migrate-page-entries)
 
 (agent-repl--webhost-rewatch)
 

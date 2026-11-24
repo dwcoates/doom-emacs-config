@@ -105,6 +105,11 @@ message ReportPageStateLoadReason {
     ReportPageStateLoadRequested load_requested = 4;
     // The cold gate that held the shown page back was answered or retracted.
     ReportPageStateLoadUngated ungated = 5;
+    // The page was held before Emacs recorded why pages are loaded, and no
+    // load rule explains it now: neither shown nor wanted. Only the one
+    // conversion of a running Emacs's held pages, when it first loads the
+    // code that keeps a reason with each page, names it.
+    ReportPageStateLoadHeldBeforeReasons held_before_reasons = 6;
   }
 }
 
@@ -118,6 +123,8 @@ message ReportPageStateLoadSlot {}
 message ReportPageStateLoadRequested {}
 // The gate holding the page back ended.
 message ReportPageStateLoadUngated {}
+// The page predates the recorded reasons, and no rule explains it now.
+message ReportPageStateLoadHeldBeforeReasons {}
 
 // Why a page was dropped. The set arm IS the reason; its arm name is the
 // metrics' `reason` label.

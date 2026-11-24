@@ -38,6 +38,14 @@ carried forward with `ReportPageUnloading`'s refusal arms), then the one shape.
   enums, per the state-enum rule; the arm name is the metrics label.
 - WHY: the counters must count each change once, and the gauge must say what
   stands now, across Emacs restarts and daemon handovers.
+- 2026-11-24, `held_before_reasons` (field 6 of `ReportPageStateLoadReason`):
+  a page a running Emacs held before it kept a reason with each page. When
+  that Emacs first loads the code that keeps the reason in the page's own
+  entry, it converts every held page once, naming the reason its current
+  state shows (`shown`, or `slot` when the page is wanted) and this arm only
+  when no load rule explains the page. It is never a load: only a `held`
+  restatement carries it. Seven such pages restated with no reason at the
+  2026-11-24 06:21 handover (`elisp.page-report.held-without-reason`).
 - WHY NOT a bool `restated` beside the page fact: it would select the
   interpretation of the adjacent data (counted or not), which the
   boolean-interpretation rule makes a oneof; four arms make "a restated load

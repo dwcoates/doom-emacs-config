@@ -41,6 +41,12 @@
   '(shown awake slot load-requested ungated)
   "Every reason a page is loaded, as `agent-repl-page-unload-load' names it.")
 
+(defconst agent-repl-page-report-held-reasons
+  (append agent-repl-page-report-load-reasons '(held-before-reasons))
+  "Every reason a held page may carry: a load reason, or `held-before-reasons',
+a page a running Emacs held before it kept a reason with each page
+\(`agent-repl--webhost-migrate-page-entries').  It is never a load's.")
+
 (defconst agent-repl-page-report-unload-reasons
   '(dormant detached released)
   "Every reason a page is dropped.")

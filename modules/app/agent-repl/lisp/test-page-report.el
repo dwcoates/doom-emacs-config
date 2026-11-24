@@ -114,6 +114,17 @@
     ;; Assert
     (should (equal (car agent-repl-test-pr--sent) '("alpha" (:arm :held :value :slot))))))
 
+(ert-deftest agent-repl-test-pr-a-page-held-before-reasons-is-restated-under-that-reason ()
+  "A page converted with no load rule to explain it restates held, never an ERROR."
+  (agent-repl-test-pr--with
+    ;; Arrange
+    (push '("alpha" . held-before-reasons) agent-repl-test-pr--pages)
+    ;; Act
+    (agent-repl-page-report-restate "alpha")
+    ;; Assert
+    (should (equal agent-repl-test-pr--sent '(("alpha" (:arm :held :value :held-before-reasons)))))
+    (should-not agent-repl-test-pr--errors)))
+
 (ert-deftest agent-repl-test-pr-a-workspace-with-no-page-is-restated-not-held ()
   "A subscribe of a workspace whose slot holds no page restates not-held."
   (agent-repl-test-pr--with
