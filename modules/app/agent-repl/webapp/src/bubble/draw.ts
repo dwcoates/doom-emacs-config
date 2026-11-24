@@ -114,6 +114,9 @@ export function isCapped(cap: BubbleCapLines): cap is CappedLines {
 export const BUBBLE_ROLE_ATTRIBUTE = "data-role";
 export const BUBBLE_VARIANT_ATTRIBUTE = "data-variant";
 export const BUBBLE_CAP_ATTRIBUTE = "data-cap-lines";
+
+/** Every bubble `drawBubble` draws, whatever its role: the one selector that finds them. */
+export const BUBBLE_SELECTOR = `.bubble[${BUBBLE_ROLE_ATTRIBUTE}]`;
 export { BUBBLE_MORE_ATTRIBUTE, BUBBLE_MORE_ELLIPSIS, BUBBLE_MORE_FADE };
 
 /**
