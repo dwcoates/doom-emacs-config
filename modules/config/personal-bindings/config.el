@@ -32,6 +32,23 @@ is loaded."
 
 (+dwc/bind-minibuffer-kill-line)
 
+;; Doom routes `ds', `cs' and friends through `evil-embrace', which hands a
+;; delimiter to evil-surround only when it is in
+;; `evil-embrace-evil-surround-keys' and otherwise looks it up in embrace's
+;; own pair list.  The backtick is in neither, so `ds`' fails with "No such
+;; a pair found".  Handing it to evil-surround lets evil's own backtick text
+;; objects (`a`' and `i`') find the pair, as they do for quotes.
+(defun +dwc/evil-surround-handle-backtick ()
+  "Add the backtick to the default `evil-embrace-evil-surround-keys' once.
+Changes the default value, since the current buffer may hold a local
+copy of the list, and mode hooks copy the default into new buffers."
+  (unless (memq ?` (default-value 'evil-embrace-evil-surround-keys))
+    (setq-default evil-embrace-evil-surround-keys
+                  (cons ?` (default-value 'evil-embrace-evil-surround-keys)))))
+
+(with-eval-after-load 'evil-embrace
+  (+dwc/evil-surround-handle-backtick))
+
 (defconst +dwc/vterm-popup-rule
   '("\\.*doom:vterm\\.*"
     :actions (agent-repl-sibling-popup-display-fn)

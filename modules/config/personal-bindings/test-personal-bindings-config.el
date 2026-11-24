@@ -79,6 +79,40 @@
                                  (kbd "C-k") #'kill-line))
                          +dwc/minibuffer-kill-line-maps))))
 
+(defvar evil-embrace-evil-surround-keys nil
+  "Stand-in for evil-embrace's list of keys it hands to evil-surround.")
+
+(ert-deftest test-personal-bindings-evil-embrace-load-hands-backtick-to-surround ()
+  "Once evil-embrace loads, the backtick is among the evil-surround keys."
+  ;; Arrange
+  (setq evil-embrace-evil-surround-keys (list ?\( ?\"))
+  ;; Act
+  (provide 'evil-embrace)
+  ;; Assert
+  (should (equal evil-embrace-evil-surround-keys (list ?` ?\( ?\"))))
+
+(ert-deftest test-personal-bindings-backtick-surround-key-added-once ()
+  "Handing the backtick to evil-surround again leaves one backtick in the list."
+  ;; Arrange
+  (let ((evil-embrace-evil-surround-keys (list ?` ?\()))
+    ;; Act
+    (+dwc/evil-surround-handle-backtick)
+    ;; Assert
+    (should (equal evil-embrace-evil-surround-keys (list ?` ?\()))))
+
+(ert-deftest test-personal-bindings-backtick-surround-key-set-in-default-value ()
+  "A buffer-local copy of the key list leaves the default value to change."
+  ;; Arrange
+  (setq-default evil-embrace-evil-surround-keys (list ?\())
+  (with-temp-buffer
+    (setq-local evil-embrace-evil-surround-keys (list ?\[))
+    ;; Act
+    (+dwc/evil-surround-handle-backtick)
+    ;; Assert
+    (should (equal (list evil-embrace-evil-surround-keys
+                         (default-value 'evil-embrace-evil-surround-keys))
+                   (list (list ?\[) (list ?` ?\())))))
+
 (ert-deftest test-personal-bindings-non-keymap-fails-hard ()
   "A listed map that is not a keymap is an invariant violation, not skipped."
   ;; Arrange
