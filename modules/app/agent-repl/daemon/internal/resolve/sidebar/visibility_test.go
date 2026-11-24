@@ -750,3 +750,77 @@ func TestAVisibilityChangeRecordNamesItsReason(t *testing.T) {
 		t.Fatalf("visibility records = %v, want the last naming reason covered", recs)
 	}
 }
+
+// subsectionFamily is a parent with a child and a grandchild, all in one
+// subsection of a collapsed repository section, beside a workspace in no
+// subsection.
+func subsectionFamily(subsectionFolded bool) sidebar.Registry {
+	sub := subsection("sub-1", "work", 1)
+	sub.Folded = subsectionFolded
+	parent := in(placed(workspace("s-p", "parent"), 1), sub)
+	kid := in(placed(workspace("s-k", "kid"), 1), sub)
+	kid.Parent = &parent.ID
+	grand := in(placed(workspace("s-g", "grand"), 1), sub)
+	grand.Parent = &kid.ID
+	reg := registry(parent, kid, grand, placed(workspace("s-loose", "loose"), 2))
+	reg.Repositories[0].Folded = true
+	reg.Subsections = []wsm.Subsection{sub}
+	return reg
+}
+
+func TestTheNearestFoldDecidesASubsectionsRows(t *testing.T) {
+	tests := []struct {
+		name             string
+		subsectionFolded bool
+		want             map[string]string
+	}{
+		{
+			name:             "an unfolded subsection in a collapsed repository shows its whole family",
+			subsectionFolded: false,
+			want:             map[string]string{"s-p": "unselected_visible", "s-k": "unselected_visible", "s-g": "unselected_visible", "s-loose": "not_visible"},
+		},
+		{
+			name:             "a folded subsection hides its rows at every depth",
+			subsectionFolded: true,
+			want:             map[string]string{"s-p": "not_visible", "s-k": "not_visible", "s-g": "not_visible", "s-loose": "not_visible"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reg := subsectionFamily(tt.subsectionFolded)
+			r := arrange(t)
+			r.SetRegistry(reg)
+
+			// Act
+			liveRegistry(r, reg)
+
+			// Assert
+			got := visibilities(t, r)
+			for id, want := range tt.want {
+				if got[id] != want {
+					t.Errorf("%s visibility = %s, want %s", id, got[id], want)
+				}
+			}
+		})
+	}
+}
+
+func TestAFoldedSubsectionsWorkingGrandchildIsVisibleWithItsChain(t *testing.T) {
+	// Arrange
+	reg := subsectionFamily(true)
+	r := arrange(t)
+	r.SetRegistry(reg)
+	liveRegistry(r, reg)
+
+	// Act
+	working(r, "s-g")
+
+	// Assert
+	got := visibilities(t, r)
+	for _, id := range []string{"s-p", "s-k", "s-g"} {
+		if got[id] != "unselected_visible" {
+			t.Errorf("%s visibility = %s, want unselected_visible: a working grandchild keeps its chain drawn", id, got[id])
+		}
+	}
+}

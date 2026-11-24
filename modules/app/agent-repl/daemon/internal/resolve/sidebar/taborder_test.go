@@ -43,6 +43,35 @@ func TestEveryFoldedTabNamesItsFold(t *testing.T) {
 			}
 			return reg
 		}, want: &sidebar.Fold{By: sidebar.FoldedBySubsection, Repository: repo.Name, Subsection: "later"}},
+		{name: "an unfolded subsection's tab in a collapsed repository names none", id: "a2", reg: func() sidebar.Registry {
+			reg := numberingRegistry()
+			reg.Repositories[0].Folded = true
+			return reg
+		}, want: nil},
+		{name: "a collapsed subsection's tab in a collapsed repository names the subsection", id: "a2", reg: func() sidebar.Registry {
+			reg := numberingRegistry()
+			reg.Repositories[0].Folded = true
+			for i := range reg.Subsections {
+				reg.Subsections[i].Folded = true
+			}
+			return reg
+		}, want: &sidebar.Fold{By: sidebar.FoldedBySubsection, Repository: repo.Name, Subsection: "later"}},
+		{name: "a collapsed repository's tab in no subsection names the repository", id: "a1", reg: func() sidebar.Registry {
+			reg := numberingRegistry()
+			reg.Repositories[0].Folded = true
+			return reg
+		}, want: &sidebar.Fold{By: sidebar.FoldedByRepository, Repository: repo.Name}},
+		{name: "a folded parent's child in an unfolded subsection of a collapsed repository names the parent", id: "k2", reg: func() sidebar.Registry {
+			reg := numberingRegistry()
+			reg.Repositories[0].Folded = true
+			sub := reg.Subsections[0]
+			parent := in(placed(workspace("p2", "parent2"), 10), sub)
+			parent.ChildrenFolded = true
+			kid := in(placed(workspace("k2", "kid2"), 1), sub)
+			kid.Parent = &parent.ID
+			reg.Workspaces = append(reg.Workspaces, parent, kid)
+			return reg
+		}, want: &sidebar.Fold{By: sidebar.FoldedByParent, Parent: "p2", ParentName: "parent2"}},
 		{name: "a folded parent's child names the parent", reg: childrenFoldedRegistry, id: "k",
 			want: &sidebar.Fold{By: sidebar.FoldedByParent, Parent: "p", ParentName: "parent"}},
 		{name: "a folded parent's own tab names none", reg: childrenFoldedRegistry, id: "p", want: nil},

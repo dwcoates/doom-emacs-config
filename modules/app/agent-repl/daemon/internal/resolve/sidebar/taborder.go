@@ -55,22 +55,28 @@ type openRegion struct {
 	rows       []openNode
 }
 
-// folded reports whether the region's tabs are folded off the tab bar: its
-// repository is collapsed, or it is a named subsection that is. The one statement of a folded tab, which the sidebar's numbering and the
-// tab bar read alike.
+// folded reports whether the region's tabs are folded off the tab bar. The
+// one statement of a folded tab, which the sidebar's numbering and the tab bar
+// read alike.
 func (r openRegion) folded(repo wsm.Repository) bool {
 	return r.fold(repo) != nil
 }
 
 // fold names what folds the region's tabs off the tab bar, nil when nothing
-// does: its repository's collapse wins over its subsection's, as the walk
-// reads them.
+// does. ONLY THE NEAREST CONTAINER'S FOLD COUNTS (owner ruling, 2026-11-24):
+// a named subsection's rows are folded by the subsection's own collapse and
+// by nothing above it, so an unfolded subsection inside a collapsed
+// repository section shows every one of its top-level rows; the rows in no
+// subsection are folded by their repository's collapse.
 func (r openRegion) fold(repo wsm.Repository) *Fold {
+	if r.subsection != nil {
+		if r.subsection.Folded {
+			return &Fold{By: FoldedBySubsection, Repository: repo.Name, Subsection: r.subsection.Name}
+		}
+		return nil
+	}
 	if repo.Folded {
 		return &Fold{By: FoldedByRepository, Repository: repo.Name}
-	}
-	if r.subsection != nil && r.subsection.Folded {
-		return &Fold{By: FoldedBySubsection, Repository: repo.Name, Subsection: r.subsection.Name}
 	}
 	return nil
 }

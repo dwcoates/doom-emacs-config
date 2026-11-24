@@ -77,8 +77,10 @@ type VisibilityInput struct {
 	// Open reports whether the workspace is one of the Open section's rows:
 	// never a hidden, closed or hidden merge workspace, nor a thread.
 	Open bool
-	// Covered reports whether a fold covers it: its repository section's,
-	// its subsection's, or any ancestor's children fold.
+	// Covered reports whether a fold covers it: its root's nearest container's
+	// (its subsection's when it sits in one, else its repository section's),
+	// or any ancestor's children fold. A collapsed repository section never
+	// covers the rows of a subsection that is not itself collapsed.
 	Covered bool
 	// Working reports whether a turn or detached work runs in it, or it asks
 	// the user something.
@@ -207,7 +209,8 @@ func ownReason(in VisibilityInput) VisibilityReason {
 //
 //   - only an Open workspace can be visible;
 //   - an Open workspace no fold covers is visible (every top-level workspace
-//     of an unfolded section, and every child of a visible, unfolded parent);
+//     of an unfolded subsection, or of an unfolded section when it sits in no
+//     subsection, and every child of an uncovered, unfolded parent);
 //   - one a fold covers, at any depth, is visible when it is Working,
 //     Unviewed or Starting, and an Open workspace of priority P0.5 or P1
 //     (TopPriority) is always visible, whatever covers it;
