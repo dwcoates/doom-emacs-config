@@ -352,12 +352,16 @@ func TestABusyBeatIsArmedAnIntervalOn(t *testing.T) {
 	}
 }
 
-func TestTheFreeEdgeAfterWorkRecordsTheWorkOnTheRow(t *testing.T) {
-	// Arrange
+// THE WORK END IS ON THE ROW BEFORE THE FREE EDGE RETURNS, with no keeper
+// loop running to take a queued edge: the watcher's close joins the edge's
+// dispatch, and a forget removes the row only after that close. Queued, the
+// write ran after the forget and found no row (merge gate, 2026-11-24).
+func TestTheFreeEdgeAfterWorkRecordsTheWorkOnTheRowBeforeItReturns(t *testing.T) {
+	// Arrange: no Run loop, so nothing queued is ever applied.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 
 	// Act
-	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, workEnded: true, why: "test"})
+	h.keeper.SessionFree(theWorkspace, true)
 
 	// Assert
 	if got := h.db.records[theWorkspace].LastWorkAt; got == nil || !got.Equal(now) {
@@ -375,7 +379,7 @@ func TestAWorkEndThatCannotBeRecordedIsAnError(t *testing.T) {
 	before := h.db.records[theWorkspace].LastWorkAt
 
 	// Act
-	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, workEnded: true, why: "test"})
+	h.keeper.SessionFree(theWorkspace, true)
 
 	// Assert
 	if !h.found(dlog.RecordQuery{Level: "error", Operation: opOwner, Message: "could not record that the workspace's work ended; its park is measured from its earlier work"}) {
@@ -394,7 +398,7 @@ func TestAnAttachComingUpFreeStampsNothing(t *testing.T) {
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 
 	// Act
-	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "test"})
+	h.keeper.SessionFree(theWorkspace, false)
 
 	// Assert
 	if len(h.db.works) != 0 {
@@ -453,7 +457,8 @@ func TestABeatSkippedForDetachedWorkIsSentWhenTheSessionFallsFree(t *testing.T) 
 	h.shim.answer = sent()
 
 	// Act
-	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, workEnded: true, why: "test"})
+	h.keeper.SessionFree(theWorkspace, true)
+	h.applyQueued()
 	h.keeper.beatsDue(context.Background())
 
 	// Assert
