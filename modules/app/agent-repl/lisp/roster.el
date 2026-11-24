@@ -218,12 +218,13 @@ each answered selection at once and moved the frame back to the
 workspace the user had just left.")
 
 (defvar agent-repl-roster--stream-addresses (make-hash-table :test 'eq :weakness 'key)
-  "Roster stream -> the address of the daemon it rides, as its subscription named it.
-Read to say which daemon\='s roster a tab was opened or torn down by
+  "Roster stream -> the address of the daemon it rides.
+Written when the daemon accepts the subscription, and read to say
+which daemon\='s roster a tab was opened or torn down by
 \(`agent-repl-roster--view-address').")
 
 (defvar agent-repl-roster--view-address nil
-  "The address of the daemon whose stream served `agent-repl-roster-view', or nil.
+  "The address of the daemon that served `agent-repl-roster-view', or nil.
 Nil when the stream was never subscribed here, as a batch test\='s is.")
 
 (defvar agent-repl-roster--placed nil
@@ -1240,7 +1241,8 @@ coming back, which the open revives, and is left alone."
 
 (defun agent-repl-roster--reconcile-row (want wanted-ids &optional decided)
   "Reconcile one roster row WANT, recording its id in WANTED-IDS.
-DECIDED is the roster facts a tab it opens records (`agent-repl-roster--decision').
+DECIDED is the roster facts a tab it opens records
+\(`agent-repl-roster--decision').
 Returns the tab name the row settled on, or nil when the row FAILED.
 
 EACH ROW IS ISOLATED.  A tab's birth touches persp-mode, the workspace
@@ -2293,12 +2295,14 @@ deliver the tabs."
            (lambda (reason) (agent-repl-roster-on-close reason stream))
            (lambda ()
              (setq agent-repl-roster--accepted stream)
+             ;; THE STREAM IS KEYED TO ITS DAEMON AT ITS ACCEPTANCE, before
+             ;; any push it carries (`agent-repl-roster--view-address').
+             (puthash stream (prin1-to-string (agent-repl-connect-connection-address conn))
+                      agent-repl-roster--stream-addresses)
              (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                                "elisp.roster.subscribed method={method} address={address}"
                                :method (prin1-to-string "WatchWorkspaceRoster")
                                :address (prin1-to-string (agent-repl-connect-connection-address conn))))))
-    (puthash stream (prin1-to-string (agent-repl-connect-connection-address conn))
-             agent-repl-roster--stream-addresses)
     (setq agent-repl-roster--stream stream
           agent-repl-roster--stream-conn conn))
   (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")

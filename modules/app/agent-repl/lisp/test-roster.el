@@ -5039,14 +5039,18 @@ Each row's tab name is its id, upcased, so a reader that confused the two fails.
                               (agent-repl-test-roster--record-text infos "elisp.roster.tab-open: ws=one"))))))
 
 (ert-deftest agent-repl-test-roster-a-subscription-names-its-daemon-for-the-records ()
-  "A roster stream is keyed to the address of the daemon it was opened on."
+  "An accepted roster stream is keyed to the address of the daemon it rides."
   (agent-repl-test-roster--with-editor
     (let ((agent-repl-roster--stream nil)
-          (agent-repl-roster--stream-conn nil))
-    (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
-               (lambda (&rest _) 'the-stream))
-)
-      ;; Act
-      (agent-repl-roster-subscribe (agent-repl-connect-connection-create :address "127.0.0.1:7801"))
-      ;; Assert
-      (should (equal (gethash 'the-stream agent-repl-roster--stream-addresses) "\"127.0.0.1:7801\""))))))
+          (agent-repl-roster--stream-conn nil)
+          (agent-repl-roster--accepted nil)
+          (accept nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional on-open)
+                   (setq accept on-open)
+                   'the-stream)))
+        (agent-repl-roster-subscribe (agent-repl-connect-connection-create :address "127.0.0.1:7801"))
+        ;; Act: the daemon accepts the subscription.
+        (funcall accept)
+        ;; Assert
+        (should (equal (gethash 'the-stream agent-repl-roster--stream-addresses) "\"127.0.0.1:7801\""))))))
