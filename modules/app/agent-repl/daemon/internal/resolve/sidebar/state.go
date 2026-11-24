@@ -116,10 +116,11 @@ type wsState struct {
 	// viewedArm is the VIEWED FACT: the status arm the user's interaction
 	// viewed the workspace on (SetInteracted), empty when the workspace is not
 	// viewed. The row's viewed (PARTIAL) marker is DERIVED from it (`viewed`).
-	// ONLY ANOTHER TURN CLEARS IT (owner ruling, 2026-11-24): a turn's start
-	// or its end (clearViewedForTurn), never any other status change, so a
-	// session that parks, revives, blips its link or is folded away and back
-	// keeps the row viewed. The arm is kept as evidence of what was viewed.
+	// ONLY A TURN'S START CLEARS IT (owner rulings, 2026-11-24;
+	// clearViewedForTurn): never a turn's end, a deploy, a restart, a park, a
+	// revival, a link blip or a fold. It is durable (the viewed sink writes
+	// wsm's viewed_status) and seeded from the record at boot (restoreViewed).
+	// The arm is kept as evidence of what was viewed.
 	viewedArm string
 	// persistedViewed is the viewed arm the durable record holds, as far as
 	// this resolver knows; a render whose viewed arm differs reports it
@@ -317,8 +318,8 @@ func (s *wsState) restoreViewed(rec wsm.Workspace) {
 	s.persistedViewed = rec.ViewedStatus
 }
 
-// clearViewedForTurn clears the viewed fact because a turn started or ended:
-// the one change the user has not seen yet. It answers whether the row was
+// clearViewedForTurn clears the viewed fact because a turn started: the one
+// change the user has not seen yet. It answers whether the row was
 // viewed.
 func (s *wsState) clearViewedForTurn() bool {
 	s.viewedSettled = true
@@ -390,7 +391,7 @@ func (s *wsState) noteArm(arm string) (string, bool) {
 }
 
 // viewed reports whether the row draws the viewed (PARTIAL) marker: the user
-// interacted with the workspace since its last turn started or ended. Every
+// interacted with the workspace since its last turn started. Every
 // arm can be viewed: "you have interacted with this since its last turn" is as
 // true of a running turn as of a finished one, and a working workspace stays
 // visible whatever this says (visibility.go).

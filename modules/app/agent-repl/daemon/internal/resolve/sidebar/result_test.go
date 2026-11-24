@@ -326,3 +326,19 @@ func TestARunningTurnIsNeverViewExempt(t *testing.T) {
 		t.Fatal("viewed = unset, want a running turn viewed by the interaction")
 	}
 }
+
+func TestARestoredViewedFactSurvivesATurnEndTheAdoptionReplays(t *testing.T) {
+	// Arrange: a daemon that booted after the user read the workspace.
+	r, reports := viewedResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone}, "done")
+
+	// Act: the adopted session's last turn end reaches this daemon.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert
+	if onlyRow(t, r).GetViewed() == nil {
+		t.Fatal("viewed = unset, want the restored fact standing: a turn's end lowers no viewed marker")
+	}
+	if len(*reports) != 0 {
+		t.Fatalf("viewed reports = %+v, want none: nothing changed", *reports)
+	}
+}

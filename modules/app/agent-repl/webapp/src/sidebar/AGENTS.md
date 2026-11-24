@@ -78,8 +78,9 @@ both halves below read visibility first. Visible does not mean loaded.
   (`frontend.v1.RosterRowViewed`).
 - Only the user's interactions raise it: scrolling the feed, typing in the
   composer, moving through the feed, following a link.
-- Only another turn (its start or its end) lowers it. A park, a revival, a
-  link blip or a fold never does.
+- Only a turn's start lowers it. A turn's end, a deploy, a daemon restart, a
+  park, a revival, a link blip or a fold never does. It is durable: written to
+  wsm's `viewed_status` on every change and seeded from it at boot.
 - An interaction within ten minutes of a turn's end marks nothing viewed; it
   still counts toward recency (`sidebar.ViewExemption`).
 

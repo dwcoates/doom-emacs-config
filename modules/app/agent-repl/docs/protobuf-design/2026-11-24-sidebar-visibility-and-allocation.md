@@ -108,7 +108,9 @@ them. Each clock is a product rule, not a bound on an operation.
 
 ### Viewed
 
-- Only another turn (its start or its end) lowers the viewed marker.
+- Only a turn's start lowers the viewed marker (owner ruling, 2026-11-24,
+  which narrows the earlier "start or end"): an end a deploy replays must
+  never mark a read workspace unread.
 - An interaction within 10 minutes of a turn's end marks nothing viewed; it
   still counts toward recency.
 - The recency walk orders by interactions alone, and reaches every open

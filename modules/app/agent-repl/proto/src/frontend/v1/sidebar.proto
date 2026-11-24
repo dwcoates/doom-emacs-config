@@ -759,7 +759,7 @@ message RosterRowAttention {}
 // never disagree.
 //
 // PARTIAL means "you have interacted with this workspace since its last turn
-// started or ended". The marker changes nothing about the lifecycle: the status dot
+// started". The marker changes nothing about the lifecycle: the status dot
 // keeps its colour in either mode, and only the row's NAME text recedes to
 // the muted colour while the marker stands. FULL draws the name in the status
 // colour.
@@ -769,17 +769,16 @@ message RosterRowAttention {}
 // feed with the editor's keys, or following a link in its page. Selecting the
 // workspace, or looking at it for any length of time, raises nothing.
 //
-// ONLY ANOTHER TURN LOWERS IT: a turn's start or its end. Any other status
-// change leaves it standing, so a workspace whose session parks, revives,
-// loses and regains its link, or is folded away and back stays PARTIAL. A
-// running turn the user scrolls is PARTIAL until that turn ends, and a
-// finished one is FULL until the user interacts with it.
+// ONLY A TURN'S START LOWERS IT. Nothing else does: not a turn's end, a
+// deploy, a daemon restart, a park, a revival, a lost and regained link, or a
+// fold. A running turn the user scrolls stays PARTIAL through its end, and a
+// turn the user has not interacted with since it started is FULL.
 // A workspace that is working stays VISIBLE whatever this marker says
 // (RosterRowVisibility), so being PARTIAL never unloads a running workspace.
 //
 // THE DAEMON DERIVES IT, in the same render as the row's `status`: the marker
-// stands exactly while the user has interacted since the last turn edge. It
-// is durable, so a restart
+// stands exactly while the user has interacted since the last turn started.
+// It is durable, so a restart
 // of the daemon draws the row as it stood. A client draws it as it arrives,
 // with no rule of its own.
 message RosterRowViewed {}
@@ -806,7 +805,7 @@ message RosterRowViewed {}
 // (agentrepl.v1.ReportUserInteraction) draws the row PARTIAL, as
 // RosterRowViewed states, and the next push omits this marker, so the whole
 // row draws the background's yellow. Like every viewed marker it is lowered
-// by the next turn, which resets the result and this marker with it. The daemon resolves the marker in the
+// by the next turn's start, which resets the result and this marker with it. The daemon resolves the marker in the
 // same render as `status`, so a client draws it as it arrives, with no rule
 // of its own; a row carrying it on any arm but `idle_async` is a contract
 // breach.

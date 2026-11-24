@@ -1027,7 +1027,7 @@ func TestRowStatesItsLiveDetachedWork(t *testing.T) {
 	}
 }
 
-func TestATurnsOwnEndViewsNothing(t *testing.T) {
+func TestATurnsEndLeavesTheViewedMarkerAsItStood(t *testing.T) {
 	cases := []struct {
 		name       string
 		act        footer.SessionAct
@@ -1049,14 +1049,14 @@ func TestATurnsOwnEndViewsNothing(t *testing.T) {
 			// Act.
 			r.SetTurnEnded(theWS, tc.how)
 
-			// Assert: the end is a status change, so the row is FULL until the
-			// user interacts with what it now shows.
+			// Assert: only a turn's start lowers the marker, so the
+			// interaction made while the turn ran still stands.
 			row := onlyRow(t, r)
 			if got := statusName(row); got != tc.wantStatus {
 				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
 			}
-			if got := row.GetViewed(); got != nil {
-				t.Fatalf("viewed = %v, want unset: a turn's end raises no viewed marker", got)
+			if got := row.GetViewed(); got == nil {
+				t.Fatal("viewed = unset, want it standing: a turn's end lowers no viewed marker")
 			}
 		})
 	}
@@ -1123,29 +1123,6 @@ func TestViewedReportDrawsADoneRowPartial(t *testing.T) {
 	// Assert: presence is the mode.
 	if got := onlyRow(t, r).GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want the marker the editor's report raises on a done row")
-	}
-}
-
-func TestAnInteractionWhileThinkingDoesNotSurviveIntoDone(t *testing.T) {
-	// Arrange: an interaction on a thinking row, which views it.
-	r := live(t, arrange(t))
-	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-	r.OnActivity(theWS, agent("a1"), &conversationv1.AgentActivity{})
-	r.SetInteracted(theWS, afterExemption)
-	if got := onlyRow(t, r).GetViewed(); got == nil {
-		t.Fatal("viewed = unset, want the thinking row viewed — every arm takes an interaction")
-	}
-
-	// Act: the turn finishes.
-	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-
-	// Assert: the finished response is new; the user has not seen it yet.
-	row := onlyRow(t, r)
-	if got := statusName(row); got != "done" {
-		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
-	}
-	if got := row.GetViewed(); got != nil {
-		t.Fatalf("viewed = %v, want unset: an interaction while thinking is not one with the done row", got)
 	}
 }
 
@@ -1355,7 +1332,7 @@ func TestALinkBlipLeavesTheViewedMarkerStanding(t *testing.T) {
 	}
 }
 
-func TestAnInteractionDuringATurnIsLoweredByThatTurnsEnd(t *testing.T) {
+func TestAnInteractionDuringATurnStandsThroughThatTurnsEnd(t *testing.T) {
 	// Arrange: the user scrolls a running turn.
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1368,9 +1345,9 @@ func TestAnInteractionDuringATurnIsLoweredByThatTurnsEnd(t *testing.T) {
 	// Act: the turn ends.
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
 
-	// Assert: its result is one the user has not read.
-	if got := onlyRow(t, r).GetViewed(); got != nil {
-		t.Fatalf("viewed = %v, want unset: a turn's end lowers the marker", got)
+	// Assert: only a turn's start lowers the marker.
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want it standing: a turn's end lowers no viewed marker")
 	}
 }
 

@@ -1341,7 +1341,7 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 			}
 			if turn != nil && s.clearViewedForTurn() {
 				log.Info("daemon.sidebar.viewed_cleared_by_turn",
-					"a new turn started, so the row is no longer viewed", dlog.Context{"edge": "start"})
+					"a new turn started, so the row is no longer viewed", nil)
 			}
 			s.startTurn(turn)
 		})
@@ -1385,10 +1385,9 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn_ended", logsite.Msg("the roster took the turn's close"),
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			cut := contextCut(s.turn)
-			if s.clearViewedForTurn() {
-				log.Info("daemon.sidebar.viewed_cleared_by_turn",
-					"the turn ended, so the row is no longer viewed", dlog.Context{"edge": "end"})
-			}
+			// A TURN'S END LOWERS NO VIEWED MARKER (owner ruling, 2026-11-24):
+			// only a turn's start does (SetTurn), so an end a deploy's
+			// adoption replays leaves the row as the user left it.
 			s.turn = nil
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = ""
@@ -1417,10 +1416,9 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 					})
 				return
 			}
-			// THE ROW IS NOT VIEWED BY ITS OWN END: a turn's end lowers the
-			// viewed marker (clearViewedForTurn, above), a completed /clear, a
-			// compaction and an interrupt included, and only the user's next
-			// interaction raises it (frontend.v1.RosterRowViewed).
+			// THE ROW'S VIEWED MARKER IS LEFT AS IT STOOD: the turn's start
+			// lowered it, and an interaction during the turn raised it again
+			// (frontend.v1.RosterRowViewed).
 			s.result = resultEnded
 			log.Info("daemon.sidebar.result_ended",
 				"the turn ended, so the row reports its end until the next turn", dlog.Context{
