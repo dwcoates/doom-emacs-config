@@ -373,3 +373,33 @@ func TestSettleWaitsForTheReportOfEveryBatchBeforeIt(t *testing.T) {
 		t.Fatal("Settle returned before the batch before it was reported")
 	}
 }
+
+func TestABarrierRendersAndPublishesNothing(t *testing.T) {
+	cases := []struct {
+		name string
+		// barrier commits one of the roster's barriers.
+		barrier func(r sidebar.Resolver)
+	}{
+		{name: "Settle", barrier: func(r sidebar.Resolver) { r.Settle() }},
+		{name: "a read", barrier: func(r sidebar.Resolver) { r.Revision() }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			fx := newCombineFixture(t)
+			before := latestPush(t, fx.r)
+			mark := len(fx.surfaces.Records())
+
+			// Act
+			tc.barrier(fx.r)
+
+			// Assert
+			if after := latestPush(t, fx.r); after != before {
+				t.Fatalf("the barrier published revision %d over %d", after.GetRevision(), before.GetRevision())
+			}
+			if _, ok := dlog.FindRecord(fx.surfaces.Records()[mark:], dlog.RecordQuery{Operation: "daemon.sidebar.rendered"}); ok {
+				t.Fatal("the barrier rendered the roster")
+			}
+		})
+	}
+}

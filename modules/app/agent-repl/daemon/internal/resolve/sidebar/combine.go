@@ -129,10 +129,7 @@ func (r *resolver) commit(m *mutation) {
 // behind every change queued before it, which then waits for every batch led
 // before its own to be reported too.
 func (r *resolver) Settle() {
-	m := &mutation{
-		operation: "daemon.sidebar.settle", message: logsite.Msg("the roster settled"),
-		log: r.log.Global(), apply: func(dlog.Logger) bool { return false },
-	}
+	m := r.barrier("daemon.sidebar.settle", logsite.Msg("the roster settled"))
 	r.core.commitView().commit(m)
 	r.qmu.Lock()
 	defer r.qmu.Unlock()
@@ -212,10 +209,18 @@ func (c *core) initQueue() {
 // included. It does not wait for their reports (Settle does), so a sink
 // that reads the roster while its batch is reported cannot wait on itself.
 func (r *resolver) awaitApplied() {
-	r.core.commitView().commit(&mutation{
-		operation: "daemon.sidebar.await_applied", message: logsite.Msg("the roster applied every change queued before a read"),
-		log: r.log.Global(), apply: func(dlog.Logger) bool { return false },
-	})
+	r.core.commitView().commit(r.barrier("daemon.sidebar.await_applied",
+		logsite.Msg("the roster applied every change queued before a read")))
+}
+
+// barrier is a change that changes nothing: committed, it returns once every
+// change queued before it has been applied, and it renders, publishes and
+// records nothing of its own.
+func (r *resolver) barrier(operation string, message logsite.Message) *mutation {
+	return &mutation{
+		operation: operation, message: message, log: r.log.Global(),
+		apply: func(dlog.Logger) bool { return false },
+	}
 }
 
 // commitView is the core's committing view, which waits for what it commits.
