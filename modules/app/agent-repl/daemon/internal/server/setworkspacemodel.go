@@ -91,7 +91,7 @@ func (s *server) SetWorkspaceModel(
 // checked against. It answers the refusal for a model the catalog does not
 // offer or a catalog never served, and an error when the registry or the
 // catalog cannot be read.
-func (s *server) checkCatalogModel(ctx context.Context, record wsm.Workspace, model string) (*refusal, error) {
+func (s *server) checkCatalogModel(ctx context.Context, record wsm.WorkspaceHead, model string) (*refusal, error) {
 	repositories, err := s.deps.DB.ListRepositories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list the repositories: %w", err)

@@ -224,6 +224,9 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 // did; a workspace with participants is answered through its rendezvous and
 // is not waited on here.
 func (c *controller) adoptClaimed(ctx context.Context, claimed []ids.WorkspaceID) {
+	// EVERY CLAIMED ADOPTION IS ORDERED BEFORE ANY OF THEM STARTS
+	// (adoptorder.go), so no goroutine's scheduling lets a lower rank pass.
+	c.order.register(c.ranksOf(claimed))
 	var headless sync.WaitGroup
 	for _, ws := range claimed {
 		if c.ExpectedParticipants(ws) == 0 {
@@ -237,6 +240,22 @@ func (c *controller) adoptClaimed(ctx context.Context, claimed []ids.WorkspaceID
 		inflight.Go(func() { c.adoptOne(ctx, ws) })
 	}
 	headless.Wait()
+}
+
+// ranksOf answers each of CLAIMED's adoption rank, as its armed entry holds
+// it.
+func (c *controller) ranksOf(claimed []ids.WorkspaceID) map[ids.WorkspaceID]adoptionRank {
+	c.mu.Lock()
+	defer c.unlock()
+	ranks := make(map[ids.WorkspaceID]adoptionRank, len(claimed))
+	for _, ws := range claimed {
+		e, armed := c.rendezvous[ws]
+		if !armed {
+			panic(fmt.Sprintf("rollout: claimed workspace %s has no armed rendezvous", ws))
+		}
+		ranks[ws] = e.rank
+	}
+	return ranks
 }
 
 // adoptOne adopts one claimed workspace, and on failure releases its claim and
@@ -275,6 +294,9 @@ func (c *controller) awaitParticipantsForTest(ctx context.Context, ws ids.Worksp
 	if !c.deps.AdoptAwaitsParticipants {
 		return true
 	}
+	// A HELD ADOPTION HOLDS NO OTHER BACK: it waits on its participants, as
+	// one waiting on its release waits on the incumbent.
+	c.order.awaiting(ws)
 	c.mu.Lock()
 	e, armed := c.rendezvous[ws]
 	var called chan struct{}
@@ -432,6 +454,7 @@ func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, s
 		c.rendezvous[session.Workspace] = &entry{
 			outgoing: outgoing,
 			expected: expected,
+			rank:     rankOf(session),
 			called:   make(chan struct{}),
 			run:      newAdoptionRun(),
 		}
@@ -718,6 +741,8 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		delete(c.adopting, ws)
 		c.unlock()
 	}()
+	// AN ADOPTION THAT ENDS, BY ANY PATH, HOLDS NO LOWER RANK BACK.
+	defer c.order.end(ws)
 	outgoing, err := c.outgoingDaemon(ws)
 	if err != nil {
 		c.log.Error(opAdopt, "could not resolve the incumbent serving owner", dlog.WithCause(fields, err))
@@ -726,6 +751,12 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	fields["outgoing_daemon"] = string(outgoing)
 	if err := c.awaitServingRelease(ctx, ws, outgoing, fields); err != nil {
 		return err
+	}
+	// THE RELEASED ADOPTION WAITS ITS TURN (adoptorder.go): no adoption of a
+	// higher rank is still pending or running ahead of it.
+	if err := c.order.admit(ctx, ws); err != nil {
+		c.log.Error(opAdopt, "the adoption lifetime ended while the adoption waited its turn", dlog.WithCause(fields, err))
+		return fmt.Errorf("rollout: adopt %q: wait for its turn: %w", ws, err)
 	}
 	// A REFUSED MID-WORK ADOPTION IS THE INCUMBENT'S TO TAKE BACK, and its
 	// take-back retires the marker. Until then the released row is the one
@@ -994,6 +1025,11 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// incumbent's status.
 	c.mirrorOwnershipChanged()
 
+	// THE ADOPTION NAMES ITS PLACE IN THE ORDER: its rank, and how many
+	// ordered adoptions reached ownership before it and with it.
+	if rank, nth, ordered := c.order.owns(ws); ordered {
+		fields = dlog.Merge(fields, dlog.Context{"adoption_rank": rank.String(), "adopted_nth": nth})
+	}
 	c.log.Info(opAdopt, "adopted the workspace", fields)
 
 	// THE WORKSPACE'S MERGES ARE THIS DAEMON'S NOW: a merge the incumbent
@@ -1211,6 +1247,7 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 			c.log.Info(opAdopt, "waiting for the incumbent to release serving ownership at freeness",
 				dlog.Merge(fields, dlog.Context{"serving_daemon": string(*owner)}))
 			waiting = true
+			c.order.awaiting(ws)
 		}
 	}
 }

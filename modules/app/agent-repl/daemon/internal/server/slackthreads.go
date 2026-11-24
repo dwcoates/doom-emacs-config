@@ -44,7 +44,7 @@ const (
 )
 
 // slackWorkspace is RECORD as the watcher names it.
-func slackWorkspace(record wsm.Workspace) slackwatch.Workspace {
+func slackWorkspace(record wsm.WorkspaceHead) slackwatch.Workspace {
 	return slackwatch.Workspace{ID: record.ID, Name: record.Name}
 }
 

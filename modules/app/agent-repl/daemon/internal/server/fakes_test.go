@@ -234,6 +234,8 @@ type fakeDB struct {
 	// holds a read in flight on.
 	workspaceEntered chan struct{}
 	workspaceRelease chan struct{}
+	// headReads and rowReads count the WorkspaceHead and Workspace reads.
+	headReads, rowReads atomic.Int64
 }
 
 func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
@@ -260,7 +262,24 @@ func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, 
 	return lease, ok, nil
 }
 
-func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
+// WorkspaceHead answers the head of what Workspace answers, through every one
+// of Workspace's seams.
+func (f *fakeDB) WorkspaceHead(ctx context.Context, id ids.WorkspaceID) (wsm.WorkspaceHead, error) {
+	f.headReads.Add(1)
+	record, err := f.workspace(ctx, id)
+	if err != nil {
+		return wsm.WorkspaceHead{}, err
+	}
+	return record.Head(), nil
+}
+
+func (f *fakeDB) Workspace(ctx context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
+	f.rowReads.Add(1)
+	return f.workspace(ctx, id)
+}
+
+// workspace is the one answer Workspace and WorkspaceHead share.
+func (f *fakeDB) workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
 	if f.workspaceEntered != nil {
 		close(f.workspaceEntered)
 		f.workspaceEntered = nil

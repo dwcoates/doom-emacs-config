@@ -49,7 +49,7 @@ const connCallersNamed = 8
 
 // callerFramesNamed is how many frames past the store a hold's caller names
 // (callerOutsideStore).
-const callerFramesNamed = 2
+const callerFramesNamed = 4
 
 // wsmFunctionPrefix is the qualified-name prefix of this package's functions,
 // which a hold's caller is found past (callerOutsideStore).
@@ -114,9 +114,11 @@ func (s *store) withConn(ctx context.Context, db *sql.DB, op string, fields dlog
 // A HOLD NAMES ITS CALLER, NOT ONLY ITS OPERATION. On the 2026-11-23 15:35
 // handover the pressure records named `daemon.wsm.workspace` 2,372 times in
 // one second, and that read has dozens of callers across the daemon: which
-// one repeated it could not be read from the logs. Two frames, because the
-// nearest caller is often a shared helper (the server's registry read) whose
-// own caller is the one that repeats.
+// one repeated it could not be read from the logs. Four frames, because the
+// nearest callers are often shared helpers (the server's registry read is a
+// closure inside a generic read inside readRegistry, three frames deep)
+// whose own caller is the one that repeats: two named only the helpers on
+// the 19:29 handover.
 func callerOutsideStore() string {
 	return framesPast(func(function string) bool { return strings.HasPrefix(function, wsmFunctionPrefix) })
 }

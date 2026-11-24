@@ -260,7 +260,12 @@ func (s *server) submitQuestion(
 // workspaces that act on their own repository directly, so the question
 // reaches the one the person is looking at.
 func (s *server) questionStaysHere(ctx context.Context, subject resolved) (bool, error) {
-	if subject.Record.DeployMediator {
+	record, err := s.wholeRow(ctx, subject)
+	if err != nil {
+		subject.Log.Error(opResponseQuestion, "could not read the workspace's row to route its question", dlog.WithCause(dlog.Context{"workspace": string(subject.Record.ID)}, err))
+		return false, fmt.Errorf("route a question of %s: %w", subject.Record.ID, err)
+	}
+	if record.DeployMediator {
 		return true, nil
 	}
 	standing, err := s.deps.DB.QueueBypass(ctx, subject.Record.ID)

@@ -117,9 +117,15 @@ func (s *server) resolveOpens(ctx context.Context, rpc string, asked []*agentrep
 			out[i].Refused = refused
 			continue
 		}
+		// THE VISIBILITY FILTER READS THE WHOLE ROW, which the resolution's
+		// head does not carry.
+		record, err := s.wholeRow(ctx, subject)
+		if err != nil {
+			return nil, failResolution(subject.Log, rpc, err)
+		}
 		out[i].Name = subject.Record.Name
 		at[subject.Record.ID] = i
-		records = append(records, subject.Record)
+		records = append(records, record)
 	}
 	// ONE READ OF THE FOLDS, through the one filter every bring-up shares, by
 	// the roster's live visibility: the editor opens a workspace the moment a

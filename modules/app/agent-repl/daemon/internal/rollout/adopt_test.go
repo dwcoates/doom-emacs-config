@@ -3054,3 +3054,54 @@ func TestTheIncumbentIsNamedAtEveryMomentOfATakeoverAnElderOutlives(t *testing.T
 		})
 	}
 }
+
+// TestJoinAdoptsTheViewedWorkspaceBeforeTheRest pins the order through the
+// successor's whole join: the idle workspace's adoption, released at the
+// same moment, waits until the viewed one owns its workspace, and each
+// adoption's record names its rank and place.
+func TestJoinAdoptsTheViewedWorkspaceBeforeTheRest(t *testing.T) {
+	// Arrange: the viewed workspace's dial is held until the test lets it go.
+	h := newHarness(t)
+	viewed, viewedDir := h.workspace(t)
+	idle, idleDir := h.workspace(t)
+	letViewedGo := make(chan struct{})
+	h.fleet.onAdopt = func(ws ids.WorkspaceID) {
+		if ws == viewed {
+			<-letViewedGo
+		}
+	}
+	session := func(ws ids.WorkspaceID, dir string, isViewed bool) ManifestSession {
+		return ManifestSession{Workspace: ws, Dir: dir, ShimPID: 4242, VendorSessionID: "vendor-" + string(ws), Intent: IntentPreserve, Viewed: isViewed}
+	}
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: previousInstance, Successor: "127.0.0.1:7788", WrittenAt: instant,
+		Sessions: []ManifestSession{session(idle, idleDir, false), session(viewed, viewedDir, true)},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+
+	// Act
+	joined := make(chan error, 1)
+	go func() { joined <- h.c.Join(context.Background()) }()
+	awaitState(t, h.c.order, idle, orderReleased)
+	adoptedWhileHeld := h.fleet.Adoptions()
+	close(letViewedGo)
+	if err := <-joined; err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+
+	// Assert
+	if len(adoptedWhileHeld) != 0 {
+		t.Fatalf("adoptions while the viewed one was held = %v, want none: the idle one waits its turn", adoptedWhileHeld)
+	}
+	if got := h.fleet.Adoptions(); !slices.Equal(got, []ids.WorkspaceID{viewed, idle}) {
+		t.Fatalf("adoptions = %v, want the viewed workspace first", got)
+	}
+	for ws, want := range map[ids.WorkspaceID][2]any{viewed: {"viewed", 1}, idle: {"rest", 2}} {
+		rec, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Operation: opAdopt, Message: "adopted the workspace",
+			Match: func(r dlog.Record) bool { return r.Context["workspace"] == string(ws) }})
+		if !found || rec.Context["adoption_rank"] != want[0] || rec.Context["adopted_nth"] != want[1] {
+			t.Fatalf("%s's adopted record = %+v (found %v), want rank %v, place %v", ws, rec.Context, found, want[0], want[1])
+		}
+	}
+}

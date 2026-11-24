@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
@@ -840,12 +841,24 @@ func TestRegistryWorkspaceAnswersTheRecord(t *testing.T) {
 	}
 }
 
-// TestEveryResolutionReadGoesThroughRegistryWorkspace fails a resolution that
-// reads the registry on its own, outside the gate Close takes.
-func TestEveryResolutionReadGoesThroughRegistryWorkspace(t *testing.T) {
-	cases := []struct{ file, function string }{
-		{"refuse.go", "resolveRegistered"},
-		{"requestlog.go", "beginRequest"},
+// TestEveryResolutionReadGoesThroughTheRegistryGate fails a resolution that
+// reads the registry on its own, outside the gate Close takes: each reads the
+// workspace's head through its shared helper (registryHead, or
+// resolutionHead, which takes the boundary's handed read or reads through
+// registryHead), never the state client directly.
+func TestEveryResolutionReadGoesThroughTheRegistryGate(t *testing.T) {
+	// readsInside marks the helpers the read itself is written in: their read
+	// of the state client is the closure they hand readRegistryValue.
+	cases := []struct {
+		file, function, helper string
+		readsInside            bool
+	}{
+		{"refuse.go", "resolveRegistered", "s.resolutionHead(", false},
+		{"requestlog.go", "beginRequest", "s.registryHead(", false},
+		{"refuse.go", "resolutionHead", "s.registryHead(", false},
+		{"refuse.go", "registryHead", "readRegistryValue(", true},
+		{"refuse.go", "registryWorkspace", "readRegistryValue(", true},
+		{"refuse.go", "readRegistryValue", "s.readRegistry(", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.function, func(t *testing.T) {
@@ -870,12 +883,12 @@ func TestEveryResolutionReadGoesThroughRegistryWorkspace(t *testing.T) {
 			}
 
 			// Act.
-			direct := strings.Contains(body, "s.deps.DB.Workspace(")
-			shared := strings.Contains(body, "s.registryWorkspace(")
+			direct := !tc.readsInside && (strings.Contains(body, "s.deps.DB.Workspace(") || strings.Contains(body, "s.deps.DB.WorkspaceHead("))
+			shared := strings.Contains(body, tc.helper)
 
 			// Assert.
 			if direct || !shared {
-				t.Fatalf("%s: direct registry read %v, shared helper %v; its registry read must go through registryWorkspace", tc.function, direct, shared)
+				t.Fatalf("%s: direct registry read %v, shared helper %v; its registry read must go through %s", tc.function, direct, shared, tc.helper)
 			}
 		})
 	}
@@ -1307,4 +1320,99 @@ func TestABareNoSessionRefusalIsAnInvariantBreak(t *testing.T) {
 
 	// Act.
 	surface.asRefusal(promptqueue.ErrNoSession)
+}
+
+// TestARequestReadsItsWorkspaceOnce pins the one read: the boundary reads the
+// workspace's head and hands it to the request's resolution, which reads
+// nothing more, and no part of either reads the whole row.
+func TestARequestReadsItsWorkspaceOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	err := clientLogOnce(h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog = %v", err)
+	}
+	if heads, rows := h.DB.headReads.Load(), h.DB.rowReads.Load(); heads != 1 || rows != 0 {
+		t.Fatalf("reads = %d heads and %d whole rows, want one head and no whole row", heads, rows)
+	}
+}
+
+func TestAHandedHeadIsTakenOnceForItsOwnWorkspace(t *testing.T) {
+	head := wsm.WorkspaceHead{ID: testWorkspaceID, Dir: "/repo/ws"}
+	tests := []struct {
+		name      string
+		handed    bool
+		id        ids.WorkspaceID
+		takenOnce bool
+		wantOK    bool
+	}{
+		{name: "nothing handed is nothing taken", handed: false, id: testWorkspaceID},
+		{name: "the handed head is taken for its workspace", handed: true, id: testWorkspaceID, wantOK: true},
+		{name: "another workspace takes nothing", handed: true, id: "another-workspace"},
+		{name: "a head already taken is not taken again", handed: true, id: testWorkspaceID, takenOnce: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			ctx := context.Background()
+			if tt.handed {
+				ctx = requestBoundary{head: &handedHead{head: head}}.handOver(ctx)
+			}
+			if tt.takenOnce {
+				takeHandedHead(ctx, tt.id)
+			}
+
+			// Act.
+			got, ok := takeHandedHead(ctx, tt.id)
+
+			// Assert.
+			if ok != tt.wantOK {
+				t.Fatalf("taken = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && got != head {
+				t.Fatalf("head = %+v, want %+v", got, head)
+			}
+		})
+	}
+}
+
+func TestWholeRowReadsTheWorkspacesWholeRow(t *testing.T) {
+	tests := []struct {
+		name     string
+		arrange  func(h *harness)
+		wantCode connect.Code
+		wantErr  bool
+	}{
+		{name: "a registered workspace's row is answered", arrange: func(*harness) {}},
+		{name: "a failed read is an error", arrange: func(h *harness) { h.DB.workspaceErr = errors.New("the database is gone") }, wantErr: true},
+		{name: "a read after close is unavailable", arrange: func(h *harness) {
+			h.Server.(*server).registryClosed = true
+		}, wantErr: true, wantCode: connect.CodeUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.arrange(h)
+			subject := resolved{Record: wsm.WorkspaceHead{ID: testWorkspaceID}}
+
+			// Act.
+			record, err := h.Server.(*server).wholeRow(context.Background(), subject)
+
+			// Assert.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("wholeRow = %v, want error %v", err, tt.wantErr)
+			}
+			if tt.wantCode != 0 && connect.CodeOf(err) != tt.wantCode {
+				t.Fatalf("wholeRow code = %v, want %v", connect.CodeOf(err), tt.wantCode)
+			}
+			if !tt.wantErr && (record.ID != testWorkspaceID || h.DB.rowReads.Load() != 1) {
+				t.Fatalf("wholeRow = %+v after %d reads, want the workspace's row from one read", record, h.DB.rowReads.Load())
+			}
+		})
+	}
 }

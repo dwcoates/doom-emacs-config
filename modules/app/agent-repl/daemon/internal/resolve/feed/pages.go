@@ -29,6 +29,20 @@ import (
 // tail echoes, and — for the root feed only — the held section as it stands at
 // that token's pin (nil for a sub-feed). The feed's newest store page is read
 // first unless it is held and no entry has moved it since.
+//
+// AN OPENING LOADS ONLY THE NEWEST PAGE, IN ONE STORE READ (a decision, not a
+// limit to lift). A page is a first paint the reader waits on, so an opening
+// reads the store once, the newest page, whose turn heads complete the turns
+// it cuts into (heads.go), and serves what that page draws; it never walks
+// older pages to fill a screen. Rows above the newest context cut are not
+// part of an opening at all: the opening starts at that divider
+// (daemon.feed.opening_moved), and everything above it, as everything older
+// than the newest page, is reached only by the reader paging back
+// (OlderPage). Each opening's record says how many store reads it made
+// (daemon.feed.opening_reads); more than one is the old walk a store without
+// turn heads still needs. Pinned by TestOpenFeedReadsOneStorePageWhenNothingIsHeld,
+// TestAnOpeningWithTurnHeadsReadsOneStorePage and
+// TestAnOpeningStartsAtTheNewestCut.
 func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
 	return r.walkPage(ctx, ws, feed, &walk{top: true}, true)
 }

@@ -67,6 +67,7 @@ func serveUnary[Req, Resp any](
 	}
 	phase = "handler"
 	defer boundary.enter()(&err)
+	ctx = boundary.handOver(ctx)
 	// THE HANDLER'S WORK IS LABELED BY ITS WORKSPACE (internal/proflabel), so
 	// a CPU profile splits by workspace.
 	proflabel.Do(ctx, ids.WorkspaceID(boundary.workspace), func(ctx context.Context) { resp, err = handle(ctx, req) })
@@ -137,6 +138,7 @@ func serveStream[Req, Resp any](
 		return boundaryFailure(err)
 	}
 	defer boundary.enter()(&err)
+	ctx = boundary.handOver(ctx)
 	// A STREAM ANOTHER DAEMON RELAYS FOR A PAGE IT HOLDS (relayWatch) connects
 	// that page to the stream's workspace here, from the stream's acceptance
 	// until it ends.

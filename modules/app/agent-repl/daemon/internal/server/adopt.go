@@ -190,7 +190,7 @@ func (s *server) subjectForAdoption(
 
 // webPageOf is the page a webview mounts for a workspace: a chat thread's
 // chat view, or an agent workspace's feed.
-func webPageOf(record wsm.Workspace) *agentreplv1.WebWorkspacePage {
+func webPageOf(record wsm.WorkspaceHead) *agentreplv1.WebWorkspacePage {
 	if record.IsThread() {
 		return &agentreplv1.WebWorkspacePage{Kind: &agentreplv1.WebWorkspacePage_Thread{Thread: &agentreplv1.WebWorkspacePageThread{}}}
 	}

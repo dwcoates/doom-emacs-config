@@ -1309,7 +1309,11 @@ func (s *server) selectSubject(
 ) (*agentreplv1.SelectWorkspaceSuccess, *connect.Error) {
 	// SELECTING A HIDDEN MERGE WORKSPACE REVEALS IT, before the selection, so
 	// the roster draws the workspace it names as current.
-	if subject.Record.MergeHidden() {
+	record, err := s.wholeRow(ctx, subject)
+	if err != nil {
+		return nil, failResolution(subject.Log, rpc, err)
+	}
+	if record.MergeHidden() {
 		if err := s.deps.Merge.RevealMergeWorkspace(ctx, subject.Record.ID, "the user selected it"); err != nil {
 			return nil, fail(subject.Log, rpc, err)
 		}

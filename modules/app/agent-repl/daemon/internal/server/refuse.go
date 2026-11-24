@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -472,10 +473,11 @@ func setNestedArms(armMessage protoreflect.Message, fields map[string]any) bool 
 	return true
 }
 
-// resolved is a per-workspace rpc's resolved subject: the registry record and
-// the workspace's own log sink.
+// resolved is a per-workspace rpc's resolved subject: the workspace's head as
+// the registry holds it (wsm.WorkspaceHead; a handler that needs a fact the
+// full row derives reads the row itself) and the workspace's own log sink.
 type resolved struct {
-	Record wsm.Workspace
+	Record wsm.WorkspaceHead
 	Log    dlog.Logger
 }
 
@@ -558,7 +560,7 @@ func (s *server) resolveRegistered(ctx context.Context, rpc string, ref *workspa
 	// two, and the read met "sql: database is closed" at ERROR — the webapp
 	// layer's roster area lost a run to a ClientLog landing in it during the
 	// drain's exit. readRegistry holds Close off for the read's duration.
-	record, ended, err := s.registryWorkspace(ctx, id)
+	record, ended, err := s.resolutionHead(ctx, id)
 	if ended {
 		s.log.Info(rpc, "refused a request that arrived while the daemon was shutting down",
 			dlog.Context{"workspace": string(id)})
@@ -627,13 +629,92 @@ func (s *server) readRegistry(read func() error) (ended bool, err error) {
 // the boundary's and resolveRegistered's alike -- run under readRegistry, so
 // neither can read a state client the exit has closed.
 func (s *server) registryWorkspace(ctx context.Context, id ids.WorkspaceID) (wsm.Workspace, bool, error) {
-	var record wsm.Workspace
+	return readRegistryValue(s, func() (wsm.Workspace, error) { return s.deps.DB.Workspace(ctx, id) })
+}
+
+// registryHead is registryWorkspace for the workspace's head alone
+// (wsm.WorkspaceHead): the read a request's resolution makes.
+func (s *server) registryHead(ctx context.Context, id ids.WorkspaceID) (wsm.WorkspaceHead, bool, error) {
+	return readRegistryValue(s, func() (wsm.WorkspaceHead, error) { return s.deps.DB.WorkspaceHead(ctx, id) })
+}
+
+// readRegistryValue runs READ under readRegistry and answers its value: the
+// one shape every registry read of a request takes.
+func readRegistryValue[T any](s *server, read func() (T, error)) (T, bool, error) {
+	var out T
 	ended, err := s.readRegistry(func() error {
 		var readErr error
-		record, readErr = s.deps.DB.Workspace(ctx, id)
+		out, readErr = read()
 		return readErr
 	})
-	return record, ended, err
+	return out, ended, err
+}
+
+// wholeRow reads SUBJECT's whole row (wsm.Workspace), for a handler that
+// needs a fact the head does not carry: one the row derives from other tables,
+// or a column only that handler reads. A read the daemon's shutdown ended is
+// errServingEnded.
+func (s *server) wholeRow(ctx context.Context, subject resolved) (wsm.Workspace, error) {
+	record, ended, err := s.registryWorkspace(ctx, subject.Record.ID)
+	if ended {
+		return wsm.Workspace{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("workspace %q: %w", subject.Record.ID, errServingEnded))
+	}
+	if err != nil {
+		return wsm.Workspace{}, fmt.Errorf("read workspace %q: %w", subject.Record.ID, err)
+	}
+	return record, nil
+}
+
+// resolutionHead is the head a request's resolution resolves ID by: the one
+// its boundary read and handed over (handedHead), else a fresh read.
+func (s *server) resolutionHead(ctx context.Context, id ids.WorkspaceID) (wsm.WorkspaceHead, bool, error) {
+	if head, ok := takeHandedHead(ctx, id); ok {
+		return head, false, nil
+	}
+	return s.registryHead(ctx, id)
+}
+
+// handedHead is the workspace head a request's boundary read, handed to the
+// request's resolution through its context so the request reads it ONCE.
+//
+// IT IS TAKEN ONCE. The boundary's read is the request's: the resolution
+// that follows it at once takes it, and any later resolution in the same
+// request (a stream re-resolving its workspace long after it opened) reads
+// the registry afresh, so no resolution acts on a head older than its own
+// request's start.
+type handedHead struct {
+	mu    sync.Mutex
+	head  wsm.WorkspaceHead
+	taken bool
+}
+
+// handedHeadKey carries a request's handedHead.
+type handedHeadKey struct{}
+
+// handOver puts the head the boundary read on CTX for the request's
+// resolution; with none read, CTX is returned as it is.
+func (b requestBoundary) handOver(ctx context.Context) context.Context {
+	if b.head == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, handedHeadKey{}, b.head)
+}
+
+// takeHandedHead answers the head CTX's boundary handed over for workspace
+// ID, once; false when none was handed, it names another workspace, or it was
+// taken already.
+func takeHandedHead(ctx context.Context, id ids.WorkspaceID) (wsm.WorkspaceHead, bool) {
+	handed, ok := ctx.Value(handedHeadKey{}).(*handedHead)
+	if !ok {
+		return wsm.WorkspaceHead{}, false
+	}
+	handed.mu.Lock()
+	defer handed.mu.Unlock()
+	if handed.taken || handed.head.ID != id {
+		return wsm.WorkspaceHead{}, false
+	}
+	handed.taken = true
+	return handed.head, true
 }
 
 // failResolution renders a failed workspace RESOLUTION, or a health report the
