@@ -429,10 +429,10 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "answers the interactive history search")
     ("host.el" agent-repl-host--unheld-select-refused "[agent-repl] The switch to %s did not happen (%s): pick it again"
      "tells the user the workspace they picked could not be switched to, and that picking it again retries")
-    ("host.el" agent-repl-host-request-switch
+    ("host.el" agent-repl-host--request-switch-held
      "[agent-repl] Cannot switch to %s: the daemon has not registered it"
      "explains why the user's switch request went nowhere")
-    ("host.el" agent-repl-host-request-switch
+    ("host.el" agent-repl-host--request-switch-held
      "[agent-repl] Cannot switch to %s: no daemon connection"
      "explains why the user's switch request went nowhere")
     ("input.el" agent-repl--input-resent

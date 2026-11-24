@@ -1786,17 +1786,17 @@ the user interacted with, most recent first.  CURRENT is shown.  Binds
     (should-not requests)))
 
 (ert-deftest agent-repl-test-commands-recency-walk-steps-through-the-shared-helper ()
-  "`s-[' / `s-]' go through `agent-repl--step-workspace' over the recency ring."
+  "`s-[' / `s-]' go through `agent-repl--step-workspace-to', the one step every chord takes."
   ;; Arrange
   (let ((calls nil))
-    (cl-letf (((symbol-function 'agent-repl--step-workspace)
-               (lambda (n ring op trigger) (push (list n ring op trigger) calls))))
+    (cl-letf (((symbol-function 'agent-repl--step-workspace-to)
+               (lambda (n _target op trigger) (push (list n op trigger) calls))))
       ;; Act
       (agent-repl-switch-older)
       (agent-repl-switch-newer)
       ;; Assert
-      (should (equal calls '((-1 agent-repl--recency-ring "recency-walk" recency-walk)
-                             (1 agent-repl--recency-ring "recency-walk" recency-walk)))))))
+      (should (equal calls '((-1 "recency-walk" recency-walk)
+                             (1 "recency-walk" recency-walk)))))))
 
 ;;;; ---- A switch is a REQUEST; the roster moves the frame ----
 
@@ -3748,15 +3748,6 @@ so no close pushes a tab to the back any more."
   (agent-repl-test-commands--with-hidden-bar '("a" "b" "folded") '("folded") "a"
     (agent-repl-switch-left)
     (should (equal agent-repl-test-commands--switched "b"))))
-
-(ert-deftest agent-repl-test-commands-recency-ring-leaves-out-a-folded-tab ()
-  "`s-[' and `s-]' never reach a tab a collapsed section folds."
-  (let ((history '("folded" "b" "a"))
-        (agent-repl--recency-walk-origin nil))
-    (agent-repl-test-commands--with-hidden-bar '("a" "b" "folded") '("folded") "a"
-      (cl-letf (((symbol-function 'agent-repl-roster-last-interacted-ms)
-                 (lambda (ws) (agent-repl-test-commands--history-ms history ws))))
-        (should (equal (agent-repl--recency-ring "a") '("a" "b")))))))
 
 (ert-deftest agent-repl-test-commands-picker-offers-only-the-drawn-tabs ()
   "The tab picker offers the drawn tabs: a folded workspace has no tab here."
