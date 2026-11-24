@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -89,6 +90,44 @@ func TestALandingOwesTheSpanBeforeItAndItsEndMakesItDue(t *testing.T) {
 			}
 			if tc.wantDue && (!c.Since.Equal(priorDeploy) || !c.Until.Equal(deployStarted)) {
 				t.Fatalf("span = %v to %v, want %v to %v", c.Since, c.Until, priorDeploy, deployStarted)
+			}
+		})
+	}
+}
+
+func TestAProductionPassTheDaemonsExitCutIsNoFailure(t *testing.T) {
+	cases := []struct {
+		name      string
+		cut       bool
+		err       error
+		wantLevel string
+	}{
+		{name: "a pass the daemon's exit cut is recorded at info", cut: true, err: context.Canceled, wantLevel: "info"},
+		{name: "a pass that fails while the daemon runs is an error", err: errors.New("database is closed"), wantLevel: "error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := production(t)
+			h.db.reposErr = tc.err
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cut {
+				cancel()
+			}
+
+			// Act
+			h.o.productionPass(ctx)
+
+			// Assert
+			rec, ok := h.recordFor(tc.wantLevel, opProduction)
+			if !ok || !strings.Contains(fmt.Sprint(rec.Context), tc.err.Error()) {
+				t.Fatalf("records = %v, want one at %s under %s carrying the cause", h.logs.Records(), tc.wantLevel, opProduction)
+			}
+			if tc.cut {
+				if _, failed := h.recordFor("error", opProduction); failed {
+					t.Fatalf("records = %v, want no error for a cut pass", h.logs.Records())
+				}
 			}
 		})
 	}

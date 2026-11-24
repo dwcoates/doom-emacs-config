@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
@@ -126,7 +127,7 @@ func (o *orchestrator) productionQueues(ctx context.Context, op string) ([]check
 func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) error {
 	queues, err := o.productionQueues(ctx, opProduction)
 	if err != nil {
-		o.deps.Log.Global().Error(opProduction, "could not list the repositories a landing owes a production check in", dlog.Context{"error": err.Error()})
+		o.mediationFailedUnder(ctx, opProduction, nil, logsite.Msg("could not list the repositories a landing owes a production check in"), err)
 		return err
 	}
 	var errs []error
@@ -134,7 +135,7 @@ func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) er
 		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano)}
 		check, owed, err := o.deps.DB.OweProductionCheck(ctx, q.key, at, "")
 		if err != nil {
-			o.deps.Log.Global().Error(opProduction, "could not owe the production check of the span the landing closed; the span runs on into the next", withField(fields, "error", err.Error()))
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not owe the production check of the span the landing closed; the span runs on into the next"), err)
 			errs = append(errs, err)
 			continue
 		}
@@ -154,7 +155,7 @@ func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) er
 func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, ending wsm.DeployEnding) error {
 	queues, err := o.productionQueues(ctx, opProduction)
 	if err != nil {
-		o.deps.Log.Global().Error(opProduction, "could not list the repositories a deploy's ending makes a production check due in", dlog.Context{"error": err.Error()})
+		o.mediationFailedUnder(ctx, opProduction, nil, logsite.Msg("could not list the repositories a deploy's ending makes a production check due in"), err)
 		return err
 	}
 	var errs []error
@@ -163,7 +164,7 @@ func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, e
 		if ending == wsm.DaemonCrashed {
 			dropped, err := o.deps.DB.DropProductionCheck(ctx, q.key, at)
 			if err != nil {
-				o.deps.Log.Global().Error(opProduction, "could not drop the production span a crash owed; it is told as a span of its own", withField(fields, "error", err.Error()))
+				o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not drop the production span a crash owed; it is told as a span of its own"), err)
 				errs = append(errs, err)
 				continue
 			}
@@ -172,7 +173,7 @@ func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, e
 		}
 		due, err := o.deps.DB.MarkProductionChecksDue(ctx, q.key, o.deps.Now())
 		if err != nil {
-			o.deps.Log.Global().Error(opProduction, "could not make the production checks the deploy ended due; the next deploy's end makes them due", withField(fields, "error", err.Error()))
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not make the production checks the deploy ended due; the next deploy's end makes them due"), err)
 			errs = append(errs, err)
 			continue
 		}
@@ -187,7 +188,7 @@ func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, e
 func (o *orchestrator) productionPass(ctx context.Context) {
 	queues, err := o.productionQueues(ctx, opProduction)
 	if err != nil {
-		o.deps.Log.Global().Error(opProduction, "could not list the repositories whose production checks are owed", dlog.Context{"error": err.Error()})
+		o.mediationFailedUnder(ctx, opProduction, nil, logsite.Msg("could not list the repositories whose production checks are owed"), err)
 		return
 	}
 	for _, q := range queues {
@@ -196,7 +197,9 @@ func (o *orchestrator) productionPass(ctx context.Context) {
 		o.endClosedChildren(ctx, q, fields)
 		check, err := o.deps.DB.ProductionCheckOf(ctx, q.key)
 		if err != nil {
-			o.deps.Log.Global().Error(opProduction, "could not read the production check to decide next", withField(fields, "error", err.Error()))
+			if o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not read the production check to decide next"), err) {
+				return
+			}
 			continue
 		}
 		if check == nil {
@@ -231,7 +234,7 @@ func (o *orchestrator) productionPass(ctx context.Context) {
 func (o *orchestrator) endClosedChildren(ctx context.Context, q checkedQueue, fields dlog.Context) {
 	children, err := o.deps.DB.ProductionChildrenOf(ctx, q.key)
 	if err != nil {
-		o.deps.Log.Global().Error(opProduction, "could not read the production children to end those that closed", withField(fields, "error", err.Error()))
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not read the production children to end those that closed"), err)
 		return
 	}
 	for _, child := range children {
@@ -240,7 +243,7 @@ func (o *orchestrator) endClosedChildren(ctx context.Context, q checkedQueue, fi
 		switch {
 		case errors.Is(err, wsm.ErrNotFound):
 		case err != nil:
-			o.deps.Log.Global().Error(opProduction, "could not read a production child's workspace", withField(withField(fields, "child", string(child.Workspace)), "error", err.Error()))
+			o.mediationFailedUnder(ctx, opProduction, withField(fields, "child", string(child.Workspace)), logsite.Msg("could not read a production child's workspace"), err)
 			continue
 		case !record.Closed:
 			continue
@@ -248,7 +251,7 @@ func (o *orchestrator) endClosedChildren(ctx context.Context, q checkedQueue, fi
 			how, at = wsm.ProductionChildLanded, *record.MergedAt
 		}
 		if _, err := o.deps.DB.EndProductionChild(ctx, child.Workspace, how, at); err != nil {
-			o.deps.Log.Global().Error(opProduction, "could not end a production child whose workspace closed; its sites stay owned", withField(withField(fields, "child", string(child.Workspace)), "error", err.Error()))
+			o.mediationFailedUnder(ctx, opProduction, withField(fields, "child", string(child.Workspace)), logsite.Msg("could not end a production child whose workspace closed; its sites stay owned"), err)
 			continue
 		}
 		o.deps.Meter.ObserveProductionChild(string(how))
@@ -264,7 +267,7 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 	fields := dlog.Context{"repo": string(q.key), "span_since": c.Since.UTC().Format(time.RFC3339Nano), "span_until": c.Until.UTC().Format(time.RFC3339Nano)}
 	brief, err := o.productionBrief(ctx, q, c)
 	if err != nil {
-		o.deps.Log.Global().Error(opProduction, "the production check's brief could not be composed; the span stays due", withField(fields, "error", err.Error()))
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production check's brief could not be composed; the span stays due"), err)
 		return
 	}
 	mediator, err := o.readyMediator(ctx, productionRole, q, fields)
@@ -280,13 +283,13 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 		})
 		switch {
 		case failed == turnMarkFailed:
-			o.deps.Log.Global().Error(opProduction, "could not record that the production mediator is told of the span; the span stays due", withField(fields, "error", err.Error()))
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not record that the production mediator is told of the span; the span stays due"), err)
 			return
 		case !marked:
 			o.deps.Log.Global().Info(opProduction, "the production check was decided before its mediator was told; this round ends", fields)
 			return
 		case failed == turnSubmitFailed:
-			o.deps.Log.Global().Error(opProduction, "the production mediator's brief could not be submitted; the next pass submits it under the turn recorded", withField(fields, "error", err.Error()))
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's brief could not be submitted; the next pass submits it under the turn recorded"), err)
 			return
 		}
 		if !mediator.briefed {
@@ -296,35 +299,25 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 		o.deps.Log.Global().Info(opProduction, "the production mediator was told of the span", withField(fields, "turn", string(turn)))
 		closed, err = o.deps.AwaitTurnEnd(ctx, ws, turn)
 		if err != nil {
-			o.productionAwaitFailed(ctx, fields, err)
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's turn could not be awaited; the span stays due"), err)
 			return
 		}
 	} else {
 		told := brief
 		if c.Resumed {
 			if told, err = o.productionResumeBrief(c); err != nil {
-				o.deps.Log.Global().Error(opProduction, "the undecided production mediator's resuming brief could not be composed; the span stays due", withField(fields, "error", err.Error()))
+				o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the undecided production mediator's resuming brief could not be composed; the span stays due"), err)
 				return
 			}
 		}
 		o.deps.Log.Global().Info(opProduction, "the production mediator was told of the span before; its turn is reattached", withField(withField(fields, "turn", string(c.Turn)), "resumed", c.Resumed))
 		closed, err = o.reattachTurn(ctx, ws, fields, c.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION)
 		if err != nil {
-			o.productionAwaitFailed(ctx, fields, err)
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's turn could not be awaited; the span stays due"), err)
 			return
 		}
 	}
 	o.productionTurnEnded(ctx, q, ws, c, closed, fields)
-}
-
-// productionAwaitFailed records a production mediator's turn that could not
-// be awaited: a cut by the daemon's exit is no failure, and anything else is
-// an ERROR; the span stays due either way.
-func (o *orchestrator) productionAwaitFailed(ctx context.Context, fields dlog.Context, err error) {
-	if o.mediationCut(ctx, fields, "the production mediator's turn could not be awaited", err) {
-		return
-	}
-	o.deps.Log.Global().Error(opProduction, "the production mediator's turn could not be awaited; the span stays due", withField(fields, "error", err.Error()))
 }
 
 // productionTurnEnded settles span TOLD once the turn the mediator was told
@@ -335,7 +328,7 @@ func (o *orchestrator) productionAwaitFailed(ctx context.Context, fields dlog.Co
 func (o *orchestrator) productionTurnEnded(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, told wsm.ProductionCheck, closed wsm.TurnClose, fields dlog.Context) {
 	now, err := o.deps.DB.ProductionCheckOf(ctx, q.key)
 	if err != nil {
-		o.deps.Log.Global().Error(opProduction, "could not read the production check the mediator's turn ended on; the next pass settles it", withField(fields, "error", err.Error()))
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not read the production check the mediator's turn ended on; the next pass settles it"), err)
 		return
 	}
 	if now == nil || !now.Until.Equal(told.Until) {
@@ -351,7 +344,7 @@ func (o *orchestrator) productionTurnEnded(ctx context.Context, q checkedQueue, 
 		return
 	}
 	if err := o.deps.DB.DecideProductionCheck(ctx, q.key, told.Until, o.deps.Now(), wsm.ProductionUnanswered, "the production mediator ended its turn without deciding the span, again after it was resumed to decide it", nil); err != nil {
-		o.deps.Log.Global().Error(opProduction, "could not record the production check unanswered; the next pass settles it", withField(fields, "error", err.Error()))
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not record the production check unanswered; the next pass settles it"), err)
 		return
 	}
 	o.deps.Meter.ObserveProductionCheck(ProductionCheckUnanswered, 0)
@@ -373,7 +366,7 @@ func (o *orchestrator) productionResumeBrief(c wsm.ProductionCheck) (string, err
 func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, c wsm.ProductionCheck, fields dlog.Context) {
 	brief, err := o.productionResumeBrief(c)
 	if err != nil {
-		o.deps.Log.Global().Error(opProduction, "the undecided production mediator's resuming brief could not be composed; the span stays due", withField(fields, "error", err.Error()))
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the undecided production mediator's resuming brief could not be composed; the span stays due"), err)
 		return
 	}
 	turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
@@ -382,20 +375,20 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 	fields = withField(fields, "turn", string(turn))
 	switch {
 	case failed == turnMarkFailed:
-		o.deps.Log.Global().Error(opProduction, "could not record that the undecided production mediator is resumed; the span stays due", withField(fields, "error", err.Error()))
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not record that the undecided production mediator is resumed; the span stays due"), err)
 		return
 	case !marked:
 		o.deps.Log.Global().Info(opProduction, "the production check was decided before its undecided mediator was resumed; this round ends", fields)
 		return
 	case failed == turnSubmitFailed:
-		o.deps.Log.Global().Error(opProduction, "the undecided production mediator's resuming brief could not be submitted; the next pass submits it", withField(fields, "error", err.Error()))
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the undecided production mediator's resuming brief could not be submitted; the next pass submits it"), err)
 		return
 	}
 	o.deps.Log.Global().Warn(opProduction, "the production mediator's turn ended deciding nothing about the span; it is resumed once to decide it", fields)
 	c.Resumed, c.Turn = true, turn
 	closed, err := o.deps.AwaitTurnEnd(ctx, ws, turn)
 	if err != nil {
-		o.productionAwaitFailed(ctx, fields, err)
+		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's turn could not be awaited; the span stays due"), err)
 		return
 	}
 	o.productionTurnEnded(ctx, q, ws, c, closed, fields)
