@@ -1772,7 +1772,7 @@ on every relaunch."
                 (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
                 ;; THE HOST HOLDS THE PAGE: a slot off screen is made with none, and a
                 ;; workspace with no page has nothing to re-point.
-                (agent-repl-webhost-ensure-page agent-repl-itest-host--ws)
+                (agent-repl-webhost-ensure-page agent-repl-itest-host--ws 'shown)
                 (setq navigated nil)
                 ;; Act.
                 (agent-repl-host-on-link-up fresh)

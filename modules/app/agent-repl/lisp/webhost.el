@@ -62,6 +62,7 @@
 (declare-function agent-repl--frontend-kill-webview "frontend" (buf))
 (declare-function agent-repl-frontend-webview-url "frontend" (ws))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
+(declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
 (declare-function agent-repl-page-unload-note-shown "page-unload" (ws))
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl--ws-current-name "workspace" ())
@@ -88,7 +89,15 @@ workspace's own.")
 ;;;; ---- Desired state ---------------------------------------------------------
 
 (defvar agent-repl--webhost-pages (make-hash-table :test #'equal)
-  "Workspace id -> the URL its page is held at.  What the host should hold.")
+  "Workspace id -> its held page, (:url URL :why WHY).  What the host should hold.
+URL is where the page is held; WHY is the reason it was loaded for
+\(`agent-repl-page-report-load-reasons').  THE REASON LIVES WITH THE PAGE, so
+no page is held without one: a restatement reads it here
+\(`agent-repl-page-report-restate'), whatever connection asks.")
+
+(defun agent-repl--webhost-page-url (id)
+  "The URL page ID is held at, or nil when no page is held for ID."
+  (plist-get (gethash id agent-repl--webhost-pages) :url))
 
 (defvar agent-repl--webhost-held-back (make-hash-table :test #'equal)
   "Workspace id -> its dir, for each page held back until the user asks.
@@ -636,16 +645,19 @@ invariant).  Non-nil when the question was sent; nil when there is no host."
   "WS's workspace id, the key the host holds its page under; nil without a ref."
   (plist-get (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws)) :id))
 
-(defun agent-repl-webhost-ensure-page (ws)
-  "Hold WS's page in the host at WS's URL, creating the host if needed.
-Answers WS's id.  Signals when WS has no ref or no connection: its URL cannot
-be built (`agent-repl-frontend-webview-url')."
+(defun agent-repl-webhost-ensure-page (ws why)
+  "Hold WS's page in the host at WS's URL, loaded for WHY, creating the host
+if needed.  WHY, a load reason (`agent-repl-page-report-load-reasons'), is
+kept with the page (`agent-repl-webhost-page-reason').  Answers WS's id.
+Signals when WS has no ref or no connection: its URL cannot be built
+\(`agent-repl-frontend-webview-url')."
   (let* ((url (agent-repl-frontend-webview-url ws))
-         (id (agent-repl--webhost-id ws)))
+         (id (agent-repl--webhost-id ws))
+         (was (gethash id agent-repl--webhost-pages)))
     (agent-repl-webhost-ensure)
-    (unless (equal (gethash id agent-repl--webhost-pages) url)
-      (puthash id url agent-repl--webhost-pages)
-      (agent-repl--info ws "elisp.webhost.page-ensured ws={ws} id={id}" :ws ws :id id))
+    (unless (and (equal (plist-get was :url) url) (eq (plist-get was :why) why))
+      (puthash id (list :url url :why why) agent-repl--webhost-pages)
+      (agent-repl--info ws "elisp.webhost.page-ensured ws={ws} id={id} why={why}" :ws ws :id id :why why))
     ;; A HELD PAGE IS NO LONGER HELD BACK: the host drops its load button.
     (remhash id agent-repl--webhost-held-back)
     (agent-repl--webhost-call "ensure" id url)
@@ -786,9 +798,16 @@ cause, so the teardown that asked stays visible."
   (let ((id (agent-repl--webhost-id ws)))
     (and id (gethash id agent-repl--webhost-pages) t)))
 
+(defun agent-repl-webhost-page-reason (ws)
+  "The reason WS's held page was loaded for, or nil when no page is held."
+  (let ((id (agent-repl--webhost-id ws)))
+    (and id (plist-get (gethash id agent-repl--webhost-pages) :why))))
+
 (defun agent-repl-webhost-reload-page (ws)
   "Load WS's page again, at its URL now: re-point it when the URL moved
-\(a daemon handover), reload it in place otherwise.
+\(a daemon handover), reload it in place otherwise.  The page keeps the
+reason it was loaded for.  WS's page is held: a page not held is a defect,
+recorded at ERROR and signalled.
 
 A HANDOVER NEVER RELOADS THE HOST.  Reloading it replaced every page at
 once, and the page on screen stood blank for seconds (4.8s on the
@@ -799,10 +818,18 @@ NOT MOVE WITH A PAGE: they follow the link (`agent-repl-webhost-follow-daemon').
   (let* ((url (agent-repl-frontend-webview-url ws))
          (id (agent-repl--webhost-id ws))
          (started (agent-repl--now-unix-ms)))
-    (if (equal (gethash id agent-repl--webhost-pages) url)
+    ;; ONLY A HELD PAGE IS RELOADED: an unloaded one is not loaded by a reload
+    ;; (`agent-repl-frontend-reload-webview'), so it has no reason to keep.
+    (unless (gethash id agent-repl--webhost-pages)
+      (agent-repl--error ws "elisp.webhost.reload-unheld ws={ws} id={id}" :ws ws :id id)
+      (error "webhost: %s holds no page to reload" ws))
+    (if (equal (agent-repl--webhost-page-url id) url)
         (apply #'agent-repl--webhost-call "reload" id started
                (agent-repl--webhost-downtime-args id))
-      (puthash id url agent-repl--webhost-pages)
+      ;; A RE-POINTED PAGE KEEPS THE REASON IT WAS LOADED FOR: it is the same
+      ;; page, held at the daemon WS moved to.
+      (puthash id (list :url url :why (agent-repl-webhost-page-reason ws))
+               agent-repl--webhost-pages)
       (apply #'agent-repl--webhost-call "ensure" id url nil started
                (agent-repl--webhost-downtime-args id)))
     (agent-repl--info ws "elisp.webhost.page-reloaded ws={ws} id={id}" :ws ws :id id)
@@ -996,7 +1023,7 @@ order given."
 Given a LANE, the host loads it once the pages before it in LANE have drawn.
 A replay after a reload hands the reload's start with the page
 \(`agent-repl--webhost-reload-started-ms')."
-  (when-let ((url (gethash id agent-repl--webhost-pages)))
+  (when-let ((url (agent-repl--webhost-page-url id)))
     (apply #'agent-repl--webhost-call "ensure" id url lane agent-repl--webhost-reload-started-ms
            (agent-repl--webhost-downtime-args id))
     (when-let ((entries (gethash id agent-repl--webhost-held-ingress)))
@@ -1029,7 +1056,7 @@ out (`agent-repl-host-adopting-p')."
   (maphash (lambda (id pixels) (agent-repl--webhost-call "setGateDock" id pixels))
            agent-repl--webhost-gate-docks)
   (let (ids)
-    (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
+    (maphash (lambda (id _page) (push id ids)) agent-repl--webhost-pages)
     (when agent-repl--webhost-shown
       (agent-repl--webhost-replay-page agent-repl--webhost-shown nil)
       ;; A SHOWN PAGE HELD BACK is shown as its load button.
@@ -1075,7 +1102,7 @@ the host's answer (`agent-repl--webhost-on-retired')."
 (defun agent-repl--webhost-page-workspaces ()
   "Every workspace the host holds a page for, by name."
   (let (out)
-    (maphash (lambda (id _url)
+    (maphash (lambda (id _page)
                (when-let ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id))))
                  (push ws out)))
              agent-repl--webhost-pages)
@@ -1185,6 +1212,41 @@ the host was last reloaded onto is already met."
     (agent-repl-webhost-reload)
     (setq agent-repl--webhost-build build)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build={build}" :build build)))
+
+;;;; ---- Page entries held before reasons were kept ----
+
+(defun agent-repl--webhost-held-page-reason (id)
+  "The reason page ID's workspace holds its page now, by the load rules.
+`shown' when the host shows it, `slot' when its page is wanted
+\(`agent-repl-page-unload-wanted-p'), and `held-before-reasons' when no
+load rule explains it."
+  (let ((ws (agent-repl--ws-by-ref-id id)))
+    (cond
+     ((equal id agent-repl--webhost-shown) 'shown)
+     ((and ws (agent-repl-page-unload-wanted-p ws)) 'slot)
+     (t 'held-before-reasons))))
+
+(defun agent-repl--webhost-migrate-page-entries ()
+  "Convert every page entry held as a bare URL into (:url URL :why WHY), once.
+A RUNNING EMACS HOT-LOADS THIS FILE OVER ITS OWN STATE: the pages it held
+before each page kept its reason are bare URLs, and a restatement of one
+found no reason (2026-11-24 06:21, seven held-without-reason ERRORs at a
+handover).  Each is given the reason its workspace's state shows now
+\(`agent-repl--webhost-held-page-reason').  A fresh Emacs holds no page
+when this runs, so it converts nothing."
+  (let (converted)
+    (maphash (lambda (id page)
+               (when (stringp page)
+                 (push (cons id (list :url page :why (agent-repl--webhost-held-page-reason id)))
+                       converted)))
+             agent-repl--webhost-pages)
+    (pcase-dolist (`(,id . ,entry) converted)
+      (puthash id entry agent-repl--webhost-pages)
+      (agent-repl--info agent-repl--webhost-central
+                        "elisp.webhost.page-entry-converted id={id} why={why}"
+                        :id id :why (plist-get entry :why)))))
+
+(agent-repl--webhost-migrate-page-entries)
 
 (agent-repl--webhost-rewatch)
 

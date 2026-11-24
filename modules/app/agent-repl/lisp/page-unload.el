@@ -66,7 +66,7 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
-(declare-function agent-repl-webhost-ensure-page "webhost" (ws))
+(declare-function agent-repl-webhost-ensure-page "webhost" (ws why))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-hold-back "webhost" (ws))
 (declare-function agent-repl-webhost-held-back-p "webhost" (ws))
@@ -75,6 +75,7 @@
 (declare-function agent-repl-roster-dormant-p "roster" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-page-report-loaded "page-report" (ws why))
+(declare-function agent-repl-page-report-check-load-reason "page-report" (ws why))
 (declare-function agent-repl-page-report-unloaded "page-report" (ws why))
 (defvar agent-repl-roster-update-functions)
 
@@ -102,8 +103,9 @@ holds it back at a gate (`agent-repl-page-unload-note-shown')."
 THE ONE PATH THAT LOADS A PAGE (see the commentary): every load is a
 show, a gate the user answered or asked past, a session come up for
 work, or a slot made while its page is wanted."
+  (agent-repl-page-report-check-load-reason ws why)
   (agent-repl--info ws "elisp.page-unload.loaded ws={ws} reason={why}" :ws ws :why why)
-  (prog1 (agent-repl-webhost-ensure-page ws)
+  (prog1 (agent-repl-webhost-ensure-page ws why)
     (agent-repl-page-report-loaded ws why)))
 
 (defun agent-repl-page-unload-note-shown (ws)

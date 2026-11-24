@@ -49,10 +49,13 @@ const (
 	LoadSlot      LoadReason = "slot"
 	LoadRequested LoadReason = "load_requested"
 	LoadUngated   LoadReason = "ungated"
+	// LoadHeldBeforeReasons is a page Emacs held before it recorded why, that
+	// no load rule explains now.
+	LoadHeldBeforeReasons LoadReason = "held_before_reasons"
 )
 
 // LoadReasons is every load reason, for a caller that serves each from 0.
-var LoadReasons = []LoadReason{LoadShown, LoadAwake, LoadSlot, LoadRequested, LoadUngated}
+var LoadReasons = []LoadReason{LoadShown, LoadAwake, LoadSlot, LoadRequested, LoadUngated, LoadHeldBeforeReasons}
 
 // LoadUnreported labels a page the web host holds that Emacs reports no load
 // of. It is never a reason Emacs gives: only Snapshot answers it, for the

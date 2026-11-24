@@ -1491,7 +1491,8 @@ Emacs's report that it is about to unload the workspace's page on purpose."
     (:awake awake "ReportPageStateLoadAwake")
     (:slot slot "ReportPageStateLoadSlot")
     (:load-requested loadRequested "ReportPageStateLoadRequested")
-    (:ungated ungated "ReportPageStateLoadUngated"))
+    (:ungated ungated "ReportPageStateLoadUngated")
+    (:held-before-reasons heldBeforeReasons "ReportPageStateLoadHeldBeforeReasons"))
   "Every `ReportPageStateLoadReason' arm: (KEYWORD WIRE-KEY MESSAGE).")
 
 (defconst agent-repl-wire--page-unload-reasons
@@ -1512,7 +1513,8 @@ Emacs's report that it is about to unload the workspace's page on purpose."
 (defun agent-repl-wire-encode-report-page-state-request-report (value)
   "Encode `ReportPageStateRequest''s oneof `report' VALUE.
 VALUE is `(:arm ARM :value REASON)': ARM `:loaded' or `:held' with REASON
-a load reason (`:shown', `:awake', `:slot', `:load-requested', `:ungated'),
+a load reason (`:shown', `:awake', `:slot', `:load-requested', `:ungated',
+`:held-before-reasons' for `:held' only),
 `:unloaded' with REASON an unload reason (`:dormant', `:detached',
 `:released'), or `:not-held' with REASON nil."
   (let ((load (lambda (message)

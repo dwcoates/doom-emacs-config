@@ -384,6 +384,7 @@ type ReportPageStateLoadReason struct {
 	//	*ReportPageStateLoadReason_Slot
 	//	*ReportPageStateLoadReason_LoadRequested
 	//	*ReportPageStateLoadReason_Ungated
+	//	*ReportPageStateLoadReason_HeldBeforeReasons
 	Reason        isReportPageStateLoadReason_Reason `protobuf_oneof:"reason"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -471,6 +472,15 @@ func (x *ReportPageStateLoadReason) GetUngated() *ReportPageStateLoadUngated {
 	return nil
 }
 
+func (x *ReportPageStateLoadReason) GetHeldBeforeReasons() *ReportPageStateLoadHeldBeforeReasons {
+	if x != nil {
+		if x, ok := x.Reason.(*ReportPageStateLoadReason_HeldBeforeReasons); ok {
+			return x.HeldBeforeReasons
+		}
+	}
+	return nil
+}
+
 type isReportPageStateLoadReason_Reason interface {
 	isReportPageStateLoadReason_Reason()
 }
@@ -502,6 +512,14 @@ type ReportPageStateLoadReason_Ungated struct {
 	Ungated *ReportPageStateLoadUngated `protobuf:"bytes,5,opt,name=ungated,proto3,oneof"`
 }
 
+type ReportPageStateLoadReason_HeldBeforeReasons struct {
+	// The page was held before Emacs recorded why pages are loaded, and no
+	// load rule explains it now: neither shown nor wanted. Only the one
+	// conversion of a running Emacs's held pages, when it first loads the
+	// code that keeps a reason with each page, names it.
+	HeldBeforeReasons *ReportPageStateLoadHeldBeforeReasons `protobuf:"bytes,6,opt,name=held_before_reasons,json=heldBeforeReasons,proto3,oneof"`
+}
+
 func (*ReportPageStateLoadReason_Shown) isReportPageStateLoadReason_Reason() {}
 
 func (*ReportPageStateLoadReason_Awake) isReportPageStateLoadReason_Reason() {}
@@ -511,6 +529,8 @@ func (*ReportPageStateLoadReason_Slot) isReportPageStateLoadReason_Reason() {}
 func (*ReportPageStateLoadReason_LoadRequested) isReportPageStateLoadReason_Reason() {}
 
 func (*ReportPageStateLoadReason_Ungated) isReportPageStateLoadReason_Reason() {}
+
+func (*ReportPageStateLoadReason_HeldBeforeReasons) isReportPageStateLoadReason_Reason() {}
 
 // The user showed the workspace.
 type ReportPageStateLoadShown struct {
@@ -697,6 +717,43 @@ func (*ReportPageStateLoadUngated) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{10}
 }
 
+// The page predates the recorded reasons, and no rule explains it now.
+type ReportPageStateLoadHeldBeforeReasons struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportPageStateLoadHeldBeforeReasons) Reset() {
+	*x = ReportPageStateLoadHeldBeforeReasons{}
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportPageStateLoadHeldBeforeReasons) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportPageStateLoadHeldBeforeReasons) ProtoMessage() {}
+
+func (x *ReportPageStateLoadHeldBeforeReasons) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportPageStateLoadHeldBeforeReasons.ProtoReflect.Descriptor instead.
+func (*ReportPageStateLoadHeldBeforeReasons) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{11}
+}
+
 // Why a page was dropped. The set arm IS the reason; its arm name is the
 // metrics' `reason` label.
 type ReportPageStateUnloadReason struct {
@@ -715,7 +772,7 @@ type ReportPageStateUnloadReason struct {
 
 func (x *ReportPageStateUnloadReason) Reset() {
 	*x = ReportPageStateUnloadReason{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -727,7 +784,7 @@ func (x *ReportPageStateUnloadReason) String() string {
 func (*ReportPageStateUnloadReason) ProtoMessage() {}
 
 func (x *ReportPageStateUnloadReason) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -740,7 +797,7 @@ func (x *ReportPageStateUnloadReason) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateUnloadReason.ProtoReflect.Descriptor instead.
 func (*ReportPageStateUnloadReason) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ReportPageStateUnloadReason) GetReason() isReportPageStateUnloadReason_Reason {
@@ -815,7 +872,7 @@ type ReportPageStateUnloadDormant struct {
 
 func (x *ReportPageStateUnloadDormant) Reset() {
 	*x = ReportPageStateUnloadDormant{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -827,7 +884,7 @@ func (x *ReportPageStateUnloadDormant) String() string {
 func (*ReportPageStateUnloadDormant) ProtoMessage() {}
 
 func (x *ReportPageStateUnloadDormant) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -840,7 +897,7 @@ func (x *ReportPageStateUnloadDormant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateUnloadDormant.ProtoReflect.Descriptor instead.
 func (*ReportPageStateUnloadDormant) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{13}
 }
 
 // The slot was taken down while the workspace stays open.
@@ -852,7 +909,7 @@ type ReportPageStateUnloadDetached struct {
 
 func (x *ReportPageStateUnloadDetached) Reset() {
 	*x = ReportPageStateUnloadDetached{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -864,7 +921,7 @@ func (x *ReportPageStateUnloadDetached) String() string {
 func (*ReportPageStateUnloadDetached) ProtoMessage() {}
 
 func (x *ReportPageStateUnloadDetached) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -877,7 +934,7 @@ func (x *ReportPageStateUnloadDetached) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateUnloadDetached.ProtoReflect.Descriptor instead.
 func (*ReportPageStateUnloadDetached) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{14}
 }
 
 // The workspace was released from the editor.
@@ -889,7 +946,7 @@ type ReportPageStateUnloadReleased struct {
 
 func (x *ReportPageStateUnloadReleased) Reset() {
 	*x = ReportPageStateUnloadReleased{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -901,7 +958,7 @@ func (x *ReportPageStateUnloadReleased) String() string {
 func (*ReportPageStateUnloadReleased) ProtoMessage() {}
 
 func (x *ReportPageStateUnloadReleased) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -914,7 +971,7 @@ func (x *ReportPageStateUnloadReleased) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateUnloadReleased.ProtoReflect.Descriptor instead.
 func (*ReportPageStateUnloadReleased) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{15}
 }
 
 // THE ARM IS THE OUTCOME.
@@ -931,7 +988,7 @@ type ReportPageStateResponse struct {
 
 func (x *ReportPageStateResponse) Reset() {
 	*x = ReportPageStateResponse{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -943,7 +1000,7 @@ func (x *ReportPageStateResponse) String() string {
 func (*ReportPageStateResponse) ProtoMessage() {}
 
 func (x *ReportPageStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -956,7 +1013,7 @@ func (x *ReportPageStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateResponse.ProtoReflect.Descriptor instead.
 func (*ReportPageStateResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ReportPageStateResponse) GetResult() isReportPageStateResponse_Result {
@@ -1009,7 +1066,7 @@ type ReportPageStateSuccess struct {
 
 func (x *ReportPageStateSuccess) Reset() {
 	*x = ReportPageStateSuccess{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1021,7 +1078,7 @@ func (x *ReportPageStateSuccess) String() string {
 func (*ReportPageStateSuccess) ProtoMessage() {}
 
 func (x *ReportPageStateSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +1091,7 @@ func (x *ReportPageStateSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateSuccess.ProtoReflect.Descriptor instead.
 func (*ReportPageStateSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{17}
 }
 
 // Arms derived from the daemon's refusal sites, exactly
@@ -1056,7 +1113,7 @@ type ReportPageStateError struct {
 
 func (x *ReportPageStateError) Reset() {
 	*x = ReportPageStateError{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1068,7 +1125,7 @@ func (x *ReportPageStateError) String() string {
 func (*ReportPageStateError) ProtoMessage() {}
 
 func (x *ReportPageStateError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1081,7 +1138,7 @@ func (x *ReportPageStateError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateError.ProtoReflect.Descriptor instead.
 func (*ReportPageStateError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ReportPageStateError) GetCause() isReportPageStateError_Cause {
@@ -1168,7 +1225,7 @@ type ReportPageStateUnknownWorkspace struct {
 
 func (x *ReportPageStateUnknownWorkspace) Reset() {
 	*x = ReportPageStateUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1180,7 +1237,7 @@ func (x *ReportPageStateUnknownWorkspace) String() string {
 func (*ReportPageStateUnknownWorkspace) ProtoMessage() {}
 
 func (x *ReportPageStateUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1193,7 +1250,7 @@ func (x *ReportPageStateUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*ReportPageStateUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{19}
 }
 
 // The echoed dir disagrees with the registry's.
@@ -1207,7 +1264,7 @@ type ReportPageStateWorkspaceRefMismatch struct {
 
 func (x *ReportPageStateWorkspaceRefMismatch) Reset() {
 	*x = ReportPageStateWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1219,7 +1276,7 @@ func (x *ReportPageStateWorkspaceRefMismatch) String() string {
 func (*ReportPageStateWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *ReportPageStateWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1232,7 +1289,7 @@ func (x *ReportPageStateWorkspaceRefMismatch) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ReportPageStateWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*ReportPageStateWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ReportPageStateWorkspaceRefMismatch) GetRegistryDir() string {
@@ -1253,7 +1310,7 @@ type ReportPageStateTransferringAway struct {
 
 func (x *ReportPageStateTransferringAway) Reset() {
 	*x = ReportPageStateTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1265,7 +1322,7 @@ func (x *ReportPageStateTransferringAway) String() string {
 func (*ReportPageStateTransferringAway) ProtoMessage() {}
 
 func (x *ReportPageStateTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1278,7 +1335,7 @@ func (x *ReportPageStateTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateTransferringAway.ProtoReflect.Descriptor instead.
 func (*ReportPageStateTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReportPageStateTransferringAway) GetAddress() string {
@@ -1303,7 +1360,7 @@ type ReportPageStateNotYetAdopted struct {
 
 func (x *ReportPageStateNotYetAdopted) Reset() {
 	*x = ReportPageStateNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1315,7 +1372,7 @@ func (x *ReportPageStateNotYetAdopted) String() string {
 func (*ReportPageStateNotYetAdopted) ProtoMessage() {}
 
 func (x *ReportPageStateNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1328,7 +1385,7 @@ func (x *ReportPageStateNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*ReportPageStateNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ReportPageStateNotYetAdopted) GetAddress() string {
@@ -1356,19 +1413,21 @@ const file_agentrepl_v1_endpoint_report_page_state_proto_rawDesc = "" +
 	"\x06reason\x18\x01 \x01(\v2).agentrepl.v1.ReportPageStateUnloadReasonR\x06reason\"V\n" +
 	"\x13ReportPageStateHeld\x12?\n" +
 	"\x06reason\x18\x01 \x01(\v2'.agentrepl.v1.ReportPageStateLoadReasonR\x06reason\"\x18\n" +
-	"\x16ReportPageStateNotHeld\"\xfd\x02\n" +
+	"\x16ReportPageStateNotHeld\"\xe3\x03\n" +
 	"\x19ReportPageStateLoadReason\x12>\n" +
 	"\x05shown\x18\x01 \x01(\v2&.agentrepl.v1.ReportPageStateLoadShownH\x00R\x05shown\x12>\n" +
 	"\x05awake\x18\x02 \x01(\v2&.agentrepl.v1.ReportPageStateLoadAwakeH\x00R\x05awake\x12;\n" +
 	"\x04slot\x18\x03 \x01(\v2%.agentrepl.v1.ReportPageStateLoadSlotH\x00R\x04slot\x12S\n" +
 	"\x0eload_requested\x18\x04 \x01(\v2*.agentrepl.v1.ReportPageStateLoadRequestedH\x00R\rloadRequested\x12D\n" +
-	"\aungated\x18\x05 \x01(\v2(.agentrepl.v1.ReportPageStateLoadUngatedH\x00R\aungatedB\b\n" +
+	"\aungated\x18\x05 \x01(\v2(.agentrepl.v1.ReportPageStateLoadUngatedH\x00R\aungated\x12d\n" +
+	"\x13held_before_reasons\x18\x06 \x01(\v22.agentrepl.v1.ReportPageStateLoadHeldBeforeReasonsH\x00R\x11heldBeforeReasonsB\b\n" +
 	"\x06reason\"\x1a\n" +
 	"\x18ReportPageStateLoadShown\"\x1a\n" +
 	"\x18ReportPageStateLoadAwake\"\x19\n" +
 	"\x17ReportPageStateLoadSlot\"\x1e\n" +
 	"\x1cReportPageStateLoadRequested\"\x1c\n" +
-	"\x1aReportPageStateLoadUngated\"\x85\x02\n" +
+	"\x1aReportPageStateLoadUngated\"&\n" +
+	"$ReportPageStateLoadHeldBeforeReasons\"\x85\x02\n" +
 	"\x1bReportPageStateUnloadReason\x12F\n" +
 	"\adormant\x18\x01 \x01(\v2*.agentrepl.v1.ReportPageStateUnloadDormantH\x00R\adormant\x12I\n" +
 	"\bdetached\x18\x02 \x01(\v2+.agentrepl.v1.ReportPageStateUnloadDetachedH\x00R\bdetached\x12I\n" +
@@ -1410,60 +1469,62 @@ func file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_agentrepl_v1_endpoint_report_page_state_proto_goTypes = []any{
-	(*ReportPageStateRequest)(nil),              // 0: agentrepl.v1.ReportPageStateRequest
-	(*ReportPageStateLoaded)(nil),               // 1: agentrepl.v1.ReportPageStateLoaded
-	(*ReportPageStateUnloaded)(nil),             // 2: agentrepl.v1.ReportPageStateUnloaded
-	(*ReportPageStateHeld)(nil),                 // 3: agentrepl.v1.ReportPageStateHeld
-	(*ReportPageStateNotHeld)(nil),              // 4: agentrepl.v1.ReportPageStateNotHeld
-	(*ReportPageStateLoadReason)(nil),           // 5: agentrepl.v1.ReportPageStateLoadReason
-	(*ReportPageStateLoadShown)(nil),            // 6: agentrepl.v1.ReportPageStateLoadShown
-	(*ReportPageStateLoadAwake)(nil),            // 7: agentrepl.v1.ReportPageStateLoadAwake
-	(*ReportPageStateLoadSlot)(nil),             // 8: agentrepl.v1.ReportPageStateLoadSlot
-	(*ReportPageStateLoadRequested)(nil),        // 9: agentrepl.v1.ReportPageStateLoadRequested
-	(*ReportPageStateLoadUngated)(nil),          // 10: agentrepl.v1.ReportPageStateLoadUngated
-	(*ReportPageStateUnloadReason)(nil),         // 11: agentrepl.v1.ReportPageStateUnloadReason
-	(*ReportPageStateUnloadDormant)(nil),        // 12: agentrepl.v1.ReportPageStateUnloadDormant
-	(*ReportPageStateUnloadDetached)(nil),       // 13: agentrepl.v1.ReportPageStateUnloadDetached
-	(*ReportPageStateUnloadReleased)(nil),       // 14: agentrepl.v1.ReportPageStateUnloadReleased
-	(*ReportPageStateResponse)(nil),             // 15: agentrepl.v1.ReportPageStateResponse
-	(*ReportPageStateSuccess)(nil),              // 16: agentrepl.v1.ReportPageStateSuccess
-	(*ReportPageStateError)(nil),                // 17: agentrepl.v1.ReportPageStateError
-	(*ReportPageStateUnknownWorkspace)(nil),     // 18: agentrepl.v1.ReportPageStateUnknownWorkspace
-	(*ReportPageStateWorkspaceRefMismatch)(nil), // 19: agentrepl.v1.ReportPageStateWorkspaceRefMismatch
-	(*ReportPageStateTransferringAway)(nil),     // 20: agentrepl.v1.ReportPageStateTransferringAway
-	(*ReportPageStateNotYetAdopted)(nil),        // 21: agentrepl.v1.ReportPageStateNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                     // 22: workspace.v1.WorkspaceRef
+	(*ReportPageStateRequest)(nil),               // 0: agentrepl.v1.ReportPageStateRequest
+	(*ReportPageStateLoaded)(nil),                // 1: agentrepl.v1.ReportPageStateLoaded
+	(*ReportPageStateUnloaded)(nil),              // 2: agentrepl.v1.ReportPageStateUnloaded
+	(*ReportPageStateHeld)(nil),                  // 3: agentrepl.v1.ReportPageStateHeld
+	(*ReportPageStateNotHeld)(nil),               // 4: agentrepl.v1.ReportPageStateNotHeld
+	(*ReportPageStateLoadReason)(nil),            // 5: agentrepl.v1.ReportPageStateLoadReason
+	(*ReportPageStateLoadShown)(nil),             // 6: agentrepl.v1.ReportPageStateLoadShown
+	(*ReportPageStateLoadAwake)(nil),             // 7: agentrepl.v1.ReportPageStateLoadAwake
+	(*ReportPageStateLoadSlot)(nil),              // 8: agentrepl.v1.ReportPageStateLoadSlot
+	(*ReportPageStateLoadRequested)(nil),         // 9: agentrepl.v1.ReportPageStateLoadRequested
+	(*ReportPageStateLoadUngated)(nil),           // 10: agentrepl.v1.ReportPageStateLoadUngated
+	(*ReportPageStateLoadHeldBeforeReasons)(nil), // 11: agentrepl.v1.ReportPageStateLoadHeldBeforeReasons
+	(*ReportPageStateUnloadReason)(nil),          // 12: agentrepl.v1.ReportPageStateUnloadReason
+	(*ReportPageStateUnloadDormant)(nil),         // 13: agentrepl.v1.ReportPageStateUnloadDormant
+	(*ReportPageStateUnloadDetached)(nil),        // 14: agentrepl.v1.ReportPageStateUnloadDetached
+	(*ReportPageStateUnloadReleased)(nil),        // 15: agentrepl.v1.ReportPageStateUnloadReleased
+	(*ReportPageStateResponse)(nil),              // 16: agentrepl.v1.ReportPageStateResponse
+	(*ReportPageStateSuccess)(nil),               // 17: agentrepl.v1.ReportPageStateSuccess
+	(*ReportPageStateError)(nil),                 // 18: agentrepl.v1.ReportPageStateError
+	(*ReportPageStateUnknownWorkspace)(nil),      // 19: agentrepl.v1.ReportPageStateUnknownWorkspace
+	(*ReportPageStateWorkspaceRefMismatch)(nil),  // 20: agentrepl.v1.ReportPageStateWorkspaceRefMismatch
+	(*ReportPageStateTransferringAway)(nil),      // 21: agentrepl.v1.ReportPageStateTransferringAway
+	(*ReportPageStateNotYetAdopted)(nil),         // 22: agentrepl.v1.ReportPageStateNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                      // 23: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_report_page_state_proto_depIdxs = []int32{
-	22, // 0: agentrepl.v1.ReportPageStateRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	23, // 0: agentrepl.v1.ReportPageStateRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.ReportPageStateRequest.loaded:type_name -> agentrepl.v1.ReportPageStateLoaded
 	2,  // 2: agentrepl.v1.ReportPageStateRequest.unloaded:type_name -> agentrepl.v1.ReportPageStateUnloaded
 	3,  // 3: agentrepl.v1.ReportPageStateRequest.held:type_name -> agentrepl.v1.ReportPageStateHeld
 	4,  // 4: agentrepl.v1.ReportPageStateRequest.not_held:type_name -> agentrepl.v1.ReportPageStateNotHeld
 	5,  // 5: agentrepl.v1.ReportPageStateLoaded.reason:type_name -> agentrepl.v1.ReportPageStateLoadReason
-	11, // 6: agentrepl.v1.ReportPageStateUnloaded.reason:type_name -> agentrepl.v1.ReportPageStateUnloadReason
+	12, // 6: agentrepl.v1.ReportPageStateUnloaded.reason:type_name -> agentrepl.v1.ReportPageStateUnloadReason
 	5,  // 7: agentrepl.v1.ReportPageStateHeld.reason:type_name -> agentrepl.v1.ReportPageStateLoadReason
 	6,  // 8: agentrepl.v1.ReportPageStateLoadReason.shown:type_name -> agentrepl.v1.ReportPageStateLoadShown
 	7,  // 9: agentrepl.v1.ReportPageStateLoadReason.awake:type_name -> agentrepl.v1.ReportPageStateLoadAwake
 	8,  // 10: agentrepl.v1.ReportPageStateLoadReason.slot:type_name -> agentrepl.v1.ReportPageStateLoadSlot
 	9,  // 11: agentrepl.v1.ReportPageStateLoadReason.load_requested:type_name -> agentrepl.v1.ReportPageStateLoadRequested
 	10, // 12: agentrepl.v1.ReportPageStateLoadReason.ungated:type_name -> agentrepl.v1.ReportPageStateLoadUngated
-	12, // 13: agentrepl.v1.ReportPageStateUnloadReason.dormant:type_name -> agentrepl.v1.ReportPageStateUnloadDormant
-	13, // 14: agentrepl.v1.ReportPageStateUnloadReason.detached:type_name -> agentrepl.v1.ReportPageStateUnloadDetached
-	14, // 15: agentrepl.v1.ReportPageStateUnloadReason.released:type_name -> agentrepl.v1.ReportPageStateUnloadReleased
-	16, // 16: agentrepl.v1.ReportPageStateResponse.success:type_name -> agentrepl.v1.ReportPageStateSuccess
-	17, // 17: agentrepl.v1.ReportPageStateResponse.error:type_name -> agentrepl.v1.ReportPageStateError
-	18, // 18: agentrepl.v1.ReportPageStateError.unknown_workspace:type_name -> agentrepl.v1.ReportPageStateUnknownWorkspace
-	19, // 19: agentrepl.v1.ReportPageStateError.workspace_ref_mismatch:type_name -> agentrepl.v1.ReportPageStateWorkspaceRefMismatch
-	20, // 20: agentrepl.v1.ReportPageStateError.transferring_away:type_name -> agentrepl.v1.ReportPageStateTransferringAway
-	21, // 21: agentrepl.v1.ReportPageStateError.not_yet_adopted:type_name -> agentrepl.v1.ReportPageStateNotYetAdopted
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	11, // 13: agentrepl.v1.ReportPageStateLoadReason.held_before_reasons:type_name -> agentrepl.v1.ReportPageStateLoadHeldBeforeReasons
+	13, // 14: agentrepl.v1.ReportPageStateUnloadReason.dormant:type_name -> agentrepl.v1.ReportPageStateUnloadDormant
+	14, // 15: agentrepl.v1.ReportPageStateUnloadReason.detached:type_name -> agentrepl.v1.ReportPageStateUnloadDetached
+	15, // 16: agentrepl.v1.ReportPageStateUnloadReason.released:type_name -> agentrepl.v1.ReportPageStateUnloadReleased
+	17, // 17: agentrepl.v1.ReportPageStateResponse.success:type_name -> agentrepl.v1.ReportPageStateSuccess
+	18, // 18: agentrepl.v1.ReportPageStateResponse.error:type_name -> agentrepl.v1.ReportPageStateError
+	19, // 19: agentrepl.v1.ReportPageStateError.unknown_workspace:type_name -> agentrepl.v1.ReportPageStateUnknownWorkspace
+	20, // 20: agentrepl.v1.ReportPageStateError.workspace_ref_mismatch:type_name -> agentrepl.v1.ReportPageStateWorkspaceRefMismatch
+	21, // 21: agentrepl.v1.ReportPageStateError.transferring_away:type_name -> agentrepl.v1.ReportPageStateTransferringAway
+	22, // 22: agentrepl.v1.ReportPageStateError.not_yet_adopted:type_name -> agentrepl.v1.ReportPageStateNotYetAdopted
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_report_page_state_proto_init() }
@@ -1483,30 +1544,31 @@ func file_agentrepl_v1_endpoint_report_page_state_proto_init() {
 		(*ReportPageStateLoadReason_Slot)(nil),
 		(*ReportPageStateLoadReason_LoadRequested)(nil),
 		(*ReportPageStateLoadReason_Ungated)(nil),
+		(*ReportPageStateLoadReason_HeldBeforeReasons)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[12].OneofWrappers = []any{
 		(*ReportPageStateUnloadReason_Dormant)(nil),
 		(*ReportPageStateUnloadReason_Detached)(nil),
 		(*ReportPageStateUnloadReason_Released)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[16].OneofWrappers = []any{
 		(*ReportPageStateResponse_Success)(nil),
 		(*ReportPageStateResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[17].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[18].OneofWrappers = []any{
 		(*ReportPageStateError_UnknownWorkspace)(nil),
 		(*ReportPageStateError_WorkspaceRefMismatch)(nil),
 		(*ReportPageStateError_TransferringAway)(nil),
 		(*ReportPageStateError_NotYetAdopted)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[21].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[22].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_report_page_state_proto_rawDesc), len(file_agentrepl_v1_endpoint_report_page_state_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

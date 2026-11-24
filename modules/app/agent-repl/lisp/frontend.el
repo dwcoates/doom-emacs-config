@@ -132,7 +132,7 @@
 (declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
 (declare-function agent-repl-page-unload-load "page-unload" (ws why))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
-(declare-function agent-repl-webhost-ensure-page "webhost" (ws))
+(declare-function agent-repl-webhost-ensure-page "webhost" (ws why))
 (declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-page-report-unloaded "page-report" (ws why))
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))

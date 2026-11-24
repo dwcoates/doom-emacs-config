@@ -1123,6 +1123,8 @@ func pageLoadReason(r *agentreplv1.ReportPageStateLoadReason) pageheld.LoadReaso
 		return pageheld.LoadRequested
 	case *agentreplv1.ReportPageStateLoadReason_Ungated:
 		return pageheld.LoadUngated
+	case *agentreplv1.ReportPageStateLoadReason_HeldBeforeReasons:
+		return pageheld.LoadHeldBeforeReasons
 	default:
 		panic(fmt.Sprintf("ReportPageState: unhandled load reason arm %T", arm))
 	}
