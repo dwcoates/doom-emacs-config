@@ -77,13 +77,16 @@ import {
 import { requireCase, requireMessage, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
 import { feedRowId, feedRowOf } from "./feed/row-id.js";
-import { PULL_REQUEST_OWNER_JUMP, jumpToPullRequestOwner } from "./feed/pull-request-owner.js";
-import { guardMalformed } from "./rpc/guard.js";
 
 const log = createLogger("webapp.link");
 
 /** Only these two schemes are a hyperlink; everything else is text. */
 const LINKABLE_SCHEME = /^https?:\/\//i;
+
+/** Whether HREF is a web link: http(s), the only schemes that are a hyperlink. */
+export function isWebHref(href: string): boolean {
+  return LINKABLE_SCHEME.test(href);
+}
 
 export interface ExternalLinkSpec {
   /** The visible text. Empty falls back to the url, so a link is never blank. */
@@ -115,7 +118,7 @@ export interface EditorLinkSpec {
  */
 export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTMLElement {
   const label = spec.text === "" ? spec.url : spec.text;
-  if (!LINKABLE_SCHEME.test(spec.url)) {
+  if (!isWebHref(spec.url)) {
     log.info("refusing to link a non-http(s) destination; drawing it as text", {
       operation: "link.unlinkable-scheme",
       context: { url: spec.url },
@@ -319,10 +322,6 @@ function editorTargetContext(target: EditorTarget): Record<string, unknown> {
  * rpc a structured link makes. `renderEditorLink`'s anchor has no `href` at
  * all, so `a[href]` never selects it.
  *
- * A SHIFT-CLICK ON A WEB LINK switches to the workspace that owns the pull
- * request it names, rather than opening it (feed/pull-request-owner.ts); a
- * web link naming no pull request opens as a plain click does.
- *
  * FILE vs WEB IS THE SCHEME. http(s) is a web link and opens externally;
  * `file://` or a filesystem path is a local file and opens in the editor. A
  * scheme that is neither is left untouched (markdown emits only http(s)
@@ -379,7 +378,7 @@ export function installNavigationGuard(ctx: AppContext, root: Document | HTMLEle
     const anchor = target.closest("a[href]");
     if (!(anchor instanceof HTMLElement)) return;
     const href = anchor.getAttribute("href") ?? "";
-    if (!LINKABLE_SCHEME.test(href)) return;
+    if (!isWebHref(href)) return;
     event.preventDefault();
     event.stopPropagation();
     log.info("an outward link no surface routed was opened externally by the page's guard", {
@@ -412,14 +411,10 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
   // The RAW href, exactly as the markdown carried it: the resolved `.href`
   // would have turned a relative or `file://` path into a page-origin url.
   const href = anchor.getAttribute("href") ?? "";
-  if (LINKABLE_SCHEME.test(href)) {
+  if (isWebHref(href)) {
     // Cancel FIRST — a navigation would destroy the page a refusal draws on.
     event.preventDefault();
     event.stopPropagation();
-    if (isShiftClick(event)) {
-      void guardMalformed(ctx, PULL_REQUEST_OWNER_JUMP.operation, shiftClickWebLink(ctx, anchor, href));
-      return;
-    }
     void openExternal(ctx, anchor, href);
     return;
   }
@@ -463,25 +458,6 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
 }
 
 /**
- * Whether a click is a plain shift-click: the primary button with shift and
- * no other modifier, which on a pull request link switches to its owner.
- */
-function isShiftClick(event: MouseEvent): boolean {
-  return event.button === 0 && event.shiftKey && !(event.metaKey || event.ctrlKey || event.altKey);
-}
-
-/**
- * A shift-click on a web link in prose: the workspace owning the pull request
- * it names is switched to (feed/pull-request-owner.ts), and a link naming no
- * pull request opens as a plain click does.
- */
-async function shiftClickWebLink(ctx: AppContext, anchor: HTMLElement, url: string): Promise<void> {
-  if ((await jumpToPullRequestOwner(ctx, anchor, url)) === "notPullRequest") {
-    await openExternal(ctx, anchor, url);
-  }
-}
-
-/**
  * The filesystem path a `file://` href names (its decoded pathname), or null
  * when it does not parse. Every other path-like href goes to the daemon as a
  * feed link, unread here.
@@ -522,7 +498,11 @@ function claimsOutwardClick(event: MouseEvent): boolean {
   return event.button === 0 || event.button === 1;
 }
 
-async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): Promise<void> {
+/**
+ * Open URL in the browser through OpenExternal, drawing a refusal beside
+ * ANCHOR: what every web link's click does.
+ */
+export async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): Promise<void> {
   clearRefusal(anchor);
   try {
     const response = await callUnary(

@@ -6,11 +6,16 @@ import {
   FindPullRequestOwnerResponseSchema,
   type FindPullRequestOwnerResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_find_pull_request_owner_pb";
+import { OpenExternalResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
 import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { jumpToPullRequestOwner, type PullRequestOwnerClick } from "../../src/feed/pull-request-owner.js";
+import {
+  installPullRequestOwnerClicks,
+  jumpToPullRequestOwner,
+  type PullRequestOwnerClick,
+} from "../../src/feed/pull-request-owner.js";
 import { scriptedAppContext } from "../rpc/app-context.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { RecordingSink, WORKSPACE } from "./harness.js";
@@ -135,5 +140,106 @@ describe("jumpToPullRequestOwner", () => {
     for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
     await call;
     expect(anchor.querySelectorAll(".pull-request-owner-refusal")).toHaveLength(1);
+  });
+});
+
+describe("installPullRequestOwnerClicks", () => {
+  /** A feed scroll zone holding one prose link to HREF, with the interceptor and a stand-in prose router on it. */
+  function scope(href: string, answer: FindPullRequestOwnerResponse) {
+    const calls: string[] = [];
+    const ctx = scriptedAppContext(
+      {
+        findPullRequestOwner: (req) => {
+          calls.push(`find ${req.url}`);
+          return answer;
+        },
+        openExternal: (req) => {
+          calls.push(`external ${req.url}`);
+          return create(OpenExternalResponseSchema, { result: { case: "success", value: {} } });
+        },
+        selectInEditor: (req) => {
+          calls.push(`select ${req.workspace?.id}`);
+          return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
+        },
+      },
+      { workspace: WORKSPACE, failures: new RecordingSink() },
+    );
+    const root = document.createElement("div");
+    root.innerHTML = `<p><a href="${href}">the link</a></p>`;
+    document.body.append(root);
+    // The prose router hangs on the scope itself, installed FIRST here, so the
+    // interceptor is seen to run ahead of it whatever the order.
+    const routed: string[] = [];
+    const router = (event: MouseEvent): void => {
+      if (!event.defaultPrevented) routed.push("prose router");
+    };
+    root.addEventListener("click", router, true);
+    // jsdom has no navigation to make for a click nothing claimed.
+    root.addEventListener("click", (event) => event.preventDefault());
+    const off = installPullRequestOwnerClicks(ctx, root);
+    const teardown = () => {
+      off();
+      root.removeEventListener("click", router, true);
+      root.remove();
+    };
+    return { root, calls, routed, teardown };
+  }
+
+  async function click(root: HTMLElement, init: MouseEventInit): Promise<MouseEvent> {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...init });
+    root.querySelector("a")!.dispatchEvent(event);
+    for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
+    return event;
+  }
+
+  it("takes a shift-click ahead of the prose router, cancels it, and switches to the owner", async () => {
+    const s = scope(URL, owned("open"));
+    const event = await click(s.root, { shiftKey: true });
+    expect([event.defaultPrevented, s.routed, s.calls]).toEqual([true, [], [`find ${URL}`, "select ws-owner"]]);
+    s.teardown();
+  });
+
+  it("opens a shift-clicked link naming no pull request as a plain click does", async () => {
+    const s = scope("https://example.test/x", answered("notPullRequest"));
+    await click(s.root, { shiftKey: true });
+    expect(s.calls).toEqual(["find https://example.test/x", "external https://example.test/x"]);
+    s.teardown();
+  });
+
+  it("leaves a plain click to the prose router", async () => {
+    const s = scope(URL, owned("open"));
+    await click(s.root, {});
+    expect([s.routed, s.calls]).toEqual([["prose router"], []]);
+    s.teardown();
+  });
+
+  it("leaves a shift-click with another modifier to the prose router", async () => {
+    const s = scope(URL, owned("open"));
+    await click(s.root, { shiftKey: true, metaKey: true });
+    expect([s.routed, s.calls]).toEqual([["prose router"], []]);
+    s.teardown();
+  });
+
+  it("leaves a shift-click on a link outside its scope alone", async () => {
+    const s = scope(URL, owned("open"));
+    const outside = document.createElement("a");
+    outside.href = URL;
+    document.body.append(outside);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, shiftKey: true });
+    outside.addEventListener("click", (e) => e.preventDefault());
+    outside.dispatchEvent(event);
+    for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
+    expect(s.calls).toEqual([]);
+    outside.remove();
+    s.teardown();
+  });
+
+  it("takes nothing once uninstalled", async () => {
+    const s = scope(URL, owned("open"));
+    s.teardown();
+    document.body.append(s.root);
+    await click(s.root, { shiftKey: true });
+    expect(s.calls).toEqual([]);
+    s.root.remove();
   });
 });
