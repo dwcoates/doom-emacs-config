@@ -124,15 +124,15 @@ func (r *resolver) resolveArms(rc rowContext) (arms, judged map[ids.WorkspaceID]
 				})
 		}
 		s.restoreViewed(rec)
-		if arm, mirrored := r.state.incumbentArms[rec.ID]; mirrored {
-			// A ROW THIS JOINING DAEMON HAS NOT ADOPTED YET DRAWS THE
-			// INCUMBENT'S OWN ARM. This daemon's footer state for the workspace
-			// is frozen at what it last read, since the incumbent still serves
-			// it; the incumbent's arm is its own footer's resolved claim, checked
-			// there against that footer (statusArm), so the projection is
-			// skipped here rather than run against a frozen footer.
-			rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace not yet adopted",
-				dlog.Context{"arm": arm, "source": "incumbent"})
+		if arm, source, held := r.heldArm(rec.ID, s); held {
+			// A ROW THIS JOINING DAEMON HAS NOT ADOPTED YET, OR WHOSE FACTS ARE
+			// NOT SETTLED, DRAWS THE INCUMBENT'S ARM (carry.go), for its
+			// visibility as for its status. The incumbent's arm is its own
+			// footer's resolved claim, checked there (statusArm), so the
+			// projection is skipped here rather than run against facts this
+			// daemon does not hold yet.
+			rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace whose facts this daemon does not hold",
+				dlog.Context{"arm": arm, "source": source})
 			arms[rec.ID], judged[rec.ID] = arm, arm
 			k.arm, k.judged, k.armKey, k.armKept = arm, arm, key, true
 			continue

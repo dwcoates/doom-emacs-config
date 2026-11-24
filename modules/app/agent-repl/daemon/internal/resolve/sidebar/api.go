@@ -296,6 +296,15 @@ type Resolver interface {
 	// workspaces whose standing is not_yet_adopted, so a row the daemon owns
 	// is never drawn from another daemon.
 	SetIncumbentArms(arms map[ids.WorkspaceID]string)
+	// SettleFacts declares WS's own facts in: its adoption has taken its
+	// session's facts, its merges and its cold gate, and started whatever it
+	// starts. A row the mirror let go of keeps drawing the incumbent's last
+	// arm until then (carry.go), and until no bring-up of it stands. The
+	// rollout's adoption is the one caller, on every path past ownership.
+	SettleFacts(ws ids.WorkspaceID)
+	// SettleAllFacts is SettleFacts for every workspace: the takeover has
+	// settled, so every row this daemon serves is drawn from its own facts.
+	SettleAllFacts()
 	// NotifyNextPublication tells FN, once, the revision of the next roster
 	// this resolver publishes (frontend.v1.RosterPush.revision): the roster
 	// mirror marks with it the first roster a successor publishes after the

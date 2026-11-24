@@ -2044,7 +2044,9 @@ func TestARowNotYetAdoptedDrawsTheIncumbentsArm(t *testing.T) {
 	tests := []struct {
 		name string
 		// mirrors are the successive incumbent arm maps installed.
-		mirrors    []map[ids.WorkspaceID]string
+		mirrors []map[ids.WorkspaceID]string
+		// settle declares the row's facts in after the mirrors.
+		settle     bool
 		wantStatus string
 		// wantDurable is how many status changes reach the durable sink.
 		wantDurable int
@@ -2060,10 +2062,18 @@ func TestARowNotYetAdoptedDrawsTheIncumbentsArm(t *testing.T) {
 			wantStatus: "ready",
 		},
 		{
-			name:        "a row adopted after the mirror is its own again",
+			// THE ROW IS ITS OWN AGAIN ONCE ITS FACTS ARE SETTLED (carry.go):
+			// until then it keeps the incumbent's arm.
+			name:        "a row adopted after the mirror is its own again once its facts are settled",
 			mirrors:     []map[ids.WorkspaceID]string{{theWS: "thinking"}, nil},
+			settle:      true,
 			wantStatus:  "ready",
 			wantDurable: 1,
+		},
+		{
+			name:       "a row adopted after the mirror keeps the incumbent's arm until its facts are settled",
+			mirrors:    []map[ids.WorkspaceID]string{{theWS: "thinking"}, nil},
+			wantStatus: "thinking",
 		},
 	}
 	for _, tc := range tests {
@@ -2074,6 +2084,9 @@ func TestARowNotYetAdoptedDrawsTheIncumbentsArm(t *testing.T) {
 			// Act
 			for _, arms := range tc.mirrors {
 				r.SetIncumbentArms(arms)
+			}
+			if tc.settle {
+				r.SettleFacts(theWS)
 			}
 
 			// Assert

@@ -1052,6 +1052,11 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// THE ROW IS THIS DAEMON'S OWN FROM HERE ON: it stops drawing the
 	// incumbent's status.
 	c.mirrorOwnershipChanged()
+	// BUT ITS OWN ARM WAITS FOR ITS FACTS: the roster keeps the incumbent's
+	// arm for the row until the rest of this adoption has taken its merges,
+	// raised its cold gate and started whatever it starts, on every path out
+	// of here (sidebar carry.go).
+	defer c.deps.FactsSettled(ws)
 
 	// THE ADOPTION NAMES ITS PLACE IN THE ORDER: its rank, and how many
 	// ordered adoptions reached ownership before it and with it.
