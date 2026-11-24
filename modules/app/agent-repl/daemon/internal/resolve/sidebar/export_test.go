@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -47,7 +48,7 @@ var OpenCount = openCount
 // that has rendered nothing yet, as a daemon that just booted or joined is
 // until its first render.
 func UnrenderedHolding(workspaces ...wsm.Workspace) Resolver {
-	c := &core{state: newRosterState()}
+	c := &core{state: newRosterState(), log: dlog.NewTestSurfaces()}
 	c.initQueue()
 	c.state.reg.Workspaces = workspaces
 	c.state.index = indexRegistry(c.state.reg)
