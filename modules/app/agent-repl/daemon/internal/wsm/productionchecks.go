@@ -259,16 +259,16 @@ func (s *store) DropProductionCheck(ctx context.Context, repo RepoKey, at time.T
 	if err != nil {
 		return false, err
 	}
-	var n int64
+	var dropped bool
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM production_checks WHERE repo_key = ? AND deploy_at = ? AND due_at IS NULL AND decided_at IS NULL`, string(key), nanos(at))
 		if err != nil {
 			return err
 		}
-		n, err = res.RowsAffected()
+		dropped, err = touchedRow(res)
 		return err
 	})
-	return n > 0, err
+	return dropped, err
 }
 
 // MarkProductionChecksDue records that the landing's deploy ended AT: every
@@ -391,16 +391,16 @@ func (s *store) productionCheckWrite(ctx context.Context, op string, repo RepoKe
 	if err != nil {
 		return false, err
 	}
-	var n int64
+	var marked bool
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, query, append(args, string(key), nanos(until))...)
 		if err != nil {
 			return err
 		}
-		n, err = res.RowsAffected()
+		marked, err = touchedRow(res)
 		return err
 	})
-	return n == 1, err
+	return marked, err
 }
 
 // DecideProductionCheck records REPO's decision on the told check ending
@@ -430,9 +430,9 @@ func (s *store) DecideProductionCheck(ctx context.Context, repo RepoKey, until, 
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil {
+		if touched, err := touchedRow(res); err != nil {
 			return err
-		} else if n != 1 {
+		} else if !touched {
 			return ErrNoProductionCheckOwed
 		}
 		named := map[string]bool{}
@@ -466,9 +466,9 @@ func (s *store) recordUnanswered(ctx context.Context, op string, key RepoKey, un
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil {
+		if touched, err := touchedRow(res); err != nil {
 			return err
-		} else if n != 1 {
+		} else if !touched {
 			return ErrNoProductionCheckOwed
 		}
 		return nil
@@ -498,23 +498,27 @@ func (s *store) OwnedSites(ctx context.Context, repo RepoKey) (map[string]Worksp
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]WorkspaceID{}
+	type owned struct {
+		site string
+		ws   WorkspaceID
+	}
+	var rows []owned
 	err = s.read(ctx, op, fields, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx, `SELECT site, workspace_id FROM production_child_sites WHERE repo_key = ?`, string(key))
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var site, ws string
-			if err := rows.Scan(&site, &ws); err != nil {
-				return err
-			}
-			out[site] = WorkspaceID(ws)
-		}
-		return rows.Err()
+		var err error
+		rows, err = listRows(ctx, s.q(ctx), `SELECT site, workspace_id FROM production_child_sites WHERE repo_key = ?`, func(row interface{ Scan(...any) error }) (owned, error) {
+			var o owned
+			return o, row.Scan(&o.site, &o.ws)
+		}, string(key))
+		return err
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]WorkspaceID, len(rows))
+	for _, o := range rows {
+		out[o.site] = o.ws
+	}
+	return out, nil
 }
 
 // FixedSites answers every site of REPO a child owned when it landed, the
@@ -528,22 +532,19 @@ func (s *store) FixedSites(ctx context.Context, repo RepoKey) ([]FixedSite, erro
 	}
 	var out []FixedSite
 	err = s.read(ctx, op, fields, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx,
-			`SELECT site, workspace_id, MAX(landed_at) FROM production_fixed_sites WHERE repo_key = ? GROUP BY site ORDER BY site`, string(key))
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var f FixedSite
-			var landed int64
-			if err := rows.Scan(&f.Site, &f.Workspace, &landed); err != nil {
-				return err
-			}
-			f.LandedAt = fromNanos(landed)
-			out = append(out, f)
-		}
-		return rows.Err()
+		var err error
+		out, err = listRows(ctx, s.q(ctx),
+			`SELECT site, workspace_id, MAX(landed_at) FROM production_fixed_sites WHERE repo_key = ? GROUP BY site ORDER BY site`,
+			func(row interface{ Scan(...any) error }) (FixedSite, error) {
+				var f FixedSite
+				var landed int64
+				if err := row.Scan(&f.Site, &f.Workspace, &landed); err != nil {
+					return FixedSite{}, err
+				}
+				f.LandedAt = fromNanos(landed)
+				return f, nil
+			}, string(key))
+		return err
 	})
 	return out, err
 }
@@ -604,20 +605,10 @@ func (s *store) ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]Produ
 	}
 	var out []ProductionChild
 	err = s.read(ctx, op, fields, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx,
-			`SELECT `+productionChildColumns+` FROM production_children WHERE repo_key = ? AND ending = '' ORDER BY dispatched_at, ordinal`, string(key))
+		var err error
+		out, err = listRows(ctx, s.q(ctx),
+			`SELECT `+productionChildColumns+` FROM production_children WHERE repo_key = ? AND ending = '' ORDER BY dispatched_at, ordinal`, scanProductionChild, string(key))
 		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			c, err := scanProductionChild(rows)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			out = append(out, c)
-		}
-		if err := rows.Close(); err != nil {
 			return err
 		}
 		for i := range out {
@@ -634,20 +625,10 @@ func (s *store) ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]Produ
 
 // childSites answers the sites WS owns, in order.
 func (s *store) childSites(ctx context.Context, ws WorkspaceID) ([]string, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT site FROM production_child_sites WHERE workspace_id = ? ORDER BY site`, string(ws))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
+	return listRows(ctx, s.q(ctx), `SELECT site FROM production_child_sites WHERE workspace_id = ? ORDER BY site`, func(row interface{ Scan(...any) error }) (string, error) {
 		var site string
-		if err := rows.Scan(&site); err != nil {
-			return nil, err
-		}
-		out = append(out, site)
-	}
-	return out, rows.Err()
+		return site, row.Scan(&site)
+	}, string(ws))
 }
 
 // FoldProductionChild moves every site FOLDED owns to SURVIVING and ends
@@ -700,7 +681,7 @@ func (s *store) EndProductionChild(ctx context.Context, ws WorkspaceID, how Prod
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil || n != 1 {
+		if touched, err := touchedRow(res); err != nil || !touched {
 			return err
 		}
 		ended = true
