@@ -514,6 +514,51 @@ func TestTheRelaunchHoldsStartsFromTheStandDownThroughTheResume(t *testing.T) {
 	}
 }
 
+// TestARelaunchRaisesTheReplacementFromTheStandDownThroughTheResume pins the
+// window in which the old shim's dead link is the relaunch's own step: raised
+// before the stand-down, lowered only after the resume.
+func TestARelaunchRaisesTheReplacementFromTheStandDownThroughTheResume(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if err := runRelaunch(t, h, ws, ReasonRestartVerb); err != nil {
+		t.Fatalf("bounce: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	raised, kill := indexOf(taken, "replacing:true"), indexOf(taken, "kill_session")
+	resume, lowered := indexOf(taken, "resume"), indexOf(taken, "replacing:false")
+	if raised < 0 || lowered < 0 || !(raised < kill && kill < resume && resume < lowered) {
+		t.Fatalf("steps = %v, want the replacement raised before the stand-down and lowered after the resume", taken)
+	}
+}
+
+func TestEveryFailedRelaunchLowersTheReplacement(t *testing.T) {
+	for _, tt := range failedRelaunches {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tt.arrange(t, h, ws)
+
+			// Act
+			err := bounceAndWait(t, h, ws, ReasonRestartVerb, false)
+
+			// Assert
+			if err == nil {
+				t.Fatal("the bounce succeeded; the case is a failure path")
+			}
+			taken := h.order.Taken()
+			if raised, lowered := countOf(taken, "replacing:true"), countOf(taken, "replacing:false"); raised != lowered {
+				t.Fatalf("steps = %v, want every raised replacement lowered", taken)
+			}
+		})
+	}
+}
+
 func TestARelaunchOfAClosedWorkspaceIsDroppedBeforeAnythingIsSpawned(t *testing.T) {
 	// Arrange: the workspace closed while its bounce waited.
 	h := newHarness(t)

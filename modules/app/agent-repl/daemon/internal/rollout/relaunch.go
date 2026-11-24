@@ -288,6 +288,12 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 		if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
 			return nil, Resumed{}, err
 		}
+		// A PLANNED REPLACEMENT CHANGES NO STATUS (2026-11-23): from the
+		// stand-down until this relaunch ends, the old shim's dead link is
+		// this daemon's own step, never a fault. Lowered however the
+		// relaunch ends, so a failed one draws what its failure recorded.
+		c.deps.Replacing(ws, true)
+		defer c.deps.Replacing(ws, false)
 		stoodDown := c.deps.Clock.Now()
 		if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
 			c.retirePrelaunch(ctx, fresh, reason, fields)

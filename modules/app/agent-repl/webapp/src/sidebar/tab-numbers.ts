@@ -66,9 +66,11 @@ export function drawTabNumberSlot(): HTMLElement {
 /**
  * Fill every number slot under ROOT from NUMBERS, by the slot's row. A row
  * whose workspace has no drawn tab (one still being opened) leaves its slot
- * empty, holding its width so the names stay aligned.
+ * empty, holding its width so the names stay aligned. Answers how many slots
+ * it changed.
  */
-export function paintTabNumbers(root: ParentNode, numbers: ReadonlyMap<string, number>): void {
+export function paintTabNumbers(root: ParentNode, numbers: ReadonlyMap<string, number>): number {
+  let painted = 0;
   for (const { slot, id } of rowSlots(root, TAB_NUMBER_CLASS, "sidebar.tab-numbers.orphan-slot", { slots: numbers.size })) {
     const number = numbers.get(id);
     const text = number === undefined ? "" : String(number);
@@ -76,5 +78,7 @@ export function paintTabNumbers(root: ParentNode, numbers: ReadonlyMap<string, n
     slot.textContent = text;
     if (number === undefined) slot.removeAttribute(TAB_NUMBER_ATTRIBUTE);
     else slot.setAttribute(TAB_NUMBER_ATTRIBUTE, text);
+    painted += 1;
   }
+  return painted;
 }

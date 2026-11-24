@@ -94,7 +94,7 @@ import {
   REPOSITORY_BLOCK_CLASS,
   REPOSITORY_DIVIDER_CLASS,
 } from "./row.js";
-import { drawRosterOpenCount, showWorkspaceCountParenthetical, statusCountOf } from "./open-count.js";
+import { drawRosterOpenCount, showWorkspaceCountParenthetical, statusCountOf, WORKSPACE_COUNT_CLASS } from "./open-count.js";
 
 /** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";
@@ -193,7 +193,6 @@ export function drawRosterSubsection(
   const bucket = subsectionBucket(u, path);
   const header = requireMessage(u.header, `${path}.header`);
   const name = requireMessage(header.label, `${path}.header.label`).text;
-  const count = drawRosterOpenCount(requireMessage(header.count, `${path}.header.count`), `${path}.header.count`);
   const element = document.createElement("div");
   element.className = SUBSECTION_CLASS;
   stampBucket(element, bucket);
@@ -204,18 +203,7 @@ export function drawRosterSubsection(
   label.className = SUBSECTION_LABEL_CLASS;
   label.textContent = name;
   paintSubsectionWork(label, u, path);
-  // A count of no workspaces draws nothing; any other count is drawn.
-  const shown =
-    count.workspaces === 0
-      ? null
-      : showWorkspaceCountParenthetical(
-          count.workspaces,
-          statusCountOf(
-            pathedOpenRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`)
-              .flatMap(({ row, path: rowPath }) => familyRows(row, rowPath))
-              .map(({ row, path: rowPath }) => ({ row: row.row, path: `${rowPath}.row` })),
-          ),
-        );
+  const shown = drawSubsectionCount(u, path);
   if (bucket.case !== "named") throw new Error("invariant: a drawn subsection is a named one");
   const id = bucket.id;
   const foldKey = subsectionFoldKey(id);
@@ -251,6 +239,43 @@ export function drawRosterSubsection(
   element.appendChild(rows);
   if (rows.children.length === 0) element.setAttribute(EMPTY_SUBSECTION_ATTRIBUTE, "");
   return { element, rows };
+}
+
+/**
+ * The count subsection U's header draws, or null for a count of no
+ * workspaces, which draws nothing: the daemon's count, with how many of its
+ * rows are in a synchronous merge (`statusCountOf`).
+ */
+function drawSubsectionCount(u: RosterSubsection, path: string): HTMLElement | null {
+  const header = requireMessage(u.header, `${path}.header`);
+  const count = drawRosterOpenCount(requireMessage(header.count, `${path}.header.count`), `${path}.header.count`);
+  if (count.workspaces === 0) return null;
+  return showWorkspaceCountParenthetical(
+    count.workspaces,
+    statusCountOf(
+      pathedOpenRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`)
+        .flatMap(({ row, path: rowPath }) => familyRows(row, rowPath))
+        .map(({ row, path: rowPath }) => ({ row: row.row, path: `${rowPath}.row` })),
+    ),
+  );
+}
+
+/**
+ * Repaint on ELEMENT, the drawn subsection U, the count its header draws
+ * (`drawSubsectionCount`), in place: a row patch keeps the subsection's box
+ * while its rows, and so its count, change. Answers whether the count drawn
+ * changed; an unchanged one is left untouched.
+ */
+export function paintSubsectionCount(element: HTMLElement, u: RosterSubsection, path: string): boolean {
+  const head = element.querySelector<HTMLElement>(`:scope > .${SUBSECTION_HEAD_CLASS}`);
+  if (head === null) throw new Error(`invariant: ${path} is drawn with no head`);
+  const drawn = head.querySelector<HTMLElement>(`:scope > .${WORKSPACE_COUNT_CLASS}`);
+  const next = drawSubsectionCount(u, path);
+  if (drawn === null && next === null) return false;
+  if (drawn !== null && next !== null && drawn.isEqualNode(next)) return false;
+  drawn?.remove();
+  if (next !== null) head.insertBefore(next, head.querySelector(":scope > .sb-subsection-delete"));
+  return true;
 }
 
 /**

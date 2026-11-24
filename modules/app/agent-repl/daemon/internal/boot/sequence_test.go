@@ -543,6 +543,56 @@ func TestAJoiningDaemonRunsTheJoin(t *testing.T) {
 	}
 }
 
+// TestAJoiningDaemonTellsTheRosterTheMergeQueuesBeforeItJoins pins that a
+// successor's roster holds every merge queue before its first adoption, so an
+// adopted row is never projected without its merge.
+func TestAJoiningDaemonTellsTheRosterTheMergeQueuesBeforeItJoins(t *testing.T) {
+	cases := []struct {
+		name          string
+		joining       string
+		wantPublished int
+		wantAtJoin    int
+	}{
+		{name: "a joining daemon publishes the queues before the join", joining: "127.0.0.1:41111", wantPublished: 1, wantAtJoin: 1},
+		{name: "an incumbent publishes none at boot", joining: "", wantPublished: 0, wantAtJoin: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = tc.joining })
+
+			// Act.
+			if _, err := h.seq.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			// Assert.
+			if got := h.merge.publications(); got != tc.wantPublished || h.rollout.publishedAtJoin != tc.wantAtJoin {
+				t.Fatalf("publications = %d (%d at the join), want %d (%d)", got, h.rollout.publishedAtJoin, tc.wantPublished, tc.wantAtJoin)
+			}
+		})
+	}
+}
+
+// TestAFailedRosterQueuePublicationFailsTheJoin pins that a successor whose
+// roster could not learn the queues joins nothing: it would project its
+// adopted rows without their merges.
+func TestAFailedRosterQueuePublicationFailsTheJoin(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(d *Deps, h *harness) {
+		d.JoiningAddress = "127.0.0.1:41111"
+		h.merge.publishErr = errBoom
+	})
+
+	// Act.
+	_, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errBoom) || h.rollout.joinCalls() != 0 {
+		t.Fatalf("Run error = %v with %d joins, want it to wrap %v and no join", err, h.rollout.joinCalls(), errBoom)
+	}
+}
+
 // TestAnIncumbentDoesNotJoin pins the other side: a daemon nobody spawned owns
 // its workspaces already and has no incumbent to take them from.
 func TestAnIncumbentDoesNotJoin(t *testing.T) {

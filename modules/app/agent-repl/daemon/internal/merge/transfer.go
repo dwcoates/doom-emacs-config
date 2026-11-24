@@ -597,11 +597,7 @@ func (o *orchestrator) ReviewQueues(ctx context.Context) error {
 		o.deps.Log.Global().Error(op, "could not read the merge queues to review them", dlog.Context{"error": err.Error()})
 		return fmt.Errorf("merge: review the queues: %w", err)
 	}
-	repos := make([]string, 0, len(queues))
-	for repo := range queues {
-		repos = append(repos, string(repo))
-	}
-	sort.Strings(repos)
+	repos := ids.Strings(queueRepos(queues))
 	// A MERGE NO HANDOVER GAVE THIS DAEMON IS TAKEN HERE. A workspace with no
 	// session and no serving row of the outgoing daemon's (a hidden merge
 	// workspace) is never transferred, so its merge ran on there until that

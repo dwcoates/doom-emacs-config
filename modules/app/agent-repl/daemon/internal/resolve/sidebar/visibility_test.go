@@ -139,6 +139,21 @@ func TestAFoldedUnviewedWorkspaceStaysVisibleWhileItsTabOpens(t *testing.T) {
 	}
 }
 
+func TestAFoldedReadWorkspaceStaysNotVisibleWhileItsTabOpens(t *testing.T) {
+	// Arrange: an idle workspace whose result is read, under a fold.
+	r := arrange(t)
+	r.SetRegistry(foldedOne())
+	liveRegistry(r, foldedOne())
+
+	// Act
+	r.SetOpening(theWS, true)
+
+	// Assert: the open shows nothing the fold hides.
+	if got := visibilities(t, r)[string(theWS)]; got != "not_visible" {
+		t.Fatalf("visibility = %s, want not_visible while the tab opens", got)
+	}
+}
+
 func TestAFoldedStartingWorkspaceIsVisible(t *testing.T) {
 	// Arrange
 	r := arrange(t)

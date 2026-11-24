@@ -1236,3 +1236,89 @@ func TestRecoverAsksNoParkForAnAdmittedMerge(t *testing.T) {
 		t.Fatalf("parks = %+v, want none for an admitted merge", parks)
 	}
 }
+
+// TestPublishRosterQueuesTellsTheRosterEveryQueueAndRecoversNothing pins what
+// a joining daemon tells its roster before it adopts: each repository's queue
+// as the store holds it, with no merge admitted or resumed.
+func TestPublishRosterQueuesTellsTheRosterEveryQueueAndRecoversNothing(t *testing.T) {
+	// Arrange: two merges queued.
+	h := newHarness(t)
+	h.register("ws-2", "ws-two")
+	for _, ws := range []ids.WorkspaceID{"ws-1", "ws-2"} {
+		enqueueWorkspace(t, h, ws)
+	}
+	before, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+
+	// Act.
+	if err := h.o.PublishRosterQueues(context.Background()); err != nil {
+		t.Fatalf("PublishRosterQueues: %v", err)
+	}
+
+	// Assert.
+	after, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	told := h.sidebar.queueOf(h.repoKey()).Workspaces
+	if !slices.Equal(told, []ids.WorkspaceID{"ws-1", "ws-2"}) || !reflect.DeepEqual(before, after) {
+		t.Fatalf("roster told %v, queue %+v -> %+v; want both merges told and the queue untouched", told, before, after)
+	}
+}
+
+// TestPublishRosterQueuesFailsLoudlyOnAFailedRead pins the error path: the
+// caller is told, the canonical log records it, and the roster is told nothing.
+func TestPublishRosterQueuesFailsLoudlyOnAFailedRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueueWorkspace(t, h, "ws-1")
+	h.db.allQueuesErr = errors.New("disk gone")
+	toldBefore := h.sidebar.toldCount()
+
+	// Act.
+	err := h.o.PublishRosterQueues(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "disk gone") {
+		t.Fatalf("err = %v, want the read's failure", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.roster_queues"}); !ok {
+		t.Fatalf("no ERROR record of the failed read")
+	}
+	if h.sidebar.toldCount() != toldBefore {
+		t.Fatalf("the roster was told %d queues after a failed read", h.sidebar.toldCount()-toldBefore)
+	}
+}
+
+// TestQueueReposAnswersEveryRepositoryInKeyOrder pins the one order every walk
+// over all the merge queues takes.
+func TestQueueReposAnswersEveryRepositoryInKeyOrder(t *testing.T) {
+	cases := []struct {
+		name   string
+		queues map[wsm.RepoKey][]wsm.MergeQueueEntry
+		want   []wsm.RepoKey
+	}{
+		{name: "no queue answers none", queues: nil, want: []wsm.RepoKey{}},
+		{name: "every repository in key order", queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/b": nil, "/a": {{Workspace: "ws-1"}}, "/c": nil}, want: []wsm.RepoKey{"/a", "/b", "/c"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := queueRepos(tc.queues)
+
+			// Assert
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("queueRepos = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEveryWalkOverAllTheQueuesTakesQueueRepos pins that no walk over all
+// the merge queues builds its own list of their repositories: queueRepos is
+// the one range over the map in the package.
+func TestEveryWalkOverAllTheQueuesTakesQueueRepos(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "for repo := range queues {")
+
+	// Assert
+	if !slices.Equal(sites, []string{"recover.go"}) {
+		t.Fatalf("ranges over all the queues in %v, want only queueRepos's in recover.go", sites)
+	}
+}

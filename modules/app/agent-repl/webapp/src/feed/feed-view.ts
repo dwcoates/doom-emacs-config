@@ -35,6 +35,7 @@
  * the rest of the feed goes on working — a feed that blanks itself because one
  * card was unreadable would lose the reader everything, including the evidence.
  */
+import { sameOptional } from "../rpc/optional-equal.js";
 import { drawFeedEarlierSteps } from "./rows/earlier-steps.js";
 import {
   FEED_LOAD_MORE_LABEL,
@@ -2416,8 +2417,7 @@ function withUndrawnFactsOf(row: FeedRow, from: FeedRow): FeedRow {
 
 /** Whether rows A and B state the same hover stamp. */
 function sameHover(a: FeedRow, b: FeedRow): boolean {
-  if (a.hover === undefined || b.hover === undefined) return a.hover === b.hover;
-  return equals(FeedHoverStampSchema, a.hover, b.hover);
+  return sameOptional(FeedHoverStampSchema, a.hover, b.hover);
 }
 
 /** Whether this row's arm is a bubble — a sub-feed with a collapsed head. */

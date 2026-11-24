@@ -3229,3 +3229,51 @@ func TestAMidWorkRefusalIsRecordedAtInfoNotAsAFailure(t *testing.T) {
 		}
 	}
 }
+
+// writeDaemonAddrOnce writes daemon.addr once: a call after a success writes
+// nothing, and a failed write records nothing, so the next call writes.
+func TestDaemonAddrIsWrittenOnce(t *testing.T) {
+	errFull := errors.New("disk full")
+	cases := []struct {
+		name       string
+		answers    []error
+		wantWrote  []bool
+		wantErrs   []error
+		wantWrites int
+	}{
+		{name: "the first write writes", answers: []error{nil}, wantWrote: []bool{true}, wantErrs: []error{nil}, wantWrites: 1},
+		{name: "a write after a success writes nothing", answers: []error{nil, nil}, wantWrote: []bool{true, false}, wantErrs: []error{nil, nil}, wantWrites: 1},
+		{name: "a failed write leaves the next one to write", answers: []error{errFull, nil}, wantWrote: []bool{false, true}, wantErrs: []error{errFull, nil}, wantWrites: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			writes := 0
+			h := newHarness(t, func(d *Deps) {
+				d.WriteDaemonAddr = func(context.Context) error {
+					err := tc.answers[writes]
+					writes++
+					return err
+				}
+			})
+
+			// Act
+			var wrote []bool
+			var errs []error
+			for range tc.answers {
+				w, err := h.c.writeDaemonAddrOnce(context.Background(), nil)
+				wrote, errs = append(wrote, w), append(errs, err)
+			}
+
+			// Assert
+			if !slices.Equal(wrote, tc.wantWrote) || writes != tc.wantWrites {
+				t.Fatalf("wrote %v in %d writes, want %v in %d", wrote, writes, tc.wantWrote, tc.wantWrites)
+			}
+			for i, err := range errs {
+				if !errors.Is(err, tc.wantErrs[i]) {
+					t.Fatalf("call %d answered %v, want %v", i, err, tc.wantErrs[i])
+				}
+			}
+		})
+	}
+}

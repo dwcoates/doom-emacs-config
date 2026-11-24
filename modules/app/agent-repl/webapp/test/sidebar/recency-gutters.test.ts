@@ -148,6 +148,25 @@ describe("paintRecencyGutters", () => {
     expect([a.hasAttribute(RECENCY_ATTRIBUTE), a.hasAttribute(RECENCY_PRESSES_ATTRIBUTE)]).toEqual([false, false]);
   });
 
+  it.each([
+    { name: "counts each slot it changes", first: new Map(), next: new Map([["a", { direction: "older" as const, presses: 3 }]]), want: 1 },
+    { name: "counts no slot already standing as the gutter says", first: new Map([["a", { direction: "older" as const, presses: 3 }]]), next: new Map([["a", { direction: "older" as const, presses: 3 }]]), want: 0 },
+    { name: "counts a slot whose presses alone changed", first: new Map([["a", { direction: "older" as const, presses: 3 }]]), next: new Map([["a", { direction: "older" as const, presses: 4 }]]), want: 1 },
+    { name: "counts a slot it clears", first: new Map([["a", { direction: "older" as const, presses: 3 }]]), next: new Map(), want: 1 },
+    { name: "counts no bare slot left bare", first: new Map(), next: new Map(), want: 0 },
+  ])("$name", ({ first, next, want }) => {
+    // Arrange
+    const root = document.createElement("div");
+    slotFor(root, "a");
+    paintRecencyGutters(root, first);
+
+    // Act
+    const painted = paintRecencyGutters(root, next);
+
+    // Assert
+    expect(painted).toBe(want);
+  });
+
   it("refuses a slot outside any roster row, logging why", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
@@ -155,7 +174,7 @@ describe("paintRecencyGutters", () => {
     root.appendChild(drawRecencyGutterSlot());
 
     // Act
-    const paint = (): void => paintRecencyGutters(root, new Map());
+    const paint = (): number => paintRecencyGutters(root, new Map());
 
     // Assert
     expect(paint).toThrow(/outside any roster row/);

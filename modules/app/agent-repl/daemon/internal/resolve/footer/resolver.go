@@ -906,6 +906,13 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
+// SetReplacing raises, or lowers, the fact that a relaunch is replacing the
+// session's shim.
+func (r *resolver) SetReplacing(ws ids.WorkspaceID, replacing bool) {
+	r.mutate(ws, "daemon.footer.set_replacing", logsite.Msg("the footer took whether a relaunch is replacing the session's shim"),
+		dlog.Context{"replacing": replacing}, func(s *wsState) { s.replacing = replacing })
+}
+
 // SetUpdating raises, or lowers, the fact that a final response is being
 // rewritten from words highlighted in it.
 func (r *resolver) SetUpdating(ws ids.WorkspaceID, updating bool) {

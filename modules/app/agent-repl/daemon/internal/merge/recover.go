@@ -63,13 +63,11 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	repos := make([]wsm.RepoKey, 0, len(queues))
+	repos := queueRepos(queues)
 	total := 0
-	for repo := range queues {
-		repos = append(repos, repo)
+	for _, repo := range repos {
 		total += len(queues[repo])
 	}
-	sort.Slice(repos, func(i, j int) bool { return repos[i] < repos[j] })
 	// THE RUN LOG CARRIES THE RECOVERY ITSELF. Each merge's own fate is a
 	// workspace-scoped record, but "this boot reconciled the merge queues" is a
 	// fact about the restart, and the durable run log is where each daemon
@@ -776,4 +774,34 @@ func (o *orchestrator) sweepOrphanedState(ctx context.Context) {
 		o.deps.Log.Global().Info(op, "swept the merge state no queue entry names any more", dlog.Context{
 			"progress_records": swept.ProgressRecords, "rounds_closed": len(swept.ClosedRounds), "leases_released": len(swept.ReleasedLeases)})
 	}
+}
+
+// PublishRosterQueues implements Orchestrator.
+func (o *orchestrator) PublishRosterQueues(ctx context.Context) error {
+	queues, err := o.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error("daemon.merge.roster_queues", "could not read the merge queues, so the roster is not told them before adoption",
+			dlog.Context{"error": err.Error()})
+		return fmt.Errorf("merge: read the merge queues for the roster: %w", err)
+	}
+	repos := queueRepos(queues)
+	for _, repo := range repos {
+		o.publishRosterQueue(ctx, repo)
+	}
+	o.publishOffQueue(ctx)
+	o.deps.Log.Global().Info("daemon.merge.roster_queues", "told the roster every merge queue before adopting any workspace",
+		dlog.Context{"repositories": len(repos)})
+	return nil
+}
+
+// queueRepos answers the repositories QUEUES holds, in key order: the one
+// order every walk over all the merge queues takes (Recover,
+// PublishRosterQueues).
+func queueRepos(queues map[wsm.RepoKey][]wsm.MergeQueueEntry) []wsm.RepoKey {
+	repos := make([]wsm.RepoKey, 0, len(queues))
+	for repo := range queues {
+		repos = append(repos, repo)
+	}
+	sort.Slice(repos, func(i, j int) bool { return repos[i] < repos[j] })
+	return repos
 }

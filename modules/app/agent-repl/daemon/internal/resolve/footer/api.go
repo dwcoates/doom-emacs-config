@@ -462,6 +462,13 @@ type Resolver interface {
 	// SetBringingUp. On a route never seen it is the bring-up window
 	// (ladder.AwaitingBringUp): `agent_repl_fault · starting`.
 	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
+	// SetReplacing raises (true) or lowers (false) the fact that a relaunch
+	// is replacing the workspace's shim with a new one (rollout's relaunch,
+	// from before the old shim's stand-down until the new one's resume
+	// answered), beside the roster's own SetReplacing. While it stands, the
+	// link the stand-down put down is no fault: the session carries on in the
+	// replacement, so only a recorded fault claims agent_repl_fault.
+	SetReplacing(ws ids.WorkspaceID, replacing bool)
 	// SetUpdating raises (true) or lowers (false) the fact that a final
 	// response of the workspace is being rewritten from words highlighted in
 	// it (revision.Reviser): the strip reads `updating`, on the thinking rung,

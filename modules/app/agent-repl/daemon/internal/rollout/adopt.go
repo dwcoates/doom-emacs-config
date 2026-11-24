@@ -917,19 +917,33 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		}
 		dialErr = c.dialAdopted(ctx, ws, parked, fields)
 	}
-	// A MID-WORK ADOPTION LETS NO HELD PROMPT GO BEFORE IT KNOWS THE TURN IN
-	// FLIGHT: until the adopted shim's re-announcement is taken up, the
-	// watcher answers no turn for a turn the shim is running, and the drain
-	// below would start a second turn beside it. A shim that never
-	// re-announces is refused, and the incumbent moves it at freeness.
-	if dial && dialErr == nil && carried && carry.MidWork && parked == nil {
+	// EVERY DIALED ADOPTION WAITS FOR THE SESSION'S FACTS before the
+	// workspace becomes this daemon's (2026-11-23). Until the adopted shim's
+	// re-announcement is taken up, the watcher answers no turn for a turn the
+	// shim is running, and the roster holds neither the session's facts nor
+	// its live work: it drew an adopted row `done` for a second before its
+	// live work made it `idle_async` again. The watcher releases the wait only
+	// once every view stands on the facts (sessionwatcher.factsInLocked), so
+	// from the ownership below the row is drawn from what this daemon has read.
+	//
+	// A MID-WORK ADOPTION whose shim never re-announces is refused, and the
+	// incumbent moves it at freeness: the drain below would otherwise start a
+	// second turn beside the one running. A free one is already this daemon's
+	// to serve, so a late re-announcement is recorded at ERROR and the
+	// adoption completes; its row is drawn from its facts when they come.
+	if dial && dialErr == nil && parked == nil {
 		facts, cancel := context.WithTimeout(ctx, c.deps.FactsBound)
 		err := c.deps.Shims.AwaitFacts(facts, ws)
 		cancel()
-		if err != nil {
+		factsFields := dlog.Merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String(), "mid_work": carried && carry.MidWork})
+		switch {
+		case err != nil && carried && carry.MidWork:
 			c.log.Info(opAdopt, "the adopted shim never re-announced its session facts; the mid-work adoption is refused",
-				dlog.WithCause(dlog.Merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
+				dlog.WithCause(factsFields, err))
 			return c.refuseAdopted(ctx, ws, "the adopted shim never re-announced its session facts within "+c.deps.FactsBound.String(), fields)
+		case err != nil:
+			c.log.Error(opAdopt, "the adopted shim did not re-announce its session facts within the bound; the free workspace is adopted without them, and its row is drawn from them when they come",
+				dlog.WithCause(factsFields, err))
 		}
 	}
 	// THE CARRIED QUEUE MEMORY IS INSTALLED BEFORE THE HOLD IS DRAINED: the
@@ -1285,7 +1299,10 @@ const advertiseRefusedBound = 30 * time.Second
 // an ERROR and nothing is retried. It once retried every failure every 25ms
 // forever.
 func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
-	err := c.deps.WriteDaemonAddr(ctx)
+	wrote, err := c.writeDaemonAddrOnce(ctx, fields)
+	if !wrote && err == nil {
+		return
+	}
 	if c.refusedStandingDown(err, fields) {
 		return
 	}
@@ -1836,15 +1853,43 @@ func (c *controller) takeOverOnClaim(ctx context.Context, awaited error, fields 
 		c.log.Debug(opAdopt, "the daemon's lifetime ended before the adoptions in flight were owned; daemon.addr is not written", dlog.WithCause(fields, err))
 		return
 	}
-	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
+	wrote, err := c.writeDaemonAddrOnce(ctx, fields)
+	if err != nil {
 		if c.refusedStandingDown(err, fields) {
 			return
 		}
 		c.log.Error(opAdopt, "daemon.addr could not be written under the held boot claim", dlog.WithCause(fields, err))
 		return
 	}
+	if !wrote {
+		return
+	}
 	c.log.Info(opAdopt, "the incumbent exited; wrote daemon.addr", fields)
 	c.becomeIncumbent(fields)
+}
+
+// writeDaemonAddrOnce writes daemon.addr unless a write already succeeded,
+// answering whether this call wrote it.
+//
+// daemon.addr IS WRITTEN ONCE (2026-11-24). The last joining adoption decides
+// at its ownership that it completes the set, and writes later; the takeover
+// writes once the incumbent exited and the adoptions in flight are owned. The
+// two could interleave and both write (merge gate 2026-11-24,
+// TestTheTakeoverDoesNotWaitForEveryRendezvous: two writes). The writes are
+// serialized here, and the one after a success writes nothing; a failed write
+// records nothing, so the other path still writes when it comes.
+func (c *controller) writeDaemonAddrOnce(ctx context.Context, fields dlog.Context) (bool, error) {
+	c.addrMu.Lock()
+	defer c.addrMu.Unlock()
+	if c.addrWritten {
+		c.log.Debug(opAdopt, "daemon.addr is already written; nothing is written again", fields)
+		return false, nil
+	}
+	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
+		return false, err
+	}
+	c.addrWritten = true
+	return true, nil
 }
 
 // beginClaimedLocked counts one adoption past its serving claim. The caller

@@ -193,10 +193,7 @@ func (o *orchestrator) standingMoved(ctx context.Context, serves bool) {
 		o.deps.Log.Global().Error(opStanding, "could not read the queues whose standing moved", dlog.Context{"serves": serves, "error": err.Error()})
 		return
 	}
-	repos := make([]wsm.RepoKey, 0, len(queues))
-	for repo := range queues {
-		repos = append(repos, repo)
-	}
+	repos := queueRepos(queues)
 	if !serves {
 		o.deps.Log.Global().Info(opStanding, "a handover holds every queue: running merges are suspended at their step and nothing is admitted", dlog.Context{"repos": len(repos)})
 		if err := o.suspendHeld(ctx, repos, suspendHandover); err != nil {

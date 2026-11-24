@@ -354,6 +354,13 @@ type Orchestrator interface {
 	// every merge that was queued but not started, in the order it was
 	// waiting in. It never silently abandons one.
 	Recover(ctx context.Context) error
+	// PublishRosterQueues states every repository's merge queue to the
+	// roster, as the store holds it, and the merges off their queues,
+	// recovering and admitting nothing. A JOINING daemon calls it before it
+	// adopts any workspace, so a row it adopts is never projected without its
+	// merge (a queued merge drawn `done` until the takeover settled, then
+	// `merge_queued` again, at the 2026-11-23 15:35 handover).
+	PublishRosterQueues(ctx context.Context) error
 	// SuspendForTransfer brings a workspace's merge to a stopping point for a
 	// handover's transfer and stops this daemon admitting any merge of it;
 	// the successor resumes it (AdoptWorkspace).

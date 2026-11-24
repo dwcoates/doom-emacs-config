@@ -300,7 +300,10 @@ func TestAMidWorkAdoptionAwaitsTheAdoptedFactsBeforeDrainingTheIntake(t *testing
 	}
 }
 
-func TestAnAdoptionAtFreenessDoesNotAwaitTheAdoptedFacts(t *testing.T) {
+// An adoption at freeness awaits the adopted facts too, before the views are
+// published and the workspace is this daemon's (2026-11-23, owner ruling:
+// the successor never draws an adopted row from facts it has not read).
+func TestAnAdoptionAtFreenessAwaitsTheAdoptedFactsBeforeItsViewsArePublished(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -310,8 +313,37 @@ func TestAnAdoptionAtFreenessDoesNotAwaitTheAdoptedFacts(t *testing.T) {
 	arm(t, h, ws, Participants{})
 
 	// Assert
-	if got := h.fleet.FactsAwaited(); len(got) != 0 {
-		t.Fatalf("facts awaited on %v, want none: nothing was in flight", got)
+	taken := h.order.Taken()
+	adopt, facts, publish := indexOf(taken, "adopt"), indexOf(taken, "await_facts"), indexOf(taken, "publish_views")
+	if adopt < 0 || facts < adopt || publish < facts {
+		t.Fatalf("steps = %v, want adopt, then the facts awaited, then the views published", taken)
+	}
+}
+
+// A free adoption whose shim re-announces late is adopted all the same, the
+// lateness recorded at ERROR: refusing it would hand back a workspace the
+// incumbent has already given up.
+func TestAFreeAdoptionWhoseShimReAnnouncesLateIsAdoptedAndRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.factsErr[ws] = context.DeadlineExceeded
+	carryFor(t, h, ws, Carry{MidWork: false})
+	arm(t, h, ws, Participants{Host: true})
+
+	// Act
+	err := h.c.AdoptHost(context.Background(), ws)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptHost = %v, want the free workspace adopted", err)
+	}
+	if indexOf(h.order.Taken(), "publish_views") < 0 {
+		t.Fatalf("steps = %v, want the views published", h.order.Taken())
+	}
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAdopt,
+		Message: "the adopted shim did not re-announce its session facts within the bound; the free workspace is adopted without them, and its row is drawn from them when they come"}); !found {
+		t.Fatalf("the late facts were not recorded at ERROR")
 	}
 }
 

@@ -174,6 +174,22 @@ type fakeMerge struct {
 	mu        sync.Mutex
 	recovered int
 	err       error
+	// published counts PublishRosterQueues calls; publishErr is their answer.
+	published  int
+	publishErr error
+}
+
+func (m *fakeMerge) PublishRosterQueues(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.published++
+	return m.publishErr
+}
+
+func (m *fakeMerge) publications() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.published
 }
 
 func (m *fakeMerge) Recover(context.Context) error {
@@ -203,6 +219,10 @@ type fakeRollout struct {
 	reconcileErr error
 	joins        int
 	joinErr      error
+	// publishedNow reads how many roster queue publications the boot had
+	// made, and publishedAtJoin is that count when Join ran.
+	publishedNow    func() int
+	publishedAtJoin int
 	// adopted and unadopted are the survivor sets the boot handed Reconcile,
 	// which is what the no-manifest accounting keys on.
 	adopted   []rollout.AdoptedSession
@@ -259,6 +279,9 @@ func (r *fakeRollout) Reconcile(_ context.Context, survivors rollout.Survivors) 
 func (r *fakeRollout) Join(context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.publishedNow != nil {
+		r.publishedAtJoin = r.publishedNow()
+	}
 	r.joins++
 	return r.joinErr
 }
@@ -446,6 +469,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 		restarts:        &restarttimingtest.Recorder{},
 	}
 	h.rollout.boundNow = func() bool { return h.binds.Load() > 0 }
+	h.rollout.publishedNow = h.merge.publications
 	h.queue.db = func() wsm.DB { return h.deps.DB }
 	h.deps = Deps{
 		// A recorded spawn the suite awaits lives until its wait ends: the

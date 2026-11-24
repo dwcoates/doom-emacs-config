@@ -24,7 +24,7 @@ import (
 // opCarry is the operation the handover carry records under.
 const opCarry = "daemon.rollout.carry"
 
-// DefaultFactsBound bounds how long a successor adopting a shim MID-WORK waits
+// DefaultFactsBound bounds how long a successor adopting a dialed shim waits
 // for the shim to re-announce its session facts. The re-announcement is the
 // first frame of the session watch the adoption opens, so the bound is a
 // failure ceiling a healthy adoption never pays.

@@ -29,7 +29,7 @@
  */
 import { drawRosterSectionHeight, drawSectionHeight, type RosterSectionHeight } from "./section-resize.js";
 import { FOLDED_CLASS } from "./folded-class.js";
-import { MERGED_AT_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
+import { EMPTY_SUBSECTION_ATTRIBUTE, MERGED_AT_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
 import {
   RosterHiddenSectionSchema,
@@ -38,6 +38,8 @@ import {
   RosterOpenSectionSchema,
   RosterRepoSectionSchema,
   type RosterCurrentWorkspace,
+  type RosterHiddenRow,
+  type RosterHiddenRows,
   type RosterHiddenSection,
   type RosterLabel,
   type RosterMergedRepoGroup,
@@ -57,12 +59,24 @@ import {
   type RosterOpenHeader,
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { changedStreams, type RosterStreams } from "./roster-streams.js";
+import { changedStreams, type RosterStreamName, type RosterStreams } from "./roster-streams.js";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { clone, equals } from "@bufbuild/protobuf";
-import { placeChildren } from "./children.js";
-import { decorativeElement, queryAll } from "../dom.js";
-import { disposeKeyedRows, drawKeyedEntries, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
+import { childrenMatching, decorativeElement, placeChildren, queryAll } from "../dom.js";
+import {
+  disposeKeyedRows,
+  drawKeyedEntries,
+  drawKeyedHiddenRows,
+  drawKeyedRows,
+  HIDDEN_ROW,
+  OPEN_ROW,
+  pathedHiddenRows,
+  placeKeyedRows,
+  reconcileKeyedRegions,
+  remarkKeyedRows,
+  type KeyedRows,
+  type Reconciled,
+} from "./keyed-rows.js";
 import { repoEntries, repoSectionRegions, sectionOpenRows, sectionSubsections, unsectionedRows, type PathedOpenRow } from "./entries.js";
 import { createLogger } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -83,6 +97,7 @@ import {
   drawCreateSubsectionControl,
   drawRosterSubsection,
   installArrangeDrag,
+  paintSubsectionCount,
   paintSubsectionWork,
   REPOSITORY_ATTRIBUTE,
   requireDrawnBucket,
@@ -136,12 +151,52 @@ const log = createLogger("webapp.sidebar.roster");
  * already drawn.
  */
 export function drawWorkspaceRoster(u: RosterStreams, rail: RailContext): HTMLElement {
+  return drawWorkspaceRosterCounted(u, rail).element;
+}
+
+/** Draw U as `drawWorkspaceRoster` does, and answer what the draw changed. */
+export function drawWorkspaceRosterCounted(u: RosterStreams, rail: RailContext): RosterDraw {
   let drawer = drawers.get(rail);
   if (drawer === undefined) {
     drawer = createRosterDrawer(rail);
     drawers.set(rail, drawer);
   }
-  return drawer.draw(u);
+  return drawer.drawCounted(u);
+}
+
+/**
+ * What one roster draw changed (`RosterDrawer.drawCounted`): the streams the
+ * push replaced, the sections drawn anew, and the rows drawn, taken down and
+ * moved, so a caller can tell a draw that changed nothing a reader sees.
+ */
+export interface RosterDraw {
+  /** The rail's one roster root. */
+  element: HTMLElement;
+  /** The streams the push replaced since the draw before. */
+  changedStreams: RosterStreamName[];
+  /** Sections drawn anew, each with every row it holds. */
+  sectionsDrawn: number;
+  /** Rows drawn: every row of a section drawn anew, and each row a kept section drew. */
+  rowsDrawn: number;
+  /** Rows a kept section took down. */
+  rowsRemoved: number;
+  /** Rows a kept section moved. */
+  rowsMoved: number;
+  /** Slots, counts and placements repainted in place (tab numbers, gutters, the open count, section order). */
+  repainted: number;
+}
+
+/** Whether DRAW changed anything a reader sees. */
+export function rosterDrawChanged(draw: RosterDraw): boolean {
+  return draw.sectionsDrawn + draw.rowsDrawn + draw.rowsRemoved + draw.rowsMoved + draw.repainted > 0;
+}
+
+/** What the workspaces stream's sections changed in one draw. */
+interface WorkspacesDrawn {
+  /** What the rows kept in their sections did. */
+  rows: Reconciled;
+  /** Slots and counts repainted in place. */
+  repainted: number;
 }
 
 /** Tear down everything RAIL's roster drawer drew. */
@@ -157,6 +212,8 @@ const drawers = new WeakMap<RailContext, RosterDrawer>();
 export interface RosterDrawer {
   /** Draw U, keeping every section it leaves unchanged; answers the rail's one roster root. */
   draw(u: RosterStreams): HTMLElement;
+  /** Draw U as `draw` does, and answer what the draw changed. */
+  drawCounted(u: RosterStreams): RosterDraw;
   /** Tear down every section's registrations. */
   dispose(): void;
 }
@@ -206,11 +263,13 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   const removeDrag = installArrangeDrag(dragScope.context, roster, drawnRefs(() => repos.values()));
   /** The open section, and the box its repository sections are placed in. */
   let open: DrawnSection<{ open: RosterOpenSection; count: string }, Drawn & { body: HTMLElement }> | null = null;
-  let hidden: DrawnSection<RosterHiddenSection> | null = null;
+  let hidden: DrawnSection<RosterHiddenSection, DrawnHiddenSection> | null = null;
   let merged: DrawnSection<{ summary: RosterMergedSection; pages: number }> | null = null;
   let mergeQueue: DrawnSection<{ queue: RosterMergeQueueSection; coldGated: ColdGated }> | null = null;
   /** The streams last drawn, null before the first draw. */
   let drawnStreams: RosterStreams | null = null;
+  /** The sections the draw under way drew anew, each with every row it holds drawn. */
+  let fresh: HTMLElement[] = [];
 
   /** SECTION kept when WIRE equals what it was drawn from, else drawn anew by DRAW. */
   const keepOrDraw = <W, D extends Drawn>(
@@ -227,7 +286,9 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
     }
     if (section !== null) discarded.push(section);
     const scope = openScope(rail);
-    return { wire, drawn: draw(scope.context), scope };
+    const drawn = draw(scope.context);
+    fresh.push(drawn.element);
+    return { wire, drawn, scope };
   };
 
   /** Whether no drag rearranged SECTION's box, so a wire it was drawn from still says what it shows. */
@@ -242,9 +303,10 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   /**
    * Draw the WORKSPACES stream's sections (the repositories, the open
    * heading, the hidden band) from U, into DISCARDED what they replace;
-   * answers how many rows were patched in place.
+   * answers what the rows kept in their sections changed, and how many
+   * slots and counts were repainted.
    */
-  const drawWorkspaces = (u: RosterStreams["workspaces"], discarded: Array<DrawnSection<unknown>>): number => {
+  const drawWorkspaces = (u: RosterStreams["workspaces"], discarded: Array<DrawnSection<unknown>>): WorkspacesDrawn => {
     const path = "WorkspaceRoster";
     const repository = requireMessage(u.repository, `${path}.repository`);
     const hiddenWire = requireMessage(u.hidden, `${path}.hidden`);
@@ -257,7 +319,13 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
     );
 
     const nextRepos = new Map<string, DrawnSection<RosterRepoSection, DrawnRepoSection>>();
-    let patchedRows = 0;
+    const kept_: Reconciled = { drawn: 0, removed: 0, moved: 0 };
+    const tally = (r: Reconciled): void => {
+      kept_.drawn += r.drawn;
+      kept_.removed += r.removed;
+      kept_.moved += r.moved;
+    };
+    let repainted = 0;
     for (const [index, section] of repository.sections.entries()) {
       const sectionPath = `${path}.repository.sections[${index}]`;
       const key = drawRosterRepoKey(requireMessage(section.key, `${sectionPath}.key`), `${sectionPath}.key`).id;
@@ -274,22 +342,19 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       }
       // A SECTION WHOSE ROWS ALONE CHANGED KEEPS ITS BOX and redraws only
       // the rows that changed (`keyed-rows.ts`): a switch changes the two
-      // rows it moves the highlight between, never their sections.
+      // rows it moves the highlight between, never their sections, and a
+      // row that moved within the section is moved, never drawn.
       if (kept !== null && !equals(RosterRepoSectionSchema, kept.wire, section) && sameButRows(kept.wire, section)) {
         const regions = kept.drawn.regions;
-        const before = regions.map((rows) => rows.entries.map((entry) => entry.element));
         const wires = repoSectionRegions(section, sectionPath);
-        if (patchKeyedRegions(regions.map((rows, r) => ({ kept: rows, rows: wires[r] })), rail, "grouping")) {
-          regions.forEach((rows, r) => {
-            patchedRows += rows.entries.filter((entry, i) => entry.element !== before[r][i]).length;
-            remarkKeyedRows(rows, rail.attention);
-          });
-          kept.wire = section;
-          paintRepoSection(kept.drawn.element, section, sectionPath);
-          kept.scope.remark(rail.attention);
-          nextRepos.set(key, kept);
-          continue;
-        }
+        tally(reconcileKeyedRegions(regions.map((rows, r) => ({ kept: rows, rows: wires[r] })), rail, "grouping", OPEN_ROW));
+        placeRepoSectionRows(kept.drawn, section, sectionPath);
+        regions.forEach((rows) => remarkKeyedRows(rows, rail.attention));
+        kept.wire = section;
+        repainted += paintRepoSection(kept.drawn.element, section, sectionPath);
+        kept.scope.remark(rail.attention);
+        nextRepos.set(key, kept);
+        continue;
       }
       const drawnSection = keepOrDraw(
         kept,
@@ -304,7 +369,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
             own: (rows) => drawKeyedEntries(rows, rail, "grouping", regions[0]),
             subsection: (rows, p, region) => drawKeyedRows(rows, rail, p, "grouping", regions[region]),
           });
-          return { element, regions };
+          return { element, regions, body: sectionBody(element, sectionPath) };
         },
         discarded,
       );
@@ -327,6 +392,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
     ) {
       paintOpenCount(open.drawn.element, openCount);
       open.wire = { open: openWire, count: openCount };
+      repainted += 1;
     }
     open = keepOrDraw(
       open,
@@ -339,42 +405,68 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       },
       discarded,
     );
-    placeChildren(open.drawn.body, [...repos.values()].map((section) => section.drawn.element));
+    repainted += placeChildren(open.drawn.body, [...repos.values()].map((section) => section.drawn.element));
     // EVERY PUSH RENUMBERS EVERY OPEN ROW, kept sections too: a tab opened
     // anywhere shifts the numbers of rows whose own wire did not change.
-    paintTabNumbers(open.drawn.body, tabNumbers(repository, `${path}.repository`));
+    // Each paints only the slots whose value changed, and says how many.
+    repainted += paintTabNumbers(open.drawn.body, tabNumbers(repository, `${path}.repository`));
     // Every switch moves every reach, so every push repaints every gutter too.
-    paintRecencyGutters(open.drawn.body, recencyGutters(repository, `${path}.repository`));
+    repainted += paintRecencyGutters(open.drawn.body, recencyGutters(repository, `${path}.repository`));
 
-    hidden = keepOrDraw(
-      hidden,
-      hiddenWire,
-      (a, b) => equals(RosterHiddenSectionSchema, a, b),
-      (scoped) => ({ element: drawRosterHiddenSection(hiddenWire, scoped, `${path}.hidden`) }),
-      discarded,
-    );
-    return patchedRows;
+    // THE HIDDEN SECTION'S ROWS ARE KEYED as a repository's are: a push that
+    // changed only its rows keeps the section and draws the rows it changed.
+    const hiddenPath = `${path}.hidden`;
+    if (hidden !== null && untouched(hidden) && !equals(RosterHiddenSectionSchema, hidden.wire, hiddenWire) && sameButHiddenRows(hidden.wire, hiddenWire)) {
+      tally(
+        reconcileKeyedRegions(
+          [{ kept: hidden.drawn.rows, rows: pathedHiddenRows(requireMessage(hiddenWire.hiddenRows, `${hiddenPath}.hidden_rows`), `${hiddenPath}.hidden_rows`) }],
+          rail,
+          "hidden",
+          HIDDEN_ROW,
+        ),
+      );
+      placeKeyedRows(sectionBody(hidden.drawn.element, hiddenPath), hidden.drawn.rows);
+      remarkKeyedRows(hidden.drawn.rows, rail.attention);
+      if (paintSectionCount(hidden.drawn.element, requireMessage(hiddenWire.header, `${hiddenPath}.header`), `${hiddenPath}.header`)) repainted += 1;
+      hidden.wire = hiddenWire;
+    } else {
+      const wasHidden = hidden;
+      hidden = keepOrDraw(
+        hidden,
+        hiddenWire,
+        (a, b) => equals(RosterHiddenSectionSchema, a, b),
+        (scoped) => {
+          const rows: KeyedRows<RosterHiddenRow> = { entries: [] };
+          scoped.onDispose(() => disposeKeyedRows(rows));
+          const element = drawRosterHiddenSection(hiddenWire, scoped, hiddenPath, (r, p) => drawKeyedHiddenRows(r, rail, p, "hidden", rows));
+          return { element, rows };
+        },
+        discarded,
+      );
+      if (hidden === wasHidden) remarkKeyedRows(hidden.drawn.rows, rail.attention);
+    }
+    return { rows: kept_, repainted };
   };
 
   /** Whether a section of the workspaces stream was rearranged by a drag, so its unchanged snapshot is drawn anew anyway. */
   const workspacesRearranged = (): boolean =>
     [...repos.values(), open, hidden].some((section) => section !== null && !untouched(section));
 
-  return {
-    draw(u: RosterStreams): HTMLElement {
+  const drawCounted = (u: RosterStreams): RosterDraw => {
       const changed = changedStreams(drawnStreams, u);
       const discarded: Array<DrawnSection<unknown>> = [];
-      let patchedRows = 0;
+      fresh = [];
+      let workspacesDrawn: WorkspacesDrawn = { rows: { drawn: 0, removed: 0, moved: 0 }, repainted: 0 };
       // A STREAM THE PUSH DID NOT REPLACE IS THE SNAPSHOT ALREADY DRAWN: its
       // sections are kept as they stand, uncompared.
       if (open === null || hidden === null || changed.includes("workspaces") || workspacesRearranged()) {
-        patchedRows = drawWorkspaces(u.workspaces, discarded);
+        workspacesDrawn = drawWorkspaces(u.workspaces, discarded);
       } else {
         for (const section of repos.values()) {
           keep(section).drawn.regions.forEach((rows) => remarkKeyedRows(rows, rail.attention));
         }
         keep(open);
-        keep(hidden);
+        remarkKeyedRows(keep(hidden).drawn.rows, rail.attention);
       }
       const openDrawn = requireDrawn(open, "the open section");
       const hiddenDrawn = requireDrawn(hidden, "the hidden section");
@@ -420,7 +512,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       // A SECTION LEFT OUT OF THE RAIL (`HeadedBoxShape.leftOut`) is not
       // placed, so each section placed stands beside the one drawn next to
       // it, which the stylesheet's rules between sections read.
-      placeChildren(
+      const placedSections = placeChildren(
         pane,
         [openDrawn.drawn.element, mergeQueue.drawn.element, merged.drawn.element, hiddenDrawn.drawn.element].filter(
           (element) => !element.hidden,
@@ -430,6 +522,24 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       // Disposed only once every kept section has moved into the new drawing,
       // so a discarded box's teardown never reaches a kept section's rows.
       for (const section of discarded) section.scope.dispose(section.drawn.element);
+      // EACH SECTION DRAWN ANEW drew every row it holds; a kept section drew
+      // only the rows its reconcile drew.
+      const rowsKept = workspacesDrawn.rows;
+      const draw: RosterDraw = {
+        element: roster,
+        changedStreams: changed,
+        sectionsDrawn: fresh.length,
+        // A fresh section placed inside another fresh one (a repository in a
+        // new open section) is counted once, with the box it stands in.
+        rowsDrawn:
+          rowsKept.drawn +
+          fresh
+            .filter((element) => !fresh.some((other) => other !== element && other.contains(element)))
+            .reduce((sum, element) => sum + queryAll(element, ".row").length, 0),
+        rowsRemoved: rowsKept.removed,
+        rowsMoved: rowsKept.moved,
+        repainted: workspacesDrawn.repainted + placedSections,
+      };
       drawnStreams = u;
       log.debug("drew the workspace roster", {
         operation: "sidebar.roster",
@@ -440,13 +550,20 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
           merged_groups: mergedWire.groups.length,
           merge_queue_groups: mergeQueueWire.groups.length,
           hidden_rows: hiddenDrawn.wire.hiddenRows?.rows.length ?? 0,
-          redrawn_sections: discarded.length,
-          redrawn_rows: patchedRows,
+          redrawn_sections: draw.sectionsDrawn,
+          redrawn_rows: draw.rowsDrawn,
+          removed_rows: draw.rowsRemoved,
+          moved_rows: draw.rowsMoved,
+          repainted: draw.repainted,
           current,
         },
       });
-      return roster;
-    },
+      return draw;
+  };
+
+  return {
+    draw: (u) => drawCounted(u).element,
+    drawCounted,
     dispose(): void {
       removeDrag();
       dragScope.dispose(roster);
@@ -470,18 +587,56 @@ function requireDrawn<T>(section: T | null, what: string): T {
 /** A drawn repository section: its element, and its rows, its own first, then each subsection's. */
 interface DrawnRepoSection extends Drawn {
   regions: KeyedRows[];
+  /** The section's rows box, which its own rows and its subsections stand in. */
+  body: HTMLElement;
+}
+
+/** A drawn hidden section: its element, and its keyed rows. */
+interface DrawnHiddenSection extends Drawn {
+  rows: KeyedRows<RosterHiddenRow>;
+}
+
+/** The rows box a drawn section ELEMENT at PATH stands its body in (`drawHeadedBox`). */
+function sectionBody(element: HTMLElement, path: string): HTMLElement {
+  const bodies = childrenMatching<HTMLElement>(element, ".rows");
+  if (bodies.length !== 1) throw new Error(`invariant: ${path} draws ${bodies.length} rows boxes, not one`);
+  return bodies[0];
 }
 
 /**
- * Whether two repository sections differ in their rows at most: the same entries in the same order (each row the same
- * workspace, each subsection the same one under the same header), only the
- * rows' drawings changed.
+ * Place a kept repository section's reconciled rows: its own rows among its
+ * subsections as U's entries interleave them, and each subsection's rows in
+ * its own box, moving only what is out of place. The section's subsections
+ * are the ones U names, in its order (`sameButRows`).
+ */
+function placeRepoSectionRows(drawn: DrawnRepoSection, u: RosterRepoSection, path: string): void {
+  const subsections = childrenMatching<HTMLElement>(drawn.body, `.${SUBSECTION_CLASS}`);
+  const own = drawn.regions[0].entries;
+  let rows = 0;
+  let subs = 0;
+  const desired: HTMLElement[] = repoEntries(u, path).map((entry) => {
+    if (entry.case === "row") return requireDrawn(own[rows++]?.element ?? null, `${entry.path}'s row`);
+    return requireDrawn(subsections[subs++] ?? null, `${entry.path}'s subsection`);
+  });
+  if (rows !== own.length || subs !== subsections.length) {
+    throw new Error(`invariant: ${path} places ${rows} of ${own.length} rows and ${subs} of ${subsections.length} subsections`);
+  }
+  placeChildren(drawn.body, desired);
+  subsections.forEach((element, index) => {
+    const region = drawn.regions[1 + index];
+    placeKeyedRows(sectionBody(element, `${path} subsection ${index}`), region);
+    element.toggleAttribute(EMPTY_SUBSECTION_ATTRIBUTE, region.entries.length === 0);
+  });
+}
+
+/**
+ * Whether two repository sections differ in their rows at most: the same
+ * subsections in the same order under the same labels, only the rows (which
+ * workspaces, in what order, drawn how) and the counts they make changed. A
+ * row patch keeps the section box, reconciles its rows by workspace
+ * (`keyed-rows.ts`) and repaints its counts (`paintRepoSection`).
  */
 function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
-  const shape = (section: RosterRepoSection): string[] =>
-    repoEntries(section, "RosterRepoSection").map((entry) =>
-      entry.case === "row" ? `row:${entry.row.row?.workspace?.workspace?.id ?? ""}` : "subsection",
-    );
   const left = clone(RosterRepoSectionSchema, a);
   const right = clone(RosterRepoSectionSchema, b);
   for (const section of [left, right]) {
@@ -489,16 +644,32 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
     // between repositories, and the patch repaints it
     // (`paintRepoSection`), so it is no reason to redraw the section.
     if (section.fold.case === "expanded") section.fold.value.collapse = { case: undefined };
+    if (section.header !== undefined) section.header.count = undefined;
     section.entries = section.entries.filter((entry) => entry.entry.case === "subsection");
     for (const entry of section.entries) {
       if (entry.entry.case !== "subsection") continue;
       const sub = entry.entry.value;
       sub.openRows = undefined;
+      if (sub.header !== undefined) sub.header.count = undefined;
       if (sub.fold.case === "expanded") sub.fold.value.collapse = { case: undefined };
     }
   }
-  const sameShape = shape(a).join("\n") === shape(b).join("\n");
-  return sameShape && equals(RosterRepoSectionSchema, left, right);
+  return equals(RosterRepoSectionSchema, left, right);
+}
+
+/** Whether two hidden sections differ in their rows at most: the same header, fold and height. */
+function sameButHiddenRows(a: RosterHiddenSection, b: RosterHiddenSection): boolean {
+  // AN EMPTY HIDDEN SECTION IS LEFT OUT of the rail (`drawRosterHiddenSection`),
+  // so a count that reaches or leaves zero draws the section anew.
+  const empty = (u: RosterHiddenSection): boolean => (u.header?.count?.workspaces ?? 0) === 0;
+  if (empty(a) || empty(b)) return false;
+  const left = clone(RosterHiddenSectionSchema, a);
+  const right = clone(RosterHiddenSectionSchema, b);
+  for (const section of [left, right]) {
+    section.hiddenRows = undefined;
+    if (section.header !== undefined) section.header.count = undefined;
+  }
+  return equals(RosterHiddenSectionSchema, left, right);
 }
 
 /**
@@ -509,8 +680,9 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
  * whose subsections differ from U's is a broken invariant: a section whose
  * subsections changed is drawn anew, never patched.
  */
-export function paintRepoSection(element: HTMLElement, u: RosterRepoSection, path: string): void {
+export function paintRepoSection(element: HTMLElement, u: RosterRepoSection, path: string): number {
   paintHoldsCurrent(element, drawRosterHoldsCurrent(u.fold, `${path}.fold`));
+  let repainted = paintSectionCount(element, requireMessage(u.header, `${path}.header`), `${path}.header`) ? 1 : 0;
   const drawn = queryAll<HTMLElement>(element, `.${SUBSECTION_CLASS}`);
   const wire = sectionSubsections(u, path);
   if (drawn.length !== wire.length) {
@@ -522,7 +694,24 @@ export function paintRepoSection(element: HTMLElement, u: RosterRepoSection, pat
     const label = drawn[index].querySelector<HTMLElement>(`:scope > .${SUBSECTION_HEAD_CLASS} > .${SUBSECTION_LABEL_CLASS}`);
     if (label === null) throw new Error(`invariant: ${subPath}: a drawn subsection has its name`);
     paintSubsectionWork(label, sub, subPath);
+    if (paintSubsectionCount(drawn[index], sub, subPath)) repainted += 1;
   });
+  return repainted;
+}
+
+/**
+ * Repaint on the drawn SECTION the count its header U draws
+ * (`drawRosterSectionHeader`), in place: a row patch keeps the section's box
+ * while the rows it holds, and so its count, change. Answers whether the
+ * count changed.
+ */
+function paintSectionCount(section: HTMLElement, u: SectionHeader, path: string): boolean {
+  const count = section.querySelector<HTMLElement>(":scope > .repo-head > [data-section-count]");
+  if (count === null) throw new Error(`invariant: ${path}'s section is drawn with no count`);
+  const text = sectionCountText(u, path);
+  if (count.textContent === text) return false;
+  count.textContent = text;
+  return true;
 }
 
 /**
@@ -1253,8 +1442,10 @@ export function drawRosterHiddenSection(
   u: RosterHiddenSection,
   sc: SidebarContext,
   path: string,
+  drawRows: (rows: RosterHiddenRows, path: string) => HTMLElement = (rows, p) => drawRosterRows(rows, sc, p, "hidden"),
 ): HTMLElement {
-  return drawHeadedSection(
+  const rows = requireMessage(u.hiddenRows, `${path}.hidden_rows`);
+  return drawHeadedBox(
     u,
     sc,
     path,
@@ -1262,7 +1453,6 @@ export function drawRosterHiddenSection(
       foldKey: HIDDEN_FOLD_KEY,
       className: HIDDEN_SECTION_CLASS,
       target: { case: "hidden", value: {} },
-      place: "hidden",
       resizable: true,
       leftOut: {
         when: (header, headerPath) =>
@@ -1270,8 +1460,7 @@ export function drawRosterHiddenSection(
         attribute: "data-hidden-empty",
       },
     },
-    requireMessage(u.hiddenRows, `${path}.hidden_rows`),
-    `${path}.hidden_rows`,
+    () => drawRows(rows, `${path}.hidden_rows`),
   );
 }
 

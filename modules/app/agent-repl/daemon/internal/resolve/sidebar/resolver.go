@@ -1052,6 +1052,13 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
+// SetReplacing implements Resolver.
+func (r *resolver) SetReplacing(ws ids.WorkspaceID, replacing bool) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_replacing",
+		logsite.Msg("the roster took whether a relaunch is replacing the session's shim"),
+		dlog.Context{"replacing": replacing}, func(s *wsState) { s.replacing = replacing })
+}
+
 // SetIncumbentArms implements Resolver. The map is copied, so the caller's
 // later writes to it cannot reach a render.
 func (r *resolver) SetIncumbentArms(arms map[ids.WorkspaceID]string) {
