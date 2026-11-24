@@ -1807,8 +1807,9 @@ and loaded no page."
           (progn
             (agent-repl--ws-put "alpha" :frontend-buffer buf)
             (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:9"
-              (cl-letf (((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) t))
-                        ((symbol-function 'agent-repl--frontend-webview-live-widget)
+              ;; THE HOST HOLDS THE PAGE: only a held page is reloaded.
+              (puthash "ws-1" (list :url "http://ws-1.localhost:8/" :why 'shown) agent-repl--webhost-pages)
+              (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
                          (lambda (_buf) 'widget))
                         ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                          #'ignore))
