@@ -511,10 +511,11 @@ type Deps struct {
 	// ReadyBound bounds the wait for a spawned successor to prove it is
 	// serving (Successor.Ready). Zero means DefaultReadyBound.
 	ReadyBound time.Duration
-	// FactsBound bounds a successor's wait, on a MID-WORK adoption, for the
-	// adopted shim to re-announce its session facts. A shim that does not is
-	// refused, and the incumbent transfers the workspace at freeness. Zero
-	// means DefaultFactsBound.
+	// FactsBound bounds a successor's wait, on every dialed adoption, for the
+	// adopted shim to re-announce its session facts. A MID-WORK adoption
+	// whose shim does not is refused, and the incumbent transfers the
+	// workspace at freeness; a free one is adopted with the lateness recorded
+	// at ERROR. Zero means DefaultFactsBound.
 	FactsBound time.Duration
 	// Clock is the controller's view of time.
 	Clock Clock

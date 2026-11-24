@@ -917,19 +917,33 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		}
 		dialErr = c.dialAdopted(ctx, ws, parked, fields)
 	}
-	// A MID-WORK ADOPTION LETS NO HELD PROMPT GO BEFORE IT KNOWS THE TURN IN
-	// FLIGHT: until the adopted shim's re-announcement is taken up, the
-	// watcher answers no turn for a turn the shim is running, and the drain
-	// below would start a second turn beside it. A shim that never
-	// re-announces is refused, and the incumbent moves it at freeness.
-	if dial && dialErr == nil && carried && carry.MidWork && parked == nil {
+	// EVERY DIALED ADOPTION WAITS FOR THE SESSION'S FACTS before the
+	// workspace becomes this daemon's (2026-11-23). Until the adopted shim's
+	// re-announcement is taken up, the watcher answers no turn for a turn the
+	// shim is running, and the roster holds neither the session's facts nor
+	// its live work: it drew an adopted row `done` for a second before its
+	// live work made it `idle_async` again. The watcher releases the wait only
+	// once every view stands on the facts (sessionwatcher.factsInLocked), so
+	// from the ownership below the row is drawn from what this daemon has read.
+	//
+	// A MID-WORK ADOPTION whose shim never re-announces is refused, and the
+	// incumbent moves it at freeness: the drain below would otherwise start a
+	// second turn beside the one running. A free one is already this daemon's
+	// to serve, so a late re-announcement is recorded at ERROR and the
+	// adoption completes; its row is drawn from its facts when they come.
+	if dial && dialErr == nil && parked == nil {
 		facts, cancel := context.WithTimeout(ctx, c.deps.FactsBound)
 		err := c.deps.Shims.AwaitFacts(facts, ws)
 		cancel()
-		if err != nil {
+		factsFields := dlog.Merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String(), "mid_work": carried && carry.MidWork})
+		switch {
+		case err != nil && carried && carry.MidWork:
 			c.log.Info(opAdopt, "the adopted shim never re-announced its session facts; the mid-work adoption is refused",
-				dlog.WithCause(dlog.Merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
+				dlog.WithCause(factsFields, err))
 			return c.refuseAdopted(ctx, ws, "the adopted shim never re-announced its session facts within "+c.deps.FactsBound.String(), fields)
+		case err != nil:
+			c.log.Error(opAdopt, "the adopted shim did not re-announce its session facts within the bound; the free workspace is adopted without them, and its row is drawn from them when they come",
+				dlog.WithCause(factsFields, err))
 		}
 	}
 	// THE CARRIED QUEUE MEMORY IS INSTALLED BEFORE THE HOLD IS DRAINED: the
