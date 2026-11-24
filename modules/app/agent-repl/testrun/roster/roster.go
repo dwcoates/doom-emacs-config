@@ -472,16 +472,16 @@ var Suites = []Suite{
 	// `npm run test:integration` always has.
 	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts",
 		IntegrationBuild: []string{"npm", "run", "pretest:integration"},
-		Reuse: &Reuse{Inputs: []string{
+		Reuse: &Reuse{Inputs: append([]string{
 			// The vocabulary, the lock helper its integration build compiles
 			// with the logging module it imports,
 			// the metaprompt its suite reads back, and the scripts its npm
 			// hooks run. What it imports is each file's import graph.
-			"proto/vocab/", "agent-shim/shim-lock/", "agent-shim/logging/go/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-mediator.md", "testdata/",
+			"proto/vocab/", "agent-shim/shim-lock/", "agent-shim/logging/go/", "testdata/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
-		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/", "agent-shim/claude/shim/.typecheck-cache/"},
+		}, metapromptFiles...), Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/", "agent-shim/claude/shim/.typecheck-cache/"},
 			Units: shimUnitInputs}},
 	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh",
 		NeverReused: "its isolation check walks the webapp's whole tree, its installed node_modules and build output included"},
@@ -813,13 +813,18 @@ var daemonUnitInputs = map[string][]string{
 		"bin/push-release.sh", "bin/hooks/", "testdata/scenario-goldens/", "requirements.json"},
 }
 
+// metapromptFiles are every metaprompt file the shim composes a session's
+// metaprompt from (agent-shim/claude/shim/src/metaprompt.ts): its suite reads
+// each back, so each is an input of the shim's and a region every run reads.
+var metapromptFiles = []string{"metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-mediator.md", "metaprompt-production-mediator.md"}
+
 // AlwaysRunRegions are the parts of the repository that only suites which
 // ALWAYS run read: the end-to-end suites' tree and the scripts the harnesses
 // test. Spelled as Suite.Path is; a "/" suffix is a subtree. Every file of the
 // repository is placed somewhere (a keyed suite's input set, a region here, or
 // ReadByNoSuite), or the run fails its placement check: a new directory is
 // unplaced until someone decides who tests it.
-var AlwaysRunRegions = []string{
+var AlwaysRunRegions = append([]string{
 	// The module's scripts and what their harnesses and the e2e suites read.
 	"bin/", "scripts/", "skills/", "hooks/", "services/", "images/", "testdata/",
 	// The metrics store's manifest and scrape config, which the requirements
@@ -841,12 +846,12 @@ var AlwaysRunRegions = []string{
 	// The Doom module files the ERT suite loads, the metaprompt the shim
 	// suite reads, the logging contract ERT reads, the requirement manifest
 	// and timing history the harnesses read.
-	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-mediator.md", "logging-contract.md",
+	"config.el", "doctor.el", "packages.el", "logging-contract.md",
 	"requirements.json", "test_time.csv",
 	// Outside the module: the hooks, the .claude scripts and the repository's
 	// bin/ each have their harness.
 	"/.githooks/", "/.claude/", "/bin/",
-}
+}, metapromptFiles...)
 
 // ReadByNoSuite are the files and subtrees no suite reads: prose, the
 // owner's own Doom configuration, and the Wi-Fi helper app no suite builds. Each entry is reviewed: none may be broad

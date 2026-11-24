@@ -410,3 +410,49 @@ func TestTheERTSuitesFakeDaemonModuleIsASuite(t *testing.T) {
 		t.Fatalf("suites at %s/testsupport/fakedaemon = %+v, want one Go module suite", ert.Path, found)
 	}
 }
+
+// TestMetapromptFilesAreEveryMetapromptOnDisk keeps metapromptFiles the
+// module's metaprompt files: one added beside the others and left out would
+// be unreadable to the shim's suite and missing from every run's regions.
+func TestMetapromptFilesAreEveryMetapromptOnDisk(t *testing.T) {
+	// Arrange
+	paths, err := filepath.Glob(filepath.Join("..", "..", "metaprompt*.md"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("glob the module's metaprompts: %v (%d found)", err, len(paths))
+	}
+	var onDisk []string
+	for _, p := range paths {
+		onDisk = append(onDisk, filepath.Base(p))
+	}
+
+	// Act
+	listed := slices.Sorted(slices.Values(metapromptFiles))
+
+	// Assert
+	slices.Sort(onDisk)
+	if !slices.Equal(listed, onDisk) {
+		t.Fatalf("metapromptFiles = %v, want the metaprompts on disk %v", listed, onDisk)
+	}
+}
+
+// TestEveryMetapromptIsAShimInputAndAnAlwaysRunRegion pins that both sites
+// take the one list, so neither can drift from it.
+func TestEveryMetapromptIsAShimInputAndAnAlwaysRunRegion(t *testing.T) {
+	// Arrange
+	var shim []string
+	for _, s := range Suites {
+		if s.Name == "shim" {
+			shim = s.Reuse.Inputs
+		}
+	}
+
+	// Act and Assert
+	for _, f := range metapromptFiles {
+		if !slices.Contains(shim, f) {
+			t.Errorf("%s is not an input of the shim's suite", f)
+		}
+		if !slices.Contains(AlwaysRunRegions, f) {
+			t.Errorf("%s is not an always-run region", f)
+		}
+	}
+}
