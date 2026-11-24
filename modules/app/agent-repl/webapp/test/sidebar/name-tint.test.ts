@@ -1,43 +1,33 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import {
-  NAME_FADE_DELAY_PROPERTY,
-  NAME_FADE_MS,
-  NAME_FADE_ONLY_MS,
-  NAME_HOLD_MS,
-  NAME_FADE_PROPERTY,
-  NAME_FADING_CLASS,
-  NAME_STEADY_CLASS,
-  applyNameTint,
-  nameTint,
-} from "../../src/sidebar/name-tint.js";
+import { NAME_STEADY_CLASS, applyNameTint, nameTint } from "../../src/sidebar/name-tint.js";
 
 describe("nameTint", () => {
   it.each([
-    { name: "holds a running turn's name at its tone", shown: "turnRunning", ended: undefined, tone: "tone-red", want: { kind: "steady" } },
-    { name: "fades an ended turn's name from the time it ended", shown: "noTurnRunning", ended: 9_000, tone: "tone-green", want: { kind: "fading", elapsedMs: 1_000 } },
-    { name: "never reads a turn that ends in the future as negative time", shown: "noTurnRunning", ended: 11_000, tone: "tone-green", want: { kind: "fading", elapsedMs: 0 } },
-    { name: "tints nothing when no turn has ended", shown: "noTurnRunning", ended: undefined, tone: "tone-green", want: null },
-    { name: "tints nothing on a merged row", shown: "merged", ended: undefined, tone: "tone-green", want: null },
-    { name: "tints nothing on a row with no tone", shown: "turnRunning", ended: undefined, tone: "tone-none", want: null },
-  ])("$name", ({ shown, ended, tone, want }) => {
+    { name: "holds a running turn's name at its tone", shown: "turnRunning", tone: "tone-red", want: { kind: "steady" } },
+    { name: "holds an ended turn's name at its tone, with no fade", shown: "noTurnRunning", tone: "tone-green", want: { kind: "steady" } },
+    { name: "holds a row that never ran a turn at its tone", shown: "noTurnRunning", tone: "tone-green", want: { kind: "steady" } },
+    { name: "holds a merged row's name at its tone", shown: "merged", tone: "tone-green", want: { kind: "steady" } },
+    { name: "tints nothing on a row with no tone", shown: "turnRunning", tone: "tone-none", want: null },
+  ])("$name", ({ shown, tone, want }) => {
     // Arrange / Act
-    const got = nameTint(shown, ended, tone, false, 10_000);
+    const got = nameTint(shown, tone, false);
 
     // Assert
     expect(got).toEqual(want);
   });
 
   it.each([
-    { name: "stops a viewed row's ended-turn fade so it draws at rest", shown: "noTurnRunning", ended: 9_000, tone: "tone-green", want: null },
-    { name: "tints nothing on a viewed row with no ended turn", shown: "noTurnRunning", ended: undefined, tone: "tone-green", want: null },
-  ])("$name", ({ shown, ended, tone, want }) => {
+    { name: "tints nothing on a viewed running turn", shown: "turnRunning", tone: "tone-red" },
+    { name: "tints nothing on a viewed ended turn", shown: "noTurnRunning", tone: "tone-green" },
+  ])("$name", ({ shown, tone }) => {
     // Arrange / Act
-    const got = nameTint(shown, ended, tone, true, 10_000);
+    const got = nameTint(shown, tone, true);
 
     // Assert
-    expect(got).toEqual(want);
+    expect(got).toBeNull();
   });
+
   it.each([
     ["holds a sync merge's name at the merge's purple", "tone-purple", false],
     ["holds a sync merge's own turn's name at the merge's purple over the row's tone", "tone-red", false],
@@ -45,7 +35,7 @@ describe("nameTint", () => {
     ["holds a toneless sync merge's name at the merge's purple", "tone-none", false],
   ] as const)("%s", (_name, tone, viewed) => {
     // Arrange / Act
-    const got = nameTint("syncMerging", undefined, tone, viewed, 10_000);
+    const got = nameTint("syncMerging", tone, viewed);
 
     // Assert
     expect(got).toEqual({ kind: "syncMerging", tone: "tone-purple" });
@@ -61,48 +51,7 @@ describe("applyNameTint", () => {
     applyNameTint(label, { kind: "steady" });
 
     // Assert
-    expect([label.classList.contains(NAME_STEADY_CLASS), label.classList.contains(NAME_FADING_CLASS)]).toEqual([true, false]);
-  });
-
-  it("marks a fading name and sets the delay to minus the elapsed time", () => {
-    // Arrange
-    const label = document.createElement("span");
-
-    // Act
-    applyNameTint(label, { kind: "fading", elapsedMs: 120_000 });
-
-    // Assert
-    expect([label.classList.contains(NAME_FADING_CLASS), label.style.getPropertyValue(NAME_FADE_DELAY_PROPERTY)]).toEqual([true, "-120000ms"]);
-  });
-
-  it("spans the 20 minute hold and the 10 minute fade", () => {
-    // Arrange
-    const label = document.createElement("span");
-
-    // Act
-    applyNameTint(label, { kind: "fading", elapsedMs: 0 });
-
-    // Assert
-    expect([NAME_FADE_MS, label.style.getPropertyValue(NAME_FADE_PROPERTY)]).toEqual([
-      1_800_000,
-      "1800000ms",
-    ]);
-  });
-
-  it("holds 20 minutes and fades 10", () => {
-    // Arrange / Act / Assert
-    expect([NAME_HOLD_MS, NAME_FADE_ONLY_MS]).toEqual([1_200_000, 600_000]);
-  });
-
-  it("gives a steady name no fade length", () => {
-    // Arrange
-    const label = document.createElement("span");
-
-    // Act
-    applyNameTint(label, { kind: "steady" });
-
-    // Assert
-    expect(label.style.getPropertyValue(NAME_FADE_PROPERTY)).toBe("");
+    expect([label.className, label.getAttribute("style")]).toEqual([NAME_STEADY_CLASS, null]);
   });
 
   it("marks a sync-merging name steady in its tone", () => {
@@ -113,7 +62,7 @@ describe("applyNameTint", () => {
     applyNameTint(label, { kind: "syncMerging", tone: "tone-purple" });
 
     // Assert
-    expect([label.classList.contains(NAME_STEADY_CLASS), label.classList.contains("tone-purple"), label.classList.contains(NAME_FADING_CLASS)]).toEqual([true, true, false]);
+    expect([label.classList.contains(NAME_STEADY_CLASS), label.classList.contains("tone-purple")]).toEqual([true, true]);
   });
 
   it("leaves an untinted name alone", () => {

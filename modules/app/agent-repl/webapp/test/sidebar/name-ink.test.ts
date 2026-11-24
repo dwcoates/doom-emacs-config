@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import { NAME_INK_CLASS, NAME_INK_MOTIONS, NAME_INK_TEXT_ATTRIBUTE, drawNameInk } from "../../src/sidebar/name-ink.js";
 import { REVIVING_CLASS } from "../../src/sidebar/reviving.js";
-import { VIEW_DWELL_CLASS } from "../../src/sidebar/view-dwell.js";
 
 /** A drawn name LABEL reading TEXT and wearing CLASSES, as row.ts draws one. */
 function label(text: string, ...classes: string[]): HTMLElement {
@@ -22,8 +21,6 @@ describe("drawNameInk", () => {
     { name: "gives a breathing name its ink box", classes: ["breathes"] },
     { name: "gives a reviving name its ink box", classes: [REVIVING_CLASS] },
     { name: "gives a name that breathes and revives one ink box", classes: ["breathes", REVIVING_CLASS] },
-    { name: "gives a name receding over the view dwell its ink box", classes: [VIEW_DWELL_CLASS] },
-    { name: "gives a name that revives over the view dwell one ink box", classes: [VIEW_DWELL_CLASS, REVIVING_CLASS] },
   ])("$name", ({ classes }) => {
     // Arrange
     const el = label("alpha", ...classes);
@@ -85,8 +82,8 @@ describe("drawNameInk", () => {
     expect(el.textContent).toBe("alpha");
   });
 
-  it("keys on exactly the breath, the reviving shimmer and the view dwell", () => {
+  it("keys on exactly the breath and the reviving shimmer", () => {
     // Arrange / Act / Assert
-    expect(NAME_INK_MOTIONS).toEqual(["breathes", REVIVING_CLASS, VIEW_DWELL_CLASS]);
+    expect(NAME_INK_MOTIONS).toEqual(["breathes", REVIVING_CLASS]);
   });
 });

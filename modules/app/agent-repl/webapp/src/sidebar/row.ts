@@ -86,7 +86,6 @@ import type { SidebarContext } from "./context.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
-import { applyViewDwell, drawRosterRowViewDwell } from "./view-dwell.js";
 import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
 import { drawRecencyGutterSlot } from "./recency-gutters.js";
 import { drawTabNumberSlot } from "./tab-numbers.js";
@@ -334,29 +333,12 @@ export function drawRosterRow(
   // mark stands still. Only a row that draws a mark breathes, so the bands'
   // names never do.
   if (place === "grouping" && mark.motion !== "still") label.classList.add(mark.motion);
-  // THE NAME STARTS AT ITS STATUS COLOR AND FADES TO GREYSCALE (owner
-  // request, 2026-10-29): held at the tone while a turn runs, fading from it
-  // once the turn ends (`name-tint.ts`), until the row is viewed. Only an
-  // open row, never a band's.
+  // THE NAME WEARS ITS STATUS COLOR UNTIL THE ROW IS VIEWED (owner request,
+  // 2026-11-23, `name-tint.ts`), whatever the status and however long ago its
+  // turn ended. Only an open row, never a band's.
   if (place === "grouping" && !hidden) {
     const shown = requireCase(requireMessage(u.when, `${path}.when`).shown, `${path}.when.shown`);
-    const endedMs =
-      shown.case === "noTurnRunning"
-        ? drawRosterRowWhenNoTurnRunning(shown.value, `${path}.when.no_turn_running`)
-        : undefined;
-    applyNameTint(label, nameTint(shown.case, endedMs, mark.toneClass, mode === "partial", sc.ctx.ticker.now()));
-  }
-  // THE NAME RECEDES OVER THE VIEW DWELL (owner request, 2026-11-19): from
-  // whatever it draws now to the viewed grey, reaching it as the viewed marker
-  // arrives (`view-dwell.ts`). The daemon draws the marker only where the
-  // dwell will draw the row PARTIAL, so a row already PARTIAL carrying it is a
-  // contract breach.
-  if (u.viewDwell !== undefined) {
-    const dwell = drawRosterRowViewDwell(u.viewDwell, `${path}.view_dwell`);
-    if (mode === "partial") {
-      throw new MalformedView(`${path}.view_dwell`, "a row already viewed carries a view dwell");
-    }
-    if (place === "grouping" && !hidden) applyViewDwell(label, dwell, sc.ctx.ticker.now());
+    applyNameTint(label, nameTint(shown.case, mark.toneClass, mode === "partial"));
   }
   // THE LOOPS RUN ON THE COMPOSITOR (2026-11-16): the breath and the shimmer
   // move copies of the name (`name-ink.ts`), never its color or its mask.

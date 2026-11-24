@@ -1,8 +1,10 @@
 /**
  * cold-gate-name — THE ONE COLD-GATE TREATMENT OF A NAME IN THE RAIL.
  *
- * A workspace parked at its cold gate draws its name struck through in a grey
- * dimmer than muted (owner ruling, 2026-10-13). The Open section's rows draw it
+ * A workspace parked at its cold gate draws its name struck through (owner
+ * ruling, 2026-10-13): an Open row's in its status tone until the row is
+ * viewed and in a grey dimmer than muted once it is (owner request,
+ * 2026-11-23), a merge queue line's always in that grey. The Open section's rows draw it
  * from their `coldGate` arm (`row.ts`), and the Merge Queue section's lines
  * from the roster's standing cold gates (`merge-queue-view.ts`, owner request
  * 2026-11-17), both through `markColdGatedName`, so the stylesheet's one rule

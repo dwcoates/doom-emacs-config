@@ -247,7 +247,7 @@ describe("placeOneShot", () => {
 
   // EVERY ONE-SHOT IS PLACED BY THE ONE HELPER: a site that spells its own
   // length and negative delay would drift from the others' format.
-  it.each(["sidebar/name-tint.ts", "sidebar/view-dwell.ts", "sidebar/fold-fade.ts", "sidebar/selection-fade.ts"])(
+  it.each(["sidebar/fold-fade.ts", "sidebar/selection-fade.ts"])(
     "places %s's one-shot through placeOneShot",
     (file) => {
       // Arrange

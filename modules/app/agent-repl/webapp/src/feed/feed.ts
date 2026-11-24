@@ -74,6 +74,7 @@ import {
   centerTarget,
   elementsSpan,
 } from "../scroll.js";
+import { installFeedInteractionReport } from "./interaction-report.js";
 import {
   OpenFeedResponseSchema,
   type OpenFeedResponse,
@@ -226,6 +227,10 @@ export function mountFeed(
     scrollBox === null || tail === null
       ? null
       : observeScrollBox(scrollBox, tail);
+  // THE READER'S OWN INPUT ON THE FEED IS THEIR INTERACTION WITH THE
+  // WORKSPACE, which views it and orders the editor's recency walk
+  // (interaction-report.ts).
+  const unreportInteraction = scrollBox === null ? null : installFeedInteractionReport(ctx, scrollBox);
   // THE WALK'S HOLD: the box stands still while an older page loads, and until
   // the gesture that asked for it is over (scroll.ts createWalkHold).
   const walkHold = scrollBox === null ? null : createWalkHold(scrollBox);
@@ -1208,6 +1213,7 @@ export function mountFeed(
     watch?.cancel();
     uninstallTrim();
     unobserve?.();
+    unreportInteraction?.();
     for (const unhold of unholdZones) unhold();
     unmountJump?.();
     intentScroll?.uninstall();

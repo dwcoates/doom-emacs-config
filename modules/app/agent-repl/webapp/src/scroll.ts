@@ -1883,7 +1883,7 @@ export function createWalkHold(box: HTMLElement, frame: (fn: () => void) => void
  * scroll-snap control, a custom scrollbar, a gamepad -- rather than a silent
  * degradation.
  */
-const READER_INPUTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+export const READER_INPUTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
 
 /** One of `READER_INPUTS`: the event kind a reader input arrived as. */
 export type ReaderInput = (typeof READER_INPUTS)[number];
