@@ -553,6 +553,23 @@ func newMergeQueue(q MergeQueue) mergeQueue {
 	return mergeQueue{pause: q.Pause, deployCheck: q.DeployCheck, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, remediating: q.Remediating, mediation: q.Mediation, deploying: q.Deploying}
 }
 
+// brokenHold names a broken hold: the landed merge still deploying, which
+// holds the queue's head until its deploy's check ends, and the merge in
+// line admitted beside it.
+type brokenHold struct {
+	deploying ids.WorkspaceID
+	admitted  ids.WorkspaceID
+}
+
+// brokenHold answers the queue's broken hold, and whether it holds one: a
+// landed merge still deploying while the front of the line is admitted.
+func (q mergeQueue) brokenHold() (brokenHold, bool) {
+	if q.deploying == nil || len(q.line) == 0 || !q.line[0].Admitted {
+		return brokenHold{}, false
+	}
+	return brokenHold{deploying: q.deploying.Workspace, admitted: q.line[0].Workspace}, true
+}
+
 // setOf indexes WS as a set.
 func setOf(ws []ids.WorkspaceID) map[ids.WorkspaceID]struct{} {
 	set := make(map[ids.WorkspaceID]struct{}, len(ws))

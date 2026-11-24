@@ -3,6 +3,7 @@ package sidebar_test
 import (
 	"agentrepl/protohelpers/rosterwalk"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -2439,6 +2440,64 @@ func TestTheMergeStillDeployingHeadsItsQueueUntilItsCheckEnds(t *testing.T) {
 				Match:   func(r dlog.Record) bool { return r.Context["deploying"] == "w-landed" && r.Context["admitted"] == "w2" }})
 			if broken != tt.wantBroken {
 				t.Fatalf("broken hold recorded = %v, want %v: %+v", broken, tt.wantBroken, logs.Records())
+			}
+		})
+	}
+}
+
+// A broken hold is a fact of the queue the roster took, recorded once when
+// the queue first holds it, never again for each render or republish of the
+// same pair.
+func TestABrokenHoldIsRecordedOncePerHold(t *testing.T) {
+	deploying := &sidebar.QueueEntry{Workspace: "w-landed", Credited: "w-landed", Admitted: true, Clock: activeClock(1)}
+	broken := func(front ids.WorkspaceID) sidebar.MergeQueue {
+		return sidebar.MergeQueue{Deploying: deploying, Workspaces: []ids.WorkspaceID{"w2", "w3"}, Line: inLine(front)}
+	}
+	cleared := sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w2", "w3"}, Line: inLine("w2")}
+	held := sidebar.MergeQueue{Deploying: deploying, Workspaces: []ids.WorkspaceID{"w2"}, Line: []sidebar.QueueEntry{{Workspace: "w2", Credited: "w2", Clock: waitingClock(1, 0)}}}
+	tests := []struct {
+		name   string
+		queues []sidebar.MergeQueue
+		want   map[string]int
+	}{
+		{name: "the same broken hold republished and redrawn is recorded once",
+			queues: []sidebar.MergeQueue{broken("w2"), broken("w2"), broken("w2")},
+			want:   map[string]int{"w2": 1}},
+		{name: "a different admitted front behind the same deploying merge is recorded again",
+			queues: []sidebar.MergeQueue{broken("w2"), broken("w3")},
+			want:   map[string]int{"w2": 1, "w3": 1}},
+		{name: "the same broken hold returning after it cleared is recorded again",
+			queues: []sidebar.MergeQueue{broken("w2"), cleared, broken("w2")},
+			want:   map[string]int{"w2": 2}},
+		{name: "a queue holding its head records nothing",
+			queues: []sidebar.MergeQueue{held, held},
+			want:   map[string]int{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, logs := newResolver(t)
+			view := queueView(workspace("w-landed", "landed"), workspace("w2", "two"), workspace("w3", "three"))
+
+			// Act
+			for _, q := range tt.queues {
+				r.SetMergeQueue(theRepo, q)
+				r.SetRegistry(view)
+				r.SetRegistry(view)
+			}
+
+			// Assert
+			records := dlog.FilterRecords(logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",
+				Message: "a merge in line was admitted while a landed merge still deploying held the head; the hold was broken"})
+			got := map[string]int{}
+			for _, rec := range records {
+				if rec.Context["deploying"] != "w-landed" || rec.Context["repo"] != string(theRepo) {
+					t.Fatalf("broken hold recorded with context %v, want deploying w-landed in repo %s", rec.Context, theRepo)
+				}
+				got[fmt.Sprint(rec.Context["admitted"])]++
+			}
+			if !maps.Equal(got, tt.want) {
+				t.Fatalf("broken holds recorded per admitted front = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -60,3 +60,41 @@ func TestTurnEndArmReadsTheLadder(t *testing.T) {
 		})
 	}
 }
+
+// A queue holds a broken hold exactly when a landed merge is still deploying
+// and the front of its line is admitted.
+func TestBrokenHoldNamesTheDeployingMergeAndTheAdmittedFront(t *testing.T) {
+	deploying := &QueueEntry{Workspace: "w-landed", Credited: "w-landed", Admitted: true}
+	admitted := QueueEntry{Workspace: "w2", Credited: "w2", Admitted: true}
+	waiting := QueueEntry{Workspace: "w2", Credited: "w2"}
+	cases := []struct {
+		name   string
+		queue  MergeQueue
+		want   brokenHold
+		wantOk bool
+	}{
+		{name: "an admitted front behind a deploying merge is a broken hold",
+			queue: MergeQueue{Deploying: deploying, Line: []QueueEntry{admitted}},
+			want:  brokenHold{deploying: "w-landed", admitted: "w2"}, wantOk: true},
+		{name: "nothing deploying holds no broken hold",
+			queue: MergeQueue{Line: []QueueEntry{admitted}}},
+		{name: "an empty line holds no broken hold",
+			queue: MergeQueue{Deploying: deploying}},
+		{name: "a front not admitted holds no broken hold",
+			queue: MergeQueue{Deploying: deploying, Line: []QueueEntry{waiting}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			q := newMergeQueue(tc.queue)
+
+			// Act
+			got, ok := q.brokenHold()
+
+			// Assert
+			if ok != tc.wantOk || got != tc.want {
+				t.Fatalf("brokenHold() = %+v, %v; want %+v, %v", got, ok, tc.want, tc.wantOk)
+			}
+		})
+	}
+}

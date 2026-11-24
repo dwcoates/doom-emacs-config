@@ -1004,11 +1004,20 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
 func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
 	fields := dlog.Context{"repo": string(repo), "paused": queue.Pause != nil, "held_for_deploy_check": queue.DeployCheck != nil,
 		"workspaces": ids.Strings(queue.Workspaces), "line": ids.Strings(queue.LineWorkspaces()), "async_requesters": ids.Strings(queue.AsyncRequesters)}
+	log := r.log.Global()
 	r.mutate("daemon.sidebar.set_merge_queue", logsite.Msg("the roster took a repository's merge queue"),
 		fields,
-		r.log.Global(),
+		log,
 		func() {
 			q := newMergeQueue(queue)
+			// A broken hold is recorded once, when the queue first holds
+			// it: a republish of the same pair is the same fact.
+			if broken, ok := q.brokenHold(); ok {
+				if held, ok := r.state.queues[repo].brokenHold(); !ok || held != broken {
+					log.Error("daemon.sidebar.merge_queue", "a merge in line was admitted while a landed merge still deploying held the head; the hold was broken", dlog.Context{
+						"repo": string(repo), "deploying": string(broken.deploying), "admitted": string(broken.admitted)})
+				}
+			}
 			if q.empty() {
 				delete(r.state.queues, repo)
 				return

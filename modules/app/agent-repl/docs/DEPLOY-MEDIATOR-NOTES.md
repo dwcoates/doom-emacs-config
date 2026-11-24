@@ -47,3 +47,9 @@ Its brief names this file, and it is the mediator's to write.
   keeps the table. The contract's reason vocabulary has no arm for an
   unrecorded reason, so the repair is seeding the table once in the running
   Emacs or an Emacs restart, which is the owner's to allow.
+- `daemon.sidebar.merge_queue` "the hold was broken" (2026-11-24): a landed
+  merge still deploying holds its queue's head from its teardown (since
+  00b3580ae3). A broken hold logged right after a handover can be one the
+  predecessor's older build admitted before it had the hold; check which
+  daemon pid logged `daemon.merge.start` for the admitted merge. On a build
+  with the hold, the record is a real broken invariant and is dispatched.
