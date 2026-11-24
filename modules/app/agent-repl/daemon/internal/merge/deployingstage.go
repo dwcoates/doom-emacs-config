@@ -38,7 +38,9 @@ import (
 //
 // A LANDING WHOSE DEPLOY NEVER OWED ITS CHECK is deployed again once a daemon
 // serves (DeployUncheckedLandings): the deploy its predecessor was asked for
-// is not carried across a restart, and nothing else would end the hold.
+// is not carried across a restart, and nothing else would end the hold. A
+// remediation finish's hold is tied to its covering deploy the same way
+// (wsm.RemediationFinish.Covered).
 //
 // THE STEP IS MEASURED ONCE (agentrepl_merge_step_seconds{step="deploying"}):
 // at the check's end when the deploy is checked (closeDeploying), at the
@@ -159,14 +161,16 @@ func (o *orchestrator) endUncheckedDeploying(ctx context.Context, repo wsm.RepoK
 	return nil
 }
 
-// DeployUncheckedLandings implements Orchestrator: every landed merge still
-// deploying whose deploy owes no check yet, read once this daemon serves, is
-// deployed again (Trigger.Landed). The deploy a predecessor was asked for
-// lives in that daemon only, so a restart between a landing and its deploy's
-// check would leave the merge holding its queue's head with no deploy coming
-// to cover and check it. A landing deployed already makes the deploy change
-// nothing, which releases its check (ReleaseUnchangedDeploy). A read that
-// fails is recorded at ERROR and answered: the merges hold their queues.
+// DeployUncheckedLandings implements Orchestrator: every landing still
+// waiting for a deploy that owes its check, read once this daemon serves --
+// a landed merge still deploying not yet checked, or a remediation finish
+// still deploying -- is deployed again (Trigger.Landed). The deploy a
+// predecessor was asked for lives in that daemon only, so a restart between a
+// landing and its deploy's check would leave the landing holding its queue's
+// head with no deploy coming to cover and check it. A landing deployed
+// already makes the deploy change nothing, which releases its check
+// (ReleaseUnchangedDeploy). A read that fails is recorded at ERROR and
+// answered: the landings hold their queues.
 //
 // IT RUNS INSIDE THE MEDIATION'S LIFETIME, as a pass does: the daemon's exit
 // cuts it and waits for it before the state client closes, a cut read is
@@ -188,14 +192,24 @@ func (o *orchestrator) DeployUncheckedLandings(ctx context.Context) error {
 		o.mediationFailedUnder(ctx, op, nil, logsite.Msg("could not read the landed merges whose deploy owes no check; they hold their queues' heads until a deploy checks them"), err)
 		return err
 	}
-	if len(unchecked) == 0 {
+	finishes, err := o.deps.DB.RemediationFinishes(ctx)
+	if err != nil {
+		o.mediationFailedUnder(ctx, op, nil, logsite.Msg("could not read the remediation finishes whose deploy owes no check; they hold their queues until a deploy checks them"), err)
+		return err
+	}
+	var landings []string
+	for _, m := range unchecked {
+		landings = append(landings, fmt.Sprintf("merge %s:%s:%s", m.Repo, m.Workspace, m.Stage))
+	}
+	for _, f := range finishes {
+		if f.Step == wsm.RemediationDeploying {
+			landings = append(landings, fmt.Sprintf("remediation %s:%s:covered=%v", f.Repo, f.Workspace, f.Covered))
+		}
+	}
+	if len(landings) == 0 {
 		return nil
 	}
-	merges := make([]string, 0, len(unchecked))
-	for _, m := range unchecked {
-		merges = append(merges, fmt.Sprintf("%s:%s:%s", m.Repo, m.Workspace, m.Stage))
-	}
-	o.deps.Log.Global().Info(op, "landed merges still deploying owe no check from a deploy; their landing is deployed again", dlog.Context{"merges": merges})
+	o.deps.Log.Global().Info(op, "landings still deploying owe no check from a deploy; they are deployed again", dlog.Context{"landings": landings})
 	o.deps.Rollout.Landed(ctx, nil)
 	return nil
 }

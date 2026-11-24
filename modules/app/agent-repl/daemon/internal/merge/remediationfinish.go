@@ -37,10 +37,12 @@ import (
 //  2. LANDS directly on the main branch: the merge, changelog line and
 //     version tag bin/land-direct.sh makes.
 //  3. DEPLOYS: the workspace is closed as a landed merge closes it, and the
-//     rollout starts. The deploy owes the chain's next check BEFORE the
-//     finish leaves its deploying step (OweMediations, then
-//     remediationDeployed), so the hold passes from the finish to that check
-//     with no instant between; only the mediator's approval of it releases
+//     rollout starts. Only the deploy that covers the finish's landing (at
+//     its commit, wsm.CoverDeployingLandings) takes the hold on: the write
+//     that owes its check moves the finish to deployed (wsm.OweMediation),
+//     so the hold passes from the finish to that check with no instant
+//     between, and a deploy that did not carry the fix leaves the finish
+//     holding the queue; only the mediator's approval of the check releases
 //     the queue.
 //
 // A FINISH NOTHING FINISHES ANY MORE IS ENDED (abandonFinish), never left
@@ -791,17 +793,12 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 }
 
 // remediationDeploy closes F's workspace as a landed merge closes it and
-// starts the rollout, whose deploy owes the chain's next check
-// (remediationDeployed moves the finish on when it does). A deploy that
-// began already since the finish reached this step is not started again.
+// starts the rollout, whose deploy owes the chain's next check: the deploy
+// that covers the finish's landing moves it on in the write that owes that
+// check (wsm.OweMediation), so a finish still deploying here was carried by
+// no deploy that owes a check yet, and its rollout is started (again, when a
+// restart cut the first short).
 func (o *orchestrator) remediationDeploy(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
-	m, err := o.deps.DB.MediationOf(ctx, f.Repo)
-	if err != nil {
-		return err
-	}
-	if m != nil && m.OwedAt.After(f.StepAt) {
-		return o.remediationDeployed(ctx, f.Repo, m.OwedAt)
-	}
 	if err := o.closeRemediation(ctx, f, fields); err != nil {
 		return err
 	}
@@ -817,8 +814,11 @@ func (o *orchestrator) remediationDeploy(ctx context.Context, f wsm.RemediationF
 	return nil
 }
 
-// remediationDeployed moves every finish of REPO's queue that was deploying
-// before the deploy that began at AT to deployed: that deploy is theirs.
+// remediationDeployed settles every finish of REPO's queue the deploy that
+// began at AT carried: the write that owed its check moved each finish that
+// deploy covered to deployed at AT (wsm.OweMediation), and here its problems
+// are marked fixed, an escalation's finish ends, and the queue is redrawn. A
+// finish that deploy did not cover still deploys, holding the queue.
 func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey, at time.Time) error {
 	finishes, err := o.deps.DB.RemediationFinishes(ctx)
 	if err != nil {
@@ -834,15 +834,11 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 		}
 	}()
 	for _, f := range finishes {
-		if !sameQueue(f.Repo, repo) || f.Step != wsm.RemediationDeploying || f.StepAt.After(at) {
-			continue
-		}
-		if _, err := o.deps.DB.AdvanceRemediationFinish(ctx, f.Workspace, wsm.RemediationDeploying, wsm.RemediationDeployed, at); err != nil {
-			errs = append(errs, err)
+		if !sameQueue(f.Repo, repo) || f.Step != wsm.RemediationDeployed || !f.StepAt.Equal(at) {
 			continue
 		}
 		moved = true
-		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy began; it owes the chain's next check", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
+		o.deps.Log.Global().Info(opRemediationFinish, "the deploy that carries the remediation began; it owes the chain's next check", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
 		// ITS PROBLEMS ARE FIXED, NOT CLOSED: a later window that logs one
 		// again finds it RECURRED, with the mediator's findings beside it.
 		if _, err := o.deps.DB.FixDeployProblems(ctx, repo, at); err != nil {

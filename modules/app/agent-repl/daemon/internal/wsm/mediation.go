@@ -163,6 +163,11 @@ func (m Mediation) Prompted() bool { return m.PromptedAt != nil }
 // replaced, read in the same write, nil when none was owed: the replacement
 // is how that mediation ended, so it is counted exactly once.
 //
+// THE LANDINGS THE DEPLOY COVERED PASS THEIR HOLD TO THIS CHECK IN THIS
+// WRITE: its landed merge still deploying moves to DeployingChecked, and each
+// remediation finish it covered moves to deployed at AT. One it did not cover
+// keeps holding the queue for the deploy that carries it.
+//
 // A DISPATCHED FIX OUTLIVES A DEPLOY THAT IS NOT ITS OWN: the newer deploy
 // ends the dispatch only when it is the remediation's, its finish deploying
 // (deploy_remediation_finishes). Any other deploy carries the dispatch into
@@ -188,13 +193,14 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 		if err != nil {
 			return err
 		}
-		// THE MEDIATOR'S OWN DEPLOY is the one its finish was deploying
-		// before: only its finishes stand in the repository's queue.
+		// THE MEDIATOR'S OWN DEPLOY is the one that covered its finish's
+		// landing (RemediationFinish.Covered, at the deploy's commit): only
+		// its finishes stand in the repository's queue.
 		ownDeploy := func() (bool, error) {
 			var own int
 			err := tx.QueryRowContext(ctx,
-				`SELECT count(*) FROM deploy_remediation_finishes WHERE repo_key = ? AND step = 'deploying' AND step_at <= ?`,
-				string(key), nanos(at)).Scan(&own)
+				`SELECT count(*) FROM deploy_remediation_finishes WHERE repo_key = ? AND step = ? AND covered = 1`,
+				string(key), string(RemediationDeploying)).Scan(&own)
 			return own > 0, err
 		}
 		carried := false
@@ -260,7 +266,17 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 		}
 		// THE LANDED MERGE THIS DEPLOY COVERED IS CHECKED BY THIS CHECK, in
 		// the write that owes it (DeployingChecked).
-		return checkDeployingMergeInTx(ctx, tx, key)
+		if err := checkDeployingMergeInTx(ctx, tx, key); err != nil {
+			return err
+		}
+		// SO IS THE REMEDIATION FINISH IT COVERED: the finish's hold passes
+		// to this check in this write, deployed at AT, and a deploy that did
+		// not carry the fix leaves its finish holding the queue for the
+		// deploy that does.
+		_, err = tx.ExecContext(ctx,
+			`UPDATE deploy_remediation_finishes SET step = ?, step_at = ? WHERE repo_key = ? AND step = ? AND covered = 1`,
+			string(RemediationDeployed), nanos(at), string(key), string(RemediationDeploying))
+		return err
 	})
 	if err != nil {
 		return nil, err

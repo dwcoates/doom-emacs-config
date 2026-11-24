@@ -119,6 +119,7 @@ func TestANewerDeployCarriesTheFixersBriefOnlyWithTheDispatch(t *testing.T) {
 			dispatchAt(t, s, repo, instant)
 			if tt.fixDeploys {
 				finishDeploying(t, s, repo, "remedy", instant.Add(30*time.Second))
+				coverLandings(t, s)
 			}
 
 			// Act

@@ -103,7 +103,23 @@ type RemediationFinish struct {
 	// the next check's brief names what it landed. It is the check's at the
 	// finish's start, never its workspace's: the deploy mediator does both.
 	ServesEscalation bool
+	// Covered is whether a deploy committed over the finish's landing while
+	// it deploys (CoverDeployingLandings): only that deploy's check takes the
+	// finish's hold on (OweMediation). Every landing clears it.
+	Covered bool
 }
+
+// remediationFinishCoveredDDL is the layout-207 addition: whether a deploy
+// covered a deploying finish's landing (RemediationFinish.Covered). A finish
+// the previous build left deploying reads as uncovered, so the daemon that
+// serves next deploys it again (merge.DeployUncheckedLandings) rather than
+// taking a deploy that may not carry it for its own.
+//
+// The fresh-file schema appends this same text (schema.go), so a migrated file
+// and a created one cannot differ.
+const remediationFinishCoveredDDL = `
+ALTER TABLE deploy_remediation_finishes ADD COLUMN covered INTEGER NOT NULL DEFAULT 0;
+`
 
 // remediationEscalationDDL is the layout-167 addition: the escalation a
 // remediation finish serves (RemediationFinish.ServesEscalation), which was
@@ -232,7 +248,7 @@ func (s *store) RecordRemediationLanded(ctx context.Context, ws WorkspaceID, hea
 			return err
 		}
 		res, err := tx.ExecContext(ctx,
-			`UPDATE deploy_remediation_finishes SET step = ?, step_at = ?, landed_head = ?, landed_paths = ? WHERE workspace_id = ? AND step = ?`,
+			`UPDATE deploy_remediation_finishes SET step = ?, step_at = ?, landed_head = ?, landed_paths = ?, covered = 0 WHERE workspace_id = ? AND step = ?`,
 			string(RemediationDeploying), nanos(at), head, joinPaths(prior.LandedPaths, paths), string(ws), string(RemediationLanding))
 		if err != nil {
 			return err
@@ -413,7 +429,7 @@ func (s *store) EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool,
 }
 
 // remediationFinishQuery reads the finish columns; callers add the WHERE.
-const remediationFinishQuery = `SELECT workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, landed_head, landed_paths, gated_head, serves_escalation FROM deploy_remediation_finishes`
+const remediationFinishQuery = `SELECT workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, landed_head, landed_paths, gated_head, serves_escalation, covered FROM deploy_remediation_finishes`
 
 // scanRemediationFinish decodes ROW, nil when there is none.
 func scanRemediationFinish(row *sql.Row) (*RemediationFinish, error) {
@@ -433,12 +449,12 @@ func scanRemediationFinishRow(row interface{ Scan(...any) error }) (RemediationF
 	var ws, repo, step, part, line, head, paths, gated string
 	var stepAt, started int64
 	var rounds int
-	var escalation bool
-	if err := row.Scan(&ws, &repo, &step, &stepAt, &rounds, &part, &line, &started, &head, &paths, &gated, &escalation); err != nil {
+	var escalation, covered bool
+	if err := row.Scan(&ws, &repo, &step, &stepAt, &rounds, &part, &line, &started, &head, &paths, &gated, &escalation, &covered); err != nil {
 		return RemediationFinish{}, err
 	}
 	f := RemediationFinish{Workspace: WorkspaceID(ws), Repo: RepoKey(repo), Step: RemediationStep(step), StepAt: fromNanos(stepAt),
-		GateRounds: rounds, StartedAt: fromNanos(started), LandedHead: head, GatedHead: gated, ServesEscalation: escalation}
+		GateRounds: rounds, StartedAt: fromNanos(started), LandedHead: head, GatedHead: gated, ServesEscalation: escalation, Covered: covered}
 	if paths != "" {
 		f.LandedPaths = strings.Split(paths, "\n")
 	}

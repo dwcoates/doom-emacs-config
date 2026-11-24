@@ -71,9 +71,10 @@ const (
 // A QUEUE IS HELD FROM A DEPLOY'S START UNTIL THE MEDIATOR APPROVES A DEPLOY
 // (owner ruling, 2026-11-22). A remediation never releases it: a finish holds
 // the queue through its gate, its landing and its deploy, and sent back to
-// fix, through the fixing too; its deploy owes the next check before the
-// finish leaves its deploying step (OweMediations, then remediationDeployed),
-// so the hold passes from the finish to that check with no instant between.
+// fix, through the fixing too; the deploy that covers its landing moves the
+// finish to deployed in the write that owes that deploy's check
+// (wsm.OweMediation), so the hold passes from the finish to that check with
+// no instant between, and no other deploy's check takes it.
 // A finish deployed is held by that check alone, and stays recorded until its
 // chain ends only for the next check's brief.
 type deployHold struct {

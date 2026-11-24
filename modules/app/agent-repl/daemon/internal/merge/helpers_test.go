@@ -522,8 +522,8 @@ func (f *fakeDB) EndDeployingMerge(ctx context.Context, repo wsm.RepoKey, from w
 	return f.checks.EndDeployingMerge(ctx, repo, from)
 }
 
-func (f *fakeDB) CoverDeployingMerges(ctx context.Context) (int, error) {
-	return f.checks.CoverDeployingMerges(ctx)
+func (f *fakeDB) CoverDeployingLandings(ctx context.Context) (wsm.CoveredLandings, error) {
+	return f.checks.CoverDeployingLandings(ctx)
 }
 
 func (f *fakeDB) UncheckedDeployingMerges(ctx context.Context) ([]wsm.DeployingMerge, error) {

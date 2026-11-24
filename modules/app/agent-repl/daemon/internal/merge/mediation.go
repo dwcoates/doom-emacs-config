@@ -599,10 +599,11 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 }
 
 // endUncheckedDeploys ends every remediation finish of REPO, a repository
-// that checks its deploys no more, whose deploy is starting: that deploy owes
-// no check in REPO (OweMediations), so nothing would take the hold on from
-// the finish, which would hold the queue for nobody. A queue a finish was
-// ended in is republished and kicked.
+// that checks its deploys no more, whose deploy covered its landing: that
+// deploy owes no check in REPO (OweMediations), so nothing would take the
+// hold on from the finish, which would hold the queue for nobody. One no
+// deploy covered yet holds on: its deploy is still to commit. A queue a
+// finish was ended in is republished and kicked.
 func (o *orchestrator) endUncheckedDeploys(ctx context.Context, repo wsm.RepoKey) error {
 	finishes, err := o.queueFinishesAt(ctx, repo, wsm.RemediationDeploying)
 	if err != nil {
@@ -611,6 +612,9 @@ func (o *orchestrator) endUncheckedDeploys(ctx context.Context, repo wsm.RepoKey
 	ended := false
 	var errs []error
 	for _, f := range finishes {
+		if !f.Covered {
+			continue
+		}
 		did, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace)
 		if err != nil {
 			errs = append(errs, err)

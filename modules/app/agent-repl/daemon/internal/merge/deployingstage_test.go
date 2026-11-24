@@ -37,9 +37,7 @@ func seedDeploying(t *testing.T, h *harness, repo wsm.RepoKey, timed bool) wsm.D
 func seedCovered(t *testing.T, h *harness, repo wsm.RepoKey, timed bool) wsm.DeployingMerge {
 	t.Helper()
 	m := seedDeploying(t, h, repo, timed)
-	if _, err := h.db.CoverDeployingMerges(context.Background()); err != nil {
-		t.Fatalf("CoverDeployingMerges: %v", err)
-	}
+	coverLandings(t, h)
 	return m
 }
 
@@ -679,6 +677,14 @@ func TestDeployUncheckedLandingsDeploysOnlyALandingWhoseDeployOwesNoCheck(t *tes
 			seedCovered(t, h, mediationKey(h), true)
 			owe(t, h)
 		}},
+		{name: "a remediation finish still deploying is deployed again", wantFired: 1, arrange: func(t *testing.T, h *harness) {
+			landedFinish(t, h)
+		}},
+		{name: "a remediation finish its deploy's check took on waits for that check", arrange: func(t *testing.T, h *harness) {
+			landedFinish(t, h)
+			coverLandings(t, h)
+			owe(t, h)
+		}},
 		{name: "an unreadable store deploys nothing and says so", readErr: errors.New("database is locked"), wantErr: true},
 	}
 	for _, tt := range tests {
@@ -707,7 +713,7 @@ func TestDeployUncheckedLandingsDeploysOnlyALandingWhoseDeployOwesNoCheck(t *tes
 			}
 			if tt.wantFired > 0 {
 				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.deploying",
-					Message: "landed merges still deploying owe no check from a deploy; their landing is deployed again"}); !ok {
+					Message: "landings still deploying owe no check from a deploy; they are deployed again"}); !ok {
 					t.Fatalf("records = %v, want the redeploy recorded", h.logs.Records())
 				}
 			}

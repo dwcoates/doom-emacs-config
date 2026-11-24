@@ -133,7 +133,8 @@ func TestARemediationFinishGatesLandsDirectlyAndDeploys(t *testing.T) {
 		t.Fatalf("recorded %v, want the landing's gate rounds", h.meter.all())
 	}
 
-	// Act: the deploy begins.
+	// Act: the deploy that carries the fix commits and begins.
+	coverLandings(t, h)
 	oweAt(t, h, h.now.Add(time.Minute))
 
 	// Assert
@@ -451,6 +452,7 @@ func TestATakenUpFinishWhoseDeployBeganIsDeployed(t *testing.T) {
 	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", tipAfter, nil, deployStarted.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
+	coverLandings(t, h)
 	if _, err := h.db.OweMediation(ctx, mediationKey(h), deployStarted.Add(time.Minute), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -544,14 +546,15 @@ func TestADeployedEscalationsFinishIsEnded(t *testing.T) {
 	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationDeploying, deployStarted); err != nil {
 		t.Fatal(err)
 	}
+	coverLandings(t, h)
 
 	// Act: its deploy begins.
-	err := h.o.remediationDeployed(ctx, mediationKey(h), deployStarted.Add(time.Minute))
+	err := h.o.OweMediations(ctx, deployStarted.Add(time.Minute))
 
 	// Assert
 	f, readErr := h.db.RemediationFinishOf(ctx, "ws-fixer")
 	if err != nil || readErr != nil || f != nil {
-		t.Fatalf("remediationDeployed = %v; finish %+v (%v), want the escalation's finish ended at its deploy", err, f, readErr)
+		t.Fatalf("OweMediations = %v; finish %+v (%v), want the escalation's finish ended at its deploy", err, f, readErr)
 	}
 }
 
@@ -870,6 +873,7 @@ func TestEveryStepOfAFinishRedrawsTheDeployCheckLabel(t *testing.T) {
 					t.Fatalf("FinishRemediation again: %v", err)
 				}
 			}
+			coverLandings(t, h)
 			oweAt(t, h, h.now.Add(time.Minute))
 
 			// Assert
@@ -1070,14 +1074,16 @@ func TestAFinishsDeployPassesTheHoldToItsCheckWithNoInstantBetween(t *testing.T)
 				reads = append(reads, held)
 			}
 			h.db.mu.Unlock()
+			coverLandings(t, h)
 
-			// Act: the fix's deploy begins.
+			// Act: the deploy that carries the fix begins. Its check is owed
+			// and the finish moved to deployed in one write (wsm.OweMediation).
 			if err := h.o.OweMediations(ctx, deployStarted.Add(time.Hour)); err != nil {
 				t.Fatalf("OweMediations: %v", err)
 			}
 
 			// Assert
-			if len(reads) < 2 || slices.Contains(reads, false) {
+			if len(reads) == 0 || slices.Contains(reads, false) {
 				t.Fatalf("held after each write = %v, want the queue held after every one", reads)
 			}
 			if f := finishOf(t, h); f != nil && finishHolds(f.Step) {
@@ -1353,8 +1359,9 @@ func TestAClosedMediatorsFinishLeavesTheQueueHeldOnlyByWhatOwesADecision(t *test
 	}
 }
 
-// landedFinish records ws-fixer's finish landed before a restart, its deploy
-// begun since: the finish a pass takes up deploys it.
+// landedFinish records ws-fixer's finish landed before a restart, no deploy
+// that owes a check having carried it since: the finish a pass takes up
+// starts its deploy again.
 func landedFinish(t *testing.T, h *harness) {
 	t.Helper()
 	ctx := context.Background()
@@ -1365,9 +1372,6 @@ func landedFinish(t *testing.T, h *harness) {
 		t.Fatal(err)
 	}
 	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", tipAfter, nil, deployStarted.Add(time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.db.OweMediation(ctx, mediationKey(h), deployStarted.Add(time.Minute), ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1416,7 +1420,68 @@ func TestAFinishPassedOverIsTakenUpByItsWorkspacesAdoption(t *testing.T) {
 	}
 
 	// Assert
-	if f := finishOf(t, h); f == nil || f.Step != wsm.RemediationDeployed {
-		t.Fatalf("finish %+v, want it taken up and deployed", f)
+	h.rollout.mu.Lock()
+	fired := h.rollout.fired
+	h.rollout.mu.Unlock()
+	if f := finishOf(t, h); f == nil || f.Step != wsm.RemediationDeploying || fired != 1 {
+		t.Fatalf("finish %+v, rollouts %d; want it taken up and its deploy started once", f, fired)
+	}
+}
+
+func TestADeployThatDidNotCarryTheFixLeavesItsFinishHoldingTheQueue(t *testing.T) {
+	// Arrange: the fix landed and its finish deploys, but the deploy that
+	// owes the next check committed before the fix landed.
+	h := checked(t)
+	ctx := context.Background()
+	landed := deployStarted.Add(-time.Second)
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: landed}); err != nil {
+		t.Fatalf("BeginRemediationFinish: %v", err)
+	}
+	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationLanding, landed); err != nil {
+		t.Fatalf("AdvanceRemediationFinish: %v", err)
+	}
+	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", "abc123", nil, landed); err != nil {
+		t.Fatalf("RecordRemediationLanded: %v", err)
+	}
+
+	// Act
+	owe(t, h)
+
+	// Assert
+	finishes, err := h.db.RemediationFinishes(ctx)
+	if err != nil || len(finishes) != 1 || finishes[0].Step != wsm.RemediationDeploying {
+		t.Fatalf("finishes = (%+v, %v), want the fix's finish still deploying, holding the queue for its own deploy", finishes, err)
+	}
+}
+
+func TestARepositoryCheckingNoDeploysEndsOnlyAFinishItsDeployCovered(t *testing.T) {
+	tests := []struct {
+		name      string
+		covered   bool
+		wantEnded bool
+	}{
+		{name: "a finish its deploy covered ends", covered: true, wantEnded: true},
+		{name: "a finish no deploy covered yet holds on"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			landedFinish(t, h)
+			if tt.covered {
+				coverLandings(t, h)
+			}
+			h.mu.Lock()
+			h.config.DeployChecks = nil
+			h.mu.Unlock()
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if ended := finishOf(t, h) == nil; ended != tt.wantEnded {
+				t.Fatalf("finish ended = %v, want %v", ended, tt.wantEnded)
+			}
+		})
 	}
 }

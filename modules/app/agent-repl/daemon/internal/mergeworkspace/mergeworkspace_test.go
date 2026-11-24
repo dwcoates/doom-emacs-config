@@ -1309,11 +1309,11 @@ type failingDB struct {
 	coverDeployingErr                 error
 }
 
-func (d failingDB) CoverDeployingMerges(ctx context.Context) (int, error) {
+func (d failingDB) CoverDeployingLandings(ctx context.Context) (wsm.CoveredLandings, error) {
 	if d.coverDeployingErr != nil {
-		return 0, d.coverDeployingErr
+		return wsm.CoveredLandings{}, d.coverDeployingErr
 	}
-	return d.DB.CoverDeployingMerges(ctx)
+	return d.DB.CoverDeployingLandings(ctx)
 }
 
 func (d failingDB) CoverUndeployedLandings(ctx context.Context) (int, error) {
@@ -1521,7 +1521,7 @@ func TestCoverOwedThatCannotCoverTheLandedMergesIsAnErrorRecordedWithItsCause(t 
 	if err == nil {
 		t.Fatal("CoverOwed = nil, want the failure")
 	}
-	if r, ok := f.recordWith(dlog.LevelError, "could not mark the landed merges still deploying covered by the deploy; they hold their queues until a deploy covers them"); !ok || r.Context["cause"] != "locked" {
+	if r, ok := f.recordWith(dlog.LevelError, "could not mark the landed merges and remediation finishes still deploying covered by the deploy; they hold their queues until a deploy covers them"); !ok || r.Context["cause"] != "locked" {
 		t.Fatalf("the failure was not recorded at ERROR with its cause: %+v", f.logs.Records())
 	}
 }

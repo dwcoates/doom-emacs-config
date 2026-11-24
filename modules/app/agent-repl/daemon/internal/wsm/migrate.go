@@ -389,6 +389,8 @@ var migrations = []migration{
 	{To: 205, Name: "deploying_merges", Kind: MigrationAdditive, DDL: deployingMergesDDL},
 	// IT IS ADDITIVE: a defaulted column the previous build never names.
 	{To: 206, Name: "deploying_merge_stage", Kind: MigrationAdditive, DDL: deployingMergeStageDDL},
+	// IT IS ADDITIVE: a defaulted column the previous build never names.
+	{To: 207, Name: "remediation_finish_covered", Kind: MigrationAdditive, DDL: remediationFinishCoveredDDL},
 }
 
 // sessionsKeepaliveRestoredAtDDL is the layout-196 addition: when a

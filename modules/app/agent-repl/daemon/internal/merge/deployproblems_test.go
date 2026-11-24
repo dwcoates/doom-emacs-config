@@ -257,14 +257,15 @@ func TestARemediationsDeployMarksItsProblemsFixed(t *testing.T) {
 	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", tipAfter, nil, deployStarted); err != nil {
 		t.Fatal(err)
 	}
+	coverLandings(t, h)
 
-	// Act
-	err := h.o.remediationDeployed(ctx, mediationKey(h), deployStarted.Add(time.Minute))
+	// Act: the deploy that carries the fix begins.
+	err := h.o.OweMediations(ctx, deployStarted.Add(time.Minute))
 
 	// Assert
 	problems, readErr := h.db.DeployProblems(ctx, mediationKey(h))
 	if err != nil || readErr != nil || len(problems) != 1 || problems[0].FixedAt == nil {
-		t.Fatalf("remediationDeployed = %v, problems (%+v, %v); want the problem fixed", err, problems, readErr)
+		t.Fatalf("OweMediations = %v, problems (%+v, %v); want the problem fixed", err, problems, readErr)
 	}
 }
 

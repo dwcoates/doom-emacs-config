@@ -145,8 +145,8 @@ func deployingAt(t *testing.T, s DB, repo RepoKey, ws WorkspaceID, at int64, sta
 		t.Fatalf("RecordDeployingMerge: %v", err)
 	}
 	if stage >= DeployingCovered {
-		if _, err := s.CoverDeployingMerges(ctx); err != nil {
-			t.Fatalf("CoverDeployingMerges: %v", err)
+		if _, err := s.CoverDeployingLandings(ctx); err != nil {
+			t.Fatalf("CoverDeployingLandings: %v", err)
 		}
 	}
 	if stage >= DeployingChecked {
@@ -203,11 +203,11 @@ func TestADeployCoversOnlyTheLandedMergesNoDeployCovered(t *testing.T) {
 			deployingAt(t, s, repo, "mws-a", 100, tt.from)
 
 			// Act
-			covered, err := s.CoverDeployingMerges(context.Background())
+			covered, err := s.CoverDeployingLandings(context.Background())
 
 			// Assert
-			if err != nil || covered != tt.wantCovered || stageOf(t, s, repo) != tt.wantStage {
-				t.Fatalf("CoverDeployingMerges = (%d, %v), stage %v; want %d covered, stage %v", covered, err, stageOf(t, s, repo), tt.wantCovered, tt.wantStage)
+			if err != nil || covered.Merges != tt.wantCovered || stageOf(t, s, repo) != tt.wantStage {
+				t.Fatalf("CoverDeployingLandings = (%+v, %v), stage %v; want %d covered, stage %v", covered, err, stageOf(t, s, repo), tt.wantCovered, tt.wantStage)
 			}
 		})
 	}

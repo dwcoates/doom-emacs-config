@@ -809,10 +809,10 @@ type DB interface {
 	// EndDeployingMerge deletes and answers one queue's landed merge still
 	// deploying at a stage or later, nil for none.
 	EndDeployingMerge(ctx context.Context, repo RepoKey, from DeployingStage) (*DeployingMerge, error)
-	// CoverDeployingMerges marks every landed merge still deploying that no
-	// deploy covered yet covered by the deploy committing now, and answers
-	// how many it moved.
-	CoverDeployingMerges(ctx context.Context) (int, error)
+	// CoverDeployingLandings marks every landed merge still deploying and
+	// every remediation finish deploying covered by the deploy committing
+	// now, and answers how many of each it moved (deployingmerges.go).
+	CoverDeployingLandings(ctx context.Context) (CoveredLandings, error)
 	// UncheckedDeployingMerges answers every landed merge still deploying
 	// whose deploy owes no check yet.
 	UncheckedDeployingMerges(ctx context.Context) ([]DeployingMerge, error)
