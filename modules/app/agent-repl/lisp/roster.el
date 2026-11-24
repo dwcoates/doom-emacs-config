@@ -217,6 +217,24 @@ and the old daemon's view, at a revision past the new daemon's, released
 each answered selection at once and moved the frame back to the
 workspace the user had just left.")
 
+(defvar agent-repl-roster--stream-addresses (make-hash-table :test 'eq :weakness 'key)
+  "Roster stream -> the address of the daemon it rides.
+Written when the daemon accepts the subscription, and read to say
+which daemon\='s roster a tab was opened or torn down by
+\(`agent-repl-roster--view-address').")
+
+(defvar agent-repl-roster--view-address nil
+  "The address of the daemon that served `agent-repl-roster-view', or nil.
+Nil when the stream was never subscribed here, as a batch test\='s is.")
+
+(defvar agent-repl-roster--placed nil
+  "Where the last reconciled roster placed every row, or nil before the first.
+A plist `(:rows ROWS :address A :revision R)': ROWS the roster\='s
+`agent-repl-roster--placements', A and R the daemon that served it and its
+revision.  The next reconcile reads it as the state BEFORE its roster, so a
+tab it opens or tears down names the row\='s section and visibility on both
+sides and the roster on each side (`agent-repl-roster--decision').")
+
 (defvar agent-repl-roster--rows-by-id (make-hash-table :test 'equal)
   "Ref id -> the decoded `RosterRow' the last accepted push carried.
 status.el reads a workspace's paint out of this table, so it is indexed
@@ -932,8 +950,45 @@ nor `:hidden': its page loads, it is only never drawn."
 
 ;;;; ---- Reconciliation ---------------------------------------------------
 
-(defun agent-repl-roster--open-tab (desired)
+(defun agent-repl-roster--placements (roster)
+  "Return where ROSTER places every row it lists, keyed by ref id.
+Each value is `(:section S :visibility V)': S the walk\='s section
+\(`:repository', `:hidden', `:closed'), or `:thread' for an open thread;
+V the row\='s visibility as the daemon stamped it."
+  (let ((rows (make-hash-table :test 'equal)))
+    (dolist (entry (agent-repl-roster-walk roster))
+      (let ((row (plist-get entry :row)))
+        (puthash (agent-repl-roster-row-id row)
+                 (list :section (plist-get entry :section)
+                       :visibility (plist-get row :visibility))
+                 rows)))
+    (dolist (thread (agent-repl-roster-threads roster))
+      (puthash (plist-get (plist-get thread :thread) :id)
+               (list :section :thread :visibility (plist-get thread :visibility))
+               rows))
+    rows))
+
+(defun agent-repl-roster--decision (id before after)
+  "Return the roster facts that decided the tab of ID, from BEFORE to AFTER.
+BEFORE and AFTER are `agent-repl-roster--placed' plists, BEFORE nil for
+the first roster.  The answer is a plist of the row\='s section and
+visibility in each, and the daemon and revision of each roster: what a tab
+open or teardown records (`elisp.roster.tab-open', `elisp.roster.tab-teardown')."
+  (let ((was (and before (gethash id (plist-get before :rows))))
+        (now (gethash id (plist-get after :rows))))
+    (list :section (plist-get now :section)
+          :visibility (plist-get now :visibility)
+          :was-section (plist-get was :section)
+          :was-visibility (plist-get was :visibility)
+          :daemon (plist-get after :address)
+          :revision (plist-get after :revision)
+          :was-daemon (plist-get before :address)
+          :was-revision (plist-get before :revision))))
+
+(defun agent-repl-roster--open-tab (desired &optional decided)
   "Open the tab DESIRED asks for and start its host stream.
+DECIDED is the roster facts that asked for it (`agent-repl-roster--decision'),
+recorded with the open.
 The roster's rows are ALREADY REGISTERED daemon-side — Register is not
 this file's verb — so the tab's whole birth is a perspective plus the
 `WatchHostWorkspace' subscription."
@@ -975,8 +1030,16 @@ this file's verb — so the tab's whole birth is a perspective plus the
     ;; on screen (`agent-repl--tabbar-target-rows'), and no later write
     ;; repins the frame.
     (agent-repl--ws-put name :thread (and (plist-get desired :thread) t))
-    (agent-repl--info name "elisp.roster.tab-open: ws={ws} id={id} dir={dir} rehold={rehold}"
-                      :ws name :id (plist-get desired :id) :dir dir :rehold (and rehold t))
+    (agent-repl--info name "elisp.roster.tab-open: ws={ws} id={id} dir={dir} rehold={rehold} section={section} visibility={visibility} was-section={was_section} was-visibility={was_visibility} daemon={daemon} revision={revision} was-daemon={was_daemon} was-revision={was_revision}"
+                      :ws name :id (plist-get desired :id) :dir dir :rehold (and rehold t)
+                      :section (plist-get decided :section)
+                      :visibility (plist-get decided :visibility)
+                      :was_section (plist-get decided :was-section)
+                      :was_visibility (plist-get decided :was-visibility)
+                      :daemon (plist-get decided :daemon)
+                      :revision (plist-get decided :revision)
+                      :was_daemon (plist-get decided :was-daemon)
+                      :was_revision (plist-get decided :was-revision))
     (agent-repl-roster--subscribe-host name ref)
     ;; A WORKSPACE THAT BECAME OPEN WITH THIS EDITOR WATCHING is the most
     ;; recent one in the selection history, so `s-]' reaches it at once.  The
@@ -1055,7 +1118,7 @@ as nil, so the caller applies the rename or leaves it alone entire."
                         :old old :new new :dir (prin1-to-string dir) :error (error-message-string err))
      nil)))
 
-(defun agent-repl-roster--tear-down-tab (name &optional released)
+(defun agent-repl-roster--tear-down-tab (name &optional released decided)
   "Tear NAME's tab down: kill the persp, tombstone it.
 RELEASED non-nil marks a workspace the roster still lists open but no
 longer marks visible (frontend.v1.RosterRowVisibility): it is only closed
@@ -1113,7 +1176,16 @@ the tab is gone."
                         :ws name :error (error-message-string err))))
   (agent-repl--ws-del name)
   (agent-repl--ws-put name :released (and released t))
-  (agent-repl--info name "elisp.roster.tab-teardown: ws={ws} released={released}" :ws name :released (and released t)))
+  (agent-repl--info name "elisp.roster.tab-teardown: ws={ws} released={released} section={section} visibility={visibility} was-section={was_section} was-visibility={was_visibility} daemon={daemon} revision={revision} was-daemon={was_daemon} was-revision={was_revision}"
+                    :ws name :released (and released t)
+                    :section (plist-get decided :section)
+                    :visibility (plist-get decided :visibility)
+                    :was_section (plist-get decided :was-section)
+                    :was_visibility (plist-get decided :was-visibility)
+                    :daemon (plist-get decided :daemon)
+                    :revision (plist-get decided :revision)
+                    :was_daemon (plist-get decided :was-daemon)
+                    :was_revision (plist-get decided :was-revision)))
 
 (defun agent-repl-roster--listed-open-ids (roster)
   "Return the ids ROSTER lists open, held here or not, as a hash set.
@@ -1167,8 +1239,10 @@ coming back, which the open revives, and is left alone."
                           :ws name :tombstone_id tombstone-id :row_id id)
         (agent-repl--ws-forget name)))))
 
-(defun agent-repl-roster--reconcile-row (want wanted-ids)
+(defun agent-repl-roster--reconcile-row (want wanted-ids &optional decided)
   "Reconcile one roster row WANT, recording its id in WANTED-IDS.
+DECIDED is the roster facts a tab it opens records
+\(`agent-repl-roster--decision').
 Returns the tab name the row settled on, or nil when the row FAILED.
 
 EACH ROW IS ISOLATED.  A tab's birth touches persp-mode, the workspace
@@ -1189,7 +1263,7 @@ and every other row is still opened and ordered."
                  (agent-repl-roster--purge-foreign-tombstone name id)
                (cond
                 ((null existing)
-                 (agent-repl-roster--open-tab want))
+                 (agent-repl-roster--open-tab want decided))
                 ((equal existing name)
                  (agent-repl--ws-put name :ref (plist-get want :ref))
                  (agent-repl--log-decision (list 'roster-tab-kept id) name
@@ -1254,13 +1328,21 @@ A row that fails to reconcile is contained rather than fatal; see
          ;; The tabs of rows whose repository the daemon holds collapsed.
          (hidden nil)
          ;; Every reconciled row, for the opens (open-tabs.el).
-         (rows nil))
+         (rows nil)
+         ;; WHERE THE ROWS STOOD BEFORE THIS ROSTER AND WHERE IT PUTS THEM,
+         ;; so each tab opened or torn down records what decided it.
+         (before agent-repl-roster--placed)
+         (after (list :rows (agent-repl-roster--placements roster)
+                      :address agent-repl-roster--view-address
+                      :revision (plist-get roster :revision))))
     (dolist (want desired)
       (let ((fresh (null (agent-repl--ws-by-ref-id (plist-get want :id)))))
         ;; EVERY ROW IS RECONCILED AT ONCE, and its tab stays out of the bar
         ;; until the daemon answers it open (open-tabs.el): no row waits on
         ;; another, and its page loads the moment it is asked for.
-        (let ((name (agent-repl-roster--reconcile-row want wanted-ids)))
+        (let ((name (agent-repl-roster--reconcile-row
+                     want wanted-ids
+                     (agent-repl-roster--decision (plist-get want :id) before after))))
           (when name
             (push (cons name (plist-get want :id)) names)
             (when (plist-get want :number)
@@ -1286,12 +1368,14 @@ A row that fails to reconcile is contained rather than fatal; see
           ;; and a signal here would abort the walk over the remaining torn
           ;; down rows for the same reason a failed open must not.
           (condition-case err
-              (agent-repl-roster--tear-down-tab name (gethash id listed-open))
+              (agent-repl-roster--tear-down-tab name (gethash id listed-open)
+                                                (agent-repl-roster--decision id before after))
             (error
              (agent-repl-roster--log-row-failure
               name (agent-repl--log-msg "elisp.roster.row-teardown-failed: ws={ws} error={error}"
               :ws name :error (error-message-string err))))))))
-    (setq agent-repl-roster--walked (nreverse names)
+    (setq agent-repl-roster--placed after
+          agent-repl-roster--walked (nreverse names)
           agent-repl-roster--walked-hidden hidden
           agent-repl-roster--tab-numbers (nreverse numbers))
     ;; THE OPENS, once the walk has made every row's workspace and BEFORE
@@ -2000,6 +2084,9 @@ order, or nil when the push was dropped."
       (agent-repl-roster--index entries)
       (setq agent-repl-roster-view roster
             agent-repl-roster--view-stream (or stream agent-repl-roster--stream)
+            agent-repl-roster--view-address (and agent-repl-roster--view-stream
+                                                 (gethash agent-repl-roster--view-stream
+                                                          agent-repl-roster--stream-addresses))
             agent-repl-roster--pushed-at (float-time))
       (let ((order (agent-repl-roster-reconcile roster)))
         ;; THE SELECTION FIRST, right after the tabs it needs exist: the edge
@@ -2208,6 +2295,10 @@ deliver the tabs."
            (lambda (reason) (agent-repl-roster-on-close reason stream))
            (lambda ()
              (setq agent-repl-roster--accepted stream)
+             ;; THE STREAM IS KEYED TO ITS DAEMON AT ITS ACCEPTANCE, before
+             ;; any push it carries (`agent-repl-roster--view-address').
+             (puthash stream (prin1-to-string (agent-repl-connect-connection-address conn))
+                      agent-repl-roster--stream-addresses)
              (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                                "elisp.roster.subscribed method={method} address={address}"
                                :method (prin1-to-string "WatchWorkspaceRoster")

@@ -162,6 +162,9 @@ whose calls are the observation."
            (agent-repl-roster--streams nil)
            (agent-repl-roster--tab-order nil)
            (agent-repl-roster--hidden-tabs nil)
+           (agent-repl-roster--placed nil)
+           (agent-repl-roster--view-address nil)
+           (agent-repl-roster--stream-addresses (make-hash-table :test 'eq :weakness 'key))
            (agent-repl-roster--rows-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--viewed-by-id (make-hash-table :test 'equal))
@@ -4957,3 +4960,97 @@ Each row's tab name is its id, upcased, so a reader that confused the two fails.
   "A workspace the roster has no row for is not known dormant."
   (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
     (should-not (agent-repl-roster-dormant-p "a"))))
+
+;;;; ---- A tab's open and teardown record the roster facts that decided them
+
+(defun agent-repl-test-roster--record-text (records prefix)
+  "Return the one record of RECORDS starting with PREFIX, failing otherwise."
+  (let ((hits (seq-filter (lambda (text) (string-prefix-p prefix text)) records)))
+    (should (= (length hits) 1))
+    (car hits)))
+
+(ert-deftest agent-repl-test-roster-a-tab-open-records-the-row-it-was-opened-for ()
+  "The open names the row's section and visibility before and after, and each roster."
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil)
+          (stream (make-symbol "successor-stream")))
+      (puthash stream "\"127.0.0.1:7801\"" agent-repl-roster--stream-addresses)
+      ;; Arrange: the row is held hidden, not visible, in the first roster.
+      (agent-repl-roster-apply
+       (plist-put (agent-repl-test-roster--fold-roster nil) :revision 4))
+      (agent-repl-roster-apply
+       (plist-put (agent-repl-test-roster--fold-roster t) :revision 5))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
+        ;; Act: the successor's roster unfolds it.
+        (agent-repl-roster-apply (plist-put (agent-repl-test-roster--fold-roster nil) :revision 1)
+                                 stream))
+      ;; Assert
+      (should (equal (agent-repl-test-roster--record-text infos "elisp.roster.tab-open: ws=two")
+                     (concat "elisp.roster.tab-open: ws=two id=w2 dir=/w/w2 rehold=t"
+                             " section=:repository visibility=:unselected-visible"
+                             " was-section=:repository was-visibility=:not-visible"
+                             " daemon=\"127.0.0.1:7801\" revision=1 was-daemon=nil was-revision=5"))))))
+
+(ert-deftest agent-repl-test-roster-a-tab-teardown-records-the-row-it-was-torn-down-for ()
+  "The teardown names the row's section and visibility before and after, and each roster."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     (let ((infos nil))
+       ;; Arrange
+       (agent-repl-roster-apply (plist-put (agent-repl-test-roster--fold-roster nil) :revision 7))
+       (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
+         ;; Act
+         (agent-repl-roster-apply (plist-put (agent-repl-test-roster--fold-roster t) :revision 8)))
+       ;; Assert
+       (should (equal (agent-repl-test-roster--record-text infos "elisp.roster.tab-teardown: ws=two")
+                      (concat "elisp.roster.tab-teardown: ws=two released=t"
+                              " section=:repository visibility=:not-visible"
+                              " was-section=:repository was-visibility=:unselected-visible"
+                              " daemon=nil revision=8 was-daemon=nil was-revision=7")))))))
+
+(ert-deftest agent-repl-test-roster-a-tab-closed-by-its-row-records-the-closed-section ()
+  "A row that closed is recorded in the closed section, the tab torn down unreleased."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     (let ((infos nil))
+       ;; Arrange
+       (agent-repl-roster-apply (plist-put (agent-repl-test-roster--fold-roster nil) :revision 2))
+       (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
+         ;; Act
+         (agent-repl-roster-apply
+          (plist-put (agent-repl-test-roster--roster
+                      :sections (list (agent-repl-test-roster--section
+                                       "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+                      :closed (list (agent-repl-test-roster--row "w2" "two" :ready :closed t)))
+                     :revision 3)))
+       ;; Assert
+       (should (string-match-p " released=nil section=:closed .* was-section=:repository "
+                               (agent-repl-test-roster--record-text infos "elisp.roster.tab-teardown: ws=two")))))))
+
+(ert-deftest agent-repl-test-roster-a-first-roster-records-no-prior-row ()
+  "The first roster's opens name no section, visibility or roster before them."
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
+        ;; Act
+        (agent-repl-roster-apply (plist-put (agent-repl-test-roster--fold-roster nil) :revision 1)))
+      ;; Assert
+      (should (string-match-p " was-section=nil was-visibility=nil daemon=nil revision=1 was-daemon=nil was-revision=nil$"
+                              (agent-repl-test-roster--record-text infos "elisp.roster.tab-open: ws=one"))))))
+
+(ert-deftest agent-repl-test-roster-a-subscription-names-its-daemon-for-the-records ()
+  "An accepted roster stream is keyed to the address of the daemon it rides."
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-roster--stream nil)
+          (agent-repl-roster--stream-conn nil)
+          (agent-repl-roster--accepted nil)
+          (accept nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional on-open)
+                   (setq accept on-open)
+                   'the-stream)))
+        (agent-repl-roster-subscribe (agent-repl-connect-connection-create :address "127.0.0.1:7801"))
+        ;; Act: the daemon accepts the subscription.
+        (funcall accept)
+        ;; Assert
+        (should (equal (gethash 'the-stream agent-repl-roster--stream-addresses) "\"127.0.0.1:7801\""))))))

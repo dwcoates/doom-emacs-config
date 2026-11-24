@@ -1491,6 +1491,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// ITS INCUMBENT'S OWN ROSTER ROW (rollout.Join's one exception).
 		DialIncumbentRoster: rostermirror.DialIncumbent,
 		IncumbentArms:       sidebarResolver.SetIncumbentArms,
+		// THE FIRST ROSTER AFTER THE MIRROR ENDS IS MARKED (rostermirror).
+		NextRosterPublication: sidebarResolver.NotifyNextPublication,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the rollout controller: %w", err)

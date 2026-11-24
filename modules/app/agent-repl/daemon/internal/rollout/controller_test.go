@@ -300,6 +300,7 @@ func TestNewRefusesAJoiningDaemonWithoutItsRosterMirror(t *testing.T) {
 	}{
 		{"no incumbent roster dial", func(d *Deps) { d.DialIncumbentRoster = nil }},
 		{"no incumbent arms sink", func(d *Deps) { d.IncumbentArms = nil }},
+		{"no next roster publication notice", func(d *Deps) { d.NextRosterPublication = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -312,7 +313,7 @@ func TestNewRefusesAJoiningDaemonWithoutItsRosterMirror(t *testing.T) {
 			_, err := New(deps)
 
 			// Assert
-			if err == nil || !strings.Contains(err.Error(), "roster dial and the arms sink") {
+			if err == nil || !strings.Contains(err.Error(), "roster dial, the arms sink and the next roster publication's notice") {
 				t.Fatalf("New = %v, want the joining daemon's missing mirror refused", err)
 			}
 		})

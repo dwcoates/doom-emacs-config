@@ -924,13 +924,19 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		return err
 	}
 	// A WORKSPACE ADOPTED WITH NO SHIM BEHIND IT HAS ITS SESSION STARTED
-	// (sessionless.go) when a takeover brings it up (bringUpFilter): its shim
-	// was up at the last stop. The marker is
+	// (sessionless.go) when a takeover brings it up (takeoverSplit): its shim
+	// was up at the last stop. The split is read only for a workspace adopted
+	// with no shim to dial, the one it decides, so its record is never written
+	// for an adoption that dials. The marker is
 	// raised here, before the views are published, so the roster never draws
 	// the adopted row idle and usable while nothing serves it; the start
 	// itself runs once the adoption is complete and the workspace is this
 	// daemon's.
-	runs := len(c.bringUpFilter(ctx, []wsm.Workspace{record}, fields)) == 1
+	runs := false
+	if !dial && !record.Closed {
+		up, _, _ := c.takeoverSplit(ctx, []wsm.Workspace{record}, fields)
+		runs = len(up) == 1
+	}
 	sessionless := !dial && !record.Closed && runs
 	// A WORKSPACE THAT RUNS NOTHING MAY STILL HAVE A LISTENER: an inert shim
 	// the incumbent held and detached, whose lock reads free. It is stood
@@ -1860,7 +1866,8 @@ func (c *controller) startRosterMirror(lifetime context.Context) {
 		NotYetAdopted: func(ws ids.WorkspaceID) bool {
 			return c.Standing(ws) == StandingNotYetAdopted
 		},
-		Sink: c.deps.IncumbentArms,
+		Sink:            c.deps.IncumbentArms,
+		NextPublication: c.deps.NextRosterPublication,
 	})
 	if err != nil {
 		// New validated both deps beside IncumbentAddress, so a mirror that

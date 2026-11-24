@@ -190,7 +190,7 @@ func TestBringUpSessionlessNeverMarksAShimThatWasNotUp(t *testing.T) {
 	}
 }
 
-func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
+func TestBringUpSessionlessStatesEachWithheldWorkspaceAtInfo(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -203,9 +203,142 @@ func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
 
 	// Assert
 	infos := levelRecords(records(h.log, opBringUp), dlog.LevelInfo)
-	if len(infos) != 1 || !slices.Contains(infos[0].Context["workspaces"].([]string), string(ws)) {
-		t.Fatalf("bring-up info records = %+v, want one naming the workspace left as it is", infos)
+	if len(infos) != 1 || infos[0].Context["workspace"] != string(ws) || infos[0].Context["rule"] != string(takeoverNotUp) {
+		t.Fatalf("bring-up info records = %+v, want one naming the workspace left as it is and its rule", infos)
 	}
+}
+
+// TestTheTakeoverRecordsEachDecisionWithItsFacts pins the per-workspace
+// record of a takeover's bring-up: the rule, the facts the records state of
+// the shim, and the workspace's visibility and standing.
+func TestTheTakeoverRecordsEachDecisionWithItsFacts(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
+		rule    takeoverRule
+		message string
+		want    dlog.Context
+	}{
+		{
+			name:    "a session nothing stood down",
+			arrange: func(*testing.T, *harness, ids.WorkspaceID) {},
+			rule:    takeoverWasUp,
+			message: "the workspace's session record says its shim was up when the last daemon stopped; the takeover starts it",
+			want:    dlog.Context{"was_up": true, "live": true, "cold_gate": false, "hidden": false},
+		},
+		{
+			name: "a parked session",
+			arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+				if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: "keepalive_cycle", At: time.Unix(1_700_000_000, 0)}); err != nil {
+					t.Fatalf("SetSessionTerminal: %v", err)
+				}
+			},
+			rule:    takeoverNotUp,
+			message: "the workspace's shim was not up when the last daemon stopped; the takeover does not start it, and a prompt brings it up",
+			want:    dlog.Context{"was_up": false, "live": false, "terminal": wsm.TerminalParked, "terminal_detail": "keepalive_cycle"},
+		},
+		{
+			name: "a hidden workspace whose session nothing stood down",
+			arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+				if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
+					t.Fatalf("SetHidden: %v", err)
+				}
+			},
+			rule:    takeoverWasUp,
+			message: "the workspace's session record says its shim was up when the last daemon stopped; the takeover starts it",
+			want:    dlog.Context{"was_up": true, "hidden": true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tc.arrange(t, h, ws)
+			record := sessionlessRecord(t, h, ws)
+
+			// Act
+			h.c.bringUpSessionless([]wsm.Workspace{record}, dlog.Context{"lock": "free"})
+			h.Started()
+
+			// Assert
+			rec, ok := dlog.FindRecord(records(h.log, opBringUp), dlog.RecordQuery{Level: dlog.LevelInfo, Message: tc.message})
+			if !ok {
+				t.Fatalf("bring-up records = %v, want %q", records(h.log, opBringUp), tc.message)
+			}
+			want := dlog.Merge(tc.want, dlog.Context{
+				"workspace": string(ws), "rule": string(tc.rule), "visibility": record.Visibility.String(), "lock": "free",
+			})
+			for key, value := range want {
+				if rec.Context[key] != value {
+					t.Fatalf("context[%q] = %v, want %v (record %v)", key, rec.Context[key], value, rec.Context)
+				}
+			}
+		})
+	}
+}
+
+func TestTheTakeoverRecordsTheStartOfAColdGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	gated := sessionlessRecord(t, h, ws)
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{gated}, nil)
+
+	// Assert
+	if got := h.Started(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("started = %v, want the gated workspace", got)
+	}
+	rec, ok := dlog.FindRecord(records(h.log, opBringUp), dlog.RecordQuery{Level: dlog.LevelInfo,
+		Message: "the workspace stands at a recorded cold gate; the takeover starts it, which raises the gate"})
+	if !ok || rec.Context["rule"] != string(takeoverColdGate) || rec.Context["cold_gate"] != true {
+		t.Fatalf("bring-up records = %v, want the cold gate's decision", records(h.log, opBringUp))
+	}
+}
+
+func TestATakeoverThatCannotReadTheSessionsStartsNoneAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record := sessionlessRecord(t, h, ws)
+	h.c.deps.DB = coldGatedDB{DB: h.db, sessionsErr: errFake}
+
+	// Act
+	left, ok := h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+
+	// Assert
+	if ok || left != nil {
+		t.Fatalf("bringUpSessionless = %v, %v; want nothing decided", left, ok)
+	}
+	if got := h.Marker(); len(got) != 0 {
+		t.Fatalf("marker edges = %v, want none", got)
+	}
+	errs := levelRecords(records(h.log, opBringUp), dlog.LevelError)
+	if len(errs) != 1 || !slices.Contains(errs[0].Context["workspaces"].([]string), string(ws)) || errs[0].Context["cause"] == nil {
+		t.Fatalf("bring-up error records = %+v, want one naming the workspaces and the cause", errs)
+	}
+}
+
+// coldGatedDB is the harness's store with its recorded cold gates and its
+// session read arranged.
+type coldGatedDB struct {
+	wsm.DB
+	gated       []wsm.WorkspaceID
+	sessionsErr error
+}
+
+func (d coldGatedDB) ColdGateWorkspaces(context.Context) ([]wsm.WorkspaceID, error) {
+	return d.gated, nil
+}
+
+func (d coldGatedDB) Sessions(ctx context.Context) ([]wsm.Session, error) {
+	if d.sessionsErr != nil {
+		return nil, d.sessionsErr
+	}
+	return d.DB.Sessions(ctx)
 }
 
 func TestBringUpSessionlessDoesNotStartAShimThatWasNotUp(t *testing.T) {

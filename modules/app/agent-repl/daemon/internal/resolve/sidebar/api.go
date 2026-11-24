@@ -292,6 +292,12 @@ type Resolver interface {
 	// workspaces whose standing is not_yet_adopted, so a row the daemon owns
 	// is never drawn from another daemon.
 	SetIncumbentArms(arms map[ids.WorkspaceID]string)
+	// NotifyNextPublication tells FN, once, the revision of the next roster
+	// this resolver publishes (frontend.v1.RosterPush.revision): the roster
+	// mirror marks with it the first roster a successor publishes after the
+	// incumbent's roster stream ended. FN runs under the resolver's lock, so
+	// it returns at once and never calls the resolver.
+	NotifyNextPublication(fn func(revision uint64))
 	// DeployedVersion installs the agent-repl version the daemon deploys
 	// from, drawn in the rail's header as its bare release
 	// (frontend.v1.WorkspaceRoster.version); nil withdraws it. The deployed
