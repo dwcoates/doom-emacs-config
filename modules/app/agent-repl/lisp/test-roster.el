@@ -3968,7 +3968,7 @@ Every request is recorded in `asked' as its list of ref ids."
              (lambda (workspaces _on-frame _on-close)
                (push (mapcar (lambda (w) (plist-get (plist-get w :workspace) :id)) workspaces)
                      asked)
-               t)))
+               #'ignore)))
        (ignore asked)
        ,@body)))
 

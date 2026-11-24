@@ -895,6 +895,7 @@ re-routes their frontend resolution instead."
          ;; its own.
          (agent-repl-open-tabs--state (make-hash-table :test 'equal))
          (agent-repl-open-tabs--reattached-while-asked (make-hash-table :test 'equal))
+         (agent-repl-open-tabs--page-waits (make-hash-table :test 'equal))
          (agent-repl-open-tabs--rows nil)
          (agent-repl-open-tabs--startup 'done)
          (agent-repl-open-tabs--startup-selected nil)
@@ -916,7 +917,8 @@ re-routes their frontend resolution instead."
 (defun agent-repl-test--open-tabs-answer-ready (workspaces on-frame _on-close)
   "Stand in for the daemon: answer every one of WORKSPACES open, at once.
 ON-FRAME takes each `opened' frame, as the daemon's stream would hand it;
-each carries the row the roster already indexed for its workspace."
+each carries the row the roster already indexed for its workspace.
+Answers a cancel that has nothing left to end: every open is answered."
   (dolist (workspace workspaces)
     (funcall on-frame (list :arm :opened
                             :value (list :workspace (plist-get workspace :workspace)
@@ -925,7 +927,7 @@ each carries the row the roster already indexed for its workspace."
                                          (list :arm :ready
                                                :value (list :row (gethash (plist-get (plist-get workspace :workspace) :id)
                                                                           agent-repl-roster--rows-by-id)))))))
-  t)
+  #'ignore)
 
 (defmacro agent-repl-test--with-mocked-git-probes (&rest body)
   "Execute BODY with the git-probe external-boundary wrappers stubbed.

@@ -945,6 +945,32 @@ A running Emacs hot-loads the code over its own pages; no ERROR is recorded."
       (should dropped)
       (should (= 1 (length (agent-repl-test-wh--sent "remove")))))))
 
+(ert-deftest agent-repl-test-wh-removing-a-held-page-runs-the-page-removed-hook ()
+  "A removal that drops a held page tells every page-removed function which workspace's."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (heard
+          (agent-repl-webhost-page-removed-functions nil))
+      (add-hook 'agent-repl-webhost-page-removed-functions (lambda (ws) (push ws heard)))
+      (agent-repl-webhost-ensure-page "alpha" 'shown)
+      ;; Act
+      (agent-repl-webhost-remove "alpha" 'unloading)
+      ;; Assert
+      (should (equal heard '("alpha"))))))
+
+(ert-deftest agent-repl-test-wh-removing-no-held-page-runs-no-page-removed-hook ()
+  "A removal that clears only a gate slot drops no page, so it tells nobody."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (heard
+          (agent-repl-webhost-page-removed-functions nil))
+      (add-hook 'agent-repl-webhost-page-removed-functions (lambda (ws) (push ws heard)))
+      (agent-repl-webhost-set-gate-dock "alpha" 90)
+      ;; Act
+      (agent-repl-webhost-remove "alpha")
+      ;; Assert
+      (should-not heard))))
+
 (ert-deftest agent-repl-test-wh-removing-with-nothing-held-sends-nothing ()
   "A teardown of a workspace whose page is already gone calls nothing on the host."
   ;; Arrange

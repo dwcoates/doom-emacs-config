@@ -61,6 +61,7 @@
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
 (declare-function agent-repl-open-progress-note-loaded "open-progress" (ws))
 (declare-function agent-repl-rpc-open-tabs "rpc" (conn workspaces on-push on-close))
+(declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-host-view-where-served "host" (ws address trigger))
 (declare-function agent-repl-host-conn "host" (ws))
@@ -113,6 +114,23 @@ A handover refusal that arrives AFTER its workspace's reattach finished
 has no reattach left to wait for, so it is asked for again at once.  The
 entry goes with the open's answer, whatever it is.")
 
+(cl-defstruct (agent-repl-open-tabs--request (:constructor agent-repl-open-tabs--request-make))
+  "One `OpenTabs' request.
+CANCEL ends its stream (what the sender answered); PAGE-DROPPED is set
+when a page it waited on was dropped, so its close asks again at once."
+  cancel page-dropped)
+
+(defvar agent-repl-open-tabs--page-waits (make-hash-table :test 'equal)
+  "Ref id -> the `agent-repl-open-tabs--request' still waiting on its page.
+AN OPEN ASKED WITH A PAGE LOADING WAITS FOR THAT PAGE TO DRAW, so a page
+dropped before it drew would leave the open unanswered for as long as its
+stream stands: the tab held, the row `opening' and unselectable
+\(2026-11-24: a workspace parked 140ms after its revived slot loaded its
+page stood so for an hour).  So every drop of such a page ends its
+request's stream (`agent-repl-open-tabs--page-removed'), whose close asks
+again for every workspace it left unanswered, each with the page it holds
+then.  The entry goes with the workspace's answer or its stream's close.")
+
 (defvar agent-repl-open-tabs--rows nil
   "The last roster walk's rows: plists `(:id :name :ref :collapsed :hidden)'.
 `:collapsed' is a tab off the bar, folded or hidden; `:hidden' is only the
@@ -128,8 +146,9 @@ is, `done' once it finished or its stream ended.")
 
 (defvar agent-repl-open-tabs-sender #'agent-repl-open-tabs--send-to-daemon
   "The function that sends one `OpenTabs' request.
-Called with WORKSPACES, ON-FRAME and ON-CLOSE; returns non-nil when the
-request was sent.  The daemon boundary: a test answers through its own.")
+Called with WORKSPACES, ON-FRAME and ON-CLOSE; returns a function of no
+arguments that cancels the request's stream when it was sent, nil when
+it was not.  The daemon boundary: a test answers through its own.")
 
 (defun agent-repl-open-tabs-starting-p ()
   "Return non-nil until this process's first open has finished."
@@ -220,11 +239,11 @@ The daemon that served the rows is the one asked to open them."
 CONN is the daemon asked when the workspaces are served by one other than
 the roster's (`agent-repl-open-tabs--serving-conn'); the roster's
 otherwise.  Returns nil, sending nothing, when there is no daemon
-connection."
+connection, and otherwise a function that cancels the request's stream."
   (let ((conn (or conn (agent-repl-open-tabs--conn))))
     (when conn
-      (agent-repl-rpc-open-tabs conn workspaces on-frame on-close)
-      t)))
+      (let ((stream (agent-repl-rpc-open-tabs conn workspaces on-frame on-close)))
+        (lambda () (agent-repl-connect-stream-cancel stream))))))
 
 (defun agent-repl-open-tabs--page (name hidden)
   "Make workspace NAME's slot unless it is HIDDEN; return the page arm.
@@ -254,6 +273,7 @@ Every row is marked in flight; when the request cannot be sent they are
 left unasked, and the next link-up or roster walk asks again."
   (let* ((startup (eq agent-repl-open-tabs--startup 'expected))
          (ids (mapcar (lambda (row) (plist-get row :id)) rows))
+         (request (agent-repl-open-tabs--request-make))
          (workspaces
           (mapcar (lambda (row)
                     (list :workspace (plist-get row :ref)
@@ -261,6 +281,12 @@ left unasked, and the next link-up or roster walk asks again."
                                                             (plist-get row :hidden))))
                   rows)))
     (dolist (id ids) (puthash id 'in-flight agent-repl-open-tabs--state))
+    ;; THE PAGE WAITS ARE NOTED BEFORE THE SEND: a sender may answer before
+    ;; it returns, and each answer clears its own.
+    (cl-mapc (lambda (id w)
+               (when (eq (plist-get (plist-get w :page) :arm) :loading)
+                 (puthash id request agent-repl-open-tabs--page-waits)))
+             ids workspaces)
     (agent-repl--info agent-repl-open-tabs--central
                       "elisp.open-tabs.ask workspaces={workspaces} startup={startup} pages={pages}"
                       :workspaces (length rows) :startup startup
@@ -272,10 +298,18 @@ left unasked, and the next link-up or roster walk asks again."
       (setq agent-repl-open-tabs--startup 'running)
       (agent-repl-open-tabs--say "opening {rows_count} workspaces…" :rows_count (length rows))
       (agent-repl-open-tabs--show-host-while-starting))
-    (unless (apply agent-repl-open-tabs-sender workspaces
-                   (lambda (frame) (agent-repl-open-tabs--on-frame frame startup))
-                   (lambda (outcome) (agent-repl-open-tabs--on-close ids outcome startup))
-                   (and conn (list conn)))
+    (if-let ((cancel (apply agent-repl-open-tabs-sender workspaces
+                            (lambda (frame) (agent-repl-open-tabs--on-frame frame startup))
+                            (lambda (outcome)
+                              (agent-repl-open-tabs--on-close ids outcome startup request))
+                            (and conn (list conn)))))
+        (progn
+          (unless (functionp cancel)
+            (agent-repl--fatal agent-repl-open-tabs--central
+                               "elisp.open-tabs.sender-answered-no-cancel answer={answer}"
+                               :answer (prin1-to-string cancel)))
+          (setf (agent-repl-open-tabs--request-cancel request) cancel))
+      (agent-repl-open-tabs--forget-page-waits ids request)
       (dolist (id ids) (remhash id agent-repl-open-tabs--state))
       (when startup (setq agent-repl-open-tabs--startup 'expected))
       (agent-repl--info agent-repl-open-tabs--central
@@ -321,6 +355,33 @@ frame already stands on a workspace of the user's."
     (let ((kill-buffer-query-functions nil))
       (kill-buffer buf))
     (agent-repl--info agent-repl-open-tabs--central "elisp.open-tabs.startup-view-dropped")))
+
+(defun agent-repl-open-tabs--forget-page-waits (ids request)
+  "Forget every page wait of IDS that REQUEST holds.
+A later request may hold an id's wait by now; that one is kept."
+  (dolist (id ids)
+    (when (eq (gethash id agent-repl-open-tabs--page-waits) request)
+      (remhash id agent-repl-open-tabs--page-waits))))
+
+(defun agent-repl-open-tabs--page-removed (ws)
+  "End the open waiting on WS's page, now that the host dropped that page.
+The page will never draw, so the open would never be answered; its
+stream's close asks again for every workspace it left unanswered
+\(`agent-repl-open-tabs--on-close').  A page no open waits on ends nothing."
+  (let* ((id (agent-repl-open-tabs--ws-id ws))
+         (request (and id (gethash id agent-repl-open-tabs--page-waits))))
+    (when request
+      (remhash id agent-repl-open-tabs--page-waits)
+      (let ((cancel (agent-repl-open-tabs--request-cancel request)))
+        (unless cancel
+          (agent-repl--fatal ws "elisp.open-tabs.page-wait-unsent ws={ws} id={id}"
+                             :ws ws :id id))
+        (agent-repl--info ws "elisp.open-tabs.page-dropped-while-asked ws={ws} id={id}"
+                          :ws ws :id id)
+        (setf (agent-repl-open-tabs--request-page-dropped request) t)
+        (funcall cancel)))))
+
+(add-hook 'agent-repl-webhost-page-removed-functions #'agent-repl-open-tabs--page-removed)
 
 (defun agent-repl-open-tabs--owed-p (row)
   "Return non-nil when ROW must be asked for now."
@@ -439,6 +500,7 @@ once a daemon is serving."
          (row (agent-repl-open-tabs--row id))
          (reattached (gethash id agent-repl-open-tabs--reattached-while-asked)))
     (remhash id agent-repl-open-tabs--reattached-while-asked)
+    (remhash id agent-repl-open-tabs--page-waits)
     (pcase (plist-get outcome :arm)
       ((or :ready :failed)
        (cond
@@ -636,11 +698,15 @@ no workspace while the rest come up."
                                  :ready (plist-get finished :ready) :total total
                                  :failed (mapconcat (lambda (f) (plist-get f :name)) failed ", ")))))
 
-(defun agent-repl-open-tabs--on-close (ids outcome startup)
-  "The stream of the open of IDS closed with OUTCOME; STARTUP marks the first.
-Every id it left unanswered is unasked again, and asked for on the next
-link-up or roster walk; never at once, so a daemon that is down is not
-dialed in a loop."
+(defun agent-repl-open-tabs--on-close (ids outcome startup request)
+  "The stream of REQUEST, the open of IDS, closed with OUTCOME.
+STARTUP marks the first.  Every id it left unanswered is unasked again,
+and asked for on the next link-up or roster walk; never at once, so a
+daemon that is down is not dialed in a loop.  The one exception is a
+stream this editor ended because a page it waited on was dropped
+\(`agent-repl-open-tabs--page-removed'): its daemon is up, so its owed
+are asked for at once."
+  (agent-repl-open-tabs--forget-page-waits ids request)
   (let ((unanswered (cl-remove-if-not
                      (lambda (id) (eq (gethash id agent-repl-open-tabs--state) 'in-flight))
                      ids)))
@@ -654,7 +720,12 @@ dialed in a loop."
                         "elisp.open-tabs.closed-unanswered outcome={outcome} unanswered={unanswered}"
                         :outcome (prin1-to-string outcome) :unanswered (prin1-to-string unanswered)))
     (when (and startup (agent-repl-open-tabs-starting-p))
-      (agent-repl-open-tabs--end-startup "stream-ended"))))
+      (agent-repl-open-tabs--end-startup "stream-ended"))
+    (when (agent-repl-open-tabs--request-page-dropped request)
+      (agent-repl--info agent-repl-open-tabs--central
+                        "elisp.open-tabs.ask-again-page-dropped unanswered={unanswered}"
+                        :unanswered (prin1-to-string unanswered))
+      (agent-repl-open-tabs--ask-owed))))
 
 (defun agent-repl-open-tabs--end-startup (why)
   "End this process's first open, for WHY, and arm Doom's one-time setup."
