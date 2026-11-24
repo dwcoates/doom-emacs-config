@@ -3277,3 +3277,37 @@ func TestDaemonAddrIsWrittenOnce(t *testing.T) {
 		})
 	}
 }
+
+// A DAEMON NEVER ADOPTS FROM ITS OWN MANIFEST (2026-11-24,
+// TestALateFactsRefusalIsOfferedAgainMidWork): an incumbent that took a
+// refused workspace back still has the manifest it wrote on disk, and a
+// participant calling it re-read that manifest, armed the workspace as if this
+// daemon were its own successor, and retried a self-adoption that found the
+// real successor serving.
+func TestADaemonArmsNothingFromTheManifestItWrote(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: h.c.deps.Instance, Successor: "127.0.0.1:7788", WrittenAt: instant,
+		Sessions: []ManifestSession{{Workspace: ws, Dir: record.Dir, ShimPID: 4242, VendorSessionID: "vendor-1", Intent: IntentPreserve, ExpectedHost: true}},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+
+	// Act
+	armErr := h.c.armFromManifest()
+	adoptErr := h.c.AdoptHost(context.Background(), ws)
+
+	// Assert
+	if armErr != nil || h.c.rendezvousSize() != 0 {
+		t.Fatalf("armFromManifest = %v, %d armed; want nothing armed from this daemon's own manifest", armErr, h.c.rendezvousSize())
+	}
+	if !errors.Is(adoptErr, ErrNoTransferAnnounced) {
+		t.Fatalf("AdoptHost answered %v, want no_transfer_announced: this daemon serves the workspace", adoptErr)
+	}
+}

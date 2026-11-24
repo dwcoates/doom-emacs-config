@@ -535,10 +535,22 @@ func (c *controller) rendezvousSize() int {
 
 // armFromManifest arms the rendezvous from the intent manifest as it stands
 // NOW, adding what is not already armed and touching nothing that is.
+//
+// A MANIFEST THIS DAEMON WROTE ARMS NOTHING: a daemon is never its own
+// successor. An incumbent that took a refused workspace back still has its
+// manifest on disk, and a participant calling it then re-read that manifest,
+// armed the workspace for a self-adoption, and retried it until the real
+// successor's adoption made it fail (2026-11-24,
+// TestALateFactsRefusalIsOfferedAgainMidWork). The workspace is served here,
+// and the caller is told no transfer was announced to this daemon.
 func (c *controller) armFromManifest() error {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil || !found {
 		return err
+	}
+	if m.Daemon == c.deps.Instance {
+		c.log.Debug(opJoin, "the intent manifest is this daemon's own; a daemon adopts nothing from itself", dlog.Context{"workspaces": len(m.Sessions)})
+		return nil
 	}
 	c.recordForcedTakeover(m.Forced)
 	c.recordDeployTakeover(m)
