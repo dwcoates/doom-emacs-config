@@ -4,8 +4,11 @@
 ;; Every load goes through `agent-repl-page-unload-load', and every unload
 ;; through `agent-repl-webhost-remove'; each tells the daemon here, with its
 ;; reason, so the daemon's page metrics (agentrepl_pages_loaded and its
-;; counters) and the sidebar's loaded-page count read what the web view
-;; holds, not what visibility makes eligible.
+;; counters) and the sidebar's loaded-page count know why each page was
+;; loaded, not only what visibility makes eligible.  Which pages are held
+;; is the web host's own report (its census's frames): this editor's table
+;; is what it asked the host to hold, and the daemon records any
+;; disagreement between the two that stands.
 ;;
 ;; THE DAEMON HOLDS THE STATE ONLY WHILE THE WORKSPACE'S HOST STREAM STANDS, so
 ;; a restarted Emacs or a daemon that took a workspace over never counts a

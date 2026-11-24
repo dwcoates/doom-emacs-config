@@ -301,7 +301,7 @@ func (s *server) WatchPage(
 	// its page stream does: a deploy reloads a host on an older webapp, and
 	// judges a host still stale by its generation (deploy/webhost.go).
 	if host := req.Msg.GetWebhost(); host != nil {
-		defer s.holdWebhostPage(host)()
+		defer s.holdWebhostPage(page.id, host)()
 		// A HOST ATTACHING ON ANOTHER WEBAPP than the installed one is
 		// reloaded onto it (deploy/webhost.go): a handover never reloads it.
 		s.deps.Deploy.ReconcileWebhost(deploy.WebhostEdgeHostAttached)

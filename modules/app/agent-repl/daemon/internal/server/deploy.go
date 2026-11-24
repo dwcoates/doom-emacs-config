@@ -332,16 +332,21 @@ func (s *server) WebhostPages() []*agentreplv1.WebhostPage {
 	return out
 }
 
-// holdWebhostPage records what a web view host's page stream stated of
-// itself for as long as the stream stands, and answers the release.
-func (s *server) holdWebhostPage(page *agentreplv1.WebhostPage) func() {
+// holdWebhostPage records what the page stream of web view host document ID
+// stated of itself for as long as the stream stands, and answers the release.
+// SO DO THE FRAMES ITS CENSUS REPORTS (pageheld): the held-page table takes
+// the document's census only while its stream stands, and a document that
+// ends takes the pages it held out of every count.
+func (s *server) holdWebhostPage(id string, page *agentreplv1.WebhostPage) func() {
 	s.deps.HotReload.WebhostReported(page.GetWebappBuild())
+	s.deps.HeldPages.HostAttached(id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.webStreamSeq++
 	key := s.webStreamSeq
 	s.webhostPages[key] = proto.CloneOf(page)
 	return func() {
+		s.deps.HeldPages.HostGone(id)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		delete(s.webhostPages, key)

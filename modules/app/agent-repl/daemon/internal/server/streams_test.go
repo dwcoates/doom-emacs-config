@@ -2181,7 +2181,7 @@ func TestReportPageStateRecordsEachArm(t *testing.T) {
 			}
 
 			// Assert.
-			_, held := h.HeldPages.Snapshot()[testWorkspaceID]
+			_, held := h.HeldPages.Reported()[testWorkspaceID]
 			loads, unloads := h.PageCounts.counted()
 			if held != tt.wantHeld || len(loads) != tt.wantLoads || len(unloads) != tt.wantUnloads {
 				t.Fatalf("held %v, loads %v, unloads %v; want held %v, %d loads, %d unloads",
@@ -2214,7 +2214,7 @@ func TestReportPageStateRefusesAMalformedReport(t *testing.T) {
 			if connect.CodeOf(err) != connect.CodeInvalidArgument {
 				t.Fatalf("err = %v, want InvalidArgument", err)
 			}
-			if pages := h.HeldPages.Snapshot(); len(pages) != 0 {
+			if pages := h.HeldPages.Reported(); len(pages) != 0 {
 				t.Fatalf("held pages = %v, want none from a refused report", pages)
 			}
 		})
@@ -2235,8 +2235,8 @@ func TestReportPageStateRefusesAnUnknownWorkspace(t *testing.T) {
 	if resp.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("result = %v, want unknown_workspace", resp.GetResult())
 	}
-	if loads, _ := h.PageCounts.counted(); len(loads) != 0 || len(h.HeldPages.Snapshot()) != 0 {
-		t.Fatalf("loads %v, pages %v; want nothing recorded for an unknown workspace", loads, h.HeldPages.Snapshot())
+	if loads, _ := h.PageCounts.counted(); len(loads) != 0 || len(h.HeldPages.Reported()) != 0 {
+		t.Fatalf("loads %v, pages %v; want nothing recorded for an unknown workspace", loads, h.HeldPages.Reported())
 	}
 }
 
@@ -2276,7 +2276,7 @@ func TestTheLastHostStreamClosingForgetsTheWorkspacesPage(t *testing.T) {
 	h.Footer.AwaitEdge(t) // the close edge, stated after the forget
 
 	// Assert.
-	if pages := h.HeldPages.Snapshot(); len(pages) != 0 {
+	if pages := h.HeldPages.Reported(); len(pages) != 0 {
 		t.Fatalf("held pages = %v, want the page forgotten with its host stream", pages)
 	}
 }

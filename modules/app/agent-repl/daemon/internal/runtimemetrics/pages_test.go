@@ -37,6 +37,8 @@ func TestLoadedPagesAreServedByReasonAndSessionState(t *testing.T) {
 	pages.Held("i", pageheld.LoadShown)
 	pages.Held("p", pageheld.LoadShown)
 	pages.Held("n", pageheld.LoadSlot)
+	pages.HostAttached("host")
+	pages.HostReported("host", []ids.WorkspaceID{"a", "k", "i", "p", "n"}, false)
 	recorded := func(_ context.Context, ws ids.WorkspaceID) (bool, error) { return ws == "p", nil }
 	if err := s.RegisterPages(pages, pagesCensus(), recorded); err != nil {
 		t.Fatalf("RegisterPages: %v", err)
@@ -55,12 +57,59 @@ func TestLoadedPagesAreServedByReasonAndSessionState(t *testing.T) {
 	)
 }
 
+func TestTheLoadedPagesAreTheHostsFrames(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	pages := pageheld.New(s)
+	pages.Held("a", pageheld.LoadAwake)
+	pages.Held("gone", pageheld.LoadShown)
+	pages.HostAttached("host")
+	pages.HostReported("host", []ids.WorkspaceID{"a", "k"}, false)
+	none := func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil }
+	if err := s.RegisterPages(pages, pagesCensus(), none); err != nil {
+		t.Fatalf("RegisterPages: %v", err)
+	}
+
+	// Act
+	body := scrape(t, s)
+
+	// Assert
+	mustContain(t, body,
+		`agentrepl_pages_loaded{reason="awake",session="working"} 1`,
+		`agentrepl_pages_loaded{reason="unreported",session="keepalive"} 1`,
+	)
+	if strings.Contains(body, PagesLoadedName+`{reason="shown"`) {
+		t.Fatalf("a page Emacs reports but the host does not hold was served:\n%s", body)
+	}
+}
+
+func TestNoPageIsServedBeforeTheHostsFirstCensus(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	pages := pageheld.New(s)
+	pages.Held("a", pageheld.LoadAwake)
+	none := func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil }
+	if err := s.RegisterPages(pages, pagesCensus(), none); err != nil {
+		t.Fatalf("RegisterPages: %v", err)
+	}
+
+	// Act
+	body := scrape(t, s)
+
+	// Assert
+	if strings.Contains(body, PagesLoadedName+"{") {
+		t.Fatalf("a page was served before the host said what it holds:\n%s", body)
+	}
+}
+
 func TestAPageWhoseSessionCannotBeReadIsOmittedAndSaidOnce(t *testing.T) {
 	// Arrange
 	s, logs := openSurface(t)
 	pages := pageheld.New(s)
 	pages.Held("p", pageheld.LoadShown)
 	pages.Held("a", pageheld.LoadAwake)
+	pages.HostAttached("host")
+	pages.HostReported("host", []ids.WorkspaceID{"p", "a"}, false)
 	failing := func(context.Context, ids.WorkspaceID) (bool, error) { return false, errors.New("state closed") }
 	if err := s.RegisterPages(pages, pagesCensus(), failing); err != nil {
 		t.Fatalf("RegisterPages: %v", err)

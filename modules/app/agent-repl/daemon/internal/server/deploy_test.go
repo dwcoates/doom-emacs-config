@@ -475,8 +475,8 @@ func TestAHeldHostPageGoesWithItsRelease(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	s := h.Server.(*server)
-	release := s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web1"})
-	keep := s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web2"})
+	release := s.holdWebhostPage("webhost-1", &agentreplv1.WebhostPage{WebappBuild: "Web1"})
+	keep := s.holdWebhostPage("webhost-2", &agentreplv1.WebhostPage{WebappBuild: "Web2"})
 	defer keep()
 
 	// Act
@@ -493,8 +493,8 @@ func TestHeldHostPagesAnswerInAttachOrderAsClones(t *testing.T) {
 	h := newHarness(t)
 	s := h.Server.(*server)
 	first := &agentreplv1.WebhostPage{WebappBuild: "Web1"}
-	defer s.holdWebhostPage(first)()
-	defer s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web2"})()
+	defer s.holdWebhostPage("webhost-1", first)()
+	defer s.holdWebhostPage("webhost-2", &agentreplv1.WebhostPage{WebappBuild: "Web2"})()
 	first.WebappBuild = "changed after the hold"
 
 	// Act
@@ -733,7 +733,7 @@ func TestWebStreamsTellTheHotReloadTheirBuilds(t *testing.T) {
 			s.holdWebBuild(testWorkspaceID, "Web1")
 			s.holdWebBuild(testWorkspaceID, "Web2")()
 		}, []string{"webview:" + string(testWorkspaceID) + ":Web1", "webview:" + string(testWorkspaceID) + ":Web2"}},
-		{"a web view host page attaching", func(s *server) { s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web3"}) },
+		{"a web view host page attaching", func(s *server) { s.holdWebhostPage("webhost-3", &agentreplv1.WebhostPage{WebappBuild: "Web3"}) },
 			[]string{"webhost:Web3"}},
 	}
 	for _, tt := range tests {
