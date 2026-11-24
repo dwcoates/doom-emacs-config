@@ -2631,34 +2631,31 @@ authorizes it: today the confirm challenge (`interruptTurn`), a restart
 (`forceEndTurn`), and the two adapters that forward their caller's force. A new
 forced site fails the unit suite until it is listed with its reason.
 
-## The roster row's viewed mode is DERIVED from a read fact, never stored
+## The roster row's viewed mode is DERIVED from the viewed fact
 
 `RosterRowViewed` is the row's display mode: present is PARTIAL (the client
-recedes the row's NAME), absent is FULL. It is not a field anywhere: `row()`
-computes it from `wsState.viewedOn(arm)`, which is true exactly when the arm is
-a turn end (`isTurnEndArm`: `done` or `interrupted`) and `wsState.result` is
-`resultRead`.
+recedes the row's NAME), absent is FULL. `row()` computes it from
+`wsState.viewedOn(arm)`, which is true exactly when `wsState.viewedArm`, the
+arm the user last interacted on, is the row's arm.
 
-The fact, `wsState.result`, has three writers and no others:
+The fact, `wsState.viewedArm`, has these writers and no others:
 
-- `SetTurnEnded` sets it `resultUnread` on a completed or killed close, and
-  `resultNone` on any other close.
-- `SetViewed` (the editor's `MarkWorkspaceViewed`) sets it `resultRead`, but
-  only when the arm LAST PUBLISHED for the row is a turn end, or `idle_async`
-  over an unread result (`wsState.viewReadsResult`); otherwise it is refused
-  and recorded (`daemon.sidebar.row_viewed_refused`).
-- `startTurn` (a new prompt) resets it to `resultNone`.
+- `SetInteracted` (`workspace.Verbs.RecordInteraction`, from
+  `ReportUserInteraction` or a followed link) sets it to the arm LAST
+  PUBLISHED for the row, on any arm.
+- `row()` clears it on every status change of the row.
+- `restoreViewed` seeds it once from `wsm.Workspace.ViewedStatus`. A seeded
+  fact waits out the bring-up's arms (`wsState.viewedRestored`) and becomes
+  live when the row first draws its arm; a turn accepted or closed before then
+  drops it (`dropRestoredViewed`).
 
-Live detached work outranks an unread result in `idleArm` (status.go): a turn
-that ends with detached work live draws `idle_async` at once. **Deriving the marker rather than clearing it on an arm change is
-the point**: the read fact outlives the arm changes that are not a new result
-(detached work starting or ending, a link blip, a merge), so a read turn end
-returning from `idle_async` is PARTIAL on the very push that changes its arm,
-and a client draws the marker as it arrives with no rule of its own.
-
-The fact is in-memory only and writes no durable record: it is a view fact and
-must not outlive a restart. The module-root AGENTS.md section "The viewed
-mode" owns the cross-surface invariant.
+It is durable: `noteViewed` hands every change to the viewed sink
+(`rosterViewed`, `wsm.SetViewedStatus`), so a restart draws the row as it
+stood. The interaction instant (`wsm.SetInteractedAt`) is the row's
+`RosterRowLastInteracted`, the later of it and the live one
+(`interactedAt`). A repeated interaction on a row already viewed and already
+the newest publishes no roster (`newestInteracted`). The module-root
+AGENTS.md section "The viewed mode" owns the cross-surface invariant.
 
 ## THE LIVE-SHIM INVARIANT: a workspace whose shim is live carries NO terminal session record
 

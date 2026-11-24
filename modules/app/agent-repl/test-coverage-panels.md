@@ -155,16 +155,6 @@ Complex function: clears the main area, fills the frame with the panels, sets bu
 
 ## Workspace switch
 
-### `agent-repl--mark-viewed (ws)`
-
-| Edge Case | Covered | Test |
-|-----------|---------|------|
-| :inactive -> :done + :viewed | Yes | `mark-viewed-inactive-to-done` |
-| :done -> :viewed (status unchanged) | Yes | `mark-viewed-done-sets-viewed` |
-| :thinking -> no-op | Yes | `mark-viewed-thinking-noop` |
-| nil status -> no-op | Yes | `mark-viewed-nil-status-noop` |
-| :permission -> no-op | Yes | `mark-viewed-permission-noop` |
-
 ### `agent-repl--drain-pending-show-panels (ws)`
 
 | Edge Case | Covered | Test |
@@ -177,7 +167,7 @@ Complex function: clears the main area, fills the frame with the panels, sets bu
 | Edge Case | Covered | Test |
 |-----------|---------|------|
 | Normal workspace switch | No | Requires workspace/persp infrastructure |
-| ws is nil | No | `when ws` guards mark-viewed |
+| ws is nil | No | `when ws` guards the switch |
 
 ### `agent-repl--non-claude-panel-window-p (w)`
 

@@ -2756,9 +2756,8 @@ them in code, comments, tests and prose.
 whenever that workspace's agent-repl panels — the webapp panel AND the input
 window — are closed, and full when they are open AND the user has not already
 seen what the workspace is showing. Nothing else may decide it: not selection,
-not the arm. Ruling 5 (2026-09-13) had "panels open" as the whole rule and
-struck the ready-view dwell that fought it; the owner's 2026-09-15 ruling put a
-dwell back, GENERALIZED — see the next section, which owns it.
+not the arm. Ruling 5 (2026-09-13) had "panels open" as the whole rule; the
+viewed mode beside it is the next section's.
 
 Where it is executable: `agent-repl--ws-agent-open-p` (status.el) is the
 panels-open fact, `agent-repl--ws-display-state` applies the rule and returns
@@ -2775,67 +2774,67 @@ The three axes on a tab are independent, and each says one thing:
 | extent | are the panels open | full vs partial |
 | selection | which workspace the user is standing in | an underline under the NAME alone |
 
-## The viewed mode: PARTIAL means "you have already seen this"
+## Viewed, visible and recency: three terms, each with one definition
+
+These three words name three different facts. Every agent uses them in
+exactly these senses, and each is decided by the daemon alone.
+
+| term | what it means | its one definition |
+|---|---|---|
+| **viewed** | the user has interacted with the workspace since its status last changed | `frontend.v1.RosterRowViewed` |
+| **visible** | the user could see the workspace's row, so the editor holds its perspective, composer and page | `frontend.v1.RosterRowVisibility` |
+| **recency** | when the user last interacted with the workspace, the order the recency walk steps along | `frontend.v1.RosterRowLastInteracted` |
+
+- The one input to viewed and to recency is the user's interaction
+  (`agentrepl.v1.ReportUserInteraction`, and a link followed in a page).
+- Visible reads viewed in one clause only: an unviewed turn-end row stays
+  visible under a fold. A working workspace is visible whatever viewed says.
+- A selection is none of the three: switching to a workspace views nothing
+  and moves no recency (`frontend.v1.RosterRowLastSelected` is the switcher's
+  separate order).
+
+## The viewed mode: PARTIAL means "you have interacted with this"
 
 The same two words, `full` and `partial`, name a SECOND thing a workspace
 carries, and it is drawn on the Emacs tab-bar and in the webapp sidebar alike.
-A workspace whose panels the user has stood in front of for its DWELL is
-demoted to **partial**: the tab's name
-falls back to the bar's ground (`[N]` keeps the status colour) and the sidebar
-row's name greys to `--muted`. **The status itself never recedes** — the
+A workspace the user has interacted with since its status last changed is
+**partial**: the tab's name falls back to the bar's ground (`[N]` keeps the
+status colour) and the sidebar row's name greys to `--muted`. A **full** row's
+sidebar name wears its status colour (`webapp/src/sidebar/name-tint.ts`), on
+every status and with no fade. **The status itself never recedes**: the
 bracket and the sidebar dot keep their colour in either mode. The mode says
-what the user has SEEN; the colour says what the workspace is DOING.
+what the user has acted on; the colour says what the workspace is DOING.
 
 **THE DAEMON IS THE SINGLE SOURCE OF THIS MODE.** A roster row carrying
 `RosterRowViewed` is **partial**; a row without it is **full**. Both the Emacs
 tab-bar and the webapp sidebar RENDER the mode from that marker and nothing
 else, so they cannot disagree.
 
-**THE MARKER IS DERIVED FROM A READ FACT** (owner ruling, 2026-09-27). A turn
-that completes or is interrupted leaves its result UNREAD;
-`MarkWorkspaceViewed` on the row while it shows that turn-end arm (`done` or
-`interrupted`) READS it; the next turn resets it. The daemon draws the marker
-exactly when the row stands on a turn-end arm and the result is read, resolved
-in the same render as the status. Live detached work outranks an unread turn
-end (owner ruling, 2026-10-12): a turn that finishes while detached work runs
-shows yellow `idle_async`, full, at once, without waiting for the user to view
-it. Viewing that `idle_async` row reads the result too, so when the work ends
-the row returns to its turn-end arm PARTIAL if the user viewed it meanwhile,
-and FULL if not.
+**ONLY THE USER'S INTERACTION RAISES IT, AND EVERY STATUS CHANGE LOWERS IT**
+(owner rulings, 2026-11-23). No timer decides it: there is no dwell.
 
-**Emacs DETECTS and REPORTS; it does not decide.** The dwell is measured in
-Emacs, because only Emacs knows what the user is standing in front of, and its
-threshold is chosen in ONE place, `agent-repl--tab-dwell-seconds` (status.el;
-owner ruling, 2026-10-02):
-
-| case | dwell |
-|---|---|
-| a `done` lands while the user is viewing the workspace | 1 s (`agent-repl-tab-dwell-fast-demote-seconds`) |
-| the user walks into any other turn end that already stood; any interrupted, failed or vendor-blocked row | 5 s (`agent-repl-tab-dwell-demote-seconds`) |
-| a `/clear` or compaction completes | none: the daemon reads the result in `SetTurnEnded` and the push that ends the cut already carries the marker |
-
-There is ONE pending dwell (`agent-repl--tab-dwell-pending`), and its timer
-carries the generation it was armed under: a timer that fires after a re-arm,
-a drop or its own demotion finds a different generation and does nothing, so
-a superseded timer cannot demote anything. The webapp runs no timer at all.
-When it is satisfied, `agent-repl--tab-view-partial` (status.el) reports
-the workspace (`agent-repl-host-mark-viewed` -> `MarkWorkspaceViewed`) and
-repaints, and latches nothing locally. The tab turns partial when the next
-roster push carries the marker: `agent-repl--tab-dwell-demoted-p` reads only
-`agent-repl-roster-viewed-for-ws` (roster.el). That one roster round trip of
-visible latency is ruled acceptable.
+- The interactions are: scrolling the workspace's feed (the page reports the
+  reader's own wheel, touch, scroll bar and keys,
+  `webapp/src/feed/interaction-report.ts`), typing in its composer and a
+  turn-boundary step through its feed with the editor's keys (Emacs reports
+  them, `agent-repl-host-report-interaction`, host.el), and a link followed in
+  its page (the daemon records the click itself, `recordLinkFollowed`).
+- Every arm can be viewed, a running turn's included. A working workspace
+  stays visible whatever the marker says, so PARTIAL never unloads it.
+- A turn's own end views nothing, a completed `/clear`, a compaction and an
+  interrupt included: the status change lowers the marker like any other.
 
 | | applies PARTIAL | restores FULL |
 |---|---|---|
-| daemon (the source) | `sidebar.Resolver.SetViewed` reads the result | `wsState.viewedOn` derives the marker; `startTurn`/`SetTurnEnded` reset the fact (daemon/internal/resolve/sidebar/state.go, resolver.go) |
-| Emacs (renders the marker) | reports via `agent-repl--tab-view-partial` (status.el) | `agent-repl--tab-view-restore-full` re-arms the dwell (status.el) |
-| webapp (renders the marker) | `viewedMode` (webapp/src/sidebar/viewed.ts) | the same function, from the wire alone |
+| daemon (the source) | `sidebar.Resolver.SetInteracted` records the arm the user interacted on | every status change clears it (`resolver.row`); the fact is durable (`workspaces.viewed_status`) |
+| Emacs (renders the marker) | reports the user's interaction (`agent-repl-host-report-interaction`) | nothing: the tab draws from the row (`agent-repl--tab-viewed-p`, status.el) |
+| webapp (renders the marker) | reports the reader's scroll; `viewedMode` (webapp/src/sidebar/viewed.ts) draws it | the same function, from the wire alone |
 
-Emacs's restore reports NOTHING: the daemon originated the clear. It hangs off
-ONE hook, `agent-repl-roster-viewed-cleared-functions` (roster.el), which fires
-per workspace on the marker's present->absent edge (a restated marker is not a
-clear, and neither is a first sighting without it). The reaction only re-arms
-the dwell clock, since the tab already draws full from the row.
+**RECENCY IS THE DAEMON'S TOO.** Emacs keeps no visit history: the recency
+walk (`s-[`, `s-]`), the jump to the previous workspace and the landing after
+a close order by the roster's interaction instant
+(`agent-repl-roster-selection-recency-order`, roster.el), led by the workspace
+shown, or by a running walk's origin (`agent-repl--recency-walk-origin`).
 
 ## Main components and systems go by their canonical names, and no others
 
