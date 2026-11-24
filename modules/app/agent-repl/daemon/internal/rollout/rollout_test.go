@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/wsm"
 )
 
 func TestHandOverIsRefusedOnASuccessorThatIsStillJoining(t *testing.T) {
@@ -314,6 +315,9 @@ func TestAHandoverWaitsForTheTakeoversOwnBringUp(t *testing.T) {
 	// Arrange: the takeover's bring-up of a session-less workspace is held.
 	h := newHarness(t)
 	ws := orphan(t, h)
+	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
+	// cold gate (owner ruling, 2026-11-23).
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 	record, err := h.db.Workspace(context.Background(), ws)
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
@@ -373,6 +377,9 @@ func TestAHandoverWhoseCallerLeavesBeforeTheTakeoverSettlesStartsNothing(t *test
 	// Arrange: a takeover whose bring-up never finishes during the test.
 	h := newHarness(t)
 	ws := orphan(t, h)
+	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
+	// cold gate (owner ruling, 2026-11-23).
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 	record, err := h.db.Workspace(context.Background(), ws)
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)

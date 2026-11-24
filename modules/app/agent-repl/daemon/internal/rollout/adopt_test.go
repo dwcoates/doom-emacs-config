@@ -2025,7 +2025,21 @@ func freeLockAdoption(t *testing.T, h *harness) ids.WorkspaceID {
 	return ws
 }
 
-func TestAnAdoptionOfAFreeLockStartsTheWorkspacesSession(t *testing.T) {
+// gatedFreeLockAdoption is freeLockAdoption for a workspace standing at a
+// recorded cold gate: the one session-less workspace a handover starts (owner
+// ruling, 2026-11-23), whose start raises the gate from its record.
+func gatedFreeLockAdoption(t *testing.T, h *harness) ids.WorkspaceID {
+	t.Helper()
+	ws := freeLockAdoption(t, h)
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
+	return ws
+}
+
+// TestAnAdoptionOfAFreeLockWhoseRecordReadsRunningStartsNoSession pins the
+// owner's ruling of 2026-11-23, which replaced the 2026-10-02 one: a free
+// lock is no session running, so a record that still reads running is a
+// stale one. The adoption records its end and starts nothing.
+func TestAnAdoptionOfAFreeLockWhoseRecordReadsRunningStartsNoSession(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := freeLockAdoption(t, h)
@@ -2034,15 +2048,36 @@ func TestAnAdoptionOfAFreeLockStartsTheWorkspacesSession(t *testing.T) {
 	arm(t, h, ws, Participants{})
 
 	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none: nothing was running behind the free lock", got)
+	}
+	session, _, err := h.db.Session(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if session.Terminal == nil || session.Terminal.Kind != wsm.TerminalParked || session.Terminal.Detail != staleDetail {
+		t.Fatalf("terminal = %+v, want the stale record's end recorded as a park", session.Terminal)
+	}
+}
+
+func TestAnAdoptionOfAFreeLockAtAColdGateStartsTheWorkspacesSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := gatedFreeLockAdoption(t, h)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
 	if got := h.Started(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
-		t.Fatalf("started = %v, want the adopted session-less workspace started", got)
+		t.Fatalf("started = %v, want the adopted workspace at its cold gate started", got)
 	}
 }
 
 func TestAnAdoptionOfAFreeLockRaisesTheMarkerBeforeItPublishes(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := freeLockAdoption(t, h)
+	ws := gatedFreeLockAdoption(t, h)
 
 	// Act
 	arm(t, h, ws, Participants{})
@@ -2061,7 +2096,7 @@ func TestAnAdoptionOfAFreeLockRaisesTheMarkerBeforeItPublishes(t *testing.T) {
 func TestAnAdoptionOfAFreeLockRaisesTheMarkerOnceAndLowersIt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := freeLockAdoption(t, h)
+	ws := gatedFreeLockAdoption(t, h)
 
 	// Act
 	arm(t, h, ws, Participants{})
@@ -2129,7 +2164,7 @@ func TestAnAdoptionWhoseViewsFailLowersTheMarkerAndStartsNothing(t *testing.T) {
 	h := newHarness(t, func(d *Deps) {
 		d.PublishViews = func(context.Context, ids.WorkspaceID) error { return errFake }
 	})
-	ws := freeLockAdoption(t, h)
+	ws := gatedFreeLockAdoption(t, h)
 
 	// Act
 	arm(t, h, ws, Participants{})

@@ -29,7 +29,8 @@ shim still draws its whole conversation.
 | A deploy check's owed compaction, carried out at once | `workspace.verbs.CompactDeployCheck`, cause `compaction` |
 | A merge's prompt or repair, and a merge workspace's hand-off | `merge.orchestrator.ensureSession`, `workspace.verbs.StartMergeWorkspace`, cause `merge` |
 | A model, permission-mode or effort pick on a workspace with no shim | `promptqueue` settings revival (`SubmitSessionAct`, `ReviveForSettings`) |
-| A boot or a handover, only for a shim that was up when the last daemon stopped | `bringup.OnlyWasUp`, in `boot` and `rollout` |
+| A boot, only for a shim that was up when the last daemon stopped | `bringup.OnlyWasUp`, in `boot` |
+| A handover, only to raise a recorded cold gate, which spawns nothing; every other session is handed over as it was (owner ruling, 2026-11-23) | `rollout.takeoverSplit` |
 
 ### What never starts a shim
 

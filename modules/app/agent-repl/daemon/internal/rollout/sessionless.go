@@ -13,39 +13,38 @@ import (
 // opBringUp is the operation a successor's session starts are recorded under.
 const opBringUp = "daemon.rollout.bring_up"
 
-// A SUCCESSOR NEVER SERVES AN OPEN VISIBLE WORKSPACE SESSION-LESS (owner ruling,
-// 2026-10-02: "when the daemon bounces while emacs is still live, workspaces
-// should always be started"). A fresh boot already starts every client-less
-// workspace (internal/boot's BringUp), but a JOINING daemon reconciles nothing
-// at boot and takes its workspaces over one by one, and two of the ways it
-// comes to serve one left it with no session at all:
+// A HANDOVER PICKS UP WHERE THINGS WERE LEFT AND STARTS NOTHING THAT WAS NOT
+// ALREADY STARTED (owner ruling, 2026-11-23, replacing the 2026-10-02 ruling
+// that a successor "always" started a session-less workspace). A session
+// running when the incumbent stopped is handed over running: its shim holds
+// the workspace's lock and the successor dials it. Every workspace that
+// reaches this file reads a FREE lock instead (a handover adopted with nothing
+// to dial, or a takeover's orphan pass finding no shim), so nothing was
+// running behind it:
 //
-//   - a workspace HANDED OVER with a free lock: the outgoing daemon's shim had
-//     died, or was inert, so the adoption had nothing to dial and adopted the
-//     WSM facts alone;
-//   - a workspace NEVER HANDED OVER, whose lock reads free: the takeover
-//     looked for orphaned shims to adopt and, finding none, recovered
-//     nothing.
+//   - a workspace standing at a recorded cold gate is started, which only
+//     raises the gate from its record and runs no shim (takeoverColdGate);
+//   - a parked or hibernated session stays parked, and a workspace with no
+//     session stays without one, until a prompt or the user opening it brings
+//     it up (takeoverNotUp);
+//   - a record that still reads running is a session whose end went
+//     unrecorded (takeoverRecordStale): the takeover records the end, as a
+//     park, and starts nothing.
 //
-// Either way the daemon served the workspace with nothing behind it. The feed
-// draws history only from a live session's watch, so the page showed an EMPTY
-// feed until the user's next prompt revived the session under a "starting up"
-// hold (measured: workspace ship-gns, 2026-10-01 17:55:21 takeover, feed
-// placed 0 rows, revived by a prompt at 17:57:06). Both paths now start the
-// session through the boot's own bring-up.
-
-// ONLY A SHIM THAT WAS UP WHEN THE LAST DAEMON STOPPED COMES BACK (owner
-// ruling, 2026-10-28), hidden or not: the session record states it at every
-// park and unpark (bringup.OnlyWasUp), and nothing else decides. A workspace
-// whose shim was parked, killed or never started is not started here; a
-// prompt brings it up.
+// The decision reads one recorded fact, whether the session was running when
+// the incumbent stopped, which every path that starts, parks, hibernates or
+// ends a session writes (internal/workspace/terminalrecord.go). The stale arm
+// repairs what that fact said before every shim end wrote it: at the
+// 2026-11-23 15:35 handover five visible workspaces whose keep-alive parks
+// had failed minutes earlier read as running, and their shims were spawned
+// under the handover's load. A boot cannot make the same repair: after a
+// host restart every shim is gone and every lock reads free, and a session
+// running when the daemon stopped must come back.
 //
 // EACH DECISION IS RECORDED WITH THE FACTS THAT MADE IT, one record per
 // workspace (takeoverSplit): the rule, what the records say of its shim (a
 // live session, its terminal and why, a recorded cold gate), its visibility
-// and standing, and the lock the caller read. On 2026-11-23 a handover
-// started 26 session-less workspaces and left 54, and no record said which
-// fact put each one in which set.
+// and standing, and the lock the caller read.
 
 // takeoverRule names why a takeover started or left one workspace.
 type takeoverRule string
@@ -54,31 +53,37 @@ const (
 	// takeoverColdGate starts a workspace standing at a recorded cold gate:
 	// the start raises the gate from its record.
 	takeoverColdGate takeoverRule = "cold_gate"
-	// takeoverWasUp starts a workspace whose session record says its shim
-	// was up when the last daemon stopped: nothing stood it down.
-	takeoverWasUp takeoverRule = "was_up"
+	// takeoverRecordStale leaves a workspace whose session record reads
+	// running with no shim holding its lock, and records its end.
+	takeoverRecordStale takeoverRule = "record_stale"
 	// takeoverNotUp leaves a workspace whose shim was parked, killed or
 	// never started.
 	takeoverNotUp takeoverRule = "not_up"
 )
 
-// takeoverRuleOf is the rule the takeover applies to one workspace, by what
-// its records say (bringup.WasUp.Up).
+// staleDetail is the terminal detail of a session end the takeover recorded
+// for a record that still read running (takeoverRecordStale).
+const staleDetail = "stale: the session record read running, but no shim held the workspace's lock at the handover"
+
+// takeoverRuleOf is the rule the takeover applies to one workspace whose lock
+// reads free, by what its records say.
 func takeoverRuleOf(facts bringup.WasUp) takeoverRule {
 	switch {
 	case facts.ColdGate:
 		return takeoverColdGate
 	case facts.Live:
-		return takeoverWasUp
+		return takeoverRecordStale
 	default:
 		return takeoverNotUp
 	}
 }
 
-// takeoverSplit splits PENDING into the workspaces the takeover brings up
-// and the ones it leaves, each in pending's order, recording each decision
-// with the facts that made it. A read that fails splits nothing, at ERROR,
-// and answers ok false: each still starts on its next prompt.
+// takeoverSplit splits PENDING, workspaces whose lock reads free, into the
+// ones the takeover brings up and the ones it leaves, each in pending's order,
+// recording each decision with the facts that made it, and recording the end
+// of each stale record (takeoverRecordStale). A read that fails splits
+// nothing, at ERROR, and answers ok false: each still starts on its next
+// prompt.
 func (c *controller) takeoverSplit(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) (up, left []wsm.Workspace, ok bool) {
 	if len(pending) == 0 {
 		return nil, nil, true
@@ -96,15 +101,28 @@ func (c *controller) takeoverSplit(ctx context.Context, pending []wsm.Workspace,
 		case takeoverColdGate:
 			c.log.Info(opBringUp, "the workspace stands at a recorded cold gate; the takeover starts it, which raises the gate", decided)
 			up = append(up, ws)
-		case takeoverWasUp:
-			c.log.Info(opBringUp, "the workspace's session record says its shim was up when the last daemon stopped; the takeover starts it", decided)
-			up = append(up, ws)
+		case takeoverRecordStale:
+			c.log.Info(opBringUp, "the session record reads running but no shim held the workspace's lock at the handover; the takeover records the session's end and does not start it", decided)
+			c.recordStale(ctx, ws, decided)
+			left = append(left, ws)
 		default:
 			c.log.Info(opBringUp, "the workspace's shim was not up when the last daemon stopped; the takeover does not start it, and a prompt brings it up", decided)
 			left = append(left, ws)
 		}
 	}
 	return up, left, true
+}
+
+// recordStale records the end of WS's session, whose record still read
+// running with no shim behind it, as a park. A failure is recorded at ERROR
+// and starts nothing: the next takeover repairs it again, and a prompt brings
+// the workspace up meanwhile.
+func (c *controller) recordStale(ctx context.Context, ws wsm.Workspace, fields dlog.Context) {
+	terminal := wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: staleDetail, At: c.deps.Clock.Now()}
+	if err := c.deps.DB.SetSessionTerminal(ctx, ws.ID, terminal); err != nil {
+		c.log.Error(opBringUp, "could not record the end of a session whose record read running with no shim behind it; it is not started",
+			dlog.WithCause(fields, err))
+	}
 }
 
 // takeoverFacts states, for one workspace's takeover decision, the rule and
