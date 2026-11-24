@@ -581,8 +581,9 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		"open_at_attach":   len(session.OpenAtAttach),
 	})
 
+	factsFirst := false
 	if session.Started != nil {
-		w.applySessionStartedLocked(session.Started)
+		factsFirst = w.applySessionStartedLocked(session.Started)
 	}
 	w.publishLinkLocked()
 
@@ -593,6 +594,9 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		w.adoptLiveWorkLocked(session.Started)
 	}
 	w.publishLiveWorkLocked()
+	if factsFirst {
+		w.factsInLocked()
+	}
 	w.mu.Unlock()
 	// Facts handed to Start may already have closed turns the adoption found
 	// open; they are handed over now, off the lock, as every turn end is.
@@ -2298,7 +2302,7 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 			"turns_waiting":     len(started.GetTurnsWaiting()),
 			"live_work":         len(started.GetLiveWork()),
 		})
-	w.applySessionStartedLocked(started)
+	factsFirst := w.applySessionStartedLocked(started)
 	// A PURE ATTACH'S TURN IN FLIGHT was started by no StartTurn of this
 	// watcher's, so none will ever name the main agent for it.
 	if t := started.GetTurnInFlight(); t != nil && w.turn != nil && *w.turn == ids.TurnID(t.GetValue()) {
@@ -2315,16 +2319,32 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 	}
 	w.adoptLiveWorkLocked(started)
 	w.publishLiveWorkLocked()
+	if factsFirst {
+		w.factsInLocked()
+	}
 	// THE FACTS ARE THE FIRST FREENESS JUDGEMENT a pure attach can make:
 	// with nothing in flight, the workspace falls free here.
 	w.signalFreenessLocked()
 }
 
+// factsInLocked releases AwaitSessionFacts once the first session facts are
+// taken up WHOLE: queued as a view edge, it is handed over only after every
+// edge this take queued before it -- the views told the facts, the roster and
+// the footer told the live-work set -- so a waiter released by it (an
+// adoption about to make the workspace this daemon's) finds every view
+// already standing on the session's own facts (2026-11-23: a successor drew
+// adopted rows `done` until their live work reached the roster a second
+// later). The watcher's state the waiter reads is set under the lock, before
+// this edge is queued.
+func (w *watcher) factsInLocked() {
+	w.mu.later(func() { close(w.factsIn) })
+}
+
 // applySessionStartedLocked is the ONE place the session facts are taken up,
 // whichever way they arrived: StartSession's own answer, or the shim's
 // re-announcement on an adopted watch.
-func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStarted) {
-	first := !w.started
+func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStarted) (first bool) {
+	first = !w.started
 	// THE MAIN AGENT IS NAMED FIRST, before the views are told the facts or
 	// any live work is routed: every owner the live work names is compared
 	// with it, and a subagent routed before it was named had no feed
@@ -2343,13 +2363,10 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	if activity := started.GetVendorActivity(); activity != nil {
 		w.takeVendorActivityLocked(activity, "session_started")
 	}
-	// THE EDGE IS SIGNALLED AFTER THE FACTS ARE TAKEN UP, under the same lock
-	// (the deferred close runs before this function's caller releases it), so
-	// a waiter released by it reads the turn in flight and the reconciled
-	// open-at-attach turns, never the moment before them.
-	if first {
-		defer close(w.factsIn)
-	}
+	// THE EDGE IS SIGNALLED BY THE CALLER once the whole take is done
+	// (factsInLocked), so a waiter released by it reads the turn in flight,
+	// the reconciled open-at-attach turns and the live-work set, never the
+	// moment before them.
 	w.mu.later(func() { w.sinks.Topbar.OnSessionStarted(w.ws, started) })
 	w.sinks.Footer.OnSessionStarted(w.ws, started)
 	w.mu.later(func() { w.sinks.Sidebar.OnSessionStarted(w.ws, started) })
@@ -2376,6 +2393,7 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	if first {
 		w.retireAsksAbsentFromFactsLocked(started.GetOpenAsks())
 	}
+	return first
 }
 
 // standOpenAsksLocked restates every ask the session's facts name open to the

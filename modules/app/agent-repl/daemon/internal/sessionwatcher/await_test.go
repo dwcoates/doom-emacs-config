@@ -203,6 +203,31 @@ func TestAwaitSessionFactsIsReleasedByTheReannouncementWithItsTurn(t *testing.T)
 	}
 }
 
+// TestAwaitSessionFactsIsReleasedOnlyOnceTheRosterHoldsTheFacts pins the order
+// an adoption depends on: when the wait answers, the roster has been told the
+// session's facts and its live-work set, so the adopted row is never drawn
+// from facts this daemon has not read.
+func TestAwaitSessionFactsIsReleasedOnlyOnceTheRosterHoldsTheFacts(t *testing.T) {
+	// Arrange: an adopting daemon's pure attach.
+	h := newHarnessAttachingPurely(t)
+	h.rec.drain()
+	answered := make(chan error, 1)
+	go func() { answered <- h.w.AwaitSessionFacts(context.Background()) }()
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted(""))
+	err := <-answered
+
+	// Assert: every edge recorded by the time the wait answered.
+	told := map[string]bool{}
+	for _, e := range h.rec.drain() {
+		told[e.name()] = true
+	}
+	if err != nil || !told["sidebar.OnSessionStarted"] || !told["sidebar.OnLiveWorkChanged"] {
+		t.Fatalf("AwaitSessionFacts = %v with the roster told %v; want it told the facts and the live work first", err, told)
+	}
+}
+
 func TestSessionFactsInAnswersTrueForAStartedSession(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
