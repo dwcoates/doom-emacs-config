@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTicker } from "../../src/clock.js";
+import { fireResize } from "../resize-observer.js";
 import type { HoverStamp } from "../../src/feed/hover-stamp.js";
 import {
   MARGIN_STAMP_CLASS,
@@ -17,35 +18,10 @@ import {
 
 const NOW = 1_000_000_000;
 
-/** A ResizeObserver whose callbacks the test fires itself, recording what it watches. */
-class FakeResizeObserver {
-  static live: FakeResizeObserver[] = [];
-  readonly watched = new Set<Element>();
-  disconnected = false;
-  constructor(private readonly callback: () => void) {
-    FakeResizeObserver.live.push(this);
-  }
-  observe(el: Element): void {
-    this.watched.add(el);
-  }
-  unobserve(el: Element): void {
-    this.watched.delete(el);
-  }
-  disconnect(): void {
-    this.disconnected = true;
-    this.watched.clear();
-  }
-  fire(): void {
-    this.callback();
-  }
-}
-
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   document.body.replaceChildren();
-  FakeResizeObserver.live = [];
-  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -74,8 +50,7 @@ function mounted() {
   const margin = mountMarginStamp(parent, createTicker(1000));
   const el = parent.querySelector<HTMLElement>(`.${MARGIN_STAMP_CLASS}`)!;
   Object.defineProperty(el, "offsetHeight", { value: 40 });
-  const observer = FakeResizeObserver.live[0];
-  return { parent, row, margin, el, observer };
+  return { parent, row, margin, el };
 }
 
 function lines(el: HTMLElement): string[] {
@@ -189,13 +164,13 @@ describe("mountMarginStamp", () => {
 
   it("places itself again when the row or the feed resizes", () => {
     // Arrange
-    const { row, margin, el, observer } = mounted();
+    const { row, margin, el } = mounted();
     margin.show(stamp(NOW - 1000), row);
     placeAt(row, 200, 400);
     // Act
-    observer.fire();
+    fireResize(row);
     // Assert
-    expect([observer.watched.has(row), el.style.top]).toEqual([true, `${300 - 100 + 1000}px`]);
+    expect(el.style.top).toBe(`${300 - 100 + 1000}px`);
   });
 
   it("fades out when a scroll takes its row wholly out of view", () => {
@@ -211,7 +186,7 @@ describe("mountMarginStamp", () => {
 
   it("stops watching a row once faded out, and is not placed again by a scroll", () => {
     // Arrange
-    const { parent, row, margin, el, observer } = mounted();
+    const { parent, row, margin, el } = mounted();
     margin.show(stamp(NOW - 1000), row);
     margin.show(null, null);
     const top = el.style.top;
@@ -219,7 +194,8 @@ describe("mountMarginStamp", () => {
     // Act
     parent.dispatchEvent(new Event("scroll"));
     // Assert
-    expect([observer.watched.has(row), el.hasAttribute(MARGIN_STAMP_SHOWN), el.style.top]).toEqual([false, false, top]);
+    expect([el.hasAttribute(MARGIN_STAMP_SHOWN), el.style.top]).toEqual([false, top]);
+    expect(() => fireResize(row)).toThrow("no ResizeObserver is watching");
   });
 
   it("refuses a page with no ResizeObserver", () => {
@@ -235,7 +211,7 @@ describe("mountMarginStamp", () => {
 
   it("stops observing and listening on dispose", () => {
     // Arrange
-    const { parent, row, margin, el, observer } = mounted();
+    const { parent, row, margin, el } = mounted();
     margin.show(stamp(NOW - 1000), row);
     margin.dispose();
     const top = el.style.top;
@@ -243,7 +219,8 @@ describe("mountMarginStamp", () => {
     // Act
     parent.dispatchEvent(new Event("scroll"));
     // Assert
-    expect([observer.disconnected, el.style.top]).toEqual([true, top]);
+    expect(el.style.top).toBe(top);
+    expect(() => fireResize(parent)).toThrow("no ResizeObserver is watching");
   });
 
   it("removes its element on dispose", () => {
