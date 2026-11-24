@@ -95,14 +95,23 @@ go: codegen-gate
 # (../launcher/Package.resolved), never taken from PATH, so the generator and
 # the runtime library the launcher links are one version by construction.
 # PROTOC_GEN_SWIFT is overridable so the check-generated self-test can stub it.
-PROTOC_GEN_SWIFT ?= ../launcher/.build/release/protoc-gen-swift
+#
+# IT IS BUILT IN THIS DIRECTORY'S OWN SCRATCH PATH (SWIFT_BUILD), NEVER IN
+# ../launcher/.build. SwiftPM holds one lock on a build directory's build.db,
+# and the launcher suite builds in ../launcher/.build while this suite's
+# check-generated builds the plugin: sharing it failed a merge gate with
+# "unable to attach DB ... database is locked" (2026-11-24). Each suite
+# declares the build directory it writes in testrun's roster (Suite.Builds),
+# whose check refuses two suites writing one.
+SWIFT_BUILD := .build
+PROTOC_GEN_SWIFT ?= $(SWIFT_BUILD)/release/protoc-gen-swift
 SWIFT_PROTOS ?= launcher/v1/launcher.proto \
 	agentrepl/v1/desktop_banner.proto \
 	agentrepl/v1/endpoint_report_desktop_banner_clicked.proto \
 	workspace/v1/workspace.proto
 
-../launcher/.build/release/protoc-gen-swift: ../launcher/Package.swift ../launcher/Package.resolved
-	cd ../launcher && swift build -c release --product protoc-gen-swift
+$(SWIFT_BUILD)/release/protoc-gen-swift: ../launcher/Package.swift ../launcher/Package.resolved
+	swift build --package-path ../launcher --scratch-path $(SWIFT_BUILD) -c release --product protoc-gen-swift
 
 swift: codegen-gate $(PROTOC_GEN_SWIFT)
 	mkdir -p $(GEN)/swift

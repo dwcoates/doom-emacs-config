@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"agentrepl/testrun/internal/cores"
+	"agentrepl/testrun/internal/testdir"
 )
 
 func TestNamesAreUniqueAndInRosterOrder(t *testing.T) {
@@ -454,5 +455,95 @@ func TestEveryMetapromptIsAShimInputAndAnAlwaysRunRegion(t *testing.T) {
 		if !slices.Contains(AlwaysRunRegions, f) {
 			t.Errorf("%s is not an always-run region", f)
 		}
+	}
+}
+
+func TestCheckRefusesTwoSuitesWritingOneBuildDirectory(t *testing.T) {
+	tests := []struct {
+		name   string
+		suites []Suite
+		want   string
+	}{
+		{"two suites in directories of their own",
+			[]Suite{{Name: "a", NeverReused: "x", Builds: []string{"a/.build/"}}, {Name: "b", NeverReused: "x", Builds: []string{"b/.build/"}}}, ""},
+		{"one suite declaring a directory twice",
+			[]Suite{{Name: "a", NeverReused: "x", Builds: []string{"a/.build/", "a/.build/"}}}, ""},
+		{"directories sharing only a name prefix",
+			[]Suite{{Name: "a", NeverReused: "x", Builds: []string{"a/.build/"}}, {Name: "b", NeverReused: "x", Builds: []string{"a/.build-swift/"}}}, ""},
+		{"two suites in one directory",
+			[]Suite{{Name: "a", NeverReused: "x", Builds: []string{"launcher/.build/"}}, {Name: "b", NeverReused: "x", Builds: []string{"launcher/.build/"}}},
+			"a and b both write the build directory launcher/.build/"},
+		{"a directory inside another suite's",
+			[]Suite{{Name: "a", NeverReused: "x", Builds: []string{"launcher/.build/"}}, {Name: "b", NeverReused: "x", Builds: []string{"launcher/.build/release/"}}},
+			"a and b both write the build directory launcher/.build/release/ (launcher/.build/)"},
+		{"a directory holding another suite's",
+			[]Suite{{Name: "a", NeverReused: "x", Builds: []string{"launcher/.build/release/"}}, {Name: "b", NeverReused: "x", Builds: []string{"launcher/"}}},
+			"a and b both write the build directory launcher/ (launcher/.build/release/)"},
+		{"a build directory not ending in a slash",
+			[]Suite{{Name: "a", NeverReused: "x", Builds: []string{"launcher/.build"}}},
+			`a declares the build directory "launcher/.build", which does not end in "/"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := Check(tt.suites)
+
+			// Assert
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestTheProtoSuiteBuildsItsSwiftPluginOutsideTheLaunchersBuildDirectory pins
+// the two Swift builds apart: proto's check-generated built protoc-gen-swift
+// in launcher/.build while the launcher suite built there, and SwiftPM failed
+// it on the locked build.db (2026-11-24). The Makefile's scratch path must be
+// the build directory the proto suite declares, which Check keeps apart from
+// the launcher suite's.
+func TestTheProtoSuiteBuildsItsSwiftPluginOutsideTheLaunchersBuildDirectory(t *testing.T) {
+	// Arrange
+	module := testdir.ModuleRoot(t)
+	proto, okProto := Lookup("proto")
+	launcher, okLauncher := Lookup("launcher")
+	if !okProto || !okLauncher {
+		t.Fatal("the roster holds no proto or no launcher suite")
+	}
+	makefile, err := os.ReadFile(filepath.Join(module, "proto", "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	var scratch string
+	var recipe bool
+	for _, line := range strings.Split(string(makefile), "\n") {
+		if v, ok := strings.CutPrefix(line, "SWIFT_BUILD := "); ok {
+			scratch = "proto/" + strings.TrimSpace(v) + "/"
+		}
+		if strings.HasPrefix(line, "\tswift build ") {
+			recipe = strings.Contains(line, "--scratch-path $(SWIFT_BUILD) ") && strings.Contains(line, "--product protoc-gen-swift")
+		}
+	}
+
+	// Assert
+	if !recipe {
+		t.Fatal("proto/Makefile builds protoc-gen-swift without --scratch-path $(SWIFT_BUILD)")
+	}
+	if !slices.Equal(proto.Builds, []string{scratch}) {
+		t.Fatalf("proto suite Builds = %v, want the Makefile's scratch path %s", proto.Builds, scratch)
+	}
+	if !slices.Equal(launcher.Builds, []string{"launcher/.build/"}) {
+		t.Fatalf("launcher suite Builds = %v, want SwiftPM's default launcher/.build/", launcher.Builds)
+	}
+	if err := Check([]Suite{proto, launcher}); err != nil {
+		t.Fatal(err)
 	}
 }
