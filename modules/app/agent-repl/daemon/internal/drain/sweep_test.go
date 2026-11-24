@@ -2114,3 +2114,45 @@ func TestNewRefusesWithoutAColdGateBridge(t *testing.T) {
 		t.Fatalf("New = %v, want the missing cold gate bridge refused", err)
 	}
 }
+
+// cancelAfterParkDB cancels the park's context once its last write lands:
+// the sweep pass or the daemon leaving the moment the park returns.
+type cancelAfterParkDB struct {
+	wsm.DB
+	cancel context.CancelFunc
+}
+
+func (d cancelAfterParkDB) SetSpawnedShim(ctx context.Context, ws ids.WorkspaceID, spawn *wsm.ProcessIdentity) error {
+	err := d.DB.SetSpawnedShim(ctx, ws, spawn)
+	d.cancel()
+	return err
+}
+
+func TestAParkObservesItsIdleTimeThoughItsCallerHasLeft(t *testing.T) {
+	// Arrange
+	parks := &fakeParks{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := newHarness(t, func(d *Deps) {
+		d.Parks = parks
+		d.DB = cancelAfterParkDB{DB: d.DB, cancel: cancel}
+		d.Detach = func(_ ids.WorkspaceID, run func(context.Context)) { run(ctx) }
+	})
+	ws := h.workspace(t, instant)
+	h.clock.Set(instant.Add(30 * time.Minute))
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if got := parks.all(); len(got) != 1 || got[0].idle != 30*time.Minute {
+		t.Fatalf("observations = %+v, want the park's 30 minutes idle observed", got)
+	}
+	if errs := records(h.log, opCycle); len(errs) > 0 {
+		for _, rec := range errs {
+			if rec.Level == "error" {
+				t.Fatalf("an ERROR was recorded: %+v", rec)
+			}
+		}
+	}
+}
