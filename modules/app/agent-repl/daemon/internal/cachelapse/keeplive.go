@@ -267,7 +267,7 @@ func (k *Keeper) keepLiveAnswered(ws ids.WorkspaceID, ack *agentreplv1.KeepLiveW
 	run.steps = append(run.steps, "vendor_answered")
 	if !standDown {
 		k.finishBeaten(run, &agentreplv1.KeepLiveWorkspaceBeaten{After: &agentreplv1.KeepLiveWorkspaceBeaten_LeftUp{
-			LeftUp: &agentreplv1.KeepLiveWorkspaceLeftUp{Rule: "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive"},
+			LeftUp: &agentreplv1.KeepLiveWorkspaceLeftUp{Rule: withinGraceRule},
 		}})
 		return
 	}

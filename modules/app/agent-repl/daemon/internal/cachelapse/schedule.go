@@ -85,6 +85,11 @@ func (k *Keeper) schedule(ctx context.Context, ws ids.WorkspaceID, why string) {
 	log.Debug(opDrive, "armed the workspace's next keep-alive", dlog.Context{"due": due, "parked": parked})
 }
 
+// withinGraceRule is why a beat sent within StandDownGrace of the
+// workspace's last real work leaves its shim up: the beat's record and a
+// keep-live run's answer both state it.
+const withinGraceRule = "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive"
+
 // beatPlan is when a workspace's next beat is due, and what it beats.
 type beatPlan struct {
 	// due is the earlier of the two conversations' next beats.
@@ -447,8 +452,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		case running:
 			k.awaitAnswer(log, ws, now, fields, !standDown)
 		case withinGrace:
-			log.Info(opDrive, "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive",
-				dlog.Merge(fields, dlog.Context{"idle_since": idleSince}))
+			log.Log(dlog.LevelInfo, opDrive, logsite.Msg(withinGraceRule), dlog.Merge(fields, dlog.Context{"idle_since": idleSince}))
 		default:
 			// NEVER UNDER ITS OWN KEEP-ALIVE (answer.go): the stand-down waits
 			// for the vendor's answer.

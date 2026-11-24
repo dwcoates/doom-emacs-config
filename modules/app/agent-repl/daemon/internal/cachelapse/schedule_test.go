@@ -1077,3 +1077,28 @@ func TestTheKeepaliveScheduleNeverReadsTheFolds(t *testing.T) {
 		t.Fatalf("OnlyVisible read in %v, KeptWarm read in %v; want the folds read nowhere and KeptWarm in schedule.go", folds, warm)
 	}
 }
+
+// TestTheBeatAndAKeepLiveStateOneGraceRule pins the shared rule
+// (withinGraceRule): the beat's record and a keep-live run's answer that
+// leave a shim up inside the grace state the same text, so neither drifts.
+func TestTheBeatAndAKeepLiveStateOneGraceRule(t *testing.T) {
+	// Arrange
+	beat := dueHarness(t, sent())
+	beat.workedAgo(time.Minute)
+	beat.keeper.beats[theWorkspace] = now
+	live := keepLiveHarness(t)
+	live.workedAgo(time.Minute)
+
+	// Act
+	beat.keeper.beatsDue(context.Background())
+	done := live.keepLive()
+	live.vendorAnswers()
+
+	// Assert
+	if !beat.found(dlog.RecordQuery{Level: "info", Operation: opDrive, Message: withinGraceRule}) {
+		t.Fatalf("the beat's record did not state %q", withinGraceRule)
+	}
+	if got := answerOf(t, done).GetSuccess().GetBeaten().GetLeftUp().GetRule(); got != withinGraceRule {
+		t.Fatalf("keep-live rule = %q, want %q", got, withinGraceRule)
+	}
+}
