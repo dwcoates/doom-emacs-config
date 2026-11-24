@@ -1299,7 +1299,10 @@ const advertiseRefusedBound = 30 * time.Second
 // an ERROR and nothing is retried. It once retried every failure every 25ms
 // forever.
 func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
-	err := c.deps.WriteDaemonAddr(ctx)
+	wrote, err := c.writeDaemonAddrOnce(ctx, fields)
+	if !wrote && err == nil {
+		return
+	}
 	if c.refusedStandingDown(err, fields) {
 		return
 	}
@@ -1850,15 +1853,43 @@ func (c *controller) takeOverOnClaim(ctx context.Context, awaited error, fields 
 		c.log.Debug(opAdopt, "the daemon's lifetime ended before the adoptions in flight were owned; daemon.addr is not written", dlog.WithCause(fields, err))
 		return
 	}
-	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
+	wrote, err := c.writeDaemonAddrOnce(ctx, fields)
+	if err != nil {
 		if c.refusedStandingDown(err, fields) {
 			return
 		}
 		c.log.Error(opAdopt, "daemon.addr could not be written under the held boot claim", dlog.WithCause(fields, err))
 		return
 	}
+	if !wrote {
+		return
+	}
 	c.log.Info(opAdopt, "the incumbent exited; wrote daemon.addr", fields)
 	c.becomeIncumbent(fields)
+}
+
+// writeDaemonAddrOnce writes daemon.addr unless a write already succeeded,
+// answering whether this call wrote it.
+//
+// daemon.addr IS WRITTEN ONCE (2026-11-24). The last joining adoption decides
+// at its ownership that it completes the set, and writes later; the takeover
+// writes once the incumbent exited and the adoptions in flight are owned. The
+// two could interleave and both write (merge gate 2026-11-24,
+// TestTheTakeoverDoesNotWaitForEveryRendezvous: two writes). The writes are
+// serialized here, and the one after a success writes nothing; a failed write
+// records nothing, so the other path still writes when it comes.
+func (c *controller) writeDaemonAddrOnce(ctx context.Context, fields dlog.Context) (bool, error) {
+	c.addrMu.Lock()
+	defer c.addrMu.Unlock()
+	if c.addrWritten {
+		c.log.Debug(opAdopt, "daemon.addr is already written; nothing is written again", fields)
+		return false, nil
+	}
+	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
+		return false, err
+	}
+	c.addrWritten = true
+	return true, nil
 }
 
 // beginClaimedLocked counts one adoption past its serving claim. The caller
