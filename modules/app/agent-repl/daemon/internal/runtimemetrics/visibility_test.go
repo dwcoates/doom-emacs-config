@@ -68,16 +68,12 @@ func TestAResultReadIsCountedByWhatReadIt(t *testing.T) {
 	s, _ := openSurface(t)
 
 	// Act
-	s.CountResultRead(sidebar.ReadByEditorView)
-	s.CountResultRead(sidebar.ReadByInterrupt)
+	s.CountResultRead(sidebar.ReadByInteraction)
+	s.CountResultRead(sidebar.ReadByInteraction)
 	body := scrape(t, s)
 
 	// Assert
-	mustContain(t, body,
-		`agentrepl_workspace_results_read_total{by="editor_view"} 1`,
-		`agentrepl_workspace_results_read_total{by="interrupted"} 1`,
-		`agentrepl_workspace_results_read_total{by="context_cut"} 0`,
-	)
+	mustContain(t, body, `agentrepl_workspace_results_read_total{by="interaction"} 2`)
 }
 
 func TestUndeclaredVisibilityLabelsPanic(t *testing.T) {
@@ -114,5 +110,5 @@ func TestTheOffSurfaceRecordsNoVisibility(t *testing.T) {
 	// Act and Assert: none of these panics on the off surface.
 	s.SetVisibilityCounts(map[wsm.VisibilityReason]int{wsm.ReasonSelected: 1})
 	s.CountVisibilityChange(wsm.NotVisible, wsm.Selected, wsm.ReasonSelected)
-	s.CountResultRead(sidebar.ReadByEditorView)
+	s.CountResultRead(sidebar.ReadByInteraction)
 }

@@ -39,6 +39,7 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prwatch"
@@ -275,6 +276,10 @@ type Deps struct {
 	// Latencies records what ReportLatencies accepts: the daemon's metrics
 	// surface, whose off value records nothing.
 	Latencies LatencyRecorder
+	// Pages holds which pages Emacs's web view holds, as ReportPageState
+	// reports them, each forgotten when its workspace's last host stream
+	// ends. REQUIRED.
+	HeldPages *pageheld.Table
 	// VendorSpend records what ReportVendorSpend accepts: the daemon's metrics
 	// surface, whose off value records nothing. REQUIRED.
 	VendorSpend VendorSpendRecorder
@@ -688,6 +693,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the Emacs measure")
 	case deps.Latencies == nil:
 		return nil, missing("a latency recorder")
+	case deps.HeldPages == nil:
+		return nil, missing("the held-page table")
 	case deps.VendorSpend == nil:
 		return nil, missing("a vendor spend recorder")
 	case deps.RPCs == nil:
@@ -718,7 +725,7 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the editor's opens")
 	case deps.StallBeat == nil:
 		return nil, missing("the stall beat detector")
-	case deps.Pages == nil:
+	case deps.HeldPages == nil:
 		return nil, missing("the superseded-page tracker")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")

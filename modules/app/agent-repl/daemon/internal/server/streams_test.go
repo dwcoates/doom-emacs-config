@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -2123,5 +2124,159 @@ func TestWatchWorkspaceRosterSendsEachSubscriptionItsUnseenStreams(t *testing.T)
 				t.Fatalf("frame carried %v at %d, want %v at %d", got, tt.frame.GetRevision(), tt.want, tt.rev)
 			}
 		})
+	}
+}
+
+// ---- ReportPageState ---------------------------------------------------------
+
+// reportPageState sends REQ's report for the test workspace and answers the
+// response, failing on a transport error.
+func reportPageState(t *testing.T, h *harness, req *agentreplv1.ReportPageStateRequest) *agentreplv1.ReportPageStateResponse {
+	t.Helper()
+	if req.Workspace == nil {
+		req.Workspace = ref()
+	}
+	resp, err := h.Client.ReportPageState(context.Background(), connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("ReportPageState: %v", err)
+	}
+	return resp.Msg
+}
+
+func shownReason() *agentreplv1.ReportPageStateLoadReason {
+	return &agentreplv1.ReportPageStateLoadReason{Reason: &agentreplv1.ReportPageStateLoadReason_Shown{Shown: &agentreplv1.ReportPageStateLoadShown{}}}
+}
+
+func dormantReason() *agentreplv1.ReportPageStateUnloadReason {
+	return &agentreplv1.ReportPageStateUnloadReason{Reason: &agentreplv1.ReportPageStateUnloadReason_Dormant{Dormant: &agentreplv1.ReportPageStateUnloadDormant{}}}
+}
+
+func TestReportPageStateRecordsEachArm(t *testing.T) {
+	loaded := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Loaded{Loaded: &agentreplv1.ReportPageStateLoaded{Reason: shownReason()}}}
+	held := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: shownReason()}}}
+	unloaded := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Unloaded{Unloaded: &agentreplv1.ReportPageStateUnloaded{Reason: dormantReason()}}}
+	notHeld := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_NotHeld{NotHeld: &agentreplv1.ReportPageStateNotHeld{}}}
+	tests := []struct {
+		name        string
+		reports     []*agentreplv1.ReportPageStateRequest
+		wantHeld    bool
+		wantLoads   int
+		wantUnloads int
+	}{
+		{name: "a load is held and counted", reports: []*agentreplv1.ReportPageStateRequest{loaded}, wantHeld: true, wantLoads: 1},
+		{name: "a restated held page is held and counted as nothing", reports: []*agentreplv1.ReportPageStateRequest{held}, wantHeld: true},
+		{name: "an unload drops the page and is counted", reports: []*agentreplv1.ReportPageStateRequest{loaded, unloaded}, wantLoads: 1, wantUnloads: 1},
+		{name: "a restated page not held drops it and is counted as nothing", reports: []*agentreplv1.ReportPageStateRequest{held, notHeld}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			for _, req := range tt.reports {
+				if resp := reportPageState(t, h, proto.Clone(req).(*agentreplv1.ReportPageStateRequest)); resp.GetSuccess() == nil {
+					t.Fatalf("result = %v, want success", resp.GetResult())
+				}
+			}
+
+			// Assert.
+			_, held := h.HeldPages.Snapshot()[testWorkspaceID]
+			loads, unloads := h.PageCounts.counted()
+			if held != tt.wantHeld || len(loads) != tt.wantLoads || len(unloads) != tt.wantUnloads {
+				t.Fatalf("held %v, loads %v, unloads %v; want held %v, %d loads, %d unloads",
+					held, loads, unloads, tt.wantHeld, tt.wantLoads, tt.wantUnloads)
+			}
+		})
+	}
+}
+
+func TestReportPageStateRefusesAMalformedReport(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.ReportPageStateRequest
+	}{
+		{name: "no report arm", req: &agentreplv1.ReportPageStateRequest{}},
+		{name: "a load with no reason", req: &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Loaded{Loaded: &agentreplv1.ReportPageStateLoaded{}}}},
+		{name: "a held page with no reason", req: &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: &agentreplv1.ReportPageStateLoadReason{}}}}},
+		{name: "an unload with no reason", req: &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Unloaded{Unloaded: &agentreplv1.ReportPageStateUnloaded{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.req.Workspace = ref()
+
+			// Act.
+			_, err := h.Client.ReportPageState(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("err = %v, want InvalidArgument", err)
+			}
+			if pages := h.HeldPages.Snapshot(); len(pages) != 0 {
+				t.Fatalf("held pages = %v, want none from a refused report", pages)
+			}
+		})
+	}
+}
+
+func TestReportPageStateRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp := reportPageState(t, h, &agentreplv1.ReportPageStateRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
+		Report:    &agentreplv1.ReportPageStateRequest_Loaded{Loaded: &agentreplv1.ReportPageStateLoaded{Reason: shownReason()}},
+	})
+
+	// Assert.
+	if resp.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.GetResult())
+	}
+	if loads, _ := h.PageCounts.counted(); len(loads) != 0 || len(h.HeldPages.Snapshot()) != 0 {
+		t.Fatalf("loads %v, pages %v; want nothing recorded for an unknown workspace", loads, h.HeldPages.Snapshot())
+	}
+}
+
+func TestReportPageStateRecordsTheLoadAndItsReason(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{global: log, workspace: log}
+	})
+
+	// Act.
+	reportPageState(t, h, &agentreplv1.ReportPageStateRequest{
+		Report: &agentreplv1.ReportPageStateRequest_Loaded{Loaded: &agentreplv1.ReportPageStateLoaded{Reason: shownReason()}},
+	})
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == "daemon.server.page_state" && rec.Context["report"] == "loaded" && rec.Context["reason"] == "shown" {
+			return
+		}
+	}
+	t.Fatalf("no INFO page_state record naming the load and its reason among %v", log.at("INFO"))
+}
+
+func TestTheLastHostStreamClosingForgetsTheWorkspacesPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	openHostStream(t, h, ctx)
+	h.Footer.AwaitEdge(t) // the open edge
+	reportPageState(t, h, &agentreplv1.ReportPageStateRequest{
+		Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: shownReason()}},
+	})
+
+	// Act.
+	cancel()
+	h.Footer.AwaitEdge(t) // the close edge, stated after the forget
+
+	// Assert.
+	if pages := h.HeldPages.Snapshot(); len(pages) != 0 {
+		t.Fatalf("held pages = %v, want the page forgotten with its host stream", pages)
 	}
 }

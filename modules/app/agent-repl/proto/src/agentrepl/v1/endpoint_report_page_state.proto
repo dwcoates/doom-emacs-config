@@ -1,0 +1,183 @@
+// endpoint_report_page_state.proto — ReportPageState: Emacs tells the daemon
+// whether it holds a workspace's page in its web view, and why. HOST section.
+//
+// WHY A PAGE IS LOADED IS AN EDITOR FACT. Emacs decides every page load and
+// unload itself (page-unload.el: a page loads when the user shows its
+// workspace, when its session comes up for work, or when its slot is made
+// while the page is wanted, and unloads when its workspace goes dormant off
+// screen or stops being visible), so a workspace's visibility makes its page
+// ELIGIBLE and never says whether the page is held. This report is how the
+// daemon's metrics (agentrepl_pages_loaded, agentrepl_page_loads_total,
+// agentrepl_page_unloads_total) and the sidebar's count of loaded pages learn
+// which pages the web view actually holds.
+//
+// THE STATE IS SCOPED TO THE WORKSPACE'S HOST STREAM. The daemon holds what
+// this report says only while a WatchHostWorkspace stream of the workspace
+// stands, and forgets it when the last one ends, so an editor that exits or a
+// daemon that hands its workspaces on can never leave a page counted that no
+// web view holds. So Emacs RESTATES what it holds (the `held` or `not_held`
+// arm) each time a workspace's host stream is subscribed, and a daemon that
+// has just taken a workspace over learns its page from that restatement.
+//
+// A CHANGE IS COUNTED ONCE; A RESTATEMENT IS NEVER COUNTED. The `loaded` and
+// `unloaded` arms report a load or an unload that just happened and are each
+// counted; `held` and `not_held` state what stands, change no counter, and
+// set the state alone.
+//
+// FIRE AND FORGET. The report changes no behavior: a call that fails is
+// recorded by Emacs and leaves the daemon's view stale only until the next
+// report or the next restatement.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportPageStateRequest {
+  // The workspace whose page this reports.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // What the report says of the page: a change that just happened, or a
+  // restatement of what stands. The set arm IS the report; an unset oneof is
+  // a malformed request (Connect InvalidArgument).
+  oneof report {
+    // The web view just loaded the page, for the reason given. Counted as a
+    // load (agentrepl_page_loads_total).
+    ReportPageStateLoaded loaded = 2;
+    // The web view just dropped the page, for the reason given. Counted as
+    // an unload (agentrepl_page_unloads_total).
+    ReportPageStateUnloaded unloaded = 3;
+    // A restatement: the web view holds the page, loaded for the reason
+    // given. Counted as nothing.
+    ReportPageStateHeld held = 4;
+    // A restatement: the web view holds no page for the workspace, whose
+    // slot may stand. Counted as nothing.
+    ReportPageStateNotHeld not_held = 5;
+  }
+}
+
+// A load that just happened.
+message ReportPageStateLoaded {
+  // Why the page was loaded.
+  ReportPageStateLoadReason reason = 1;
+}
+
+// An unload that just happened.
+message ReportPageStateUnloaded {
+  // Why the page was dropped.
+  ReportPageStateUnloadReason reason = 1;
+}
+
+// A restatement of a page the web view holds.
+message ReportPageStateHeld {
+  // Why the page the web view holds was loaded: the reason of its last load.
+  ReportPageStateLoadReason reason = 1;
+}
+
+// A restatement that the web view holds no page for the workspace.
+message ReportPageStateNotHeld {}
+
+// Why a page was loaded: the moment page-unload.el's one load path took. The
+// set arm IS the reason; its arm name is the metrics' `reason` label.
+message ReportPageStateLoadReason {
+  // The moment that loaded the page; Emacs always sets one.
+  oneof reason {
+    // The user showed the workspace and its page was not held.
+    ReportPageStateLoadShown shown = 1;
+    // The workspace's session came up for work while its slot stood with no
+    // page.
+    ReportPageStateLoadAwake awake = 2;
+    // The workspace's slot was made while its page was wanted (visible, not
+    // cold-gated, not dormant).
+    ReportPageStateLoadSlot slot = 3;
+    // The user clicked the load button the host draws for a cold-gated page.
+    ReportPageStateLoadRequested load_requested = 4;
+    // The cold gate that held the shown page back was answered or retracted.
+    ReportPageStateLoadUngated ungated = 5;
+  }
+}
+
+// The user showed the workspace.
+message ReportPageStateLoadShown {}
+// The session came up for work.
+message ReportPageStateLoadAwake {}
+// The slot was made while the page was wanted.
+message ReportPageStateLoadSlot {}
+// The user asked for the held-back page.
+message ReportPageStateLoadRequested {}
+// The gate holding the page back ended.
+message ReportPageStateLoadUngated {}
+
+// Why a page was dropped. The set arm IS the reason; its arm name is the
+// metrics' `reason` label.
+message ReportPageStateUnloadReason {
+  // The moment that dropped the page; Emacs always sets one.
+  oneof reason {
+    // Its session went dormant (parked, or up only for a keep-alive) while the
+    // host did not show it, or the user switched away from it dormant. Its
+    // slot stays.
+    ReportPageStateUnloadDormant dormant = 1;
+    // Its webview slot was taken down while the workspace stays open: the
+    // panel closed, a bundle remount, the restart verb's bounce.
+    ReportPageStateUnloadDetached detached = 2;
+    // The workspace was released from the editor: it stopped being visible,
+    // or was closed, killed or merged.
+    ReportPageStateUnloadReleased released = 3;
+  }
+}
+
+// The session went dormant off screen.
+message ReportPageStateUnloadDormant {}
+// The slot was taken down while the workspace stays open.
+message ReportPageStateUnloadDetached {}
+// The workspace was released from the editor.
+message ReportPageStateUnloadReleased {}
+
+// THE ARM IS THE OUTCOME.
+message ReportPageStateResponse {
+  oneof result {
+    ReportPageStateSuccess success = 1;
+    ReportPageStateError error = 2;
+  }
+}
+// Recorded.
+message ReportPageStateSuccess {}
+// Arms derived from the daemon's refusal sites, exactly
+// ReportPageUnloading's: this verb resolves the same subject through the
+// same guard. Validation failures (unset field, blank string, unset report
+// or reason) are Connect InvalidArgument, never an arm.
+message ReportPageStateError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ReportPageStateUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ReportPageStateWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ReportPageStateTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ReportPageStateNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// The workspace id is not in the daemon's registry.
+message ReportPageStateUnknownWorkspace {}
+// The echoed dir disagrees with the registry's.
+message ReportPageStateWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// The workspace moved to a successor daemon.
+message ReportPageStateTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not adopted the workspace yet.
+message ReportPageStateNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. UNSET when no live
+  // daemon serves the workspace (a takeover after the incumbent died), in
+  // which case the client waits for the adoption; its restatement on the next
+  // host subscribe carries the state.
+  optional string address = 1;
+}

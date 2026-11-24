@@ -3,6 +3,7 @@ package sidebar_test
 import (
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -661,16 +662,17 @@ func TestAResultReadIsCountedByWhatReadIt(t *testing.T) {
 	tests := []struct {
 		name string
 		act  func(r sidebarResolver)
-		want sidebar.ResultReadBy
+		want []sidebar.ResultReadBy
 	}{
-		{name: "the editor's viewed report", act: func(r sidebarResolver) {
+		{name: "an interaction that views the row", act: func(r sidebarResolver) {
 			turnFinished(r, theWS)
-			r.SetViewed(theWS)
-		}, want: sidebar.ReadByEditorView},
-		{name: "an interrupted turn", act: func(r sidebarResolver) {
-			working(r, theWS)
-			r.SetTurnEnded(theWS, wsm.CloseKilled)
-		}, want: sidebar.ReadByInterrupt},
+			r.SetInteracted(theWS, epoch)
+		}, want: []sidebar.ResultReadBy{sidebar.ReadByInteraction}},
+		{name: "a repeat on a row already viewed is not counted again", act: func(r sidebarResolver) {
+			turnFinished(r, theWS)
+			r.SetInteracted(theWS, epoch)
+			r.SetInteracted(theWS, epoch.Add(time.Second))
+		}, want: []sidebar.ResultReadBy{sidebar.ReadByInteraction}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -684,8 +686,8 @@ func TestAResultReadIsCountedByWhatReadIt(t *testing.T) {
 			tt.act(r)
 
 			// Assert
-			if len(tel.reads) != 1 || tel.reads[0] != tt.want {
-				t.Fatalf("reads = %v, want one %s", tel.reads, tt.want)
+			if len(tel.reads) != len(tt.want) || (len(tt.want) == 1 && tel.reads[0] != tt.want[0]) {
+				t.Fatalf("reads = %v, want %v", tel.reads, tt.want)
 			}
 		})
 	}

@@ -726,6 +726,13 @@ func (s *requestLoggingServer) LoadPageInEditor(
 	return serveUnary(s, ctx, "LoadPageInEditor", req, s.server.LoadPageInEditor)
 }
 
+func (s *requestLoggingServer) ReportPageState(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportPageStateRequest],
+) (*connect.Response[agentreplv1.ReportPageStateResponse], error) {
+	return serveUnary(s, ctx, "ReportPageState", req, s.server.ReportPageState)
+}
+
 func (s *requestLoggingServer) ReportPageUnloading(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportPageUnloadingRequest],

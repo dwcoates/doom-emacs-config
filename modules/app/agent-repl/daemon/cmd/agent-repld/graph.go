@@ -65,6 +65,7 @@ import (
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/netwatch"
 	"agent-repld/internal/opentabs"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/pagesupersede"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/persistentwifi"
@@ -602,6 +603,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// waits on the state database's one connection.
 	// SO IS EVERY WORKSPACE'S VISIBILITY: a boot and a deploy read it before
 	// they allocate anything (wsm.Workspace.Visibility).
+	// THE PAGES EMACS'S WEB VIEW HOLDS, as it reports them (ReportPageState):
+	// the loaded-pages gauge and the sidebar's count both read this table.
+	heldPages := pageheld.New(p.Metrics)
 	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterViewed(p.DB, p.Surfaces.Global()),
 		rosterStatusChanges(p.DB, p.Surfaces.Global()),
 		rosterVisibility(p.DB, p.Surfaces.Global()))
@@ -1201,6 +1205,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Now:   clock.System{}.Now,
 	}
 	if err := p.Metrics.RegisterSessions(sessionsCensus); err != nil {
+		return nil, fmt.Errorf("agent-repld: %w", err)
+	}
+	if err := p.Metrics.RegisterPages(heldPages, sessionsCensus, func(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+		_, found, err := p.DB.Session(ctx, ws)
+		return found, err
+	}); err != nil {
 		return nil, fmt.Errorf("agent-repld: %w", err)
 	}
 	// The synthesizer's digest call reaches the shim through the fleet, now that
@@ -2228,6 +2238,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StallBeat:         stallBeat,
 			Pages:             supersededPages,
 			Latencies:         p.Metrics,
+			HeldPages:         heldPages,
 			VendorSpend:       p.Metrics,
 			RPCs:              p.Metrics,
 			Reconnects:        p.Reconnects,

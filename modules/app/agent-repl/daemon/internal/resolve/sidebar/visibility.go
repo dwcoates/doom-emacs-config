@@ -71,24 +71,19 @@ type VisibilityTelemetry interface {
 	CountResultRead(by ResultReadBy)
 }
 
-// ResultReadBy is what made a workspace's last turn result read: the closed
-// vocabulary agentrepl_workspace_results_read_total counts by.
+// ResultReadBy is what marked a workspace's row viewed (its last result read):
+// the closed vocabulary agentrepl_workspace_results_read_total counts by.
 type ResultReadBy string
 
-// The readers of a result.
+// The markers of a viewed row.
 const (
-	// ReadByEditorView is the editor's viewed report (MarkWorkspaceViewed):
-	// the user looked at the turn-end row for the view dwell.
-	ReadByEditorView ResultReadBy = "editor_view"
-	// ReadByContextCut is a /clear or compaction that completed, read the
-	// moment it lands: it leaves no response to read.
-	ReadByContextCut ResultReadBy = "context_cut"
-	// ReadByInterrupt is a turn the user interrupted, read the moment it ends.
-	ReadByInterrupt ResultReadBy = "interrupted"
+	// ReadByInteraction is the user's interaction with the workspace
+	// (SetInteracted) viewing its row on its status.
+	ReadByInteraction ResultReadBy = "interaction"
 )
 
-// ResultReadersAll is every reader, for a caller that serves each from 0.
-var ResultReadersAll = []ResultReadBy{ReadByEditorView, ReadByContextCut, ReadByInterrupt}
+// ResultReadersAll is every marker, for a caller that serves each from 0.
+var ResultReadersAll = []ResultReadBy{ReadByInteraction}
 
 // WithVisibilityTelemetry installs where the resolver counts visibilities,
 // their changes and the results read.
