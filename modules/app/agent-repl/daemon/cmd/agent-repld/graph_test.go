@@ -1062,7 +1062,9 @@ func TestOnBothStatusSurfacesTellsTheFooterThenTheRoster(t *testing.T) {
 			// Arrange
 			var calls []string
 			record := func(surface string) func(ids.WorkspaceID, bool) {
-				return func(ws ids.WorkspaceID, on bool) { calls = append(calls, surface+":"+string(ws)+":"+strconv.FormatBool(on)) }
+				return func(ws ids.WorkspaceID, on bool) {
+					calls = append(calls, surface+":"+string(ws)+":"+strconv.FormatBool(on))
+				}
 			}
 			set := onBothStatusSurfaces(record("footer"), record("roster"))
 

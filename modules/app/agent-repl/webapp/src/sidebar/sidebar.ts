@@ -198,7 +198,7 @@ export function mountWebhostSidebar(
 }
 
 /** What the sidebar page's rail may have injected, beside the shared deps. */
-export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame" | "focusLeft"> & {
+export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame" | "focusLeft" | "drawTiming"> & {
   /** Told once, when the first push reveals the sidebar. */
   revealed?: () => void;
   /** The sidebar document's failures and notices, which its version lists (notices.ts). */

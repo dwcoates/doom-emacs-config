@@ -24,6 +24,7 @@ import {
 } from "../../src/sidebar/sidebar.js";
 import { RosterVersionSchema, type RosterPush } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RosterStreams } from "../../src/sidebar/roster-streams.js";
+import type { DrawTimingEnv } from "../../src/sidebar/draw-timing.js";
 import type {
   ListMergedWorkspacesRequest,
   ListMergedWorkspacesResponse,
@@ -149,7 +150,16 @@ beforeEach(() => {
 
 /** Mount the rail drawing on the suite's frames. */
 function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDeps = {}): ReturnType<typeof mountSidebarNow> {
-  return mountSidebarNow(host, ctx, { frame: frames.frame, ...deps });
+  return mountSidebarNow(host, ctx, { frame: frames.frame, drawTiming: drawTimingOn(deps.frame ?? frames.frame), ...deps });
+}
+
+/**
+ * The draw timing on FRAME, the rail's own frames: each draw's record is
+ * written at a frame its test drains, never at a real animation frame that
+ * comes after its test ended, inside the next one.
+ */
+function drawTimingOn(frame: (callback: () => void) => void): DrawTimingEnv {
+  return { now: () => performance.now(), frame };
 }
 
 /** Mount the webhost's sidebar drawing on the suite's frames. */
@@ -158,7 +168,7 @@ function mountWebhostSidebar(
   ctx: Parameters<typeof mountWebhostSidebarNow>[1],
   deps: WebhostSidebarDeps = {},
 ): ReturnType<typeof mountWebhostSidebarNow> {
-  return mountWebhostSidebarNow(host, ctx, { frame: frames.frame, ...deps });
+  return mountWebhostSidebarNow(host, ctx, { frame: frames.frame, drawTiming: drawTimingOn(deps.frame ?? frames.frame), ...deps });
 }
 
 /** Let the stream deliver its pushes, and the rail draw them. */

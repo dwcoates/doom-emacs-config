@@ -1304,10 +1304,11 @@ A tab answered open meanwhile is ordered and selected by the walk itself,
 which sets the order and applies the selection once it is done.")
 
 (defun agent-repl-roster--walk-unchanged-p (inputs desired)
-  "Non-nil when a walk over INPUTS, whose desired rows are DESIRED, changes nothing.
-INPUTS are the last walk's own (`agent-repl-roster--reconciled'), every
-wanted tab stands under the name it wants, and every roster-owned tab is
-wanted, so the walk would open, rename and tear down nothing."
+  "Non-nil when a walk over INPUTS and DESIRED would change nothing.
+DESIRED are the desired rows INPUTS carry.  INPUTS are the last walk's
+own (`agent-repl-roster--reconciled'), every wanted tab stands under the
+name it wants, and every roster-owned tab is wanted, so the walk would
+open, rename and tear down nothing."
   (and (equal inputs agent-repl-roster--reconciled)
        (cl-every (lambda (want)
                    (equal (agent-repl--ws-by-ref-id (plist-get want :id)) (plist-get want :name)))
@@ -1354,8 +1355,9 @@ A row that fails to reconcile is contained rather than fatal; see
         :revision (plist-get roster :revision)))
 
 (defun agent-repl-roster--walk (roster desired listed-open)
-  "Walk ROSTER's DESIRED rows into the tab bar; LISTED-OPEN are the ids it lists open.
-The whole of `agent-repl-roster-reconcile' for a push that changed what it reads."
+  "Walk ROSTER's DESIRED rows into the tab bar.
+LISTED-OPEN are the ids ROSTER lists open.  The whole of
+`agent-repl-roster-reconcile' for a push that changed what it reads."
   (let* ((wanted-ids (make-hash-table :test 'equal))
          ;; Counted BEFORE the walk, because the walk is what makes rows
          ;; stop being tabless: asking the same question afterwards would

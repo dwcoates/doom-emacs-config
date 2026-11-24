@@ -1314,29 +1314,11 @@ func TestQueueReposAnswersEveryRepositoryInKeyOrder(t *testing.T) {
 // the merge queues builds its own list of their repositories: queueRepos is
 // the one range over the map in the package.
 func TestEveryWalkOverAllTheQueuesTakesQueueRepos(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-
 	// Act
-	var ranges []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		for range strings.Count(string(source), "for repo := range queues {") {
-			ranges = append(ranges, file)
-		}
-	}
+	sites := sourcescan.Sites(t, "for repo := range queues {")
 
 	// Assert
-	if !slices.Equal(ranges, []string{"recover.go"}) {
-		t.Fatalf("ranges over all the queues in %v, want only queueRepos's in recover.go", ranges)
+	if !slices.Equal(sites, []string{"recover.go"}) {
+		t.Fatalf("ranges over all the queues in %v, want only queueRepos's in recover.go", sites)
 	}
 }
