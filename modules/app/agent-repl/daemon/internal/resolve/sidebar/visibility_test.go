@@ -394,6 +394,33 @@ func TestEveryVisibilityChangeIsHandedToTheSink(t *testing.T) {
 	}
 }
 
+func TestAnOpenOfAFoldedUnviewedWorkspaceHandsTheSinkNoChange(t *testing.T) {
+	// Arrange: kept visible only by its unread result. Each editor open raises
+	// the opening marker and lowers it once the open answers; on 2026-11-23 the
+	// marker's `inactive` moved the visibility both ways, so every open tore
+	// the tab down and every teardown opened it again, about 800 times.
+	sink := &visibilitySink{}
+	resolver, surfaces := newResolver(t, sidebar.WithVisibilitySink(sink.record))
+	r := sidebarResolver{Resolver: resolver, surfaces: surfaces}
+	r.SetRegistry(foldedOne())
+	turnFinished(r, theWS)
+	before := len(sink.all())
+
+	// Act: the open cycle the editor runs, more than once.
+	for range 3 {
+		r.SetOpening(theWS, true)
+		r.SetOpening(theWS, false)
+	}
+
+	// Assert
+	if got := sink.all()[before:]; len(got) != 0 {
+		t.Fatalf("changes = %v, want none: an open acts on the visibility and moves none", got)
+	}
+	if got := r.Visibility(theWS); got != wsm.UnselectedVisible {
+		t.Fatalf("visibility = %v, want unselected_visible after the opens", got)
+	}
+}
+
 func TestAnUnchangedVisibilityIsNotHandedToTheSinkAgain(t *testing.T) {
 	// Arrange
 	sink := &visibilitySink{}
