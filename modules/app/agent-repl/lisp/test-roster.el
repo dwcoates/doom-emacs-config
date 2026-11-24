@@ -824,8 +824,8 @@ area came up on the fallback buffer."
 
 (ert-deftest agent-repl-test-roster-merged-current-tab-lands-on-the-previously-selected ()
   "An IMPLICIT close -- the daemon closing a workspace after its merge lands --
-of the tab the user stands on lands them on the workspace selected before
-it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
+of the tab the user stands on lands them on the workspace interacted with
+before it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-apply
@@ -835,8 +835,10 @@ it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
                                     (agent-repl-test-roster--row "b" "second" :ready)
                                     (agent-repl-test-roster--row "c" "third" :ready))))))
     (setq agent-repl-test-roster--current-name "third")
-    (let ((agent-repl--workspace-history '("third" "second" "first")))
-      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+    (let ((instants '(("third" . 300) ("second" . 200) ("first" . 100))))
+      (cl-letf (((symbol-function 'agent-repl-roster-last-interacted-ms)
+                 (lambda (ws) (cdr (assoc ws instants))))
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
                 ((symbol-function 'agent-repl--ws-all-names)
                  (lambda () '("first" "second" "third")))
                 ((symbol-function 'agent-repl--ws-list-names)
@@ -851,87 +853,89 @@ it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("second")))))
 
-;;; --- A workspace opened after startup leads the selection history
-
-(ert-deftest agent-repl-test-roster-a-tab-opened-after-startup-leads-the-history ()
-  "A workspace that became open with the editor watching is the most recent."
-  ;; Arrange
-  (agent-repl-test-roster--with-editor
-    (let ((agent-repl--workspace-history '("shown" "older"))
-          (agent-repl--panels-arrivals-armed t))
-      ;; Act
-      (agent-repl-roster--open-tab (list :id "n" :name "newborn" :ref (list :id "n" :dir "/w/n")))
-      ;; Assert
-      (should (equal agent-repl--workspace-history '("newborn" "shown" "older"))))))
+;;; --- A workspace opened after startup is not viewed
 
 (ert-deftest agent-repl-test-roster-a-creation-is-not-stamped-viewed ()
-  "Leading the history is not a view, so no `:last-viewed-at' is written."
+  "Opening a tab is not a view, so no `:last-viewed-at' is written."
   ;; Arrange
   (agent-repl-test-roster--with-editor
-    (let ((agent-repl--workspace-history nil)
-          (agent-repl--panels-arrivals-armed t))
+    (let ((agent-repl--panels-arrivals-armed t))
       ;; Act
       (agent-repl-roster--open-tab (list :id "n" :name "newborn" :ref (list :id "n" :dir "/w/n")))
       ;; Assert
       (should-not (agent-repl--ws-get "newborn" :last-viewed-at)))))
 
-(ert-deftest agent-repl-test-roster-a-startup-tab-leaves-the-history-alone ()
-  "Before the startup roster is delivered, opening tabs does not reorder the history."
-  ;; Arrange
-  (agent-repl-test-roster--with-editor
-    (let ((agent-repl--workspace-history '("shown"))
-          (agent-repl--panels-arrivals-armed nil))
-      ;; Act
-      (agent-repl-roster--open-tab (list :id "n" :name "old-tab" :ref (list :id "n" :dir "/w/n")))
-      ;; Assert
-      (should (equal agent-repl--workspace-history '("shown"))))))
-
 ;;; --- The one selection-recency order
 
-(defmacro agent-repl-test-roster--with-instants (instants history &rest body)
-  "Run BODY with INSTANTS (alist name -> ms) as the roster's durable
-last-selected instants and HISTORY as this session's switches."
-  (declare (indent 2))
-  `(let ((agent-repl--workspace-history ,history)
-         (agent-repl--current-visit nil)
-         (instants ,instants))
-     (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+(defmacro agent-repl-test-roster--with-instants (instants shown origin &rest body)
+  "Run BODY with INSTANTS (alist name -> ms) as the roster\='s durable
+interaction instants, SHOWN as the workspace the frame stands in and ORIGIN
+as a running recency walk\='s origin (nil for none)."
+  (declare (indent 3))
+  `(let ((agent-repl--recency-walk-origin ,origin)
+         (instants ,instants)
+         (shown ,shown))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () shown))
+               ((symbol-function 'agent-repl-roster-row-for-ws)
                 (lambda (ws)
                   (let ((ms (cdr (assoc ws instants))))
-                    (and ms (list :last-selected (list :at-ms ms)))))))
+                    (and ms (list :last-interacted (list :at-ms ms)))))))
        ,@body)))
 
-(ert-deftest agent-repl-test-roster-recency-order-puts-session-history-first ()
-  "This session's switches outrank a newer durable instant from the roster."
-  (agent-repl-test-roster--with-instants '(("a" . 100) ("b" . 900)) '("a")
-    (should (equal (agent-repl-roster-selection-recency-order '("b" "a"))
-                   '("a" "b")))))
+(ert-deftest agent-repl-test-roster-recency-order-leads-with-the-workspace-shown ()
+  "The workspace the frame stands in leads, whatever its own instant."
+  (agent-repl-test-roster--with-instants '(("a" . 900) ("b" . 100)) "c" nil
+    (should (equal (agent-repl-roster-selection-recency-order '("a" "b" "c"))
+                   '("c" "a" "b")))))
 
-(ert-deftest agent-repl-test-roster-recency-order-leads-with-the-standing-visit ()
-  "The workspace the frame stands in leads the order before its visit is recorded."
-  (agent-repl-test-roster--with-instants nil '("a")
-    (let ((agent-repl--current-visit (list :name "c" :began 100.0 :ahead nil))
-          (agent-repl--recency-walk-landing nil))
-      (should (equal (agent-repl-roster-selection-recency-order '("a" "b" "c"))
-                     '("c" "a" "b"))))))
+(ert-deftest agent-repl-test-roster-recency-order-leads-with-the-walk-origin-while-walking ()
+  "While a recency walk runs its origin leads, never the landing the frame stands on."
+  (agent-repl-test-roster--with-instants '(("a" . 100) ("b" . 900) ("c" . 500)) "c" "a"
+    (should (equal (agent-repl-roster-selection-recency-order '("a" "b" "c"))
+                   '("a" "b" "c")))))
 
-(ert-deftest agent-repl-test-roster-recency-order-orders-the-rest-by-the-durable-instant ()
-  "Workspaces the history does not hold order newest durable instant first."
-  (agent-repl-test-roster--with-instants '(("a" . 100) ("b" . 900) ("c" . 500)) nil
+(ert-deftest agent-repl-test-roster-recency-order-orders-the-rest-by-the-interaction-instant ()
+  "Every workspace after the lead orders newest interaction instant first."
+  (agent-repl-test-roster--with-instants '(("a" . 100) ("b" . 900) ("c" . 500)) nil nil
     (should (equal (agent-repl-roster-selection-recency-order '("a" "b" "c"))
                    '("b" "c" "a")))))
 
-(ert-deftest agent-repl-test-roster-recency-order-keeps-the-never-selected-in-given-order ()
-  "Never-selected workspaces come last, in the order the caller gave them."
-  (agent-repl-test-roster--with-instants '(("s" . 100)) nil
+(ert-deftest agent-repl-test-roster-recency-order-keeps-the-never-interacted-in-given-order ()
+  "Workspaces never interacted with come last, in the order the caller gave them."
+  (agent-repl-test-roster--with-instants '(("s" . 100)) nil nil
     (should (equal (agent-repl-roster-selection-recency-order '("y" "s" "x"))
                    '("s" "y" "x")))))
 
-(ert-deftest agent-repl-test-roster-recency-order-ignores-history-outside-names ()
-  "A history entry that is not a candidate (closed, departing) adds nothing."
-  (agent-repl-test-roster--with-instants nil '("gone" "b")
+(ert-deftest agent-repl-test-roster-recency-order-ignores-a-lead-outside-names ()
+  "A lead that is not a candidate (closed, departing) adds nothing."
+  (agent-repl-test-roster--with-instants '(("b" . 5)) "gone" nil
     (should (equal (agent-repl-roster-selection-recency-order '("a" "b"))
                    '("b" "a")))))
+
+(ert-deftest agent-repl-test-roster-last-interacted-ms-reads-a-thread-row ()
+  "A chat thread, which has no workspace row, reads its thread row\='s instant."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil))
+            ((symbol-function 'agent-repl--ws-get)
+             (lambda (_ws key) (and (eq key :ref) '(:id "t1"))))
+            ((symbol-function 'agent-repl-roster-threads)
+             (lambda (&rest _) '((:thread (:id "t0") :last-interacted (:at-ms 1))
+                                 (:thread (:id "t1") :last-interacted (:at-ms 7))))))
+    (should (equal (agent-repl-roster-last-interacted-ms "thread") 7))))
+
+(ert-deftest agent-repl-test-roster-interaction-standing-p ()
+  "An interaction is standing only when the row is viewed AND the newest."
+  (dolist (case '((:name "viewed and newest" :viewed t :instants (("w" . 9) ("x" . 5)) :want t)
+                  (:name "not viewed" :viewed nil :instants (("w" . 9) ("x" . 5)) :want nil)
+                  (:name "another is newer" :viewed t :instants (("w" . 5) ("x" . 9)) :want nil)
+                  (:name "never interacted" :viewed t :instants (("x" . 9)) :want nil)))
+    (let ((instants (plist-get case :instants))
+          (viewed (plist-get case :viewed)))
+      (cl-letf (((symbol-function 'agent-repl-roster-last-interacted-ms)
+                 (lambda (ws) (cdr (assoc ws instants))))
+                ((symbol-function 'agent-repl-roster-viewed-for-ws) (lambda (_ws) viewed))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("w" "x"))))
+        (should (eq (and (agent-repl-roster-interaction-standing-p "w") t)
+                    (plist-get case :want)))))))
 
 (ert-deftest agent-repl-test-roster-instant-ms-reads-the-named-field ()
   "The instant reader answers the `:at-ms' of the row field it is named."
@@ -1110,20 +1114,20 @@ naming its own row field, so no accessor hand-rolls a divergent read."
 
 (ert-deftest agent-repl-test-roster-merged-current-tab-lands-by-the-durable-instant-after-restart ()
   "After an Emacs restart the session history holds only the closing tab, and
-the landing is the workspace the roster says was selected most recently."
+the landing is the workspace the roster says was interacted with most recently."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-apply
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "repo" (list (plist-put (agent-repl-test-roster--row "a" "first" :ready)
-                                               :last-selected '(:at-ms 100))
+                                               :last-interacted '(:at-ms 100))
                                     (plist-put (agent-repl-test-roster--row "b" "second" :ready)
-                                               :last-selected '(:at-ms 900))
+                                               :last-interacted '(:at-ms 900))
                                     (plist-put (agent-repl-test-roster--row "c" "third" :ready)
-                                               :last-selected '(:at-ms 1000)))))))
+                                               :last-interacted '(:at-ms 1000)))))))
     (setq agent-repl-test-roster--current-name "third")
-    (let ((agent-repl--workspace-history '("third")))
+    (progn
       (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
                 ((symbol-function 'agent-repl--ws-all-names)
                  (lambda () '("first" "second" "third")))
@@ -1134,11 +1138,11 @@ the landing is the workspace the roster says was selected most recently."
          (agent-repl-test-roster--roster
           :sections (list (agent-repl-test-roster--section
                            "repo" (list (plist-put (agent-repl-test-roster--row "a" "first" :ready)
-                                                   :last-selected '(:at-ms 100))
+                                                   :last-interacted '(:at-ms 100))
                                         (plist-put (agent-repl-test-roster--row "b" "second" :ready)
-                                                   :last-selected '(:at-ms 900)))))
+                                                   :last-interacted '(:at-ms 900)))))
           :merged (list (plist-put (agent-repl-test-roster--row "c" "third" :merged :closed t)
-                                   :last-selected '(:at-ms 1000)))))))
+                                   :last-interacted '(:at-ms 1000)))))))
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("second")))))
 
@@ -3644,23 +3648,20 @@ saying the roster had been asked for one and declined."
                         errors)))))
 
 (ert-deftest agent-repl-test-roster-an-unfold-reopens-a-released-workspace-as-a-re-hold ()
-  "A released workspace held again is no arrival: it neither enters the history nor opens panels."
+  "A released workspace held again is no arrival: it opens no panels."
   (agent-repl-test-roster--with-editor
     (agent-repl-test-roster--recording-saves
      (let ((agent-repl--panels-arrivals-armed t)
-           (created nil)
            (arrived nil))
-       (cl-letf (((symbol-function 'agent-repl--note-workspace-created) (lambda (ws) (push ws created)))
-                 ((symbol-function 'agent-repl--panels-open-on-arrival) (lambda (ws _id) (push ws arrived))))
+       (cl-letf (((symbol-function 'agent-repl--panels-open-on-arrival) (lambda (ws _id) (push ws arrived))))
          ;; Arrange
          (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
          (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster t))
-         (setq created nil arrived nil)
+         (setq arrived nil)
          ;; Act
          (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil)))
        ;; Assert
        (should (equal (agent-repl--ws-by-ref-id "w2") "two"))
-       (should-not (member "two" created))
        (should-not (member "two" arrived))
        (should-not (agent-repl--ws-get "two" :released))))))
 
@@ -3669,9 +3670,8 @@ saying the roster had been asked for one and declined."
   (agent-repl-test-roster--with-editor
     (agent-repl-test-roster--recording-saves
      (let ((agent-repl--panels-arrivals-armed t)
-           (created nil))
-       (cl-letf (((symbol-function 'agent-repl--note-workspace-created) (lambda (ws) (push ws created)))
-                 ((symbol-function 'agent-repl--panels-open-on-arrival) #'ignore))
+           (arrived nil))
+       (cl-letf (((symbol-function 'agent-repl--panels-open-on-arrival) (lambda (ws _id) (push ws arrived))))
          ;; Arrange
          (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
          (agent-repl-roster-reconcile
@@ -3679,11 +3679,11 @@ saying the roster had been asked for one and declined."
            :sections (list (agent-repl-test-roster--section
                             "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
            :closed (list (agent-repl-test-roster--row "w2" "two" :ready :closed t))))
-         (setq created nil)
+         (setq arrived nil)
          ;; Act
          (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil)))
        ;; Assert
-       (should (member "two" created))))))
+       (should (member "two" arrived))))))
 
 (ert-deftest agent-repl-test-roster-listed-open-ids-name-every-open-and-hidden-row-and-thread ()
   "The rows a roster lists open are its Open and Hidden rows and open threads, held or not."

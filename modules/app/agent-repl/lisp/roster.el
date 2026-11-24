@@ -59,9 +59,8 @@
 (declare-function agent-repl--with-log-context "core"
                   (workspace request-id function))
 (defvar agent-repl--global-log-scope)
-(declare-function agent-repl--selection-history "workspace" ())
+(defvar agent-repl--recency-walk-origin)
 (defvar agent-repl--panels-arrivals-armed)
-(declare-function agent-repl--note-workspace-created "workspace" (name))
 (defvar agent-repl--log-context-request-id)
 (defvar agent-repl--log-context-workspace)
 (declare-function agent-repl--current-ws-p "core" (ws))
@@ -72,6 +71,7 @@
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
 (declare-function agent-repl--ws-current-name "workspace" ())
+(declare-function agent-repl--ws-list-names "workspace" ())
 (declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl--ws-tombstoned-p "workspace" (ws))
 (declare-function agent-repl--ws-forget "workspace" (ws))
@@ -1041,13 +1041,6 @@ this file's verb — so the tab's whole birth is a perspective plus the
                       :was_daemon (plist-get decided :was-daemon)
                       :was_revision (plist-get decided :was-revision))
     (agent-repl-roster--subscribe-host name ref)
-    ;; A WORKSPACE THAT BECAME OPEN WITH THIS EDITOR WATCHING is the most
-    ;; recent one in the selection history, so `s-]' reaches it at once.  The
-    ;; startup roster is exempt: its tabs were open before this session and
-    ;; the durable last-selected instants order them
-    ;; (`agent-repl-roster-selection-recency-order').
-    (when (and agent-repl--panels-arrivals-armed (not rehold))
-      (agent-repl--note-workspace-created name))
     ;; A TAB BORN HERE IS A WORKSPACE THAT JUST BECAME OPEN, and opening a
     ;; workspace opens its panels before it is switched to (owner ruling,
     ;; 2026-09-13, item 6).  This is the one landing every open takes --
@@ -1448,6 +1441,39 @@ fills from its own record, so it survives an Emacs restart.  nil when the
 roster has no row for WS or the user never selected it."
   (agent-repl-roster--instant-ms ws :last-selected))
 
+(defun agent-repl-roster-last-interacted-ms (ws)
+  "Return WS\='s durable interaction instant in epoch ms, or nil.
+Read from WS\='s roster row (`RosterRowLastInteracted'), or from its thread
+row (`RosterThreadLastInteracted') for a chat thread, which the daemon
+fills from its own record of the user\='s interactions, so it survives an
+Emacs restart.  nil when the roster has neither row for WS or the user
+never interacted with it."
+  (let ((row (agent-repl-roster-row-for-ws ws)))
+    (if row
+        (agent-repl-roster-row-instant-ms row :last-interacted)
+      (let ((id (plist-get (agent-repl--ws-get ws :ref) :id)))
+        (and id
+             (agent-repl-roster-row-instant-ms
+              (cl-find-if (lambda (thread) (equal (plist-get (plist-get thread :thread) :id) id))
+                          (agent-repl-roster-threads))
+              :last-interacted))))))
+
+(defun agent-repl-roster-interaction-standing-p (ws)
+  "Return non-nil when an interaction with WS would tell the daemon nothing.
+That is: WS\='s row is already viewed (`agent-repl-roster-viewed-for-ws')
+AND no other row\='s interaction instant is newer than WS\='s, so WS is
+already the workspace interacted with most recently.  The one gate
+`agent-repl-host-report-interaction' reads, so a keystroke reports only
+what the roster does not already say."
+  (let ((mine (agent-repl-roster-last-interacted-ms ws)))
+    (and mine
+         (agent-repl-roster-viewed-for-ws ws)
+         (not (cl-some (lambda (name)
+                         (let ((theirs (and (not (equal name ws))
+                                            (agent-repl-roster-last-interacted-ms name))))
+                           (and theirs (> theirs mine))))
+                       (agent-repl--ws-list-names))))))
+
 (defun agent-repl-roster-last-turn-ended-ms (ws)
   "Return WS's durable last-turn-ended instant in epoch ms, or nil.
 Read from WS's roster row (`RosterRowLastTurnEnded'), which the daemon
@@ -1510,30 +1536,32 @@ nil when the roster has no row for WS; otherwise
   (agent-repl-roster-row-instant-ms (agent-repl-roster-row-for-ws ws) field))
 
 (defun agent-repl-roster-selection-recency-order (names)
-  "Return NAMES ordered most recently selected first.
-THE ONE SELECTION-RECENCY ORDER: the landing after a close
+  "Return NAMES ordered by the user\='s interaction recency, newest first.
+THE ONE RECENCY ORDER: the recency walk (`s-[', `s-]'), the jump to the
+previous workspace, the landing after a close
 \(`agent-repl--teardown-landing-target') and the jump to the most recent
-workspace (`agent-repl--roster-recent-names') both order by it, so the two
-can never disagree about which workspace came before.
+workspace (`agent-repl--roster-recent-names') all order by it, so none
+can disagree about which workspace came before.  The daemon is its
+source: Emacs keeps no history of its own.
 
-  1. Names in `agent-repl--selection-history', in its order: this
-     session's own visits, the one the frame stands in first, and only
-     those that lasted `agent-repl-visit-dwell-seconds' or were prompted
-     in (`agent-repl--note-visit-prompted') after it.
-  2. Then names the history does not hold, by the roster's durable
-     last-selected instant (`agent-repl-roster-last-selected-ms'),
-     newest first: what a fresh Emacs knows of earlier sessions.
-  3. Then names never selected at all, in the order NAMES gives them.
+  1. The walk\='s origin while a recency walk runs
+     (`agent-repl--recency-walk-origin'), and otherwise the workspace the
+     frame stands in: the place a step starts from.
+  2. Then the names the user interacted with, by the daemon\='s durable
+     interaction instant (`agent-repl-roster-last-interacted-ms'), newest
+     first.  A step of the walk stamps none, so the order holds still
+     under it.
+  3. Then the names never interacted with, in the order NAMES gives them.
 
 NAMES is never filtered, only reordered."
-  (let* ((history (cl-remove-if-not (lambda (n) (member n names))
-                                    (agent-repl--selection-history)))
-         (rest (cl-remove-if (lambda (n) (member n history)) names))
-         (stamped (cl-remove-if-not #'agent-repl-roster-last-selected-ms rest))
-         (never (cl-remove-if #'agent-repl-roster-last-selected-ms rest)))
-    (append history
+  (let* ((lead (or agent-repl--recency-walk-origin (agent-repl--ws-current-name)))
+         (head (and lead (member lead names) (list lead)))
+         (rest (remove lead names))
+         (stamped (cl-remove-if-not #'agent-repl-roster-last-interacted-ms rest))
+         (never (cl-remove-if #'agent-repl-roster-last-interacted-ms rest)))
+    (append head
             (cl-stable-sort (copy-sequence stamped) #'>
-                            :key #'agent-repl-roster-last-selected-ms)
+                            :key #'agent-repl-roster-last-interacted-ms)
             never)))
 
 (defun agent-repl-roster--filter-order ()

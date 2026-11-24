@@ -664,14 +664,6 @@ the composer it asks for.  Every arm is an empty message."
                         (lambda (v) (agent-repl-wire--decode-empty name v)))))
               '(asked moved withdrawn taken))))))
 
-;;;; ---- The link-followed push ----
-
-(defun agent-repl-wire-decode-host-workspace-link-followed (value)
-  "Decode VALUE as the empty message `HostWorkspaceLinkFollowed'.
-The reader followed a link in this workspace\='s page; the stream names
-the workspace, so counting it viewed is all that is left."
-  (agent-repl-wire--decode-empty "HostWorkspaceLinkFollowed" value))
-
 ;;;; ---- The load button push ----
 
 (defun agent-repl-wire-decode-host-workspace-load-page-requested (value)
@@ -1040,10 +1032,6 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `response_question' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-response-question value))
 
-(defun agent-repl-wire-decode-watch-host-workspace-response-link-followed (value)
-  "Decode the `link_followed' push arm VALUE."
-  (agent-repl-wire-decode-host-workspace-link-followed value))
-
 (defun agent-repl-wire-decode-watch-host-workspace-response-load-page-requested (value)
   "Decode the `load_page_requested' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-load-page-requested value))
@@ -1127,8 +1115,6 @@ Returns a plist (:command STRING)."
                            agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked)
      (loadPageRequested :load-page-requested
                         agent-repl-wire-decode-watch-host-workspace-response-load-page-requested)
-     (linkFollowed :link-followed
-                   agent-repl-wire-decode-watch-host-workspace-response-link-followed)
      (composeEntry :compose-entry
                    agent-repl-wire-decode-watch-host-workspace-response-compose-entry)
      (chatTextHighlighted :chat-text-highlighted
@@ -1498,52 +1484,36 @@ Emacs's report that it is about to unload the workspace's page on purpose."
   "Decode VALUE as `ReportPageUnloadingResponse'.  THE ARM IS THE OUTCOME."
   (agent-repl-wire--decode-subject-response "ReportPageUnloading" value))
 
-;;;; ---- MarkWorkspaceViewed ----
+;;;; ---- ReportUserInteraction ----
 
-(defun agent-repl-wire-encode-mark-workspace-viewed-request (value)
-  "Encode the MarkWorkspaceViewedRequest plist VALUE `(:workspace REF)'.
-The editor's report that the user has now SEEN this workspace."
-  (agent-repl-wire--encode-subject-request "MarkWorkspaceViewed" value))
+(defun agent-repl-wire-encode-user-interaction (value)
+  "Encode VALUE, a keyword naming the user\='s act, as `UserInteraction'.
+VALUE is `:feed-scrolled', `:composer-typed' or `:feed-navigated'; any
+other is a caller defect and signals."
+  (let ((arm (pcase value
+               (:feed-scrolled '(feedScrolled . "UserInteractionFeedScrolled"))
+               (:composer-typed '(composerTyped . "UserInteractionComposerTyped"))
+               (:feed-navigated '(feedNavigated . "UserInteractionFeedNavigated"))
+               (_ (agent-repl-wire--fail "UserInteraction" 'kind
+                                         (format "expected :feed-scrolled, :composer-typed or :feed-navigated, got %S" value))))))
+    (agent-repl-wire--encoded
+     "UserInteraction"
+     (list (cons (car arm) (agent-repl-wire--encode-empty (cdr arm) nil))))))
 
-(defun agent-repl-wire-decode-mark-workspace-viewed-response (value)
-  "Decode VALUE as `MarkWorkspaceViewedResponse'.  THE ARM IS THE OUTCOME.
-Marked; the roster stream carries the row's viewed marker."
-  (agent-repl-wire--decode-subject-response "MarkWorkspaceViewed" value))
-
-;;;; ---- ReportViewDwell ----
-
-(defun agent-repl-wire-encode-report-view-dwell-request-dwell (value)
-  "Encode `ReportViewDwellRequest''s oneof `dwell' VALUE.
-VALUE is `(:arm :counting :value (:length-ms MS))' or
-`(:arm :stopped :value nil)'.  MS is a positive integer: the dwell's
-length, which the daemon refuses otherwise."
-  (agent-repl-wire--encode-oneof
-   "ReportViewDwellRequest" 'dwell value
-   `((:counting counting
-                ,(lambda (v)
-                   (let ((ms (plist-get v :length-ms)))
-                     (unless (and (integerp ms) (> ms 0))
-                       (agent-repl-wire--fail "ReportViewDwellCounting" 'length_ms
-                                              "expected a positive integer"))
-                     (agent-repl-wire--encoded "ReportViewDwellCounting"
-                                               (list (cons 'lengthMs ms))))))
-     (:stopped stopped ,(lambda (v) (agent-repl-wire--encode-empty "ReportViewDwellStopped" v))))))
-
-(defun agent-repl-wire-encode-report-view-dwell-request (value)
-  "Encode ReportViewDwellRequest VALUE `(:workspace REF :dwell DWELL)'.
-The editor's report that it started, or stopped, counting the user's
-dwell on the workspace; DWELL is as
-`agent-repl-wire-encode-report-view-dwell-request-dwell' takes it."
-  (agent-repl-wire--require-fields "ReportViewDwellRequest" value '(:workspace :dwell))
+(defun agent-repl-wire-encode-report-user-interaction-request (value)
+  "Encode ReportUserInteractionRequest VALUE `(:workspace REF :interaction KIND)'.
+The editor\='s report that the user interacted with the workspace; KIND is as
+`agent-repl-wire-encode-user-interaction' takes it."
+  (agent-repl-wire--require-fields "ReportUserInteractionRequest" value '(:workspace :interaction))
   (agent-repl-wire--encoded
-   "ReportViewDwellRequest"
-   (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
-         (agent-repl-wire-encode-report-view-dwell-request-dwell (plist-get value :dwell)))))
+   "ReportUserInteractionRequest"
+   (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
+         (cons 'interaction (agent-repl-wire-encode-user-interaction (plist-get value :interaction))))))
 
-(defun agent-repl-wire-decode-report-view-dwell-response (value)
-  "Decode VALUE as `ReportViewDwellResponse'.  THE ARM IS THE OUTCOME.
-Recorded; the roster stream carries the row's dwell marker."
-  (agent-repl-wire--decode-subject-response "ReportViewDwell" value))
+(defun agent-repl-wire-decode-report-user-interaction-response (value)
+  "Decode VALUE as `ReportUserInteractionResponse'.  THE ARM IS THE OUTCOME.
+Recorded; the roster stream carries the row\='s viewed marker and recency."
+  (agent-repl-wire--decode-subject-response "ReportUserInteraction" value))
 
 ;;;; ---- AdoptHostWorkspace ----
 

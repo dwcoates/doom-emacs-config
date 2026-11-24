@@ -218,24 +218,11 @@ marker above, so the decoded value must be something other than nil.
 EMACS DRAWS FROM IT.  The daemon is the single source of the mode: the
 tab bar reads it back (`agent-repl-roster-viewed-for-ws') exactly as the
 webapp sidebar does, so the two surfaces cannot disagree.  Emacs only
-REPORTS the dwell that raises it (`agent-repl--tab-view-partial'); the
-daemon also raises it by itself when a /clear or compaction completes."
+REPORTS the user\='s interaction that raises it
+\(`agent-repl-host-report-interaction'), and the row\='s next status
+change lowers it."
   (agent-repl-wire--decode-empty "RosterRowViewed" value)
   t)
-
-(defun agent-repl-wire-decode-roster-row-view-dwell (value)
-  "Decode VALUE as `RosterRowViewDwell'.
-Returns `(:started-at-ms MS :length-ms LEN)': the editor's own dwell, as
-the daemon stamped it on the selected row whose dwell will draw it
-PARTIAL.  The webapp sidebar fades the row's name over it; Emacs counts
-the dwell itself (`agent-repl--tab-dwell-pending') and draws nothing from
-the marker, but decodes it like every other field of the row."
-  (let ((object (agent-repl-wire--object "RosterRowViewDwell" value)))
-    (agent-repl-wire--check-keys "RosterRowViewDwell" object '(startedAtMs lengthMs))
-    (agent-repl-wire--decoded
-     "RosterRowViewDwell"
-     (list :started-at-ms (agent-repl-wire--decode-int64 "RosterRowViewDwell" 'startedAtMs object)
-           :length-ms (agent-repl-wire--decode-int64 "RosterRowViewDwell" 'lengthMs object)))))
 
 (defconst agent-repl-wire-roster-row-idle-async-unread-arms
   '((done :done agent-repl-wire-decode-roster-row-status-done)
@@ -464,6 +451,14 @@ restart.  Emacs orders by it and never draws it
 \(`agent-repl-roster-selection-recency-order'); the when-column is
 `RosterRowWhen'."
   (agent-repl-wire-roster--decode-instant "RosterRowLastSelected" value))
+
+(defun agent-repl-wire-decode-roster-row-last-interacted (value)
+  "Decode VALUE as `RosterRowLastInteracted', a plist `(:at-ms)'.
+The DURABLE instant the user last interacted with the workspace, epoch
+MILLISECONDS: the recency the daemon keeps from the user\='s interactions
+alone, which a selection does not move.  Emacs orders by it and never
+draws it \(`agent-repl-roster-selection-recency-order')."
+  (agent-repl-wire-roster--decode-instant "RosterRowLastInteracted" value))
 
 (defun agent-repl-wire-decode-roster-row-last-turn-ended (value)
   "Decode VALUE as `RosterRowLastTurnEnded', a plist `(:at-ms)'.
@@ -952,18 +947,18 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention viewed viewDwell idleAsyncUnread reviving dormant detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest contextHeat visibility lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention viewed idleAsyncUnread reviving dormant detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest contextHeat visibility lastSelected lastInteracted lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :viewed V
-:view-dwell VD :idle-async-unread IU :reviving R :dormant DO
+:idle-async-unread IU :reviving R :dormant DO
 :detached-live DL :one-shot OS :opening O :async-merging AM
 :merge-paused MP :merge-turn MT :open-owned-pull-request OP
 :context-heat CH :visibility VIS
-:last-selected L :last-turn-ended LT
+:last-selected L :last-interacted LI :last-turn-ended LT
 :last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
 :availability AV
@@ -985,9 +980,6 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :viewed (agent-repl-wire--decode-optional-message
                     "RosterRow" 'viewed object
                     #'agent-repl-wire-decode-roster-row-viewed)
-           :view-dwell (agent-repl-wire--decode-optional-message
-                        "RosterRow" 'viewDwell object
-                        #'agent-repl-wire-decode-roster-row-view-dwell)
            :idle-async-unread (agent-repl-wire--decode-optional-message
                                "RosterRow" 'idleAsyncUnread object
                                #'agent-repl-wire-decode-roster-row-idle-async-unread)
@@ -1029,6 +1021,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
+           :last-interacted (agent-repl-wire--decode-optional-message
+                             "RosterRow" 'lastInteracted object
+                             #'agent-repl-wire-decode-roster-row-last-interacted)
            :last-turn-ended (agent-repl-wire--decode-optional-message
                              "RosterRow" 'lastTurnEnded object
                              #'agent-repl-wire-decode-roster-row-last-turn-ended)
@@ -2562,14 +2557,17 @@ the row."
 
 (defun agent-repl-wire-decode-roster-thread-row (value)
   "Decode VALUE as `RosterThreadRow',
-`(:thread REF :name :summary :current :standing S :outline O :visibility V)'.
+`(:thread REF :name :summary :current :standing S :outline O :visibility V
+:last-interacted LI)'.
 SUMMARY is nil when none is set; CURRENT is t on the selected thread;
 VISIBILITY is `agent-repl-wire-decode-roster-row-visibility''s, `:selected'
 only on the thread that is the selection;
 STANDING is `agent-repl-wire-decode-roster-thread-standing''s; OUTLINE is
-nil on every row but the current thread's."
+nil on every row but the current thread's.  LAST-INTERACTED is
+`(:at-ms MS)', the thread\='s interaction recency, or nil when the user
+never interacted with it."
   (let ((object (agent-repl-wire--object "RosterThreadRow" value)))
-    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current standing outline visibility))
+    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current standing outline visibility lastInteracted))
     (agent-repl-wire--decoded
      "RosterThreadRow"
      (list :thread (agent-repl-wire--decode-message
@@ -2590,7 +2588,16 @@ nil on every row but the current thread's."
                      #'agent-repl-wire-decode-roster-thread-outline)
            :visibility (agent-repl-wire--decode-message
                         "RosterThreadRow" 'visibility object
-                        #'agent-repl-wire-decode-roster-row-visibility)))))
+                        #'agent-repl-wire-decode-roster-row-visibility)
+           :last-interacted (agent-repl-wire--decode-optional-message
+                             "RosterThreadRow" 'lastInteracted object
+                             #'agent-repl-wire-decode-roster-thread-last-interacted)))))
+
+(defun agent-repl-wire-decode-roster-thread-last-interacted (value)
+  "Decode VALUE as `RosterThreadLastInteracted', a plist `(:at-ms)'.
+A thread row\='s own copy of the interaction recency
+\(`agent-repl-wire-decode-roster-row-last-interacted')."
+  (agent-repl-wire-roster--decode-instant "RosterThreadLastInteracted" value))
 
 (defun agent-repl-wire-decode-roster-thread-section (value)
   "Decode VALUE as `RosterThreadSection', `(:new-thread LABEL :rows ROWS)'.

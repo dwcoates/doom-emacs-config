@@ -71,12 +71,9 @@ would abort the very branch a test is asserting."
     ("SelectWorkspace" agent-repl-rpc-select-workspace
      agent-repl-wire-encode-select-workspace-request
      agent-repl-wire-decode-select-workspace-response)
-    ("MarkWorkspaceViewed" agent-repl-rpc-mark-workspace-viewed
-     agent-repl-wire-encode-mark-workspace-viewed-request
-     agent-repl-wire-decode-mark-workspace-viewed-response)
-    ("ReportViewDwell" agent-repl-rpc-report-view-dwell
-     agent-repl-wire-encode-report-view-dwell-request
-     agent-repl-wire-decode-report-view-dwell-response)
+    ("ReportUserInteraction" agent-repl-rpc-report-user-interaction
+     agent-repl-wire-encode-report-user-interaction-request
+     agent-repl-wire-decode-report-user-interaction-response)
     ("AdoptHostWorkspace" agent-repl-rpc-adopt-host-workspace
      agent-repl-wire-encode-adopt-host-workspace-request
      agent-repl-wire-decode-adopt-host-workspace-response)

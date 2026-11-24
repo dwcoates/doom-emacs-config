@@ -1830,12 +1830,13 @@ to step from."
 `s-[' and `s-]' are `s-{' and `s-}' over the recency order rather than the
 bar's (`agent-repl--recency-ring'), wrapping at both ends.
 
-A STEP IS NOT A VISIT.  The switch is requested with the `recency-walk'
-trigger, so neither the daemon's last-selected instant nor Emacs's own
-history moves (`agent-repl--recency-walk-landing').  The order therefore
-holds still under the walk, and the current workspace's place in it IS the
-walk's position: `s-[' pressed again lands one older, and `s-]' comes back
-toward the most recent, with no cursor to keep."
+A STEP IS NOT AN INTERACTION.  The switch is requested with the
+`recency-walk' trigger, so it stamps no interaction instant, and the walk\='s
+origin leads the order while it runs (`agent-repl--recency-walk-origin').
+The order therefore holds still under the walk, and the current
+workspace's place in it IS the walk's position: `s-[' pressed again lands
+one older, and `s-]' comes back toward the most recent, with no cursor to
+keep."
   (agent-repl--step-workspace n #'agent-repl--recency-ring "recency-walk" 'recency-walk))
 
 (defun agent-repl-switch-older ()

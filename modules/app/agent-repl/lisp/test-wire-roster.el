@@ -73,7 +73,6 @@ See `agent-repl-test-wire-roster--row-json'."
                  '(:workspace (:workspace (:id "ws-1" :dir "/w/1"))
                    :attention nil
                    :viewed nil
-                   :view-dwell nil
                    :idle-async-unread nil
                    :reviving nil
                    :dormant nil
@@ -87,6 +86,7 @@ See `agent-repl-test-wire-roster--row-json'."
                    :context-heat nil
                    :visibility :unselected-visible
                    :last-selected nil
+                   :last-interacted nil
                    :last-turn-ended nil
                    :last-turn-boundary nil
                    :last-turn-started nil
@@ -368,23 +368,6 @@ See `agent-repl-test-wire-roster--row-json'."
                    "\"ready\":{}" "\"viewed\":{\"mode\":\"partial\"}"))
                  '("RosterRowViewed" mode "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-roster-row-decodes-the-view-dwell ()
-  "A row carrying `viewDwell' decodes its start and length."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-roster-row
-                             (agent-repl-test-wire-roster--row
-                              "\"done\":{}" "\"viewDwell\":{\"startedAtMs\":\"1700000000000\",\"lengthMs\":\"5000\"}"))
-                            :view-dwell)
-                 '(:started-at-ms 1700000000000 :length-ms 5000))))
-
-(ert-deftest agent-repl-test-wire-roster-row-view-dwell-refuses-an-unknown-field ()
-  "`RosterRowViewDwell' carries its start and length and nothing else."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-row
-                  (agent-repl-test-wire-roster--row
-                   "\"done\":{}" "\"viewDwell\":{\"startedAtMs\":\"1\",\"lengthMs\":\"5\",\"mode\":1}"))
-                 '("RosterRowViewDwell" mode "unknown field"))))
-
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-reviving-marker ()
   "A row carrying `reviving' decodes it as PRESENT."
   (should (eq (plist-get (agent-repl-test-wire-roster--decode
@@ -460,6 +443,25 @@ See `agent-repl-test-wire-roster--row-json'."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"lastSelected\":{\"atMs\":\"1\",\"by\":\"emacs\"}"))
                  '("RosterRowLastSelected" by "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-interacted-instant ()
+  "A row carrying `lastInteracted' decodes its durable interaction instant."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"ready\":{}" "\"lastInteracted\":{\"atMs\":\"1756400000000\"}"))
+                            :last-interacted)
+                 '(:at-ms 1756400000000))))
+
+(ert-deftest agent-repl-test-wire-roster-thread-row-decodes-its-last-interacted-instant ()
+  "A thread row decodes its own `lastInteracted' instant, and nil when absent."
+  (dolist (case '(("" nil)
+                  (",\"lastInteracted\":{\"atMs\":\"7\"}" (:at-ms 7))))
+    (let ((row (agent-repl-test-wire-roster--decode
+                #'agent-repl-wire-decode-roster-thread-row
+                (concat "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"},"
+                        "\"standing\":{\"open\":{}},\"visibility\":{\"selected\":{}}" (car case) "}"))))
+      (should (equal (plist-get row :last-interacted) (cadr case))))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-turn-ended-instant ()
   "A row carrying `lastTurnEnded' decodes its durable turn-end instant."
@@ -828,6 +830,8 @@ decodes to its keyword: the decode and the allow-list read the same table."
   "Every roster instant decoder is the shared helper under its own message
 name: each one's breach names that message exactly as the helper's does."
   (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
+                  (agent-repl-wire-decode-roster-row-last-interacted . "RosterRowLastInteracted")
+                  (agent-repl-wire-decode-roster-thread-last-interacted . "RosterThreadLastInteracted")
                   (agent-repl-wire-decode-roster-row-last-turn-ended . "RosterRowLastTurnEnded")
                   (agent-repl-wire-decode-roster-row-last-turn-boundary . "RosterRowLastTurnBoundary")
                   (agent-repl-wire-decode-roster-row-last-turn-started . "RosterRowLastTurnStarted")

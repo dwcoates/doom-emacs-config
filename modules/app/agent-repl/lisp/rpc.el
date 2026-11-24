@@ -74,10 +74,8 @@
 (declare-function agent-repl-wire-decode-create-thread-response "wire-chat" (alist))
 (declare-function agent-repl-wire-encode-select-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-select-workspace-response "wire-host" (alist))
-(declare-function agent-repl-wire-encode-mark-workspace-viewed-request "wire-host" (request))
-(declare-function agent-repl-wire-decode-mark-workspace-viewed-response "wire-host" (alist))
-(declare-function agent-repl-wire-encode-report-view-dwell-request "wire-host" (request))
-(declare-function agent-repl-wire-decode-report-view-dwell-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-report-user-interaction-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-report-user-interaction-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-page-unloading-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-report-page-unloading-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-adopt-host-workspace-request "wire-host" (request))
@@ -436,25 +434,14 @@ never sent twice.")
   "Ask the daemon for a workspace's status, open or closed.
 Emacs reads only its standing: whether the workspace is still open.")
 
-(agent-repl-rpc--defverb agent-repl-rpc-report-view-dwell
-  "ReportViewDwell"
-  agent-repl-wire-encode-report-view-dwell-request
-  agent-repl-wire-decode-report-view-dwell-response
-  "Tell the daemon Emacs started, or stopped, counting the view dwell.
-The roster carries a counting dwell on the selected row it will draw
-PARTIAL, so the sidebar fades the row\='s name over the dwell instead of
-flipping it when `agent-repl-rpc-mark-workspace-viewed' lands.")
-
-(agent-repl-rpc--defverb agent-repl-rpc-mark-workspace-viewed
-  "MarkWorkspaceViewed"
-  agent-repl-wire-encode-mark-workspace-viewed-request
-  agent-repl-wire-decode-mark-workspace-viewed-response
-  "Tell the daemon the user has now SEEN this workspace.
-Its roster row goes PARTIAL — the sidebar recedes the row's name, exactly
-as the tab bar recedes the tab's — until the row's STATUS CHANGES, which
-the daemon detects itself.  There is no companion verb to undo it, and no
-notification on the restore: the daemon originated the status change that
-restores FULL, so it already knows.  Idempotent.")
+(agent-repl-rpc--defverb agent-repl-rpc-report-user-interaction
+  "ReportUserInteraction"
+  agent-repl-wire-encode-report-user-interaction-request
+  agent-repl-wire-decode-report-user-interaction-response
+  "Tell the daemon the user interacted with this workspace.
+The one input the daemon draws viewed and recency from: its roster row goes
+PARTIAL on the status it stands on until that status changes, and its
+interaction instant orders the recency walk.  Idempotent.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-report-page-unloading
   "ReportPageUnloading"

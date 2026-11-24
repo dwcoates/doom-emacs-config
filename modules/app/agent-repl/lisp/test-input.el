@@ -44,6 +44,9 @@
 (defvar agent-repl-test-input--messages nil
   "Strings passed to `message' during a test.")
 
+(defvar agent-repl-test-input--interactions nil
+  "Every interaction the composer reported, newest first, as (WS KIND).")
+
 (defvar agent-repl-test-input--retries nil
   "Workspaces an empty send asked for the vendor-error retry now, newest first.")
 
@@ -86,6 +89,7 @@ The notices it hands its page are captured in
          (agent-repl-test-input--refusals nil)
          (agent-repl-test-input--messages nil)
          (agent-repl-test-input--retries nil)
+         (agent-repl-test-input--interactions nil)
          (agent-repl-test-input--notices nil)
          (agent-repl-test-input--answer (agent-repl-test-input--turn-answer))
          (agent-repl-test-input--gate :open)
@@ -152,6 +156,8 @@ The notices it hands its page are captured in
                          nil))
                       ((symbol-function 'agent-repl-verb-retry-vendor-error)
                        (lambda (ws) (push ws agent-repl-test-input--retries)))
+                      ((symbol-function 'agent-repl-host-report-interaction)
+                       (lambda (ws kind) (push (list ws kind) agent-repl-test-input--interactions)))
                       ((symbol-function 'agent-repl-rpc-submit-prompt)
                        (lambda (_conn request &rest keys)
                          (push request agent-repl-test-input--submitted)
@@ -218,53 +224,61 @@ The notices it hands its page are captured in
         (agent-repl--send :command-update-pr "update the pr"))
       (should-not (seq-find (lambda (p) (eq (nth 1 p) :composer-prompted-at)) puts)))))
 
-(ert-deftest agent-repl-input-a-user-send-notes-the-visit-prompted ()
-  "A prompt the user sends tells the visit history the workspace was prompted."
+(ert-deftest agent-repl-input-a-user-send-reports-the-interaction ()
+  "A prompt the user sends is their interaction with the workspace."
   (agent-repl-test-input--with
-    (let ((noted nil))
-      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
-                 (lambda (ws) (push ws noted))))
-        ;; Arrange
-        (agent-repl-test-input--type "my draft")
-        ;; Act
-        (agent-repl--send :user-sent))
-      ;; Assert
-      (should (equal noted '("ws-one"))))))
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal agent-repl-test-input--interactions '(("ws-one" :composer-typed))))))
 
-(ert-deftest agent-repl-input-a-canned-send-notes-the-visit-prompted ()
-  "A canned command the user runs is a prompt they sent, so it notes the visit too."
+(ert-deftest agent-repl-input-a-canned-send-reports-the-interaction ()
+  "A canned command the user runs is a prompt they sent, so it reports too."
   (agent-repl-test-input--with
-    (let ((noted nil))
-      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
-                 (lambda (ws) (push ws noted))))
-        ;; Act
-        (agent-repl--send :command-update-pr "update the pr"))
-      ;; Assert
-      (should (equal noted '("ws-one"))))))
+    ;; Act
+    (agent-repl--send :command-update-pr "update the pr")
+    ;; Assert
+    (should (equal agent-repl-test-input--interactions '(("ws-one" :composer-typed))))))
 
-(ert-deftest agent-repl-input-a-queue-drain-does-not-note-the-visit-prompted ()
-  "A deferred prompt's drain is not the user writing now, so the visit is not noted."
+(ert-deftest agent-repl-input-a-queue-drain-reports-no-interaction ()
+  "A deferred prompt's drain is not the user writing now, so it reports nothing."
   (agent-repl-test-input--with
-    (let ((noted nil))
-      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
-                 (lambda (ws) (push ws noted))))
-        ;; Act
-        (agent-repl--send agent-repl--prompt-queue-drain-origin "written earlier"))
-      ;; Assert
-      (should-not noted))))
+    ;; Act
+    (agent-repl--send agent-repl--prompt-queue-drain-origin "written earlier")
+    ;; Assert
+    (should-not agent-repl-test-input--interactions)))
 
-(ert-deftest agent-repl-input-an-empty-send-does-not-note-the-visit-prompted ()
-  "An empty composer sends nothing, so the visit is not noted."
+(ert-deftest agent-repl-input-an-empty-send-reports-no-interaction ()
+  "An empty composer sends nothing, so it reports nothing."
   (agent-repl-test-input--with
-    (let ((noted nil))
-      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
-                 (lambda (ws) (push ws noted))))
-        ;; Arrange
-        (agent-repl-test-input--type "   ")
-        ;; Act
-        (agent-repl--send :user-sent))
-      ;; Assert
-      (should-not noted))))
+    ;; Arrange
+    (agent-repl-test-input--type "   ")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not agent-repl-test-input--interactions)))
+
+(ert-deftest agent-repl-input-an-edit-under-a-command-reports-the-interaction ()
+  "An edit the user's command makes in the composer is their typing."
+  (agent-repl-test-input--with
+    ;; Act
+    (with-current-buffer agent-repl-test-input--buffer
+      (let ((this-command 'self-insert-command))
+        (insert "a")))
+    ;; Assert
+    (should (equal agent-repl-test-input--interactions '(("ws-one" :composer-typed))))))
+
+(ert-deftest agent-repl-input-an-edit-under-no-command-reports-nothing ()
+  "Text the editor inserts by itself, under no command, is no interaction."
+  (agent-repl-test-input--with
+    ;; Act
+    (with-current-buffer agent-repl-test-input--buffer
+      (let ((this-command nil))
+        (insert "a restored draft")))
+    ;; Assert
+    (should-not agent-repl-test-input--interactions)))
 
 (ert-deftest agent-repl-input-an-explicit-text-send-keeps-the-draft ()
   "A canned command composed its own words and must not eat an unrelated draft."
@@ -3184,6 +3198,14 @@ stubbed rpc received is pushed onto `requests'."
     ;; Assert
     (should (equal (agent-repl-test-input--last-move)
                    '(:arm :turn-boundary :value (:direction :newer))))))
+
+(ert-deftest agent-repl-test-input-a-turn-boundary-step-reports-the-feed-navigated ()
+  "A step through the feed\='s turn boundaries is the user moving through the feed."
+  (agent-repl-test-input--with-select (agent-repl-test-input--select-outcome :selected)
+    ;; Act
+    (agent-repl-turn-boundary-select-next)
+    ;; Assert
+    (should (equal agent-repl-test-input--interactions '(("ws-one" :feed-navigated))))))
 
 (ert-deftest agent-repl-test-input-select-addresses-this-workspace ()
   "A step names its workspace by the daemon-minted ref."

@@ -121,11 +121,11 @@ and a transport failure or a held call is the batch\='s own."
 (defvar agent-repl-test-host--select-answer nil
   "What the stubbed SelectWorkspace answers; see the harness.")
 
-(defvar agent-repl-test-host--mark-viewed-answer nil
-  "What the stubbed MarkWorkspaceViewed answers; see the harness.")
+(defvar agent-repl-test-host--interaction-answer nil
+  "What the stubbed ReportUserInteraction answers; see the harness.")
 
-(defvar agent-repl-test-host--view-dwell-answer nil
-  "What the stubbed ReportViewDwell answers; see the harness.")
+(defvar agent-repl-test-host--interaction-standing nil
+  "Whether the stubbed roster says an interaction would tell the daemon nothing.")
 
 (defvar agent-repl-test-host--unloading-answer nil
   "What the stubbed ReportPageUnloading answers; see the harness.")
@@ -244,8 +244,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-host--select-queued nil)
          (agent-repl-host--confirming nil)
          (agent-repl--recency-walk-landing nil)
-         (agent-repl--workspace-history nil)
-         (agent-repl--current-visit nil)
+         (agent-repl--recency-walk-origin nil)
          (agent-repl-host-last-request nil)
          (agent-repl-host--editor-switches 0)
          (agent-repl-host-automatic-switch nil)
@@ -281,11 +280,10 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--register-all-answer nil)
          (agent-repl-test-host--select-answer
           (list :response (list :arm :success :value (list :roster-revision 0))))
-         (agent-repl-test-host--mark-viewed-answer
+         (agent-repl-test-host--interaction-answer
           (list :response (list :arm :success :value nil)))
+         (agent-repl-test-host--interaction-standing nil)
          (agent-repl-test-host--unloading-answer
-          (list :response (list :arm :success :value nil)))
-         (agent-repl-test-host--view-dwell-answer
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
           (list :response (list :arm :success :value nil)))
@@ -311,18 +309,14 @@ unary rpc can produce, which the contract never collapses into one."
                   (agent-repl-test-host--answer agent-repl-test-host--select-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
-               ((symbol-function 'agent-repl-rpc-mark-workspace-viewed)
+               ((symbol-function 'agent-repl-rpc-report-user-interaction)
                 (lambda (conn request &rest keys)
-                  (push (list "MarkWorkspaceViewed" conn request) agent-repl-test-host--calls)
-                  (agent-repl-test-host--answer agent-repl-test-host--mark-viewed-answer
+                  (push (list "ReportUserInteraction" conn request) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer agent-repl-test-host--interaction-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
-               ((symbol-function 'agent-repl-rpc-report-view-dwell)
-                (lambda (conn request &rest keys)
-                  (push (list "ReportViewDwell" conn request) agent-repl-test-host--calls)
-                  (agent-repl-test-host--answer agent-repl-test-host--view-dwell-answer
-                                                (plist-get keys :on-response)
-                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-roster-interaction-standing-p)
+                (lambda (_ws) agent-repl-test-host--interaction-standing))
                ((symbol-function 'agent-repl-rpc-report-page-unloading)
                 (lambda (conn request &rest keys)
                   (push (list "ReportPageUnloading" conn request) agent-repl-test-host--calls)
@@ -629,148 +623,114 @@ looked at."
     ;; Assert
     (should (null (assoc "SelectWorkspace" agent-repl-test-host--calls)))))
 
-;;;; ---- View dwell ----
+;;;; ---- The user's interaction ----
 
-(defconst agent-repl-test-host--counting
-  '(:arm :counting :value (:length-ms 5000))
-  "A counting view-dwell report, as status.el makes one.")
-
-(defun agent-repl-test-host--view-dwell-reports ()
-  "The dwell of every ReportViewDwell sent, oldest first."
-  (mapcar (lambda (call) (plist-get (nth 2 call) :dwell))
-          (reverse (cl-remove-if-not (lambda (call) (equal (car call) "ReportViewDwell"))
+(defun agent-repl-test-host--interactions ()
+  "The request of every ReportUserInteraction sent, oldest first."
+  (mapcar (lambda (call) (nth 2 call))
+          (reverse (cl-remove-if-not (lambda (call) (equal (car call) "ReportUserInteraction"))
                                      agent-repl-test-host--calls))))
 
-(ert-deftest agent-repl-test-host-view-dwell-echoes-the-ref-and-the-dwell ()
-  "ReportViewDwell carries the daemon-minted ref and the dwell it was handed."
+(ert-deftest agent-repl-test-host-interaction-echoes-the-ref-and-the-kind ()
+  "ReportUserInteraction carries the daemon-minted ref and the kind it was handed."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     (setq agent-repl-test-host--calls nil)
     ;; Act
-    (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
     ;; Assert
-    (should (equal (nth 2 (car agent-repl-test-host--calls))
-                   (list :workspace (agent-repl-test-host--ref)
-                         :dwell agent-repl-test-host--counting)))))
+    (should (equal (agent-repl-test-host--interactions)
+                   (list (list :workspace (agent-repl-test-host--ref) :interaction :composer-typed))))))
 
-(ert-deftest agent-repl-test-host-view-dwell-holds-a-report-while-one-is-in-flight ()
-  "A second report waits for the first one\='s answer: one in flight per workspace."
+(ert-deftest agent-repl-test-host-interaction-the-roster-already-states-is-not-sent ()
+  "A viewed workspace that is already the newest tells the daemon nothing new."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     (setq agent-repl-test-host--calls nil
-          agent-repl-test-host--view-dwell-answer '(:held))
-    (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
+          agent-repl-test-host--interaction-standing t)
     ;; Act
-    (agent-repl-host-report-view-dwell "ws-1" (list :arm :stopped :value nil))
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
     ;; Assert
-    (should (equal (agent-repl-test-host--view-dwell-reports)
-                   (list agent-repl-test-host--counting)))))
+    (should-not (agent-repl-test-host--interactions))))
 
-(ert-deftest agent-repl-test-host-view-dwell-sends-the-latest-held-report-on-the-answer ()
-  "The answer sends what is wanted by then, and a report it replaced is never sent."
+(ert-deftest agent-repl-test-host-interaction-in-flight-drops-the-next ()
+  "One report is in flight per workspace: another meanwhile is the same news."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     (setq agent-repl-test-host--calls nil
-          agent-repl-test-host--view-dwell-answer '(:held))
-    (let ((stopped (list :arm :stopped :value nil))
-          (recount (list :arm :counting :value (list :length-ms 1000))))
-      (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
-      (agent-repl-host-report-view-dwell "ws-1" stopped)
-      (agent-repl-host-report-view-dwell "ws-1" recount)
-      ;; Act
-      (agent-repl-test-host--answer-held (list :arm :success :value nil))
-      ;; Assert
-      (should (equal (agent-repl-test-host--view-dwell-reports)
-                     (list agent-repl-test-host--counting recount))))))
-
-(ert-deftest agent-repl-test-host-view-dwell-sends-an-equal-later-count-again ()
-  "A later count of the same length is a new dwell, so it is sent too."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--calls nil
-          agent-repl-test-host--view-dwell-answer '(:held))
-    (agent-repl-host-report-view-dwell "ws-1" (list :arm :counting :value (list :length-ms 5000)))
-    (agent-repl-host-report-view-dwell "ws-1" (list :arm :counting :value (list :length-ms 5000)))
+          agent-repl-test-host--interaction-answer '(:held))
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
     ;; Act
+    (agent-repl-host-report-interaction "ws-1" :feed-navigated)
+    ;; Assert
+    (should (= (length (agent-repl-test-host--interactions)) 1))))
+
+(ert-deftest agent-repl-test-host-interaction-answer-frees-the-next-report ()
+  "Once the report in flight is answered, the next interaction is sent."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil
+          agent-repl-test-host--interaction-answer '(:held))
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
     (agent-repl-test-host--answer-held (list :arm :success :value nil))
+    ;; Act
+    (agent-repl-host-report-interaction "ws-1" :feed-navigated)
     ;; Assert
-    (should (= (length (agent-repl-test-host--view-dwell-reports)) 2))))
+    (should (= (length (agent-repl-test-host--interactions)) 2))))
 
-(ert-deftest agent-repl-test-host-view-dwell-refusal-is-logged-and-frees-the-next-report ()
+(ert-deftest agent-repl-test-host-interaction-refusal-is-logged-and-frees-the-next-report ()
   "A refused report is surfaced at ERROR, and the next report is sent, not held forever."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     (setq agent-repl-test-host--calls nil
-          agent-repl-test-host--view-dwell-answer
+          agent-repl-test-host--interaction-answer
           (list :response (list :arm :error :value nil)))
-    (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
     ;; Act
-    (agent-repl-host-report-view-dwell "ws-1" (list :arm :stopped :value nil))
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
     ;; Assert
-    (should (agent-repl-test-host--logged-p :error "elisp.host.view-dwell-refused"))
-    (should (= (length (agent-repl-test-host--view-dwell-reports)) 2))))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.interaction-refused"))
+    (should (= (length (agent-repl-test-host--interactions)) 2))))
 
-(ert-deftest agent-repl-test-host-view-dwell-without-a-ref-sends-nothing ()
-  "An unregistered workspace has no row to draw a dwell on, and holds nothing back."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-host-report-view-dwell "ws-unknown" agent-repl-test-host--counting)
-    ;; Assert
-    (should (null agent-repl-test-host--calls))
-    (should (null (plist-get (agent-repl-host--entry "ws-unknown") :view-dwell-in-flight)))))
-
-;;;; ---- Mark viewed ----
-
-(ert-deftest agent-repl-test-host-mark-viewed-echoes-the-ref ()
-  "MarkWorkspaceViewed carries the daemon-minted ref, never a path."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--calls nil)
-    ;; Act
-    (agent-repl-host-mark-viewed "ws-1")
-    ;; Assert
-    (should (equal (car agent-repl-test-host--calls)
-                   (list "MarkWorkspaceViewed"
-                         (nth 1 (car agent-repl-test-host--calls))
-                         (list :workspace (agent-repl-test-host--ref)))))))
-
-(ert-deftest agent-repl-test-host-mark-viewed-without-a-ref-sends-nothing ()
-  "An unregistered workspace has no row to mark."
-  (agent-repl-test-host--with-harness
-    ;; Arrange / Act
-    (agent-repl-host-mark-viewed "ws-unknown")
-    ;; Assert
-    (should (null agent-repl-test-host--calls))))
-
-(ert-deftest agent-repl-test-host-mark-viewed-refusal-is-logged-at-error ()
-  "A refused report is surfaced, never swallowed."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--mark-viewed-answer
-          (list :response (list :arm :error :value nil)))
-    ;; Act
-    (agent-repl-host-mark-viewed "ws-1")
-    ;; Assert
-    (should (agent-repl-test-host--logged-p :error "elisp.host.mark-viewed-refused"))))
-
-(ert-deftest agent-repl-test-host-mark-viewed-transport-failure-is-logged-at-error ()
+(ert-deftest agent-repl-test-host-interaction-transport-failure-is-logged-at-error ()
   "A report that never lands is recorded; there is no local state to undo."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--mark-viewed-answer
+    (setq agent-repl-test-host--interaction-answer
           (list :failure (list :kind :transport :message "no route")))
     ;; Act
-    (agent-repl-host-mark-viewed "ws-1")
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
     ;; Assert
-    (should (agent-repl-test-host--logged-p :error "elisp.host.mark-viewed-failed"))))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.interaction-failed"))
+    (should-not (plist-get (agent-repl-host--entry "ws-1") :interaction-in-flight))))
+
+(ert-deftest agent-repl-test-host-interaction-without-a-ref-sends-nothing ()
+  "An unregistered workspace has no row to view, and holds nothing back."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-host-report-interaction "ws-unknown" :composer-typed)
+    ;; Assert
+    (should (null agent-repl-test-host--calls))
+    (should (null (plist-get (agent-repl-host--entry "ws-unknown") :interaction-in-flight)))))
+
+(ert-deftest agent-repl-test-host-interaction-with-the-walks-landing-ends-the-walk ()
+  "The user acting on the workspace a recency walk stands on stops the walk there."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl--recency-walk-landing "ws-1"
+          agent-repl--recency-walk-origin "ws-2")
+    ;; Act
+    (agent-repl-host-report-interaction "ws-1" :composer-typed)
+    ;; Assert
+    (should-not agent-repl--recency-walk-landing)
+    (should-not agent-repl--recency-walk-origin)))
 
 ;;;; ---- The workspace-subject verbs' one sender ----
 
@@ -781,7 +741,7 @@ looked at."
     (let (not-sent)
       ;; Act
       (let ((sent (agent-repl-host--send-subject-verb
-                   "ws-unknown" "some-verb" #'agent-repl-rpc-mark-workspace-viewed
+                   "ws-unknown" "some-verb" #'agent-repl-rpc-report-page-unloading
                    #'ignore (lambda () (setq not-sent t)))))
         ;; Assert
         (should (equal (list sent not-sent) '(nil t)))
@@ -795,13 +755,13 @@ looked at."
     (let (ran)
       ;; Act
       (agent-repl-host--send-subject-verb
-       "ws-1" "some-verb" #'agent-repl-rpc-mark-workspace-viewed
+       "ws-1" "some-verb" #'agent-repl-rpc-report-page-unloading
        (lambda () (push 'success ran)) (lambda () (push 'not-sent ran)))
       ;; Assert
       (should (equal ran '(success))))))
 
 (ert-deftest agent-repl-test-host-every-subject-verb-shares-the-one-sender ()
-  "MarkWorkspaceViewed and ReportPageUnloading both send through the one sender.
+  "ReportUserInteraction and ReportPageUnloading both send through the one sender.
 A hand-rolled copy of either would not be recorded here."
   (agent-repl-test-host--with-harness
     ;; Arrange
@@ -809,10 +769,10 @@ A hand-rolled copy of either would not be recorded here."
       (cl-letf (((symbol-function 'agent-repl-host--send-subject-verb)
                  (lambda (_ws op &rest _) (push op ops) t)))
         ;; Act
-        (agent-repl-host-mark-viewed "ws-1")
+        (agent-repl-host-report-interaction "ws-1" :composer-typed)
         (agent-repl-host-report-page-unloading "ws-1" #'ignore #'ignore))
       ;; Assert
-      (should (equal (reverse ops) '("mark-viewed" "page-unloading"))))))
+      (should (equal (reverse ops) '("interaction" "page-unloading"))))))
 
 ;;;; ---- Report page unloading ----
 
@@ -1274,7 +1234,7 @@ says now rather than wait for a push that will never come."
   ;; Arrange
   (let ((agent-repl-test-host--calls
          (list (list "SelectWorkspace" nil '(:workspace (:id "b")))
-               (list "MarkWorkspaceViewed" nil '(:workspace (:id "x")))
+               (list "ReportUserInteraction" nil '(:workspace (:id "x")))
                (list "SelectWorkspace" nil '(:workspace (:id "a"))))))
     ;; Act / Assert
     (should (equal (agent-repl-test-host--select-requests)
@@ -1326,35 +1286,41 @@ says now rather than wait for a push that will never come."
     ;; Assert
     (should-not agent-repl--recency-walk-landing)))
 
-(ert-deftest agent-repl-test-host-a-chosen-request-records-the-walk-landing-as-viewed ()
-  "A choice after a walk records the walk's landing as visited before the frame moves."
+(ert-deftest agent-repl-test-host-a-walks-first-step-records-its-origin ()
+  "The walk's first step records the workspace shown as the walk's origin."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe-three)
-    (setq agent-repl--workspace-history '("ws-2" "ws-1"))
-    (setq agent-repl--recency-walk-landing "ws-1")
-    (setq agent-repl--current-visit (list :name "ws-1" :began 100.0 :ahead nil))
-    (let ((seen :unset))
-      (cl-letf (((symbol-function 'agent-repl-host--move-on-request)
-                 (lambda (_ws _shown) (setq seen agent-repl--workspace-history))))
-        ;; Act
-        (cl-letf (((symbol-function 'agent-repl--now) (lambda () 110.0)))
-          (agent-repl-host-request-switch "ws-3" 'picker)))
-      ;; Assert
-      (should (equal seen '("ws-1" "ws-2"))))))
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'recency-walk)
+    ;; Assert
+    (should (equal agent-repl--recency-walk-origin "ws-1"))))
 
-(ert-deftest agent-repl-test-host-a-walk-step-records-no-earlier-landing ()
-  "A further walk step moves the landing on without recording the step it leaves."
+(ert-deftest agent-repl-test-host-a-walk-step-keeps-the-origin ()
+  "A further walk step moves the landing on and keeps the walk's origin."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe-three)
-    (setq agent-repl--workspace-history '("ws-3" "ws-2" "ws-1"))
-    (setq agent-repl--recency-walk-landing "ws-2")
+    (setq agent-repl--recency-walk-landing "ws-2"
+          agent-repl--recency-walk-origin "ws-3")
     ;; Act
     (agent-repl-host-request-switch "ws-1" 'recency-walk)
     ;; Assert
-    (should (equal agent-repl--workspace-history '("ws-3" "ws-2" "ws-1")))
+    (should (equal agent-repl--recency-walk-origin "ws-3"))
     (should (equal agent-repl--recency-walk-landing "ws-1"))))
+
+(ert-deftest agent-repl-test-host-a-chosen-request-clears-the-walks-origin ()
+  "A choice ends the walk, its origin with its landing."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl--recency-walk-landing "ws-1"
+          agent-repl--recency-walk-origin "ws-3")
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'slot)
+    ;; Assert
+    (should-not agent-repl--recency-walk-origin)))
 
 (ert-deftest agent-repl-test-host-a-queued-walk-step-keeps-the-history-when-sent ()
   "A walk step queued behind one in flight is sent with its own keep flag."
@@ -2773,46 +2739,6 @@ answers `:unknown' and records the breach rather than opening."
     (agent-repl-host-select-requested (agent-repl-test-host--ref))
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.select-requested id=ws-id-1"))))
-
-;;;; ---- A link followed in a page ----
-
-(ert-deftest agent-repl-test-host-link-followed-keeps-the-workspaces-visit ()
-  "A `link_followed' push keeps the visit of the workspace its stream carries."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (let ((kept nil))
-      (cl-letf (((symbol-function 'agent-repl--keep-visit) (lambda (ws) (push ws kept)))
-                ((symbol-function 'agent-repl--tab-view-on-link-followed) #'ignore))
-        ;; Act
-        (agent-repl-test-host--push "ws-1" (list :arm :link-followed :value nil)))
-      ;; Assert
-      (should (equal kept '("ws-1"))))))
-
-(ert-deftest agent-repl-test-host-link-followed-counts-the-workspace-viewed ()
-  "A `link_followed' push reports the workspace its stream carries viewed."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (let ((viewed nil))
-      (cl-letf (((symbol-function 'agent-repl--keep-visit) #'ignore)
-                ((symbol-function 'agent-repl--tab-view-on-link-followed) (lambda (ws) (push ws viewed))))
-        ;; Act
-        (agent-repl-test-host--push "ws-1" (list :arm :link-followed :value nil)))
-      ;; Assert
-      (should (equal viewed '("ws-1"))))))
-
-(ert-deftest agent-repl-test-host-link-followed-is-logged ()
-  "The link's news reaching Emacs leaves an INFO record naming the workspace."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (cl-letf (((symbol-function 'agent-repl--keep-visit) #'ignore)
-              ((symbol-function 'agent-repl--tab-view-on-link-followed) #'ignore))
-      ;; Act
-      (agent-repl-test-host--push "ws-1" (list :arm :link-followed :value nil)))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.link-followed ws=ws-1"))))
 
 ;;;; ---- The final-response click ----
 
@@ -4603,7 +4529,7 @@ callback must still run rather than resolve to nil."
 ;;
 ;; Regression, 2026-09-27: a daemon exited without transferring a workspace,
 ;; Emacs's link was promoted onto its successor, and the workspace kept its
-;; dead connection -- every SelectWorkspace and MarkWorkspaceViewed went to
+;; dead connection -- every SelectWorkspace and ReportUserInteraction went to
 ;; the dead address and its webview stayed blank on the dead origin.
 
 (defmacro agent-repl-test-host--with-dir (&rest body)
@@ -5087,7 +5013,7 @@ Registering on a daemon that is handing over would only fail."
         (setq agent-repl-test-host--live live
               agent-repl-test-host--calls nil)
         ;; Act
-        (agent-repl-host-mark-viewed "ws-1")
+        (agent-repl-host-report-interaction "ws-1" :composer-typed)
         ;; Assert
         (should (null (seq-filter (lambda (call) (eq (nth 1 call) dead))
                                   agent-repl-test-host--calls)))))))
@@ -5382,7 +5308,7 @@ Registering on a daemon that is handing over would only fail."
                    (lambda (&rest _) (setq registers (1+ registers)))))
           ;; Act
           (agent-repl-host-select "ws-1")
-          (agent-repl-host-mark-viewed "ws-1"))
+          (agent-repl-host-report-interaction "ws-1" :composer-typed))
         ;; Assert
         (should (= registers 1))))))
 
@@ -6317,14 +6243,14 @@ OLD and SUCCESSOR are bound to the two daemons\\=' connections."
 (ert-deftest agent-repl-test-host-call-gate-holds-a-call-while-its-adopt-is-unanswered ()
   "THE DEFECT: calls about a workspace reached the successor before its adopt was answered.
 The 2026-11-13 14:42 deploy lost ReportPageUnloading,
-MarkWorkspaceViewed and SelectWorkspace that way, each refused
+ReportUserInteraction and SelectWorkspace that way, each refused
 `not_yet_adopted'."
   (agent-repl-test-host--mid-adopt
     ;; Act
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     ;; Assert
     (should (null agent-repl-test-host--gated))
-    (should (agent-repl-test-host--logged-p :info "elisp.host.call-held ws=ws-1 method=MarkWorkspaceViewed held=1"))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.call-held ws=ws-1 method=ReportUserInteraction held=1"))))
 
 (ert-deftest agent-repl-test-host-call-gate-holds-without-waiting ()
   "A held call returns at once and blocks on nothing, so the editor keeps working."
@@ -6339,7 +6265,7 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
                  (lambda (&rest _) (push :sit-for waited) t)))
         ;; Act
         (agent-repl-test-host--gate successor "SelectWorkspace")
-        (agent-repl-test-host--gate successor "ReportViewDwell"))
+        (agent-repl-test-host--gate successor "SelectWorkspace"))
       ;; Assert
       (should (null waited))
       (should (= 2 (length (plist-get (agent-repl-host--entry "ws-1") :held-calls)))))))
@@ -6348,14 +6274,14 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
   "The adopt's success sends every held call, oldest first, to the successor."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "ReportViewDwell")
+    (agent-repl-test-host--gate successor "SelectWorkspace")
     (agent-repl-test-host--gate successor "ReportPageUnloading")
     (agent-repl-test-host--gate successor "SelectWorkspace")
     ;; Act
     (agent-repl-test-host--answer-held (list :arm :success :value nil))
     ;; Assert
     (should (equal agent-repl-test-host--gated
-                   (list (list "ReportViewDwell" :sent successor)
+                   (list (list "SelectWorkspace" :sent successor)
                          (list "ReportPageUnloading" :sent successor)
                          (list "SelectWorkspace" :sent successor))))
     (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=3 outcome=adopted"))))
@@ -6364,11 +6290,11 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
   "An adopt that fails or times out still sends the held calls, at the daemon WS is put back on."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     ;; Act
     (agent-repl-test-host--answer-adopt-failure (list :kind :timeout :message "no answer"))
     ;; Assert
-    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent old))))
+    (should (equal agent-repl-test-host--gated (list (list "ReportUserInteraction" :sent old))))
     (should (agent-repl-test-host--logged-p :error "elisp.host.adopt-failed ws=ws-1"))
     (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=failed"))
     (should (null (plist-get (agent-repl-host--entry "ws-1") :held-calls)))))
@@ -6392,26 +6318,26 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
           (conn (agent-repl-connect-open "127.0.0.1:9001")))
       (agent-repl-test-host--subscribe "ws-1" conn)
       ;; Act
-      (agent-repl-test-host--gate conn "MarkWorkspaceViewed")
+      (agent-repl-test-host--gate conn "ReportUserInteraction")
       ;; Assert
-      (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent conn)))))))
+      (should (equal agent-repl-test-host--gated (list (list "ReportUserInteraction" :sent conn)))))))
 
 (ert-deftest agent-repl-test-host-call-gate-sends-at-once-a-call-to-another-daemon ()
   "Only a call addressed to the daemon the adopt is on is held."
   (agent-repl-test-host--mid-adopt
     ;; Act
-    (agent-repl-test-host--gate old "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate old "ReportUserInteraction")
     ;; Assert
-    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent old))))))
+    (should (equal agent-repl-test-host--gated (list (list "ReportUserInteraction" :sent old))))))
 
 (ert-deftest agent-repl-test-host-call-gate-sends-at-once-a-call-about-another-workspace ()
   "A call naming a workspace that is not mid-adopt goes out at once."
   (agent-repl-test-host--mid-adopt
     ;; Act
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed"
+    (agent-repl-test-host--gate successor "ReportUserInteraction"
                                 (agent-repl-test-host--ref "id-2" "/tmp/ws-2"))
     ;; Assert
-    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent successor))))))
+    (should (equal agent-repl-test-host--gated (list (list "ReportUserInteraction" :sent successor))))))
 
 (ert-deftest agent-repl-test-host-call-gate-never-holds-the-adopt-itself ()
   "The adopt is what ends the hold, so it is never held behind it."
@@ -6425,7 +6351,7 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
   "A held call that finds no connection answers its own ON-FAILURE, at ERROR."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) nil)))
       ;; Act
       (agent-repl-test-host--answer-held (list :arm :success :value nil)))
@@ -6433,7 +6359,7 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
     (should (equal (mapcar #'cadr agent-repl-test-host--gated) '(:failed)))
     (should (eq (plist-get (nth 2 (car agent-repl-test-host--gated)) :kind) :transport))
     (should (agent-repl-test-host--logged-p
-             :error "elisp.host.held-call-unsent ws=ws-1 method=MarkWorkspaceViewed outcome=adopted reason=no-connection"))))
+             :error "elisp.host.held-call-unsent ws=ws-1 method=ReportUserInteraction outcome=adopted reason=no-connection"))))
 
 (ert-deftest agent-repl-test-host-call-gate-fails-a-held-call-whose-send-signals-and-sends-the-rest ()
   "A held send that signals a transport error fails that call alone."
@@ -6443,31 +6369,31 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
                                 (lambda (_target)
                                   (signal 'agent-repl-connect-error
                                           (list (list :kind :transport :message "closed")))))
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     ;; Act
     (agent-repl-test-host--answer-held (list :arm :success :value nil))
     ;; Assert
     (should (equal agent-repl-test-host--gated
                    (list (list "SelectWorkspace" :failed (list :kind :transport :message "closed"))
-                         (list "MarkWorkspaceViewed" :sent successor))))
+                         (list "ReportUserInteraction" :sent successor))))
     (should (agent-repl-test-host--logged-p :error "elisp.host.held-call-unsent ws=ws-1 method=SelectWorkspace"))))
 
 (ert-deftest agent-repl-test-host-call-gate-sends-held-calls-when-a-register-walk-supersedes-the-adopt ()
   "A newer walk that is not an adopt drops the adopt's answer, so the hold ends with it."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     ;; Act
     (agent-repl-host--begin-walk "ws-1" successor :register "test")
     ;; Assert
-    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent successor))))
+    (should (equal agent-repl-test-host--gated (list (list "ReportUserInteraction" :sent successor))))
     (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=superseded"))))
 
 (ert-deftest agent-repl-test-host-call-gate-keeps-holding-across-a-newer-adopt-onto-the-same-daemon ()
   "A retried adopt onto the same successor keeps the calls held for its answer."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     ;; Act
     (agent-repl-host--begin-walk "ws-1" successor :adopt "test")
     ;; Assert
@@ -6477,21 +6403,21 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
   "A withdrawn transfer puts WS back, and its held calls go there."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     ;; Act
     (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
     ;; Assert
-    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent old))))))
+    (should (equal agent-repl-test-host--gated (list (list "ReportUserInteraction" :sent old))))))
 
 (ert-deftest agent-repl-test-host-call-gate-sends-held-calls-before-the-workspace-is-forgotten ()
   "A held call is the user's, and is never dropped with its workspace."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (agent-repl-test-host--gate successor "ReportUserInteraction")
     ;; Act
     (agent-repl-host-forget "ws-1")
     ;; Assert
-    (should (equal (mapcar #'car agent-repl-test-host--gated) '("MarkWorkspaceViewed")))
+    (should (equal (mapcar #'car agent-repl-test-host--gated) '("ReportUserInteraction")))
     (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=forgotten"))))
 
 ;;;; ---- A handover walks a workspace ONCE, onto the connection that stays ----

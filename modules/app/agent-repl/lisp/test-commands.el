@@ -692,32 +692,41 @@ the last answers an empty last page."
                                                 :extent (:arm :last :value (:rows (:rows nil))))))))))
        ,@body)))
 
+(defun agent-repl-test-commands--history-ms (history ws)
+  "Return the interaction instant HISTORY gives WS, or nil.
+HISTORY names workspaces the user interacted with, most recent first, so
+each takes an instant newer than every later one and than any row\='s own."
+  (let ((place (cl-position ws history :test #'equal)))
+    (and place (- most-positive-fixnum place))))
+
 (defmacro agent-repl-test-commands--with-rows (rows history &rest body)
-  "Run BODY over a roster of ROWS, with HISTORY as this session's switches.
-Each row's name is its workspace, and its durable instant is read from
-the row itself, as the roster's own lookup would."
+  "Run BODY over a roster of ROWS, with HISTORY the workspaces the user
+interacted with most recently, newest first.  Each row\='s name is its
+workspace, and a workspace HISTORY does not name takes its row\='s own
+`:last-interacted' instant, as the roster\='s own lookup would."
   (declare (indent 2))
   `(let* ((rows ,rows)
           (agent-repl-roster-view (agent-repl-test-commands--roster rows))
-          (agent-repl--workspace-history ,history))
+          (history ,history))
      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
                 (lambda (id)
                   (cl-loop for row in rows
                            when (equal (plist-get (plist-get (plist-get row :workspace) :workspace) :id) id)
                            return (plist-get (plist-get row :name) :text))))
-               ((symbol-function 'agent-repl-roster-last-selected-ms)
+               ((symbol-function 'agent-repl-roster-last-interacted-ms)
                 (lambda (ws)
-                  (cl-loop for row in rows
-                           when (equal (plist-get (plist-get row :name) :text) ws)
-                           return (plist-get (plist-get row :last-selected) :at-ms)))))
+                  (or (agent-repl-test-commands--history-ms history ws)
+                      (cl-loop for row in rows
+                               when (equal (plist-get (plist-get row :name) :text) ws)
+                               return (plist-get (plist-get row :last-interacted) :at-ms))))))
        ,@body)))
 
 (ert-deftest agent-repl-test-commands-recent-names-order-by-the-durable-instant ()
-  "Without session history, recency is the roster's durable last-selected
-instant, so a fresh Emacs still knows the order."
+  "Recency is the roster's durable interaction instant, so a fresh Emacs
+still knows the order."
   (agent-repl-test-commands--with-rows
-      (list (agent-repl-test-commands--row "old" "id-old" 100)
-            (agent-repl-test-commands--row "new" "id-new" 900))
+      (list (plist-put (agent-repl-test-commands--row "old" "id-old" 100) :last-interacted '(:at-ms 100))
+            (plist-put (agent-repl-test-commands--row "new" "id-new" 900) :last-interacted '(:at-ms 900)))
       nil
     (should (equal (agent-repl--roster-recent-names) '("new" "old")))))
 
@@ -739,10 +748,10 @@ order a close lands by."
     (should (equal (agent-repl--roster-recent-names) '("open")))))
 
 (ert-deftest agent-repl-test-commands-recent-names-sink-the-never-selected ()
-  "A never-selected workspace sorts last rather than being dropped."
+  "A workspace never interacted with sorts last rather than being dropped."
   (agent-repl-test-commands--with-rows
       (list (agent-repl-test-commands--row "never" "id-never" nil)
-            (agent-repl-test-commands--row "seen" "id-seen" 500))
+            (plist-put (agent-repl-test-commands--row "seen" "id-seen" 500) :last-interacted '(:at-ms 500)))
       nil
     (should (equal (agent-repl--roster-recent-names) '("seen" "never")))))
 
@@ -894,16 +903,17 @@ Binds `switched' to the requested target and `logged' to the log lines."
     (should (member "elisp.commands.previous-none from=here" logged))))
 
 (defmacro agent-repl-test-commands--with-roster (history rows threads &rest body)
-  "Run BODY over a roster of open ROWS and open THREADS, with HISTORY.
+  "Run BODY over a roster of open ROWS and open THREADS, with HISTORY the
+workspaces and threads the user interacted with, newest first.
 ROWS are workspace ids, each opened under its own name; THREADS are the
 ids of thread rows, each opened under its own name unless it is a cons
 `(ID . nil)', a thread Emacs has not opened yet.  Binds `shown' to the
 workspace the frame stands on (nil) and `requests' to the switches asked
 for, each landing as an activation."
   (declare (indent 3))
-  `(let ((agent-repl--workspace-history ,history)
+  `(let ((history ,history)
          (agent-repl--recency-walk-landing nil)
-         (agent-repl--current-visit nil)
+         (agent-repl--recency-walk-origin nil)
          (shown nil) (requests nil))
      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () shown))
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
@@ -911,7 +921,8 @@ for, each landing as an activation."
                ((symbol-function 'agent-repl-verbs--all-rows) (lambda () ,rows))
                ((symbol-function 'agent-repl-roster-row-closed-p) (lambda (_row) nil))
                ((symbol-function 'agent-repl-roster-row-ref) (lambda (row) (list :id row)))
-               ((symbol-function 'agent-repl-roster-last-selected-ms) #'ignore)
+               ((symbol-function 'agent-repl-roster-last-interacted-ms)
+                (lambda (ws) (agent-repl-test-commands--history-ms history ws)))
                ((symbol-function 'agent-repl-roster-threads)
                 (lambda (&optional _roster)
                   (mapcar (lambda (thread)
@@ -1117,11 +1128,14 @@ whether the new-thread prompt ran, `logged' and `said'."
     (should (equal (agent-repl--recent-workspace-and-thread-names) '("w" "chat/t")))))
 
 (ert-deftest agent-repl-test-commands-recency-walk-stays-on-the-drawn-tabs ()
-  "`s-[' and `s-]' walk the drawn tabs only: a thread looked at last is no step."
-  (let ((agent-repl--workspace-history '("chat/t" "b" "a")))
+  "`s-[' and `s-]' walk the drawn tabs only: a thread interacted with last is no step."
+  (let ((history '("chat/t" "b" "a"))
+        (agent-repl--recency-walk-origin nil))
     (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b")))
-              ((symbol-function 'agent-repl-roster-last-selected-ms) #'ignore))
-      (should (equal (agent-repl--recency-ring "a") '("b" "a"))))))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+              ((symbol-function 'agent-repl-roster-last-interacted-ms)
+               (lambda (ws) (agent-repl-test-commands--history-ms history ws))))
+      (should (equal (agent-repl--recency-ring "a") '("a" "b"))))))
 
 ;;;; ---- The jump to the workspace that most recently finished ----
 
@@ -1589,15 +1603,20 @@ formatted `info' records, newest first."
 ;;;; ---- s-[ / s-] walk the selection history ----
 
 (defmacro agent-repl-test-commands--with-history (tabs hidden history current &rest body)
-  "Run BODY with TABS on the roster, HIDDEN undrawn, HISTORY most recent first.
-CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
+  "Run BODY with TABS on the roster, HIDDEN undrawn, HISTORY the workspaces
+the user interacted with, most recent first.  CURRENT is shown.  Binds
+`requests' to the (WS TRIGGER) pairs requested."
   (declare (indent 4))
-  `(let ((requests nil)
-         (agent-repl--workspace-history ,history)
-         (agent-repl--current-visit nil))
+  `(let* ((requests nil)
+          (history ,history)
+          ;; A CURRENT other than HISTORY's newest stands mid-walk: the walk
+          ;; started from the newest, which leads the order while it runs.
+          (agent-repl--recency-walk-origin
+           (and history (not (equal ,current (car history))) (car history))))
      (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order)
                 (lambda () (cl-remove-if (lambda (name) (member name ,hidden)) ,tabs)))
-               ((symbol-function 'agent-repl-roster-last-selected-ms) (lambda (_) nil))
+               ((symbol-function 'agent-repl-roster-last-interacted-ms)
+                (lambda (ws) (agent-repl-test-commands--history-ms history ws)))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
                ((symbol-function 'agent-repl-host-pending-selection)
@@ -1742,10 +1761,10 @@ CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
     ;; Assert
     (should (equal requests '(("a" recency-walk))))))
 
-(ert-deftest agent-repl-test-commands-recency-walk-orders-unvisited-tabs-by-the-daemon ()
-  "Tabs this session never visited follow by the daemon's last-selected instant."
-  (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c") "c"
-    (cl-letf (((symbol-function 'agent-repl-roster-last-selected-ms)
+(ert-deftest agent-repl-test-commands-recency-walk-orders-tabs-by-the-daemon ()
+  "Tabs after the one shown follow by the daemon's interaction instant."
+  (agent-repl-test-commands--with-history '("a" "b" "c") nil nil "c"
+    (cl-letf (((symbol-function 'agent-repl-roster-last-interacted-ms)
                (lambda (ws) (pcase ws ("a" 100) ("b" 200)))))
       ;; Act
       (agent-repl-switch-older)
@@ -3640,10 +3659,12 @@ so no close pushes a tab to the back any more."
 
 (ert-deftest agent-repl-test-commands-recency-ring-leaves-out-a-folded-tab ()
   "`s-[' and `s-]' never reach a tab a collapsed section folds."
-  (let ((agent-repl--workspace-history '("folded" "b" "a")))
+  (let ((history '("folded" "b" "a"))
+        (agent-repl--recency-walk-origin nil))
     (agent-repl-test-commands--with-hidden-bar '("a" "b" "folded") '("folded") "a"
-      (cl-letf (((symbol-function 'agent-repl-roster-last-selected-ms) #'ignore))
-        (should (equal (agent-repl--recency-ring "a") '("b" "a")))))))
+      (cl-letf (((symbol-function 'agent-repl-roster-last-interacted-ms)
+                 (lambda (ws) (agent-repl-test-commands--history-ms history ws))))
+        (should (equal (agent-repl--recency-ring "a") '("a" "b")))))))
 
 (ert-deftest agent-repl-test-commands-picker-offers-only-the-drawn-tabs ()
   "The tab picker offers the drawn tabs: a folded workspace has no tab here."

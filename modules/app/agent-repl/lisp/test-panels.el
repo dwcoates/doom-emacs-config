@@ -1661,7 +1661,7 @@ foreign directory."
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--drain-pending-show-panels) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--maybe-autoselect-input) (lambda (_ws) nil)))
-      ;; Should not error -- the when guard skips mark-viewed
+      ;; Should not error -- the when guard skips a nil workspace
       (agent-repl--on-workspace-switch))))
 
 (ert-deftest agent-repl-test-panels-on-workspace-switch-stamps-no-ack ()

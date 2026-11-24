@@ -39,8 +39,6 @@
 (declare-function agent-repl-roster-drawn-tab-numbers "roster" (names))
 (declare-function agent-repl-roster-last-turn-boundary-ms "roster" (ws))
 (declare-function agent-repl--ws-window-conf "workspace")
-(declare-function agent-repl-host-mark-viewed "host")
-(declare-function agent-repl-host-report-view-dwell "host")
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl-roster-row-attention-p "roster")
 (declare-function agent-repl-roster-row-id "roster")
@@ -2071,72 +2069,17 @@ went to and which fact decided it."
        ws "tab-background: ws={ws} mode={mode} previous={previous} reason={reason}"
        :ws ws :mode mode :previous previous :reason reason))))
 
-;;; The view-dwell demotion --------------------------------------------------
+;;; The viewed mode ------------------------------------------------------------
 ;;
-;; RE-INTRODUCED, GENERALIZED, from the ready-view dwell latch removed in
-;; commit abc0ee3c3 ("the tab background extent is the panels-open fact, and
-;; only that").  That latch demoted ONLY a `:ready' workspace's tab from full
-;; to bracket-only after a couple of seconds of viewing, and owner ruling 5
-;; (2026-09-13) struck it because green-into-green changed a color without
-;; changing anything true.  Owner's NEW ruling (2026-09-15) reinstates the
-;; demotion for EVERY state, as a plain "you've seen it" signal: once a
-;; workspace's panels have been VIEWED for at least
-;; `agent-repl-tab-dwell-demote-seconds', its tab drops from FULL to PARTIAL
-;; (only `[N]' keeps the status color) even with the panels open.  It is NOT
-;; the status going away — the bracket still carries it — and it RESETS to
-;; FULL on the next STATUS UPDATE for that workspace (new activity), which
-;; re-arms the dwell.
-;;
-;; Unlike the old apparatus, demotion is a LATCH (a per-workspace flag), not
-;; a time comparison performed inside `agent-repl--ws-display-state': that
-;; function runs on the hottest redisplay path (see
-;; `agent-repl--note-tab-background-mode'), so it reads a boolean and never
-;; calls the clock.  The clock lives in `agent-repl--tab-dwell-note', which
-;; the dwell timer calls once the pending dwell's deadline arrives; the latch
-;; itself is the daemon's viewed marker.
-;;
-;; THE THRESHOLD IS CHOSEN IN ONE PLACE (`agent-repl--tab-dwell-seconds'),
-;; owner ruling 2026-10-02: one second when a `done' lands while the user is
-;; viewing the workspace; five when the user walks into any turn end that
-;; already stood.  A completed /clear or compaction takes no dwell at all:
-;; the daemon draws it PARTIAL on the push that ends it.
+;; A workspace the user has interacted with since its status last changed is
+;; drawn PARTIAL (only `[N]' keeps the status color).  The daemon decides it
+;; from the user's interaction alone (agentrepl.v1.ReportUserInteraction) and
+;; lowers it on the row's next status change; the tab bar reads it back off
+;; the roster row's `:viewed' marker and decides nothing of its own.
 
-(defconst agent-repl-tab-dwell-demote-seconds 5
-  "Seconds a workspace's panels must be VIEWED before its tab demotes.
-The STANDARD dwell: after this much continuous viewing of a panels-open,
-currently-viewed workspace, it is reported viewed and draws PARTIAL (only
-the `[N]' bracket keeps the status color) instead of FULL — the \"you've
-seen it\" demotion.  It applies when the user walks INTO a workspace whose
-turn already ended; `agent-repl-tab-dwell-fast-demote-seconds' is the
-exception, and `agent-repl--tab-dwell-seconds' is the one place that
-chooses between them.")
-
-(defconst agent-repl-tab-dwell-fast-demote-seconds 1
-  "Seconds of viewing that demote a `done' row the user WATCHED land.
-Owner ruling (2026-10-02): when the final response arrives while the user
-is already looking at the workspace, it has been seen as it landed, so the
-tab goes PARTIAL after one second rather than
-`agent-repl-tab-dwell-demote-seconds'.")
-
-(defvar agent-repl--tab-dwell-pending nil
-  "The ONE pending view dwell, or nil when none is armed.
-A plist (:ws WS :at TIME :seconds N :generation G :timer TIMER).  Only the
-currently-viewed workspace accrues a dwell, so one record suffices.
-`:generation' is the value of `agent-repl--tab-dwell-generation' the
-record was armed under; the timer carries it, and a firing whose
-generation is not this record's is a SUPERSEDED timer and does nothing
-\(`agent-repl--tab-dwell-fire').  That is what makes a stale timer
-structurally unable to demote anything, whether or not its cancellation
-reached it in time.")
-
-(defvar agent-repl--tab-dwell-generation 0
-  "Monotonic count of view dwells armed or dropped.
-Every arm and every drop advances it, so a timer scheduled under an older
-value can never match the pending record again.")
-
-(defun agent-repl--tab-dwell-demoted-p (ws)
-  "Return non-nil when WS's tab is view-demoted to PARTIAL.
-The daemon is the single source: the decoded roster row's `:viewed'
+(defun agent-repl--tab-viewed-p (ws)
+  "Return non-nil when WS\='s tab is drawn PARTIAL because it is viewed.
+The daemon is the single source: the decoded roster row\='s `:viewed'
 marker (`agent-repl-roster-viewed-for-ws') is the ONLY input."
   (and (agent-repl-roster-viewed-for-ws ws) t))
 
@@ -2154,19 +2097,15 @@ default name face):
   state, suppressing the full-tab color for a workspace whose panels
   the user has dismissed.
 
-- View dwell — when the panels ARE open but the workspace has been
-  view-demoted (`agent-repl--tab-dwell-demoted-p'), returns nil so the
-  tab draws PARTIAL: the \"you've seen it\" demotion that fires after
-  `agent-repl-tab-dwell-demote-seconds' of viewing and resets to FULL on
-  the next status update.  See the view-dwell section above.
+- Viewed — when the panels ARE open but the workspace is viewed
+  (`agent-repl--tab-viewed-p'), returns nil so the tab draws PARTIAL:
+  the user has interacted with it since its status last changed.  See
+  the viewed-mode section above.
 
 THE PANEL-VISIBILITY EXTENT RULE IS AN IF AND ONLY IF (owner ruling 5,
 2026-09-13): a panels-CLOSED tab is always PARTIAL and a panels-OPEN tab
-is FULL unless the view dwell has demoted it (owner ruling, 2026-09-15).
-The ORIGINAL ready-view dwell latch that ruling 5 removed demoted only a
-panels-OPEN `:ready' workspace; the dwell here is its generalized
-successor — it applies to every state and is reset by new activity
-rather than by a state transition.
+is FULL unless the user has interacted with it since its status last
+changed, which the daemon states as the row\='s viewed marker.
 
 `:agent-state' is preserved on the plist so the original color
 reappears the next time the user reopens panels.  The nil-state
@@ -2193,8 +2132,8 @@ the bracket keeps its color when panels are closed."
        ((not (agent-repl--ws-agent-open-p ws))
         (agent-repl--note-tab-background-mode ws :partial "panels-closed")
         nil)
-       ((agent-repl--tab-dwell-demoted-p ws)
-        (agent-repl--note-tab-background-mode ws :partial "dwell-demoted")
+       ((agent-repl--tab-viewed-p ws)
+        (agent-repl--note-tab-background-mode ws :partial "viewed")
         nil)
        (t
         (agent-repl--note-tab-background-mode ws :full "panels-open")
@@ -2225,8 +2164,8 @@ state, except on a FULL `idle_async\=' tab whose row carries the
 unread-turn-end marker (`agent-repl-status-tab-unread-turn-end\='): there
 the name takes the unread turn end\='s state (`:done\=', `:interrupted\='
 or `:turn-failed\='), so a background workspace over an unread result
-reads as a yellow `[N]\=' then a green name until a dwell reads the
-result and the daemon drops the marker (owner request, 2026-10-20).  The
+reads as a yellow `[N]\=' then a green name until the user interacts with
+it and the daemon drops the marker (owner request, 2026-10-20).  The
 bracket is untouched: it keeps the `idle_async\=' yellow.  A PARTIAL tab
 \(nil DISPLAY-STATE) draws its name uncolored already, so the marker
 changes nothing there."
@@ -3399,276 +3338,11 @@ For background workspaces, inspects the saved persp window configuration."
 ;; view, no ticks), so a local re-derivation could only ever be a second,
 ;; drifting answer to a question already answered.
 ;;
-;; TWO local clocks survive, and neither derives lifecycle: the heartbeat
-;; below repaints the tab bar on a fixed cadence, and the view-dwell timer
-;; (`agent-repl--tab-dwell-pending', armed in the view-dwell section above)
-;; fires once at the demotion deadline to repaint the "you've seen it" flip.
-;; Both are LOCAL PRESENTATION modifiers (blessed as such): they derive no
-;; lifecycle, fork nothing, and touch no workspace plist.  The dwell READS
-;; the row's resolved status only to choose its threshold
-;; (`agent-repl--tab-dwell-seconds').
-
-;;; The view-dwell mechanism (timers, arming, reset) ------------------------
-;;
-;; Declared here, alongside the heartbeat, because both are the module's
-;; local presentation clocks; the latch and its reader live in the
-;; view-dwell section next to `agent-repl--ws-display-state', which is the
-;; one place that reads them.
-
-(defun agent-repl--tab-dwell-drop (reason)
-  "Drop the pending view dwell, if any, recording REASON.
-Cancels its timer AND advances `agent-repl--tab-dwell-generation', so even
-a timer whose cancellation came too late finds no record of its own
-generation and does nothing (`agent-repl--tab-dwell-fire').  It reports
-the dwell STOPPED to the daemon, so the sidebar returns the row\='s name
-to its unviewed colour at once (`agent-repl-host-report-view-dwell')."
-  (let ((pending agent-repl--tab-dwell-pending))
-    (when pending
-      (let ((timer (plist-get pending :timer)))
-        (when (timerp timer)
-          (cancel-timer timer)))
-      (agent-repl--log (plist-get pending :ws)
-                       "tab-view: dwell dropped ws={ws} generation={generation} reason={reason}"
-                       :ws (plist-get pending :ws) :generation (plist-get pending :generation) :reason reason)
-      (setq agent-repl--tab-dwell-pending nil)
-      (cl-incf agent-repl--tab-dwell-generation)
-      (agent-repl-host-report-view-dwell (plist-get pending :ws) '(:arm :stopped :value nil)))))
-
-(defun agent-repl--tab-dwell-eligible-p (ws)
-  "Return non-nil when WS can still accrue a view dwell.
-That is: WS is the currently-viewed workspace, its panels are open, and
-it has not already been demoted.  A workspace nobody is looking at is not
-being viewed, and a panels-closed tab is PARTIAL already, so neither
-dwells."
-  (and ws
-       (agent-repl--ws-known-p ws)
-       (equal ws (agent-repl--ws-current-name))
-       (agent-repl--ws-agent-open-p ws)
-       (not (agent-repl--tab-dwell-demoted-p ws))))
-
-(defun agent-repl--tab-dwell-seconds (ws origin)
-  "Return how many seconds WS must be viewed, for a dwell armed by ORIGIN.
-
-THE ONE PLACE THE THRESHOLD IS DECIDED (owner ruling, 2026-10-02).  ORIGIN
-names what armed the dwell:
-
-  `activation'     — the user walked INTO WS;
-  `status-change'  — WS's status changed while it is armed;
-  `viewed-cleared' — the daemon cleared WS's viewed marker.
-
-A `done' row takes `agent-repl-tab-dwell-fast-demote-seconds' when the
-user was ALREADY viewing it when it landed (any origin but `activation'):
-the final response arrived under the user's eyes.  A `done' never stands
-beside live detached work: the daemon draws `idle_async' (yellow) over it
-at once, so no dwell rule waits on that work.
-
-Every other case keeps `agent-repl-tab-dwell-demote-seconds' — walking
-into a turn end that already stood, and an interrupted, failed or
-vendor-blocked row however it arrived.  The status
-is read off the row (`agent-repl--ws-render-status'), not off the hook
-that armed the dwell, so the status-change and viewed-cleared reactions
-to one push can never choose differently.
-
-An ORIGIN outside the three is a caller defect and signals."
-  (unless (memq origin '(activation status-change viewed-cleared))
-    (agent-repl--error ws "tab-view: dwell armed by unknown origin={origin} ws={ws}" :origin (prin1-to-string origin) :ws ws)
-    (error "agent-repl: view dwell armed by unknown origin %S" origin))
-  (let* ((status (agent-repl--ws-render-status ws))
-         (rule (cond ((not (eq status :done)) "standard")
-                     ((not (eq origin 'activation)) "done-landed-while-viewing")
-                     (t "standard")))
-         (seconds (if (equal rule "standard")
-                      agent-repl-tab-dwell-demote-seconds
-                    agent-repl-tab-dwell-fast-demote-seconds)))
-    (agent-repl--log ws "tab-view: dwell threshold ws={ws} origin={origin} status={status} seconds={seconds} rule={rule}"
-                     :ws ws :origin origin :status status :seconds seconds :rule rule)
-    seconds))
-
-(defun agent-repl--tab-dwell-note (ws now)
-  "Demote WS's tab if its view dwell has elapsed as of NOW.
-NOW is a time value (`current-time' in production; injected in tests).
-This function is the CLOCK and nothing else: it decides whether the
-pending dwell (`agent-repl--tab-dwell-pending') is WS's and has elapsed
-for an eligible workspace (`agent-repl--tab-dwell-eligible-p'), and hands
-the verdict to `agent-repl--tab-view-partial', which is what applies
-PARTIAL everywhere it has to be applied.  Returns non-nil when it demoted.
-
-It reads the injected clock, never `current-time', so the dwell can be
-exercised without sleeping."
-  (let ((pending agent-repl--tab-dwell-pending))
-    (when (and pending
-               (equal ws (plist-get pending :ws))
-               (agent-repl--tab-dwell-eligible-p ws)
-               (>= (float-time (time-subtract now (plist-get pending :at)))
-                   (plist-get pending :seconds)))
-      (setq agent-repl--tab-dwell-pending nil)
-      (agent-repl--tab-view-partial ws "dwell")
-      t)))
-
-(defun agent-repl--tab-dwell-fire (ws generation)
-  "Timer callback: try to demote WS now that its dwell deadline arrived.
-GENERATION is the generation the timer was armed under.  A timer whose
-GENERATION is not the pending dwell's has been SUPERSEDED — re-armed,
-dropped, or already spent — and does nothing but record that it fired.
-
-A dwell whose deadline finds WS no longer eligible
-\(`agent-repl--tab-dwell-eligible-p') is DROPPED there, which reports it
-stopped: the sidebar has carried the name to the viewed grey by its
-deadline, and a dwell that will not demote must not leave it there."
-  (let ((pending agent-repl--tab-dwell-pending))
-    (if (and pending
-             (equal ws (plist-get pending :ws))
-             (eql generation (plist-get pending :generation)))
-        (or (agent-repl--tab-dwell-note ws (current-time))
-            (unless (agent-repl--tab-dwell-eligible-p ws)
-              (agent-repl--tab-dwell-drop "not-eligible-at-deadline")
-              nil))
-      (agent-repl--log ws "tab-view: superseded dwell timer ignored ws={ws} generation={generation} pending={pending}"
-                       :ws ws :generation generation :pending (and pending (plist-get pending :generation)))
-      nil)))
-
-(defun agent-repl--tab-dwell-arm (ws now origin)
-  "Arm WS's view dwell as of NOW, because ORIGIN says viewing (re)starts.
-ORIGIN is one of the symbols `agent-repl--tab-dwell-seconds' names.
-
-When WS is eligible (`agent-repl--tab-dwell-eligible-p'), the pending
-dwell is REPLACED: the old one is dropped (its timer cancelled and its
-generation retired), and a new record with the threshold
-`agent-repl--tab-dwell-seconds' chooses is installed with its one-shot
-timer, and reported COUNTING to the daemon, so the sidebar fades the
-row\='s name over exactly that threshold
-\(`agent-repl-host-report-view-dwell').  When WS is not eligible, a
-pending dwell that is WS's own is
-dropped, and one belonging to the workspace the user IS viewing is left
-running: a background workspace's status change says nothing about how
-long the user has looked at another one.
-
-Does NOT clear the demotion — only the daemon does that."
-  (if (not (agent-repl--tab-dwell-eligible-p ws))
-      (progn
-        (agent-repl--log ws "tab-view: dwell not armed ws={ws} origin={origin} reason=not-eligible" :ws ws :origin origin)
-        (when (equal ws (plist-get agent-repl--tab-dwell-pending :ws))
-          (agent-repl--tab-dwell-drop "not-eligible")))
-    (agent-repl--tab-dwell-drop "re-armed")
-    (let* ((seconds (agent-repl--tab-dwell-seconds ws origin))
-           (generation (cl-incf agent-repl--tab-dwell-generation)))
-      (setq agent-repl--tab-dwell-pending
-            (list :ws ws :at now :seconds seconds :generation generation
-                  :timer (run-with-timer seconds nil #'agent-repl--tab-dwell-fire
-                                         ws generation)))
-      (agent-repl-host-report-view-dwell
-       ws (list :arm :counting :value (list :length-ms (round (* 1000 seconds)))))
-      (agent-repl--log ws "tab-view: dwell armed ws={ws} origin={origin} seconds={seconds} generation={generation}"
-                       :ws ws :origin origin :seconds seconds :generation generation))))
-
-(defun agent-repl--tab-view-partial (ws reason)
-  "Draw WS PARTIAL everywhere, because REASON says the user has seen it.
-
-THE ONE PLACE STALENESS IS APPLIED.  Whatever detects it — today the view
-dwell, tomorrow anything else — calls exactly this, and it does BOTH
-halves of applying the mode:
-
-  - it REPORTS the workspace to the daemon (`agent-repl-host-mark-viewed'),
-    which raises the row's viewed marker and re-pushes the roster; and
-  - it forces a tab-bar repaint.
-
-It latches NOTHING locally.  The daemon is the single source of the mode:
-the tab bar and the webapp sidebar both render it from the roster row's
-`:viewed' marker, so the tab flips one roster round trip after the
-report (ruled acceptable) and the two surfaces can never disagree.
-
-There is no matching notification on the RESTORE — see
-`agent-repl--tab-view-restore-full'."
-  (agent-repl--log
-   ws
-   "tab-view: PARTIAL ws={ws} reason={reason} — the tab name falls back to default and [N] keeps the status color; the sidebar row's name greys"
-   :ws ws :reason reason)
-  (agent-repl--force-tab-bar-redraw)
-  (agent-repl-host-mark-viewed ws))
-
-(defun agent-repl--tab-view-on-link-followed (ws)
-  "Count WS viewed at once, because the reader followed a link in its page.
-FOLLOWING A LINK IS PROOF THE PAGE WAS READ, so it does at once what the
-view dwell does at its end (`agent-repl--tab-view-partial'), and drops the
-dwell pending for WS, which has nothing left to decide.  It holds whether
-or not WS is still the workspace shown: the link may have switched the
-frame away before the news arrived.  A workspace already demoted has
-nothing left to report, and says so.  Whether the report takes is the
-daemon's decision, as for the dwell's."
-  (if (agent-repl--tab-dwell-demoted-p ws)
-      (agent-repl--log ws "tab-view: link followed ws={ws} already viewed" :ws ws)
-    (when (equal ws (plist-get agent-repl--tab-dwell-pending :ws))
-      (agent-repl--tab-dwell-drop "link-followed"))
-    (agent-repl--tab-view-partial ws "link-followed")))
-
-(defun agent-repl--tab-view-restore-full (ws now)
-  "Re-arm WS's dwell as of NOW, because the daemon cleared its viewed marker.
-
-THE ONE PLACE THE RESTORE IS REACTED TO.  The tab already draws FULL:
-the row it renders from no longer carries the marker.  This only re-arms
-the dwell (`agent-repl--tab-dwell-arm'), so the clock restarts from the
-new activity rather than from whenever the workspace was last activated.
-
-IT NOTIFIES THE DAEMON OF NOTHING, deliberately.  The daemon ORIGINATED
-the status change that brought us here — every status Emacs knows arrives
-on the roster stream — and it clears the row's viewed marker on that same
-edge, in that same push.  A report back would be Emacs telling the daemon
-a fact the daemon has just told Emacs.
-
-The daemon drops the marker whenever the row leaves a read turn-end state,
-from any origin."
-  (agent-repl--tab-dwell-arm ws now 'viewed-cleared))
-
-(defun agent-repl--tab-dwell-on-activation (&rest _)
-  "Arm the view dwell for the workspace just activated.
-Registered on the persp activation hook, alongside
-`agent-repl--record-workspace-history' (which stamps `:last-viewed-at').
-Switching INTO a workspace restarts the continuous-viewing clock; it does
-not un-demote a workspace that was already demoted with no new activity.
-
-Takes and ignores its arguments (`&rest _'): `persp-activated-functions'
-invokes each registered function WITH the activation type (e.g. `frame' or
-`window'), so a nil arglist signalled \"Wrong number of arguments\" on every
-persp switch and aborted the activation hook run.  It mirrors its sibling
-`agent-repl--record-workspace-history', which is on the same hook for the
-same reason."
-  (let ((ws (agent-repl--ws-current-name)))
-    (when (and ws (agent-repl--ws-known-p ws))
-      (agent-repl--tab-dwell-arm ws (current-time) 'activation))))
-
-(agent-repl--ws-add-activated-hook #'agent-repl--tab-dwell-on-activation)
-
-(defun agent-repl--tab-view-restore-on-viewed-cleared (ws)
-  "React to the daemon clearing WS's viewed marker: restore FULL.
-Registered on `agent-repl-roster-viewed-cleared-functions', which fires
-once per row whose marker went present->absent.  The daemon drops the
-marker on any change that leaves a read turn-end state, from any origin,
-so this reaction never has to enumerate origins."
-  (agent-repl--log ws "tab-view: FULL ws={ws} reason=viewed-cleared" :ws ws)
-  (agent-repl--tab-view-restore-full ws (current-time)))
-
-(add-hook 'agent-repl-roster-viewed-cleared-functions
-          #'agent-repl--tab-view-restore-on-viewed-cleared)
-
-(defun agent-repl--tab-dwell-rearm-on-status-change (ws previous current)
-  "Re-arm WS's view dwell because its status moved from PREVIOUS to CURRENT.
-Registered on `agent-repl-roster-status-change-functions'.
-
-The daemon takes a dwell on a turn-end row (done, interrupted or
-turn-failed) and on a vendor-blocked one, whose failed turn it reads;
-one reported while WS is thinking, waiting, severed or anything else is
-dropped, so there is no marker for the viewed-cleared edge to announce later.
-Without this, a user who watched a turn run to done would have spent the
-one-shot dwell on the running turn, and the finished response would never go
-PARTIAL.  Every status change therefore restarts the clock, and the next
-report lands on whatever the row has become; whether it takes is the
-daemon's decision, never this one's."
-  (agent-repl--log ws "tab-view: dwell re-armed ws={ws} reason=status-change from={from} to={to}"
-                   :ws ws :from previous :to current)
-  (agent-repl--tab-dwell-arm ws (current-time) 'status-change))
-
-(add-hook 'agent-repl-roster-status-change-functions
-          #'agent-repl--tab-dwell-rearm-on-status-change)
+;; ONE local clock survives, and it derives no lifecycle: the heartbeat below
+;; repaints the tab bar on a fixed cadence.  It is a LOCAL PRESENTATION
+;; modifier (blessed as such): it derives no lifecycle, forks nothing, and
+;; touches no workspace plist.  Whether a tab is viewed is the daemon's
+;; (`agent-repl--tab-viewed-p'), and no timer decides it.
 
 (defun agent-repl--arm-state-poll-timer ()
   "Arm the tab-bar repaint heartbeat under the `:state-poll' key.
