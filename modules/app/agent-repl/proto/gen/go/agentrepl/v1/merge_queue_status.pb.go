@@ -39,15 +39,23 @@ const (
 // landing), fixing tests, and resolving conflicts (both out of line). So at
 // most one entry is running, at most one is fixing_tests and at most one is
 // resolving_conflicts; every other merge out of line awaits its repair's slot.
+// A LANDED MERGE WHOSE DEPLOY A DEPLOY CHECK IS OWED OF
+// (repoconfig.v1.LifecycleConfig.deploy_checks) stays listed as running its
+// deploying step until the check ends: the deploy mediator approves,
+// escalates or dispatches, or the check is released without its word. It
+// stands at the front, ahead of the line; a merge admitted in the instant
+// between its deploy's start and the check being owed may run beside it, so
+// such a queue lists two running entries.
 type MergeQueueStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The repository whose queue this is.
 	Repository *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
 	// Whether the queue advances.
 	Advance *MergeQueueStatusAdvance `protobuf:"bytes,2,opt,name=advance,proto3" json:"advance,omitempty"`
-	// Every merge of the queue: those in line, front first -- the running
-	// merge (when one runs), then every waiting merge in the order it will run
-	// -- then every merge out of line: the holder of each repair slot, then the
+	// Every merge of the queue: the landed merge still deploying (when one
+	// stands), then those in line, front first -- the running merge (when one
+	// runs), then every waiting merge in the order it will run -- then every
+	// merge out of line: the holder of each repair slot, then the
 	// merges awaiting each slot, in the order each will be granted it.
 	Entries []*MergeQueueStatusEntry `protobuf:"bytes,3,rep,name=entries,proto3" json:"entries,omitempty"`
 	// Every merge that left this queue without landing and whose request still

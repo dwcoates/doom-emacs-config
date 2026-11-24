@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -764,5 +765,18 @@ func TestRestateLiveHeadRestatesOnlyALiveHead(t *testing.T) {
 				t.Fatalf("drawn=%v live=%v marked=%v restated=%d, want drawn=%v live=%v", drawn, live, marked, restated, tt.wantDrawn, tt.wantLive)
 			}
 		})
+	}
+}
+
+func TestHeadFeedIDDecodesToTheBubblesHead(t *testing.T) {
+	// Arrange
+	want := headRef(theWorkspace, "lease-1")
+
+	// Act
+	got, err := feedid.Decode(headFeedID(theWorkspace, "lease-1"))
+
+	// Assert
+	if err != nil || got != want {
+		t.Fatalf("Decode(headFeedID) = (%+v, %v), want %+v", got, err, want)
 	}
 }

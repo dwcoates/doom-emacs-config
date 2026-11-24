@@ -800,6 +800,15 @@ type DB interface {
 	// deploy that started at AT, answering the mediation it replaced
 	// (mediation.go).
 	OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) (*ReplacedMediation, error)
+	// RecordDeployingMerge records a queue's landed merge still deploying,
+	// answering the row it replaced (deployingmerges.go).
+	RecordDeployingMerge(ctx context.Context, m DeployingMerge) (*DeployingMerge, error)
+	// DeployingMergeOf answers one queue's landed merge still deploying, nil
+	// for none.
+	DeployingMergeOf(ctx context.Context, repo RepoKey) (*DeployingMerge, error)
+	// EndDeployingMerge deletes and answers one queue's landed merge still
+	// deploying, nil for none.
+	EndDeployingMerge(ctx context.Context, repo RepoKey) (*DeployingMerge, error)
 	// MediationOf answers the mediation one repository owes, nil for none.
 	MediationOf(ctx context.Context, repo RepoKey) (*Mediation, error)
 	// MarkMediationPrompted records that the mediator was told of the

@@ -57,6 +57,7 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 		return refuse(ArmNoMediationOwed, ws, "the check this dispatch was for ended meanwhile")
 	}
 	o.observeDispatch(m, at)
+	o.endDeployingMerge(ctx, q.key, MediationDispatched)
 	// THE MEDIATOR IS IN SIGHT WHILE IT FIXES (owner ruling, 2026-11-17).
 	if err := o.deps.DeployChecks.Resume(ctx, ws); err != nil {
 		o.deps.Log.Global().Error(opMediation, "the dispatch is recorded but the mediator could not be shown while it fixes; the next pass shows it", withField(fields, "error", err.Error()))

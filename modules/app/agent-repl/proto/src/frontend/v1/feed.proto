@@ -4933,7 +4933,9 @@ message FeedMergeHookScriptTimedOut {
 // derived by comparing ids. The head workspace is shown NOTHING about the
 // queue (its bubble is busy merging).
 message FeedMergeQueue {
-  // The entries ahead, front first.
+  // The entries ahead, front first. A landed merge whose deploy's check is
+  // still owed is the first, merging on its deploy tab since its deploying
+  // step began, until the check ends.
   repeated FeedMergeQueueEntry ahead = 1;
   // This workspace's own entry.
   FeedMergeQueueEntry current = 2;

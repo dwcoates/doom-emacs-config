@@ -5282,7 +5282,10 @@ func (*RosterRepoSection_Collapsed) isRosterRepoSection_Fold() {}
 type RosterRepoMergeQueue struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The merge at the head: the merge at the front of the line, the one
-	// merge running the queue's test gate (its testing slot). A queue is
+	// merge running the queue's test gate (its testing slot). A LANDED MERGE
+	// WHOSE DEPLOY'S CHECK IS STILL OWED is the head, merging, its deploy stage
+	// live, until the check ends, and the front of the line is then the first
+	// of `waiting`; a front already admitted keeps the head instead. A queue is
 	// listed while its line holds a merge or a merge stands out of line, so a
 	// listed queue carries its head unless its line is empty and a merge
 	// stands out of line; an unset head anywhere else is malformed. (A failed

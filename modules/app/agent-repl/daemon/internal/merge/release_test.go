@@ -7,7 +7,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
 
@@ -18,7 +17,7 @@ func headRowID(t *testing.T, h *harness, ws ids.WorkspaceID) string {
 	if !ok {
 		t.Fatalf("%s has no ledger identity", ws)
 	}
-	return feedid.Encode(headRef(ws, lease)).GetValue()
+	return headFeedID(ws, lease).GetValue()
 }
 
 // lastQueueTabOf answers the newest queue snapshot drawn on WS's bubble.

@@ -56,6 +56,7 @@ func TestTheMergesViewIsDrawnThroughOnePath(t *testing.T) {
 		{needle: "facts.Held =", want: []string{"orchestrator.go:publish"}},
 		{needle: "viewOf(", want: []string{"rosterstages.go:stagesOf"}},
 		{needle: "o.heldByQueue(", want: []string{"bubbleview.go:republishBubbles", "rosterqueue.go:rosterLine"}},
+		{needle: "feedid.Encode(headRef(", want: []string{"tabs.go:headFeedID"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.needle, func(t *testing.T) {

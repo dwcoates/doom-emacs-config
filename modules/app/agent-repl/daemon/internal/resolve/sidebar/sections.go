@@ -139,6 +139,8 @@ type repoQueue struct {
 	offQueue []OffQueueEntry
 	// mediation is the deploy mediation the queue waits on, nil for none.
 	mediation *QueueMediation
+	// deploying is the landed merge still deploying, nil for none.
+	deploying *QueueEntry
 }
 
 // listed reports whether the merge queue section lists Q: its line holds a
@@ -146,7 +148,7 @@ type repoQueue struct {
 // repository leaves the section as soon as its line empties and nothing
 // stands out of line). A paused queue holding nothing is not listed either.
 func (q repoQueue) listed() bool {
-	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0 || len(q.offQueue) > 0 || q.mediation != nil
+	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0 || len(q.offQueue) > 0 || q.mediation != nil || q.deploying != nil
 }
 
 // drawMergeQueue composes one repository's merge queue: the merge at the
@@ -216,10 +218,17 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			Discard: &frontendv1.RosterMergeQueueOffQueueDiscard{Merge: own.Ref()},
 		})
 	}
-	if len(q.line) == 0 {
+	// THE LANDED MERGE STILL DEPLOYING IS THE HEAD until its deploy's check
+	// ends, and every merge in line waits behind it, unless the front of the
+	// line was admitted already (MergeQueue.Deploying).
+	line := q.line
+	if d := q.deploying; d != nil && (len(line) == 0 || !line[0].Admitted) {
+		line = append([]QueueEntry{*d}, line...)
+	}
+	if len(line) == 0 {
 		return out
 	}
-	front := q.line[0]
+	front := line[0]
 	if sub, ok := subject(front); ok {
 		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages}
 		if front.Admitted {
@@ -232,7 +241,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			out.Head = head
 		}
 	}
-	for _, entry := range q.line[1:] {
+	for _, entry := range line[1:] {
 		sub, ok := subject(entry)
 		if !ok {
 			continue
@@ -531,6 +540,20 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			rq.remediating = append(rq.remediating, entry)
 			rq.pause, rq.deployCheck = q.pause, q.deployCheck
 			out[ws.Repo] = rq
+		}
+		if d := q.deploying; d != nil {
+			ws, ok := r.state.record(d.Workspace)
+			if !ok {
+				log.Error(op, "the landed merge still deploying names a workspace the registry does not carry, so it is not drawn", dlog.Context{
+					"repo": string(key), "workspace_id": string(d.Workspace),
+					"invariant_violation": "a merge queue entry references a registered workspace"})
+			} else {
+				claim(key, ws.Repo, d.Workspace)
+				rq := out[ws.Repo]
+				rq.deploying = d
+				rq.pause, rq.deployCheck = q.pause, q.deployCheck
+				out[ws.Repo] = rq
+			}
 		}
 		// THE MEDIATION NAMES THE REPOSITORY whose queue it holds: the
 		// mediator is no workspace the sidebar draws.

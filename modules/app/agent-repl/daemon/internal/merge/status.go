@@ -20,6 +20,10 @@ type QueueStatus struct {
 	// Mediation is the deploy mediation the queue waits on, nil while it owes
 	// none (owedMediation).
 	Mediation *OwedMediation
+	// Deploying is the queue's landed merge whose deploy's check is still
+	// owed, listed at the front as running its deploying step until the
+	// check ends (deployingstage.go); nil while none stands.
+	Deploying *QueueMember
 }
 
 // Status implements Orchestrator.
@@ -73,7 +77,17 @@ func (o *orchestrator) Status(ctx context.Context, scope *RepositoryScope) ([]Qu
 			o.deps.Log.Global().Error(op, "could not read the deploy mediation a repository's queue waits on", dlog.WithCause(dlog.Context{"repository": string(repository.ID)}, err))
 			return nil, fmt.Errorf("merge: reading the mediation of %s: %w", repository.ID, err)
 		}
-		out = append(out, QueueStatus{Repository: repository, Queue: queue, OffQueue: off, Mediation: mediation})
+		deploying, err := o.deps.DB.DeployingMergeOf(ctx, key)
+		if err != nil {
+			o.deps.Log.Global().Error(op, "could not read a repository's landed merge still deploying", dlog.WithCause(dlog.Context{"repository": string(repository.ID)}, err))
+			return nil, fmt.Errorf("merge: reading the merge still deploying in %s: %w", repository.ID, err)
+		}
+		status := QueueStatus{Repository: repository, Queue: queue, OffQueue: off, Mediation: mediation}
+		if deploying != nil {
+			member := deployingMember(*deploying)
+			status.Deploying = &member
+		}
+		out = append(out, status)
 	}
 	return out, nil
 }

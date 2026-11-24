@@ -44,6 +44,12 @@ func headRef(ws ids.WorkspaceID, lease ids.LeaseID) feedid.Ref {
 	}
 }
 
+// headFeedID is the wire row id of the merge bubble's head that headRef
+// addresses: the one spelling every drawing that names the head uses.
+func headFeedID(ws ids.WorkspaceID, lease ids.LeaseID) *frontendv1.FeedId {
+	return feedid.Encode(headRef(ws, lease))
+}
+
 // tabRef addresses one tab row of a merge bubble's sub-feed in WS's
 // placement.
 func tabRef(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey) feedid.Ref {
@@ -188,7 +194,7 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, line branchLine, pullRequest
 		panic(fmt.Sprintf("merge: a head's result is %T, which is no head arm", result))
 	}
 	return &frontendv1.FeedRow{
-		Id: feedid.Encode(headRef(ws, lease)),
+		Id: headFeedID(ws, lease),
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: merge},
 		}},
@@ -611,6 +617,11 @@ func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, view que
 	snap := &frontendv1.FeedMergeQueue{}
 	if view.paused {
 		snap.Paused = &frontendv1.FeedMergeQueuePaused{}
+	}
+	// THE LANDED MERGE STILL DEPLOYING IS AHEAD OF EVERY MERGE IN LINE until
+	// its deploy's check ends (deployingstage.go).
+	if view.deploying != nil {
+		snap.Ahead = append(snap.Ahead, view.deploying)
 	}
 	seenSelf := false
 	for i, entry := range entries {

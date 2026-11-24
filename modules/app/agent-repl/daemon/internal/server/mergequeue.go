@@ -165,7 +165,13 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 	// granted it (agentrepl.v1.MergeQueueStatus.entries).
 	outOfLine := slices.Clone(status.Queue.Remediating)
 	slices.SortStableFunc(outOfLine, func(a, b merge.QueueMember) int { return int(a.Repair) - int(b.Repair) })
-	members := append(slices.Clone(status.Queue.Members), outOfLine...)
+	// THE LANDED MERGE STILL DEPLOYING STANDS AT THE FRONT, running its
+	// deploying step until its deploy's check ends (merge.QueueStatus.Deploying).
+	var members []merge.QueueMember
+	if status.Deploying != nil {
+		members = append(members, *status.Deploying)
+	}
+	members = append(append(members, status.Queue.Members...), outOfLine...)
 	awaiting := map[sidebar.QueueRepair]uint32{}
 	for _, member := range members {
 		kind := &agentreplv1.MergeQueueStatusEntryKind{Kind: &agentreplv1.MergeQueueStatusEntryKind_OwnBranch{OwnBranch: &agentreplv1.MergeQueueStatusEntryKindOwnBranch{}}}

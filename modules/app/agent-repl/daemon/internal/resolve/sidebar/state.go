@@ -543,11 +543,14 @@ type mergeQueue struct {
 	remediating []QueueEntry
 	// mediation is the deploy mediation the queue waits on, nil for none.
 	mediation *QueueMediation
+	// deploying is the landed merge still deploying (MergeQueue.Deploying),
+	// nil for none.
+	deploying *QueueEntry
 }
 
 // newMergeQueue indexes one stated queue.
 func newMergeQueue(q MergeQueue) mergeQueue {
-	return mergeQueue{pause: q.Pause, deployCheck: q.DeployCheck, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, remediating: q.Remediating, mediation: q.Mediation}
+	return mergeQueue{pause: q.Pause, deployCheck: q.DeployCheck, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, remediating: q.Remediating, mediation: q.Mediation, deploying: q.Deploying}
 }
 
 // setOf indexes WS as a set.
@@ -562,7 +565,7 @@ func setOf(ws []ids.WorkspaceID) map[ids.WorkspaceID]struct{} {
 // empty reports whether the queue says nothing the roster could draw: not
 // paused, and no workspace on it.
 func (q mergeQueue) empty() bool {
-	return q.pause == nil && q.deployCheck == nil && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0 && len(q.remediating) == 0 && q.mediation == nil
+	return q.pause == nil && q.deployCheck == nil && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0 && len(q.remediating) == 0 && q.mediation == nil && q.deploying == nil
 }
 
 // newRosterState builds an empty roster accumulation.
