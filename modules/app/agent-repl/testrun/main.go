@@ -390,7 +390,7 @@ func investigate(log *run.Log, m ramdisk.Manager, module string, trouble *ramdis
 	}
 }
 
-func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, root string, prefix []string, rank int) int {
+func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, root string, prefix []string, rank int) (code int) {
 	// THE PUSH'S TARGET LEAVES THE ENVIRONMENT before any unit starts, so a
 	// test that runs testrun again never pushes into the owner's store.
 	metricsTarget, err := testtimes.TakeTarget()
@@ -485,8 +485,14 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	// host's tests, and the first to hold the role does until it exits.
 	ticker := time.NewTicker(cores.Tick)
 	defer ticker.Stop()
-	governorCtx, stopGovernor := context.WithCancel(ctx)
-	defer stopGovernor()
+	// The run's loops are joined, not only cancelled, before the run's reap
+	// (life.Background): a loop left running starts commands the reap finds.
+	background := life.NewBackground(ctx, life.JoinBound, time.After, log)
+	defer func() {
+		if err := background.Stop(); err != nil {
+			code = 1
+		}
+	}()
 	if plan.Governed {
 		// The tests' own CPU: every process carrying the mark this run, and
 		// every other, sets on its units (cores.TestsCPU).
@@ -509,7 +515,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		readPower := func() (cores.HostPower, error) {
 			return cores.ReadHostPower(power, power.EnergyMode, power.LidClosedAwake)
 		}
-		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Units: unitsCPU.ReadByMark, Power: readPower, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
+		background.Go("the CPU governor", (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Units: unitsCPU.ReadByMark, Power: readPower, Now: time.Now, Ticks: ticker.C, Log: log}).Run)
 	}
 	// EACH TEST'S CPU (cputime): measured only for a run that pushes its
 	// times, since every read scans the user's processes.
@@ -523,7 +529,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		cpuTicks := time.NewTicker(cputime.Every)
 		defer cpuTicks.Stop()
 		sampler := &cputime.Sampler{Read: (&cores.TestsCPU{Scan: tagged.Scan}).ReadGrowthByMark, Now: time.Now, Ticks: cpuTicks.C, Log: log, Pid: os.Getpid()}
-		go sampler.Run(governorCtx)
+		background.Go("the units' CPU sampler", sampler.Run)
 		unitCPU = sampler
 	}
 	return cli.Run(ctx, cli.Deps{
