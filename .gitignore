@@ -13,3 +13,5 @@ node_modules
 # "Never version control a conversation").
 *.transcript.md
 docs/session-instructions/
+.claude-repl-history
+*-session-prompts.txt
