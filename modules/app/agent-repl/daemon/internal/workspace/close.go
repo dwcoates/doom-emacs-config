@@ -36,7 +36,13 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause
 		return err
 	}
 
-	if err := v.refuseClose(ctx, log, record, by, false); err != nil {
+	// A RUNNING TURN IS INTERRUPTED AHEAD OF THE CLOSE (owner ruling,
+	// 2026-11-24), so the close is never refused for it.
+	interrupted, err := v.interruptBeforeLeaving(ctx, log, ws, opClose, "close")
+	if err != nil {
+		return err
+	}
+	if err := v.refuseClose(ctx, log, record, by, interrupted); err != nil {
 		return err
 	}
 
@@ -141,6 +147,26 @@ func (v *verbs) refuseBlockedClose(log dlog.Logger, ws ids.WorkspaceID, blocked 
 			"summary":        blocked.Detail,
 		},
 	}
+}
+
+// interruptBeforeLeaving interrupts WS's running turn ahead of a close or a
+// backlog (owner ruling, 2026-11-24: the workspace's page unloads and its
+// shim parks, so a turn left running would run on unseen). It answers whether
+// a turn was interrupted; a workspace with none is left as it is. The
+// interrupt is confirmed, so live detached agents stop with the turn. OP and
+// WHAT name the verb for the record.
+func (v *verbs) interruptBeforeLeaving(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, op, what string) (bool, error) {
+	running, live := v.deps.Freeness(ws)
+	if !live || running.Turn == nil {
+		return false, nil
+	}
+	if _, err := v.Interrupt(ctx, ws, InterruptTarget{Turn: true}, true); err != nil {
+		log.Error(op, "could not interrupt the running turn ahead of the verb; nothing was changed", dlog.Context{
+			"verb": what, "turn_id": string(*running.Turn), "cause": err.Error()})
+		return false, fmt.Errorf("%s %q: interrupt the running turn: %w", what, ws, err)
+	}
+	log.Info(op, "interrupted the running turn ahead of the verb", dlog.Context{"verb": what, "turn_id": string(*running.Turn)})
+	return true, nil
 }
 
 // CloseSelf is a workspace's agent closing its own workspace. The asking turn

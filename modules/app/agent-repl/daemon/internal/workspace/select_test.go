@@ -2022,3 +2022,57 @@ func TestEveryHiddenSectionMoveEndsInHiddenRecorded(t *testing.T) {
 		t.Fatalf("hiddenRecorded is called at %v, want recordHidden and BacklogColdGate in select.go", sites)
 	}
 }
+
+func TestABacklogInterruptsARunningTurnFirst(t *testing.T) {
+	tests := []struct {
+		name       string
+		killErr    error
+		wantHidden bool
+		wantErr    bool
+	}{
+		{name: "the turn is interrupted, then the workspace is backlogged", wantHidden: true},
+		{name: "a failed interrupt backlogs nothing", killErr: errors.New("shim unreachable"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			runningTurn(f, 0)
+			f.shim.killTurnErr = tt.killErr
+
+			// Act
+			err := f.verbs.SetHidden(context.Background(), "w1", true)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("SetHidden error = %v, want error %v", err, tt.wantErr)
+			}
+			if len(f.shim.killedTurns) != 1 && tt.killErr == nil {
+				t.Fatalf("killed turns = %+v, want one", f.shim.killedTurns)
+			}
+			if got := f.db.workspaces["w1"].Hidden; got != tt.wantHidden {
+				t.Fatalf("hidden = %v, want %v", got, tt.wantHidden)
+			}
+			if tt.wantErr && !loggedAtError(f, opSetHidden) {
+				t.Fatal("the failed interrupt was not recorded at error")
+			}
+		})
+	}
+}
+
+func TestABacklogOfAnIdleWorkspaceInterruptsNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	if err := f.verbs.SetHidden(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none for an idle workspace", f.shim.killedTurns)
+	}
+}

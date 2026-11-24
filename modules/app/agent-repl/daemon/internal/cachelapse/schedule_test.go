@@ -1107,3 +1107,31 @@ func TestTheBeatAndAKeepLiveStateOneGraceRule(t *testing.T) {
 		t.Fatalf("keep-live rule = %q, want %q", got, withinGraceRule)
 	}
 }
+
+func TestABackloggedWorkspaceOwesOneLastBeat(t *testing.T) {
+	tests := []struct {
+		name      string
+		hiddenAgo time.Duration
+		wantArmed bool
+	}{
+		{name: "backlogged after its cache was last written, it owes the beat that clock is due", hiddenAgo: 5 * time.Minute, wantArmed: true},
+		{name: "backlogged before its cache was last written, its last beat is spent", hiddenAgo: 20 * time.Minute, wantArmed: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the cache was last written ten minutes ago.
+			rec := hidden()
+			at := now.Add(-tt.hiddenAgo)
+			rec.HiddenAt = &at
+			h := newHarness(t, beatable(rec, 10*time.Minute))
+
+			// Act
+			h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+			// Assert
+			if _, armed := h.keeper.beats[theWorkspace]; armed != tt.wantArmed {
+				t.Fatalf("beat armed = %v, want %v", armed, tt.wantArmed)
+			}
+		})
+	}
+}

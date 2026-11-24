@@ -328,7 +328,7 @@ func TestLetsCacheLapseOfASelectedWorkspace(t *testing.T) {
 	}
 }
 
-func TestKeptWarmIgnoresCollapsingAndHonorsAHide(t *testing.T) {
+func TestKeptWarmIgnoresCollapsingAndKeepsABacklogForItsLastBeat(t *testing.T) {
 	hiddenAt := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name   string
@@ -337,7 +337,8 @@ func TestKeptWarmIgnoresCollapsingAndHonorsAHide(t *testing.T) {
 		want   bool
 	}{
 		{name: "a drawn workspace is kept warm", ws: Workspace{ID: "w"}, want: true},
-		{name: "a hidden workspace lets its cache lapse", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt}},
+		{name: "a backlogged workspace is kept warm for its last beat, which the keeper spends", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt}, want: true},
+		{name: "a hidden merge workspace is not kept warm", ws: Workspace{ID: "w", MergeOf: &MergeOrigin{}}},
 		{name: "a hidden workspace the user is looking at is kept warm", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt, Current: true}, want: true},
 		{name: "a hidden workspace with a merge queued is kept warm", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt}, queued: true, want: true},
 	}

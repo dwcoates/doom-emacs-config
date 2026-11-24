@@ -172,9 +172,6 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace has a merge queued", logsite.Msg("could not read whether the workspace has a merge queued; its keep-alive is not armed"), nil, err)
 		return beatPlan{}, false
 	}
-	if record.KeepaliveHeld() && !queued {
-		return none(noBeatCold, "it is hidden and nobody is looking at it; its cache lapses on its own clock")
-	}
 	if _, gated := k.deps.ColdGate(ws); gated {
 		return none(noBeatCold, "its session stands at the cold gate")
 	}
@@ -196,10 +193,22 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if session.Terminal != nil && !session.Parked() {
 		return none(noBeatNoSession, "its session is not live: "+session.Terminal.Kind)
 	}
-	// A CLOSED WORKSPACE OWES EACH CONVERSATION ONE LAST BEAT: none once that
-	// conversation's clock has passed the close.
+	// A CLOSED OR BACKLOGGED WORKSPACE OWES EACH CONVERSATION ONE LAST BEAT
+	// (owner rulings, 2026-10-17 and 2026-11-24): none once that
+	// conversation's clock has passed the close, or the backlog while nobody
+	// is looking at it (wsm.Workspace.KeepaliveHeld). Its cache then lapses on
+	// its own clock.
 	spent := func(clock time.Time) bool {
-		return record.Closed && !queued && (record.Closure == nil || !clock.Before(record.Closure.At))
+		switch {
+		case queued:
+			return false
+		case record.Closed:
+			return record.Closure == nil || !clock.Before(record.Closure.At)
+		case record.KeepaliveHeld():
+			return record.HiddenAt == nil || !clock.Before(*record.HiddenAt)
+		default:
+			return false
+		}
 	}
 	plan := beatPlan{sessionParked: session.Parked()}
 	// THE BOUND CONVERSATION, timed from THE CACHE CLOCK, NOT THE TURNS': a

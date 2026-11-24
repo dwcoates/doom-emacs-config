@@ -89,12 +89,16 @@ func (ws Workspace) InMergedBand() bool {
 // changes, and the visibility is no keep-alive input (owner-settled,
 // 2026-11-21). It is the run rule with every section unfolded and no
 // visibility: the selection, a queued merge, a deploy mediator, and every
-// workspace that is neither hidden nor a hidden merge workspace.
+// workspace that is not a hidden merge workspace, a backlogged one for its one
+// last beat.
 func (ws Workspace) KeptWarm(mergeQueued bool) bool {
 	if ws.Current || mergeQueued || ws.IsMediator() {
 		return true
 	}
-	return !ws.MergeHidden() && !ws.InHiddenSection()
+	// A BACKLOGGED WORKSPACE IS KEPT WARM FOR ONE LAST BEAT, as a closed one
+	// is (owner ruling, 2026-11-24): the keeper's schedule spends that beat
+	// and then holds its keep-alives (KeepaliveHeld).
+	return !ws.MergeHidden()
 }
 
 // LetsCacheLapse reports whether the workspace's prompt cache is left to lapse
@@ -161,10 +165,10 @@ func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 	return spared
 }
 
-// KeepaliveHeld reports whether the workspace's keep-alives are held from
-// the start (the keeper's `hold` cadence): it sits in the hidden section and
-// the user is not looking at it. The session's start and the keeper's cadence
-// read it, and LetsCacheLapse is it or a close.
+// KeepaliveHeld reports whether the workspace's keep-alives are held after
+// one last beat (owner ruling, 2026-11-24, which matches the close's
+// 2026-10-17 rule): it sits in the backlog and the user is not looking at it.
+// The keeper's cadence reads it, and LetsCacheLapse is it or a close.
 func (ws Workspace) KeepaliveHeld() bool {
 	return ws.InHiddenSection() && !ws.Current && !ws.IsMediator()
 }

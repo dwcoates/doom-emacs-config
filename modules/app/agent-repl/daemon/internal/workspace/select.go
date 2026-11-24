@@ -299,6 +299,10 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 		if err := v.revealMergeHidden(ctx, record); err != nil {
 			return err
 		}
+	} else if _, err := v.interruptBeforeLeaving(ctx, log, ws, opSetHidden, "backlog"); err != nil {
+		// A RUNNING TURN IS INTERRUPTED AHEAD OF THE BACKLOG (owner ruling,
+		// 2026-11-24): its page unloads and its shim parks.
+		return err
 	}
 	if err := v.recordHidden(ctx, log, ws, hidden); err != nil {
 		return err
