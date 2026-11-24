@@ -623,13 +623,26 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     ;; Act / Assert
     (should-not (agent-repl-open-tabs--ws-row "a"))))
 
+(ert-deftest agent-repl-test-open-tabs-ws-id-answers-a-workspaces-ref-id ()
+  "A workspace's id is its ref's."
+  (agent-repl-test-open-tabs--with
+    ;; Act / Assert
+    (should (equal (agent-repl-open-tabs--ws-id "a") "a"))))
+
+(ert-deftest agent-repl-test-open-tabs-ws-id-is-nil-for-a-workspace-with-no-ref ()
+  "A workspace with no ref has no id."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-get) #'ignore))
+      ;; Act / Assert
+      (should-not (agent-repl-open-tabs--ws-id "a")))))
+
 (ert-deftest agent-repl-test-open-tabs-every-name-to-row-read-shares-ws-row ()
-  "No function of open-tabs.el reads a workspace's row by its ref by hand."
+  "No function of open-tabs.el reads a workspace's id by its ref by hand."
   ;; Arrange
   (let ((source (with-temp-buffer
                   (insert-file-contents (replace-regexp-in-string "\\.elc\\'" ".el" (symbol-file 'agent-repl-open-tabs--ws-row)))
                   (buffer-string))))
-    ;; Act / Assert: the one read is `agent-repl-open-tabs--ws-row' itself.
+    ;; Act / Assert: the one read is `agent-repl-open-tabs--ws-id' itself.
     (should (= (agent-repl-test-open-tabs--occurrences "(agent-repl--ws-get ws :ref) :id)" source) 1))))
 
 (defun agent-repl-test-open-tabs--occurrences (needle haystack)

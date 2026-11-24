@@ -140,9 +140,13 @@ request was sent.  The daemon boundary: a test answers through its own.")
 Until it has, the frame has no workspace of the user's to move to."
   (and (agent-repl-open-tabs-starting-p) (null agent-repl-open-tabs--startup-selected)))
 
+(defun agent-repl-open-tabs--ws-id (ws)
+  "Return workspace WS\='s ref id, or nil when WS has none."
+  (plist-get (agent-repl--ws-get ws :ref) :id))
+
 (defun agent-repl-open-tabs--ws-row (ws)
   "Return workspace WS\='s row of the last roster walk, or nil."
-  (let ((id (plist-get (agent-repl--ws-get ws :ref) :id)))
+  (let ((id (agent-repl-open-tabs--ws-id ws)))
     (and id (agent-repl-open-tabs--row id))))
 
 (defun agent-repl-open-tabs-hidden-p (ws)
