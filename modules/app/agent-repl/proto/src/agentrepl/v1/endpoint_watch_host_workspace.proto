@@ -142,6 +142,15 @@ message WatchHostWorkspaceResponse {
     // composer offers is always a link in the feed. State, not an event: a
     // late subscriber is sent the set in force first.
     frontend.v1.WorkspaceMentionTargets mention_targets = 22;
+    // THE COMPOSER COMPLETIONS THE READER TOOK, whole-replaced on every
+    // change: Emacs's standing record of them, which orders the composer's
+    // completions so the candidate taken most recently is offered first. The
+    // record is the user's, one for the whole daemon, so every workspace's
+    // host watch carries the same record (ReportComposerSelection). State, not
+    // an event: a late subscriber is sent the record in force first, which is
+    // how Emacs is hydrated after either side restarts. The daemon keeps the
+    // record durably.
+    HostComposerSelections composer_selections = 24;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -669,3 +678,15 @@ message HostWorkspaceMentions {
   repeated string workspaces = 2;
 }
 
+// Every candidate the reader took from a composer's completion, by kind, each
+// list the most recently taken first. A selection's instant is stamped by the
+// daemon as it records it, strictly later than every earlier one, so no two
+// selections tie. Every name is listed once per kind.
+message HostComposerSelections {
+  // The slash commands, by name WITHOUT the leading slash.
+  repeated string commands = 1;
+  // The workspaces, by name.
+  repeated string workspaces = 2;
+  // The Slack channels, by name WITHOUT the leading hash.
+  repeated string channels = 3;
+}

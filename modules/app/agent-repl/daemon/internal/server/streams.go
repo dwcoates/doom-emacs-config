@@ -449,6 +449,10 @@ func (s *server) serveHost(
 	// record in force, so every fresh subscription -- a reconnect, a restart
 	// on either side -- hydrates Emacs with it first.
 	mentions, ackMentions := s.deps.Mentions.Topic(ws).SubscribeStream(streamCtx)
+	// THE COMPOSER SELECTIONS are state too, one record for every workspace:
+	// the topic holds the record in force, so every fresh subscription
+	// hydrates Emacs with it first.
+	chosen, ackChosen := s.deps.Selections.Topic().SubscribeStream(streamCtx)
 	// THE MENTION TARGETS are the names the composer completes: the very set
 	// this workspace's page links (mentionTargets), resolved from the roster
 	// topic, which replays the roster in force, and sent only when it changes.
@@ -515,6 +519,14 @@ func (s *server) serveHost(
 			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
 				Push: &agentreplv1.WatchHostWorkspaceResponse_Mentions{Mentions: record},
 			}, ackMentions
+		case record, ok := <-chosen:
+			if !ok {
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
+				return nil
+			}
+			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
+				Push: &agentreplv1.WatchHostWorkspaceResponse_ComposerSelections{ComposerSelections: record},
+			}, ackChosen
 		case roster, ok := <-rosters:
 			if !ok {
 				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)

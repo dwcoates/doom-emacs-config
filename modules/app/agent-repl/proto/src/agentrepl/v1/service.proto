@@ -82,6 +82,7 @@ import "agentrepl/v1/endpoint_keep_live_workspace.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
 import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
 import "agentrepl/v1/endpoint_list_slack_channels.proto";
+import "agentrepl/v1/endpoint_report_composer_selection.proto";
 import "agentrepl/v1/endpoint_list_slash_commands.proto";
 import "agentrepl/v1/endpoint_list_workspace_transcripts.proto";
 import "agentrepl/v1/endpoint_load_feed_through.proto";
@@ -713,6 +714,11 @@ service AgentRepl {
     // through). It may start a read of the channels, which is a cache fill.
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // The reader took a candidate from a composer's completion; the daemon
+  // records it as the newest of its kind, which orders every composer's
+  // completions. See endpoint_report_composer_selection.proto.
+  rpc ReportComposerSelection(ReportComposerSelectionRequest) returns (ReportComposerSelectionResponse);
 
   // ---- WEB LINK ----
   // The webview's connection surface: neither host-natured nor a drawn

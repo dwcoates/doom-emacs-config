@@ -359,6 +359,9 @@ const (
 	// AgentReplListSlackChannelsProcedure is the fully-qualified name of the AgentRepl's
 	// ListSlackChannels RPC.
 	AgentReplListSlackChannelsProcedure = "/agentrepl.v1.AgentRepl/ListSlackChannels"
+	// AgentReplReportComposerSelectionProcedure is the fully-qualified name of the AgentRepl's
+	// ReportComposerSelection RPC.
+	AgentReplReportComposerSelectionProcedure = "/agentrepl.v1.AgentRepl/ReportComposerSelection"
 	// AgentReplWatchWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchWebWorkspace RPC.
 	AgentReplWatchWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchWebWorkspace"
@@ -643,6 +646,7 @@ var (
 	agentReplAcceptHandedWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("AcceptHandedWorkspace")
 	agentReplListSlashCommandsMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ListSlashCommands")
 	agentReplListSlackChannelsMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ListSlackChannels")
+	agentReplReportComposerSelectionMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("ReportComposerSelection")
 	agentReplWatchWebWorkspaceMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
 	agentReplOpenLoginMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
 	agentReplWatchLoginTerminalMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
@@ -1082,6 +1086,10 @@ type AgentReplClient interface {
 	// Every Slack channel the user is a member of on their work Slack, for the
 	// composer's `#` completion. See endpoint_list_slack_channels.proto.
 	ListSlackChannels(context.Context, *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error)
+	// The reader took a candidate from a composer's completion; the daemon
+	// records it as the newest of its kind, which orders every composer's
+	// completions. See endpoint_report_composer_selection.proto.
+	ReportComposerSelection(context.Context, *connect.Request[v1.ReportComposerSelectionRequest]) (*connect.Response[v1.ReportComposerSelectionResponse], error)
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error)
@@ -2008,6 +2016,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		reportComposerSelection: connect.NewClient[v1.ReportComposerSelectionRequest, v1.ReportComposerSelectionResponse](
+			httpClient,
+			baseURL+AgentReplReportComposerSelectionProcedure,
+			connect.WithSchema(agentReplReportComposerSelectionMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchWebWorkspace: connect.NewClient[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplWatchWebWorkspaceProcedure,
@@ -2492,6 +2506,7 @@ type agentReplClient struct {
 	acceptHandedWorkspace              *connect.Client[v1.AcceptHandedWorkspaceRequest, v1.AcceptHandedWorkspaceResponse]
 	listSlashCommands                  *connect.Client[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse]
 	listSlackChannels                  *connect.Client[v1.ListSlackChannelsRequest, v1.ListSlackChannelsResponse]
+	reportComposerSelection            *connect.Client[v1.ReportComposerSelectionRequest, v1.ReportComposerSelectionResponse]
 	watchWebWorkspace                  *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
 	openLogin                          *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
 	watchLoginTerminal                 *connect.Client[v1.WatchLoginTerminalRequest, v1.LoginTerminalOutput]
@@ -3135,6 +3150,11 @@ func (c *agentReplClient) ListSlashCommands(ctx context.Context, req *connect.Re
 // ListSlackChannels calls agentrepl.v1.AgentRepl.ListSlackChannels.
 func (c *agentReplClient) ListSlackChannels(ctx context.Context, req *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error) {
 	return c.listSlackChannels.CallUnary(ctx, req)
+}
+
+// ReportComposerSelection calls agentrepl.v1.AgentRepl.ReportComposerSelection.
+func (c *agentReplClient) ReportComposerSelection(ctx context.Context, req *connect.Request[v1.ReportComposerSelectionRequest]) (*connect.Response[v1.ReportComposerSelectionResponse], error) {
+	return c.reportComposerSelection.CallUnary(ctx, req)
 }
 
 // WatchWebWorkspace calls agentrepl.v1.AgentRepl.WatchWebWorkspace.
@@ -3807,6 +3827,10 @@ type AgentReplHandler interface {
 	// Every Slack channel the user is a member of on their work Slack, for the
 	// composer's `#` completion. See endpoint_list_slack_channels.proto.
 	ListSlackChannels(context.Context, *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error)
+	// The reader took a candidate from a composer's completion; the daemon
+	// records it as the newest of its kind, which orders every composer's
+	// completions. See endpoint_report_composer_selection.proto.
+	ReportComposerSelection(context.Context, *connect.Request[v1.ReportComposerSelectionRequest]) (*connect.Response[v1.ReportComposerSelectionResponse], error)
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error
@@ -4729,6 +4753,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportComposerSelectionHandler := connect.NewUnaryHandler(
+		AgentReplReportComposerSelectionProcedure,
+		svc.ReportComposerSelection,
+		connect.WithSchema(agentReplReportComposerSelectionMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchWebWorkspaceHandler := connect.NewServerStreamHandler(
 		AgentReplWatchWebWorkspaceProcedure,
 		svc.WatchWebWorkspace,
@@ -5327,6 +5357,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplListSlashCommandsHandler.ServeHTTP(w, r)
 		case AgentReplListSlackChannelsProcedure:
 			agentReplListSlackChannelsHandler.ServeHTTP(w, r)
+		case AgentReplReportComposerSelectionProcedure:
+			agentReplReportComposerSelectionHandler.ServeHTTP(w, r)
 		case AgentReplWatchWebWorkspaceProcedure:
 			agentReplWatchWebWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplOpenLoginProcedure:
@@ -5918,6 +5950,10 @@ func (UnimplementedAgentReplHandler) ListSlashCommands(context.Context, *connect
 
 func (UnimplementedAgentReplHandler) ListSlackChannels(context.Context, *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListSlackChannels is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportComposerSelection(context.Context, *connect.Request[v1.ReportComposerSelectionRequest]) (*connect.Response[v1.ReportComposerSelectionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportComposerSelection is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error {

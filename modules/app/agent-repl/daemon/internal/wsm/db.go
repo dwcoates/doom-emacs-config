@@ -1076,6 +1076,12 @@ type DB interface {
 	PutComposerMentions(ctx context.Context, mentions []ComposerMention) error
 	// ComposerMentions loads every workspace's recorded mentions.
 	ComposerMentions(ctx context.Context) ([]ComposerMention, error)
+	// PutComposerSelection records a candidate the reader took from a
+	// composer's completion as last taken at its instant
+	// (composerselections.go).
+	PutComposerSelection(ctx context.Context, sel ComposerSelection) error
+	// ComposerSelections loads every recorded composer selection.
+	ComposerSelections(ctx context.Context) ([]ComposerSelection, error)
 	// AccountModelCatalog answers the catalog an account root last served.
 	AccountModelCatalog(ctx context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error)
 	// PutAccountModelCatalog records the catalog an account root served.

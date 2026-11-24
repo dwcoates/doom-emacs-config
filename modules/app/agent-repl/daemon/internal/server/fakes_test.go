@@ -2702,7 +2702,10 @@ type harness struct {
 	SlackChannels *fakeSlackChannels
 	// Mentions is the composer mentions' record, one topic per workspace,
 	// which a test publishes to.
-	Mentions   *fakeMentions
+	Mentions *fakeMentions
+	// Selections is the composer selections' record, which
+	// ReportComposerSelection records into and a test publishes to.
+	Selections *fakeSelections
 	Surfaces   *fakeSurfaces
 	Tests      *fakeTests
 	WebappDist string
@@ -2861,6 +2864,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		SlashCommands:    commandcatalog.New(),
 		SlackChannels:    &fakeSlackChannels{},
 		Mentions:         &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
+		Selections:       &fakeSelections{},
 		StallBeat:        &fakeStallBeat{},
 		Pages:            &fakeSupersededPages{},
 	}
@@ -2900,6 +2904,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		SlashCommands:     h.SlashCommands,
 		SlackChannels:     h.SlackChannels,
 		Mentions:          h.Mentions,
+		Selections:        h.Selections,
 		Login:             h.Login,
 		Ownership:         h.Ownership,
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
@@ -3896,6 +3901,33 @@ func (f *fakeMentions) Topic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.Hos
 		f.topics[ws] = topic
 	}
 	return topic
+}
+
+// fakeSelection is one selection the server handed the record.
+type fakeSelection struct {
+	Kind wsm.ComposerSelectionKind
+	Name string
+}
+
+// fakeSelections is the composer selections' record: one topic, holding
+// nothing until a test publishes to it, and every selection the server handed
+// it, refused with err when a test sets one.
+type fakeSelections struct {
+	mu       sync.Mutex
+	topic    publish.Topic[*agentreplv1.HostComposerSelections]
+	err      error
+	selected []fakeSelection
+}
+
+func (f *fakeSelections) Selected(_ context.Context, kind wsm.ComposerSelectionKind, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.selected = append(f.selected, fakeSelection{Kind: kind, Name: name})
+	return f.err
+}
+
+func (f *fakeSelections) Topic() *publish.Topic[*agentreplv1.HostComposerSelections] {
+	return &f.topic
 }
 
 // fakeSlackChannels answers ListSlackChannels with the response a test set,

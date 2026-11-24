@@ -80,7 +80,7 @@
 (declare-function agent-repl-sigil-word-ask-key "sigil-word" (bounds unanswered))
 (declare-function agent-repl-sigil-word-next-known "sigil-word" (sigil known-p limit))
 (declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
-(declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
+(declare-function agent-repl-completion-order-exit-function "completion-order" (ws kind key))
 (declare-function agent-repl-host-mentions "agent-repl-host" (ws kind))
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
 (declare-function agent-repl-rpc-list-slash-commands "agent-repl-rpc" (conn request &rest keys))
@@ -283,7 +283,7 @@ completion runs per keystroke."
         (agent-repl-completion-order-sorter
          'command (agent-repl-host-mentions ws 'command) #'agent-repl--command-completion-name))
        :exit-function
-       (agent-repl-completion-order-exit-function 'command #'agent-repl--command-completion-name)
+       (agent-repl-completion-order-exit-function ws 'command #'agent-repl--command-completion-name)
        :annotation-function
        (lambda (candidate) (agent-repl--command-completion-annotation catalog candidate))
        :company-docsig

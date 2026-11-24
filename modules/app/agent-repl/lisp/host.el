@@ -1672,6 +1672,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:host (agent-repl-host--apply-state ws value))
     (:selection (agent-repl-host--apply-selection ws value))
     (:mentions (agent-repl-host--apply-mentions ws value))
+    (:composer-selections (agent-repl-host--apply-composer-selections ws value))
     (:mention-targets (agent-repl-host--apply-mention-targets ws value))
     (:final-response-clicked (agent-repl-host--reply-target-picked ws "final-response-clicked"))
     (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
@@ -1793,6 +1794,41 @@ mentioned nothing."
                ('command :commands)
                ('workspace :workspaces)
                (_ (error "agent-repl: unknown mention kind %S" kind)))))
+
+;;;; ---- The composer selections ----
+
+(defvar agent-repl-host--composer-selections nil
+  "Every candidate the reader took from a composer's completion, or nil.
+The decoded `HostComposerSelections' plist `(:commands :workspaces
+:channels)', each a list of names, the most recently taken first, as the
+daemon last pushed it.  The record is the user's, not a workspace's, so it
+is one for all of Emacs: every workspace's host watch pushes the same one.
+Nil before the first push, which is nothing taken.")
+
+(defun agent-repl-host--apply-composer-selections (ws selections)
+  "Record SELECTIONS, the daemon's record of the composer's taken completions.
+SELECTIONS is the decoded `HostComposerSelections' plist.  It is the host
+watch's `composer_selections' push, arriving on WS's watch: state,
+whole-replaced, and sent first on every subscription, so Emacs's record is
+the daemon's after a restart of either side.  The composer orders its
+completions by it (completion-order.el)."
+  (setq agent-repl-host--composer-selections selections)
+  (agent-repl--log ws "elisp.host.composer-selections ws={ws} commands={commands} workspaces={workspaces} channels={channels}"
+                   :ws ws :commands (length (plist-get selections :commands))
+                   :workspaces (length (plist-get selections :workspaces))
+                   :channels (length (plist-get selections :channels))))
+
+(defun agent-repl-host-composer-selections (kind)
+  "Return the names of KIND the reader took from a composer's completion.
+The most recently taken first.  KIND is `command' (names without their
+slash), `workspace' or `channel' (names without their hash).  Nil before
+the first `composer_selections' push, which is nothing taken."
+  (plist-get agent-repl-host--composer-selections
+             (pcase kind
+               ('command :commands)
+               ('workspace :workspaces)
+               ('channel :channels)
+               (_ (error "agent-repl: unknown composer selection kind %S" kind)))))
 
 ;;;; ---- The mention targets ----
 

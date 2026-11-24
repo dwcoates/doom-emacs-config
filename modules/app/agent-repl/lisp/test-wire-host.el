@@ -442,6 +442,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"runInTerminal\":{\"command\":\"ls\"}}" :run-in-terminal)
                       (list "{\"selection\":{\"none\":{}}}" :selection)
                       (list "{\"mentions\":{\"commands\":[\"merge-queue\"]}}" :mentions)
+                      (list "{\"composerSelections\":{\"commands\":[\"compact\"]}}" :composer-selections)
                       (list "{\"mentionTargets\":{}}" :mention-targets)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"loadPageRequested\":{}}" :load-page-requested)
@@ -497,6 +498,37 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-host-workspace-mentions "{\"skills\":[]}")
                  '("HostWorkspaceMentions" skills "unknown field"))))
+
+;;;; ---- The composer selections push ----
+
+(ert-deftest agent-repl-test-wire-host-composer-selections-decode-every-list ()
+  "The composer selections push decodes each kind's names, newest first, as sent."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-watch-host-workspace-response
+                             (concat "{\"composerSelections\":{\"commands\":[\"compact\",\"autocompact\"],"
+                                     "\"workspaces\":[\"alpha\"],\"channels\":[\"eng\"]}}"))
+                            :value)
+                 '(:commands ("compact" "autocompact") :workspaces ("alpha") :channels ("eng")))))
+
+(ert-deftest agent-repl-test-wire-host-composer-selections-absent-lists-are-empty ()
+  "An empty record decodes to three empty lists, protojson's omitted fields."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-watch-host-workspace-response
+                             "{\"composerSelections\":{}}")
+                            :value)
+                 '(:commands nil :workspaces nil :channels nil))))
+
+(ert-deftest agent-repl-test-wire-host-composer-selections-a-non-string-name-is-a-breach ()
+  "A taken name that is not a string is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-composer-selections "{\"channels\":[3]}")
+                 '("HostComposerSelections" channels "expected a string"))))
+
+(ert-deftest agent-repl-test-wire-host-composer-selections-an-unknown-field-is-a-breach ()
+  "A field the record does not declare is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-composer-selections "{\"skills\":[]}")
+                 '("HostComposerSelections" skills "unknown field"))))
 
 ;;;; ---- The mention targets push ----
 
@@ -1968,7 +2000,7 @@ OpenTabs streams."
                              "openInEditor" "openCommitLog" "runInTerminal" "ending" "selection"
                              "finalResponseClicked" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
-                             "responseQuestion" "mentions" "mentionTargets")
+                             "responseQuestion" "mentions" "mentionTargets" "composerSelections")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
@@ -2760,6 +2792,59 @@ replaces it."
     (should (equal logged
                    '("elisp.wire.contract-breach message=WorkspaceOpenStage field=teleporting reason=unknown field")))))
 
+
+;;;; ---- ReportComposerSelection ----
+
+(ert-deftest agent-repl-test-wire-host-report-composer-selection-encodes-each-kind ()
+  "Each kind of selection encodes as its own arm carrying the name."
+  (dolist (case '((:command "{\"selection\":{\"command\":{\"name\":\"compact\"}}}")
+                  (:workspace "{\"selection\":{\"workspace\":{\"name\":\"compact\"}}}")
+                  (:channel "{\"selection\":{\"channel\":{\"name\":\"compact\"}}}")))
+    (should (equal (agent-repl-test-wire-host--quiet
+                     (json-serialize (agent-repl-wire-encode-report-composer-selection-request
+                                      (list :selection (list :arm (car case) :value '(:name "compact"))))))
+                   (cadr case)))))
+
+(ert-deftest agent-repl-test-wire-host-report-composer-selection-refuses-an-empty-name ()
+  "A selection naming nothing is refused before it is sent."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-report-composer-selection-request
+                  '(:selection (:arm :command :value (:name ""))))
+                 '("ComposerSelectionCommand" name "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-report-composer-selection-refuses-an-unknown-kind ()
+  "A selection of a kind the message does not declare is refused."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-report-composer-selection-request
+                  '(:selection (:arm :skill :value (:name "x"))))
+                 '("ComposerSelection" kind "unknown oneof arm"))))
+
+(ert-deftest agent-repl-test-wire-host-report-composer-selection-refuses-no-selection ()
+  "A request with no selection is refused."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-report-composer-selection-request '())
+                 '("ReportComposerSelectionRequest" selection "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-report-composer-selection-success-decodes ()
+  "Success carries nothing: the order arrives on the host stream."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-composer-selection-response
+                  "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-report-composer-selection-not-recorded-decodes ()
+  "The error arm decodes its cause with the daemon's detail."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-composer-selection-response
+                  "{\"error\":{\"notRecorded\":{\"detail\":\"disk full\"}}}")
+                 '(:arm :error :value (:cause (:arm :not-recorded :value (:detail "disk full")))))))
+
+(ert-deftest agent-repl-test-wire-host-report-composer-selection-unset-cause-is-a-breach ()
+  "An error naming no cause is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-report-composer-selection-response
+                  "{\"error\":{}}")
+                 '("ReportComposerSelectionError" cause "oneof is unset"))))
 
 (provide 'test-wire-host)
 

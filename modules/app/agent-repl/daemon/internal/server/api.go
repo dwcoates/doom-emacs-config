@@ -131,6 +131,10 @@ type Deps struct {
 	// Mentions backs the host stream's `mentions` arm: each workspace's record
 	// of the names its own final responses mentioned (composermentions.go).
 	Mentions ComposerMentions
+	// Selections backs ReportComposerSelection and the host stream's
+	// `composer_selections` arm: the record of every candidate the reader took
+	// from a composer's completion (composerselections.go).
+	Selections ComposerSelections
 	// Login backs the four login verbs; WatchLoginTerminal is a SERVER stream
 	// and SendLoginInput is unary.
 	Login login.Manager
@@ -756,6 +760,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the Slack channels")
 	case deps.Mentions == nil:
 		return nil, missing("the composer mentions")
+	case deps.Selections == nil:
+		return nil, missing("the composer selections")
 	}
 
 	life, cancel := context.WithCancel(context.Background())

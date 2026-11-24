@@ -1,0 +1,98 @@
+// endpoint_report_composer_selection.proto — ReportComposerSelection: the
+// reader took a candidate from a composer's completion. HOST section.
+//
+// Emacs is the only sender. Each time the reader finishes a composer
+// completion (a slash command, a workspace name or a Slack channel), Emacs
+// reports what was taken, and the daemon records it as the most recently
+// selected of its kind.
+//
+// THE RECORD IS THE USER'S, NOT A WORKSPACE'S. A command taken in one
+// workspace's composer is offered first in every other's, so the request names
+// no workspace and the record is one for the whole daemon. The daemon keeps it
+// durably, so it outlives a restart of either side.
+//
+// THE DAEMON ANSWERS WITH STATE, NOT IN THIS RESPONSE. A recorded selection is
+// pushed, the whole record restated, on every workspace's host watch
+// (agentrepl.v1.HostComposerSelections), which is the only place Emacs reads
+// the order from.
+//
+// NOT IDEMPOTENT: reporting the same name again makes it the newest again,
+// which is the point.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The selection the reader just made in a composer's completion.
+message ReportComposerSelectionRequest {
+  // What was taken. REQUIRED: an unset selection, an unset kind or an empty
+  // name is Connect InvalidArgument.
+  ComposerSelection selection = 1;
+}
+
+// One candidate taken from a composer's completion. THE ARM IS THE KIND of
+// completion it was taken from, since each kind is a separate namespace: a
+// command and a workspace may share a name and are ordered apart.
+message ComposerSelection {
+  // Which completion the candidate came from.
+  oneof kind {
+    // A slash command (a skill, a built-in, a custom command).
+    ComposerSelectionCommand command = 1;
+    // A workspace name.
+    ComposerSelectionWorkspace workspace = 2;
+    // A Slack channel.
+    ComposerSelectionChannel channel = 3;
+  }
+}
+
+// A slash command taken from the composer's `/` completion.
+message ComposerSelectionCommand {
+  // The command's name WITHOUT its leading slash ("compact"), the spelling the
+  // completion candidate named it by (its name or one of its aliases). Never
+  // empty.
+  string name = 1;
+}
+
+// A workspace name taken from the composer's workspace completion.
+message ComposerSelectionWorkspace {
+  // The workspace's name as completed. Never empty.
+  string name = 1;
+}
+
+// A Slack channel taken from the composer's `#` completion.
+message ComposerSelectionChannel {
+  // The channel's name WITHOUT its leading hash. Never empty.
+  string name = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportComposerSelectionResponse {
+  // Whether the selection was recorded.
+  oneof result {
+    ReportComposerSelectionSuccess success = 1;
+    ReportComposerSelectionError error = 2;
+  }
+}
+
+// The daemon recorded the selection durably as the newest of its kind and
+// pushed the restated record on every host watch.
+message ReportComposerSelectionSuccess {}
+
+// The selection could not be recorded; the record stands as it was, and no
+// push follows.
+message ReportComposerSelectionError {
+  // Why it was not recorded.
+  oneof cause {
+    // The daemon's state store refused the write.
+    ReportComposerSelectionNotRecorded not_recorded = 1;
+  }
+}
+
+// The daemon's state store refused the write, so the selection is neither
+// recorded nor pushed. The daemon has logged the failure.
+message ReportComposerSelectionNotRecorded {
+  // The store's error, for the sender's log.
+  string detail = 1;
+}

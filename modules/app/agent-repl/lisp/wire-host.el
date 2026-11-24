@@ -700,6 +700,22 @@ without their slash, WORKSPACES as the roster names them."
      (list :commands (agent-repl-wire--decode-repeated-string message 'commands object)
            :workspaces (agent-repl-wire--decode-repeated-string message 'workspaces object)))))
 
+;;;; ---- The composer selections push ----
+
+(defun agent-repl-wire-decode-host-composer-selections (value)
+  "Decode VALUE as `HostComposerSelections', a plist
+\(:commands :workspaces :channels).
+Each is a list of names, the most recently taken first: COMMANDS without
+their slash, CHANNELS without their hash."
+  (let* ((message "HostComposerSelections")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "HostComposerSelections" object '(commands workspaces channels))
+    (agent-repl-wire--decoded
+     message
+     (list :commands (agent-repl-wire--decode-repeated-string message 'commands object)
+           :workspaces (agent-repl-wire--decode-repeated-string message 'workspaces object)
+           :channels (agent-repl-wire--decode-repeated-string message 'channels object)))))
+
 ;;;; ---- The mention targets push ----
 
 (defun agent-repl-wire-decode-workspace-mention-repository (value)
@@ -1044,6 +1060,11 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `mentions' push arm VALUE as its `(:commands :workspaces)' plist."
   (agent-repl-wire-decode-host-workspace-mentions value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-composer-selections (value)
+  "Decode the `composer_selections' push arm VALUE as its
+`(:commands :workspaces :channels)' plist."
+  (agent-repl-wire-decode-host-composer-selections value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-mention-targets (value)
   "Decode the `mention_targets' push arm VALUE as its list of target plists."
   (agent-repl-wire-decode-workspace-mention-targets value))
@@ -1109,6 +1130,8 @@ Returns a plist (:command STRING)."
      (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending)
      (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection)
      (mentions :mentions agent-repl-wire-decode-watch-host-workspace-response-mentions)
+     (composerSelections :composer-selections
+                         agent-repl-wire-decode-watch-host-workspace-response-composer-selections)
      (mentionTargets :mention-targets
                      agent-repl-wire-decode-watch-host-workspace-response-mention-targets)
      (finalResponseClicked :final-response-clicked
@@ -1131,7 +1154,8 @@ Returns a plist (:command STRING)."
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending selection
        finalResponseClicked loadPageRequested composeEntry chatTextHighlighted
-       transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets))
+       transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets
+       composerSelections))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))
@@ -2912,6 +2936,82 @@ THE ARM IS THE CAUSE, so an unset cause is a contract breach."
       message 'result object
       '((success :success agent-repl-wire-decode-list-slack-channels-success)
         (error :error agent-repl-wire-decode-list-slack-channels-error))))))
+
+;;;; ---- ReportComposerSelection ----
+
+(defconst agent-repl-wire--composer-selection-arms
+  '((:command command "ComposerSelectionCommand")
+    (:workspace workspace "ComposerSelectionWorkspace")
+    (:channel channel "ComposerSelectionChannel"))
+  "Each `ComposerSelection' kind arm: its keyword, wire key and message name.
+Every arm carries one required name, so one encoder serves them all.")
+
+(defun agent-repl-wire--encode-composer-selection-name (message-name value)
+  "Encode VALUE, the plist `(:name NAME)', as MESSAGE-NAME's one name field."
+  (agent-repl-wire--require-fields message-name value '(:name))
+  (agent-repl-wire--encoded
+   message-name
+   (list (cons 'name (agent-repl-wire--require-string
+                      message-name 'name (plist-get value :name))))))
+
+(defun agent-repl-wire-encode-composer-selection (value)
+  "Encode VALUE as `ComposerSelection', the oneof plist `(:arm KIND :value
+\(:name NAME))'.  KIND is `:command', `:workspace' or `:channel'; NAME is
+never empty."
+  (agent-repl-wire--encoded
+   "ComposerSelection"
+   (agent-repl-wire--encode-oneof
+    "ComposerSelection" 'kind value
+    (mapcar (pcase-lambda (`(,arm ,key ,message))
+              (list arm key (lambda (v) (agent-repl-wire--encode-composer-selection-name message v))))
+            agent-repl-wire--composer-selection-arms))))
+
+(defun agent-repl-wire-encode-report-composer-selection-request (value)
+  "Encode the ReportComposerSelectionRequest plist VALUE `(:selection SEL)'.
+The record is the user's, not a workspace's, so no workspace is named."
+  (agent-repl-wire--require-fields "ReportComposerSelectionRequest" value '(:selection))
+  (agent-repl-wire--encoded
+   "ReportComposerSelectionRequest"
+   (list (cons 'selection (agent-repl-wire-encode-composer-selection
+                           (plist-get value :selection))))))
+
+(defun agent-repl-wire-decode-report-composer-selection-success (value)
+  "Decode VALUE as the empty message `ReportComposerSelectionSuccess'."
+  (agent-repl-wire--decode-empty "ReportComposerSelectionSuccess" value))
+
+(defun agent-repl-wire-decode-report-composer-selection-not-recorded (value)
+  "Decode VALUE as `ReportComposerSelectionNotRecorded', a plist (:detail TEXT)."
+  (let* ((message "ReportComposerSelectionNotRecorded")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ReportComposerSelectionNotRecorded" object '(detail))
+    (agent-repl-wire--decoded
+     message
+     (list :detail (agent-repl-wire--decode-string message 'detail object)))))
+
+(defun agent-repl-wire-decode-report-composer-selection-error (value)
+  "Decode VALUE as `ReportComposerSelectionError', a plist (:cause ONEOF).
+THE ARM IS THE CAUSE, so an unset cause is a contract breach."
+  (let* ((message "ReportComposerSelectionError")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ReportComposerSelectionError" object '(notRecorded))
+    (agent-repl-wire--decoded
+     message
+     (list :cause
+           (agent-repl-wire--decode-oneof
+            message 'cause object
+            '((notRecorded :not-recorded agent-repl-wire-decode-report-composer-selection-not-recorded)))))))
+
+(defun agent-repl-wire-decode-report-composer-selection-response (value)
+  "Decode VALUE as `ReportComposerSelectionResponse'.  THE ARM IS THE OUTCOME."
+  (let* ((message "ReportComposerSelectionResponse")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ReportComposerSelectionResponse" object '(success error))
+    (agent-repl-wire--decoded
+     message
+     (agent-repl-wire--decode-oneof
+      message 'result object
+      '((success :success agent-repl-wire-decode-report-composer-selection-success)
+        (error :error agent-repl-wire-decode-report-composer-selection-error))))))
 
 (provide 'wire-host)
 

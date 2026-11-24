@@ -963,6 +963,13 @@ func (s *requestLoggingServer) ListSlackChannels(
 	return serveUnary(s, ctx, "ListSlackChannels", req, s.server.ListSlackChannels)
 }
 
+func (s *requestLoggingServer) ReportComposerSelection(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportComposerSelectionRequest],
+) (*connect.Response[agentreplv1.ReportComposerSelectionResponse], error) {
+	return serveUnary(s, ctx, "ReportComposerSelection", req, s.server.ReportComposerSelection)
+}
+
 func (s *requestLoggingServer) ListSlashCommands(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ListSlashCommandsRequest],

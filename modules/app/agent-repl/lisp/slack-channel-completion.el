@@ -60,7 +60,7 @@
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-part-starts "completion-match" (word names separators))
 (declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
-(declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
+(declare-function agent-repl-completion-order-exit-function "completion-order" (ws kind key))
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
 (declare-function agent-repl--input-composers "input" ())
 (declare-function agent-repl-rpc-list-slack-channels "agent-repl-rpc" (conn request &rest keys))
@@ -266,7 +266,7 @@ call: completion runs per keystroke."
           (agent-repl-completion-order-sorter
            'channel nil #'agent-repl--slack-channel-completion-name))
          :exit-function
-         (agent-repl-completion-order-exit-function 'channel #'agent-repl--slack-channel-completion-name)
+         (agent-repl-completion-order-exit-function ws 'channel #'agent-repl--slack-channel-completion-name)
          :annotation-function
          (agent-repl--slack-channel-completion-annotation channels candidates)
          :company-docsig

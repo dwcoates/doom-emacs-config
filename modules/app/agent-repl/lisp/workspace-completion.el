@@ -63,7 +63,7 @@
 (declare-function agent-repl-completion-match-table "completion-match" (category collection &optional sort))
 (declare-function agent-repl-completion-match-part-starts "completion-match" (word names separators))
 (declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
-(declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
+(declare-function agent-repl-completion-order-exit-function "completion-order" (ws kind key))
 (declare-function agent-repl-host-mentions "agent-repl-host" (ws kind))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
@@ -167,7 +167,7 @@ completion runs per keystroke."
       names
       (agent-repl-completion-order-sorter
        'workspace (agent-repl-host-mentions ws 'workspace) #'identity))
-     :exit-function (agent-repl-completion-order-exit-function 'workspace #'identity)
+     :exit-function (agent-repl-completion-order-exit-function ws 'workspace #'identity)
      :annotation-function
      (agent-repl--workspace-completion-annotation
       (mapcar (lambda (name) (assoc name workspaces)) names)))))
