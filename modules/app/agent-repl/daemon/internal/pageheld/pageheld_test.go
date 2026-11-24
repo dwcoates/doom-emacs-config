@@ -22,10 +22,10 @@ func TestALoadIsHeldAndCounted(t *testing.T) {
 	table := New(c)
 
 	// Act
-	table.Loaded("a", LoadAwake)
+	table.Loaded("a", LoadAllocated)
 
 	// Assert
-	if got := table.Reported(); len(got) != 1 || got["a"] != LoadAwake || len(c.loads) != 1 || c.loads[0] != LoadAwake {
+	if got := table.Reported(); len(got) != 1 || got["a"] != LoadAllocated || len(c.loads) != 1 || c.loads[0] != LoadAllocated {
 		t.Fatalf("pages %v, loads %v; want a held for awake, counted once", got, c.loads)
 	}
 }
@@ -37,10 +37,10 @@ func TestAnUnloadDropsThePageAndIsCounted(t *testing.T) {
 	table.Loaded("a", LoadShown)
 
 	// Act
-	table.Unloaded("a", UnloadDormant)
+	table.Unloaded("a", UnloadDeallocated)
 
 	// Assert
-	if got := table.Reported(); len(got) != 0 || len(c.unloads) != 1 || c.unloads[0] != UnloadDormant {
+	if got := table.Reported(); len(got) != 0 || len(c.unloads) != 1 || c.unloads[0] != UnloadDeallocated {
 		t.Fatalf("pages %v, unloads %v; want none held, one dormant unload", got, c.unloads)
 	}
 }
@@ -90,7 +90,7 @@ func TestEveryAnswerIsACopy(t *testing.T) {
 func TestTheSnapshotIsTheHostsFramesLabelledWithEmacssReasons(t *testing.T) {
 	// Arrange
 	table := hosted()
-	table.Held("a", LoadAwake)
+	table.Held("a", LoadAllocated)
 	table.Held("emacs-only", LoadShown)
 
 	// Act
@@ -98,7 +98,7 @@ func TestTheSnapshotIsTheHostsFramesLabelledWithEmacssReasons(t *testing.T) {
 
 	// Assert
 	got := table.Snapshot()
-	if len(got) != 2 || got["a"] != LoadAwake || got["host-only"] != LoadUnreported {
+	if len(got) != 2 || got["a"] != LoadAllocated || got["host-only"] != LoadUnreported {
 		t.Fatalf("snapshot = %v, want a for awake and host-only unreported, never emacs-only", got)
 	}
 }
@@ -108,7 +108,7 @@ func TestTheSnapshotHoldsNothingBeforeTheHostsFirstCensus(t *testing.T) {
 	table := New(&counts{})
 
 	// Act
-	table.Held("a", LoadAwake)
+	table.Held("a", LoadAllocated)
 
 	// Assert
 	if got := table.Snapshot(); len(got) != 0 {

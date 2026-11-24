@@ -678,9 +678,9 @@ A DEBUG line (`agent-repl--log') is dropped."
   "The reason a page is loaded for is kept with the page itself."
   (agent-repl-test-wh--with-host
     ;; Act
-    (agent-repl-webhost-ensure-page "alpha" 'awake)
+    (agent-repl-webhost-ensure-page "alpha" 'allocated)
     ;; Assert
-    (should (eq (agent-repl-webhost-page-reason "alpha") 'awake))))
+    (should (eq (agent-repl-webhost-page-reason "alpha") 'allocated))))
 
 (ert-deftest agent-repl-test-wh-a-page-loaded-again-holds-its-latest-reason ()
   "A held page loaded again, for another reason, holds the newer reason."
@@ -713,7 +713,7 @@ streams with no reason (elisp.page-report.held-without-reason)."
   "A page dropped from the host takes its reason with it."
   (agent-repl-test-wh--with-host
     ;; Arrange
-    (agent-repl-webhost-ensure-page "alpha" 'awake)
+    (agent-repl-webhost-ensure-page "alpha" 'allocated)
     ;; Act
     (agent-repl-webhost-remove "alpha" t)
     ;; Assert
@@ -785,12 +785,12 @@ A running Emacs hot-loads the code over its own pages; no ERROR is recorded."
   "An entry already holding its reason is not converted, nor recorded."
   (agent-repl-test-wh--with-old-entries nil nil nil
     (let ((logged nil))
-      (puthash "id-alpha" (list :url "http://ws-alpha.localhost:1/" :why 'awake) agent-repl--webhost-pages)
+      (puthash "id-alpha" (list :url "http://ws-alpha.localhost:1/" :why 'allocated) agent-repl--webhost-pages)
       (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--webhost-migrate-page-entries))
       ;; Assert
-      (should (equal (gethash "id-alpha" agent-repl--webhost-pages) '(:url "http://ws-alpha.localhost:1/" :why awake)))
+      (should (equal (gethash "id-alpha" agent-repl--webhost-pages) '(:url "http://ws-alpha.localhost:1/" :why allocated)))
       (should-not (seq-some (lambda (text) (string-search "page-entry-converted" text)) logged)))))
 
 (ert-deftest agent-repl-test-wh-converting-records-each-entry-at-info ()

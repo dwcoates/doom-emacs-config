@@ -125,6 +125,13 @@ type wsState struct {
 	// this resolver knows; a render whose viewed arm differs reports it
 	// (noteViewed).
 	persistedViewed string
+	// leftAt is when the user last switched away from the workspace, nil
+	// until this roster saw them do so; leftFirstViewed reports that the visit
+	// left then first marked it viewed, and visitBeganViewed whether the
+	// current or last visit began viewed (page.go).
+	leftAt           *time.Time
+	leftFirstViewed  bool
+	visitBeganViewed bool
 	// turnEndedAt is when this roster saw the workspace's last turn end
 	// (SetTurnEnded), nil until it has; the view exemption measures from the
 	// later of it and the durable record's LastTurnEndedAt.
@@ -482,6 +489,9 @@ type rosterState struct {
 	// visibility sink, or read from the registry, per workspace.
 	visibility     map[ids.WorkspaceID]wsm.Visibility
 	visibilityKept map[ids.WorkspaceID]wsm.Visibility
+	// page is every workspace's page verdict as the last render derived it
+	// (resolvePages): true when the editor holds its page.
+	page map[ids.WorkspaceID]bool
 	// regSeen reports whether any registry has been installed. Nothing
 	// publishes before one: the roster is a view OF the registry, and a roster
 	// built from live frames alone would name no workspaces.

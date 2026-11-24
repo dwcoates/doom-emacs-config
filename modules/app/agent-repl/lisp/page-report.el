@@ -38,7 +38,7 @@
 (declare-function agent-repl-webhost-page-reason "webhost" (ws))
 
 (defconst agent-repl-page-report-load-reasons
-  '(shown awake slot load-requested ungated)
+  '(shown allocated slot load-requested ungated)
   "Every reason a page is loaded, as `agent-repl-page-unload-load' names it.")
 
 (defconst agent-repl-page-report-held-reasons
@@ -48,7 +48,7 @@ a page a running Emacs held before it kept a reason with each page
 \(`agent-repl--webhost-migrate-page-entries').  It is never a load's.")
 
 (defconst agent-repl-page-report-unload-reasons
-  '(dormant detached released)
+  '(deallocated detached released)
   "Every reason a page is dropped.")
 
 (defun agent-repl-page-report--keyword (why)

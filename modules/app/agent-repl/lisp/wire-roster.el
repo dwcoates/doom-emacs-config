@@ -249,14 +249,26 @@ question only the daemon answers."
                 agent-repl-wire-roster-row-idle-async-unread-arms)
                :arm)))
 
-(defun agent-repl-wire-decode-roster-row-dormant (value)
-  "Decode VALUE as `RosterRowDormant' and return t.
-The DORMANT marker: this workspace\='s session runs no work (parked, or
-up only for a keep-alive).  EMPTY, and PRESENCE IS THE FACT, as for the
-markers above.  The editor holds no page of a dormant workspace it does
-not show (`page-unload.el')."
-  (agent-repl-wire--decode-empty "RosterRowDormant" value)
-  t)
+(defun agent-repl-wire-decode-roster-row-page-loaded (value)
+  "Decode VALUE as the empty message `RosterRowPageLoaded'."
+  (agent-repl-wire--decode-empty "RosterRowPageLoaded" value))
+
+(defun agent-repl-wire-decode-roster-row-page-unloaded (value)
+  "Decode VALUE as the empty message `RosterRowPageUnloaded'."
+  (agent-repl-wire--decode-empty "RosterRowPageUnloaded" value))
+
+(defun agent-repl-wire-decode-roster-row-page (value)
+  "Decode VALUE as `RosterRowPage' and return its arm, `:loaded' or `:unloaded'.
+The daemon\='s PAGE VERDICT: whether this editor holds the workspace\='s
+page.  The editor loads and unloads the page to match (`page-unload.el')
+and decides nothing itself beyond the cold gate\='s hold-back."
+  (let ((object (agent-repl-wire--object "RosterRowPage" value)))
+    (agent-repl-wire--check-keys "RosterRowPage" object '(loaded unloaded))
+    (plist-get (agent-repl-wire--decode-oneof
+                "RosterRowPage" 'page object
+                '((loaded :loaded agent-repl-wire-decode-roster-row-page-loaded)
+                  (unloaded :unloaded agent-repl-wire-decode-roster-row-page-unloaded)))
+               :arm)))
 
 (defun agent-repl-wire-decode-roster-row-reviving (value)
   "Decode VALUE as `RosterRowReviving' and return t.
@@ -947,14 +959,14 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention viewed idleAsyncUnread reviving dormant detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest contextHeat visibility lastSelected lastInteracted lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention viewed idleAsyncUnread reviving page detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest contextHeat visibility lastSelected lastInteracted lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :viewed V
-:idle-async-unread IU :reviving R :dormant DO
+:idle-async-unread IU :reviving R :page PAGE
 :detached-live DL :one-shot OS :opening O :async-merging AM
 :merge-paused MP :merge-turn MT :open-owned-pull-request OP
 :context-heat CH :visibility VIS
@@ -986,9 +998,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :reviving (agent-repl-wire--decode-optional-message
                       "RosterRow" 'reviving object
                       #'agent-repl-wire-decode-roster-row-reviving)
-           :dormant (agent-repl-wire--decode-optional-message
-                     "RosterRow" 'dormant object
-                    #'agent-repl-wire-decode-roster-row-dormant)
+           :page (agent-repl-wire--decode-message
+                  "RosterRow" 'page object
+                  #'agent-repl-wire-decode-roster-row-page)
            :detached-live (agent-repl-wire--decode-optional-message
                            "RosterRow" 'detachedLive object
                            #'agent-repl-wire-decode-roster-row-detached-live)

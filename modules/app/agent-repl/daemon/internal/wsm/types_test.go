@@ -133,33 +133,3 @@ func TestNextKeepalives(t *testing.T) {
 	}
 }
 
-func TestSessionDormant(t *testing.T) {
-	restored := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
-	before, after := restored.Add(-time.Minute), restored.Add(time.Minute)
-	tests := []struct {
-		name        string
-		session     Session
-		turnStarted *time.Time
-		running     bool
-		want        bool
-	}{
-		{name: "a live session up for work", session: Session{}, want: false},
-		{name: "a parked session", session: sessionWithTerminal(TerminalParked), want: true},
-		{name: "a dead session", session: sessionWithTerminal("shim_died"), want: false},
-		{name: "a keep-alive's restore with no turn ever", session: Session{KeepaliveRestoredAt: &restored}, want: true},
-		{name: "a keep-alive's restore whose last turn started before it", session: Session{KeepaliveRestoredAt: &restored}, turnStarted: &before, want: true},
-		{name: "a keep-alive's restore a turn has started since", session: Session{KeepaliveRestoredAt: &restored}, turnStarted: &after, want: false},
-		{name: "a keep-alive's restore under a running turn", session: Session{KeepaliveRestoredAt: &restored}, turnStarted: &before, running: true, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := tt.session.Dormant(tt.turnStarted, tt.running)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("Dormant() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}

@@ -1,12 +1,11 @@
 // endpoint_report_page_state.proto — ReportPageState: Emacs tells the daemon
 // whether it holds a workspace's page in its web view, and why. HOST section.
 //
-// WHY A PAGE IS LOADED IS AN EDITOR FACT. Emacs decides every page load and
-// unload itself (page-unload.el: a page loads when the user shows its
-// workspace, when its session comes up for work, or when its slot is made
-// while the page is wanted, and unloads when its workspace goes dormant off
-// screen or stops being visible), so a workspace's visibility makes its page
-// ELIGIBLE and never says whether the page is held. This report is how the
+// WHETHER A PAGE IS LOADED IS THE DAEMON'S VERDICT, CARRIED OUT BY EMACS
+// (frontend.v1.RosterRowPage; page-unload.el): a page loads when the user
+// shows its workspace or when the verdict turns `loaded`, and unloads when the
+// verdict turns `unloaded` while the host does not show it, or when the
+// workspace stops being visible. The cold gate's hold-back is Emacs's own. This report is how the
 // daemon's metrics (agentrepl_pages_loaded, agentrepl_page_loads_total,
 // agentrepl_page_unloads_total) and the sidebar's count of loaded pages learn
 // why each page was loaded and what Emacs asked the web view to hold.
@@ -380,11 +379,11 @@ type ReportPageStateLoadReason struct {
 	// Types that are valid to be assigned to Reason:
 	//
 	//	*ReportPageStateLoadReason_Shown
-	//	*ReportPageStateLoadReason_Awake
 	//	*ReportPageStateLoadReason_Slot
 	//	*ReportPageStateLoadReason_LoadRequested
 	//	*ReportPageStateLoadReason_Ungated
 	//	*ReportPageStateLoadReason_HeldBeforeReasons
+	//	*ReportPageStateLoadReason_Allocated
 	Reason        isReportPageStateLoadReason_Reason `protobuf_oneof:"reason"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -436,15 +435,6 @@ func (x *ReportPageStateLoadReason) GetShown() *ReportPageStateLoadShown {
 	return nil
 }
 
-func (x *ReportPageStateLoadReason) GetAwake() *ReportPageStateLoadAwake {
-	if x != nil {
-		if x, ok := x.Reason.(*ReportPageStateLoadReason_Awake); ok {
-			return x.Awake
-		}
-	}
-	return nil
-}
-
 func (x *ReportPageStateLoadReason) GetSlot() *ReportPageStateLoadSlot {
 	if x != nil {
 		if x, ok := x.Reason.(*ReportPageStateLoadReason_Slot); ok {
@@ -481,6 +471,15 @@ func (x *ReportPageStateLoadReason) GetHeldBeforeReasons() *ReportPageStateLoadH
 	return nil
 }
 
+func (x *ReportPageStateLoadReason) GetAllocated() *ReportPageStateLoadAllocated {
+	if x != nil {
+		if x, ok := x.Reason.(*ReportPageStateLoadReason_Allocated); ok {
+			return x.Allocated
+		}
+	}
+	return nil
+}
+
 type isReportPageStateLoadReason_Reason interface {
 	isReportPageStateLoadReason_Reason()
 }
@@ -490,15 +489,9 @@ type ReportPageStateLoadReason_Shown struct {
 	Shown *ReportPageStateLoadShown `protobuf:"bytes,1,opt,name=shown,proto3,oneof"`
 }
 
-type ReportPageStateLoadReason_Awake struct {
-	// The workspace's session came up for work while its slot stood with no
-	// page.
-	Awake *ReportPageStateLoadAwake `protobuf:"bytes,2,opt,name=awake,proto3,oneof"`
-}
-
 type ReportPageStateLoadReason_Slot struct {
-	// The workspace's slot was made while its page was wanted (visible, not
-	// cold-gated, not dormant).
+	// The workspace's slot was made while its page was wanted (the daemon's
+	// page verdict `loaded`, not cold-gated).
 	Slot *ReportPageStateLoadSlot `protobuf:"bytes,3,opt,name=slot,proto3,oneof"`
 }
 
@@ -520,9 +513,13 @@ type ReportPageStateLoadReason_HeldBeforeReasons struct {
 	HeldBeforeReasons *ReportPageStateLoadHeldBeforeReasons `protobuf:"bytes,6,opt,name=held_before_reasons,json=heldBeforeReasons,proto3,oneof"`
 }
 
-func (*ReportPageStateLoadReason_Shown) isReportPageStateLoadReason_Reason() {}
+type ReportPageStateLoadReason_Allocated struct {
+	// The daemon's page verdict (frontend.v1.RosterRowPage) turned `loaded`
+	// while the workspace's slot stood with no page.
+	Allocated *ReportPageStateLoadAllocated `protobuf:"bytes,7,opt,name=allocated,proto3,oneof"`
+}
 
-func (*ReportPageStateLoadReason_Awake) isReportPageStateLoadReason_Reason() {}
+func (*ReportPageStateLoadReason_Shown) isReportPageStateLoadReason_Reason() {}
 
 func (*ReportPageStateLoadReason_Slot) isReportPageStateLoadReason_Reason() {}
 
@@ -531,6 +528,8 @@ func (*ReportPageStateLoadReason_LoadRequested) isReportPageStateLoadReason_Reas
 func (*ReportPageStateLoadReason_Ungated) isReportPageStateLoadReason_Reason() {}
 
 func (*ReportPageStateLoadReason_HeldBeforeReasons) isReportPageStateLoadReason_Reason() {}
+
+func (*ReportPageStateLoadReason_Allocated) isReportPageStateLoadReason_Reason() {}
 
 // The user showed the workspace.
 type ReportPageStateLoadShown struct {
@@ -569,43 +568,6 @@ func (*ReportPageStateLoadShown) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{6}
 }
 
-// The session came up for work.
-type ReportPageStateLoadAwake struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReportPageStateLoadAwake) Reset() {
-	*x = ReportPageStateLoadAwake{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReportPageStateLoadAwake) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReportPageStateLoadAwake) ProtoMessage() {}
-
-func (x *ReportPageStateLoadAwake) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReportPageStateLoadAwake.ProtoReflect.Descriptor instead.
-func (*ReportPageStateLoadAwake) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{7}
-}
-
 // The slot was made while the page was wanted.
 type ReportPageStateLoadSlot struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -615,7 +577,7 @@ type ReportPageStateLoadSlot struct {
 
 func (x *ReportPageStateLoadSlot) Reset() {
 	*x = ReportPageStateLoadSlot{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -627,7 +589,7 @@ func (x *ReportPageStateLoadSlot) String() string {
 func (*ReportPageStateLoadSlot) ProtoMessage() {}
 
 func (x *ReportPageStateLoadSlot) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -640,7 +602,7 @@ func (x *ReportPageStateLoadSlot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateLoadSlot.ProtoReflect.Descriptor instead.
 func (*ReportPageStateLoadSlot) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{7}
 }
 
 // The user asked for the held-back page.
@@ -652,7 +614,7 @@ type ReportPageStateLoadRequested struct {
 
 func (x *ReportPageStateLoadRequested) Reset() {
 	*x = ReportPageStateLoadRequested{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -664,7 +626,7 @@ func (x *ReportPageStateLoadRequested) String() string {
 func (*ReportPageStateLoadRequested) ProtoMessage() {}
 
 func (x *ReportPageStateLoadRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -677,7 +639,7 @@ func (x *ReportPageStateLoadRequested) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateLoadRequested.ProtoReflect.Descriptor instead.
 func (*ReportPageStateLoadRequested) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{8}
 }
 
 // The gate holding the page back ended.
@@ -689,7 +651,7 @@ type ReportPageStateLoadUngated struct {
 
 func (x *ReportPageStateLoadUngated) Reset() {
 	*x = ReportPageStateLoadUngated{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -701,7 +663,7 @@ func (x *ReportPageStateLoadUngated) String() string {
 func (*ReportPageStateLoadUngated) ProtoMessage() {}
 
 func (x *ReportPageStateLoadUngated) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -714,7 +676,7 @@ func (x *ReportPageStateLoadUngated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateLoadUngated.ProtoReflect.Descriptor instead.
 func (*ReportPageStateLoadUngated) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{9}
 }
 
 // The page predates the recorded reasons, and no rule explains it now.
@@ -726,7 +688,7 @@ type ReportPageStateLoadHeldBeforeReasons struct {
 
 func (x *ReportPageStateLoadHeldBeforeReasons) Reset() {
 	*x = ReportPageStateLoadHeldBeforeReasons{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -738,7 +700,7 @@ func (x *ReportPageStateLoadHeldBeforeReasons) String() string {
 func (*ReportPageStateLoadHeldBeforeReasons) ProtoMessage() {}
 
 func (x *ReportPageStateLoadHeldBeforeReasons) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -751,6 +713,43 @@ func (x *ReportPageStateLoadHeldBeforeReasons) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ReportPageStateLoadHeldBeforeReasons.ProtoReflect.Descriptor instead.
 func (*ReportPageStateLoadHeldBeforeReasons) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{10}
+}
+
+// The daemon's page verdict wanted the page.
+type ReportPageStateLoadAllocated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportPageStateLoadAllocated) Reset() {
+	*x = ReportPageStateLoadAllocated{}
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportPageStateLoadAllocated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportPageStateLoadAllocated) ProtoMessage() {}
+
+func (x *ReportPageStateLoadAllocated) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportPageStateLoadAllocated.ProtoReflect.Descriptor instead.
+func (*ReportPageStateLoadAllocated) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{11}
 }
 
@@ -762,9 +761,9 @@ type ReportPageStateUnloadReason struct {
 	//
 	// Types that are valid to be assigned to Reason:
 	//
-	//	*ReportPageStateUnloadReason_Dormant
 	//	*ReportPageStateUnloadReason_Detached
 	//	*ReportPageStateUnloadReason_Released
+	//	*ReportPageStateUnloadReason_Deallocated
 	Reason        isReportPageStateUnloadReason_Reason `protobuf_oneof:"reason"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -807,15 +806,6 @@ func (x *ReportPageStateUnloadReason) GetReason() isReportPageStateUnloadReason_
 	return nil
 }
 
-func (x *ReportPageStateUnloadReason) GetDormant() *ReportPageStateUnloadDormant {
-	if x != nil {
-		if x, ok := x.Reason.(*ReportPageStateUnloadReason_Dormant); ok {
-			return x.Dormant
-		}
-	}
-	return nil
-}
-
 func (x *ReportPageStateUnloadReason) GetDetached() *ReportPageStateUnloadDetached {
 	if x != nil {
 		if x, ok := x.Reason.(*ReportPageStateUnloadReason_Detached); ok {
@@ -834,15 +824,17 @@ func (x *ReportPageStateUnloadReason) GetReleased() *ReportPageStateUnloadReleas
 	return nil
 }
 
-type isReportPageStateUnloadReason_Reason interface {
-	isReportPageStateUnloadReason_Reason()
+func (x *ReportPageStateUnloadReason) GetDeallocated() *ReportPageStateUnloadDeallocated {
+	if x != nil {
+		if x, ok := x.Reason.(*ReportPageStateUnloadReason_Deallocated); ok {
+			return x.Deallocated
+		}
+	}
+	return nil
 }
 
-type ReportPageStateUnloadReason_Dormant struct {
-	// Its session went dormant (parked, or up only for a keep-alive) while the
-	// host did not show it, or the user switched away from it dormant. Its
-	// slot stays.
-	Dormant *ReportPageStateUnloadDormant `protobuf:"bytes,1,opt,name=dormant,proto3,oneof"`
+type isReportPageStateUnloadReason_Reason interface {
+	isReportPageStateUnloadReason_Reason()
 }
 
 type ReportPageStateUnloadReason_Detached struct {
@@ -857,48 +849,17 @@ type ReportPageStateUnloadReason_Released struct {
 	Released *ReportPageStateUnloadReleased `protobuf:"bytes,3,opt,name=released,proto3,oneof"`
 }
 
-func (*ReportPageStateUnloadReason_Dormant) isReportPageStateUnloadReason_Reason() {}
+type ReportPageStateUnloadReason_Deallocated struct {
+	// The daemon's page verdict (frontend.v1.RosterRowPage) turned `unloaded`
+	// while the host did not show the workspace. Its slot stays.
+	Deallocated *ReportPageStateUnloadDeallocated `protobuf:"bytes,4,opt,name=deallocated,proto3,oneof"`
+}
 
 func (*ReportPageStateUnloadReason_Detached) isReportPageStateUnloadReason_Reason() {}
 
 func (*ReportPageStateUnloadReason_Released) isReportPageStateUnloadReason_Reason() {}
 
-// The session went dormant off screen.
-type ReportPageStateUnloadDormant struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReportPageStateUnloadDormant) Reset() {
-	*x = ReportPageStateUnloadDormant{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReportPageStateUnloadDormant) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReportPageStateUnloadDormant) ProtoMessage() {}
-
-func (x *ReportPageStateUnloadDormant) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReportPageStateUnloadDormant.ProtoReflect.Descriptor instead.
-func (*ReportPageStateUnloadDormant) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{13}
-}
+func (*ReportPageStateUnloadReason_Deallocated) isReportPageStateUnloadReason_Reason() {}
 
 // The slot was taken down while the workspace stays open.
 type ReportPageStateUnloadDetached struct {
@@ -909,7 +870,7 @@ type ReportPageStateUnloadDetached struct {
 
 func (x *ReportPageStateUnloadDetached) Reset() {
 	*x = ReportPageStateUnloadDetached{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -921,7 +882,7 @@ func (x *ReportPageStateUnloadDetached) String() string {
 func (*ReportPageStateUnloadDetached) ProtoMessage() {}
 
 func (x *ReportPageStateUnloadDetached) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -934,7 +895,7 @@ func (x *ReportPageStateUnloadDetached) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateUnloadDetached.ProtoReflect.Descriptor instead.
 func (*ReportPageStateUnloadDetached) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{13}
 }
 
 // The workspace was released from the editor.
@@ -946,7 +907,7 @@ type ReportPageStateUnloadReleased struct {
 
 func (x *ReportPageStateUnloadReleased) Reset() {
 	*x = ReportPageStateUnloadReleased{}
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -958,7 +919,7 @@ func (x *ReportPageStateUnloadReleased) String() string {
 func (*ReportPageStateUnloadReleased) ProtoMessage() {}
 
 func (x *ReportPageStateUnloadReleased) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -971,6 +932,43 @@ func (x *ReportPageStateUnloadReleased) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPageStateUnloadReleased.ProtoReflect.Descriptor instead.
 func (*ReportPageStateUnloadReleased) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{14}
+}
+
+// The daemon's page verdict let the page go off screen.
+type ReportPageStateUnloadDeallocated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportPageStateUnloadDeallocated) Reset() {
+	*x = ReportPageStateUnloadDeallocated{}
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportPageStateUnloadDeallocated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportPageStateUnloadDeallocated) ProtoMessage() {}
+
+func (x *ReportPageStateUnloadDeallocated) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportPageStateUnloadDeallocated.ProtoReflect.Descriptor instead.
+func (*ReportPageStateUnloadDeallocated) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_report_page_state_proto_rawDescGZIP(), []int{15}
 }
 
@@ -1413,29 +1411,29 @@ const file_agentrepl_v1_endpoint_report_page_state_proto_rawDesc = "" +
 	"\x06reason\x18\x01 \x01(\v2).agentrepl.v1.ReportPageStateUnloadReasonR\x06reason\"V\n" +
 	"\x13ReportPageStateHeld\x12?\n" +
 	"\x06reason\x18\x01 \x01(\v2'.agentrepl.v1.ReportPageStateLoadReasonR\x06reason\"\x18\n" +
-	"\x16ReportPageStateNotHeld\"\xe3\x03\n" +
+	"\x16ReportPageStateNotHeld\"\xfc\x03\n" +
 	"\x19ReportPageStateLoadReason\x12>\n" +
-	"\x05shown\x18\x01 \x01(\v2&.agentrepl.v1.ReportPageStateLoadShownH\x00R\x05shown\x12>\n" +
-	"\x05awake\x18\x02 \x01(\v2&.agentrepl.v1.ReportPageStateLoadAwakeH\x00R\x05awake\x12;\n" +
+	"\x05shown\x18\x01 \x01(\v2&.agentrepl.v1.ReportPageStateLoadShownH\x00R\x05shown\x12;\n" +
 	"\x04slot\x18\x03 \x01(\v2%.agentrepl.v1.ReportPageStateLoadSlotH\x00R\x04slot\x12S\n" +
 	"\x0eload_requested\x18\x04 \x01(\v2*.agentrepl.v1.ReportPageStateLoadRequestedH\x00R\rloadRequested\x12D\n" +
 	"\aungated\x18\x05 \x01(\v2(.agentrepl.v1.ReportPageStateLoadUngatedH\x00R\aungated\x12d\n" +
-	"\x13held_before_reasons\x18\x06 \x01(\v22.agentrepl.v1.ReportPageStateLoadHeldBeforeReasonsH\x00R\x11heldBeforeReasonsB\b\n" +
-	"\x06reason\"\x1a\n" +
-	"\x18ReportPageStateLoadShown\"\x1a\n" +
-	"\x18ReportPageStateLoadAwake\"\x19\n" +
+	"\x13held_before_reasons\x18\x06 \x01(\v22.agentrepl.v1.ReportPageStateLoadHeldBeforeReasonsH\x00R\x11heldBeforeReasons\x12J\n" +
+	"\tallocated\x18\a \x01(\v2*.agentrepl.v1.ReportPageStateLoadAllocatedH\x00R\tallocatedB\b\n" +
+	"\x06reasonJ\x04\b\x02\x10\x03R\x05awake\"\x1a\n" +
+	"\x18ReportPageStateLoadShown\"\x19\n" +
 	"\x17ReportPageStateLoadSlot\"\x1e\n" +
 	"\x1cReportPageStateLoadRequested\"\x1c\n" +
 	"\x1aReportPageStateLoadUngated\"&\n" +
-	"$ReportPageStateLoadHeldBeforeReasons\"\x85\x02\n" +
-	"\x1bReportPageStateUnloadReason\x12F\n" +
-	"\adormant\x18\x01 \x01(\v2*.agentrepl.v1.ReportPageStateUnloadDormantH\x00R\adormant\x12I\n" +
+	"$ReportPageStateLoadHeldBeforeReasons\"\x1e\n" +
+	"\x1cReportPageStateLoadAllocated\"\xa0\x02\n" +
+	"\x1bReportPageStateUnloadReason\x12I\n" +
 	"\bdetached\x18\x02 \x01(\v2+.agentrepl.v1.ReportPageStateUnloadDetachedH\x00R\bdetached\x12I\n" +
-	"\breleased\x18\x03 \x01(\v2+.agentrepl.v1.ReportPageStateUnloadReleasedH\x00R\breleasedB\b\n" +
-	"\x06reason\"\x1e\n" +
-	"\x1cReportPageStateUnloadDormant\"\x1f\n" +
+	"\breleased\x18\x03 \x01(\v2+.agentrepl.v1.ReportPageStateUnloadReleasedH\x00R\breleased\x12R\n" +
+	"\vdeallocated\x18\x04 \x01(\v2..agentrepl.v1.ReportPageStateUnloadDeallocatedH\x00R\vdeallocatedB\b\n" +
+	"\x06reasonJ\x04\b\x01\x10\x02R\adormant\"\x1f\n" +
 	"\x1dReportPageStateUnloadDetached\"\x1f\n" +
-	"\x1dReportPageStateUnloadReleased\"\xa1\x01\n" +
+	"\x1dReportPageStateUnloadReleased\"\"\n" +
+	" ReportPageStateUnloadDeallocated\"\xa1\x01\n" +
 	"\x17ReportPageStateResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.ReportPageStateSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.ReportPageStateErrorH\x00R\x05errorB\b\n" +
@@ -1478,15 +1476,15 @@ var file_agentrepl_v1_endpoint_report_page_state_proto_goTypes = []any{
 	(*ReportPageStateNotHeld)(nil),               // 4: agentrepl.v1.ReportPageStateNotHeld
 	(*ReportPageStateLoadReason)(nil),            // 5: agentrepl.v1.ReportPageStateLoadReason
 	(*ReportPageStateLoadShown)(nil),             // 6: agentrepl.v1.ReportPageStateLoadShown
-	(*ReportPageStateLoadAwake)(nil),             // 7: agentrepl.v1.ReportPageStateLoadAwake
-	(*ReportPageStateLoadSlot)(nil),              // 8: agentrepl.v1.ReportPageStateLoadSlot
-	(*ReportPageStateLoadRequested)(nil),         // 9: agentrepl.v1.ReportPageStateLoadRequested
-	(*ReportPageStateLoadUngated)(nil),           // 10: agentrepl.v1.ReportPageStateLoadUngated
-	(*ReportPageStateLoadHeldBeforeReasons)(nil), // 11: agentrepl.v1.ReportPageStateLoadHeldBeforeReasons
+	(*ReportPageStateLoadSlot)(nil),              // 7: agentrepl.v1.ReportPageStateLoadSlot
+	(*ReportPageStateLoadRequested)(nil),         // 8: agentrepl.v1.ReportPageStateLoadRequested
+	(*ReportPageStateLoadUngated)(nil),           // 9: agentrepl.v1.ReportPageStateLoadUngated
+	(*ReportPageStateLoadHeldBeforeReasons)(nil), // 10: agentrepl.v1.ReportPageStateLoadHeldBeforeReasons
+	(*ReportPageStateLoadAllocated)(nil),         // 11: agentrepl.v1.ReportPageStateLoadAllocated
 	(*ReportPageStateUnloadReason)(nil),          // 12: agentrepl.v1.ReportPageStateUnloadReason
-	(*ReportPageStateUnloadDormant)(nil),         // 13: agentrepl.v1.ReportPageStateUnloadDormant
-	(*ReportPageStateUnloadDetached)(nil),        // 14: agentrepl.v1.ReportPageStateUnloadDetached
-	(*ReportPageStateUnloadReleased)(nil),        // 15: agentrepl.v1.ReportPageStateUnloadReleased
+	(*ReportPageStateUnloadDetached)(nil),        // 13: agentrepl.v1.ReportPageStateUnloadDetached
+	(*ReportPageStateUnloadReleased)(nil),        // 14: agentrepl.v1.ReportPageStateUnloadReleased
+	(*ReportPageStateUnloadDeallocated)(nil),     // 15: agentrepl.v1.ReportPageStateUnloadDeallocated
 	(*ReportPageStateResponse)(nil),              // 16: agentrepl.v1.ReportPageStateResponse
 	(*ReportPageStateSuccess)(nil),               // 17: agentrepl.v1.ReportPageStateSuccess
 	(*ReportPageStateError)(nil),                 // 18: agentrepl.v1.ReportPageStateError
@@ -1506,14 +1504,14 @@ var file_agentrepl_v1_endpoint_report_page_state_proto_depIdxs = []int32{
 	12, // 6: agentrepl.v1.ReportPageStateUnloaded.reason:type_name -> agentrepl.v1.ReportPageStateUnloadReason
 	5,  // 7: agentrepl.v1.ReportPageStateHeld.reason:type_name -> agentrepl.v1.ReportPageStateLoadReason
 	6,  // 8: agentrepl.v1.ReportPageStateLoadReason.shown:type_name -> agentrepl.v1.ReportPageStateLoadShown
-	7,  // 9: agentrepl.v1.ReportPageStateLoadReason.awake:type_name -> agentrepl.v1.ReportPageStateLoadAwake
-	8,  // 10: agentrepl.v1.ReportPageStateLoadReason.slot:type_name -> agentrepl.v1.ReportPageStateLoadSlot
-	9,  // 11: agentrepl.v1.ReportPageStateLoadReason.load_requested:type_name -> agentrepl.v1.ReportPageStateLoadRequested
-	10, // 12: agentrepl.v1.ReportPageStateLoadReason.ungated:type_name -> agentrepl.v1.ReportPageStateLoadUngated
-	11, // 13: agentrepl.v1.ReportPageStateLoadReason.held_before_reasons:type_name -> agentrepl.v1.ReportPageStateLoadHeldBeforeReasons
-	13, // 14: agentrepl.v1.ReportPageStateUnloadReason.dormant:type_name -> agentrepl.v1.ReportPageStateUnloadDormant
-	14, // 15: agentrepl.v1.ReportPageStateUnloadReason.detached:type_name -> agentrepl.v1.ReportPageStateUnloadDetached
-	15, // 16: agentrepl.v1.ReportPageStateUnloadReason.released:type_name -> agentrepl.v1.ReportPageStateUnloadReleased
+	7,  // 9: agentrepl.v1.ReportPageStateLoadReason.slot:type_name -> agentrepl.v1.ReportPageStateLoadSlot
+	8,  // 10: agentrepl.v1.ReportPageStateLoadReason.load_requested:type_name -> agentrepl.v1.ReportPageStateLoadRequested
+	9,  // 11: agentrepl.v1.ReportPageStateLoadReason.ungated:type_name -> agentrepl.v1.ReportPageStateLoadUngated
+	10, // 12: agentrepl.v1.ReportPageStateLoadReason.held_before_reasons:type_name -> agentrepl.v1.ReportPageStateLoadHeldBeforeReasons
+	11, // 13: agentrepl.v1.ReportPageStateLoadReason.allocated:type_name -> agentrepl.v1.ReportPageStateLoadAllocated
+	13, // 14: agentrepl.v1.ReportPageStateUnloadReason.detached:type_name -> agentrepl.v1.ReportPageStateUnloadDetached
+	14, // 15: agentrepl.v1.ReportPageStateUnloadReason.released:type_name -> agentrepl.v1.ReportPageStateUnloadReleased
+	15, // 16: agentrepl.v1.ReportPageStateUnloadReason.deallocated:type_name -> agentrepl.v1.ReportPageStateUnloadDeallocated
 	17, // 17: agentrepl.v1.ReportPageStateResponse.success:type_name -> agentrepl.v1.ReportPageStateSuccess
 	18, // 18: agentrepl.v1.ReportPageStateResponse.error:type_name -> agentrepl.v1.ReportPageStateError
 	19, // 19: agentrepl.v1.ReportPageStateError.unknown_workspace:type_name -> agentrepl.v1.ReportPageStateUnknownWorkspace
@@ -1540,16 +1538,16 @@ func file_agentrepl_v1_endpoint_report_page_state_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[5].OneofWrappers = []any{
 		(*ReportPageStateLoadReason_Shown)(nil),
-		(*ReportPageStateLoadReason_Awake)(nil),
 		(*ReportPageStateLoadReason_Slot)(nil),
 		(*ReportPageStateLoadReason_LoadRequested)(nil),
 		(*ReportPageStateLoadReason_Ungated)(nil),
 		(*ReportPageStateLoadReason_HeldBeforeReasons)(nil),
+		(*ReportPageStateLoadReason_Allocated)(nil),
 	}
 	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[12].OneofWrappers = []any{
-		(*ReportPageStateUnloadReason_Dormant)(nil),
 		(*ReportPageStateUnloadReason_Detached)(nil),
 		(*ReportPageStateUnloadReason_Released)(nil),
+		(*ReportPageStateUnloadReason_Deallocated)(nil),
 	}
 	file_agentrepl_v1_endpoint_report_page_state_proto_msgTypes[16].OneofWrappers = []any{
 		(*ReportPageStateResponse_Success)(nil),

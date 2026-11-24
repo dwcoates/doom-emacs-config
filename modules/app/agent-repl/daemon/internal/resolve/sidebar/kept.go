@@ -47,6 +47,8 @@ type rowKey struct {
 	arm        string
 	visibility wsm.Visibility
 	current    bool
+	// page is the page verdict, which a clock flips with no other input.
+	page bool
 }
 
 // kept is what the renders keep for one workspace.
@@ -155,6 +157,7 @@ func (r *resolver) rowKeyOf(ws ids.WorkspaceID, arm string, rc rowContext) rowKe
 		arm:        arm,
 		visibility: r.state.visibility[ws],
 		current:    rc.selected != nil && *rc.selected == ws,
+		page:       r.state.page[ws],
 	}
 }
 

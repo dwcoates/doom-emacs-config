@@ -118,3 +118,28 @@ them. Each clock is a product rule, not a bound on an operation.
 
 - The section the sidebar labels "Backlog" is BACKLOGGED in code and harness,
   never "hidden", which reads as "not visible".
+
+## Landed changes, continued
+
+### 2. `frontend.v1.RosterRow.page` replaces `dormant`; the page reasons follow
+
+- WHAT: `RosterRow.dormant` (field 80) and `RosterRowDormant` are retired.
+  `RosterRow.page` (field 82) is a `RosterRowPage` whose oneof is `loaded` or
+  `unloaded`: the daemon's page verdict. `agentrepl.v1.ReportPageState`'s
+  load reason `awake` (2) is retired for `allocated` (7), and its unload
+  reason `dormant` (1) for `deallocated` (4).
+- WHY: the owner wants one source of truth for workspace resource
+  allocation, with "not shown, so no page" structurally guaranteed. The editor
+  used to weigh dormancy, visits and its own ten-second timer
+  (`lisp/page-unload.el`); the daemon now derives the verdict
+  (`daemon/internal/resolve/sidebar/page.go`, `pageVerdict`), reading
+  visibility first so a not-visible workspace can never be `loaded`, and arms
+  one timer for the earliest clock so the verdict flips on time.
+- Ruling on the obviated declarations: `wsm.Session.Dormant` had no reader
+  left and was removed; `wsm.Session.KeepaliveRestoredAt` stays as recorded
+  evidence of why a session came up (dropping it needs a store migration for
+  no gain).
+- Consequences: the metrics' `reason` labels change (`awake` to `allocated`,
+  `dormant` to `deallocated`; `skills/agent-repl-metrics/CATALOG.md`). Every
+  verdict change is recorded at INFO (`daemon.sidebar.page_verdict_changed`)
+  with the inputs that decided it.

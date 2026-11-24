@@ -840,22 +840,41 @@ message RosterRowIdleAsyncUnread {
 // text while it stands.
 message RosterRowReviving {}
 
-// THE WORKSPACE'S SESSION RUNS NO WORK (wsm.Session.Dormant): it is parked,
-// whatever parked it, or a keep-alive's restore brought it up for its beat
-// and no turn has started since. Empty: presence is the fact.
+// WHETHER THE EDITOR HOLDS THE WORKSPACE'S PAGE: the page half of workspace
+// resource allocation (owner rulings, 2026-11-24). THE DAEMON DECIDES IT, on
+// every render, and the editor loads or unloads the page to match, deciding
+// nothing itself beyond the cold gate's hold-back. A workspace that is not
+// visible (RosterRowVisibility) is ALWAYS `unloaded`: the rule cannot be
+// broken by a clock or a status, because visibility is read first.
 //
-// WHAT IT GATES (owner rulings, 2026-11-23): the editor holds a visible
-// workspace's page while it is not dormant, or while the user is looking at
-// it, and loads a page at no other time. So a park unloads the page of a
-// workspace off screen; a switch to a dormant workspace loads its page with no
-// shim started (a prompt alone starts one), and a switch away from a visit
-// during which it was neither viewed nor working unloads it ten seconds later
-// unless the user switches back (a visit that viewed or worked keeps the page
-// until the session next goes dormant off screen); a session coming up for work (a prompt, a merge, a cold gate's
-// answer) loads its page; and a keep-alive's restore, which the beat's own
-// stand-down parks again, loads none. It says nothing of the status: a
-// dormant session is drawn as the idle session it stands in for.
-message RosterRowDormant {}
+// The rule, for a visible workspace, first that holds:
+//   - the selection is `loaded`;
+//   - a one-shot, or a workspace in its own (synchronous) merge, is
+//     `unloaded`: its page is loaded only while the user looks at it;
+//   - a working workspace (a turn or detached work runs, it asks something, it
+//     is starting, or it has priority P0.5 or P1) is `loaded`;
+//   - a workspace whose last result is unread is `loaded` for one hour after
+//     its turn ended;
+//   - any other is `loaded` for ten seconds after the user switched away from
+//     it, or for fifteen minutes when the visit being left is the one that
+//     first marked it viewed, and `unloaded` after.
+// The daemon re-renders when a clock above runs out, so the arm flips on time.
+message RosterRowPage {
+  // The verdict; exactly one arm is set, and an unset oneof is malformed.
+  oneof page {
+    // The editor holds the page, loading it if it holds none.
+    RosterRowPageLoaded loaded = 1;
+    // The editor holds no page for it, unloading one it holds unless the user
+    // is looking at it.
+    RosterRowPageUnloaded unloaded = 2;
+  }
+}
+
+// The editor holds the workspace's page. Empty: the arm is the verdict.
+message RosterRowPageLoaded {}
+
+// The editor holds no page for the workspace. Empty: the arm is the verdict.
+message RosterRowPageUnloaded {}
 
 // DETACHED WORK RUNS in this workspace: a subagent, a background shell, or
 // any other work that outlives the main thread's turn. PRESENT exactly while
@@ -2582,9 +2601,13 @@ message RosterRow {
   // The row's CONTEXT HEAT: present while the workspace's context holds at
   // least 400,000 tokens. See RosterRowContextHeat.
   optional RosterRowContextHeat context_heat = 79;
-  // The row's DORMANT marker: present while the workspace's session runs no
-  // work. See RosterRowDormant, which carries its whole contract.
-  optional RosterRowDormant dormant = 80;
+  // Field 80 (`dormant`) is RETIRED: whether the editor holds the page is
+  // the daemon's `page` verdict, not a rule the editor weighs.
+  reserved 80;
+  reserved "dormant";
+  // The row's PAGE verdict, which the editor follows. Always set. See
+  // RosterRowPage, which carries its whole contract.
+  RosterRowPage page = 82;
 
   // The row's display name.
   RosterRowName name = 2;

@@ -3410,9 +3410,8 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		PermissionMode:    permissionModeName(started.GetPermissionMode()),
 		StartedAt:         previous.StartedAt,
 	}
-	// A KEEP-ALIVE'S RESTORE IS RECORDED AS ONE, so every view tells a
-	// session up only for its keep-alive (dormant, wsm.Session.Dormant) from
-	// one up for work; any other bring-up's record clears it.
+	// A KEEP-ALIVE'S RESTORE IS RECORDED AS ONE, as evidence of why the
+	// session came up; any other bring-up's record clears it.
 	if cause, _ := shimlife.StartOf(ctx); cause == shimlife.StartKeepalive {
 		next.KeepaliveRestoredAt = &now
 	}

@@ -5116,22 +5116,22 @@ Each row's tab name is its id, upcased, so a reader that confused the two fails.
       ;; Act / Assert
       (should (equal (plist-get (agent-repl-roster-family-of "C2") :parent) "P")))))
 
-;;;; ---- The dormant marker ----
+;;;; ---- The page verdict ----
 
-(ert-deftest agent-repl-test-roster-dormant-p-reads-the-rows-marker ()
-  "A workspace whose row carries the dormant marker is dormant."
-  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:dormant t))))
-    (should (agent-repl-roster-dormant-p "a"))))
+(ert-deftest agent-repl-test-roster-page-loaded-p-reads-the-rows-verdict ()
+  "A workspace whose row's verdict is `loaded' holds its page."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:page :loaded))))
+    (should (agent-repl-roster-page-loaded-p "a"))))
 
-(ert-deftest agent-repl-test-roster-dormant-p-is-nil-for-a-session-at-work ()
-  "A row without the dormant marker runs work on its shim."
-  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:dormant nil))))
-    (should-not (agent-repl-roster-dormant-p "a"))))
+(ert-deftest agent-repl-test-roster-page-loaded-p-is-nil-for-an-unloaded-verdict ()
+  "A row whose verdict is `unloaded' holds no page."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:page :unloaded))))
+    (should-not (agent-repl-roster-page-loaded-p "a"))))
 
-(ert-deftest agent-repl-test-roster-dormant-p-is-nil-without-a-row ()
-  "A workspace the roster has no row for is not known dormant."
+(ert-deftest agent-repl-test-roster-page-loaded-p-is-nil-without-a-row ()
+  "A workspace the roster has no row for has no verdict, so holds no page."
   (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
-    (should-not (agent-repl-roster-dormant-p "a"))))
+    (should-not (agent-repl-roster-page-loaded-p "a"))))
 
 ;;;; ---- A tab's open and teardown record the roster facts that decided them
 

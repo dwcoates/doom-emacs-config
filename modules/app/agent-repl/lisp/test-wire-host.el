@@ -282,7 +282,7 @@
   (dolist (case '(((:arm :loaded :value :shown) . "\"loaded\":{\"reason\":{\"shown\":{}}}")
                   ((:arm :held :value :load-requested) . "\"held\":{\"reason\":{\"loadRequested\":{}}}")
                   ((:arm :held :value :held-before-reasons) . "\"held\":{\"reason\":{\"heldBeforeReasons\":{}}}")
-                  ((:arm :unloaded :value :dormant) . "\"unloaded\":{\"reason\":{\"dormant\":{}}}")
+                  ((:arm :unloaded :value :deallocated) . "\"unloaded\":{\"reason\":{\"deallocated\":{}}}")
                   ((:arm :not-held :value nil) . "\"notHeld\":{}")))
     (should (equal (agent-repl-test-wire-host--quiet
                      (json-serialize
@@ -1784,7 +1784,7 @@ OpenTabs streams."
           "\"name\":{\"text\":\"one\"},"
           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
           "\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"ready\":{},"
-          "\"visibility\":{\"unselectedVisible\":{}}}")
+          "\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}}}")
   "A minimal valid RosterRow for workspace w1.")
 
 (defun agent-repl-test-wire-host--opened (arm value)

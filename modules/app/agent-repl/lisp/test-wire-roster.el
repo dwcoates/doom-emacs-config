@@ -46,7 +46,8 @@
 LAST-UPDATED is the field's raw JSON, or nil to leave the field absent.  A
 row's other non-optional message fields are all present, its visibility
 `unselectedVisible' unless a fragment states one; FRAGMENTS supply the
-status arm and whatever else the case is about."
+status arm and whatever else the case is about.  Its page verdict is
+`loaded' unless a fragment states one."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"name\":{\"text\":\"fix-flaky\"},"
           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
@@ -55,6 +56,9 @@ status arm and whatever else the case is about."
           (if (seq-some (lambda (f) (string-prefix-p "\"visibility\":" f)) fragments)
               ""
             ",\"visibility\":{\"unselectedVisible\":{}}")
+          (if (seq-some (lambda (f) (string-prefix-p "\"page\":" f)) fragments)
+              ""
+            ",\"page\":{\"loaded\":{}}")
           (mapconcat (lambda (f) (concat "," f)) fragments "")
           "}"))
 
@@ -75,7 +79,7 @@ See `agent-repl-test-wire-roster--row-json'."
                    :viewed nil
                    :idle-async-unread nil
                    :reviving nil
-                   :dormant nil
+                   :page :loaded
                    :detached-live nil
                    :one-shot nil
                    :opening nil
@@ -377,22 +381,36 @@ See `agent-repl-test-wire-roster--row-json'."
                          :reviving)
               t)))
 
-(ert-deftest agent-repl-test-wire-roster-row-decodes-the-dormant-marker ()
-  "A row carrying `dormant' decodes it as PRESENT."
-  (should (eq (plist-get (agent-repl-test-wire-roster--decode
-                          #'agent-repl-wire-decode-roster-row
-                          (agent-repl-test-wire-roster--row
-                           "\"ready\":{}" "\"dormant\":{}"))
-                         :dormant)
-              t)))
+(ert-deftest agent-repl-test-wire-roster-row-decodes-its-page-verdict ()
+  "A row decodes the daemon's page verdict onto its arm."
+  (dolist (case '(("\"page\":{\"loaded\":{}}" . :loaded) ("\"page\":{\"unloaded\":{}}" . :unloaded)))
+    (should (eq (plist-get (agent-repl-test-wire-roster--decode
+                            #'agent-repl-wire-decode-roster-row
+                            (agent-repl-test-wire-roster--row "\"ready\":{}" (car case)))
+                           :page)
+                (cdr case)))))
 
-(ert-deftest agent-repl-test-wire-roster-row-dormant-carries-no-payload ()
-  "`RosterRowDormant' is EMPTY: a field inside it is an unknown field."
+(ert-deftest agent-repl-test-wire-roster-a-row-without-a-page-verdict-is-a-breach ()
+  "Every row carries the page verdict; an absent one is a breach."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (agent-repl-test-wire-roster--row
-                   "\"ready\":{}" "\"dormant\":{\"x\":1}"))
-                 '("RosterRowDormant" x "unknown field"))))
+                  (replace-regexp-in-string ",\"page\":{\"loaded\":{}}" ""
+                                            (agent-repl-test-wire-roster--row "\"ready\":{}") t t))
+                 '("RosterRow" page "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-page-verdict-on-no-arm-is-a-breach ()
+  "A page verdict naming no arm is a breach."
+  (should (equal (car (agent-repl-test-wire-roster--breach
+                       #'agent-repl-wire-decode-roster-row
+                       (agent-repl-test-wire-roster--row "\"ready\":{}" "\"page\":{}")))
+                 "RosterRowPage")))
+
+(ert-deftest agent-repl-test-wire-roster-the-retired-dormant-marker-is-a-breach ()
+  "A row naming the retired `dormant' marker is refused as unknown."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"ready\":{}" "\"dormant\":{}"))
+                 '("RosterRow" dormant "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-reviving-carries-no-payload ()
   "`RosterRowReviving' is EMPTY: a field inside it is an unknown field."
@@ -740,7 +758,7 @@ reserved."
   "The row's join key is not optional."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
+                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" workspace "required message field is absent"))))
 
@@ -748,7 +766,7 @@ reserved."
   "Every row has a display name element."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}},"
                           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" name "required message field is absent"))))
 
@@ -757,7 +775,7 @@ reserved."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"detail\":{}}"))
                  '("RosterRow" closed "required message field is absent"))))
 
@@ -766,7 +784,7 @@ reserved."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-roster-row
                              (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                                     "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},"
+                                     "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}},"
                                      "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},"
                                      "\"closed\":{\"closed\":true}}"))
                             :closed)
@@ -1026,7 +1044,7 @@ message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}},\"current\":{},"
                           "\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" when "required message field is absent"))))
 
@@ -1143,7 +1161,7 @@ message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"closed\":{}}"))
                  '("RosterRow" detail "required message field is absent"))))
 
@@ -2333,7 +2351,7 @@ carried, KEY's decoded value, and the push revision."
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
-                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}}}"))
+                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"page\":{\"loaded\":{}}}"))
                  '("RosterRow" availability "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-section-header-decodes-its-count ()

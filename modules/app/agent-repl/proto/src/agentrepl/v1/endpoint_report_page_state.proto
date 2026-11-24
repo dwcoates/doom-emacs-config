@@ -1,12 +1,11 @@
 // endpoint_report_page_state.proto — ReportPageState: Emacs tells the daemon
 // whether it holds a workspace's page in its web view, and why. HOST section.
 //
-// WHY A PAGE IS LOADED IS AN EDITOR FACT. Emacs decides every page load and
-// unload itself (page-unload.el: a page loads when the user shows its
-// workspace, when its session comes up for work, or when its slot is made
-// while the page is wanted, and unloads when its workspace goes dormant off
-// screen or stops being visible), so a workspace's visibility makes its page
-// ELIGIBLE and never says whether the page is held. This report is how the
+// WHETHER A PAGE IS LOADED IS THE DAEMON'S VERDICT, CARRIED OUT BY EMACS
+// (frontend.v1.RosterRowPage; page-unload.el): a page loads when the user
+// shows its workspace or when the verdict turns `loaded`, and unloads when the
+// verdict turns `unloaded` while the host does not show it, or when the
+// workspace stops being visible. The cold gate's hold-back is Emacs's own. This report is how the
 // daemon's metrics (agentrepl_pages_loaded, agentrepl_page_loads_total,
 // agentrepl_page_unloads_total) and the sidebar's count of loaded pages learn
 // why each page was loaded and what Emacs asked the web view to hold.
@@ -91,15 +90,16 @@ message ReportPageStateNotHeld {}
 // Why a page was loaded: the moment page-unload.el's one load path took. The
 // set arm IS the reason; its arm name is the metrics' `reason` label.
 message ReportPageStateLoadReason {
+  // `awake` (field 2) is RETIRED: a page loads off screen only when the
+  // daemon's page verdict wants it (`allocated`).
+  reserved 2;
+  reserved "awake";
   // The moment that loaded the page; Emacs always sets one.
   oneof reason {
     // The user showed the workspace and its page was not held.
     ReportPageStateLoadShown shown = 1;
-    // The workspace's session came up for work while its slot stood with no
-    // page.
-    ReportPageStateLoadAwake awake = 2;
-    // The workspace's slot was made while its page was wanted (visible, not
-    // cold-gated, not dormant).
+    // The workspace's slot was made while its page was wanted (the daemon's
+    // page verdict `loaded`, not cold-gated).
     ReportPageStateLoadSlot slot = 3;
     // The user clicked the load button the host draws for a cold-gated page.
     ReportPageStateLoadRequested load_requested = 4;
@@ -110,13 +110,14 @@ message ReportPageStateLoadReason {
     // conversion of a running Emacs's held pages, when it first loads the
     // code that keeps a reason with each page, names it.
     ReportPageStateLoadHeldBeforeReasons held_before_reasons = 6;
+    // The daemon's page verdict (frontend.v1.RosterRowPage) turned `loaded`
+    // while the workspace's slot stood with no page.
+    ReportPageStateLoadAllocated allocated = 7;
   }
 }
 
 // The user showed the workspace.
 message ReportPageStateLoadShown {}
-// The session came up for work.
-message ReportPageStateLoadAwake {}
 // The slot was made while the page was wanted.
 message ReportPageStateLoadSlot {}
 // The user asked for the held-back page.
@@ -125,31 +126,36 @@ message ReportPageStateLoadRequested {}
 message ReportPageStateLoadUngated {}
 // The page predates the recorded reasons, and no rule explains it now.
 message ReportPageStateLoadHeldBeforeReasons {}
+// The daemon's page verdict wanted the page.
+message ReportPageStateLoadAllocated {}
 
 // Why a page was dropped. The set arm IS the reason; its arm name is the
 // metrics' `reason` label.
 message ReportPageStateUnloadReason {
+  // `dormant` (field 1) is RETIRED: a page an open workspace keeps a slot for
+  // unloads when the daemon's page verdict lets it go (`deallocated`).
+  reserved 1;
+  reserved "dormant";
   // The moment that dropped the page; Emacs always sets one.
   oneof reason {
-    // Its session went dormant (parked, or up only for a keep-alive) while the
-    // host did not show it, or the user switched away from it dormant. Its
-    // slot stays.
-    ReportPageStateUnloadDormant dormant = 1;
     // Its webview slot was taken down while the workspace stays open: the
     // panel closed, a bundle remount, the restart verb's bounce.
     ReportPageStateUnloadDetached detached = 2;
     // The workspace was released from the editor: it stopped being visible,
     // or was closed, killed or merged.
     ReportPageStateUnloadReleased released = 3;
+    // The daemon's page verdict (frontend.v1.RosterRowPage) turned `unloaded`
+    // while the host did not show the workspace. Its slot stays.
+    ReportPageStateUnloadDeallocated deallocated = 4;
   }
 }
 
-// The session went dormant off screen.
-message ReportPageStateUnloadDormant {}
 // The slot was taken down while the workspace stays open.
 message ReportPageStateUnloadDetached {}
 // The workspace was released from the editor.
 message ReportPageStateUnloadReleased {}
+// The daemon's page verdict let the page go off screen.
+message ReportPageStateUnloadDeallocated {}
 
 // THE ARM IS THE OUTCOME.
 message ReportPageStateResponse {

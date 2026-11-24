@@ -118,6 +118,13 @@ type core struct {
 	// now is the clock a status change is stamped by (WithClock).
 	now func() time.Time
 
+	// pageClock arms the page verdicts' clock (WithPageClock); nil is
+	// time.AfterFunc. pageWakeAt is the instant it is armed for, zero when
+	// none is, and pageWakeStop stops it (page.go). Caller holds mu.
+	pageClock    PageClock
+	pageWakeAt   time.Time
+	pageWakeStop func() bool
+
 	// quiet is the lid-closed quiet state's view gate (WithQuiet): while it
 	// stands, a change derives every row's facts but resolves and publishes
 	// no roster, and quietStale records that one was skipped, so leaving
@@ -654,6 +661,7 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 	var judged map[ids.WorkspaceID]string
 	rc.arms, judged = r.resolveArms(rc)
 	r.resolveVisibility(repos, rc, judged)
+	r.resolvePages(rc, rc.arms)
 
 	workspaces := &frontendv1.WorkspaceRoster{
 		Repository: r.repositoryView(repos, orphans, rc, log),
@@ -1113,7 +1121,16 @@ func (r *resolver) DeployedVersion(v *deployedversion.Version) {
 func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_selected",
 		logsite.Msg("the roster took the selection and cleared the workspace's attention marker"),
-		nil, func(*wsState) {
+		nil, func(s *wsState) {
+			// A SWITCH ENDS ONE VISIT AND BEGINS ANOTHER, which the page
+			// verdict reads (page.go): when the user left, and whether that
+			// visit first marked the workspace viewed.
+			if prev := r.state.selected; prev != nil && *prev != ws {
+				noteDeparture(r.state.workspace(*prev), r.now())
+			}
+			if prev := r.state.selected; prev == nil || *prev != ws {
+				noteArrival(s)
+			}
 			selected := ws
 			r.state.selected = &selected
 		})

@@ -32,7 +32,7 @@ func TestLoadedPagesAreServedByReasonAndSessionState(t *testing.T) {
 	// Arrange
 	s, _ := openSurface(t)
 	pages := pageheld.New(s)
-	pages.Held("a", pageheld.LoadAwake)
+	pages.Held("a", pageheld.LoadAllocated)
 	pages.Held("k", pageheld.LoadSlot)
 	pages.Held("i", pageheld.LoadShown)
 	pages.Held("p", pageheld.LoadShown)
@@ -49,7 +49,7 @@ func TestLoadedPagesAreServedByReasonAndSessionState(t *testing.T) {
 
 	// Assert
 	mustContain(t, body,
-		`agentrepl_pages_loaded{reason="awake",session="working"} 1`,
+		`agentrepl_pages_loaded{reason="allocated",session="working"} 1`,
 		`agentrepl_pages_loaded{reason="slot",session="keepalive"} 1`,
 		`agentrepl_pages_loaded{reason="shown",session="idle"} 1`,
 		`agentrepl_pages_loaded{reason="shown",session="parked"} 1`,
@@ -61,7 +61,7 @@ func TestTheLoadedPagesAreTheHostsFrames(t *testing.T) {
 	// Arrange
 	s, _ := openSurface(t)
 	pages := pageheld.New(s)
-	pages.Held("a", pageheld.LoadAwake)
+	pages.Held("a", pageheld.LoadAllocated)
 	pages.Held("gone", pageheld.LoadShown)
 	pages.HostAttached("host")
 	pages.HostReported("host", []ids.WorkspaceID{"a", "k"}, false)
@@ -75,7 +75,7 @@ func TestTheLoadedPagesAreTheHostsFrames(t *testing.T) {
 
 	// Assert
 	mustContain(t, body,
-		`agentrepl_pages_loaded{reason="awake",session="working"} 1`,
+		`agentrepl_pages_loaded{reason="allocated",session="working"} 1`,
 		`agentrepl_pages_loaded{reason="unreported",session="keepalive"} 1`,
 	)
 	if strings.Contains(body, PagesLoadedName+`{reason="shown"`) {
@@ -87,7 +87,7 @@ func TestNoPageIsServedBeforeTheHostsFirstCensus(t *testing.T) {
 	// Arrange
 	s, _ := openSurface(t)
 	pages := pageheld.New(s)
-	pages.Held("a", pageheld.LoadAwake)
+	pages.Held("a", pageheld.LoadAllocated)
 	none := func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil }
 	if err := s.RegisterPages(pages, pagesCensus(), none); err != nil {
 		t.Fatalf("RegisterPages: %v", err)
@@ -107,7 +107,7 @@ func TestAPageWhoseSessionCannotBeReadIsOmittedAndSaidOnce(t *testing.T) {
 	s, logs := openSurface(t)
 	pages := pageheld.New(s)
 	pages.Held("p", pageheld.LoadShown)
-	pages.Held("a", pageheld.LoadAwake)
+	pages.Held("a", pageheld.LoadAllocated)
 	pages.HostAttached("host")
 	pages.HostReported("host", []ids.WorkspaceID{"p", "a"}, false)
 	failing := func(context.Context, ids.WorkspaceID) (bool, error) { return false, errors.New("state closed") }
@@ -120,7 +120,7 @@ func TestAPageWhoseSessionCannotBeReadIsOmittedAndSaidOnce(t *testing.T) {
 	body := scrape(t, s)
 
 	// Assert
-	mustContain(t, body, `agentrepl_pages_loaded{reason="awake",session="working"} 1`)
+	mustContain(t, body, `agentrepl_pages_loaded{reason="allocated",session="working"} 1`)
 	if strings.Contains(body, `session="parked"`) {
 		t.Fatalf("an unread page was served:\n%s", body)
 	}
@@ -142,14 +142,14 @@ func TestPageLoadsAndUnloadsAreCountedFromZero(t *testing.T) {
 
 	// Act
 	pages.Loaded("a", pageheld.LoadShown)
-	pages.Unloaded("a", pageheld.UnloadDormant)
+	pages.Unloaded("a", pageheld.UnloadDeallocated)
 	body := scrape(t, s)
 
 	// Assert
 	mustContain(t, body,
 		`agentrepl_page_loads_total{reason="shown"} 1`,
 		`agentrepl_page_loads_total{reason="slot"} 0`,
-		`agentrepl_page_unloads_total{reason="dormant"} 1`,
+		`agentrepl_page_unloads_total{reason="deallocated"} 1`,
 		`agentrepl_page_unloads_total{reason="released"} 0`,
 	)
 }

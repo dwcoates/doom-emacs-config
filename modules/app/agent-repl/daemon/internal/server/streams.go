@@ -1127,8 +1127,8 @@ func pageLoadReason(r *agentreplv1.ReportPageStateLoadReason) pageheld.LoadReaso
 	switch arm := r.GetReason().(type) {
 	case *agentreplv1.ReportPageStateLoadReason_Shown:
 		return pageheld.LoadShown
-	case *agentreplv1.ReportPageStateLoadReason_Awake:
-		return pageheld.LoadAwake
+	case *agentreplv1.ReportPageStateLoadReason_Allocated:
+		return pageheld.LoadAllocated
 	case *agentreplv1.ReportPageStateLoadReason_Slot:
 		return pageheld.LoadSlot
 	case *agentreplv1.ReportPageStateLoadReason_LoadRequested:
@@ -1145,8 +1145,8 @@ func pageLoadReason(r *agentreplv1.ReportPageStateLoadReason) pageheld.LoadReaso
 // pageUnloadReason reads a validated unload reason's arm.
 func pageUnloadReason(r *agentreplv1.ReportPageStateUnloadReason) pageheld.UnloadReason {
 	switch arm := r.GetReason().(type) {
-	case *agentreplv1.ReportPageStateUnloadReason_Dormant:
-		return pageheld.UnloadDormant
+	case *agentreplv1.ReportPageStateUnloadReason_Deallocated:
+		return pageheld.UnloadDeallocated
 	case *agentreplv1.ReportPageStateUnloadReason_Detached:
 		return pageheld.UnloadDetached
 	case *agentreplv1.ReportPageStateUnloadReason_Released:

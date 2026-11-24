@@ -2149,7 +2149,7 @@ func shownReason() *agentreplv1.ReportPageStateLoadReason {
 }
 
 func dormantReason() *agentreplv1.ReportPageStateUnloadReason {
-	return &agentreplv1.ReportPageStateUnloadReason{Reason: &agentreplv1.ReportPageStateUnloadReason_Dormant{Dormant: &agentreplv1.ReportPageStateUnloadDormant{}}}
+	return &agentreplv1.ReportPageStateUnloadReason{Reason: &agentreplv1.ReportPageStateUnloadReason_Deallocated{Deallocated: &agentreplv1.ReportPageStateUnloadDeallocated{}}}
 }
 
 func TestReportPageStateRecordsEachArm(t *testing.T) {
