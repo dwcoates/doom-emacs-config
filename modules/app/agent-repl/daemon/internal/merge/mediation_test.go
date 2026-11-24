@@ -1993,7 +1993,7 @@ func TestARoundWhoseServedMediatorCannotBeRefreshedIsStillEscalated(t *testing.T
 	// Assert
 	assertRoundFailureEscalated(t, h, "the deploy mediator could not be found, made or readied for the check", "rebase conflicts")
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed"}); !ok {
+		Message: "the mediator's worktree could not be brought to the main branch's tip; it is not briefed"}); !ok {
 		t.Fatalf("records = %v, want the refresh's failure at ERROR", h.logs.Records())
 	}
 }

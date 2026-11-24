@@ -111,19 +111,19 @@ func TestMediatorOfAnswersWhatItCannotDo(t *testing.T) {
 		arrange func(t *testing.T, h *harness)
 		message string
 	}{
-		{name: "a mediator that cannot be read", message: "could not read the deploy mediator",
+		{name: "a mediator that cannot be read", message: "could not read the mediator",
 			arrange: func(t *testing.T, h *harness) {
 				mediatorIn(t, h, "ws-standing", false)
 				h.db.mu.Lock()
 				h.db.workspaceErr = errors.New("database is locked")
 				h.db.mu.Unlock()
 			}},
-		{name: "a closed one that cannot be reopened", message: "the deploy mediator could not be reopened",
+		{name: "a closed one that cannot be reopened", message: "the mediator could not be reopened",
 			arrange: func(t *testing.T, h *harness) {
 				mediatorIn(t, h, "ws-standing", true)
 				h.checks.reopenErr = errors.New("branch gone")
 			}},
-		{name: "one that cannot be made", message: "the deploy mediator could not be made",
+		{name: "one that cannot be made", message: "the mediator could not be made",
 			arrange: func(t *testing.T, h *harness) { h.checks.createErr = errors.New("disk full") }},
 	}
 	for _, tt := range tests {
@@ -141,8 +141,9 @@ func TestMediatorOfAnswersWhatItCannotDo(t *testing.T) {
 			if err == nil {
 				t.Fatal("mediatorOf = nil, want the failure answered")
 			}
-			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
-				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message,
+				Match: func(r dlog.Record) bool { return r.Context["role"] == string(wsm.MediatorDeploy) }}); !ok {
+				t.Fatalf("records = %v, want %q at ERROR naming the deploy role", h.logs.Records(), tt.message)
 			}
 		})
 	}
@@ -202,11 +203,11 @@ func TestReadyMediatorAnswersWhatItCannotDo(t *testing.T) {
 		arrange func(h *harness)
 		message string
 	}{
-		{name: "a worktree that cannot be refreshed", message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
+		{name: "a worktree that cannot be refreshed", message: "the mediator's worktree could not be brought to the main branch's tip; it is not briefed",
 			arrange: func(h *harness) { h.checks.refreshErr = errors.New("rebase conflicts") }},
-		{name: "an effort that cannot be set", message: "the deploy mediator's model and effort could not be set; it is not briefed",
+		{name: "an effort that cannot be set", message: "the mediator's model and effort could not be set; it is not briefed",
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no selector") }},
-		{name: "a mediator that cannot be shown", message: "the deploy mediator could not be shown for its brief; it is not briefed",
+		{name: "a mediator that cannot be shown", message: "the mediator could not be shown for its brief; it is not briefed",
 			arrange: func(h *harness) { h.checks.resumeErr = errors.New("parent hidden") }},
 	}
 	for _, tt := range tests {
@@ -223,8 +224,9 @@ func TestReadyMediatorAnswersWhatItCannotDo(t *testing.T) {
 			if err == nil {
 				t.Fatal("readyMediator = nil, want the failure answered")
 			}
-			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
-				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message,
+				Match: func(r dlog.Record) bool { return r.Context["role"] == string(wsm.MediatorDeploy) }}); !ok {
+				t.Fatalf("records = %v, want %q at ERROR naming the deploy role", h.logs.Records(), tt.message)
 			}
 		})
 	}
@@ -550,7 +552,7 @@ func TestAHiddenMediatorThatCannotBeShownIsAnError(t *testing.T) {
 
 	// Assert
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the hidden deploy mediator could not be shown"}); !ok {
+		Message: "the hidden mediator could not be shown"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }
@@ -727,7 +729,7 @@ func TestAnAdoptionWhoseMediatorCannotBeReadSaysSo(t *testing.T) {
 		t.Fatalf("AdoptWorkspace = %v, want the merges taken all the same", err)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "could not read whether the adopted workspace is a deploy mediator; a round its adoption owes waits for the queue's next pass"}); !ok {
+		Message: "could not read whether the adopted workspace is a mediator; a round its adoption owes waits for the queue's next pass"}); !ok {
 		t.Fatalf("records = %v, want the unread mediator at ERROR", h.logs.Records())
 	}
 }

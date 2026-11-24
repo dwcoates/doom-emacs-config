@@ -313,7 +313,7 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 		o.deps.Log.Global().Info(opProduction, "the production mediator was told of the span before; its turn is reattached", withField(withField(fields, "turn", string(c.Turn)), "resumed", c.Resumed))
 		closed, err = o.reattachTurn(ctx, ws, fields, c.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION)
 		if err != nil {
-			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's turn could not be awaited; the span stays due"), err)
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's reattached turn could not be awaited; the span stays due"), err)
 			return
 		}
 	}
@@ -660,7 +660,7 @@ func (o *orchestrator) DecideProduction(ctx context.Context, ws ids.WorkspaceID,
 		return nil, o.productionDecisionFailed(fields, err)
 	}
 	o.deps.Meter.ObserveProductionCheck(ProductionCheckDispatched, len(made))
-	o.deps.Log.Global().Info(opProduction, "the production mediator dispatched {children} children", withField(fields, "summary", d.Summary))
+	o.deps.Log.Global().Info(opProduction, "the production mediator dispatched its children", withField(fields, "summary", d.Summary))
 	return made, nil
 }
 

@@ -258,7 +258,7 @@ func (o *orchestrator) mediatorOnly(ctx context.Context, ws ids.WorkspaceID, fie
 	for _, r := range []mediatorRole{deployRole, productionRole} {
 		_, isMediator, err := o.deps.DB.StandingMediatorRepoOf(ctx, r.role, ws)
 		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not read whether the workspace changing the ignored records is a {role} mediator", withField(r.roleFields(fields), "error", err.Error()))
+			o.deps.Log.Global().Error(opMediation, "could not read whether the workspace changing the ignored records is a mediator", withField(r.roleFields(fields), "error", err.Error()))
 			return err
 		}
 		if isMediator {
