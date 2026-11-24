@@ -371,6 +371,10 @@ type Subsection struct {
 	// has a constituent (agentsubsections.go): the write that leaves it with
 	// no open workspace deletes it.
 	CreatedBy *WorkspaceID
+	// OneShots is whether the subsection is its repository's one-shots
+	// subsection (oneshotssubsection.go), which the daemon created and which,
+	// like an agent's, lasts only while it has a constituent.
+	OneShots bool
 }
 
 // ForgetReport is what a Forget removed BESIDES the workspace's own rows.

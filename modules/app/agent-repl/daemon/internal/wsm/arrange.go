@@ -256,8 +256,8 @@ func insertSubsection(ctx context.Context, tx *sql.Tx, sub *Subsection) error {
 		`SELECT COALESCE(MAX(place), 0) + 1 FROM subsections WHERE repo_id = ?`, sub.Repo).Scan(&sub.Place); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO subsections (id, repo_id, name, place, created_by) VALUES (?, ?, ?, ?, ?)`,
-		sub.ID, sub.Repo, sub.Name, sub.Place, nullableID(sub.CreatedBy))
+	_, err := tx.ExecContext(ctx, `INSERT INTO subsections (id, repo_id, name, place, created_by, one_shots) VALUES (?, ?, ?, ?, ?, ?)`,
+		sub.ID, sub.Repo, sub.Name, sub.Place, nullableID(sub.CreatedBy), sub.OneShots)
 	return err
 }
 
@@ -760,14 +760,14 @@ func listSubsections(ctx context.Context, q querier) ([]Subsection, error) {
 
 // subsectionColumns is every column a Subsection is read from, in
 // scanSubsection's order.
-const subsectionColumns = `id, repo_id, name, place, folded, slot, created_by`
+const subsectionColumns = `id, repo_id, name, place, folded, slot, created_by, one_shots`
 
 // scanSubsection reads one Subsection from a row of subsectionColumns.
 func scanSubsection(row interface{ Scan(...any) error }) (Subsection, error) {
 	var sub Subsection
 	var slot sql.NullInt64
 	var createdBy sql.NullString
-	if err := row.Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place, &sub.Folded, &slot, &createdBy); err != nil {
+	if err := row.Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place, &sub.Folded, &slot, &createdBy, &sub.OneShots); err != nil {
 		return Subsection{}, err
 	}
 	if slot.Valid {

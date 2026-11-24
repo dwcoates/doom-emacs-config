@@ -248,18 +248,18 @@ func TestAWriteWhoseSubsectionPruneFailsCommitsNothing(t *testing.T) {
 		t.Fatalf("attention = %v (%v), want the write rolled back", got.Attention, readErr)
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.set_attention",
-		Message: "could not remove the agent-created subsections the write left empty"}); !ok {
+		Message: "could not remove the agent-created and one-shots subsections the write left empty"}); !ok {
 		t.Fatal("the failed prune was not recorded at error under the write's operation")
 	}
 }
 
-func TestTheAgentSubsectionQueryNarrowsTheEmptySubsectionQuery(t *testing.T) {
+func TestThePrunedSubsectionQueryNarrowsTheEmptySubsectionQuery(t *testing.T) {
 	// Arrange -- an empty subsection the user created.
 	s, _ := testStore(t)
 	ws := registerIn(t, s, arrangeRepo(t, "repo"), "one", nil)
 	user := mustSubsection(t, s, ws.Repo, "user's")
-	if !strings.HasPrefix(emptyAgentSubsectionsQuery, emptySubsectionsQuery) {
-		t.Fatal("the agent subsection query does not narrow the shared empty subsection query")
+	if !strings.HasPrefix(emptyPrunedSubsectionsQuery, emptySubsectionsQuery) {
+		t.Fatal("the pruned subsection query does not narrow the shared empty subsection query")
 	}
 
 	// Act

@@ -13,7 +13,7 @@ import (
 // RegisterPlacement is where a workspace is FILED by the insert that mints it
 // (RegisterFacts.Placement): the creator decided, so the row is never drawn
 // unsectioned for an instant and never asks to file itself. Exactly one of
-// Into and New is set.
+// Into, New and OneShots is set.
 type RegisterPlacement struct {
 	// Into is the NAME of an existing subsection of the workspace's
 	// repository the workspace joins.
@@ -23,6 +23,22 @@ type RegisterPlacement struct {
 	// CreatedBy is the workspace whose agent files the new workspace, the
 	// creator of New. Required beside New.
 	CreatedBy WorkspaceID
+	// OneShots files the workspace, a one-shot the user dispatched, into its
+	// repository's one-shots subsection, created with it when the repository
+	// has none (oneshotssubsection.go). It names no creator: the daemon files
+	// it.
+	OneShots bool
+}
+
+// targets is how many of Into, New and OneShots the placement sets.
+func (p RegisterPlacement) targets() int {
+	n := 0
+	for _, set := range []bool{p.Into != "", p.New != nil, p.OneShots} {
+		if set {
+			n++
+		}
+	}
+	return n
 }
 
 // NewSubsectionPlacement is a subsection created by a register: its NAME and
@@ -137,17 +153,30 @@ func scanGatherCandidate(row interface{ Scan(...any) error }) (gatherCandidate, 
 // moved between them, and then the second refuses with the same typed error.
 // PARENT and MERGE are the facts of the workspace being placed.
 func checkPlacement(ctx context.Context, q querier, repo RepoID, p RegisterPlacement, parent *WorkspaceID, merge bool) (resolvedPlacement, error) {
-	if (p.Into == "") == (p.New == nil) {
-		panic(fmt.Sprintf("wsm: a placement names exactly one of an existing subsection and a new one: %+v", p))
+	if p.targets() != 1 {
+		panic(fmt.Sprintf("wsm: a placement names exactly one of an existing subsection, a new one and the one-shots one: %+v", p))
 	}
 	if p.New != nil && p.CreatedBy == "" {
 		panic("wsm: a placement into a new subsection names the workspace creating it")
+	}
+	if p.OneShots && p.CreatedBy != "" {
+		panic(fmt.Sprintf("wsm: a placement into the one-shots subsection is the daemon's, and names no creator: %+v", p))
 	}
 	switch {
 	case parent != nil:
 		return resolvedPlacement{}, ErrPlacementOnChild
 	case merge:
 		return resolvedPlacement{}, ErrPlacementOnMerge
+	}
+	if p.OneShots {
+		sub, found, err := oneShotsSubsection(ctx, q, repo)
+		if err != nil {
+			return resolvedPlacement{}, err
+		}
+		if found {
+			return resolvedPlacement{into: &sub.ID}, nil
+		}
+		return resolvedPlacement{create: &Subsection{ID: NewSubsectionID(), Repo: repo, Name: OneShotsSubsectionName, OneShots: true}}, nil
 	}
 	if p.New == nil {
 		subs, err := listRows(ctx, q, `SELECT `+subsectionColumns+` FROM subsections WHERE repo_id = ? AND name = ? ORDER BY place`, scanSubsection, repo, strings.TrimSpace(p.Into))
@@ -229,11 +258,13 @@ func (s *store) RefusePlacement(ctx context.Context, repoDir string, p RegisterP
 // applyPlacement writes a resolved placement for the freshly inserted
 // workspace ID inside TX: the one assignment, or the new subsection with the
 // gathered families and the workspace itself in it, through the same helpers
-// a drag and an agent's subsection create write through.
+// a drag and an agent's subsection create write through. A new subsection is
+// an agent's or the one-shots one, both of which last only while they have a
+// constituent.
 func applyPlacement(ctx context.Context, tx *sql.Tx, id WorkspaceID, r resolvedPlacement) error {
 	if r.create == nil {
 		err := placeFamilies(ctx, tx, []WorkspaceID{id}, r.into, AtEnd{})
 		return err
 	}
-	return fileIntoNewAgentSubsection(ctx, tx, r.create, append(append([]WorkspaceID{}, r.gather...), id))
+	return fileIntoNewPrunedSubsection(ctx, tx, r.create, append(append([]WorkspaceID{}, r.gather...), id))
 }
