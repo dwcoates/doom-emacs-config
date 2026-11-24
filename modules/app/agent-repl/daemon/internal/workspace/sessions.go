@@ -420,6 +420,12 @@ type Fleet struct {
 	starting startingshim.Waiter
 	mu       sync.RWMutex
 	sessions map[ids.WorkspaceID]*live
+	// terminalMu orders every write of a session record's terminal against
+	// the map: a clear (the live-shim invariant) runs after its client is in
+	// the map, and an end (the ended-shim invariant) checks the map and
+	// writes under the same lock, so an end can never land after a newer
+	// session's clear (terminalrecord.go). Taken before mu.
+	terminalMu sync.Mutex
 	// sessionsMoved announces every change to a workspace's entry in sessions
 	// or its watcher (movedLocked). A freeness wait whose
 	// watcher closed, or whose session is still coming up, waits on it for the
@@ -3489,7 +3495,54 @@ func (f *Fleet) recordStopEnded(ctx context.Context, ws ids.WorkspaceID, why str
 		return nil
 	}
 	log := f.logFor(ctx, ws).With(dlog.Context{"stand_down": string(reason)})
-	return recordShimEnded(context.WithoutCancel(ctx), log, f.deps.DB, opBringUp, ws, kind, string(reason)+": "+why, f.now())
+	return f.recordEnded(context.WithoutCancel(ctx), log, ws, kind, string(reason)+": "+why, nil)
+}
+
+// clearTerminal retires WS's terminal record for a client the caller has
+// already put in the map, under terminalMu (see Fleet.terminalMu).
+func (f *Fleet) clearTerminal(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) error {
+	f.terminalMu.Lock()
+	defer f.terminalMu.Unlock()
+	return retireTerminalRecord(ctx, log, f.deps.DB, operation, ws)
+}
+
+// ReconcileLiveTerminal retires WS's terminal record when a session is live
+// for it, the check and the write one step under terminalMu, so no stop's end
+// can fall between them. It answers whether the workspace was live.
+func (f *Fleet) ReconcileLiveTerminal(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
+	f.terminalMu.Lock()
+	defer f.terminalMu.Unlock()
+	if !f.Live(ws) {
+		return false, nil
+	}
+	return true, retireTerminalRecord(ctx, log, f.deps.DB, operation, ws)
+}
+
+// recordEnded records the end of WS's shim (recordShimEnded) unless the map
+// holds a newer session for WS, the check and the write one step under
+// terminalMu. ENDED reports whether a session the map still holds is the one
+// that ended (a death the fleet has not retired yet); nil means the ended
+// session has already left the map.
+func (f *Fleet) recordEnded(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kind, detail string, ended func(*live) bool) error {
+	f.terminalMu.Lock()
+	defer f.terminalMu.Unlock()
+	f.mu.RLock()
+	session, held := f.sessions[ws]
+	f.mu.RUnlock()
+	if held && (ended == nil || !ended(session)) {
+		log.Info(opBringUp, "a newer session holds the workspace, so the end of its last shim is not recorded", dlog.Context{
+			"terminal": kind, "terminal_detail": detail,
+		})
+		return nil
+	}
+	return recordShimEnded(ctx, log, f.deps.DB, opBringUp, ws, kind, detail, f.now())
+}
+
+// recordDeath records the death of CLIENT's shim, which its watcher saw go
+// with nothing stopping it, unless a newer session holds the workspace.
+func (f *Fleet) recordDeath(ws ids.WorkspaceID, client shimclient.Client) {
+	_ = f.recordEnded(context.Background(), f.logFor(context.Background(), ws), ws, wsm.TerminalParked,
+		"shim_died: the shim exited with nothing stopping it", func(s *live) bool { return s.client == client })
 }
 
 // removeStoodDownLocked takes WS's session out of the map for a stand-down
@@ -3720,7 +3773,7 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 	if session.client.StandingDown() {
 		detail = "stood_down: the shim left after the stand-down this daemon asked for"
 	}
-	_ = recordShimEnded(context.Background(), f.logFor(context.Background(), ws), f.deps.DB, opBringUp, ws, wsm.TerminalParked, detail, f.now())
+	_ = f.recordEnded(context.Background(), f.logFor(context.Background(), ws), ws, wsm.TerminalParked, detail, nil)
 	f.publishHost(ws)
 }
 
@@ -3777,7 +3830,7 @@ func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, s
 	if err := f.claimServing(ctx, log, ws); err != nil {
 		return err
 	}
-	if err := retireTerminalRecord(ctx, log, f.deps.DB, opBringUp, ws); err != nil {
+	if err := f.clearTerminal(ctx, log, opBringUp, ws); err != nil {
 		return err
 	}
 	// A HELD CLIENT WITH NO SESSION STARTED IS A HISTORY SOURCE all the same

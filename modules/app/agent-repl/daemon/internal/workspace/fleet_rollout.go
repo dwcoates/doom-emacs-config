@@ -653,7 +653,7 @@ func (f *Fleet) retireTerminal(ctx context.Context, ws ids.WorkspaceID) error {
 		return fmt.Errorf("workspace: retire the terminal session record for %q: %w", ws, err)
 	}
 	log := f.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(ws)})
-	return retireTerminalRecord(ctx, log, f.deps.DB, opFleetRollout, ws)
+	return f.clearTerminal(ctx, log, opFleetRollout, ws)
 }
 
 // Adopt dials the workspace's ALREADY RUNNING shim without spawning — the

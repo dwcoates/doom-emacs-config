@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
 
 	"agent-repld/internal/dlog"
@@ -144,6 +145,18 @@ type sessionNotingLifecycle struct {
 	sessionwatcher.LifecycleSink
 	fleet  *Fleet
 	client shimclient.Client
+}
+
+// OnDeparted hands the departure on, then records the death of a shim that
+// went with nothing stopping it (the ended-shim invariant, terminalrecord.go)
+// off the watcher's goroutine: a departure must not block, and its record is
+// a store write. An ordered departure's end is the stop's own to record.
+func (s sessionNotingLifecycle) OnDeparted(ws ids.WorkspaceID, departed sessionwatcher.Watcher, departure sessionwatcher.Departure) {
+	s.LifecycleSink.OnDeparted(ws, departed, departure)
+	if departure.Ordered {
+		return
+	}
+	inflight.ForWorkspace(string(ws)).Go(func() { s.fleet.recordDeath(ws, s.client) })
 }
 
 // OnVendorSessionID records the session running, then hands the id on.

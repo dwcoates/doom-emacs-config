@@ -15,8 +15,11 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/wsm"
 )
 
 // openingPointer is the main-watch pointer the retired watcher in these
@@ -388,6 +391,120 @@ func TestWatchPointersAnswersTheLastWatchersPointers(t *testing.T) {
 			// Assert
 			if watched != tt.wantWatched || got.Main.GetValue() != tt.wantMain.GetValue() {
 				t.Fatalf("WatchPointers = (%q, %v), want (%q, %v)", got.Main.GetValue(), watched, tt.wantMain.GetValue(), tt.wantWatched)
+			}
+		})
+	}
+}
+
+// departedSink is the lifecycle sink a fleet's watcher wraps, recording each
+// departure it is handed on.
+type departedSink struct {
+	sessionwatcher.LifecycleSink
+	departures []sessionwatcher.Departure
+}
+
+func (s *departedSink) OnDeparted(_ ids.WorkspaceID, _ sessionwatcher.Watcher, departure sessionwatcher.Departure) {
+	s.departures = append(s.departures, departure)
+}
+
+// TestAShimThatDiesRecordsItsSessionsEnd pins the ended-shim invariant for a
+// death (terminalrecord.go): a shim whose watcher saw it go with nothing
+// stopping it has its session's end recorded, and an ordered departure's end
+// is left to the stop that ordered it.
+func TestAShimThatDiesRecordsItsSessionsEnd(t *testing.T) {
+	cases := []struct {
+		name    string
+		ordered bool
+		want    bool
+	}{
+		{name: "a death", want: true},
+		{name: "an ordered departure", ordered: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			inner := &departedSink{}
+			sink := sessionNotingLifecycle{LifecycleSink: inner, fleet: f.fleet, client: f.client}
+
+			// Act
+			sink.OnDeparted(ws.ID, nil, sessionwatcher.Departure{Ordered: tc.ordered, Cause: sessionwatcher.DepartureLinkDead})
+			if err := inflight.Default.AwaitIdleFor(context.Background(), []string{string(ws.ID)}); err != nil {
+				t.Fatalf("AwaitIdleFor: %v", err)
+			}
+
+			// Assert
+			if len(inner.departures) != 1 {
+				t.Fatalf("departures handed on = %v, want the one", inner.departures)
+			}
+			terminal, recorded := f.db.terminals[ws.ID]
+			if recorded != tc.want {
+				t.Fatalf("terminal = %+v (recorded %v), want recorded: %v", terminal, recorded, tc.want)
+			}
+			if tc.want && (terminal.Kind != wsm.TerminalParked || !strings.HasPrefix(terminal.Detail, "shim_died: ")) {
+				t.Fatalf("terminal = %+v, want a park naming the death", terminal)
+			}
+		})
+	}
+}
+
+func TestADeathAfterANewerSessionTookTheWorkspaceRecordsNothing(t *testing.T) {
+	// Arrange: the dead shim's client is no longer the one the fleet holds.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	dead := &fakeClient{pid: 9191}
+
+	// Act
+	f.fleet.recordDeath(ws.ID, dead)
+
+	// Assert
+	if terminal, recorded := f.db.terminals[ws.ID]; recorded {
+		t.Fatalf("terminal = %+v, want none: a newer session holds the workspace", terminal)
+	}
+	if !recordedAt(f, dlog.LevelInfo, opBringUp, "a newer session holds the workspace, so the end of its last shim is not recorded") {
+		t.Fatalf("records = %+v, want the skip at INFO", f.log.logger.Records())
+	}
+}
+
+func TestReconcileLiveTerminalRetiresOnlyALiveWorkspacesTerminal(t *testing.T) {
+	cases := []struct {
+		name string
+		live bool
+	}{
+		{name: "a live workspace", live: true},
+		{name: "a workspace with no session"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if tc.live {
+				if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+					t.Fatalf("Start: %v", err)
+				}
+			}
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			if err := f.db.SetSessionTerminal(context.Background(), ws.ID, wsm.SessionTerminal{Kind: "killed", At: fixedNow}); err != nil {
+				t.Fatalf("SetSessionTerminal: %v", err)
+			}
+
+			// Act
+			live, err := f.fleet.ReconcileLiveTerminal(context.Background(), f.log.logger, opOpen, ws.ID)
+
+			// Assert
+			if err != nil || live != tc.live {
+				t.Fatalf("ReconcileLiveTerminal = %v, %v; want %v", live, err, tc.live)
+			}
+			if retired := f.db.sessions[ws.ID].Terminal == nil; retired != tc.live {
+				t.Fatalf("terminal = %+v, want it retired only for a live workspace", f.db.sessions[ws.ID].Terminal)
 			}
 		})
 	}

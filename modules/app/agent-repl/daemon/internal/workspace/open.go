@@ -75,15 +75,14 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 		}
 	}
 
-	if v.deps.Sessions.Live(ws) {
-		// AN OPEN RECONCILES; IT DOES NOT TRUST THE LIVENESS IT READ. The
-		// workspace's session record may still read `killed` from a
-		// KillWorkspace weeks earlier, the roster RECEDES a killed session's
-		// row, and Emacs gives a tab only to a row that is not receded. The
-		// open leaves the record saying what the fleet says.
-		if err := retireTerminalRecord(ctx, log, v.deps.DB, opOpen, ws); err != nil {
-			return fmt.Errorf("open %q: %w", ws, err)
-		}
+	// AN OPEN RECONCILES; IT DOES NOT TRUST THE LIVENESS IT READ. The
+	// workspace's session record may still read `killed` from a
+	// KillWorkspace weeks earlier, the roster RECEDES a killed session's
+	// row, and Emacs gives a tab only to a row that is not receded. The
+	// open leaves the record saying what the fleet says, the check and the
+	// write one step, so a stop's end cannot fall between them.
+	if _, err := v.deps.Sessions.ReconcileLiveTerminal(ctx, log, opOpen, ws); err != nil {
+		return fmt.Errorf("open %q: %w", ws, err)
 	}
 
 	// A MERGED ROW IS REOPENED EVEN WHEN IT IS NOT CLOSED: the merge queue

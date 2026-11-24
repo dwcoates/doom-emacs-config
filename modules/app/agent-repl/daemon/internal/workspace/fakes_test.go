@@ -3171,8 +3171,11 @@ type fakeSessions struct {
 	restateSteps *[]string
 	restateErr   error
 	// held marks a workspace whose shim is held with no session on it.
-	held     map[ids.WorkspaceID]bool
-	live     map[ids.WorkspaceID]bool
+	held map[ids.WorkspaceID]bool
+	live map[ids.WorkspaceID]bool
+	// db is the store ReconcileLiveTerminal retires a live workspace's
+	// terminal on, as the fleet does.
+	db       *fakeDB
 	started  []ids.WorkspaceID
 	startErr error
 	// standingDown is what StandingDown answers: the supervisor's latch.
@@ -3355,6 +3358,15 @@ func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) e
 }
 
 func (s *fakeSessions) Live(ws ids.WorkspaceID) bool { return s.live[ws] }
+
+// ReconcileLiveTerminal retires a live workspace's terminal on the fixture's
+// store, as the fleet does.
+func (s *fakeSessions) ReconcileLiveTerminal(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
+	if !s.live[ws] {
+		return false, nil
+	}
+	return true, retireTerminalRecord(ctx, log, s.db, operation, ws)
+}
 
 func (s *fakeSessions) StandingDown() bool { return s.standingDown }
 
@@ -4095,6 +4107,7 @@ func newFixture(t *testing.T) *fixture {
 		derived:    &fakeDerived{},
 	}
 	f.queue.db = f.db
+	f.fleet.db = f.db
 	// EVERY UNNAMED CREATE NAMES THROUGH THE MODEL, so the naming brief is part
 	// of the arrangement every create test starts from, exactly as the corpus
 	// ships it.
