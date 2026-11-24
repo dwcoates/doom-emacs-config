@@ -55,5 +55,8 @@ export function directPageStreams(client: AgentReplClient, page = "test-page"): 
     },
     // A direct stream is attached from the start and never re-attaches.
     onAttached: () => () => undefined,
+    // A direct stream never ends dormant: the page under a component test is
+    // always awake.
+    awake: () => Promise.resolve(),
   };
 }

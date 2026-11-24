@@ -74,6 +74,14 @@ export type StreamEnd =
   /** A push was read and this page failed to draw it: the page's defect. */
   | { kind: "draw_failed"; error: unknown };
 
+/**
+ * Whether END is one the daemon planned (planned-reopen.ts): the run ended in
+ * a `PlannedReopen`, which reopens at once and is no outage.
+ */
+export function isPlannedEnd(end: StreamEnd): end is { kind: "transport_failure"; error: PlannedReopen } {
+  return end.kind === "transport_failure" && end.error instanceof PlannedReopen;
+}
+
 export interface StreamHandle {
   /** Abort the stream and stop reopening it. Idempotent. */
   cancel(): void;
@@ -100,9 +108,8 @@ export interface StreamContext {
   onQuiesced(fn: () => void): () => void;
   /**
    * Run FN every time the daemon this context's client dials MOVES (the web
-   * view host's `setDaemon`), synchronously as it moves, and every time a
-   * workspace page adopts its workspace in place after a handover
-   * (`AppContext.rehome`). Answers the unsubscribe.
+   * view host's `setDaemon`), synchronously as it moves. A workspace page's
+   * daemon is its own origin and never moves. Answers the unsubscribe.
    */
   onDaemonMoved(fn: () => void): () => void;
   /**
@@ -397,32 +404,22 @@ export function watchStream<Res extends Message>(
       if (cancelled) return;
       // A CLOSE THAT NAMES THE SUCCESSOR IS THE HANDOVER, not an outage
       // (2026-11-16: every stream of a page closed `transferring_away` and was
-      // filed as daemon_unreachable). It raises the page's move, and the
-      // stream waits for the move's end: the page adopting the workspace in
-      // place re-homes it (a daemon move, above), and the page going quiet
-      // cancels it. The lifecycle ends every move one way or the other, its
-      // adoption under its own budget, so the wait is bounded by that.
+      // filed as daemon_unreachable). It raises the page's move, which adopts
+      // the workspace in place or quiets the page (cancelling this stream),
+      // and the stream reopens on its backoff, filing nothing: every daemon
+      // serves the one shared address, so the reopen reaches whichever serves
+      // the workspace now. The backoff bounds a daemon that keeps answering
+      // the same move while its successor is still adopting.
       const successor = end.kind === "transport_failure" ? successorOf(end.error) : undefined;
       if (successor !== undefined) {
-        log.info("the {name} stream closed because the workspace moved to {successor}; waiting for the page to move", {
+        log.info("the {name} stream closed because the workspace moved to {successor}; reopening where it is served", {
           operation: "rpc.stream-ended-moved",
-          context: { rpc: opts.name, address: successor },
+          context: { rpc: opts.name, address: successor, backoff_ms: backoffMs },
         }, { name: opts.name, successor });
         workspaceMoved(successor);
-        if (!daemonMoved) {
-          await new Promise<void>((resolve) => {
-            wakeFromBackoff = () => {
-              wakeFromBackoff = null;
-              resolve();
-            };
-          });
-        }
+        await waitBackoff(backoffMs);
         if (cancelled) return;
-        log.info("the {name} stream is reopening where the workspace moved", {
-          operation: "rpc.stream-moved-reopen",
-          context: { rpc: opts.name },
-        }, { name: opts.name });
-        backoffMs = initialMs;
+        backoffMs = Math.min(backoffMs * 2, maxMs);
         continue;
       }
       // THE DAEMON MOVED UNDER THE RUN: however it ended, it was this end that
@@ -449,7 +446,7 @@ export function watchStream<Res extends Message>(
       // THE DAEMON PLANNED THIS END (planned-reopen.ts): the page's attachment
       // is over, or the daemon serving a relayed view ended it cleanly.
       // Nothing failed, so nothing is filed and the stream reopens at once.
-      if (end.kind === "transport_failure" && end.error instanceof PlannedReopen) {
+      if (isPlannedEnd(end)) {
         log.info("the {name} stream ended as planned ({message}); reopening", {
           operation: "rpc.stream-ended-planned-reopen",
           context: { rpc: opts.name, reason: end.error.message },

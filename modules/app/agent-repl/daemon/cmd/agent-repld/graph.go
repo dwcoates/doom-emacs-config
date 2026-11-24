@@ -1245,6 +1245,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SessionAbsent:  fleet.SessionAbsent,
 		StandingDown:   supervisor.StandingDown,
 		StandDowns:     fleet.StandDowns,
+		// A BOUNCE'S END IS AN EDGE for a stand-down it deferred (a sync
+		// merge's park, a keep-alive cycle's): the workspace is free, so no
+		// turn's end will come to retry it.
+		BounceEnded: func(ws ids.WorkspaceID) { lifecycle.retryWithheld(ws, "bounce_ended") },
 		// AN OPEN WAITS FOR THE CUT TURN ITS BRING-UP RESUMES (opentabs).
 		Resumptions: func(ws ids.WorkspaceID, report promptqueue.ResumeReport) {
 			opens.Resumption(ws, opentabs.Resume{Kind: resumeKind(report.Kind), Text: report.Text})

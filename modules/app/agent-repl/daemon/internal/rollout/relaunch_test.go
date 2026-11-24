@@ -2072,3 +2072,49 @@ func TestAnUnansweredStandDownWhoseShimLeftIsRecordedByWhyItsCallFailed(t *testi
 		})
 	}
 }
+
+// TestAHoldTheWorkspacesCloseAlreadyReleasedIsRecordedAtInfo pins a relaunch's
+// release over a workspace closed under it: the close dropped the hold, which
+// is the state the release asks for, so nothing is recorded at ERROR. A hold
+// missing from a workspace still open is still the ERROR it was.
+func TestAHoldTheWorkspacesCloseAlreadyReleasedIsRecordedAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		close     bool
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "a workspace closed under the relaunch", close: true, wantLevel: dlog.LevelInfo,
+			wantMsg: "the workspace was closed under the relaunch; its close already released the restart-pending hold"},
+		{name: "a workspace still open", close: false, wantLevel: dlog.LevelError,
+			wantMsg: "could not release the restart-pending hold"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the hold is taken, then gone before the release.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			ctx := context.Background()
+			lease, err := h.db.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
+			if err != nil {
+				t.Fatalf("AcquireLease: %v", err)
+			}
+			if err := h.db.ReleaseLease(ctx, lease.ID); err != nil {
+				t.Fatalf("ReleaseLease: %v", err)
+			}
+			if tt.close {
+				if err := h.db.MarkClosed(ctx, ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+					t.Fatalf("MarkClosed: %v", err)
+				}
+			}
+
+			// Act
+			h.c.release(ctx, ws, lease.ID, dlog.Context{"workspace": string(ws)})
+
+			// Assert
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: opRelaunch, Message: tt.wantMsg}); !ok {
+				t.Fatalf("relaunch records = %v, want %q at %s", records(h.log, opRelaunch), tt.wantMsg, tt.wantLevel)
+			}
+		})
+	}
+}

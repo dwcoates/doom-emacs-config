@@ -85,6 +85,19 @@ type pageStream struct {
 	// closing is set when the planned exit's drain begins; a subscription
 	// asked for after it is refused, since the page will carry nothing more.
 	closing bool
+
+	// handOff closes when the successor accepts on the shared address
+	// (EndPageStreams): the page's stream then ends as a planned exit ends it,
+	// so the page reattaches once, at the successor.
+	handOff     chan struct{}
+	handOffOnce sync.Once
+}
+
+// isClosing reports whether the page's planned ending has begun.
+func (p *pageStream) isClosing() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closing
 }
 
 // pageSubscription is one watch running on a page. Every field is read and
@@ -157,6 +170,14 @@ func (s *server) attachPage(id string, ctx context.Context, cancel context.Cance
 		ctx:        ctx,
 		writerGone: make(chan struct{}),
 		subs:       make(map[string]*pageSubscription),
+		handOff:    make(chan struct{}),
+	}
+	// A PAGE ATTACHING AFTER THE HAND-OFF (its request was taken before this
+	// daemon stopped accepting, and reached here after EndPageStreams) is
+	// handed off at once, so no page is left on a daemon that is not the one
+	// accepting.
+	if s.pagesHandedOff {
+		p.handOffOnce.Do(func() { close(p.handOff) })
 	}
 	s.pages[id] = p
 	// THE OPENS LEARN OF THE PAGE UNDER THE SAME LOCK, so the attach and the
@@ -322,6 +343,14 @@ func (s *server) WatchPage(
 			s.log.Info(rpc, "the page's stream ended on cancellation",
 				dlog.Context{"page": page.id})
 			return nil
+		case <-page.handOff:
+			// THE SUCCESSOR ACCEPTS ON THE SHARED ADDRESS NOW, and this daemon
+			// on it no more: the page ends here as a planned exit ends it, so
+			// its one reattach can only reach the successor.
+			s.drainPageForExit(rpc, page, ctx, out)
+			s.log.Info(rpc, "the page's stream ended for the successor, which now accepts on the shared address",
+				dlog.Context{"page": page.id})
+			return nil
 		case msg := <-page.out:
 			if err := out.Send(msg); err != nil {
 				s.log.Info(rpc, "the page's client went away",
@@ -330,6 +359,27 @@ func (s *server) WatchPage(
 			}
 		}
 	}
+}
+
+// EndPageStreams ends every page stream this daemon holds, each as its
+// planned exit ends it: every subscription's last frame, then the page's
+// `ending`. It is called once the successor accepts on the shared address
+// (rollout's yield), which is the handover's promotion: a page reopening
+// after it reaches only the successor, so each page attaches once, there,
+// however long this daemon goes on serving workspaces still busy here.
+func (s *server) EndPageStreams() {
+	s.mu.Lock()
+	s.pagesHandedOff = true
+	pages := make([]*pageStream, 0, len(s.pages))
+	for _, p := range s.pages {
+		pages = append(pages, p)
+	}
+	s.mu.Unlock()
+	for _, p := range pages {
+		p.handOffOnce.Do(func() { close(p.handOff) })
+	}
+	s.log.Info("daemon.server.page_streams_ended", "every page stream here ends for the successor, which now accepts on the shared address",
+		dlog.Context{"pages": len(pages)})
 }
 
 // SubscribePage starts one subscription on an attached page.
@@ -479,6 +529,12 @@ func (s *server) SubscribePage(
 			return connect.NewResponse(subscribedAnswer()), nil
 		default:
 		}
+		// THE PAGE ENDED UNDER IT: the page's planned ending cancelled a
+		// subscription that had not yet accepted, which is the attachment
+		// being over, not a refusal of the watch.
+		if page.isClosing() {
+			return s.pageGone(rpc, req.Msg, "the page's stream ended while the subscription was being made"), nil
+		}
 		// The body finished before it accepted: a refusal, or a validation
 		// failure. It is this call's answer, exactly as it would have been the
 		// dedicated rpc's. The subscription is already ended and, never having
@@ -616,7 +672,7 @@ func (s *server) endPageSubscription(page *pageStream, id string, err error) {
 	// subscription that nobody unsubscribed reads on the page as a source
 	// that finished, which it files as a failure. The page's `ending` frame,
 	// sent once every subscription has finished, is this subscription's end.
-	if !unsubscribed && s.life.Err() != nil {
+	if !unsubscribed && (s.life.Err() != nil || page.isClosing()) {
 		s.log.Debug("daemon.server.page_subscription_ended",
 			"a page subscription ended with the daemon's planned exit; the page's ending frame is its end",
 			dlog.Context{"page": page.id, "subscription": id})
@@ -842,9 +898,20 @@ func (s *server) pageWatchFor(
 // A page whose client goes away meanwhile is owed nothing more.
 func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Context, out streamSink[agentreplv1.WatchPageResponse]) {
 	clientGone := logsite.Msg("the page's client went away while its exit drained")
+	// CLOSING IS SET BEFORE ANY SUBSCRIPTION ENDS, so each one's end reads it
+	// and leaves its ending to the page's own (endPageSubscription). A
+	// daemon's exit has already ended them with its lifetime; a hand-off to
+	// the successor ends them here.
 	page.mu.Lock()
 	page.closing = true
+	cancels := make([]context.CancelFunc, 0, len(page.subs))
+	for _, sub := range page.subs {
+		cancels = append(cancels, sub.cancel)
+	}
 	page.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	drained := make(chan struct{})
 	// inflight: joined: the function that starts it waits for it.
 	go func() {
@@ -860,7 +927,7 @@ func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Cont
 				return
 			}
 		case <-drained:
-			endStandingStream(s, rpc, s.log, out, pageEnding())
+			sendStandingEnding(rpc, s.log, out, pageEnding())
 			s.log.Debug(rpc, "the page's subscriptions sent their last frames; the page was told the daemon is standing down",
 				dlog.Context{"page": page.id})
 			return

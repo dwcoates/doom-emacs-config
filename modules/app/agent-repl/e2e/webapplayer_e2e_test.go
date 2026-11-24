@@ -185,8 +185,10 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 //     this suite mocks; THE WEB ADOPT IS THE PAGE'S OWN. No handover reloads
 //     a page (owner ruling, 2026-11-22): on `transferred` the mounted page
 //     adopts its workspace in place through the shared address, which the
-//     incumbent forwards to the successor, and re-homes every stream there
-//     (webapp/src/lifecycle/lifecycle.ts `adoptInPlace`). Its adopt is the
+//     incumbent forwards to the successor, keeps its streams until the
+//     incumbent ends its page stream at the promotion, and attaches once at
+//     the successor (webapp/src/lifecycle/lifecycle.ts `adoptInPlace`,
+//     docs/protobuf-design/feed-resume.md). Its adopt is the
 //     rendezvous's web participant, so the host adopt below succeeds only
 //     together with it.
 //

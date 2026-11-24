@@ -1432,6 +1432,150 @@ func TestAPlannedCloseEndsAPageInOrder(t *testing.T) {
 	}
 }
 
+// TestEndingThePageStreamsEndsEachPageInOrder pins the handover's promotion:
+// once the successor accepts on the shared address, every page here ends as a
+// planned exit ends it, with the daemon still running, so each page reattaches
+// once, at the successor, and reads no subscription's end as a failure.
+func TestEndingThePageStreamsEndsEachPageInOrder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := attachPageStream(t, h, ctx, "page-1")
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{Page: "page-1", Subscription: "footer-1",
+		Request: &agentreplv1.SubscribePageRequest_Footer{Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()}}})
+	h.Footer.topic.Publish(footerView(7))
+	if !stream.Receive() || stream.Msg().GetPush().GetFooter() == nil {
+		t.Fatalf("prove the footer subscription: %v", stream.Err())
+	}
+
+	// Act
+	h.Server.(*server).EndPageStreams()
+	frames, err := pageFramesToEnd(stream)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the page's stream ended with %v, want a clean end", err)
+	}
+	if len(frames) != 1 || frames[0].GetEnding() == nil {
+		t.Fatalf("frames = %v, want the page's ending alone", frames)
+	}
+	if _, attached := h.Server.(*server).pageFor("page-1"); attached {
+		t.Fatal("the page is still attached here after its stream ended")
+	}
+}
+
+// TestEndingThePageStreamsStartsNothingThatWasNotStarted pins the owner's
+// ruling of 2026-11-23: a handover picks up where things were left and starts
+// nothing new. Ending the page streams at the promotion ends only the pages
+// that held one, attaches no page, and opens no feed, for any workspace.
+func TestEndingThePageStreamsStartsNothingThatWasNotStarted(t *testing.T) {
+	tests := []struct {
+		name  string
+		pages []string
+	}{
+		{name: "a daemon holding no page", pages: nil},
+		{name: "a daemon holding one page", pages: []string{"page-1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var streams []*connect.ServerStreamForClient[agentreplv1.WatchPageResponse]
+			for _, page := range tt.pages {
+				streams = append(streams, attachPageStream(t, h, ctx, page))
+			}
+			srv := h.Server.(*server)
+
+			// Act
+			srv.EndPageStreams()
+			for _, stream := range streams {
+				if _, err := pageFramesToEnd(stream); err != nil {
+					t.Fatalf("the page's stream ended with %v, want a clean end", err)
+				}
+			}
+
+			// Assert
+			srv.mu.Lock()
+			held, present := len(srv.pages), len(srv.pagePresence)
+			srv.mu.Unlock()
+			if held != 0 || present != 0 {
+				t.Fatalf("pages held = %d, present = %d; want none left and none attached", held, present)
+			}
+			if h.Feed.openCalls != 0 {
+				t.Fatalf("feed opens = %d, want none", h.Feed.openCalls)
+			}
+		})
+	}
+}
+
+// TestAPageAttachingAfterThePageStreamsEndedIsEndedAtOnce pins that no page is
+// left on a daemon that no longer accepts: one whose request reached here
+// after the hand-off is attached and ended at once, to reattach where the
+// successor accepts.
+func TestAPageAttachingAfterThePageStreamsEndedIsEndedAtOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.Server.(*server).EndPageStreams()
+
+	// Act
+	stream := attachPageStream(t, h, ctx, "page-late")
+	frames, err := pageFramesToEnd(stream)
+
+	// Assert
+	if err != nil || len(frames) != 1 || frames[0].GetEnding() == nil {
+		t.Fatalf("frames = %v, err %v; want the page's ending alone after its attachment", frames, err)
+	}
+}
+
+// TestASubscriptionThePageEndingCutIsAnsweredPageGone pins that a subscription
+// still being made when its page ends is told the attachment is over, which
+// the page reads as planned, rather than refused.
+func TestASubscriptionThePageEndingCutIsAnsweredPageGone(t *testing.T) {
+	// Arrange: a login watch that is held before it accepts.
+	h := newHarness(t)
+	h.Login.watchEntered = make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := attachPageStream(t, h, ctx, "page-1")
+	answered := make(chan *connect.Response[agentreplv1.SubscribePageResponse], 1)
+	failed := make(chan error, 1)
+	go func() {
+		resp, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+			Page: "page-1", Subscription: "login-1",
+			Request: &agentreplv1.SubscribePageRequest_LoginTerminal{
+				LoginTerminal: &agentreplv1.WatchLoginTerminalRequest{Workspace: ref()},
+			},
+		}))
+		if err != nil {
+			failed <- err
+			return
+		}
+		answered <- resp
+	}()
+	<-h.Login.watchEntered
+
+	// Act
+	h.Server.(*server).EndPageStreams()
+
+	// Assert
+	select {
+	case err := <-failed:
+		t.Fatalf("SubscribePage failed with %v, want page_gone", err)
+	case resp := <-answered:
+		if resp.Msg.GetSuccess().GetPageGone() == nil {
+			t.Fatalf("SubscribePage = %v, want page_gone", resp.Msg)
+		}
+	}
+	if frames, err := pageFramesToEnd(stream); err != nil || len(frames) != 1 || frames[0].GetEnding() == nil {
+		t.Fatalf("frames = %v, err %v; want the page's ending alone", frames, err)
+	}
+}
+
 // TestAPageClosingAnswersANewSubscriptionPageGone pins the drain's bound:
 // once a planned exit drains a page, nothing new may join what it waits out,
 // and the page is told its attachment is over rather than refused.

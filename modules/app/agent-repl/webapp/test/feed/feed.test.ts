@@ -6,11 +6,13 @@ import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.
 import { createControl } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { onResponseHighlightStates } from "../../src/feed/response-highlight.js";
-import { create } from "@bufbuild/protobuf";
+import { clone, create } from "@bufbuild/protobuf";
 import { WatchFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
   FeedBreadcrumbSchema,
   FeedPageSchema,
+  FeedRowOrderSchema,
+  FeedRowRevisionSchema,
   FeedRowSchema,
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -20,7 +22,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { withOrder } from "../feed-order.js";
-import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
+import { OpenFeedResponseSchema, OpenFeedResumedSchema, type OpenFeedRequest, type OpenFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import {
   clearClientFailures,
@@ -442,6 +444,190 @@ describe("mountFeed: re-opening the tail", () => {
     await settle();
     // Assert: the open belongs to the stream, but only one attempt has run.
     expect(h.calls.openFeed).toHaveLength(1);
+  });
+});
+
+describe("mountFeed: resuming the feed it holds", () => {
+  /** ROW as the daemon published it at REVISION. */
+  function revised(row: FeedRow, revision: string): FeedRow {
+    const copy = clone(FeedRowSchema, row);
+    copy.revision = create(FeedRowRevisionSchema, { digest: revision });
+    return copy;
+  }
+
+  /** A resumed open's answer: ROWS newer than what is held, STANDING the whole page. */
+  function resumedOpen(rows: FeedRow[], standing: string[], req: OpenFeedRequest): OpenFeedResponse {
+    const answer = openSuccess(page(rows), tokenFor(req));
+    if (answer.result.case === "success") {
+      answer.result.value.resumed = create(OpenFeedResumedSchema, { standing: standing.map(feedId) });
+    }
+    return answer;
+  }
+
+  /**
+   * A daemon whose first open answers FIRST whole and whose every reopen is a
+   * resume answered by RESUMED, tailed on a channel the test closes.
+   */
+  function resuming(first: FeedRow[], resumed: (req: OpenFeedRequest) => OpenFeedResponse) {
+    return liveRootHarness({
+      openFeed: (req) => (req.resume === undefined ? openSuccess(page(first), tokenFor(req)) : resumed(req)),
+    });
+  }
+
+  /** End the root tail and let its reopen run. */
+  async function reopen(channel: { close(): void }): Promise<void> {
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+  }
+
+  it("asks for the whole newest page on its first open", async () => {
+    // Arrange / Act
+    const { h } = resuming([revised(userPromptRow("p1", "cold"), "r1")], (req) => resumedOpen([], [], req));
+    mount(h);
+    await settle();
+    // Assert
+    expect(h.calls.openFeed[0]?.resume).toBeUndefined();
+  });
+
+  it("names every row it holds at its revision when it opens the feed again", async () => {
+    // Arrange
+    const { h, channel } = resuming(
+      [revised(userPromptRow("p1", "cold"), "r1"), revised(userPromptRow("p2", "warm"), "r2")],
+      (req) => resumedOpen([], ["p1", "p2"], req),
+    );
+    mount(h);
+    await settle();
+    // Act
+    await reopen(channel);
+    // Assert
+    const held = h.calls.openFeed[1]?.resume?.held.map((row) => [row.id?.value, row.revision?.digest]);
+    expect(held).toEqual([["p1", "r1"], ["p2", "r2"]]);
+  });
+
+  it("draws nothing on a second attach that finds nothing newer", async () => {
+    // Arrange
+    const { h, channel } = resuming(
+      [revised(userPromptRow("p1", "cold"), "r1"), revised(userPromptRow("p2", "warm"), "r2")],
+      (req) => resumedOpen([], ["p1", "p2"], req),
+    );
+    const { host } = mount(h);
+    await settle();
+    const before = [...host.querySelectorAll("[data-feed-row]")];
+    // Act
+    await reopen(channel);
+    // Assert: the very elements drawn at the first attach still stand, none rebuilt.
+    expect([...host.querySelectorAll("[data-feed-row]")]).toEqual(before);
+    expect(before).toHaveLength(2);
+  });
+
+  it("draws nothing for a row a resume sends again unchanged", async () => {
+    // Arrange: a daemon that sends a row the reader holds as it holds it.
+    const p1 = revised(userPromptRow("p1", "cold"), "r1");
+    const { h, channel } = resuming([p1], (req) => resumedOpen([p1], ["p1"], req));
+    const { host } = mount(h);
+    await settle();
+    const before = host.querySelector('[data-feed-row="p1"]');
+    // Act
+    await reopen(channel);
+    // Assert
+    expect(host.querySelector('[data-feed-row="p1"]')).toBe(before);
+  });
+
+  it("redraws a row that changed while the page held it", async () => {
+    // Arrange
+    const { h, channel } = resuming(
+      [revised(userPromptRow("p1", "cold"), "r1")],
+      (req) => resumedOpen([revised(userPromptRow("p1", "changed"), "r9")], ["p1"], req),
+    );
+    const { host } = mount(h);
+    await settle();
+    // Act
+    await reopen(channel);
+    // Assert
+    expect(host.querySelector('[data-feed-row="p1"]')?.textContent).toContain("changed");
+  });
+
+  it("places a row that is new since the page held its feed", async () => {
+    // Arrange
+    const { h, channel } = resuming(
+      [revised(userPromptRow("p1", "cold"), "r1")],
+      (req) => resumedOpen([revised(userPromptRow("p2", "new"), "r2")], ["p1", "p2"], req),
+    );
+    const { host } = mount(h);
+    await settle();
+    // Act
+    await reopen(channel);
+    // Assert
+    expect([...host.querySelectorAll("[data-feed-row]")].map((el) => el.getAttribute("data-feed-row"))).toEqual(["p1", "p2"]);
+  });
+
+  it("drops a held row the resumed page no longer names", async () => {
+    // Arrange
+    const { h, channel } = resuming(
+      [revised(userPromptRow("p1", "cold"), "r1"), revised(userPromptRow("p2", "gone"), "r2")],
+      (req) => resumedOpen([], ["p1"], req),
+    );
+    const { host } = mount(h);
+    await settle();
+    // Act
+    await reopen(channel);
+    // Assert
+    expect(host.querySelector('[data-feed-row="p2"]')).toBeNull();
+    expect(host.querySelector('[data-feed-row="p1"]')).not.toBeNull();
+  });
+
+  it("keeps a held row older than every row the resumed page names", async () => {
+    // Arrange: P0 sorts before the resumed page's span.
+    const { h, channel } = resuming(
+      [revised(userPromptRow("p0", "older"), "r0"), revised(userPromptRow("p1", "cold"), "r1")],
+      (req) => resumedOpen([], ["p1"], req),
+    );
+    const { host } = mount(h);
+    await settle();
+    // Act
+    await reopen(channel);
+    // Assert
+    expect(host.querySelector('[data-feed-row="p0"]')).not.toBeNull();
+  });
+
+  it("places a resumed row again at the order key its daemon now gives it", async () => {
+    // Arrange: the successor keys P1 after P2.
+    const p1 = revised(userPromptRow("p1", "cold"), "r1");
+    const p2 = revised(userPromptRow("p2", "warm"), "r2");
+    const rekeyed = revised(userPromptRow("p1", "cold"), "r1-rekeyed");
+    rekeyed.order = create(FeedRowOrderSchema, { key: `${p2.order?.key ?? ""}~` });
+    const { h, channel } = resuming([p1, p2], (req) => resumedOpen([rekeyed], ["p2", "p1"], req));
+    const { host } = mount(h);
+    await settle();
+    // Act
+    await reopen(channel);
+    // Assert
+    expect([...host.querySelectorAll("[data-feed-row]")].map((el) => el.getAttribute("data-feed-row"))).toEqual(["p2", "p1"]);
+  });
+
+  it("asks for nothing while its page is asleep, and resumes once it wakes", async () => {
+    // Arrange: a page whose stream ended while nobody saw it.
+    const { h, channel } = resuming([revised(userPromptRow("p1", "cold"), "r1")], (req) => resumedOpen([], ["p1"], req));
+    let wake: () => void = () => undefined;
+    const asleep = new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+    let woken = true;
+    Object.assign(h.ctx, {
+      streams: { ...h.ctx.streams, awake: () => (woken ? Promise.resolve() : asleep) },
+    });
+    mount(h);
+    await settle();
+    woken = false;
+    // Act
+    await reopen(channel);
+    const whileAsleep = h.calls.openFeed.length;
+    woken = true;
+    wake();
+    await settle();
+    // Assert: only the first open ran until the page woke.
+    expect([whileAsleep, h.calls.openFeed.length]).toEqual([1, 2]);
   });
 });
 

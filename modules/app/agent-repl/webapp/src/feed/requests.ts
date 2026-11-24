@@ -19,6 +19,7 @@ import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_
 import type { FeedId, FeedRowOrder } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   OpenFeedRequestSchema,
+  type FeedResume,
   type OpenFeedRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import {
@@ -52,8 +53,15 @@ import {
 export function buildOpenFeedRequest(
   workspace: WorkspaceRef,
   feed?: FeedId,
+  resume?: FeedResume,
 ): OpenFeedRequest {
-  return create(OpenFeedRequestSchema, feed === undefined ? { workspace } : { workspace, feed });
+  return create(OpenFeedRequestSchema, {
+    workspace,
+    ...(feed === undefined ? {} : { feed }),
+    // A REOPEN NAMES WHAT IT HOLDS, so it is answered only what is newer
+    // (OpenFeedRequest.resume); a first open names nothing.
+    ...(resume === undefined ? {} : { resume }),
+  });
 }
 
 /**

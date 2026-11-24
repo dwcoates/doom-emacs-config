@@ -2,15 +2,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { isStill } from "../bubble/still.js";
 import { boxRect as scriptedRect } from "../dom-rect.js";
-import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { filesUnder } from "../files-under.js";
+import { OpenFeedResumedSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import {
   FeedBreadcrumbSchema,
   FeedHoverStampSchema,
   FeedIdSchema,
   FeedPageSchema,
   FeedRowRemovedSchema,
+  FeedRowRevisionSchema,
   FeedRowRolledBackSchema,
   FeedRowSchema,
   FeedSelectionSchema,
@@ -401,6 +404,61 @@ describe("createFeedController: painting a page", () => {
     expect(() =>
       controller.applyPage(create(FeedPageSchema, {}), "replace"),
     ).toThrow(MalformedView);
+  });
+});
+
+describe("createFeedController: resuming", () => {
+  /** ROW at REVISION. */
+  function revised(row: FeedRow, revision: string): FeedRow {
+    const copy = clone(FeedRowSchema, row);
+    copy.revision = create(FeedRowRevisionSchema, { digest: revision });
+    return copy;
+  }
+
+  it("names nothing to resume from before a page is placed", () => {
+    const { controller } = fixture();
+    expect(controller.resume()).toBeUndefined();
+  });
+
+  it("names every row it drew at its revision, and none it drew without one", () => {
+    const { controller } = fixture();
+    controller.applyPage(page([revised(userPromptRow("a", "1"), "r1"), userPromptRow("b", "2")]), "replace");
+    expect(controller.resume()?.held.map((row) => [row.id?.value, row.revision?.digest])).toEqual([["a", "r1"]]);
+  });
+
+  it("draws a resumed page's failure where the rows would be", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([userPromptRow("a", "1")]), "replace");
+    const failed = create(FeedPageSchema, {
+      result: { case: "error", value: { headline: { text: "gap", tone: "red" }, kind: { case: "historyReplayTruncated", value: { reason: "cut" } } } },
+    });
+    controller.applyResumed(failed, create(OpenFeedResumedSchema, {}));
+    expect(host.querySelector("[data-page-error]")).not.toBeNull();
+  });
+
+  it("replaces the rows with a first open's whole page", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([userPromptRow("a", "1")]), "replace");
+    controller.applyOpened(page([userPromptRow("b", "2")]), undefined);
+    expect(drawnIds(host)).toEqual(["b"]);
+  });
+
+  it("places a resumed open's rows among the rows held", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([userPromptRow("a", "1")]), "replace");
+    controller.applyOpened(page([userPromptRow("b", "2")]), create(OpenFeedResumedSchema, { standing: [feedId("a"), feedId("b")] }));
+    expect(drawnIds(host)).toEqual(["a", "b"]);
+  });
+
+  it("is the one place an open's answer is told apart from a resume's", () => {
+    // Arrange
+    const sources = filesUnder(join(process.cwd(), "src"));
+    // Act
+    const offenders = sources.filter(
+      (file) => !file.endsWith("feed-view.ts") && /\.applyResumed\(/.test(readFileSync(file, "utf8")),
+    );
+    // Assert
+    expect(offenders).toEqual([]);
   });
 });
 

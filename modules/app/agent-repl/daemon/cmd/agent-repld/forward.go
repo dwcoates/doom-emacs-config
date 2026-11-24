@@ -118,6 +118,12 @@ func (f *serverForwarder) RetractTransferred(ws ids.WorkspaceID) {
 	}
 }
 
+func (f *serverForwarder) EndPageStreams() {
+	if target, ok := f.bound(); ok {
+		target.EndPageStreams()
+	}
+}
+
 func (f *serverForwarder) PushReloadWebapp(ws ids.WorkspaceID) {
 	if target, ok := f.bound(); ok {
 		target.PushReloadWebapp(ws)

@@ -1925,15 +1925,23 @@ type fakeLogin struct {
 	openErr     error
 	watchFrames chan login.Output
 	watchErr    error
-	sendErr     error
-	closeErr    error
+	// watchEntered, when set, is told each Watch call as it begins, and the
+	// call then waits for its context to end: a watch held before it accepts.
+	watchEntered chan struct{}
+	sendErr      error
+	closeErr     error
 }
 
 func (f *fakeLogin) Open(context.Context, ids.WorkspaceID) (string, error) {
 	return f.configDir, f.openErr
 }
 
-func (f *fakeLogin) Watch(context.Context, ids.WorkspaceID) (<-chan login.Output, error) {
+func (f *fakeLogin) Watch(ctx context.Context, _ ids.WorkspaceID) (<-chan login.Output, error) {
+	if f.watchEntered != nil {
+		f.watchEntered <- struct{}{}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if f.watchErr != nil {
 		return nil, f.watchErr
 	}

@@ -13,7 +13,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
-import type { FeedId, FeedPage } from "../../frontend/v1/feed_pb";
+import type { FeedId, FeedPage, FeedRowRevision } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { FeedHeld } from "../../frontend/v1/feed_held_pb";
 import { file_frontend_v1_feed_held } from "../../frontend/v1/feed_held_pb";
@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_open_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9mZWVkLnByb3RvEgxhZ2VudHJlcGwudjEicQoPT3BlbkZlZWRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJgoEZmVlZBgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBQgcKBV9mZWVkInwKEE9wZW5GZWVkUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5PcGVuRmVlZFN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5PcGVuRmVlZEVycm9ySABCCAoGcmVzdWx0IpYBCg9PcGVuRmVlZFN1Y2Nlc3MSIwoEcGFnZRgBIAEoCzIVLmZyb250ZW5kLnYxLkZlZWRQYWdlEisKBXdhdGNoGAIgASgLMhwuYWdlbnRyZXBsLnYxLkZlZWRXYXRjaFRva2VuEigKBGhlbGQYAyABKAsyFS5mcm9udGVuZC52MS5GZWVkSGVsZEgAiAEBQgcKBV9oZWxkIr4DCg1PcGVuRmVlZEVycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5GZWVkVW5rbm93bldvcmtzcGFjZUgAEkwKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkZlZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkMKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5GZWVkVHJhbnNmZXJyaW5nQXdheUgAEj4KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuRmVlZE5vdFlldEFkb3B0ZWRIABJBChBmZWVkX3VuZGVjb2RhYmxlGAUgASgLMiUuYWdlbnRyZXBsLnYxLk9wZW5GZWVkRmVlZFVuZGVjb2RhYmxlSAASSQoVZmVlZF9ub3RfaW5fd29ya3NwYWNlGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5GZWVkRmVlZE5vdEluV29ya3NwYWNlSABCBwoFY2F1c2UiGgoYT3BlbkZlZWRVbmtub3duV29ya3NwYWNlIjQKHE9wZW5GZWVkV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIisKGE9wZW5GZWVkVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIjkKFU9wZW5GZWVkTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiGQoXT3BlbkZlZWRGZWVkVW5kZWNvZGFibGUiHAoaT3BlbkZlZWRGZWVkTm90SW5Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed, file_frontend_v1_feed_held, file_agentrepl_v1_feed_token]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9mZWVkLnByb3RvEgxhZ2VudHJlcGwudjEiqwEKD09wZW5GZWVkUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiYKBGZlZWQYAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRIAIgBARItCgZyZXN1bWUYAyABKAsyGC5hZ2VudHJlcGwudjEuRmVlZFJlc3VtZUgBiAEBQgcKBV9mZWVkQgkKB19yZXN1bWUiOwoKRmVlZFJlc3VtZRItCgRoZWxkGAEgAygLMh8uYWdlbnRyZXBsLnYxLkZlZWRSZXN1bWVIZWxkUm93ImQKEUZlZWRSZXN1bWVIZWxkUm93Eh8KAmlkGAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEi4KCHJldmlzaW9uGAIgASgLMhwuZnJvbnRlbmQudjEuRmVlZFJvd1JldmlzaW9uInwKEE9wZW5GZWVkUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5PcGVuRmVlZFN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5PcGVuRmVlZEVycm9ySABCCAoGcmVzdWx0ItcBCg9PcGVuRmVlZFN1Y2Nlc3MSIwoEcGFnZRgBIAEoCzIVLmZyb250ZW5kLnYxLkZlZWRQYWdlEisKBXdhdGNoGAIgASgLMhwuYWdlbnRyZXBsLnYxLkZlZWRXYXRjaFRva2VuEigKBGhlbGQYAyABKAsyFS5mcm9udGVuZC52MS5GZWVkSGVsZEgAiAEBEjMKB3Jlc3VtZWQYBCABKAsyHS5hZ2VudHJlcGwudjEuT3BlbkZlZWRSZXN1bWVkSAGIAQFCBwoFX2hlbGRCCgoIX3Jlc3VtZWQiOAoPT3BlbkZlZWRSZXN1bWVkEiUKCHN0YW5kaW5nGAEgAygLMhMuZnJvbnRlbmQudjEuRmVlZElkIr4DCg1PcGVuRmVlZEVycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5GZWVkVW5rbm93bldvcmtzcGFjZUgAEkwKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkZlZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkMKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5GZWVkVHJhbnNmZXJyaW5nQXdheUgAEj4KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuRmVlZE5vdFlldEFkb3B0ZWRIABJBChBmZWVkX3VuZGVjb2RhYmxlGAUgASgLMiUuYWdlbnRyZXBsLnYxLk9wZW5GZWVkRmVlZFVuZGVjb2RhYmxlSAASSQoVZmVlZF9ub3RfaW5fd29ya3NwYWNlGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5GZWVkRmVlZE5vdEluV29ya3NwYWNlSABCBwoFY2F1c2UiGgoYT3BlbkZlZWRVbmtub3duV29ya3NwYWNlIjQKHE9wZW5GZWVkV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIisKGE9wZW5GZWVkVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIjkKFU9wZW5GZWVkTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiGQoXT3BlbkZlZWRGZWVkVW5kZWNvZGFibGUiHAoaT3BlbkZlZWRGZWVkTm90SW5Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed, file_frontend_v1_feed_held, file_agentrepl_v1_feed_token]);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedRequest
@@ -46,6 +46,18 @@ export type OpenFeedRequest = Message<"agentrepl.v1.OpenFeedRequest"> & {
    * @generated from field: optional frontend.v1.FeedId feed = 2;
    */
   feed?: FeedId | undefined;
+
+  /**
+   * WHAT THE READER ALREADY HOLDS of this feed, when it opens it again (a
+   * page reattaching after a handover, a tail that ended and reopens). SET:
+   * the answer carries only what is newer than what is held
+   * (OpenFeedSuccess.resumed), so a reader holding the feed as it stands is
+   * sent no row and draws nothing. UNSET: a first open, answered with the
+   * whole newest page.
+   *
+   * @generated from field: optional agentrepl.v1.FeedResume resume = 3;
+   */
+  resume?: FeedResume | undefined;
 };
 
 /**
@@ -54,6 +66,58 @@ export type OpenFeedRequest = Message<"agentrepl.v1.OpenFeedRequest"> & {
  */
 export const OpenFeedRequestSchema: GenMessage<OpenFeedRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_feed, 0);
+
+/**
+ * The rows a reader holds of one feed, each at the revision it holds it, so
+ * the open answers only the rows that changed or are new since.
+ *
+ * @generated from message agentrepl.v1.FeedResume
+ */
+export type FeedResume = Message<"agentrepl.v1.FeedResume"> & {
+  /**
+   * Every row the reader holds and drew, in any order. A row the reader
+   * holds that is absent here is sent as though it were new.
+   *
+   * @generated from field: repeated agentrepl.v1.FeedResumeHeldRow held = 1;
+   */
+  held: FeedResumeHeldRow[];
+};
+
+/**
+ * Describes the message agentrepl.v1.FeedResume.
+ * Use `create(FeedResumeSchema)` to create a new message.
+ */
+export const FeedResumeSchema: GenMessage<FeedResume> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 1);
+
+/**
+ * One row a reader holds, and the publication of it the reader drew.
+ *
+ * @generated from message agentrepl.v1.FeedResumeHeldRow
+ */
+export type FeedResumeHeldRow = Message<"agentrepl.v1.FeedResumeHeldRow"> & {
+  /**
+   * The row, as the daemon served it.
+   *
+   * @generated from field: frontend.v1.FeedId id = 1;
+   */
+  id?: FeedId | undefined;
+
+  /**
+   * The revision the reader drew, echoed exactly as the row carried it
+   * (frontend.v1.FeedRow.revision).
+   *
+   * @generated from field: frontend.v1.FeedRowRevision revision = 2;
+   */
+  revision?: FeedRowRevision | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.FeedResumeHeldRow.
+ * Use `create(FeedResumeHeldRowSchema)` to create a new message.
+ */
+export const FeedResumeHeldRowSchema: GenMessage<FeedResumeHeldRow> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 2);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -84,7 +148,7 @@ export type OpenFeedResponse = Message<"agentrepl.v1.OpenFeedResponse"> & {
  * Use `create(OpenFeedResponseSchema)` to create a new message.
  */
 export const OpenFeedResponseSchema: GenMessage<OpenFeedResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 1);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 3);
 
 /**
  * The open's answer: paint, then tail.
@@ -122,6 +186,18 @@ export type OpenFeedSuccess = Message<"agentrepl.v1.OpenFeedSuccess"> & {
    * @generated from field: optional frontend.v1.FeedHeld held = 3;
    */
   held?: FeedHeld | undefined;
+
+  /**
+   * SET exactly when the request carried `resume`: `page` then carries only
+   * the rows of the feed's newest page the reader does not hold at their
+   * revision (new rows, and rows that changed since), not the whole page, and
+   * the reader places them among the rows it holds rather than replacing
+   * them. An empty `page.rows` means nothing is newer. UNSET on a first open,
+   * whose `page` is the whole newest page.
+   *
+   * @generated from field: optional agentrepl.v1.OpenFeedResumed resumed = 4;
+   */
+  resumed?: OpenFeedResumed | undefined;
 };
 
 /**
@@ -129,7 +205,32 @@ export type OpenFeedSuccess = Message<"agentrepl.v1.OpenFeedSuccess"> & {
  * Use `create(OpenFeedSuccessSchema)` to create a new message.
  */
 export const OpenFeedSuccessSchema: GenMessage<OpenFeedSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 2);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 4);
+
+/**
+ * How a resumed open's answer stands against what the reader holds.
+ *
+ * @generated from message agentrepl.v1.OpenFeedResumed
+ */
+export type OpenFeedResumed = Message<"agentrepl.v1.OpenFeedResumed"> & {
+  /**
+   * Every row of the feed's newest page as the daemon serves it now, oldest
+   * to newest, the ones `page` leaves out included. A row the reader holds
+   * that sorts at or after the oldest of these and is not named here has left
+   * the feed, and the reader drops it. Rows older than the oldest named stand
+   * as the reader holds them.
+   *
+   * @generated from field: repeated frontend.v1.FeedId standing = 1;
+   */
+  standing: FeedId[];
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenFeedResumed.
+ * Use `create(OpenFeedResumedSchema)` to create a new message.
+ */
+export const OpenFeedResumedSchema: GenMessage<OpenFeedResumed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 5);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -197,7 +298,7 @@ export type OpenFeedError = Message<"agentrepl.v1.OpenFeedError"> & {
  * Use `create(OpenFeedErrorSchema)` to create a new message.
  */
 export const OpenFeedErrorSchema: GenMessage<OpenFeedError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 3);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 6);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedUnknownWorkspace
@@ -210,7 +311,7 @@ export type OpenFeedUnknownWorkspace = Message<"agentrepl.v1.OpenFeedUnknownWork
  * Use `create(OpenFeedUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenFeedUnknownWorkspaceSchema: GenMessage<OpenFeedUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 4);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 7);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedWorkspaceRefMismatch
@@ -229,7 +330,7 @@ export type OpenFeedWorkspaceRefMismatch = Message<"agentrepl.v1.OpenFeedWorkspa
  * Use `create(OpenFeedWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenFeedWorkspaceRefMismatchSchema: GenMessage<OpenFeedWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 5);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 8);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedTransferringAway
@@ -248,7 +349,7 @@ export type OpenFeedTransferringAway = Message<"agentrepl.v1.OpenFeedTransferrin
  * Use `create(OpenFeedTransferringAwaySchema)` to create a new message.
  */
 export const OpenFeedTransferringAwaySchema: GenMessage<OpenFeedTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 6);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 9);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedNotYetAdopted
@@ -272,7 +373,7 @@ export type OpenFeedNotYetAdopted = Message<"agentrepl.v1.OpenFeedNotYetAdopted"
  * Use `create(OpenFeedNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenFeedNotYetAdoptedSchema: GenMessage<OpenFeedNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 7);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 10);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedFeedUndecodable
@@ -285,7 +386,7 @@ export type OpenFeedFeedUndecodable = Message<"agentrepl.v1.OpenFeedFeedUndecoda
  * Use `create(OpenFeedFeedUndecodableSchema)` to create a new message.
  */
 export const OpenFeedFeedUndecodableSchema: GenMessage<OpenFeedFeedUndecodable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 8);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 11);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedFeedNotInWorkspace
@@ -298,5 +399,5 @@ export type OpenFeedFeedNotInWorkspace = Message<"agentrepl.v1.OpenFeedFeedNotIn
  * Use `create(OpenFeedFeedNotInWorkspaceSchema)` to create a new message.
  */
 export const OpenFeedFeedNotInWorkspaceSchema: GenMessage<OpenFeedFeedNotInWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_feed, 9);
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 12);
 

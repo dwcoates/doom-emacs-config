@@ -690,10 +690,15 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    * page painted over the sub-feed's rows, and the token that page came with.
    */
   async function reopen(signal: AbortSignal): Promise<FeedWatchToken | null> {
+    // A PAGE NOBODY SEES ASKS NOTHING (page-streams.ts `awake`), and a reopen
+    // resumes from what the sub-feed holds rather than redrawing it.
+    await opts.ctx.streams.awake(signal);
+    if (disposed || signal.aborted) return null;
+    const resume = child?.resume();
     const response: OpenFeedResponse = await callUnary(
       opts.ctx,
       "OpenFeed",
-      (client) => client.openFeed(buildOpenFeedRequest(opts.ctx.workspace, id)),
+      (client) => client.openFeed(buildOpenFeedRequest(opts.ctx.workspace, id, resume)),
       OpenFeedResponseSchema,
     );
     if (disposed || signal.aborted) return null;
@@ -701,7 +706,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     switch (result.case) {
       case "success": {
         const controller = ensureChild();
-        controller.applyPage(requireMessage(result.value.page, "OpenFeedSuccess.page"), "replace");
+        controller.applyOpened(requireMessage(result.value.page, "OpenFeedSuccess.page"), result.value.resumed);
         return requireMessage(result.value.watch, "OpenFeedSuccess.watch");
       }
       case "error":

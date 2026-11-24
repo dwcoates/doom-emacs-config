@@ -284,6 +284,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs to know whether the daemon is standing down")
 	case deps.StandDowns == nil:
 		return nil, fmt.Errorf("the prompt queue needs the count of each workspace's ordered stand-downs")
+	case deps.BounceEnded == nil:
+		return nil, fmt.Errorf("the prompt queue needs to tell the stand-downs a bounce ended")
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now

@@ -37,7 +37,14 @@ type OpenFeedRequest struct {
 	// WHICH feed. UNSET = the workspace's root feed. SET = a sub-feed the
 	// client was shown — a subagent bubble row's own FeedId, which addresses
 	// the feed within it. Only served ids open; a client never constructs one.
-	Feed          *v11.FeedId `protobuf:"bytes,2,opt,name=feed,proto3,oneof" json:"feed,omitempty"`
+	Feed *v11.FeedId `protobuf:"bytes,2,opt,name=feed,proto3,oneof" json:"feed,omitempty"`
+	// WHAT THE READER ALREADY HOLDS of this feed, when it opens it again (a
+	// page reattaching after a handover, a tail that ended and reopens). SET:
+	// the answer carries only what is newer than what is held
+	// (OpenFeedSuccess.resumed), so a reader holding the feed as it stands is
+	// sent no row and draws nothing. UNSET: a first open, answered with the
+	// whole newest page.
+	Resume        *FeedResume `protobuf:"bytes,3,opt,name=resume,proto3,oneof" json:"resume,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -86,6 +93,117 @@ func (x *OpenFeedRequest) GetFeed() *v11.FeedId {
 	return nil
 }
 
+func (x *OpenFeedRequest) GetResume() *FeedResume {
+	if x != nil {
+		return x.Resume
+	}
+	return nil
+}
+
+// The rows a reader holds of one feed, each at the revision it holds it, so
+// the open answers only the rows that changed or are new since.
+type FeedResume struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every row the reader holds and drew, in any order. A row the reader
+	// holds that is absent here is sent as though it were new.
+	Held          []*FeedResumeHeldRow `protobuf:"bytes,1,rep,name=held,proto3" json:"held,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeedResume) Reset() {
+	*x = FeedResume{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeedResume) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeedResume) ProtoMessage() {}
+
+func (x *FeedResume) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeedResume.ProtoReflect.Descriptor instead.
+func (*FeedResume) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *FeedResume) GetHeld() []*FeedResumeHeldRow {
+	if x != nil {
+		return x.Held
+	}
+	return nil
+}
+
+// One row a reader holds, and the publication of it the reader drew.
+type FeedResumeHeldRow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The row, as the daemon served it.
+	Id *v11.FeedId `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The revision the reader drew, echoed exactly as the row carried it
+	// (frontend.v1.FeedRow.revision).
+	Revision      *v11.FeedRowRevision `protobuf:"bytes,2,opt,name=revision,proto3" json:"revision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeedResumeHeldRow) Reset() {
+	*x = FeedResumeHeldRow{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeedResumeHeldRow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeedResumeHeldRow) ProtoMessage() {}
+
+func (x *FeedResumeHeldRow) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeedResumeHeldRow.ProtoReflect.Descriptor instead.
+func (*FeedResumeHeldRow) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *FeedResumeHeldRow) GetId() *v11.FeedId {
+	if x != nil {
+		return x.Id
+	}
+	return nil
+}
+
+func (x *FeedResumeHeldRow) GetRevision() *v11.FeedRowRevision {
+	if x != nil {
+		return x.Revision
+	}
+	return nil
+}
+
 // THE ARM IS THE OUTCOME.
 type OpenFeedResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -100,7 +218,7 @@ type OpenFeedResponse struct {
 
 func (x *OpenFeedResponse) Reset() {
 	*x = OpenFeedResponse{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -112,7 +230,7 @@ func (x *OpenFeedResponse) String() string {
 func (*OpenFeedResponse) ProtoMessage() {}
 
 func (x *OpenFeedResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -125,7 +243,7 @@ func (x *OpenFeedResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedResponse.ProtoReflect.Descriptor instead.
 func (*OpenFeedResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *OpenFeedResponse) GetResult() isOpenFeedResponse_Result {
@@ -187,14 +305,21 @@ type OpenFeedSuccess struct {
 	// page's rows. SET for the root feed and UNSET for every sub-feed, which has
 	// no held section. Every later change of it arrives as a WatchFeed
 	// held-section frame.
-	Held          *v11.FeedHeld `protobuf:"bytes,3,opt,name=held,proto3,oneof" json:"held,omitempty"`
+	Held *v11.FeedHeld `protobuf:"bytes,3,opt,name=held,proto3,oneof" json:"held,omitempty"`
+	// SET exactly when the request carried `resume`: `page` then carries only
+	// the rows of the feed's newest page the reader does not hold at their
+	// revision (new rows, and rows that changed since), not the whole page, and
+	// the reader places them among the rows it holds rather than replacing
+	// them. An empty `page.rows` means nothing is newer. UNSET on a first open,
+	// whose `page` is the whole newest page.
+	Resumed       *OpenFeedResumed `protobuf:"bytes,4,opt,name=resumed,proto3,oneof" json:"resumed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *OpenFeedSuccess) Reset() {
 	*x = OpenFeedSuccess{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -206,7 +331,7 @@ func (x *OpenFeedSuccess) String() string {
 func (*OpenFeedSuccess) ProtoMessage() {}
 
 func (x *OpenFeedSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -219,7 +344,7 @@ func (x *OpenFeedSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedSuccess.ProtoReflect.Descriptor instead.
 func (*OpenFeedSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *OpenFeedSuccess) GetPage() *v11.FeedPage {
@@ -243,6 +368,63 @@ func (x *OpenFeedSuccess) GetHeld() *v11.FeedHeld {
 	return nil
 }
 
+func (x *OpenFeedSuccess) GetResumed() *OpenFeedResumed {
+	if x != nil {
+		return x.Resumed
+	}
+	return nil
+}
+
+// How a resumed open's answer stands against what the reader holds.
+type OpenFeedResumed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every row of the feed's newest page as the daemon serves it now, oldest
+	// to newest, the ones `page` leaves out included. A row the reader holds
+	// that sorts at or after the oldest of these and is not named here has left
+	// the feed, and the reader drops it. Rows older than the oldest named stand
+	// as the reader holds them.
+	Standing      []*v11.FeedId `protobuf:"bytes,1,rep,name=standing,proto3" json:"standing,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenFeedResumed) Reset() {
+	*x = OpenFeedResumed{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenFeedResumed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenFeedResumed) ProtoMessage() {}
+
+func (x *OpenFeedResumed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenFeedResumed.ProtoReflect.Descriptor instead.
+func (*OpenFeedResumed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OpenFeedResumed) GetStanding() []*v11.FeedId {
+	if x != nil {
+		return x.Standing
+	}
+	return nil
+}
+
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type OpenFeedError struct {
@@ -262,7 +444,7 @@ type OpenFeedError struct {
 
 func (x *OpenFeedError) Reset() {
 	*x = OpenFeedError{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -274,7 +456,7 @@ func (x *OpenFeedError) String() string {
 func (*OpenFeedError) ProtoMessage() {}
 
 func (x *OpenFeedError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -287,7 +469,7 @@ func (x *OpenFeedError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedError.ProtoReflect.Descriptor instead.
 func (*OpenFeedError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *OpenFeedError) GetCause() isOpenFeedError_Cause {
@@ -405,7 +587,7 @@ type OpenFeedUnknownWorkspace struct {
 
 func (x *OpenFeedUnknownWorkspace) Reset() {
 	*x = OpenFeedUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -417,7 +599,7 @@ func (x *OpenFeedUnknownWorkspace) String() string {
 func (*OpenFeedUnknownWorkspace) ProtoMessage() {}
 
 func (x *OpenFeedUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -430,7 +612,7 @@ func (x *OpenFeedUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*OpenFeedUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{7}
 }
 
 type OpenFeedWorkspaceRefMismatch struct {
@@ -443,7 +625,7 @@ type OpenFeedWorkspaceRefMismatch struct {
 
 func (x *OpenFeedWorkspaceRefMismatch) Reset() {
 	*x = OpenFeedWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -455,7 +637,7 @@ func (x *OpenFeedWorkspaceRefMismatch) String() string {
 func (*OpenFeedWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *OpenFeedWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -468,7 +650,7 @@ func (x *OpenFeedWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*OpenFeedWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *OpenFeedWorkspaceRefMismatch) GetRegistryDir() string {
@@ -488,7 +670,7 @@ type OpenFeedTransferringAway struct {
 
 func (x *OpenFeedTransferringAway) Reset() {
 	*x = OpenFeedTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -500,7 +682,7 @@ func (x *OpenFeedTransferringAway) String() string {
 func (*OpenFeedTransferringAway) ProtoMessage() {}
 
 func (x *OpenFeedTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -513,7 +695,7 @@ func (x *OpenFeedTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedTransferringAway.ProtoReflect.Descriptor instead.
 func (*OpenFeedTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *OpenFeedTransferringAway) GetAddress() string {
@@ -538,7 +720,7 @@ type OpenFeedNotYetAdopted struct {
 
 func (x *OpenFeedNotYetAdopted) Reset() {
 	*x = OpenFeedNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -550,7 +732,7 @@ func (x *OpenFeedNotYetAdopted) String() string {
 func (*OpenFeedNotYetAdopted) ProtoMessage() {}
 
 func (x *OpenFeedNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -563,7 +745,7 @@ func (x *OpenFeedNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*OpenFeedNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *OpenFeedNotYetAdopted) GetAddress() string {
@@ -581,7 +763,7 @@ type OpenFeedFeedUndecodable struct {
 
 func (x *OpenFeedFeedUndecodable) Reset() {
 	*x = OpenFeedFeedUndecodable{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -593,7 +775,7 @@ func (x *OpenFeedFeedUndecodable) String() string {
 func (*OpenFeedFeedUndecodable) ProtoMessage() {}
 
 func (x *OpenFeedFeedUndecodable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -606,7 +788,7 @@ func (x *OpenFeedFeedUndecodable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedFeedUndecodable.ProtoReflect.Descriptor instead.
 func (*OpenFeedFeedUndecodable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{11}
 }
 
 type OpenFeedFeedNotInWorkspace struct {
@@ -617,7 +799,7 @@ type OpenFeedFeedNotInWorkspace struct {
 
 func (x *OpenFeedFeedNotInWorkspace) Reset() {
 	*x = OpenFeedFeedNotInWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -629,7 +811,7 @@ func (x *OpenFeedFeedNotInWorkspace) String() string {
 func (*OpenFeedFeedNotInWorkspace) ProtoMessage() {}
 
 func (x *OpenFeedFeedNotInWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -642,27 +824,40 @@ func (x *OpenFeedFeedNotInWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenFeedFeedNotInWorkspace.ProtoReflect.Descriptor instead.
 func (*OpenFeedFeedNotInWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{12}
 }
 
 var File_agentrepl_v1_endpoint_open_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_feed_proto_rawDesc = "" +
 	"\n" +
-	"%agentrepl/v1/endpoint_open_feed.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x1bfrontend/v1/feed_held.proto\x1a\x1dagentrepl/v1/feed_token.proto\"\x82\x01\n" +
+	"%agentrepl/v1/endpoint_open_feed.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x1bfrontend/v1/feed_held.proto\x1a\x1dagentrepl/v1/feed_token.proto\"\xc4\x01\n" +
 	"\x0fOpenFeedRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12,\n" +
-	"\x04feed\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01B\a\n" +
-	"\x05_feed\"\x8c\x01\n" +
+	"\x04feed\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01\x125\n" +
+	"\x06resume\x18\x03 \x01(\v2\x18.agentrepl.v1.FeedResumeH\x01R\x06resume\x88\x01\x01B\a\n" +
+	"\x05_feedB\t\n" +
+	"\a_resume\"A\n" +
+	"\n" +
+	"FeedResume\x123\n" +
+	"\x04held\x18\x01 \x03(\v2\x1f.agentrepl.v1.FeedResumeHeldRowR\x04held\"r\n" +
+	"\x11FeedResumeHeldRow\x12#\n" +
+	"\x02id\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x02id\x128\n" +
+	"\brevision\x18\x02 \x01(\v2\x1c.frontend.v1.FeedRowRevisionR\brevision\"\x8c\x01\n" +
 	"\x10OpenFeedResponse\x129\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1d.agentrepl.v1.OpenFeedSuccessH\x00R\asuccess\x123\n" +
 	"\x05error\x18\x02 \x01(\v2\x1b.agentrepl.v1.OpenFeedErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\xa9\x01\n" +
+	"\x06result\"\xf3\x01\n" +
 	"\x0fOpenFeedSuccess\x12)\n" +
 	"\x04page\x18\x01 \x01(\v2\x15.frontend.v1.FeedPageR\x04page\x122\n" +
 	"\x05watch\x18\x02 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\x12.\n" +
-	"\x04held\x18\x03 \x01(\v2\x15.frontend.v1.FeedHeldH\x00R\x04held\x88\x01\x01B\a\n" +
-	"\x05_held\"\xac\x04\n" +
+	"\x04held\x18\x03 \x01(\v2\x15.frontend.v1.FeedHeldH\x00R\x04held\x88\x01\x01\x12<\n" +
+	"\aresumed\x18\x04 \x01(\v2\x1d.agentrepl.v1.OpenFeedResumedH\x01R\aresumed\x88\x01\x01B\a\n" +
+	"\x05_heldB\n" +
+	"\n" +
+	"\b_resumed\"B\n" +
+	"\x0fOpenFeedResumed\x12/\n" +
+	"\bstanding\x18\x01 \x03(\v2\x13.frontend.v1.FeedIdR\bstanding\"\xac\x04\n" +
 	"\rOpenFeedError\x12U\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2&.agentrepl.v1.OpenFeedUnknownWorkspaceH\x00R\x10unknownWorkspace\x12b\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2*.agentrepl.v1.OpenFeedWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12U\n" +
@@ -695,43 +890,53 @@ func file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentrepl_v1_endpoint_open_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_agentrepl_v1_endpoint_open_feed_proto_goTypes = []any{
 	(*OpenFeedRequest)(nil),              // 0: agentrepl.v1.OpenFeedRequest
-	(*OpenFeedResponse)(nil),             // 1: agentrepl.v1.OpenFeedResponse
-	(*OpenFeedSuccess)(nil),              // 2: agentrepl.v1.OpenFeedSuccess
-	(*OpenFeedError)(nil),                // 3: agentrepl.v1.OpenFeedError
-	(*OpenFeedUnknownWorkspace)(nil),     // 4: agentrepl.v1.OpenFeedUnknownWorkspace
-	(*OpenFeedWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.OpenFeedWorkspaceRefMismatch
-	(*OpenFeedTransferringAway)(nil),     // 6: agentrepl.v1.OpenFeedTransferringAway
-	(*OpenFeedNotYetAdopted)(nil),        // 7: agentrepl.v1.OpenFeedNotYetAdopted
-	(*OpenFeedFeedUndecodable)(nil),      // 8: agentrepl.v1.OpenFeedFeedUndecodable
-	(*OpenFeedFeedNotInWorkspace)(nil),   // 9: agentrepl.v1.OpenFeedFeedNotInWorkspace
-	(*v1.WorkspaceRef)(nil),              // 10: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                   // 11: frontend.v1.FeedId
-	(*v11.FeedPage)(nil),                 // 12: frontend.v1.FeedPage
-	(*FeedWatchToken)(nil),               // 13: agentrepl.v1.FeedWatchToken
-	(*v11.FeedHeld)(nil),                 // 14: frontend.v1.FeedHeld
+	(*FeedResume)(nil),                   // 1: agentrepl.v1.FeedResume
+	(*FeedResumeHeldRow)(nil),            // 2: agentrepl.v1.FeedResumeHeldRow
+	(*OpenFeedResponse)(nil),             // 3: agentrepl.v1.OpenFeedResponse
+	(*OpenFeedSuccess)(nil),              // 4: agentrepl.v1.OpenFeedSuccess
+	(*OpenFeedResumed)(nil),              // 5: agentrepl.v1.OpenFeedResumed
+	(*OpenFeedError)(nil),                // 6: agentrepl.v1.OpenFeedError
+	(*OpenFeedUnknownWorkspace)(nil),     // 7: agentrepl.v1.OpenFeedUnknownWorkspace
+	(*OpenFeedWorkspaceRefMismatch)(nil), // 8: agentrepl.v1.OpenFeedWorkspaceRefMismatch
+	(*OpenFeedTransferringAway)(nil),     // 9: agentrepl.v1.OpenFeedTransferringAway
+	(*OpenFeedNotYetAdopted)(nil),        // 10: agentrepl.v1.OpenFeedNotYetAdopted
+	(*OpenFeedFeedUndecodable)(nil),      // 11: agentrepl.v1.OpenFeedFeedUndecodable
+	(*OpenFeedFeedNotInWorkspace)(nil),   // 12: agentrepl.v1.OpenFeedFeedNotInWorkspace
+	(*v1.WorkspaceRef)(nil),              // 13: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                   // 14: frontend.v1.FeedId
+	(*v11.FeedRowRevision)(nil),          // 15: frontend.v1.FeedRowRevision
+	(*v11.FeedPage)(nil),                 // 16: frontend.v1.FeedPage
+	(*FeedWatchToken)(nil),               // 17: agentrepl.v1.FeedWatchToken
+	(*v11.FeedHeld)(nil),                 // 18: frontend.v1.FeedHeld
 }
 var file_agentrepl_v1_endpoint_open_feed_proto_depIdxs = []int32{
-	10, // 0: agentrepl.v1.OpenFeedRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	11, // 1: agentrepl.v1.OpenFeedRequest.feed:type_name -> frontend.v1.FeedId
-	2,  // 2: agentrepl.v1.OpenFeedResponse.success:type_name -> agentrepl.v1.OpenFeedSuccess
-	3,  // 3: agentrepl.v1.OpenFeedResponse.error:type_name -> agentrepl.v1.OpenFeedError
-	12, // 4: agentrepl.v1.OpenFeedSuccess.page:type_name -> frontend.v1.FeedPage
-	13, // 5: agentrepl.v1.OpenFeedSuccess.watch:type_name -> agentrepl.v1.FeedWatchToken
-	14, // 6: agentrepl.v1.OpenFeedSuccess.held:type_name -> frontend.v1.FeedHeld
-	4,  // 7: agentrepl.v1.OpenFeedError.unknown_workspace:type_name -> agentrepl.v1.OpenFeedUnknownWorkspace
-	5,  // 8: agentrepl.v1.OpenFeedError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenFeedWorkspaceRefMismatch
-	6,  // 9: agentrepl.v1.OpenFeedError.transferring_away:type_name -> agentrepl.v1.OpenFeedTransferringAway
-	7,  // 10: agentrepl.v1.OpenFeedError.not_yet_adopted:type_name -> agentrepl.v1.OpenFeedNotYetAdopted
-	8,  // 11: agentrepl.v1.OpenFeedError.feed_undecodable:type_name -> agentrepl.v1.OpenFeedFeedUndecodable
-	9,  // 12: agentrepl.v1.OpenFeedError.feed_not_in_workspace:type_name -> agentrepl.v1.OpenFeedFeedNotInWorkspace
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	13, // 0: agentrepl.v1.OpenFeedRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	14, // 1: agentrepl.v1.OpenFeedRequest.feed:type_name -> frontend.v1.FeedId
+	1,  // 2: agentrepl.v1.OpenFeedRequest.resume:type_name -> agentrepl.v1.FeedResume
+	2,  // 3: agentrepl.v1.FeedResume.held:type_name -> agentrepl.v1.FeedResumeHeldRow
+	14, // 4: agentrepl.v1.FeedResumeHeldRow.id:type_name -> frontend.v1.FeedId
+	15, // 5: agentrepl.v1.FeedResumeHeldRow.revision:type_name -> frontend.v1.FeedRowRevision
+	4,  // 6: agentrepl.v1.OpenFeedResponse.success:type_name -> agentrepl.v1.OpenFeedSuccess
+	6,  // 7: agentrepl.v1.OpenFeedResponse.error:type_name -> agentrepl.v1.OpenFeedError
+	16, // 8: agentrepl.v1.OpenFeedSuccess.page:type_name -> frontend.v1.FeedPage
+	17, // 9: agentrepl.v1.OpenFeedSuccess.watch:type_name -> agentrepl.v1.FeedWatchToken
+	18, // 10: agentrepl.v1.OpenFeedSuccess.held:type_name -> frontend.v1.FeedHeld
+	5,  // 11: agentrepl.v1.OpenFeedSuccess.resumed:type_name -> agentrepl.v1.OpenFeedResumed
+	14, // 12: agentrepl.v1.OpenFeedResumed.standing:type_name -> frontend.v1.FeedId
+	7,  // 13: agentrepl.v1.OpenFeedError.unknown_workspace:type_name -> agentrepl.v1.OpenFeedUnknownWorkspace
+	8,  // 14: agentrepl.v1.OpenFeedError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenFeedWorkspaceRefMismatch
+	9,  // 15: agentrepl.v1.OpenFeedError.transferring_away:type_name -> agentrepl.v1.OpenFeedTransferringAway
+	10, // 16: agentrepl.v1.OpenFeedError.not_yet_adopted:type_name -> agentrepl.v1.OpenFeedNotYetAdopted
+	11, // 17: agentrepl.v1.OpenFeedError.feed_undecodable:type_name -> agentrepl.v1.OpenFeedFeedUndecodable
+	12, // 18: agentrepl.v1.OpenFeedError.feed_not_in_workspace:type_name -> agentrepl.v1.OpenFeedFeedNotInWorkspace
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_feed_proto_init() }
@@ -741,12 +946,12 @@ func file_agentrepl_v1_endpoint_open_feed_proto_init() {
 	}
 	file_agentrepl_v1_feed_token_proto_init()
 	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[0].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[1].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3].OneofWrappers = []any{
 		(*OpenFeedResponse_Success)(nil),
 		(*OpenFeedResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[2].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[4].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[6].OneofWrappers = []any{
 		(*OpenFeedError_UnknownWorkspace)(nil),
 		(*OpenFeedError_WorkspaceRefMismatch)(nil),
 		(*OpenFeedError_TransferringAway)(nil),
@@ -754,14 +959,14 @@ func file_agentrepl_v1_endpoint_open_feed_proto_init() {
 		(*OpenFeedError_FeedUndecodable)(nil),
 		(*OpenFeedError_FeedNotInWorkspace)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[7].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_feed_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_feed_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

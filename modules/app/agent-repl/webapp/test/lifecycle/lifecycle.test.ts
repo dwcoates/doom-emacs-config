@@ -664,19 +664,34 @@ describe("startLifecycle: the handover", () => {
     expect(state.adoptCalls).toBe(1);
   });
 
-  it("re-homes every stream and draws no notice when the adopting daemon serves this page's build", async () => {
+  it("keeps every stream where it stands and draws no notice when the adopting daemon serves this page's build", async () => {
     // ARRANGE
     const host = document.createElement("div");
     const { client } = lifecycleClient({ web: transferred });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    let rehomed = 0;
-    ctx.onDaemonMoved(() => (rehomed += 1));
+    let moved = 0;
+    ctx.onDaemonMoved(() => (moved += 1));
     // ACT
     const handle = startLifecycle(ctx, lifecycleDeps(host));
     await settle();
-    // ASSERT (before dispose: disposing takes the banner down by design)
-    expect([rehomed, host.textContent, ctx.isQuiesced()]).toEqual([1, "", false]);
+    // ASSERT (before dispose: disposing takes the banner down by design): the
+    // page moves once, when its daemon ends its stream, never at the adoption.
+    expect([moved, host.textContent, ctx.isQuiesced()]).toEqual([0, "", false]);
     handle.dispose();
+  });
+
+  it("records that it keeps its streams after an adoption on this page's build", async () => {
+    // ARRANGE
+    const h = captureLogRecords();
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(host));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect((await forwardedRecords(h)).map((r) => r.operation)).toContain("lifecycle.adopted-in-place");
   });
 
   it("draws the moved notice naming the successor when the adopting daemon serves another build", async () => {
@@ -739,8 +754,8 @@ describe("startLifecycle: the handover", () => {
     await settle();
     handle.dispose();
     // ASSERT: read off the entry tag `beforeEach` above wrote into the
-    // document, on the first open and on the re-homed one alike.
-    expect(state.webRequests).toEqual([{ webappBuild: "testbuild" }, { webappBuild: "testbuild" }]);
+    // document. The adoption reopens nothing, so the one open is the only one.
+    expect(state.webRequests).toEqual([{ webappBuild: "testbuild" }]);
   });
 
   it("quiesces the page on another build, so nothing more is sent on this client", async () => {

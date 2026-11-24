@@ -627,6 +627,13 @@ type Deps struct {
 	// resumption, and nothing held is delivered into a shim about to go
 	// (restartredrive.go). REQUIRED.
 	StandingDown func() bool
+	// BounceEnded is told each time a bounce of WS stops draining it and
+	// dispatch resumes (finished, failed, ended unperformed or deferred behind
+	// live work), after Bouncing(WS) has turned false. A stand-down deferred
+	// because the bounce owned the workspace is asked again on it
+	// (drain.Controller.RetryWithheld): a free workspace raises no other edge,
+	// so without it that stand-down waited for good. REQUIRED.
+	BounceEnded func(ws ids.WorkspaceID)
 	// Resumptions is told what every session-up release did about the
 	// resumption a stand-down owes the workspace (restartredrive.go), so an
 	// editor's open of the workspace waits for a resumed turn to have started

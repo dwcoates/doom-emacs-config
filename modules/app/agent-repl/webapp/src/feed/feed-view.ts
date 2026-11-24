@@ -79,7 +79,8 @@ import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
 import { centerTarget, elementsSpan, type ScrollPosition, type TailFollow, type VerticalSpan, type WalkHold } from "../scroll.js";
 import type { AppContext } from "../rpc/context.js";
-import { clone, equals } from "@bufbuild/protobuf";
+import { clone, create, equals } from "@bufbuild/protobuf";
+import { FeedResumeSchema, type FeedResume, type OpenFeedResumed } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import {
   FeedHoverStampSchema,
   FeedRowSchema,
@@ -269,6 +270,25 @@ export interface FeedController extends Handle {
   /** One live upsert. */
   upsert(row: FeedRow): void;
   /**
+   * What this feed holds, for a reopen to resume from (agentrepl.v1.FeedResume):
+   * every row it drew, at the revision it drew it. Undefined until a page has
+   * been placed, so a first open asks for the whole newest page.
+   */
+  resume(): FeedResume | undefined;
+  /**
+   * Apply a resumed open's answer (OpenFeedSuccess.resumed): place each row it
+   * carries among the rows held, as a push is placed, and drop each held row
+   * the newest page no longer names. Nothing is replaced, so an answer that
+   * finds nothing newer draws nothing and moves nothing.
+   */
+  applyResumed(page: FeedPage, resumed: OpenFeedResumed): void;
+  /**
+   * Apply an OpenFeed answer, whichever it is: a resumed open's answer
+   * (RESUMED set) is placed among the rows held (`applyResumed`), a first
+   * open's whole page replaces them (`applyPage`).
+   */
+  applyOpened(page: FeedPage, resumed: OpenFeedResumed | undefined): void;
+  /**
    * Apply the daemon's feed selection: mark the selected row (a final response
    * or a prompt), center-scroll it, and suppress tail-follow while a row is
    * selected — returning to the bottom, or staying put, when it ends.
@@ -367,6 +387,12 @@ export function createFeedController(
     loadThrough,
     freeOlderThanNewestPage: () => serializeWalk(freeBelowNewestPage),
     upsert,
+    resume,
+    applyResumed,
+    applyOpened: (page, resumed) => {
+      if (resumed === undefined) applyPage(page, "replace");
+      else applyResumed(page, resumed);
+    },
     applySelection,
     selectionActive: () => selectedRow !== null,
     rows,
@@ -636,6 +662,75 @@ export function createFeedController(
       context: { feed: feedName(), arm: kind.case },
     }, { text: headline.text });
     replaceTicking(errorSlot, [el]);
+  }
+
+  /** See FeedController.resume. */
+  function resume(): FeedResume | undefined {
+    if (!placed) return undefined;
+    const held = [...states.values()].flatMap((state) =>
+      state.row.revision === undefined || state.row.id === undefined
+        ? []
+        : [{ id: state.row.id, revision: state.row.revision }],
+    );
+    return create(FeedResumeSchema, { held });
+  }
+
+  /**
+   * See FeedController.applyResumed.
+   *
+   * A REATTACH RESUMES, IT NEVER REDRAWS (docs/protobuf-design/feed-resume.md).
+   * Each row the answer carries goes through `upsert`, which draws nothing for
+   * a row equal to the one held, so even a daemon that sent every row again
+   * could not redraw an unchanged one; and the daemon sends only rows whose
+   * revision differs. The newest page's span is the oldest key among the rows
+   * it names; a held row sorting in it that it does not name has left.
+   */
+  function applyResumed(page: FeedPage, resumed: OpenFeedResumed): void {
+    const result = requireCase(page.result, "FeedPage.result");
+    if (result.case === "error") {
+      drawPageError(result.value);
+      announce();
+      return;
+    }
+    if (result.case !== "success") {
+      unreachableArm("FeedPage.result", armName(result));
+      return;
+    }
+    const incoming = result.value.rows;
+    const keys = incoming.map(orderKeyOf);
+    const standing = new Set(resumed.standing.map((id) => id.value));
+    const incomingKey = new Map(incoming.map((row, i) => [requireMessage(row.id, "FeedRow.id").value, keys[i]]));
+    let spanStart: string | undefined;
+    for (const id of standing) {
+      const key = incomingKey.get(id) ?? states.get(id)?.key;
+      if (key !== undefined && (spanStart === undefined || key < spanStart)) spanStart = key;
+    }
+    const left = spanStart === undefined
+      ? []
+      : [...states].filter(([id, state]) => !standing.has(id) && state.key >= spanStart).map(([id]) => id);
+    for (const removed of result.value.removed) remove(removed.value);
+    for (const id of left) remove(id);
+    for (let i = 0; i < incoming.length; i += 1) {
+      const row = incoming[i];
+      const id = requireMessage(row.id, "FeedRow.id").value;
+      const held = states.get(id);
+      // A SUCCESSOR MAY PLACE A ROW AT ANOTHER KEY than the daemon that drew
+      // it: the resume re-places it there, where every later push of this
+      // daemon will be ordered, rather than recording a broken invariant.
+      if (held !== undefined && held.key !== keys[i] && !settlesPinned(held, row, keys[i])) {
+        log.info("feed row {id} resumed at another order key; it is placed again there", {
+          operation: "feed.resume-row-rekeyed",
+          context: { feed: feedName(), row: id, placed_key: held.key, resumed_key: keys[i] },
+        }, { id });
+        remove(id);
+      }
+      upsert(row);
+    }
+    log.info("resumed a {rows}-row page against the rows held", {
+      operation: "feed.page-resumed",
+      context: { feed: feedName(), standing: standing.size, left: left.length },
+    }, { rows: incoming.length });
+    if (left.length > 0 || result.value.removed.length > 0) announce();
   }
 
   /** One live upsert: replace in place if seen, insert at its key if new. */

@@ -83,17 +83,10 @@ export interface DaemonContext {
    */
   onQuiesced(fn: () => void): () => void;
   /**
-   * Run FN every time the daemon this context dials moves, or the page is
-   * re-homed (`rehome`). See StreamContext.onDaemonMoved.
+   * Run FN every time the daemon this context dials moves. See
+   * StreamContext.onDaemonMoved.
    */
   onDaemonMoved(fn: () => void): () => void;
-  /**
-   * The workspace moved to another daemon behind this page's one origin, and
-   * the page adopted it there in place (lifecycle.ts): every standing stream
-   * ends its run and reopens at once, exactly as a daemon move makes it, so
-   * every subscription is made again where the workspace is served now.
-   */
-  rehome(): void;
   /**
    * Announce that a stream frame arrived and could be read.
    *
@@ -191,6 +184,12 @@ export interface DaemonContextInit {
   daemon?: DaemonOrigin;
   /** See DaemonContext.clientAt; set by the web view host's context alone. */
   clientAt?: (address: string) => AgentReplClient;
+  /**
+   * Whether a reader can see this page now (page-seen.ts): a page whose stream
+   * ended while unseen attaches again only once it is seen (page-streams.ts).
+   * Unset on the web view host's context, which a reader always sees.
+   */
+  seen?: PageSeen;
 }
 
 /** What a workspace page's context is built from. */
@@ -228,7 +227,6 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   const quietListeners = createListeners();
   const pushListeners = createListeners();
   const restoredListeners = createListeners();
-  const rehomeListeners = createListeners();
   const base = {
     webappBuild: init.webappBuild,
     client: init.client,
@@ -267,20 +265,9 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
       return restoredListeners.add(fn);
     },
     onDaemonMoved(fn: () => void): () => void {
-      // A PAGE'S DAEMON IS ITS OWN ORIGIN and never moves, so only a rehome
-      // tells it; the web view host's origin moves as well.
-      const unsubscribeFromRehome = rehomeListeners.add(fn);
-      const unsubscribeFromOrigin = init.daemon?.onMoved(fn) ?? ((): void => undefined);
-      return () => {
-        unsubscribeFromRehome();
-        unsubscribeFromOrigin();
-      };
-    },
-    rehome(): void {
-      log.info("the page adopted its workspace in place; every stream reopens where it is served now", {
-        operation: "rpc.context-rehome",
-      });
-      rehomeListeners.notify();
+      // A PAGE'S DAEMON IS ITS OWN ORIGIN and never moves; only the web view
+      // host's movable origin does.
+      return init.daemon?.onMoved(fn) ?? ((): void => undefined);
     },
     onQuiesced(fn: () => void): () => void {
       // A subscriber arriving AFTER the page went quiet is told at once, or a
@@ -297,6 +284,6 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   // this same object, so it is opened once the rest of the context exists and
   // handed back on the finished one.
   const streams: PageStreams =
-    init.streams ?? startPageStreams(base satisfies PageStreamContext, init.page, init.webhost);
+    init.streams ?? startPageStreams(base satisfies PageStreamContext, init.page, { webhost: init.webhost, seen: init.seen });
   return { ...base, streams };
 }

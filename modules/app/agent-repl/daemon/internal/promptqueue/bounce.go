@@ -1024,6 +1024,7 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		q.mu.Unlock()
 		q.deferReplacementLocked(d, pending, edge, runErr, log)
 		d.unlock()
+		q.deps.BounceEnded(ws)
 		return nil
 	}
 	dones := stage.dones
@@ -1139,6 +1140,12 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 	}
 	for _, done := range lost {
 		done(fmt.Errorf("bounce %q: %w", ws, errMoveNeverSealed))
+	}
+	// THE BOUNCE NO LONGER OWNS THE WORKSPACE: a stand-down it deferred is
+	// asked again now, since nothing else may happen to the workspace after.
+	// A workspace kept drained is its new owner's, and owes no such edge.
+	if !keep {
+		q.deps.BounceEnded(ws)
 	}
 	return nil
 }

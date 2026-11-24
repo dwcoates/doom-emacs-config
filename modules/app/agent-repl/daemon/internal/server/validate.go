@@ -335,7 +335,18 @@ func validateOpenFeedRequest(req *agentreplv1.OpenFeedRequest) *connect.Error {
 		return err
 	}
 	if req.Feed != nil {
-		return validateFeedID("feed", req.GetFeed())
+		if err := validateFeedID("feed", req.GetFeed()); err != nil {
+			return err
+		}
+	}
+	for i, held := range req.GetResume().GetHeld() {
+		path := fmt.Sprintf("resume.held[%d]", i)
+		if err := validateFeedID(path+".id", held.GetId()); err != nil {
+			return err
+		}
+		if held.GetRevision().GetDigest() == "" {
+			return invalid(path+".revision", "a held row's revision is required")
+		}
 	}
 	return nil
 }

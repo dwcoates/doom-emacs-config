@@ -490,6 +490,11 @@ func (c *controller) yieldToSuccessor(ctx context.Context, fields dlog.Context) 
 	}
 	c.log.Info(opHandover, "the transfer pass is over: the successor takes over now, and this daemon serves what is still busy here until each workspace is free to move",
 		dlog.Merge(fields, dlog.Context{"holdouts": holdouts}))
+	// THE PAGES MOVE AT THE PROMOTION, ONCE. Each web page kept its stream
+	// here through its workspace's adoption; ended now, it reattaches at the
+	// successor, the only daemon accepting, however long this one goes on
+	// serving the workspaces still busy here.
+	c.deps.Pusher.EndPageStreams()
 }
 
 // requestTransfer asks the bounce registry for WS's transfer and answers

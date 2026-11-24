@@ -468,6 +468,65 @@ func TestABounceDroppedUnrunResumesDispatchAtInfo(t *testing.T) {
 	}
 }
 
+// TestABounceThatLetsTheWorkspaceGoSaysSoOnceItNoLongerBounces pins the edge a
+// stand-down the bounce deferred is retried on (Deps.BounceEnded): told once
+// dispatch resumes, however the bounce ended, and only after Bouncing reads
+// false, so the retried stand-down is not deferred again by the bounce itself.
+func TestABounceThatLetsTheWorkspaceGoSaysSoOnceItNoLongerBounces(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "a bounce that finished", err: nil},
+		{name: "a bounce that failed", err: errors.New("the replacement shim did not start")},
+		{name: "a bounce dropped unrun", err: fmt.Errorf("the workspace is closed: %w", bounce.ErrUnregistered)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.watcher.idle()
+			g := newGate()
+			if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false)); err != nil {
+				t.Fatalf("RequestBounce: %v", err)
+			}
+			g.awaitStart(t)
+
+			// Act
+			g.finish(h, tt.err)
+
+			// Assert
+			ends := h.bounceEnds.await(t, bounceStartBound)
+			if len(ends) != 1 || ends[0].ws != theWorkspace || ends[0].stillBouncing {
+				t.Fatalf("bounce ends = %+v, want one for the workspace, told once it no longer bounced", ends)
+			}
+		})
+	}
+}
+
+// TestAKeepDrainingBounceTellsNoBounceEnd pins that a workspace a bounce keeps
+// drained (its new owner's) raises no edge: nothing here may stand it down.
+func TestAKeepDrainingBounceTellsNoBounceEnd(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	req := g.request("handover_transfer", false)
+	req.KeepDraining = true
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, req); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	g.awaitStart(t)
+
+	// Act: finish joins the bounce's goroutine, which reports any end before
+	// it returns.
+	g.finish(h, nil)
+
+	// Assert
+	if ends := h.bounceEnds.reported(); len(ends) != 0 {
+		t.Fatalf("bounce ends = %+v, want none for a workspace kept drained", ends)
+	}
+}
+
 func TestAKeepDrainingBounceLeavesTheWorkspaceDrained(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

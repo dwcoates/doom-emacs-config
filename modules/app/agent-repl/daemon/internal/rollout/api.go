@@ -667,6 +667,11 @@ type WorkspacePusher interface {
 	// PushReloadWebapp pushes the EMPTY reload_webapp arm on the workspace's
 	// host stream: no address rides it, because the daemon is not changing.
 	PushReloadWebapp(ws ids.WorkspaceID)
+	// EndPageStreams ends every web page's stream this daemon holds with its
+	// planned ending, once the successor accepts on the shared address: the
+	// handover's promotion, after which a page's one reattach can reach only
+	// the successor.
+	EndPageStreams()
 }
 
 // ParticipantSource answers who holds a workspace's two per-workspace streams.

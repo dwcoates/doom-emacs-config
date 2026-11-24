@@ -191,6 +191,14 @@ func endStandingStream[R any](s *server, rpc string, log dlog.Logger, out stream
 	if s.life.Err() == nil {
 		return
 	}
+	sendStandingEnding(rpc, log, out, ending)
+}
+
+// sendStandingEnding sends a standing stream's planned ending ENDING as its
+// last frame. endStandingStream sends it when the daemon's own lifetime ended
+// the stream; the page's drain sends it at that exit and when the successor
+// takes the shared address over (page.go), where the lifetime has not ended.
+func sendStandingEnding[R any](rpc string, log dlog.Logger, out streamSink[R], ending *R) {
 	if err := out.Send(ending); err != nil {
 		log.Debug(opStreamEnding, "the standing stream's client went away before its planned ending",
 			dlog.Context{"rpc": rpc, "cause": err.Error()})

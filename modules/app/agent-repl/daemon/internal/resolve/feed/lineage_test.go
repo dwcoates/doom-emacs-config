@@ -173,7 +173,10 @@ func TestAForksInheritedAnswerIsDrawnAsItsParentDrawsIt(t *testing.T) {
 	}
 	for i := range parentRows {
 		want, got := proto.Clone(parentRows[i]).(*frontendv1.FeedRow), proto.Clone(forkRows[i]).(*frontendv1.FeedRow)
+		// The revision digests the row's key too, so it differs exactly as the
+		// key does.
 		want.Order, got.Order = nil, nil
+		want.Revision, got.Revision = nil, nil
 		if !proto.Equal(want, got) {
 			t.Fatalf("row %d differs:\nparent %v\nfork   %v", i, want, got)
 		}

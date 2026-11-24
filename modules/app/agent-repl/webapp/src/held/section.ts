@@ -47,7 +47,7 @@
  * no held item: it carries `FOLDING_ATTRIBUTE` instead of the item's id, so
  * no reader of the held entries counts it.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, equals } from "@bufbuild/protobuf";
 import { FeedHeldSchema, type FeedHeld, type FeedHeldItem } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import type { WatchFeedHeldFold } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import { createLogger } from "../log.js";
@@ -261,6 +261,14 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
   return {
     apply,
     opened(section) {
+      // A REOPEN THAT FINDS THE SECTION AS DRAWN DRAWS NOTHING: the tail was
+      // handed on, not lost, and the daemon states what it stated before.
+      if (live && last !== null && equals(FeedHeldSchema, last, section)) {
+        log.debug("the root feed reopened with the held section as drawn; nothing is redrawn", {
+          operation: "held.reopened-unchanged",
+        });
+        return;
+      }
       if (!live) {
         log.info("the root feed opened; the daemon is the held section's only source", {
           operation: "held.source-daemon",

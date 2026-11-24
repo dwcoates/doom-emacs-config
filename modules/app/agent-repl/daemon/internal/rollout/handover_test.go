@@ -2490,6 +2490,51 @@ func TestAHandoverWhoseYieldFailsSaysSo(t *testing.T) {
 	awaitRecord(t, h, opHandover, "the transfer pass is over but the boot claim could not be yielded; the successor takes over at this daemon's exit")
 }
 
+// yieldOnce runs the end of a transfer pass: the yield of the boot claim to
+// the successor, and what follows it.
+func yieldOnce(h *harness) {
+	h.c.mu.Lock()
+	h.c.handover = &handoverSlot{}
+	h.c.unlock()
+	h.c.yieldToSuccessor(context.Background(), dlog.Context{})
+}
+
+func TestTheYieldEndsThePageStreamsOnceTheSuccessorAccepts(t *testing.T) {
+	// Arrange
+	var h *harness
+	h = newHarness(t, func(d *Deps) {
+		d.YieldBootClaim = func() error {
+			h.order.record("yield")
+			return nil
+		}
+	})
+
+	// Act
+	yieldOnce(h)
+
+	// Assert
+	taken := h.order.Taken()
+	yield, ended := indexOf(taken, "yield"), indexOf(taken, "end_page_streams")
+	if yield < 0 || ended < yield {
+		t.Fatalf("steps = %v, want the page streams ended after the boot claim is yielded", taken)
+	}
+}
+
+func TestAYieldThatFailsEndsNoPageStream(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.YieldBootClaim = func() error { return errors.New("the boot lock could not be released") }
+	})
+
+	// Act
+	yieldOnce(h)
+
+	// Assert: the pages stay where the daemon still accepts, and end with its exit.
+	if taken := h.order.Taken(); indexOf(taken, "end_page_streams") >= 0 {
+		t.Fatalf("steps = %v, want no page stream ended after a failed yield", taken)
+	}
+}
+
 func TestARestartNeverYieldsTheBootClaim(t *testing.T) {
 	// Arrange
 	yielded := make(chan struct{}, 1)

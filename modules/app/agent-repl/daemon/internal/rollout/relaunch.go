@@ -637,14 +637,40 @@ func mergeHoldsTheWorkspace(reason RelaunchReason, err error) bool {
 // release drops the restart-pending hold and TELLS THE QUEUE, which is what
 // un-stamps the held intake: the release alone changes a row the queue is not
 // watching, so a bounce without this leaves the intake held forever.
+//
+// A HOLD THE WORKSPACE'S KILL ALREADY ENDED is the state the release asks for:
+// a kill or a forget under the bounce closes the workspace and drops every
+// lease it holds (2026-11-23, the daemon integration suite: a workspace
+// killed under its query_died bounce). It is recorded at INFO; a hold missing
+// from a workspace that is still open stays an ERROR, as any other failure.
 func (c *controller) release(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) {
 	if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
+		if errors.Is(err, wsm.ErrNotFound) && c.closedUnder(ctx, ws, fields) {
+			c.log.Info(opRelaunch, "the workspace was closed under the relaunch; its close already released the restart-pending hold", dlog.WithCause(fields, err))
+			c.deps.LeaseChanged(ws)
+			return
+		}
 		c.log.Error(opRelaunch, "could not release the restart-pending hold", dlog.WithCause(fields, err))
 		return
 	}
 	c.deps.LeaseChanged(ws)
 	c.publishHost(ws)
 	c.log.Debug(opRelaunch, "released the restart-pending hold", fields)
+}
+
+// closedUnder reports whether WS was closed or forgotten while its relaunch
+// ran. A read that fails is recorded and answers false, so the missing hold is
+// recorded at ERROR.
+func (c *controller) closedUnder(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) bool {
+	record, err := c.deps.DB.Workspace(ctx, ws)
+	if errors.Is(err, wsm.ErrNotFound) {
+		return true
+	}
+	if err != nil {
+		c.log.Error(opRelaunch, "could not read whether the workspace was closed under its relaunch", dlog.WithCause(fields, err))
+		return false
+	}
+	return record.Closed
 }
 
 // recordRelaunchFault records a resume that failed hard as the WORKSPACE'S OWN
