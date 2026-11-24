@@ -85,7 +85,7 @@ func (s *server) PlanRollback(
 	}
 	restore := req.Msg.GetRestoreFiles() != nil
 	named := req.Msg.GetPrompt()
-	plan, ok, err := s.planRollback(ctx, subject.Record.ID, restore, named)
+	plan, ok, err := s.planRollback(ctx, subject.Record.ID, subject.Log, restore, named)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -146,7 +146,7 @@ func (s *server) RollBack(
 	if !known || planned.ws != ws {
 		return stale("the plan is not one this daemon made for this workspace")
 	}
-	now, ok, err := s.planRollback(ctx, ws, planned.restore, planned.row)
+	now, ok, err := s.planRollback(ctx, ws, subject.Log, planned.restore, planned.row)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -244,7 +244,7 @@ func (s *server) planLatestPrompt(ctx context.Context, ws ids.WorkspaceID, log d
 		return rollbackPlan{}, false, nil
 	}
 	latest := prompts[len(prompts)-1]
-	plan, ok, err := s.planRollback(ctx, ws, false, latest)
+	plan, ok, err := s.planRollback(ctx, ws, log, false, latest)
 	if err != nil {
 		return rollbackPlan{}, false, err
 	}
@@ -339,7 +339,7 @@ func rollbackRefusal(s *server, shim *workspace.ShimRefusal) refusal {
 // planRollback works out what rolling back would do. ROW names the prompt
 // (a named prompt, or a plan being checked again); nil resolves it: the
 // selected prompt, else the latest. ok is false when no prompt can be rolled back to.
-func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, restore bool, row *frontendv1.FeedId) (rollbackPlan, bool, error) {
+func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, restore bool, row *frontendv1.FeedId) (rollbackPlan, bool, error) {
 	plan := rollbackPlan{ws: ws, restore: restore, row: row}
 	if row == nil {
 		if selected, kind, held := s.currentSelection(ws); held && kind == selectionPrompt {
@@ -355,7 +355,7 @@ func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, restore b
 		return rollbackPlan{}, false, nil
 	}
 	plan.turns, plan.said = target.Turns, target.Said
-	plan.excerpt = excerptOf(target.Said)
+	plan.excerpt = excerptOf(log, target.Said)
 	first, err := s.deps.DB.Turn(ctx, ws, target.Turns[0])
 	since := first.StartedAt
 	switch {
@@ -464,9 +464,16 @@ func composerWords(log dlog.Logger, said *conversationv1.UserSaid) *conversation
 	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
 }
 
+// composerText is the text of SAID's words as the composer would hold them
+// again (composerWords): how a rollback's choices and its confirmation name a
+// prompt, so they name it as the person typed it.
+func composerText(log dlog.Logger, said *conversationv1.UserSaid) string {
+	return saidText(composerWords(log, said))
+}
+
 // excerptOf is the prompt's opening words, for the confirmation to name it.
-func excerptOf(said *conversationv1.UserSaid) string {
-	words := strings.Join(strings.Fields(saidText(said)), " ")
+func excerptOf(log dlog.Logger, said *conversationv1.UserSaid) string {
+	words := strings.Join(strings.Fields(composerText(log, said)), " ")
 	if utf8.RuneCountInString(words) <= rollbackExcerptRunes {
 		return words
 	}

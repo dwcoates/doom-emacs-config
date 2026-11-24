@@ -159,3 +159,24 @@ func TestListRollbackPromptsRequiresAValidWorkspace(t *testing.T) {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
 }
+
+// TestListRollbackPromptsNamesEachPromptWithoutInjectedSpans pins that each
+// choice names its prompt as the person typed it.
+func TestListRollbackPromptsNamesEachPromptWithoutInjectedSpans(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Topbar.contextWindow = 200_000
+	h.Feed.rollbackChoices = []feed.RollbackChoice{{Row: feedIDs("p1")[0], Turn: "t1", Said: injected("my words")}}
+
+	// Act.
+	msg, err := listRollbackPrompts(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ListRollbackPrompts: %v", err)
+	}
+	got := msg.GetSuccess().GetPrompts()
+	if len(got) != 1 || got[0].GetText() != "my words" {
+		t.Fatalf("prompts = %v, want one named %q", got, "my words")
+	}
+}

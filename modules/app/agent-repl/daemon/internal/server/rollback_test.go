@@ -611,11 +611,12 @@ func TestExcerptOf(t *testing.T) {
 		{name: "sixty-one runes truncates with an ellipsis", said: multiBlockSaid(sixtyOne), want: sixty + "…"},
 		{name: "a multibyte prompt truncates by runes, not bytes",
 			said: multiBlockSaid(multibyte), want: strings.Repeat("日", 60) + "…"},
+		{name: "injected spans are left out", said: injected("Hello world"), want: "Hello world"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := excerptOf(tc.said)
+			got := excerptOf(dlog.NewTestLogger(), tc.said)
 
 			// Assert.
 			if got != tc.want {
@@ -1593,5 +1594,25 @@ func TestEveryComposerHandbackIsBuiltByTheHelper(t *testing.T) {
 	// Assert.
 	if handbacks != 2 || helped != handbacks {
 		t.Fatalf("composer handbacks = %d, built by composerWords = %d; want 2, both by composerWords", handbacks, helped)
+	}
+}
+
+// TestPlanRollbackNamesThePromptWithoutInjectedSpans pins that the
+// confirmation names the prompt as the person typed it.
+func TestPlanRollbackNamesThePromptWithoutInjectedSpans(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	h.Feed.rollbackTarget.Said = injected("my words")
+
+	// Act.
+	resp, err := h.Client.PlanRollback(context.Background(), connect.NewRequest(keepFilesPlan()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PlanRollback: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetPlan().GetTarget().GetExcerpt(); got != "my words" {
+		t.Fatalf("excerpt = %q, want %q", got, "my words")
 	}
 }
