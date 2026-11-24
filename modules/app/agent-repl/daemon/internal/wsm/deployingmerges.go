@@ -253,19 +253,9 @@ func (s *store) UncheckedDeployingMerges(ctx context.Context) ([]DeployingMerge,
 	const op = "daemon.wsm.unchecked_deploying_merges"
 	var out []DeployingMerge
 	err := s.read(ctx, op, nil, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx, deployingMergeQuery+` WHERE stage < ? ORDER BY repo_key`, int(DeployingChecked))
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			m, err := scanDeployingMergeRow(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, *m)
-		}
-		return rows.Err()
+		merges, err := listRows(ctx, s.q(ctx), deployingMergeQuery+` WHERE stage < ? ORDER BY repo_key`, scanDeployingMergeRow, int(DeployingChecked))
+		out = merges
+		return err
 	})
 	return out, err
 }
@@ -291,12 +281,15 @@ func scanDeployingMerge(row *sql.Row) (*DeployingMerge, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return m, err
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // scanDeployingMergeRow decodes one row of deployingMergeColumns. It is the
 // one decoding path.
-func scanDeployingMergeRow(row interface{ Scan(...any) error }) (*DeployingMerge, error) {
+func scanDeployingMergeRow(row interface{ Scan(...any) error }) (DeployingMerge, error) {
 	var (
 		m                       DeployingMerge
 		repo, ws, lease, credit string
@@ -304,9 +297,9 @@ func scanDeployingMergeRow(row interface{ Scan(...any) error }) (*DeployingMerge
 		stage                   int
 	)
 	if err := row.Scan(&repo, &ws, &lease, &credit, &m.Async, &m.Name, &m.Branch, &m.TargetDir, &active, &deploying, &m.Timed, &stage); err != nil {
-		return nil, err
+		return DeployingMerge{}, err
 	}
 	m.Repo, m.Workspace, m.Lease, m.Credited = RepoKey(repo), WorkspaceID(ws), LeaseID(lease), WorkspaceID(credit)
 	m.ActiveSince, m.DeployingSince, m.Stage = fromNanos(active), fromNanos(deploying), DeployingStage(stage)
-	return &m, nil
+	return m, nil
 }
