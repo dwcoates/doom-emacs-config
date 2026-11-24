@@ -925,8 +925,15 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, cause revivalCau
 		// or handed to a successor while the revival ran, which the stop's own
 		// record says. It still fails the submission, which waits for the
 		// session's next bring-up.
+		// NOR IS ONE WHOSE WORKSPACE WAS FORGOTTEN WHILE IT RAN: a notice or a
+		// relaunch's resubmission can race the forget, and the registry no
+		// longer holding the workspace is an ordinary schedule; the
+		// forget's own records say it.
 		if bringup.IsStandDown(err) {
 			log.Info(opSubmit, "a stand-down this daemon ordered cut the revival short; the submission waits for the session's next bring-up",
+				dlog.Context{"cause": err.Error()})
+		} else if errors.Is(err, wsm.ErrNotFound) {
+			log.Info(opSubmit, "the workspace was forgotten while its revival ran; the submission cannot be delivered",
 				dlog.Context{"cause": err.Error()})
 		} else {
 			log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
