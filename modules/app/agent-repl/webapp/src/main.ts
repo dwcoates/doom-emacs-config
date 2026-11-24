@@ -467,7 +467,7 @@ function mountWorkspaceFooter(
   // activity cell shows it while the pointer is on the bubble.
   // THE HOVERED ROW'S TIME AND AGE ARE READ IN THE FEED'S RIGHT MARGIN
   // (owner request, 2026-11-21), faded in beside the row.
-  const marginStamp = mountMarginStamp(shell.feedScroll, ctx.ticker);
+  const marginStamp = mountMarginStamp(shell.feedScroll, shell.feedStamp, ctx.ticker);
   installHoverStamp(
     shell.feed,
     (stamp, row) => {

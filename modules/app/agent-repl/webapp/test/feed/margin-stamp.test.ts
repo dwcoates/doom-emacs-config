@@ -32,25 +32,32 @@ function stamp(atMs: number | null): HoverStamp {
   return { label: "Response", tokens: null, atMs, startedAtMs: null };
 }
 
-/** Give EL a viewport extent from TOP to BOTTOM. */
-function placeAt(el: Element, top: number, bottom: number): void {
-  el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
+/** Give EL a viewport extent from TOP to BOTTOM, its left edge at LEFT. */
+function placeAt(el: Element, top: number, bottom: number, left = 0): void {
+  el.getBoundingClientRect = () => ({ top, bottom, left }) as DOMRect;
 }
 
-/** Feed geometry: the feed shows 100..500 of the viewport, scrolled 1000 down, and the stamp is 40 tall. */
+/**
+ * Feed geometry: the scroll box shows 100..500 of the viewport from x 30,
+ * 600 wide, scrolled 1000 down; the stamp's slot stands at the box's bottom
+ * edge from x 20; and the stamp is 40 tall.
+ */
 function mounted() {
   const parent = document.createElement("div");
-  document.body.append(parent);
-  placeAt(parent, 100, 500);
+  const slot = document.createElement("div");
+  document.body.append(parent, slot);
+  placeAt(parent, 100, 500, 30);
   Object.defineProperty(parent, "clientHeight", { value: 400 });
+  Object.defineProperty(parent, "clientWidth", { value: 600 });
   parent.scrollTop = 1000;
+  placeAt(slot, 500, 500, 20);
   const row = document.createElement("div");
   parent.append(row);
   placeAt(row, 200, 300);
-  const margin = mountMarginStamp(parent, createTicker(1000));
-  const el = parent.querySelector<HTMLElement>(`.${MARGIN_STAMP_CLASS}`)!;
+  const margin = mountMarginStamp(parent, slot, createTicker(1000));
+  const el = slot.querySelector<HTMLElement>(`.${MARGIN_STAMP_CLASS}`)!;
   Object.defineProperty(el, "offsetHeight", { value: 40 });
-  return { parent, row, margin, el };
+  return { parent, slot, row, margin, el };
 }
 
 function lines(el: HTMLElement): string[] {
@@ -141,13 +148,43 @@ describe("mountMarginStamp", () => {
     expect(lines(el)).toEqual(before);
   });
 
-  it("stands at the middle of the row's visible part, in the feed's scrolled content", () => {
+  it("stands at the middle of the row's visible part, in its slot's terms", () => {
     // Arrange
     const { row, margin, el } = mounted();
     // Act
     margin.show(stamp(NOW - 1000), row);
     // Assert
-    expect(el.style.top).toBe(`${250 - 100 + 1000}px`);
+    expect(el.style.top).toBe(`${250 - 500}px`);
+  });
+
+  it("is mounted in its slot, never in the scroll box, so it adds nothing to the feed's height", () => {
+    // Arrange
+    const { parent, slot, row, margin, el } = mounted();
+    // Act
+    margin.show(stamp(NOW - 1000), row);
+    // Assert
+    expect([el.parentElement, parent.contains(el)]).toEqual([slot, false]);
+  });
+
+  it("spans the scroll box's client area across", () => {
+    // Arrange
+    const { row, margin, el } = mounted();
+    // Act
+    margin.show(stamp(NOW - 1000), row);
+    // Assert
+    expect([el.style.left, el.style.width]).toEqual([`${30 - 20}px`, "600px"]);
+  });
+
+  it("stands at the same place however far the feed is scrolled, while the row stands still on screen", () => {
+    // Arrange
+    const { parent, row, margin, el } = mounted();
+    margin.show(stamp(NOW - 1000), row);
+    const top = el.style.top;
+    parent.scrollTop = 4000;
+    // Act
+    parent.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(el.style.top).toBe(top);
   });
 
   it("places itself again when the feed scrolls", () => {
@@ -159,7 +196,7 @@ describe("mountMarginStamp", () => {
     // Act
     parent.dispatchEvent(new Event("scroll"));
     // Assert
-    expect(el.style.top).toBe(`${200 - 100 + 1500}px`);
+    expect(el.style.top).toBe(`${200 - 500}px`);
   });
 
   it("places itself again when the row or the feed resizes", () => {
@@ -170,7 +207,7 @@ describe("mountMarginStamp", () => {
     // Act
     fireResize(row);
     // Assert
-    expect(el.style.top).toBe(`${300 - 100 + 1000}px`);
+    expect(el.style.top).toBe(`${300 - 500}px`);
   });
 
   it("fades out when a scroll takes its row wholly out of view", () => {
@@ -204,7 +241,7 @@ describe("mountMarginStamp", () => {
     const parent = document.createElement("div");
     document.body.append(parent);
     // Act
-    const mount = (): unknown => mountMarginStamp(parent, createTicker(1000));
+    const mount = (): unknown => mountMarginStamp(parent, parent, createTicker(1000));
     // Assert
     expect(mount).toThrow("invariant: the feed's page has a ResizeObserver");
   });
@@ -225,10 +262,10 @@ describe("mountMarginStamp", () => {
 
   it("removes its element on dispose", () => {
     // Arrange
-    const { parent, margin } = mounted();
+    const { slot, margin } = mounted();
     // Act
     margin.dispose();
     // Assert
-    expect(parent.querySelector(`.${MARGIN_STAMP_CLASS}`)).toBeNull();
+    expect(slot.querySelector(`.${MARGIN_STAMP_CLASS}`)).toBeNull();
   });
 });

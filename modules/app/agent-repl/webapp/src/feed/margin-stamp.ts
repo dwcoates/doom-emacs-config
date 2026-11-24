@@ -20,6 +20,16 @@
  * row's middle, and a row cut off by the feed's top or bottom edge has it at
  * the middle of what remains, so the stamp is always in view. A scroll, or a
  * resize of the row or the feed, places it again.
+ *
+ * IT STANDS OUTSIDE THE SCROLL BOX (2026-11-24). It is mounted in its own
+ * slot, a sibling of the feed's scroll box that does not scroll, and placed in
+ * the viewport's terms rather than the scrolled content's. Inside the scroll
+ * box, an absolutely positioned stamp counted toward the box's scrollable
+ * height wherever it last stood: a faded stamp left low in a feed that then
+ * shrank kept the box taller than its rows, and the tail follow parked the
+ * view in the blank below the last row. Outside it, the stamp cannot add to
+ * the feed's height at all, and a scroll never carries it along with the
+ * content between two placings.
  */
 import type { Ticker } from "../clock.js";
 import { decorativeElement, pageResizeObserver } from "../dom.js";
@@ -68,37 +78,47 @@ export interface MarginStamp {
 }
 
 /**
- * Mount the margin stamp in PARENT, the positioned box the feed scrolls in,
- * its text counting off TICKER.
+ * Mount the margin stamp in SLOT, a positioned box beside the feed's scroll box
+ * BOX that does not scroll, its text counting off TICKER. The stamp is placed
+ * over BOX's visible area, read in viewport terms, so BOX's scrollable height
+ * never includes it.
  */
-export function mountMarginStamp(parent: HTMLElement, ticker: Ticker): MarginStamp {
-  const Observer = pageResizeObserver(parent);
+export function mountMarginStamp(box: HTMLElement, slot: HTMLElement, ticker: Ticker): MarginStamp {
+  const Observer = pageResizeObserver(box);
   if (Observer === null) throw new Error("invariant: the feed's page has a ResizeObserver");
   const el = decorativeElement("div", MARGIN_STAMP_CLASS);
   const lines = decorativeElement("div", MARGIN_STAMP_LINES_CLASS);
   el.append(lines);
-  parent.append(el);
+  slot.append(el);
   let row: Element | null = null;
   const place = (): void => {
     if (row === null) return;
-    const box = parent.getBoundingClientRect();
-    const viewTop = box.top + parent.clientTop;
+    const boxRect = box.getBoundingClientRect();
+    const viewTop = boxRect.top + box.clientTop;
+    const viewLeft = boxRect.left + box.clientLeft;
     const rect = row.getBoundingClientRect();
     const center = marginStampCenter(
       { top: rect.top, bottom: rect.bottom },
-      { top: viewTop, bottom: viewTop + parent.clientHeight },
+      { top: viewTop, bottom: viewTop + box.clientHeight },
       el.offsetHeight,
     );
     if (center === null) {
       el.removeAttribute(MARGIN_STAMP_SHOWN);
       return;
     }
-    el.style.top = `${center - viewTop + parent.scrollTop}px`;
+    const slotRect = slot.getBoundingClientRect();
+    const slotTop = slotRect.top + slot.clientTop;
+    const slotLeft = slotRect.left + slot.clientLeft;
+    // Across, the stamp spans the box's client area, its scrollbar excluded,
+    // exactly as the feed's rows do.
+    el.style.left = `${viewLeft - slotLeft}px`;
+    el.style.width = `${box.clientWidth}px`;
+    el.style.top = `${center - slotTop}px`;
     el.setAttribute(MARGIN_STAMP_SHOWN, "");
   };
   const observer = new Observer(place);
-  observer.observe(parent);
-  parent.addEventListener("scroll", place, { passive: true });
+  observer.observe(box);
+  box.addEventListener("scroll", place, { passive: true });
   const hide = (): void => {
     if (row !== null) observer.unobserve(row);
     row = null;
@@ -126,7 +146,7 @@ export function mountMarginStamp(parent: HTMLElement, ticker: Ticker): MarginSta
     dispose() {
       hide();
       observer.disconnect();
-      parent.removeEventListener("scroll", place);
+      box.removeEventListener("scroll", place);
       el.remove();
     },
   };
