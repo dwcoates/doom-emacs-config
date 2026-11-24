@@ -111,8 +111,15 @@ func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fro
 // hiddenColdGate reports whether a hidden workspace's cache has lapsed with a
 // gated verdict at NOW.
 func hiddenColdGate(rec wsm.Workspace, now time.Time) bool {
+	return armReadsClock(rec) && rec.CacheLapse.Lapsed(now)
+}
+
+// armReadsClock reports whether REC's arm depends on the clock: a hidden
+// workspace whose cache lapses with a gated verdict turns `cold_gate` at its
+// lapse whatever else changes, so no render keeps its arm (kept.go).
+func armReadsClock(rec wsm.Workspace) bool {
 	lapse := rec.CacheLapse
-	return rec.InHiddenSection() && lapse != nil && lapse.GatedTokens != nil && lapse.Lapsed(now)
+	return rec.InHiddenSection() && lapse != nil && lapse.GatedTokens != nil
 }
 
 // projectArm names the roster arm that draws the footer's status on every rung

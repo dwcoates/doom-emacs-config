@@ -110,9 +110,16 @@ type partition struct {
 	hidden, merged, closed, threads []wsm.Workspace
 }
 
+// partition answers the registry's lists, derived once per registry install
+// (registryIndex) and shared: a caller that edits a list edits a copy of it.
 func (r *resolver) partition() partition {
+	return r.state.index.lists
+}
+
+// partitionOf sorts WORKSPACES into their lists, as partition answers them.
+func partitionOf(workspaces []wsm.Workspace) partition {
 	var out partition
-	for _, ws := range r.state.reg.Workspaces {
+	for _, ws := range workspaces {
 		switch {
 		case ws.IsThread():
 			out.threads = append(out.threads, ws)
@@ -215,7 +222,7 @@ func (r *resolver) MergedPage(q MergedPageQuery) (MergedPage, error) {
 	}
 	// A MERGE WHOSE REPOSITORY THE REGISTRY DOES NOT CARRY is in no group of
 	// the summary (mergedSection records it), so no page lists it either.
-	merged := slices.DeleteFunc(r.partition().merged, func(ws wsm.Workspace) bool {
+	merged := slices.DeleteFunc(slices.Clone(r.partition().merged), func(ws wsm.Workspace) bool {
 		_, ok := r.repositoryOf(ws)
 		return !ok
 	})

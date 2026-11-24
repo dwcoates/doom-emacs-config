@@ -124,6 +124,8 @@ type resolver struct {
 	// the row from the facts last derived and derives none, so a read feeds
 	// no durable sink and no departure.
 	readOnly bool
+	// stats counts what the render under way did (timeRender).
+	stats renderStats
 	// batchCauses names, for the span of a combined commit's render, the
 	// operation that last changed each workspace in the batch.
 	batchCauses map[ids.WorkspaceID]string
@@ -203,8 +205,8 @@ func assertTables(colors vocab.RenderColors) error {
 // it while the roster's lock is held — a roster warning teed onto the strip,
 // which moves the activity line alone (footer.mutateLine).
 func (r *resolver) FooterStatusChanged(ws ids.WorkspaceID) {
-	r.mutate("daemon.sidebar.footer_status_changed", logsite.Msg("the roster re-projected the footer's status"),
-		dlog.Context{"workspace_id": string(ws)}, r.log.Global(), func() {})
+	r.mutateWorkspace(ws, "daemon.sidebar.footer_status_changed", logsite.Msg("the roster re-projected the footer's status"),
+		nil, func(*wsState) {})
 }
 
 // Topic is the one editor-global roster publication.
@@ -220,12 +222,26 @@ func (r *resolver) Topic() *publish.Topic[*frontendv1.RosterPush] { return &r.to
 // the roster renders it on. Its records go to the central sink naming it
 // (dlog.Surfaces.WorkspaceOrCentral, the surface for callers that render
 // every workspace the registry holds), and nothing about it is a violation.
+//
+// THE SINK IS RESOLVED ONCE PER DIRECTORY AND KEPT (kept.log), never once per
+// row per render: the registry index finds the record, and a kept sink
+// re-resolves its directory on every record anyway (dlog.Surfaces.Workspace).
+// Only an OPEN workspace's central fallback is resolved again, since its
+// worktree may be recreated and its own sink then resolves.
 func (r *resolver) logFor(ws ids.WorkspaceID) dlog.Logger {
-	for _, rec := range r.state.reg.Workspaces {
-		if rec.ID != ws {
-			continue
+	if at, ok := r.state.index.at[ws]; ok {
+		rec := &r.state.reg.Workspaces[at]
+		k := r.state.keptOf(ws)
+		if k.log != nil && k.logDir == rec.Dir && (!k.logCentral || rec.Closed) {
+			return k.log
 		}
-		return r.log.WorkspaceOrCentral(rec.Dir).With(dlog.Context{"workspace_id": string(ws)})
+		log, err := r.log.Workspace(rec.Dir)
+		k.logCentral = err != nil
+		if k.logCentral {
+			log = r.log.WorkspaceOrCentral(rec.Dir)
+		}
+		k.log, k.logDir = log.With(dlog.Context{"workspace_id": string(ws)}), rec.Dir
+		return k.log
 	}
 	return r.log.Global().With(dlog.Context{
 		"workspace_id":        string(ws),
@@ -273,6 +289,16 @@ func (r *resolver) mutateIf(operation string, message logsite.Message, ctx dlog.
 	})
 }
 
+// mutateRegistry is mutateIf for a change that installs a registry, which
+// moves the version of exactly what it changed (setRegistry) rather than
+// every workspace's.
+func (r *resolver) mutateRegistry(operation string, message logsite.Message, ctx dlog.Context, apply func() bool) {
+	r.commit(&mutation{
+		operation: operation, message: message, ctx: ctx, log: r.log.Global(), touchesOwn: true,
+		apply: func(dlog.Logger) bool { return apply() },
+	})
+}
+
 // applyBatch applies every mutation of one combined commit (combine.go) under
 // the lock, and resolves and publishes the roster ONCE for all of them. It
 // answers what the caller reports off the lock.
@@ -289,6 +315,15 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 		m.changed = m.apply(m.log)
 		if !m.changed {
 			continue
+		}
+		// WHAT THE CHANGE MOVED IS DERIVED AGAIN (kept.go): the one
+		// workspace a scoped change is about, what a registry install
+		// changed (it moves that itself), or everything.
+		switch {
+		case m.scoped:
+			r.state.touch(m.ws)
+		case !m.touchesOwn:
+			r.state.touchAll()
 		}
 		last = m
 		if m.scoped {
@@ -409,7 +444,7 @@ func (r *resolver) resolvePush(log dlog.Logger, cause string) *frontendv1.Roster
 	}
 	changed := false
 	reuse := func(fresh, last proto.Message) bool {
-		if proto.Equal(fresh, last) {
+		if fresh == last || proto.Equal(fresh, last) {
 			return true
 		}
 		changed = true
@@ -544,7 +579,7 @@ func (r *resolver) rowContext(cause string) rowContext {
 		selected: r.state.selected,
 		cause:    cause,
 		causes:   r.batchCauses,
-		children: childrenOf(r.state.reg.Workspaces),
+		children: r.state.index.children,
 	}
 }
 
@@ -562,6 +597,7 @@ func (r *resolver) rowContext(cause string) rowContext {
 // session ends), and each move is a status change the durable record keeps
 // and a departure a quiet roster publishes.
 func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush, []ids.WorkspaceID, uint64) {
+	defer r.timeRender(log, cause, time.Now())
 	if dlog.Enabled(log, dlog.LevelDebug) {
 		if r.state.renderLogs == nil {
 			r.state.renderLogs = map[string]string{}
@@ -597,7 +633,7 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 		Workspaces:     workspaces,
 		RecentlyMerged: r.mergedSection(lists.merged, token, log),
 		MergeQueue:     r.mergeQueueSection(log),
-		Closed:         r.closedRows(lists.closed, rc, log),
+		Closed:         r.closedRows(r.state.index.closed, rc, log),
 	}
 	workspaces.AppSwitcher = r.appSwitcher()
 	workspaces.Threads = r.threadSection(lists.threads)
@@ -609,6 +645,55 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 		workspaces.Version = &frontendv1.RosterVersion{Text: v.String()}
 	}
 	return out, set, token
+}
+
+// renderStats counts what one render did, for its timing record
+// (timeRender). Caller holds mu.
+type renderStats struct {
+	// armsDerived are the workspaces whose status arm the render derived
+	// (resolveArms), armsKept those whose arm it kept from the render before.
+	armsDerived, armsKept int
+	// rowsBuilt are the rows the render built (row), factsDerived the
+	// workspaces whose facts it derived and built no row for (factsOnly),
+	// and rowsKept and factsKept the rows and facts it kept from a render
+	// before (kept.go).
+	rowsBuilt, factsDerived, rowsKept, factsKept int
+}
+
+// slowRender is a render a person can feel: the roster's push, and every
+// change waiting on it, is held for the render's whole length. A render this
+// long or longer is recorded at INFO, every other at DEBUG.
+const slowRender = 100 * time.Millisecond
+
+// renderLevel is the level a render that took ELAPSED is recorded at.
+func renderLevel(elapsed time.Duration) string {
+	if elapsed >= slowRender {
+		return dlog.LevelInfo
+	}
+	return dlog.LevelDebug
+}
+
+// timeRender records one render: how long it took, what caused it, and how
+// many workspaces, arms and rows it walked, derived, built and kept, so a
+// render whose cost is not proportional to its change shows in the log
+// (2026-11-23: one handover's renders rebuilt all 1,529 rows per edge).
+// Caller holds mu.
+func (r *resolver) timeRender(log dlog.Logger, cause string, started time.Time) {
+	elapsed := time.Since(started)
+	stats := r.stats
+	r.stats = renderStats{}
+	log.Log(renderLevel(elapsed), "daemon.sidebar.rendered", logsite.Msg("the roster rendered"), dlog.Context{
+		"cause":         cause,
+		"facts_only":    r.factsOnly,
+		"elapsed_ms":    elapsed.Milliseconds(),
+		"workspaces":    len(r.state.reg.Workspaces),
+		"arms_derived":  stats.armsDerived,
+		"arms_kept":     stats.armsKept,
+		"rows_built":    stats.rowsBuilt,
+		"facts_derived": stats.factsDerived,
+		"rows_kept":     stats.rowsKept,
+		"facts_kept":    stats.factsKept,
+	})
 }
 
 // rowFacts derives WS's row facts and builds no row (row under factsOnly).
@@ -662,8 +747,11 @@ func (r *resolver) selectedWorkspace() *wsm.Workspace {
 // carrying one was composed by a caller that skipped the store.
 func (r *resolver) SetRegistry(reg Registry) {
 	r.assertArrangement(reg)
-	r.mutate("daemon.sidebar.set_registry", logsite.Msg("the roster took a registry snapshot"),
-		registryContext(reg), r.log.Global(), func() { r.installRegistry(reg) })
+	r.mutateRegistry("daemon.sidebar.set_registry", logsite.Msg("the roster took a registry snapshot"),
+		registryContext(reg), func() bool {
+			r.installRegistry(reg)
+			return true
+		})
 }
 
 // SetRegistrySelected installs the durable half and the user's selection in
@@ -678,11 +766,12 @@ func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID, stamp S
 	r.assertArrangement(reg)
 	ctx := stampContext(registryContext(reg), stamp)
 	ctx["workspace_id"] = string(ws)
-	r.mutate("daemon.sidebar.set_registry_selected",
+	r.mutateRegistry("daemon.sidebar.set_registry_selected",
 		logsite.Msg("the roster took a registry snapshot and the selection, and cleared the workspace's attention marker"),
-		ctx, r.log.Global(), func() {
+		ctx, func() bool {
 			r.installRegistry(reg)
 			r.installSelected(ws, stamp)
+			return true
 		})
 }
 
@@ -701,14 +790,14 @@ func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID, stamp S
 func (r *resolver) SetSelection(sel wsm.Selection, stamp SelectStamp) bool {
 	ctx := stampContext(dlog.Context{"workspace_id": string(sel.Current), "again": sel.Again, "rows": len(sel.Workspaces)}, stamp)
 	applied := false
-	r.mutateIf("daemon.sidebar.set_selection",
+	r.mutateRegistry("daemon.sidebar.set_selection",
 		logsite.Msg("the roster took the select's change and the selection, and cleared the workspace's attention marker"),
-		ctx, r.log.Global(), func() bool {
+		ctx, func() bool {
 			reg, ok := patchedRegistry(r.state.reg, r.state.regSeen, sel)
 			if !ok {
 				return false
 			}
-			r.state.reg = reg
+			r.setRegistry(reg)
 			// A RE-SELECTION CHANGES NO VIEW, so its stamp is not stated:
 			// the selection's standing one stays, and the roster renders
 			// as it did and is dropped as the duplicate it is.
@@ -821,7 +910,7 @@ func registryContext(reg Registry) dlog.Context {
 
 // installRegistry is the registry half of a mutation; it runs under the lock.
 func (r *resolver) installRegistry(reg Registry) {
-	r.state.reg = reg
+	r.setRegistry(reg)
 	r.state.regSeen = true
 	// The registry's selection is the durable one. A selection the daemon
 	// stamped a moment ago stands until WSM catches up, so a registry that
@@ -852,6 +941,11 @@ func (r *resolver) forgetNuked() {
 			continue
 		}
 		delete(r.state.workspaces, ws)
+	}
+	for ws := range r.state.kept {
+		if _, ok := known[ws]; !ok {
+			delete(r.state.kept, ws)
+		}
 	}
 	if r.state.selected != nil {
 		if _, ok := known[*r.state.selected]; !ok {

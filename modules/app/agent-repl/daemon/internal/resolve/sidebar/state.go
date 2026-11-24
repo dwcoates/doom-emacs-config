@@ -497,6 +497,12 @@ type rosterState struct {
 	// recency is the connected Emacs's recency reach (AttachRecencyReach,
 	// ReportRecencyReach), scoped to its WatchDaemon stream.
 	recency streamslot.Slot[RecencyReach]
+	// index is what the roster derived from reg at its install (kept.go).
+	index registryIndex
+	// kept are the facts each workspace's last render kept, and epoch the
+	// version every workspace's kept facts share (kept.go).
+	kept  map[ids.WorkspaceID]*kept
+	epoch uint64
 }
 
 // stampedSelection is a select's stamp with the workspace it selected: the
@@ -558,6 +564,7 @@ func newRosterState() *rosterState {
 		divergence: map[ids.RepoID]repodivergence.Measure{},
 		gates:      map[ids.WorkspaceID]coldGate{},
 		queues:     map[wsm.RepoKey]mergeQueue{},
+		kept:       map[ids.WorkspaceID]*kept{},
 	}
 }
 
@@ -616,9 +623,5 @@ func (r *rosterState) workspace(ws ids.WorkspaceID) *wsState {
 
 // sessions indexes the registry's durable session records by workspace.
 func (r *rosterState) sessions() map[ids.WorkspaceID]*wsm.Session {
-	out := make(map[ids.WorkspaceID]*wsm.Session, len(r.reg.Sessions))
-	for i := range r.reg.Sessions {
-		out[r.reg.Sessions[i].Workspace] = &r.reg.Sessions[i]
-	}
-	return out
+	return r.index.sessions
 }

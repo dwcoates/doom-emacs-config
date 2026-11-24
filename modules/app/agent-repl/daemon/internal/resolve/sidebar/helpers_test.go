@@ -55,6 +55,13 @@ func testColors() vocab.RenderColors {
 // exactly as the daemon delivers it (fanned).
 func newResolver(t *testing.T, opts ...sidebar.Option) (sidebar.Resolver, *dlog.TestSurfaces) {
 	t.Helper()
+	surfaces := dlog.NewTestSurfaces()
+	return newResolverOn(t, surfaces, opts...), surfaces
+}
+
+// newResolverOn is newResolver writing its records to SURFACES.
+func newResolverOn(t *testing.T, surfaces dlog.Surfaces, opts ...sidebar.Option) sidebar.Resolver {
+	t.Helper()
 	colors, err := vocab.LoadRenderColors(repoVocabDir)
 	if err != nil {
 		t.Fatalf("LoadRenderColors: %v", err)
@@ -66,7 +73,6 @@ func newResolver(t *testing.T, opts ...sidebar.Option) (sidebar.Resolver, *dlog.
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
 	}
-	surfaces := dlog.NewTestSurfaces()
 	// Status changes are stamped at epoch: a test that wants another clock
 	// passes its own WithClock, which overrides this one.
 	clock := sidebar.WithClock(func() time.Time { return epoch })
@@ -74,7 +80,7 @@ func newResolver(t *testing.T, opts ...sidebar.Option) (sidebar.Resolver, *dlog.
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
 	}
-	return &fanned{Resolver: r, footer: f, dir: t.TempDir(), bound: map[ids.WorkspaceID]bool{}}, surfaces
+	return &fanned{Resolver: r, footer: f, dir: t.TempDir(), bound: map[ids.WorkspaceID]bool{}}
 }
 
 // fanned is the roster with the footer whose status it projects, fed the way

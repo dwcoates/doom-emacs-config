@@ -44,6 +44,10 @@ type mutation struct {
 	log    dlog.Logger
 	ws     ids.WorkspaceID
 	scoped bool
+	// touchesOwn marks an unscoped change that moves the version of what it
+	// changed itself (a registry install, setRegistry); every other unscoped
+	// change moves the epoch (kept.go).
+	touchesOwn bool
 	// apply makes the change under the lock and answers whether it changed
 	// anything; it is handed the change's log sink.
 	apply func(dlog.Logger) bool
@@ -83,6 +87,15 @@ func (r *resolver) commit(m *mutation) {
 		return
 	}
 	r.leadBatch(m)
+}
+
+// Settle implements Resolver: a change that changes nothing, committed
+// behind every change queued before it.
+func (r *resolver) Settle() {
+	r.commit(&mutation{
+		operation: "daemon.sidebar.settle", message: logsite.Msg("the roster settled"),
+		log: r.log.Global(), apply: func(dlog.Logger) bool { return false },
+	})
 }
 
 // leadBatch takes the whole queue as one batch, applies and publishes it, hands

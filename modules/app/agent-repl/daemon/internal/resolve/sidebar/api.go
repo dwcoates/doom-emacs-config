@@ -213,6 +213,9 @@ type Resolver interface {
 	// it stands, the dead link of the old shim's stand-down leaves the
 	// session live.
 	SetReplacing(ws ids.WorkspaceID, replacing bool)
+	// Settle returns once every change queued before it has been applied,
+	// published and reported.
+	Settle()
 	// SetOpening raises (true) or lowers (false) the fact that an OpenTabs in
 	// flight names the workspace and has not answered it `opened` yet. While
 	// it stands the row draws `inactive` with its `opening` marker, over every

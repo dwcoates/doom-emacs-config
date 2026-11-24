@@ -2,6 +2,10 @@ package sidebar
 
 import "agent-repld/internal/wsm"
 
+// RenderLevel exposes renderLevel, the level a render's timing record is
+// written at.
+var RenderLevel = renderLevel
+
 // SortMergedNewestFirst exposes sortMergedNewestFirst to the external test
 // package.
 var SortMergedNewestFirst = sortMergedNewestFirst
