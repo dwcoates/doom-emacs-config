@@ -814,8 +814,10 @@ message RosterRowReviving {}
 // workspace's page while it is not dormant, or while the user is looking at
 // it, and loads a page at no other time. So a park unloads the page of a
 // workspace off screen; a switch to a dormant workspace loads its page with no
-// shim started (a prompt alone starts one), and a switch away unloads it
-// again; a session coming up for work (a prompt, a merge, a cold gate's
+// shim started (a prompt alone starts one), and a switch away from a visit
+// during which it was neither viewed nor working unloads it ten seconds later
+// unless the user switches back (a visit that viewed or worked keeps the page
+// until the session next goes dormant off screen); a session coming up for work (a prompt, a merge, a cold gate's
 // answer) loads its page; and a keep-alive's restore, which the beat's own
 // stand-down parks again, loads none. It says nothing of the status: a
 // dormant session is drawn as the idle session it stands in for.
