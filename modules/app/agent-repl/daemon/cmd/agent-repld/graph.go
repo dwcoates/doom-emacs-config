@@ -2097,6 +2097,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return ok
 		},
 		Visibility: sidebarResolver.Visibility,
+		Census:     sessionsCensus,
+		Pages:      heldPages,
 		Now:        time.Now,
 	})
 	if err != nil {

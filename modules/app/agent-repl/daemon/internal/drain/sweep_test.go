@@ -2026,11 +2026,14 @@ func TestAParkObservesHowLongTheSessionStoodUpIdle(t *testing.T) {
 		name string
 		// turnEnded is the session's last turn's end, zero for none.
 		turnEnded time.Time
-		want      time.Duration
+		// restartedAt is a bring-up of the session after its work, zero for none.
+		restartedAt time.Time
+		want        time.Duration
 	}{
-		{name: "from its last turn's end, after the session's start", turnEnded: instant.Add(time.Minute), want: 29 * time.Minute},
-		{name: "from the session's start, when its work came before it", turnEnded: instant.Add(-time.Hour), want: 30 * time.Minute},
-		{name: "from the session's start, when it never worked", want: 30 * time.Minute},
+		{name: "from its last real work, a turn's end", turnEnded: instant.Add(time.Minute), want: 29 * time.Minute},
+		{name: "from its last real work, which a turn ending earlier does not move back", turnEnded: instant.Add(-time.Hour), want: 30 * time.Minute},
+		{name: "from its last real work, with no turn since", want: 30 * time.Minute},
+		{name: "from its last real work, which a later session start does not move", restartedAt: instant.Add(10 * time.Minute), want: 30 * time.Minute},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2040,6 +2043,9 @@ func TestAParkObservesHowLongTheSessionStoodUpIdle(t *testing.T) {
 			ws := h.workspace(t, instant)
 			if !tt.turnEnded.IsZero() {
 				h.turnClosed(t, ws, tt.turnEnded)
+			}
+			if !tt.restartedAt.IsZero() {
+				h.restarted(t, ws, tt.restartedAt)
 			}
 			h.clock.Set(instant.Add(30 * time.Minute))
 
@@ -2075,31 +2081,6 @@ func TestADeferredParkObservesNothingAndHoldsDeferredBusy(t *testing.T) {
 	}
 }
 
-func TestIdleSinceIsTheLaterOfTheLastTurnsEndAndTheSessionsStart(t *testing.T) {
-	ended := instant.Add(time.Minute)
-	before := instant.Add(-time.Hour)
-	tests := []struct {
-		name  string
-		ended *time.Time
-		want  time.Time
-	}{
-		{name: "a turn after the start", ended: &ended, want: ended},
-		{name: "a turn before the start", ended: &before, want: instant},
-		{name: "no turn", want: instant},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := idleSince(wsm.Workspace{LastTurnEndedAt: tt.ended}, wsm.Session{StartedAt: instant})
-
-			// Assert
-			if !got.Equal(tt.want) {
-				t.Fatalf("idleSince = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAParkWithNoIdleStartObservesNothingAndSaysSo(t *testing.T) {
 	// Arrange
 	parks := &fakeParks{}
@@ -2113,7 +2094,7 @@ func TestAParkWithNoIdleStartObservesNothingAndSaysSo(t *testing.T) {
 	if got := parks.all(); len(got) != 0 {
 		t.Fatalf("observations = %+v, want none", got)
 	}
-	record := recordWith(t, h, opSweep, "the parked session has neither a start nor a turn end on record; its idle time before the park is not observed")
+	record := recordWith(t, h, opSweep, "the parked workspace has neither work nor a creation on record; its idle time before the park is not observed")
 	if record.Level != "error" || record.Context["invariant_violation"] == nil {
 		t.Fatalf("record = %+v, want an ERROR naming the broken invariant", record)
 	}
@@ -2131,5 +2112,47 @@ func TestNewRefusesWithoutAColdGateBridge(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "cold gate's bridge") {
 		t.Fatalf("New = %v, want the missing cold gate bridge refused", err)
+	}
+}
+
+// cancelAfterParkDB cancels the park's context once its last write lands:
+// the sweep pass or the daemon leaving the moment the park returns.
+type cancelAfterParkDB struct {
+	wsm.DB
+	cancel context.CancelFunc
+}
+
+func (d cancelAfterParkDB) SetSpawnedShim(ctx context.Context, ws ids.WorkspaceID, spawn *wsm.ProcessIdentity) error {
+	err := d.DB.SetSpawnedShim(ctx, ws, spawn)
+	d.cancel()
+	return err
+}
+
+func TestAParkObservesItsIdleTimeThoughItsCallerHasLeft(t *testing.T) {
+	// Arrange
+	parks := &fakeParks{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := newHarness(t, func(d *Deps) {
+		d.Parks = parks
+		d.DB = cancelAfterParkDB{DB: d.DB, cancel: cancel}
+		d.Detach = func(_ ids.WorkspaceID, run func(context.Context)) { run(ctx) }
+	})
+	ws := h.workspace(t, instant)
+	h.clock.Set(instant.Add(30 * time.Minute))
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if got := parks.all(); len(got) != 1 || got[0].idle != 30*time.Minute {
+		t.Fatalf("observations = %+v, want the park's 30 minutes idle observed", got)
+	}
+	if errs := records(h.log, opCycle); len(errs) > 0 {
+		for _, rec := range errs {
+			if rec.Level == "error" {
+				t.Fatalf("an ERROR was recorded: %+v", rec)
+			}
+		}
 	}
 }

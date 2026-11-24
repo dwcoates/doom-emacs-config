@@ -159,3 +159,61 @@ func TestAFailedServingClaimLeavesTheShimHeld(t *testing.T) {
 		t.Fatal("the fleet holds no client after a failed claim; the shim would be orphaned")
 	}
 }
+
+func TestAServingClaimTheForgetsFenceEndedIsRecordedAtInfo(t *testing.T) {
+	// Arrange: the forget's fence cancelled the start, and with it its claim.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.claimErr = context.Canceled
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrWorkspaceForgotten)
+
+	// Act.
+	err := f.fleet.claimServing(ctx, f.log.logger, ws.ID)
+
+	// Assert.
+	if !errors.Is(err, ErrWorkspaceForgotten) {
+		t.Fatalf("claimServing() = %v, want the claim ended on ErrWorkspaceForgotten", err)
+	}
+	var infos int
+	for _, rec := range f.log.logger.Records() {
+		if rec.Operation != opServing {
+			continue
+		}
+		if rec.Level == "error" {
+			t.Fatalf("serving record %+v at ERROR, want a claim the fence ended recorded at INFO", rec)
+		}
+		if rec.Level == "info" && rec.Context["workspace"] == string(ws.ID) {
+			infos++
+		}
+	}
+	if infos != 1 {
+		t.Fatalf("serving INFO records naming %s = %d, want exactly one", ws.ID, infos)
+	}
+}
+
+func TestAServingClaimCancelledForAnotherCauseStaysAnError(t *testing.T) {
+	// Arrange: the claim's context ended for a reason that is not the forget.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.claimErr = context.Canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err := f.fleet.claimServing(ctx, f.log.logger, ws.ID)
+
+	// Assert.
+	if err == nil || errors.Is(err, ErrWorkspaceForgotten) {
+		t.Fatalf("claimServing() = %v, want a failed claim not read as the forget's", err)
+	}
+	var errs int
+	for _, rec := range f.log.logger.Records() {
+		if rec.Operation == opServing && rec.Level == "error" {
+			errs++
+		}
+	}
+	if errs != 1 {
+		t.Fatalf("serving ERROR records = %d, want exactly one", errs)
+	}
+}

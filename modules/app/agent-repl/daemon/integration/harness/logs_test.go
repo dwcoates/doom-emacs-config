@@ -630,6 +630,36 @@ func TestEveryTurnEndedWaitNamesOpTurnEnded(t *testing.T) {
 	}
 }
 
+// TestNoTurnCountWaitCountsTheTurnEndedOperation pins that a wait for N turns
+// counts their durable closes (AwaitTurnsClosed): one turn's close writes
+// several OpTurnEnded records, so a count of the operation is met before the
+// N-th turn has left the watcher.
+func TestNoTurnCountWaitCountsTheTurnEndedOperation(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob(filepath.Join("..", "*_test.go"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("glob the integration tests = %v, %v, want files", files, err)
+	}
+	counting := regexp.MustCompile(`AwaitWorkspaceLogOperationCount\([^)]*harness\.OpTurnEnded`)
+
+	// Act
+	var found []string
+	for _, f := range files {
+		body, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if counting.Match(body) {
+			found = append(found, f)
+		}
+	}
+
+	// Assert
+	if len(found) != 0 {
+		t.Fatalf("integration tests count harness.OpTurnEnded records instead of AwaitTurnsClosed: %v", found)
+	}
+}
+
 // TestExpectWorkspaceRestartWarningsDeclaresTheWholeRestartSet covers the
 // helper's one guarantee: every operation of WorkspaceRestartWarnings is
 // licensed, and nothing else is.

@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/pageheld"
 	"agent-repld/internal/procmetrics"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/wsm"
 )
 
@@ -29,9 +31,45 @@ func group(process, ws string) procmetrics.Group {
 // one is not visible.
 var visible = map[ids.WorkspaceID]bool{"a": true}
 
+// shimsUp are the sessions the popups' tests' census holds up: a, visible,
+// and b, not visible.
+var shimsUp = []ids.WorkspaceID{"a", "b"}
+
+// pageCounts counts nothing: the popups only read the held pages.
+type pageCounts struct{}
+
+func (pageCounts) CountPageLoad(pageheld.LoadReason)     {}
+func (pageCounts) CountPageUnload(pageheld.UnloadReason) {}
+
+// heldPages answers a table holding a page for each of HELD.
+func heldPages(held ...ids.WorkspaceID) *pageheld.Table {
+	table := pageheld.New(pageCounts{})
+	for _, ws := range held {
+		table.Held(ws, pageheld.LoadShown)
+	}
+	return table
+}
+
+// census answers a census holding UP, each idle.
+func census(up ...ids.WorkspaceID) sessionwhy.Census {
+	return sessionwhy.Census{
+		Live:  func() []ids.WorkspaceID { return up },
+		Work:  func(ids.WorkspaceID) (sessionwhy.Work, bool) { return sessionwhy.Work{}, true },
+		Table: sessionwhy.NewTable(),
+		Now:   func() time.Time { return time.Unix(1_800_000_000, 0) },
+	}
+}
+
 func newPopups(t *testing.T, procs fakeProcesses, running ...ids.WorkspaceID) *Popups {
 	t.Helper()
+	return newPopupsWith(t, procs, census(shimsUp...), heldPages(), running...)
+}
+
+func newPopupsWith(t *testing.T, procs fakeProcesses, up sessionwhy.Census, pages *pageheld.Table, running ...ids.WorkspaceID) *Popups {
+	t.Helper()
 	p, err := New(Deps{
+		Census: up,
+		Pages:  pages,
 		Visibility: func(ws ids.WorkspaceID) wsm.Visibility {
 			if visible[ws] {
 				return wsm.UnselectedVisible
@@ -100,37 +138,6 @@ func TestAFailedSampleIsTheOverviewsFailure(t *testing.T) {
 	}
 }
 
-func TestTheOverviewSumsEveryLine(t *testing.T) {
-	// Arrange
-	p := newPopups(t, sampled(map[procmetrics.Group]uint64{
-		group(procmetrics.ProcessWebKitWebContent, ""): 2000,
-		group(procmetrics.ProcessShim, "a"):            100,
-		group(procmetrics.ProcessShimTools, "a"):       50,
-		group(procmetrics.ProcessShim, "b"):            150,
-		group(procmetrics.ProcessDaemon, ""):           300,
-		group(procmetrics.ProcessDaemonTools, ""):      10,
-		group(procmetrics.ProcessEmacs, ""):            400,
-	}))
-
-	// Act
-	out, err := p.Overview(everyOpen)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Overview: %v", err)
-	}
-	if got := out.GetPages().GetFootprintBytes(); got != 2000 {
-		t.Fatalf("pages footprint = %d, want 2000", got)
-	}
-	agents := out.GetAgents().GetRunning()
-	if agents.GetCount() != 2 || agents.GetFootprintBytes() != 300 || agents.GetAverageBytes() != 150 {
-		t.Fatalf("agents = %v, want 2 shims at 300 averaging 150", agents)
-	}
-	if got := out.GetTotal().GetFootprintBytes(); got != 2000+300+310+400 {
-		t.Fatalf("total = %d, want every line summed", got)
-	}
-}
-
 func TestTheOverviewListsEachProcessInDrawnOrder(t *testing.T) {
 	// Arrange
 	p := newPopups(t, sampled(map[procmetrics.Group]uint64{group(procmetrics.ProcessStore, ""): 70}))
@@ -159,32 +166,6 @@ func TestAProcessNotRunningHasNoFigure(t *testing.T) {
 	sidecar := out.GetProcesses()[3]
 	if sidecar.FootprintBytes != nil {
 		t.Fatalf("the sidecar line = %v, want no figure for a process not running", sidecar)
-	}
-}
-
-func TestNoShimRunningIsTheAgentsNoneArm(t *testing.T) {
-	// Arrange
-	p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
-
-	// Act
-	out, _ := p.Overview(everyOpen)
-
-	// Assert
-	if out.GetAgents().GetNone() == nil {
-		t.Fatalf("agents = %v, want the none arm", out.GetAgents())
-	}
-}
-
-func TestThePageCountsFollowTheOpenWorkspacesVisibility(t *testing.T) {
-	// Arrange
-	p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
-
-	// Act
-	out, _ := p.Overview([]ids.WorkspaceID{"a", "b"})
-
-	// Assert
-	if out.GetPages().GetLoaded() != 1 || out.GetPages().GetNotLoaded() != 1 {
-		t.Fatalf("pages = %v, want the visible one loaded and the other not", out.GetPages())
 	}
 }
 
@@ -243,29 +224,138 @@ func TestARunningShimNotYetMeasuredHasNoFigure(t *testing.T) {
 	}
 }
 
-func TestAVisibleWorkspacesPageIsLoaded(t *testing.T) {
+func TestTheOverviewSumsEveryLine(t *testing.T) {
+	// Arrange
+	p := newPopups(t, sampled(map[procmetrics.Group]uint64{
+		group(procmetrics.ProcessWebKitWebContent, ""): 2000,
+		group(procmetrics.ProcessShim, "a"):            100,
+		group(procmetrics.ProcessShimTools, "a"):       50,
+		group(procmetrics.ProcessShim, "b"):            150,
+		group(procmetrics.ProcessDaemon, ""):           300,
+		group(procmetrics.ProcessDaemonTools, ""):      10,
+		group(procmetrics.ProcessEmacs, ""):            400,
+	}))
+
+	// Act
+	out, err := p.Overview(everyOpen)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Overview: %v", err)
+	}
+	if got := out.GetWorkspaces().GetPages().GetFootprintBytes(); got != 2000 {
+		t.Fatalf("pages footprint = %d, want 2000", got)
+	}
+	shims := out.GetWorkspaces().GetShims()
+	if shims.GetUp() != 2 || shims.GetFootprintBytes() != 300 || shims.GetAverageBytes() != 150 {
+		t.Fatalf("shims = %v, want 2 up at 300 averaging 150", shims)
+	}
+	if got := out.GetTotal().GetFootprintBytes(); got != 2000+300+310+400 {
+		t.Fatalf("total = %d, want every line summed", got)
+	}
+}
+
+func TestTheVisibleCountIsTheOpenWorkspacesThatAreVisible(t *testing.T) {
 	// Arrange
 	p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
 
 	// Act
-	page := p.Workspace("a").GetPage()
+	out, _ := p.Overview([]ids.WorkspaceID{"a", "b", "c"})
 
 	// Assert
-	if page.GetLoaded() == nil {
-		t.Fatalf("page = %v, want loaded: the workspace is visible", page)
+	if v := out.GetWorkspaces().GetVisible(); v.GetVisible() != 1 || v.GetOpen() != 3 {
+		t.Fatalf("visible = %v, want 1 of 3 open", v)
 	}
 }
 
-func TestAWorkspaceThatIsNotVisibleHasNoPageLoaded(t *testing.T) {
+func TestTheShimsCountIsEverySessionUpVisibleOrNot(t *testing.T) {
+	// Arrange: b's shim is up and b is not visible.
+	p := newPopups(t, sampled(map[procmetrics.Group]uint64{group(procmetrics.ProcessShim, "b"): 90}))
+
+	// Act
+	out, _ := p.Overview(everyOpen)
+
+	// Assert
+	if shims := out.GetWorkspaces().GetShims(); shims.GetUp() != 2 || shims.GetFootprintBytes() != 90 || shims.GetAverageBytes() != 90 {
+		t.Fatalf("shims = %v, want both up, b's footprint averaged over the one measured", shims)
+	}
+}
+
+func TestNoShimUpHasNoFootprint(t *testing.T) {
 	// Arrange
-	p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
+	p := newPopupsWith(t, sampled(map[procmetrics.Group]uint64{}), census(), heldPages())
+
+	// Act
+	out, _ := p.Overview(everyOpen)
+
+	// Assert
+	if shims := out.GetWorkspaces().GetShims(); shims.GetUp() != 0 || shims.FootprintBytes != nil || shims.AverageBytes != nil {
+		t.Fatalf("shims = %v, want none up and no figure", shims)
+	}
+}
+
+func TestThePagesCountIsThePagesTheWebViewHolds(t *testing.T) {
+	// Arrange: b's page is held though b is not visible.
+	p := newPopupsWith(t, sampled(map[procmetrics.Group]uint64{}), census(), heldPages("b"))
+
+	// Act
+	out, _ := p.Overview(everyOpen)
+
+	// Assert
+	if got := out.GetWorkspaces().GetPages().GetLoaded(); got != 1 {
+		t.Fatalf("pages loaded = %d, want the one the web view holds", got)
+	}
+}
+
+func TestAVisibleWorkspaceWithItsPageUnloadedCountsNoPage(t *testing.T) {
+	// Arrange: a is visible and the web view holds no page of it.
+	p := newPopupsWith(t, sampled(map[procmetrics.Group]uint64{}), census(), heldPages())
+
+	// Act
+	out, _ := p.Overview(everyOpen)
+	page := p.Workspace("a").GetPage()
+
+	// Assert
+	if out.GetWorkspaces().GetPages().GetLoaded() != 0 || page.GetNotLoaded() == nil {
+		t.Fatalf("pages = %v, page = %v; want no page loaded for a visible workspace whose page is unloaded", out.GetWorkspaces().GetPages(), page)
+	}
+}
+
+func TestAWorkspaceWhosePageIsHeldHasItLoaded(t *testing.T) {
+	// Arrange
+	p := newPopupsWith(t, sampled(map[procmetrics.Group]uint64{}), census(), heldPages("b"))
 
 	// Act
 	page := p.Workspace("b").GetPage()
 
 	// Assert
-	if page.GetNotLoaded() == nil {
-		t.Fatalf("page = %v, want not loaded: the workspace is not visible", page)
+	if page.GetLoaded() == nil {
+		t.Fatalf("page = %v, want loaded: the web view holds it", page)
+	}
+}
+
+func TestNewRequiresTheCensusAndThePages(t *testing.T) {
+	tests := []struct {
+		name  string
+		amend func(*Deps)
+	}{
+		{name: "no census", amend: func(d *Deps) { d.Census = sessionwhy.Census{} }},
+		{name: "no held pages", amend: func(d *Deps) { d.Pages = nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			deps := newPopups(t, fakeProcesses{}).deps
+			tt.amend(&deps)
+
+			// Act
+			_, err := New(deps)
+
+			// Assert
+			if err == nil {
+				t.Fatal("New accepted a missing source")
+			}
+		})
 	}
 }
 

@@ -1033,9 +1033,25 @@ func (d *Daemon) AwaitCumulativeWorkspaceLogMessageCount(workspaceDir, operation
 // it — the point after which that turn's terminal frame will be attributed.
 const OpTurnOpened = "daemon.sessionwatcher.turn_opened"
 
-// OpTurnEnded is the record the prompt queue writes as it stamps a turn's
-// close: the turn's durable end, after which nothing of it is still in flight.
+// OpTurnEnded is the operation of the prompt queue's records about a turn's
+// close. One turn's close writes SEVERAL records under it (the stamp, the
+// banner decision, what waits to be delivered), so a count of the operation is
+// no count of turns: count TurnCloseStamped (AwaitTurnsClosed).
 const OpTurnEnded = "daemon.promptqueue.turn_ended"
+
+// TurnCloseStamped is the message of the one OpTurnEnded record each turn's
+// durable close writes, after the session watcher let the turn go: nothing of
+// that turn is still in flight once it is on the record.
+const TurnCloseStamped = "stamped the turn's close"
+
+// AwaitTurnsClosed waits until N turns of the workspace at WORKSPACEDIR have
+// been durably closed by this daemon: N TurnCloseStamped records.
+func (d *Daemon) AwaitTurnsClosed(workspaceDir string, n int) {
+	d.t.Helper()
+	d.AwaitWorkspaceLogRecordCount(workspaceDir, "turns durably closed by this daemon", n, func(r LogRecord) bool {
+		return r.Operation == OpTurnEnded && r.Message == TurnCloseStamped && r.PID == d.PID()
+	})
+}
 
 // ShimVerbOrder answers the shim.v1 verbs one workspace's fake shim received,
 // in arrival order.

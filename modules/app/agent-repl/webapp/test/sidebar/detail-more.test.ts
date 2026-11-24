@@ -5,11 +5,13 @@ import {
   DETAILS_LABEL,
   DETAILS_PANEL_CLASS,
   FACT_HOMES,
+  childPopup,
   closeDetails,
   detailsEntry,
   detailsPanel,
   detailsPlacement,
   factHome,
+  labelChildPopup,
   openDetails,
   placeDetailsPanel,
   requireFactHome,
@@ -379,5 +381,60 @@ describe("the details entry's gesture", () => {
     detail.querySelector(".detail-more-label")?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     // ASSERT
     expect(detailsEntry(detail)?.classList.contains("open")).toBe(true);
+  });
+});
+
+describe("a child popup under its own label", () => {
+  it("draws its entry reading the label, hidden until filled", () => {
+    const panel = document.createElement("div");
+
+    const sub = childPopup(panel, "workspaces");
+
+    const entry = detailsEntry(panel)!;
+    expect([entry.querySelector(".detail-more-label")?.textContent, entry.hidden, sub.parentElement]).toEqual([
+      "workspaces",
+      true,
+      entry,
+    ]);
+  });
+
+  it("is the details entry's shape, so one mechanism opens both", () => {
+    const rowPanel = document.createElement("div");
+    const versionPanel = document.createElement("div");
+
+    detailsPanel(rowPanel);
+    childPopup(versionPanel, "workspaces");
+
+    const shape = (panel: HTMLElement) => {
+      const entry = detailsEntry(panel)!;
+      return [entry.className, entry.tabIndex, [...entry.children].map((c) => c.className)];
+    };
+    expect(shape(versionPanel)).toEqual(shape(rowPanel));
+  });
+
+  it("is asked for again without a second entry", () => {
+    const panel = document.createElement("div");
+
+    const first = childPopup(panel, "workspaces");
+    const second = childPopup(panel, "workspaces");
+
+    expect([first === second, panel.querySelectorAll(".detail-more").length]).toEqual([true, 1]);
+  });
+
+  it("takes new words for its entry", () => {
+    const panel = document.createElement("div");
+    childPopup(panel, "workspaces");
+
+    labelChildPopup(panel, "workspaces · 3 visible");
+
+    expect(detailsEntry(panel)!.querySelector(".detail-more-label")?.textContent).toBe("workspaces · 3 visible");
+  });
+
+  it("leaves a panel with no entry unlabelled", () => {
+    const panel = document.createElement("div");
+
+    labelChildPopup(panel, "workspaces");
+
+    expect(panel.children.length).toBe(0);
   });
 });

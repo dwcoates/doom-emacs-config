@@ -9,10 +9,9 @@ import {
   type GetWorkspaceMemoryRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_workspace_memory_pb";
 import {
-  SidebarMemoryAgentsSchema,
   SidebarMemoryOverviewSchema,
-  SidebarMemoryPagesSchema,
   SidebarMemoryStrainSchema,
+  SidebarMemoryWorkspacesSchema,
   SidebarWorkspaceMemoryPageSchema,
   SidebarWorkspaceMemorySchema,
   type SidebarMemoryOverview,
@@ -29,6 +28,8 @@ import {
   pageLine,
   showRowMemory,
   workspaceLines,
+  workspacesLines,
+  workspacesSummary,
 } from "../../src/sidebar/memory.js";
 import type { SidebarContext } from "../../src/sidebar/context.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
@@ -57,9 +58,12 @@ const settle = () => new Promise((resolve) => globalThis.setTimeout(resolve, 0))
 /** A whole overview, every line set, then EDIT applied to it. */
 function overview(edit: (o: SidebarMemoryOverview) => void = () => undefined): SidebarMemoryOverview {
   const o = create(SidebarMemoryOverviewSchema, {
-    pages: { footprintBytes: BigInt(Math.round(2.3 * GIB)), loaded: 14, notLoaded: 44 },
+    workspaces: {
+      visible: { visible: 50, open: 110 },
+      shims: { up: 22, footprintBytes: BigInt(22 * 66 * MIB), averageBytes: BigInt(66 * MIB) },
+      pages: { loaded: 21, footprintBytes: BigInt(Math.round(2.3 * GIB)) },
+    },
     strain: { stalls: 31, blockedMs: 13_600n, windowSeconds: 600 },
-    agents: { state: { case: "running", value: { count: 22, footprintBytes: BigInt(22 * 66 * MIB), averageBytes: BigInt(66 * MIB) } } },
     processes: [
       { label: "daemon", footprintBytes: BigInt(925 * MIB) },
       { label: "Emacs", footprintBytes: BigInt(505 * MIB) },
@@ -90,11 +94,9 @@ describe("formatting", () => {
 });
 
 describe("the version hover's lines", () => {
-  it("states every line in drawn order", () => {
+  it("states every line below the workspaces entry in drawn order", () => {
     expect(overviewLines(overview(), "o")).toEqual([
-      ["pages", "2.3 GB · 14 of 58 loaded"],
       ["stalls", "31, 13.6 s blocked in the last 10 min"],
-      ["agents", "22 running · 1.4 GB (66 MB each)"],
       ["daemon", "925 MB"],
       ["Emacs", "505 MB"],
       ["store", "not running"],
@@ -103,23 +105,44 @@ describe("the version hover's lines", () => {
     ]);
   });
 
-  it("says no web view when the page process is not running", () => {
-    const lines = overviewLines(overview((o) => (o.pages = create(SidebarMemoryPagesSchema, { loaded: 0, notLoaded: 3 }))), "o");
-    expect(lines[0]).toEqual(["pages", "no web view · 0 of 3 loaded"]);
-  });
-
   it("says no stalls when the window held none", () => {
     const lines = overviewLines(overview((o) => (o.strain = create(SidebarMemoryStrainSchema, { stalls: 0, blockedMs: 0n, windowSeconds: 600 }))), "o");
-    expect(lines[1]).toEqual(["stalls", "none in the last 10 min"]);
+    expect(lines[0]).toEqual(["stalls", "none in the last 10 min"]);
+  });
+});
+
+describe("the workspaces entry", () => {
+  const workspaces = () => overview().workspaces!;
+
+  it("states the three counts in short form, never calling visible workspaces loaded", () => {
+    expect(workspacesSummary(workspaces(), "w")).toBe("workspaces · 50 visible · 22 shims · 21 webpages");
   });
 
-  it("says none running when no shim runs", () => {
-    const lines = overviewLines(overview((o) => (o.agents = create(SidebarMemoryAgentsSchema, { state: { case: "none", value: {} } }))), "o");
-    expect(lines[2]).toEqual(["agents", "none running"]);
+  it("states the visible workspaces out of the open ones", () => {
+    expect(workspacesLines(workspaces(), "w")[0]).toEqual(["workspaces visible", "50 of 110 open"]);
   });
 
-  it("refuses an overview with no agents arm", () => {
-    expect(() => overviewLines(overview((o) => (o.agents = create(SidebarMemoryAgentsSchema, {}))), "o")).toThrow();
+  it("states the shims up with their footprint", () => {
+    expect(workspacesLines(workspaces(), "w")[1]).toEqual(["workspace shims", "22 up · 1.4 GB (66 MB each)"]);
+  });
+
+  it("states the shims up with no figure when none was measured", () => {
+    const w = create(SidebarMemoryWorkspacesSchema, { visible: { visible: 1, open: 2 }, shims: { up: 3 }, pages: { loaded: 0 } });
+    expect(workspacesLines(w, "w")[1]).toEqual(["workspace shims", "3 up"]);
+  });
+
+  it("states the pages the web view holds with its footprint", () => {
+    expect(workspacesLines(workspaces(), "w")[2]).toEqual(["workspace loaded webpages", "21 · 2.3 GB"]);
+  });
+
+  it("states the pages loaded with no web view open", () => {
+    const w = create(SidebarMemoryWorkspacesSchema, { visible: { visible: 1, open: 2 }, shims: { up: 0 }, pages: { loaded: 0 } });
+    expect(workspacesLines(w, "w")[2]).toEqual(["workspace loaded webpages", "0 · no web view"]);
+  });
+
+  it("refuses a workspaces entry with no shims line", () => {
+    const w = create(SidebarMemoryWorkspacesSchema, { visible: { visible: 1, open: 2 }, pages: { loaded: 0 } });
+    expect(() => workspacesLines(w, "w")).toThrow();
   });
 });
 
@@ -127,7 +150,7 @@ describe("a workspace hover's lines", () => {
   const page = (when: Parameters<typeof create<typeof SidebarWorkspaceMemoryPageSchema>>[1]) => create(SidebarWorkspaceMemoryPageSchema, when);
 
   it.each([
-    ["loaded", { state: { case: "loaded" as const, value: {} } }, "loaded, held while visible"],
+    ["loaded", { state: { case: "loaded" as const, value: {} } }, "loaded"],
     ["not loaded", { state: { case: "notLoaded" as const, value: {} } }, "not loaded"],
   ])("states a page %s", (_name, init, want) => {
     expect(pageLine(page(init), "p")).toBe(want);
@@ -149,7 +172,7 @@ describe("a workspace hover's lines", () => {
     });
     expect(workspaceLines(memory, "w")).toEqual([
       ["agent", "98 MB"],
-      ["page", "loaded, held while visible"],
+      ["page", "loaded"],
     ]);
   });
 
@@ -218,7 +241,52 @@ describe("the version hover", () => {
     version.dispatchEvent(new MouseEvent("mouseenter"));
     await settle();
 
-    expect([panel.classList.contains("open"), panel.querySelector("dt")?.textContent]).toEqual([true, "pages"]);
+    expect([panel.classList.contains("open"), panel.querySelector(":scope > .lines dt")?.textContent]).toEqual([true, "stalls"]);
+  });
+
+  it("draws the workspaces entry first, its counts in its child popup", async () => {
+    const { version, panel } = mounted(measured);
+
+    version.dispatchEvent(new MouseEvent("mouseenter"));
+    await settle();
+
+    const entry = panel.firstElementChild as HTMLElement;
+    expect([
+      entry.classList.contains("detail-more"),
+      entry.hidden,
+      entry.querySelector(".detail-more-label")?.textContent,
+      [...entry.querySelectorAll(".detail-sub dt")].map((dt) => dt.textContent),
+    ]).toEqual([
+      true,
+      false,
+      "workspaces · 50 visible · 22 shims · 21 webpages",
+      ["workspaces visible", "workspace shims", "workspace loaded webpages"],
+    ]);
+  });
+
+  it("opens the workspaces child popup on hover and shuts it as the pointer leaves", async () => {
+    const { version, panel } = mounted(measured);
+    version.dispatchEvent(new MouseEvent("mouseenter"));
+    await settle();
+    const entry = panel.querySelector<HTMLElement>(":scope > .detail-more")!;
+
+    entry.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    const opened = entry.classList.contains("open");
+    entry.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: panel.querySelector(".lines") }));
+
+    expect([opened, entry.classList.contains("open")]).toEqual([true, false]);
+  });
+
+  it("keeps the workspaces entry across a refresh", async () => {
+    const { version, panel, ticker } = mounted(measured);
+    version.dispatchEvent(new MouseEvent("mouseenter"));
+    await settle();
+
+    ticker.tick(1);
+    ticker.tick(2);
+    await settle();
+
+    expect(panel.querySelectorAll(":scope > .detail-more").length).toBe(1);
   });
 
   it("asks again every second tick while open", async () => {

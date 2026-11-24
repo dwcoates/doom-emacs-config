@@ -71,6 +71,9 @@
 (defvar agent-repl-test-host--calls nil
   "Recorded rpc calls, newest first: `(METHOD CONN REQUEST)'.")
 
+(defvar agent-repl-test-host--page-states nil
+  "Recorded ReportPageState restatements, newest first: `(METHOD CONN REQUEST)'.")
+
 (defvar agent-repl-test-host--register-answer nil
   "What the stubbed RegisterWorkspace answers; see the harness.")
 
@@ -261,6 +264,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--streams nil)
          (agent-repl-test-host--cancelled nil)
          (agent-repl-test-host--calls nil)
+         (agent-repl-test-host--page-states nil)
          (agent-repl-test-host--effects nil)
          (agent-repl-test-host--logs nil)
          (agent-repl-test-host--current-ws nil)
@@ -322,6 +326,13 @@ unary rpc can produce, which the contract never collapses into one."
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-roster-interaction-standing-p)
                 (lambda (_ws) agent-repl-test-host--interaction-standing))
+               ;; THE PAGE STATE IS RESTATED ON EVERY SUBSCRIBE (page-report.el):
+               ;; the daemon answers it, and the restatements are kept apart
+               ;; from the calls the host's own verbs make.
+               ((symbol-function 'agent-repl-rpc-report-page-state)
+                (lambda (conn request &rest keys)
+                  (push (list "ReportPageState" conn request) agent-repl-test-host--page-states)
+                  (funcall (plist-get keys :on-response) '(:arm :success :value nil))))
                ((symbol-function 'agent-repl-rpc-report-page-unloading)
                 (lambda (conn request &rest keys)
                   (push (list "ReportPageUnloading" conn request) agent-repl-test-host--calls)
@@ -4352,6 +4363,18 @@ could only be invented, and the link already holds the accepted successor."
       (funcall (plist-get record :on-open))
       ;; Assert
       (should (agent-repl-test-host--logged-p :info "method=\"WatchHostWorkspace\"")))))
+
+(ert-deftest agent-repl-test-host-acceptance-sends-the-page-restatement ()
+  "The acceptance's restatement reaches the daemon as a ReportPageState."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((record (agent-repl-test-host--subscribe "ws-1")))
+      ;; Act
+      (funcall (plist-get record :on-open))
+      ;; Assert
+      (should (equal (mapcar #'car agent-repl-test-host--page-states) '("ReportPageState")))
+      (should (equal (plist-get (nth 2 (car agent-repl-test-host--page-states)) :report)
+                     '(:arm :not-held :value nil))))))
 
 (ert-deftest agent-repl-test-host-acceptance-restates-the-page ()
   "The daemon accepting the watch is when the workspace's page state is restated."
