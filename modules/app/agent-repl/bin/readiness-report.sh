@@ -37,9 +37,10 @@
 #      "unknown"; it is never inferred from mtimes or from repo HEAD, because a
 #      guess is indistinguishable from a fact once it is in the JSON.
 #
-#   2. SOURCE revision — the newest commit touching that system's pathspec.
-#      proto/ is in every system's pathspec: regeneration flows from it, so a
-#      proto edit genuinely stales every Go and TypeScript artifact.
+#   2. SOURCE revision — the newest commit touching a file that system's build
+#      reads (lib-deploy-stamp.sh derives the files from the build's own
+#      tool). A generated binding is in the set of the systems that compile
+#      from it and in no other's, so a proto edit stales exactly those.
 #
 #   3. RUNNING staleness — whether a live process is serving an older image
 #      than the one installed on disk. Only systems with a single long-lived
@@ -222,11 +223,12 @@ system_tree_stamp() {
     esac
 }
 
-# system_paths NAME — repo-relative pathspec, space separated. Read from the
+# load_system_pathspec NAME — fill DEPLOY_STAMP_PATHSPEC with the files NAME's
+# build reads, or return 1 when they cannot be determined. Read from the
 # shared table in lib-deploy-stamp.sh, which is also what build-frontend.sh
 # builds its staleness answer from; a second copy here is exactly the drift the
 # shared table exists to prevent.
-system_paths() { deploy_stamp_system_paths "$1" "$REL_ROOT"; }
+load_system_pathspec() { deploy_stamp_load_pathspec "$1" "$REPO_ROOT" "$REL_ROOT"; }
 
 # system_process_match NAME — the absolute binary path a live process for NAME
 # runs, or nothing when NAME has no single long-lived process.
@@ -306,15 +308,16 @@ proc_start_epoch() {
 
 emit_system() { # NAME
     local name="$1"
-    local stamp paths stamp_value deployed_sha deployed_commit deployed_dirty=0
+    local stamp stamp_value deployed_sha deployed_commit deployed_dirty=0
     local source_sha="" source_ct="" deployed_ct="" commits_behind="" minutes_behind=""
     local error="" ready=0
     local match pid="" started_epoch="" started_at="" stale=0 running_json="null"
-    local tree_stamp built_tree="" current_tree="" source_tree_stale=1 source_dirty=0
+    local tree_stamp built_tree="" current_tree="" source_tree_stale=1 source_dirty=0 paths_known
 
     stamp="$(system_stamp "$name")"
     tree_stamp="$(system_tree_stamp "$name")"
-    paths="$(system_paths "$name")"
+    paths_known=1
+    load_system_pathspec "$name" || paths_known=0
 
     # 1. deployed revision, strictly from the stamp.
     deployed_sha=""
@@ -332,13 +335,16 @@ emit_system() { # NAME
 
     # 2. newest commit touching the system, with its commit timestamp.
     local log_line
-    # shellcheck disable=SC2086
-    if log_line="$(git -C "$REPO_ROOT" log -1 --format='%H %ct' -- $paths 2>/dev/null)" \
+    if [ "$paths_known" -eq 1 ] && log_line="$(git -C "$REPO_ROOT" log -1 --format='%H %ct' -- "${DEPLOY_STAMP_PATHSPEC[@]}" 2>/dev/null)" \
        && [ -n "$log_line" ]; then
         source_sha="${log_line%% *}"
         source_ct="${log_line##* }"
     else
-        error="no commit touches this system's pathspec: $paths"
+        if [ "$paths_known" -eq 0 ]; then
+            error="the files this system's build reads could not be determined"
+        else
+            error="no commit touches this system's source files (${#DEPLOY_STAMP_PATHSPEC[@]} paths)"
+        fi
     fi
 
     # 3. distances, only when both ends are known commits in THIS checkout.
@@ -347,8 +353,7 @@ emit_system() { # NAME
             deployed_ct=""
             error="deployed revision $deployed_commit is not present in this checkout"
         else
-            # shellcheck disable=SC2086
-            if ! commits_behind="$(git -C "$REPO_ROOT" rev-list --count "$deployed_commit..$source_sha" -- $paths 2>/dev/null)"; then
+            if ! commits_behind="$(git -C "$REPO_ROOT" rev-list --count "$deployed_commit..$source_sha" -- "${DEPLOY_STAMP_PATHSPEC[@]}" 2>/dev/null)"; then
                 commits_behind=""
                 error="could not count commits between $deployed_commit and $source_sha"
             elif [ "$commits_behind" -eq 0 ]; then
@@ -369,10 +374,9 @@ emit_system() { # NAME
     # identical — a state no rebuild can clear, and therefore one this gate must
     # not fail on. The stamp comparison answers the question that actually
     # gates: is the artifact standing here built from the source standing here.
-    # shellcheck disable=SC2086
-    if ! current_tree="$(source_tree_id "$REPO_ROOT" $paths)"; then
+    if [ "$paths_known" -eq 0 ] || ! current_tree="$(source_tree_id "$REPO_ROOT" "${DEPLOY_STAMP_PATHSPEC[@]}")"; then
         current_tree=""
-        [ -n "$error" ] || error="the source set for this system could not be determined: $paths"
+        [ -n "$error" ] || error="the source set for this system could not be determined"
     elif built_tree="$(read_source_tree "$tree_stamp")"; then
         if source_tree_is_dirty "$current_tree"; then source_dirty=1; fi
         # Bases, not full ids: an uncommitted edit makes the build stale (and

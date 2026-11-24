@@ -72,6 +72,8 @@ fi
 
 # shellcheck source=lib-harness-report.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
+# shellcheck source=lib-source-set-stubs.sh
+. "$THIS_DIR/lib-source-set-stubs.sh"
 
 # --- build a fake project tree in a temp dir -------------------------------
 # Layout mirrors what build-frontend.sh expects relative to its parent dir.
@@ -98,6 +100,7 @@ make_tree() {
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$root/bin/lib-deploy-stamp.sh"
     cp "$THIS_DIR/lib-node-store.sh" "$root/bin/lib-node-store.sh"
+    cp "$THIS_DIR/source-files.mjs" "$root/bin/source-files.mjs"
     cp "$THIS_DIR/lib-worktrees.sh" "$root/bin/lib-worktrees.sh"
 
     # Sources.
@@ -117,15 +120,26 @@ make_tree() {
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
     echo '{"scripts":{"build":"true"}}' > "$root/webapp/package.json"
     echo '{"name":"tree-sitter-tldr"}' > "$root/tree-sitter-tldr/package.json"
-    echo "module x" > "$root/daemon/go.mod"
-    echo "module store" > "$root/agent-shim/shim-store/go.mod"
-    echo "module sidecar" > "$root/agent-shim/claude/shim-sidecar/go.mod"
-    echo "module lock" > "$root/agent-shim/shim-lock/go.mod"
-    echo "module zettel" > "$root/zettel/go.mod"
-    echo "module testservice" > "$root/testservice/go.mod"
+    # Each Go module names the modules it compiles from, as the real go.mod
+    # files do: a target's source set follows these `replace` lines (the go
+    # stub's `list`), so a target is rebuilt for the code it imports and for
+    # no other.
+    printf 'module x\nreplace agentrepl/proto => ../proto/gen/go\nreplace agentrepl/protohelpers => ../proto/helpers/go\nreplace agentrepl/logging => ../agent-shim/logging/go\n' > "$root/daemon/go.mod"
+    printf 'module store\nreplace agentrepl/proto => ../../proto/gen/go\nreplace agentrepl/logging => ../logging/go\n' > "$root/agent-shim/shim-store/go.mod"
+    printf 'module sidecar\nreplace agentrepl/proto => ../../../proto/gen/go\nreplace agentrepl/logging => ../../logging/go\n' > "$root/agent-shim/claude/shim-sidecar/go.mod"
+    printf 'module lock\nreplace agentrepl/logging => ../logging/go\n' > "$root/agent-shim/shim-lock/go.mod"
+    printf 'module zettel\nreplace agentrepl/logging => ../agent-shim/logging/go\n' > "$root/zettel/go.mod"
+    printf 'module testservice\nreplace agentrepl/logging => ../agent-shim/logging/go\nreplace agentrepl/proto => ../proto/gen/go\n' > "$root/testservice/go.mod"
     echo "module logging" > "$root/agent-shim/logging/go/go.mod"
     echo "module proto" > "$root/proto/gen/go/go.mod"
     echo "module protohelpers" > "$root/proto/helpers/go/go.mod"
+
+    # The launcher's package, as SwiftPM lists it (the swift stub).
+    mkdir -p "$root/launcher/Sources/Zettel" "$root/launcher/Bundle"
+    echo 'print("z")' > "$root/launcher/Sources/Zettel/main.swift"
+    echo '// package' > "$root/launcher/Package.swift"
+    echo '{}' > "$root/launcher/Package.resolved"
+    echo '<plist/>' > "$root/launcher/Bundle/Info.plist"
 
     # Sources the old mtime-scanned set never looked at, and which the twelve
     # merges of 2026-09-09 landed in: the shim's tests, and the shared logging
@@ -184,12 +198,10 @@ tree_stamp_path() {
 # stamp_fresh_source_trees ROOT — record, for every system, that its artifact
 # was built from exactly the revision standing in the fixture.
 stamp_fresh_source_trees() {
-    local root="$1" name paths
+    local root="$1" name
     for name in shim webapp daemon shim-store shim-claude-sidecar shim-lock; do
-        paths="$(deploy_stamp_system_paths "$name" "")"
-        # shellcheck disable=SC2086
         write_source_tree "$(tree_stamp_path "$root" "$name")" \
-                          "$(source_tree_id "$root" $paths || true)"
+                          "$(PATH="$root/stubs:$PATH" deploy_stamp_source_id "$name" "$root" "" || true)"
     done
 }
 
@@ -276,6 +288,9 @@ exit 0
 EOF
     cat > "$bindir/go" <<'EOF'
 #!/usr/bin/env bash
+# `go list` is the source-set question, answered over the fixture and not
+# logged: it says which files a build reads, and is no build step.
+[ "${1:-}" = list ] && exec "$(dirname "$0")/go-list-stub" "$@"
 echo "go $*" >> "$STUB_LOG"
 # `go version` answers the toolchain; `go version -m <binary>` answers the
 # toolchain and link flags recorded in the binary by the stub's own build, which
@@ -334,6 +349,7 @@ done
 exit 0
 EOF2
     chmod +x "$bindir/npm" "$bindir/go" "$bindir/make"
+    install_source_set_stubs "$bindir"
 }
 
 run_script() {
@@ -773,9 +789,9 @@ t_no_git_leaves_no_stamp() {
 }
 
 # --- awkward source filenames still reach the staleness check ---------------
-# The pathspec list is passed to git unquoted (it is a space-separated table),
-# so these pin that a FILENAME's own spaces and glob metacharacters are never
-# taken as list separators or expanded against the cwd on the way there.
+# A source set reaches git as one literal path per file, so these pin that a
+# FILENAME's own spaces and glob metacharacters are never taken as list
+# separators or expanded against the cwd on the way there.
 
 t_stale_source_with_space_in_name() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
@@ -1067,36 +1083,58 @@ t_lock_installs_beside_shim_store() {
 # clear. Two independent causes, one per pair below.
 
 # CAUSE 1: the source set was narrower than the one the gate measures. The shim
-# scanned `shim/src` plus a few manifests; the merges touched `shim/test/`.
-t_committed_change_outside_src_stales_the_shim() {
+# scanned `shim/src` plus a few manifests; the merges touched code the shim
+# does compile from. A target's source set is now the files its build reads
+# (lib-deploy-stamp.sh), the same set the gate measures, so what the build
+# reads is never outside it, and what it does not read is never inside.
+t_committed_change_in_the_shim_sources_stales_the_shim() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    commit_change "$root" agent-shim/claude/shim/src/main.ts \
+                  "export const x = 2" "feat(shim): another case"
+    run_script "$root" shim >/dev/null
+    if grep -q "npm run build" "$root/stub.log"; then
+        pass "staleness: a committed change under shim/src stales the shim bundle"
+    else
+        fail "staleness: a committed change under shim/src stales the shim bundle" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# The shim's tests are no input of its bundle: a landing that only adds a test
+# case must not rebuild it.
+t_committed_change_under_shim_test_keeps_the_shim_fresh() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" agent-shim/claude/shim/test/main.test.ts \
                   "test('y', () => {})" "test(shim): another case"
     run_script "$root" shim >/dev/null
-    if grep -q "npm run build" "$root/stub.log"; then
-        pass "staleness: a committed change under shim/test stales the shim bundle"
+    if [ ! -s "$root/stub.log" ]; then
+        pass "staleness: a committed change under shim/test leaves the shim bundle fresh"
     else
-        fail "staleness: a committed change under shim/test stales the shim bundle" \
+        fail "staleness: a committed change under shim/test leaves the shim bundle fresh" \
              "stub.log: $(cat "$root/stub.log")"
     fi
     rm -rf "$root"
 }
 
-# The webapp's half of the same cause: the merges touched `webapp/test/` and the
-# shared logging module, neither of which the old scan looked at.
-t_committed_change_in_shared_logging_stales_the_webapp() {
+# The shared Go logging module is compiled into the daemon, and no part of the
+# webapp's build reads it: a change there stales the daemon and leaves the
+# webapp fresh.
+t_committed_change_in_shared_logging_stales_the_daemon_not_the_webapp() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" agent-shim/logging/go/timestamp.go \
                   "// size-capped with N generations" "feat(logging): rotate"
-    run_script "$root" webapp >/dev/null
-    if grep -q "npm run build" "$root/stub.log"; then
-        pass "staleness: a committed change to shared logging stales the webapp"
+    run_script "$root" webapp daemon >/dev/null
+    if grep -q "^go build" "$root/stub.log" && ! grep -q "npm run build" "$root/stub.log"; then
+        pass "staleness: a committed change to shared Go logging stales the daemon and leaves the webapp fresh"
     else
-        fail "staleness: a committed change to shared logging stales the webapp" \
+        fail "staleness: a committed change to shared Go logging stales the daemon and leaves the webapp fresh" \
              "stub.log: $(cat "$root/stub.log")"
     fi
     rm -rf "$root"
@@ -1230,13 +1268,11 @@ t_daemon_build_removes_a_stale_snapshot_when_there_is_no_config() {
 
 # The stamp is what makes the skip possible, so a build must leave one behind.
 t_build_records_the_source_tree_stamp() {
-    local root recorded expected paths; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    local root recorded expected; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     run_script "$root" daemon >/dev/null
     recorded="$(cat "$root/daemon/bin/.source-tree" 2>/dev/null || echo MISSING)"
-    paths="$(deploy_stamp_system_paths daemon "")"
-    # shellcheck disable=SC2086
-    expected="$(source_tree_id "$root" $paths)"
+    expected="$(PATH="$root/stubs:$PATH" deploy_stamp_source_id daemon "$root" "")"
     if [ "$recorded" = "$expected" ]; then
         pass "stamp: a build records the source-tree id its artifact came from"
     else
@@ -1373,10 +1409,7 @@ staging_head() { git -C "$1" rev-parse HEAD; }
 # fake_source_tree NAME — the source-tree id of NAME in STAGING_ROOT, computed
 # by the SAME library function the script stamps with.
 fake_source_tree() {
-    local paths
-    paths="$(deploy_stamp_system_paths "$1" "")"
-    # shellcheck disable=SC2086
-    source_tree_id "$STAGING_ROOT" $paths
+    PATH="$STAGING_ROOT/stubs:$PATH" deploy_stamp_source_id "$1" "$STAGING_ROOT" ""
 }
 
 # live_files ROOT — every file standing in the fixture's LIVE artifact
@@ -1463,7 +1496,6 @@ printf 'build-launcher %s\n' "$*" >> "$STUB_LOG"
 mkdir -p "$2/Contents/MacOS" && printf 'zettel\n' > "$2/Contents/MacOS/Zettel"
 STUB
     chmod +x "$root/bin/build-launcher.sh"
-    printf '#!/bin/sh\nexit 0\n' > "$root/stubs/swift" && chmod +x "$root/stubs/swift"
 }
 
 # The launcher (macOS only): staged, it is built into cache-bin and NOT
@@ -2434,8 +2466,9 @@ build_group_components() {
 }
 
 build_group_revision_staleness() {
-    t_committed_change_outside_src_stales_the_shim
-    t_committed_change_in_shared_logging_stales_the_webapp
+    t_committed_change_in_the_shim_sources_stales_the_shim
+    t_committed_change_under_shim_test_keeps_the_shim_fresh
+    t_committed_change_in_shared_logging_stales_the_daemon_not_the_webapp
     t_older_mtime_source_change_still_rebuilds
     t_unchanged_tree_skips_even_with_an_older_artifact
     t_dirty_tree_always_rebuilds
@@ -2523,10 +2556,7 @@ build_group_staging() {
 # stamp_fresh_proto ROOT — record that the fixture's bindings were generated
 # from the proto tree standing there now.
 stamp_fresh_proto() {
-    local paths
-    paths="$(deploy_stamp_system_paths proto "")"
-    # shellcheck disable=SC2086
-    write_source_tree "$1/proto/.source-tree" "$(source_tree_id "$1" $paths)"
+    write_source_tree "$1/proto/.source-tree" "$(deploy_stamp_source_id proto "$1" "")"
 }
 
 # proto_case ROOT — a fixture whose stub log is empty.
@@ -2543,9 +2573,7 @@ proto_gated_only() {
 t_proto_without_a_stamp_generates_and_stamps() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     proto_case "$root"
-    local paths; paths="$(deploy_stamp_system_paths proto "")"
-    # shellcheck disable=SC2086
-    local want; want="$(source_tree_id "$root" $paths)"
+    local want; want="$(deploy_stamp_source_id proto "$root" "")"
     if run_script "$root" proto >/dev/null && proto_generated "$root" &&
            [ "$(read_source_tree "$root/proto/.source-tree")" = "$want" ]; then
         pass "proto: with no stamp it generates, then stamps the proto tree"
