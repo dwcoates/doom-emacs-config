@@ -301,9 +301,12 @@ func latest(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster {
 
 // latestPush reads the push the resolver last published, failing when it
 // published none or one that leaves a stream out: every value the topic
-// carries holds every stream.
+// carries holds every stream. It settles the roster first, since a change
+// posted to it (the footer's status edge, a posting view's) is published
+// after its call returns.
 func latestPush(t *testing.T, r sidebar.Resolver) *frontendv1.RosterPush {
 	t.Helper()
+	r.Settle()
 	push, ok := r.Topic().Latest()
 	if !ok {
 		t.Fatal("the roster published nothing")

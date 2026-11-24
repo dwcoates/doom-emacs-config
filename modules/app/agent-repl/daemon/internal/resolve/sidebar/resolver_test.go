@@ -121,6 +121,7 @@ func TestRosterPublishesNothingBeforeAnyRegistry(t *testing.T) {
 	r.OnLink(theWS, shimclient.LinkConnected)
 
 	// Assert: a roster built from live frames alone would name no workspaces.
+	r.Settle()
 	if _, ok := r.Topic().Latest(); ok {
 		t.Fatal("the roster published before any registry")
 	}

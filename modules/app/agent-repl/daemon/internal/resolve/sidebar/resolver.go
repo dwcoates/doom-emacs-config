@@ -1138,11 +1138,8 @@ func (r *resolver) SetInteracted(ws ids.WorkspaceID, at time.Time) {
 // r.mu.
 func (r *resolver) newestInteracted(ws ids.WorkspaceID, s *wsState) bool {
 	var mine *time.Time
-	for _, rec := range r.state.reg.Workspaces {
-		if rec.ID == ws {
-			mine = interactedAt(rec, s)
-			break
-		}
+	if rec, ok := r.state.record(ws); ok {
+		mine = interactedAt(*rec, s)
 	}
 	if mine == nil {
 		return false

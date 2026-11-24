@@ -3,9 +3,7 @@ package sidebar_test
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +17,7 @@ import (
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -381,27 +380,15 @@ func TestARecordIsTheRegistrysOwnThroughItsIndex(t *testing.T) {
 
 // TestNoSiteScansTheRegistryForOneRecord holds every lookup of one
 // workspace's record to rosterState.record: a loop over the registry's
-// workspaces that compares each one's id and returns is a scan for one record
-// the index replaced, and one per row per render was what made a render cost
-// the whole registry.
+// workspaces that leaves the loop (a return, a break) once a workspace's id
+// equals the one it looks for is a scan for one record the index replaced,
+// and one per row per render was what made a render cost the whole registry.
 func TestNoSiteScansTheRegistryForOneRecord(t *testing.T) {
 	// Arrange
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	fset := token.NewFileSet()
+	var scans []string
 
 	// Act
-	var scans []string
-	for _, path := range sources {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
+	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, file *ast.File) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			loop, ok := n.(*ast.RangeStmt)
 			if !ok || !strings.HasSuffix(exprText(loop.X), "reg.Workspaces") {
@@ -411,29 +398,43 @@ func TestNoSiteScansTheRegistryForOneRecord(t *testing.T) {
 			if v, ok := loop.Value.(*ast.Ident); ok {
 				ids[v.Name+".ID"] = true
 			}
-			var compared, returns bool
 			ast.Inspect(loop.Body, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.BinaryExpr:
-					if (n.Op == token.EQL || n.Op == token.NEQ) && (ids[exprText(n.X)] || ids[exprText(n.Y)]) {
-						compared = true
-					}
-				case *ast.ReturnStmt:
-					returns = true
+				found, ok := n.(*ast.IfStmt)
+				if !ok || !comparesID(found.Cond, ids) || !leavesLoop(found.Body) {
+					return true
 				}
-				return true
-			})
-			if compared && returns {
 				scans = append(scans, fset.Position(loop.Pos()).String())
-			}
+				return false
+			})
 			return true
 		})
-	}
+	})
 
 	// Assert
 	if len(scans) > 0 {
 		t.Fatalf("these sites scan the registry for one workspace's record, want rosterState.record: %v", scans)
 	}
+}
+
+// comparesID reports whether COND is an equality of one of IDS with anything.
+func comparesID(cond ast.Expr, ids map[string]bool) bool {
+	cmp, ok := cond.(*ast.BinaryExpr)
+	return ok && cmp.Op == token.EQL && (ids[exprText(cmp.X)] || ids[exprText(cmp.Y)])
+}
+
+// leavesLoop reports whether BODY ends by leaving its loop: a return or a
+// break.
+func leavesLoop(body *ast.BlockStmt) bool {
+	if len(body.List) == 0 {
+		return false
+	}
+	switch last := body.List[len(body.List)-1].(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.BranchStmt:
+		return last.Tok == token.BREAK
+	}
+	return false
 }
 
 // exprText spells a selector chain (r.state.reg.Workspaces), empty for any
