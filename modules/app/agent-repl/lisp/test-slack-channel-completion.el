@@ -44,7 +44,6 @@ one."
      (setq-local agent-repl--owning-workspace "ws-1")
      (let ((agent-repl-test-slack-channel-completion--requests nil)
            (agent-repl--slack-channel-completion-channels nil)
-           (agent-repl--completion-order-selected (make-hash-table :test 'equal))
            (composer (current-buffer))
            (answer ,answer))
        (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary)
@@ -124,18 +123,18 @@ one."
 (ert-deftest agent-repl-test-slack-channel-completion-offers-a-taken-channel-first ()
   "A channel taken before is offered first."
   (agent-repl-test-slack-channel-completion--with nil
-    ;; Arrange
-    (setq agent-repl--slack-channel-completion-channels
-          '((:id "C1" :name "eng-a" :visibility (:arm :public-channel :value nil) :purpose nil)
-            (:id "C2" :name "eng-b" :visibility (:arm :public-channel :value nil) :purpose nil)))
-    (agent-repl-completion-order-note-selected 'channel "eng-b")
-    (insert "#eng")
-    ;; Act
-    (let* ((answer (agent-repl-slack-channel-completion-at-point))
-           (sort (completion-metadata-get (completion-metadata "#eng" (nth 2 answer) nil)
-                                          'display-sort-function)))
-      ;; Assert
-      (should (equal (funcall sort (list "eng-a" "eng-b")) '("eng-b" "eng-a"))))))
+    (agent-repl-test--with-composer-selections '(:channels ("eng-b"))
+      ;; Arrange
+      (setq agent-repl--slack-channel-completion-channels
+            '((:id "C1" :name "eng-a" :visibility (:arm :public-channel :value nil) :purpose nil)
+              (:id "C2" :name "eng-b" :visibility (:arm :public-channel :value nil) :purpose nil)))
+      (insert "#eng")
+      ;; Act
+      (let* ((answer (agent-repl-slack-channel-completion-at-point))
+             (sort (completion-metadata-get (completion-metadata "#eng" (nth 2 answer) nil)
+                                            'display-sort-function)))
+        ;; Assert
+        (should (equal (funcall sort (list "eng-a" "eng-b")) '("eng-b" "eng-a")))))))
 
 ;;;; ---- Annotations ----
 

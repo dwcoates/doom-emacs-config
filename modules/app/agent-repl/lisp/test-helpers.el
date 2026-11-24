@@ -820,6 +820,10 @@ re-routes their frontend resolution instead."
          ;; Decisions recorded on change (core.el): a decision one test made
          ;; must not silence the same record in the next.
          (agent-repl--log-decisions (make-hash-table :test 'equal))
+         ;; The daemon's record of the composer's taken completions
+         ;; (host.el): a push one test applied must not order the next
+         ;; one's completions.
+         (agent-repl-host--composer-selections nil)
          (agent-repl--webhost-buffer nil)
          (agent-repl--webhost-pages (make-hash-table :test 'equal))
          (agent-repl--webhost-shown nil)
@@ -1102,6 +1106,42 @@ clock every suite uses (test-test-helpers.el holds every suite to it)."
   (declare (indent 1))
   `(let ((agent-repl-test--clock ,start))
      (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test--clock)))
+       ,@body)))
+
+(defvar agent-repl-test--composer-selection-reports nil
+  "Every `ReportComposerSelection' request a test's composer made, newest first.
+Each is the request plist `(:selection (:arm KIND :value (:name NAME)))'.")
+
+(defun agent-repl-test--fake-composer-selection-daemon (_conn request &rest keys)
+  "Answer REQUEST, a `ReportComposerSelection', as the daemon does.
+Records REQUEST into `agent-repl-test--composer-selection-reports', pushes
+the restated record (the taken name moved to the front of its kind) into
+`agent-repl-host--composer-selections' as the host stream's push would, and
+answers success through KEYS' `:on-response'."
+  (push request agent-repl-test--composer-selection-reports)
+  (let* ((selection (plist-get request :selection))
+         (field (pcase (plist-get selection :arm)
+                  (:command :commands) (:workspace :workspaces) (:channel :channels)))
+         (name (plist-get (plist-get selection :value) :name)))
+    (setq agent-repl-host--composer-selections
+          (plist-put (copy-sequence agent-repl-host--composer-selections) field
+                     (cons name (remove name (plist-get agent-repl-host--composer-selections field))))))
+  (funcall (plist-get keys :on-response) (list :arm :success :value nil)))
+
+(defmacro agent-repl-test--with-composer-selections (record &rest body)
+  "Run BODY with RECORD as the daemon's composer selections, behind a fake daemon.
+RECORD is the `HostComposerSelections' plist `(:commands :workspaces
+:channels)' the host stream last pushed.  Taking a candidate reaches
+`agent-repl-test--fake-composer-selection-daemon', which records the report
+into `agent-repl-test--composer-selection-reports' and pushes the restated
+record.  THE ONE fake of the composer selections every completion suite
+uses."
+  (declare (indent 1))
+  `(let ((agent-repl-host--composer-selections ,record)
+         (agent-repl-test--composer-selection-reports nil))
+     (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) 'conn))
+               ((symbol-function 'agent-repl-rpc-report-composer-selection)
+                #'agent-repl-test--fake-composer-selection-daemon))
        ,@body)))
 
 (defmacro agent-repl-test--record-into (place)

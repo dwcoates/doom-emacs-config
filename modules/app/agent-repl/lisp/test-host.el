@@ -2321,6 +2321,62 @@ answers `:unknown' and records the breach rather than opening."
     ;; Act / Assert
     (should-error (agent-repl-host-mentions "ws-1" 'skill))))
 
+;;;; ---- The composer selections ----
+
+(ert-deftest agent-repl-test-host-composer-selections-are-nil-before-the-first-push ()
+  "Before any host watch pushed the record, nothing was taken."
+  (agent-repl-test-host--with-harness
+    ;; Act / Assert
+    (should-not (agent-repl-host-composer-selections 'command))
+    (should-not (agent-repl-host-composer-selections 'workspace))
+    (should-not (agent-repl-host-composer-selections 'channel))))
+
+(ert-deftest agent-repl-test-host-composer-selections-push-is-read-back-by-kind ()
+  "The pushed record is answered by kind, newest first, as pushed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :composer-selections
+                  :value '(:commands ("compact" "autocompact") :workspaces ("alpha") :channels ("eng"))))
+    ;; Assert
+    (should (equal (agent-repl-host-composer-selections 'command) '("compact" "autocompact")))
+    (should (equal (agent-repl-host-composer-selections 'workspace) '("alpha")))
+    (should (equal (agent-repl-host-composer-selections 'channel) '("eng")))))
+
+(ert-deftest agent-repl-test-host-composer-selections-are-one-record-for-every-workspace ()
+  "The record is the user's: a push on one workspace's watch orders every composer."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--subscribe "ws-2")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :composer-selections :value '(:commands ("a"))))
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-2" (list :arm :composer-selections :value '(:commands ("b" "a"))))
+    ;; Assert
+    (should (equal (agent-repl-host-composer-selections 'command) '("b" "a")))))
+
+(ert-deftest agent-repl-test-host-composer-selections-push-is-logged ()
+  "The push is recorded with how many names of each kind it carried."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :composer-selections :value '(:commands ("b" "a") :channels ("eng"))))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :log "elisp.host.composer-selections ws=ws-1 commands=2 workspaces=0 channels=1"))))
+
+(ert-deftest agent-repl-test-host-composer-selections-of-an-unknown-kind-is-an-error ()
+  "Asking for a kind the record does not hold is a defect, refused loudly."
+  (agent-repl-test-host--with-harness
+    ;; Act / Assert
+    (should-error (agent-repl-host-composer-selections 'skill))))
+
 ;;;; ---- The mention targets ----
 
 (defconst agent-repl-test-host--targets

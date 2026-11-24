@@ -891,8 +891,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
 No candidate is taken before BODY runs."
   (declare (indent 1))
   `(agent-repl-test-command-completion--with nil
-     (let ((agent-repl--completion-order-selected (make-hash-table :test 'equal))
-           (agent-repl--completion-order-clock 0))
+     (agent-repl-test--with-composer-selections nil
        (cl-letf (((symbol-function 'agent-repl-host-mentions)
                   (lambda (ws kind)
                     (should (equal ws "ws-1"))
@@ -937,7 +936,31 @@ No candidate is taken before BODY runs."
     (funcall (plist-get (nthcdr 3 (agent-repl-command-completion-at-point)) :exit-function)
              "/clear" 'sole)
     ;; Assert
-    (should (gethash '(command . "clear") agent-repl--completion-order-selected))))
+    (should (equal agent-repl-test--composer-selection-reports
+                   '((:selection (:arm :command :value (:name "clear"))))))))
+
+(ert-deftest agent-repl-test-command-completion-capf-offers-the-latest-taken-match-first ()
+  "After `/compact' is taken, `/co' offers `/compact' before `/autocompact'."
+  (agent-repl-test-command-completion--with nil
+    (agent-repl-test--with-composer-selections nil
+      (cl-letf (((symbol-function 'agent-repl-host-mentions) (lambda (_ws _kind) nil)))
+        ;; Arrange
+        (setq agent-repl--command-completion-catalog
+              '((:name "autocompact" :description nil :argument-hint nil :aliases nil)
+                (:name "compact" :description nil :argument-hint nil :aliases nil)))
+        (setq agent-repl--command-completion-asked-at '(1 . 0))
+        (agent-repl-test-command-completion--type "/co")
+        (funcall (plist-get (nthcdr 3 (agent-repl-command-completion-at-point)) :exit-function)
+                 "compact" 'finished)
+        ;; Act
+        (let* ((table (nth 2 (agent-repl-command-completion-at-point)))
+               (sort (completion-metadata-get (completion-metadata "/co" table nil)
+                                              'display-sort-function))
+               (matches (seq-filter (lambda (name) (string-match-p "co" name))
+                                    (all-completions "/" table))))
+          ;; Assert
+          (should (equal (funcall sort matches)
+                         '("compact" "autocompact"))))))))
 
 (provide 'test-command-completion)
 ;;; test-command-completion.el ends here

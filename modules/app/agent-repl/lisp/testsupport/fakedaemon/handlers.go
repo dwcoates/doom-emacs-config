@@ -287,6 +287,10 @@ func (s *fakeServer) ListSlackChannels(ctx context.Context, req *connect.Request
 	return handleUnary[v1.ListSlackChannelsRequest, v1.ListSlackChannelsResponse](ctx, s, "ListSlackChannels", req.Msg)
 }
 
+func (s *fakeServer) ReportComposerSelection(ctx context.Context, req *connect.Request[v1.ReportComposerSelectionRequest]) (*connect.Response[v1.ReportComposerSelectionResponse], error) {
+	return handleUnary[v1.ReportComposerSelectionRequest, v1.ReportComposerSelectionResponse](ctx, s, "ReportComposerSelection", req.Msg)
+}
+
 func (s *fakeServer) SessionHealth(ctx context.Context, req *connect.Request[v1.SessionHealthRequest]) (*connect.Response[v1.SessionHealthResponse], error) {
 	return handleUnary[v1.SessionHealthRequest, v1.SessionHealthResponse](ctx, s, "SessionHealth", req.Msg)
 }

@@ -371,8 +371,7 @@ No name is taken before BODY runs."
   (declare (indent 1))
   `(agent-repl-test-workspace-completion--with "agent-"
        '("agent-a" "agent-b" "agent-c")
-     (let ((agent-repl--completion-order-selected (make-hash-table :test 'equal))
-           (agent-repl--completion-order-clock 0))
+     (agent-repl-test--with-composer-selections nil
        (cl-letf (((symbol-function 'agent-repl-host-mentions)
                   (lambda (ws kind)
                     (should (equal ws "ws-1"))
