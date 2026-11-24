@@ -167,7 +167,7 @@ commit_tree() {
     # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
     # artifact a build just produced would itself make the tree "dirty" and
     # every build would read as stale forever.
-    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n.source-tree\n' > "$root/.gitignore"
+    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n.source-tree\n.generators\n' > "$root/.gitignore"
     git -C "$root" init -q
     git -C "$root" add -A
     git -C "$root" commit -qm seed
@@ -235,14 +235,42 @@ make_fresh_artifacts_files() {
     local root="$1"
     echo built > "$root/agent-shim/claude/shim/dist/main.js"
     write_webapp_index "$root/webapp/dist/index.html"
-    # The Go binaries are shaped as the go stub builds them (make_stubs): the
-    # toolchain they were linked by and, for the daemon, its link flags.
-    printf 'built\ntoolchain=go1.0\nldflags=-X agent-repld/internal/checkout.builtFrom=%s\n' "$root" > "$root/daemon/bin/agent-repld"
+    # The Go binaries are shaped as the go stub builds them (make_stubs): what
+    # a build here links, so the stub's build leaves them untouched.
+    fake_go_binary "$root" go1.0 "-w -X agent-repld/internal/checkout.builtFrom=$root" > "$root/daemon/bin/agent-repld"
     mkdir -p "$root/home/.cache/agent-repl/bin"
     local name
     for name in shim-store shim-claude-sidecar shim-lock; do
-        printf 'built\ntoolchain=go1.0\n' > "$root/home/.cache/agent-repl/bin/$name"
+        fake_go_binary "$root" go1.0 "-w" > "$root/home/.cache/agent-repl/bin/$name"
     done
+}
+
+# fake_go_binary ROOT TOOLCHAIN LDFLAGS — the bytes the go stub links in the
+# fixture ROOT: the toolchain, the link flags, and a build ID over both and
+# over every source file of ROOT (fake_go_inputs), as a real build ID names the
+# link action that made a binary, every compiled package among its inputs. The
+# stub runs this same definition.
+fake_go_binary() {
+    local id
+    id="$(printf 'toolchain=%s ldflags=%s inputs=%s\n' "$2" "$3" "$(fake_go_inputs "$1")" |
+          { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16)"
+    printf 'built\ntoolchain=%s\nldflags=%s\nbuildid=%s\n' "$2" "$3" "$id"
+}
+
+# fake_go_inputs ROOT — one hash over the path and bytes of every source file
+# of the fixture ROOT: everything but its git directory, its build outputs and
+# stamps, and the harness's own scratch (stubs, home, staging, store, logs).
+fake_go_inputs() {
+    local sum=(sha256sum)
+    command -v shasum >/dev/null 2>&1 && sum=(shasum -a 256)
+    ( cd "$1" && find . -type f \
+          -not -path './.git/*' -not -path './stubs/*' -not -path './home/*' \
+          -not -path './staging/*' -not -path './store/*' -not -path '*/node_modules/*' \
+          -not -path '*/bin/*' -not -path '*/dist/*' -not -name '*.log' \
+          -not -name '.source-tree' -not -name '.generators' -not -name '.built-sha' \
+          -not -name '.*.source-tree' -not -name '.*.built-sha' -not -name '.build-id' \
+          -not -path './out' -not -path './err' -print0 | LC_ALL=C sort -z |
+          xargs -0 "${sum[@]}" | "${sum[@]}" | cut -c1-16 )
 }
 
 # PATH stubs for npm/go that log to $STUB_LOG and touch their artifact.
@@ -291,18 +319,21 @@ EOF
 # `go list` is the source-set question, answered over the fixture and not
 # logged: it says which files a build reads, and is no build step.
 [ "${1:-}" = list ] && exec "$(dirname "$0")/go-list-stub" "$@"
-echo "go $*" >> "$STUB_LOG"
-# `go version` answers the toolchain; `go version -m <binary>` answers the
-# toolchain and link flags recorded in the binary by the stub's own build, which
-# is what the real one reads out of the binary's build info.
+# `go tool buildid <binary>` answers the build ID the stub's own build wrote
+# into the binary (fake_go_binary), and fails on a file without one, as the
+# real one does on a file the Go toolchain did not link. Not logged: it is a
+# question, not a build step.
+if [ "${1:-}" = tool ] && [ "${2:-}" = buildid ]; then
+    id="$(sed -n 's/^buildid=//p' "$3" 2>/dev/null)"
+    [ -n "$id" ] || exit 1
+    echo "$id"
+    exit 0
+fi
+args="$*"
+# `go version` answers the toolchain.
 if [ "${1:-}" = version ]; then
-    if [ "${2:-}" = -m ]; then
-        [ -f "$3" ] || exit 1
-        echo "$3: $(sed -n 's/^toolchain=//p' "$3")"
-        sed -n 's/^ldflags=\(.*\)$/\tbuild\t-ldflags="\1"/p' "$3"
-    else
-        echo "go version ${FAKE_GO_TOOLCHAIN:-go1.0} stub/stub"
-    fi
+    echo "go $args" >> "$STUB_LOG"
+    echo "go version ${FAKE_GO_TOOLCHAIN:-go1.0} stub/stub"
     exit 0
 fi
 # `go build -o <out> ./cmd/...` — grab the -o target and touch it.
@@ -317,6 +348,7 @@ done
 # build under it runs. FAKE_GO_FAIL=testrun fails that build.
 case "$out" in
     */testrun)
+        echo "go $args" >> "$STUB_LOG"
         [ "${FAKE_GO_FAIL:-}" = testrun ] && exit 1
         mkdir -p "$(dirname "$out")"
         cat > "$out" <<'EOT'
@@ -331,20 +363,49 @@ EOT
         exit 0
         ;;
 esac
-[ -n "$out" ] && {
+# THE REAL GO'S UP-TO-DATE RULE: a target whose build ID is the one this build
+# would link (the toolchain, the link flags and the fixture's sources) is left
+# untouched, logged as `go (unchanged)
+# build`; any other is linked, logged as `go build`.
+if [ -n "$out" ]; then
+    if [ "${FAKE_GO_FAIL:-}" = build ]; then
+        echo "go $args" >> "$STUB_LOG"
+        echo "stub: FAKE_GO_FAIL=build" >&2
+        exit 1
+    fi
+    binary="$("$(dirname "$0")/fake-go-binary" "$(dirname "$STUB_LOG")" "${FAKE_GO_TOOLCHAIN:-go1.0}" "$ldflags")"
+    if [ -f "$out" ] && [ "$(cat "$out")" = "$binary" ]; then
+        echo "go (unchanged) $args" >> "$STUB_LOG"
+        exit 0
+    fi
+    echo "go $args" >> "$STUB_LOG"
     mkdir -p "$(dirname "$out")"
-    echo built > "$out"
-    echo "toolchain=${FAKE_GO_TOOLCHAIN:-go1.0}" >> "$out"
-    [ -z "$ldflags" ] || echo "ldflags=$ldflags" >> "$out"
-}
+    printf '%s\n' "$binary" > "$out"
+    exit 0
+fi
+echo "go $args" >> "$STUB_LOG"
 exit 0
 EOF
-    # make: logs, and exits 1 when its target is FAKE_MAKE_FAIL.
+    {
+        echo '#!/usr/bin/env bash'
+        declare -f fake_go_binary fake_go_inputs
+        echo 'fake_go_binary "$@"'
+    } > "$bindir/fake-go-binary"
+    chmod +x "$bindir/fake-go-binary"
+    # make: logs, and exits 1 when its target is FAKE_MAKE_FAIL. proto's
+    # generator-id target writes FAKE_GENERATOR_ID (default generators-1) to
+    # the file its GENERATOR_ID_OUT names, as the real one writes the
+    # generators' identity there.
     cat > "$bindir/make" <<'EOF2'
 #!/usr/bin/env bash
 echo "make $*" >> "$STUB_LOG"
 for arg in "$@"; do
     [ -n "${FAKE_MAKE_FAIL:-}" ] && [ "$arg" = "$FAKE_MAKE_FAIL" ] && exit 1
+done
+for arg in "$@"; do
+    case "$arg" in
+        GENERATOR_ID_OUT=*) printf '%s\n' "${FAKE_GENERATOR_ID:-generators-1}" > "${arg#GENERATOR_ID_OUT=}" ;;
+    esac
 done
 exit 0
 EOF2
@@ -447,10 +508,13 @@ t_force() {
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     run_script "$root" --force daemon >/dev/null
-    if grep -q "^go build" "$root/stub.log"; then
+    # --force runs the go command whatever the stamps say; the go command then
+    # leaves a binary that is already what it would link untouched (the stub
+    # logs that `go (unchanged) build`), exactly as the real one does.
+    if grep -Eq "^go (\(unchanged\) )?build " "$root/stub.log"; then
         pass "force: fresh daemon still rebuilt under --force"
     else
-        fail "force: fresh daemon rebuilt" "stub.log: $(cat "$root/stub.log")"
+        fail "force: fresh daemon still rebuilt under --force" "stub.log: $(cat "$root/stub.log")"
     fi
     rm -rf "$root"
 }
@@ -1662,8 +1726,7 @@ setup_mismatched_stamp() {
 setup_missing_artifact() { rm -f "$1/daemon/bin/agent-repld" "$1/home/.cache/agent-repl/bin/shim-store"; }
 setup_other_toolchain() { export FAKE_GO_TOOLCHAIN=go2.0; }
 setup_daemon_built_for_another_checkout() {
-    printf 'built\ntoolchain=go1.0\nldflags=-X agent-repld/internal/checkout.builtFrom=/elsewhere\n' > "$1/daemon/bin/agent-repld"
-    printf 'built\ntoolchain=go1.0\n' > "$1/home/.cache/agent-repl/bin/shim-store"
+    fake_go_binary "$1" go1.0 "-w -X agent-repld/internal/checkout.builtFrom=/elsewhere" > "$1/daemon/bin/agent-repld"
     rm -f "$1/home/.cache/agent-repl/bin/.shim-store.source-tree"
 }
 
@@ -1687,6 +1750,108 @@ t_out_reuse_declines_a_daemon_built_for_another_checkout() {
     else
         fail "reuse: a daemon linked for another checkout builds, with this checkout's root" \
              "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+# --- reuse of a Go binary is the go command's answer, by build ID ----------
+
+t_out_reuse_asks_the_go_command_of_every_go_binary() {
+    local root out log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"
+    out="$root/staging"
+    log="$(run_script "$root" --out "$out" daemon store)"
+    if grep -q "^go (unchanged) build .* -o $out/daemon/bin/agent-repld ./cmd/agent-repld$" "$root/stub.log" &&
+           grep -q "^go (unchanged) build .* -o $out/cache-bin/shim-store \.$" "$root/stub.log" &&
+           [ "$(outcome_of "$log" daemon)" = reused ] && [ "$(outcome_of "$log" shim-store)" = reused ]; then
+        pass "reuse: each installed Go binary is reused only once the go command, building into its staged copy, leaves it untouched"
+    else
+        fail "reuse: each installed Go binary is reused only once the go command, building into its staged copy, leaves it untouched" \
+             "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+t_out_reuse_declines_a_service_linked_with_debug_information() {
+    local root out log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"
+    fake_go_binary "$root" go1.0 "" > "$root/home/.cache/agent-repl/bin/shim-store"
+    out="$root/staging"
+    log="$(run_script "$root" --out "$out" store)"
+    if [ "$(outcome_of "$log" shim-store)" = built ] &&
+           cmp -s <(fake_go_binary "$root" go1.0 "-w") "$out/cache-bin/shim-store"; then
+        pass "reuse: an installed service linked with DWARF is rebuilt, linked with -w"
+    else
+        fail "reuse: an installed service linked with DWARF is rebuilt, linked with -w" \
+             "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+t_out_reuse_declines_a_binary_with_no_build_id() {
+    local root out log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"
+    printf 'not linked by go\n' > "$root/home/.cache/agent-repl/bin/shim-store"
+    out="$root/staging"
+    log="$(run_script "$root" --out "$out" store)"
+    if [ "$(outcome_of "$log" shim-store)" = built ] &&
+           cmp -s <(fake_go_binary "$root" go1.0 "-w") "$out/cache-bin/shim-store"; then
+        pass "reuse: an installed file with no Go build ID is not reused, and is built"
+    else
+        fail "reuse: an installed file with no Go build ID is not reused, and is built" \
+             "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+# The check builds into the staged copy, so the installed binary it declines
+# is never written, and the build after it links once, not twice.
+t_out_reuse_check_writes_nothing_live_and_links_once() {
+    local root out log before; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"; setup_daemon_built_for_another_checkout "$root"
+    stamp_fresh_source_trees "$root"
+    before="$(cat "$root/daemon/bin/agent-repld")"
+    out="$root/staging"
+    log="$(run_script "$root" --out "$out" daemon)"
+    if [ "$(cat "$root/daemon/bin/agent-repld")" = "$before" ] &&
+           [ "$(grep -c "^go build .* -o $out/daemon/bin/agent-repld " "$root/stub.log")" -eq 1 ] &&
+           [ "$(grep -c "^go (unchanged) build .* -o $out/daemon/bin/agent-repld " "$root/stub.log")" -eq 1 ] &&
+           [ "$(outcome_of "$log" daemon)" = built ]; then
+        pass "reuse: a declined check leaves the installed daemon untouched and the daemon is linked once"
+    else
+        fail "reuse: a declined check leaves the installed daemon untouched and the daemon is linked once" \
+             "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+t_out_reuse_check_failing_build_fails_the_target() {
+    local root out rc log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"
+    out="$root/staging"
+    set +e
+    log="$(FAKE_GO_FAIL=build run_script "$root" --out "$out" store 2>&1)"
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] && ! grep -q "outcome target=shim-store .* outcome=reused" <<<"$log" &&
+           grep -q "stub: FAKE_GO_FAIL=build" <<<"$log"; then
+        pass "reuse: a go build that fails while checking the installed binary fails the target loudly"
+    else
+        fail "reuse: a go build that fails while checking the installed binary fails the target loudly" \
+             "rc $rc | stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+t_out_go_builds_link_without_dwarf() {
+    local root; root="$(new_staging_root)"
+    run_script "$root" --out "$root/staging" daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
+           go_builds_all_pass "-ldflags -w" "$root/stub.log"; then
+        pass "link: every staged go build links without DWARF, -w first in its one -ldflags"
+    else
+        fail "link: every staged go build links without DWARF, -w first in its one -ldflags" \
+             "stub.log: $(cat "$root/stub.log")"
     fi
     rm -rf "$root"
 }
@@ -2542,21 +2707,34 @@ build_group_staging() {
     t_out_reuse_declines_a_missing_artifact
     t_out_reuse_declines_a_binary_of_another_toolchain
     t_out_reuse_declines_a_daemon_built_for_another_checkout
+    t_out_reuse_asks_the_go_command_of_every_go_binary
+    t_out_reuse_declines_a_service_linked_with_debug_information
+    t_out_reuse_declines_a_binary_with_no_build_id
+    t_out_reuse_check_writes_nothing_live_and_links_once
+    t_out_reuse_check_failing_build_fails_the_target
     t_out_reuse_copies_the_installed_launcher
     t_in_place_launcher_stamps_the_installed_app
     t_out_logs_a_built_target_with_its_source_tree
     t_out_go_builds_pass_buildvcs_false
     t_out_go_builds_pass_trimpath
+    t_out_go_builds_link_without_dwarf
     t_out_refuses_a_relative_dir
     t_out_creates_an_absent_dir
 }
 
 # --- the proto target: generation only when proto's sources changed ---------
 
+# generator_stamp_of ID — the generator stamp build-frontend.sh writes when the
+# stub make's generator-id target answers ID.
+generator_stamp_of() {
+    printf '%s\n' "$1" | deploy_stamp_hash
+}
+
 # stamp_fresh_proto ROOT — record that the fixture's bindings were generated
-# from the proto tree standing there now.
+# from the proto tree standing there now, by the stub's default generators.
 stamp_fresh_proto() {
     write_source_tree "$1/proto/.source-tree" "$(deploy_stamp_source_id proto "$1" "")"
+    write_source_tree "$1/proto/.generators" "$(generator_stamp_of generators-1)"
 }
 
 # proto_case ROOT — a fixture whose stub log is empty.
@@ -2684,8 +2862,84 @@ t_proto_failed_gate_fails_an_unchanged_tree() {
     rm -rf "$root"
 }
 
+t_proto_generation_stamps_the_generators() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"
+    local want; want="$(generator_stamp_of generators-1)"
+    if run_script "$root" proto >/dev/null && proto_generated "$root" &&
+           [ "$(read_source_tree "$root/proto/.generators")" = "$want" ]; then
+        pass "proto: a generation stamps the identity of the generators it ran"
+    else
+        fail "proto: a generation stamps the identity of the generators it ran" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.generators" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_changed_generator_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    local want; want="$(generator_stamp_of generators-2)"
+    if FAKE_GENERATOR_ID=generators-2 run_script "$root" proto >/dev/null && proto_generated "$root" &&
+           [ "$(read_source_tree "$root/proto/.generators")" = "$want" ]; then
+        pass "proto: a changed generator regenerates an unchanged tree and stamps the new generators"
+    else
+        fail "proto: a changed generator regenerates an unchanged tree and stamps the new generators" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.generators" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_missing_generator_stamp_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    rm -f "$root/proto/.generators"
+    if run_script "$root" proto >/dev/null && proto_generated "$root"; then
+        pass "proto: bindings with no generator stamp regenerate"
+    else
+        fail "proto: bindings with no generator stamp regenerate" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# FAKE_MAKE_FAIL=generator-id fails both askings, the one before generation
+# and the one after it, so the stamp is removed rather than kept.
+t_proto_unknown_generators_regenerate_and_stamp_nothing() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    local err
+    if err="$(FAKE_MAKE_FAIL=generator-id run_script "$root" proto 2>&1 >/dev/null)" &&
+           proto_generated "$root" && [ ! -e "$root/proto/.generators" ] &&
+           grep -q "the generators' identity cannot be determined" <<<"$err"; then
+        pass "proto: generators whose identity cannot be determined regenerate, say so, and leave no generator stamp"
+    else
+        fail "proto: generators whose identity cannot be determined regenerate, say so, and leave no generator stamp" \
+             "stub.log: $(cat "$root/stub.log"); stderr: $err; stamp: $(cat "$root/proto/.generators" 2>&1)"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_failed_generation_keeps_the_generator_stamp() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    local want; want="$(generator_stamp_of generators-1)"
+    if ! FAKE_GENERATOR_ID=generators-2 FAKE_MAKE_FAIL=all run_script "$root" proto >/dev/null 2>&1 &&
+           [ "$(read_source_tree "$root/proto/.generators")" = "$want" ]; then
+        pass "proto: a failed generation by changed generators fails and leaves the old generator stamp, so the next build regenerates"
+    else
+        fail "proto: a failed generation by changed generators fails and leaves the old generator stamp, so the next build regenerates" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.generators" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
 build_group_proto() {
     t_proto_without_a_stamp_generates_and_stamps
+    t_proto_generation_stamps_the_generators
+    t_proto_changed_generator_regenerates
+    t_proto_missing_generator_stamp_regenerates
+    t_proto_unknown_generators_regenerate_and_stamp_nothing
+    t_proto_failed_generation_keeps_the_generator_stamp
     t_proto_unchanged_tree_runs_only_the_gate
     t_proto_committed_schema_change_regenerates
     t_proto_dirty_tree_regenerates

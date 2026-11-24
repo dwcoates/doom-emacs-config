@@ -106,12 +106,14 @@
 #              staged, the deploy installs it.
 #   proto   -> NOT STAGED: the bindings are sources the other targets compile
 #              from, so they are generated into the checkout's proto/gen in
-#              both modes, and proto/.source-tree is consulted in both.
+#              both modes, and proto/.source-tree and proto/.generators are
+#              consulted in both.
 #
 # REUSE keeps the staged bytes what a fresh build would make. A Go binary is
-# reused only when it was linked by the Go toolchain on PATH, and the daemon
-# only when it carries this checkout's own `builtFrom` link-time stamp, the
-# one per-checkout identity any artifact embeds. The shim bundle and the
+# reused only when the go command, building into the staged copy, leaves it
+# untouched: its build ID names the toolchain, every package and the link
+# flags, the daemon's `builtFrom` stamp of this checkout (the one per-checkout
+# identity any artifact embeds) among them (go_build_unchanged). The shim bundle and the
 # webapp's dist embed none: the shim reads its build identity from its spawn
 # env, and the webapp's `.build-id` is taken from the copied artifact's own
 # entry-bundle hash. A reused artifact's `.built-sha` is rewritten to the
@@ -360,6 +362,9 @@ LAUNCHER_TREE_STAMP="$CACHE_BIN/.Zettel.app.source-tree"
 # Beside the bindings it describes, in the checkout, in both modes: the
 # bindings are never staged (build_proto). proto/.gitignore ignores it.
 PROTO_TREE_STAMP="$PROTO_DIR/.source-tree"
+# Beside it, the identity of the generators those bindings were made by
+# (proto_generator_id). proto/.gitignore ignores it too.
+PROTO_GENERATOR_STAMP="$PROTO_DIR/.generators"
 
 # Flags every `go build` here passes, in place and staged alike.
 #
@@ -374,16 +379,33 @@ PROTO_TREE_STAMP="$PROTO_DIR/.source-tree"
 # built from by a link-time stamp instead (agent-repld/internal/checkout).
 GO_BUILD_FLAGS=(-buildvcs=false -trimpath)
 
+# The link flag every `go build` here passes, before a target's own.
+#
+# -w: link without DWARF debug information, which only a debugger reads. Stack
+# traces, a panic's file:line, the profilers' symbols and the build info come
+# from the line table and the build-info section, which -w keeps. The test
+# runner links every test binary and program the same way (testrun's
+# gobuild.LinkFlags). Measured 2026-11-23 on the daemon, every package cached,
+# one run each: the link took 4.9s wall with DWARF and 1.4s without; a deploy's
+# daemon step took about 9s, a recompile of the main package (1.0s) and that
+# link most of it, the gate having compiled every other package already.
+GO_LINK_FLAGS="-w"
+
 # The daemon's one link-time identity: the checkout it was built from.
 DAEMON_LDFLAGS="-X agent-repld/internal/checkout.builtFrom=$ROOT"
 
+# go_link_flags [LDFLAGS] — the one -ldflags argument a build here passes:
+# GO_LINK_FLAGS, then LDFLAGS when given.
+go_link_flags() {
+    printf '%s\n' "$GO_LINK_FLAGS${1:+ $1}"
+}
+
 # go_build DIR ARTIFACT PACKAGE [LDFLAGS] — the one `go build` here: PACKAGE,
-# built from DIR into ARTIFACT with GO_BUILD_FLAGS, and LDFLAGS, when given, as
+# built from DIR into ARTIFACT with GO_BUILD_FLAGS and go_link_flags LDFLAGS as
 # its one -ldflags argument.
 go_build() {
     local dir="$1" artifact="$2" package="$3" ldflags="${4:-}"
-    local args=("${GO_BUILD_FLAGS[@]}")
-    [ -n "$ldflags" ] && args+=(-ldflags "$ldflags")
+    local args=("${GO_BUILD_FLAGS[@]}" -ldflags "$(go_link_flags "$ldflags")")
     ( cd "$dir" && go build "${args[@]}" -o "$artifact" "$package" )
 }
 
@@ -478,23 +500,36 @@ report_outcome() {
     echo "[build-frontend] outcome target=$1 source_tree=$(system_source_id "$1" || echo unknown) outcome=$2"
 }
 
-# go_binary_current BINARY [LDFLAGS] — return 0 when a Go binary is what a build
-# here would link: made by the Go toolchain on PATH and, when LDFLAGS is given,
-# carrying exactly those link flags (build info records them). A binary that
-# cannot be read this way is not reusable.
-go_binary_current() {
-    local binary="$1" ldflags="${2:-}" toolchain info
-    command -v go >/dev/null 2>&1 || return 1
-    toolchain="$(go version | awk '{print $3}')" || return 1
-    [ -n "$toolchain" ] || return 1
-    info="$(go version -m "$binary" 2>/dev/null)" || return 1
-    [ "$(printf '%s\n' "$info" | sed -n '1s/^[^:]*: //p')" = "$toolchain" ] || return 1
-    [ -z "$ldflags" ] || grep -qF -- "$ldflags" <<<"$info"
+# go_build_id BINARY — echo the Go build ID of BINARY, or return 1 when it has
+# none (a file the Go toolchain did not link).
+go_build_id() {
+    local id
+    id="$(go tool buildid "$1" 2>/dev/null)" || return 1
+    [ -n "$id" ] || return 1
+    printf '%s\n' "$id"
 }
 
-# go_binary_current_for LDFLAGS BINARY — go_binary_current with the arguments in
-# the order reuse_installed hands them (its CHECK COMMAND gets the artifact last).
-go_binary_current_for() { go_binary_current "$2" "$1"; }
+# go_build_unchanged DIR PACKAGE LDFLAGS ARTIFACT — return 0 when ARTIFACT, a
+# copy of an installed Go binary, is exactly what go_build DIR ARTIFACT PACKAGE
+# LDFLAGS makes, and 1 when it is not.
+#
+# THE GO TOOLCHAIN ANSWERS, BY BUILD ID. A Go binary's build ID names the link
+# action that made it: the toolchain, every compiled package, and the link
+# flags, -X bindings included. `go build -o ARTIFACT` leaves a target whose
+# build ID is the one it would link untouched, and relinks any other. So the
+# build is run INTO the copy, and the copy was current exactly when its build ID
+# is unchanged. Build info cannot answer this: under -trimpath the go command
+# records no -ldflags there, so a check reading it declined every daemon.
+# Measured 2026-11-23 on the daemon, every package cached: an unchanged target
+# took 0.36s, a relink 3.5s.
+go_build_unchanged() {
+    local dir="$1" package="$2" ldflags="$3" artifact="$4" before after
+    command -v go >/dev/null 2>&1 || return 1
+    before="$(go_build_id "$artifact")" || return 1
+    go_build "$dir" "$artifact" "$package" "$ldflags" || return 1
+    after="$(go_build_id "$artifact")" || return 1
+    [ "$before" = "$after" ]
+}
 
 # reuse_installed NAME LIVE LIVE_STAMP ARTIFACT [CHECK COMMAND...] — in a staging
 # run, stage a copy of the INSTALLED artifact LIVE as ARTIFACT instead of
@@ -505,19 +540,24 @@ go_binary_current_for() { go_binary_current "$2" "$1"; }
 # would be a second store to fill, collect and keep in step with the first. It
 # is reusable exactly when stamp_is_stale says it is fresh against its live
 # stamp (so a dirty tree, a missing artifact, a missing stamp or a different id
-# all build) and CHECK COMMAND, when given, accepts the live artifact: the
-# check that the artifact embeds nothing a fresh build here would not.
+# all build) and CHECK COMMAND, when given, accepts the staged COPY (handed as
+# its last argument): the check that the artifact is what a fresh build here
+# would make. The check is given the copy, never LIVE, so it may build into it.
+# A copy it refuses is left in place for the build that follows, which always
+# runs and makes the artifact what a fresh build makes: go_build_unchanged has
+# already relinked it, so the go command finds it current instead of linking
+# a second time.
 reuse_installed() {
     local name="$1" live="$2" live_stamp="$3" artifact="$4"; shift 4
     [ -n "$OUT_DIR" ] || return 1
     ! stamp_is_stale "$name" "$live" "$live_stamp" || return 1
-    if [ $# -gt 0 ] && ! "$@" "$live"; then
-        echo "[build-frontend] $name: the installed artifact is not what a build here would make, building"
-        return 1
-    fi
     rm -rf "$artifact"
     mkdir -p "$(dirname "$artifact")"
     cp -Rp "$live" "$artifact"
+    if [ $# -gt 0 ] && ! "$@" "$artifact"; then
+        echo "[build-frontend] $name: the installed artifact is not what a build here would make, building"
+        return 1
+    fi
     echo "[build-frontend] $name: reusing the installed artifact ($live)"
     report_outcome "$name" reused
 }
@@ -799,9 +839,10 @@ build_webapp() {
 build_daemon() {
     require_go_source_dirs "$DAEMON_DIR"
     # The daemon embeds this checkout's root, its one per-checkout identity:
-    # an installed binary linked for another root is not what a build here makes.
+    # an installed binary linked for another root is not what a build here
+    # makes, and its build ID says so (go_build_unchanged).
     if reuse_installed daemon "$LIVE_DAEMON_BIN/agent-repld" "$LIVE_DAEMON_BIN/.source-tree" "$DAEMON_ARTIFACT" \
-           go_binary_current_for "$DAEMON_LDFLAGS"; then
+           go_build_unchanged "$DAEMON_DIR" ./cmd/agent-repld "$DAEMON_LDFLAGS"; then
         snapshot_lifecycle_config
         write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
         stamp_source_tree daemon "$DAEMON_TREE_STAMP"
@@ -862,7 +903,7 @@ build_service() {
     local name="$1" dir="$2" artifact="$3" sha_stamp="$4" tree_stamp="$5"
     require_go_source_dirs "$dir"
     if reuse_installed "$name" "$LIVE_CACHE_BIN/$(basename "$artifact")" "$LIVE_CACHE_BIN/$(basename "$tree_stamp")" "$artifact" \
-           go_binary_current_for ""; then
+           go_build_unchanged "$dir" . ""; then
         write_built_sha "$sha_stamp" "$ROOT"
         stamp_source_tree "$name" "$tree_stamp"
         return 0
@@ -919,14 +960,37 @@ build_launcher() {
     report_outcome launcher built
 }
 
+# proto_generator_id — echo one id for the generators proto's `make all` runs
+# (the Makefile's generator-id target, which brings them up to date first and
+# writes one line per generator), or return 1 when it cannot be determined,
+# which callers treat as stale. The target's own output (an npm ci, a plugin
+# build) goes to stderr, so this prints the id alone.
+proto_generator_id() {
+    local out id
+    out="$(mktemp "${TMPDIR:-/tmp}/build-frontend-generators.XXXXXX")" || return 1
+    if ! make -s -C "$PROTO_DIR" generator-id GENERATOR_ID_OUT="$out" >&2 || [ ! -s "$out" ]; then
+        rm -f "$out"
+        return 1
+    fi
+    id="$(deploy_stamp_hash < "$out")"
+    rm -f "$out"
+    [ -n "$id" ] || return 1
+    printf '%s\n' "$id"
+}
+
 # build_proto — regenerate the protobuf bindings into proto/gen, but only when
-# proto's source tree differs from the one they were last generated from here.
+# what they are generated from differs from what they were last generated from
+# here: proto's source tree, or the generators.
 #
-# Generation is deterministic in its inputs, and every input is under proto's
-# pathspec: the schemas, the Makefile, and the lockfile pinning protoc-gen-es
-# (the Go generators are pinned by version on the host, like every toolchain
-# here). The pathspec takes in gen/ itself, so a hand-edited or half-written
-# binding reads as dirty, and a dirty tree always regenerates.
+# Generation is deterministic in its inputs, and every input is one of the two
+# stamps' subjects: the schemas, the Makefile, its scripts and the lockfile
+# pinning protoc-gen-es are under proto's pathspec, and the generators
+# themselves (protoc, protoc-gen-go, protoc-gen-connect-go, the installed
+# protoc-gen-es and the built protoc-gen-swift) are proto_generator_id's. The
+# pathspec takes in gen/ itself, so a hand-edited or half-written binding reads
+# as dirty, and a dirty tree always regenerates. A generator identity that
+# cannot be determined regenerates too, and `make all` then fails loudly on the
+# generator that is missing.
 #
 # THE CODEGEN GATE RUNS EITHER WAY. It scans consumer sources outside proto/
 # (the Makefile's ISOLATION_ROOT), which proto's stamp does not describe, so a
@@ -935,19 +999,35 @@ build_launcher() {
 # Measured 2026-11-21 (one warm run each): the gate costs 1.9s, the Go
 # generation 0.8s, the TypeScript generation 2.6s; a deploy's proto step took
 # p50 6.5s over the seven days before (agentrepl deploy_build, step proto).
+# Measured 2026-11-23: an unchanged step took 2.7s alone and about 3.5s in a
+# deploy, 1.7s of it the gate's awk pass over every daemon and webapp source;
+# the gate now prefilters with a fixed-string grep (0.5s), and the generator
+# identity costs 0.2s.
 build_proto() {
     require_bin make "install the Xcode command line tools"
-    if ! stamp_is_stale proto "$PROTO_DIR/gen" "$PROTO_TREE_STAMP"; then
+    local generators recorded
+    generators="$(proto_generator_id)" || generators=""
+    recorded="$(read_source_tree "$PROTO_GENERATOR_STAMP")" || recorded=""
+    if [ -n "$generators" ] && [ "$generators" = "$recorded" ] &&
+           ! stamp_is_stale proto "$PROTO_DIR/gen" "$PROTO_TREE_STAMP"; then
         echo "[build-frontend] proto: fresh, skipping generation"
         make -C "$PROTO_DIR" codegen-gate
         return 0
     fi
-    echo "[build-frontend] proto: generating..."
+    echo "[build-frontend] proto: generating (generators ${generators:-unknown}, last generated by ${recorded:-nothing recorded})..."
     make -C "$PROTO_DIR" all
     # Generation rewrote tracked files that other targets' ids cover: no id
     # computed before it describes the tree now.
     rm -f "$SOURCE_ID_CACHE"/*
     stamp_source_tree proto "$PROTO_TREE_STAMP"
+    # Asked again: `make all` may have installed or built a generator the
+    # first answer could not name. An answer that still cannot be had removes
+    # the stamp, so the next run regenerates rather than trusting it.
+    generators="$(proto_generator_id)" || {
+        generators=""
+        echo "[build-frontend] proto: the generators' identity cannot be determined; no generator stamp is written, so the next build regenerates" >&2
+    }
+    write_source_tree "$PROTO_GENERATOR_STAMP" "$generators"
     echo "[build-frontend] proto: done"
 }
 
