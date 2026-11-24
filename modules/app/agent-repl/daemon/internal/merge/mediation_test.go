@@ -1850,6 +1850,10 @@ func TestAFinishDeployingInARepositoryThatChecksNoDeploysIsEnded(t *testing.T) {
 			h := checked(t)
 			withMediator(t, h)
 			standFinish(t, h, mediationKey(h), tt.step, true)
+			// A FINISH DEPLOYING STANDS COVERED: its deploy committed over its
+			// landing (TestARepositoryCheckingNoDeploysEndsOnlyAFinishItsDeployCovered
+			// covers one no deploy covered yet).
+			coverLandings(t, h)
 			if tt.dropChecks {
 				h.config.DeployChecks = nil
 			}

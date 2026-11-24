@@ -657,6 +657,7 @@ func TestAnEscalatedMediationHoldsThroughEveryDeployButItsFixs(t *testing.T) {
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				escalateAt(t, s, repo, instant, true)
 				finishDeploying(t, s, repo, "mediator", instant.Add(30*time.Second))
+				coverLandings(t, s)
 				oweAt(t, s, repo, instant.Add(time.Minute))
 			},
 			want: Mediation{}},

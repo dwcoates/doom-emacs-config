@@ -873,6 +873,7 @@ func TestEveryStepOfAFinishRedrawsTheDeployCheckLabel(t *testing.T) {
 					t.Fatalf("FinishRemediation again: %v", err)
 				}
 			}
+			coverLandings(t, h)
 			oweAt(t, h, h.now.Add(time.Minute))
 
 			// Assert
@@ -1073,14 +1074,16 @@ func TestAFinishsDeployPassesTheHoldToItsCheckWithNoInstantBetween(t *testing.T)
 				reads = append(reads, held)
 			}
 			h.db.mu.Unlock()
+			coverLandings(t, h)
 
-			// Act: the fix's deploy begins.
+			// Act: the deploy that carries the fix begins. Its check is owed
+			// and the finish moved to deployed in one write (wsm.OweMediation).
 			if err := h.o.OweMediations(ctx, deployStarted.Add(time.Hour)); err != nil {
 				t.Fatalf("OweMediations: %v", err)
 			}
 
 			// Assert
-			if len(reads) < 2 || slices.Contains(reads, false) {
+			if len(reads) == 0 || slices.Contains(reads, false) {
 				t.Fatalf("held after each write = %v, want the queue held after every one", reads)
 			}
 			if f := finishOf(t, h); f != nil && finishHolds(f.Step) {
