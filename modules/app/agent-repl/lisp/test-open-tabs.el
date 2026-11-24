@@ -22,6 +22,8 @@
 
 (defvar agent-repl-test-open-tabs--requests nil
   "Every request sent, oldest first, as (WORKSPACES ON-FRAME ON-CLOSE).")
+(defvar agent-repl-test-open-tabs--cancelled nil
+  "The indexes of every request whose stream was cancelled, newest first.")
 (defvar agent-repl-test-open-tabs--connected t "Whether the stand-in daemon takes a request.")
 (defvar agent-repl-test-open-tabs--lines nil "The lines said, in order.")
 (defvar agent-repl-test-open-tabs--paged nil "Workspaces that have a live page.")
@@ -59,11 +61,16 @@ A ref id names the workspace of the same name."
            (agent-repl-open-tabs-sender
             (lambda (workspaces on-frame on-close &optional conn)
               (when agent-repl-test-open-tabs--connected
-                (setq agent-repl-test-open-tabs--requests
-                      (append agent-repl-test-open-tabs--requests
-                              (list (list workspaces on-frame on-close conn))))
-                t)))
+                (let ((n (length agent-repl-test-open-tabs--requests)))
+                  (setq agent-repl-test-open-tabs--requests
+                        (append agent-repl-test-open-tabs--requests
+                                (list (list workspaces on-frame on-close conn))))
+                  ;; The cancel closes the stream as the transport does.
+                  (lambda ()
+                    (push n agent-repl-test-open-tabs--cancelled)
+                    (funcall on-close (list :cancelled)))))))
            (agent-repl-test-open-tabs--requests nil)
+           (agent-repl-test-open-tabs--cancelled nil)
            (agent-repl-test-open-tabs--connected t)
            (agent-repl-test-open-tabs--lines nil)
            (agent-repl-test-open-tabs--paged nil)
@@ -307,6 +314,144 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (should (equal (list agent-repl-test-open-tabs--paged
                          (agent-repl-test-open-tabs--page-arm "a"))
                    '(("a") :none)))))
+
+;;;; ---- A page dropped while its open waits on it ----
+
+(ert-deftest agent-repl-test-open-tabs-a-page-dropped-while-asked-ends-its-open ()
+  "An open asked with a page loading is ended when that page is dropped before its answer."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-open-tabs--page-removed "a")
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--cancelled '(0)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-page-dropped-while-asked-is-asked-again-without-it ()
+  "The ended open is asked again at once, with the page the workspace holds then."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (setq agent-repl-test-open-tabs--slot-only '("a"))
+    ;; Act
+    (agent-repl-open-tabs--page-removed "a")
+    ;; Assert
+    (should (equal (list (length agent-repl-test-open-tabs--requests)
+                         (agent-repl-test-open-tabs--asked)
+                         (agent-repl-test-open-tabs--page-arm "a")
+                         (gethash "a" agent-repl-open-tabs--state))
+                   '(2 ("a") :none in-flight)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-page-dropped-while-asked-asks-again-for-the-rest ()
+  "Every other workspace the ended open left unanswered is asked again with it."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    ;; Act
+    (agent-repl-open-tabs--page-removed "a")
+    ;; Assert
+    (should (equal (agent-repl-test-open-tabs--asked) '("a" "b")))))
+
+(ert-deftest agent-repl-test-open-tabs-a-page-dropped-after-its-answer-ends-nothing ()
+  "A page dropped once its open answered ends no stream and asks nothing."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-open-tabs--page-removed "a")
+    ;; Assert
+    (should (equal (list agent-repl-test-open-tabs--cancelled
+                         (length agent-repl-test-open-tabs--requests))
+                   '(nil 1)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-page-dropped-for-an-open-asked-none-ends-nothing ()
+  "An open asked with no page waits on none, so a page drop does not end it."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (setq agent-repl-test-open-tabs--slot-only '("a"))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-open-tabs--page-removed "a")
+    ;; Assert
+    (should-not agent-repl-test-open-tabs--cancelled)))
+
+(ert-deftest agent-repl-test-open-tabs-a-page-dropped-while-asked-is-recorded ()
+  "Ending an open for its dropped page, and asking again, are each recorded at INFO."
+  (agent-repl-test-open-tabs--with
+    (let (infos)
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
+        ;; Arrange
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+        ;; Act
+        (agent-repl-open-tabs--page-removed "a"))
+      ;; Assert
+      (should (member "elisp.open-tabs.page-dropped-while-asked ws=a id=a" infos))
+      (should (member "elisp.open-tabs.ask-again-page-dropped unanswered=(\"a\")" infos)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-stream-closed-unprovoked-is-not-asked-again-at-once ()
+  "A stream that closed of itself is asked again on the next walk or link-up, not at once."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--close '(:error "connection reset"))
+    ;; Assert
+    (should (equal (list (length agent-repl-test-open-tabs--requests)
+                         (gethash "a" agent-repl-open-tabs--page-waits))
+                   '(1 nil)))))
+
+(ert-deftest agent-repl-test-open-tabs-forgetting-a-requests-page-waits-keeps-a-later-ones ()
+  "A request forgets only the page waits it holds, never a later request's."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (let ((earlier (agent-repl-open-tabs--request-make))
+          (later (agent-repl-open-tabs--request-make)))
+      (puthash "a" later agent-repl-open-tabs--page-waits)
+      (puthash "b" earlier agent-repl-open-tabs--page-waits)
+      ;; Act
+      (agent-repl-open-tabs--forget-page-waits '("a" "b") earlier)
+      ;; Assert
+      (should (equal (list (gethash "a" agent-repl-open-tabs--page-waits)
+                           (gethash "b" agent-repl-open-tabs--page-waits))
+                     (list later nil))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-sender-answering-no-cancel-is-fatal ()
+  "A sender that says it sent but answers no cancel breaks its contract."
+  (agent-repl-test-open-tabs--with
+    (let (fatals
+          (agent-repl-open-tabs-sender (lambda (&rest _) t)))
+      (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
+        ;; Act / Assert
+        (should-error (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")))
+        (should (equal fatals '("elisp.open-tabs.sender-answered-no-cancel answer=t")))))))
+
+(ert-deftest agent-repl-test-open-tabs-every-page-the-host-drops-is-heard ()
+  "The host's page drops reach the opens: the hook carries the handler."
+  ;; Assert
+  (should (memq #'agent-repl-open-tabs--page-removed
+                (default-value 'agent-repl-webhost-page-removed-functions))))
+
+(ert-deftest agent-repl-test-open-tabs-the-daemon-sender-answers-a-cancel-of-its-stream ()
+  "The daemon sender answers a function that cancels the stream it opened."
+  (agent-repl-test-open-tabs--with
+    (let (cancelled)
+      (cl-letf (((symbol-function 'agent-repl-open-tabs--conn) (lambda () 'conn))
+                ((symbol-function 'agent-repl-rpc-open-tabs) (lambda (&rest _) 'stream))
+                ((symbol-function 'agent-repl-connect-stream-cancel)
+                 (lambda (stream) (push stream cancelled))))
+        ;; Act
+        (funcall (agent-repl-open-tabs--send-to-daemon nil #'ignore #'ignore))
+        ;; Assert
+        (should (equal cancelled '(stream)))))))
+
+(ert-deftest agent-repl-test-open-tabs-the-daemon-sender-answers-nil-with-no-daemon ()
+  "With no daemon connection the daemon sender sends nothing and answers nil."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl-open-tabs--conn) #'ignore))
+      ;; Act / Assert
+      (should-not (agent-repl-open-tabs--send-to-daemon nil #'ignore #'ignore)))))
 
 (ert-deftest agent-repl-test-open-tabs-makes-a-visible-rows-input-buffer-as-it-asks ()
   "A visible row's input buffer is made when it is asked for."
@@ -623,13 +768,26 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     ;; Act / Assert
     (should-not (agent-repl-open-tabs--ws-row "a"))))
 
+(ert-deftest agent-repl-test-open-tabs-ws-id-answers-a-workspaces-ref-id ()
+  "A workspace's id is its ref's."
+  (agent-repl-test-open-tabs--with
+    ;; Act / Assert
+    (should (equal (agent-repl-open-tabs--ws-id "a") "a"))))
+
+(ert-deftest agent-repl-test-open-tabs-ws-id-is-nil-for-a-workspace-with-no-ref ()
+  "A workspace with no ref has no id."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-get) #'ignore))
+      ;; Act / Assert
+      (should-not (agent-repl-open-tabs--ws-id "a")))))
+
 (ert-deftest agent-repl-test-open-tabs-every-name-to-row-read-shares-ws-row ()
-  "No function of open-tabs.el reads a workspace's row by its ref by hand."
+  "No function of open-tabs.el reads a workspace's id by its ref by hand."
   ;; Arrange
   (let ((source (with-temp-buffer
                   (insert-file-contents (replace-regexp-in-string "\\.elc\\'" ".el" (symbol-file 'agent-repl-open-tabs--ws-row)))
                   (buffer-string))))
-    ;; Act / Assert: the one read is `agent-repl-open-tabs--ws-row' itself.
+    ;; Act / Assert: the one read is `agent-repl-open-tabs--ws-id' itself.
     (should (= (agent-repl-test-open-tabs--occurrences "(agent-repl--ws-get ws :ref) :id)" source) 1))))
 
 (defun agent-repl-test-open-tabs--occurrences (needle haystack)

@@ -1121,6 +1121,7 @@ signals."
                 ;; runs with the startup over, its opens asked of its own
                 ;; daemon, unless it stages its own.
                 (agent-repl-open-tabs--state (make-hash-table :test 'equal))
+                (agent-repl-open-tabs--page-waits (make-hash-table :test 'equal))
                 (agent-repl-open-tabs--rows nil)
                 (agent-repl-open-tabs--startup 'done)
                 (agent-repl-open-tabs--startup-selected nil)

@@ -88,6 +88,11 @@ workspace's own.")
 
 ;;;; ---- Desired state ---------------------------------------------------------
 
+(defvar agent-repl-webhost-page-removed-functions nil
+  "Functions called with WS each time the host drops a page it held for WS.
+Every drop of a page comes through `agent-repl-webhost-remove', so a
+caller that relied on the page drawing hears here that it never will.")
+
 (defvar agent-repl--webhost-pages (make-hash-table :test #'equal)
   "Workspace id -> its held page, (:url URL :why WHY).  What the host should hold.
 URL is where the page is held; WHY is the reason it was loaded for
@@ -758,7 +763,8 @@ UNLOADING keeps WS's gate slot: the webhost draws the gate itself, so an
 unloaded page's workspace still shows its gate at the composer's height
 \(webapp/src/host/gate.ts).  Answers non-nil when a page was held and is
 now dropped, so the caller reports the unload
-\(`agent-repl-page-report-unloaded').
+\(`agent-repl-page-report-unloaded'), and runs
+`agent-repl-webhost-page-removed-functions' with WS.
 
 A REMOVAL WITH NOTHING HELD SENDS NOTHING.  Every teardown of a workspace
 calls this, held page or not, so a workspace whose tab is torn down and
@@ -786,6 +792,8 @@ cause, so the teardown that asked stays visible."
           (setq agent-repl--webhost-shown nil))
         (agent-repl--info ws "elisp.webhost.page-removed ws={ws} id={id}" :ws ws :id id)
         (agent-repl--webhost-call "remove" id)
+        (when page
+          (run-hook-with-args 'agent-repl-webhost-page-removed-functions ws))
         (and page t)))))
 
 (defun agent-repl-webhost-shown-p (ws)
