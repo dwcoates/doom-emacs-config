@@ -3192,3 +3192,40 @@ func TestTheTakeoverTellsTheMergeQueueOfWhatItMadeOwnedOnceItIsOwned(t *testing.
 		})
 	}
 }
+
+// TestAMidWorkRefusalIsRecordedAtInfoNotAsAFailure pins that the successor's
+// own adoption reaching a mid-work refusal (ErrMidWorkRefused, the designed
+// hand-back to a transfer at freeness) writes no ERROR or WARN, on the first
+// attempt and on its retry alike, while it is still retried.
+func TestAMidWorkRefusalIsRecordedAtInfoNotAsAFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	setAdoptErr(h.fleet, ws, fmt.Errorf("rollout: adopt %q: %w", ws, ErrMidWorkRefused))
+	writeHeadlessManifest(t, h, ws)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Act: the join's attempt, then one retry.
+	if err := h.c.Join(ctx); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptRetryInitial)
+	h.clock.Fire(adoptRetryInitial)
+	h.clock.awaitArmed(t, 2*adoptRetryInitial)
+
+	// Assert
+	for _, level := range []string{dlog.LevelError, dlog.LevelWarn} {
+		if rec, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: level, Operation: opJoin}); found {
+			t.Fatalf("record = %+v, want no %s for a mid-work refusal", rec, level)
+		}
+	}
+	for _, message := range []string{
+		"the mid-work adoption was refused; the incumbent transfers the workspace again at freeness, and the adoption is retried",
+		"the mid-work adoption was refused again; the incumbent transfers the workspace at freeness, and the adoption is retried",
+	} {
+		if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opJoin, Message: message}); !found {
+			t.Fatalf("records = %+v, want %q at info", h.log.Records(), message)
+		}
+	}
+}

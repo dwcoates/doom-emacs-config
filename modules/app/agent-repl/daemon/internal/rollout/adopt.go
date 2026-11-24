@@ -269,9 +269,18 @@ func (c *controller) adoptOne(ctx context.Context, ws ids.WorkspaceID) {
 		return
 	}
 	// A workspace that will not adopt is that workspace's own failure, not
-	// the join's: the rest still transfer.
-	c.log.Error(opJoin, "a workspace could not be adopted; retrying",
-		dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
+	// the join's: the rest still transfer. A MID-WORK REFUSAL IS NO FAILURE
+	// (ErrMidWorkRefused): the successor declined a mid-work adoption it
+	// cannot make safely, and the incumbent takes the workspace back and
+	// transfers it again at freeness, by design. Whether this goroutine or a
+	// participant's adopt reaches the refusal first is only timing.
+	if errors.Is(err, ErrMidWorkRefused) {
+		c.log.Info(opJoin, "the mid-work adoption was refused; the incumbent transfers the workspace again at freeness, and the adoption is retried",
+			dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
+	} else {
+		c.log.Error(opJoin, "a workspace could not be adopted; retrying",
+			dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
+	}
 	// THE CLAIM IS RELEASED ON FAILURE so this workspace can be tried again;
 	// an adoption that never happened must not look like one that did.
 	c.releaseAdoption(ws)
@@ -387,8 +396,13 @@ func (c *controller) retryAdoption(ctx context.Context, ws ids.WorkspaceID) {
 		}
 		fields := dlog.Context{"workspace": string(ws), "attempt": attempt}
 		if err := c.driveAdoption(ctx, ws, "daemon-retry"); err != nil {
-			c.log.Warn(opJoin, "a workspace could not be adopted; retrying",
-				dlog.WithCause(fields, err))
+			if errors.Is(err, ErrMidWorkRefused) {
+				c.log.Info(opJoin, "the mid-work adoption was refused again; the incumbent transfers the workspace at freeness, and the adoption is retried",
+					dlog.WithCause(fields, err))
+			} else {
+				c.log.Warn(opJoin, "a workspace could not be adopted; retrying",
+					dlog.WithCause(fields, err))
+			}
 			c.releaseAdoption(ws)
 			if delay *= 2; delay > adoptRetryMax {
 				delay = adoptRetryMax
