@@ -1220,6 +1220,20 @@ func takeoverDecision(t *testing.T, d *harness.Daemon, ws *workspacev1.Workspace
 	})
 }
 
+// awaitAdoptedBySuccessor awaits the record a successor writes once WS is its
+// own (internal/rollout/adopt.go), from any daemon but the incumbent. The
+// successor writes daemon.addr before it has adopted every workspace (an idle
+// one ranks last in the adoption order), and until it owns WS it answers
+// WS's requests with not_yet_adopted; the record follows the ownership, so a
+// request made after it is served.
+func awaitAdoptedBySuccessor(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef, what string) {
+	t.Helper()
+	incumbent := d.PID()
+	d.AwaitRunLogRecordFromAnyProcess(what, func(r harness.LogRecord) bool {
+		return r.PID != incumbent && r.Operation == "daemon.rollout.adopt" && r.Message == "adopted the workspace" && r.Context["workspace"] == ws.GetId()
+	})
+}
+
 // TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt pins the
 // owner's ruling of 2026-11-23, which replaced the one of 2026-10-02 ("the
 // most recent page of the feed should be automatically rendered when the
@@ -1271,6 +1285,7 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 		t.Fatalf("decision = %v, want not_up on the parked record the shim's death left", decision.Context)
 	}
 	// Assert: and its feed draws the conversation from the stored history.
+	awaitAdoptedBySuccessor(t, f.d, f.ws, "the successor's adoption of the workspace")
 	successor := drainDial(addr)
 	open := func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 		resp, err := successor.OpenFeed(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: f.ws}))
@@ -1319,6 +1334,8 @@ func TestAHandoverStartsNoSessionThatWasNotRunning(t *testing.T) {
 		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
 	}
 	drainAwaitAddrFileChange(t, d, addr)
+	awaitAdoptedBySuccessor(t, d, parked.ws, "the successor's adoption of the parked workspace")
+	awaitAdoptedBySuccessor(t, d, never, "the successor's adoption of the never-opened workspace")
 
 	successor := drainDial(addr)
 	openOn := func(ws *workspacev1.WorkspaceRef) func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
