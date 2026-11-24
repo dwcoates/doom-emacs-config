@@ -1167,10 +1167,7 @@ func TestALateFactsRefusalIsOfferedAgainMidWork(t *testing.T) {
 	// ownership as daemon.rollout.adopt's "adopted the workspace", which the
 	// refused first attempt never wrote (2026-11-17 gate: the offer again
 	// won, so the retry's own "on a retry" record was never written).
-	d.AwaitRunLogRecordFromAnyProcess("the successor adopting the workspace again", func(r harness.LogRecord) bool {
-		return r.PID != d.PID() && r.Operation == "daemon.rollout.adopt" &&
-			r.Message == "adopted the workspace" && r.Context["workspace"] == f.ws.GetId()
-	})
+	awaitAdoptedBySuccessor(t, d, f.ws, "the successor adopting the workspace again")
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); offering the workspace again interrupts nothing", got)
 	}
@@ -1201,11 +1198,16 @@ func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 	}
 	drainAwaitAddrFileChange(t, d, addr)
 
-	// Assert: the workspace is usable on the successor without ever having
-	// been the subject of AdoptHostWorkspace/AdoptWebWorkspace.
+	// Assert: the workspace is adopted, and usable on the successor, without
+	// ever having been the subject of AdoptHostWorkspace/AdoptWebWorkspace.
+	awaitAdoptedBySuccessor(t, d, ws, "the successor's adoption of the headless workspace")
 	successor := drainDial(addr)
-	if _, err := successor.SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
+	resp, err := successor.SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws}))
+	if err != nil {
 		t.Fatalf("SelectWorkspace on the successor for a headless workspace = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SelectWorkspace on the successor for a headless workspace = %v, want a success", resp.Msg)
 	}
 }
 
@@ -1292,6 +1294,9 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("OpenFeed on the successor = error %v, want a page", err)
 		}
+		if resp.Msg.GetSuccess() == nil {
+			t.Fatalf("OpenFeed on the successor = %v, want a page", resp.Msg)
+		}
 		return resp.Msg.GetSuccess().GetPage(), resp.Msg.GetSuccess().GetWatch()
 	}
 	openFeedUntil(t, f.d, successor, open, "the conversation, on the successor", pageCarriesTheConversation)
@@ -1343,6 +1348,9 @@ func TestAHandoverStartsNoSessionThatWasNotRunning(t *testing.T) {
 			resp, err := successor.OpenFeed(d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 			if err != nil {
 				t.Fatalf("OpenFeed on the successor = error %v, want a page", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("OpenFeed on the successor = %v, want a page", resp.Msg)
 			}
 			return resp.Msg.GetSuccess().GetPage(), resp.Msg.GetSuccess().GetWatch()
 		}
