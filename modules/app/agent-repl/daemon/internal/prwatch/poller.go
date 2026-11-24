@@ -589,7 +589,7 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 	}
 	var told []*agentreplv1.PullRequestActivity
 	for _, a := range activity {
-		if sub.Events.Has(eventOf(a)) {
+		if sub.Events.Overlaps(eventsOf(a)) {
 			told = append(told, a)
 		}
 	}

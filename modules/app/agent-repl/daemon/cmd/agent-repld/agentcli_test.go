@@ -3609,7 +3609,7 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 		{name: "pr-subscribe sends #N for the daemon to resolve, asking every event by default", args: []string{"pr-subscribe", "here", "-pr", "#7"},
 			check: func(t *testing.T, f *cliFixture) {
 				req := only[*agentreplv1.SubscribePullRequestRequest](t, f)
-				if req.GetText() != "#7" || len(req.GetEvents()) != 6 {
+				if req.GetText() != "#7" || len(req.GetEvents()) != len(wsm.AllPullRequestEvents().Members()) {
 					t.Errorf("request = %v, want #7 with every event", req)
 				}
 			}},
@@ -3636,6 +3636,14 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 			check: func(t *testing.T, f *cliFixture) {
 				req := only[*agentreplv1.SubscribePullRequestRequest](t, f)
 				want := []agentreplv1.PullRequestNoticeEvent{agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE, agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_STATE}
+				if !slices.Equal(req.GetEvents(), want) {
+					t.Errorf("events = %v, want %v", req.GetEvents(), want)
+				}
+			}},
+		{name: "pr-subscribe asks for the merge alone", args: []string{"pr-subscribe", "here", "-pr", "o/r#7", "-events", "merged"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.SubscribePullRequestRequest](t, f)
+				want := []agentreplv1.PullRequestNoticeEvent{agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGED}
 				if !slices.Equal(req.GetEvents(), want) {
 					t.Errorf("events = %v, want %v", req.GetEvents(), want)
 				}

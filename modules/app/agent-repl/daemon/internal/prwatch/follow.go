@@ -88,10 +88,15 @@ func SubscriptionProto(sub wsm.PullRequestSubscription) *agentreplv1.PullRequest
 	for _, e := range sub.Events.Members() {
 		out.Events = append(out.Events, EventProto(e))
 	}
-	if sub.Origin == wsm.PullRequestOriginOwnedLink {
+	switch sub.Origin {
+	case wsm.PullRequestOriginOwnedLink:
 		out.Origin.Origin = &agentreplv1.PullRequestSubscriptionOrigin_OwnedLink{OwnedLink: &agentreplv1.PullRequestSubscriptionOriginOwnedLink{}}
-	} else {
+	case wsm.PullRequestOriginRequested:
 		out.Origin.Origin = &agentreplv1.PullRequestSubscriptionOrigin_Requested{Requested: &agentreplv1.PullRequestSubscriptionOriginRequested{}}
+	case wsm.PullRequestOriginFollowedWorkspace:
+		out.Origin.Origin = &agentreplv1.PullRequestSubscriptionOrigin_FollowedWorkspace{FollowedWorkspace: &agentreplv1.PullRequestSubscriptionOriginFollowedWorkspace{}}
+	default:
+		panic(fmt.Sprintf("prwatch: subscription origin %q has no contract spelling", sub.Origin))
 	}
 	out.Health = healthProto(sub.LastRead, sub.Failing)
 	return out
@@ -136,6 +141,8 @@ func EventProto(e wsm.PullRequestEvent) agentreplv1.PullRequestNoticeEvent {
 		return agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_CHECKS
 	case wsm.PullRequestEventMergeQueue:
 		return agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE
+	case wsm.PullRequestEventMerged:
+		return agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGED
 	}
 	panic(fmt.Sprintf("prwatch: event %d has no contract spelling", int(e)))
 }
@@ -159,6 +166,8 @@ func EventsOf(events []agentreplv1.PullRequestNoticeEvent) wsm.PullRequestEvents
 			out = append(out, wsm.PullRequestEventChecks)
 		case agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE:
 			out = append(out, wsm.PullRequestEventMergeQueue)
+		case agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGED:
+			out = append(out, wsm.PullRequestEventMerged)
 		default:
 			panic(fmt.Sprintf("prwatch: notice event %s has no store event", e))
 		}

@@ -65,7 +65,8 @@ func TestPullRequestEventsAreASet(t *testing.T) {
 		wantValid bool
 		wantName  string
 	}{
-		{name: "every event", set: AllPullRequestEvents(), wantValid: true, wantName: "comment,review,review_comment,state,checks,merge_queue"},
+		{name: "every event", set: AllPullRequestEvents(), wantValid: true, wantName: "comment,review,review_comment,state,checks,merge_queue,merged"},
+		{name: "the merge alone is a member", set: NewPullRequestEvents(PullRequestEventMerged), wantValid: true, wantName: "merged"},
 		{name: "the merge queue is a member", set: NewPullRequestEvents(PullRequestEventMergeQueue, PullRequestEventState), wantValid: true, wantName: "state,merge_queue"},
 		{name: "a repeat is one member", set: NewPullRequestEvents(PullRequestEventChecks, PullRequestEventChecks), wantValid: true, wantName: "checks"},
 		{name: "no event", set: NewPullRequestEvents(), wantValid: false},
@@ -79,6 +80,51 @@ func TestPullRequestEventsAreASet(t *testing.T) {
 			}
 			if tt.wantValid && tt.set.String() != tt.wantName {
 				t.Fatalf("String = %q, want %q", tt.set.String(), tt.wantName)
+			}
+		})
+	}
+}
+
+func TestPullRequestEventsOverlap(t *testing.T) {
+	tests := []struct {
+		name  string
+		set   PullRequestEvents
+		other PullRequestEvents
+		want  bool
+	}{
+		{name: "a shared member", set: NewPullRequestEvents(PullRequestEventMerged, PullRequestEventChecks), other: NewPullRequestEvents(PullRequestEventState, PullRequestEventMerged), want: true},
+		{name: "no shared member", set: NewPullRequestEvents(PullRequestEventMerged), other: NewPullRequestEvents(PullRequestEventState), want: false},
+		{name: "an empty set", set: NewPullRequestEvents(PullRequestEventMerged), other: NewPullRequestEvents(), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.set.Overlaps(tt.other)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("%s.Overlaps(%s) = %v, want %v", tt.set, tt.other, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPullRequestOriginsAreDeclared(t *testing.T) {
+	tests := []struct {
+		origin PullRequestOrigin
+		want   bool
+	}{
+		{origin: PullRequestOriginOwnedLink, want: true},
+		{origin: PullRequestOriginRequested, want: true},
+		{origin: PullRequestOriginFollowedWorkspace, want: true},
+		{origin: "", want: false},
+		{origin: "inherited", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.origin), func(t *testing.T) {
+			// Assert
+			if got := tt.origin.Valid(); got != tt.want {
+				t.Fatalf("PullRequestOrigin(%q).Valid() = %v, want %v", tt.origin, got, tt.want)
 			}
 		})
 	}

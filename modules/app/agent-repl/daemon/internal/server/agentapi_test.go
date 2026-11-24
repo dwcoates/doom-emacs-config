@@ -400,6 +400,36 @@ func TestSubscribeWorkspaceRecordsTheEventsAndAnswersTheStatus(t *testing.T) {
 	}
 }
 
+func TestSubscribeWorkspaceRepublishesTheSubscribersLinks(t *testing.T) {
+	// Arrange
+	h := followHarness(t)
+
+	// Act
+	_, err := h.Client.SubscribeWorkspace(context.Background(), followRequest(agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SubscribeWorkspace: %v", err)
+	}
+	if want := []ids.WorkspaceID{"ws-1"}; !reflect.DeepEqual(h.Verbs.republished, want) {
+		t.Fatalf("republished = %v, want the subscriber's links, which may now hold the followed workspace's pull requests", h.Verbs.republished)
+	}
+}
+
+func TestSubscribeWorkspaceFailsWhenTheSubscribersLinksCannotBeRepublished(t *testing.T) {
+	// Arrange
+	h := followHarness(t)
+	h.Verbs.republishErr = errors.New("the links are unreadable")
+
+	// Act
+	_, err := h.Client.SubscribeWorkspace(context.Background(), followRequest(agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("SubscribeWorkspace = %v, want an internal failure", err)
+	}
+}
+
 func TestSubscribeWorkspaceHoldsTheEventsItsRequestNames(t *testing.T) {
 	const (
 		bundle = agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE

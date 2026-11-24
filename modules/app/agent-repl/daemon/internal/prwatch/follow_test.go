@@ -163,9 +163,54 @@ func TestTheMergeQueueEventRoundTripsThroughTheContract(t *testing.T) {
 	if spelled != agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE || stored != wsm.NewPullRequestEvents(wsm.PullRequestEventMergeQueue) {
 		t.Fatalf("spelled %v, stored %v", spelled, stored)
 	}
-	if got := sub.GetEvents(); len(got) != 6 || got[5] != spelled {
-		t.Fatalf("an owned link's events = %v, want every event, the merge queue last", got)
+	if got := sub.GetEvents(); len(got) != 7 || got[5] != spelled {
+		t.Fatalf("an owned link's events = %v, want every event, the merge queue sixth", got)
 	}
+}
+
+func TestTheMergedEventRoundTripsThroughTheContract(t *testing.T) {
+	// Act
+	spelled := EventProto(wsm.PullRequestEventMerged)
+	stored := EventsOf([]agentreplv1.PullRequestNoticeEvent{spelled})
+
+	// Assert
+	if spelled != agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGED || stored != wsm.NewPullRequestEvents(wsm.PullRequestEventMerged) {
+		t.Fatalf("spelled %v, stored %v", spelled, stored)
+	}
+}
+
+func TestSubscriptionProtoSpellsEachOrigin(t *testing.T) {
+	tests := []struct {
+		origin wsm.PullRequestOrigin
+		want   func(*agentreplv1.PullRequestSubscriptionOrigin) bool
+	}{
+		{origin: wsm.PullRequestOriginOwnedLink, want: func(o *agentreplv1.PullRequestSubscriptionOrigin) bool { return o.GetOwnedLink() != nil }},
+		{origin: wsm.PullRequestOriginRequested, want: func(o *agentreplv1.PullRequestSubscriptionOrigin) bool { return o.GetRequested() != nil }},
+		{origin: wsm.PullRequestOriginFollowedWorkspace, want: func(o *agentreplv1.PullRequestSubscriptionOrigin) bool { return o.GetFollowedWorkspace() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.origin), func(t *testing.T) {
+			// Act
+			got := SubscriptionProto(wsm.PullRequestSubscription{Subscriber: "ws", PullRequest: prK, Events: wsm.NewPullRequestEvents(wsm.PullRequestEventMerged), Origin: tt.origin})
+
+			// Assert
+			if !tt.want(got.GetOrigin()) {
+				t.Fatalf("origin = %v, want the %s arm", got.GetOrigin(), tt.origin)
+			}
+		})
+	}
+}
+
+func TestSubscriptionProtoFailsHardOnAnUndeclaredOrigin(t *testing.T) {
+	// Arrange
+	defer func() {
+		if recover() == nil {
+			t.Fatal("SubscriptionProto did not panic")
+		}
+	}()
+
+	// Act
+	SubscriptionProto(wsm.PullRequestSubscription{Subscriber: "ws", PullRequest: prK, Events: wsm.NewPullRequestEvents(wsm.PullRequestEventMerged), Origin: "inherited"})
 }
 
 // followFromFirstRead subscribes the rig's workspace to the pull request as

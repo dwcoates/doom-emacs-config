@@ -181,8 +181,10 @@ func (s *store) WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]Workspace
 // shown reference, if any is shown. A shown link, and a reference relabeled,
 // keep their placement. In the same transaction an owned pull
 // request takes SET.Subscribe when ID holds no subscription to it, and a link
-// no longer owned ends the subscription its ownership took. It answers every
-// link ID now holds, read in the same transaction.
+// no longer owned ends the subscription its ownership took, and every
+// workspace following ID is subscribed to an owned pull request's merge
+// (followedpullrequests.go). It answers every link ID now holds, read in the
+// same transaction.
 func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSet) ([]WorkspaceLink, error) {
 	const op = "daemon.wsm.set_workspace_link"
 	url, label := set.URL, set.Label
@@ -202,7 +204,10 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 		s.log.Error(op, "refused a link its caller should never have made: it names no url or no label", withError(fields, err))
 		return nil, err
 	}
-	var out []WorkspaceLink
+	var (
+		out         []WorkspaceLink
+		followedPRs []FollowedPullRequest
+	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
 			return err
@@ -245,9 +250,17 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 		if err := s.followLinkInTx(ctx, tx, id, set); err != nil {
 			return err
 		}
+		if set.Owned && set.PullRequest != nil {
+			if followedPRs, err = followOwnedPullRequestByFollowersInTx(ctx, tx, id, *set.PullRequest, nowUTC()); err != nil {
+				return err
+			}
+		}
 		out, err = linksOf(ctx, tx, id)
 		return err
 	})
+	if err == nil {
+		s.logFollowedPullRequests(op, followedPRs)
+	}
 	return out, err
 }
 

@@ -212,7 +212,9 @@ var ErrUnknownFollowed = errors.New("wsm: the followed workspace is not register
 // replaced one. Both workspaces' rows are checked in the same transaction, so
 // a close or a forget cannot slip between the check and the write: an
 // unregistered subscriber is ErrNotFound, a closed one ErrSubscriberClosed,
-// and an unregistered followed workspace ErrUnknownFollowed.
+// and an unregistered followed workspace ErrUnknownFollowed. In the same
+// transaction the subscriber is subscribed to the merge of every pull request
+// the followed workspace owns (followedpullrequests.go).
 func (s *store) SubscribeWorkspace(ctx context.Context, sub WorkspaceSubscription) (bool, error) {
 	const op = "daemon.wsm.subscribe_workspace"
 	fields := dlog.Context{"subscriber": string(sub.Subscriber), "followed": string(sub.Followed), "events": sub.Events.String()}
@@ -221,7 +223,10 @@ func (s *store) SubscribeWorkspace(ctx context.Context, sub WorkspaceSubscriptio
 		s.log.Error(op, "refused a workspace subscription its caller should never have made", withError(fields, err))
 		return false, err
 	}
-	var replaced bool
+	var (
+		replaced    bool
+		followedPRs []FollowedPullRequest
+	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var closed bool
 		err := tx.QueryRowContext(ctx, `SELECT closed FROM workspaces WHERE id = ?`, sub.Subscriber).Scan(&closed)
@@ -250,8 +255,15 @@ func (s *store) SubscribeWorkspace(ctx context.Context, sub WorkspaceSubscriptio
 			`INSERT INTO workspace_subscriptions (subscriber, followed, events, subscribed_at) VALUES (?, ?, ?, ?)
 			 ON CONFLICT(subscriber, followed) DO UPDATE SET events = excluded.events, subscribed_at = excluded.subscribed_at`,
 			sub.Subscriber, sub.Followed, int64(sub.Events), nanos(sub.SubscribedAt))
+		if err != nil {
+			return err
+		}
+		followedPRs, err = followOwnedPullRequestsInTx(ctx, tx, sub.Subscriber, sub.Followed, nil, sub.SubscribedAt)
 		return err
 	})
+	if err == nil {
+		s.logFollowedPullRequests(op, followedPRs)
+	}
 	return replaced, err
 }
 
