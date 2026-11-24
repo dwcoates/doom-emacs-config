@@ -385,6 +385,8 @@ var migrations = []migration{
 	{To: 203, Name: "one_shots_subsection", Kind: MigrationAdditive, DDL: oneShotsSubsectionDDL},
 	// IT IS ADDITIVE: one new table the previous build never names.
 	{To: 204, Name: "composer_selections", Kind: MigrationAdditive, DDL: composerSelectionsDDL},
+	// IT IS ADDITIVE: one new table the previous build never names.
+	{To: 205, Name: "deploying_merges", Kind: MigrationAdditive, DDL: deployingMergesDDL},
 }
 
 // sessionsKeepaliveRestoredAtDDL is the layout-196 addition: when a
