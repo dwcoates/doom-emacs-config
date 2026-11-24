@@ -444,6 +444,10 @@ func (s *fakeServer) OpenInEditor(ctx context.Context, req *connect.Request[v1.O
 	return handleUnary[v1.OpenInEditorRequest, v1.OpenInEditorResponse](ctx, s, "OpenInEditor", req.Msg)
 }
 
+func (s *fakeServer) FindPullRequestOwner(ctx context.Context, req *connect.Request[v1.FindPullRequestOwnerRequest]) (*connect.Response[v1.FindPullRequestOwnerResponse], error) {
+	return handleUnary[v1.FindPullRequestOwnerRequest, v1.FindPullRequestOwnerResponse](ctx, s, "FindPullRequestOwner", req.Msg)
+}
+
 func (s *fakeServer) SelectInEditor(ctx context.Context, req *connect.Request[v1.SelectInEditorRequest]) (*connect.Response[v1.SelectInEditorResponse], error) {
 	return handleUnary[v1.SelectInEditorRequest, v1.SelectInEditorResponse](ctx, s, "SelectInEditor", req.Msg)
 }
