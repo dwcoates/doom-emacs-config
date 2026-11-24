@@ -179,10 +179,9 @@
     (let ((unloads nil))
       (cl-letf (((symbol-function 'agent-repl-page-report-unloaded)
                  (lambda (ws why) (push (list ws why) unloads))))
-        (push "alpha" agent-repl-test-pu--dormant)
-        (agent-repl-page-unload-note-shown "alpha")
+        (agent-repl-test-pu--visit-alpha)
         ;; Act
-        (agent-repl-page-unload-note-shown "beta")
+        (agent-repl-test-pu--fire-armed)
         ;; Assert
         (should (equal unloads '(("alpha" dormant))))))))
 

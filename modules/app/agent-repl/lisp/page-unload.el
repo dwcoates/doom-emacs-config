@@ -109,7 +109,8 @@ Begun by its show (`agent-repl-page-unload--visit-begin'), it outlives
 the switch away until the page is dropped, so a kept visit keeps its page.")
 
 (defvar agent-repl-page-unload--timers (make-hash-table :test #'equal)
-  "Each workspace's armed visit unload timer (`agent-repl-page-unload-visit-grace').")
+  "Each workspace's armed visit unload timer.
+It fires `agent-repl-page-unload-visit-grace' seconds after the switch away.")
 
 (defvar agent-repl-page-unload--dormant-seen (make-hash-table :test #'equal)
   "Each workspace's dormancy as the last roster push stated it.
@@ -161,7 +162,8 @@ shown before WS has its page unloaded when its session is dormant
       (when was (agent-repl-page-unload--visit-end was)))))
 
 (defun agent-repl-page-unload--working-p (ws)
-  "Non-nil when WS works: no longer dormant, or its arm runs a turn or background work."
+  "Non-nil when WS works.
+It works when no longer dormant, or when its arm runs a turn or background work."
   (or (not (agent-repl-roster-dormant-p ws))
       (let ((status (agent-repl-roster-status-for-ws ws)))
         (or (memq status agent-repl-roster-running-statuses)
