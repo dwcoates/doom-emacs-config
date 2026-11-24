@@ -122,7 +122,7 @@ func TestStagesOf(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got, err := stagesOf(tc.intervals, false)
+			got, err := stagesOf(tc.intervals, false, false)
 
 			// Assert
 			if err != nil {
@@ -164,7 +164,7 @@ func TestStagesOfRefusesWhatTheLedgerHasNoBusinessHolding(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got, err := stagesOf(tc.intervals, false)
+			got, err := stagesOf(tc.intervals, false, false)
 
 			// Assert
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {

@@ -159,7 +159,7 @@ func (o *orchestrator) rosterDeploying(ctx context.Context, m wsm.DeployingMerge
 			intervals = ledger.Intervals
 		}
 	}
-	view, err := viewOf(intervals, false)
+	stages, err := stagesOf(intervals, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (o *orchestrator) rosterDeploying(ctx context.Context, m wsm.DeployingMerge
 		Async:     m.Async,
 		Reveal:    headFeedID(m.Credited, m.Lease),
 		Admitted:  true,
-		Stages:    rosterStages(deployingView(view)),
+		Stages:    stages,
 		Clock:     wsm.MergeClock{Phase: wsm.MergeClockActive, Since: m.ActiveSince},
 	}
 	if m.Async {

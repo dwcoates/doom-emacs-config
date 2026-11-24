@@ -483,7 +483,7 @@ func (o *orchestrator) ledgerStages(ctx context.Context, ws ids.WorkspaceID, lea
 	}
 	for _, ledger := range ledgers {
 		if ledger.Lease == lease {
-			return stagesOf(ledger.Intervals, queueHeld)
+			return stagesOf(ledger.Intervals, queueHeld, false)
 		}
 	}
 	return nil, nil

@@ -37,10 +37,15 @@ func stageGroup(kind string) (group string, collapsed bool, ok bool) {
 
 // stagesOf answers the stages INTERVALS draw on the roster, in the order each
 // began: the rendering of the merge's one view (viewOf) under QUEUEHELD.
-func stagesOf(intervals []wsm.TabInterval, queueHeld bool) ([]*frontendv1.RosterMergeQueueStage, error) {
+// DEPLOYING draws a landed merge whose deploy's check is still owed, its last
+// deploy stage live (deployingView).
+func stagesOf(intervals []wsm.TabInterval, queueHeld, deploying bool) ([]*frontendv1.RosterMergeQueueStage, error) {
 	view, err := viewOf(intervals, queueHeld)
 	if err != nil {
 		return nil, err
+	}
+	if deploying {
+		view = deployingView(view)
 	}
 	return rosterStages(view), nil
 }
