@@ -366,7 +366,7 @@ func titleLinks(links []Link) *frontendv1.TopbarTitleLinks {
 	})
 	items := make([]*frontendv1.TopbarTitleLinkMenuItem, len(ordered))
 	for i, link := range ordered {
-		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL, Owned: link.Owned, Icon: linkIcon(link.URL), Badge: linkBadge(link.State)}
+		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL, Owned: link.Owned, Icon: linkIcon(link.URL), Badge: linkBadge(link.State), Subscribed: link.Subscribed}
 	}
 	return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Menu{
 		Menu: &frontendv1.TopbarTitleLinkMenu{Items: items}}}

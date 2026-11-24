@@ -508,8 +508,9 @@ message TopbarTitleLinkMenuItem {
   string url = 2;
   // Whether the workspace's work made what the link points at (a pull request
   // it opened, a doc it wrote). Owned rows are served BEFORE every reference
-  // row and drawn on a slightly lighter ground than the reference rows, so
-  // the client draws the flag and never reorders.
+  // row and drawn on a slightly lighter ground than the reference rows, with
+  // an "owned" badge beside the label, so the client draws the flag and never
+  // reorders.
   bool owned = 3;
   // The service the url's host names, drawn as an icon on the row's left.
   TopbarTitleLinkIcon icon = 4;
@@ -520,6 +521,13 @@ message TopbarTitleLinkMenuItem {
   // pull-request cadence, so the badge follows a merge or a close without the
   // link being set again.
   optional TopbarTitleLinkBadge badge = 5;
+  // Whether the workspace is subscribed to the link's updates through
+  // agent-repl: a GitHub pull request it follows and has not stopped
+  // following (agentrepl.v1.WorkspaceLinkOwnedFollowFollowing), or a Slack
+  // thread it subscribes to (agentrepl.v1.SlackThreadSubscription). Drawn as
+  // a green "subscribed" badge beside the label, present if and only if the
+  // flag is set.
+  bool subscribed = 6;
 }
 
 // A menu row's pull request badge. THE ARM IS THE STATE the badge draws, in

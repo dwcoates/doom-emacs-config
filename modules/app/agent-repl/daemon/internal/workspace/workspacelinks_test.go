@@ -325,6 +325,27 @@ func TestShownLinksCarriesOwnership(t *testing.T) {
 	}
 }
 
+func TestShownLinksCarriesWhetherEachIsSubscribed(t *testing.T) {
+	// Arrange.
+	key := wsm.PullRequestKey{Owner: "a", Repo: "b", Number: 1}
+	followed := wsm.WorkspaceLink{URL: key.String(), Label: "The pull request", Shown: true, PullRequest: &key, Follow: &wsm.PullRequestSubscription{}}
+	thread := wsm.WorkspaceLink{URL: "https://chesscom.slack.com/archives/C0439CR3S3A/p1784225803782699", Label: "The thread", Shown: true, SlackSubscribed: true}
+	plain := wsm.WorkspaceLink{URL: "https://example.com/doc", Label: "The doc", Shown: true}
+
+	// Act.
+	got := ShownLinks([]wsm.WorkspaceLink{followed, thread, plain})
+
+	// Assert.
+	want := []topbar.Link{
+		{Label: followed.Label, URL: followed.URL, Subscribed: true},
+		{Label: thread.Label, URL: thread.URL, Subscribed: true},
+		{Label: plain.Label, URL: plain.URL},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ShownLinks = %+v, want %+v", got, want)
+	}
+}
+
 func TestLinksView(t *testing.T) {
 	unshown := wsm.WorkspaceLink{URL: "https://example.com/old", Label: "An older draft"}
 	shownArm := &agentreplv1.WorkspaceLinkPlacement{Placement: &agentreplv1.WorkspaceLinkPlacement_Shown{Shown: &agentreplv1.WorkspaceLinkPlacementShown{}}}

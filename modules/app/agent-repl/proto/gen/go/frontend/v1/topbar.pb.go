@@ -2616,8 +2616,9 @@ type TopbarTitleLinkMenuItem struct {
 	Url string `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
 	// Whether the workspace's work made what the link points at (a pull request
 	// it opened, a doc it wrote). Owned rows are served BEFORE every reference
-	// row and drawn on a slightly lighter ground than the reference rows, so
-	// the client draws the flag and never reorders.
+	// row and drawn on a slightly lighter ground than the reference rows, with
+	// an "owned" badge beside the label, so the client draws the flag and never
+	// reorders.
 	Owned bool `protobuf:"varint,3,opt,name=owned,proto3" json:"owned,omitempty"`
 	// The service the url's host names, drawn as an icon on the row's left.
 	Icon TopbarTitleLinkIcon `protobuf:"varint,4,opt,name=icon,proto3,enum=frontend.v1.TopbarTitleLinkIcon" json:"icon,omitempty"`
@@ -2627,7 +2628,14 @@ type TopbarTitleLinkMenuItem struct {
 	// then draws no badge. The daemon reads every linked pull request on its
 	// pull-request cadence, so the badge follows a merge or a close without the
 	// link being set again.
-	Badge         *TopbarTitleLinkBadge `protobuf:"bytes,5,opt,name=badge,proto3,oneof" json:"badge,omitempty"`
+	Badge *TopbarTitleLinkBadge `protobuf:"bytes,5,opt,name=badge,proto3,oneof" json:"badge,omitempty"`
+	// Whether the workspace is subscribed to the link's updates through
+	// agent-repl: a GitHub pull request it follows and has not stopped
+	// following (agentrepl.v1.WorkspaceLinkOwnedFollowFollowing), or a Slack
+	// thread it subscribes to (agentrepl.v1.SlackThreadSubscription). Drawn as
+	// a green "subscribed" badge beside the label, present if and only if the
+	// flag is set.
+	Subscribed    bool `protobuf:"varint,6,opt,name=subscribed,proto3" json:"subscribed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2695,6 +2703,13 @@ func (x *TopbarTitleLinkMenuItem) GetBadge() *TopbarTitleLinkBadge {
 		return x.Badge
 	}
 	return nil
+}
+
+func (x *TopbarTitleLinkMenuItem) GetSubscribed() bool {
+	if x != nil {
+		return x.Subscribed
+	}
+	return false
 }
 
 // A menu row's pull request badge. THE ARM IS THE STATE the badge draws, in
@@ -5134,13 +5149,16 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\"Q\n" +
 	"\x13TopbarTitleLinkMenu\x12:\n" +
-	"\x05items\x18\x01 \x03(\v2$.frontend.v1.TopbarTitleLinkMenuItemR\x05items\"\xd5\x01\n" +
+	"\x05items\x18\x01 \x03(\v2$.frontend.v1.TopbarTitleLinkMenuItemR\x05items\"\xf5\x01\n" +
 	"\x17TopbarTitleLinkMenuItem\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n" +
 	"\x05owned\x18\x03 \x01(\bR\x05owned\x124\n" +
 	"\x04icon\x18\x04 \x01(\x0e2 .frontend.v1.TopbarTitleLinkIconR\x04icon\x12<\n" +
-	"\x05badge\x18\x05 \x01(\v2!.frontend.v1.TopbarTitleLinkBadgeH\x00R\x05badge\x88\x01\x01B\b\n" +
+	"\x05badge\x18\x05 \x01(\v2!.frontend.v1.TopbarTitleLinkBadgeH\x00R\x05badge\x88\x01\x01\x12\x1e\n" +
+	"\n" +
+	"subscribed\x18\x06 \x01(\bR\n" +
+	"subscribedB\b\n" +
 	"\x06_badge\"\xa2\x02\n" +
 	"\x14TopbarTitleLinkBadge\x12;\n" +
 	"\x04open\x18\x01 \x01(\v2%.frontend.v1.TopbarTitleLinkBadgeOpenH\x00R\x04open\x12>\n" +

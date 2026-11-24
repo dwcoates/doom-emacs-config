@@ -1,8 +1,11 @@
 /**
- * The pull request badge a summary-menu row draws in its right margin. The
- * daemon names the state from its latest read of the pull request
- * (frontend.v1.TopbarTitleLinkBadge), so this file never inspects a url: it
- * only draws the word and color the arm names.
+ * The badges a summary-menu row draws. The pull request badge sits in the
+ * row's right margin, its state named by the daemon from its latest read of
+ * the pull request (frontend.v1.TopbarTitleLinkBadge). The row's marks sit
+ * beside its label: "owned" for a link the workspace's work made, and
+ * "subscribed" for a link whose updates the workspace is told
+ * (frontend.v1.TopbarTitleLinkMenuItem.owned and .subscribed). This file never
+ * inspects a url: it only draws what the daemon served.
  */
 import type { TopbarTitleLinkBadge } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { unreachableArm } from "../rpc/strict.js";
@@ -39,4 +42,29 @@ function wordFor(state: NonNullable<TopbarTitleLinkBadge["state"]["case"]>): str
     default:
       return unreachableArm("TopbarTitleLinkBadge.state", String(state));
   }
+}
+
+/** A label mark's class; `data-mark` names which mark it draws. */
+export const LINK_MARK_CLASS = "topbar-title-link-mark";
+
+/** The marks a row can carry beside its label, in the order drawn. */
+export type LinkMark = "owned" | "subscribed";
+
+/**
+ * The marks beside a menu row's label, in the order drawn: "owned" when the
+ * workspace's work made what the link points at, then "subscribed" when the
+ * workspace is told about the link's updates. Each wears the feed's shared
+ * badge pill (`.badge`), so a mark reads as the same badge a tool card draws.
+ */
+export function drawLinkMarks(item: { owned: boolean; subscribed: boolean }): HTMLElement[] {
+  const marks: LinkMark[] = [];
+  if (item.owned) marks.push("owned");
+  if (item.subscribed) marks.push("subscribed");
+  return marks.map((mark) => {
+    const el = document.createElement("span");
+    el.classList.add("badge", LINK_MARK_CLASS);
+    el.dataset.mark = mark;
+    el.textContent = mark;
+    return el;
+  });
 }

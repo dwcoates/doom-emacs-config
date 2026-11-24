@@ -8925,6 +8925,35 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   height: 1em;
   flex: none;
 }
+/* A SERVICE ICON IS NEVER TINTED (owner request, 2026-11-23): an owned row's
+   label wears the summary's purple, but the icon before it stays the
+   foreground white on every row. */
+.topbar-title-link-option .topbar-title-link-icon {
+  color: var(--fg);
+}
+/* A ROW'S FIRST LINE: the label, then its marks beside it. */
+.topbar-title-link-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+/* A LABEL'S MARKS (owner request, 2026-11-23): "owned" and "subscribed", the
+   feed's badge pill (`.badge`) at the topbar's own size, since the feed's
+   text zoom never reaches the topbar. Each mark's border is its text color:
+   owned in the foreground white, subscribed in the status green. */
+.topbar-title-link-mark {
+  font-size: 0.7rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  border-color: currentColor;
+}
+.topbar-title-link-mark[data-mark="owned"] {
+  color: var(--fg);
+}
+.topbar-title-link-mark[data-mark="subscribed"] {
+  color: var(--ok);
+}
 /* AN OWNED LINK'S ROW (owner request, 2026-11-09): a link the workspace's
    work made rides a slightly lighter ground than the reference rows, halfway
    between the menu's own ground and the topbar's (--sidebar-ground), so it

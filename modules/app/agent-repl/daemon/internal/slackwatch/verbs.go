@@ -126,18 +126,8 @@ func (w *Watcher) find(ctx context.Context, ws ids.WorkspaceID, url string) (wsm
 	if err != nil {
 		return wsm.SlackThreadSubscription{}, false, err
 	}
-	for _, sub := range subs {
-		if sub.Thread.Channel != thread.Channel {
-			continue
-		}
-		if sub.Thread.ThreadTS == thread.TS {
-			return sub, true, nil
-		}
-		if named, err := slacklink.ParseThread(sub.URL); err == nil && named.TS == thread.TS {
-			return sub, true, nil
-		}
-	}
-	return wsm.SlackThreadSubscription{}, false, nil
+	sub, found := wsm.FindSlackThreadSubscription(subs, thread)
+	return sub, found, nil
 }
 
 // Subscribe subscribes WS to the thread URL names, in MODE, answering the
@@ -188,6 +178,11 @@ func (w *Watcher) Subscribe(ctx context.Context, ws Workspace, url string, mode 
 		w.announce(ctx, ws, sub, modeChangeAnnouncement(mode))
 	}
 	w.startWorker(keyOf(sub))
+	if !wasHeld {
+		if err := w.republishLinks(ctx, ws.ID, sub.Thread, "subscribe"); err != nil {
+			return wsm.SlackThreadSubscription{}, false, err
+		}
+	}
 	stored, _, err := w.lookup(ctx, keyOf(sub))
 	return stored, wasHeld, err
 }
@@ -207,7 +202,25 @@ func (w *Watcher) Unsubscribe(ctx context.Context, ws Workspace, url string) (bo
 	}
 	w.stopWorker(keyOf(sub))
 	w.deps.Log.Info(opVerb, "ended the workspace's Slack-thread subscription", dlog.Context{"subscriber": string(ws.ID), "thread": sub.Thread.String(), "announced": announced})
+	if ended {
+		if err := w.republishLinks(ctx, ws.ID, sub.Thread, "unsubscribe"); err != nil {
+			return false, announced, err
+		}
+	}
 	return ended, announced, nil
+}
+
+// republishLinks republishes WS's links after its subscription to THREAD
+// started or ended (VERB), so a link to the thread draws its "subscribed"
+// badge exactly while the subscription stands. A failure is recorded here,
+// once, and returned.
+func (w *Watcher) republishLinks(ctx context.Context, ws ids.WorkspaceID, thread wsm.SlackThreadKey, verb string) error {
+	if err := w.deps.Links.RepublishLinks(ctx, ws); err != nil {
+		w.deps.Log.Error(opVerb, "could not republish the workspace's links after its Slack-thread subscription changed",
+			dlog.WithCause(dlog.Context{"subscriber": string(ws), "thread": thread.String(), "verb": verb}, err))
+		return fmt.Errorf("slackwatch: republish the links of %s after %s: %w", ws, verb, err)
+	}
+	return nil
 }
 
 // SetMode sets the mode of WS's subscription to the thread URL names,

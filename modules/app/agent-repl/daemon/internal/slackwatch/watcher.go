@@ -83,6 +83,12 @@ type Store interface {
 	RecordSlackReactionBaseline(ctx context.Context, standing []wsm.SlackReactionTrigger, at time.Time) error
 }
 
+// LinksPublisher republishes a workspace's links to every view of them
+// (workspace.Verbs.RepublishLinks).
+type LinksPublisher interface {
+	RepublishLinks(ctx context.Context, ws ids.WorkspaceID) error
+}
+
 // Deps are the watcher's collaborators: everything but the prompt handler,
 // which is handed to Run.
 type Deps struct {
@@ -101,6 +107,10 @@ type Deps struct {
 	Serves func() bool
 	// Intakes creates a fired reaction's intake workspace (reactions.go).
 	Intakes IntakeCreator
+	// Links republishes a workspace's links whenever one of its thread
+	// subscriptions starts or ends, so the summary's menu draws a Slack
+	// link's "subscribed" badge exactly while the subscription stands.
+	Links LinksPublisher
 	// Notices measures every digest told (briefprompt.Composer.Meter).
 	Notices briefprompt.Meter
 	Clock   clock.Clock
@@ -148,7 +158,7 @@ func (k subKey) fields() dlog.Context {
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	if deps.Store == nil || deps.GNS == nil || deps.Holds == nil || deps.Briefs == nil || deps.MintKey == nil || deps.NewNonce == nil ||
-		deps.Serves == nil || deps.Intakes == nil || deps.Notices == nil || deps.Clock == nil || deps.Log == nil {
+		deps.Serves == nil || deps.Intakes == nil || deps.Links == nil || deps.Notices == nil || deps.Clock == nil || deps.Log == nil {
 		return nil, errors.New("slackwatch: every collaborator is required")
 	}
 	return &Watcher{deps: deps, gate: intakegate.NewFor(deps.Serves, deps.Log, opGate, "the Slack streams and polls"),

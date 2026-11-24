@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"agent-repld/internal/slacklink"
 )
 
 // slackKey is the thread every test follows.
@@ -406,6 +408,42 @@ func TestCarriesNonce(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := CarriesNonce(tt.text, tt.nonces); got != tt.want {
 				t.Fatalf("CarriesNonce = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindSlackThreadSubscription(t *testing.T) {
+	// A subscription taken through a reply's link (no thread_ts) keeps the
+	// reply's link while its key holds the thread's root.
+	reply := SlackThreadSubscription{Thread: slackKey, URL: "https://chesscom.slack.com/archives/C0439CR3S3A/p1784225900000001"}
+	root := slackSub("ws", SlackThreadModeListen)
+	other := SlackThreadSubscription{Thread: SlackThreadKey{Channel: "C0OTHER", ThreadTS: slackKey.ThreadTS}, URL: "https://chesscom.slack.com/archives/C0OTHER/p1784225803782699"}
+	tests := []struct {
+		name   string
+		subs   []SlackThreadSubscription
+		thread slacklink.Thread
+		want   SlackThreadSubscription
+		found  bool
+	}{
+		{name: "the subscription rooted at the link's message", subs: []SlackThreadSubscription{other, root},
+			thread: slacklink.Thread{Channel: slackKey.Channel, TS: slackKey.ThreadTS}, want: root, found: true},
+		{name: "the subscription whose own link names the message", subs: []SlackThreadSubscription{reply},
+			thread: slacklink.Thread{Channel: slackKey.Channel, TS: "1784225900.000001"}, want: reply, found: true},
+		{name: "a root in another channel is not the thread", subs: []SlackThreadSubscription{other},
+			thread: slacklink.Thread{Channel: slackKey.Channel, TS: slackKey.ThreadTS}},
+		{name: "another message in the channel is not the thread", subs: []SlackThreadSubscription{root},
+			thread: slacklink.Thread{Channel: slackKey.Channel, TS: "1784229999.000000"}},
+		{name: "no subscriptions", thread: slacklink.Thread{Channel: slackKey.Channel, TS: slackKey.ThreadTS}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, found := FindSlackThreadSubscription(tt.subs, tt.thread)
+
+			// Assert
+			if found != tt.found || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("FindSlackThreadSubscription = %+v, %v; want %+v, %v", got, found, tt.want, tt.found)
 			}
 		})
 	}

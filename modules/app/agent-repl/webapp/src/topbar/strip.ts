@@ -44,7 +44,7 @@ import type {
   TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { renderExternalLink } from "../link.js";
-import { drawLinkBadge } from "./link-badge.js";
+import { drawLinkBadge, drawLinkMarks } from "./link-badge.js";
 import { drawLinkIcon } from "./link-icon.js";
 import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -191,6 +191,8 @@ export const LINKS_REVEAL = "links";
 export const OWNED_LINK_CLASS = "is-owned";
 /** A menu row that carries a pull request badge, which reserves its margin. */
 export const BADGED_LINK_CLASS = "has-badge";
+/** A summary-menu row's first line: its label and the marks beside it. */
+export const LINK_HEAD_CLASS = "topbar-title-link-head";
 
 /**
  * The title: the workspace's generated summary, drawn verbatim. With one shown
@@ -242,8 +244,9 @@ export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMen
  * its name. A click anywhere in a row closes the menu as it opens the link.
  * The daemon serves the owned links first; an owned row is tinted and its
  * label drawn in the summary's purple, a row whose host has a known service
- * leads with that service's icon, and a pull request's row carries its state's
- * badge in its right margin.
+ * leads with that service's icon (never tinted), the label is followed by its
+ * "owned" and "subscribed" marks, and a pull request's row carries its
+ * state's badge in its right margin.
  */
 export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext): HTMLElement {
   const list = document.createElement("div");
@@ -270,10 +273,14 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
       if (link.contains(event.target as Node)) return;
       link.click();
     });
+    // The row's first line: the label, then its marks beside it.
+    const head = document.createElement("div");
+    head.className = LINK_HEAD_CLASS;
+    head.append(link, ...drawLinkMarks(item));
     const url = document.createElement("span");
     url.className = "topbar-title-link-url";
     url.textContent = item.url;
-    row.append(link, url);
+    row.append(head, url);
     const badge = drawLinkBadge(item.badge);
     if (badge !== null) {
       row.classList.add(BADGED_LINK_CLASS);

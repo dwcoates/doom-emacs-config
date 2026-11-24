@@ -142,6 +142,20 @@ func (f *fakeIntakes) CreateSlackIntake(_ context.Context, req IntakeRequest) er
 	return nil
 }
 
+// fakeLinks records every workspace whose links were republished.
+type fakeLinks struct {
+	got  []ids.WorkspaceID
+	fail error
+}
+
+func (f *fakeLinks) RepublishLinks(_ context.Context, ws ids.WorkspaceID) error {
+	if f.fail != nil {
+		return f.fail
+	}
+	f.got = append(f.got, ws)
+	return nil
+}
+
 // briefs splices a brief as `name|key=value|...`, keys sorted, so a test
 // reads what was composed.
 func briefs(name string, values map[string]string) (string, error) {
@@ -165,6 +179,7 @@ type rig struct {
 	prompts *fakePrompts
 	holds   *fakeHolds
 	intakes *fakeIntakes
+	links   *fakeLinks
 	notices *briefprompttest.Meter
 	clock   *clocktest.Scripted
 	log     *dlog.TestLogger
@@ -188,11 +203,11 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{db: db, gns: &fakeGNS{username: "dodge", head: 40, name: "dodge"}, prompts: &fakePrompts{}, holds: &fakeHolds{}, intakes: &fakeIntakes{}, notices: &briefprompttest.Meter{},
+	r := &rig{db: db, gns: &fakeGNS{username: "dodge", head: 40, name: "dodge"}, prompts: &fakePrompts{}, holds: &fakeHolds{}, intakes: &fakeIntakes{}, links: &fakeLinks{}, notices: &briefprompttest.Meter{},
 		clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: Workspace{ID: record.ID, Name: "follower"}, repo: string(record.Repo), serves: true}
 	r.w, err = New(Deps{Store: db, GNS: r.gns, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
 		NewNonce: func() (string, error) { r.nonces++; return fmt.Sprintf("n%07d", r.nonces), nil },
-		Serves:   func() bool { return r.serves }, Intakes: r.intakes, Notices: r.notices, Clock: r.clock, Log: r.log})
+		Serves:   func() bool { return r.serves }, Intakes: r.intakes, Links: r.links, Notices: r.notices, Clock: r.clock, Log: r.log})
 	if err != nil {
 		t.Fatal(err)
 	}

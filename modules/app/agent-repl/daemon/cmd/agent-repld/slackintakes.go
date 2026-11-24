@@ -50,6 +50,19 @@ func (f *verbsForwarder) createIntakeVia(ctx context.Context, spec workspace.Int
 	return verbs.CreateIntake(ctx, spec)
 }
 
+// slackLinks republishes a workspace's links for the Slack watcher
+// (slackwatch.Deps.Links) through the late-bound workspace verbs.
+type slackLinks struct{ verbs *verbsForwarder }
+
+// RepublishLinks republishes WS's links (workspace.Verbs.RepublishLinks).
+func (l slackLinks) RepublishLinks(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := l.verbs.bound("a Slack-thread subscription's links republish")
+	if err != nil {
+		return err
+	}
+	return verbs.RepublishLinks(ctx, ws)
+}
+
 // slackNonce mints a Slack post's nonce: 16 random hex digits, so two
 // posts of one subscription never share one (slackwatch.Deps.NewNonce).
 func slackNonce() (string, error) {

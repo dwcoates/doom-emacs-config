@@ -2,15 +2,19 @@ package slackwatch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/gnsclient"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
 )
@@ -781,5 +785,84 @@ func TestTheDigestSubmitsThroughTheComposer(t *testing.T) {
 	}
 	if strings.Contains(source, "prompts.Submit(") || strings.Contains(source, ".MintKey(\"") {
 		t.Error("digest.go composes or submits a brief prompt by hand")
+	}
+}
+
+func TestSubscriptionChangesRepublishTheWorkspacesLinks(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(t *testing.T, r *rig)
+		want int
+	}{
+		{name: "a fresh subscription", act: func(t *testing.T, r *rig) { r.subscribe(t, wsm.SlackThreadModeRespond) }, want: 1},
+		{name: "a held subscription's mode change", act: func(t *testing.T, r *rig) {
+			r.subscribe(t, wsm.SlackThreadModeRespond)
+			r.subscribe(t, wsm.SlackThreadModeInteract)
+		}, want: 1},
+		{name: "an unsubscribe that ends one", act: func(t *testing.T, r *rig) {
+			r.subscribe(t, wsm.SlackThreadModeRespond)
+			if _, _, err := r.w.Unsubscribe(context.Background(), r.ws, threadURL); err != nil {
+				t.Fatal(err)
+			}
+		}, want: 2},
+		{name: "an unsubscribe that holds none", act: func(t *testing.T, r *rig) {
+			if _, _, err := r.w.Unsubscribe(context.Background(), r.ws, threadURL); err != nil {
+				t.Fatal(err)
+			}
+		}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+
+			// Act
+			tt.act(t, r)
+
+			// Assert
+			want := slices.Repeat([]ids.WorkspaceID{r.ws.ID}, tt.want)
+			if !slices.Equal(r.links.got, want) {
+				t.Fatalf("republished %v, want %v", r.links.got, want)
+			}
+		})
+	}
+}
+
+func TestAFailedLinksRepublishFailsTheVerbAndIsRecorded(t *testing.T) {
+	tests := []struct {
+		name string
+		verb string
+		act  func(r *rig) error
+	}{
+		{name: "subscribe", verb: "subscribe", act: func(r *rig) error {
+			_, _, err := r.w.Subscribe(context.Background(), r.ws, threadURL, wsm.SlackThreadModeRespond, wsm.SlackThreadOriginRequested)
+			return err
+		}},
+		{name: "unsubscribe", verb: "unsubscribe", act: func(r *rig) error {
+			_, _, err := r.w.Unsubscribe(context.Background(), r.ws, threadURL)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			if tt.verb == "unsubscribe" {
+				r.subscribe(t, wsm.SlackThreadModeRespond)
+			}
+			r.links.fail = errBoom
+
+			// Act
+			err := tt.act(r)
+
+			// Assert
+			if !errors.Is(err, errBoom) {
+				t.Fatalf("%s = %v; want the republish's failure", tt.verb, err)
+			}
+			rec := r.record(t, dlog.LevelError, opVerb, "could not republish the workspace's links after its Slack-thread subscription changed")
+			if rec.Context["subscriber"] != string(r.ws.ID) || rec.Context["thread"] != threadKey.String() || rec.Context["verb"] != tt.verb || rec.Context["cause"] != errBoom.Error() {
+				t.Fatalf("record context = %+v", rec.Context)
+			}
+		})
 	}
 }

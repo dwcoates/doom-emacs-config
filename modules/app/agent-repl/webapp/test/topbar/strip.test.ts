@@ -27,10 +27,11 @@ import {
   drawTopbarTitle,
   drawTopbarWorkspaceName,
   BADGED_LINK_CLASS,
+  LINK_HEAD_CLASS,
   OWNED_LINK_CLASS,
 } from "../../src/topbar/strip.js";
 import { drawLinkIcon } from "../../src/topbar/link-icon.js";
-import { LINK_BADGE_CLASS } from "../../src/topbar/link-badge.js";
+import { LINK_BADGE_CLASS, LINK_MARK_CLASS } from "../../src/topbar/link-badge.js";
 import styles from "../../src/styles.css?raw";
 import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
@@ -458,9 +459,11 @@ describe("drawTopbarTitle with several shown links", () => {
     const { host, title } = drawn();
     click(title);
     const rows = [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
-    expect(rows.map((row) => [...row.children].map((el) => [el.className, el.textContent]))).toEqual([
-      [["external-link", "The pull request"], ["topbar-title-link-url", PR]],
-      [["external-link", "The design doc"], ["topbar-title-link-url", DOC]],
+    expect(
+      rows.map((row) => [...row.children].map((el) => [el.className, [...el.children].map((c) => c.className), el.textContent])),
+    ).toEqual([
+      [[LINK_HEAD_CLASS, ["external-link"], "The pull request"], ["topbar-title-link-url", [], PR]],
+      [[LINK_HEAD_CLASS, ["external-link"], "The design doc"], ["topbar-title-link-url", [], DOC]],
     ]);
   });
 
@@ -575,19 +578,35 @@ describe("drawTopbarTitle with several shown links", () => {
   });
 });
 
+/** One summary-menu row to draw, as the daemon serves it. */
+type MenuItem = {
+  label: string;
+  url: string;
+  owned?: boolean;
+  subscribed?: boolean;
+  icon?: TopbarTitleLinkIcon;
+  badge?: { state: { case: "open" | "draft" | "merged" | "closed"; value: object } };
+};
+
+/**
+ * Draws a heading whose summary drops a menu of ITEMS, opens the menu, and
+ * answers its rows in the order drawn. CTX is the app context the strip opens
+ * links through.
+ */
+function rowsOf(items: MenuItem[], ctx?: AppContext): HTMLElement[] {
+  const { host, tc } = topbarContext(ctx);
+  const heading = drawTopbarHeading(
+    create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
+    workspaceName("w"),
+    tc,
+  );
+  host.append(heading);
+  bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
+  click(heading.querySelector<HTMLElement>(".topbar-title")!);
+  return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+}
+
 describe("a summary menu row's owned tint and service icon", () => {
-  const rowsOf = (items: { label: string; url: string; owned?: boolean; icon?: TopbarTitleLinkIcon }[]) => {
-    const { host, tc } = topbarContext();
-    const heading = drawTopbarHeading(
-      create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
-      workspaceName("w"),
-      tc,
-    );
-    host.append(heading);
-    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
-    click(heading.querySelector<HTMLElement>(".topbar-title")!);
-    return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
-  };
 
   it("marks owned rows and leaves reference rows unmarked", () => {
     const rows = rowsOf([
@@ -624,19 +643,6 @@ describe("a summary menu row's owned tint and service icon", () => {
 });
 
 describe("a summary menu row's pull request badge and owned label", () => {
-  type Item = { label: string; url: string; owned?: boolean; badge?: { state: { case: "open" | "draft" | "merged" | "closed"; value: object } } };
-  const rowsOf = (items: Item[]) => {
-    const { host, tc } = topbarContext();
-    const heading = drawTopbarHeading(
-      create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
-      workspaceName("w"),
-      tc,
-    );
-    host.append(heading);
-    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
-    click(heading.querySelector<HTMLElement>(".topbar-title")!);
-    return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
-  };
   const PR = "https://github.com/o/r/pull/7";
 
   it("draws a pull request's badge after its label and url, and reserves the row's margin", () => {
@@ -698,6 +704,65 @@ describe("a menu row's second line", () => {
     try {
       const values = SECOND_LINES.map((cls) => cascadedValueIn("topbar-reveal", cls, property));
       expect(new Set(values).size).toBe(1);
+    } finally {
+      teardown();
+    }
+  });
+});
+
+describe("a summary menu row's owned and subscribed marks and its untinted icon", () => {
+  const marksOf = (row: HTMLElement) =>
+    [...row.querySelectorAll<HTMLElement>(`.${LINK_HEAD_CLASS} > .${LINK_MARK_CLASS}`)].map((el) => el.dataset.mark);
+
+  it.each([
+    [{ owned: true, subscribed: true }, ["owned", "subscribed"]],
+    [{ owned: true, subscribed: false }, ["owned"]],
+    [{ owned: false, subscribed: true }, ["subscribed"]],
+    [{ owned: false, subscribed: false }, []],
+  ])("draws the marks of %o beside the label", (flags, want) => {
+    // Act
+    const [row] = rowsOf([{ label: "L", url: "https://a.example/1", ...flags }]);
+    // Assert
+    expect(marksOf(row!)).toEqual(want);
+  });
+
+  it("opens the row's link when a mark is clicked", async () => {
+    // Arrange
+    const { ctx, first } = recordingContext();
+    const [row] = rowsOf([{ label: "A", url: "https://a.example/1", subscribed: true }], ctx);
+    // Act
+    click(row!.querySelector<HTMLElement>(`.${LINK_MARK_CLASS}`)!);
+    // Assert
+    await first;
+  });
+
+  it.each([
+    ["owned", "--fg"],
+    ["subscribed", "--ok"],
+  ])("draws the %s mark's text and border in %s", (mark, token) => {
+    const css = withoutBlockComments(styles);
+    const rule = css.match(new RegExp(`\\.topbar-title-link-mark\\[data-mark="${mark}"\\]\\s*\\{([^}]*)\\}`));
+    const base = css.match(/\.topbar-title-link-mark\s*\{([^}]*)\}/);
+    expect([rule?.[1].match(new RegExp(`color:\\s*var\\(${token}\\)`)) !== null, base?.[1].includes("border-color: currentColor")]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("draws an owned row's icon in the foreground, not the label's purple", () => {
+    const teardown = installStylesheet();
+    try {
+      // Act
+      const [owned, reference] = rowsOf([
+        { label: "Mine", url: "https://github.com/o/r/pull/1", owned: true, icon: TopbarTitleLinkIcon.GITHUB },
+        { label: "Theirs", url: "https://github.com/o/r/pull/2", icon: TopbarTitleLinkIcon.GITHUB },
+      ]);
+      // Assert
+      const iconColor = (row: HTMLElement) => cascadedValue(row.querySelector("svg")!, "color");
+      expect([iconColor(owned!) === iconColor(reference!), iconColor(owned!) === cascadedValue(owned!.querySelector("a")!, "color")]).toEqual([
+        true,
+        false,
+      ]);
     } finally {
       teardown();
     }
