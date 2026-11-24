@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/logsite"
@@ -341,6 +342,8 @@ func (m *queuedMerge) fields(fields dlog.Context) dlog.Context {
 func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat time.Time, reason standDownReason, merge *queuedMerge) (withheldOutcome, CycleOutcome) {
 	op := reason.op
 	fields := merge.fields(dlog.Context{"workspace": string(ws), "since": beat})
+	// THE HOLD IS THE LAST ATTEMPT'S: each attempt states its own afresh.
+	c.deps.Why.ClearHold(ws)
 	if err := ctx.Err(); err != nil {
 		c.log.Info(op, "the daemon is leaving; the stand-down is not taken", dlog.WithCause(fields, err))
 		return withheldPending, CycleOutcome{}
@@ -435,6 +438,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	case gateBusy, gateStarting, gateReviving:
 		log.Info(op, "the session is busy; its stand-down waits for it to fall free",
 			dlog.Merge(fields, dlog.Context{"gate": gate.String()}))
+		c.deps.Why.SetHold(ws, sessionwhy.HoldDeferredBusy)
 		return withheldPending, CycleOutcome{}
 	default:
 		log.Error(op, "the stand-down gate answered a value this stand-down cannot read; it is dropped",

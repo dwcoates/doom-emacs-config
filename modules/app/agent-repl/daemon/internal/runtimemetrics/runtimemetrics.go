@@ -34,21 +34,22 @@ const Operation = "daemon.metrics"
 type Surface struct {
 	// root is the metrics root the surface advertises under, which the merge
 	// queue hands its test runs so they push their timings to the same store.
-	root       string
-	srv        *metrics.Server
-	log        dlog.Logger
-	version    *deployedVersion
-	latencies  *latencies
-	spend      *vendorSpend
-	restarts   *restarts
-	rpcs       *prometheus.HistogramVec
-	records    *prometheus.CounterVec
-	merges     merges
-	cache      cacheTelemetry
-	shimLife   shimLifeTelemetry
-	quiet      quietTelemetry
-	prompts    promptTelemetry
-	visibility visibilityTelemetry
+	root           string
+	srv            *metrics.Server
+	log            dlog.Logger
+	version        *deployedVersion
+	latencies      *latencies
+	spend          *vendorSpend
+	restarts       *restarts
+	rpcs           *prometheus.HistogramVec
+	records        *prometheus.CounterVec
+	merges         merges
+	cache          cacheTelemetry
+	shimLife       shimLifeTelemetry
+	quiet          quietTelemetry
+	prompts        promptTelemetry
+	visibility     visibilityTelemetry
+	idleBeforePark *prometheus.HistogramVec
 	// processes is the registered process collector, whose latest scrape the
 	// rail's memory popups read (Latest); nil until RegisterProcesses.
 	processes atomic.Pointer[procmetrics.Collector]
@@ -80,11 +81,12 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 	quiet := newQuietTelemetry()
 	prompts := newPromptTelemetry()
 	visibility := newVisibilityTelemetry()
+	idleBeforePark := newIdleBeforePark()
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
 	}, version, lat, spend, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.remediations, mrg.remediationGates, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.heads, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, mrg.mediatorTurnTokens, mrg.mediatorCompactions, mrg.mediatorRuns, cache.lateness, cache.lapses, cache.coldIdle, cache.runBeats, cache.runTokens, life.starts, life.standDowns, life.gateAnswers,
 		quiet.quiet, quiet.freezes, quiet.thaws, quiet.skipped, prompts.submitted,
-		visibility.visible, visibility.changes, visibility.read)
+		visibility.visible, visibility.changes, visibility.read, idleBeforePark)
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)
 	}
@@ -92,7 +94,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
 	})
-	return &Surface{root: root, srv: srv, log: log, version: version, latencies: lat, spend: spend, restarts: rst, rpcs: rpcs, records: records, merges: mrg, cache: cache, shimLife: life, quiet: quiet, prompts: prompts, visibility: visibility,
+	return &Surface{root: root, srv: srv, log: log, version: version, latencies: lat, spend: spend, restarts: rst, rpcs: rpcs, records: records, merges: mrg, cache: cache, shimLife: life, quiet: quiet, prompts: prompts, visibility: visibility, idleBeforePark: idleBeforePark,
 		emacs: procmetrics.NewEmacsProcess(log)}, nil
 }
 

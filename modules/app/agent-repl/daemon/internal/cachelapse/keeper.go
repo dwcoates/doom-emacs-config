@@ -81,6 +81,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -180,6 +181,10 @@ type StandDowns interface {
 // Deps are the Keeper's collaborators. Every one is REQUIRED.
 type Deps struct {
 	DB DB
+	// Why mirrors each session's stand-down owner and armed idle park, for
+	// the sessions-up gauge (agentrepl_sessions_up). It only measures: nil
+	// mirrors nothing.
+	Why *sessionwhy.Table
 	// Shim answers the cadence of the shim serving WS, false when this daemon
 	// serves no session for it.
 	Shim func(ws ids.WorkspaceID) (Keepalives, bool)
@@ -851,6 +856,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.owners, ws)
 	delete(k.idleDue, ws)
 	delete(k.early, ws)
+	k.deps.Why.Forget(ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace

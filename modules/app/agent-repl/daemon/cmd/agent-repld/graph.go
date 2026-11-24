@@ -90,6 +90,7 @@ import (
 	"agent-repld/internal/server"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimidentity"
 	"agent-repld/internal/shimlife"
@@ -587,6 +588,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// WatchDaemon stream (owner request, 2026-09-28): the set is built here,
 	// before the hook and the server, so no open can precede it.
 	loudFaults := health.NewLoudFaults(log)
+	// THE SESSIONS' FACTS the keeper and the drain mirror for the census
+	// built once the fleet exists (sessionwhy). They only measure.
+	sessionWhy := sessionwhy.NewTable()
+	var sessionsCensus sessionwhy.Census
 	// THE ROSTER IS BUILT BEFORE THE HOOK because it is one of the hook's
 	// surfaces: the network fault reaches it through the same door as the
 	// footer. It raises no fault itself, so it needs no decorated client.
@@ -954,6 +959,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
 		DB:   p.DB,
+		Why:  sessionWhy,
 		Shim: func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
 		// LATE-BOUND like its neighbours: a method value here would bind the
 		// nil fleet this keeper is built before, and the first parked beat
@@ -1182,6 +1188,21 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the session fleet: %w", err)
 	}
 	history.bind(fleet)
+	// WHY EACH SESSION IS UP is read from one census: the fleet's live
+	// sessions and what runs in them, with the keeper's and the drain's facts
+	// (agentrepl_sessions_up).
+	sessionsCensus = sessionwhy.Census{
+		Live: fleet.Workspaces,
+		Work: func(ws ids.WorkspaceID) (sessionwhy.Work, bool) {
+			running, held := fleet.Running(ws)
+			return sessionwhy.Work{Turn: running.Turn != nil, Detached: !running.LiveWork.Empty()}, held
+		},
+		Table: sessionWhy,
+		Now:   clock.System{}.Now,
+	}
+	if err := p.Metrics.RegisterSessions(sessionsCensus); err != nil {
+		return nil, fmt.Errorf("agent-repld: %w", err)
+	}
 	// The synthesizer's digest call reaches the shim through the fleet, now that
 	// it exists.
 
@@ -1561,6 +1582,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	drainController, err = drain.New(drain.Deps{
 		DB:         p.DB,
+		Why:        sessionWhy,
+		Parks:      p.Metrics,
 		IdleCutoff: p.Opts.idleCutoff,
 		FoldDelay:  p.Opts.foldStandDownDelay,
 		// THE ROSTER'S LIVE VISIBILITY decides whether a withheld workspace is

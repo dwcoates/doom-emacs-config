@@ -28,6 +28,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -127,6 +128,13 @@ type Controller interface {
 type Deps struct {
 	// DB holds the schedule and the last-engagement facts.
 	DB wsm.DB
+	// Why mirrors the drain's last unfinished word on each session's
+	// stand-down (held back busy, kept because shown), for the sessions-up
+	// gauge (agentrepl_sessions_up). It only measures: nil mirrors nothing.
+	Why *sessionwhy.Table
+	// Parks observes how long each session it parks stood up idle
+	// (agentrepl_session_idle_before_park_seconds). Nil observes nothing.
+	Parks ParkTelemetry
 	// IdleCutoff is how long a session may go unengaged before the sweep
 	// parks it (the --idle-cutoff flag). AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS
 	// BEATS it (its name predates the one park and is kept so an existing

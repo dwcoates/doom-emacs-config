@@ -12,6 +12,8 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -607,5 +609,73 @@ func TestAWithheldStandDownWhoseQueuesCannotBeReadIsDropped(t *testing.T) {
 	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opWithheld})
 	if !ok || !strings.Contains(fmt.Sprint(rec.Context["cause"]), "database is locked") || len(h.stand.Killed()) != 0 {
 		t.Fatalf("error record = %+v, %v; want the queues' read failure and no stand-down", rec, ok)
+	}
+}
+
+func TestAWithheldStandDownIsCountedUnderItsTriggersReason(t *testing.T) {
+	tests := []struct {
+		name     string
+		withhold func(t *testing.T, h *harness) ids.WorkspaceID
+		trigger  WithheldTrigger
+		want     shimlife.StandDownReason
+	}{
+		{name: "a fold's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.collapsed(t) },
+			trigger: WithheldCollapse, want: shimlife.StandDownFold},
+		{name: "a cache lapse's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+			trigger: WithheldCacheLapse, want: shimlife.StandDownCacheLapse},
+		{name: "an ended merge's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+			trigger: WithheldMergeEnded, want: shimlife.StandDownMergeEnded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.withhold(t, h)
+
+			// Act
+			h.c.StandDownWithheld(ws, tt.trigger)
+
+			// Assert
+			killed := h.stand.Killed()
+			if len(killed) != 1 || killed[0].Life != tt.want {
+				t.Fatalf("kills = %+v, want one counted as %s", killed, tt.want)
+			}
+		})
+	}
+}
+
+func TestAWithheldStandDownStatesItsHold(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
+		want    sessionwhy.Hold
+	}{
+		{name: "a busy session is held back busy", arrange: func(_ *testing.T, h *harness, ws ids.WorkspaceID) {
+			h.freeness.SetFree(ws, false)
+		}, want: sessionwhy.HoldDeferredBusy},
+		{name: "a workspace shown again is kept because shown", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if err := h.db.SetHidden(context.Background(), ws, false, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+		}, want: sessionwhy.HoldWithheldShown},
+		{name: "a session stood down holds nothing", arrange: func(*testing.T, *harness, ids.WorkspaceID) {}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			why := sessionwhy.NewTable()
+			h := newHarness(t, func(d *Deps) { d.Why = why })
+			ws := h.hidden(t)
+			why.SetHold(ws, sessionwhy.HoldDeferredBusy)
+			tt.arrange(t, h, ws)
+
+			// Act
+			h.c.StandDownWithheld(ws, WithheldCacheLapse)
+
+			// Assert
+			if got := why.Facts(ws).Hold; got != tt.want {
+				t.Fatalf("hold = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

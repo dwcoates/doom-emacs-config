@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -431,6 +432,8 @@ func (f *fakeStandDowns) StandDownWithheld(ws ids.WorkspaceID, trigger drain.Wit
 
 type harness struct {
 	keeper *Keeper
+	// why is the sessions' facts table the keeper mirrors its owners into.
+	why    *sessionwhy.Table
 	db     *fakeDB
 	shim   *fakeShim
 	// shims, when set, is the shim serving each workspace; a workspace absent
@@ -553,9 +556,11 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		log:        dlog.NewTestSurfaces(),
 		telemetry:  &fakeTelemetry{},
 		faults:     &fakeFaults{},
+		why:        sessionwhy.NewTable(),
 	}
 	keeper, err := New(Deps{
-		DB: h.db,
+		DB:  h.db,
+		Why: h.why,
 		Shim: func(ws ids.WorkspaceID) (Keepalives, bool) {
 			if h.shims != nil {
 				shim, ok := h.shims[ws]

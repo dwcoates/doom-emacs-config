@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/logsite"
@@ -167,13 +168,28 @@ func (c *controller) kick(ws ids.WorkspaceID, st *withheldState) {
 	})
 }
 
+// withheldLife is the shim lifecycle reason a withheld stand-down for
+// TRIGGER is counted under.
+func withheldLife(trigger WithheldTrigger) shimlife.StandDownReason {
+	switch trigger {
+	case WithheldCollapse:
+		return shimlife.StandDownFold
+	case WithheldCacheLapse:
+		return shimlife.StandDownCacheLapse
+	case WithheldMergeEnded:
+		return shimlife.StandDownMergeEnded
+	default:
+		panic(fmt.Sprintf("drain: a withheld stand-down names no trigger (%s)", trigger))
+	}
+}
+
 // withheldReason is a withheld workspace's stand-down reason for TRIGGER.
 func withheldReason(trigger WithheldTrigger) standDownReason {
 	return standDownReason{
 		op:      opWithheld,
 		detail:  "hidden, collapsed or closed by the user; the transcript was left as it stood",
 		done:    logsite.Msg("stood a withheld workspace's session down"),
-		life:    shimlife.StandDownCacheLapse,
+		life:    withheldLife(trigger),
 		trigger: trigger.String(),
 		remote:  remoteSpares,
 	}
@@ -182,6 +198,8 @@ func withheldReason(trigger WithheldTrigger) standDownReason {
 // standDownWithheld is one attempt.
 func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, trigger WithheldTrigger) withheldOutcome {
 	fields := dlog.Context{"workspace": string(ws), "trigger": trigger.String()}
+	// THE HOLD IS THE LAST ATTEMPT'S: each attempt states its own afresh.
+	c.deps.Why.ClearHold(ws)
 	if err := ctx.Err(); err != nil {
 		c.log.Info(opWithheld, "the daemon is leaving; a withheld workspace's stand-down is not taken", dlog.WithCause(fields, err))
 		return withheldPending
@@ -233,6 +251,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, 
 	fields = dlog.Merge(fields, dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed})
 	if visibility.Runs && !record.Closed {
 		log.Info(opWithheld, "the workspace was shown or reopened before its session was stood down; it keeps running", fields)
+		c.deps.Why.SetHold(ws, sessionwhy.HoldWithheldShown)
 		return withheldSettled
 	}
 	session, found, err := c.deps.DB.Session(ctx, ws)
@@ -252,6 +271,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, 
 	case gateBusy, gateStarting, gateReviving:
 		log.Info(opWithheld, "a withheld workspace's session is busy; its stand-down waits for the turn to end",
 			dlog.Merge(fields, dlog.Context{"gate": gate.String()}))
+		c.deps.Why.SetHold(ws, sessionwhy.HoldDeferredBusy)
 		return withheldPending
 	default:
 		log.Error(opWithheld, "the stand-down gate answered a value this stand-down cannot read; it is dropped",

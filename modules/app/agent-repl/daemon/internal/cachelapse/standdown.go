@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/wsm"
 )
 
@@ -56,14 +57,14 @@ const (
 
 // The stand-down owners, and the reasons a session is left up.
 const (
-	ownerVisit = "settings_visit"
-	ownerCycle = "keepalive_cycle"
-	ownerLapse = "cache_lapse"
-	ownerSweep = "idle_sweep"
-	ownerCold  = "cold_park"
+	ownerVisit = string(sessionwhy.OwnerVisit)
+	ownerCycle = string(sessionwhy.OwnerCycle)
+	ownerLapse = string(sessionwhy.OwnerLapse)
+	ownerSweep = string(sessionwhy.OwnerSweep)
+	ownerCold  = string(sessionwhy.OwnerCold)
 
-	upInView        = "in_view"
-	upRemoteControl = "remote_control"
+	upInView        = string(sessionwhy.OwnerInView)
+	upRemoteControl = string(sessionwhy.OwnerRemoteControl)
 )
 
 // noBeat is the kind of reason a workspace owes no keep-alive, which names
@@ -101,6 +102,7 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 	// ownCold and ownIdle re-arm it from the row.
 	armed, wasArmed := k.idleDue[ws]
 	delete(k.idleDue, ws)
+	k.deps.Why.ClearParkDue(ws)
 	if _, served := k.deps.Shim(ws); !served {
 		k.endStoodDownVisit(ctx, log, record)
 		k.disown(log, ws)
@@ -255,6 +257,7 @@ func (k *Keeper) parkWaits(log dlog.Logger, ws ids.WorkspaceID, since, armed tim
 		log.Info(opOwner, "the session was idle less than its grace ago; its park waits", dlog.Context{"idle_since": since, "due": due})
 	}
 	k.idleDue[ws] = due
+	k.deps.Why.SetParkDue(ws, due)
 	return true
 }
 
@@ -267,6 +270,7 @@ func (k *Keeper) idleParksDue(ctx context.Context) {
 			continue
 		}
 		delete(k.idleDue, ws)
+		k.deps.Why.ClearParkDue(ws)
 		k.schedule(ctx, ws, "its idle park came due")
 	}
 }
@@ -284,6 +288,7 @@ func (k *Keeper) setStanding(log dlog.Logger, ws ids.WorkspaceID, next standing,
 		return
 	}
 	k.owners[ws] = next
+	k.deps.Why.SetOwner(ws, sessionwhy.Owner(next.owner))
 	if next.up {
 		log.Info(opOwner, "the session is left up, owned by no stand-down", dlog.Merge(fields, dlog.Context{"left_up": next.owner}))
 		return
@@ -293,6 +298,7 @@ func (k *Keeper) setStanding(log dlog.Logger, ws ids.WorkspaceID, next standing,
 
 // disown drops WS's stand-down owner: no session of it is live here.
 func (k *Keeper) disown(log dlog.Logger, ws ids.WorkspaceID) {
+	k.deps.Why.Forget(ws)
 	was, had := k.owners[ws]
 	if !had {
 		return

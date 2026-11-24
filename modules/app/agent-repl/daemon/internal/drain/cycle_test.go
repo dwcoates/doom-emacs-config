@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
@@ -959,5 +960,27 @@ func TestAMergeQueuedParkLeavesTheOrdinaryParkARestoreReads(t *testing.T) {
 	session, found, err := h.db.Session(context.Background(), ws)
 	if err != nil || !found || !session.Parked() {
 		t.Fatalf("session = %+v (found %v, err %v), want the ordinary park", session, found, err)
+	}
+}
+
+func TestABusyCycleStandDownHoldsDeferredBusyUntilItIsTaken(t *testing.T) {
+	// Arrange
+	why := sessionwhy.NewTable()
+	h := newHarness(t, func(d *Deps) { d.Why = why })
+	ws := h.workspace(t, instant)
+	h.freeness.SetFree(ws, false)
+
+	// Act: held back busy, then taken once the session falls free.
+	h.c.CycleDown(ws, beatAfter)
+	held := why.Facts(ws).Hold
+	h.freeness.SetFree(ws, true)
+	h.c.RetryWithheld(ws)
+
+	// Assert
+	if held != sessionwhy.HoldDeferredBusy {
+		t.Fatalf("hold while busy = %q, want %q", held, sessionwhy.HoldDeferredBusy)
+	}
+	if got := why.Facts(ws).Hold; got != "" {
+		t.Fatalf("hold after the park = %q, want none", got)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -1989,5 +1992,116 @@ func TestNewRefusesWithoutARemoteControlGate(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "remote-control gate") {
 		t.Fatalf("New = %v, want the missing remote-control gate refused", err)
+	}
+}
+
+// fakeParks records every idle-before-park observation.
+type fakeParks struct {
+	mu   sync.Mutex
+	seen []parkObservation
+}
+
+type parkObservation struct {
+	reason shimlife.StandDownReason
+	idle   time.Duration
+}
+
+func (p *fakeParks) ObserveIdleBeforePark(reason shimlife.StandDownReason, idle time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.seen = append(p.seen, parkObservation{reason: reason, idle: idle})
+}
+
+func (p *fakeParks) all() []parkObservation {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]parkObservation(nil), p.seen...)
+}
+
+func TestAParkObservesHowLongTheSessionStoodUpIdle(t *testing.T) {
+	tests := []struct {
+		name string
+		// turnEnded is the session's last turn's end, zero for none.
+		turnEnded time.Time
+		want      time.Duration
+	}{
+		{name: "from its last turn's end, after the session's start", turnEnded: instant.Add(time.Minute), want: 29 * time.Minute},
+		{name: "from the session's start, when its work came before it", turnEnded: instant.Add(-time.Hour), want: 30 * time.Minute},
+		{name: "from the session's start, when it never worked", want: 30 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			parks := &fakeParks{}
+			h := newHarness(t, func(d *Deps) { d.Parks = parks })
+			ws := h.workspace(t, instant)
+			if !tt.turnEnded.IsZero() {
+				h.turnClosed(t, ws, tt.turnEnded)
+			}
+			h.clock.Set(instant.Add(30 * time.Minute))
+
+			// Act
+			h.c.CycleDown(ws, beatAfter)
+
+			// Assert
+			got := parks.all()
+			if len(got) != 1 || got[0].reason != shimlife.StandDownKeepaliveCycle || got[0].idle != tt.want {
+				t.Fatalf("observations = %+v, want one keepalive_cycle park idle %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestADeferredParkObservesNothingAndHoldsDeferredBusy(t *testing.T) {
+	// Arrange
+	parks := &fakeParks{}
+	why := sessionwhy.NewTable()
+	h := newHarness(t, func(d *Deps) { d.Parks, d.Why = parks, why })
+	ws := h.workspace(t, instant)
+	h.delivering = func(ids.WorkspaceID) bool { return true }
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if got := parks.all(); len(got) != 0 {
+		t.Fatalf("observations = %+v, want none for a deferred park", got)
+	}
+	if got := why.Facts(ws).Hold; got != sessionwhy.HoldDeferredBusy {
+		t.Fatalf("hold = %q, want %q", got, sessionwhy.HoldDeferredBusy)
+	}
+}
+
+// parkedSessionFailingDB fails the session read once the session is parked:
+// the read the idle-before-park observation makes after the park.
+type parkedSessionFailingDB struct{ wsm.DB }
+
+func (d parkedSessionFailingDB) Session(ctx context.Context, ws ids.WorkspaceID) (wsm.Session, bool, error) {
+	session, found, err := d.DB.Session(ctx, ws)
+	if err == nil && found && session.Terminal != nil {
+		return wsm.Session{}, false, errFake
+	}
+	return session, found, err
+}
+
+func TestAParkWhoseSessionCannotBeReadObservesNothingAndSaysSo(t *testing.T) {
+	// Arrange
+	parks := &fakeParks{}
+	h := newHarness(t, func(d *Deps) { d.Parks = parks; d.DB = parkedSessionFailingDB{d.DB} })
+	ws := h.workspace(t, instant)
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
+		t.Fatalf("terminal = %+v, want the park standing", term)
+	}
+	if got := parks.all(); len(got) != 0 {
+		t.Fatalf("observations = %+v, want none", got)
+	}
+	record := recordWith(t, h, opCycle, "could not read the parked session's start; its idle time before the park is not observed")
+	if record.Level != "error" || record.Context["workspace"] != string(ws) {
+		t.Fatalf("record = %+v, want an ERROR naming the workspace", record)
 	}
 }

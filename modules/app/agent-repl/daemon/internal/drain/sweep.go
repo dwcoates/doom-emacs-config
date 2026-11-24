@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
@@ -317,6 +318,63 @@ func (c *controller) idleReason() standDownReason {
 // the shim is gone, which its own no-shim path starts again
 // (UpdateRemoteControlMode): never between the decision and the act.
 func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) parkOutcome {
+	outcome := c.parkOnce(ctx, log, ws, fields, why)
+	switch outcome {
+	case parkDeferred:
+		c.deps.Why.SetHold(ws, sessionwhy.HoldDeferredBusy)
+	case parkDone:
+		c.deps.Why.ClearHold(ws)
+		c.observeIdleBeforePark(ctx, log, ws, fields, why)
+	}
+	return outcome
+}
+
+// ParkTelemetry is where the drain observes how long each session it parked
+// stood up idle (runtimemetrics.Surface). It is one histogram update and
+// never blocks.
+type ParkTelemetry interface {
+	// ObserveIdleBeforePark records one park for REASON of a session that
+	// stood up IDLE since its last real work.
+	ObserveIdleBeforePark(reason shimlife.StandDownReason, idle time.Duration)
+}
+
+// observeIdleBeforePark records how long WS's session, just parked for WHY,
+// stood up idle: from the later of its last turn's end and its own start
+// (a session restored after its work idles only from its start) to now. A
+// read that fails is recorded at ERROR and observes nothing; the park stands.
+func (c *controller) observeIdleBeforePark(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) {
+	if c.deps.Parks == nil {
+		return
+	}
+	record, err := c.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		log.Error(why.op, "could not read the parked workspace's last turn; its idle time before the park is not observed", dlog.WithCause(fields, err))
+		return
+	}
+	session, found, err := c.deps.DB.Session(ctx, ws)
+	if err != nil {
+		log.Error(why.op, "could not read the parked session's start; its idle time before the park is not observed", dlog.WithCause(fields, err))
+		return
+	}
+	since := time.Time{}
+	if found {
+		since = session.StartedAt
+	}
+	if ended := record.LastTurnEndedAt; ended != nil && ended.After(since) {
+		since = *ended
+	}
+	if since.IsZero() {
+		log.Error(why.op, "the parked session has neither a start nor a turn end on record; its idle time before the park is not observed",
+			dlog.Merge(fields, dlog.Context{"invariant_violation": "a parked session has a start on record"}))
+		return
+	}
+	idle := c.deps.Clock.Now().Sub(since)
+	log.Debug(why.op, "observed how long the parked session stood up idle", dlog.Merge(fields, dlog.Context{"idle_since": since, "idle": idle.String()}))
+	c.deps.Parks.ObserveIdleBeforePark(why.life, idle)
+}
+
+// parkOnce is park's one attempt, before its hold and its observation.
+func (c *controller) parkOnce(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) parkOutcome {
 	if why.remote != remoteSpares && why.remote != remoteParks {
 		panic(fmt.Sprintf("drain: the %s stand-down names no remote-control policy (%s)", why.op, why.remote))
 	}
