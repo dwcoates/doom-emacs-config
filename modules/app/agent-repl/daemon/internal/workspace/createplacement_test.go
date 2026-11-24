@@ -103,7 +103,7 @@ func TestACreateWithoutAPlacementStillFilesItself(t *testing.T) {
 		placement *CreatePlacement
 		want      bool
 
-		oneShot   bool
+		oneShot bool
 	}{
 		{name: "no placement", placement: nil, want: true},
 		{name: "a placement", placement: &CreatePlacement{Subsection: "x"}, want: false},

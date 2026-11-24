@@ -14,6 +14,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/wsm"
 
 	"connectrpc.com/connect"
 )
@@ -338,9 +339,9 @@ func unsectionedMarks(r *frontendv1.RosterPush) (ids []string, oneShot map[strin
 
 func TestAOneShotIsDrawnWhereItIsPlacedAndKeepsItsMark(t *testing.T) {
 	t.Parallel()
-	// Arrange: a one-shot beside a registered workspace, which draws among
-	// the unsectioned rows like any other workspace (owner request,
-	// 2026-11-03).
+	// Arrange: a one-shot the user dispatched beside a registered workspace,
+	// which the daemon files into its repository's One-shots subsection
+	// (owner request, 2026-11-24).
 	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
@@ -359,33 +360,34 @@ func TestAOneShotIsDrawnWhereItIsPlacedAndKeepsItsMark(t *testing.T) {
 		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
 	}
 	oneShot := resp.Msg.GetSuccess().GetWorkspace()
-	var before []string
-	awaitRoster(t, d, roster, "the marked one-shot beside a, in no subsection", func(r *frontendv1.RosterPush) bool {
-		ids, marks := unsectionedMarks(r)
-		before = ids
-		return marks[oneShot.GetId()] && slices.Contains(ids, a.GetId()) &&
-			len(rosterwalk.Subsections(r.GetWorkspaces().GetRepository().GetSections()[0])) == 0
+	awaitRoster(t, d, roster, "the marked one-shot alone in the One-shots subsection, a in none", func(r *frontendv1.RosterPush) bool {
+		ids, _ := unsectionedMarks(r)
+		sections := r.GetWorkspaces().GetRepository().GetSections()
+		if len(sections) == 0 {
+			return false
+		}
+		subs := rosterwalk.Subsections(sections[0])
+		if len(subs) != 1 || subs[0].GetHeader().GetLabel().GetText() != wsm.OneShotsSubsectionName {
+			return false
+		}
+		rows := subs[0].GetOpenRows().GetRows()
+		return len(rows) == 1 && rows[0].GetRow().GetWorkspace().GetWorkspace().GetId() == oneShot.GetId() &&
+			rows[0].GetRow().GetOneShot() != nil && slices.Contains(ids, a.GetId()) && !slices.Contains(ids, oneShot.GetId())
 	})
-	// The one-shot is moved to the other side of a, whichever side it was
-	// drawn on.
-	at := &agentreplv1.ArrangePlaceWorkspace{
+
+	// Act: the one-shot is dragged out, to the end of the unsectioned rows.
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
 		Workspace: oneShot,
 		Into:      &agentreplv1.ArrangePlaceWorkspace_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}},
 		At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
-	}
-	wantAbove := slices.Index(before, oneShot.GetId()) > slices.Index(before, a.GetId())
-	if wantAbove {
-		at.At = &agentreplv1.ArrangePlaceWorkspace_Before{Before: a}
-	}
+	}}})
 
-	// Act
-	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{PlaceWorkspace: at}})
-
-	// Assert: the one-shot stands where it was placed, still marked.
-	awaitRoster(t, d, roster, "the placed one-shot on a's other side, still marked", func(r *frontendv1.RosterPush) bool {
+	// Assert: the one-shot stands where it was placed, still marked, and the
+	// emptied One-shots subsection is gone.
+	awaitRoster(t, d, roster, "the placed one-shot last, still marked, and no subsection", func(r *frontendv1.RosterPush) bool {
 		ids, marks := unsectionedMarks(r)
-		above := slices.Index(ids, oneShot.GetId()) < slices.Index(ids, a.GetId())
-		return marks[oneShot.GetId()] && slices.Contains(ids, a.GetId()) && above == wantAbove
+		return marks[oneShot.GetId()] && slices.Contains(ids, a.GetId()) && ids[len(ids)-1] == oneShot.GetId() &&
+			len(rosterwalk.Subsections(r.GetWorkspaces().GetRepository().GetSections()[0])) == 0
 	})
 }
 
