@@ -90,7 +90,9 @@ func TestProductionMediationRefusesInputItCannotRead(t *testing.T) {
 	}
 }
 
-func TestDescribeProductionRefusals(t *testing.T) {
+// productionRefusals is the production mediation's refusal, with a sentence
+// for each of its arms.
+var productionRefusals = func() []describedRefusal {
 	child := &workspacev1.WorkspaceRef{Id: "c", Dir: "/w/c"}
 	site := &agentreplv1.LogSiteKey{Hex: "0123456789ab"}
 	e := &agentreplv1.UpdateProductionMediationError{}
@@ -113,8 +115,12 @@ func TestDescribeProductionRefusals(t *testing.T) {
 		{name: "child_refused", err: &agentreplv1.UpdateProductionMediationError{Cause: &agentreplv1.UpdateProductionMediationError_ChildRefused{ChildRefused: &agentreplv1.UpdateProductionMediationChildRefused{Child: 1, Detail: "the name is taken"}}},
 			want: "child 1 could not be made (the name is taken); no child of the dispatch was kept"},
 	}
-	testDescribedRefusals(t, []describedRefusal{{name: "production", cases: cases, empty: e, oneof: "cause",
+	return []describedRefusal{{name: "production", cases: cases, empty: e, oneof: "cause",
 		describe: func(m proto.Message) (string, error) {
 			return describeProductionRefusal(m.(*agentreplv1.UpdateProductionMediationError))
-		}}})
+		}}}
+}()
+
+func TestDescribeProductionRefusals(t *testing.T) {
+	testDescribedRefusals(t, productionRefusals)
 }
