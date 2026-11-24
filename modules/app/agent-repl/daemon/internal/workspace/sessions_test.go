@@ -5165,3 +5165,163 @@ func TestABringUpRecordsWhetherAKeepalivesRestoreMadeIt(t *testing.T) {
 		})
 	}
 }
+
+// TestAStopRecordsTheShimsEndOnTheSessionRecord pins the ended-shim
+// invariant's ordered half (terminalrecord.go): every stop that leaves no
+// shim behind records the session's end, except the daemon's own exit and a
+// handover, whose sessions run on past them.
+func TestAStopRecordsTheShimsEndOnTheSessionRecord(t *testing.T) {
+	cases := []struct {
+		name    string
+		reason  shimlife.StandDownReason
+		killErr error
+		kind    string
+	}{
+		{name: "a park", reason: shimlife.StandDownKeepaliveCycle, kind: wsm.TerminalParked},
+		{name: "a kill", reason: shimlife.StandDownKill, kind: "killed"},
+		{name: "a park whose kill escalated to the SIGKILL", reason: shimlife.StandDownHibernate,
+			killErr: fmt.Errorf("pgid 1 was SIGKILLed: %w: %w", shimclient.ErrSIGKILLed, context.DeadlineExceeded), kind: wsm.TerminalParked},
+		{name: "the daemon's own exit", reason: shimlife.StandDownShutdown},
+		{name: "a handover", reason: shimlife.StandDownHandover},
+		{name: "a kill whose SIGKILL could not be sent", reason: shimlife.StandDownKeepaliveCycle,
+			killErr: errors.New("shimclient: SIGKILL 1: operation not permitted")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			f.client.killErr = tc.killErr
+
+			// Act
+			err := f.fleet.Stop(shimlife.WithStandDown(context.Background(), tc.reason), ws.ID, false)
+
+			// Assert
+			if (err != nil) != (tc.killErr != nil) {
+				t.Fatalf("Stop = %v, want an error only for a failed kill", err)
+			}
+			terminal, recorded := f.db.terminals[ws.ID]
+			if tc.kind == "" {
+				if recorded {
+					t.Fatalf("terminal = %+v, want none: the session runs on", terminal)
+				}
+				return
+			}
+			if !recorded || terminal.Kind != tc.kind || !strings.HasPrefix(terminal.Detail, string(tc.reason)+": ") {
+				t.Fatalf("terminal = %+v (recorded %v), want %q naming the stand-down %s", terminal, recorded, tc.kind, tc.reason)
+			}
+		})
+	}
+}
+
+func TestAStopWhoseEndCannotBeRecordedFailsAtError(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.db.setTerminalErr = errors.New("the store is unreadable")
+
+	// Act
+	err := f.fleet.Stop(shimlife.WithStandDown(context.Background(), shimlife.StandDownIdle), ws.ID, false)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the store is unreadable") {
+		t.Fatalf("Stop = %v, want the record's failure surfaced", err)
+	}
+	if !recordedAt(f, dlog.LevelError, opBringUp, "could not record the end of the workspace's shim") {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
+// TestAShimThatIsGoneRecordsItsSessionsEnd pins the invariant's other half: a
+// shim the fleet finds gone records its session's end, a death and a
+// stand-down it asked for alike, each named in the detail.
+func TestAShimThatIsGoneRecordsItsSessionsEnd(t *testing.T) {
+	cases := []struct {
+		name      string
+		stoodDown bool
+		detail    string
+	}{
+		{name: "a shim that died", detail: "shim_died: "},
+		{name: "a shim that left after its stand-down", stoodDown: true, detail: "stood_down: "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			f.client.reaped = true
+			f.client.stoodDown = tc.stoodDown
+
+			// Act
+			f.fleet.retireReaped(ws.ID)
+
+			// Assert
+			terminal, recorded := f.db.terminals[ws.ID]
+			if !recorded || terminal.Kind != wsm.TerminalParked || !strings.HasPrefix(terminal.Detail, tc.detail) {
+				t.Fatalf("terminal = %+v (recorded %v), want a park whose detail starts %q", terminal, recorded, tc.detail)
+			}
+		})
+	}
+}
+
+func TestAStopRecordsTheDetailItsCallerStated(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	ctx := shimlife.WithStandDownDetail(shimlife.WithStandDown(context.Background(), shimlife.StandDownIdle), "parked after its idle grace")
+
+	// Act
+	if err := f.fleet.Stop(ctx, ws.ID, false); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Assert
+	if terminal := f.db.terminals[ws.ID]; terminal.Kind != wsm.TerminalParked || terminal.Detail != "parked after its idle grace" {
+		t.Fatalf("terminal = %+v, want the park with the caller's detail", terminal)
+	}
+}
+
+func TestRecordEndedUnlessHeldRecordsOnlyForAWorkspaceTheFleetDoesNotHold(t *testing.T) {
+	cases := []struct {
+		name string
+		held bool
+	}{
+		{name: "a workspace with no session held", held: false},
+		{name: "a workspace a session holds", held: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if tc.held {
+				if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+					t.Fatalf("Start: %v", err)
+				}
+			}
+
+			// Act
+			err := f.fleet.RecordEndedUnlessHeld(context.Background(), f.log.logger, ws.ID, wsm.TerminalParked, "stale: the record read running")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RecordEndedUnlessHeld: %v", err)
+			}
+			if _, recorded := f.db.terminals[ws.ID]; recorded == tc.held {
+				t.Fatalf("recorded = %v, want it recorded only when no session holds the workspace", recorded)
+			}
+		})
+	}
+}

@@ -3571,8 +3571,21 @@ A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
 daemon stopped (`bringup.OnlyWasUp`), plus every workspace with a recorded cold
 gate, whose start only raises the gate from its record and spawns nothing, so a
 gate shows the moment the daemon serves and not at the next prompt, hidden or not: the session record states
-each workspace's shim at every park and unpark, and nothing else decides.
+each workspace's shim, and nothing else decides.
 Emacs's re-announcement starts nothing.
+A HANDOVER PICKS UP WHERE THINGS WERE LEFT AND STARTS NOTHING THAT WAS NOT
+ALREADY STARTED (owner ruling, 2026-11-23, replacing the 2026-10-02 "always"):
+a running session is handed over running, its shim dialed; a parked session
+stays parked and a workspace with no session stays without one, each drawing
+its feed from the store. A record that reads running behind a free lock is a
+session whose end went unrecorded: the takeover records the end and starts
+nothing (`daemon/internal/rollout/sessionless.go`).
+EVERY PATH THAT ENDS A SHIM RECORDS ITS SESSION'S END BEFORE IT RETURNS, so a
+session record with a conversation and no terminal is a session that is
+running or was running when its daemon stopped: an ordered stop, a shim found
+gone and a death the watcher saw are each recorded as a park with the cause in
+its detail, a kill as `killed`, and only the daemon's own exit and a handover
+leave the record running (`daemon/internal/workspace/terminalrecord.go`).
 
 ## One canonical token shape, and the daemon owns every judgment taken from it
 

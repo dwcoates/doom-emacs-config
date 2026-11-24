@@ -590,7 +590,7 @@ const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
  * this bound.
  *
  * SO THIS BOUND IS FOR SILENCE, AND ONLY SILENCE — and after the live signal
- * landed it is silence of a kind the round-trip's own 3s bound already catches,
+ * landed it is silence of a kind the round-trip's own bound already catches,
  * which leaves this for the one case that has no bound of its own: a
  * `createQuery` that returned a child which then answers neither the control
  * request nor anything else, so nothing ever resolves or rejects. Every
@@ -601,7 +601,7 @@ const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
  * Sized under that daemon bound on purpose: the shim knows WHY the start failed
  * and the daemon does not, so the shim must be the one that answers first.
  */
-const INIT_TIMEOUT_MS = 45_000;
+export const INIT_TIMEOUT_MS = 45_000;
 
 /**
  * How long one control round-trip may take before the start is refused.
@@ -621,11 +621,30 @@ const INIT_TIMEOUT_MS = 45_000;
  * make it anyway: its answer IS `SessionStarted.model_catalog`, so the proof
  * costs no extra call.
  *
- * TEN TIMES THE OBSERVED HEALTHY MAX. ~300ms measured, 3s bounded: small enough
- * that a wedged child is reported in seconds rather than at the daemon's 60s,
- * wide enough that nothing healthy can reach it.
+ * SIZED FROM THE ANSWERS UNDER REAL LOAD, per the timeout rule (two to three
+ * times the healthy worst case). It was 3s, ten times an idle host's ~300ms,
+ * and under the host's ordinary load that refused healthy children. Measured
+ * 2026-11-23 over 72h of this host's shim logs (`answered_ms` of every proven
+ * start, 1,978 of them): p50 390ms, p90 1.9s, p99 10.6s, max 23.8s. At 3s,
+ * 7.9% of first starts were refused (156 of 1,979), and the retries showed the
+ * children were slow, not wedged: 71 answered at the 6s bound (p50 4.1s), 57
+ * at 12s (p50 7.4s), 26 at 24s (p50 13.1s). Every refusal killed a child
+ * seconds from answering and cold-started another, which loaded the host
+ * further. 25s is about 2.4 times the p99. A child silent past it is still
+ * reported well inside the daemon's 60s start bound, and one silent past every
+ * doubling meets {@link INIT_TIMEOUT_MS}.
  */
-const LIVE_SIGNAL_TIMEOUT_MS = 3_000;
+export const LIVE_SIGNAL_TIMEOUT_MS = 25_000;
+
+/**
+ * The liveness bound a start gives the vendor after MISSES starts in a row the
+ * bound refused: BASE doubled for each, up to CAP (the init bound). See
+ * the session's liveSignalBoundMs for why it grows.
+ */
+export function liveSignalBound(baseMs: number, capMs: number, misses: number): number {
+  const cap = Math.max(baseMs, capMs);
+  return Math.min(baseMs * 2 ** misses, cap);
+}
 
 /**
  * How many pre-`init` vendor messages a failed start names in its own record.
@@ -3176,7 +3195,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    *
    *   - THE CHILD ANSWERED NO CONTROL REQUEST EITHER. The start no longer
    *     waits for `init` — it settles on one control round-trip, whose own
-   *     3s bound is what a wedged child normally trips. Reaching THIS bound
+   *     bound (LIVE_SIGNAL_TIMEOUT_MS) is what a wedged child normally trips. Reaching THIS bound
    *     means even that round-trip neither answered nor failed, so the child
    *     is not merely quiet on its stdout: it is not serving at all.
    *   - AN UNTRUSTED WORKSPACE IS A DEGRADED ONE. It does not hang, but its
@@ -5563,9 +5582,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * seconds; each miss after it gives the next child twice as long.
    */
   function liveSignalBoundMs(): number {
-    const base = deps.liveSignalTimeoutMs ?? LIVE_SIGNAL_TIMEOUT_MS;
-    const cap = Math.max(base, deps.initTimeoutMs ?? INIT_TIMEOUT_MS);
-    return Math.min(base * 2 ** liveSignalMisses, cap);
+    return liveSignalBound(
+      deps.liveSignalTimeoutMs ?? LIVE_SIGNAL_TIMEOUT_MS,
+      deps.initTimeoutMs ?? INIT_TIMEOUT_MS,
+      liveSignalMisses,
+    );
   }
 
   async function proveLive(active: QueryLike, boundMs: number): Promise<void> {

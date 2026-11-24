@@ -104,7 +104,7 @@ func TestTheTakeoverOfAFreeLock(t *testing.T) {
 	}{
 		{name: "stands down the listening inert survivor of a shim that was not up", parked: true, listening: true, wantStood: true},
 		{name: "holds nothing for a parked workspace no shim listens for", parked: true},
-		{name: "leaves a survivor whose shim was up to its bring-up", listening: true},
+		{name: "stands down the listening inert survivor of a record that still reads running", listening: true, wantStood: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -266,7 +266,11 @@ func TestATakeoverThatCannotPromoteRecoversNoOrphan(t *testing.T) {
 	}
 }
 
-func TestTheTakeoverStartsTheSessionOfAFreeLock(t *testing.T) {
+// TestTheTakeoverStartsNoSessionForAFreeLock pins the owner's ruling of
+// 2026-11-23, which replaced the 2026-10-02 one: a free lock is no session
+// running, so the takeover starts none, and a record that still reads
+// running has its end recorded.
+func TestTheTakeoverStartsNoSessionForAFreeLock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
@@ -282,8 +286,37 @@ func TestTheTakeoverStartsTheSessionOfAFreeLock(t *testing.T) {
 	takeOver(h)
 
 	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none for a free lock", got)
+	}
+	session, _, err := h.db.Session(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if session.Terminal == nil || session.Terminal.Detail != staleDetail {
+		t.Fatalf("terminal = %+v, want the stale record's end recorded", session.Terminal)
+	}
+}
+
+func TestTheTakeoverStartsTheSessionOfAFreeLockAtAColdGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateFree
+	h.mu.Unlock()
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
+
+	// Act
+	takeOver(h)
+
+	// Assert
 	if got := h.Started(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
-		t.Fatalf("started = %v, want the session-less workspace started", got)
+		t.Fatalf("started = %v, want the workspace at its cold gate started", got)
 	}
 }
 

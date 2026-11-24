@@ -140,6 +140,9 @@ func TestATakeoversSessionStartsAreTimedAsATakeovers(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
+	// cold gate (owner ruling, 2026-11-23).
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 
 	// Act
 	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)

@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/shimclient"
@@ -83,6 +84,9 @@ func TestFleetReadHistoryOfAWorkspaceWithNoConversationIsEmpty(t *testing.T) {
 	assertEmptyHistory(t, page, err)
 	if len(f.store.asked) != 0 || len(f.supervisor.spawns) != 0 {
 		t.Fatalf("store asked %v, spawns %d; want neither", f.store.asked, len(f.supervisor.spawns))
+	}
+	if !recordedAt(f, dlog.LevelInfo, "daemon.workspace.history_book", "the workspace has no recorded book and its shim persisted none; it has no conversation yet, so its feed is empty") {
+		t.Fatalf("records = %+v, want the empty feed's reason at INFO", f.log.logger.Records())
 	}
 }
 

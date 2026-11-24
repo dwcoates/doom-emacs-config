@@ -66,6 +66,12 @@ const HealthyStandDownExit = 7 * time.Millisecond
 // (`abandonBringUp`) has no session to tear down at all.
 const DefaultKillGrace = 1250 * time.Millisecond
 
+// ErrSIGKILLed marks a graceful Kill whose caller's bound ended inside the
+// grace: the SIGKILL has gone out, so the process is ending and only its reap
+// is still owed. A caller reads it as a shim that is gone, never as one that
+// may still run (workspace.Fleet's teardown records the session's end by it).
+var ErrSIGKILLed = errors.New("the shim was SIGKILLed")
+
 // EscalationBound is the room a caller must leave AFTER the grace for the
 // SIGKILL to be delivered and its exit decode to land. SIGKILL is not
 // negotiable and the reap that follows it is the kernel handing over a wait
@@ -547,8 +553,8 @@ func (c *client) Kill(ctx context.Context, attr KillAttribution) error {
 		// collect its wait status whether or not anyone is still waiting here.
 		// The caller asked for its answer by now and gets it, named as the
 		// escalation it was rather than as a plain deadline.
-		return fmt.Errorf("shimclient: pgid %d was SIGKILLed because the kill's context ended inside the %s grace; the reap continues: %w",
-			pgid, grace, expired)
+		return fmt.Errorf("shimclient: pgid %d was SIGKILLed because the kill's context ended inside the %s grace; the reap continues: %w: %w",
+			pgid, grace, ErrSIGKILLed, expired)
 	}
 	return c.awaitReap(ctx, pgid, "the process group was SIGKILLed")
 }

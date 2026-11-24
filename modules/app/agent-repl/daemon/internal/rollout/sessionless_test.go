@@ -26,6 +26,9 @@ func TestBringUpSessionlessStartsEachPendingWorkspace(t *testing.T) {
 	h := newHarness(t)
 	first, _ := h.workspace(t)
 	second, _ := h.workspace(t)
+	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
+	// cold gate (owner ruling, 2026-11-23).
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{first, second}}
 	pending := []wsm.Workspace{sessionlessRecord(t, h, first), sessionlessRecord(t, h, second)}
 
 	// Act
@@ -45,6 +48,9 @@ func TestBringUpSessionlessRaisesTheMarkerBeforeItReturns(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
+	// cold gate (owner ruling, 2026-11-23).
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 	h.mu.Lock()
 	h.startErr[ws] = errFake
 	h.mu.Unlock()
@@ -65,6 +71,9 @@ func TestBringUpSessionlessLowersTheMarkerOnceTheStartEnds(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
+	// cold gate (owner ruling, 2026-11-23).
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 
 	// Act
 	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)
@@ -96,6 +105,9 @@ func TestBringUpSessionlessRecordsAFailedStartAtError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
+	// cold gate (owner ruling, 2026-11-23).
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 	h.mu.Lock()
 	h.startErr[ws] = errFake
 	h.mu.Unlock()
@@ -118,6 +130,7 @@ func TestBringUpSessionlessGoesThroughTheSharedBringUp(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 
 	// Act
 	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)
@@ -135,14 +148,17 @@ func TestBringUpSessionlessGoesThroughTheSharedBringUp(t *testing.T) {
 	}
 }
 
-// TestBringUpSessionlessStartsAShimThatWasUpHiddenOrNot pins the owner ruling
-// of 2026-10-28: the session record alone decides, so a hidden or collapsed
-// workspace whose shim was up comes back.
-func TestBringUpSessionlessStartsAShimThatWasUpHiddenOrNot(t *testing.T) {
+// TestBringUpSessionlessLeavesARecordThatReadsRunningHiddenOrNot pins the
+// owner's ruling of 2026-11-23, which replaced the 2026-10-02 one: what
+// reaches the session-less bring-up reads a free lock, so a record that still
+// reads running is stale, whatever the workspace's visibility. It is not
+// started, and its end is recorded.
+func TestBringUpSessionlessLeavesARecordThatReadsRunningHiddenOrNot(t *testing.T) {
 	cases := []struct {
 		name    string
 		arrange func(t *testing.T, h *harness, record wsm.Workspace)
 	}{
+		{name: "a visible workspace", arrange: func(*testing.T, *harness, wsm.Workspace) {}},
 		{name: "a hidden workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
 			if err := h.db.SetHidden(context.Background(), record.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
 				t.Fatalf("SetHidden: %v", err)
@@ -159,17 +175,47 @@ func TestBringUpSessionlessStartsAShimThatWasUpHiddenOrNot(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			ws, _ := h.workspace(t)
+			h.fleet.mu.Lock()
+			delete(h.fleet.live, ws)
+			h.fleet.mu.Unlock()
 			record := sessionlessRecord(t, h, ws)
 			tc.arrange(t, h, record)
 
 			// Act
-			h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+			left, ok := h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
 
 			// Assert
-			if got := h.Started(); len(got) != 1 || got[0] != ws {
-				t.Fatalf("started = %v, want %v", got, ws)
+			if got := h.Started(); len(got) != 0 || !ok || len(left) != 1 {
+				t.Fatalf("started = %v, left = %v, ok = %v; want nothing started and the workspace left", got, left, ok)
+			}
+			session, _, err := h.db.Session(context.Background(), ws)
+			if err != nil {
+				t.Fatalf("Session: %v", err)
+			}
+			if session.Terminal == nil || session.Terminal.Kind != wsm.TerminalParked || session.Terminal.Detail != staleDetail {
+				t.Fatalf("terminal = %+v, want the stale record's end recorded", session.Terminal)
 			}
 		})
+	}
+}
+
+func TestAStaleRecordWhoseEndCannotBeRecordedIsNotStartedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record := sessionlessRecord(t, h, ws)
+	h.fleet.terminalErr = errFake
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none", got)
+	}
+	errs := levelRecords(records(h.log, opBringUp), dlog.LevelError)
+	if len(errs) != 1 || errs[0].Context["workspace"] != string(ws) || errs[0].Context["cause"] != errFake.Error() {
+		t.Fatalf("bring-up error records = %+v, want one naming the workspace and the cause", errs)
 	}
 }
 
@@ -220,10 +266,10 @@ func TestTheTakeoverRecordsEachDecisionWithItsFacts(t *testing.T) {
 		want    dlog.Context
 	}{
 		{
-			name:    "a session nothing stood down",
+			name:    "a session record that still reads running",
 			arrange: func(*testing.T, *harness, ids.WorkspaceID) {},
-			rule:    takeoverWasUp,
-			message: "the workspace's session record says its shim was up when the last daemon stopped; the takeover starts it",
+			rule:    takeoverRecordStale,
+			message: "the session record reads running but no shim held the workspace's lock at the handover; the takeover records the session's end and does not start it",
 			want:    dlog.Context{"was_up": true, "live": true, "cold_gate": false, "hidden": false},
 		},
 		{
@@ -238,14 +284,14 @@ func TestTheTakeoverRecordsEachDecisionWithItsFacts(t *testing.T) {
 			want:    dlog.Context{"was_up": false, "live": false, "terminal": wsm.TerminalParked, "terminal_detail": "keepalive_cycle"},
 		},
 		{
-			name: "a hidden workspace whose session nothing stood down",
+			name: "a hidden workspace whose record still reads running",
 			arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
 				if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 					t.Fatalf("SetHidden: %v", err)
 				}
 			},
-			rule:    takeoverWasUp,
-			message: "the workspace's session record says its shim was up when the last daemon stopped; the takeover starts it",
+			rule:    takeoverRecordStale,
+			message: "the session record reads running but no shim held the workspace's lock at the handover; the takeover records the session's end and does not start it",
 			want:    dlog.Context{"was_up": true, "hidden": true},
 		},
 	}
@@ -330,7 +376,10 @@ type coldGatedDB struct {
 	sessionsErr error
 }
 
-func (d coldGatedDB) ColdGateWorkspaces(context.Context) ([]wsm.WorkspaceID, error) {
+func (d coldGatedDB) ColdGateWorkspaces(ctx context.Context) ([]wsm.WorkspaceID, error) {
+	if d.gated == nil {
+		return d.DB.ColdGateWorkspaces(ctx)
+	}
 	return d.gated, nil
 }
 
@@ -367,5 +416,27 @@ func TestBringUpSessionlessDoesNotStartAShimThatWasNotUp(t *testing.T) {
 				t.Fatalf("started = %v, want nothing for a shim that was not up", got)
 			}
 		})
+	}
+}
+
+// TestAStaleRecordOfAWorkspaceARevivalHoldsIsNotRepaired pins the repair's
+// ordering: a session the fleet holds by the time the repair runs (a prompt
+// drained during the adoption revived it) keeps its record running.
+func TestAStaleRecordOfAWorkspaceARevivalHoldsIsNotRepaired(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record := sessionlessRecord(t, h, ws)
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+
+	// Assert
+	session, _, err := h.db.Session(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if session.Terminal != nil {
+		t.Fatalf("terminal = %+v, want the held session's record left running", session.Terminal)
 	}
 }

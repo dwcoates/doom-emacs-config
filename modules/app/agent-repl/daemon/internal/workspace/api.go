@@ -1329,6 +1329,10 @@ type Sessions interface {
 	// Live reports whether the workspace has nothing for a start to do: a
 	// session runs on its shim, or a cold gate parks it.
 	Live(ws ids.WorkspaceID) bool
+	// ReconcileLiveTerminal retires the workspace's terminal session record
+	// when a session is live for it, the check and the write one step, and
+	// answers whether it was live.
+	ReconcileLiveTerminal(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error)
 	// Held reports whether a shim is held for the workspace, a session on it
 	// or not: what a teardown has to stand down.
 	Held(ws ids.WorkspaceID) bool

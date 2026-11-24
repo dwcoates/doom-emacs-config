@@ -635,6 +635,10 @@ func (r *fakeReports) payments() []reportPayment {
 // fakeFleet is the shim fleet.
 type fakeFleet struct {
 	mu sync.Mutex
+	// db is where RecordEndedUnlessHeld records an end, as the fleet does;
+	// terminalErr fails that write.
+	db          wsm.DB
+	terminalErr error
 	// reclaimed is every workspace given back by a reclaim, in order.
 	reclaimed []ids.WorkspaceID
 	// live is the workspace's current client.
@@ -806,6 +810,22 @@ func (f *fakeFleet) FactsAwaited() []ids.WorkspaceID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]ids.WorkspaceID(nil), f.factsAwaited...)
+}
+
+// RecordEndedUnlessHeld records the end on the harness's store unless the
+// fake holds a live client for WS, as the fleet does.
+func (f *fakeFleet) RecordEndedUnlessHeld(ctx context.Context, _ dlog.Logger, ws ids.WorkspaceID, kind, detail string) error {
+	f.mu.Lock()
+	_, held := f.live[ws]
+	err := f.terminalErr
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if held {
+		return nil
+	}
+	return f.db.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{Kind: kind, Detail: detail, At: time.Unix(1_700_000_000, 0)})
 }
 
 func (f *fakeFleet) Client(ws ids.WorkspaceID) (shimclient.Client, bool) {
@@ -1374,6 +1394,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		restarts:       &restarttimingtest.Recorder{},
 		creates:        creategate.New(),
 	}
+	h.fleet.db = db
 	h.reports = &fakeReports{registry: h.registry}
 	h.rosterDials = make(chan *rostermirrortest.Stream, 4)
 	h.incumbentArms = make(chan map[ids.WorkspaceID]string, 64)

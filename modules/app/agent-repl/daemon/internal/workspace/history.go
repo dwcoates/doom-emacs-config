@@ -116,7 +116,9 @@ func (f *Fleet) adoptPersistedBook(ctx context.Context, ws ids.WorkspaceID) (str
 		return "", false, fmt.Errorf("read the book %q's shim persisted: %w", ws, err)
 	}
 	if !found {
-		log.Debug("daemon.workspace.history_book", "the workspace has no recorded book and its shim persisted none; it has no conversation yet", nil)
+		// INFO, NOT A FAILURE: a workspace that never had a session has
+		// nothing to draw, and its empty feed says so in the shared log.
+		log.Info("daemon.workspace.history_book", "the workspace has no recorded book and its shim persisted none; it has no conversation yet, so its feed is empty", nil)
 		return "", false, nil
 	}
 	if err := f.deps.DB.SetWorkspaceBook(ctx, ws, book); err != nil {

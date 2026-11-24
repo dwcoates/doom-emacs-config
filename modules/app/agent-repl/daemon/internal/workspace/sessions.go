@@ -420,6 +420,12 @@ type Fleet struct {
 	starting startingshim.Waiter
 	mu       sync.RWMutex
 	sessions map[ids.WorkspaceID]*live
+	// terminalMu orders every write of a session record's terminal against
+	// the map: a clear (the live-shim invariant) runs after its client is in
+	// the map, and an end (the ended-shim invariant) checks the map and
+	// writes under the same lock, so an end can never land after a newer
+	// session's clear (terminalrecord.go). Taken before mu.
+	terminalMu sync.Mutex
 	// sessionsMoved announces every change to a workspace's entry in sessions
 	// or its watcher (movedLocked). A freeness wait whose
 	// watcher closed, or whose session is still coming up, waits on it for the
@@ -3466,6 +3472,91 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	return f.teardown(ctx, ws, session, force, "the workspace's session was stopped")
 }
 
+// killErrOf is the error a stop whose kill failed with ERR answers, nil when
+// it did not fail.
+func killErrOf(ws ids.WorkspaceID, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("stop session for %q: kill the shim: %w", ws, err)
+}
+
+// recordStopEnded records the end of WS's shim for the ordered stop CTX names
+// the reason of (shimEndTerminal), on a context its caller's end cannot
+// cancel: the record is the workspace's own accounting, owed once the shim is
+// gone. The detail is the caller's (shimlife.WithStandDownDetail) when it
+// stated one, else the stand-down reason and WHY, the stop's own account.
+func (f *Fleet) recordStopEnded(ctx context.Context, ws ids.WorkspaceID, why string) error {
+	reason, stated := shimlife.StandDownOf(ctx)
+	if !stated {
+		reason = shimlife.StandDownUnstated
+	}
+	kind, record := shimEndTerminal(reason)
+	if !record {
+		return nil
+	}
+	log := f.logFor(ctx, ws).With(dlog.Context{"stand_down": string(reason)})
+	detail := string(reason) + ": " + why
+	if stated, ok := shimlife.StandDownDetailOf(ctx); ok {
+		detail = stated
+	}
+	return f.recordEnded(context.WithoutCancel(ctx), log, ws, kind, detail, nil)
+}
+
+// clearTerminal retires WS's terminal record for a client the caller has
+// already put in the map, under terminalMu (see Fleet.terminalMu).
+func (f *Fleet) clearTerminal(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) error {
+	f.terminalMu.Lock()
+	defer f.terminalMu.Unlock()
+	return retireTerminalRecord(ctx, log, f.deps.DB, operation, ws)
+}
+
+// ReconcileLiveTerminal retires WS's terminal record when a session is live
+// for it, the check and the write one step under terminalMu, so no stop's end
+// can fall between them. It answers whether the workspace was live.
+func (f *Fleet) ReconcileLiveTerminal(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
+	f.terminalMu.Lock()
+	defer f.terminalMu.Unlock()
+	if !f.Live(ws) {
+		return false, nil
+	}
+	return true, retireTerminalRecord(ctx, log, f.deps.DB, operation, ws)
+}
+
+// recordEnded records the end of WS's shim (recordShimEnded) unless the map
+// holds a newer session for WS, the check and the write one step under
+// terminalMu. ENDED reports whether a session the map still holds is the one
+// that ended (a death the fleet has not retired yet); nil means the ended
+// session has already left the map.
+func (f *Fleet) recordEnded(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kind, detail string, ended func(*live) bool) error {
+	f.terminalMu.Lock()
+	defer f.terminalMu.Unlock()
+	f.mu.RLock()
+	session, held := f.sessions[ws]
+	f.mu.RUnlock()
+	if held && (ended == nil || !ended(session)) {
+		log.Info(opBringUp, "a newer session holds the workspace, so the end of its last shim is not recorded", dlog.Context{
+			"terminal": kind, "terminal_detail": detail,
+		})
+		return nil
+	}
+	return recordShimEnded(ctx, log, f.deps.DB, opBringUp, ws, kind, detail, f.now())
+}
+
+// RecordEndedUnlessHeld records the end of WS's session for a caller outside
+// the fleet (a takeover repairing a record that read running), unless the
+// fleet holds a session for WS (recordEnded).
+func (f *Fleet) RecordEndedUnlessHeld(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kind, detail string) error {
+	return f.recordEnded(ctx, log, ws, kind, detail, func(*live) bool { return false })
+}
+
+// recordDeath records the death of CLIENT's shim, which its watcher saw go
+// with nothing stopping it, unless a newer session holds the workspace.
+func (f *Fleet) recordDeath(ws ids.WorkspaceID, client shimclient.Client) {
+	_ = f.recordEnded(context.Background(), f.logFor(context.Background(), ws), ws, wsm.TerminalParked,
+		"shim_died: the shim exited with nothing stopping it", func(s *live) bool { return s.client == client })
+}
+
 // removeStoodDownLocked takes WS's session out of the map for a stand-down
 // this daemon ordered, and counts it (StandDowns) IN THE SAME CRITICAL
 // SECTION: whoever reads the session gone under mu reads the count that
@@ -3539,8 +3630,17 @@ func (f *Fleet) teardown(ctx context.Context, ws ids.WorkspaceID, session *live,
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
+	// THE END IS RECORDED BEFORE THIS RETURNS (terminalrecord.go), on every
+	// path that leaves no shim behind: a kill that answered, and one whose
+	// bound ran out with the SIGKILL already gone out. A SIGKILL that could
+	// not be sent may leave the shim running, so that stop records nothing.
+	if killErr == nil || errors.Is(killErr, shimclient.ErrSIGKILLed) {
+		if err := f.recordStopEnded(ctx, ws, reason); err != nil {
+			return errors.Join(err, killErrOf(ws, killErr))
+		}
+	}
 	if killErr != nil {
-		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, killErr)
+		return killErrOf(ws, killErr)
 	}
 	f.noteReap(ws, session.client)
 	// THE SHIM'S VERDICT ENDS WITH THE SHIM. A fault the shim reported stands
@@ -3677,6 +3777,15 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 	f.deps.Log.Global().Info(opBringUp, "retired the session of a shim that is gone", dlog.Context{
 		"workspace": string(ws), "shim_pid": session.client.PID(),
 	})
+	// A SHIM THAT IS GONE ENDED ITS SESSION, whether a stand-down this daemon
+	// asked for made it leave or it died: the end is recorded before this
+	// returns (terminalrecord.go). A failure is recorded there and is all the
+	// reaper can do with it.
+	detail := "shim_died: the shim exited with nothing stopping it"
+	if session.client.StandingDown() {
+		detail = "stood_down: the shim left after the stand-down this daemon asked for"
+	}
+	_ = f.recordEnded(context.Background(), f.logFor(context.Background(), ws), ws, wsm.TerminalParked, detail, nil)
 	f.publishHost(ws)
 }
 
@@ -3733,7 +3842,7 @@ func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, s
 	if err := f.claimServing(ctx, log, ws); err != nil {
 		return err
 	}
-	if err := retireTerminalRecord(ctx, log, f.deps.DB, opBringUp, ws); err != nil {
+	if err := f.clearTerminal(ctx, log, opBringUp, ws); err != nil {
 		return err
 	}
 	// A HELD CLIENT WITH NO SESSION STARTED IS A HISTORY SOURCE all the same

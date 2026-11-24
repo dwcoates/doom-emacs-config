@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
@@ -423,23 +424,28 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		return parkFailed
 	}
 
-	standDown, cancelStandDown := context.WithTimeout(shimlife.WithStandDown(ctx, why.life), c.deps.StandBound)
+	// THE FLEET RECORDS THE PARK, under the lock that orders it against the
+	// next session's clear (workspace/terminalrecord.go); the sweep hands it
+	// the park's own account.
+	standDown, cancelStandDown := context.WithTimeout(shimlife.WithStandDownDetail(shimlife.WithStandDown(ctx, why.life), why.detail), c.deps.StandBound)
 	err = c.deps.Stand.KillSession(standDown, ws, false)
 	cancelStandDown()
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, shimclient.ErrSIGKILLed):
+		// THE PARK HAPPENED: the shim acked the hibernate, its stop ran out of
+		// the bound, and the SIGKILL that followed ended it. Only its reap is
+		// still owed, so the park is recorded below like any other; deferring
+		// it left a gone shim's session reading as running (2026-11-23, five
+		// workspaces the 15:35 handover then started).
+		log.Info(why.op, "the shim acked the hibernate and its stop ran out of the bound, so it was SIGKILLed; the park is recorded",
+			dlog.WithCause(fields, err))
+	default:
 		log.Error(why.op, "the graceful stand-down failed after the hibernate ack; deferring",
 			dlog.WithCause(fields, err))
 		return parkFailed
 	}
 
-	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
-		Kind:   wsm.TerminalParked,
-		Detail: why.detail,
-		At:     c.deps.Clock.Now(),
-	}); err != nil {
-		log.Error(why.op, "could not record the park", dlog.WithCause(fields, err))
-		return parkFailed
-	}
 	// The shim is gone, so the pid the intent manifest would name is gone with
 	// it. A pid left behind would make the next reconciliation read a dead
 	// session as preserved.

@@ -21,7 +21,15 @@ import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
 import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
-import { createEngine, type InferenceSpec, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
+import {
+  createEngine,
+  INIT_TIMEOUT_MS,
+  LIVE_SIGNAL_TIMEOUT_MS,
+  liveSignalBound,
+  type InferenceSpec,
+  type QuerySpec,
+  type SessionEngine,
+} from "../../src/engine/session.js";
 import { contextCutUpsertKey } from "../../src/store/keys.js";
 import { compactionPrompt } from "../../src/engine/compaction.js";
 import { SUMMARY_PART_CHARS } from "../../src/engine/conversation-text.js";
@@ -20246,5 +20254,24 @@ describe("a nested spawn whose commission the engine waits for", () => {
       context: { task_id: LOCATOR, bound_ms: NESTED_SPAWN_RECORD_BOUND_MS, measured_ms: NESTED_SPAWN_RECORD_MEASURED_MS },
     });
     expect(h.fold.learned.map((learned) => learned.answer.kind)).toEqual(["failed"]);
+  });
+});
+
+describe("the liveness bound", () => {
+  it("gives a first start 25s, measured under the host's real load", () => {
+    expect(LIVE_SIGNAL_TIMEOUT_MS).toBe(25_000);
+    expect(liveSignalBound(LIVE_SIGNAL_TIMEOUT_MS, INIT_TIMEOUT_MS, 0)).toBe(25_000);
+  });
+
+  it("doubles for each start in a row the bound refused", () => {
+    expect(liveSignalBound(3_000, 45_000, 2)).toBe(12_000);
+  });
+
+  it("never grows past the init bound", () => {
+    expect(liveSignalBound(LIVE_SIGNAL_TIMEOUT_MS, INIT_TIMEOUT_MS, 1)).toBe(INIT_TIMEOUT_MS);
+  });
+
+  it("is the base itself when the init bound is shorter", () => {
+    expect(liveSignalBound(25_000, 5, 3)).toBe(25_000);
   });
 });

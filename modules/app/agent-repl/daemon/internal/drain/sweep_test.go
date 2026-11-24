@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -395,6 +396,31 @@ func TestSweepDefersWhenTheStandDownFails(t *testing.T) {
 	}
 	if len(hibernated) != 0 || session.Terminal != nil {
 		t.Fatalf("hibernated = %v terminal = %+v, want no stand-down recorded for a failed kill", hibernated, session.Terminal)
+	}
+}
+
+// TestSweepRecordsTheParkWhenTheStandDownWasSIGKILLed pins the escalated
+// stop: the shim acked the hibernate and its kill ran out of the bound, so the
+// SIGKILL ended it, and the park is recorded rather than deferred.
+func TestSweepRecordsTheParkWhenTheStandDownWasSIGKILLed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.killErr[ws] = fmt.Errorf("stop session: kill the shim: pgid 1 was SIGKILLed: %w: %w", shimclient.ErrSIGKILLed, context.DeadlineExceeded)
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	session, _, sessErr := h.db.Session(context.Background(), ws)
+
+	// Assert
+	if err != nil || sessErr != nil {
+		t.Fatalf("Sweep = %v, Session = %v", err, sessErr)
+	}
+	if len(hibernated) != 1 || session.Terminal == nil || session.Terminal.Kind != wsm.TerminalParked {
+		t.Fatalf("hibernated = %v terminal = %+v, want the park recorded", hibernated, session.Terminal)
+	}
+	if errs := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError}); len(errs) != 0 {
+		t.Fatalf("errors = %v, want none for a stop the SIGKILL ended", errs)
 	}
 }
 

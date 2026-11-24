@@ -16,6 +16,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/grantedclock"
@@ -1208,14 +1209,26 @@ func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 	}
 }
 
-// TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt pins the owner
-// ruling of 2026-10-02: "The feed (or rather, the most recent page of the
-// feed) should be automatically rendered when the workspace bounces or its
-// backend(s) bounce, always." A workspace the incumbent serves with NO session
-// is handed over with a free lock; the successor used to adopt it on its WSM
-// facts alone and serve an empty feed until the user's next prompt revived it
-// (ship-gns, 2026-10-01 17:55). The successor starts its session as it adopts
-// it, so the conversation's turn is on the successor's feed with no prompt.
+// takeoverDecision awaits the successor's bring-up decision for WS: the one
+// record a takeover writes per session-less workspace it reaches
+// (internal/rollout/sessionless.go), from any daemon but the incumbent.
+func takeoverDecision(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef, what string) harness.LogRecord {
+	t.Helper()
+	incumbent := d.PID()
+	return d.AwaitRunLogRecordFromAnyProcess(what, func(r harness.LogRecord) bool {
+		return r.PID != incumbent && r.Operation == "daemon.rollout.bring_up" && r.Context["workspace"] == ws.GetId() && r.Context["rule"] != nil
+	})
+}
+
+// TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt pins the
+// owner's ruling of 2026-11-23, which replaced the one of 2026-10-02 ("the
+// most recent page of the feed should be automatically rendered when the
+// workspace bounces or its backend(s) bounce, always", which started every
+// session-less workspace a handover reached): a handover picks up where
+// things were left and starts nothing that was not already started. A
+// workspace whose shim died, so its session is not running, is handed over
+// with no session, the successor starts none, and the feed still draws the
+// conversation from its stored history.
 func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a headless workspace whose shim died twice before any turn
@@ -1235,9 +1248,9 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the loop guard leaving the session down", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.promptqueue.revive" && r.Level == "warn"
 	})
-	// WRITTEN BEFORE THE HANDOVER: the successor's bring-up spawns the shim
-	// that resumes this book.
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())})
+	// THE STORE HOLDS THE CONVERSATION, as the real store holds every
+	// workspace's: the feed is drawn from it with no shim up.
+	f.d.KeepResumedBook(f.ws.GetId(), harness.ShimProfile{ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())})
 	daemonStream := f.d.WatchDaemonStream()
 
 	// Act: an unforced deploy hands the session-less workspace over.
@@ -1251,12 +1264,13 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	}
 	drainAwaitAddrFileChange(t, f.d, addr)
 
-	// Assert: the successor brings the session up on its own, before anything
-	// asks it for the feed or sends a prompt.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the successor bringing the session up", func(r harness.LogRecord) bool {
-		return r.PID != f.d.PID() && r.Operation == "daemon.workspace.bring_up" && r.Message == "the session is up"
-	})
-	// Assert: and its feed then draws the conversation's turn.
+	// Assert: the successor decides to start nothing, because the dead
+	// shim's end is on the session record.
+	decision := takeoverDecision(t, f.d, f.ws, "the successor's bring-up decision")
+	if decision.Context["rule"] != "not_up" || decision.Context["terminal"] != "parked" {
+		t.Fatalf("decision = %v, want not_up on the parked record the shim's death left", decision.Context)
+	}
+	// Assert: and its feed draws the conversation from the stored history.
 	successor := drainDial(addr)
 	open := func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 		resp, err := successor.OpenFeed(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: f.ws}))
@@ -1266,6 +1280,93 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 		return resp.Msg.GetSuccess().GetPage(), resp.Msg.GetSuccess().GetWatch()
 	}
 	openFeedUntil(t, f.d, successor, open, "the conversation, on the successor", pageCarriesTheConversation)
+}
+
+// TestAHandoverStartsNoSessionThatWasNotRunning pins the owner's ruling of
+// 2026-11-23 for the two states a handover must leave as it found them, one
+// handover for both, each its own case: a parked session stays parked with no
+// shim spawned, and a workspace with no session stays without one. A session
+// running before is running after: TestHandoverTransfersAFreeWorkspace-
+// ThroughTheAdoptionRendezvous pins that its shim is adopted and serves the
+// next prompt.
+func TestAHandoverStartsNoSessionThatWasNotRunning(t *testing.T) {
+	t.Parallel()
+	// Arrange: one workspace parked by the idle sweep, and one registered
+	// and never opened.
+	parked := newOpened(t, harness.Opts{DurableState: true, IdleCutoffMS: 50, Timeout: harness.HandoverChainTimeout,
+		ExpectWarnings: []string{"daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up"}})
+	d := parked.d
+	d.AwaitShimLoggedRequest(parked.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
+	d.AwaitShimLoggedRequest(parked.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	parked.shim.AwaitGone()
+	d.AwaitWorkspaceLogRecord(parked.repo.Dir, "the sweep's own park record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "parked a session idle past the cutoff")
+	})
+	// THE STORE HOLDS THE PARKED CONVERSATION, as the real store holds every
+	// workspace's: its feed is drawn from it with no shim up.
+	d.KeepResumedBook(parked.ws.GetId(), harness.ShimProfile{ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())})
+	neverRepo := harness.NewRepo(t)
+	never := harness.Register(t, d, neverRepo.Dir)
+	daemonStream := d.WatchDaemonStream()
+
+	// Act
+	d.StageDeployBuild(harness.DeployStaleDaemon)
+	deployHandsOver(t, d.Ctx(), d.Client(), "the incumbent")
+	addr := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced().GetAddress()
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
+	}
+	drainAwaitAddrFileChange(t, d, addr)
+
+	successor := drainDial(addr)
+	openOn := func(ws *workspacev1.WorkspaceRef) func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
+		return func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
+			resp, err := successor.OpenFeed(d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+			if err != nil {
+				t.Fatalf("OpenFeed on the successor = error %v, want a page", err)
+			}
+			return resp.Msg.GetSuccess().GetPage(), resp.Msg.GetSuccess().GetWatch()
+		}
+	}
+
+	// Assert
+	t.Run("a parked session's feed draws its stored conversation", func(t *testing.T) {
+		openFeedUntil(t, d, successor, openOn(parked.ws), "the parked conversation, on the successor", pageCarriesTheConversation)
+	})
+	t.Run("a workspace that never had a session draws an empty feed and says why", func(t *testing.T) {
+		page, _ := openOn(never)()
+		if rows := len(page.GetSuccess().GetRows()); rows != 0 {
+			t.Fatalf("rows = %d, want an empty feed", rows)
+		}
+		d.AwaitWorkspaceLogRecord(neverRepo.Dir, "the empty feed's reason", func(r harness.LogRecord) bool {
+			return r.Level == "info" && r.Operation == "daemon.workspace.history_book" && strings.Contains(r.Message, "it has no conversation yet")
+		})
+	})
+	t.Run("a parked session stays parked with no shim spawned", func(t *testing.T) {
+		decision := takeoverDecision(t, d, parked.ws, "the parked workspace's decision")
+		if decision.Context["rule"] != "not_up" || decision.Context["terminal"] != "parked" {
+			t.Fatalf("decision = %v, want not_up on the parked record", decision.Context)
+		}
+		// The shim's durable log spans every shim of the workspace: one start,
+		// the arrangement's, and none from the successor.
+		starts := 0
+		for _, r := range harness.ReadLog(t, harness.WorkspaceLogPath(parked.repo.Dir, "shim")) {
+			if r.Operation == "shim.fake."+harness.RPCStartSession {
+				starts++
+			}
+		}
+		if n := starts; n != 1 {
+			t.Fatalf("StartSession requests = %d, want only the arrangement's", n)
+		}
+	})
+	t.Run("a workspace with no session stays without one", func(t *testing.T) {
+		decision := takeoverDecision(t, d, never, "the never-opened workspace's decision")
+		if decision.Context["rule"] != "not_up" || decision.Context["recorded"] != false {
+			t.Fatalf("decision = %v, want not_up for a workspace with no session record", decision.Context)
+		}
+	})
 }
 
 // TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement
