@@ -195,9 +195,18 @@ with `agent-repl-window--restore-configuration'."
   "Restore CONFIG, saved by `agent-repl-window--save-configuration'.
 Every window CONFIG names gets back the layout parameters it was saved
 with (`agent-repl-window--layout-parameters').  WS names the workspace
-for the record only."
+for the record only.
+
+THE MINI-WINDOW IS NEVER RESTORED.  CONFIG records the buffer the
+mini-window showed, and a layout saved while a minibuffer was active
+recorded that minibuffer (\" *Minibuf-1*\").  Restored after it exited,
+the empty inactive minibuffer stood in the mini-window at depth 0, and
+every cleared message then left the row in the frame\='s own background
+rather than the minibuffer\='s painted ground (minibuffer-ground.el), until
+something redrew it (2026-11-24).  Which minibuffer the mini-window shows
+is Emacs\='s alone, so the restore leaves it as it stands."
   (agent-repl-window--with-layout-parameters
-   (lambda () (set-window-configuration config)))
+   (lambda () (set-window-configuration config nil t)))
   ;; The record reads the frame the restore left selected, never CONFIG:
   ;; CONFIG is opaque to everything but `set-window-configuration'.
   (let ((frame (selected-frame)))
