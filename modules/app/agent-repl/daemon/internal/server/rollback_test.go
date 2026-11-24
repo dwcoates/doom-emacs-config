@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
@@ -1410,7 +1411,7 @@ func TestRolledBackUnansweredCarriesTheWordsWithoutTheQuote(t *testing.T) {
 	quoted := replyquote.Quote(said("my words"), "Paris.", false, "")
 
 	// Act.
-	got := rolledBackUnanswered(quoted)
+	got := rolledBackUnanswered(dlog.NewTestLogger(), quoted)
 
 	// Assert.
 	if !proto.Equal(got.RolledBackUnanswered.GetPrompt(), said("my words")) {
@@ -1443,5 +1444,154 @@ func TestEveryRolledBackUnansweredAnswerIsBuiltByTheHelper(t *testing.T) {
 	// Assert.
 	if builds != 1 {
 		t.Fatalf("the rolled_back_unanswered arm is built %d times, want once, in rolledBackUnanswered", builds)
+	}
+}
+
+// injected is a prompt the way the host and the daemon deliver it: the
+// person's words with an injected span ahead of them and another after them.
+func injected(words string) *conversationv1.UserSaid {
+	return said(prompts.Wrap("a daemon note") + words + "\n\n" + prompts.Wrap("\nthe postprocessing directive\n"))
+}
+
+func TestComposerWords(t *testing.T) {
+	image := &conversationv1.UserContentBlock{Block: &conversationv1.UserContentBlock_Image{Image: &conversationv1.ImageBlock{}}}
+	withImage := func(s *conversationv1.UserSaid) *conversationv1.UserSaid {
+		s.Content.Blocks = append(s.Content.Blocks, image)
+		return s
+	}
+	tests := []struct {
+		name string
+		said *conversationv1.UserSaid
+		want *conversationv1.UserSaid
+	}{
+		{name: "plain words stand as typed", said: said("my words"), want: said("my words")},
+		{name: "a reply's quote is left out", said: replyquote.Quote(said("my words"), "Paris.", false, ""), want: said("my words")},
+		{name: "injected spans around the words are left out", said: injected("my words"), want: said("my words")},
+		{name: "an injected span inside the words leaves one separator", said: said("first" + prompts.Wrap("note") + " second"), want: said("first second")},
+		{name: "a block of injected spans alone is dropped", said: said(prompts.Wrap("only a note")), want: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{}}}},
+		{name: "a block that is not text is kept", said: withImage(injected("my words")), want: withImage(said("my words"))},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			original := proto.Clone(tc.said)
+
+			// Act.
+			got := composerWords(dlog.NewTestLogger(), tc.said)
+
+			// Assert.
+			if !proto.Equal(got, tc.want) {
+				t.Fatalf("composerWords = %v, want %v", got, tc.want)
+			}
+			if !proto.Equal(tc.said, original) {
+				t.Fatalf("composerWords changed its argument to %v, want %v", tc.said, original)
+			}
+		})
+	}
+}
+
+// TestComposerWordsLeavesUnbalancedSpansAndRecordsThem pins that a prompt
+// whose injected spans are unbalanced (a producer bug) is handed back whole,
+// and that the bug is recorded on the workspace's log.
+func TestComposerWordsLeavesUnbalancedSpansAndRecordsThem(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	unbalanced := said("my words" + prompts.MetaOpen + "never closed")
+
+	// Act.
+	got := composerWords(log, unbalanced)
+
+	// Assert.
+	if !proto.Equal(got, unbalanced) {
+		t.Fatalf("composerWords = %v, want the prompt whole", got)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "warn", Operation: "daemon.cmd.strip_sentinels"}); !ok {
+		t.Fatalf("records = %v, want a WARN naming the unbalanced spans", log.Records())
+	}
+}
+
+// TestEveryComposerHandbackLeavesInjectedSpansOut pins, through each RPC, that
+// a prompt a rollback or a stop takes back reaches the composer as the
+// person's words alone.
+func TestEveryComposerHandbackLeavesInjectedSpansOut(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(t *testing.T, h *harness) *conversationv1.UserSaid
+	}{
+		{name: "rollback", act: func(t *testing.T, h *harness) *conversationv1.UserSaid {
+			seedPlannable(h)
+			h.Feed.rollbackTarget.Said = injected("my words")
+			resp, err := h.Client.RollBack(context.Background(), connect.NewRequest(rollBackRequest(planToken(t, h, keepFilesPlan()))))
+			if err != nil {
+				t.Fatalf("RollBack: %v", err)
+			}
+			return resp.Msg.GetSuccess().GetPrompt()
+		}},
+		{name: "stop rolling back the running turn's prompt", act: func(t *testing.T, h *harness) *conversationv1.UserSaid {
+			seedUnanswered(h)
+			h.Feed.rollbackTarget.Said = injected("my words")
+			h.Verbs.interruptOutcome = workspace.InterruptOutcome{RolledBack: true}
+			resp, err := stopRollingBack(t, h)
+			if err != nil {
+				t.Fatalf("Interrupt: %v", err)
+			}
+			return resp.Msg.GetSuccess().GetRolledBackUnanswered().GetPrompt()
+		}},
+		{name: "stop taking back a held prompt", act: func(t *testing.T, h *harness) *conversationv1.UserSaid {
+			seedUnanswered(h)
+			h.Feed.promptFollowed = true
+			h.Queue.heldRolledBack = wsm.HeldPrompt{Turn: "t2", Said: injected("my words")}
+			h.Queue.heldRollBackOK = true
+			resp, err := stopRollingBack(t, h)
+			if err != nil {
+				t.Fatalf("Interrupt: %v", err)
+			}
+			return resp.Msg.GetSuccess().GetRolledBackUnanswered().GetPrompt()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			got := tc.act(t, h)
+
+			// Assert.
+			if !proto.Equal(got, said("my words")) {
+				t.Fatalf("composer prompt = %v, want the words alone", got)
+			}
+		})
+	}
+}
+
+// EVERY PROMPT HANDED BACK TO THE COMPOSER IS BUILT BY composerWords, so a
+// hand-built handback in the server's source fails here.
+func TestEveryComposerHandbackIsBuiltByTheHelper(t *testing.T) {
+	// Arrange.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the server's source: %v", err)
+	}
+	var handbacks, helped int
+
+	// Act.
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		src := string(raw)
+		handbacks += strings.Count(src, "&agentreplv1.RollBackSuccess{") + strings.Count(src, "&agentreplv1.InterruptRolledBackUnanswered{")
+		helped += strings.Count(src, "&agentreplv1.RollBackSuccess{Prompt: composerWords(") +
+			strings.Count(src, "&agentreplv1.InterruptRolledBackUnanswered{Prompt: composerWords(")
+	}
+
+	// Assert.
+	if handbacks != 2 || helped != handbacks {
+		t.Fatalf("composer handbacks = %d, built by composerWords = %d; want 2, both by composerWords", handbacks, helped)
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -19,6 +20,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -182,10 +184,8 @@ func (s *server) RollBack(
 	if planned.selected {
 		s.endSelection(subject.Log, ws, planned.row, returnToTail(), "rolled_back")
 	}
-	// THE COMPOSER HOLDS THE PERSON'S WORDS AGAIN, never a reply's quote: a
-	// quote is the daemon's, made from a selection, and a resend replies to
-	// whatever is selected when it is sent.
-	success := &agentreplv1.RollBackSuccess{Prompt: replyquote.Words(planned.said)}
+	// THE COMPOSER HOLDS THE PERSON'S WORDS AGAIN (composerWords).
+	success := &agentreplv1.RollBackSuccess{Prompt: composerWords(subject.Log, planned.said)}
 	if planned.restore {
 		success.FilesRestored = &agentreplv1.RollBackFilesRestored{Files: uint32(result.FilesRestored)}
 	}
@@ -434,6 +434,34 @@ func saidText(said *conversationv1.UserSaid) string {
 		}
 	}
 	return strings.Join(texts, "\n\n")
+}
+
+// composerWords is SAID as the composer holds it again after a rollback or a
+// stop takes it back: the person's words alone. A reply's quote is left out,
+// because a quote is the daemon's, made from a selection, and a resend replies
+// to whatever is selected when it is sent (replyquote.Words). A span the host
+// or the daemon injected is left out too, because the person never typed it,
+// and the resend's delivery injects its own spans again (prompts.Wrap). A
+// text block that held nothing but injected spans is dropped.
+func composerWords(log dlog.Logger, said *conversationv1.UserSaid) *conversationv1.UserSaid {
+	strip := prompts.SentinelStripper(log)
+	words := replyquote.Words(said)
+	blocks := make([]*conversationv1.UserContentBlock, 0, len(words.GetContent().GetBlocks()))
+	for _, block := range words.GetContent().GetBlocks() {
+		text := block.GetText()
+		if text == nil {
+			blocks = append(blocks, block)
+			continue
+		}
+		stripped := strip(text.GetText())
+		if stripped == "" {
+			continue
+		}
+		block = proto.Clone(block).(*conversationv1.UserContentBlock)
+		block.GetText().Text = stripped
+		blocks = append(blocks, block)
+	}
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
 }
 
 // excerptOf is the prompt's opening words, for the confirmation to name it.
