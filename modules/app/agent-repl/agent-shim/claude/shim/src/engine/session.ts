@@ -155,7 +155,7 @@ import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
 import { recordTimestampMs } from "../convert/place.js";
 import { compactionIdField, compactionTracker, fastModeUpdate } from "../convert/session-updates.js";
 import { SerialProbe } from "./serial-probe.js";
-import { InFlight } from "./in-flight.js";
+import { InFlight, type InFlightOutcome } from "./in-flight.js";
 import { planUsageUpdate } from "../convert/plan-usage.js";
 import { backupTranscript } from "./backup.js";
 import {
@@ -551,6 +551,12 @@ type BootOutcome =
   | { readonly kind: "booted" }
   | { readonly kind: "refused"; readonly vendorMessage: string }
   | { readonly kind: "failed"; readonly detail: string };
+
+/**
+ * How a start in flight settled, as a later start that waited for it is told:
+ * it opened the session, it answered a refusal, or it threw.
+ */
+type StartSettlement = "started" | "refused" | "failed";
 
 /**
  * How long the teardown waits for ONE of its bounded stages to finish.
@@ -1151,6 +1157,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let parked: ParkedBridge | undefined;
   /** The HoldParkedBridge opening under way, which every later call waits out. */
   const parkedOpening = new InFlight<void>();
+  /**
+   * The start this shim process is running, while one is: every start waits
+   * for it to settle before it runs its own ({@link startSession}).
+   */
+  const starting = new InFlight<StartSettlement>();
   /** The workspace's name, as StartSession stated it; unset until then. */
   let workspaceName: string | undefined;
   /**
@@ -5709,7 +5720,47 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
   }
 
+  /**
+   * Every start this shim process runs, ONE AT A TIME (`starting`).
+   *
+   * A start that arrives while an earlier one is still in flight waits for it
+   * to settle, and only then runs its own: the earlier one's session lock is
+   * this process's own, and a start beside it collided with it and answered
+   * `conversation_owned`, naming another process that did not exist (the
+   * 2026-11-24T06:08Z handover: a daemon that abandoned its first StartSession
+   * asked again while the first was still opening). After the wait the
+   * ordinary path answers: `already_started` when the earlier start opened
+   * the session, a start of its own when it was refused or failed. The wait
+   * is bounded by the earlier start's own bounds, which always settle it.
+   */
   async function startSession(
+    request: shimv1.StartSessionRequest,
+  ): Promise<shimv1.StartSessionResponse> {
+    for (let earlier = starting.settling; earlier !== undefined; earlier = starting.settling) {
+      const asked = {
+        source: request.source.case ?? "",
+        asked_vendor_session_id: request.source.case === "resume" ? request.source.value.vendorSessionId : "",
+      };
+      const waitBeganMs = deps.nowMs();
+      LOGGER.info(asked, "StartSession waits for this shim's own earlier start, still in flight, to settle");
+      const settled = await earlier;
+      LOGGER.info(
+        { ...asked, waited_ms: deps.nowMs() - waitBeganMs },
+        "StartSession waited out this shim's own earlier start, which {earlier_start}",
+        { earlier_start: settled },
+      );
+    }
+    return starting.run(() => runStartSession(request), startSettledAs);
+  }
+
+  /** How a start settled, as a start that waited for it is told. */
+  function startSettledAs(outcome: InFlightOutcome<shimv1.StartSessionResponse>): StartSettlement {
+    if (outcome.kind === "rejected") return "failed";
+    return outcome.value.result.case === "success" ? "started" : "refused";
+  }
+
+  /** One start of this shim's session, run only through {@link startSession}. */
+  async function runStartSession(
     request: shimv1.StartSessionRequest,
   ): Promise<shimv1.StartSessionResponse> {
     if (started) {
@@ -7695,7 +7746,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * StartSession as the daemon calls it. A shim holding a parked
    * conversation's bridge answers it from the bridge ({@link promoteParked});
    * every other call is an ordinary start. An opening under way is waited out
-   * first, so a start never runs beside the bridge's own.
+   * first, so a start never runs beside the bridge's own; an ordinary start
+   * then waits out any other start still in flight ({@link startSession}).
    */
   async function startSessionAsked(request: shimv1.StartSessionRequest): Promise<shimv1.StartSessionResponse> {
     const opening = parkedOpening.settling;

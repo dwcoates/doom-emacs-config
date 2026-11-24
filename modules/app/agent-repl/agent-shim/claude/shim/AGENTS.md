@@ -196,6 +196,17 @@ means the daemon and this build disagree about the contract.
   daemon relays it as `OpenWorkspaceError.lock_holder_unavailable`. Anything
   else a claim throws is raised from `StartSession`, never answered as an
   owner.
+- **A shim runs ONE start at a time.** Every start of the process (the
+  daemon's `StartSession`, a parked bridge's opening) goes through the engine's
+  one serialized entry (`startSession` in `engine/session.ts`, held by an
+  `InFlight` record, `engine/in-flight.ts`): a start that arrives while an
+  earlier one is still in flight waits for it to settle, recorded at INFO
+  both when the wait begins and when it ends, then answers `already_started`
+  when the earlier one opened the session or runs its own when it was refused
+  or failed. A start beside its own process's earlier start collided with that
+  start's session lock and answered `conversation_owned` for an owner that did
+  not exist (the 2026-11-24T06:08Z handover). The wait needs no bound of its
+  own: the earlier start's bounds always settle it.
 - **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
   query is created, and SIX things settle it: the PROVEN-LIVE SIGNAL (below);
   `init`, for a vendor that still announces one first; a hook that comes back
