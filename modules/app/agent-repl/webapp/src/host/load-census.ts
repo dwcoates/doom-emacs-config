@@ -38,7 +38,7 @@ import { CENSUS_EVERY_MS } from "../page-census.js";
 import { every, pageAfter, type After } from "../every.js";
 import { workerHeartbeat, type Heartbeat } from "./stall-heartbeat.js";
 import { FRAME_SHOWN_ATTRIBUTE, FRAME_WORKSPACE_ATTRIBUTE } from "./host.js";
-import { queryAll } from "../dom.js";
+import { pageMutationObserver, queryAll } from "../dom.js";
 
 const log = createLogger("webapp.host.load-census");
 
@@ -153,10 +153,11 @@ export function installLoadCensus(
   // A CHANGE TO THE FRAMES IS A CENSUS OF ITS OWN, so the daemon's count
   // follows a load or an unload at once rather than at the next period. The
   // host appends every frame to its body (host.ts `frameParent`); one task's
-  // changes (a replay's many frames) arrive as one batch, so one census.
+  // changes (a replay's many frames) arrive as one batch, so one census. The
+  // observer is the page's own (dom.ts), disconnected as the document hides.
   let lastFrames = reportsFrames ? heldFrames(env.doc).join("\n") : "";
   const observer = reportsFrames
-    ? new MutationObserver(() => {
+    ? pageMutationObserver(env.doc, () => {
         const now = heldFrames(env.doc).join("\n");
         if (now === lastFrames) return;
         lastFrames = now;
