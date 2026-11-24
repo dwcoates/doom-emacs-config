@@ -977,26 +977,63 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 // with, under the same lock as the render this mutation runs, and AT is its
 // interaction recency. It takes on every arm (frontend.v1.RosterRowViewed).
 // An interaction before the row's first arm views nothing, and says so.
+//
+// A REPEAT THAT CHANGES NOTHING DRAWN PUBLISHES NOTHING. An interaction with a
+// row already viewed on its status, and already the newest interacted with,
+// moves only its instant, which reorders no client's recency: the roster is
+// not resolved for it, and the row states the moved instant on its next
+// publish. So a reader's scroll, reported a gesture at a time, costs no
+// redraw of any surface.
 func (r *resolver) SetInteracted(ws ids.WorkspaceID, at time.Time) {
-	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_interacted",
+	r.mutateWorkspaceIf(ws, "daemon.sidebar.set_interacted",
 		logsite.Msg("the roster took the user's interaction with the workspace"),
-		dlog.Context{"at": at.UTC()}, func(s *wsState, log dlog.Logger) {
+		dlog.Context{"at": at.UTC()}, func(s *wsState, log dlog.Logger) bool {
 			was := s.viewedArm
+			newest := r.newestInteracted(ws, s)
 			if !s.interacted(at) {
 				if !s.lastArmSeen {
 					log.Info("daemon.sidebar.interaction_before_arm",
 						"the user interacted before the roster drew the row any status, so nothing is viewed yet", nil)
-					return
+					return !newest
 				}
 				log.Debug("daemon.sidebar.interaction_restamped",
-					"the row was already viewed on its status; only its interaction instant moved", dlog.Context{"status": s.lastArm})
-				return
+					"the row was already viewed on its status; only its interaction instant moved", dlog.Context{
+						"status": s.lastArm, "reorders": !newest,
+					})
+				return !newest
 			}
 			log.Info("daemon.sidebar.row_viewed",
 				"the user interacted with the workspace, so its row is viewed until its next status change", dlog.Context{
 					"status": s.viewedArm, "was": was,
 				})
+			return true
 		})
+}
+
+// newestInteracted reports whether WS, whose facts are S, is already the
+// workspace the user interacted with most recently: no other registry
+// workspace's interaction instant is newer than its own. The caller holds
+// r.mu.
+func (r *resolver) newestInteracted(ws ids.WorkspaceID, s *wsState) bool {
+	var mine *time.Time
+	for _, rec := range r.state.reg.Workspaces {
+		if rec.ID == ws {
+			mine = interactedAt(rec, s)
+			break
+		}
+	}
+	if mine == nil {
+		return false
+	}
+	for _, rec := range r.state.reg.Workspaces {
+		if rec.ID == ws {
+			continue
+		}
+		if theirs := interactedAt(rec, r.state.workspaces[rec.ID]); theirs != nil && theirs.After(*mine) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetBringingUp raises or lowers the workspace's bring-up-under-way fact,

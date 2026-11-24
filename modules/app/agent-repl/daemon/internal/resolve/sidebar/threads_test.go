@@ -251,7 +251,7 @@ func TestAThreadRowStatesItsInteractionRecency(t *testing.T) {
 	}{
 		{name: "never interacted states none"},
 		{name: "the durable instant alone", durable: at(time.Minute), want: &frontendv1.RosterThreadLastInteracted{AtMs: at(time.Minute).UnixMilli()}},
-		{name: "a live interaction newer than the durable one", durable: at(time.Minute), live: &later, want: &frontendv1.RosterThreadLastInteracted{AtMs: later.UnixMilli()}},
+		{name: "a live interaction newer than the durable one, on the next publish", durable: at(time.Minute), live: &later, want: &frontendv1.RosterThreadLastInteracted{AtMs: later.UnixMilli()}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -261,9 +261,11 @@ func TestAThreadRowStatesItsInteractionRecency(t *testing.T) {
 			th.InteractedAt = tc.durable
 			r.SetRegistry(withThreads(th))
 
-			// Act
+			// Act: an interaction that reorders nothing publishes nothing, so
+			// the next publish (a summary landing) is where the row states it.
 			if tc.live != nil {
 				r.SetInteracted("t-1", *tc.live)
+				r.SetSummary("t-1", "a summary")
 			}
 
 			// Assert

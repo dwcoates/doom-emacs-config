@@ -2341,3 +2341,32 @@ func TestAWorkspaceWithNoSessionIsNotMarkedDormant(t *testing.T) {
 		t.Fatalf("dormant = %v, want none for a workspace with no session", got)
 	}
 }
+
+func TestARepeatedInteractionPublishesOnlyWhenItReordersTheRecency(t *testing.T) {
+	cases := []struct {
+		name        string
+		otherAt     *time.Time
+		wantPublish bool
+	}{
+		{name: "already viewed and the newest publishes nothing", wantPublish: false},
+		{name: "outranked by a newer workspace publishes the reorder", otherAt: at(time.Hour), wantPublish: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the row is viewed on its ready.
+			other := workspace("w2", "two")
+			other.InteractedAt = tc.otherAt
+			r := live(t, arrange(t, workspace(string(theWS), "one"), other))
+			r.SetInteracted(theWS, epoch)
+			before := r.Revision()
+
+			// Act
+			r.SetInteracted(theWS, epoch.Add(time.Second))
+
+			// Assert
+			if got := r.Revision() != before; got != tc.wantPublish {
+				t.Fatalf("published = %v (revision %d -> %d), want %v", got, before, r.Revision(), tc.wantPublish)
+			}
+		})
+	}
+}
