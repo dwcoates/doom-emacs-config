@@ -566,6 +566,11 @@ coverage impact (always none).
     - Pitfalls the upgrade surfaced, each a fix at its source: a second `vi.spyOn` of the same method returns the spy already installed, so a spy per fixture recursed; a getter spy and a setter spy on one accessor restored the mocked getter for every later file; files that left the root element's attributes or the document's own properties behind failed others once vitest 5 reordered the files (`webapp/test/setup-shared-worker.ts` now starts every test on a bare root element and the document as the environment made it); a module reading an import at its top level inside an import cycle read `undefined` (`src/sidebar/section-classes.ts`).
     - Coverage impact: none; every test runs with its assertions unchanged.
 
+22. **One wait bound spent on a sequence of waits.**
+    - Evidence (2026-11-24): `TestSubagents/BashDetachedStartAndComplete` took one `w.WaitCtx()` and spent it on six waits in a row; under the gate's load its settle wait ran the 5s bound out (5.001s granted of 6.731s wall, 2.004s waiting for a CPU), though it passes alone and its gate passes took 0.84-2.62s for the whole step. `TestSubagents/DetachedLostWentSilent` and `TestTurns/InterruptAfterTextDelta` chained their waits the same way.
+    - Fix: a wait helper bounds its own wait (`w.WaitCtx()`, or `grantedclock.WithBound` for a named window) and takes no context from its caller, so a step cannot stretch one bound over several waits (`e2e/detachedbash_e2e_test.go`'s `dbAwait*`, `e2e/detachedlost_e2e_test.go`'s `dlAwait*`). `harness.DefaultTimeout`'s doc already says it bounds ONE wait; a longer chain gets its own named, measured bound, as `HibernationChainTimeout` does.
+    - Coverage impact: none; every wait asserts the same event.
+
 ## Changes that LOOK faster and are refused
 
 - Skipping a test, or moving it behind a flag nobody sets: coverage loss.
