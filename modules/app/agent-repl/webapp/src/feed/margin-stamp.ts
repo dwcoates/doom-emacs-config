@@ -37,7 +37,7 @@
  */
 import { BUBBLE_ROLE_ATTRIBUTE, BUBBLE_SELECTOR } from "../bubble/draw.js";
 import type { Ticker } from "../clock.js";
-import { decorativeElement, pageResizeObserver } from "../dom.js";
+import { decorativeElement, pageResizeObserver, queryAll } from "../dom.js";
 import { formatTickedAge } from "../duration.js";
 import { spanIntersection, type VerticalSpan } from "../scroll.js";
 import type { HoverStamp } from "./hover-stamp.js";
@@ -61,7 +61,7 @@ export const MARGIN_STAMP_ROW_ROLE = "data-row-role";
  * than in a row nested inside it, or null when ROW draws none.
  */
 export function rowBubbleRole(row: Element): string | null {
-  for (const bubble of row.querySelectorAll(BUBBLE_SELECTOR)) {
+  for (const bubble of queryAll(row, BUBBLE_SELECTOR)) {
     if (feedRowOf(bubble) === row) return bubble.getAttribute(BUBBLE_ROLE_ATTRIBUTE);
   }
   return null;
