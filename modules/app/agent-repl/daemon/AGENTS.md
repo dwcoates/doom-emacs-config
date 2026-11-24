@@ -576,12 +576,13 @@ stands the session down through the idle sweep's own gate and park (`drain/withh
 a turn in flight defers it to the free edge that turn's end raises, and a
 workspace expanded again meanwhile is not stood down. A fold never stands down
 a one-shot or a workspace with a merge pending (`wsm.Workspace.FoldSpare`):
-it hides them and changes no status. HIDING leaves the cache
-to lapse first (`internal/cachelapse`, 2026-10-13): the keeper holds the
-shim's keep-alives, records the lapse the held shim projects on the row (the
-hidden section counts down to it), and stands the session down through the
-same withheld path when it comes; a hidden workspace's session is also
-started held. Records: `daemon.cachelapse.cadence` (INFO per hold or run),
+it hides them and changes no status. A BACKLOG interrupts the running turn,
+and its cache gets one last keep-alive beat before it lapses; the rules of
+which workspaces hold a page and a running shim live in
+`webapp/src/sidebar/AGENTS.md` ("Workspace resource allocation"). The keeper
+records the lapse the held shim projects on the row (the backlog counts down
+to it), and stands the session down through the same withheld path when it
+comes. Records: `daemon.cachelapse.cadence` (INFO per hold or run),
 `daemon.cachelapse.projection` (INFO per recorded or dropped projection),
 `daemon.cachelapse.lapse` (INFO per lapse taken or skipped),
 `daemon.opentabs.open` (INFO per answered workspace, with its

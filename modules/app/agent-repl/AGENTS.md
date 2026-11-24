@@ -3533,15 +3533,11 @@ pids, the views told, the roster republished):
   is parked (`drain.Controller.CycleDown`) until a minute before its next
   beat, when it is restored, at most three at once, earliest beat first. A
   shim runs no timer of its own.
-- THE IDLE PARK (owner ruling, 2026-11-23). A session that owes keep-alives
-  is parked once it has been idle `cachelapse.StandDownGrace`, twenty
-  minutes after the latest of its last turn's end, its last engagement and
-  the instant it last fell free (`cachelapse.Keeper.ownIdle`,
-  `drain.Controller.IdleDown`, reason `idle`), so the user has twenty
-  minutes after the work ends to prompt with no shim start. It is restored
-  before each beat as above, and the beat's own stand-down parks it again.
-  No park is taken under a turn or live detached work, for the selected
-  workspace, or once a real turn ran since the instant it was measured from. A CACHE KNOWN COLD IS
+- THE IDLE PARK (owner rulings, 2026-11-24). An idle session is parked when
+  its workspace's shim hold ends, a rule of workspace resource allocation
+  whose one home is `webapp/src/sidebar/AGENTS.md`. It is restored before
+  each beat as above, and the beat's own stand-down parks it again. No park
+  is taken under a turn or live detached work. A CACHE KNOWN COLD IS
   NEVER BEATEN (owner ruling, 2026-10-29): a gate's raise and answer, and a
   shim judging a beat's cache lapsed, mark the row (`cache_cold_turn_at`,
   `wsm.Workspace.CacheKnownCold`), and no keep-alive is owed until a real
@@ -3562,9 +3558,7 @@ pids, the views told, the roster republished):
   ending. A session start, a keep-alive and its turn, a deploy's bounce and a
   successor's adoption never move it, and never the cache clock a keep-alive
   moves: measured on the cache clock, a pinged session would never have been
-  idle at all. The cache keeper's cold and idle parks measure their
-  `StandDownGrace` from the same instant, whichever owns the session
-  (`daemon/internal/wsm/lastwork.go`).
+  idle at all (`daemon/internal/wsm/lastwork.go`).
 
 ONLY A PROMPT, A SETTINGS PICK, A KEEP-ALIVE RESTORE, A COLD GATE'S ANSWER OR
 A RESTART BRINGS A SHIM UP (owner rulings, 2026-10-28): a look, a select, an
