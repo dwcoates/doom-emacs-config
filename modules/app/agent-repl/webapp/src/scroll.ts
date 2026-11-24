@@ -2006,6 +2006,16 @@ export interface VerticalSpan {
 }
 
 /**
+ * The part of A that B also covers: THE ONE CLIP of a span to a view, for a
+ * node's lines clipped to the bubble boxes around them (node-reveal.ts) and a
+ * hovered row clipped to the feed (margin-stamp.ts) alike. When the two do not
+ * overlap, the answer's bottom is at or above its top.
+ */
+export function spanIntersection(a: VerticalSpan, b: VerticalSpan): VerticalSpan {
+  return { top: Math.max(a.top, b.top), bottom: Math.min(a.bottom, b.bottom) };
+}
+
+/**
  * How far a view must move for NODE to show whole in VIEW, ONLY AS FAR AS NODE
  * NEEDS (owner requests, 2026-10-26): every "scroll it into view" that must
  * not center.

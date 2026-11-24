@@ -24,7 +24,7 @@
 import type { Ticker } from "../clock.js";
 import { decorativeElement, pageResizeObserver } from "../dom.js";
 import { formatTickedAge } from "../duration.js";
-import type { VerticalSpan } from "../scroll.js";
+import { spanIntersection, type VerticalSpan } from "../scroll.js";
 import type { HoverStamp } from "./hover-stamp.js";
 import { stopTicking, tickWhileShown } from "./ticking.js";
 
@@ -54,11 +54,10 @@ export function marginStampLines(atMs: number, nowMs: number): [string, string] 
  * view shows none of the row.
  */
 export function marginStampCenter(row: VerticalSpan, view: VerticalSpan, height: number): number | null {
-  const top = Math.max(row.top, view.top);
-  const bottom = Math.min(row.bottom, view.bottom);
-  if (bottom <= top) return null;
+  const shown = spanIntersection(row, view);
+  if (shown.bottom <= shown.top) return null;
   const half = height / 2;
-  return Math.min(Math.max((top + bottom) / 2, view.top + half), view.bottom - half);
+  return Math.min(Math.max((shown.top + shown.bottom) / 2, view.top + half), view.bottom - half);
 }
 
 /** The margin stamp: what the hover tells it, and its removal. */

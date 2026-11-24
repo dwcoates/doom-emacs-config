@@ -9,6 +9,8 @@ import selectionScrollSource from "../src/sidebar/selection-scroll.ts?raw";
 import scrollKeepSource from "../src/sidebar/scroll-keep.ts?raw";
 import bandFitSource from "../src/sidebar/band-fit.ts?raw";
 import sidebarPopupsSource from "../src/host/sidebar-popups.ts?raw";
+import nodeRevealSource from "../src/feed/node-reveal.ts?raw";
+import marginStampSource from "../src/feed/margin-stamp.ts?raw";
 import { chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -40,6 +42,7 @@ import {
   wheelDeltaPx,
   revealCenterDelta,
   nearestEdgeOffset,
+  spanIntersection,
   revealNearestDelta,
   revealGeometry,
   centerOffset,
@@ -3122,6 +3125,35 @@ describe("revealNearestDelta", () => {
     const got = revealNearestDelta({ ...view, ...node }, box);
     // Assert
     expect(got).toBe(want);
+  });
+});
+
+/** THE ONE CLIP of a span to a view. */
+describe("spanIntersection", () => {
+  /** A 300px view starting 100px down. */
+  const view = { top: 100, bottom: 400 };
+
+  it.each([
+    { name: "keeps a span wholly inside the view", span: { top: 150, bottom: 250 }, want: { top: 150, bottom: 250 } },
+    { name: "clips a span cut by the view's top", span: { top: 0, bottom: 200 }, want: { top: 100, bottom: 200 } },
+    { name: "clips a span cut by the view's bottom", span: { top: 300, bottom: 600 }, want: { top: 300, bottom: 400 } },
+    { name: "clips a span taller than the view to the view", span: { top: -100, bottom: 900 }, want: { top: 100, bottom: 400 } },
+    { name: "answers a bottom above its top for a span wholly above the view", span: { top: 0, bottom: 50 }, want: { top: 100, bottom: 50 } },
+  ])("$name", ({ span, want }) => {
+    // Arrange, Act
+    const got = spanIntersection(span, view);
+    // Assert
+    expect(got).toEqual(want);
+  });
+
+  it("is the one clip node-reveal and the margin stamp share", () => {
+    // Arrange, Act, Assert: neither hand-rolls a max-of-tops, min-of-bottoms clip.
+    expect([
+      nodeRevealSource.match(/spanIntersection\(/g)?.length,
+      nodeRevealSource.includes("Math.max(visible.top"),
+      marginStampSource.match(/spanIntersection\(/g)?.length,
+      marginStampSource.includes("Math.max(row.top"),
+    ]).toEqual([1, false, 1, false]);
   });
 });
 
