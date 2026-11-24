@@ -268,6 +268,10 @@ func (c *cliClient) CommentOnPullRequest(_ context.Context, req *connect.Request
 	return connect.NewResponse(&agentreplv1.CommentOnPullRequestResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) OpenExternal(_ context.Context, req *connect.Request[agentreplv1.OpenExternalRequest]) (*connect.Response[agentreplv1.OpenExternalResponse], error) {
+	return connect.NewResponse(&agentreplv1.OpenExternalResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) NotifyWorkspace(_ context.Context, req *connect.Request[agentreplv1.NotifyWorkspaceRequest]) (*connect.Response[agentreplv1.NotifyWorkspaceResponse], error) {
 	return connect.NewResponse(&agentreplv1.NotifyWorkspaceResponse{}), c.record(req.Msg)
 }
@@ -3859,6 +3863,57 @@ func TestNotifyRefusesAMalformedCall(t *testing.T) {
 		{name: "no text", args: []string{"notify", "peer"}},
 		{name: "blank text", args: []string{"notify", "peer", "  "}},
 		{name: "two texts", args: []string{"notify", "peer", "one", "two"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code == exitSuccess || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, sent %v; want a usage failure and nothing sent", code, f.client.requests)
+			}
+		})
+	}
+}
+
+func TestOpenLinkOpensTheLinkForTheNamedWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		wantID string
+	}{
+		{name: "another workspace, by name", target: "peer", wantID: "ws-peer"},
+		{name: "the calling workspace", target: "here", wantID: "ws-caller"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, "open-link", tt.target, "https://x.com/device?code=AB")
+
+			// Assert
+			req := only[*agentreplv1.OpenExternalRequest](t, f)
+			if code != exitSuccess || req.GetWorkspace().GetId() != tt.wantID || req.GetUrl() != "https://x.com/device?code=AB" {
+				t.Fatalf("exit %d, request %v; want the link opened for %s", code, req, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestOpenLinkRefusesAMalformedCall(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no link", args: []string{"open-link", "peer"}},
+		{name: "blank link", args: []string{"open-link", "peer", "  "}},
+		{name: "two links", args: []string{"open-link", "peer", "https://a.com", "https://b.com"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
