@@ -62,7 +62,7 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FeedChessBoard } from "../../../proto/gen/ts/frontend/v1/chess_board_pb";
 import type { RowArrival, RowContext } from "./cards/context.js";
-import { FEED_ROW_SELECTOR } from "./row-id.js";
+import { FEED_ROWS_CLASS, FEED_ROW_SELECTOR } from "./row-id.js";
 
 const log = createLogger("webapp.feed.renderers");
 
@@ -183,7 +183,7 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   breadcrumbs.setAttribute("data-breadcrumbs", "");
 
   const rows = document.createElement("div");
-  rows.className = "feed-rows";
+  rows.className = FEED_ROWS_CLASS;
 
   // ONE GROUP STORE PER BODY (so per open feed). It outlives every redraw, which
   // is what lets a reader's tab pick and a run's identity survive the re-arrange

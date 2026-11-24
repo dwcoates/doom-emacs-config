@@ -131,7 +131,7 @@ import { glideSentPrompt } from "./send-glide.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { childrenMatching, queryAll } from "../dom.js";
 import { entryLines, flashEntryOncePainted } from "./entries.js";
-import { FEED_ROW_ATTRIBUTE, feedRowId } from "./row-id.js";
+import { FEED_BODY_CLASS, FEED_ROW_ATTRIBUTE, feedRowId } from "./row-id.js";
 import { applyRevealedNode } from "./revealed-node.js";
 
 const log = createLogger("webapp.feed.feed-view");
@@ -373,7 +373,7 @@ export function createFeedController(
   errorSlot.className = "feed-page-error-slot";
 
   const bodyMount = document.createElement("div");
-  bodyMount.className = "feed-body";
+  bodyMount.className = FEED_BODY_CLASS;
 
   // THE WALK CONTROL IS PRESENT ONLY WHEN THERE IS A WALK. A feed that has
   // reached its start offers no way back further, and an inert control the
