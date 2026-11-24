@@ -39,7 +39,7 @@ func (s *server) ListRollbackPrompts(
 	for _, choice := range slices.Backward(choices) {
 		entry := &agentreplv1.RollbackPromptEntry{
 			Prompt:        choice.Row,
-			Text:          saidText(choice.Said),
+			Text:          composerText(subject.Log, choice.Said),
 			ContextTokens: choice.ContextTokens,
 		}
 		if tokens := choice.ContextTokens; tokens != nil {

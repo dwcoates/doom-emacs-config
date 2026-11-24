@@ -17,7 +17,6 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
-	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -226,7 +225,7 @@ func (s *server) Interrupt(
 		}
 		// THE ROLLED-BACK PROMPT'S SELECTION ENDS WITH IT: its row is gone.
 		s.endSelection(subject.Log, subject.Record.ID, unanswered.row, returnToTail(), "rolled_back")
-		success.Outcome = rolledBackUnanswered(unanswered.said)
+		success.Outcome = rolledBackUnanswered(subject.Log, unanswered.said)
 	case outcome.TurnStillRunning != nil:
 		// A STOP OF DETACHED WORK THAT REACHED NONE WHILE THE TURN RUNS: the
 		// answer names the turn, so the caller never reads a busy workspace
@@ -265,15 +264,15 @@ func (s *server) Interrupt(
 func (s *server) rolledBackHeld(log dlog.Logger, held wsm.HeldPrompt, resp *agentreplv1.InterruptResponse) (*connect.Response[agentreplv1.InterruptResponse], error) {
 	log.Debug("daemon.server.interrupt", "answered that the stop took back a held prompt and left the turn running",
 		dlog.Context{"turn": string(held.Turn)})
-	return interruptSucceeded(resp, &agentreplv1.InterruptSuccess{Outcome: rolledBackUnanswered(held.Said)})
+	return interruptSucceeded(resp, &agentreplv1.InterruptSuccess{Outcome: rolledBackUnanswered(log, held.Said)})
 }
 
 // rolledBackUnanswered is the ONE answer to a stop that took a prompt back,
-// the running turn's or a held one: SAID's words, its reply quote left out,
-// for the composer to hold again.
-func rolledBackUnanswered(said *conversationv1.UserSaid) *agentreplv1.InterruptSuccess_RolledBackUnanswered {
+// the running turn's or a held one: SAID's words (composerWords), for the
+// composer to hold again.
+func rolledBackUnanswered(log dlog.Logger, said *conversationv1.UserSaid) *agentreplv1.InterruptSuccess_RolledBackUnanswered {
 	return &agentreplv1.InterruptSuccess_RolledBackUnanswered{
-		RolledBackUnanswered: &agentreplv1.InterruptRolledBackUnanswered{Prompt: replyquote.Words(said)},
+		RolledBackUnanswered: &agentreplv1.InterruptRolledBackUnanswered{Prompt: composerWords(log, said)},
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -19,6 +20,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -83,7 +85,7 @@ func (s *server) PlanRollback(
 	}
 	restore := req.Msg.GetRestoreFiles() != nil
 	named := req.Msg.GetPrompt()
-	plan, ok, err := s.planRollback(ctx, subject.Record.ID, restore, named)
+	plan, ok, err := s.planRollback(ctx, subject.Record.ID, subject.Log, restore, named)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -144,7 +146,7 @@ func (s *server) RollBack(
 	if !known || planned.ws != ws {
 		return stale("the plan is not one this daemon made for this workspace")
 	}
-	now, ok, err := s.planRollback(ctx, ws, planned.restore, planned.row)
+	now, ok, err := s.planRollback(ctx, ws, subject.Log, planned.restore, planned.row)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -182,10 +184,8 @@ func (s *server) RollBack(
 	if planned.selected {
 		s.endSelection(subject.Log, ws, planned.row, returnToTail(), "rolled_back")
 	}
-	// THE COMPOSER HOLDS THE PERSON'S WORDS AGAIN, never a reply's quote: a
-	// quote is the daemon's, made from a selection, and a resend replies to
-	// whatever is selected when it is sent.
-	success := &agentreplv1.RollBackSuccess{Prompt: replyquote.Words(planned.said)}
+	// THE COMPOSER HOLDS THE PERSON'S WORDS AGAIN (composerWords).
+	success := &agentreplv1.RollBackSuccess{Prompt: composerWords(subject.Log, planned.said)}
 	if planned.restore {
 		success.FilesRestored = &agentreplv1.RollBackFilesRestored{Files: uint32(result.FilesRestored)}
 	}
@@ -244,7 +244,7 @@ func (s *server) planLatestPrompt(ctx context.Context, ws ids.WorkspaceID, log d
 		return rollbackPlan{}, false, nil
 	}
 	latest := prompts[len(prompts)-1]
-	plan, ok, err := s.planRollback(ctx, ws, false, latest)
+	plan, ok, err := s.planRollback(ctx, ws, log, false, latest)
 	if err != nil {
 		return rollbackPlan{}, false, err
 	}
@@ -339,7 +339,7 @@ func rollbackRefusal(s *server, shim *workspace.ShimRefusal) refusal {
 // planRollback works out what rolling back would do. ROW names the prompt
 // (a named prompt, or a plan being checked again); nil resolves it: the
 // selected prompt, else the latest. ok is false when no prompt can be rolled back to.
-func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, restore bool, row *frontendv1.FeedId) (rollbackPlan, bool, error) {
+func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, restore bool, row *frontendv1.FeedId) (rollbackPlan, bool, error) {
 	plan := rollbackPlan{ws: ws, restore: restore, row: row}
 	if row == nil {
 		if selected, kind, held := s.currentSelection(ws); held && kind == selectionPrompt {
@@ -355,7 +355,7 @@ func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, restore b
 		return rollbackPlan{}, false, nil
 	}
 	plan.turns, plan.said = target.Turns, target.Said
-	plan.excerpt = excerptOf(target.Said)
+	plan.excerpt = excerptOf(log, target.Said)
 	first, err := s.deps.DB.Turn(ctx, ws, target.Turns[0])
 	since := first.StartedAt
 	switch {
@@ -436,9 +436,44 @@ func saidText(said *conversationv1.UserSaid) string {
 	return strings.Join(texts, "\n\n")
 }
 
+// composerWords is SAID as the composer holds it again after a rollback or a
+// stop takes it back: the person's words alone. A reply's quote is left out,
+// because a quote is the daemon's, made from a selection, and a resend replies
+// to whatever is selected when it is sent (replyquote.Words). A span the host
+// or the daemon injected is left out too, because the person never typed it,
+// and the resend's delivery injects its own spans again (prompts.Wrap). A
+// text block that held nothing but injected spans is dropped.
+func composerWords(log dlog.Logger, said *conversationv1.UserSaid) *conversationv1.UserSaid {
+	strip := prompts.SentinelStripper(log)
+	words := replyquote.Words(said)
+	blocks := make([]*conversationv1.UserContentBlock, 0, len(words.GetContent().GetBlocks()))
+	for _, block := range words.GetContent().GetBlocks() {
+		text := block.GetText()
+		if text == nil {
+			blocks = append(blocks, block)
+			continue
+		}
+		stripped := strip(text.GetText())
+		if stripped == "" {
+			continue
+		}
+		block = proto.Clone(block).(*conversationv1.UserContentBlock)
+		block.GetText().Text = stripped
+		blocks = append(blocks, block)
+	}
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
+}
+
+// composerText is the text of SAID's words as the composer would hold them
+// again (composerWords): how a rollback's choices and its confirmation name a
+// prompt, so they name it as the person typed it.
+func composerText(log dlog.Logger, said *conversationv1.UserSaid) string {
+	return saidText(composerWords(log, said))
+}
+
 // excerptOf is the prompt's opening words, for the confirmation to name it.
-func excerptOf(said *conversationv1.UserSaid) string {
-	words := strings.Join(strings.Fields(saidText(said)), " ")
+func excerptOf(log dlog.Logger, said *conversationv1.UserSaid) string {
+	words := strings.Join(strings.Fields(composerText(log, said)), " ")
 	if utf8.RuneCountInString(words) <= rollbackExcerptRunes {
 		return words
 	}
