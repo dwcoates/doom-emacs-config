@@ -304,6 +304,19 @@ message RosterThreadRow {
   // is `selected` while the Chat app shows it and `not_visible` otherwise.
   // Always set. The rail draws nothing for it.
   RosterRowVisibility visibility = 8;
+  // When the user last interacted with the thread, as
+  // RosterRowLastInteracted states it for a workspace's row. UNSET = the user
+  // never interacted with it. The rail draws nothing for it: the editor
+  // orders its recency walk by it.
+  optional RosterThreadLastInteracted last_interacted = 9;
+}
+
+// When the user last interacted with a thread, in epoch MILLISECONDS: the
+// thread row's own copy of the interaction recency RosterRowLastInteracted
+// carries for a workspace, durable, which a selection does not move.
+message RosterThreadLastInteracted {
+  // The interaction instant, epoch milliseconds.
+  int64 at_ms = 1;
 }
 
 // A THREAD'S BRANCHES AROUND ITS SHOWN PATH (owner ruling, 2026-10-25:

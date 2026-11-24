@@ -376,7 +376,7 @@ type fakeDB struct {
 	// order; interactedErr fails it.
 	interactedAt  []interaction
 	interactedErr error
-	forgotten []ids.WorkspaceID
+	forgotten     []ids.WorkspaceID
 	// forgetReport is what Forget answers, and forgetErr makes it fail; the
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport

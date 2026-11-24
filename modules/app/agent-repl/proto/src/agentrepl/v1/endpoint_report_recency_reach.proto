@@ -2,17 +2,18 @@
 // of Emacs's recency walk (`s-[` older, `s-]` newer) reach each nearby tab.
 // HOST section.
 //
-// EMACS OWNS THE WALK'S ORDER. The ring `s-[` and `s-]` step along is the
-// selection history Emacs keeps (its visits, filtered by their dwell), so only
-// Emacs can say where a press lands. It computes each tab's reach with the
-// very stepping the chords use, starting where the next press starts, and
-// reports it here; the daemon draws it on the Open section's rows
+// EMACS STEPS THE WALK. The ring `s-[` and `s-]` step along is the daemon's
+// interaction recency (frontend.v1.RosterRowLastInteracted) over the tabs
+// Emacs draws, led by the tab the walk started from, so only Emacs can say
+// where a press lands. It computes each tab's reach with the very stepping
+// the chords use, starting where the next press starts, and reports it here;
+// the daemon draws it on the Open section's rows
 // (frontend.v1.RosterOpenRow.recency_gutter) and derives nothing.
 //
 // THE REPORT IS REPLACED WHOLE. Each report states every reach that stands,
 // so a tab absent from it has none, and nothing from an earlier report can
 // linger. Emacs reports again whenever a reach changes: a switch, a new
-// visit in the history, a tab opened, closed or folded away.
+// interaction, a tab opened, closed or folded away.
 //
 // THE REACH LIVES AND DIES WITH EMACS'S WatchDaemon STREAM, as its desktop
 // focus does (ReportEditorFocus): a stream's attach starts with no reach, the

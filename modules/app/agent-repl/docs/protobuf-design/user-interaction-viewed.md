@@ -96,6 +96,14 @@ roster row's markers.
 - `frontend.v1.RosterRowLastSelected` stays: the switcher orders by
   selection by owner request (2026-11-11), which is a different order.
 
+### `frontend.v1.RosterThreadLastInteracted` is added
+
+- WHAT: `RosterThreadRow.last_interacted`, the same recency for a chat
+  thread's row, in a message of its own (one wrapper per view).
+- WHY: the editor's recency order spans open workspaces and threads alike
+  (the jump to the previous one toggles between a workspace and a thread),
+  and it now reads every instant from the daemon.
+
 ### Durable record (not proto)
 
 - `workspaces.viewed_status` holds the status arm the user last interacted

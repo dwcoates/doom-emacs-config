@@ -141,14 +141,14 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 
 	if !r.readOnly {
 		rowLog.Debug("daemon.sidebar.row", "the roster resolved a row", dlog.Context{
-			"status":   armName,
-			"current":  current,
-			"closed":   closed,
-			"viewed":   viewed,
-			"result":   s.result.String(),
-			"reviving": s.reviving,
+			"status":        armName,
+			"current":       current,
+			"closed":        closed,
+			"viewed":        viewed,
+			"result":        s.result.String(),
+			"reviving":      s.reviving,
 			"detached_live": detachedLive,
-			"was_viewed": wasViewed,
+			"was_viewed":    wasViewed,
 		})
 	}
 	r.assertArm(armName, rowLog)
@@ -286,15 +286,24 @@ func availability(s *wsState) *frontendv1.RosterRowAvailability {
 	}
 }
 
-// lastInteracted resolves the row's interaction recency: the later of the
+// interactedAt resolves a workspace's interaction recency: the later of the
 // instant this resolver heard (SetInteracted) and the durable record's, or nil
-// for a workspace the user never interacted with. Like lastSelected it is
-// never drawn.
-func lastInteracted(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowLastInteracted {
+// for a workspace the user never interacted with. It is the ONE reading every
+// row that states the recency takes (lastInteracted, the thread rows), and S
+// may be nil for a workspace this resolver holds no facts of.
+func interactedAt(rec wsm.Workspace, s *wsState) *time.Time {
 	at := rec.InteractedAt
-	if s.interactedAt != nil && (at == nil || s.interactedAt.After(*at)) {
+	if s != nil && s.interactedAt != nil && (at == nil || s.interactedAt.After(*at)) {
 		at = s.interactedAt
 	}
+	return at
+}
+
+// lastInteracted states a workspace row's interaction recency (interactedAt),
+// nil for a workspace the user never interacted with. Like lastSelected it is
+// never drawn.
+func lastInteracted(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowLastInteracted {
+	at := interactedAt(rec, s)
 	if at == nil {
 		return nil
 	}

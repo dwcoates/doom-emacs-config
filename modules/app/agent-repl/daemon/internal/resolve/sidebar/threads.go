@@ -98,6 +98,11 @@ func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThre
 		if s, ok := r.state.workspaces[ws.ID]; ok && s.summary != "" {
 			row.Summary = &frontendv1.RosterThreadSummary{Text: s.summary}
 		}
+		// THE THREAD'S INTERACTION RECENCY, read as a workspace row's is, for
+		// the editor's recency order.
+		if at := interactedAt(ws, r.state.workspaces[ws.ID]); at != nil {
+			row.LastInteracted = &frontendv1.RosterThreadLastInteracted{AtMs: at.UnixMilli()}
+		}
 		current := r.state.selected != nil && *r.state.selected == ws.ID
 		// THE THREAD'S VISIBILITY, as this render derived it: selected while
 		// the Chat app shows it, never visible otherwise.
