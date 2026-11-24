@@ -105,7 +105,16 @@ func (r *resolver) countResultRead(by ResultReadBy) {
 func (r *resolver) resolveArms(rc rowContext) (arms, judged map[ids.WorkspaceID]string) {
 	arms = make(map[ids.WorkspaceID]string, len(r.state.reg.Workspaces))
 	judged = make(map[ids.WorkspaceID]string, len(r.state.reg.Workspaces))
-	for _, rec := range r.state.reg.Workspaces {
+	for i := range r.state.reg.Workspaces {
+		rec := r.state.reg.Workspaces[i]
+		// AN ARM WHOSE INPUTS DID NOT MOVE IS KEPT (kept.go), so a change
+		// derives only the arms it moved.
+		k, key := r.state.keptOf(rec.ID), r.state.keyOf(rec.ID)
+		if k.armKept && k.armKey == key && !armReadsClock(rec) {
+			arms[rec.ID], judged[rec.ID] = k.arm, k.judged
+			r.stats.armsKept++
+			continue
+		}
 		s := r.state.workspace(rec.ID)
 		rowLog := r.logFor(rec.ID)
 		if s.restoreResult(rec) {
@@ -125,10 +134,13 @@ func (r *resolver) resolveArms(rc rowContext) (arms, judged map[ids.WorkspaceID]
 			rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace not yet adopted",
 				dlog.Context{"arm": arm, "source": "incumbent"})
 			arms[rec.ID], judged[rec.ID] = arm, arm
+			k.arm, k.judged, k.armKey, k.armKept = arm, arm, key, true
 			continue
 		}
+		r.stats.armsDerived++
 		judged[rec.ID] = sessionArm(s, rec, rc.sessions[rec.ID], r.footer.Status(rec.ID), r.now(), rowLog)
 		arms[rec.ID] = openingOver(s, judged[rec.ID])
+		k.arm, k.judged, k.armKey, k.armKept = arms[rec.ID], judged[rec.ID], key, true
 	}
 	return arms, judged
 }
@@ -321,15 +333,14 @@ func visibilityOf(v wsm.Visibility) *frontendv1.RosterRowVisibility {
 // until the first render. A workspace the registry does not carry is
 // NotVisible.
 func (r *resolver) Visibility(ws ids.WorkspaceID) wsm.Visibility {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if v, derived := r.state.visibility[ws]; derived {
 		return v
 	}
-	for _, rec := range r.state.reg.Workspaces {
-		if rec.ID == ws {
-			return rec.Visibility
-		}
+	if rec, ok := r.state.record(ws); ok {
+		return rec.Visibility
 	}
 	return wsm.NotVisible
 }

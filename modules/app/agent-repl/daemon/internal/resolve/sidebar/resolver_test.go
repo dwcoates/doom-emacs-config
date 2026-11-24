@@ -121,6 +121,7 @@ func TestRosterPublishesNothingBeforeAnyRegistry(t *testing.T) {
 	r.OnLink(theWS, shimclient.LinkConnected)
 
 	// Assert: a roster built from live frames alone would name no workspaces.
+	r.Settle()
 	if _, ok := r.Topic().Latest(); ok {
 		t.Fatal("the roster published before any registry")
 	}
@@ -1028,18 +1029,23 @@ func TestOnActivityRendersOnlyWhenItChangesTheRowsFacts(t *testing.T) {
 // the central sink naming it, and nothing records an invariant violation
 // (TestALateFactsRefusalIsOfferedAgainMidWork, 2026-11-13).
 func TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary(t *testing.T) {
-	// Arrange: the workspace's directory can host no sink.
-	r := arrange(t)
-	r.surfaces.BindWorkspaceIDs(func(string) (string, error) {
+	// Arrange: the workspace's directory can host no sink from the first
+	// resolve, as a reaped worktree is: the real surfaces stat a directory
+	// once, so a sink that resolved never stops resolving, and the roster
+	// keeps the sink it resolved (kept.go).
+	r, surfaces := newResolver(t)
+	surfaces.BindWorkspaceIDs(func(string) (string, error) {
 		return "", errors.New("the worktree was reaped")
 	})
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
 
 	// Act: a fact that moves the row's status arm.
 	r.OnLink(theWS, shimclient.LinkConnected)
 
 	// Assert.
 	var routed bool
-	for _, rec := range r.surfaces.Records() {
+	r.Settle()
+	for _, rec := range surfaces.Records() {
 		if _, ok := rec.Context["invariant_violation"]; ok {
 			t.Fatalf("record %s carries an invariant violation: %+v", rec.Operation, rec.Context)
 		}
@@ -1048,7 +1054,7 @@ func TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary(t *te
 		}
 	}
 	if !routed {
-		t.Fatalf("records = %+v, want the arm change on the central sink naming the workspace", r.surfaces.Records())
+		t.Fatalf("records = %+v, want the arm change on the central sink naming the workspace", surfaces.Records())
 	}
 }
 
@@ -1222,5 +1228,53 @@ func TestATransitionMovesEveryStreamItTouchesInOnePush(t *testing.T) {
 				t.Fatalf("merged token = %d, want this push's revision %d", got, push.GetRevision())
 			}
 		})
+	}
+}
+
+func TestARenderIsRecordedAtInfoOnlyWhenAPersonCanFeelIt(t *testing.T) {
+	cases := []struct {
+		name    string
+		elapsed time.Duration
+		want    string
+	}{
+		{name: "an instant render is debug", elapsed: 0, want: dlog.LevelDebug},
+		{name: "a render just under the bound is debug", elapsed: 99 * time.Millisecond, want: dlog.LevelDebug},
+		{name: "a render at the bound is info", elapsed: 100 * time.Millisecond, want: dlog.LevelInfo},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := sidebar.RenderLevel(tc.elapsed)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("RenderLevel(%v) = %s, want %s", tc.elapsed, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestARenderRecordsItsCauseAndWhatItWalked(t *testing.T) {
+	// Arrange
+	r, surfaces := newResolver(t)
+	r.SetRegistry(registry(workspace("one", "one"), workspace("two", "two")))
+	mark := len(surfaces.Records())
+
+	// Act
+	r.OnLink("one", shimclient.LinkConnected)
+
+	// Assert
+	rec, ok := dlog.FindRecord(surfaces.Records()[mark:], dlog.RecordQuery{Operation: "daemon.sidebar.rendered",
+		Match: func(rec dlog.Record) bool { return rec.Context["cause"] == "daemon.sidebar.on_link" }})
+	if !ok {
+		t.Fatalf("no render record names the link edge as its cause: %v", surfaces.Records()[mark:])
+	}
+	for key, want := range map[string]int{"workspaces": 2, "arms_derived": 1, "arms_kept": 1, "rows_built": 1, "rows_kept": 1} {
+		if got := rec.Context[key]; got != want {
+			t.Errorf("the render record's %s = %v, want %d", key, got, want)
+		}
+	}
+	if _, ok := rec.Context["elapsed_ms"].(int64); !ok {
+		t.Errorf("the render record's elapsed_ms = %#v, want milliseconds", rec.Context["elapsed_ms"])
 	}
 }

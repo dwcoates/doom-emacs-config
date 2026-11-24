@@ -16,6 +16,7 @@ import (
 // row is resolved on demand as a page resolves it (readRow), from the merged
 // set the last push was resolved from, and stated with that push's revision.
 func (r *resolver) Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.last == nil {
@@ -39,6 +40,7 @@ func (r *resolver) Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
 // Thread implements Resolver: whether the last push lists WS in its thread
 // section, with that push's revision.
 func (r *resolver) Thread(ws ids.WorkspaceID) (uint64, bool) {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.last == nil {
@@ -54,6 +56,7 @@ func (r *resolver) Thread(ws ids.WorkspaceID) (uint64, bool) {
 
 // Revision implements Resolver: the last push's revision.
 func (r *resolver) Revision() uint64 {
+	r.awaitApplied()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.last.GetRevision()

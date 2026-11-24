@@ -1,6 +1,14 @@
 package sidebar
 
-import "agent-repld/internal/wsm"
+import (
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
+)
+
+// RenderLevel exposes renderLevel, the level a render's timing record is
+// written at.
+var RenderLevel = renderLevel
 
 // SortMergedNewestFirst exposes sortMergedNewestFirst to the external test
 // package.
@@ -40,7 +48,16 @@ var OpenCount = openCount
 // that has rendered nothing yet, as a daemon that just booted or joined is
 // until its first render.
 func UnrenderedHolding(workspaces ...wsm.Workspace) Resolver {
-	r := &resolver{state: newRosterState()}
-	r.state.reg.Workspaces = workspaces
-	return r
+	c := &core{state: newRosterState(), log: dlog.NewTestSurfaces()}
+	c.initQueue()
+	c.state.reg.Workspaces = workspaces
+	c.state.index = indexRegistry(c.state.reg)
+	return c.commitView()
+}
+
+// IndexedRecord answers rosterState.record for WS in a roster holding REG.
+func IndexedRecord(reg Registry, ws ids.WorkspaceID) (*wsm.Workspace, bool) {
+	state := newRosterState()
+	state.reg, state.index = reg, indexRegistry(reg)
+	return state.record(ws)
 }

@@ -51,9 +51,11 @@ func (g *gatedFooter) arm() {
 }
 
 // combineFixture is a roster over three registered workspaces whose next
-// render can be held, with the queue's depth reported on queued.
+// render can be held, with the queue's depth reported on queued, and the
+// revision of its first push, read before anything reported to queued.
 type combineFixture struct {
 	r        sidebar.Resolver
+	revision uint64
 	gate     *gatedFooter
 	surfaces *dlog.TestSurfaces
 	queued   chan int
@@ -83,9 +85,12 @@ func newCombineFixture(t *testing.T, opts ...sidebar.Option) *combineFixture {
 		t.Fatalf("sidebar.New: %v", err)
 	}
 	r.SetRegistry(registry(workspace(string(wsA), "a"), workspace(string(wsB), "b"), workspace(string(wsC), "c")))
+	// READ BEFORE THE HOOK: a read settles the roster, whose barrier joins
+	// the queue too.
+	revision := latestPush(t, r).GetRevision()
 	queued := make(chan int, 16)
 	sidebar.SetOnQueued(r, func(depth int) { queued <- depth })
-	return &combineFixture{r: r, gate: gate, surfaces: surfaces, queued: queued}
+	return &combineFixture{r: r, revision: revision, gate: gate, surfaces: surfaces, queued: queued}
 }
 
 // holdRender starts change on its own goroutine with the next render held at
@@ -129,7 +134,7 @@ func TestTheCombinedCommit(t *testing.T) {
 	t.Run("changes queued while a render runs are published by one further render", func(t *testing.T) {
 		// Arrange
 		fx := newCombineFixture(t)
-		before := latestPush(t, fx.r).GetRevision()
+		before := fx.revision
 		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
 		waiters := fx.queueBehind(t,
 			func() { fx.r.SetBringingUp(wsB, true) },
@@ -227,4 +232,204 @@ func TestTheCombinedCommit(t *testing.T) {
 			t.Fatalf("the change was not published")
 		}
 	})
+}
+
+func TestThePostingView(t *testing.T) {
+	t.Run("a posted change returns while a render holds the roster's lock", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+
+		// Act: returns only because it waits for nothing.
+		fx.r.Posting().SetBringingUp(wsB, true)
+
+		// Assert
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the posted change joined a queue of depth %d, want 1", depth)
+		}
+		close(fx.gate.released)
+		<-leader
+		fx.r.Settle()
+		if row, _, ok := fx.r.Row(wsB); !ok || availabilityName(row) != "pending" {
+			t.Fatalf("the posted change was not published once the held render ended")
+		}
+	})
+
+	t.Run("a posted change with no batch under way is led on its own", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+
+		// Act
+		fx.r.Posting().SetBringingUp(wsB, true)
+		fx.r.Settle()
+
+		// Assert
+		if row, _, ok := fx.r.Row(wsB); !ok || availabilityName(row) != "pending" {
+			t.Fatalf("the posted change was not published")
+		}
+	})
+
+	t.Run("posted and committed changes are applied in the order they were queued", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+		fx.r.Posting().SetOpening(wsC, true)
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the posted change joined a queue of depth %d, want 1", depth)
+		}
+		committed := make(chan struct{})
+		go func() {
+			defer close(committed)
+			fx.r.SetOpening(wsC, false)
+		}()
+		if depth := <-fx.queued; depth != 2 {
+			t.Fatalf("the committed change joined a queue of depth %d, want 2", depth)
+		}
+
+		// Act
+		close(fx.gate.released)
+		<-leader
+		<-committed
+
+		// Assert
+		if row, _, ok := fx.r.Row(wsC); !ok || row.GetOpening() != nil {
+			t.Fatalf("the row draws the posted change over the committed one queued after it")
+		}
+	})
+
+	t.Run("a read waits for every change posted before it", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+		fx.r.Posting().SetBringingUp(wsC, true)
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the posted change joined a queue of depth %d, want 1", depth)
+		}
+		read := make(chan *frontendv1.RosterRow, 1)
+		go func() {
+			row, _, _ := fx.r.Row(wsC)
+			read <- row
+		}()
+		if depth := <-fx.queued; depth != 2 {
+			t.Fatalf("the read joined a queue of depth %d, want 2", depth)
+		}
+
+		// Act
+		close(fx.gate.released)
+		<-leader
+
+		// Assert
+		if row := <-read; availabilityName(row) != "pending" {
+			t.Fatalf("the read answered availability %q, want the posted change's pending", availabilityName(row))
+		}
+	})
+
+	t.Run("edges posted while a render runs are rendered together once", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+		fx.r.Posting().OnLink(wsB, shimclient.LinkConnected)
+		fx.r.Posting().OnLink(wsC, shimclient.LinkConnected)
+		fx.r.Posting().SetOpening(wsB, true)
+		for want := 1; want <= 3; want++ {
+			if depth := <-fx.queued; depth != want {
+				t.Fatalf("posted edge %d joined a queue of depth %d", want, depth)
+			}
+		}
+		mark := len(fx.surfaces.Records())
+
+		// Act
+		close(fx.gate.released)
+		<-leader
+		fx.r.Settle()
+
+		// Assert: the held render, then one render of all three edges.
+		if renders := rendersSince(t, fx.surfaces.Records(), mark).renders; renders != 2 {
+			t.Fatalf("the held render and three posted edges took %d renders, want 2", renders)
+		}
+	})
+
+	t.Run("the footer's status edge is posted", func(t *testing.T) {
+		// Arrange
+		fx := newCombineFixture(t)
+		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
+
+		// Act: returns only because it waits for nothing.
+		fx.r.FooterStatusChanged(wsB)
+
+		// Assert
+		if depth := <-fx.queued; depth != 1 {
+			t.Fatalf("the footer's status edge joined a queue of depth %d, want 1", depth)
+		}
+		close(fx.gate.released)
+		<-leader
+	})
+}
+
+func TestSettleWaitsForTheReportOfEveryBatchBeforeIt(t *testing.T) {
+	// Arrange: the status-change sink holds the first report it is handed.
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	reported := false
+	fx := newCombineFixture(t, sidebar.WithStatusChangeSink(func(ids.WorkspaceID, time.Time) {
+		held := false
+		once.Do(func() { held = true })
+		if !held {
+			return
+		}
+		close(entered)
+		<-release
+		mu.Lock()
+		reported = true
+		mu.Unlock()
+	}))
+	fx.r.Posting().SetOpening(wsB, true)
+	<-entered
+
+	// Act
+	settled := make(chan struct{})
+	go func() {
+		defer close(settled)
+		fx.r.Settle()
+	}()
+	close(release)
+	<-settled
+
+	// Assert
+	mu.Lock()
+	defer mu.Unlock()
+	if !reported {
+		t.Fatal("Settle returned before the batch before it was reported")
+	}
+}
+
+func TestABarrierRendersAndPublishesNothing(t *testing.T) {
+	cases := []struct {
+		name string
+		// barrier commits one of the roster's barriers.
+		barrier func(r sidebar.Resolver)
+	}{
+		{name: "Settle", barrier: func(r sidebar.Resolver) { r.Settle() }},
+		{name: "a read", barrier: func(r sidebar.Resolver) { r.Revision() }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			fx := newCombineFixture(t)
+			before := latestPush(t, fx.r)
+			mark := len(fx.surfaces.Records())
+
+			// Act
+			tc.barrier(fx.r)
+
+			// Assert
+			if after := latestPush(t, fx.r); after != before {
+				t.Fatalf("the barrier published revision %d over %d", after.GetRevision(), before.GetRevision())
+			}
+			if _, ok := dlog.FindRecord(fx.surfaces.Records()[mark:], dlog.RecordQuery{Operation: "daemon.sidebar.rendered"}); ok {
+				t.Fatal("the barrier rendered the roster")
+			}
+		})
+	}
 }

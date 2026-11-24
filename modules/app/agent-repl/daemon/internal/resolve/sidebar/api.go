@@ -213,6 +213,16 @@ type Resolver interface {
 	// it stands, the dead link of the old shim's stand-down leaves the
 	// session live.
 	SetReplacing(ws ids.WorkspaceID, replacing bool)
+	// Settle returns once every change queued before it has been applied,
+	// published and reported.
+	Settle()
+	// Posting answers the roster's POSTING VIEW: every change made through it
+	// is queued in order behind every change queued before it, through either
+	// view, and the call returns without waiting for any render. A caller
+	// that holds a lock of its own (a session watcher's, another resolver's)
+	// makes its changes through it, so it never waits on the roster's lock
+	// (combine.go). Its reads are the roster's own.
+	Posting() Resolver
 	// SetOpening raises (true) or lowers (false) the fact that an OpenTabs in
 	// flight names the workspace and has not answered it `opened` yet. While
 	// it stands the row draws `inactive` with its `opening` marker, over every

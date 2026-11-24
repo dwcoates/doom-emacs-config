@@ -64,6 +64,23 @@ func (r *resolver) rowRepository(rec wsm.Workspace, log dlog.Logger) *frontendv1
 // its list's own row type's (openRow, hiddenRow).
 // row composes REC's row.
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
+	// A ROW WHOSE INPUTS DID NOT MOVE IS KEPT (kept.go): its facts were
+	// derived from them, and its row built from them, by a render before.
+	var key rowKey
+	var k *kept
+	if !r.readOnly {
+		if arm, decided := rc.arms[rec.ID]; decided {
+			k, key = r.state.keptOf(rec.ID), r.rowKeyOf(rec.ID, arm, rc)
+			switch {
+			case r.factsOnly && k.factsKept && k.factsKey == key:
+				r.stats.factsKept++
+				return &frontendv1.RosterRow{}
+			case !r.factsOnly && k.row != nil && k.rowKey == key:
+				r.stats.rowsKept++
+				return k.row
+			}
+		}
+	}
 	s := r.state.workspace(rec.ID)
 	session := rc.sessions[rec.ID]
 	// THE ROW'S RECORDS ARE ITS WORKSPACE'S, in its own sink (logFor), never
@@ -127,12 +144,17 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 				r.departures = append(r.departures, departure{ws: rec.ID, arm: armName})
 			}
 		}
+		k.factsKey, k.factsKept = key, true
 		if r.factsOnly {
+			r.stats.factsDerived++
 			// A FACTS-ONLY RENDER (renderFacts) stops here: everything above
 			// is what an agent or the durable record depends on, everything
 			// below draws the row for a page nobody can see.
 			return &frontendv1.RosterRow{}
 		}
+	}
+	if !r.readOnly {
+		r.stats.rowsBuilt++
 	}
 	viewed := s.viewedOn(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
@@ -259,6 +281,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// THE UPDATE RECENCY, for ordering only: the editor's switcher offers
 	// workspaces most-recently-updated first. Always set.
 	out.LastUpdated = lastUpdated(rec, s.statusChangedAt)
+	if !r.readOnly {
+		k.row, k.rowKey = out, key
+	}
 	return out
 }
 

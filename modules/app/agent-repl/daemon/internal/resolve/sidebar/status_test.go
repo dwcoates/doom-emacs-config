@@ -1932,12 +1932,14 @@ func TestClosingTheNetworkFaultRestoresTheRow(t *testing.T) {
 func TestClosingAFaultTheRosterNeverHeldPublishesNothing(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
+	r.Settle()
 	before, _ := r.Topic().Latest()
 
 	// Act.
 	r.FaultClosed(theWS, "never-opened")
 
 	// Assert.
+	r.Settle()
 	if after, _ := r.Topic().Latest(); after != before {
 		t.Fatal("closing a fault the roster never held republished the roster")
 	}

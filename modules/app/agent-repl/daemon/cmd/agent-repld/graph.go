@@ -620,7 +620,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the sidebar resolver: %w", err)
 	}
 	statusChanged.bind(sidebarResolver)
-	topbarResolver.BindContextFill(sidebarResolver.SetContextFill)
+	// POSTED: the topbar states a context fill under its own lock, which
+	// must never wait on the roster's render (sidebar combine.go).
+	topbarResolver.BindContextFill(sidebarResolver.Posting().SetContextFill)
 	// ONE BRING-UP, ONE CALL, BOTH SURFACES. The roster draws a bring-up as
 	// its availability and the footer as the bring-up window of a route never
 	// seen (ladder.AwaitingBringUp), which the roster then projects; telling
@@ -1115,9 +1117,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Feed: feedResolver,
 			// A TURN THE VENDOR REJECTED FOR THE CREDENTIAL opens the login
 			// by itself (signInSensingFooter).
-			Footer:     signInSensingFooter{FooterSink: footerResolver, topbar: topbarResolver},
-			Topbar:     topbarResolver,
-			Sidebar:    sidebarResolver,
+			Footer: signInSensingFooter{FooterSink: footerResolver, topbar: topbarResolver},
+			Topbar: topbarResolver,
+			// THE ROSTER IS TOLD THROUGH ITS POSTING VIEW: a watcher tells it
+			// under a lock of its own, which must never wait on a render
+			// (sidebar combine.go's lock order).
+			Sidebar:    sidebarResolver.Posting(),
 			Holds:      feedResolver,
 			Lifecycle:  lifecycle,
 			Summary:    summaries,

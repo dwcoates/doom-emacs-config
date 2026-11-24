@@ -1849,6 +1849,13 @@ func TestAnUndeclaredCloseCauseFailsHard(t *testing.T) {
 	ws := workspace("w1", "one")
 	ws.Closed = true
 	ws.Closure = &wsm.Closure{At: *at(time.Hour), By: wsm.CloseCause("someone")}
+	// The footer is bound first and the roster settled, so the footer's
+	// posted status edges are applied before the install: the install's
+	// render then runs on this goroutine, whose panic the test recovers,
+	// rather than on the goroutine leading a posted batch.
+	fan := r.(*fanned)
+	fan.bindRegistry(registry(ws))
+	r.Settle()
 
 	// Act.
 	defer func() {
@@ -1863,7 +1870,7 @@ func TestAnUndeclaredCloseCauseFailsHard(t *testing.T) {
 		}
 		t.Fatalf("the undeclared cause was not logged at error: %v", log.Records())
 	}()
-	r.SetRegistry(registry(ws))
+	fan.Resolver.SetRegistry(registry(ws))
 }
 
 // THE TURN BOUNDARY is the running turn's start, else the durable last end,
