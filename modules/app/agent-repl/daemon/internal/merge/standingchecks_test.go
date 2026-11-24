@@ -566,3 +566,64 @@ func TestRenderOccasionNamesTheDeployOrTheCrashTheCheckIsOf(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAdoptionRunsThePassOnlyForAMediatorOrAFinishsWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		adopted  ids.WorkspaceID
+		finish   bool
+		wantPass bool
+	}{
+		{name: "the recorded mediator's adoption runs the pass", adopted: "ws-fixer", wantPass: true},
+		{name: "a remediation finish's workspace's adoption runs the pass", adopted: "ws-old", finish: true, wantPass: true},
+		{name: "any other workspace's adoption runs no pass", adopted: "ws-other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a pass that runs is seen by its record that this
+			// daemon does not serve the queues, and does nothing else.
+			h := checked(t)
+			withMediator(t, h)
+			if tt.finish {
+				if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-old", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.standing.serves = false
+
+			// Act
+			if err := h.o.AdoptWorkspace(context.Background(), tt.adopted); err != nil {
+				t.Fatalf("AdoptWorkspace: %v", err)
+			}
+
+			// Assert
+			_, ran := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "this daemon does not serve the queues; their checks are run by the daemon that does"})
+			_, said := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "this daemon adopted a deploy mediator; the mediation pass runs what it passed over while the mediator was not served here"})
+			if ran != tt.wantPass || said != tt.wantPass {
+				t.Fatalf("pass ran %v, said %v; want %v", ran, said, tt.wantPass)
+			}
+		})
+	}
+}
+
+func TestAnAdoptionWhoseMediatorCannotBeReadSaysSo(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	h.db.mu.Lock()
+	h.db.mediatorRepoErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.AdoptWorkspace(context.Background(), "ws-fixer")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptWorkspace = %v, want the merges taken all the same", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not read whether the adopted workspace is a deploy mediator; a round its adoption owes waits for the queue's next pass"}); !ok {
+		t.Fatalf("records = %v, want the unread mediator at ERROR", h.logs.Records())
+	}
+}

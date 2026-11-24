@@ -39,6 +39,39 @@ type standing struct {
 	briefed bool
 }
 
+// mediateAdopted runs the mediation pass when WS, a workspace this daemon has
+// just come to serve (AdoptWorkspace, called after its standing turned
+// owned), is a queue's recorded deploy mediator or a remediation finish's
+// workspace: the pass then runs the rounds and takes up the finish it passed
+// over while WS was not served here (Mediate's gate). Any other workspace's
+// adoption runs no pass. A failed read is recorded, and the round waits for
+// the queue's next pass.
+//
+// THE PASS OUTLIVES THE ADOPTION'S CALLER: the rpc an adoption answers may
+// end before the pass does, and the pass is bounded by the mediation's
+// lifetime (enterMediation), which the daemon's exit cuts.
+func (o *orchestrator) mediateAdopted(ctx context.Context, ws ids.WorkspaceID) {
+	fields := dlog.Context{"workspace": string(ws)}
+	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
+	if err != nil {
+		o.mediationFailed(ctx, fields, logsite.Msg("could not read whether the adopted workspace is a deploy mediator; a round its adoption owes waits for the queue's next pass"), err)
+		return
+	}
+	if !isMediator {
+		finish, err := o.deps.DB.RemediationFinishOf(ctx, ws)
+		if err != nil {
+			o.mediationFailed(ctx, fields, logsite.Msg("could not read whether the adopted workspace has a remediation finish; a finish its adoption owes waits for the queue's next pass"), err)
+			return
+		}
+		if finish == nil {
+			return
+		}
+		repo = finish.Repo
+	}
+	o.deps.Log.Global().Info(opMediation, "this daemon adopted a deploy mediator; the mediation pass runs what it passed over while the mediator was not served here", withField(fields, "repo", string(repo)))
+	o.mediateAgain(context.WithoutCancel(ctx))
+}
+
 // mediatorOf answers queue Q's standing mediator: the one recorded,
 // reopened when it was closed, or one made and recorded when the queue has
 // none (or the one recorded is gone from the registry).

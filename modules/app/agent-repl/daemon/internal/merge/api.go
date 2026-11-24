@@ -360,6 +360,8 @@ type Orchestrator interface {
 	SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error
 	// AdoptWorkspace takes every merge of a workspace this daemon now serves
 	// from its durable rows, resuming an admitted one at its recorded step.
+	// The adoption of a deploy mediator also runs the mediation pass, for
+	// the rounds it was not served here for (mediateAdopted).
 	AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error
 	// ReturnPausedMerges puts every merge of WS a handover paused back at
 	// its place in line, dropping its merge lease and progress: WS waits on
