@@ -709,7 +709,7 @@ Each is a list of names, the most recently taken first: COMMANDS without
 their slash, CHANNELS without their hash."
   (let* ((message "HostComposerSelections")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(commands workspaces channels))
+    (agent-repl-wire--check-keys "HostComposerSelections" object '(commands workspaces channels))
     (agent-repl-wire--decoded
      message
      (list :commands (agent-repl-wire--decode-repeated-string message 'commands object)
@@ -2983,7 +2983,7 @@ The record is the user's, not a workspace's, so no workspace is named."
   "Decode VALUE as `ReportComposerSelectionNotRecorded', a plist (:detail TEXT)."
   (let* ((message "ReportComposerSelectionNotRecorded")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(detail))
+    (agent-repl-wire--check-keys "ReportComposerSelectionNotRecorded" object '(detail))
     (agent-repl-wire--decoded
      message
      (list :detail (agent-repl-wire--decode-string message 'detail object)))))
@@ -2993,7 +2993,7 @@ The record is the user's, not a workspace's, so no workspace is named."
 THE ARM IS THE CAUSE, so an unset cause is a contract breach."
   (let* ((message "ReportComposerSelectionError")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(notRecorded))
+    (agent-repl-wire--check-keys "ReportComposerSelectionError" object '(notRecorded))
     (agent-repl-wire--decoded
      message
      (list :cause
@@ -3005,7 +3005,7 @@ THE ARM IS THE CAUSE, so an unset cause is a contract breach."
   "Decode VALUE as `ReportComposerSelectionResponse'.  THE ARM IS THE OUTCOME."
   (let* ((message "ReportComposerSelectionResponse")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(success error))
+    (agent-repl-wire--check-keys "ReportComposerSelectionResponse" object '(success error))
     (agent-repl-wire--decoded
      message
      (agent-repl-wire--decode-oneof

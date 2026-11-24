@@ -2,8 +2,10 @@ package composerselections
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -248,5 +250,28 @@ func TestAFailedLoadIsLoggedAndReturned(t *testing.T) {
 	records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opLoad})
 	if len(records) != 1 || records[0].Context["cause"] == nil {
 		t.Fatalf("records = %+v, want one ERROR carrying the cause", log.Records())
+	}
+}
+
+// keeperSource is this package's keeper, read by the test below.
+//
+//go:embed keeper.go
+var keeperSource string
+
+// TestTheRecordIsOrderedThroughRecencyNewestFirst pins that this keeper states
+// its order through recency.NewestFirst, the helper the other composer record
+// (internal/composermentions) uses too, rather than a sort of its own, so the two orders
+// and their tie-break cannot drift apart.
+func TestTheRecordIsOrderedThroughRecencyNewestFirst(t *testing.T) {
+	// Arrange
+	src := keeperSource
+
+	// Act
+	shared := strings.Contains(src, "recency.NewestFirst(")
+	handRolled := strings.Contains(src, "slices.SortFunc")
+
+	// Assert
+	if !shared || handRolled {
+		t.Fatalf("keeper.go orders through recency.NewestFirst = %v, sorts by hand = %v; want only the shared helper", shared, handRolled)
 	}
 }

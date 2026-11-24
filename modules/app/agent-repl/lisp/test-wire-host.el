@@ -2000,7 +2000,7 @@ OpenTabs streams."
                              "openInEditor" "openCommitLog" "runInTerminal" "ending" "selection"
                              "finalResponseClicked" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
-                             "responseQuestion" "mentions" "mentionTargets")
+                             "responseQuestion" "mentions" "mentionTargets" "composerSelections")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

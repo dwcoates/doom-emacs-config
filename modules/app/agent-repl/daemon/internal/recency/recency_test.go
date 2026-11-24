@@ -1,9 +1,7 @@
 package recency
 
 import (
-	"os"
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -25,39 +23,6 @@ func TestNewestFirst(t *testing.T) {
 			// Assert
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("NewestFirst(%v) = %v, want %v", tt.names, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestTheComposerRecordsShareNewestFirst pins that both composer records state
-// their order through NewestFirst rather than a sort of their own, so the two
-// orders and their tie-break cannot drift apart.
-func TestTheComposerRecordsShareNewestFirst(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-	}{
-		{name: "the composer mentions", path: "../composermentions/keeper.go"},
-		{name: "the composer selections", path: "../composerselections/keeper.go"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			src, err := os.ReadFile(tt.path)
-			if err != nil {
-				t.Fatalf("read %s: %v", tt.path, err)
-			}
-
-			// Act
-			text := string(src)
-
-			// Assert
-			if !strings.Contains(text, "recency.NewestFirst(") {
-				t.Fatalf("%s does not order its record through recency.NewestFirst", tt.path)
-			}
-			if strings.Contains(text, "slices.SortFunc") {
-				t.Fatalf("%s sorts a record by hand beside recency.NewestFirst", tt.path)
 			}
 		})
 	}

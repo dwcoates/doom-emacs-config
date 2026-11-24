@@ -37,7 +37,9 @@
 
 (defmacro agent-repl-test-command-completion--with (answer &rest body)
   "Run BODY in a composer owned by \"ws-1\" whose `ListSlashCommands' answers ANSWER.
-ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
+ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing.
+Nothing is taken yet, and a taken command reaches the fake composer
+selections daemon (`agent-repl-test--with-composer-selections')."
   (declare (indent 1))
   `(with-temp-buffer
      (setq-local agent-repl--owning-workspace "ws-1")
@@ -53,7 +55,8 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
                     (pcase (car answer)
                       (:response (funcall (plist-get keys :on-response) (cadr answer)))
                       (:failure (funcall (plist-get keys :on-failure) (cadr answer)))))))
-         ,@body))))
+         (agent-repl-test--with-composer-selections nil
+           ,@body)))))
 
 (defun agent-repl-test-command-completion--type (text)
   "Insert TEXT at point as typed input."
