@@ -4,6 +4,7 @@ import * as metapromptTree from "../src/metaprompt-tree.js";
 import {
   WIDE_CHAR_CLASS,
   boxWideChars,
+  closesLastUnit,
   formatTree,
   layoutTree,
   lineText,
@@ -804,6 +805,112 @@ describe("renderTreeHtml wraps by the width a line draws", () => {
     const html = renderTreeHtml(tree("Response (`x`)\n\n1 🔧 A\n└── 1.1 b"), inline, columnMeasure(40));
     // Assert
     expect(html).toContain("Response (<code>x</code>)");
+  });
+});
+
+describe("renderTreeHtml breaks a word too wide for a whole line between its characters", () => {
+  // "└── 1.1 " is 8 columns of a 24-column budget: a 16-column field.
+  const URL = "https://example.com/abcdefghijklmnopqrstuvwxyz";
+  const lineContents = (html: string): string[] =>
+    [...html.matchAll(/<span class="mp-content">(.*?)<\/span><\/div>/g)].map((m) => m[1]);
+  const drawn = (content: string): string => content.replace(/<[^>]*>/g, "");
+  const render = (text: string, onIssue?: Parameters<typeof renderTreeHtml>[3]): string =>
+    renderTreeHtml(tree(`${R}\n└── 1.1 ${text}`), inline, columnMeasure(24), onIssue);
+
+  it("fills each line of the field with the word's characters", () => {
+    // Act
+    const contents = lineContents(render(URL)).slice(1);
+    // Assert
+    expect(contents.map(drawn)).toEqual(["https://example.", "com/abcdefghijkl", "mnopqrstuvwxyz"]);
+  });
+
+  it("hangs every later piece of the word under the branch's text, on a wrap line", () => {
+    // Act
+    const html = render(URL);
+    // Assert — two wrap lines, each carrying the label pad that indents it under the text.
+    expect(html.match(new RegExp(`class="${TREE_LABEL_PAD_CLASS}"`, "g"))).toHaveLength(2);
+  });
+
+  it("closes the link at each break and reopens it on the next line", () => {
+    // Act
+    const contents = lineContents(render(URL)).slice(1);
+    // Assert
+    expect(contents.every((c) => /^<a [^>]*>[^<]*<\/a>$/.test(c))).toBe(true);
+  });
+
+  it("starts the word on a line of its own after the words before it", () => {
+    // Act
+    const contents = lineContents(render(`see ${URL}`)).slice(1);
+    // Assert
+    expect(contents.map(drawn)[0]).toBe("see");
+  });
+
+  it("keeps the punctuation after the link with the link's last characters", () => {
+    // Act
+    const contents = lineContents(render(`${URL}.`)).slice(1);
+    // Assert
+    expect(contents.map(drawn)).toEqual(["https://example.", "com/abcdefghijkl", "mnopqrstuvwxyz."]);
+  });
+
+  it("joins the words after the broken word to its last line with a space", () => {
+    // Act
+    const contents = lineContents(render(`${URL} o`)).slice(1);
+    // Assert
+    expect(contents.map(drawn)[2]).toBe("mnopqrstuvwxyz o");
+  });
+
+  it("never breaks inside a character cluster", () => {
+    // Act — each "🔧" is two columns: the 16-column field holds seven after "aa".
+    const contents = lineContents(render(`aa${"🔧".repeat(9)}`)).slice(1);
+    // Assert
+    expect(contents.map(drawn)).toEqual([`aa${"🔧".repeat(7)}`, "🔧🔧"]);
+  });
+
+  it("reports no overflow for a word it could break", () => {
+    // Arrange
+    const issues: string[] = [];
+    // Act
+    render(URL, (message) => issues.push(renderMessage(message)));
+    // Assert
+    expect(issues).toEqual([]);
+  });
+
+  it("measures every character in the one call to the measure", () => {
+    // Arrange
+    const calls: TreeMeasureItem[][] = [];
+    // Act
+    renderTreeHtml(graph([{ label: "1", text: "x" }, { parent: 0, label: "1.1", text: "WWWWWWWWWWWWWWWWWWWW" }]), identity, pxMeasure(160, calls));
+    // Assert
+    expect([calls.length, calls[0].some((i) => i.html === "W")]).toEqual([1, true]);
+  });
+
+  it("breaks by each character's drawn width, not its count", () => {
+    // Act — 1.1's 64px prefix leaves 96px: four 20px "W"s per line, never nine 10px characters.
+    const html = renderTreeHtml(graph([{ label: "1", text: "x" }, { parent: 0, label: "1.1", text: "WWWWWWWWWW" }]), identity, pxMeasure(160));
+    // Assert
+    expect(textsOf(html, "mp-content").slice(1)).toEqual(["WWWW", "WWWW", "WW"]);
+  });
+});
+
+describe("closesLastUnit", () => {
+  it.each([
+    { name: "joins a close tag with no text pending to the last unit", tag: "</a>", pending: "", units: 1, joins: true },
+    { name: "keeps a close tag with text pending in the pending unit", tag: "</a>", pending: "x", units: 1, joins: false },
+    { name: "keeps a close tag before any unit in the first unit", tag: "</a>", pending: "", units: 0, joins: false },
+    { name: "rides an open tag on the next unit", tag: '<a href="u">', pending: "", units: 1, joins: false },
+  ])("$name", ({ tag, pending, units, joins }) => {
+    // Act + Assert
+    expect(closesLastUnit(tag, pending, units)).toBe(joins);
+  });
+
+  it("is the rule both a word split and a character split place a close tag by", () => {
+    // Arrange — a close tag after a space (word split) and before a period (character split).
+    const URL = "https://example.com/abcdefghijklmnopqrstuvwxyz";
+    // Act
+    const words = wrap(`${R}\n└── 1.1 <b>alpha beta gamma </b>x`, 18);
+    const chars = renderTreeHtml(tree(`${R}\n└── 1.1 ${URL}.`), inline, columnMeasure(24));
+    // Assert — each line closes the element its own text is in.
+    expect([words.split("\n")[2] === "        <b>gamma</b> x", chars.includes("mnopqrstuvwxyz</a>.")]).toEqual([true, true]);
   });
 });
 
