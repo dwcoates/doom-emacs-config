@@ -1,11 +1,11 @@
 // Whether two optional protobuf messages say the same thing. See src/rpc/optional-equal.ts.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { RosterVersionSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { sameOptional } from "../../src/rpc/optional-equal.js";
 import { codeOf } from "../source-text.js";
+import sidebarSource from "../../src/sidebar/sidebar.ts?raw";
+import feedSource from "../../src/feed/feed-view.ts?raw";
 
 const version = (text: string) => create(RosterVersionSchema, { text });
 
@@ -26,9 +26,8 @@ describe("sameOptional", () => {
 
   it("is how the rail's head and the feed's hover stamp compare their optional messages", () => {
     // Arrange
-    const src = join(__dirname, "..", "..", "src");
-    const sidebar = codeOf(readFileSync(join(src, "sidebar", "sidebar.ts"), "utf8"));
-    const feed = codeOf(readFileSync(join(src, "feed", "feed-view.ts"), "utf8"));
+    const sidebar = codeOf(sidebarSource);
+    const feed = codeOf(feedSource);
 
     // Act / Assert
     expect([sidebar.includes("sameOptional(RosterVersionSchema"), feed.includes("sameOptional(FeedHoverStampSchema")]).toEqual([true, true]);

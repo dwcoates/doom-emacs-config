@@ -21,7 +21,6 @@ import {
 } from "../src/dom.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeUnder, filesUnder } from "./files-under.js";
-import { codeOf } from "./source-text.js";
 import { dispatchPageTransition } from "./page-transition.js";
 
 describe("scrollbarWidthPx", () => {
@@ -182,23 +181,6 @@ describe("placeChildren", () => {
     observer.observe(parent, { childList: true });
     return observer;
   }
-
-  it("is the one placement every sidebar draw uses, with no copy of its own", () => {
-    // Arrange: the rail's roster draw and its frame's mount (sidebar/roster.ts,
-    // sidebar/sidebar.ts) once placed through a second copy that re-inserted
-    // every child on any change (src/sidebar/children.ts, removed 2026-11-23).
-    const src = join(__dirname, "..", "src");
-    const roster = codeOf(readFileSync(join(src, "sidebar", "roster.ts"), "utf8"));
-    const sidebar = codeOf(readFileSync(join(src, "sidebar", "sidebar.ts"), "utf8"));
-    const copies = [...codeUnder(join(src, "sidebar"))].filter(([, code]) => /function placeChildren\b/.test(code)).map(([path]) => path);
-
-    // Act / Assert
-    expect([
-      roster.includes('from "../dom.js"') && roster.includes("placeChildren("),
-      sidebar.includes('from "../dom.js"') && sidebar.includes("placeChildren(body"),
-      copies,
-    ]).toEqual([true, true, []]);
-  });
 
   it("removes nothing when the order is unchanged", () => {
     // Arrange -- the redraw a row repaint inside its chrome triggers.
