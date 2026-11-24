@@ -3466,6 +3466,32 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	return f.teardown(ctx, ws, session, force, "the workspace's session was stopped")
 }
 
+// killErrOf is the error a stop whose kill failed with ERR answers, nil when
+// it did not fail.
+func killErrOf(ws ids.WorkspaceID, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("stop session for %q: kill the shim: %w", ws, err)
+}
+
+// recordStopEnded records the end of WS's shim for the ordered stop CTX names
+// the reason of (shimEndTerminal), on a context its caller's end cannot
+// cancel: the record is the workspace's own accounting, owed once the shim is
+// gone. WHY is the stop's own account of itself.
+func (f *Fleet) recordStopEnded(ctx context.Context, ws ids.WorkspaceID, why string) error {
+	reason, stated := shimlife.StandDownOf(ctx)
+	if !stated {
+		reason = shimlife.StandDownUnstated
+	}
+	kind, record := shimEndTerminal(reason)
+	if !record {
+		return nil
+	}
+	log := f.logFor(ctx, ws).With(dlog.Context{"stand_down": string(reason)})
+	return recordShimEnded(context.WithoutCancel(ctx), log, f.deps.DB, opBringUp, ws, kind, string(reason)+": "+why, f.now())
+}
+
 // removeStoodDownLocked takes WS's session out of the map for a stand-down
 // this daemon ordered, and counts it (StandDowns) IN THE SAME CRITICAL
 // SECTION: whoever reads the session gone under mu reads the count that
@@ -3539,8 +3565,17 @@ func (f *Fleet) teardown(ctx context.Context, ws ids.WorkspaceID, session *live,
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
+	// THE END IS RECORDED BEFORE THIS RETURNS (terminalrecord.go), on every
+	// path that leaves no shim behind: a kill that answered, and one whose
+	// bound ran out with the SIGKILL already gone out. A SIGKILL that could
+	// not be sent may leave the shim running, so that stop records nothing.
+	if killErr == nil || errors.Is(killErr, shimclient.ErrSIGKILLed) {
+		if err := f.recordStopEnded(ctx, ws, reason); err != nil {
+			return errors.Join(err, killErrOf(ws, killErr))
+		}
+	}
 	if killErr != nil {
-		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, killErr)
+		return killErrOf(ws, killErr)
 	}
 	f.noteReap(ws, session.client)
 	// THE SHIM'S VERDICT ENDS WITH THE SHIM. A fault the shim reported stands
@@ -3677,6 +3712,15 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 	f.deps.Log.Global().Info(opBringUp, "retired the session of a shim that is gone", dlog.Context{
 		"workspace": string(ws), "shim_pid": session.client.PID(),
 	})
+	// A SHIM THAT IS GONE ENDED ITS SESSION, whether a stand-down this daemon
+	// asked for made it leave or it died: the end is recorded before this
+	// returns (terminalrecord.go). A failure is recorded there and is all the
+	// reaper can do with it.
+	detail := "shim_died: the shim exited with nothing stopping it"
+	if session.client.StandingDown() {
+		detail = "stood_down: the shim left after the stand-down this daemon asked for"
+	}
+	_ = recordShimEnded(context.Background(), f.logFor(context.Background(), ws), f.deps.DB, opBringUp, ws, wsm.TerminalParked, detail, f.now())
 	f.publishHost(ws)
 }
 

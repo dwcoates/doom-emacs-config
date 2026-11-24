@@ -818,6 +818,9 @@ func TestKillAnswersItsCallerWhenTheContextEndsInsideTheGrace(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Kill() error = %v, want a context.DeadlineExceeded", err)
 	}
+	if !errors.Is(err, ErrSIGKILLed) {
+		t.Fatalf("Kill() error = %v, want ErrSIGKILLed: the SIGKILL has gone out, so the shim is gone", err)
+	}
 	if answered >= grace {
 		t.Fatalf("Kill() answered after %v; it must answer on the caller's %v bound, not the grace", answered, callerBound)
 	}
