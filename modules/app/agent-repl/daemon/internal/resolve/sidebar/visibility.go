@@ -338,10 +338,8 @@ func (r *resolver) Visibility(ws ids.WorkspaceID) wsm.Visibility {
 	if v, derived := r.state.visibility[ws]; derived {
 		return v
 	}
-	for _, rec := range r.state.reg.Workspaces {
-		if rec.ID == ws {
-			return rec.Visibility
-		}
+	if rec, ok := r.state.record(ws); ok {
+		return rec.Visibility
 	}
 	return wsm.NotVisible
 }

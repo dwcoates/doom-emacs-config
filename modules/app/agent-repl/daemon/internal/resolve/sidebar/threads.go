@@ -38,12 +38,8 @@ func (r *resolver) selectedIsThread() bool {
 	if r.state.selected == nil {
 		return false
 	}
-	for _, ws := range r.state.reg.Workspaces {
-		if ws.ID == *r.state.selected {
-			return ws.IsThread()
-		}
-	}
-	return false
+	ws, ok := r.state.record(*r.state.selected)
+	return ok && ws.IsThread()
 }
 
 // appSwitcher resolves the rail's title and its dropdown.

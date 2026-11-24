@@ -229,8 +229,7 @@ func (r *resolver) Topic() *publish.Topic[*frontendv1.RosterPush] { return &r.to
 // Only an OPEN workspace's central fallback is resolved again, since its
 // worktree may be recreated and its own sink then resolves.
 func (r *resolver) logFor(ws ids.WorkspaceID) dlog.Logger {
-	if at, ok := r.state.index.at[ws]; ok {
-		rec := &r.state.reg.Workspaces[at]
+	if rec, ok := r.state.record(ws); ok {
 		k := r.state.keptOf(ws)
 		if k.log != nil && k.logDir == rec.Dir && (!k.logCentral || rec.Closed) {
 			return k.log
@@ -730,12 +729,8 @@ func (r *resolver) selectedWorkspace() *wsm.Workspace {
 	if r.state.selected == nil {
 		return nil
 	}
-	for i := range r.state.reg.Workspaces {
-		if r.state.reg.Workspaces[i].ID == *r.state.selected {
-			return &r.state.reg.Workspaces[i]
-		}
-	}
-	return nil
+	rec, _ := r.state.record(*r.state.selected)
+	return rec
 }
 
 // ---- daemon-fact setters --------------------------------------------------

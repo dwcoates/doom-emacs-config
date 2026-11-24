@@ -2,6 +2,11 @@ package sidebar_test
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -345,5 +350,103 @@ func TestARowsLogSinkIsResolvedAgainOnlyForAnOpenWorkspaceThatFellBack(t *testin
 				t.Fatalf("the edge resolved %d sinks, want resolving again %v", got, tc.again)
 			}
 		})
+	}
+}
+
+func TestARecordIsTheRegistrysOwnThroughItsIndex(t *testing.T) {
+	// Arrange
+	reg := registry(workspace("one", "one"), workspace("two", "two"))
+
+	cases := []struct {
+		name  string
+		ws    ids.WorkspaceID
+		want  *wsm.Workspace
+		found bool
+	}{
+		{name: "a carried workspace answers the registry's own record", ws: "two", want: &reg.Workspaces[1], found: true},
+		{name: "a workspace the registry does not carry answers none", ws: "three", want: nil, found: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, found := sidebar.IndexedRecord(reg, tc.ws)
+
+			// Assert
+			if found != tc.found || got != tc.want {
+				t.Fatalf("record(%s) = %p, %v, want %p, %v", tc.ws, got, found, tc.want, tc.found)
+			}
+		})
+	}
+}
+
+// TestNoSiteScansTheRegistryForOneRecord holds every lookup of one
+// workspace's record to rosterState.record: a loop over the registry's
+// workspaces that compares each one's id and returns is a scan for one record
+// the index replaced, and one per row per render was what made a render cost
+// the whole registry.
+func TestNoSiteScansTheRegistryForOneRecord(t *testing.T) {
+	// Arrange
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	fset := token.NewFileSet()
+
+	// Act
+	var scans []string
+	for _, path := range sources {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			loop, ok := n.(*ast.RangeStmt)
+			if !ok || !strings.HasSuffix(exprText(loop.X), "reg.Workspaces") {
+				return true
+			}
+			ids := map[string]bool{exprText(loop.X) + "[].ID": true}
+			if v, ok := loop.Value.(*ast.Ident); ok {
+				ids[v.Name+".ID"] = true
+			}
+			var compared, returns bool
+			ast.Inspect(loop.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.BinaryExpr:
+					if (n.Op == token.EQL || n.Op == token.NEQ) && (ids[exprText(n.X)] || ids[exprText(n.Y)]) {
+						compared = true
+					}
+				case *ast.ReturnStmt:
+					returns = true
+				}
+				return true
+			})
+			if compared && returns {
+				scans = append(scans, fset.Position(loop.Pos()).String())
+			}
+			return true
+		})
+	}
+
+	// Assert
+	if len(scans) > 0 {
+		t.Fatalf("these sites scan the registry for one workspace's record, want rosterState.record: %v", scans)
+	}
+}
+
+// exprText spells a selector chain (r.state.reg.Workspaces), empty for any
+// other expression.
+func exprText(e ast.Expr) string {
+	switch e := e.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return exprText(e.X) + "." + e.Sel.Name
+	case *ast.IndexExpr:
+		return exprText(e.X) + "[]"
+	default:
+		return ""
 	}
 }

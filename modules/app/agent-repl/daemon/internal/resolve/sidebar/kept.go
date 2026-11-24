@@ -109,6 +109,17 @@ func indexRegistry(reg Registry) registryIndex {
 	return out
 }
 
+// record answers WS's record in the registry the roster holds, through its
+// index, and whether the registry carries it. The record is the registry's
+// own, read and never written. Caller holds mu.
+func (r *rosterState) record(ws ids.WorkspaceID) (*wsm.Workspace, bool) {
+	at, ok := r.index.at[ws]
+	if !ok {
+		return nil, false
+	}
+	return &r.reg.Workspaces[at], true
+}
+
 // keptOf answers WS's kept facts, made at the first ask. Caller holds mu.
 func (r *rosterState) keptOf(ws ids.WorkspaceID) *kept {
 	k, ok := r.kept[ws]

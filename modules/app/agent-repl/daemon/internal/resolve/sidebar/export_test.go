@@ -1,6 +1,9 @@
 package sidebar
 
-import "agent-repld/internal/wsm"
+import (
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
+)
 
 // RenderLevel exposes renderLevel, the level a render's timing record is
 // written at.
@@ -47,4 +50,11 @@ func UnrenderedHolding(workspaces ...wsm.Workspace) Resolver {
 	r := &resolver{state: newRosterState()}
 	r.state.reg.Workspaces = workspaces
 	return r
+}
+
+// IndexedRecord answers rosterState.record for WS in a roster holding REG.
+func IndexedRecord(reg Registry, ws ids.WorkspaceID) (*wsm.Workspace, bool) {
+	state := newRosterState()
+	state.reg, state.index = reg, indexRegistry(reg)
+	return state.record(ws)
 }

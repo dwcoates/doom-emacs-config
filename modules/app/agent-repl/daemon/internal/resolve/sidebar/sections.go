@@ -161,9 +161,8 @@ func (q repoQueue) listed() bool {
 func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
 	const op = "daemon.sidebar.merge_queue"
 	out := &frontendv1.RosterRepoMergeQueue{Paused: drawMergeQueuePause(q.pause, q.deployCheck)}
-	byID := r.workspacesByID()
 	subject := func(entry QueueEntry) (*frontendv1.RosterMergeQueueSubject, bool) {
-		credited, ok := byID[entry.Credited]
+		credited, ok := r.state.record(entry.Credited)
 		if !ok {
 			log.Error(op, "a merge in the queue is credited to a workspace the registry does not carry, so it is not drawn", dlog.Context{
 				"workspace_id": string(entry.Workspace), "credited": string(entry.Credited),
@@ -176,10 +175,10 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 				"invariant_violation": "a merge queue entry carries its own name iff it is async"})
 			return nil, false
 		}
-		return queueSubject(credited, entry), true
+		return queueSubject(*credited, entry), true
 	}
 	if m := q.mediation; m != nil {
-		out.Mediation = drawMediation(*m, byID, r.state.turnInFlight(m.Mediator), log)
+		out.Mediation = drawMediation(*m, r.state.record, r.state.turnInFlight(m.Mediator), log)
 	}
 	for _, entry := range q.remediating {
 		sub, ok := subject(entry)
@@ -200,13 +199,13 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		})
 	}
 	for _, entry := range q.offQueue {
-		own, ok := byID[entry.Workspace]
+		own, ok := r.state.record(entry.Workspace)
 		if !ok {
 			log.Error(op, "a merge off its queue names a workspace the registry does not carry, so it is not drawn", dlog.Context{
 				"workspace_id": string(entry.Workspace), "invariant_violation": "a merge off its queue references a registered workspace"})
 			continue
 		}
-		sub, ok := subject(QueueEntry{Workspace: entry.Workspace, Credited: entry.Credited, Async: entry.Async, AsyncName: asyncName(own, entry.Async)})
+		sub, ok := subject(QueueEntry{Workspace: entry.Workspace, Credited: entry.Credited, Async: entry.Async, AsyncName: asyncName(*own, entry.Async)})
 		if !ok {
 			continue
 		}
@@ -396,20 +395,20 @@ func drawDeployCheckHold(h *DeployCheckHold) *frontendv1.RosterMergeQueuePaused 
 // label reads that the mediator is at work on what the user settled, and
 // reads that the deploy needs the user again once the turn ends with no
 // finish. The label follows the same turn the mediator's own row draws.
-func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, working bool, log dlog.Logger) *frontendv1.RosterMergeQueueMediation {
+func drawMediation(m QueueMediation, record func(ids.WorkspaceID) (*wsm.Workspace, bool), working bool, log dlog.Logger) *frontendv1.RosterMergeQueueMediation {
 	const op = "daemon.sidebar.merge_queue"
 	target := func(ws ids.WorkspaceID) *frontendv1.RosterMergeQueueMediationTarget {
 		if ws == "" {
 			return nil
 		}
-		record, ok := byID[ws]
+		rec, ok := record(ws)
 		if !ok {
 			log.Error(op, "the deploy mediator is one the registry does not carry, so the label selects nothing", dlog.Context{
 				"workspace_id": string(ws), "repository_id": string(m.Repo), "stage": int(m.Stage),
 				"invariant_violation": "a deploy mediator is registered"})
 			return nil
 		}
-		return &frontendv1.RosterMergeQueueMediationTarget{Workspace: record.Ref()}
+		return &frontendv1.RosterMergeQueueMediationTarget{Workspace: rec.Ref()}
 	}
 	stage := m.Stage
 	if stage == MediationEscalated && working && m.Mediator != "" {
@@ -472,15 +471,6 @@ func asyncName(own wsm.Workspace, async bool) string {
 	return own.Name
 }
 
-// workspacesByID indexes the registry's workspaces by id.
-func (r *resolver) workspacesByID() map[ids.WorkspaceID]wsm.Workspace {
-	byID := make(map[ids.WorkspaceID]wsm.Workspace, len(r.state.reg.Workspaces))
-	for _, ws := range r.state.reg.Workspaces {
-		byID[ws.ID] = ws
-	}
-	return byID
-}
-
 // repoQueues answers every repository's merge queue, keyed by the repository
 // of the workspace each merge runs in: a queue is keyed by its repository's
 // git common dir, which only the merge orchestrator resolves, and every merge
@@ -496,7 +486,6 @@ func (r *resolver) workspacesByID() map[ids.WorkspaceID]wsm.Workspace {
 // the workspace it is credited to.
 func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 	const op = "daemon.sidebar.queue_lines"
-	byID := r.workspacesByID()
 	keys := make([]wsm.RepoKey, 0, len(r.state.queues))
 	for key := range r.state.queues {
 		keys = append(keys, key)
@@ -516,7 +505,7 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 	for _, key := range keys {
 		q := r.state.queues[key]
 		for _, entry := range q.line {
-			ws, ok := byID[entry.Workspace]
+			ws, ok := r.state.record(entry.Workspace)
 			if !ok {
 				log.Error(op, "a merge in line names a workspace the registry does not carry, so its queue row is not drawn", dlog.Context{
 					"repo": string(key), "workspace_id": string(entry.Workspace),
@@ -530,7 +519,7 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			out[ws.Repo] = rq
 		}
 		for _, entry := range q.remediating {
-			ws, ok := byID[entry.Workspace]
+			ws, ok := r.state.record(entry.Workspace)
 			if !ok {
 				log.Error(op, "a merge remediating out of line names a workspace the registry does not carry, so it is not drawn", dlog.Context{
 					"repo": string(key), "workspace_id": string(entry.Workspace),
@@ -554,7 +543,7 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 		}
 	}
 	for _, entry := range r.state.github {
-		ws, ok := byID[entry.Workspace]
+		ws, ok := r.state.record(entry.Workspace)
 		if !ok {
 			log.Error(op, "a workspace standing in a GitHub merge queue is not in the registry, so it is not drawn", dlog.Context{
 				"workspace_id":        string(entry.Workspace),
@@ -566,7 +555,7 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 		out[ws.Repo] = rq
 	}
 	for _, entry := range r.state.offQueue {
-		ws, ok := byID[entry.Workspace]
+		ws, ok := r.state.record(entry.Workspace)
 		if !ok {
 			log.Error(op, "a merge off its queue names a workspace the registry does not carry, so it is not drawn", dlog.Context{
 				"workspace_id": string(entry.Workspace), "invariant_violation": "a merge off its queue references a registered workspace"})
