@@ -1591,8 +1591,8 @@ THE ONE RECENCY ORDER: the recency walk (`s-[', `s-]'), the jump to the
 previous workspace and the jump to the most recent workspace
 \(`agent-repl--roster-recent-names') all order by it, so none can
 disagree about which workspace came before.  The landing after a close
-is the daemon's own rule instead (`agent-repl-roster-departure-landing').  The daemon is its
-source: Emacs keeps no history of its own.
+is the daemon's own rule instead (`agent-repl-roster-departure-landing').
+The daemon is its source: Emacs keeps no history of its own.
 
   1. The walk\='s origin while a recency walk runs
      (`agent-repl--recency-walk-origin'), and otherwise the workspace the
