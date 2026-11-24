@@ -1773,7 +1773,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                             :hidden-rows (:rows nil)
                             :fold (:arm :expanded :value nil))
                    :current (:workspace (:id "ws-1" :dir "/w/1")
-                             :selection-id "" :switch-started-at-ms nil)
+                             :selection-id "" :switch-started-at-ms nil
+                             :departure-landing nil)
                    :version nil
                    :app-switcher (:title "Workspaces" :shown :workspaces :options nil)
                    :threads (:new-thread "New thread" :rows nil)
@@ -1785,7 +1786,16 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-roster-current-workspace
                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"},\"selectionId\":\"sel-1\",\"switchStartedAtMs\":\"1700000000123\"}")
                  '(:workspace (:id "ws-1" :dir "/w/1")
-                   :selection-id "sel-1" :switch-started-at-ms 1700000000123))))
+                   :selection-id "sel-1" :switch-started-at-ms 1700000000123
+                   :departure-landing nil))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-current-selections-departure-landing ()
+  "The current workspace's departure landing decodes to its ref."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-current-workspace
+                             "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"},\"departureLanding\":{\"id\":\"ws-2\",\"dir\":\"/w/2\"}}")
+                            :departure-landing)
+                 '(:id "ws-2" :dir "/w/2"))))
 
 (defun agent-repl-test-wire-roster--with-cold-gates (gates)
   "The whole roster JSON carrying GATES, a JSON array's text, as its cold gates."

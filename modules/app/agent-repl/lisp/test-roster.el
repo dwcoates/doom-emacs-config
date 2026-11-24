@@ -454,6 +454,49 @@ whose calls are the observation."
     ;; Act / Assert
     (should-not (agent-repl-roster-repository-of "m" roster))))
 
+;;; --- The current workspace's departure landing
+
+(defmacro agent-repl-test-roster--with-departure (current landing live &rest body)
+  "Run BODY with the roster selecting CURRENT, naming LANDING its departure landing.
+CURRENT and LANDING are ref ids (LANDING nil for none); LIVE is an alist of
+each ref id that has a live tab here to its name."
+  (declare (indent 3))
+  `(let ((agent-repl-roster-view
+          (list :current (list :workspace (list :id ,current :dir "/w/current")
+                               :departure-landing (and ,landing (list :id ,landing :dir "/w/landing"))))))
+     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+                (lambda (id) (cdr (assoc id ,live)))))
+       (agent-repl-test-roster--with-refs '(("gone" . (:id "gone-id")) ("other" . (:id "other-id")))
+         ,@body))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-names-the-landings-tab ()
+  "The selected workspace's departure landing answers the landing's tab name."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" "parent-id" '(("parent-id" . "parent"))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster-departure-landing "gone") "parent"))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-is-nil-for-a-workspace-not-selected ()
+  "The roster states the landing for its selection only, so another workspace has none."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" "parent-id" '(("parent-id" . "parent"))
+    ;; Act / Assert
+    (should-not (agent-repl-roster-departure-landing "other"))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-is-nil-when-the-roster-names-none ()
+  "A roster naming no landing (no other tab drawn) answers nil."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" nil '(("parent-id" . "parent"))
+    ;; Act / Assert
+    (should-not (agent-repl-roster-departure-landing "gone"))))
+
+(ert-deftest agent-repl-test-roster-departure-landing-is-nil-when-the-landing-has-no-tab ()
+  "A landing with no live tab here answers nil."
+  ;; Arrange
+  (agent-repl-test-roster--with-departure "gone-id" "parent-id" nil
+    ;; Act / Assert
+    (should-not (agent-repl-roster-departure-landing "gone"))))
+
 ;;; --- A workspace's repository, by its name
 
 (defmacro agent-repl-test-roster--with-refs (refs &rest body)

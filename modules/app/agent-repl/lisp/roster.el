@@ -1588,10 +1588,10 @@ nil when the roster has no row for WS; otherwise
 (defun agent-repl-roster-selection-recency-order (names)
   "Return NAMES ordered by the user\='s interaction recency, newest first.
 THE ONE RECENCY ORDER: the recency walk (`s-[', `s-]'), the jump to the
-previous workspace, the landing after a close
-\(`agent-repl--teardown-landing-target') and the jump to the most recent
-workspace (`agent-repl--roster-recent-names') all order by it, so none
-can disagree about which workspace came before.  The daemon is its
+previous workspace and the jump to the most recent workspace
+\(`agent-repl--roster-recent-names') all order by it, so none can
+disagree about which workspace came before.  The landing after a close
+is the daemon's own rule instead (`agent-repl-roster-departure-landing').  The daemon is its
 source: Emacs keeps no history of its own.
 
   1. The walk\='s origin while a recency walk runs
@@ -1728,6 +1728,22 @@ caller asks `agent-repl-roster-drawn-tab-order' whether it is drawn."
 (defun agent-repl-roster--current-id (roster)
   "Return ROSTER's selected workspace id, or nil when there is none."
   (plist-get (plist-get (plist-get roster :current) :workspace) :id))
+
+(defun agent-repl-roster-departure-landing (ws)
+  "Return the workspace a close of WS lands the user on, or nil.
+THE DAEMON'S RULE (frontend.v1.RosterCurrentWorkspace.departure_landing):
+the drawn tab nearest WS the user selected most recently -- its
+ancestors, then its subsection, then its repository, then its
+repository's main workspace -- the same rule its hide and fold landings
+take.  The roster states it for the selected workspace only, so nil when
+the roster's selection is not WS, when it names no landing, or when the
+landing has no live tab here."
+  (let* ((current (plist-get agent-repl-roster-view :current))
+         (from (plist-get (plist-get current :workspace) :id))
+         (landing (plist-get (plist-get current :departure-landing) :id)))
+    (and landing
+         (equal from (plist-get (agent-repl--ws-get ws :ref) :id))
+         (agent-repl--ws-by-ref-id landing))))
 
 (defvar agent-repl-roster-following nil
   "Non-nil while the frame is being moved to follow the roster's `current'.

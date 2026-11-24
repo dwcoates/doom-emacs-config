@@ -68,6 +68,7 @@
 (declare-function agent-repl--kill-cause-str "core")
 (declare-function agent-repl--pseudo-workspace-name-p "core")
 (declare-function agent-repl-roster-selection-recency-order "roster" (names))
+(declare-function agent-repl-roster-departure-landing "roster" (ws))
 (declare-function agent-repl-roster-last-interacted-ms "roster" (ws))
 (declare-function agent-repl--ws-dir "status")
 (declare-function agent-repl--ws-log-routable-p "core")
@@ -1946,23 +1947,23 @@ directly or guarding it themselves with `boundp'."
 (defun agent-repl--teardown-landing-target (ws)
   "Return the workspace a teardown of WS lands the user on, or nil.
 
-THE WORKSPACE THE USER WORKED IN BEFORE WS (owner ruling, 2026-09-30):
-the agent-repl workspace still open that the user interacted with most
-recently, in the one recency order
-\(`agent-repl-roster-selection-recency-order'), which is the daemon\='s
-durable interaction instant, so a fresh Emacs still knows which workspace
-came before.  A workspace that has since closed is not a
-candidate, so the next most recent survivor is taken.  How WS closed does
-not matter -- the user's close, kill or nuke and an implicit close such as
-a landed merge all reach this one rule through
-`agent-repl--land-before-teardown' -- and it is only ever asked when the
-user stands on WS (the landing is not owed otherwise).
+THE DAEMON'S LANDING RULE (owner request, 2026-11-24): the drawn tab
+nearest WS the user selected most recently -- its ancestors, then its
+subsection, then its repository, then its repository's main workspace
+-- which the roster states for the selected workspace
+\(`agent-repl-roster-departure-landing').  A hide and a fold land by the
+same rule in the daemon, so every way a workspace leaves the bar lands
+the same.  How WS closed does not matter -- the user's close, kill or
+nuke and an implicit close such as a landed merge all reach this one
+rule through `agent-repl--land-before-teardown' -- and it is only ever
+asked when the user stands on WS (the landing is not owed otherwise).
 
-Tab order decides only among workspaces never interacted with at all, the
-genuine, expected case of workspaces the user has not yet worked in; with
-no agent-repl workspace left, the first surviving perspective of any kind
-is taken.  Which source decided (roster, tab-order or foreign-persp) is
-recorded at INFO.  WS itself is never a candidate.
+Tab order decides only when the roster names no landing for WS: before
+the first roster, when the roster's selection is not WS, or when its
+landing has no live tab here.  With no agent-repl workspace left, the
+first surviving perspective of any kind is taken.  Which source decided
+\(roster, tab-order or foreign-persp) is recorded at INFO.  WS itself is
+never a candidate.
 
 A BUILT-IN PERSPECTIVE IS NOT A LANDING.  \"none\" and Doom's startup
 \"main\" are persp-mode's own perspectives
@@ -1977,15 +1978,16 @@ source is filtered to workspaces this module actually owns."
                        (and (stringp n)
                             (not (equal n ws))
                             (not (agent-repl--pseudo-workspace-name-p n)))))
-         (open (agent-repl-roster-selection-recency-order
-                (cl-remove-if-not landable-p (agent-repl--ws-list-names))))
-         (target (or (car open)
-                     (car (cl-remove-if-not landable-p (agent-repl--ws-all-names)))))
-         (source (cond ((null (car open)) "foreign-persp")
-                       ((agent-repl-roster-last-interacted-ms target) "roster")
-                       (t "tab-order"))))
-    (agent-repl--info ws "elisp.workspace.teardown-landing-target: ws={ws} target={target} source={source}"
-                      :ws ws :target target :source source)
+         (open (cl-remove-if-not landable-p (agent-repl--ws-list-names)))
+         (departure (agent-repl-roster-departure-landing ws))
+         (target (cond ((member departure open) departure)
+                       (open (car open))
+                       (t (car (cl-remove-if-not landable-p (agent-repl--ws-all-names))))))
+         (source (cond ((member departure open) "roster")
+                       (open "tab-order")
+                       (t "foreign-persp"))))
+    (agent-repl--info ws "elisp.workspace.teardown-landing-target: ws={ws} target={target} source={source} departure={departure}"
+                      :ws ws :target target :source source :departure departure)
     target))
 
 (defun agent-repl--land-before-teardown (ws)

@@ -1278,3 +1278,48 @@ func TestARenderRecordsItsCauseAndWhatItWalked(t *testing.T) {
 		t.Errorf("the render record's elapsed_ms = %#v, want milliseconds", rec.Context["elapsed_ms"])
 	}
 }
+
+func TestTheCurrentWorkspaceStatesItsDepartureLanding(t *testing.T) {
+	selected := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	parent := ids.WorkspaceID("w1")
+	tests := []struct {
+		name       string
+		workspaces func() []wsm.Workspace
+		want       string
+	}{
+		{
+			name: "the landing is the daemon's landing rule's",
+			workspaces: func() []wsm.Workspace {
+				w1, w2, w3 := workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three")
+				w2.Parent = &parent
+				later := selected.Add(time.Minute)
+				w1.LastSelectedAt, w3.LastSelectedAt = &selected, &later
+				return []wsm.Workspace{w1, w2, w3}
+			},
+			want: "w1",
+		},
+		{
+			name:       "no other drawn tab states no landing",
+			workspaces: func() []wsm.Workspace { return []wsm.Workspace{workspace("w2", "two")} },
+			want:       "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			reg := registry(tt.workspaces()...)
+			current := ids.WorkspaceID("w2")
+			reg.Current = &current
+			r.SetRegistry(reg)
+
+			// Act
+			roster := <-subscribe(t, r)
+
+			// Assert
+			if got := roster.GetWorkspaces().GetCurrent().GetDepartureLanding().GetId(); got != tt.want {
+				t.Fatalf("departure landing = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

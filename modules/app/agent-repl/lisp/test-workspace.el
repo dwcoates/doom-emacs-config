@@ -2958,8 +2958,8 @@ startup pre-created but has not opened are not drawn."
 (defvar agent-repl-test-ws--current nil
   "The perspective a teardown test's fake frame is standing on.")
 
-(defvar agent-repl-test-ws--recency nil
-  "The workspaces the user interacted with, newest first, as a teardown test names them.")
+(defvar agent-repl-test-ws--departure nil
+  "The landing the roster names for the departing workspace in a teardown test.")
 
 (defmacro agent-repl-test-ws--with-teardown (current names &rest body)
   "Run BODY on a faked persp-mode: standing on CURRENT with NAMES live.
@@ -2971,17 +2971,12 @@ records which perspective was current when it ran."
   (let ((names-var (make-symbol "names")))
     `(let ((,names-var ,names)
            (agent-repl-test-ws--events nil)
-           (agent-repl-test-ws--current ,current)
-           (outer-interacted (symbol-function 'agent-repl-roster-last-interacted-ms)))
+           (agent-repl-test-ws--current ,current))
        (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
-                 ;; THE RECENCY is `agent-repl-test-ws--recency' when a test
-                 ;; names one, else whatever the test stubbed around this.
-                 ((symbol-function 'agent-repl-roster-last-interacted-ms)
-                  (lambda (ws)
-                    (let ((place (cl-position ws agent-repl-test-ws--recency :test #'equal)))
-                      (if place
-                          (- most-positive-fixnum place)
-                        (funcall outer-interacted ws)))))
+                 ;; THE LANDING is the one `agent-repl-test-ws--departure'
+                 ;; names, as the roster states it for the departing workspace.
+                 ((symbol-function 'agent-repl-roster-departure-landing)
+                  (lambda (_ws) agent-repl-test-ws--departure))
                  ((symbol-function 'agent-repl--ws-current-name)
                   (lambda () agent-repl-test-ws--current))
                  ((symbol-function 'agent-repl--ws-all-names) (lambda () ,names-var))
@@ -3039,65 +3034,54 @@ take; the lines are kept most recent first."
       ;; Act / Assert
       (should-not (agent-repl--teardown-landing-target "gone")))))
 
-;;; --- The landing target is the workspace selected before the departing one
+;;; --- The landing target is the daemon's departure landing
 
-(ert-deftest agent-repl-test-teardown-landing-target-is-the-previously-selected-workspace ()
-  "Closing the workspace the user stands on lands on the one selected before
-it, not the first tab (owner ruling, 2026-09-30)."
+(ert-deftest agent-repl-test-teardown-landing-target-is-the-rosters-departure-landing ()
+  "Closing the workspace the user stands on lands on the one the roster
+names as its departure landing, not the first tab (owner request, 2026-11-24)."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency '("gone" "second" "first")))
+    (let ((agent-repl-test-ws--departure "second"))
       (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
         ;; Act / Assert
         (should (equal (agent-repl--teardown-landing-target "gone") "second"))))))
 
-(ert-deftest agent-repl-test-teardown-landing-target-skips-a-previous-workspace-since-closed ()
-  "A previously selected workspace that has itself closed is skipped: the next
-most recent one still open is the landing."
+(ert-deftest agent-repl-test-teardown-landing-target-skips-a-departure-landing-with-no-tab ()
+  "A departure landing with no live tab here is no landing: the first open
+tab is."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency '("gone" "closed-earlier" "third" "first")))
+    (let ((agent-repl-test-ws--departure "closed-earlier"))
       (agent-repl-test-ws--with-teardown "gone" '("first" "gone" "third")
         ;; Act / Assert
-        (should (equal (agent-repl--teardown-landing-target "gone") "third"))))))
+        (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
 
-(ert-deftest agent-repl-test-teardown-landing-target-skips-a-built-in-in-the-history ()
-  "A built-in perspective the user once stood in is never a history landing."
+(ert-deftest agent-repl-test-teardown-landing-target-skips-a-built-in-departure-landing ()
+  "A built-in perspective is never a landing, whatever the roster names."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((persp-nil-name "none")
-          (agent-repl-test-ws--recency '("gone" "main" "second")))
+          (agent-repl-test-ws--departure "main"))
       (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main")))
         (agent-repl-test-ws--with-teardown "gone" '("main" "first" "second" "gone")
           ;; Act / Assert
-          (should (equal (agent-repl--teardown-landing-target "gone") "second")))))))
+          (should (equal (agent-repl--teardown-landing-target "gone") "first")))))))
 
-(ert-deftest agent-repl-test-teardown-landing-target-falls-back-to-tab-order-on-empty-history ()
-  "With an empty history and no durable instant -- no workspace ever
-selected -- the first open workspace in tab order is the landing."
+(ert-deftest agent-repl-test-teardown-landing-target-falls-back-to-tab-order-without-a-departure-landing ()
+  "With no departure landing -- no roster yet, or its selection is another
+workspace -- the first open workspace in tab order is the landing."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency nil))
+    (let ((agent-repl-test-ws--departure nil))
       (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
         ;; Act / Assert
         (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
 
-(ert-deftest agent-repl-test-teardown-landing-target-falls-back-when-no-history-entry-is-open ()
-  "A history naming only the departing workspace and closed ones, with no
-durable instant either, is the same expected condition as an empty one:
-the first open tab is the landing."
+(ert-deftest agent-repl-test-teardown-landing-target-records-a-roster-decision-at-info ()
+  "Which source chose the landing is recorded at INFO: here, the roster."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency '("gone" "closed-earlier")))
-      (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
-        ;; Act / Assert
-        (should (equal (agent-repl--teardown-landing-target "gone") "first"))))))
-
-(ert-deftest agent-repl-test-teardown-landing-target-records-a-history-decision-at-info ()
-  "Which source chose the landing is recorded at INFO: here, the roster\='s recency."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency '("gone" "second"))
+    (let ((agent-repl-test-ws--departure "second")
           (info (agent-repl-test-ws--recorder)))
       (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
@@ -3107,14 +3091,14 @@ the first open tab is the landing."
           (should (seq-some
                    (lambda (l)
                      (string-match-p
-                      "teardown-landing-target: ws=gone target=second source=roster" l))
+                      "teardown-landing-target: ws=gone target=second source=roster departure=second" l))
                    (cadr info))))))))
 
 (ert-deftest agent-repl-test-teardown-landing-target-records-a-tab-order-fallback-at-info ()
   "Which source chose the landing is recorded at INFO: here, the tab order."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency nil)
+    (let ((agent-repl-test-ws--departure nil)
           (info (agent-repl-test-ws--recorder)))
       (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "gone" '("first" "gone")
@@ -3127,42 +3111,11 @@ the first open tab is the landing."
                       "teardown-landing-target: ws=gone target=first source=tab-order" l))
                    (cadr info))))))))
 
-(ert-deftest agent-repl-test-teardown-landing-target-uses-the-durable-instant-without-history ()
-  "With no session history naming a survivor (a fresh Emacs), the landing is
-the survivor the roster's durable instant says was selected most recently."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency '("gone")))
-      (cl-letf (((symbol-function 'agent-repl-roster-last-interacted-ms)
-                 (lambda (ws) (cdr (assoc ws '(("first" . 100) ("second" . 900)))))))
-        (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
-          ;; Act / Assert
-          (should (equal (agent-repl--teardown-landing-target "gone") "second")))))))
-
-(ert-deftest agent-repl-test-teardown-landing-target-records-a-roster-decision-at-info ()
-  "Which source chose the landing is recorded at INFO: here, the roster."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency nil)
-          (info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info))
-                ((symbol-function 'agent-repl-roster-last-interacted-ms)
-                 (lambda (ws) (and (equal ws "second") 900))))
-        (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
-          ;; Act
-          (agent-repl--teardown-landing-target "gone")
-          ;; Assert
-          (should (seq-some
-                   (lambda (l)
-                     (string-match-p
-                      "teardown-landing-target: ws=gone target=second source=roster" l))
-                   (cadr info))))))))
-
 (ert-deftest agent-repl-test-teardown-landing-target-records-a-foreign-persp-fallback-at-info ()
   "Which source chose the landing is recorded at INFO: here, a foreign persp."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency nil)
+    (let ((agent-repl-test-ws--departure nil)
           (info (agent-repl-test-ws--recorder)))
       (cl-letf (((symbol-function 'agent-repl--emit-info) (car info))
                 ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
@@ -3176,22 +3129,22 @@ the survivor the roster's durable instant says was selected most recently."
                     "teardown-landing-target: ws=gone target=foreign source=foreign-persp" l))
                  (cadr info)))))))
 
-(ert-deftest agent-repl-test-land-before-teardown-lands-on-the-previously-selected-workspace ()
-  "Standing on the departing workspace, the user lands where they were before."
+(ert-deftest agent-repl-test-land-before-teardown-lands-on-the-departure-landing ()
+  "Standing on the departing workspace, the user lands where the roster says."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency '("gone" "second" "first")))
+    (let ((agent-repl-test-ws--departure "second"))
       (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
         ;; Act
         (should (equal (agent-repl--land-before-teardown "gone") "second"))
         ;; Assert
         (should (equal agent-repl-test-ws--events '((:switch "second"))))))))
 
-(ert-deftest agent-repl-test-land-before-teardown-ignores-the-history-when-standing-elsewhere ()
-  "Closing a workspace the user is NOT on moves nothing, whatever the history."
+(ert-deftest agent-repl-test-land-before-teardown-ignores-the-landing-when-standing-elsewhere ()
+  "Closing a workspace the user is NOT on moves nothing, whatever the roster names."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-test-ws--recency '("mine" "other" "first")))
+    (let ((agent-repl-test-ws--departure "first"))
       (agent-repl-test-ws--with-teardown "mine" '("first" "mine" "other")
         ;; Act
         (should-not (agent-repl--land-before-teardown "other"))
@@ -3589,14 +3542,14 @@ workspace, and killing it now is exactly the hazard the order exists for."
         ;; Assert
         (should (equal torn-down "ws"))))))
 
-(ert-deftest agent-repl-test-kill-one-workspace-of-the-current-lands-on-the-previously-selected ()
+(ert-deftest agent-repl-test-kill-one-workspace-of-the-current-lands-on-the-departure-landing ()
   "An EXPLICIT close, kill or nuke tears the tab down through
 `agent-repl--kill-one-workspace', and closing the workspace the user stands
-on lands them on the one selected before it, not the first tab."
+on lands them on the roster's departure landing, not the first tab."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
-    (let ((agent-repl-test-ws--recency '("ws" "second" "first")))
+    (let ((agent-repl-test-ws--departure "second"))
       (agent-repl-test-ws--with-teardown "ws" '("first" "second" "ws")
         (cl-letf (((symbol-function 'agent-repl--state-save) #'ignore)
                   ((symbol-function 'agent-repl--kill-workspace-buffers) #'ignore)

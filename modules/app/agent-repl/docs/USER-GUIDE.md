@@ -1103,6 +1103,15 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - It stays where it was if its branch has commits its parent lacks, or the worktree has uncommitted changes.
 - **Merging it again carries only the new work.**
 
+## Where you land when the workspace you are on goes away
+
+- **Closing, hiding or folding away the workspace you are on selects the workspace nearest it that you selected most recently.**
+  - First its ancestors, the workspaces it was spawned from.
+  - Then the other workspaces of its sidebar subsection.
+  - Then the other workspaces of its repository.
+  - Then its repository's main workspace, when none of those was ever selected.
+  - Only when its repository has no other tab drawn does it reach into another repository.
+
 ## Hidden workspaces
 
 - **Hiding a workspace keeps its conversation's cache warm for a while instead of stopping it at once.**
