@@ -121,6 +121,15 @@ type ManifestSession struct {
 	ExpectedHost bool `json:"expected_host"`
 	// ExpectedWeb records the same for the WatchWebWorkspace stream.
 	ExpectedWeb bool `json:"expected_web"`
+	// Viewed records that the workspace was the user's current one when the
+	// handover began (wsm.Workspace.Current), so the incoming daemon adopts
+	// it first (adoptorder.go). False on a manifest an older daemon wrote.
+	Viewed bool `json:"viewed,omitempty"`
+	// WorkInFlight records that the workspace had a turn or detached work
+	// running when the handover began (Freeness), so the incoming daemon
+	// adopts it before the idle ones. False on a manifest an older daemon
+	// wrote.
+	WorkInFlight bool `json:"work_in_flight,omitempty"`
 }
 
 // Disposition is one session's reconciled outcome.

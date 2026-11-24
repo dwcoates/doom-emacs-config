@@ -2727,3 +2727,55 @@ func TestNewRefusesWithoutTheSharedAddress(t *testing.T) {
 		t.Fatalf("New = %v, want the missing shared address refused", err)
 	}
 }
+
+// TestTheManifestNamesTheViewedWorkspaceAndTheWorkInFlight pins the two facts
+// the successor orders its adoptions by: they are written for each session
+// from the handover's own reading, never left for the successor to guess.
+func TestTheManifestNamesTheViewedWorkspaceAndTheWorkInFlight(t *testing.T) {
+	// Arrange: one viewed and idle, one busy, one idle.
+	h := newHarness(t)
+	viewed, viewedDir := h.workspace(t)
+	busy, busyDir := h.workspace(t)
+	idle, idleDir := h.workspace(t)
+	h.freeness.SetFree(viewed, true)
+	h.freeness.SetFree(busy, false)
+	h.freeness.SetFree(idle, true)
+	workspaces := []wsm.Workspace{
+		{ID: viewed, Dir: viewedDir, Current: true}, {ID: busy, Dir: busyDir}, {ID: idle, Dir: idleDir},
+	}
+
+	// Act
+	m := h.c.manifest(context.Background(), "127.0.0.1:1", workspaces, map[ids.WorkspaceID]Participants{})
+
+	// Assert
+	want := map[ids.WorkspaceID][2]bool{viewed: {true, false}, busy: {false, true}, idle: {false, false}}
+	for _, session := range m.Sessions {
+		if got := [2]bool{session.Viewed, session.WorkInFlight}; got != want[session.Workspace] {
+			t.Fatalf("session %s (viewed, in flight) = %v, want %v", session.Workspace, got, want[session.Workspace])
+		}
+	}
+}
+
+func TestTheHandoverMovesTheViewedWorkspaceFirstThenTheWorkInFlight(t *testing.T) {
+	// Arrange: listed idle, busy, viewed.
+	h := newHarness(t)
+	idle, busy, viewed := ids.WorkspaceID("idle"), ids.WorkspaceID("busy"), ids.WorkspaceID("viewed")
+	h.freeness.SetFree(idle, true)
+	h.freeness.SetFree(viewed, true)
+	listed := []wsm.Workspace{{ID: idle}, {ID: busy}, {ID: viewed, Current: true}}
+
+	// Act
+	ordered := h.c.adoptionOrdered(listed)
+
+	// Assert
+	var got []ids.WorkspaceID
+	for _, ws := range ordered {
+		got = append(got, ws.ID)
+	}
+	if want := []ids.WorkspaceID{viewed, busy, idle}; !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+	if listed[0].ID != idle {
+		t.Fatalf("the listed slice was reordered in place: %v", listed)
+	}
+}

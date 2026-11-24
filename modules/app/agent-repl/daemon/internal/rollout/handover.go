@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -295,7 +296,7 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	// never from what it has become by each transfer (owner ruling,
 	// 2026-11-13).
 	folded := foldedRows(workspaces)
-	workspaces = unfoldedFirst(workspaces, folded)
+	workspaces = unfoldedFirst(c.adoptionOrdered(workspaces), folded)
 	c.fixServed(slot, address, workspaces, untransferable, fields)
 
 	announced := daemonaddr.ClientAddress(c.deps.SharedAddress(), address)
@@ -356,6 +357,30 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 		forced:         force,
 		fields:         fields,
 	}, nil
+}
+
+// adoptionOrdered orders WORKSPACES as the successor adopts them: the one the
+// user is viewing, then those with work in flight, then the rest, each group
+// in the order it came. The transfers are asked for, and the manifest's
+// sessions written, in this order.
+func (c *controller) adoptionOrdered(workspaces []wsm.Workspace) []wsm.Workspace {
+	out := slices.Clone(workspaces)
+	slices.SortStableFunc(out, func(a, b wsm.Workspace) int {
+		return int(c.rankAtHandover(a)) - int(c.rankAtHandover(b))
+	})
+	return out
+}
+
+// rankAtHandover is WS's adoption rank as this daemon writes it into the
+// manifest (rankOf of its session).
+func (c *controller) rankAtHandover(ws wsm.Workspace) adoptionRank {
+	return rankOf(ManifestSession{Viewed: ws.Current, WorkInFlight: c.workInFlight(ws.ID)})
+}
+
+// workInFlight reports whether WS has a turn or detached work running: not
+// free, as the carry's mid-work reads it (carry.go).
+func (c *controller) workInFlight(ws ids.WorkspaceID) bool {
+	return c.deps.Freeness == nil || !c.deps.Freeness.Free(ws)
 }
 
 // foldedRows answers, for each of WORKSPACES, whether the user cannot see it:
@@ -1639,6 +1664,8 @@ func (c *controller) manifest(ctx context.Context, successor string, workspaces 
 			Intent:       IntentNoSession,
 			ExpectedHost: snapshot[ws.ID].Host,
 			ExpectedWeb:  snapshot[ws.ID].Web,
+			Viewed:       ws.Current,
+			WorkInFlight: c.workInFlight(ws.ID),
 		}
 		if session, found := sessions[ws.ID]; found {
 			record.VendorSessionID = session.VendorSessionID

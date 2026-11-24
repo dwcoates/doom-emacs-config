@@ -404,7 +404,7 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, hold ids.Leas
 	}
 	// NO FREENESS SOURCE IS READ AS WORK IN FLIGHT: the successor then
 	// waits for the adopted facts, which costs nothing when there is no work.
-	carry.MidWork = c.deps.Freeness == nil || !c.deps.Freeness.Free(ws)
+	carry.MidWork = c.workInFlight(ws)
 	c.mu.Lock()
 	carry.ShimBuild = c.reported[ws]
 	c.unlock()

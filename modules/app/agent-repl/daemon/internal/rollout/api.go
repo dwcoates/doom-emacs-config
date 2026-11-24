@@ -957,6 +957,7 @@ func New(deps Deps) (Controller, error) {
 		settled:       make(chan struct{}),
 	}
 	c.serving = newServingWatch(c)
+	c.order = newAdoptionOrder(c.log)
 	c.intake.answer = c.servesIntakeLocked()
 	c.queue.answer = c.servesQueueLocked()
 	// NO TAKEOVER IS COMING until Join says one is.

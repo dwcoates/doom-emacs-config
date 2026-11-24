@@ -50,6 +50,8 @@ type controller struct {
 	log  dlog.Logger
 	// serving answers every adoption waiting on its serving release.
 	serving *servingWatch
+	// order admits a handover's adoptions by rank (adoptorder.go).
+	order *adoptionOrder
 
 	// mu guards every field below it. It is released ONLY through unlock,
 	// which is where a change of ServesIntake's or ServesQueue's answer is
@@ -215,6 +217,9 @@ type entry struct {
 	servedHere bool
 	// expected is who owed an adoption call at announcement.
 	expected Participants
+	// rank is where the workspace's adoption stands in the order, from the
+	// manifest (rankOf).
+	rank adoptionRank
 	// hostCalled and webCalled record who has since called. The web slot is
 	// satisfied by the FIRST AdoptWebWorkspace from any connection, because the
 	// reloaded page — not a surviving stream — is the web participant.
