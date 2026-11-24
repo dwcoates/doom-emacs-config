@@ -70,7 +70,7 @@ ISOLATION_ROOT ?= ..
 # regenerate into a scratch tree and never write the committed one.
 GEN ?= gen
 
-.PHONY: all go ts swift lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate clean
+.PHONY: all go ts swift generator-id lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated test-generator-id check-generated validate clean
 
 all: go ts swift
 
@@ -111,6 +111,17 @@ swift: codegen-gate $(PROTOC_GEN_SWIFT)
 
 node_modules/.package-lock.json: package.json package-lock.json
 	npm ci
+
+# THE GENERATORS' IDENTITY, written to $(GENERATOR_ID_OUT): one line per
+# generator `all` runs (scripts/generator-id.sh says what each line holds).
+# bin/build-frontend.sh stamps it beside the source tree the bindings were
+# generated from, so a changed generator regenerates as a changed schema does.
+# It names the plugins by the variables the generation targets use and brings
+# them up to date by the same rules first, so it describes exactly the
+# generators the next `all` would run.
+generator-id: $(PROTOC_GEN_SWIFT) node_modules/.package-lock.json
+	@test -n "$(GENERATOR_ID_OUT)" || { echo "generator-id: GENERATOR_ID_OUT names no file" >&2; exit 2; }
+	./scripts/generator-id.sh node_modules/.package-lock.json $(PROTOC_GEN_SWIFT) > "$(GENERATOR_ID_OUT)"
 
 ts: codegen-gate node_modules/.package-lock.json
 	mkdir -p $(GEN)/ts
@@ -185,8 +196,11 @@ check-generated:
 test-check-generated:
 	$(BACKGROUND) ./scripts/test-check-generated.sh
 
+test-generator-id:
+	$(BACKGROUND) ./scripts/test-generator-id.sh
+
 # Validate both the source schema and the checked-in Go/TS generated artifacts.
-validate: lint test-check-conversation-isolation test-check-generated check-generated
+validate: lint test-check-conversation-isolation test-check-generated test-generator-id check-generated
 
 clean:
 	rm -rf gen

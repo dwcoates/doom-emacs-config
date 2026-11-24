@@ -167,7 +167,7 @@ commit_tree() {
     # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
     # artifact a build just produced would itself make the tree "dirty" and
     # every build would read as stale forever.
-    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n.source-tree\n' > "$root/.gitignore"
+    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n.source-tree\n.generators\n' > "$root/.gitignore"
     git -C "$root" init -q
     git -C "$root" add -A
     git -C "$root" commit -qm seed
@@ -339,12 +339,20 @@ esac
 }
 exit 0
 EOF
-    # make: logs, and exits 1 when its target is FAKE_MAKE_FAIL.
+    # make: logs, and exits 1 when its target is FAKE_MAKE_FAIL. proto's
+    # generator-id target writes FAKE_GENERATOR_ID (default generators-1) to
+    # the file its GENERATOR_ID_OUT names, as the real one writes the
+    # generators' identity there.
     cat > "$bindir/make" <<'EOF2'
 #!/usr/bin/env bash
 echo "make $*" >> "$STUB_LOG"
 for arg in "$@"; do
     [ -n "${FAKE_MAKE_FAIL:-}" ] && [ "$arg" = "$FAKE_MAKE_FAIL" ] && exit 1
+done
+for arg in "$@"; do
+    case "$arg" in
+        GENERATOR_ID_OUT=*) printf '%s\n' "${FAKE_GENERATOR_ID:-generators-1}" > "${arg#GENERATOR_ID_OUT=}" ;;
+    esac
 done
 exit 0
 EOF2
@@ -2553,10 +2561,17 @@ build_group_staging() {
 
 # --- the proto target: generation only when proto's sources changed ---------
 
+# generator_stamp_of ID — the generator stamp build-frontend.sh writes when the
+# stub make's generator-id target answers ID.
+generator_stamp_of() {
+    printf '%s\n' "$1" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-40
+}
+
 # stamp_fresh_proto ROOT — record that the fixture's bindings were generated
-# from the proto tree standing there now.
+# from the proto tree standing there now, by the stub's default generators.
 stamp_fresh_proto() {
     write_source_tree "$1/proto/.source-tree" "$(deploy_stamp_source_id proto "$1" "")"
+    write_source_tree "$1/proto/.generators" "$(generator_stamp_of generators-1)"
 }
 
 # proto_case ROOT — a fixture whose stub log is empty.
@@ -2684,8 +2699,84 @@ t_proto_failed_gate_fails_an_unchanged_tree() {
     rm -rf "$root"
 }
 
+t_proto_generation_stamps_the_generators() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"
+    local want; want="$(generator_stamp_of generators-1)"
+    if run_script "$root" proto >/dev/null && proto_generated "$root" &&
+           [ "$(read_source_tree "$root/proto/.generators")" = "$want" ]; then
+        pass "proto: a generation stamps the identity of the generators it ran"
+    else
+        fail "proto: a generation stamps the identity of the generators it ran" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.generators" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_changed_generator_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    local want; want="$(generator_stamp_of generators-2)"
+    if FAKE_GENERATOR_ID=generators-2 run_script "$root" proto >/dev/null && proto_generated "$root" &&
+           [ "$(read_source_tree "$root/proto/.generators")" = "$want" ]; then
+        pass "proto: a changed generator regenerates an unchanged tree and stamps the new generators"
+    else
+        fail "proto: a changed generator regenerates an unchanged tree and stamps the new generators" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.generators" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_missing_generator_stamp_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    rm -f "$root/proto/.generators"
+    if run_script "$root" proto >/dev/null && proto_generated "$root"; then
+        pass "proto: bindings with no generator stamp regenerate"
+    else
+        fail "proto: bindings with no generator stamp regenerate" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# FAKE_MAKE_FAIL=generator-id fails both askings, the one before generation
+# and the one after it, so the stamp is removed rather than kept.
+t_proto_unknown_generators_regenerate_and_stamp_nothing() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    local err
+    if err="$(FAKE_MAKE_FAIL=generator-id run_script "$root" proto 2>&1 >/dev/null)" &&
+           proto_generated "$root" && [ ! -e "$root/proto/.generators" ] &&
+           grep -q "the generators' identity cannot be determined" <<<"$err"; then
+        pass "proto: generators whose identity cannot be determined regenerate, say so, and leave no generator stamp"
+    else
+        fail "proto: generators whose identity cannot be determined regenerate, say so, and leave no generator stamp" \
+             "stub.log: $(cat "$root/stub.log"); stderr: $err; stamp: $(cat "$root/proto/.generators" 2>&1)"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_failed_generation_keeps_the_generator_stamp() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    local want; want="$(generator_stamp_of generators-1)"
+    if ! FAKE_GENERATOR_ID=generators-2 FAKE_MAKE_FAIL=all run_script "$root" proto >/dev/null 2>&1 &&
+           [ "$(read_source_tree "$root/proto/.generators")" = "$want" ]; then
+        pass "proto: a failed generation by changed generators fails and leaves the old generator stamp, so the next build regenerates"
+    else
+        fail "proto: a failed generation by changed generators fails and leaves the old generator stamp, so the next build regenerates" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.generators" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
 build_group_proto() {
     t_proto_without_a_stamp_generates_and_stamps
+    t_proto_generation_stamps_the_generators
+    t_proto_changed_generator_regenerates
+    t_proto_missing_generator_stamp_regenerates
+    t_proto_unknown_generators_regenerate_and_stamp_nothing
+    t_proto_failed_generation_keeps_the_generator_stamp
     t_proto_unchanged_tree_runs_only_the_gate
     t_proto_committed_schema_change_regenerates
     t_proto_dirty_tree_regenerates
