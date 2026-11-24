@@ -994,6 +994,30 @@ took that window object, and the restore kept its `window-side'."
         ;; Assert
         (should (= (length (window-list nil 'nomini)) 1))))))
 
+(ert-deftest agent-repl-test-window-restore-configuration-leaves-the-mini-window-alone ()
+  "The restore leaves the mini-window showing what it shows now.
+The 2026-11-24 shape: a layout saved while a minibuffer was active put
+that empty minibuffer back in the mini-window after it had exited."
+  (agent-repl-test--with-clean-state
+    (agent-repl-window-test--with-temp-frame
+      ;; Arrange
+      (let* ((mini (minibuffer-window))
+             (before (window-buffer mini))
+             (saved-with (get-buffer-create " *agent-repl-test-saved-mini*"))
+             (now-shown (get-buffer-create " *agent-repl-test-current-mini*")))
+        (unwind-protect
+            (progn
+              (set-window-buffer mini saved-with)
+              (let ((config (agent-repl-window--save-configuration)))
+                (set-window-buffer mini now-shown)
+                ;; Act
+                (agent-repl-window--restore-configuration config "ws"))
+              ;; Assert
+              (should (eq (window-buffer mini) now-shown)))
+          (set-window-buffer mini before)
+          (kill-buffer saved-with)
+          (kill-buffer now-shown))))))
+
 (ert-deftest agent-repl-test-window-restore-configuration-records-the-restore ()
   "The restore is recorded through the canonical logger, centrally for \"main\"."
   (agent-repl-test--with-clean-state
