@@ -1313,8 +1313,8 @@ hide the offset arithmetic the cases below assert.")
         (should (= lines
                    (agent-repl-window-test--unfloored-height)))))))
 
-(ert-deftest agent-repl-window-test-input-height-default-is-three-lines-under-the-fraction ()
-  "By default the composer is exactly three lines shorter than the fraction alone.
+(ert-deftest agent-repl-window-test-input-height-default-is-five-lines-under-the-fraction ()
+  "By default the composer is exactly five lines shorter than the fraction alone.
 The fraction is raised so the batch frame's short height leaves the
 offset clear of the floor (`agent-repl-window--input-height-minimum')."
   (agent-repl-window-test--with-temp-frame
@@ -1327,7 +1327,7 @@ offset clear of the floor (`agent-repl-window--input-height-minimum')."
         ;; Act
         (let ((lines (agent-repl-window--input-height)))
           ;; Assert
-          (should (= lines (- unadjusted 3))))))))
+          (should (= lines (- unadjusted 5))))))))
 
 (ert-deftest agent-repl-window-test-input-height-minimum-is-two-body-lines ()
   "The floor is two lines, every one of them body: the composer has no mode line."
