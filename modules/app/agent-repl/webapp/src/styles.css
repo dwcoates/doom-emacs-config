@@ -884,6 +884,8 @@ body {
    a touch smaller and dimmer (owner request, 2026-10-25). The head is its
    containing block (`position: relative`, the apps section below). */
 #ws-sidebar .sb-version {
+  /* A CLICK OPENS ITS MEMORY POPUP (sidebar/memory.ts). */
+  cursor: pointer;
   position: absolute;
   top: 5px;
   right: 0.7rem;
@@ -2180,7 +2182,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    max-content` is what lets it grow into the feed only as far as its own
    content asks; the max-width is the window's own last word on that. */
 #ws-sidebar .detail { display: none; }
-/* THE VERSION'S MEMORY HOVER (sidebar/memory.ts) is a detail panel of its own,
+/* THE VERSION'S MEMORY POPUP (sidebar/memory.ts) is a detail panel of its own,
    placed under the version by `clampReveal`. */
 #ws-sidebar .ws.open > .detail,
 #ws-sidebar .detail.sb-memory.open { display: block; }

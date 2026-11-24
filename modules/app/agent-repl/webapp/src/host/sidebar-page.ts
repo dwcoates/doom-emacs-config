@@ -16,8 +16,8 @@
  * call's own script and run here, in order, the moment the page starts.
  *
  * The page talks to the daemon over its own connection (document.ts). Its
- * warnings and errors are listed behind the rail's version (sidebar/
- * notices.ts), since the pages' warning chip is in another web view.
+ * warnings and errors tint the rail's version (sidebar/notices.ts), since the
+ * pages' warning chip is in another web view.
  */
 import { parseWindowLevel, type AppliedLevel, type LevelWindow, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { bootFailed } from "../failure/sink.js";
@@ -142,7 +142,7 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
       recordLatency: (workspace, kind, seconds) => latencies.record(kind, seconds, workspace),
       focusLeft,
       popupMirror,
-      notices: { failures: started.failures, notices },
+      notices,
       revealed: () => {
         log.info("the sidebar page drew its rail", { operation: "sidebar-page.revealed", context: {} });
       },

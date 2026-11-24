@@ -2,7 +2,7 @@
  * memory — the rail's two memory popups (owner request, 2026-10-29;
  * frontend.v1 sidebar_memory.proto).
  *
- * THE VERSION'S HOVER says what agent-repl holds in memory taken as a whole,
+ * THE VERSION'S POPUP, opened by a click, says what agent-repl holds in memory taken as a whole,
  * naming no workspace. AN OPEN ROW'S HOVER adds what that one workspace holds
  * to the row's detail panel. Every figure is the daemon's, measured; this end
  * formats it and derives nothing but the time left before an unload, which it
@@ -18,7 +18,6 @@ import { callUnary } from "../rpc/unary.js";
 import { refusalSentence } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { createLogger } from "../log.js";
-import { nextFrame } from "../frame.js";
 import { clampReveal } from "../topbar/clamp.js";
 import { applyPlacement, viewportOf } from "../placement.js";
 import { GetMemoryOverviewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_memory_overview_pb";
@@ -49,7 +48,7 @@ const log = createLogger("webapp.sidebar.memory");
 /** How many ticks of the shared one-second clock pass between a popup's asks. */
 export const REFRESH_TICKS = 2;
 
-/** The class of the version hover's panel. */
+/** The class of the version popup's panel. */
 export const MEMORY_PANEL_CLASS = "sb-memory";
 
 /** The class an open row's memory block carries inside its detail panel. */
@@ -72,7 +71,7 @@ export function formatBlocked(ms: bigint | number): string {
   return `${(n / 1000).toFixed(1)} s`;
 }
 
-/** The version hover's lines below its workspaces entry, as (label, value) pairs in drawn order. */
+/** The version popup's lines below its workspaces entry, as (label, value) pairs in drawn order. */
 export function overviewLines(u: SidebarMemoryOverview, path: string): Array<[string, string]> {
   const lines: Array<[string, string]> = [];
   const strain = requireMessage(u.strain, `${path}.strain`);
@@ -90,7 +89,7 @@ export function overviewLines(u: SidebarMemoryOverview, path: string): Array<[st
   return lines;
 }
 
-/** The label of the version hover's workspaces entry. */
+/** The label of the version popup's workspaces entry. */
 export const WORKSPACES_LABEL = "workspaces";
 
 /** The workspaces entry's words: the three counts in short form. */
@@ -208,7 +207,7 @@ const OVERVIEW_LINES_CLASS = "lines";
 function overviewBlock(panel: HTMLElement): HTMLElement {
   const block = panel.querySelector<HTMLElement>(`:scope > .${OVERVIEW_LINES_CLASS}`);
   if (block === null) {
-    throw new Error("agent-repl: the version hover's panel has no lines block");
+    throw new Error("agent-repl: the version popup's panel has no lines block");
   }
   return block;
 }
@@ -346,17 +345,15 @@ function noteFailed(operation: string, err: unknown): void {
   });
 }
 
-/** The key the version hover's panel is mirrored under (host/sidebar-popups.ts): no workspace id. */
+/** The key the version popup's panel is mirrored under (host/sidebar-popups.ts): no workspace id. */
 export const VERSION_POPUP_KEY = "sb-version";
 
-/** What the version hover answers to besides the pointer. */
-export interface VersionHoverOptions {
-  /** Whether the hover must stay shut: the version's click opened its notices (notices.ts). */
-  readonly suppressed?: () => boolean;
+/** What the version popup answers to besides the version's click. */
+export interface VersionPopupOptions {
   /**
-   * The rail's dropdowns: the open hover is one, so a click elsewhere in the
+   * The rail's dropdowns: the open popup is one, so a click elsewhere in the
    * rail, another dropdown opening, or the user leaving the rail
-   * (transients.ts) closes it.
+   * (transients.ts: a press in the feed or the composer among them) closes it.
    */
   readonly dropdowns?: Dropdowns;
   /**
@@ -368,17 +365,17 @@ export interface VersionHoverOptions {
 }
 
 /**
- * Hover the rail's version to show the overview. The panel opens on the
- * pointer's arrival, closes on its departure from both the version and the
- * panel, and asks again every REFRESH_TICKS seconds while open.
+ * Click the rail's version to show the overview (owner request, 2026-11-24:
+ * it opened on hover before). The panel stays open until a click lands
+ * outside it, or on the version again, and asks again every REFRESH_TICKS
+ * seconds while open.
  */
-export function installVersionHover(
+export function installVersionPopup(
   ctx: DaemonContext,
   version: HTMLElement,
   rail: HTMLElement,
-  options: VersionHoverOptions = {},
+  options: VersionPopupOptions = {},
 ): void {
-  const suppressed = options.suppressed ?? (() => false);
   const dropdowns = options.dropdowns ?? null;
   const mirror = options.mirror ?? null;
   const panel = document.createElement("div");
@@ -393,7 +390,6 @@ export function installVersionHover(
     placeDetailsPanel(panel, (el) => el.getBoundingClientRect(), viewportOf());
   });
   let stop: (() => void) | null = null;
-  let over = 0;
   /** Close the panel; RELEASE when its own gesture closed it, not the dropdowns. */
   const close = (release: boolean): void => {
     if (stop === null) return;
@@ -404,8 +400,6 @@ export function installVersionHover(
     mirror?.hide(VERSION_POPUP_KEY);
   };
   const open = (): void => {
-    // The version's click opened its notices (notices.ts): the hover stays shut under them.
-    if (stop !== null || suppressed()) return;
     fillOverviewNote(panel, "measuring…");
     panel.classList.add("open");
     // REGISTERED BEFORE IT IS MIRRORED: the row panel it closes takes its
@@ -431,20 +425,15 @@ export function installVersionHover(
       fetchOverview(ctx, panel).then(place, (err: unknown) => noteFailed("sidebar.memory.overview-fetch", err));
     });
   };
-  for (const el of [version, panel]) {
-    el.addEventListener("mouseenter", () => {
-      over += 1;
-      open();
-    });
-    el.addEventListener("mouseleave", () => {
-      over = Math.max(0, over - 1);
-      // The pointer crossing from the version into the panel leaves one
-      // before it enters the other; the next frame decides.
-      nextFrame(() => {
-        if (over === 0) close(true);
-      });
-    });
-  }
+  // THE VERSION IS THE PANEL'S OPENER (dropdowns.ts): its own click toggles
+  // the panel, and the rail's dismiss leaves it to this one.
+  version.addEventListener("click", () => {
+    if (stop !== null) {
+      close(true);
+      return;
+    }
+    open();
+  });
 }
 
 /** An open row's memory: what it fetches, and its block once the panel first opened. */

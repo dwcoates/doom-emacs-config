@@ -1,43 +1,30 @@
 // @vitest-environment jsdom
-// The sidebar's own warnings and errors, behind its version. See
+// The sidebar's own warnings and errors, which tint its version. See
 // src/sidebar/notices.ts.
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createLocalFailures, daemonUnreachable } from "../../src/failure/local.js";
-import { createDropdowns } from "../../src/sidebar/dropdowns.js";
-import {
-  NOTICE_LIMIT,
-  createSidebarNotices,
-  installVersionNotices,
-  noticesToneClass,
-  type VersionNotices,
-} from "../../src/sidebar/notices.js";
+import { NOTICE_LIMIT, createSidebarNotices, installVersionTint, noticesToneClass } from "../../src/sidebar/notices.js";
 
 /** A record's JSON line, as the logger writes it. */
 function line(message: string, operation = "test.op", timestamp = "2026-10-31T12:00:00.000Z"): string {
   return JSON.stringify({ timestamp, operation, message, level: "warn" });
 }
 
-let installed: VersionNotices | null = null;
+let uninstall: (() => void) | null = null;
 
 afterEach(() => {
-  installed?.dispose();
-  installed = null;
+  uninstall?.();
+  uninstall = null;
   document.body.replaceChildren();
 });
 
-/** A version in a rail head, with notices installed on it. */
+/** A version with its tint installed. */
 function install() {
-  const rail = document.createElement("div");
   const version = document.createElement("span");
-  rail.appendChild(version);
-  document.body.appendChild(rail);
+  document.body.appendChild(version);
   const notices = createSidebarNotices();
-  const failures = createLocalFailures();
-  const dropdowns = createDropdowns();
-  installed = installVersionNotices(version, rail, failures, notices, dropdowns);
-  const panel = (): HTMLElement => rail.querySelector<HTMLElement>(".sb-notices")!;
-  return { rail, version, notices, failures, dropdowns, panel };
+  uninstall = installVersionTint(version, notices);
+  return { version, notices };
 }
 
 describe("createSidebarNotices", () => {
@@ -131,7 +118,7 @@ describe("createSidebarNotices", () => {
   });
 });
 
-describe("installVersionNotices", () => {
+describe("installVersionTint", () => {
   it("tints the version green with nothing recorded", () => {
     // Act
     const { version } = install();
@@ -151,98 +138,28 @@ describe("installVersionNotices", () => {
     expect([version.classList.contains("notices-error"), version.classList.contains("notices-ok")]).toEqual([true, false]);
   });
 
-  it("opens the list on a click on the version", () => {
+  it("opens nothing on a click on the version", () => {
     // Arrange
-    const { version, panel } = install();
+    const { version, notices } = install();
+    notices.record("warn", line("careful"));
 
     // Act
     version.click();
 
     // Assert
-    expect(panel().classList.contains("open")).toBe(true);
+    expect(document.body.innerHTML).toBe(version.outerHTML);
   });
 
-  it("says there is nothing to show when nothing was recorded", () => {
+  it("stops re-tinting once uninstalled", () => {
     // Arrange
-    const { version, panel } = install();
+    const { version, notices } = install();
+    uninstall?.();
+    uninstall = null;
 
     // Act
-    version.click();
+    notices.record("error", line("broken"));
 
     // Assert
-    expect(panel().querySelector(".sb-notices-none")).not.toBeNull();
-  });
-
-  it("lists the records newest first", () => {
-    // Arrange
-    const { version, notices, panel } = install();
-    notices.record("warn", line("first"));
-    notices.record("error", line("second"));
-
-    // Act
-    version.click();
-
-    // Assert
-    expect([...panel().querySelectorAll(".sb-notices-list li span")].map((e) => e.textContent)).toEqual(["second", "first"]);
-  });
-
-  it("lists the failures standing now above the records", () => {
-    // Arrange
-    const { version, failures, panel } = install();
-    failures.report(daemonUnreachable(1006, "gone"));
-
-    // Act
-    version.click();
-
-    // Assert
-    expect(panel().querySelectorAll(".sb-notices-standing li").length).toBe(1);
-  });
-
-  it("refills the open list as records arrive", () => {
-    // Arrange
-    const { version, notices, panel } = install();
-    version.click();
-
-    // Act
-    notices.record("warn", line("late"));
-
-    // Assert
-    expect(panel().querySelector(".sb-notices-list li span")?.textContent).toBe("late");
-  });
-
-  it("closes the list on a second click on the version", () => {
-    // Arrange
-    const { version, panel } = install();
-    version.click();
-
-    // Act
-    version.click();
-
-    // Assert
-    expect(panel().classList.contains("open")).toBe(false);
-  });
-
-  it("closes the list on a click elsewhere in the rail", () => {
-    // Arrange
-    const { version, dropdowns, rail, panel } = install();
-    version.click();
-
-    // Act
-    dropdowns.dismissOutside(rail);
-
-    // Assert
-    expect(panel().classList.contains("open")).toBe(false);
-  });
-
-  it("removes its panel when disposed", () => {
-    // Arrange
-    const { rail } = install();
-
-    // Act
-    installed?.dispose();
-    installed = null;
-
-    // Assert
-    expect(rail.querySelector(".sb-notices")).toBeNull();
+    expect(version.classList.contains("notices-ok")).toBe(true);
   });
 });

@@ -323,7 +323,7 @@ service AgentRepl {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // agent-repl's memory as a whole, for the version's hover. See
+  // agent-repl's memory as a whole, for the version's popup. See
   // endpoint_get_memory_overview.proto.
   rpc GetMemoryOverview(GetMemoryOverviewRequest) returns (GetMemoryOverviewResponse) {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).

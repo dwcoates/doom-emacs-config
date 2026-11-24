@@ -694,7 +694,7 @@ export const AgentRepl: GenService<{
     output: typeof ListMergedWorkspacesResponseSchema;
   },
   /**
-   * agent-repl's memory as a whole, for the version's hover. See
+   * agent-repl's memory as a whole, for the version's popup. See
    * endpoint_get_memory_overview.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.GetMemoryOverview

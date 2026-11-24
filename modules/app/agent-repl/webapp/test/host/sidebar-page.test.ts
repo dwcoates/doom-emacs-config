@@ -113,7 +113,7 @@ describe("startSidebarPage", () => {
     expect([told.nav?.id, told.nav?.hidden, told.nav?.parentElement]).toEqual([SIDEBAR_ID, true, document.body]);
   });
 
-  it("hands the rail its failures and notices for the version", () => {
+  it("hands the rail its notices for the version", () => {
     // Arrange
     const { mount, told } = recordingRail();
     const notices = createSidebarNotices();
@@ -122,7 +122,7 @@ describe("startSidebarPage", () => {
     start({ mount, notices });
 
     // Assert
-    expect(told.deps?.notices?.notices).toBe(notices);
+    expect(told.deps?.notices).toBe(notices);
   });
 
   it("hands the rail a mirror that draws its open panels over the feed, on the page's channel", () => {
@@ -205,22 +205,6 @@ describe("startSidebarPage", () => {
 
     // Assert
     expect(notices.tone()).toBe("warn");
-  });
-
-  it("lists a rail that failed to start behind the version", () => {
-    // Arrange
-    const { mount, told } = recordingRail();
-
-    // Act
-    start({
-      mount: (nav, ctx, deps) => {
-        mount(nav, ctx, deps);
-        throw new Error("no roster");
-      },
-    });
-
-    // Assert
-    expect(told.deps?.notices?.failures.standing().map((f) => f.arm)).toEqual(["bootFailed"]);
   });
 
   it("records a rail that failed to start at error", () => {

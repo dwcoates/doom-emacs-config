@@ -1,7 +1,7 @@
 // sidebar_memory.proto — THE RAIL'S TWO MEMORY POPUPS, resolved by the daemon
 // and drawn verbatim (owner request, 2026-10-29).
 //
-// THE VERSION'S HOVER says what agent-repl holds in memory taken as a whole,
+// THE VERSION'S POPUP says what agent-repl holds in memory taken as a whole,
 // naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
 // what that one workspace holds. Every figure is MEASURED: the daemon's
 // process collector (procmetrics) samples each process's physical footprint,
@@ -10,12 +10,12 @@
 // page eligible, so a visible workspace whose page is unloaded counts as not
 // loaded. Each count is read from the one fact the matching metric reads
 // (agentrepl_workspaces_visible, agentrepl_sessions_up,
-// agentrepl_pages_loaded), so the hover and the metrics never disagree.
+// agentrepl_pages_loaded), so the popups and the metrics never disagree.
 // Nothing here is estimated: the workspace pages share one WebKit web content
 // process, which reports one footprint for all of them, so no per-page byte
 // figure exists to draw and none is served.
 //
-// FETCHED ON HOVER, NOT PUSHED. The figures move every sample, so they ride no
+// FETCHED WHILE OPEN, NOT PUSHED. The figures move every sample, so they ride no
 // roster push (a whole-roster push per sample would redraw every row and
 // decode in Emacs every two seconds); the page asks for them when the popup
 // opens (agentrepl.v1 GetMemoryOverview, GetWorkspaceMemory) and again while it
@@ -36,7 +36,7 @@ export const file_frontend_v1_sidebar_memory: GenFile = /*@__PURE__*/
   fileDesc("CiBmcm9udGVuZC92MS9zaWRlYmFyX21lbW9yeS5wcm90bxILZnJvbnRlbmQudjEihAIKFVNpZGViYXJNZW1vcnlPdmVydmlldxI4Cgp3b3Jrc3BhY2VzGAYgASgLMiQuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeVdvcmtzcGFjZXMSMAoGc3RyYWluGAIgASgLMiAuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeVN0cmFpbhI0Cglwcm9jZXNzZXMYBCADKAsyIS5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5UHJvY2VzcxIuCgV0b3RhbBgFIAEoCzIfLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlUb3RhbEoECAEQAkoECAMQBFIFcGFnZXNSBmFnZW50cyLLAQoXU2lkZWJhck1lbW9yeVdvcmtzcGFjZXMSPAoHdmlzaWJsZRgBIAEoCzIrLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzVmlzaWJsZRI4CgVzaGltcxgCIAEoCzIpLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzU2hpbXMSOAoFcGFnZXMYAyABKAsyKS5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5V29ya3NwYWNlc1BhZ2VzIj8KHlNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzVmlzaWJsZRIPCgd2aXNpYmxlGAEgASgNEgwKBG9wZW4YAiABKA0iigEKHFNpZGViYXJNZW1vcnlXb3Jrc3BhY2VzU2hpbXMSCgoCdXAYASABKA0SHAoPZm9vdHByaW50X2J5dGVzGAIgASgESACIAQESGgoNYXZlcmFnZV9ieXRlcxgDIAEoBEgBiAEBQhIKEF9mb290cHJpbnRfYnl0ZXNCEAoOX2F2ZXJhZ2VfYnl0ZXMiYAocU2lkZWJhck1lbW9yeVdvcmtzcGFjZXNQYWdlcxIOCgZsb2FkZWQYASABKA0SHAoPZm9vdHByaW50X2J5dGVzGAIgASgESACIAQFCEgoQX2Zvb3RwcmludF9ieXRlcyJRChNTaWRlYmFyTWVtb3J5U3RyYWluEg4KBnN0YWxscxgBIAEoDRISCgpibG9ja2VkX21zGAIgASgEEhYKDndpbmRvd19zZWNvbmRzGAMgASgNIlcKFFNpZGViYXJNZW1vcnlQcm9jZXNzEg0KBWxhYmVsGAEgASgJEhwKD2Zvb3RwcmludF9ieXRlcxgCIAEoBEgAiAEBQhIKEF9mb290cHJpbnRfYnl0ZXMiLQoSU2lkZWJhck1lbW9yeVRvdGFsEhcKD2Zvb3RwcmludF9ieXRlcxgBIAEoBCKIAQoWU2lkZWJhcldvcmtzcGFjZU1lbW9yeRI3CgVhZ2VudBgBIAEoCzIoLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudBI1CgRwYWdlGAIgASgLMicuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2UitQEKG1NpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudBJCCgdydW5uaW5nGAEgASgLMi8uZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50UnVubmluZ0gAEkkKC25vdF9ydW5uaW5nGAIgASgLMjIuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50Tm90UnVubmluZ0gAQgcKBXN0YXRlIlYKIlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudFJ1bm5pbmcSHAoPZm9vdHByaW50X2J5dGVzGAEgASgESACIAQFCEgoQX2Zvb3RwcmludF9ieXRlcyInCiVTaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnROb3RSdW5uaW5nIq4BChpTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZRI/CgZsb2FkZWQYASABKAsyLS5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZUxvYWRlZEgAEkYKCm5vdF9sb2FkZWQYAiABKAsyMC5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZU5vdExvYWRlZEgAQgcKBXN0YXRlIjEKIFNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlTG9hZGVkSgQIARACUgdyZWxlYXNlIiUKI1NpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlTm90TG9hZGVkQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
 
 /**
- * The version hover's popup: one line per element, top to bottom. Fields 1
+ * The version's popup: one line per element, top to bottom. Fields 1
  * (`pages`) and 3 (`agents`) are RETIRED: their counts and footprints are the
  * `workspaces` entry's lines.
  *

@@ -82,7 +82,7 @@ export const POPUP_LAYER_ID = "ws-sidebar";
 
 /**
  * What the rail hands the host as a popup: a detail panel (a row's, the
- * version's memory hover) or a row's verb menu. Markup holding neither is no
+ * version's memory popup) or a row's verb menu. Markup holding neither is no
  * popup.
  */
 export const POPUP_PANEL_SELECTOR = ".detail, .sb-menu";
