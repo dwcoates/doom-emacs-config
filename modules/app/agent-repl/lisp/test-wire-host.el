@@ -947,6 +947,14 @@ each is refused there as an unknown field."
                     (format "{\"%s\":{}}" arm))
                    (list "WatchHostWorkspaceResponse" arm "unknown field")))))
 
+(ert-deftest agent-repl-test-wire-host-retired-link-followed-arm-is-refused ()
+  "The retired `linkFollowed' push is refused as an unknown field: the daemon
+records a followed link as the user\='s interaction itself."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"linkFollowed\":{}}")
+                 '("WatchHostWorkspaceResponse" linkFollowed "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-host-retired-notification-arm-is-refused ()
   "The retired `notification' push is refused as an unknown field."
   (should (equal (agent-repl-test-wire-host--breach

@@ -1131,7 +1131,7 @@ Returns a plist (:command STRING)."
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending selection
        finalResponseClicked loadPageRequested composeEntry chatTextHighlighted
-       transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets linkFollowed))
+       transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))
