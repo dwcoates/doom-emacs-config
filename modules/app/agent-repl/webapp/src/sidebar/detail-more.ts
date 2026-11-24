@@ -103,7 +103,7 @@ export function detailsPanel(detail: HTMLElement): HTMLElement {
 /**
  * DETAIL's one child popup, its entry, reading LABEL, drawn at the panel's
  * bottom the first time it is asked for: the row panel's "details" entry, and
- * the version hover's "workspaces" entry, drawn and opened alike. The entry is
+ * the version popup's "workspaces" entry, drawn and opened alike. The entry is
  * hidden until `syncDetailsEntry` finds a fact in the popup.
  */
 export function childPopup(detail: HTMLElement, label: string): HTMLElement {

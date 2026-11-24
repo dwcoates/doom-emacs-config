@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { createSidebarNotices } from "../../src/sidebar/notices.js";
-import { createLocalFailures } from "../../src/failure/local.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { SELECTION_ANIMATIONS, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
+import { GetMemoryOverviewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_memory_overview_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { createAgentReplClient } from "../../src/rpc/client.js";
@@ -1132,7 +1132,7 @@ function twoRows(current: string): RosterStreams {
   });
 }
 
-describe("the webhost's version notices", () => {
+describe("the webhost's version tint", () => {
   it("tints the version by the notices it is handed", async () => {
     // Arrange
     const host = document.createElement("nav");
@@ -1143,7 +1143,7 @@ describe("the webhost's version notices", () => {
     mountWebhostSidebar(host, ctxFor([twoRows("ws-1")]), {
       storage: null,
       timers: fakeTimers(),
-      notices: { failures: createLocalFailures(), notices },
+      notices,
     });
     await settle();
 
@@ -1161,6 +1161,75 @@ describe("the webhost's version notices", () => {
 
     // Assert
     expect([...(host.querySelector(".sb-version")?.classList ?? [])].some((c) => c.startsWith("notices-"))).toBe(false);
+  });
+});
+
+describe("the rail's version popup", () => {
+  /** The page's focus-left signal, fired by hand through its own writer. */
+  function manualFocus(): FocusLeftSource {
+    return createFocusLeft(window, createPresence(document, true));
+  }
+
+  const memoryPanel = (host: HTMLElement): HTMLElement => host.querySelector<HTMLElement>(".detail.sb-memory")!;
+  const version = (host: HTMLElement): HTMLElement => host.querySelector<HTMLElement>(".sb-version")!;
+
+  /** A webhost rail mounted with its version popup opened by a click. */
+  async function opened(): Promise<{ host: HTMLElement; focus: FocusLeftSource }> {
+    const host = document.createElement("nav");
+    document.body.replaceChildren(host);
+    const focus = manualFocus();
+    mountWebhostSidebar(
+      host,
+      ctxFor([twoRows("ws-1")], {
+        getMemoryOverview: () =>
+          create(GetMemoryOverviewResponseSchema, { result: { case: "success", value: { outcome: { case: "notYetMeasured", value: {} } } } }),
+      }),
+      { storage: null, timers: fakeTimers(), focusLeft: focus },
+    );
+    await settle();
+    await click(version(host));
+    return { host, focus };
+  }
+
+  it("opens on a click on the version", async () => {
+    // Act
+    const { host } = await opened();
+
+    // Assert
+    expect(memoryPanel(host).classList.contains("open")).toBe(true);
+  });
+
+  it("stays open for a click inside it", async () => {
+    // Arrange
+    const { host } = await opened();
+
+    // Act
+    await click(memoryPanel(host));
+
+    // Assert
+    expect(memoryPanel(host).classList.contains("open")).toBe(true);
+  });
+
+  it("closes on a click elsewhere in the rail", async () => {
+    // Arrange
+    const { host } = await opened();
+
+    // Act
+    await click(host);
+
+    // Assert
+    expect(memoryPanel(host).classList.contains("open")).toBe(false);
+  });
+
+  it("closes once the focus leaves the page, as a click in the feed or the composer takes it", async () => {
+    // Arrange
+    const { host, focus } = await opened();
+
+    // Act
+    focus.left("the page lost focus");
+
+    // Assert
+    expect(memoryPanel(host).classList.contains("open")).toBe(false);
   });
 });
 

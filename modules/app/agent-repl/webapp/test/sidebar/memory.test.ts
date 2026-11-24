@@ -21,9 +21,9 @@ import {
   addRowMemory,
   formatBlocked,
   formatBytes,
-  installVersionHover,
+  installVersionPopup,
   VERSION_POPUP_KEY,
-  type VersionHoverOptions,
+  type VersionPopupOptions,
   overviewLines,
   pageLine,
   showRowMemory,
@@ -93,7 +93,7 @@ describe("formatting", () => {
   });
 });
 
-describe("the version hover's lines", () => {
+describe("the version popup's lines", () => {
   it("states every line below the workspaces entry in drawn order", () => {
     expect(overviewLines(overview(), "o")).toEqual([
       ["stalls", "31, 13.6 s blocked in the last 10 min"],
@@ -207,10 +207,10 @@ describe("a workspace hover's lines", () => {
   });
 });
 
-describe("the version hover", () => {
+describe("the version popup", () => {
   function mounted(
     answer: () => ReturnType<typeof create<typeof GetMemoryOverviewResponseSchema>>,
-    options: VersionHoverOptions = {},
+    options: VersionPopupOptions = {},
   ) {
     const ticker = fakeTicker();
     let asked = 0;
@@ -227,7 +227,7 @@ describe("the version hover", () => {
     const version = document.createElement("span");
     head.appendChild(version);
     document.body.appendChild(head);
-    installVersionHover(ctx, version, head, options);
+    installVersionPopup(ctx, version, head, options);
     const panel = head.querySelector<HTMLElement>(".sb-memory")!;
     return { ticker, version, panel, asked: () => asked };
   }
@@ -235,19 +235,58 @@ describe("the version hover", () => {
   const measured = () =>
     create(GetMemoryOverviewResponseSchema, { result: { case: "success", value: { outcome: { case: "measured", value: overview() } } } });
 
-  it("opens on hover and draws the overview", async () => {
+  it("opens on a click and draws the overview", async () => {
     const { version, panel } = mounted(measured);
 
-    version.dispatchEvent(new MouseEvent("mouseenter"));
+    version.click();
     await settle();
 
     expect([panel.classList.contains("open"), panel.querySelector(":scope > .lines dt")?.textContent]).toEqual([true, "stalls"]);
   });
 
+  it("opens nothing on hover", () => {
+    const { version, panel, asked } = mounted(measured);
+
+    version.dispatchEvent(new MouseEvent("mouseenter"));
+
+    expect([panel.classList.contains("open"), asked()]).toEqual([false, 0]);
+  });
+
+  it("stays open, still asking, when the pointer leaves the version and the panel", async () => {
+    const { version, panel, ticker } = mounted(measured);
+    version.click();
+    await settle();
+
+    version.dispatchEvent(new MouseEvent("mouseleave"));
+    panel.dispatchEvent(new MouseEvent("mouseleave"));
+
+    expect([panel.classList.contains("open"), ticker.subscribers()]).toEqual([true, 1]);
+  });
+
+  it("stops asking and closes on a second click on the version", async () => {
+    const { version, panel, ticker } = mounted(measured);
+    version.click();
+    await settle();
+
+    version.click();
+
+    expect([panel.classList.contains("open"), ticker.subscribers()]).toEqual([false, 0]);
+  });
+
+  it("stays open for a click inside the panel", async () => {
+    const { version, panel } = mounted(measured);
+    version.click();
+    await settle();
+
+    panel.click();
+
+    expect(panel.classList.contains("open")).toBe(true);
+  });
+
   it("draws the workspaces entry first, its counts in its child popup", async () => {
     const { version, panel } = mounted(measured);
 
-    version.dispatchEvent(new MouseEvent("mouseenter"));
+    version.click();
     await settle();
 
     const entry = panel.firstElementChild as HTMLElement;
@@ -266,7 +305,7 @@ describe("the version hover", () => {
 
   it("opens the workspaces child popup on hover and shuts it as the pointer leaves", async () => {
     const { version, panel } = mounted(measured);
-    version.dispatchEvent(new MouseEvent("mouseenter"));
+    version.click();
     await settle();
     const entry = panel.querySelector<HTMLElement>(":scope > .detail-more")!;
 
@@ -279,7 +318,7 @@ describe("the version hover", () => {
 
   it("keeps the workspaces entry across a refresh", async () => {
     const { version, panel, ticker } = mounted(measured);
-    version.dispatchEvent(new MouseEvent("mouseenter"));
+    version.click();
     await settle();
 
     ticker.tick(1);
@@ -291,7 +330,7 @@ describe("the version hover", () => {
 
   it("asks again every second tick while open", async () => {
     const { version, ticker, asked } = mounted(measured);
-    version.dispatchEvent(new MouseEvent("mouseenter"));
+    version.click();
     await settle();
 
     ticker.tick(1);
@@ -301,28 +340,6 @@ describe("the version hover", () => {
     expect(asked()).toBe(2);
   });
 
-  it("stops asking and closes when the pointer leaves", async () => {
-    const { version, panel, ticker } = mounted(measured);
-    version.dispatchEvent(new MouseEvent("mouseenter"));
-    await settle();
-
-    version.dispatchEvent(new MouseEvent("mouseleave"));
-
-    expect([panel.classList.contains("open"), ticker.subscribers()]).toEqual([false, 0]);
-  });
-
-  it("stays open while the pointer crosses into the panel", async () => {
-    const { version, panel } = mounted(measured);
-    version.dispatchEvent(new MouseEvent("mouseenter"));
-    await settle();
-
-    panel.dispatchEvent(new MouseEvent("mouseenter"));
-    version.dispatchEvent(new MouseEvent("mouseleave"));
-
-    expect(panel.classList.contains("open")).toBe(true);
-  });
-
-
   describe("drawn over the feed by a popup mirror", () => {
     it("hands the mirror its panel beside the version's line when it opens", () => {
       // ARRANGE
@@ -330,7 +347,7 @@ describe("the version hover", () => {
       const shown: HTMLElement[] = [];
       const { version, panel } = mounted(measured, { mirror: recordingPopupMirror(told, shown) });
       // ACT
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       // ASSERT
       expect([told[0], shown]).toEqual([`show:${VERSION_POPUP_KEY}`, [panel, version]]);
     });
@@ -340,22 +357,34 @@ describe("the version hover", () => {
       const told: string[] = [];
       const { version } = mounted(measured, { mirror: recordingPopupMirror(told) });
       // ACT
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       await settle();
       // ASSERT
       expect(told).toEqual([`show:${VERSION_POPUP_KEY}`, `show:${VERSION_POPUP_KEY}`]);
     });
 
-    it("takes the panel off the feed when the pointer leaves", async () => {
+    it("takes the panel off the feed on a second click on the version", async () => {
       // ARRANGE
       const told: string[] = [];
       const { version } = mounted(measured, { mirror: recordingPopupMirror(told) });
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       await settle();
       // ACT
-      version.dispatchEvent(new MouseEvent("mouseleave"));
+      version.click();
       // ASSERT
       expect(told.at(-1)).toBe(`hide:${VERSION_POPUP_KEY}`);
+    });
+
+    it("keeps the panel on the feed while the pointer leaves its copy", async () => {
+      // ARRANGE
+      const told: string[] = [];
+      const { version, panel } = mounted(measured, { mirror: recordingPopupMirror(told) });
+      version.click();
+      await settle();
+      // ACT
+      panel.dispatchEvent(new MouseEvent("mouseleave"));
+      // ASSERT
+      expect(told.includes(`hide:${VERSION_POPUP_KEY}`)).toBe(false);
     });
   });
 
@@ -372,7 +401,7 @@ describe("the version hover", () => {
       // ARRANGE
       const dropdowns = createDropdowns();
       const { version, panel, ticker } = mounted(measured, { dropdowns });
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       await settle();
       // ACT
       act(dropdowns);
@@ -385,7 +414,7 @@ describe("the version hover", () => {
       const dropdowns = createDropdowns();
       const told: string[] = [];
       const { version } = mounted(measured, { dropdowns, mirror: recordingPopupMirror(told) });
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       await settle();
       // ACT
       dropdowns.dismissAll("the page lost focus");
@@ -397,7 +426,7 @@ describe("the version hover", () => {
       // ARRANGE
       const dropdowns = createDropdowns();
       const { version, panel } = mounted(measured, { dropdowns });
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       await settle();
       // ACT
       dropdowns.dismissOutside(version);
@@ -405,26 +434,30 @@ describe("the version hover", () => {
       expect(panel.classList.contains("open")).toBe(true);
     });
 
-    it("lets the dropdowns go of it when the pointer closes it", async () => {
+    it("lets the dropdowns go of it when its own click closes it", async () => {
       // ARRANGE
       const dropdowns = createDropdowns();
       const released = vi.spyOn(dropdowns, "released");
       const { version, panel } = mounted(measured, { dropdowns });
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       await settle();
       // ACT
-      version.dispatchEvent(new MouseEvent("mouseleave"));
+      version.click();
       // ASSERT
       expect(released).toHaveBeenCalledWith(panel);
     });
 
-    it("opens nothing while suppressed", () => {
+    it("opens again on a click after the dropdowns closed it", async () => {
       // ARRANGE
-      const { version, panel } = mounted(measured, { suppressed: () => true });
+      const dropdowns = createDropdowns();
+      const { version, panel } = mounted(measured, { dropdowns });
+      version.click();
+      await settle();
+      dropdowns.dismissAll("the page lost focus");
       // ACT
-      version.dispatchEvent(new MouseEvent("mouseenter"));
+      version.click();
       // ASSERT
-      expect(panel.classList.contains("open")).toBe(false);
+      expect(panel.classList.contains("open")).toBe(true);
     });
   });
 
@@ -433,7 +466,7 @@ describe("the version hover", () => {
       create(GetMemoryOverviewResponseSchema, { result: { case: "success", value: { outcome: { case: "notYetMeasured", value: {} } } } }),
     );
 
-    version.dispatchEvent(new MouseEvent("mouseenter"));
+    version.click();
     await settle();
 
     expect(panel.textContent).toBe("not measured yet");
@@ -446,7 +479,7 @@ describe("the version hover", () => {
       }),
     );
 
-    version.dispatchEvent(new MouseEvent("mouseenter"));
+    version.click();
     await settle();
 
     expect(panel.textContent).toBe("the sample failed");

@@ -7,28 +7,20 @@
  * surface, cannot list what goes wrong in it. Instead the version in the
  * rail's top-right corner is tinted by what the sidebar has recorded since it
  * last started, in a subtle shade: red when there was an error, yellow when
- * there was a warning and no error, green when there was neither. A click on
- * the version lists them, the failures standing now first, then every warning
- * and error recorded, newest first.
+ * there was a warning and no error, green when there was neither. The records
+ * themselves are listed nowhere for now (owner request, 2026-11-24): the
+ * version's click opens its memory popup (memory.ts) instead.
  *
  * WHAT IS COUNTED. Every record the sidebar's document writes at warn or error
- * (its logger tells `record` each one, host/document.ts), and every failure
- * standing in it. A failure is filed with a record of its own too, so the
- * tint never needs the standing set; the list shows it so a failure still
- * standing reads apart from one that came and went.
+ * (its logger tells `record` each one, host/document.ts). A failure standing
+ * in the document is filed with a record of its own too, so the tint counts
+ * it.
  */
-import type { LocalFailureView } from "../failure/local.js";
 import type { ClientLogLevel } from "../log.js";
 import { createListeners } from "../listeners.js";
-import { clampReveal } from "../topbar/clamp.js";
-import { applyPlacement, viewportOf } from "../placement.js";
-import type { Dropdowns } from "./dropdowns.js";
 
 /** How many records the list keeps; the counts behind the tint keep counting past it. */
 export const NOTICE_LIMIT = 100;
-
-/** The class of the version's notices panel. */
-export const NOTICES_PANEL_CLASS = "sb-notices";
 
 /** The version's tint: what the sidebar recorded since it started. */
 export type NoticesTone = "ok" | "warn" | "error";
@@ -95,118 +87,16 @@ export function noticesToneClass(tone: NoticesTone): string {
   return `notices-${tone}`;
 }
 
-/** Fill PANEL with FAILURES standing and NOTICES, newest first. */
-export function fillNoticesPanel(panel: HTMLElement, failures: LocalFailureView, notices: SidebarNotices): void {
-  const sections: HTMLElement[] = [];
-  const standing = failures.standing();
-  if (standing.length > 0) {
-    const list = document.createElement("ul");
-    list.className = "sb-notices-standing";
-    for (const failure of standing) {
-      const item = document.createElement("li");
-      item.className = "error";
-      item.textContent = failure.headline;
-      list.appendChild(item);
-    }
-    sections.push(heading("Standing"), list);
-  }
-  const entries = notices.entries();
-  if (entries.length === 0) {
-    const none = document.createElement("p");
-    none.className = "sb-notices-none";
-    none.textContent = "No warnings or errors since the sidebar started.";
-    sections.push(none);
-  } else {
-    const list = document.createElement("ul");
-    list.className = "sb-notices-list";
-    for (const notice of [...entries].reverse()) {
-      const item = document.createElement("li");
-      item.className = notice.level;
-      const when = document.createElement("time");
-      when.textContent = notice.timestamp;
-      const text = document.createElement("span");
-      text.textContent = notice.message;
-      item.append(when, text);
-      item.title = notice.operation;
-      list.appendChild(item);
-    }
-    sections.push(heading("Since the sidebar started"), list);
-  }
-  panel.replaceChildren(...sections);
-}
-
-function heading(text: string): HTMLElement {
-  const el = document.createElement("h4");
-  el.textContent = text;
-  return el;
-}
-
-/** The version's notices, as the rail installs them. */
-export interface VersionNotices {
-  /** Whether the notices panel is open. */
-  isOpen(): boolean;
-  dispose(): void;
-}
-
 /**
- * Tint VERSION by NOTICES and open the list in a panel of RAIL's on a click.
- *
- * The panel is one of the rail's dropdowns (`dropdowns.ts`): a click outside
- * it, or the rail losing the user, closes it, and a second click on the
- * version does too. It is placed under the version by `clampReveal`, inside
- * the sidebar's window, and refilled while open as records arrive.
+ * Tint VERSION by NOTICES, again after every record taken; answers the
+ * unsubscribe.
  */
-export function installVersionNotices(
-  version: HTMLElement,
-  rail: HTMLElement,
-  failures: LocalFailureView,
-  notices: SidebarNotices,
-  dropdowns: Dropdowns,
-): VersionNotices {
-  const panel = document.createElement("div");
-  panel.className = `detail ${NOTICES_PANEL_CLASS}`;
-  rail.appendChild(panel);
+export function installVersionTint(version: HTMLElement, notices: SidebarNotices): () => void {
   const tones: readonly NoticesTone[] = ["ok", "warn", "error"];
   const tint = (): void => {
     const tone = notices.tone();
     for (const each of tones) version.classList.toggle(noticesToneClass(each), each === tone);
   };
-  const place = (): void => {
-    applyPlacement(panel, clampReveal(version.getBoundingClientRect(), panel.getBoundingClientRect(), viewportOf()));
-  };
-  const isOpen = (): boolean => panel.classList.contains("open");
-  const close = (): void => {
-    panel.classList.remove("open");
-  };
-  const refresh = (): void => {
-    tint();
-    if (!isOpen()) return;
-    fillNoticesPanel(panel, failures, notices);
-    place();
-  };
-  const onClick = (): void => {
-    if (isOpen()) {
-      close();
-      dropdowns.released(panel);
-      return;
-    }
-    fillNoticesPanel(panel, failures, notices);
-    panel.classList.add("open");
-    place();
-    dropdowns.opened({ kind: "version-notices", element: panel, openers: [version], close });
-  };
-  version.addEventListener("click", onClick);
-  const offNotices = notices.subscribe(refresh);
-  const offFailures = failures.subscribe(refresh);
   tint();
-  return {
-    isOpen,
-    dispose() {
-      version.removeEventListener("click", onClick);
-      offNotices();
-      offFailures();
-      dropdowns.released(panel);
-      panel.remove();
-    },
-  };
+  return notices.subscribe(tint);
 }

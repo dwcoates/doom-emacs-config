@@ -22,9 +22,8 @@
  * preferences it once stored in `localStorage` starts from the daemon's view
  * instead, says so once at INFO, and drops what it stored.
  */
-import { installVersionHover } from "./memory.js";
-import { installVersionNotices, type SidebarNotices } from "./notices.js";
-import type { LocalFailureView } from "../failure/local.js";
+import { installVersionPopup } from "./memory.js";
+import { installVersionTint, type SidebarNotices } from "./notices.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
@@ -201,8 +200,8 @@ export function mountWebhostSidebar(
 export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame" | "focusLeft" | "drawTiming"> & {
   /** Told once, when the first push reveals the sidebar. */
   revealed?: () => void;
-  /** The sidebar document's failures and notices, which its version lists (notices.ts). */
-  notices?: { failures: LocalFailureView; notices: SidebarNotices };
+  /** The sidebar document's notices, which tint its version (notices.ts). */
+  notices?: SidebarNotices;
   /** Where the open row panels are drawn over the feed (host/sidebar-popups.ts); beside the rows when absent. */
   popupMirror?: PopupMirror;
   /** Where the switch's sidebar latency goes (selection-paint.ts); it is measured but not reported when absent. */
@@ -344,16 +343,13 @@ function mountSidebarIn(
     bandFit.refit();
   });
   const head = drawRailHead(search, createAppSwitcher(ctx, dropdowns));
-  // THE VERSION LISTS THE SIDEBAR'S OWN WARNINGS AND ERRORS on a click, and
-  // is tinted by them (notices.ts), in the sidebar's own web view.
-  const versionNotices =
-    deps.notices === undefined
-      ? null
-      : installVersionNotices(head.version, head.element, deps.notices.failures, deps.notices.notices, dropdowns);
-  // THE VERSION HOVERS AGENT-REPL'S MEMORY (memory.ts), naming no workspace.
-  // DRAWN OVER THE FEED in the sidebar page, as an open row's panel is.
-  installVersionHover(ctx, head.version, head.element, {
-    suppressed: () => versionNotices?.isOpen() ?? false,
+  // THE VERSION IS TINTED BY THE SIDEBAR'S OWN WARNINGS AND ERRORS
+  // (notices.ts), in the sidebar's own web view.
+  const removeVersionTint = deps.notices === undefined ? null : installVersionTint(head.version, deps.notices);
+  // A CLICK ON THE VERSION OPENS AGENT-REPL'S MEMORY (memory.ts), naming no
+  // workspace. DRAWN OVER THE FEED in the sidebar page, as an open row's
+  // panel is.
+  installVersionPopup(ctx, head.version, head.element, {
     dropdowns,
     mirror: deps.popupMirror ?? null,
   });
@@ -654,7 +650,7 @@ function mountSidebarIn(
       removeSectionResize();
       focusFoldScope.dispose(host);
       rail.mergedPages.dispose();
-      versionNotices?.dispose();
+      removeVersionTint?.();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
       disposeThreadList(rail);
@@ -669,7 +665,7 @@ function mountSidebarIn(
 /** The rail's header. */
 export interface RailHead {
   element: HTMLElement;
-  /** The version's element, which hovers the memory overview (memory.ts). */
+  /** The version's element, whose click opens the memory overview (memory.ts). */
   version: HTMLElement;
   /** State the roster's agent-repl version at the head's right; none hides it. */
   showVersion(version: RosterVersion | undefined): void;
