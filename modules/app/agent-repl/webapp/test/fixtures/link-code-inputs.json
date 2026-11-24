@@ -9,6 +9,8 @@
   { "markdown": "see https://x.com/`a` and run foo()", "spans": ["foo()"], "hrefs": ["https://x.com/a"], "codes": ["foo()"] },
   { "markdown": "<https://a.com/`b`>", "hrefs": ["https://a.com/b"], "codes": [] },
   { "markdown": "www.x.com/`a`.", "hrefs": ["http://www.x.com/a"], "codes": [] },
+  { "markdown": "open `https://x.com/a?b=1` now", "hrefs": ["https://x.com/a?b=1"], "codes": [] },
+  { "markdown": "run `curl https://x.com/a`", "hrefs": [], "codes": ["curl https://x.com/a"] },
   { "markdown": "(see https://x.com/y)`foo`", "hrefs": ["https://x.com/y"], "codes": ["foo"] },
   { "markdown": "[`t`][r]\n\n[r]: https://a.com/`b`", "hrefs": ["https://a.com/b"], "codes": [] },
   { "markdown": "https://x.com/a_(b) and a_(b)", "spans": ["a_(b)"], "hrefs": ["https://x.com/a_(b)"], "codes": ["a_(b)"] },

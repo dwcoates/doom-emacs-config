@@ -50,6 +50,22 @@
     "drawn": "www.x.com/a."
   },
   {
+    "markdown": "open `https://x.com/a?b=1` now",
+    "hrefs": [
+      "https://x.com/a?b=1"
+    ],
+    "codes": [],
+    "drawn": "open <https://x.com/a?b=1> now"
+  },
+  {
+    "markdown": "run `curl https://x.com/a`",
+    "hrefs": [],
+    "codes": [
+      "curl https://x.com/a"
+    ],
+    "drawn": "run `curl https://x.com/a`"
+  },
+  {
     "markdown": "(see https://x.com/y)`foo`",
     "hrefs": [
       "https://x.com/y"

@@ -147,3 +147,30 @@ func TestIsLink(t *testing.T) {
 		}
 	}
 }
+
+func TestSchemeURL(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		want bool
+	}{
+		{"https URL", "https://gns.example.com/oauth/x/device?user_code=9R9R-GK6E", true},
+		{"http URL any case", "HTTP://x.com/a", true},
+		{"www URL has no scheme", "www.x.com/a", false},
+		{"URL then more text", "https://x.com/a and more", false},
+		{"text then URL", "see https://x.com", false},
+		{"trailing period outside the URL", "https://x.com/a.", false},
+		{"backtick inside", "https://x.com/`a`", false},
+		{"angle bracket inside", "https://x.com/<a>", false},
+		{"no host", "https://", false},
+		{"not a URL", "foo()", false},
+		{"empty", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SchemeURL(tc.s); got != tc.want {
+				t.Fatalf("SchemeURL(%q) = %v, want %v", tc.s, got, tc.want)
+			}
+		})
+	}
+}

@@ -426,6 +426,23 @@ func urlAt(line string, i int) (Span, bool) {
 	return Span{Kind: URL, At: i, Raw: line[i:end], Dest: line[i:end]}, true
 }
 
+// SchemeURL reports whether S is, whole, one bare `http://` or `https://`
+// URL the renderer links (urlAt), with no character an autolink cannot hold
+// (whitespace, `<`, `>`, a backtick). A `www.` URL is not one: it has no
+// scheme to stand as an autolink.
+func SchemeURL(s string) bool {
+	if hasFoldPrefix(s, "www.") || strings.ContainsAny(s, "<>`") {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] <= ' ' || s[i] == 0x7f {
+			return false
+		}
+	}
+	span, ok := urlAt(s, 0)
+	return ok && span.Raw == s
+}
+
 // urlEnd answers where the URL whose host starts at FROM ends: its host, then
 // any path, query or fragment, by linkify-it's path grammar (its re.js
 // src_path). A backtick is an ordinary character of either, since the
