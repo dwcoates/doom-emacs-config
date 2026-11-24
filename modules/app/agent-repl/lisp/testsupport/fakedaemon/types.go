@@ -77,6 +77,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"OpenExternal":               func() proto.Message { return &v1.OpenExternalResponse{} },
 	"OpenInEditor":               func() proto.Message { return &v1.OpenInEditorResponse{} },
 	"FindPullRequestOwner":       func() proto.Message { return &v1.FindPullRequestOwnerResponse{} },
+	"UpdateProductionMediation":  func() proto.Message { return &v1.UpdateProductionMediationResponse{} },
 	"AdoptWebWorkspace":          func() proto.Message { return &v1.AdoptWebWorkspaceResponse{} },
 	"DismissNewsDigest":          func() proto.Message { return &v1.DismissNewsDigestResponse{} },
 	"RefreshNewsDigest":          func() proto.Message { return &v1.RefreshNewsDigestResponse{} },
