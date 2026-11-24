@@ -1977,7 +1977,7 @@ func TestParkRefusesAReasonWithNoRemoteControlPolicy(t *testing.T) {
 			t.Fatalf("kills = %+v, want none", killed)
 		}
 	}()
-	h.c.park(context.Background(), h.c.log, ws, dlog.Context{}, reason)
+	h.c.park(context.Background(), h.c.log, ws, dlog.Context{}, reason, instant)
 }
 
 func TestNewRefusesWithoutARemoteControlGate(t *testing.T) {
@@ -2072,36 +2072,46 @@ func TestADeferredParkObservesNothingAndHoldsDeferredBusy(t *testing.T) {
 	}
 }
 
-// parkedSessionFailingDB fails the session read once the session is parked:
-// the read the idle-before-park observation makes after the park.
-type parkedSessionFailingDB struct{ wsm.DB }
-
-func (d parkedSessionFailingDB) Session(ctx context.Context, ws ids.WorkspaceID) (wsm.Session, bool, error) {
-	session, found, err := d.DB.Session(ctx, ws)
-	if err == nil && found && session.Terminal != nil {
-		return wsm.Session{}, false, errFake
+func TestIdleSinceIsTheLaterOfTheLastTurnsEndAndTheSessionsStart(t *testing.T) {
+	ended := instant.Add(time.Minute)
+	before := instant.Add(-time.Hour)
+	tests := []struct {
+		name  string
+		ended *time.Time
+		want  time.Time
+	}{
+		{name: "a turn after the start", ended: &ended, want: ended},
+		{name: "a turn before the start", ended: &before, want: instant},
+		{name: "no turn", want: instant},
 	}
-	return session, found, err
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := idleSince(wsm.Workspace{LastTurnEndedAt: tt.ended}, wsm.Session{StartedAt: instant})
+
+			// Assert
+			if !got.Equal(tt.want) {
+				t.Fatalf("idleSince = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
-func TestAParkWhoseSessionCannotBeReadObservesNothingAndSaysSo(t *testing.T) {
+func TestAParkWithNoIdleStartObservesNothingAndSaysSo(t *testing.T) {
 	// Arrange
 	parks := &fakeParks{}
-	h := newHarness(t, func(d *Deps) { d.Parks = parks; d.DB = parkedSessionFailingDB{d.DB} })
-	ws := h.workspace(t, instant)
+	h := newHarness(t, func(d *Deps) { d.Parks = parks })
+	log := h.log.Global()
 
 	// Act
-	h.c.CycleDown(ws, beatAfter)
+	h.c.observeIdleBeforePark(log, dlog.Context{"workspace": "ws-x"}, h.c.idleReason(), time.Time{})
 
 	// Assert
-	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
-		t.Fatalf("terminal = %+v, want the park standing", term)
-	}
 	if got := parks.all(); len(got) != 0 {
 		t.Fatalf("observations = %+v, want none", got)
 	}
-	record := recordWith(t, h, opCycle, "could not read the parked session's start; its idle time before the park is not observed")
-	if record.Level != "error" || record.Context["workspace"] != string(ws) {
-		t.Fatalf("record = %+v, want an ERROR naming the workspace", record)
+	record := recordWith(t, h, opSweep, "the parked session has neither a start nor a turn end on record; its idle time before the park is not observed")
+	if record.Level != "error" || record.Context["invariant_violation"] == nil {
+		t.Fatalf("record = %+v, want an ERROR naming the broken invariant", record)
 	}
 }

@@ -451,7 +451,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	// stand-down is taken, and so no pre-beat restore is ever owed. The mode
 	// is read at the act, under its gate (park), so one turned off since the
 	// ask parks at the next beat as usual.
-	switch c.park(ctx, log, ws, fields, reason) {
+	switch c.park(ctx, log, ws, fields, reason, idleSince(record, session)) {
 	case parkDone:
 		return withheldSettled, CycleOutcome{Down: true, Why: reason.done.Template()}
 	case parkSpared:

@@ -115,7 +115,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 				dlog.Merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
 			continue
 		}
-		switch outcome := c.park(ctx, log, ws.ID, fields, c.idleReason()); outcome {
+		switch outcome := c.park(ctx, log, ws.ID, fields, c.idleReason(), idleSince(ws, session)); outcome {
 		case parkDone:
 			c.clearRetry(ws.ID)
 			parked = append(parked, ws.ID)
@@ -317,14 +317,14 @@ func (c *controller) idleReason() standDownReason {
 // it lands either before the read, which then spares the session, or after
 // the shim is gone, which its own no-shim path starts again
 // (UpdateRemoteControlMode): never between the decision and the act.
-func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) parkOutcome {
+func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason, idleSince time.Time) parkOutcome {
 	outcome := c.parkOnce(ctx, log, ws, fields, why)
 	switch outcome {
 	case parkDeferred:
 		c.deps.Why.SetHold(ws, sessionwhy.HoldDeferredBusy)
 	case parkDone:
 		c.deps.Why.ClearHold(ws)
-		c.observeIdleBeforePark(ctx, log, ws, fields, why)
+		c.observeIdleBeforePark(log, fields, why, idleSince)
 	}
 	return outcome
 }
@@ -338,30 +338,25 @@ type ParkTelemetry interface {
 	ObserveIdleBeforePark(reason shimlife.StandDownReason, idle time.Duration)
 }
 
-// observeIdleBeforePark records how long WS's session, just parked for WHY,
-// stood up idle: from the later of its last turn's end and its own start
-// (a session restored after its work idles only from its start) to now. A
-// read that fails is recorded at ERROR and observes nothing; the park stands.
-func (c *controller) observeIdleBeforePark(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) {
-	if c.deps.Parks == nil {
-		return
-	}
-	record, err := c.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		log.Error(why.op, "could not read the parked workspace's last turn; its idle time before the park is not observed", dlog.WithCause(fields, err))
-		return
-	}
-	session, found, err := c.deps.DB.Session(ctx, ws)
-	if err != nil {
-		log.Error(why.op, "could not read the parked session's start; its idle time before the park is not observed", dlog.WithCause(fields, err))
-		return
-	}
-	since := time.Time{}
-	if found {
-		since = session.StartedAt
-	}
+// idleSince answers when SESSION, the workspace RECORD's, began standing up
+// idle: the later of its last turn's end and its own start (a session
+// restored after its work idles only from its start). Every caller of park
+// has both from the reads that decided the park, so nothing is read after it.
+func idleSince(record wsm.Workspace, session wsm.Session) time.Time {
+	since := session.StartedAt
 	if ended := record.LastTurnEndedAt; ended != nil && ended.After(since) {
 		since = *ended
+	}
+	return since
+}
+
+// observeIdleBeforePark records how long the session just parked for WHY
+// stood up idle, from SINCE (idleSince) to now. A zero SINCE is a session
+// with neither a start nor a turn end on record, a broken invariant recorded
+// at ERROR; the park stands.
+func (c *controller) observeIdleBeforePark(log dlog.Logger, fields dlog.Context, why standDownReason, since time.Time) {
+	if c.deps.Parks == nil {
+		return
 	}
 	if since.IsZero() {
 		log.Error(why.op, "the parked session has neither a start nor a turn end on record; its idle time before the park is not observed",

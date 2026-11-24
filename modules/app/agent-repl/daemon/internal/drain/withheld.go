@@ -278,7 +278,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, 
 			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 		return withheldSettled
 	}
-	switch c.park(ctx, log, ws, fields, withheldReason(trigger)) {
+	switch c.park(ctx, log, ws, fields, withheldReason(trigger), idleSince(record, session)) {
 	case parkDone, parkSpared:
 		return withheldSettled
 	case parkDeferred:
