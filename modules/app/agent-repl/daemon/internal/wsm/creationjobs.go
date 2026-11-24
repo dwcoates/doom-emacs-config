@@ -14,7 +14,12 @@ import (
 // is current state, never an append-only history.
 func (s *store) PutCreationJob(ctx context.Context, job CreationJob) error {
 	const op = "daemon.wsm.put_creation_job"
-	fields := dlog.Context{"workspace": string(job.Workspace), "materialized": job.Materialized, "one_shot": job.OneShot}
+	fields := dlog.Context{"workspace": string(job.Workspace), "materialized": job.Materialized, "one_shot": job.OneShot, "finish_placement": string(job.FinishPlacement)}
+	if !job.FinishPlacement.valid() || (job.FinishPlacement != FinishPlacementAsked && !job.OneShot) {
+		err := fmt.Errorf("wsm: a creation job fixes a finish placement of front or back on a one-shot only, not %q (one-shot %v)", job.FinishPlacement, job.OneShot)
+		s.log.Error(op, "refused a creation job's finish placement", withError(fields, err))
+		return err
+	}
 	before, err := encodeHooks(job.Hooks.PreDeploy)
 	if err != nil {
 		s.log.Error(op, "refused unencodable pre-deploy hooks", withError(fields, err))
@@ -41,17 +46,17 @@ func (s *store) PutCreationJob(ctx context.Context, job CreationJob) error {
 func writeCreationJob(ctx context.Context, tx *sql.Tx, job CreationJob, before, after string) error {
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
-		   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at, finish_placement)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(workspace_id) DO UPDATE SET
 		   source_branch = excluded.source_branch, source_dir = excluded.source_dir, target_dir = excluded.target_dir,
 		   layout_origin = excluded.layout_origin, pre_deploy_hooks = excluded.pre_deploy_hooks, post_deploy_hooks = excluded.post_deploy_hooks,
 		   base_ref = excluded.base_ref, materialized = excluded.materialized, one_shot = excluded.one_shot,
 		   initial_prompt = excluded.initial_prompt, consented_ungated_mode = excluded.consented_ungated_mode,
-		   created_at = excluded.created_at`,
+		   created_at = excluded.created_at, finish_placement = excluded.finish_placement`,
 		job.Workspace, job.Layout.SourceBranch, job.Layout.SourceDir, job.Layout.TargetDir, job.Layout.Origin,
 		before, after, job.BaseRef, job.Materialized, job.OneShot, job.InitialPrompt, job.ConsentedUngatedMode,
-		nanos(job.CreatedAt))
+		nanos(job.CreatedAt), string(job.FinishPlacement))
 	return err
 }
 
@@ -91,10 +96,10 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 		)
 		row := s.q(ctx).QueryRowContext(ctx,
 			`SELECT workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
-			        base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at
+			        base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at, finish_placement
 			 FROM creation_jobs WHERE workspace_id = ?`, id)
 		err := row.Scan(&job.Workspace, &job.Layout.SourceBranch, &job.Layout.SourceDir, &job.Layout.TargetDir, &job.Layout.Origin,
-			&before, &after, &job.BaseRef, &job.Materialized, &job.OneShot, &job.InitialPrompt, &job.ConsentedUngatedMode, &created)
+			&before, &after, &job.BaseRef, &job.Materialized, &job.OneShot, &job.InitialPrompt, &job.ConsentedUngatedMode, &created, &job.FinishPlacement)
 		if errors.Is(err, sql.ErrNoRows) {
 			job, found = CreationJob{}, false
 			return nil
@@ -109,6 +114,9 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 			return err
 		}
 		job.CreatedAt = fromNanos(created)
+		if !job.FinishPlacement.valid() {
+			return &DecodeError{Table: "creation_jobs", Row: string(id), Field: "finish_placement", Err: fmt.Errorf("unknown placement %q", job.FinishPlacement)}
+		}
 		found = true
 		return nil
 	})
@@ -117,3 +125,11 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 	}
 	return job, found, nil
 }
+
+// finishPlacementsDDL is the layout-202 addition: where each one-shot's
+// finish joins the merge queue when its creator fixed it
+// (CreationJob.FinishPlacement). IT IS ADDITIVE: a defaulted column the
+// previous build never names, and every earlier job names none.
+const finishPlacementsDDL = `
+ALTER TABLE creation_jobs ADD COLUMN finish_placement TEXT NOT NULL DEFAULT '';
+`

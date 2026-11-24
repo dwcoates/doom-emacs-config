@@ -120,11 +120,11 @@ func TestAnEscalationThatCannotReachTheMediatorStillNotifiesTheUser(t *testing.T
 		arrange func(h *harness)
 		message string
 	}{
-		{name: "a mediator that cannot be shown", message: "the deploy mediator could not be shown for its brief; it is not briefed",
+		{name: "a mediator that cannot be shown", message: "the mediator could not be shown for its brief; it is not briefed",
 			arrange: func(h *harness) { h.checks.resumeErr = errors.New("parent hidden") }},
-		{name: "an effort that cannot be set", byUs: true, message: "the deploy mediator's effort could not be set; it is not briefed",
+		{name: "an effort that cannot be set", byUs: true, message: "the mediator's model and effort could not be set; it is not briefed",
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no catalog") }},
-		{name: "a worktree that cannot be refreshed", byUs: true, message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
+		{name: "a worktree that cannot be refreshed", byUs: true, message: "the mediator's worktree could not be brought to the main branch's tip; it is not briefed",
 			arrange: func(h *harness) { h.checks.refreshErr = errors.New("git gone") }},
 		{name: "a daemon's brief that cannot be composed", byUs: true, message: "the escalation's brief could not be composed; the mediator is not briefed, and the next pass tells it",
 			arrange: func(h *harness) { delete(h.briefs, BriefDeployEscalation) }},
@@ -172,13 +172,13 @@ func TestAMadeMediatorThatCannotBeRecordedIsNotAnswered(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act
-	_, err := h.o.mediatorOf(context.Background(), queueOf(t, h), dlog.Context{})
+	_, err := h.o.mediatorOf(context.Background(), deployRole, queueOf(t, h), dlog.Context{})
 
 	// Assert
 	if err == nil {
 		t.Fatal("mediatorOf = nil, want the failed record answered")
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the deploy mediator was made but could not be recorded"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the mediator was made but could not be recorded"}); !ok {
 		t.Fatalf("records = %+v, want the failed record at ERROR", h.logs.Records())
 	}
 }
@@ -488,13 +488,13 @@ func TestShowMediatorAnswersAMediatorThatCannotBeShown(t *testing.T) {
 	h.checks.resumeErr = errors.New("parent hidden")
 
 	// Act
-	_, err := h.o.showMediator(context.Background(), queueOf(t, h), dlog.Context{})
+	_, err := h.o.showMediator(context.Background(), deployRole, queueOf(t, h), dlog.Context{})
 
 	// Assert
 	if err == nil {
 		t.Fatal("showMediator = nil, want the failure answered")
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the deploy mediator could not be shown for its brief; it is not briefed"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the mediator could not be shown for its brief; it is not briefed"}); !ok {
 		t.Fatalf("records = %v, want the show failure at ERROR", h.logs.Records())
 	}
 	if len(h.checks.refreshed) != 0 || len(h.checks.efforts) != 0 {

@@ -226,6 +226,11 @@ type ClientLogRecord struct {
 	// (logging-contract.md "Log sites"). Required: a record with no site, or
 	// one not 12 lowercase hex, is malformed (Connect InvalidArgument), since a
 	// record the production checks cannot count is a record they miss.
+	//
+	// A BARE STRING, NOT agentrepl.v1.LogSiteKey: a deploy restarts the sidecar
+	// before the daemon hands over and reloads the webapp beside it, so a
+	// changed wire type here would have the old daemon refuse the new
+	// clients' records for the length of every handover.
 	Site string `protobuf:"bytes,12,opt,name=site,proto3" json:"site,omitempty"`
 	// The call's unrendered message, its placeholders ({name}) unfilled: the
 	// site's summary. Required (a blank one is malformed). `message` is this

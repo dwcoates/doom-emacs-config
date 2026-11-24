@@ -8,6 +8,7 @@ import (
 	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
@@ -21,58 +22,82 @@ import (
 // and settles an escalation with the user. It is made with no initial
 // prompt, so no session comes up at the create, and recorded as its queue's
 // standing mediator before it is briefed: its session first comes up for the
-// brief's delivery, at the effort picked for it (SetDeployMediatorEffort),
+// brief's delivery, at the effort picked for it (SetMediatorAgent),
 // so it always comes up under the mediator's landing (sessionProfile).
 
 // opDeployChecks is the operation the deploy mediator's verbs are recorded
 // under.
 const opDeployChecks = "daemon.workspace.deploy_checks"
 
-// The mediator's model and effort (owner ruling, 2026-11-17: "an opus
-// low-effort agent").
-const (
-	mediatorModel  = DefaultLaunchModel
-	mediatorEffort = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW
-)
+// MediatorAgent is how a standing mediator's session runs: its model and its
+// effort, read from its repository's lifecycle config at each brief
+// (MediatorAgentOf).
+type MediatorAgent struct {
+	Model  string
+	Effort conversationv1.AgentEffortLevel
+}
 
-// deployMediatorSpec is the create of the deploy mediator for slug NAME
-// (`deploy-mediator`) of the repository at REPODIR: shown, since it stands in
-// its repository's section for good (owner ruling, 2026-11-19), on the
-// mediator's model, with no initial prompt. Its name and branch lie in the
-// daemon's own namespace (StandingBranch), so no branch a person or an agent
-// cut can ever hold them.
-func deployMediatorSpec(repoDir, name string) CreateSpec {
+// mediatorEffort is a mediator's effort when its config names none (owner
+// ruling, 2026-11-17: "an opus low-effort agent").
+const mediatorEffort = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW
+
+// MediatorAgentOf is how a mediator configured by CFG runs: the model and
+// effort CFG names, else the daemon's default launch model at low effort.
+func MediatorAgentOf(cfg *repoconfigv1.MediatorAgent) MediatorAgent {
+	agent := MediatorAgent{Model: DefaultLaunchModel, Effort: mediatorEffort}
+	if cfg != nil && cfg.Model != nil {
+		agent.Model = cfg.GetModel()
+	}
+	if cfg != nil && cfg.Effort != nil {
+		agent.Effort = cfg.GetEffort()
+	}
+	return agent
+}
+
+// mediatorSpec is the create of the standing mediator for slug NAME of the
+// repository at REPODIR: shown, since it stands in its repository's section
+// for good (owner ruling, 2026-11-19), on MODEL, with no initial prompt. Its
+// name and branch lie in the daemon's own namespace (StandingBranch), so no
+// branch a person or an agent cut can ever hold them.
+func mediatorSpec(repoDir, name, model string) CreateSpec {
 	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
-	spec.RepoDir, spec.Name, spec.Model = repoDir, StandingBranch(name), mediatorModel
+	spec.RepoDir, spec.Name, spec.Model = repoDir, StandingBranch(name), model
 	spec.standing = true
 	return spec
 }
 
-// CreateDeployMediator implements Verbs: makes a repository's deploy
-// mediator, unprompted.
+// CreateMediator implements Verbs: makes a repository's standing mediator,
+// unprompted, on the model CFG configures (MediatorAgentOf).
 //
 // IT IS MADE IN REMOTE CONTROL (owner ruling, 2026-11-16): the user settles
 // an escalation from wherever they are, so its mode is recorded on before
 // its first session starts, which puts the mode in force at bring-up.
-func (v *verbs) CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
-	spec := deployMediatorSpec(repoDir, name)
+func (v *verbs) CreateMediator(ctx context.Context, repoDir, name string, cfg *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
+	spec := mediatorSpec(repoDir, name, MediatorAgentOf(cfg).Model)
 	fields := dlog.Context{"repo": spec.RepoDir, "name": spec.Name, "model": spec.Model}
 	made, err := v.Create(ctx, spec)
 	if err != nil {
-		v.deps.Log.Global().Error(opDeployChecks, "the deploy mediator could not be made", dlog.WithCause(fields, err))
-		return wsm.Workspace{}, fmt.Errorf("make the deploy mediator %q: %w", spec.Name, err)
+		v.deps.Log.Global().Error(opDeployChecks, "the standing mediator could not be made", dlog.WithCause(fields, err))
+		return wsm.Workspace{}, fmt.Errorf("make the standing mediator %q: %w", spec.Name, err)
 	}
 	if _, err := v.deps.DB.SetRemoteControlMode(ctx, made.ID, wsm.RemoteControlOn); err != nil {
-		v.deps.Log.Global().Error(opDeployChecks, "the deploy mediator was made but its remote control could not be turned on", dlog.WithCause(withWorkspace(fields, made.ID), err))
-		return wsm.Workspace{}, fmt.Errorf("turn remote control on for the deploy mediator %q: %w", name, err)
+		v.deps.Log.Global().Error(opDeployChecks, "the standing mediator was made but its remote control could not be turned on", dlog.WithCause(withWorkspace(fields, made.ID), err))
+		return wsm.Workspace{}, fmt.Errorf("turn remote control on for the standing mediator %q: %w", name, err)
 	}
-	v.deps.Log.Global().Info(opDeployChecks, "made the deploy mediator", withWorkspace(fields, made.ID))
+	v.deps.Log.Global().Info(opDeployChecks, "made the standing mediator", withWorkspace(fields, made.ID))
 	return made, nil
 }
 
-// SetDeployMediatorEffort implements Verbs: puts WS at the mediator's
-// effort. A sessionless workspace's shim starts for it, so its standing is
-// recorded before.
+// SetMediatorAgent implements Verbs: puts WS on the model and effort CFG
+// configures (MediatorAgentOf)
+// before a brief, so an edit of the repository's lifecycle config takes
+// effect at the mediator's next brief.
+//
+// THE MODEL IS RECORDED FIRST (wsm.SetSessionModel), which every start of the
+// session names; only then is a live session switched, through the queue
+// (SetModel), so the switch never overtakes the brief. A model the live
+// session's catalog does not offer is refused at ERROR, never swapped for
+// another.
 //
 // THE EFFORT IS A RECORDED PICK FIRST (Topbar.SetPickedEffort), which every
 // session start puts back in force (Fleet.reapplyEffort, from the cold
@@ -83,42 +108,81 @@ func (v *verbs) CreateDeployMediator(ctx context.Context, repoDir, name string) 
 // a shim the rollout had just stood down, the round failed, and the deploy's
 // check was never told.
 //
-// THE ROUND NEVER WAITS ON THE SWITCH. A live session is switched off the
-// round's goroutine (Sessions.SwitchEffort): the shim holds a switch asked
-// mid-turn until the turn ends, which has no bound (2026-11-21 13:55:20: a
-// round stood behind the mediator's running turn for minutes), and the brief
-// the round submits is queued behind that same turn.
+// THE ROUND NEVER WAITS ON THE EFFORT'S SWITCH. A live session is switched
+// off the round's goroutine (Sessions.SwitchEffort): the shim holds a switch
+// asked mid-turn until the turn ends, which has no bound (2026-11-21
+// 13:55:20: a round stood behind the mediator's running turn for minutes),
+// and the brief the round submits is queued behind that same turn.
 //
 // A REAL FAILURE STAYS AN ERROR: a level the live session's selector never
 // offered is refused here, before any pick, and a vendor's refusal of the
 // switch is recorded at ERROR and stated on the warning strip by the fleet.
-func (v *verbs) SetDeployMediatorEffort(ctx context.Context, ws wsm.WorkspaceID) error {
-	fields := dlog.Context{"workspace": string(ws), "effort": mediatorEffort.String()}
+func (v *verbs) SetMediatorAgent(ctx context.Context, ws wsm.WorkspaceID, cfg *repoconfigv1.MediatorAgent) error {
+	agent := MediatorAgentOf(cfg)
+	if err := v.setMediatorModel(ctx, ws, agent.Model); err != nil {
+		return err
+	}
+	return v.setMediatorEffort(ctx, ws, agent.Effort)
+}
+
+// setMediatorModel records MODEL as WS's session model when it is not
+// already, and switches a live session to it.
+func (v *verbs) setMediatorModel(ctx context.Context, ws wsm.WorkspaceID, model string) error {
+	fields := dlog.Context{"workspace": string(ws), "model": model}
+	session, _, err := v.deps.DB.Session(ctx, ws)
+	if err != nil {
+		v.deps.Log.Global().Error(opDeployChecks, "the standing mediator's recorded model could not be read", dlog.WithCause(fields, err))
+		return fmt.Errorf("read the standing mediator %s's model: %w", ws, err)
+	}
+	if session.Model == model {
+		return nil
+	}
+	fields["was"] = session.Model
+	if err := v.deps.DB.SetSessionModel(ctx, ws, model); err != nil {
+		v.deps.Log.Global().Error(opDeployChecks, "the standing mediator's model could not be recorded", dlog.WithCause(fields, err))
+		return fmt.Errorf("record the standing mediator %s's model: %w", ws, err)
+	}
+	if _, live := v.deps.Cards.Models(ws); !live {
+		v.deps.Log.Global().Info(opDeployChecks, "recorded the standing mediator's model; its session starts on it", fields)
+		return nil
+	}
+	if err := v.SetModel(ctx, ws, model); err != nil {
+		v.deps.Log.Global().Error(opDeployChecks, "the standing mediator's live session could not be switched to its model", dlog.WithCause(fields, err))
+		return fmt.Errorf("switch the standing mediator %s's model: %w", ws, err)
+	}
+	v.deps.Log.Global().Info(opDeployChecks, "switched the standing mediator's live session to its model before its brief", fields)
+	return nil
+}
+
+// setMediatorEffort puts WS at EFFORT. A sessionless workspace's shim starts
+// for it, so its standing is recorded before.
+func (v *verbs) setMediatorEffort(ctx context.Context, ws wsm.WorkspaceID, effort conversationv1.AgentEffortLevel) error {
+	fields := dlog.Context{"workspace": string(ws), "effort": effort.String()}
 	// A WORKSPACE WITH NO SESSION YET SERVES NO EFFORT SELECTOR, so its level
 	// is only picked: setting it through the selector refused every fresh
 	// intake (2026-11-15 16:17, 0.444.0: "serves no effort level for its
 	// model") and left the queue held for it.
 	served, live := v.deps.Cards.EffortLevels(ws)
 	if !live {
-		v.deps.Topbar.SetPickedEffort(ws, mediatorEffort)
-		v.deps.Log.Global().Info(opDeployChecks, "picked the deploy mediator's effort; its session starts at it", fields)
+		v.deps.Topbar.SetPickedEffort(ws, effort)
+		v.deps.Log.Global().Info(opDeployChecks, "picked the standing mediator's effort; its session starts at it", fields)
 		return nil
 	}
 	// unset records the effort's failure, ERR, once for every way it fails.
 	unset := func(err error) error {
-		v.deps.Log.Global().Error(opDeployChecks, "the deploy mediator's effort could not be set", dlog.WithCause(fields, err))
-		return fmt.Errorf("set the deploy mediator %s's effort: %w", ws, err)
+		v.deps.Log.Global().Error(opDeployChecks, "the standing mediator's effort could not be set", dlog.WithCause(fields, err))
+		return fmt.Errorf("set the standing mediator %s's effort: %w", ws, err)
 	}
-	if !slices.Contains(served, mediatorEffort) {
-		return unset(fmt.Errorf("the selector served %v and never offered %v", served, mediatorEffort))
+	if !slices.Contains(served, effort) {
+		return unset(fmt.Errorf("the selector served %v and never offered %v", served, effort))
 	}
-	_, log, err := v.owned(ctx, "SetDeployMediatorEffort", ws)
+	_, log, err := v.owned(ctx, "SetMediatorAgent", ws)
 	if err != nil {
 		return unset(err)
 	}
-	v.deps.Topbar.SetPickedEffort(ws, mediatorEffort)
-	v.deps.Sessions.SwitchEffort(log, ws, mediatorEffort)
-	v.deps.Log.Global().Info(opDeployChecks, "picked the deploy mediator's effort; its live session is switched to it before its next turn", fields)
+	v.deps.Topbar.SetPickedEffort(ws, effort)
+	v.deps.Sessions.SwitchEffort(log, ws, effort)
+	v.deps.Log.Global().Info(opDeployChecks, "picked the standing mediator's effort; its live session is switched to it before its next turn", fields)
 	return nil
 }
 
@@ -227,7 +291,7 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 	// check is passed over before any ownership is asked: a handover raises
 	// gates again on workspaces this daemon has not adopted yet (2026-11-17
 	// 13:24: five not_yet_adopted ERRORs, none a deploy check).
-	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.DeployMediator {
+	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.IsMediator() {
 		return err
 	}
 	_, err := v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,

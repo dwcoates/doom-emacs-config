@@ -227,6 +227,10 @@ type fakeDB struct {
 	// workspaceReadErrs fails Workspace once per entry, in order, before any
 	// other answer: the seam for a record that goes away between two reads.
 	workspaceReadErrs []error
+	// rowErr fails the whole-row read (Workspace) and never the head
+	// (WorkspaceHead): the seam for a handler's own whole-row read failing
+	// after its request resolved.
+	rowErr error
 	// turnStarted answers Turn's start by turn; turnStartedErr fails every
 	// read instead (wsm.ErrNotFound for a turn the workspace never recorded).
 	turnStarted    map[ids.TurnID]time.Time
@@ -288,6 +292,9 @@ func (f *fakeDB) WorkspaceHead(ctx context.Context, id ids.WorkspaceID) (wsm.Wor
 
 func (f *fakeDB) Workspace(ctx context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
 	f.rowReads.Add(1)
+	if f.rowErr != nil {
+		return wsm.Workspace{}, f.rowErr
+	}
 	return f.workspace(ctx, id)
 }
 
@@ -1382,6 +1389,13 @@ func (f *fakeQueue) RollBackHeld(context.Context, ids.WorkspaceID) (wsm.HeldProm
 
 // fakeMerge answers the orchestrator's four server-facing verbs.
 type fakeMerge struct {
+	// productionDecisions and folds are every DecideProduction and
+	// FoldProduction asked; productionMade answers a dispatch and
+	// productionErr fails either.
+	productionDecisions []merge.ProductionDecisionRequest
+	folds               [][3]ids.WorkspaceID
+	productionMade      []wsm.Workspace
+	productionErr       error
 	// releasedEscalations is every ReleaseEscalation asked, and
 	// escalationReleaseErr what each answers.
 	releasedEscalations  []merge.RepositoryScope
@@ -1682,6 +1696,19 @@ func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope, by
 type fakeDecision struct {
 	ws       ids.WorkspaceID
 	decision merge.Decision
+}
+
+func (f *fakeMerge) DecideProduction(_ context.Context, ws ids.WorkspaceID, d merge.ProductionDecisionRequest) ([]wsm.Workspace, error) {
+	f.productionDecisions = append(f.productionDecisions, d)
+	if f.productionErr != nil {
+		return nil, f.productionErr
+	}
+	return f.productionMade, nil
+}
+
+func (f *fakeMerge) FoldProduction(_ context.Context, ws, folded, surviving ids.WorkspaceID) error {
+	f.folds = append(f.folds, [3]ids.WorkspaceID{ws, folded, surviving})
+	return f.productionErr
 }
 
 func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, d merge.Decision) error {

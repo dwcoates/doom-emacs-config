@@ -102,6 +102,9 @@ var createRefusals = func() []describedRefusal {
 		set("requested_by_deploy_mediator", "requested_by_deploy_mediator",
 			&agentreplv1.CreateWorkspaceRequestedByDeployMediator{Workspace: ref("/w/m"), Detail: "do the work in your own session"},
 			"the requester at /w/m is its repository's deploy mediator, which never creates a workspace: do the work in your own session"),
+		set("requested_by_production_mediator", "requested_by_production_mediator",
+			&agentreplv1.CreateWorkspaceRequestedByProductionMediator{Workspace: ref("/w/p"), Detail: "dispatch it"},
+			"the requester at /w/p is its repository's production mediator, which creates its children only by dispatching them: dispatch it"),
 	}
 	cases = append(cases, parentNotOpenCases(e, "create it again")...)
 	return []describedRefusal{{name: "create", empty: e, oneof: "cause", cases: cases,

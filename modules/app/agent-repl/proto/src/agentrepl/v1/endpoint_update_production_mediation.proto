@@ -1,0 +1,234 @@
+// endpoint_update_production_mediation.proto — UpdateProductionMediation:
+// the production mediator's decisions. AGENT API section. Only a
+// repository's standing production mediator
+// (repoconfig.v1.LifecycleConfig.production_checks) may call it, through
+// `agent-repld production-mediation`.
+//
+// After each deploy the daemon owes the mediator a CHECK of the span the
+// version before it served alone, from the previous landing's finish to this
+// landing's start, and briefs it with the log sites new to that span. The
+// mediator DECIDES the check: nothing to do, or a set of CHILDREN to dispatch,
+// each a one-shot child of the mediator holding findings and the log sites
+// they cover, created together and landing at the front of the merge queue.
+// Apart from any check, it may FOLD one open child into another when their
+// work converges.
+//
+// THE DAEMON RECORDS WHICH CHILD OWNS WHICH SITE. A site an open child owns is
+// left out of every later brief and may not be dispatched again until that
+// child lands or closes, so no site is ever worked by two children at once.
+//
+// Nothing here holds the queue or a deploy: a production check never blocks
+// anything.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/log_site_key.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// What the production mediator asks for.
+message UpdateProductionMediationRequest {
+  // The production mediator asking, as the roster served it. Any other
+  // workspace is refused (`not_production_mediator`).
+  workspace.v1.WorkspaceRef mediator = 1;
+  // REQUIRED. What the mediator does; the arm IS the action.
+  oneof action {
+    // Decide the check the mediator is owed. Refused while none is owed
+    // (`no_check_owed`).
+    ProductionMediationDecision decide = 2;
+    // Fold one of the mediator's open children into another.
+    ProductionMediationFold fold = 3;
+  }
+}
+
+// ---- Decide: how the owed check ends ----
+
+// The mediator's decision on the check it is owed. Either arm ends the check,
+// and the span it read is recorded as read.
+message ProductionMediationDecision {
+  // REQUIRED, never blank. What the mediator found, in a sentence or two;
+  // the check is recorded with it.
+  string summary = 1;
+  // REQUIRED. THE ARM IS THE DECISION.
+  oneof decision {
+    // Nothing in the span needs work.
+    ProductionMediationNothingToDo nothing_to_do = 2;
+    // Work to hand to children, all created by this one call.
+    ProductionMediationDispatch dispatch = 3;
+  }
+}
+// Nothing needs work. No fields: the summary says what was read.
+message ProductionMediationNothingToDo {}
+
+// The children to create, all in this one call. A refusal at any child
+// undoes every child already made, so a dispatch stands whole or not at all.
+message ProductionMediationDispatch {
+  // REQUIRED, at least one. Findings the mediator judges likely related go
+  // to one child. Each child's commission names every sibling, its findings
+  // and the sites it owns, so a child that suspects its work converges with a
+  // sibling's can say so to that sibling and to the mediator.
+  repeated ProductionChild children = 1;
+}
+
+// One child to create: a one-shot child of the mediator, cut from and
+// landing into the main branch at the front of the merge queue
+// (CreateWorkspaceOneShot.finish_placement), on the daemon's default model
+// for children.
+message ProductionChild {
+  // The child's workspace name. UNSET: the daemon mints one from the first
+  // finding's statement, as it does a one-shot's.
+  optional string name = 1;
+  // REQUIRED. THE ARM IS THE KIND OF WORK, which decides the child's
+  // commission.
+  oneof work {
+    // The fix is clear: the child makes it and finishes.
+    ProductionChildRemediation remediation = 2;
+    // The fix is unclear, or turns on how the user wants something to look
+    // or behave: the child investigates, convenes with the user, and then
+    // makes the agreed change and finishes the same way.
+    ProductionChildInvestigation investigation = 3;
+  }
+  // REQUIRED, at least one. What the child takes on, most serious first.
+  repeated ProductionFinding findings = 4;
+}
+// A remediation. No fields: its findings are the work.
+message ProductionChildRemediation {}
+// An investigation. No fields: its findings are the questions.
+message ProductionChildInvestigation {}
+
+// One thing wrong in production, as the mediator states it to a child.
+message ProductionFinding {
+  // REQUIRED, never blank. What is wrong, in a sentence: the symptom as the
+  // evidence shows it.
+  string statement = 1;
+  // The log sites the finding covers, as the brief or ListLogSites served
+  // them. The child owns each from its creation until it lands or closes.
+  // EMPTY for a finding no log site shows, such as a performance regression
+  // read from the metrics store.
+  repeated LogSiteKey sites = 2;
+  // REQUIRED, at least one. The records that show the finding, quoted
+  // verbatim as the log, the doctor or the metrics store printed them, so
+  // the child starts from the evidence rather than from the mediator's
+  // reading of it.
+  repeated string evidence = 3;
+}
+
+// ---- Fold: one child's work moves into another ----
+
+// Fold one open child into another. The surviving child takes over every
+// site and finding the folded child owned, and is told the folded child's
+// branch so it can carry over any work already on it; the folded child is
+// then closed.
+message ProductionMediationFold {
+  // The child folded away. Must be an open child this mediator dispatched.
+  workspace.v1.WorkspaceRef folded = 1;
+  // The child that survives. Must be another open child this mediator
+  // dispatched.
+  workspace.v1.WorkspaceRef surviving = 2;
+}
+
+// ---- Response ----
+
+// THE ARM IS THE OUTCOME.
+message UpdateProductionMediationResponse {
+  oneof result {
+    UpdateProductionMediationSuccess success = 1;
+    UpdateProductionMediationError error = 2;
+  }
+}
+
+// Done. THE ARM IS WHAT WAS DONE, matching the request's action.
+message UpdateProductionMediationSuccess {
+  oneof outcome {
+    // The check ended with nothing to do.
+    ProductionMediationDecidedNothing decided_nothing = 1;
+    // The check ended with these children created and started.
+    ProductionMediationDispatched dispatched = 2;
+    // The fold was done.
+    ProductionMediationFolded folded = 3;
+  }
+}
+// The check ended with nothing to do. No fields.
+message ProductionMediationDecidedNothing {}
+// The children created, in the request's order.
+message ProductionMediationDispatched {
+  // Each child, in the order the request listed it.
+  repeated workspace.v1.WorkspaceRef children = 1;
+}
+// The fold was done. No fields: the surviving child is told, and the folded
+// one is closing.
+message ProductionMediationFolded {}
+
+// Why nothing was done. Validation failures (an unset arm, a blank summary
+// or statement, a finding with no evidence, a malformed site key) are
+// Connect InvalidArgument, never an arm.
+message UpdateProductionMediationError {
+  oneof cause {
+    // The mediator's id is not in the daemon's registry.
+    UpdateProductionMediationUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    UpdateProductionMediationWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    UpdateProductionMediationTransferringAway transferring_away = 3;
+    // The caller is not its repository's production mediator.
+    UpdateProductionMediationNotProductionMediator not_production_mediator = 4;
+    // A decision while the mediator owes no check.
+    UpdateProductionMediationNoCheckOwed no_check_owed = 5;
+    // A dispatch naming a site an open child already owns, or naming one
+    // site in two children. Nothing was created.
+    UpdateProductionMediationSiteOwned site_owned = 6;
+    // A fold naming a workspace that is not an open child of this mediator,
+    // or naming one child twice. Nothing was folded.
+    UpdateProductionMediationNotFoldable not_foldable = 7;
+    // A child's create was refused. Every child created before it in this
+    // dispatch was undone, so nothing was created.
+    UpdateProductionMediationChildRefused child_refused = 8;
+  }
+}
+// The unknown-workspace refusal. No fields: the caller holds the ref it sent.
+message UpdateProductionMediationUnknownWorkspace {}
+// The ref-mismatch refusal.
+message UpdateProductionMediationWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// The handover refusal.
+message UpdateProductionMediationTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// The not-the-mediator refusal. No fields: the caller knows who it is.
+message UpdateProductionMediationNotProductionMediator {}
+// The no-check-owed refusal. No fields.
+message UpdateProductionMediationNoCheckOwed {}
+// A site that cannot be dispatched.
+message UpdateProductionMediationSiteOwned {
+  // The site.
+  LogSiteKey site = 1;
+  // THE ARM IS WHO HOLDS IT.
+  oneof holder {
+    // An open child already owns it.
+    workspace.v1.WorkspaceRef open_child = 2;
+    // Two children of this dispatch both name it; the value is the second
+    // child's index in the request.
+    uint32 repeated_in_child = 3;
+  }
+}
+// A fold that cannot be done.
+message UpdateProductionMediationNotFoldable {
+  // The workspace that cannot take part.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Why, as a sentence: not a child of this mediator, closed, or named as
+  // both sides.
+  string detail = 2;
+}
+// A child the daemon refused to create.
+message UpdateProductionMediationChildRefused {
+  // The child's index in the request.
+  uint32 child = 1;
+  // The create's refusal, as a sentence the mediator's agent reads.
+  string detail = 2;
+}

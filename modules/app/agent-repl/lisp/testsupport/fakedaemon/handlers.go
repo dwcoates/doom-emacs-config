@@ -849,3 +849,7 @@ func (s *fakeServer) launcherOnly(ctx context.Context, method string, msg proto.
 func (s *fakeServer) ListLogSites(ctx context.Context, req *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error) {
 	return handleUnary[v1.ListLogSitesRequest, v1.ListLogSitesResponse](ctx, s, "ListLogSites", req.Msg)
 }
+
+func (s *fakeServer) UpdateProductionMediation(ctx context.Context, req *connect.Request[v1.UpdateProductionMediationRequest]) (*connect.Response[v1.UpdateProductionMediationResponse], error) {
+	return handleUnary[v1.UpdateProductionMediationRequest, v1.UpdateProductionMediationResponse](ctx, s, "UpdateProductionMediation", req.Msg)
+}

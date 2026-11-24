@@ -268,6 +268,11 @@ var cliNouns = map[string]map[string]cliCommand{
 	logsNoun: {
 		"sites": {usage: "sites -since WHEN [-until WHEN] [-level debug|info|warn|error]", run: logsSites},
 	},
+	productionMediationNoun: {
+		"decide":   {usage: "decide -summary TEXT", run: productionDecide},
+		"dispatch": {usage: "dispatch -summary TEXT (the children are JSON on stdin)", run: productionDispatch},
+		"fold":     {usage: "fold -folded CHILD -surviving CHILD", run: productionFold},
+	},
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},
 		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER] [-daemon ADDRESS]", run: runtimeRollOutLanding},
@@ -786,6 +791,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 	contextOrigin := fs.String("context", "", "fresh, or fork of -fork")
 	fork := fs.String("fork", "", "the workspace whose conversation is forked")
 	oneShot := fs.Bool("one-shot", false, "a one-shot, which lands itself when done")
+	finish := fs.String("finish", "", "front or back: where the one-shot's finish joins the merge queue, fixed now; unset lets its finish name its own")
 	prompt := fs.String("prompt", "", "the first prompt")
 	name := fs.String("name", "", "the workspace's name; unset derives it from the prompt")
 	model := fs.String("model", "", "the session's model; unset is the daemon's")
@@ -872,6 +878,9 @@ func workspaceCreate(c *cliCall, args []string) int {
 	default:
 		return c.usageFailed("-context is fresh or fork, not %q", *contextOrigin)
 	}
+	if *finish != "" && !*oneShot {
+		return c.usageFailed("-finish fixes a one-shot's finish; name -one-shot")
+	}
 	if *oneShot {
 		if *prompt == "" {
 			return c.usageFailed("a one-shot names its -prompt")
@@ -879,6 +888,16 @@ func workspaceCreate(c *cliCall, args []string) int {
 		form := &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Relationship: kind, LandingTarget: landing}
 		if *name != "" {
 			form.Name = name
+		}
+		if *finish != "" {
+			if *finish != "front" && *finish != "back" {
+				return c.usageFailed("-finish is front or back, not %q", *finish)
+			}
+			where, err := placement(*finish)
+			if err != nil {
+				return c.usageFailed("%v", err)
+			}
+			form.FinishPlacement = where
 		}
 		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: form}
 	} else {

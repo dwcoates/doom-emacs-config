@@ -1,6 +1,7 @@
 package merge
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"encoding/json"
 	"errors"
@@ -209,12 +210,22 @@ func replacedOutcome(m wsm.ReplacedMediation) string {
 // checkedQueue is a registered repository whose deploys are checked.
 type checkedQueue struct {
 	registeredQueue
+	// config is the repository's lifecycle config as the queue was listed.
+	config *repoconfigv1.LifecycleConfig
 }
 
 // checkedQueues answers every registered repository whose lifecycle config
 // checks its deploys. A repository with no lifecycle config checks none; one
 // whose config cannot be read is recorded under OP and passed over.
 func (o *orchestrator) checkedQueues(ctx context.Context, op string) ([]checkedQueue, error) {
+	return o.queuesWhere(ctx, op, func(cfg *repoconfigv1.LifecycleConfig) bool { return cfg.GetDeployChecks() != nil })
+}
+
+// queuesWhere answers every registered repository whose lifecycle config
+// CHECKS says yes to, with the config as it was read. A repository with no
+// lifecycle config is passed over; one whose config cannot be read is
+// recorded under OP and passed over.
+func (o *orchestrator) queuesWhere(ctx context.Context, op string, checks func(*repoconfigv1.LifecycleConfig) bool) ([]checkedQueue, error) {
 	queues, err := o.registeredQueues(ctx, op)
 	if err != nil {
 		return nil, err
@@ -231,8 +242,8 @@ func (o *orchestrator) checkedQueues(ctx context.Context, op string) ([]checkedQ
 				dlog.Context{"repository": q.repository.Dir, "error": err.Error()})
 			continue
 		}
-		if cfg.GetDeployChecks() != nil {
-			out = append(out, checkedQueue{registeredQueue: q})
+		if checks(cfg) {
+			out = append(out, checkedQueue{registeredQueue: q, config: cfg})
 		}
 	}
 	return out, nil
@@ -245,12 +256,19 @@ func (o *orchestrator) checkedQueueOf(ctx context.Context, repo wsm.RepoKey) (ch
 	if err != nil {
 		return checkedQueue{}, false, err
 	}
+	q, found := queueKeyed(queues, repo)
+	return q, found, nil
+}
+
+// queueKeyed answers the queue of QUEUES keyed REPO, by sameQueue, and
+// whether one is. Every lookup of a listed queue by its key goes through it.
+func queueKeyed(queues []checkedQueue, repo wsm.RepoKey) (checkedQueue, bool) {
 	for _, q := range queues {
 		if sameQueue(q.key, repo) {
-			return q, true, nil
+			return q, true
 		}
 	}
-	return checkedQueue{}, false, nil
+	return checkedQueue{}, false
 }
 
 // sameQueue reports whether A and B key one queue: the store answers a key
@@ -301,6 +319,12 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 		}
 		o.republishMediation(ctx, q.key)
 	}
+	// THE PRODUCTION SPAN THE LANDING CLOSED IS OWED BESIDE ITS DEPLOY CHECK:
+	// the deploy check reads the landing from its start, the production
+	// check the span that ended there (owner ruling, 2026-11-23).
+	if err := o.oweProductionChecks(ctx, at); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -336,6 +360,9 @@ func (o *orchestrator) NoteDeployEnding(ctx context.Context, at time.Time, endin
 		if recorded {
 			o.deps.Log.Global().Info(opMediation, "recorded how the deploy ended on its check", fields)
 		}
+	}
+	if err := o.noteProductionEnding(ctx, at, ending); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
@@ -436,6 +463,9 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 	}
 	o.releaseUnchecked(ctx, queues)
 	o.resumeRemediationFinishes(ctx)
+	// THE PRODUCTION CHECKS RUN BESIDE THE DEPLOY CHECKS and hold nothing, so
+	// a deploy check that ends this pass early never stops them.
+	defer o.productionPass(ctx)
 	for _, q := range queues {
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
@@ -455,7 +485,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		// not served reads it before that transition, and the pass its edge
 		// runs after it finds the mediator served.
 		fields := dlog.Context{"repo": string(q.key)}
-		mediator, standing, err := o.mediatorStanding(ctx, q.key)
+		mediator, standing, err := o.mediatorStanding(ctx, deployRole, q.key)
 		if err != nil {
 			if o.mediationFailed(ctx, fields, logsite.Msg("could not read whether this daemon serves the queue's deploy mediator; its check's round is not run, and the next pass runs it"), err) {
 				return
@@ -464,7 +494,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		}
 		served := standing == ServedHere
 		if served {
-			o.keepMediatorShown(ctx, q)
+			o.keepMediatorShown(ctx, deployRole, q)
 		}
 		o.surfaceFinish(ctx, q.key)
 		if m == nil {
@@ -637,6 +667,7 @@ func (o *orchestrator) endChain(ctx context.Context, repo wsm.RepoKey, m wsm.Med
 // round from running (2026-11-14: a replaced round's claim on the queue
 // left a deploy's check untold for twenty minutes).
 type checkClaim struct {
+	role wsm.MediatorRole
 	repo wsm.RepoKey
 	owed int64
 }
@@ -644,9 +675,16 @@ type checkClaim struct {
 // claimMediation reports whether this caller runs the round of the check
 // REPO owes at OWED: none runs for it already.
 func (o *orchestrator) claimMediation(repo wsm.RepoKey, owed time.Time) bool {
+	return o.claimRound(deployRole, repo, owed)
+}
+
+// claimRound reports whether this caller runs role R's round of the check of
+// REPO identified by OWED, claiming it when no round runs; releaseRound gives
+// the claim up.
+func (o *orchestrator) claimRound(r mediatorRole, repo wsm.RepoKey, owed time.Time) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	claim := checkClaim{repo: repo, owed: owed.UnixNano()}
+	claim := checkClaim{role: r.role, repo: repo, owed: owed.UnixNano()}
 	if o.mediating[claim] {
 		return false
 	}
@@ -654,16 +692,19 @@ func (o *orchestrator) claimMediation(repo wsm.RepoKey, owed time.Time) bool {
 	return true
 }
 
+// releaseRound gives up role R's claim on the round of REPO's check OWED.
+func (o *orchestrator) releaseRound(r mediatorRole, repo wsm.RepoKey, owed time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.mediating, checkClaim{role: r.role, repo: repo, owed: owed.UnixNano()})
+}
+
 // intakeRound tells Q's mediator of check M, when it was not told yet, and
 // awaits the turn it was told in; then settles a check that turn decided
 // nothing about (intakeTurnEnded). A check the mediator dispatched a fix
 // for is watched instead (watchFixer): its fix's deploy owes the next.
 func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Mediation) {
-	defer func() {
-		o.mu.Lock()
-		delete(o.mediating, checkClaim{repo: q.key, owed: m.OwedAt.UnixNano()})
-		o.mu.Unlock()
-	}()
+	defer o.releaseRound(deployRole, q.key, m.OwedAt)
 	fields := dlog.Context{"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano),
 		"chain_started": m.ChainStartedAt.UTC().Format(time.RFC3339Nano), "chain_redeploys": m.ChainRedeploys}
 	// EVERY ROUND STATES THE CHAIN IT CHECKS, so a daemon that booted on a
@@ -778,7 +819,7 @@ func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Me
 		o.escalateNotRun(ctx, q, m, what, err, fields)
 		return
 	}
-	if _, merr := o.mediatorOf(ctx, q, fields); merr != nil {
+	if _, merr := o.mediatorOf(ctx, deployRole, q, fields); merr != nil {
 		o.deps.Log.Global().With(withField(withField(fields, "error", err.Error()), "mediator_error", merr.Error())).Error(opMediation,
 			"{what}; no deploy mediator could be found or made to escalate the check to, and the queue stays held for it", dlog.Context{"what": what})
 		return
@@ -833,18 +874,18 @@ func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, m wsm.Me
 // worktree under that turn.
 func (o *orchestrator) mediatorFor(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) (ids.WorkspaceID, error) {
 	if m.Prompted() {
-		mediator, err := o.mediatorOf(ctx, q, fields)
+		mediator, err := o.mediatorOf(ctx, deployRole, q, fields)
 		if err != nil {
 			return "", fmt.Errorf("merge: the queue's deploy mediator: %w", err)
 		}
 		return mediator.ws, nil
 	}
-	mediator, err := o.readyMediator(ctx, q, fields)
+	mediator, err := o.readyMediator(ctx, deployRole, q, fields)
 	if err != nil {
 		return "", fmt.Errorf("merge: the queue's deploy mediator: %w", err)
 	}
 	if !mediator.briefed {
-		o.markBriefed(ctx, q, fields)
+		o.markBriefed(ctx, deployRole, q, fields)
 	}
 	o.deps.Log.Global().Info(opMediation, "the deploy mediator takes the check", withField(fields, "mediator", string(mediator.ws)))
 	return mediator.ws, nil
@@ -890,6 +931,39 @@ func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.Wo
 	o.deps.Log.Global().Info(opMediation, "the intake was told of the deploy", withField(fields, "turn", string(turn)))
 	o.republishMediation(ctx, q.key)
 	return turn, nil
+}
+
+// turnFailure is the step of submitMarkedTurn that failed.
+type turnFailure int
+
+const (
+	turnNotFailed turnFailure = iota
+	// turnMarkFailed is the turn's record that failed: nothing was submitted.
+	turnMarkFailed
+	// turnSubmitFailed is the brief's submission that failed, after the
+	// turn was recorded: the next round submits it under the recorded turn.
+	turnSubmitFailed
+)
+
+// submitMarkedTurn is EVERY CHECK TURN'S ONE START: it mints a turn, records
+// it with MARK before anything is queued, so a round cut between the two
+// finds the turn and submits it then (bringTurnOn), and submits BRIEF to WS
+// under ORIGIN. It answers the turn, whether MARK recorded it (false when the
+// check moved on, and nothing was submitted), and the step that failed with
+// its error, for the caller to record.
+func (o *orchestrator) submitMarkedTurn(ctx context.Context, ws ids.WorkspaceID, brief string, origin conversationv1.PromptOrigin, mark func(ids.TurnID) (bool, error)) (ids.TurnID, bool, turnFailure, error) {
+	turn := wsm.NewTurnID()
+	marked, err := mark(turn)
+	if err != nil {
+		return turn, false, turnMarkFailed, err
+	}
+	if !marked {
+		return turn, false, turnNotFailed, nil
+	}
+	if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, origin); err != nil {
+		return turn, true, turnSubmitFailed, err
+	}
+	return turn, true, turnNotFailed, nil
 }
 
 // submitCheckPrompt puts TEXT in WS's prompt queue as TURN, behind any turn
@@ -983,18 +1057,18 @@ func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.
 		o.roundFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
 		return
 	}
-	turn := wsm.NewTurnID()
+	turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION, func(turn ids.TurnID) (bool, error) {
+		return o.deps.DB.MarkMediationResumed(ctx, q.key, m.OwedAt, turn)
+	})
 	fields = withField(fields, "turn", string(turn))
-	marked, err := o.deps.DB.MarkMediationResumed(ctx, q.key, m.OwedAt, turn)
-	if err != nil {
+	switch {
+	case failed == turnMarkFailed:
 		o.roundFailed(ctx, q, m, "could not record that the undecided deploy mediator is resumed", err, fields)
 		return
-	}
-	if !marked {
+	case !marked:
 		o.deps.Log.Global().Info(opMediation, "the check was decided, dispatched or replaced before its undecided intake was resumed; this round ends", fields)
 		return
-	}
-	if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
+	case failed == turnSubmitFailed:
 		o.roundFailed(ctx, q, m, "the undecided deploy mediator's resuming brief could not be submitted", err, fields)
 		return
 	}

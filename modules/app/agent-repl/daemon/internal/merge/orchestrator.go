@@ -508,6 +508,8 @@ func (d Deps) validate() error {
 	check(d.StandingRefusal != nil, "StandingRefusal")
 	check(d.DeployChecks != nil, "DeployChecks")
 	check(d.ReadLogs != nil, "ReadLogs")
+	check(d.LogSites != nil, "LogSites")
+	check(d.ProductionChildren != nil, "ProductionChildren")
 	check(d.QueueEvents != nil, "QueueEvents")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")

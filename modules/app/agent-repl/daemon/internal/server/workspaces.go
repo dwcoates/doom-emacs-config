@@ -136,7 +136,7 @@ func (s *server) CreateWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if refused, done := s.refuseDeployMediatorCreate(ctx, rpc, resp, req.Msg.GetRequester()); done {
+	if refused, done := s.refuseMediatorCreate(ctx, rpc, resp, req.Msg.GetRequester()); done {
 		return answer(resp, refused)
 	}
 	if req.Msg.Placement != nil && req.Msg.GetAsyncMerge() != nil {
@@ -164,6 +164,7 @@ func (s *server) CreateWorkspace(
 	}
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
+		spec.FinishPlacement = finishPlacementOf(oneShot.GetFinishPlacement())
 		spec.InitialPrompt, spec.InitialImages = saidParts(oneShot.GetPrompt())
 		spec.Name = oneShot.GetName()
 		spec.Parent = relationshipParent(oneShot.GetRelationship())
@@ -307,12 +308,18 @@ func (s *server) refuseUnadmitted(rpc string, resp proto.Message, err error) *co
 // sentence, read by the mediator's own agent.
 const deployMediatorCreateDetail = "the deploy mediator never creates a workspace of any kind: it does all of its work, every fix and every investigation, in its own session on its own branch, then finishes as its rules say"
 
-// refuseDeployMediatorCreate refuses a create whose requester is its
-// repository's deploy mediator, of every form, before anything is named or
-// built (owner ruling, 2026-11-18). A requester the registry does not hold is
-// the create's own to refuse later (unknown_requester); a failed read is
-// answered as a failure.
-func (s *server) refuseDeployMediatorCreate(ctx context.Context, rpc string, resp *agentreplv1.CreateWorkspaceResponse, requester *agentreplv1.WorkspaceRequester) (*connect.Error, bool) {
+// productionMediatorCreateDetail is the requested_by_production_mediator
+// refusal's detail: the sentence the production mediator's agent reads.
+const productionMediatorCreateDetail = "the production mediator creates its children only by dispatching them with `agent-repld production-mediation dispatch`, so each is recorded with the log sites it owns and lands at the front of the queue"
+
+// refuseMediatorCreate refuses a create whose requester is one of its
+// repository's standing mediators, of every form, before anything is named or
+// built: the deploy mediator never creates a workspace (owner ruling,
+// 2026-11-18), and the production mediator creates its children only by
+// dispatching them. A requester the registry does not hold is the create's
+// own to refuse later (unknown_requester); a failed read is answered as a
+// failure.
+func (s *server) refuseMediatorCreate(ctx context.Context, rpc string, resp *agentreplv1.CreateWorkspaceResponse, requester *agentreplv1.WorkspaceRequester) (*connect.Error, bool) {
 	id := requesterID(requester)
 	if id == nil {
 		return nil, false
@@ -322,12 +329,18 @@ func (s *server) refuseDeployMediatorCreate(ctx context.Context, rpc string, res
 	case ended, errors.Is(err, wsm.ErrNotFound):
 		return nil, false
 	case err != nil:
-		return failResolution(s.log, rpc, fmt.Errorf("read the requester %s's deploy-mediator standing: %w", *id, err)), true
-	case !record.DeployMediator:
+		return failResolution(s.log, rpc, fmt.Errorf("read the requester %s's mediator standing: %w", *id, err)), true
+	}
+	var arm, reason string
+	switch record.Mediator {
+	case wsm.MediatorDeploy:
+		arm, reason = workspace.ArmRequestedByDeployMediator, deployMediatorCreateDetail
+	case wsm.MediatorProduction:
+		arm, reason = workspace.ArmRequestedByProductionMediator, productionMediatorCreateDetail
+	default:
 		return nil, false
 	}
-	return s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmRequestedByDeployMediator, Info: true,
-		Reason: deployMediatorCreateDetail,
+	return s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: arm, Info: true, Reason: reason,
 		Fields: map[string]any{"workspace": record.Ref()}})), true
 }
 
@@ -1032,11 +1045,11 @@ func (s *server) FinishWorkspace(
 		}
 		success.Landing = &agentreplv1.FinishWorkspaceSuccess_LandingDirectly{LandingDirectly: &agentreplv1.FinishWorkspaceSuccessLandingDirectly{}}
 	} else {
-		if err := validateQueuedFinishPlacement(req.Msg); err != nil {
-			subject.Log.Warn("daemon.server.finish_workspace", "refused a finish through the merge queue that names no placement; nothing was finished", dlog.Context{"rpc": rpc})
-			return nil, err
+		placement, refused, cerr := s.finishPlacement(ctx, subject, rpc, resp, req.Msg)
+		if refused || cerr != nil {
+			return answer(resp, cerr)
 		}
-		if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg)); err != nil {
+		if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg, placement)); err != nil {
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
 		}
 	}
@@ -1047,15 +1060,70 @@ func (s *server) FinishWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
+// finishPlacement answers where SUBJECT's finish through the queue joins it:
+// the placement its create fixed (wsm.Workspace.FinishPlacement), which a
+// different one in REQ is refused against (`placement_conflicts_with_stored`,
+// filled into RESP); else the one REQ names, which a finish with none fixed
+// must (InvalidArgument). REFUSED reports that RESP holds the refusal. The
+// stored placement is derived from the workspace's creation job, which the
+// head does not carry, so the whole row is read (wsm.WorkspaceHead).
+func (s *server) finishPlacement(ctx context.Context, subject resolved, rpc string, resp *agentreplv1.FinishWorkspaceResponse, req *agentreplv1.FinishWorkspaceRequest) (*agentreplv1.MergeQueuePlacement, bool, *connect.Error) {
+	record, err := s.wholeRow(ctx, subject)
+	if err != nil {
+		return nil, false, failResolution(subject.Log, rpc, err)
+	}
+	stored := storedPlacement(record.FinishPlacement)
+	asked := req.GetPlacement()
+	switch {
+	case stored == nil:
+		if err := validateQueuedFinishPlacement(req); err != nil {
+			subject.Log.Warn("daemon.server.finish_workspace", "refused a finish through the merge queue that names no placement; nothing was finished", dlog.Context{"rpc": rpc})
+			return nil, true, err
+		}
+		return asked, false, nil
+	case asked == nil || proto.Equal(asked, stored):
+		return stored, false, nil
+	}
+	subject.Log.Info("daemon.server.finish_workspace", "refused a finish whose placement differs from the one its create fixed; nothing was finished", dlog.Context{
+		"rpc": rpc, "stored": string(record.FinishPlacement), "requested": asked.String()})
+	resp.Result = &agentreplv1.FinishWorkspaceResponse_Error{Error: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_PlacementConflictsWithStored{
+		PlacementConflictsWithStored: &agentreplv1.FinishWorkspacePlacementConflictsWithStored{Stored: stored, Requested: asked},
+	}}}
+	return nil, true, nil
+}
+
+// storedPlacement is the queue placement P fixes, nil for none.
+func storedPlacement(p wsm.FinishPlacement) *agentreplv1.MergeQueuePlacement {
+	switch p {
+	case wsm.FinishPlacementFront:
+		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}
+	case wsm.FinishPlacementBack:
+		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}
+	}
+	return nil
+}
+
+// finishPlacementOf is the placement a create fixes from P, the zero value
+// for none. The request's validation refused a placement behind a merge.
+func finishPlacementOf(p *agentreplv1.MergeQueuePlacement) wsm.FinishPlacement {
+	switch {
+	case p.GetFront() != nil:
+		return wsm.FinishPlacementFront
+	case p.GetBack() != nil:
+		return wsm.FinishPlacementBack
+	}
+	return wsm.FinishPlacementAsked
+}
+
 // finishRequest reads the request into the orchestrator's request: the
-// workspace's own branch, in place, asked by the requester and placed as the
-// request says. It closes the workspace once its deploy succeeds.
-func finishRequest(ws ids.WorkspaceID, req *agentreplv1.FinishWorkspaceRequest) merge.Request {
+// workspace's own branch, in place, asked by the requester and joining the
+// queue at PLACEMENT. It closes the workspace once its deploy succeeds.
+func finishRequest(ws ids.WorkspaceID, req *agentreplv1.FinishWorkspaceRequest, placement *agentreplv1.MergeQueuePlacement) merge.Request {
 	out := merge.Request{Workspace: ws}
 	out.By, out.Asker = askerOf(req.GetRequester())
 	out.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
-	out.Source.Front = req.GetPlacement().GetFront() != nil
-	out.PlaceBehind = placedBehind(req.GetPlacement())
+	out.Source.Front = placement.GetFront() != nil
+	out.PlaceBehind = placedBehind(placement)
 	out.Source.Version = versionIncrement(req.GetVersionIncrement())
 	out.Source.ProfileGate = req.GetProfileGate()
 	return out

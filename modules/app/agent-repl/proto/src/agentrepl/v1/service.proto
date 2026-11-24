@@ -12,6 +12,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_list_log_sites.proto";
+import "agentrepl/v1/endpoint_update_production_mediation.proto";
 import "agentrepl/v1/endpoint_subscribe_pull_request.proto";
 import "agentrepl/v1/endpoint_unsubscribe_pull_request.proto";
 import "agentrepl/v1/endpoint_list_pull_request_subscriptions.proto";
@@ -820,6 +821,11 @@ service AgentRepl {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+  // The production mediator's decisions: end the check it is owed with
+  // nothing to do or with children to dispatch, or fold one of its children
+  // into another. `agent-repld production-mediation` asks it. See
+  // endpoint_update_production_mediation.proto.
+  rpc UpdateProductionMediation(UpdateProductionMediationRequest) returns (UpdateProductionMediationResponse);
   // The registry's agent workspaces, open or closed, narrowed by repository,
   // activity window, standing, text and whether the sidebar draws them, each
   // with its name, summary and, when drawn, its roster section and live

@@ -732,7 +732,7 @@ func asDeployMediator(h *harness, ws ids.WorkspaceID) {
 	h.db.mu.Lock()
 	defer h.db.mu.Unlock()
 	record := h.db.workspaces[ws]
-	record.DeployMediator = true
+	record.Mediator = wsm.MediatorDeploy
 	h.db.workspaces[ws] = record
 }
 

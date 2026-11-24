@@ -107,10 +107,16 @@ const mediationNotRun = "the mediations were not run: this daemon is stopping; t
 // the mediator's serving standing (mediatorNotServed); and at ERROR as
 // MESSAGE otherwise.
 func (o *orchestrator) mediationFailed(ctx context.Context, fields dlog.Context, message logsite.Message, err error) bool {
-	if o.mediationCut(ctx, fields, message.Template(), err) {
+	return o.mediationFailedUnder(ctx, opMediation, fields, message, err)
+}
+
+// mediationFailedUnder is mediationFailed recording under operation OP, for
+// a mediation whose records are its own operation's (the production checks').
+func (o *orchestrator) mediationFailedUnder(ctx context.Context, op string, fields dlog.Context, message logsite.Message, err error) bool {
+	if o.mediationCutUnder(ctx, op, fields, message.Template(), err) {
 		return true
 	}
-	o.deps.Log.Global().Log(dlog.LevelError, opMediation, message, withField(fields, "error", err.Error()))
+	o.deps.Log.Global().Log(dlog.LevelError, op, message, withField(fields, "error", err.Error()))
 	return false
 }
 
@@ -121,12 +127,17 @@ func (o *orchestrator) mediationFailed(ctx context.Context, fields dlog.Context,
 // and records such a cut at INFO. Any other failure is left to the caller to
 // record.
 func (o *orchestrator) mediationCut(ctx context.Context, fields dlog.Context, what string, err error) bool {
+	return o.mediationCutUnder(ctx, opMediation, fields, what, err)
+}
+
+// mediationCutUnder is mediationCut recording under operation OP.
+func (o *orchestrator) mediationCutUnder(ctx context.Context, op string, fields dlog.Context, what string, err error) bool {
 	if cutUnder(ctx, err) {
-		o.deps.Log.Global().Info(opMediation, "the mediation was cut by the daemon's exit; the next boot's pass runs it again", withField(withField(fields, "cut", what), "cause", err.Error()))
+		o.deps.Log.Global().Info(op, "the mediation was cut by the daemon's exit; the next boot's pass runs it again", withField(withField(fields, "cut", what), "cause", err.Error()))
 		return true
 	}
 	if o.cutByHandover(err) {
-		o.deps.Log.Global().Info(opMediation, mediationHandedOver, withField(withField(fields, "cut", what), "cause", err.Error()))
+		o.deps.Log.Global().Info(op, mediationHandedOver, withField(withField(fields, "cut", what), "cause", err.Error()))
 		return true
 	}
 	return o.refusedOnStanding(fields, what, err)

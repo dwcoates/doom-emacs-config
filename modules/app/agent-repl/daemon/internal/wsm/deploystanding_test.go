@@ -203,8 +203,8 @@ func TestAWorkspaceReadsWhetherItIsADeployMediator(t *testing.T) {
 	gotOther, err2 := s.Workspace(ctx, other.ID)
 
 	// Assert
-	if err1 != nil || err2 != nil || !gotStanding.DeployMediator || gotOther.DeployMediator {
-		t.Fatalf("DeployMediator = (%v, %v), errors (%v, %v); want only the recorded one", gotStanding.DeployMediator, gotOther.DeployMediator, err1, err2)
+	if err1 != nil || err2 != nil || gotStanding.Mediator != MediatorDeploy || gotOther.IsMediator() {
+		t.Fatalf("DeployMediator = (%v, %v), errors (%v, %v); want only the recorded one", gotStanding.Mediator, gotOther.Mediator, err1, err2)
 	}
 }
 

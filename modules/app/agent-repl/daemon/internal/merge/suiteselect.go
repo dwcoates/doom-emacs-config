@@ -58,9 +58,9 @@ type matchKind int
 const (
 	// matchSubtree matches every path under Path, which ends in "/".
 	matchSubtree matchKind = iota
-	// matchDirFile matches files sitting DIRECTLY in Path whose name ends in
-	// Suffix. It exists for the module's root-level files, which sit beside
-	// directories that map elsewhere.
+	// matchDirFile matches files sitting DIRECTLY in Path whose name starts
+	// with Prefix and ends in Suffix. It exists for the module's root-level
+	// files, which sit beside directories that map elsewhere.
 	matchDirFile
 	// matchExact matches one repository-relative path exactly.
 	matchExact
@@ -75,6 +75,7 @@ const (
 type suiteRule struct {
 	Kind   matchKind
 	Path   string
+	Prefix string
 	Suffix string
 	Full   bool
 	Suites []string
@@ -189,17 +190,16 @@ var suiteRules = []suiteRule{
 
 	// DOCUMENTATION SELECTS NOTHING. The module's docs/, plans/ and org/
 	// (the todo table of noticed deficiencies) hold prose, and so does every Markdown file at
-	// the module root -- except metaprompt.md, whose committed text the shim's
+	// the module root -- except the metaprompts, whose committed text the shim's
 	// own suite reads back (test/metaprompt.test.ts). Markdown deeper in the
 	// tree belongs to its system's region above: a suite may read it (the
 	// shim's AGENTS.md, a testdata MANIFEST.md, a skill's SKILL.md).
 	{Kind: matchSubtree, Path: moduleRoot + "docs/", Suites: []string{}},
 	{Kind: matchSubtree, Path: moduleRoot + "plans/", Suites: []string{}},
 	{Kind: matchSubtree, Path: moduleRoot + "org/", Suites: []string{}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "sidecar", "e2e"}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt-merge-queue.md", Suites: []string{"shim", "sidecar", "e2e"}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt-queue-bypass.md", Suites: []string{"shim", "sidecar", "e2e"}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt-deploy-mediator.md", Suites: []string{"shim", "sidecar", "e2e"}},
+	// Every metaprompt the shim composes a session's metaprompt from, which its suite,
+	// the sidecar's and the e2e suites read back.
+	{Kind: matchDirFile, Path: moduleRoot, Prefix: "metaprompt", Suffix: ".md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".md", Suites: []string{}},
 
 	// The module's elisp: every source and suite lives in lisp/, while the three
@@ -279,7 +279,7 @@ func (r suiteRule) matches(path string) bool {
 		return strings.HasPrefix(path, r.Path)
 	case matchDirFile:
 		rest, under := strings.CutPrefix(path, r.Path)
-		return under && !strings.Contains(rest, "/") && strings.HasSuffix(rest, r.Suffix)
+		return under && !strings.Contains(rest, "/") && strings.HasPrefix(rest, r.Prefix) && strings.HasSuffix(rest, r.Suffix)
 	case matchSubtreeFile:
 		return strings.HasPrefix(path, r.Path) && strings.HasSuffix(path, r.Suffix)
 	}

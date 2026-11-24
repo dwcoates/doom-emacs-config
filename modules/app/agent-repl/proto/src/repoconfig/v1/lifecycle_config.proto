@@ -65,6 +65,8 @@ syntax = "proto3";
 
 package repoconfig.v1;
 
+import "conversation/v1/api.proto";
+
 option go_package = "agentrepl/proto/repoconfig/v1;repoconfigv1";
 
 // A repository's lifecycle: the whole of `.agent-repl/lifecycle.yaml`.
@@ -163,6 +165,19 @@ message LifecycleConfig {
   // checks; one whose file is unusable fails the subscription's read, naming
   // the file, until a commit fixes it.
   optional PullRequestFollowing pull_requests = 13;
+  // The repository's PRODUCTION CHECKS: after each deploy, a standing hidden
+  // PRODUCTION MEDIATOR reviews what production logged while the version
+  // before it served alone, from the moment the previous landing finished to
+  // the moment this landing started, against the same span before it. It
+  // states the warnings and errors new to that span and the performance
+  // regressions between the two versions, and hands each to a one-shot child
+  // workspace that lands at the front of the merge queue
+  // (agentrepl.v1.UpdateProductionMediation). It never holds the queue or a
+  // deploy, and neither it nor any child lands outside the queue. The deploy
+  // checks review the landings themselves, so the two never read the same
+  // record (docs/investigations/2026-11-23-production-mediator-plan.md).
+  // UNSET: the repository's production is not checked.
+  optional ProductionChecks production_checks = 14;
 }
 
 // How a repository's pull requests are followed.
@@ -185,6 +200,37 @@ message DeployChecks {
   // deploy holds. The field stays declared, and a config may still set it,
   // because a daemon built before the change requires it.
   uint32 remediations_before_escalation = 1;
+  // How the deploy mediator's session runs. UNSET: the daemon's default
+  // model at low effort.
+  optional MediatorAgent agent = 2;
+}
+
+// How a repository's production is checked.
+message ProductionChecks {
+  // How the production mediator's session runs. UNSET: the daemon's default
+  // model at low effort. The children it dispatches never follow it: each
+  // runs on the daemon's default model for children, `opus`, whatever the
+  // mediator runs on, because a child does the fix itself while the mediator
+  // only reads and dispatches.
+  optional MediatorAgent agent = 1;
+}
+
+// How one of a repository's standing mediators runs its session, read when
+// the daemon starts the mediator's session and again whenever it restarts
+// it, so an edit takes effect at the mediator's next session. A running
+// session keeps the model and effort it started with.
+message MediatorAgent {
+  // The model the mediator runs on, as `agent-repld workspace create -model`
+  // names one (an alias such as `fable`, or a dated id). UNSET: the daemon's
+  // default launch model. A model the mediator's login does not offer fails
+  // the session's start, which the daemon logs naming the model and the
+  // login, and the mediator stays down until the file is fixed: the daemon
+  // never falls back to another model.
+  optional string model = 1;
+  // How much reasoning the mediator spends. UNSET: low. A level the model
+  // does not accept fails the session's start as an unoffered model does.
+  // The YAML spells it as the enum value's name (`AGENT_EFFORT_LEVEL_LOW`).
+  optional conversation.v1.AgentEffortLevel effort = 2;
 }
 
 // ---- Stages: one hook list per kind of workspace ----

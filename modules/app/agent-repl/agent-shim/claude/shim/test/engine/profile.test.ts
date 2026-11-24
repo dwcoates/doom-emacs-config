@@ -18,6 +18,16 @@ describe("profileFromProto", () => {
       want: { kind: "agent", standing: "main_workspace", landing: "through_queue" },
     },
     {
+      name: "the deploy mediator's profile",
+      wire: create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "deployMediator", value: {} } } } } }),
+      want: { kind: "agent", standing: "linked_workspace", landing: "deploy_mediator" },
+    },
+    {
+      name: "the production mediator's profile",
+      wire: create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "productionMediator", value: {} } } } } }),
+      want: { kind: "agent", standing: "linked_workspace", landing: "production_mediator" },
+    },
+    {
       name: "a chat profile with its prompt",
       wire: create(shimv1.SessionProfileSchema, { kind: { case: "chat", value: { systemPrompt: { text: "Answer." } } } }),
       want: { kind: "chat", systemPrompt: "Answer." },

@@ -580,6 +580,14 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 				return err
 			}
 		}
+		if placement := oneShot.GetFinishPlacement(); placement != nil {
+			if err := validateMergeQueuePlacement("one_shot.finish_placement", placement); err != nil {
+				return err
+			}
+			if placement.GetBehind() != nil {
+				return invalid("one_shot.finish_placement", "a finish placement fixed at create is front or back: a merge to stand behind is known only when the finish is asked for")
+			}
+		}
 		if about := oneShot.GetContext(); about != nil {
 			if err := validateWorkspaceRef("one_shot.context.workspace", about.GetWorkspace()); err != nil {
 				return err

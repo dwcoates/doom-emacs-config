@@ -74,6 +74,12 @@ func TestMergeQueueSeriesAreServed(t *testing.T) {
 				`agentrepl_deploy_mediator_compaction_seconds_bucket{outcome="compacted",le="30"} 0`}},
 		{name: "a deploy mediator's run", observe: func(s *Surface) { s.CountMediatorRun("finished_remediation") },
 			want: []string{`agentrepl_deploy_mediator_runs_total{outcome="finished_remediation"} 1`}},
+		{name: "a production check that dispatched", observe: func(s *Surface) { s.ObserveProductionCheck("dispatched", 2) },
+			want: []string{`agentrepl_production_checks_total{outcome="dispatched"} 1`, `agentrepl_production_children_total{event="dispatched"} 2`}},
+		{name: "a production check with nothing to do counts no child", observe: func(s *Surface) { s.ObserveProductionCheck("nothing_to_do", 0) },
+			want: []string{`agentrepl_production_checks_total{outcome="nothing_to_do"} 1`}},
+		{name: "a production child's event", observe: func(s *Surface) { s.ObserveProductionChild("landed") },
+			want: []string{`agentrepl_production_children_total{event="landed"} 1`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

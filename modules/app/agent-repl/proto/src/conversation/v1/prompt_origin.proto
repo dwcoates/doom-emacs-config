@@ -303,4 +303,9 @@ enum PromptOrigin {
   // it, and drawn as an ordinary prompt bubble the daemon sent, so the user
   // reads in the feed what the thread said.
   PROMPT_ORIGIN_SLACK_THREAD_NOTICE = 54 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
+  // The production mediator's brief: a deploy finished, and the span the
+  // version before it served alone is ready to review
+  // (repoconfig.v1.LifecycleConfig.production_checks). Nothing waits on it.
+  // Drawn as the daemon's prompt to its own hidden workspace.
+  PROMPT_ORIGIN_PRODUCTION_MEDIATION = 55 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
 }

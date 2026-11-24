@@ -70,6 +70,7 @@
 package repoconfigv1
 
 import (
+	v1 "agentrepl/proto/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -173,9 +174,22 @@ type LifecycleConfig struct {
 	// changes, so it is read once per commit. A commit with no file has no gate
 	// checks; one whose file is unusable fails the subscription's read, naming
 	// the file, until a commit fixes it.
-	PullRequests  *PullRequestFollowing `protobuf:"bytes,13,opt,name=pull_requests,json=pullRequests,proto3,oneof" json:"pull_requests,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PullRequests *PullRequestFollowing `protobuf:"bytes,13,opt,name=pull_requests,json=pullRequests,proto3,oneof" json:"pull_requests,omitempty"`
+	// The repository's PRODUCTION CHECKS: after each deploy, a standing hidden
+	// PRODUCTION MEDIATOR reviews what production logged while the version
+	// before it served alone, from the moment the previous landing finished to
+	// the moment this landing started, against the same span before it. It
+	// states the warnings and errors new to that span and the performance
+	// regressions between the two versions, and hands each to a one-shot child
+	// workspace that lands at the front of the merge queue
+	// (agentrepl.v1.UpdateProductionMediation). It never holds the queue or a
+	// deploy, and neither it nor any child lands outside the queue. The deploy
+	// checks review the landings themselves, so the two never read the same
+	// record (docs/investigations/2026-11-23-production-mediator-plan.md).
+	// UNSET: the repository's production is not checked.
+	ProductionChecks *ProductionChecks `protobuf:"bytes,14,opt,name=production_checks,json=productionChecks,proto3,oneof" json:"production_checks,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *LifecycleConfig) Reset() {
@@ -271,6 +285,13 @@ func (x *LifecycleConfig) GetPullRequests() *PullRequestFollowing {
 	return nil
 }
 
+func (x *LifecycleConfig) GetProductionChecks() *ProductionChecks {
+	if x != nil {
+		return x.ProductionChecks
+	}
+	return nil
+}
+
 // How a repository's pull requests are followed.
 type PullRequestFollowing struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -332,8 +353,11 @@ type DeployChecks struct {
 	// deploy holds. The field stays declared, and a config may still set it,
 	// because a daemon built before the change requires it.
 	RemediationsBeforeEscalation uint32 `protobuf:"varint,1,opt,name=remediations_before_escalation,json=remediationsBeforeEscalation,proto3" json:"remediations_before_escalation,omitempty"`
-	unknownFields                protoimpl.UnknownFields
-	sizeCache                    protoimpl.SizeCache
+	// How the deploy mediator's session runs. UNSET: the daemon's default
+	// model at low effort.
+	Agent         *MediatorAgent `protobuf:"bytes,2,opt,name=agent,proto3,oneof" json:"agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeployChecks) Reset() {
@@ -373,6 +397,128 @@ func (x *DeployChecks) GetRemediationsBeforeEscalation() uint32 {
 	return 0
 }
 
+func (x *DeployChecks) GetAgent() *MediatorAgent {
+	if x != nil {
+		return x.Agent
+	}
+	return nil
+}
+
+// How a repository's production is checked.
+type ProductionChecks struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How the production mediator's session runs. UNSET: the daemon's default
+	// model at low effort. The children it dispatches never follow it: each
+	// runs on the daemon's default model for children, `opus`, whatever the
+	// mediator runs on, because a child does the fix itself while the mediator
+	// only reads and dispatches.
+	Agent         *MediatorAgent `protobuf:"bytes,1,opt,name=agent,proto3,oneof" json:"agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProductionChecks) Reset() {
+	*x = ProductionChecks{}
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProductionChecks) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProductionChecks) ProtoMessage() {}
+
+func (x *ProductionChecks) ProtoReflect() protoreflect.Message {
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProductionChecks.ProtoReflect.Descriptor instead.
+func (*ProductionChecks) Descriptor() ([]byte, []int) {
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ProductionChecks) GetAgent() *MediatorAgent {
+	if x != nil {
+		return x.Agent
+	}
+	return nil
+}
+
+// How one of a repository's standing mediators runs its session, read when
+// the daemon starts the mediator's session and again whenever it restarts
+// it, so an edit takes effect at the mediator's next session. A running
+// session keeps the model and effort it started with.
+type MediatorAgent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The model the mediator runs on, as `agent-repld workspace create -model`
+	// names one (an alias such as `fable`, or a dated id). UNSET: the daemon's
+	// default launch model. A model the mediator's login does not offer fails
+	// the session's start, which the daemon logs naming the model and the
+	// login, and the mediator stays down until the file is fixed: the daemon
+	// never falls back to another model.
+	Model *string `protobuf:"bytes,1,opt,name=model,proto3,oneof" json:"model,omitempty"`
+	// How much reasoning the mediator spends. UNSET: low. A level the model
+	// does not accept fails the session's start as an unoffered model does.
+	// The YAML spells it as the enum value's name (`AGENT_EFFORT_LEVEL_LOW`).
+	Effort        *v1.AgentEffortLevel `protobuf:"varint,2,opt,name=effort,proto3,enum=conversation.v1.AgentEffortLevel,oneof" json:"effort,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MediatorAgent) Reset() {
+	*x = MediatorAgent{}
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MediatorAgent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MediatorAgent) ProtoMessage() {}
+
+func (x *MediatorAgent) ProtoReflect() protoreflect.Message {
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MediatorAgent.ProtoReflect.Descriptor instead.
+func (*MediatorAgent) Descriptor() ([]byte, []int) {
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *MediatorAgent) GetModel() string {
+	if x != nil && x.Model != nil {
+		return *x.Model
+	}
+	return ""
+}
+
+func (x *MediatorAgent) GetEffort() v1.AgentEffortLevel {
+	if x != nil && x.Effort != nil {
+		return *x.Effort
+	}
+	return v1.AgentEffortLevel(0)
+}
+
 // A workspace stage's hooks, one list per kind of workspace. Each kind runs
 // only its own list. A kind's list UNSET runs the stage's built-in default for
 // that kind (empty but for emoji-ack creation, finish and post_deploy); SET,
@@ -389,7 +535,7 @@ type LifecycleStageHooks struct {
 
 func (x *LifecycleStageHooks) Reset() {
 	*x = LifecycleStageHooks{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[3]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -401,7 +547,7 @@ func (x *LifecycleStageHooks) String() string {
 func (*LifecycleStageHooks) ProtoMessage() {}
 
 func (x *LifecycleStageHooks) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[3]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -414,7 +560,7 @@ func (x *LifecycleStageHooks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LifecycleStageHooks.ProtoReflect.Descriptor instead.
 func (*LifecycleStageHooks) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{3}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *LifecycleStageHooks) GetEmojiAck() *LifecycleHookList {
@@ -444,7 +590,7 @@ type LifecycleHookList struct {
 
 func (x *LifecycleHookList) Reset() {
 	*x = LifecycleHookList{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[4]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -456,7 +602,7 @@ func (x *LifecycleHookList) String() string {
 func (*LifecycleHookList) ProtoMessage() {}
 
 func (x *LifecycleHookList) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[4]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -469,7 +615,7 @@ func (x *LifecycleHookList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LifecycleHookList.ProtoReflect.Descriptor instead.
 func (*LifecycleHookList) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{4}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LifecycleHookList) GetHooks() []*HookEntry {
@@ -494,7 +640,7 @@ type LifecycleDeployStage struct {
 
 func (x *LifecycleDeployStage) Reset() {
 	*x = LifecycleDeployStage{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[5]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +652,7 @@ func (x *LifecycleDeployStage) String() string {
 func (*LifecycleDeployStage) ProtoMessage() {}
 
 func (x *LifecycleDeployStage) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[5]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +665,7 @@ func (x *LifecycleDeployStage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LifecycleDeployStage.ProtoReflect.Descriptor instead.
 func (*LifecycleDeployStage) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{5}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *LifecycleDeployStage) GetEmojiAck() *HookEntry {
@@ -560,7 +706,7 @@ type DeployPreDeployStage struct {
 
 func (x *DeployPreDeployStage) Reset() {
 	*x = DeployPreDeployStage{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[6]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -572,7 +718,7 @@ func (x *DeployPreDeployStage) String() string {
 func (*DeployPreDeployStage) ProtoMessage() {}
 
 func (x *DeployPreDeployStage) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[6]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -585,7 +731,7 @@ func (x *DeployPreDeployStage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployPreDeployStage.ProtoReflect.Descriptor instead.
 func (*DeployPreDeployStage) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{6}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeployPreDeployStage) GetEmojiAck() *LifecycleHookList {
@@ -636,7 +782,7 @@ type DeployConcurrentStages struct {
 
 func (x *DeployConcurrentStages) Reset() {
 	*x = DeployConcurrentStages{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[7]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -648,7 +794,7 @@ func (x *DeployConcurrentStages) String() string {
 func (*DeployConcurrentStages) ProtoMessage() {}
 
 func (x *DeployConcurrentStages) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[7]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -661,7 +807,7 @@ func (x *DeployConcurrentStages) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployConcurrentStages.ProtoReflect.Descriptor instead.
 func (*DeployConcurrentStages) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{7}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DeployConcurrentStages) GetThrough() isDeployConcurrentStages_Through {
@@ -719,7 +865,7 @@ type DeployConcurrentThroughPreDeploy struct {
 
 func (x *DeployConcurrentThroughPreDeploy) Reset() {
 	*x = DeployConcurrentThroughPreDeploy{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[8]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -731,7 +877,7 @@ func (x *DeployConcurrentThroughPreDeploy) String() string {
 func (*DeployConcurrentThroughPreDeploy) ProtoMessage() {}
 
 func (x *DeployConcurrentThroughPreDeploy) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[8]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -744,7 +890,7 @@ func (x *DeployConcurrentThroughPreDeploy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployConcurrentThroughPreDeploy.ProtoReflect.Descriptor instead.
 func (*DeployConcurrentThroughPreDeploy) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{8}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{10}
 }
 
 // The concurrent run is pre_deploy and deploy. DELIBERATELY EMPTY: the arm is
@@ -757,7 +903,7 @@ type DeployConcurrentThroughDeploy struct {
 
 func (x *DeployConcurrentThroughDeploy) Reset() {
 	*x = DeployConcurrentThroughDeploy{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[9]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -769,7 +915,7 @@ func (x *DeployConcurrentThroughDeploy) String() string {
 func (*DeployConcurrentThroughDeploy) ProtoMessage() {}
 
 func (x *DeployConcurrentThroughDeploy) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[9]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -782,7 +928,7 @@ func (x *DeployConcurrentThroughDeploy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployConcurrentThroughDeploy.ProtoReflect.Descriptor instead.
 func (*DeployConcurrentThroughDeploy) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{9}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{11}
 }
 
 // THE BUILT-IN LOCAL MERGE. Its steps are the daemon's own code, in this
@@ -809,7 +955,7 @@ type DeployLocalMerge struct {
 
 func (x *DeployLocalMerge) Reset() {
 	*x = DeployLocalMerge{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[10]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -821,7 +967,7 @@ func (x *DeployLocalMerge) String() string {
 func (*DeployLocalMerge) ProtoMessage() {}
 
 func (x *DeployLocalMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[10]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -834,7 +980,7 @@ func (x *DeployLocalMerge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployLocalMerge.ProtoReflect.Descriptor instead.
 func (*DeployLocalMerge) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{10}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeployLocalMerge) GetTests() *DeployLocalMergeTests {
@@ -867,7 +1013,7 @@ type DeployLocalMergeTests struct {
 
 func (x *DeployLocalMergeTests) Reset() {
 	*x = DeployLocalMergeTests{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[11]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -879,7 +1025,7 @@ func (x *DeployLocalMergeTests) String() string {
 func (*DeployLocalMergeTests) ProtoMessage() {}
 
 func (x *DeployLocalMergeTests) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[11]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -892,7 +1038,7 @@ func (x *DeployLocalMergeTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployLocalMergeTests.ProtoReflect.Descriptor instead.
 func (*DeployLocalMergeTests) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{11}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DeployLocalMergeTests) GetKind() isDeployLocalMergeTests_Kind {
@@ -938,7 +1084,7 @@ type DeployTestsAgentReplSuites struct {
 
 func (x *DeployTestsAgentReplSuites) Reset() {
 	*x = DeployTestsAgentReplSuites{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[12]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -950,7 +1096,7 @@ func (x *DeployTestsAgentReplSuites) String() string {
 func (*DeployTestsAgentReplSuites) ProtoMessage() {}
 
 func (x *DeployTestsAgentReplSuites) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[12]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -963,7 +1109,7 @@ func (x *DeployTestsAgentReplSuites) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployTestsAgentReplSuites.ProtoReflect.Descriptor instead.
 func (*DeployTestsAgentReplSuites) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{12}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeployTestsAgentReplSuites) GetScriptPath() string {
@@ -983,7 +1129,7 @@ type DeployVersionTag struct {
 
 func (x *DeployVersionTag) Reset() {
 	*x = DeployVersionTag{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[13]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -995,7 +1141,7 @@ func (x *DeployVersionTag) String() string {
 func (*DeployVersionTag) ProtoMessage() {}
 
 func (x *DeployVersionTag) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[13]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1008,7 +1154,7 @@ func (x *DeployVersionTag) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployVersionTag.ProtoReflect.Descriptor instead.
 func (*DeployVersionTag) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{13}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{15}
 }
 
 // One hook of a stage, and which workspaces of its kind it runs for.
@@ -1026,7 +1172,7 @@ type HookEntry struct {
 
 func (x *HookEntry) Reset() {
 	*x = HookEntry{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[14]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1038,7 +1184,7 @@ func (x *HookEntry) String() string {
 func (*HookEntry) ProtoMessage() {}
 
 func (x *HookEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[14]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1051,7 +1197,7 @@ func (x *HookEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookEntry.ProtoReflect.Descriptor instead.
 func (*HookEntry) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{14}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *HookEntry) GetHook() *Hook {
@@ -1090,7 +1236,7 @@ type Hook struct {
 
 func (x *Hook) Reset() {
 	*x = Hook{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[15]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1102,7 +1248,7 @@ func (x *Hook) String() string {
 func (*Hook) ProtoMessage() {}
 
 func (x *Hook) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[15]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1115,7 +1261,7 @@ func (x *Hook) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hook.ProtoReflect.Descriptor instead.
 func (*Hook) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{15}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Hook) GetHook() isHook_Hook {
@@ -1216,7 +1362,7 @@ type HookScript struct {
 
 func (x *HookScript) Reset() {
 	*x = HookScript{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[16]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1228,7 +1374,7 @@ func (x *HookScript) String() string {
 func (*HookScript) ProtoMessage() {}
 
 func (x *HookScript) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[16]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1241,7 +1387,7 @@ func (x *HookScript) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookScript.ProtoReflect.Descriptor instead.
 func (*HookScript) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{16}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *HookScript) GetPath() string {
@@ -1278,7 +1424,7 @@ type HookPrompt struct {
 
 func (x *HookPrompt) Reset() {
 	*x = HookPrompt{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[17]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1290,7 +1436,7 @@ func (x *HookPrompt) String() string {
 func (*HookPrompt) ProtoMessage() {}
 
 func (x *HookPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[17]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1303,7 +1449,7 @@ func (x *HookPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookPrompt.ProtoReflect.Descriptor instead.
 func (*HookPrompt) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{17}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *HookPrompt) GetText() string {
@@ -1323,7 +1469,7 @@ type HookBuiltIn struct {
 
 func (x *HookBuiltIn) Reset() {
 	*x = HookBuiltIn{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[18]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1335,7 +1481,7 @@ func (x *HookBuiltIn) String() string {
 func (*HookBuiltIn) ProtoMessage() {}
 
 func (x *HookBuiltIn) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[18]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1348,7 +1494,7 @@ func (x *HookBuiltIn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookBuiltIn.ProtoReflect.Descriptor instead.
 func (*HookBuiltIn) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{18}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{20}
 }
 
 // Which landing targets a hook runs for. THE ARM IS THE SCOPE.
@@ -1367,7 +1513,7 @@ type HookRunsFor struct {
 
 func (x *HookRunsFor) Reset() {
 	*x = HookRunsFor{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[19]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1379,7 +1525,7 @@ func (x *HookRunsFor) String() string {
 func (*HookRunsFor) ProtoMessage() {}
 
 func (x *HookRunsFor) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[19]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1392,7 +1538,7 @@ func (x *HookRunsFor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookRunsFor.ProtoReflect.Descriptor instead.
 func (*HookRunsFor) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{19}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *HookRunsFor) GetScope() isHookRunsFor_Scope {
@@ -1450,7 +1596,7 @@ type HookRunsForMain struct {
 
 func (x *HookRunsForMain) Reset() {
 	*x = HookRunsForMain{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[20]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1462,7 +1608,7 @@ func (x *HookRunsForMain) String() string {
 func (*HookRunsForMain) ProtoMessage() {}
 
 func (x *HookRunsForMain) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[20]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1475,7 +1621,7 @@ func (x *HookRunsForMain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookRunsForMain.ProtoReflect.Descriptor instead.
 func (*HookRunsForMain) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{20}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{22}
 }
 
 // The hook runs whatever the target. DELIBERATELY EMPTY: the arm is the scope.
@@ -1487,7 +1633,7 @@ type HookRunsForAnyTarget struct {
 
 func (x *HookRunsForAnyTarget) Reset() {
 	*x = HookRunsForAnyTarget{}
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[21]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1499,7 +1645,7 @@ func (x *HookRunsForAnyTarget) String() string {
 func (*HookRunsForAnyTarget) ProtoMessage() {}
 
 func (x *HookRunsForAnyTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[21]
+	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1512,14 +1658,14 @@ func (x *HookRunsForAnyTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookRunsForAnyTarget.ProtoReflect.Descriptor instead.
 func (*HookRunsForAnyTarget) Descriptor() ([]byte, []int) {
-	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{21}
+	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{23}
 }
 
 var File_repoconfig_v1_lifecycle_config_proto protoreflect.FileDescriptor
 
 const file_repoconfig_v1_lifecycle_config_proto_rawDesc = "" +
 	"\n" +
-	"$repoconfig/v1/lifecycle_config.proto\x12\rrepoconfig.v1\"\x92\x06\n" +
+	"$repoconfig/v1/lifecycle_config.proto\x12\rrepoconfig.v1\x1a\x19conversation/v1/api.proto\"\xfb\x06\n" +
 	"\x0fLifecycleConfig\x12C\n" +
 	"\bcreation\x18\x06 \x01(\v2\".repoconfig.v1.LifecycleStageHooksH\x00R\bcreation\x88\x01\x01\x12?\n" +
 	"\x06finish\x18\a \x01(\v2\".repoconfig.v1.LifecycleStageHooksH\x01R\x06finish\x88\x01\x01\x12B\n" +
@@ -1534,19 +1680,31 @@ const file_repoconfig_v1_lifecycle_config_proto_rawDesc = "" +
 	"concurrent\x88\x01\x01\x12>\n" +
 	"\rqueue_drained\x18\x05 \x03(\v2\x19.repoconfig.v1.HookScriptR\fqueueDrained\x12E\n" +
 	"\rdeploy_checks\x18\f \x01(\v2\x1b.repoconfig.v1.DeployChecksH\x05R\fdeployChecks\x88\x01\x01\x12M\n" +
-	"\rpull_requests\x18\r \x01(\v2#.repoconfig.v1.PullRequestFollowingH\x06R\fpullRequests\x88\x01\x01B\v\n" +
+	"\rpull_requests\x18\r \x01(\v2#.repoconfig.v1.PullRequestFollowingH\x06R\fpullRequests\x88\x01\x01\x12Q\n" +
+	"\x11production_checks\x18\x0e \x01(\v2\x1f.repoconfig.v1.ProductionChecksH\aR\x10productionChecks\x88\x01\x01B\v\n" +
 	"\t_creationB\t\n" +
 	"\a_finishB\t\n" +
 	"\a_deployB\x0e\n" +
 	"\f_post_deployB\r\n" +
 	"\v_concurrentB\x10\n" +
 	"\x0e_deploy_checksB\x10\n" +
-	"\x0e_pull_requestsJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\v\x10\fR\x0fdeploy_mediator\"7\n" +
+	"\x0e_pull_requestsB\x14\n" +
+	"\x12_production_checksJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\v\x10\fR\x0fdeploy_mediator\"7\n" +
 	"\x14PullRequestFollowing\x12\x1f\n" +
 	"\vgate_checks\x18\x01 \x03(\tR\n" +
-	"gateChecks\"T\n" +
+	"gateChecks\"\x97\x01\n" +
 	"\fDeployChecks\x12D\n" +
-	"\x1eremediations_before_escalation\x18\x01 \x01(\rR\x1cremediationsBeforeEscalation\"\xd0\x01\n" +
+	"\x1eremediations_before_escalation\x18\x01 \x01(\rR\x1cremediationsBeforeEscalation\x127\n" +
+	"\x05agent\x18\x02 \x01(\v2\x1c.repoconfig.v1.MediatorAgentH\x00R\x05agent\x88\x01\x01B\b\n" +
+	"\x06_agent\"U\n" +
+	"\x10ProductionChecks\x127\n" +
+	"\x05agent\x18\x01 \x01(\v2\x1c.repoconfig.v1.MediatorAgentH\x00R\x05agent\x88\x01\x01B\b\n" +
+	"\x06_agent\"\x7f\n" +
+	"\rMediatorAgent\x12\x19\n" +
+	"\x05model\x18\x01 \x01(\tH\x00R\x05model\x88\x01\x01\x12>\n" +
+	"\x06effort\x18\x02 \x01(\x0e2!.conversation.v1.AgentEffortLevelH\x01R\x06effort\x88\x01\x01B\b\n" +
+	"\x06_modelB\t\n" +
+	"\a_effort\"\xd0\x01\n" +
 	"\x13LifecycleStageHooks\x12B\n" +
 	"\temoji_ack\x18\x01 \x01(\v2 .repoconfig.v1.LifecycleHookListH\x00R\bemojiAck\x88\x01\x01\x12Q\n" +
 	"\x11user_or_workspace\x18\x02 \x01(\v2 .repoconfig.v1.LifecycleHookListH\x01R\x0fuserOrWorkspace\x88\x01\x01B\f\n" +
@@ -1624,66 +1782,73 @@ func file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP() []byte {
 	return file_repoconfig_v1_lifecycle_config_proto_rawDescData
 }
 
-var file_repoconfig_v1_lifecycle_config_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_repoconfig_v1_lifecycle_config_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_repoconfig_v1_lifecycle_config_proto_goTypes = []any{
 	(*LifecycleConfig)(nil),                  // 0: repoconfig.v1.LifecycleConfig
 	(*PullRequestFollowing)(nil),             // 1: repoconfig.v1.PullRequestFollowing
 	(*DeployChecks)(nil),                     // 2: repoconfig.v1.DeployChecks
-	(*LifecycleStageHooks)(nil),              // 3: repoconfig.v1.LifecycleStageHooks
-	(*LifecycleHookList)(nil),                // 4: repoconfig.v1.LifecycleHookList
-	(*LifecycleDeployStage)(nil),             // 5: repoconfig.v1.LifecycleDeployStage
-	(*DeployPreDeployStage)(nil),             // 6: repoconfig.v1.DeployPreDeployStage
-	(*DeployConcurrentStages)(nil),           // 7: repoconfig.v1.DeployConcurrentStages
-	(*DeployConcurrentThroughPreDeploy)(nil), // 8: repoconfig.v1.DeployConcurrentThroughPreDeploy
-	(*DeployConcurrentThroughDeploy)(nil),    // 9: repoconfig.v1.DeployConcurrentThroughDeploy
-	(*DeployLocalMerge)(nil),                 // 10: repoconfig.v1.DeployLocalMerge
-	(*DeployLocalMergeTests)(nil),            // 11: repoconfig.v1.DeployLocalMergeTests
-	(*DeployTestsAgentReplSuites)(nil),       // 12: repoconfig.v1.DeployTestsAgentReplSuites
-	(*DeployVersionTag)(nil),                 // 13: repoconfig.v1.DeployVersionTag
-	(*HookEntry)(nil),                        // 14: repoconfig.v1.HookEntry
-	(*Hook)(nil),                             // 15: repoconfig.v1.Hook
-	(*HookScript)(nil),                       // 16: repoconfig.v1.HookScript
-	(*HookPrompt)(nil),                       // 17: repoconfig.v1.HookPrompt
-	(*HookBuiltIn)(nil),                      // 18: repoconfig.v1.HookBuiltIn
-	(*HookRunsFor)(nil),                      // 19: repoconfig.v1.HookRunsFor
-	(*HookRunsForMain)(nil),                  // 20: repoconfig.v1.HookRunsForMain
-	(*HookRunsForAnyTarget)(nil),             // 21: repoconfig.v1.HookRunsForAnyTarget
+	(*ProductionChecks)(nil),                 // 3: repoconfig.v1.ProductionChecks
+	(*MediatorAgent)(nil),                    // 4: repoconfig.v1.MediatorAgent
+	(*LifecycleStageHooks)(nil),              // 5: repoconfig.v1.LifecycleStageHooks
+	(*LifecycleHookList)(nil),                // 6: repoconfig.v1.LifecycleHookList
+	(*LifecycleDeployStage)(nil),             // 7: repoconfig.v1.LifecycleDeployStage
+	(*DeployPreDeployStage)(nil),             // 8: repoconfig.v1.DeployPreDeployStage
+	(*DeployConcurrentStages)(nil),           // 9: repoconfig.v1.DeployConcurrentStages
+	(*DeployConcurrentThroughPreDeploy)(nil), // 10: repoconfig.v1.DeployConcurrentThroughPreDeploy
+	(*DeployConcurrentThroughDeploy)(nil),    // 11: repoconfig.v1.DeployConcurrentThroughDeploy
+	(*DeployLocalMerge)(nil),                 // 12: repoconfig.v1.DeployLocalMerge
+	(*DeployLocalMergeTests)(nil),            // 13: repoconfig.v1.DeployLocalMergeTests
+	(*DeployTestsAgentReplSuites)(nil),       // 14: repoconfig.v1.DeployTestsAgentReplSuites
+	(*DeployVersionTag)(nil),                 // 15: repoconfig.v1.DeployVersionTag
+	(*HookEntry)(nil),                        // 16: repoconfig.v1.HookEntry
+	(*Hook)(nil),                             // 17: repoconfig.v1.Hook
+	(*HookScript)(nil),                       // 18: repoconfig.v1.HookScript
+	(*HookPrompt)(nil),                       // 19: repoconfig.v1.HookPrompt
+	(*HookBuiltIn)(nil),                      // 20: repoconfig.v1.HookBuiltIn
+	(*HookRunsFor)(nil),                      // 21: repoconfig.v1.HookRunsFor
+	(*HookRunsForMain)(nil),                  // 22: repoconfig.v1.HookRunsForMain
+	(*HookRunsForAnyTarget)(nil),             // 23: repoconfig.v1.HookRunsForAnyTarget
+	(v1.AgentEffortLevel)(0),                 // 24: conversation.v1.AgentEffortLevel
 }
 var file_repoconfig_v1_lifecycle_config_proto_depIdxs = []int32{
-	3,  // 0: repoconfig.v1.LifecycleConfig.creation:type_name -> repoconfig.v1.LifecycleStageHooks
-	3,  // 1: repoconfig.v1.LifecycleConfig.finish:type_name -> repoconfig.v1.LifecycleStageHooks
-	6,  // 2: repoconfig.v1.LifecycleConfig.pre_deploy:type_name -> repoconfig.v1.DeployPreDeployStage
-	5,  // 3: repoconfig.v1.LifecycleConfig.deploy:type_name -> repoconfig.v1.LifecycleDeployStage
-	3,  // 4: repoconfig.v1.LifecycleConfig.post_deploy:type_name -> repoconfig.v1.LifecycleStageHooks
-	7,  // 5: repoconfig.v1.LifecycleConfig.concurrent:type_name -> repoconfig.v1.DeployConcurrentStages
-	16, // 6: repoconfig.v1.LifecycleConfig.queue_drained:type_name -> repoconfig.v1.HookScript
+	5,  // 0: repoconfig.v1.LifecycleConfig.creation:type_name -> repoconfig.v1.LifecycleStageHooks
+	5,  // 1: repoconfig.v1.LifecycleConfig.finish:type_name -> repoconfig.v1.LifecycleStageHooks
+	8,  // 2: repoconfig.v1.LifecycleConfig.pre_deploy:type_name -> repoconfig.v1.DeployPreDeployStage
+	7,  // 3: repoconfig.v1.LifecycleConfig.deploy:type_name -> repoconfig.v1.LifecycleDeployStage
+	5,  // 4: repoconfig.v1.LifecycleConfig.post_deploy:type_name -> repoconfig.v1.LifecycleStageHooks
+	9,  // 5: repoconfig.v1.LifecycleConfig.concurrent:type_name -> repoconfig.v1.DeployConcurrentStages
+	18, // 6: repoconfig.v1.LifecycleConfig.queue_drained:type_name -> repoconfig.v1.HookScript
 	2,  // 7: repoconfig.v1.LifecycleConfig.deploy_checks:type_name -> repoconfig.v1.DeployChecks
 	1,  // 8: repoconfig.v1.LifecycleConfig.pull_requests:type_name -> repoconfig.v1.PullRequestFollowing
-	4,  // 9: repoconfig.v1.LifecycleStageHooks.emoji_ack:type_name -> repoconfig.v1.LifecycleHookList
-	4,  // 10: repoconfig.v1.LifecycleStageHooks.user_or_workspace:type_name -> repoconfig.v1.LifecycleHookList
-	14, // 11: repoconfig.v1.LifecycleHookList.hooks:type_name -> repoconfig.v1.HookEntry
-	14, // 12: repoconfig.v1.LifecycleDeployStage.emoji_ack:type_name -> repoconfig.v1.HookEntry
-	14, // 13: repoconfig.v1.LifecycleDeployStage.user_or_workspace:type_name -> repoconfig.v1.HookEntry
-	4,  // 14: repoconfig.v1.DeployPreDeployStage.emoji_ack:type_name -> repoconfig.v1.LifecycleHookList
-	4,  // 15: repoconfig.v1.DeployPreDeployStage.user_or_workspace:type_name -> repoconfig.v1.LifecycleHookList
-	10, // 16: repoconfig.v1.DeployPreDeployStage.local_merge:type_name -> repoconfig.v1.DeployLocalMerge
-	8,  // 17: repoconfig.v1.DeployConcurrentStages.through_pre_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughPreDeploy
-	9,  // 18: repoconfig.v1.DeployConcurrentStages.through_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughDeploy
-	11, // 19: repoconfig.v1.DeployLocalMerge.tests:type_name -> repoconfig.v1.DeployLocalMergeTests
-	13, // 20: repoconfig.v1.DeployLocalMerge.version_tag:type_name -> repoconfig.v1.DeployVersionTag
-	12, // 21: repoconfig.v1.DeployLocalMergeTests.agent_repl_suites:type_name -> repoconfig.v1.DeployTestsAgentReplSuites
-	15, // 22: repoconfig.v1.HookEntry.hook:type_name -> repoconfig.v1.Hook
-	19, // 23: repoconfig.v1.HookEntry.runs_for:type_name -> repoconfig.v1.HookRunsFor
-	16, // 24: repoconfig.v1.Hook.script:type_name -> repoconfig.v1.HookScript
-	17, // 25: repoconfig.v1.Hook.prompt:type_name -> repoconfig.v1.HookPrompt
-	18, // 26: repoconfig.v1.Hook.builtin:type_name -> repoconfig.v1.HookBuiltIn
-	20, // 27: repoconfig.v1.HookRunsFor.main:type_name -> repoconfig.v1.HookRunsForMain
-	21, // 28: repoconfig.v1.HookRunsFor.any_target:type_name -> repoconfig.v1.HookRunsForAnyTarget
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	3,  // 9: repoconfig.v1.LifecycleConfig.production_checks:type_name -> repoconfig.v1.ProductionChecks
+	4,  // 10: repoconfig.v1.DeployChecks.agent:type_name -> repoconfig.v1.MediatorAgent
+	4,  // 11: repoconfig.v1.ProductionChecks.agent:type_name -> repoconfig.v1.MediatorAgent
+	24, // 12: repoconfig.v1.MediatorAgent.effort:type_name -> conversation.v1.AgentEffortLevel
+	6,  // 13: repoconfig.v1.LifecycleStageHooks.emoji_ack:type_name -> repoconfig.v1.LifecycleHookList
+	6,  // 14: repoconfig.v1.LifecycleStageHooks.user_or_workspace:type_name -> repoconfig.v1.LifecycleHookList
+	16, // 15: repoconfig.v1.LifecycleHookList.hooks:type_name -> repoconfig.v1.HookEntry
+	16, // 16: repoconfig.v1.LifecycleDeployStage.emoji_ack:type_name -> repoconfig.v1.HookEntry
+	16, // 17: repoconfig.v1.LifecycleDeployStage.user_or_workspace:type_name -> repoconfig.v1.HookEntry
+	6,  // 18: repoconfig.v1.DeployPreDeployStage.emoji_ack:type_name -> repoconfig.v1.LifecycleHookList
+	6,  // 19: repoconfig.v1.DeployPreDeployStage.user_or_workspace:type_name -> repoconfig.v1.LifecycleHookList
+	12, // 20: repoconfig.v1.DeployPreDeployStage.local_merge:type_name -> repoconfig.v1.DeployLocalMerge
+	10, // 21: repoconfig.v1.DeployConcurrentStages.through_pre_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughPreDeploy
+	11, // 22: repoconfig.v1.DeployConcurrentStages.through_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughDeploy
+	13, // 23: repoconfig.v1.DeployLocalMerge.tests:type_name -> repoconfig.v1.DeployLocalMergeTests
+	15, // 24: repoconfig.v1.DeployLocalMerge.version_tag:type_name -> repoconfig.v1.DeployVersionTag
+	14, // 25: repoconfig.v1.DeployLocalMergeTests.agent_repl_suites:type_name -> repoconfig.v1.DeployTestsAgentReplSuites
+	17, // 26: repoconfig.v1.HookEntry.hook:type_name -> repoconfig.v1.Hook
+	21, // 27: repoconfig.v1.HookEntry.runs_for:type_name -> repoconfig.v1.HookRunsFor
+	18, // 28: repoconfig.v1.Hook.script:type_name -> repoconfig.v1.HookScript
+	19, // 29: repoconfig.v1.Hook.prompt:type_name -> repoconfig.v1.HookPrompt
+	20, // 30: repoconfig.v1.Hook.builtin:type_name -> repoconfig.v1.HookBuiltIn
+	22, // 31: repoconfig.v1.HookRunsFor.main:type_name -> repoconfig.v1.HookRunsForMain
+	23, // 32: repoconfig.v1.HookRunsFor.any_target:type_name -> repoconfig.v1.HookRunsForAnyTarget
+	33, // [33:33] is the sub-list for method output_type
+	33, // [33:33] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_repoconfig_v1_lifecycle_config_proto_init() }
@@ -1692,23 +1857,26 @@ func file_repoconfig_v1_lifecycle_config_proto_init() {
 		return
 	}
 	file_repoconfig_v1_lifecycle_config_proto_msgTypes[0].OneofWrappers = []any{}
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[2].OneofWrappers = []any{}
 	file_repoconfig_v1_lifecycle_config_proto_msgTypes[3].OneofWrappers = []any{}
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[4].OneofWrappers = []any{}
 	file_repoconfig_v1_lifecycle_config_proto_msgTypes[5].OneofWrappers = []any{}
-	file_repoconfig_v1_lifecycle_config_proto_msgTypes[6].OneofWrappers = []any{}
-	file_repoconfig_v1_lifecycle_config_proto_msgTypes[7].OneofWrappers = []any{
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[7].OneofWrappers = []any{}
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[8].OneofWrappers = []any{}
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[9].OneofWrappers = []any{
 		(*DeployConcurrentStages_ThroughPreDeploy)(nil),
 		(*DeployConcurrentStages_ThroughDeploy)(nil),
 	}
-	file_repoconfig_v1_lifecycle_config_proto_msgTypes[10].OneofWrappers = []any{}
-	file_repoconfig_v1_lifecycle_config_proto_msgTypes[11].OneofWrappers = []any{
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[12].OneofWrappers = []any{}
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[13].OneofWrappers = []any{
 		(*DeployLocalMergeTests_AgentReplSuites)(nil),
 	}
-	file_repoconfig_v1_lifecycle_config_proto_msgTypes[15].OneofWrappers = []any{
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[17].OneofWrappers = []any{
 		(*Hook_Script)(nil),
 		(*Hook_Prompt)(nil),
 		(*Hook_Builtin)(nil),
 	}
-	file_repoconfig_v1_lifecycle_config_proto_msgTypes[19].OneofWrappers = []any{
+	file_repoconfig_v1_lifecycle_config_proto_msgTypes[21].OneofWrappers = []any{
 		(*HookRunsFor_Main)(nil),
 		(*HookRunsFor_AnyTarget)(nil),
 	}
@@ -1718,7 +1886,7 @@ func file_repoconfig_v1_lifecycle_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_repoconfig_v1_lifecycle_config_proto_rawDesc), len(file_repoconfig_v1_lifecycle_config_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

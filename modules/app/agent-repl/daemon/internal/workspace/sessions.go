@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/account"
 	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/changesignal"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/headless"
@@ -2695,12 +2696,15 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 			log.Error(opBringUp, "the workspace's queue bypass standing could not be read; the session was not started", dlog.Context{"cause": err.Error()})
 			return nil, fmt.Errorf("start session for %q: read the queue bypass standing: %w", ws, err)
 		}
-		// A REPOSITORY'S DEPLOY MEDIATOR LANDS AS THE MEDIATOR, by its standing,
+		// A REPOSITORY'S STANDING MEDIATOR LANDS AS ITS ROLE, by its standing,
 		// recorded before its first prompt brought this session up
-		// (deploychecks.go), so every turn of it, a check's or a fix's, runs
-		// under the one system prompt.
-		if record.DeployMediator {
+		// (deploychecks.go), so every turn of it runs under its role's one
+		// system prompt.
+		switch record.Mediator {
+		case wsm.MediatorDeploy:
 			return agentProfileLanding(standing, deployMediatorLanding()), nil
+		case wsm.MediatorProduction:
+			return agentProfileLanding(standing, productionMediatorLanding()), nil
 		}
 		return agentProfile(standing, bypass.Holds), nil
 	}
@@ -2739,6 +2743,11 @@ func agentProfileLanding(standing *shimv1.SessionProfileAgentStanding, landing *
 // deployMediatorLanding is a repository's deploy mediator's landing.
 func deployMediatorLanding() *shimv1.SessionProfileAgentLanding {
 	return &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_DeployMediator{DeployMediator: &shimv1.SessionProfileAgentLandingDeployMediator{}}}
+}
+
+// productionMediatorLanding is a repository's production mediator's landing.
+func productionMediatorLanding() *shimv1.SessionProfileAgentLanding {
+	return &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_ProductionMediator{ProductionMediator: &shimv1.SessionProfileAgentLandingProductionMediator{}}}
 }
 
 // ParkedKeepalive answers the keep-alive request for WS's parked conversation
@@ -2948,6 +2957,15 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		// only the record says which of the two happened.
 		if errors.Is(err, shimclient.ErrStandDownOrdered) {
 			log.Info(opBringUp, "the StartSession call ended in a stand-down this daemon ordered",
+				dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("start session for %q: %w", ws, err)
+		}
+		// A START ITS CALLER WENT AWAY FROM IS NOT A FAILED START either: the
+		// daemon's exit, or a teardown that forgot the workspace, ended the
+		// bring-up's context before the shim answered. The shim client has
+		// stated the abandoned call; the start still stops.
+		if ctxend.Is(err) && ctx.Err() != nil {
+			log.Info(opBringUp, "the StartSession call was abandoned: the bring-up's caller went away before the shim answered",
 				dlog.Context{"cause": err.Error()})
 			return nil, fmt.Errorf("start session for %q: %w", ws, err)
 		}

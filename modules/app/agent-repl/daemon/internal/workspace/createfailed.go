@@ -137,6 +137,8 @@ var createRefusalArms = map[string]bool{
 	ArmGatherNotGatherable:                  true,
 	// The deploy mediator asked: it does its work in its own session.
 	ArmRequestedByDeployMediator: true,
+	// The production mediator asked directly: it dispatches its children.
+	ArmRequestedByProductionMediator: true,
 	// A fault of the daemon, the repository or the machine.
 	ArmBriefMissing:                     false,
 	ArmUnknownRepository:                false,

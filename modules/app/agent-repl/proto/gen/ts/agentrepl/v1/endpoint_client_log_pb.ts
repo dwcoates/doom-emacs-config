@@ -210,6 +210,11 @@ export type ClientLogRecord = Message<"agentrepl.v1.ClientLogRecord"> & {
    * one not 12 lowercase hex, is malformed (Connect InvalidArgument), since a
    * record the production checks cannot count is a record they miss.
    *
+   * A BARE STRING, NOT agentrepl.v1.LogSiteKey: a deploy restarts the sidecar
+   * before the daemon hands over and reloads the webapp beside it, so a
+   * changed wire type here would have the old daemon refuse the new
+   * clients' records for the length of every handover.
+   *
    * @generated from field: string site = 12;
    */
   site: string;

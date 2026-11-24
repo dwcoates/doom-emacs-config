@@ -160,11 +160,16 @@ type Workspace struct {
 	// as the roster last derived it: what every per-workspace allocation is
 	// gated on.
 	Visibility Visibility
-	// DeployMediator reports whether the workspace is its repository's deploy
-	// mediator (deploy_mediators): it runs and is kept warm like any open
-	// workspace, hidden or not (owner ruling, 2026-11-17), so a deploy's check
-	// never waits on a cold cache.
-	DeployMediator bool
+	// FinishPlacement is where its finish joins the merge queue, fixed at its
+	// create (CreationJob.FinishPlacement); the zero value when its finish
+	// names its own.
+	FinishPlacement FinishPlacement
+	// Mediator is the standing mediator the workspace is, if any: its
+	// repository's deploy mediator (deploy_mediators) or production mediator
+	// (production_mediators). A mediator runs and is kept warm like any open
+	// workspace, hidden or not (owner ruling, 2026-11-17), so a check never
+	// waits on a cold cache.
+	Mediator MediatorRole
 	// EmojiAck reports that the Slack emoji-ack reaction system created the
 	// workspace (its recorded originator, workspace_originators). READ-ONLY,
 	// derived in the shared select list, so the record and the originator can
@@ -506,6 +511,10 @@ type CreationJob struct {
 	Materialized bool
 	// OneShot marks a one-shot workspace (created, prompted, merged, closed).
 	OneShot bool
+	// FinishPlacement is where the one-shot's finish joins the merge queue,
+	// fixed at its create (agentrepl.v1.CreateWorkspaceOneShot
+	// .finish_placement); the zero value lets every finish name its own.
+	FinishPlacement FinishPlacement
 	// InitialPrompt is the prompt the workspace was created with, empty when
 	// created without one.
 	InitialPrompt string
@@ -1738,4 +1747,43 @@ func (e MergeQueueEntry) AheadFailed() bool {
 // AheadLanded reports whether the merge this entry waits on has landed.
 func (e MergeQueueEntry) AheadLanded() bool {
 	return e.WaitsOnLeft == MergeLeftLanded
+}
+
+// MediatorRole is which of its repository's standing mediators a workspace
+// is. The zero value is a workspace that is neither.
+type MediatorRole string
+
+// The mediator roles.
+const (
+	// NotMediator is a workspace that is no standing mediator.
+	NotMediator MediatorRole = ""
+	// MediatorDeploy is the repository's deploy mediator, which checks each
+	// landing and holds the queue until it decides.
+	MediatorDeploy MediatorRole = "deploy"
+	// MediatorProduction is the repository's production mediator, which
+	// reviews the span between landings and dispatches children.
+	MediatorProduction MediatorRole = "production"
+)
+
+// IsMediator reports whether the workspace is one of its repository's
+// standing mediators.
+func (w Workspace) IsMediator() bool { return w.Mediator != NotMediator }
+
+// FinishPlacement is where a workspace's finish joins its merge queue when
+// its creator fixed it. The zero value is a workspace whose every finish
+// names its own placement.
+type FinishPlacement string
+
+// The placements a create may fix.
+const (
+	// FinishPlacementAsked is a workspace whose finish names its placement.
+	FinishPlacementAsked FinishPlacement = ""
+	// FinishPlacementFront joins ahead of every ordinary merge waiting.
+	FinishPlacementFront FinishPlacement = "front"
+	// FinishPlacementBack joins behind every merge waiting.
+	FinishPlacementBack FinishPlacement = "back"
+)
+
+func (p FinishPlacement) valid() bool {
+	return p == FinishPlacementAsked || p == FinishPlacementFront || p == FinishPlacementBack
 }

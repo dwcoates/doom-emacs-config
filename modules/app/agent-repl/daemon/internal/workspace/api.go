@@ -7,6 +7,7 @@
 package workspace
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -60,6 +61,10 @@ type CreateSpec struct {
 	InitialImages []*conversationv1.ImageBlock
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
+	// FinishPlacement, set only on a one-shot, fixes where its finish joins
+	// the merge queue (agentrepl.v1.CreateWorkspaceOneShot.finish_placement);
+	// the zero value lets its finish name its own.
+	FinishPlacement wsm.FinishPlacement
 	// FromOrigin cuts a workspace landing on the primary branch from origin's
 	// primary branch, fetched as the create runs, rather than from the local
 	// primary branch (agentrepl.v1.WorkspaceLandingTargetPrimary.from_origin).
@@ -437,14 +442,17 @@ type Verbs interface {
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
 	// request.
 	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
-	// CreateDeployMediator makes the deploy mediator NAME of the
-	// repository at REPODIR, unprompted and in remote control
+	// CreateMediator makes the standing mediator NAME of the repository at
+	// REPODIR on AGENT's model, unprompted and in remote control
 	// (deploychecks.go).
-	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployMediatorEffort picks the deploy mediator's effort and
-	// switches a live session to it without waiting on its turn
-	// (deploychecks.go).
-	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
+	CreateMediator(ctx context.Context, repoDir, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error)
+	// SetMediatorAgent puts a standing mediator on AGENT's model and effort
+	// before a brief (deploychecks.go).
+	SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error
+	// CreateProductionChild makes a child of production mediator MEDIATOR:
+	// a one-shot landing on the main branch at the front of the queue, on
+	// opus, named NAME and commissioned with PROMPT (productionchildren.go).
+	CreateProductionChild(ctx context.Context, repoDir string, mediator ids.WorkspaceID, name, prompt string) (wsm.Workspace, error)
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
 	// live, making the fork it still owes: what a hand-off that finds the
 	// merge workspace a restart left behind needs before its pick can run.

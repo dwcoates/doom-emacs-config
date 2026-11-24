@@ -48,6 +48,7 @@ export const LANDING_REL_PATHS: Readonly<Record<WorkspaceLanding, string>> = {
   through_queue: "modules/app/agent-repl/metaprompt-merge-queue.md",
   bypassing_queue: "modules/app/agent-repl/metaprompt-queue-bypass.md",
   deploy_mediator: "modules/app/agent-repl/metaprompt-deploy-mediator.md",
+  production_mediator: "modules/app/agent-repl/metaprompt-production-mediator.md",
 };
 
 /**

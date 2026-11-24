@@ -27,6 +27,7 @@ package agentrepl.v1;
 
 import "google/protobuf/struct.proto";
 import "agentrepl/v1/log_level.proto";
+import "agentrepl/v1/log_site_key.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -118,8 +119,13 @@ message ListLogSitesCoveredPartial {
 
 // One log site at one level, as it fired in the window.
 message LogSite {
-  // The site's key: 12 lowercase hex characters.
-  string key = 1;
+  // Tag 1 (`key`) carried the key as a bare string before the key had a type
+  // of its own.
+  reserved 1;
+  reserved "key";
+  // The site's key. A caller names it back as it was served, such as in the
+  // findings a production mediator dispatches.
+  LogSiteKey site = 10;
   // The call's unrendered message, its placeholders ({name}) unfilled. It is
   // the site's summary: what the call reports, without any one record's
   // values.

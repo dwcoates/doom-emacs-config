@@ -353,6 +353,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		BaseRef:              baseRef,
 		Materialized:         false,
 		OneShot:              spec.OneShot,
+		FinishPlacement:      spec.FinishPlacement,
 		InitialPrompt:        spec.InitialPrompt,
 		ConsentedUngatedMode: spec.ConsentedUngatedMode,
 		CreatedAt:            v.now(),

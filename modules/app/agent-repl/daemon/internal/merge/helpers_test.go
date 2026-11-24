@@ -28,6 +28,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/logsites"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
@@ -123,6 +124,11 @@ type fakeDB struct {
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
 	checks wsm.DB
+	// landingOpened, when set, is when the landing of every owed check
+	// began, standing in for a running merge the real store would find
+	// (wsm.Mediation.LandingStartedAt): the harness's queue is this fake's,
+	// not the checks store's.
+	landingOpened time.Time
 	// endingErr fails RecordMediationEnding.
 	endingErr error
 	// mediatorRecordErr fails RecordDeployMediator.
@@ -487,7 +493,25 @@ func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediat
 	if err != nil {
 		return nil, err
 	}
-	return f.checks.MediationOf(ctx, repo)
+	m, err := f.checks.MediationOf(ctx, repo)
+	if m == nil || err != nil {
+		return m, err
+	}
+	f.mu.Lock()
+	if !f.landingOpened.IsZero() {
+		m.LandingStartedAt = f.landingOpened
+	}
+	f.mu.Unlock()
+	return m, nil
+}
+
+// runningMergeOpenedAt makes every owed check's landing begin AT, as a merge
+// of the queue that began running then would.
+func (h *harness) runningMergeOpenedAt(t *testing.T, at time.Time) {
+	t.Helper()
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.landingOpened = at
 }
 
 func (f *fakeDB) RecordMergeLanding(ctx context.Context, landing wsm.MergeLanding) (bool, error) {
@@ -537,6 +561,84 @@ func (f *fakeDB) RecordDeployMediator(ctx context.Context, repo wsm.RepoKey, ws 
 
 func (f *fakeDB) MarkMediatorBriefed(ctx context.Context, repo wsm.RepoKey) error {
 	return f.checks.MarkMediatorBriefed(ctx, repo)
+}
+
+func (f *fakeDB) OweProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (wsm.ProductionCheck, bool, error) {
+	return f.checks.OweProductionCheck(ctx, repo, at, version)
+}
+
+func (f *fakeDB) DropProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time) (bool, error) {
+	return f.checks.DropProductionCheck(ctx, repo, at)
+}
+
+func (f *fakeDB) MarkProductionChecksDue(ctx context.Context, repo wsm.RepoKey, at time.Time) (int, error) {
+	return f.checks.MarkProductionChecksDue(ctx, repo, at)
+}
+
+func (f *fakeDB) ProductionCheckOf(ctx context.Context, repo wsm.RepoKey) (*wsm.ProductionCheck, error) {
+	return f.checks.ProductionCheckOf(ctx, repo)
+}
+
+func (f *fakeDB) PreviousProductionSpan(ctx context.Context, repo wsm.RepoKey, until time.Time) (wsm.ProductionCheck, bool, error) {
+	return f.checks.PreviousProductionSpan(ctx, repo, until)
+}
+
+func (f *fakeDB) MarkProductionCheckPrompted(ctx context.Context, repo wsm.RepoKey, until, at time.Time, turn wsm.TurnID) (bool, error) {
+	return f.checks.MarkProductionCheckPrompted(ctx, repo, until, at, turn)
+}
+
+func (f *fakeDB) MarkProductionCheckResumed(ctx context.Context, repo wsm.RepoKey, until time.Time, turn wsm.TurnID) (bool, error) {
+	return f.checks.MarkProductionCheckResumed(ctx, repo, until, turn)
+}
+
+func (f *fakeDB) DecideProductionCheck(ctx context.Context, repo wsm.RepoKey, until, at time.Time, decision wsm.ProductionDecision, summary string, children []wsm.ProductionChild) error {
+	return f.checks.DecideProductionCheck(ctx, repo, until, at, decision, summary, children)
+}
+
+func (f *fakeDB) OwnedSites(ctx context.Context, repo wsm.RepoKey) (map[string]wsm.WorkspaceID, error) {
+	return f.checks.OwnedSites(ctx, repo)
+}
+
+func (f *fakeDB) FixedSites(ctx context.Context, repo wsm.RepoKey) ([]wsm.FixedSite, error) {
+	return f.checks.FixedSites(ctx, repo)
+}
+
+func (f *fakeDB) ProductionChildOf(ctx context.Context, ws ids.WorkspaceID) (wsm.ProductionChild, bool, error) {
+	return f.checks.ProductionChildOf(ctx, ws)
+}
+
+func (f *fakeDB) ProductionChildrenOf(ctx context.Context, repo wsm.RepoKey) ([]wsm.ProductionChild, error) {
+	return f.checks.ProductionChildrenOf(ctx, repo)
+}
+
+func (f *fakeDB) FoldProductionChild(ctx context.Context, folded, surviving ids.WorkspaceID, at time.Time) error {
+	return f.checks.FoldProductionChild(ctx, folded, surviving, at)
+}
+
+func (f *fakeDB) EndProductionChild(ctx context.Context, ws ids.WorkspaceID, how wsm.ProductionChildEnding, at time.Time) (bool, error) {
+	return f.checks.EndProductionChild(ctx, ws, how, at)
+}
+
+func (f *fakeDB) StandingMediatorOf(ctx context.Context, role wsm.MediatorRole, repo wsm.RepoKey) (wsm.DeployMediator, bool, error) {
+	return f.checks.StandingMediatorOf(ctx, role, repo)
+}
+
+func (f *fakeDB) StandingMediatorRepoOf(ctx context.Context, role wsm.MediatorRole, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
+	if role == wsm.MediatorDeploy {
+		return f.MediatorRepoOf(ctx, ws)
+	}
+	return f.checks.StandingMediatorRepoOf(ctx, role, ws)
+}
+
+func (f *fakeDB) RecordStandingMediator(ctx context.Context, role wsm.MediatorRole, repo wsm.RepoKey, ws ids.WorkspaceID) error {
+	if role == wsm.MediatorDeploy {
+		return f.RecordDeployMediator(ctx, repo, ws)
+	}
+	return f.checks.RecordStandingMediator(ctx, role, repo, ws)
+}
+
+func (f *fakeDB) MarkStandingMediatorBriefed(ctx context.Context, role wsm.MediatorRole, repo wsm.RepoKey) error {
+	return f.checks.MarkStandingMediatorBriefed(ctx, role, repo)
 }
 
 func (f *fakeDB) MarkEscalationTold(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
@@ -3771,7 +3873,11 @@ type harness struct {
 	pauseInTerminal AdmissionPause
 	rollout         *fakeRollout
 	// checks is the deploy check workspaces' fake; logs answers ReadLogs.
-	checks     *fakeDeployChecks
+	checks *fakeDeployChecks
+	// children makes the production mediator's children; sites answers the
+	// production checks' log site windows.
+	children   *fakeChildren
+	sites      *fakeTally
 	logRecords func(since, until time.Time) ([]LogRecord, error)
 	// standing is the rollout controller's queue standing: serving, and
 	// every workspace served, unless a test says otherwise.
@@ -4220,6 +4326,8 @@ func newHarness(t *testing.T) *harness {
 	h.feed = &fakeFeed{seq: h.next, db: h.db}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
 	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository, rollout: h.rollout, key: func() wsm.RepoKey { return scopedKey(h) }}
+	h.children = &fakeChildren{db: h.db}
+	h.sites = &fakeTally{answers: map[time.Time]logsites.Answer{}, errs: map[time.Time]error{}}
 	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
@@ -4410,10 +4518,12 @@ func (h *harness) deps() Deps {
 			h.interrupted = append(h.interrupted, ws)
 			return h.interruptRunning, h.interruptErr
 		},
-		Rollout:         h.rollout,
-		Standing:        h.standing,
-		StandingRefusal: harnessStandingRefusal,
-		DeployChecks:    h.checks,
+		Rollout:            h.rollout,
+		Standing:           h.standing,
+		StandingRefusal:    harnessStandingRefusal,
+		DeployChecks:       h.checks,
+		ProductionChildren: h.children,
+		LogSites:           h.sites,
 		ReadLogs: func(_ context.Context, _ string, since, until time.Time) ([]LogRecord, error) {
 			// A WINDOW HOLDS A WARNING UNLESS A TEST SAYS OTHERWISE, so a
 			// round tells the mediator: a window with none releases the
@@ -5014,6 +5124,80 @@ type fakeMeter struct {
 	compactionTook []time.Duration
 }
 
+func (f *fakeMeter) ObserveProductionCheck(outcome string, children int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("production_check:%s:%d", outcome, children))
+}
+
+func (f *fakeMeter) ObserveProductionChild(event string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "production_child:"+event)
+}
+
+// fakeTally is a LogSiteTally answering each window from answers, keyed by
+// the window's start, and recording every window asked.
+type fakeTally struct {
+	mu      sync.Mutex
+	answers map[time.Time]logsites.Answer
+	// errs, keyed like answers, fail a window's read.
+	errs  map[time.Time]error
+	asked []time.Time
+}
+
+func (f *fakeTally) Window(_ context.Context, since, until time.Time, minimum string) (logsites.Answer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, since)
+	if err := f.errs[since]; err != nil {
+		return logsites.Answer{}, err
+	}
+	return f.answers[since], nil
+}
+
+// fakeChildren is a ProductionChildren recording every child made, undone
+// and closed; createErrAt fails the create of that child, counted from 1.
+type fakeChildren struct {
+	mu          sync.Mutex
+	db          *fakeDB
+	made        []string
+	prompts     []string
+	undone      []ids.WorkspaceID
+	closed      []ids.WorkspaceID
+	createErrAt int
+	closeErr    error
+}
+
+func (f *fakeChildren) CreateChild(_ context.Context, _ string, mediator ids.WorkspaceID, name, prompt string) (wsm.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.createErrAt == len(f.made)+1 {
+		return wsm.Workspace{}, errors.New("the name is taken")
+	}
+	f.made = append(f.made, name)
+	f.prompts = append(f.prompts, prompt)
+	ws := wsm.Workspace{ID: ids.WorkspaceID("child-" + name), Name: name, Branch: name, Dir: "/w/" + name, Repo: theRepository}
+	f.db.mu.Lock()
+	f.db.workspaces[ws.ID] = ws
+	f.db.mu.Unlock()
+	return ws, nil
+}
+
+func (f *fakeChildren) Undo(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.undone = append(f.undone, ws)
+	return nil
+}
+
+func (f *fakeChildren) Close(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = append(f.closed, ws)
+	return f.closeErr
+}
+
 func (f *fakeMeter) ObserveMergeStep(step string, took time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -5392,12 +5576,15 @@ type fakeDeployChecks struct {
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
 	effortErr error
+	// agents are the mediator configs every create and readying was given,
+	// in order.
+	agents []*repoconfigv1.MediatorAgent
 	// onEffort, when set, runs as the effort is set, before effortErr is
 	// answered: a test cuts the caller's context there.
 	onEffort func()
 }
 
-func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error {
+func (f *fakeDeployChecks) SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error {
 	_, standing, err := f.db.DeployMediatorOf(ctx, f.key())
 	if err != nil {
 		return err
@@ -5405,6 +5592,7 @@ func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.W
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.efforts = append(f.efforts, fmt.Sprintf("mediator:%s:standing=%v", ws, standing))
+	f.agents = append(f.agents, agent)
 	if f.onEffort != nil {
 		f.onEffort()
 	}
@@ -5425,7 +5613,10 @@ func (f *fakeDeployChecks) make(prefix, name string) (wsm.Workspace, error) {
 	return ws, nil
 }
 
-func (f *fakeDeployChecks) CreateDeployMediator(ctx context.Context, _, name string) (wsm.Workspace, error) {
+func (f *fakeDeployChecks) CreateMediator(ctx context.Context, _, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
+	f.mu.Lock()
+	f.agents = append(f.agents, agent)
+	f.mu.Unlock()
 	f.mu.Lock()
 	err := f.escalationErr
 	f.createCtxErrs = append(f.createCtxErrs, ctx.Err())

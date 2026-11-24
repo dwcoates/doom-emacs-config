@@ -68,9 +68,9 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	var escalation standing
 	var err error
 	if said || told.NotRun != nil {
-		escalation, err = o.showMediator(ctx, q, fields)
+		escalation, err = o.showMediator(ctx, deployRole, q, fields)
 	} else {
-		escalation, err = o.readyMediator(ctx, q, fields)
+		escalation, err = o.readyMediator(ctx, deployRole, q, fields)
 	}
 	if err != nil {
 		return failed(logsite.Msg("the deploy mediator could not be readied for the escalation; it is not told, and the next pass tells it"), err)

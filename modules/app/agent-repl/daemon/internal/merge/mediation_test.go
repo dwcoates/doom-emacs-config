@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -102,7 +103,7 @@ func owedCheck(t *testing.T, h *harness) *wsm.Mediation {
 func withMediator(t *testing.T, h *harness) {
 	t.Helper()
 	h.db.mu.Lock()
-	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: mediatorName, Repo: theRepository}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: deployRole.name, Repo: theRepository}
 	h.db.mu.Unlock()
 	if _, found, err := h.db.DeployMediatorOf(context.Background(), mediationKey(h)); err != nil || !found {
 		if err := h.db.RecordDeployMediator(context.Background(), mediationKey(h), "ws-fixer"); err != nil {
@@ -206,7 +207,7 @@ func TestARoundMakesTheQueuesMediatorAndTellsItUncompacted(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: one mediator made, which the undecided check is escalated to.
-	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != mediatorName {
+	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != deployRole.name {
 		t.Fatalf("made %v, want one mediator for the queue", h.checks.made)
 	}
 	for _, sub := range intakeSubmissions(h) {
@@ -258,7 +259,7 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 	// Assert: one mediator made and told of each deploy, its session never
 	// ended and nothing closed.
 	made := h.checks.made
-	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{mediatorName}) {
+	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{deployRole.name}) {
 		t.Fatalf("mediator told %d times, made %v; want the one mediator told of each deploy", len(intakeTellings(h)), made)
 	}
 	if len(h.stoppedSessions) != 0 || len(h.checks.closed) != 0 {
@@ -1991,7 +1992,7 @@ func TestARoundWhoseServedMediatorCannotBeRefreshedIsStillEscalated(t *testing.T
 	// Assert
 	assertRoundFailureEscalated(t, h, "the deploy mediator could not be found, made or readied for the check", "rebase conflicts")
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed"}); !ok {
+		Message: "the mediator's worktree could not be brought to the main branch's tip; it is not briefed"}); !ok {
 		t.Fatalf("records = %v, want the refresh's failure at ERROR", h.logs.Records())
 	}
 }
@@ -2007,7 +2008,7 @@ func TestAQueueWithNoRecordedMediatorIsNotGated(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if made := checkWorkspacesMade(h); !slices.Equal(made, []string{mediatorName}) || len(intakeTellings(h)) != 1 {
+	if made := checkWorkspacesMade(h); !slices.Equal(made, []string{deployRole.name}) || len(intakeTellings(h)) != 1 {
 		t.Fatalf("made %v, told %d; want the mediator made and told", made, len(intakeTellings(h)))
 	}
 }
@@ -2029,5 +2030,48 @@ func TestAMediatorWhoseStandingCannotBeReadRunsNoRound(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
 		Message: "could not read whether this daemon serves the queue's deploy mediator; its check's round is not run, and the next pass runs it"}); !ok {
 		t.Fatalf("records = %v, want the unread standing at ERROR", h.logs.Records())
+	}
+}
+
+func TestQueueKeyedFindsAListedQueueByItsKey(t *testing.T) {
+	a := checkedQueue{registeredQueue: registeredQueue{key: wsm.RepoKey(t.TempDir())}}
+	b := checkedQueue{registeredQueue: registeredQueue{key: wsm.RepoKey(t.TempDir())}}
+	cases := []struct {
+		name      string
+		repo      wsm.RepoKey
+		wantFound bool
+		want      checkedQueue
+	}{
+		{name: "a listed key finds its queue", repo: b.key, wantFound: true, want: b},
+		{name: "a key no queue has finds none", repo: wsm.RepoKey(t.TempDir())},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, found := queueKeyed([]checkedQueue{a, b}, tc.repo)
+
+			// Assert
+			if found != tc.wantFound || got.key != tc.want.key {
+				t.Fatalf("queueKeyed = (%v, %v), want (%v, %v)", got.key, found, tc.want.key, tc.wantFound)
+			}
+		})
+	}
+}
+
+func TestEveryListedQueueLookupGoesThroughQueueKeyed(t *testing.T) {
+	// Arrange: every merge source file but the helper's own.
+	byHand := regexp.MustCompile(`sameQueue\(\w+\.key,`)
+	total := 0
+
+	// Act, Assert: no other code compares a listed queue's key by hand.
+	for _, file := range sourcescan.Production(t) {
+		n := len(byHand.FindAllIndex(file.Source, -1))
+		if n > 0 && file.Name != "mediation.go" {
+			t.Fatalf("%s compares a listed queue's key by hand; use queueKeyed", file.Name)
+		}
+		total += n
+	}
+	if total != 1 {
+		t.Fatalf("a listed queue's key is compared %d times, want once, inside queueKeyed", total)
 	}
 }

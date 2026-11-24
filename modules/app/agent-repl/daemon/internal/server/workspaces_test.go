@@ -1737,6 +1737,83 @@ func TestFinishWorkspaceMapsTheRequest(t *testing.T) {
 	}
 }
 
+func TestFinishWorkspaceJoinsWhereItsCreateFixed(t *testing.T) {
+	none := ownFinish()
+	none.Placement = nil
+	front := ownFinish()
+	front.Placement = frontPlacement()
+	back := ownFinish()
+	tests := []struct {
+		name string
+		// stored is the placement the workspace's create fixed.
+		stored wsm.FinishPlacement
+		req    *agentreplv1.FinishWorkspaceRequest
+		// wantFront is whether the finish joined at the front; wantRefused
+		// whether it was refused against the stored placement.
+		wantFront, wantRefused bool
+	}{
+		{name: "a finish naming none joins where its create fixed", stored: wsm.FinishPlacementFront, req: none, wantFront: true},
+		{name: "a finish naming the fixed placement joins there", stored: wsm.FinishPlacementFront, req: front, wantFront: true},
+		{name: "a finish naming another placement is refused", stored: wsm.FinishPlacementFront, req: back, wantRefused: true},
+		{name: "a fixed back placement joins at the back", stored: wsm.FinishPlacementBack, req: none},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.DB.workspaces[testWorkspaceID]
+			ws.FinishPlacement = tt.stored
+			h.DB.workspaces[testWorkspaceID] = ws
+
+			// Act
+			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FinishWorkspace: %v", err)
+			}
+			if conflict := resp.Msg.GetError().GetPlacementConflictsWithStored(); (conflict != nil) != tt.wantRefused {
+				t.Fatalf("result = %v, want refused %v", resp.Msg.GetResult(), tt.wantRefused)
+			}
+			if tt.wantRefused {
+				if len(h.Merge.requests) != 0 {
+					t.Fatalf("requests = %+v, want nothing enqueued", h.Merge.requests)
+				}
+				return
+			}
+			if len(h.Merge.requests) != 1 || h.Merge.requests[0].Source.Front != tt.wantFront {
+				t.Fatalf("requests = %+v, want one at the front %v", h.Merge.requests, tt.wantFront)
+			}
+		})
+	}
+}
+
+// TestFinishWorkspaceFailsWhenItsStoredPlacementCannotBeRead: the stored
+// placement is read from the workspace's whole row, and a failed read is
+// answered internal, recorded at ERROR with its cause, and enqueues nothing.
+func TestFinishWorkspaceFailsWhenItsStoredPlacementCannotBeRead(t *testing.T) {
+	// Arrange
+	h, log := newLoggedHarness(t)
+	h.DB.rowErr = errors.New("database is locked")
+
+	// Act
+	_, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("FinishWorkspace = %v, want internal", err)
+	}
+	if len(h.Merge.requests) != 0 {
+		t.Fatalf("requests = %+v, want nothing enqueued", h.Merge.requests)
+	}
+	for _, record := range log.at("ERROR") {
+		if cause, _ := record.Context["cause"].(string); record.Operation == "FinishWorkspace" && strings.Contains(cause, "database is locked") {
+			return
+		}
+	}
+	t.Fatalf("no error record named the failed read: %+v", log.at("ERROR"))
+}
+
 func TestFinishWorkspaceAnswersWhoMayLandIt(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2268,6 +2345,45 @@ func TestCreateWorkspaceMapsAOneShotContextToTheSpec(t *testing.T) {
 			}
 			if (spec.ContextWorkspace == nil) != (tt.want == nil) || (tt.want != nil && *spec.ContextWorkspace != *tt.want) {
 				t.Fatalf("context workspace = %v, want %v", spec.ContextWorkspace, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceFixesAOneShotsFinishPlacement(t *testing.T) {
+	tests := []struct {
+		name      string
+		placement *agentreplv1.MergeQueuePlacement
+		want      wsm.FinishPlacement
+		// wantInvalid is whether the create is refused as invalid.
+		wantInvalid bool
+	}{
+		{name: "none fixed lets the finish name its own", want: wsm.FinishPlacementAsked},
+		{name: "the front is fixed", placement: frontPlacement(), want: wsm.FinishPlacementFront},
+		{name: "the back is fixed", placement: backPlacement(), want: wsm.FinishPlacementBack},
+		{name: "a placement behind a merge cannot be fixed", wantInvalid: true,
+			placement: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: "other"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			req := oneShotCreate(registeredRepoRef(h), nil)
+			req.GetOneShot().FinishPlacement = tt.placement
+
+			// Act
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			if tt.wantInvalid {
+				if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Verbs.createSpecs) != 0 {
+					t.Fatalf("CreateWorkspace = (%v, %v), specs %d; want InvalidArgument and nothing created", resp, err, len(h.Verbs.createSpecs))
+				}
+				return
+			}
+			if err != nil || resp.Msg.GetSuccess() == nil || h.Verbs.createSpecs[0].FinishPlacement != tt.want {
+				t.Fatalf("CreateWorkspace = (%v, %v), spec %+v; want placement %q", resp, err, h.Verbs.createSpecs, tt.want)
 			}
 		})
 	}
@@ -3766,7 +3882,7 @@ func mediatorHarness(t *testing.T) *harness {
 	h := newHarness(t)
 	ws := h.DB.workspaces[testWorkspaceID]
 	ws.Repo = "repo-1"
-	ws.DeployMediator = true
+	ws.Mediator = wsm.MediatorDeploy
 	h.DB.workspaces[testWorkspaceID] = ws
 	return h
 }
@@ -3810,6 +3926,28 @@ func TestCreateWorkspaceRefusesEveryFormTheDeployMediatorRequests(t *testing.T) 
 	}
 }
 
+func TestCreateWorkspaceRefusesTheProductionMediatorsDirectCreate(t *testing.T) {
+	// Arrange
+	h := mediatorHarness(t)
+	ws := h.DB.workspaces[testWorkspaceID]
+	ws.Mediator = wsm.MediatorProduction
+	h.DB.workspaces[testWorkspaceID] = ws
+	req := standardCreate(registeredRepoRef(h), "")
+	req.Requester = workspaceRequester(&workspacev1.WorkspaceRef{Id: string(testWorkspaceID)})
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	refused := resp.Msg.GetError().GetRequestedByProductionMediator()
+	if refused == nil || refused.GetWorkspace().GetId() != string(testWorkspaceID) || !strings.Contains(refused.GetDetail(), "production-mediation dispatch") {
+		t.Fatalf("result = %v, want requested_by_production_mediator naming the mediator and the dispatch", resp.Msg.GetResult())
+	}
+}
+
 func TestCreateWorkspaceDoesNotRefuseAnOrdinaryRequesterAsTheDeployMediator(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -3830,7 +3968,7 @@ func TestCreateWorkspaceFailsWhenTheRequestersStandingCannotBeRead(t *testing.T)
 	log := &recordingLogger{}
 	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
 	ws := h.DB.workspaces[testWorkspaceID]
-	ws.DeployMediator = true
+	ws.Mediator = wsm.MediatorDeploy
 	h.DB.workspaces[testWorkspaceID] = ws
 	h.DB.workspaceErrs = map[ids.WorkspaceID]error{testWorkspaceID: errors.New("database is locked")}
 	req := standardCreate(registeredRepoRef(h), "")
@@ -3845,7 +3983,7 @@ func TestCreateWorkspaceFailsWhenTheRequestersStandingCannotBeRead(t *testing.T)
 	}
 	logged := false
 	for _, rec := range log.at("ERROR") {
-		if strings.Contains(fmt.Sprint(rec.Context), "deploy-mediator standing") {
+		if strings.Contains(fmt.Sprint(rec.Context), "mediator standing") {
 			logged = true
 		}
 	}

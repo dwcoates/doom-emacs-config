@@ -2373,7 +2373,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "nameBranchExists" "invalidName" "unknownContextWorkspace" "unknownOwner" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeNameOffQueue" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown" "lifecycleConfigInvalid" "creationHookFailed" "placementOnChild" "placementOnMergeWorkspace" "placementRequiresWorkspace" "unknownPlacementSubsection" "blankPlacementSubsectionName" "gatherUnknownWorkspace" "gatherNotGatherable" "requestedByDeployMediator")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "nameBranchExists" "invalidName" "unknownContextWorkspace" "unknownOwner" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeNameOffQueue" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown" "lifecycleConfigInvalid" "creationHookFailed" "placementOnChild" "placementOnMergeWorkspace" "placementRequiresWorkspace" "unknownPlacementSubsection" "blankPlacementSubsectionName" "gatherUnknownWorkspace" "gatherNotGatherable" "requestedByDeployMediator" "requestedByProductionMediator")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-model-not-in-catalog-arm ()
@@ -3135,8 +3135,27 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_finish_workspace.pb.go" "FinishWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid" "placementBehindNotInLine" "mergeOffQueue")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid" "placementBehindNotInLine" "mergeOffQueue" "placementConflictsWithStored")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-placement-conflicts-with-stored-arm ()
+  "FinishWorkspaceError's `placement_conflicts_with_stored' arm decodes the
+stored placement and the one the finish named."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"placementConflictsWithStored\":{\"stored\":{\"front\":{}},\"requested\":{\"back\":{}}}}"))
+                   '(:cause (:arm :placement-conflicts-with-stored
+                             :value (:stored ((front)) :requested ((back)))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-placement-conflicts-with-stored-unknown-key ()
+  "FinishWorkspaceError's `placement_conflicts_with_stored' arm refuses a key
+its message does not declare."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-finish-workspace-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"placementConflictsWithStored\":{\"someday\":{}}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-finish-error-placement-behind-not-in-line-arm ()
   "FinishWorkspaceError's `placement_behind_not_in_line' arm decodes the merge

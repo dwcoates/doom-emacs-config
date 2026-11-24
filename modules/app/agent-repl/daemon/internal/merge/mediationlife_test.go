@@ -135,6 +135,44 @@ func TestMediationFailed(t *testing.T) {
 	}
 }
 
+func TestMediationFailedUnderRecordsUnderItsOperation(t *testing.T) {
+	tests := []struct {
+		name      string
+		cut       bool
+		err       error
+		wantLevel string
+		wantCut   bool
+	}{
+		{name: "a cut is recorded at info under the operation", cut: true, err: context.Canceled, wantLevel: "info", wantCut: true},
+		{name: "a failure is an error under the operation", err: errors.New("disk gone"), wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cut {
+				cancel()
+			}
+
+			// Act
+			cut := h.o.mediationFailedUnder(ctx, opProduction, dlog.Context{"repo": "r"}, logsite.Msg("could not read it"), tt.err)
+
+			// Assert
+			if cut != tt.wantCut {
+				t.Fatalf("mediationFailedUnder = %v, want %v", cut, tt.wantCut)
+			}
+			if rec, ok := h.recordFor(tt.wantLevel, opProduction); !ok || rec.Context["repo"] != "r" {
+				t.Fatalf("records = %v, want one at %s under %s carrying the repo", h.logs.Records(), tt.wantLevel, opProduction)
+			}
+			if _, under := h.recordFor(tt.wantLevel, opMediation); under {
+				t.Fatalf("records = %v, want none under %s", h.logs.Records(), opMediation)
+			}
+		})
+	}
+}
+
 func TestTheDrainCutsAMediationRoundAndWaitsForIt(t *testing.T) {
 	// Arrange: a round told of the deploy and awaiting its intake's turn.
 	h := checked(t)

@@ -39,14 +39,16 @@ func TestTheIntakesWindowStartsWhereTheLastCheckRead(t *testing.T) {
 		wantSince time.Time
 	}{
 		{name: "a repository never checked reads from the deploy's start", wantSince: deployStarted},
-		{name: "a later check reads from where the last one read to",
+		// The span between the last check's read and this landing's start is
+		// the production check's (owner ruling, 2026-11-23).
+		{name: "a later check reads from its landing's start, not from where the last one read to",
 			arrange: func(t *testing.T, h *harness) {
 				if ok, err := h.db.RecordMediationWindow(context.Background(), mediationKey(h), deployStarted, wsm.CheckWindow{Start: deployStarted, Through: deployStarted.Add(30 * time.Second)}); err != nil || !ok {
 					t.Fatalf("RecordMediationWindow = (%v, %v)", ok, err)
 				}
 				oweAt(t, h, deployStarted.Add(time.Minute))
 			},
-			wantSince: deployStarted.Add(30 * time.Second)},
+			wantSince: deployStarted.Add(time.Minute)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

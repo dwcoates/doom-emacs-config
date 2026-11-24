@@ -874,7 +874,7 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 	// THE DEPLOY MEDIATOR STAYS OPEN (owner ruling, 2026-11-17): warm, in
 	// its repository's section, with its conversation and its worktree, for
 	// the next brief, which brings its worktree to the main branch's tip.
-	if record.DeployMediator {
+	if record.Mediator == wsm.MediatorDeploy {
 		o.deps.Log.Global().Info(opRemediationFinish, "the landed fix deployed; the deploy mediator stays open for the next brief", fields)
 		return nil
 	}

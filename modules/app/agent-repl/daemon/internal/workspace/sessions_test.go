@@ -3207,6 +3207,66 @@ func TestTheStartBoundDoesNotSpeakForTheCallersOwnCancellation(t *testing.T) {
 	}
 }
 
+// TestAStartItsCallerAbandonedIsNoFailedStart: a bring-up whose caller went
+// away (the daemon's exit, a teardown that forgot the workspace) is stated at
+// INFO, never as the ERROR of a start the shim failed.
+func TestAStartItsCallerAbandonedIsNoFailedStart(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-caller-left")
+	f.fleet.startBound = time.Minute
+	entered := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	settled := make(chan error, 1)
+	go func() { settled <- f.fleet.Start(ctx, ws.ID) }()
+	<-entered
+
+	// Act.
+	cancel()
+
+	// Assert.
+	if err := <-settled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start = %v, want the caller's cancellation answered", err)
+	}
+	var abandoned bool
+	for _, r := range f.log.logger.Records() {
+		if r.Operation != opBringUp {
+			continue
+		}
+		if r.Message == "the StartSession call failed" {
+			t.Fatalf("an abandoned start was recorded as a failed one: %+v", r)
+		}
+		if strings.Contains(r.Message, "the StartSession call was abandoned") {
+			abandoned = r.Level == "info"
+		}
+	}
+	if !abandoned {
+		t.Fatalf("records = %+v, want the abandoned start at info", f.log.logger.Records())
+	}
+}
+
+// TestAStartSessionCallThatFailsWhileItsCallerWaitsIsAnError: a call that
+// fails with its caller still there is the failed start's ERROR.
+func TestAStartSessionCallThatFailsWhileItsCallerWaitsIsAnError(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.startErr = errors.New("the shim hung up")
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opBringUp && r.Message == "the StartSession call failed" && r.Level == "error" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the failed start at error", f.log.logger.Records())
+}
+
 // ---------------------------------------------------------------------------
 // The compaction phases a remediated re-open relays.
 //
@@ -4825,14 +4885,25 @@ func TestParkedKeepaliveSurfacesAnUnreadableStanding(t *testing.T) {
 	}
 }
 
-func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
+func TestAStandingMediatorsSessionLandsAsItsRole(t *testing.T) {
 	cases := []struct {
-		name         string
-		standing     bool
-		wantMediator bool
+		name string
+		role wsm.MediatorRole
+		// want names the landing arm the session runs under.
+		want func(*shimv1.SessionProfileAgentLanding) bool
 	}{
-		{name: "the repository's deploy mediator, by its standing", standing: true, wantMediator: true},
-		{name: "any other workspace lands through the queue"},
+		{
+			name: "the repository's deploy mediator, by its standing", role: wsm.MediatorDeploy,
+			want: func(l *shimv1.SessionProfileAgentLanding) bool { return l.GetDeployMediator() != nil },
+		},
+		{
+			name: "the repository's production mediator, by its standing", role: wsm.MediatorProduction,
+			want: func(l *shimv1.SessionProfileAgentLanding) bool { return l.GetProductionMediator() != nil },
+		},
+		{
+			name: "any other workspace lands through the queue",
+			want: func(l *shimv1.SessionProfileAgentLanding) bool { return l.GetThroughQueue() != nil },
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4840,7 +4911,7 @@ func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
 			f := newFleetFixture(t)
 			ws := resumable(f)
 			record := f.db.workspaces[ws]
-			record.DeployMediator = tc.standing
+			record.Mediator = tc.role
 			f.db.workspaces[ws] = record
 
 			// Act
@@ -4850,11 +4921,8 @@ func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sessionProfile: %v", err)
 			}
-			if mediator := got.GetAgent().GetLanding().GetDeployMediator() != nil; mediator != tc.wantMediator {
-				t.Fatalf("deploy mediator landing = %v, want %v", mediator, tc.wantMediator)
-			}
-			if !tc.wantMediator && got.GetAgent().GetLanding().GetThroughQueue() == nil {
-				t.Fatalf("landing = %v, want through the queue", got.GetAgent().GetLanding())
+			if landing := got.GetAgent().GetLanding(); !tc.want(landing) {
+				t.Fatalf("landing = %v, want the %q role's", landing, tc.role)
 			}
 		})
 	}

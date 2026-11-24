@@ -374,6 +374,12 @@ var migrations = []migration{
 	// IT IS ADDITIVE: two new nullable columns the previous build never names.
 	{To: 198, Name: "workspaces_interaction", Kind: MigrationAdditive, DDL: interactionDDL},
 	{To: 199, Name: "retired_result_read", Kind: MigrationContract, DDL: retiredResultReadDDL},
+	// IT IS ADDITIVE: a new column the previous build never names.
+	{To: 200, Name: "landing_windows", Kind: MigrationAdditive, DDL: landingWindowsDDL},
+	// IT IS ADDITIVE: new tables the previous build never names.
+	{To: 201, Name: "production_checks", Kind: MigrationAdditive, DDL: productionChecksDDL},
+	// IT IS ADDITIVE: a defaulted column the previous build never names.
+	{To: 202, Name: "finish_placements", Kind: MigrationAdditive, DDL: finishPlacementsDDL},
 }
 
 // sessionsKeepaliveRestoredAtDDL is the layout-196 addition: when a

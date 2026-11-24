@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
 	"fmt"
@@ -22,13 +23,45 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-func TestTheDeployMediatorIsMadeShownOnOpusWithNoPrompt(t *testing.T) {
+// onTheDefaultModel records WS's session on the daemon's default model, so
+// readying it as a mediator configured with none switches no model.
+func onTheDefaultModel(f *fixture, ws wsm.WorkspaceID) wsm.WorkspaceID {
+	f.db.sessions[ws] = wsm.Session{Workspace: ws, Model: DefaultLaunchModel}
+	return ws
+}
+
+func TestAStandingMediatorIsMadeShownOnItsModelWithNoPrompt(t *testing.T) {
 	// Act
-	spec := deployMediatorSpec("/repo", "deploy-mediator")
+	spec := mediatorSpec("/repo", "deploy-mediator", "fable")
 
 	// Assert
-	if spec.RepoDir != "/repo" || spec.Name != StandingBranch("deploy-mediator") || !spec.standing || spec.Model != "opus" || spec.Hidden || spec.InitialPrompt != "" {
-		t.Fatalf("spec = %+v, want an unprompted standing workspace on opus, in sight, in the reserved namespace", spec)
+	if spec.RepoDir != "/repo" || spec.Name != StandingBranch("deploy-mediator") || !spec.standing || spec.Model != "fable" || spec.Hidden || spec.InitialPrompt != "" {
+		t.Fatalf("spec = %+v, want an unprompted standing workspace on fable, in sight, in the reserved namespace", spec)
+	}
+}
+
+func TestAMediatorRunsAsItsConfigSaysElseOnTheDefaults(t *testing.T) {
+	model, high := "fable", conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_HIGH
+	cases := []struct {
+		name string
+		cfg  *repoconfigv1.MediatorAgent
+		want MediatorAgent
+	}{
+		{name: "no section runs on the default model at low", want: MediatorAgent{Model: DefaultLaunchModel, Effort: mediatorEffort}},
+		{name: "an empty section runs on the defaults", cfg: &repoconfigv1.MediatorAgent{}, want: MediatorAgent{Model: DefaultLaunchModel, Effort: mediatorEffort}},
+		{name: "a configured model keeps the default effort", cfg: &repoconfigv1.MediatorAgent{Model: &model}, want: MediatorAgent{Model: "fable", Effort: mediatorEffort}},
+		{name: "a configured effort keeps the default model", cfg: &repoconfigv1.MediatorAgent{Effort: &high}, want: MediatorAgent{Model: DefaultLaunchModel, Effort: high}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := MediatorAgentOf(tc.cfg)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("MediatorAgentOf = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -38,11 +71,11 @@ func TestTheDeployMediatorIsMadeUnpromptedInRemoteControl(t *testing.T) {
 	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
 
 	// Act
-	made, err := f.verbs.(*verbs).CreateDeployMediator(context.Background(), mainWorktree(t, f), "deploy-mediator")
+	made, err := f.verbs.(*verbs).CreateMediator(context.Background(), mainWorktree(t, f), "deploy-mediator", nil)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("CreateDeployMediator: %v", err)
+		t.Fatalf("CreateMediator: %v", err)
 	}
 	if len(f.fleet.efforts) != 0 {
 		t.Fatalf("efforts = %+v, want none set at the create", f.fleet.efforts)
@@ -53,7 +86,7 @@ func TestTheDeployMediatorIsMadeUnpromptedInRemoteControl(t *testing.T) {
 	if !standing.On {
 		t.Fatalf("remote control %+v, want it on", standing)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "made the deploy mediator"}); !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "made the standing mediator"}); !ok {
 		t.Fatalf("records = %+v, want the made mediator recorded", f.log.logger.Records())
 	}
 }
@@ -64,9 +97,9 @@ func TestADeployMediatorThatCannotBeMadeIsRecorded(t *testing.T) {
 		arrange func(t *testing.T, f *fixture) string
 		message string
 	}{
-		{name: "no repository to make it in", message: "the deploy mediator could not be made",
+		{name: "no repository to make it in", message: "the standing mediator could not be made",
 			arrange: func(t *testing.T, f *fixture) string { return t.TempDir() + "/not-a-repository" }},
-		{name: "a remote control that cannot be recorded", message: "the deploy mediator was made but its remote control could not be turned on",
+		{name: "a remote control that cannot be recorded", message: "the standing mediator was made but its remote control could not be turned on",
 			arrange: func(t *testing.T, f *fixture) string {
 				f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
 				f.db.remoteSetErr = errors.New("database is locked")
@@ -80,11 +113,11 @@ func TestADeployMediatorThatCannotBeMadeIsRecorded(t *testing.T) {
 			repoDir := tt.arrange(t, f)
 
 			// Act
-			_, err := f.verbs.(*verbs).CreateDeployMediator(context.Background(), repoDir, "deploy-mediator")
+			_, err := f.verbs.(*verbs).CreateMediator(context.Background(), repoDir, "deploy-mediator", nil)
 
 			// Assert
 			if err == nil {
-				t.Fatal("CreateDeployMediator = nil, want the failure answered")
+				t.Fatal("CreateMediator = nil, want the failure answered")
 			}
 			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: tt.message}); !ok {
 				t.Fatalf("records = %+v, want %q at ERROR", f.log.logger.Records(), tt.message)
@@ -96,16 +129,16 @@ func TestADeployMediatorThatCannotBeMadeIsRecorded(t *testing.T) {
 func TestTheDeployMediatorIsSetToLowEffort(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir()).ID
+	ws := onTheDefaultModel(f, f.workspace("w1", t.TempDir()).ID)
 	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{mediatorEffort}, true
 
 	// Act
-	err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
+	err := f.verbs.(*verbs).SetMediatorAgent(context.Background(), ws, nil)
 
 	// Assert: picked, and the live session switched off the round's
 	// goroutine, never waited on.
 	if err != nil || f.topbarPicked != mediatorEffort {
-		t.Fatalf("SetDeployMediatorEffort = %v, picked %v; want low picked", err, f.topbarPicked)
+		t.Fatalf("SetMediatorAgent = %v, picked %v; want low picked", err, f.topbarPicked)
 	}
 	if len(f.fleet.switches) != 1 || f.fleet.switches[0].Level != mediatorEffort || len(f.fleet.efforts) != 0 {
 		t.Fatalf("switches %+v, sets %+v; want one switch at low and no set waited on", f.fleet.switches, f.fleet.efforts)
@@ -118,16 +151,16 @@ func TestTheDeployMediatorIsSetToLowEffort(t *testing.T) {
 func TestASessionlessDeployMediatorHasItsEffortPickedForItsStart(t *testing.T) {
 	// Arrange: no session yet, so no effort selector is served.
 	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir()).ID
+	ws := onTheDefaultModel(f, f.workspace("w1", t.TempDir()).ID)
 
 	// Act
-	err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
+	err := f.verbs.(*verbs).SetMediatorAgent(context.Background(), ws, nil)
 
 	// Assert
 	if err != nil || f.topbarPicked != mediatorEffort || len(f.fleet.efforts) != 0 {
-		t.Fatalf("SetDeployMediatorEffort = %v, picked %v, set %+v; want its effort picked and nothing set", err, f.topbarPicked, f.fleet.efforts)
+		t.Fatalf("SetMediatorAgent = %v, picked %v, set %+v; want its effort picked and nothing set", err, f.topbarPicked, f.fleet.efforts)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "picked the deploy mediator's effort; its session starts at it"}); !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "picked the standing mediator's effort; its session starts at it"}); !ok {
 		t.Fatalf("records = %+v, want the pick at INFO", f.log.logger.Records())
 	}
 }
@@ -141,12 +174,12 @@ func TestADeployMediatorWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
 		{name: "a live session whose selector never offered low", cause: "never offered",
 			arrange: func(t *testing.T, f *fixture) wsm.WorkspaceID {
 				f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM}, true
-				return f.workspace("w1", t.TempDir()).ID
+				return onTheDefaultModel(f, f.workspace("w1", t.TempDir()).ID)
 			}},
 		{name: "a workspace this daemon does not own", cause: "w-unknown",
 			arrange: func(t *testing.T, f *fixture) wsm.WorkspaceID {
 				f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{mediatorEffort}, true
-				return "w-unknown"
+				return onTheDefaultModel(f, "w-unknown")
 			}},
 	}
 	for _, tt := range tests {
@@ -156,18 +189,61 @@ func TestADeployMediatorWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
 			ws := tt.arrange(t, f)
 
 			// Act
-			err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
+			err := f.verbs.(*verbs).SetMediatorAgent(context.Background(), ws, nil)
 
 			// Assert
 			if err == nil {
-				t.Fatal("SetDeployMediatorEffort answered success for an effort it could not set")
+				t.Fatal("SetMediatorAgent answered success for an effort it could not set")
 			}
-			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy mediator's effort could not be set"})
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the standing mediator's effort could not be set"})
 			if !ok || !strings.Contains(fmt.Sprint(record.Context["cause"]), tt.cause) {
 				t.Fatalf("records = %+v, want the failure at ERROR carrying %q", f.log.logger.Records(), tt.cause)
 			}
 			if f.topbarPicked != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED || len(f.fleet.switches) != 0 {
 				t.Fatalf("picked %v, switches %+v; want nothing picked or switched", f.topbarPicked, f.fleet.switches)
+			}
+		})
+	}
+}
+
+func TestAMediatorIsPutOnItsConfiguredModelBeforeItsBrief(t *testing.T) {
+	fable := "fable"
+	cases := []struct {
+		name string
+		// recorded is the session's recorded model before the brief.
+		recorded string
+		// live is the catalog a live session serves; nil for no session.
+		live []string
+		// wantRecorded is the recorded model after; wantActs the model
+		// switches queued.
+		wantRecorded string
+		wantActs     int
+		// wantErr is whether the brief's readying fails.
+		wantErr bool
+	}{
+		{name: "a mediator already on its model is left alone", recorded: "fable", live: []string{"fable"}, wantRecorded: "fable"},
+		{name: "a sessionless mediator has its model recorded for its start", recorded: "opus", wantRecorded: "fable"},
+		{name: "a live mediator is switched through the queue", recorded: "opus", live: []string{"opus", "fable"}, wantRecorded: "fable", wantActs: 1},
+		{name: "a live mediator whose catalog lacks the model is refused", recorded: "opus", live: []string{"opus"}, wantRecorded: "fable", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ws := f.workspace("w1", t.TempDir()).ID
+			f.db.sessions[ws] = wsm.Session{Workspace: ws, Model: tc.recorded}
+			f.cards.models, f.cards.hasModels = tc.live, tc.live != nil
+			f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{mediatorEffort}, true
+
+			// Act
+			err := f.verbs.(*verbs).SetMediatorAgent(context.Background(), ws, &repoconfigv1.MediatorAgent{Model: &fable})
+
+			// Assert
+			if (err != nil) != tc.wantErr || f.db.sessions[ws].Model != tc.wantRecorded || len(f.queue.acts[ws]) != tc.wantActs {
+				t.Fatalf("SetMediatorAgent = %v, recorded %q, acts %+v; want error %v, %q, %d switches", err, f.db.sessions[ws].Model, f.queue.acts[ws], tc.wantErr, tc.wantRecorded, tc.wantActs)
+			}
+			if _, logged := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the standing mediator's live session could not be switched to its model"}); logged != tc.wantErr {
+				t.Fatalf("records = %+v, want the failed switch at ERROR: %v", f.log.logger.Records(), tc.wantErr)
 			}
 		})
 	}
@@ -345,7 +421,9 @@ func TestAnswerDeployCheckColdGateAnswersOnlyAStandingDeployChecksGate(t *testin
 			// Arrange
 			f := newFixture(t)
 			record := f.workspace("w1", t.TempDir())
-			record.DeployMediator = tt.standing
+			if tt.standing {
+				record.Mediator = wsm.MediatorDeploy
+			}
 			f.db.workspaces[record.ID] = record
 			if tt.gate {
 				f.cards.coldGate = &ServedColdGate{VendorSessionID: "v-1"}
@@ -609,13 +687,13 @@ func TestTheDeployMediatorIsMadeInTheReservedNamespaceBesideAHandMadeBranch(t *t
 	f.git.existingBranches = map[string]bool{"deploy-mediator": true}
 
 	// Act
-	made, err := f.verbs.(*verbs).CreateDeployMediator(context.Background(), repo, "deploy-mediator")
+	made, err := f.verbs.(*verbs).CreateMediator(context.Background(), repo, "deploy-mediator", nil)
 
 	// Assert: made on its own branch and directory; the person's branch is
 	// untouched.
 	want := StandingBranch("deploy-mediator")
 	if err != nil {
-		t.Fatalf("CreateDeployMediator: %v", err)
+		t.Fatalf("CreateMediator: %v", err)
 	}
 	if made.Name != want || made.Branch != want {
 		t.Fatalf("made = %+v, want name and branch %q", made, want)

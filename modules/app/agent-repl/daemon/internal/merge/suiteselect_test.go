@@ -118,6 +118,16 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"shim", "sidecar", "e2e"},
 		},
 		{
+			name:  "a role's metaprompt selects what the committed one does",
+			paths: []string{"modules/app/agent-repl/metaprompt-production-mediator.md"},
+			want:  []string{"shim", "sidecar", "e2e"},
+		},
+		{
+			name:  "other Markdown at the module root selects nothing",
+			paths: []string{"modules/app/agent-repl/README.md"},
+			want:  []string{},
+		},
+		{
 			name:  "documentation beside a daemon change adds nothing to the daemon's selection",
 			paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md", "modules/app/agent-repl/daemon/main.go"},
 			want:  []string{"daemon", "e2e-kit", "e2e", "repo-scans"},

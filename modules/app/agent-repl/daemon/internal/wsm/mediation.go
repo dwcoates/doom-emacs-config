@@ -29,9 +29,16 @@ type Mediation struct {
 	// DeployEnding is how the checked deploy ended (RecordMediationEnding),
 	// empty while it has not, or for a check owed before endings were kept.
 	DeployEnding DeployEnding
-	// OwedAt is the deploy's start: the instant the window its mediator
-	// checks opens, and the identity of this mediation.
+	// OwedAt is the deploy's start, the identity of this mediation.
 	OwedAt time.Time
+	// LandingStartedAt is when the landing this deploy belongs to began: the
+	// earliest start of the queue's merges still running as the deploy
+	// began, since a landing logs from its merge on (owner ruling,
+	// 2026-11-16), or the deploy's own start when none was running (a direct
+	// landing, a crash). The deploy mediator's window opens here, and the
+	// production checks' span between landings closes here (owner ruling,
+	// 2026-11-23).
+	LandingStartedAt time.Time
 	// PromptedAt is when the mediator was told of it; nil while it has not
 	// been.
 	PromptedAt *time.Time
@@ -215,6 +222,10 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 		if prior != nil {
 			replaced = &ReplacedMediation{Mediation: *prior, DispatchCarried: carried}
 		}
+		landingStarted, err := landingStartedIn(ctx, tx, key, at)
+		if err != nil {
+			return err
+		}
 		// THE CHAIN PASSES TO THE NEWER DEPLOY: it begins only where no
 		// mediation was owed, and counts a replaced mediation that had a fix
 		// dispatched as one remediation deployed. The newer deploy's own
@@ -235,14 +246,14 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 			}
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_dispatched, mediation_dispatched_at, mediation_escalation_brief, mediation_escalation_told) VALUES (?, 0, ?, NULL, ?, '', ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(repo_key) DO UPDATE SET mediation_owed_at = excluded.mediation_owed_at,
+			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_dispatched, mediation_dispatched_at, mediation_escalation_brief, mediation_escalation_told, mediation_landing_started_at) VALUES (?, 0, ?, NULL, ?, '', ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(repo_key) DO UPDATE SET mediation_owed_at = excluded.mediation_owed_at, mediation_landing_started_at = excluded.mediation_landing_started_at,
 			   mediation_prompted_at = NULL, mediation_version = excluded.mediation_version, mediation_turn = '', mediation_window = '', mediation_window_start = NULL,
 			   mediation_chain_started_at = excluded.mediation_chain_started_at, mediation_chain_redeploys = excluded.mediation_chain_redeploys,
 			   mediation_dispatched = excluded.mediation_dispatched, mediation_dispatched_at = excluded.mediation_dispatched_at,
 			   mediation_escalation_brief = excluded.mediation_escalation_brief, mediation_escalation_told = excluded.mediation_escalation_told, mediation_deploy_ending = '',
 			   mediation_fixer_turn = ?, mediation_fixer_brief = ?, mediation_fixer_origin = ?`,
-			key, nanos(at), version, nanos(chainStart), redeploys, carried, dispatchedAt, escalationBrief, escalationTold,
+			key, nanos(at), version, nanos(chainStart), redeploys, carried, dispatchedAt, escalationBrief, escalationTold, nanos(landingStarted),
 			string(fixer.ID), fixer.Brief, fixer.Origin)
 		return err
 	})
@@ -252,20 +263,47 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 	return replaced, nil
 }
 
+// landingStartedIn answers when the landing of KEY's deploy that began AT
+// began, inside TX: the earliest opening of the ledger of a merge of KEY's
+// queue still running (admitted or remediating) and opened by AT, or AT
+// itself when none is.
+func landingStartedIn(ctx context.Context, tx *sql.Tx, key RepoKey, at time.Time) (time.Time, error) {
+	var opened sql.NullInt64
+	err := tx.QueryRowContext(ctx,
+		`SELECT MIN(l.opened_at) FROM merge_queue AS q JOIN merge_ledger AS l ON l.lease_id = q.ledger_id
+		 WHERE q.repo_key = ? AND q.state IN (?, ?) AND l.opened_at <= ?`,
+		string(key), int(MergeAdmitted), int(MergeRemediating), nanos(at)).Scan(&opened)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("wsm: read when the landing of %s's deploy began: %w", key, err)
+	}
+	if !opened.Valid {
+		return at, nil
+	}
+	return fromNanos(opened.Int64), nil
+}
+
+// landingWindowsDDL is the layout-200 addition: when each owed check's
+// landing began (Mediation.LandingStartedAt). IT IS ADDITIVE: a column the
+// previous build never names. A check owed before it reads its deploy's
+// start.
+const landingWindowsDDL = `
+ALTER TABLE merge_queue_repos ADD COLUMN mediation_landing_started_at INTEGER;
+`
+
 // mediationQuery reads one repository's mediation columns, keyed by repo.
-const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_dispatched, mediation_dispatched_at, mediation_resumed_owed_at, mediation_escalation_brief, mediation_escalation_told, mediation_deploy_ending, mediation_fixer_turn, mediation_fixer_brief, mediation_fixer_origin FROM merge_queue_repos WHERE repo_key = ?`
+const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_dispatched, mediation_dispatched_at, mediation_resumed_owed_at, mediation_escalation_brief, mediation_escalation_told, mediation_deploy_ending, mediation_fixer_turn, mediation_fixer_brief, mediation_fixer_origin, mediation_landing_started_at FROM merge_queue_repos WHERE repo_key = ?`
 
 // scanMediation decodes ROW of mediationQuery, REPO's: nil when the
 // repository has no row or owes no mediation. It is the one mediation
 // decoding path. An owed mediation with no chain is a DecodeError: every
 // write that owes one records its chain.
 func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
-	var owed, prompted, chainStart, dispatchedAt, resumedOwed sql.NullInt64
+	var owed, prompted, chainStart, dispatchedAt, resumedOwed, landingStarted sql.NullInt64
 	var version, turn, escalationBrief, ending, fixerTurn, fixerBrief string
 	var redeploys int
 	var fixerOrigin int32
 	var dispatched, escalationTold bool
-	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &dispatched, &dispatchedAt, &resumedOwed, &escalationBrief, &escalationTold, &ending, &fixerTurn, &fixerBrief, &fixerOrigin)
+	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &dispatched, &dispatchedAt, &resumedOwed, &escalationBrief, &escalationTold, &ending, &fixerTurn, &fixerBrief, &fixerOrigin, &landingStarted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -279,6 +317,10 @@ func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
 		Dispatched: dispatched, Resumed: resumedOwed.Valid && resumedOwed.Int64 == owed.Int64,
 		EscalationBrief: escalationBrief, EscalationTold: escalationTold, DeployEnding: DeployEnding(ending),
 		FixerTurn: FixerTurn{ID: TurnID(fixerTurn), Brief: fixerBrief, Origin: fixerOrigin}}
+	m.LandingStartedAt = m.OwedAt
+	if landingStarted.Valid {
+		m.LandingStartedAt = fromNanos(landingStarted.Int64)
+	}
 	if prompted.Valid {
 		at := fromNanos(prompted.Int64)
 		m.PromptedAt = &at

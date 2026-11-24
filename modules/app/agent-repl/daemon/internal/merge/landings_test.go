@@ -133,7 +133,7 @@ func TestADirectLandingIsClassifiedByTheDaemonsState(t *testing.T) {
 	}{
 		{name: "the mediator's branch is the mediator's landing whoever ran it", caller: "ws-main", branch: "feature",
 			arrange: func(h *harness) {
-				h.register("ws-fixer", mediatorName)
+				h.register("ws-fixer", deployRole.name)
 				withMediator(t, h)
 				h.db.mu.Lock()
 				record := h.db.workspaces["ws-fixer"]

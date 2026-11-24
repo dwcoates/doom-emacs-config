@@ -213,6 +213,22 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.");
   });
 
+  it("gives the production mediator its own section: review each span, dispatch children, change no code", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("production_mediator", home);
+    // Assert: owner rulings 2026-11-20 and 2026-11-23. The production mediator
+    // reviews the span between landings, holds nothing, hands every fix to a
+    // child, and its section is its own text.
+    expect(text).toContain("This session is the production mediator");
+    expect(text).toContain("agent-repld production-mediation dispatch -summary");
+    expect(text).toContain("agent-repld production-mediation fold -folded");
+    expect(text).toContain("This workspace never edits, commits, lands or deploys anything.");
+    expect(text).toContain("Children run on opus whatever this workspace runs on");
+    expect(text).not.toContain("This session is the deploy mediator");
+  });
+
   it("gives the deploy mediator its own section: check every deploy, and fix what it dispatches itself", () => {
     // Arrange
     const home = homeOnThisRepository();

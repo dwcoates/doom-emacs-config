@@ -202,7 +202,10 @@ func TestEveryVisibleWorkspaceRuns(t *testing.T) {
 	merged := time.Unix(100, 0)
 	for mask := 0; mask < 1<<7; mask++ {
 		bit := func(i int) bool { return mask&(1<<i) != 0 }
-		ws := Workspace{Hidden: bit(0), Closed: bit(1), Current: bit(2), OneShot: bit(3), DeployMediator: bit(4)}
+		ws := Workspace{Hidden: bit(0), Closed: bit(1), Current: bit(2), OneShot: bit(3)}
+		if bit(4) {
+			ws.Mediator = MediatorDeploy
+		}
 		if bit(5) {
 			ws.MergeOf = &of
 		}
@@ -244,7 +247,8 @@ func TestRuns(t *testing.T) {
 		{name: "a collapsed workspace with a merge pending runs, as the fold spares it", ws: Workspace{MergePending: true}, repoFolded: true, want: true},
 		{name: "a hidden one-shot does not run, as only a fold spares", ws: Workspace{OneShot: true, Hidden: true}, want: false},
 		{name: "an unfolded one-shot that is not visible does not run", ws: Workspace{OneShot: true}, want: false},
-		{name: "a hidden standing deploy check runs", ws: Workspace{Hidden: true, DeployMediator: true}, want: true},
+		{name: "a hidden standing deploy check runs", ws: Workspace{Hidden: true, Mediator: MediatorDeploy}, want: true},
+		{name: "a hidden production mediator runs", ws: Workspace{Hidden: true, Mediator: MediatorProduction}, want: true},
 		{name: "a thread that is not visible does not run", ws: Workspace{Kind: WorkspaceKindThread}, want: false},
 	}
 	for _, tc := range cases {
@@ -271,7 +275,8 @@ func TestKeepaliveHeld(t *testing.T) {
 		{name: "a hidden workspace lets its cache lapse", ws: Workspace{Hidden: true}, want: true},
 		{name: "a hidden workspace the user is looking at keeps its cache warm", ws: Workspace{Hidden: true, Current: true}, want: false},
 		{name: "a reopened merged hidden workspace lets its cache lapse", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
-		{name: "a hidden standing deploy check keeps its cache warm", ws: Workspace{Hidden: true, DeployMediator: true}, want: false},
+		{name: "a hidden standing deploy check keeps its cache warm", ws: Workspace{Hidden: true, Mediator: MediatorDeploy}, want: false},
+		{name: "a hidden production mediator keeps its cache warm", ws: Workspace{Hidden: true, Mediator: MediatorProduction}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -135,6 +135,9 @@ func describeCreateRefusal(e *agentreplv1.CreateWorkspaceError) (string, error) 
 	case *agentreplv1.CreateWorkspaceError_RequestedByDeployMediator:
 		return fmt.Sprintf("the requester at %s is its repository's deploy mediator, which never creates a workspace: %s",
 			r.RequestedByDeployMediator.GetWorkspace().GetDir(), r.RequestedByDeployMediator.GetDetail()), nil
+	case *agentreplv1.CreateWorkspaceError_RequestedByProductionMediator:
+		return fmt.Sprintf("the requester at %s is its repository's production mediator, which creates its children only by dispatching them: %s",
+			r.RequestedByProductionMediator.GetWorkspace().GetDir(), r.RequestedByProductionMediator.GetDetail()), nil
 	}
 	return "", undescribed("creating a workspace", e)
 }
