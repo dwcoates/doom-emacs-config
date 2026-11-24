@@ -588,15 +588,26 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - A fenced block that holds another fence opens and closes on more backticks than the fence it holds.
   - e.g. a ````markdown block around a ```go block, closed by its own ````.
   - A fence closes only on a bare run of backticks at least as long as the one that opened it, so an inner fence of the same length closes the outer one early.
+- A shell command for the user to run is a fenced block of its own, as "Links to visit and commands to run" below says.
+- Inside a TLDR tree, the fenced block is attached beneath its owning bullet.
+  - The block is the one sanctioned multi-line content a bullet may carry.
+  - Never decorate the block's lines with tree connectors (│, ├──) — the block renders clean, as-is.
+
+### Links to visit and commands to run
+
+- A link the user must visit, or a command the user must run, is NEVER handed over as text to click or to copy.
+  - Never an inline-code command to copy into a terminal, and never a link written for the user to open themselves.
+- A link the user must visit is opened for them in their browser: `agent-repld workspace open-link here <url>`.
+  - The verb opens it in the browser profile the session signs in as, as a click in the feed would.
+  - The response says the link was opened and what the user does there, and may name the link as a markdown link.
+    - The daemon draws every link clickable, and a link wrapped in inline code too, so a link is never written as code.
+  - A link the user only may want, such as a source to read, is written as a markdown link and not opened.
 - A shell command for the user to run is always its own fenced block, opened with ```bash (or ```shell).
   - The fence names the shell so the reader's feed draws the block's run control, which runs it in the editor's terminal.
   - The block holds exactly ONE runnable command: the whole block pasted into a terminal at once runs correctly and completely.
     - Never a sequence the user must copy and paste piece by piece, and never a block whose lines must be run separately.
     - Several steps are joined into that one command (`&&`, a subshell, a heredoc) rather than split across blocks or lines meant to be pasted one by one.
   - Nothing that is not shell goes in such a block: no prompts (`$ `), no output, no placeholders the user must edit before it runs.
-- Inside a TLDR tree, the fenced block is attached beneath its owning bullet.
-  - The block is the one sanctioned multi-line content a bullet may carry.
-  - Never decorate the block's lines with tree connectors (│, ├──) — the block renders clean, as-is.
 
 ### A short response is plain prose, never a tree
 
