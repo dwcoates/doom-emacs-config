@@ -161,6 +161,10 @@ type fakeDB struct {
 	runSubs []wsm.GithubWorkflowRunSubscription
 	runOwed []wsm.GithubWorkflowRunCompletion
 	runErr  error
+	// prOwners is each pull request's owner PullRequestOwnerOf answers, and
+	// prOwnerErr fails that read.
+	prOwners   map[wsm.PullRequestKey]wsm.PullRequestOwner
+	prOwnerErr error
 	// mergeQueues are the merge queues AllMergeQueues answers.
 	mergeQueues map[wsm.RepoKey][]wsm.MergeQueueEntry
 	wsm.DB
@@ -261,6 +265,14 @@ func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, 
 	}
 	lease, ok := f.leases[id]
 	return lease, ok, nil
+}
+
+func (f *fakeDB) PullRequestOwnerOf(_ context.Context, pr wsm.PullRequestKey) (wsm.PullRequestOwner, bool, error) {
+	if f.prOwnerErr != nil {
+		return wsm.PullRequestOwner{}, false, f.prOwnerErr
+	}
+	owner, ok := f.prOwners[pr]
+	return owner, ok, nil
 }
 
 // WorkspaceHead answers the head of what Workspace answers, through every one

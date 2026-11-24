@@ -237,6 +237,10 @@ A workspace keeps every link that bears on its task, such as its pull request, t
 - `agent-repld workspace pr-subscriptions WS` lists what a workspace follows, and whether the daemon's reads of each pull request are working.
 - `agent-repld workspace pr-unsubscribe WS -pr URL` stops following one; agents never do this themselves.
 - The daemon reads GitHub as your `gh` login, so it needs `gh auth login` done once.
+- Shift-clicking a link to a pull request in a prompt or response bubble switches to the workspace that owns it, rather than opening the link.
+  - An open owner is selected. A closed one, such as a workspace closed when its pull request merged, is reopened and then selected.
+  - When no workspace owns the pull request, the link says so and nothing opens.
+  - Shift-clicking a link that is not a pull request opens it as a plain click does.
 
 ### Slack threads a workspace follows
 

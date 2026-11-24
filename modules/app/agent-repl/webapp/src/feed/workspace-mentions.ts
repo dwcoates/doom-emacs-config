@@ -53,7 +53,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { TREE_LABEL_CLASS, TREE_RAILS_CLASS } from "../metaprompt-tree.js";
-import { jumpToWorkspace, openAndJumpToWorkspace, type JumpSite } from "./merge/jump.js";
+import { jumpForStanding, type JumpSite } from "./merge/jump.js";
 
 const log = createLogger("webapp.feed.workspace-mentions");
 
@@ -265,24 +265,10 @@ export function installWorkspaceMentionClicks(ctx: AppContext, root: HTMLElement
       throw new Error(`a drawn workspace mention names ${JSON.stringify(id)}, which is no current target`);
     }
     const workspace = create(WorkspaceRefSchema, { id: target.workspace.id, dir: target.workspace.dir });
-    void guardMalformed(ctx, MENTION_JUMP.operation, mentionJump(target.standing)(mention, ctx, workspace, MENTION_JUMP));
+    void guardMalformed(ctx, MENTION_JUMP.operation, jumpForStanding(target.standing, "WorkspaceMentionTarget.standing")(mention, ctx, workspace, MENTION_JUMP));
   };
   root.addEventListener("click", onClick, true);
   return () => root.removeEventListener("click", onClick, true);
-}
-
-/** The jump a click on a target of STANDING makes. */
-function mentionJump(standing: Standing): typeof jumpToWorkspace {
-  switch (standing) {
-    case "open":
-      return jumpToWorkspace;
-    case "closed":
-      return openAndJumpToWorkspace;
-    default: {
-      const other: string = standing;
-      return unreachableArm("WorkspaceMentionTarget.standing", other);
-    }
-  }
 }
 
 /**

@@ -17,7 +17,13 @@ import {
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { FeedIdSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { jumpToWorkspace, openAndJumpToWorkspace, type JumpSite } from "../../../src/feed/merge/jump.js";
+import {
+  jumpForStanding,
+  jumpToWorkspace,
+  openAndJumpToWorkspace,
+  type JumpSite,
+  type JumpStanding,
+} from "../../../src/feed/merge/jump.js";
 import { scriptedAppContext } from "../../rpc/app-context.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "../harness.js";
@@ -245,5 +251,27 @@ describe("openAndJumpToWorkspace", () => {
       await call;
     }
     expect(host.querySelectorAll(".merge-test-refusal")).toHaveLength(1);
+  });
+});
+
+describe("jumpForStanding", () => {
+  it("selects an open target", () => {
+    expect(jumpForStanding("open", "Test.standing")).toBe(jumpToWorkspace);
+  });
+
+  it("reopens a closed target before selecting it", () => {
+    expect(jumpForStanding("closed", "Test.standing")).toBe(openAndJumpToWorkspace);
+  });
+
+  it("refuses a standing it does not know as a malformed view naming the served field", () => {
+    expect(() => jumpForStanding("parked" as JumpStanding, "Test.standing")).toThrow(MalformedView);
+    expect(() => jumpForStanding("parked" as JumpStanding, "Test.standing")).toThrow(/Test\.standing/);
+  });
+
+  it("is the one choice of jump by standing: no caller picks between the two jumps itself", () => {
+    for (const file of ["feed/workspace-mentions.ts", "feed/pull-request-owner.ts"]) {
+      const source = codeOf(readFileSync(join(process.cwd(), "src", file), "utf8"));
+      expect([source.includes("jumpForStanding("), source.includes("openAndJumpToWorkspace")], file).toEqual([true, false]);
+    }
   });
 });

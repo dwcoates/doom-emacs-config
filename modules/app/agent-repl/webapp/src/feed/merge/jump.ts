@@ -160,6 +160,28 @@ export async function openAndJumpToWorkspace(
   }
 }
 
+/** Whether a jump's target is open or closed, as the daemon served it. */
+export type JumpStanding = "open" | "closed";
+
+/**
+ * The jump a click on a target of STANDING makes: an open workspace is
+ * selected, and a closed one is reopened and then selected, as the sidebar's
+ * closed entries are. PATH names the served field the standing came from, for
+ * the loud failure an unknown standing is.
+ */
+export function jumpForStanding(standing: JumpStanding, path: string): typeof jumpToWorkspace {
+  switch (standing) {
+    case "open":
+      return jumpToWorkspace;
+    case "closed":
+      return openAndJumpToWorkspace;
+    default: {
+      const other: string = standing;
+      return unreachableArm(path, other);
+    }
+  }
+}
+
 /** Record RPC's refusal of WORKSPACE under SITE, and draw it inside HOST. */
 function refuse(
   host: HTMLElement,
@@ -173,7 +195,7 @@ function refuse(
     operation: `${site.operation}-refused`,
     context: { arm, workspace: workspace.id },
   }, { rpc, sentence });
-  host.append(drawRefusal(site, arm, sentence));
+  host.append(drawJumpRefusal(site, arm, sentence));
 }
 
 /**
@@ -186,11 +208,11 @@ function refuseTransport(host: HTMLElement, site: JumpSite, rpc: string, workspa
     operation: `${site.operation}-failed`,
     context: { workspace: workspace.id, cause: err },
   }, { rpc, err: String(err) });
-  host.append(drawRefusal(site, "transport", "the daemon could not be reached"));
+  host.append(drawJumpRefusal(site, "transport", "the daemon could not be reached"));
 }
 
 /** The refusal, inside the element that made the call. */
-function drawRefusal(site: JumpSite, arm: string, text: string): HTMLElement {
+export function drawJumpRefusal(site: JumpSite, arm: string, text: string): HTMLElement {
   const el = document.createElement("div");
   el.className = `refusal ${site.refusalClass}`;
   el.setAttribute("data-arm", arm);

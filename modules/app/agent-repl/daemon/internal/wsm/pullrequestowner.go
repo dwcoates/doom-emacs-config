@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"agent-repld/internal/dlog"
 )
 
 // This file is ONE OWNER PER PULL REQUEST: the workspace that owns a pull
@@ -90,4 +92,52 @@ func ownHeldSubscriptionInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, pr
 		`UPDATE pull_request_subscriptions SET origin = ?, events = events | ? WHERE subscriber = ? AND owner = ? AND repo = ? AND number = ? AND origin != ?`,
 		string(PullRequestOriginOwnedLink), int64(AllPullRequestEvents()), id, pr.Owner, pr.Repo, pr.Number, string(PullRequestOriginOwnedLink))
 	return err
+}
+
+// PullRequestOwner is the workspace a pull request's canonical owned link
+// belongs to (agentrepl.v1.FindPullRequestOwnerOwned).
+type PullRequestOwner struct {
+	Workspace WorkspaceID
+	// Closed is true when the owner is a closed workspace, which a click
+	// reopens before selecting it.
+	Closed bool
+}
+
+// PullRequestOwnerOf answers the workspace that owns PR, and false when none
+// does. An open owner is the one holding PR's owned-link subscription, which
+// the index admits for one workspace only. A close ends that subscription but
+// keeps the owned link, so when no open workspace owns PR the most recently
+// closed workspace that stored it owned answers.
+func (s *store) PullRequestOwnerOf(ctx context.Context, pr PullRequestKey) (PullRequestOwner, bool, error) {
+	var (
+		owner PullRequestOwner
+		found bool
+	)
+	err := s.read(ctx, "daemon.wsm.pull_request_owner_of", dlog.Context{"pull_request": pr.String()}, func(ctx context.Context) error {
+		q := s.q(ctx)
+		err := q.QueryRowContext(ctx,
+			`SELECT subscriber FROM pull_request_subscriptions WHERE origin = ? AND owner = ? AND repo = ? AND number = ?`,
+			string(PullRequestOriginOwnedLink), pr.Owner, pr.Repo, pr.Number).Scan(&owner.Workspace)
+		switch {
+		case err == nil:
+			found = true
+			return nil
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		err = q.QueryRowContext(ctx,
+			`SELECT w.id FROM workspace_links AS l JOIN workspaces AS w ON w.id = l.workspace_id
+			 WHERE l.owned = 1 AND l.pr_owner = ? AND l.pr_repo = ? AND l.pr_number = ? AND w.closed = 1
+			 ORDER BY w.closure_at DESC, w.id LIMIT 1`,
+			pr.Owner, pr.Repo, pr.Number).Scan(&owner.Workspace)
+		switch {
+		case err == nil:
+			owner.Closed, found = true, true
+			return nil
+		case errors.Is(err, sql.ErrNoRows):
+			return nil
+		}
+		return err
+	})
+	return owner, found, err
 }

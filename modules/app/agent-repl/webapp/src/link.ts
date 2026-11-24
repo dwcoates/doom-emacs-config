@@ -83,6 +83,11 @@ const log = createLogger("webapp.link");
 /** Only these two schemes are a hyperlink; everything else is text. */
 const LINKABLE_SCHEME = /^https?:\/\//i;
 
+/** Whether HREF is a web link: http(s), the only schemes that are a hyperlink. */
+export function isWebHref(href: string): boolean {
+  return LINKABLE_SCHEME.test(href);
+}
+
 export interface ExternalLinkSpec {
   /** The visible text. Empty falls back to the url, so a link is never blank. */
   text: string;
@@ -113,7 +118,7 @@ export interface EditorLinkSpec {
  */
 export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTMLElement {
   const label = spec.text === "" ? spec.url : spec.text;
-  if (!LINKABLE_SCHEME.test(spec.url)) {
+  if (!isWebHref(spec.url)) {
     log.info("refusing to link a non-http(s) destination; drawing it as text", {
       operation: "link.unlinkable-scheme",
       context: { url: spec.url },
@@ -373,7 +378,7 @@ export function installNavigationGuard(ctx: AppContext, root: Document | HTMLEle
     const anchor = target.closest("a[href]");
     if (!(anchor instanceof HTMLElement)) return;
     const href = anchor.getAttribute("href") ?? "";
-    if (!LINKABLE_SCHEME.test(href)) return;
+    if (!isWebHref(href)) return;
     event.preventDefault();
     event.stopPropagation();
     log.info("an outward link no surface routed was opened externally by the page's guard", {
@@ -406,7 +411,7 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
   // The RAW href, exactly as the markdown carried it: the resolved `.href`
   // would have turned a relative or `file://` path into a page-origin url.
   const href = anchor.getAttribute("href") ?? "";
-  if (LINKABLE_SCHEME.test(href)) {
+  if (isWebHref(href)) {
     // Cancel FIRST — a navigation would destroy the page a refusal draws on.
     event.preventDefault();
     event.stopPropagation();
@@ -493,7 +498,11 @@ function claimsOutwardClick(event: MouseEvent): boolean {
   return event.button === 0 || event.button === 1;
 }
 
-async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): Promise<void> {
+/**
+ * Open URL in the browser through OpenExternal, drawing a refusal beside
+ * ANCHOR: what every web link's click does.
+ */
+export async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): Promise<void> {
   clearRefusal(anchor);
   try {
     const response = await callUnary(

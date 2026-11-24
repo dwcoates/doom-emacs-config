@@ -59,6 +59,7 @@ import "agentrepl/v1/endpoint_dismiss_news_digest.proto";
 import "agentrepl/v1/endpoint_edit_held_prompt.proto";
 import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
 import "agentrepl/v1/endpoint_find_entry_neighbor.proto";
+import "agentrepl/v1/endpoint_find_pull_request_owner.proto";
 import "agentrepl/v1/endpoint_find_workspaces.proto";
 import "agentrepl/v1/endpoint_finish_workspace.proto";
 import "agentrepl/v1/endpoint_fold_held_prompt.proto";
@@ -743,6 +744,13 @@ service AgentRepl {
   // host stream so the editor makes the switch as it makes a key's. See
   // endpoint_select_in_editor.proto.
   rpc SelectInEditor(SelectInEditorRequest) returns (SelectInEditorResponse);
+  // Which workspace owns the pull request a link names, so a shift-click on
+  // the link switches to that workspace. See
+  // endpoint_find_pull_request_owner.proto.
+  rpc FindPullRequestOwner(FindPullRequestOwnerRequest) returns (FindPullRequestOwnerResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // The webhost's load button for a held-back page (a cold-gated workspace's),
   // relayed to the workspace's host stream so the editor loads the page. See
   // endpoint_load_page_in_editor.proto.

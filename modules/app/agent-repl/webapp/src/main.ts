@@ -67,6 +67,7 @@ import { mountTopbar } from "./topbar/topbar.js";
 import { installNavigationGuard, installProseLinkRouting, installRunControlRouting } from "./link.js";
 import { installLinkHoverPopup } from "./link-hover.js";
 import { MENTION_TEXT_CLASS, installWorkspaceMentionClicks, watchWorkspaceMentions } from "./feed/workspace-mentions.js";
+import { installPullRequestOwnerClicks } from "./feed/pull-request-owner.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { createLogger, logLevelSelection, renderMessage, type LogMessage } from "./log.js";
@@ -395,6 +396,10 @@ export async function boot(): Promise<void> {
     // exactly as the structured links do. Hung here, at the feed/markdown seam,
     // once — every markdown-bearing surface lives inside `feedScroll`.
     installProseLinkRouting(ctx, shell.feedScroll);
+    // A SHIFT-CLICK ON A PULL REQUEST LINK switches to the workspace owning
+    // it (feed/pull-request-owner.ts), ahead of the prose router by the
+    // document's capture phase.
+    installPullRequestOwnerClicks(ctx, shell.feedScroll);
     // A SHELL CODE BLOCK'S RUN CONTROL runs its command in the editor's
     // terminal popup (link.ts, installRunControlRouting), hung at the same seam.
     installRunControlRouting(ctx, shell.feedScroll);
