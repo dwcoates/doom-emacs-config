@@ -46,7 +46,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,8 +120,10 @@ const dlSpoolBound = stack.DefaultTimeout
 // spool would mean the test is ruling on a file it did not intend, and the
 // arm it then asserts would be about something else. It is failed rather
 // than picked between.
-func dlAwaitOneSpool(t *testing.T, ctx context.Context, w *stack.World) string {
+func dlAwaitOneSpool(t *testing.T, w *stack.World) string {
 	t.Helper()
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), dlSpoolBound)
+	defer cancel()
 	tick := time.NewTicker(stack.PollInterval)
 	defer tick.Stop()
 	for {
@@ -158,8 +159,8 @@ func dlAwaitOneSpool(t *testing.T, ctx context.Context, w *stack.World) string {
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("e2e: no spool appeared under %s within %s; the scenario's detached shell never wrote one",
-				w.Sidecar.SpoolRoot, dlSpoolBound)
+			t.Fatalf("e2e: no spool appeared under %s within %s: %v; the scenario's detached shell never wrote one",
+				w.Sidecar.SpoolRoot, dlSpoolBound, grantedclock.Explain(ctx))
 		case <-tick.C:
 		}
 	}
@@ -172,8 +173,14 @@ func dlAwaitOneSpool(t *testing.T, ctx context.Context, w *stack.World) string {
 // (seam.go) carries a dedicated `reason` key holding the same word the
 // wire's DetachedLost arm carries, so this assertion goes on failing if the
 // arm regresses — a substring match against the sentence would not.
-func dlAwaitLostReason(t *testing.T, ctx context.Context, w *stack.World, workspaceDir, spool, reason string) harness.LogRecord {
+//
+// IT IS THE ONE WAIT dlLostBound BOUNDS, from the moment the spool is found:
+// the waits before and after it are ordinary ones with bounds of their own,
+// so none of them is charged to the window's conclusion.
+func dlAwaitLostReason(t *testing.T, w *stack.World, workspaceDir, spool, reason string) harness.LogRecord {
 	t.Helper()
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), dlLostBound)
+	defer cancel()
 	tick := time.NewTicker(stack.PollInterval)
 	defer tick.Stop()
 	for {
@@ -194,8 +201,8 @@ func dlAwaitLostReason(t *testing.T, ctx context.Context, w *stack.World, worksp
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("e2e: the sidecar never concluded %s LOST with reason=%q within the bound; "+
-				"the conclusions it did state for that file were %v", spool, reason, seen)
+			t.Fatalf("e2e: the sidecar never concluded %s LOST with reason=%q within %s: %v; "+
+				"the conclusions it did state for that file were %v", spool, reason, dlLostBound, grantedclock.Explain(ctx), seen)
 		case <-tick.C:
 		}
 	}
@@ -229,7 +236,6 @@ func dlSamePath(a, b string) bool {
 // cancelled. The shell is answered so a caller can assert on the rest of it.
 func dlAwaitLostShell(
 	t *testing.T,
-	ctx context.Context,
 	w *stack.World,
 	ws *workspacev1.WorkspaceRef,
 	initial []*frontendv1.FeedRow,
@@ -242,7 +248,7 @@ func dlAwaitLostShell(
 	// conclusion never drops what was observed: the body is awaited carrying
 	// it, which is also what makes the answered spool the one the settled
 	// bubble draws.
-	shell, spool = dbAwaitSettledShell(t, ctx, w, ws, initial, stream, commandSubstring,
+	shell, spool = dbAwaitSettledShell(t, w, ws, initial, stream, commandSubstring,
 		func(s *frontendv1.FeedShellSettled) bool { return s.GetOutcome() != nil },
 		"partial output with no terminator")
 	lost := shell.GetSettled().GetLost()
@@ -313,19 +319,16 @@ func testDetachedLostWentSilent(t *testing.T) {
 	initial, stream, ws := dlDriveDetachedLive(t, w)
 	defer stream.Close()
 
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), dlLostBound)
-	defer cancel()
-
 	// Act: nothing. The scenario's own silence IS the act — the spool exists,
 	// carries its one line, and will never grow again.
-	spool := dlAwaitOneSpool(t, ctx, w)
+	spool := dlAwaitOneSpool(t, w)
 
 	// Assert: the arm, on the sidecar's own `reason` key.
-	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "went_silent")
+	dlAwaitLostReason(t, w, ws.GetDir(), spool, "went_silent")
 
 	// Assert: the feed draws it LOST, and the spool it managed to write is
 	// still carried — a LOST conclusion never drops what was observed.
-	shell, got := dlAwaitLostShell(t, ctx, w, ws, initial, stream, "sleep 100000", "went_silent")
+	shell, got := dlAwaitLostShell(t, w, ws, initial, stream, "sleep 100000", "went_silent")
 	if !strings.Contains(got, "partial output with no terminator") {
 		t.Errorf("the LOST shell's spool = %q, want the one line the run managed to write before it went silent", got)
 	}

@@ -70,7 +70,6 @@ import (
 
 	"connectrpc.com/connect"
 
-	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -102,15 +101,17 @@ func testInterruptAfterTextDelta(t *testing.T) {
 
 	turn := stack.SubmitPrompt(t, w, ws, "!interrupt")
 
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
-	defer cancel()
-
+	// EACH WAIT BELOW TAKES ITS OWN BOUND (w.WaitCtx): stack.DefaultTimeout
+	// bounds one wait, and one context spent on all three charged the
+	// terminal's wait for the running call's and the settle's.
 	// Act: wait until the Bash tool call is genuinely live (running, no
 	// result yet) — the window INTERRUPT_MID_TOOL's own `awaitInterrupt()`
 	// call is parked inside, in the same synchronous run as the tool_use
 	// above it, so there is no window where the call is live and a stop has
 	// nothing to resolve — then interrupt the turn for real.
-	harness.AwaitView(t, ctx, tail, "the Bash tool call to start running", func(r *frontendv1.FeedRow) bool {
+	runningCtx, cancelRunning := w.WaitCtx()
+	defer cancelRunning()
+	harness.AwaitView(t, runningCtx, tail, "the Bash tool call to start running", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == turn.GetValue() &&
 			r.GetActivity().GetSimpleToolCall().GetName().GetText() == "Bash" &&
 			r.GetActivity().GetSimpleToolCall().GetRunning() != nil
@@ -130,7 +131,9 @@ func testInterruptAfterTextDelta(t *testing.T) {
 	// Assert: the Bash tool call settles (returned, succeeded — see the file
 	// header: there is no third "interrupted" verdict on the wire), and the
 	// turn's own terminal row is the interrupted arm.
-	returned := harness.AwaitView(t, ctx, tail, "the Bash tool call to settle after the interrupt", func(r *frontendv1.FeedRow) bool {
+	settleCtx, cancelSettle := w.WaitCtx()
+	defer cancelSettle()
+	returned := harness.AwaitView(t, settleCtx, tail, "the Bash tool call to settle after the interrupt", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == turn.GetValue() &&
 			r.GetActivity().GetSimpleToolCall().GetName().GetText() == "Bash" &&
 			r.GetActivity().GetSimpleToolCall().GetReturned() != nil
@@ -139,7 +142,9 @@ func testInterruptAfterTextDelta(t *testing.T) {
 		t.Fatalf("the interrupted Bash call's returned verdict = %v, want succeeded (an interrupted run is a SUCCESS arm — see the file header)", returned.GetActivity().GetSimpleToolCall().GetReturned())
 	}
 
-	terminal := harness.AwaitView(t, ctx, tail, "the turn's interrupted terminal", func(r *frontendv1.FeedRow) bool {
+	terminalCtx, cancelTerminal := w.WaitCtx()
+	defer cancelTerminal()
+	terminal := harness.AwaitView(t, terminalCtx, tail, "the turn's interrupted terminal", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == turn.GetValue() && r.GetTurnEnded().GetInterrupted() != nil
 	})
 	if terminal.GetTurnEnded().GetInterrupted() == nil {
