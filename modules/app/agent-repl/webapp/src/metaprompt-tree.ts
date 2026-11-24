@@ -607,34 +607,103 @@ interface Piece {
   width: number;
   breakSuffix: string;
   breakPrefix: string;
+  /** Joined to the piece before it with no space: a later character of a word broken between its characters. */
+  glued: boolean;
+  /** Starts a line of its own unless it is the line's first piece: the first character of a word broken between its characters. */
+  opensLine: boolean;
+}
+
+/** A whole word or atom as one packer piece, its open elements at the break before it as STACK says. */
+function wordPiece(raw: string, width: number, stack: readonly string[]): Piece {
+  return { raw, width, breakSuffix: closeSequence([...stack]), breakPrefix: openSequence([...stack]), glued: false, opensLine: false };
 }
 
 /**
  * to_pieces: turn atoms into packer pieces, expanding any atom too wide. An
  * HTML body's pieces are measured by WIDTHOF; a markdown body's are counted in
  * the daemon's columns, as the port always counted them.
+ *
+ * A WORD OF AN HTML BODY TOO WIDE FOR A WHOLE LINE BREAKS BETWEEN ITS
+ * CHARACTERS (`wordCharacters`), so a long link or path wraps onto
+ * continuation lines that hang under the branch's text rather than overflowing
+ * the line for the browser to wrap back to the line's start. A markdown body's
+ * word stays whole, as the daemon formatter kept it.
  */
 function toPieces(atoms: Atom[], width: number, widthOf?: WidthOf): Piece[] {
   const pieces: Piece[] = [];
   for (const atom of atoms) {
     const atomW = widthOf === undefined ? atomWidth(atom) : widthOf("text", pieceHtml(atomRaw(atom)));
     if (atomW <= width) {
-      pieces.push({ raw: atomRaw(atom), width: atomW, breakSuffix: "", breakPrefix: "" });
+      pieces.push(wordPiece(atomRaw(atom), atomW, []));
       continue;
     }
     let stack: string[] = [];
     for (const sw of atomSubwords(atom, widthOf !== undefined)) {
-      pieces.push({
-        raw: sw.raw,
-        width: widthOf === undefined ? sw.width : widthOf("text", pieceHtml(sw.raw)),
-        breakSuffix: closeSequence(stack),
-        breakPrefix: openSequence(stack),
-      });
+      const swW = widthOf === undefined ? sw.width : widthOf("text", pieceHtml(sw.raw));
+      if (widthOf === undefined || swW <= width) {
+        pieces.push(wordPiece(sw.raw, swW, stack));
+      } else {
+        wordCharacters(sw.raw, stack).forEach((c, i) => {
+          pieces.push({ ...wordPiece(c.raw, widthOf("text", c.html), c.stack), glued: i > 0, opensLine: i === 0 });
+        });
+      }
       stack = sw.openAfter;
     }
   }
   return pieces;
 }
+
+/** One character of a word broken between its characters (`wordCharacters`). */
+interface WordCharacter {
+  /** The character as it is placed: escaped, with the element tags around it in the word. */
+  raw: string;
+  /** The character as it is measured: drawn inside the elements open around it. */
+  html: string;
+  /** The elements open at the break before the character. */
+  stack: string[];
+}
+
+/**
+ * The characters (grapheme clusters, so an emoji and its selector stay one)
+ * of WORD, an HTML word whose elements open before it are STACK. An open tag
+ * rides on the character after it and a close tag on the character before it,
+ * so the characters' raws join back to WORD; each is measured inside the
+ * elements open around it, which set its face. A word with no text is one
+ * character.
+ */
+function wordCharacters(word: string, stack: readonly string[]): WordCharacter[] {
+  const chars: WordCharacter[] = [];
+  const open = [...stack];
+  let pending = "";
+  let before: string[] = [...open];
+  for (const r of parseRuns(word)) {
+    if (r.isTag) {
+      if (r.raw.startsWith("</") && pending === "" && chars.length > 0) {
+        chars[chars.length - 1].raw += r.raw;
+      } else {
+        if (pending === "") before = [...open];
+        pending += r.raw;
+      }
+      applyTag(open, r.raw);
+      continue;
+    }
+    for (const { segment } of GRAPHEMES.segment(decodeEntities(r.raw))) {
+      const text = escapeHtml(segment);
+      chars.push({
+        raw: pending + text,
+        html: pieceHtml(openSequence(open) + text + closeSequence(open)),
+        stack: pending === "" ? [...open] : before,
+      });
+      pending = "";
+    }
+  }
+  // A word of markup alone (an image) has no characters to break between, and is one.
+  if (chars.length === 0) return [{ raw: word, html: pieceHtml(word), stack: [...stack] }];
+  if (pending !== "") chars[chars.length - 1].raw += pending;
+  return chars;
+}
+
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** A piece of body text as it is drawn, and so as it is measured: its wide characters boxed. */
 function pieceHtml(raw: string): string {
@@ -646,7 +715,12 @@ function pieceItems(atoms: Atom[]): TreeMeasureItem[] {
   const items: TreeMeasureItem[] = [];
   for (const atom of atoms) {
     items.push({ kind: "text", html: pieceHtml(atomRaw(atom)) });
-    for (const sw of atomSubwords(atom, true)) items.push({ kind: "text", html: pieceHtml(sw.raw) });
+    let stack: string[] = [];
+    for (const sw of atomSubwords(atom, true)) {
+      items.push({ kind: "text", html: pieceHtml(sw.raw) });
+      for (const c of wordCharacters(sw.raw, stack)) items.push({ kind: "text", html: c.html });
+      stack = sw.openAfter;
+    }
   }
   return items;
 }
@@ -766,7 +840,8 @@ function pack(
       lines.push("");
       widths.push(0);
     }
-    if (placed && currentWidth + space + piece.width + closeW > room()) {
+    const gap = piece.glued ? 0 : space;
+    if (placed && (piece.opensLine || currentWidth + gap + piece.width + closeW > room())) {
       // Break: close the current line's open span, then reopen it on the next.
       const closing = before[i].open ? "`".repeat(before[i].delim) : "";
       lines.push(current + piece.breakSuffix + closing);
@@ -777,8 +852,8 @@ function pack(
       placed = false;
     }
     if (placed) {
-      current += " ";
-      currentWidth += space;
+      if (!piece.glued) current += " ";
+      currentWidth += gap;
     } else if (piece.width + reopenW + closeW > room()) {
       overflows.push(stripTags(piece.raw));
     }
