@@ -104,7 +104,7 @@ func TestImpactDataRefusesASuiteThatDeclaresNoInputs(t *testing.T) {
 func TestImpactMetricsCarryTheReportAndSortTheBreadth(t *testing.T) {
 	// Arrange
 	rep := impact.Report{
-		WouldSkip: 3, WouldSkipCPU: 9.5, Misses: []impact.Miss{{}}, RecordsWritten: 5, OverheadCPU: 1.25, Incomplete: 2,
+		WouldSkip: 3, WouldSkipCPU: 9.5, Misses: []impact.Miss{{}}, RecordsWritten: 5, OverheadCPU: 1.25,
 		Breadth: map[impact.TestKey]float64{
 			{Package: "integration", Test: "TestB"}: 0.5,
 			{Package: "integration", Test: "TestA"}: 0.25,
@@ -113,7 +113,7 @@ func TestImpactMetricsCarryTheReportAndSortTheBreadth(t *testing.T) {
 	// Act
 	m := impactMetrics(impact.PackagePass{Suite: "daemon"}, rep)
 	// Assert
-	if m.Suite != "daemon" || m.WouldSkip != 3 || m.WouldSkipCPU != 9.5 || m.Misses != 1 || m.RecordsWritten != 5 || m.OverheadCPU != 1.25 || m.Incomplete != 2 {
+	if m.Suite != "daemon" || m.WouldSkip != 3 || m.WouldSkipCPU != 9.5 || m.Misses != 1 || m.RecordsWritten != 5 || m.OverheadCPU != 1.25 {
 		t.Fatalf("metrics = %+v", m)
 	}
 	if len(m.Breadth) != 2 || m.Breadth[0].Test != "integration.TestA" || m.Breadth[1].Share != 0.5 {
@@ -144,7 +144,6 @@ func newImpactFixture(t *testing.T) *impactFixture {
 		"mod/daemon/internal/a/a.go":                "package a\n\nfunc A() int { return 1 }\n",
 		"mod/daemon/integration/harness/h.go":       "package harness\n\nfunc Start() {}\n",
 		"mod/daemon/integration/one_test.go":        "package integration\n\nimport (\n\t\"testing\"\n\n\t\"fx/integration/harness\"\n)\n\nfunc TestOne(t *testing.T) { harness.Start() }\n",
-		"mod/goroot/testing/testing.go":             "package testing\n\ntype T struct{}\n",
 		"mod/prompts/p.txt":                         "p\n",
 		"mod/agent-shim/logging/go/go.mod":          "module agentrepl/logging\n",
 		"mod/agent-shim/claude/shim-sidecar/go.mod": "module agentrepl/shim-claude-sidecar\n",
@@ -171,7 +170,7 @@ func newImpactFixture(t *testing.T) *impactFixture {
 		},
 		Impact: &ImpactDeps{
 			Store: impact.Store{Dir: filepath.Join(t.TempDir(), "impact")},
-			List:  f.list,
+			List:  impact.ExecLister,
 			Toolchain: func() (map[string]string, error) {
 				return map[string]string{"go": "go1.24"}, nil
 			},
@@ -180,25 +179,6 @@ func newImpactFixture(t *testing.T) *impactFixture {
 		},
 	}
 	return f
-}
-
-// list answers the listings a real `go list` would for the fixture's module,
-// by hand: the cli's own tests never run the go command (their unit is
-// confined to its declared inputs).
-func (f *impactFixture) list(dir, tags string, test bool, patterns ...string) ([]impact.Pkg, error) {
-	d := filepath.Join(f.module, "daemon")
-	mod := &impact.PkgModule{Path: "fx", Dir: d, GoMod: filepath.Join(d, "go.mod")}
-	pkg := func(path, rel string, files ...string) impact.Pkg {
-		return impact.Pkg{ImportPath: path, Dir: filepath.Join(d, rel), GoFiles: files, Module: mod}
-	}
-	if test {
-		variant := pkg("fx/integration [fx/integration.test]", "integration", "one_test.go")
-		variant.ForTest = "fx/integration"
-		// A real listing holds the standard packages the tests import.
-		std := impact.Pkg{ImportPath: "testing", Dir: filepath.Join(f.module, "goroot", "testing"), GoFiles: []string{"testing.go"}, Standard: true}
-		return []impact.Pkg{std, pkg("fx/integration/harness", "integration/harness", "h.go"), variant}, nil
-	}
-	return []impact.Pkg{pkg("fx/internal/a", "internal/a", "a.go"), pkg("fx/cmd/agent-repld", "cmd/agent-repld", "main.go")}, nil
 }
 
 // result is a recorded chunk's result whose harness wrote windows.
@@ -232,7 +212,7 @@ func TestRecordImpactRecordsDecidesAndLogsEveryDecision(t *testing.T) {
 
 	// Assert
 	if len(first) != 1 || first[0].WouldSkip != 0 || first[0].RecordsWritten != 1 || first[0].Errors != 0 {
-		t.Fatalf("first = %+v, want one record written and nothing to skip\nerror log: %s", first, f.errOut.String())
+		t.Fatalf("first = %+v, want one record written and nothing to skip", first)
 	}
 	if len(second) != 1 || second[0].WouldSkip != 1 || second[0].WouldSkipCPU != 3 || second[0].Misses != 0 {
 		t.Fatalf("second = %+v, want the test would-skipped with its CPU", second)

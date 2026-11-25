@@ -109,10 +109,6 @@ const (
 	// ImpactBreadthSeriesName is, per test, the share of the daemon's files
 	// its record covers.
 	ImpactBreadthSeriesName = "agentrepl_test_impact_record_breadth"
-	// ImpactIncompleteSeriesName counts the tests whose recording was
-	// incomplete (a window the harness could not cut, a daemon killed before
-	// it wrote its counters): never recorded, always would run.
-	ImpactIncompleteSeriesName = "agentrepl_test_impact_incomplete"
 	// ImpactErrorsSeriesName is 1 when recording or deciding failed in this
 	// run, and 0 otherwise.
 	ImpactErrorsSeriesName = "agentrepl_test_impact_errors"
@@ -212,8 +208,6 @@ type Impact struct {
 	Misses         int
 	RecordsWritten int
 	OverheadCPU    float64
-	// Incomplete counts tests whose recording was incomplete.
-	Incomplete int
 	// Errors is 1 when recording or deciding failed.
 	Errors int
 	// Breadth is each recorded test's share of the daemon's files.
@@ -496,7 +490,6 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 			{ImpactMissesSeriesName, strconv.Itoa(im.Misses)},
 			{ImpactRecordsSeriesName, strconv.Itoa(im.RecordsWritten)},
 			{ImpactOverheadSeriesName, num(im.OverheadCPU)},
-			{ImpactIncompleteSeriesName, strconv.Itoa(im.Incomplete)},
 			{ImpactErrorsSeriesName, strconv.Itoa(im.Errors)},
 		} {
 			fmt.Fprintf(&b, "%s{%s} %s %d\n", v.name, labels, v.value, ms)

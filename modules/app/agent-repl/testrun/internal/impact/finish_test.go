@@ -279,9 +279,6 @@ func TestFinishNeverRecordsAnIncompleteWindowOrASkippedTest(t *testing.T) {
 	if !strings.Contains(strings.Join(log.infos, "\n"), "daemon:integration.TestOne: would run: its recording is incomplete: a daemon was killed") {
 		t.Fatalf("log = %v, want the incomplete recording named", log.infos)
 	}
-	if len(log.errors) != 1 || !strings.Contains(log.errors[0], "impact: INCOMPLETE: daemon:integration.TestOne was not recorded: a daemon was killed") {
-		t.Fatalf("error log = %v, want the incomplete recording logged as an error", log.errors)
-	}
 }
 
 func TestFinishCountsAnUnnamedChunkFailureAndSkipsNothingOnIt(t *testing.T) {

@@ -116,16 +116,11 @@ type goPkg struct {
 }
 
 // ImpactParallel is how a recorded chunk runs its tests: one at a time, so a
-// counter window holds exactly one top-level test. It holds TWO core slots:
-// MEASURED in the first gate run that recorded (2026-11-21), a recorded chunk
-// used 1.8 cores (the test process, its instrumented daemon and the window
-// reductions), and a chunk that claims one seat while using 1.8 oversubscribes
-// the host, which starved four cases into their 5s log-record waits. The
-// planner runs more chunks at once to keep the run's overall parallelism, and
-// sizes them by each test's measured seconds like any other chunks: a recorded
-// run's history is each test's own serial time, so later runs cut chunks no
-// longer than the unrecorded ones were.
-var ImpactParallel = roster.Parallel{Tests: 1, Slots: 2}
+// counter window holds exactly one top-level test, on one core. The planner
+// runs more chunks at once to keep the run's overall parallelism. PROVISIONAL
+// width: the first recorded runs' cores per chunk (the run summary's "not
+// pinned to its width" line) say whether one core holds.
+var ImpactParallel = roster.Parallel{Tests: 1, Slots: 1}
 
 // recordImpact runs the package's chunks recorded, writing their windows
 // under dir: one test at a time (ImpactParallel), against each program's
