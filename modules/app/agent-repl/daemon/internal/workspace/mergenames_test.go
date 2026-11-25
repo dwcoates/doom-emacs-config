@@ -437,14 +437,14 @@ func TestCreateRetiresAClosedHolderWhoseWorkIsAllMerged(t *testing.T) {
 			t.Setenv(PrefixEnv, "ABC")
 			t.Setenv(LegacyPrefixEnv, "")
 			repoDir := mainWorktree(t, f)
-			holder := wsm.Workspace{ID: "ws-inv", Name: "ABC/deploy-mediator-retired", Branch: "ABC/deploy-mediator", Repo: f.db.repositories[0].ID,
+			holder := wsm.Workspace{ID: "ws-inv", Name: "ABC/ramdisk-investigation-retired", Branch: "ABC/ramdisk-investigation", Repo: f.db.repositories[0].ID,
 				Closed: true, ParentBranch: "master", Dir: t.TempDir()}
 			f.git.existingBranches = map[string]bool{"master": true}
 			tc.arrange(f, &holder)
 			f.db.with(holder)
 
 			// Act
-			_, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "deploy-mediator"})
+			_, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "ramdisk-investigation"})
 
 			// Assert
 			if !tc.wantRetired {
@@ -459,7 +459,7 @@ func TestCreateRetiresAClosedHolderWhoseWorkIsAllMerged(t *testing.T) {
 			if len(f.git.removedClean) != 1 || f.git.removedClean[0].WorktreeDir != holder.Dir || f.db.workspaces["ws-inv"].MergedAt == nil {
 				t.Fatalf("removed %+v, merged %v; want the holder retired", f.git.removedClean, f.db.workspaces["ws-inv"].MergedAt)
 			}
-			if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/deploy-mediator" {
+			if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/ramdisk-investigation" {
 				t.Fatalf("Create = %v, created %+v; want the workspace built on the freed name", err, f.git.created)
 			}
 			if len(operationRecords(f, dlog.LevelInfo, opReleaseName)) != 1 {
@@ -480,7 +480,7 @@ func TestCreateBuildsAtTheDirectoryARetiredHolderLeft(t *testing.T) {
 	t.Setenv(PrefixEnv, "ABC")
 	t.Setenv(LegacyPrefixEnv, "")
 	repoDir := mainWorktree(t, f)
-	derived, err := WorktreeDir(repoDir, "ABC/deploy-mediator")
+	derived, err := WorktreeDir(repoDir, "ABC/ramdisk-investigation")
 	if err != nil {
 		t.Fatalf("WorktreeDir: %v", err)
 	}
@@ -490,12 +490,12 @@ func TestCreateBuildsAtTheDirectoryARetiredHolderLeft(t *testing.T) {
 	if derived, err = normalizeDir(derived); err != nil {
 		t.Fatalf("normalizeDir: %v", err)
 	}
-	f.db.with(wsm.Workspace{ID: "ws-inv", Kind: wsm.WorkspaceKindRepository, Name: "ABC/deploy-mediator", Branch: "ABC/deploy-mediator", Repo: f.db.repositories[0].ID,
+	f.db.with(wsm.Workspace{ID: "ws-inv", Kind: wsm.WorkspaceKindRepository, Name: "ABC/ramdisk-investigation", Branch: "ABC/ramdisk-investigation", Repo: f.db.repositories[0].ID,
 		Closed: true, ParentBranch: "master", Dir: derived})
 	f.git.existingBranches = map[string]bool{"master": true}
 
 	// Act
-	record, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "deploy-mediator"})
+	record, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "ramdisk-investigation"})
 
 	// Assert
 	if err != nil || record.Dir != derived {
@@ -519,13 +519,13 @@ func TestCreateFailsLoudlyWhenAClosedHoldersWorkCannotBeJudged(t *testing.T) {
 	t.Setenv(PrefixEnv, "ABC")
 	t.Setenv(LegacyPrefixEnv, "")
 	repoDir := mainWorktree(t, f)
-	f.db.with(wsm.Workspace{ID: "ws-inv", Name: "ABC/deploy-mediator", Branch: "ABC/deploy-mediator", Repo: f.db.repositories[0].ID,
+	f.db.with(wsm.Workspace{ID: "ws-inv", Name: "ABC/ramdisk-investigation", Branch: "ABC/ramdisk-investigation", Repo: f.db.repositories[0].ID,
 		Closed: true, ParentBranch: "master", Dir: t.TempDir()})
 	f.git.existingBranches = map[string]bool{"master": true}
 	f.git.ancestorErr = errors.New("git gone")
 
 	// Act
-	_, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "deploy-mediator"})
+	_, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "ramdisk-investigation"})
 
 	// Assert
 	if err == nil || len(f.git.removedClean) != 0 || len(f.git.created) != 0 {
