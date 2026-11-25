@@ -721,8 +721,8 @@ is nil for a branch no registered workspace ever held, cut by hand."
 N is the supplied name, trimmed; C is the `/'-separated component that
 broke its rule, empty when that component is empty; R is `:slug' when
 the last component is not a slug, `:prefix' when an earlier one is
-not a prefix, and `:reserved' when the name lies in the daemon's own
-`agent-repl' branch namespace."
+not a prefix, and `:reserved' when the name ends in a standing
+workspace's name (a repository's mediator's)."
   (let ((message "CreateWorkspaceInvalidName"))
     (agent-repl-wire-verbs--check-keys message json '(name component slug prefix reserved))
     (list :name (agent-repl-wire-verbs--decode-string message 'name json)

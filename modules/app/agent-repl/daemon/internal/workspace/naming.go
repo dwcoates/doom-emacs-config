@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"agent-repld/internal/wsm"
+
 	"fmt"
 	"os"
 	"path/filepath"
@@ -114,45 +116,33 @@ const (
 	// NameRulePrefix is a supplied name with a component before the last that
 	// is not a prefix.
 	NameRulePrefix = refusalarm.Nested("prefix")
-	// NameRuleReserved is a supplied name in the daemon's own branch
-	// namespace (ReservedNamespace).
+	// NameRuleReserved is a supplied name ending in a standing workspace's
+	// name (IsStandingName).
 	NameRuleReserved = refusalarm.Nested("reserved")
 )
 
-// THE DAEMON'S OWN BRANCH NAMESPACE. A workspace's branch is its name, so a
-// workspace the daemon makes for itself under a fixed name collides with any
-// branch a person or an agent cut by that name: a hand-made `deploy-intake`
-// branch refused the standing intake's create and held the merge queue
-// (2026-11-17). Every branch the daemon makes for itself lies under
-// ReservedNamespace, and the naming rule refuses every other create, rename
-// and async merge name there, so the two can never meet: only the daemon
-// makes a branch there, and a person's branch is never the daemon's.
-const (
-	// ReservedNamespace is the first component of every branch in the
-	// daemon's own namespace. The name `agent-repl` alone is reserved too:
-	// as a branch it would block every ref beneath it.
-	ReservedNamespace = "agent-repl"
-	// standingNamespace holds a repository's standing workspaces (its deploy
-	// checks), one branch per role.
-	standingNamespace = ReservedNamespace + "/standing"
-	// reservedDirPrefix starts the worktree directory of a branch in the
-	// reserved namespace. A git ref component never starts with `.`, so no
-	// other branch's directory (its bare name) can ever be one of these.
-	reservedDirPrefix = "."
-)
+// THE STANDING WORKSPACES' NAMES. A workspace the daemon makes for itself
+// (a repository's mediators) is named plainly, as any workspace is: its name,
+// its branch and its worktree directory are its role's name
+// (wsm.MediatorRole.Name; owner ruling, 2026-11-25). A workspace's branch is
+// its name, so a branch a person or an agent cut by that name would refuse
+// the standing workspace's create: a hand-made `deploy-intake` branch once
+// held the merge queue (2026-11-17). So the naming rule refuses every other
+// create, rename and async merge whose name ends in a standing name, which
+// also keeps its worktree directory (the name's bare component) the standing
+// workspace's alone.
+var standingNames = func() map[string]bool {
+	names := map[string]bool{}
+	for _, role := range wsm.MediatorRoles {
+		names[role.Name()] = true
+	}
+	return names
+}()
 
-// InReservedNamespace answers whether NAME, a name or a branch, lies in the
-// daemon's own namespace: its first `/`-separated component is
-// ReservedNamespace.
-func InReservedNamespace(name string) bool {
-	first, _, _ := strings.Cut(name, "/")
-	return first == ReservedNamespace
-}
-
-// StandingBranch is the branch, and the name, of the standing workspace
-// whose role is spelled SLUG (`deploy-intake`, `deploy-fixer`).
-func StandingBranch(slug string) string {
-	return standingNamespace + "/" + slug
+// IsStandingName answers whether NAME, a name or a branch, ends in a standing
+// workspace's name: its last `/`-separated component is one.
+func IsStandingName(name string) bool {
+	return standingNames[BareName(name)]
 }
 
 // NameBreach is where a supplied name broke the naming rule: the
@@ -166,13 +156,13 @@ type NameBreach struct {
 // workspace's branch, worktree directory and tab label as it stands. Its last
 // `/`-separated component must have the slug's shape (ValidateSlugShape) with
 // no word or length limit, and every earlier component must be a prefix
-// (prefixShape). A name in the daemon's own namespace (InReservedNamespace)
-// breaks the rule before its shape is read. It answers the first breach, or
+// (prefixShape). A name ending in a standing workspace's name
+// (IsStandingName) breaks the rule before its shape is read. It answers the first breach, or
 // nil for a legal name. The name is validated, never repaired.
 func ValidateSuppliedName(name string) *NameBreach {
 	components := strings.Split(name, "/")
-	if InReservedNamespace(name) {
-		return &NameBreach{Component: components[0], Rule: NameRuleReserved}
+	if IsStandingName(name) {
+		return &NameBreach{Component: components[len(components)-1], Rule: NameRuleReserved}
 	}
 	last := len(components) - 1
 	for i, component := range components[:last] {
@@ -228,10 +218,7 @@ func BareName(name string) string {
 // repository directory it is cut from. The rule, unchanged from the system this
 // replaces:
 //
-//   - the directory name is the branch's BARE component, except for a
-//     branch in the daemon's own namespace (InReservedNamespace), whose
-//     directory is `.` and the whole branch with `-` for `/`
-//     (`.agent-repl-standing-deploy-intake`);
+//   - the directory name is the branch's BARE component;
 //   - when repoDir is the MAIN worktree (its .git is a directory), the parent
 //     is the SIBLING directory "<repo basename><WorktreeDirSuffix>" beside it —
 //     `~/.config/doom` yields `~/.config/doom-worktrees/<slug>`;
@@ -247,11 +234,6 @@ func BareName(name string) string {
 // A branch with no safe directory component is an error rather than a guess.
 func WorktreeDir(repoDir, branch string) (string, error) {
 	bare := BareName(branch)
-	if InReservedNamespace(branch) {
-		// A RESERVED BRANCH'S DIRECTORY IS ITS WHOLE BRANCH, dot-led: its bare
-		// name (`deploy-intake`) is a name any workspace may take.
-		bare = reservedDirPrefix + strings.ReplaceAll(branch, "/", "-")
-	}
 	if bare == "" || bare == "." || bare == string(filepath.Separator) {
 		return "", fmt.Errorf("branch %q has no safe worktree directory name", branch)
 	}

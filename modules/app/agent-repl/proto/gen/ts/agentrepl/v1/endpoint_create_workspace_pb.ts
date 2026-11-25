@@ -2493,14 +2493,12 @@ export const CreateWorkspaceInvalidNamePrefixSchema: GenMessage<CreateWorkspaceI
   messageDesc(file_agentrepl_v1_endpoint_create_workspace, 58);
 
 /**
- * The name's first component is `agent-repl`, the branch namespace the daemon
- * keeps for the workspaces it makes and owns itself (a repository's standing
- * deploy checks, under `agent-repl/standing/`). No create, rename or async
- * merge name outside the daemon may take a branch there, so a branch the
- * daemon makes for itself can never collide with one a person or an agent
- * cut, and a person's branch is never the daemon's to touch. The name
- * `agent-repl` alone is refused too: as a branch it would block every ref
- * beneath it.
+ * The name's last component is a standing workspace's name, one the daemon
+ * keeps for a workspace it makes and owns itself (a repository's mediators,
+ * `deploy-mediator` and `production-mediator`). No create, rename or async
+ * merge name outside the daemon may end in one, so the branch and the
+ * worktree directory the daemon makes for itself can never collide with one
+ * a person or an agent made.
  *
  * @generated from message agentrepl.v1.CreateWorkspaceInvalidNameReserved
  */

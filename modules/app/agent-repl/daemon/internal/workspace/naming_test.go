@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/refusalarm"
+	"agent-repld/internal/wsm"
 )
 
 func TestValidateSlugAcceptsTheNamingRule(t *testing.T) {
@@ -361,9 +362,8 @@ func TestValidateSuppliedNameNamesTheFirstBreach(t *testing.T) {
 		{name: "a doubled slash", supplied: "ABC//fix", component: "", rule: NameRulePrefix},
 		{name: "a prefix with a doubled dot", supplied: "a..b/fix", component: "a..b", rule: NameRulePrefix},
 		{name: "a bad prefix before a bad slug", supplied: "a b/C D", component: "a b", rule: NameRulePrefix},
-		{name: "a standing workspace's branch", supplied: "agent-repl/standing/deploy-intake", component: "agent-repl", rule: NameRuleReserved},
-		{name: "the reserved namespace's root", supplied: "agent-repl", component: "agent-repl", rule: NameRuleReserved},
-		{name: "a bad slug in the reserved namespace", supplied: "agent-repl/Bad Slug", component: "agent-repl", rule: NameRuleReserved},
+		{name: "a standing workspace's name", supplied: "production-mediator", component: "production-mediator", rule: NameRuleReserved},
+		{name: "a standing workspace's name under a prefix", supplied: "ABC/deploy-mediator", component: "deploy-mediator", rule: NameRuleReserved},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -549,60 +549,35 @@ func TestRefuseSuppliedNameFieldsAreTheBreachFields(t *testing.T) {
 	}
 }
 
-func TestInReservedNamespace(t *testing.T) {
+func TestIsStandingName(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
 		want bool
 	}{
-		{name: "a standing branch", in: "agent-repl/standing/deploy-intake", want: true},
-		{name: "the namespace's root", in: "agent-repl", want: true},
-		{name: "a hand-made branch of a standing role's slug", in: "deploy-intake", want: false},
-		{name: "a name that only starts with the namespace", in: "agent-repl-fix", want: false},
-		{name: "the namespace below a prefix", in: "ABC/agent-repl", want: false},
+		{name: "the deploy mediator's name", in: "deploy-mediator", want: true},
+		{name: "the production mediator's name", in: "production-mediator", want: true},
+		{name: "a standing name under a prefix", in: "ABC/production-mediator", want: true},
+		{name: "a name that only starts with a standing name", in: "production-mediator-planning", want: false},
+		{name: "a standing name as a prefix", in: "production-mediator/fix", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := InReservedNamespace(tt.in)
+			got := IsStandingName(tt.in)
 
 			// Assert
 			if got != tt.want {
-				t.Fatalf("InReservedNamespace(%q) = %v, want %v", tt.in, got, tt.want)
+				t.Fatalf("IsStandingName(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestStandingBranchLiesInTheReservedNamespace(t *testing.T) {
-	// Act
-	got := StandingBranch("deploy-intake")
-
-	// Assert
-	if got != "agent-repl/standing/deploy-intake" || !InReservedNamespace(got) {
-		t.Fatalf("StandingBranch = %q, want agent-repl/standing/deploy-intake in the reserved namespace", got)
-	}
-}
-
-func TestWorktreeDirOfAReservedBranchCanNeverBeAnotherBranchs(t *testing.T) {
-	// Arrange: a main worktree, and a hand-made branch of the standing
-	// role's slug, whose directory is its bare name.
-	parent := t.TempDir()
-	repo := filepath.Join(parent, "doom")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	ordinary, err := WorktreeDir(repo, "deploy-intake")
-	if err != nil {
-		t.Fatalf("WorktreeDir(deploy-intake): %v", err)
-	}
-
-	// Act
-	got, err := WorktreeDir(repo, StandingBranch("deploy-intake"))
-
-	// Assert: dot-led, which no git ref component (no bare name) can be.
-	want := filepath.Join(parent, "doom-worktrees", ".agent-repl-standing-deploy-intake")
-	if err != nil || got != want || got == ordinary {
-		t.Fatalf("WorktreeDir() = (%q, %v), want %q, apart from the ordinary branch's %q", got, err, want, ordinary)
+func TestEveryMediatorRolesNameIsAStandingName(t *testing.T) {
+	for _, role := range wsm.MediatorRoles {
+		if !IsStandingName(role.Name()) {
+			t.Errorf("%s's name %q is no standing name", role, role.Name())
+		}
 	}
 }

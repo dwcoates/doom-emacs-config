@@ -129,9 +129,9 @@ func TestTheSharedNestedRefusalSentences(t *testing.T) {
 		{name: "invalid prefix", say: func() (string, error) {
 			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "A/b", Component: "A", Rule: &agentreplv1.CreateWorkspaceInvalidName_Prefix{Prefix: &agentreplv1.CreateWorkspaceInvalidNamePrefix{}}})
 		}, want: `the name "A/b" breaks the naming rule: its component "A" before the last is not a prefix`},
-		{name: "a name in the daemon's namespace", say: func() (string, error) {
-			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "agent-repl/x", Component: "agent-repl", Rule: &agentreplv1.CreateWorkspaceInvalidName_Reserved{Reserved: &agentreplv1.CreateWorkspaceInvalidNameReserved{}}})
-		}, want: `the name "agent-repl/x" lies in the daemon's own branch namespace "agent-repl", which no workspace's name may use`},
+		{name: "a standing workspace's name", say: func() (string, error) {
+			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "fix/production-mediator", Component: "production-mediator", Rule: &agentreplv1.CreateWorkspaceInvalidName_Reserved{Reserved: &agentreplv1.CreateWorkspaceInvalidNameReserved{}}})
+		}, want: `the name "fix/production-mediator" ends in "production-mediator", a name agent-repl keeps for its own standing workspace`},
 		{name: "version unexpected, unversioned", say: func() (string, error) {
 			return sayVersionUnexpected(&agentreplv1.MergeWorkspaceVersionIncrementUnexpected{Reason: &agentreplv1.MergeWorkspaceVersionIncrementUnexpected_UnversionedRepository{UnversionedRepository: &agentreplv1.MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository{}}})
 		}, want: "its repository's deploy config versions nothing"},

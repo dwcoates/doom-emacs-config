@@ -924,7 +924,7 @@ type DeployCheckWorkspaces interface {
 	// CreateMediator makes a repository's standing mediator, in sight,
 	// unprompted, in remote control, on the model AGENT configures (the
 	// daemon's default when it names none).
-	CreateMediator(ctx context.Context, repoDir, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error)
+	CreateMediator(ctx context.Context, repoDir string, role wsm.MediatorRole, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error)
 	// SetMediatorAgent records a standing mediator's model and picks its
 	// effort, which its session comes up at, and switches a live session to
 	// both; a shim absent, stood down or unreachable is no failure.

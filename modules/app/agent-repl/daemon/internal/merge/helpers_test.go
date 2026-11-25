@@ -5682,7 +5682,7 @@ func (f *fakeDeployChecks) make(prefix, name string) (wsm.Workspace, error) {
 	return ws, nil
 }
 
-func (f *fakeDeployChecks) CreateMediator(ctx context.Context, _, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
+func (f *fakeDeployChecks) CreateMediator(ctx context.Context, _ string, role wsm.MediatorRole, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
 	f.mu.Lock()
 	f.agents = append(f.agents, agent)
 	f.mu.Unlock()
@@ -5693,7 +5693,7 @@ func (f *fakeDeployChecks) CreateMediator(ctx context.Context, _, name string, a
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return f.make("ws-fixer", name)
+	return f.make("ws-fixer", role.Name())
 }
 
 func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {

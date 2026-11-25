@@ -1594,7 +1594,7 @@ name that keeps it."
                            "it has an empty part between slashes"
                          (format "its prefix %S must be letters and digits joined by single . _ or -"
                                  component)))
-              (:reserved (format "its first part %S is the branch namespace agent-repl keeps for its own workspaces"
+              (:reserved (format "%S is the name agent-repl keeps for its own standing workspace"
                                  component))))))
 
 (defun agent-repl-verbs--create-policy-refusal-sentence (missing)

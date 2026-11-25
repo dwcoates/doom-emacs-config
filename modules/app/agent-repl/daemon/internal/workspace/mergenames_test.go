@@ -664,7 +664,7 @@ func TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld(t *testing.T) {
 	}
 }
 
-func TestClaimMergeNameAnswersTakenForTheReservedNamespace(t *testing.T) {
+func TestClaimMergeNameAnswersTakenForAStandingName(t *testing.T) {
 	// Arrange: nothing holds the name, and no branch of it exists.
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "")
@@ -672,16 +672,16 @@ func TestClaimMergeNameAnswersTakenForTheReservedNamespace(t *testing.T) {
 	repo := claimRepo(t, f)
 
 	// Act
-	branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), repo, "agent-repl/standing/deploy-intake")
+	branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), repo, "production-mediator")
 
 	// Assert
-	if err != nil || !taken || branch != "agent-repl/standing/deploy-intake" || release != nil {
+	if err != nil || !taken || branch != "production-mediator" || release != nil {
 		t.Fatalf("ClaimMergeName = %q, %v, %v; want taken with no claim", branch, taken, err)
 	}
 	if claimed := f.verbs.(*verbs).names.claimed; len(claimed) != 0 {
 		t.Fatalf("claimed = %+v, want no claim", claimed)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opNaming, Message: "an async merge's name lies in the daemon's reserved branch namespace"}); !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opNaming, Message: "an async merge's name ends in a standing workspace's name"}); !ok {
 		t.Fatalf("records = %+v, want the reserved name recorded", f.log.logger.Records())
 	}
 }

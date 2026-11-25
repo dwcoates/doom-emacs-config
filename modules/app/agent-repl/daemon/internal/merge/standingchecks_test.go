@@ -31,7 +31,7 @@ func mediatorIn(t *testing.T, h *harness, ws ids.WorkspaceID, closed bool) {
 	t.Helper()
 	ctx := context.Background()
 	h.db.mu.Lock()
-	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: deployRole.name, Repo: theRepository, Closed: closed}
+	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: deployRole.role.Name(), Repo: theRepository, Closed: closed}
 	h.db.mu.Unlock()
 	if err := h.db.RecordDeployMediator(ctx, mediationKey(h), ws); err != nil {
 		t.Fatal(err)
@@ -91,8 +91,8 @@ func TestMediatorOfMakesOneForAQueueWithNone(t *testing.T) {
 			got, err := h.o.mediatorOf(context.Background(), deployRole, queueOf(t, h), dlog.Context{})
 
 			// Assert
-			if err != nil || got != (standing{ws: "ws-fixer"}) || !slices.Equal(h.checks.made, []string{deployRole.name}) {
-				t.Fatalf("mediatorOf = (%+v, %v), made %v; want %s made", got, err, h.checks.made, deployRole.name)
+			if err != nil || got != (standing{ws: "ws-fixer"}) || !slices.Equal(h.checks.made, []string{deployRole.role.Name()}) {
+				t.Fatalf("mediatorOf = (%+v, %v), made %v; want %s made", got, err, h.checks.made, deployRole.role.Name())
 			}
 			recorded, found, readErr := h.db.DeployMediatorOf(context.Background(), mediationKey(h))
 			if readErr != nil || !found || recorded.Workspace != got.ws {

@@ -780,13 +780,13 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 	if origin != nil {
 		return v.claimSupplied(ctx, log, repoDir, spec.MergeName, origin.Requester)
 	}
-	// A STANDING WORKSPACE IS THE DAEMON'S OWN, named in its reserved
-	// namespace (StandingBranch), which the naming rule refuses every other
-	// create: so it skips that rule, and is still refused, typed, when an
-	// unlanded workspace or a branch already holds its name.
+	// A STANDING WORKSPACE IS THE DAEMON'S OWN, named its role's name
+	// (IsStandingName), which the naming rule refuses every other create: so
+	// it skips that rule, and is still refused, typed, when a workspace or a
+	// branch already holds its name.
 	if spec.standing {
-		if !InReservedNamespace(spec.Name) {
-			panic(fmt.Sprintf("workspace: standing create %q is outside the reserved namespace %q", spec.Name, ReservedNamespace))
+		if !standingNames[spec.Name] {
+			panic(fmt.Sprintf("workspace: standing create %q is no standing workspace's name", spec.Name))
 		}
 		return v.claimSupplied(ctx, log, repoDir, spec.Name, "")
 	}

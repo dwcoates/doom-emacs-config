@@ -32,11 +32,11 @@ func onTheDefaultModel(f *fixture, ws wsm.WorkspaceID) wsm.WorkspaceID {
 
 func TestAStandingMediatorIsMadeShownOnItsModelWithNoPrompt(t *testing.T) {
 	// Act
-	spec := mediatorSpec("/repo", "deploy-mediator", "fable")
+	spec := mediatorSpec("/repo", wsm.MediatorDeploy, "fable")
 
 	// Assert
-	if spec.RepoDir != "/repo" || spec.Name != StandingBranch("deploy-mediator") || !spec.standing || spec.Model != "fable" || spec.Backlogged || spec.InitialPrompt != "" {
-		t.Fatalf("spec = %+v, want an unprompted standing workspace on fable, in sight, in the reserved namespace", spec)
+	if spec.RepoDir != "/repo" || spec.Name != "deploy-mediator" || !spec.standing || spec.Model != "fable" || spec.Backlogged || spec.InitialPrompt != "" {
+		t.Fatalf("spec = %+v, want an unprompted standing workspace on fable, in sight, named plainly", spec)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestTheDeployMediatorIsMadeUnpromptedInRemoteControl(t *testing.T) {
 	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
 
 	// Act
-	made, err := f.verbs.(*verbs).CreateMediator(context.Background(), mainWorktree(t, f), "deploy-mediator", nil)
+	made, err := f.verbs.(*verbs).CreateMediator(context.Background(), mainWorktree(t, f), wsm.MediatorDeploy, nil)
 
 	// Assert
 	if err != nil {
@@ -113,7 +113,7 @@ func TestADeployMediatorThatCannotBeMadeIsRecorded(t *testing.T) {
 			repoDir := tt.arrange(t, f)
 
 			// Act
-			_, err := f.verbs.(*verbs).CreateMediator(context.Background(), repoDir, "deploy-mediator", nil)
+			_, err := f.verbs.(*verbs).CreateMediator(context.Background(), repoDir, wsm.MediatorDeploy, nil)
 
 			// Assert
 			if err == nil {
@@ -676,8 +676,40 @@ func TestCompactRequeuedMergeColdGateWaitsOutASlowCompaction(t *testing.T) {
 	}
 }
 
-func TestTheDeployMediatorIsMadeInTheReservedNamespaceBesideAHandMadeBranch(t *testing.T) {
-	// Arrange: a branch a person cut under the mediator's slug, held by no
+func TestAMediatorIsMadeUnderItsRolesPlainName(t *testing.T) {
+	cases := []struct {
+		name string
+		role wsm.MediatorRole
+		want string
+	}{
+		{name: "the deploy mediator", role: wsm.MediatorDeploy, want: "deploy-mediator"},
+		{name: "the production mediator", role: wsm.MediatorProduction, want: "production-mediator"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
+			t.Setenv(PrefixEnv, "")
+			t.Setenv(LegacyPrefixEnv, "")
+			repo := mainWorktree(t, f)
+
+			// Act
+			made, err := f.verbs.(*verbs).CreateMediator(context.Background(), repo, tc.role, nil)
+
+			// Assert: its name, its branch and its directory are its role's name.
+			if err != nil || made.Name != tc.want || made.Branch != tc.want {
+				t.Fatalf("CreateMediator = (%+v, %v), want name and branch %q", made, err, tc.want)
+			}
+			if len(f.git.created) != 1 || filepath.Base(f.git.created[0].WorktreeDir) != tc.want {
+				t.Fatalf("created = %+v, want one worktree in %q", f.git.created, tc.want)
+			}
+		})
+	}
+}
+
+func TestAHandMadeBranchByAMediatorsNameRefusesItsCreate(t *testing.T) {
+	// Arrange: a branch a person cut by the mediator's name, held by no
 	// workspace (as the 2026-11-17 `deploy-intake` was at 3913181be5).
 	f := newFixture(t)
 	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
@@ -687,32 +719,24 @@ func TestTheDeployMediatorIsMadeInTheReservedNamespaceBesideAHandMadeBranch(t *t
 	f.git.existingBranches = map[string]bool{"deploy-mediator": true}
 
 	// Act
-	made, err := f.verbs.(*verbs).CreateMediator(context.Background(), repo, "deploy-mediator", nil)
+	_, err := f.verbs.(*verbs).CreateMediator(context.Background(), repo, wsm.MediatorDeploy, nil)
 
-	// Assert: made on its own branch and directory; the person's branch is
-	// untouched.
-	want := StandingBranch("deploy-mediator")
-	if err != nil {
-		t.Fatalf("CreateMediator: %v", err)
+	// Assert: refused typed, with the person's branch untouched and nothing built.
+	if refusal, ok := AsRefusal(err); !ok || refusal.Arm != ArmNameBranchExists {
+		t.Fatalf("CreateMediator = %v, want the %s refusal", err, ArmNameBranchExists)
 	}
-	if made.Name != want || made.Branch != want {
-		t.Fatalf("made = %+v, want name and branch %q", made, want)
-	}
-	if len(f.git.created) != 1 || f.git.created[0].Branch != want || filepath.Base(f.git.created[0].WorktreeDir) != ".agent-repl-standing-deploy-mediator" {
-		t.Fatalf("created = %+v, want one worktree on %q in its dot-led directory", f.git.created, want)
-	}
-	if len(f.git.nuked) != 0 {
-		t.Fatalf("nuked = %+v, want the hand-made branch untouched", f.git.nuked)
+	if len(f.git.created) != 0 || len(f.git.nuked) != 0 {
+		t.Fatalf("created %+v, nuked %+v; want nothing built and the branch untouched", f.git.created, f.git.nuked)
 	}
 }
 
-func TestACreateInTheReservedNamespaceIsRefused(t *testing.T) {
+func TestACreateNamedForAStandingWorkspaceIsRefused(t *testing.T) {
 	tests := []struct {
 		name     string
 		supplied string
 	}{
-		{name: "a standing workspace's branch", supplied: "agent-repl/standing/deploy-mediator"},
-		{name: "the namespace's root", supplied: "agent-repl"},
+		{name: "a standing workspace's name", supplied: "production-mediator"},
+		{name: "a standing workspace's name under a prefix", supplied: "fix/deploy-mediator"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -727,7 +751,7 @@ func TestACreateInTheReservedNamespaceIsRefused(t *testing.T) {
 
 			// Assert: refused typed, recorded, and nothing claimed or built.
 			refusal, ok := AsRefusal(err)
-			if !ok || refusal.Arm != ArmInvalidName || refusal.Fields["component"] != ReservedNamespace || refusal.Fields["rule"] != NameRuleReserved {
+			if !ok || refusal.Arm != ArmInvalidName || !IsStandingName(fmt.Sprint(refusal.Fields["component"])) || refusal.Fields["rule"] != NameRuleReserved {
 				t.Fatalf("Create = %v, want the %s refusal under the %s rule", err, ArmInvalidName, NameRuleReserved)
 			}
 			if len(f.git.created) != 0 {

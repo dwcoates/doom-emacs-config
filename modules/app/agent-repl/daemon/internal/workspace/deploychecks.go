@@ -54,14 +54,14 @@ func MediatorAgentOf(cfg *repoconfigv1.MediatorAgent) MediatorAgent {
 	return agent
 }
 
-// mediatorSpec is the create of the standing mediator for slug NAME of the
+// mediatorSpec is the create of the standing mediator of ROLE of the
 // repository at REPODIR: shown, since it stands in its repository's section
 // for good (owner ruling, 2026-11-19), on MODEL, with no initial prompt. Its
-// name and branch lie in the daemon's own namespace (StandingBranch), so no
-// branch a person or an agent cut can ever hold them.
-func mediatorSpec(repoDir, name, model string) CreateSpec {
+// name and branch are the role's name (wsm.MediatorRole.Name), which no other
+// workspace may take (IsStandingName).
+func mediatorSpec(repoDir string, role wsm.MediatorRole, model string) CreateSpec {
 	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
-	spec.RepoDir, spec.Name, spec.Model = repoDir, StandingBranch(name), model
+	spec.RepoDir, spec.Name, spec.Model = repoDir, role.Name(), model
 	spec.standing = true
 	return spec
 }
@@ -72,8 +72,8 @@ func mediatorSpec(repoDir, name, model string) CreateSpec {
 // IT IS MADE IN REMOTE CONTROL (owner ruling, 2026-11-16): the user settles
 // an escalation from wherever they are, so its mode is recorded on before
 // its first session starts, which puts the mode in force at bring-up.
-func (v *verbs) CreateMediator(ctx context.Context, repoDir, name string, cfg *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
-	spec := mediatorSpec(repoDir, name, MediatorAgentOf(cfg).Model)
+func (v *verbs) CreateMediator(ctx context.Context, repoDir string, role wsm.MediatorRole, cfg *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
+	spec := mediatorSpec(repoDir, role, MediatorAgentOf(cfg).Model)
 	fields := dlog.Context{"repo": spec.RepoDir, "name": spec.Name, "model": spec.Model}
 	made, err := v.Create(ctx, spec)
 	if err != nil {
@@ -82,7 +82,7 @@ func (v *verbs) CreateMediator(ctx context.Context, repoDir, name string, cfg *r
 	}
 	if _, err := v.deps.DB.SetRemoteControlMode(ctx, made.ID, wsm.RemoteControlOn); err != nil {
 		v.deps.Log.Global().Error(opDeployChecks, "the standing mediator was made but its remote control could not be turned on", dlog.WithCause(withWorkspace(fields, made.ID), err))
-		return wsm.Workspace{}, fmt.Errorf("turn remote control on for the standing mediator %q: %w", name, err)
+		return wsm.Workspace{}, fmt.Errorf("turn remote control on for the standing mediator %q: %w", spec.Name, err)
 	}
 	v.deps.Log.Global().Info(opDeployChecks, "made the standing mediator", withWorkspace(fields, made.ID))
 	return made, nil
