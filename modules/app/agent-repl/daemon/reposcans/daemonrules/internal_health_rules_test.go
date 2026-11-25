@@ -20,39 +20,14 @@ import (
 // internalHealthDir is the package these rules hold, under the daemon module's root.
 const internalHealthDir = "internal/health"
 
-// stringConsts parses the health package's production sources and answers every
-// string constant whose name satisfies keep, name to value.
-func stringConsts(t *testing.T, keep func(name string, spec *ast.ValueSpec) bool) map[string]string {
+// stringConsts answers every string constant of the health package whose
+// name and declared type satisfy keep, name to value.
+func stringConsts(t *testing.T, keep func(name, typ string) bool) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	fset := token.NewFileSet()
-	for _, file := range sourcescan.Production(t, internalHealthDir) {
-		parsed, err := parser.ParseFile(fset, file.Name, file.Source, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", file.Name, err)
-		}
-		for _, decl := range parsed.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.CONST {
-				continue
-			}
-			for _, raw := range gen.Specs {
-				spec := raw.(*ast.ValueSpec)
-				for i, name := range spec.Names {
-					if !keep(name.Name, spec) || i >= len(spec.Values) {
-						continue
-					}
-					lit, ok := spec.Values[i].(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING {
-						continue
-					}
-					value, err := strconv.Unquote(lit.Value)
-					if err != nil {
-						t.Fatalf("unquote %s: %v", name.Name, err)
-					}
-					out[name.Name] = value
-				}
-			}
+	for _, d := range sourcescan.StringDecls(t, internalHealthDir) {
+		if d.Const && len(d.Values) == 1 && keep(d.Name, d.Type) {
+			out[d.Name] = d.Values[0]
 		}
 	}
 	return out
@@ -62,7 +37,7 @@ func stringConsts(t *testing.T, keep func(name string, spec *ast.ValueSpec) bool
 // string constant of the health package.
 func kindConsts(t *testing.T) map[string]string {
 	t.Helper()
-	return stringConsts(t, func(name string, _ *ast.ValueSpec) bool {
+	return stringConsts(t, func(name, _ string) bool {
 		return strings.HasPrefix(name, "Kind")
 	})
 }
@@ -216,9 +191,8 @@ func TestEveryRecoveryEdgeClosesSomeKind(t *testing.T) {
 // edgeConsts answers every recovery edge: each constant typed Edge.
 func edgeConsts(t *testing.T) map[string]string {
 	t.Helper()
-	return stringConsts(t, func(_ string, spec *ast.ValueSpec) bool {
-		typ, ok := spec.Type.(*ast.Ident)
-		return ok && typ.Name == "Edge"
+	return stringConsts(t, func(_, typ string) bool {
+		return typ == "Edge"
 	})
 }
 

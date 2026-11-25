@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -371,5 +372,26 @@ func TestInPackageResolvesADirectoryUnderTheDaemonRoot(t *testing.T) {
 	}
 	if resolved, _ := filepath.EvalSymlinks(want); got != want && got != resolved {
 		t.Fatalf("working directory = %q, want %q", got, want)
+	}
+}
+
+func TestStringDeclsReadsEverySpelledStringOfThePackage(t *testing.T) {
+	// Arrange
+	dir := fixturePackage(t, map[string]string{
+		"a.go":      "package p\ntype Edge string\nconst (\n\tKindX = \"x\"\n\tEdgeY Edge = \"y\"\n\tn = 3\n)\nvar List = []string{\"a\", \"b\"}\nvar mixed = []any{\"a\", 1}\nvar computed = f()\n",
+		"a_test.go": "package p\nconst KindTest = \"t\"\n",
+	})
+
+	// Act
+	got := StringDecls(t, dir)
+
+	// Assert
+	want := []StringDecl{
+		{Name: "KindX", Const: true, Values: []string{"x"}},
+		{Name: "EdgeY", Type: "Edge", Const: true, Values: []string{"y"}},
+		{Name: "List", Values: []string{"a", "b"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("StringDecls = %+v, want %+v", got, want)
 	}
 }

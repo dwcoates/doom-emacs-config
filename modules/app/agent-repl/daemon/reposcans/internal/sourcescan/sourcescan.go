@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -230,4 +231,83 @@ func IsSelector(n ast.Node, pkg, name string) bool {
 	}
 	id, ok := sel.X.(*ast.Ident)
 	return ok && id.Name == pkg && sel.Sel.Name == name
+}
+
+// StringDecl is one package-level const or var whose value is a string
+// literal, or a composite literal ([]string{...}) of string literals.
+type StringDecl struct {
+	Name string
+	// Type is the declared type's name ("Edge"), empty when none is written.
+	Type string
+	// Const reports a const; false is a var.
+	Const bool
+	// Values are the literal's strings: one for a string literal, each
+	// element for a composite.
+	Values []string
+}
+
+// StringDecls answers every such declaration of the production sources in
+// DIR, in file order: THE ONE READER of a package's spelled strings, for a
+// rule that needs a package's constants or lists without importing it (a
+// vocabulary's kinds, a harness's operation names).
+func StringDecls(t testing.TB, dir string) []StringDecl {
+	t.Helper()
+	var out []StringDecl
+	fset := token.NewFileSet()
+	for _, f := range Production(t, dir) {
+		file, err := parser.ParseFile(fset, f.Name, f.Source, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("sourcescan: parse %s: %v", f.Name, err)
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || (gen.Tok != token.CONST && gen.Tok != token.VAR) {
+				continue
+			}
+			for _, raw := range gen.Specs {
+				spec := raw.(*ast.ValueSpec)
+				typ := ""
+				if id, ok := spec.Type.(*ast.Ident); ok {
+					typ = id.Name
+				}
+				for i, name := range spec.Names {
+					if i >= len(spec.Values) {
+						continue
+					}
+					if values, ok := stringValues(spec.Values[i]); ok {
+						out = append(out, StringDecl{Name: name.Name, Type: typ, Const: gen.Tok == token.CONST, Values: values})
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// stringValues answers the strings EXPR spells: a string literal's, or each
+// element of a composite literal of string literals. OK is false for any
+// other expression.
+func stringValues(expr ast.Expr) ([]string, bool) {
+	var lits []ast.Expr
+	switch v := expr.(type) {
+	case *ast.BasicLit:
+		lits = []ast.Expr{v}
+	case *ast.CompositeLit:
+		lits = v.Elts
+	default:
+		return nil, false
+	}
+	values := make([]string, 0, len(lits))
+	for _, lit := range lits {
+		basic, ok := lit.(*ast.BasicLit)
+		if !ok || basic.Kind != token.STRING {
+			return nil, false
+		}
+		value, err := strconv.Unquote(basic.Value)
+		if err != nil {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, len(values) > 0
 }

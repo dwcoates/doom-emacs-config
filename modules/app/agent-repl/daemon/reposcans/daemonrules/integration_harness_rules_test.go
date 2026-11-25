@@ -3,7 +3,6 @@ package daemonrules
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -597,55 +596,18 @@ func TestWarningDeclarationReadsEveryDeclarationForm(t *testing.T) {
 	}
 }
 
-// harnessStrings reads the string literal value of the integration harness's
-// constant NAME, or the string literals of its []string variable NAME, off
-// its production sources: the rules need the harness's spellings, and
-// importing the harness would link most of the daemon into the rule suite.
+// harnessStrings reads the string value of the integration harness's
+// constant NAME, or the strings of its []string variable NAME, off its
+// production sources: the rules need the harness's spellings, and importing
+// the harness would link most of the daemon into the rule suite.
 func harnessStrings(t *testing.T, name string) []string {
 	t.Helper()
-	fset := token.NewFileSet()
-	for _, f := range sourcescan.Production(t, integrationHarnessDir) {
-		file, err := parser.ParseFile(fset, f.Name, f.Source, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f.Name, err)
-		}
-		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || (gen.Tok != token.CONST && gen.Tok != token.VAR) {
-				continue
-			}
-			for _, raw := range gen.Specs {
-				spec := raw.(*ast.ValueSpec)
-				if len(spec.Names) != 1 || spec.Names[0].Name != name || len(spec.Values) != 1 {
-					continue
-				}
-				var lits []ast.Expr
-				switch v := spec.Values[0].(type) {
-				case *ast.BasicLit:
-					lits = []ast.Expr{v}
-				case *ast.CompositeLit:
-					lits = v.Elts
-				}
-				var out []string
-				for _, lit := range lits {
-					basic, ok := lit.(*ast.BasicLit)
-					if !ok || basic.Kind != token.STRING {
-						t.Fatalf("harness.%s holds a value that is no string literal", name)
-					}
-					value, err := strconv.Unquote(basic.Value)
-					if err != nil {
-						t.Fatalf("unquote harness.%s: %v", name, err)
-					}
-					out = append(out, value)
-				}
-				if len(out) == 0 {
-					t.Fatalf("harness.%s holds no string", name)
-				}
-				return out
-			}
+	for _, d := range sourcescan.StringDecls(t, integrationHarnessDir) {
+		if d.Name == name {
+			return d.Values
 		}
 	}
-	t.Fatalf("the integration harness declares no %s", name)
+	t.Fatalf("the integration harness declares no %s spelled in string literals", name)
 	return nil
 }
 

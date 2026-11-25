@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -176,5 +177,35 @@ func TestNoDaemonCodeOutsideReposcansReadsGoSource(t *testing.T) {
 	}
 	if len(offenders) != 0 {
 		t.Fatalf("these read Go source outside reposcans; a rule test goes in reposcans/daemonrules, a source-reading helper in reposcans/internal:\n%s", strings.Join(offenders, "\n"))
+	}
+}
+
+// TestEveryStringValueReadGoesThroughStringDecls holds the rule tests to the
+// one reader of a package's spelled strings (sourcescan.StringDecls): a rule
+// that walked a package's declarations for their literal values by hand
+// could drift from it.
+func TestEveryStringValueReadGoesThroughStringDecls(t *testing.T) {
+	// Arrange
+	names, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("glob the rule tests: %v", err)
+	}
+	needle := "spec.Values[i].(*ast." + "BasicLit)"
+	var offenders []string
+
+	// Act
+	for _, name := range names {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if strings.Contains(string(body), needle) {
+			offenders = append(offenders, name)
+		}
+	}
+
+	// Assert
+	if len(names) == 0 || len(offenders) != 0 {
+		t.Fatalf("rule tests %v read declared string values by hand among %d files; use sourcescan.StringDecls", offenders, len(names))
 	}
 }
