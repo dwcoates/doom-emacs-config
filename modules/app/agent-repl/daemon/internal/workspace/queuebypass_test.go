@@ -355,6 +355,38 @@ func TestQueueBypassChipOffersTheContextsTheStandingAllows(t *testing.T) {
 	}
 }
 
+func TestQueueBypassChipIsNotOfferedToTheWorkAccount(t *testing.T) {
+	cases := []struct {
+		name    string
+		session wsm.Session
+	}{
+		{name: "a session filed under the multi-repo account", session: wsm.Session{ConfigDir: "/work"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the standing would offer contexts, were the account personal.
+			f := newFixture(t)
+			f.account.multiRepoDir = "/work"
+			record := f.workspace("w1", t.TempDir())
+			session := tc.session
+			session.Workspace = record.ID
+			f.db.sessions[record.ID] = session
+			f.db.bypass = map[ids.WorkspaceID]wsm.QueueBypass{"w1": {}}
+
+			// Act
+			chip, err := f.verbs.(*verbs).queueBypassChip(context.Background(), record)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("queueBypassChip: %v", err)
+			}
+			if chip.Offered || chip.Holds || len(chip.Offers) != 0 {
+				t.Fatalf("chip = %+v, want the zero chip (not offered to the work account)", chip)
+			}
+		})
+	}
+}
+
 func TestQueueBypassContextProtoRoundTrips(t *testing.T) {
 	for _, named := range []QueueBypassContext{QueueBypassContextFullMain, QueueBypassContextCompactedMain, QueueBypassContextExisting, QueueBypassContextExistingPlusCompactedMain} {
 		t.Run(named.String(), func(t *testing.T) {

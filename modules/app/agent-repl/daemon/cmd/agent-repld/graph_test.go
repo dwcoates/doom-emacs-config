@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/externalbrowser"
 	"agent-repld/internal/health"
@@ -1032,6 +1033,41 @@ func TestOnBothStatusSurfacesTellsTheFooterThenTheRoster(t *testing.T) {
 			want := []string{"footer:ws-1:" + strconv.FormatBool(tc.on), "roster:ws-1:" + strconv.FormatBool(tc.on)}
 			if !slices.Equal(calls, want) {
 				t.Fatalf("calls = %v, want %v", calls, want)
+			}
+		})
+	}
+}
+
+// notedRefusals is a drain controller that records only NoteRefusal; every
+// other method is the nil embedded interface, which the noter never reaches.
+type notedRefusals struct {
+	drain.Controller
+	noted []ids.WorkspaceID
+}
+
+func (n *notedRefusals) NoteRefusal(ws ids.WorkspaceID) { n.noted = append(n.noted, ws) }
+
+func TestRefusalNoterForwardsToTheControllerItsRefPointsAt(t *testing.T) {
+	cases := []struct {
+		name string
+		ws   ids.WorkspaceID
+	}{
+		{name: "one refused submission", ws: "ws-refused"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the graph fills the ref in after the noter is built.
+			var controller drain.Controller
+			noter := refusalNoter{ref: &controller}
+			recorder := &notedRefusals{}
+			controller = recorder
+
+			// Act
+			noter.NoteRefusal(tc.ws)
+
+			// Assert
+			if want := []ids.WorkspaceID{tc.ws}; !slices.Equal(recorder.noted, want) {
+				t.Fatalf("noted = %v, want %v", recorder.noted, want)
 			}
 		})
 	}

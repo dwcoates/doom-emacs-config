@@ -395,6 +395,37 @@ func TestATurnThatDrewNoProseAndNamedNoAnswerRaisesNothing(t *testing.T) {
 	}
 }
 
+// TestTurnDrewProseSkipsFoldsThatAreNotThisTurnsAnswerProse pins the fold
+// filter: a fold of another turn, a fold with no markdown yet, and a
+// directive's fold are not prose this turn drew.
+func TestTurnDrewProseSkipsFoldsThatAreNotThisTurnsAnswerProse(t *testing.T) {
+	tests := []struct {
+		name       string
+		fold       proseState
+		directives map[string]bool
+	}{
+		{name: "a fold of another turn", fold: proseState{turn: "turn-2", markdown: "the other answer"}},
+		{name: "an empty fold", fold: proseState{turn: "turn-1"}},
+		{name: "a directive unit's fold", fold: proseState{turn: "turn-1", markdown: "compacted"}, directives: map[string]bool{"unit-1": true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			fold := tt.fold
+			s := &wsState{id: testWorkspace, responses: map[string]*proseState{"unit-1": &fold}, directiveUnits: tt.directives}
+
+			// Act.
+			unit, drew := h.resolver.turnDrewProse(s, "turn-1")
+
+			// Assert.
+			if drew || unit != "" {
+				t.Fatalf("turnDrewProse = (%q, %v), want (\"\", false)", unit, drew)
+			}
+		})
+	}
+}
+
 // apiErrorNotice is the vendor's synthesized "API Error" notice as a producer
 // marks it: prose in the shape of an answer that no model wrote.
 func apiErrorNotice() *conversationv1.AgentResponseSuccess {

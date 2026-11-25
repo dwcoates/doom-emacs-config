@@ -5519,3 +5519,64 @@ func TestRecordEndedUnlessHeldRecordsOnlyForAWorkspaceTheFleetDoesNotHold(t *tes
 		})
 	}
 }
+
+// fakeUpdateAgentTransport answers UpdateAgent with a scripted response.
+type fakeUpdateAgentTransport struct {
+	shimclient.Client
+	resp *shimv1.UpdateAgentResponse
+}
+
+func (c *fakeUpdateAgentTransport) UpdateAgent(context.Context, *shimv1.UpdateAgentRequest) (*shimv1.UpdateAgentResponse, error) {
+	return c.resp, nil
+}
+
+// TestShimAdapterUpdateAgentCarriesTheShimsRefusal covers every verb the
+// adapter sends through UpdateAgent: a refusal reaches the caller as the
+// shim's arm in the shim's words.
+func TestShimAdapterUpdateAgentCarriesTheShimsRefusal(t *testing.T) {
+	tests := []struct {
+		name    string
+		send    func(a *shimAdapter) error
+		failure *shimv1.UpdateAgentFailure
+		arm     string
+	}{
+		{
+			name: "an answer with no open ask",
+			send: func(a *shimAdapter) error {
+				return a.Answer(context.Background(), &conversationv1.AgentId{Value: "main"}, &conversationv1.AgentAnswer{})
+			},
+			failure: &shimv1.UpdateAgentFailure{Detail: "the agent has no open ask",
+				Kind: &shimv1.UpdateAgentFailure_NoOpenAsk{NoOpenAsk: &shimv1.UpdateAgentNoOpenAsk{}}},
+			arm: ArmShimNoOpenAsk,
+		},
+		{
+			name: "a stop with nothing running",
+			send: func(a *shimAdapter) error {
+				return a.StopAgent(context.Background(), &conversationv1.AgentId{Value: "sub-1"})
+			},
+			failure: &shimv1.UpdateAgentFailure{Detail: "agent sub-1 is not running",
+				Kind: &shimv1.UpdateAgentFailure_NothingRunning{NothingRunning: &shimv1.UpdateAgentNothingRunning{}}},
+			arm: ArmShimNothingRunning,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			adapter := &shimAdapter{client: &fakeUpdateAgentTransport{resp: &shimv1.UpdateAgentResponse{
+				Result: &shimv1.UpdateAgentResponse_Failure{Failure: tt.failure},
+			}}}
+
+			// Act.
+			err := tt.send(adapter)
+
+			// Assert.
+			refusal, ok := AsShimRefusal(err)
+			if !ok {
+				t.Fatalf("send = %v, want a typed shim refusal", err)
+			}
+			if refusal.Verb != "UpdateAgent" || refusal.Arm != tt.arm || refusal.Detail != tt.failure.GetDetail() {
+				t.Fatalf("refusal = %+v, want UpdateAgent's %s with the shim's detail %q", refusal, tt.arm, tt.failure.GetDetail())
+			}
+		})
+	}
+}

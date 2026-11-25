@@ -1393,6 +1393,39 @@ func TestRestartStandaloneKickstartsItAlone(t *testing.T) {
 	}
 }
 
+func TestRestartStandaloneWhoseDefinitionCannotBeRewrittenRestartsNothing(t *testing.T) {
+	cases := []struct {
+		name      string
+		defineErr error
+	}{
+		{name: "the definition's rewrite fails", defineErr: errors.New("define-service exited 1")},
+	}
+	for _, sv := range Standalones {
+		for _, tc := range cases {
+			t.Run(sv.Short+"/"+tc.name, func(t *testing.T) {
+				// Arrange: the standalone is loaded, so it is redefined before its restart.
+				h := newRestarter(t)
+				writeFile(t, filepath.Join(h.services.dir, sv.Label+".plist"), "<plist/>")
+				h.defineErr = tc.defineErr
+
+				// Act
+				err := h.r.RestartStandalone(context.Background(), sv)
+
+				// Assert
+				if !errors.Is(err, tc.defineErr) {
+					t.Fatalf("RestartStandalone = %v, want the definition's failure %v", err, tc.defineErr)
+				}
+				if acts := h.acts(); fmt.Sprint(acts) != fmt.Sprint([]string{"define " + sv.Label}) {
+					t.Fatalf("acts = %v, want only the failed define of %s", acts, sv.Label)
+				}
+				if !loggedTo(h.log, "error", "a service's definition could not be written from its requirements entry; nothing was restarted") {
+					t.Fatalf("records = %+v, want the failed rewrite at ERROR", h.log.Records())
+				}
+			})
+		}
+	}
+}
+
 // standalonesCurrent makes every standalone service run the installed build,
 // but SKIP's.
 func standalonesCurrent(t *testing.T, h *restarterHarness, skip Standalone) {

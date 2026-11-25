@@ -931,3 +931,38 @@ func TestSubmitPromptWhoseTakeBackFailsDeliversNothing(t *testing.T) {
 		t.Fatalf("SubmitPrompt = %v with %d submissions, want an internal error and none", err, h.Prompts.submits)
 	}
 }
+
+func TestSubmitPromptWhoseVerbFailsCodedKeepsTheCode(t *testing.T) {
+	cases := []struct {
+		name string
+		code connect.Code
+	}{
+		{name: "the shutdown's unavailable", code: connect.CodeUnavailable},
+		{name: "a deadline the verb named", code: connect.CodeDeadlineExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			h.Prompts.err = connect.NewError(tc.code, errors.New("the daemon is going away"))
+
+			// Act.
+			_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert.
+			if got := connect.CodeOf(err); got != tc.code {
+				t.Fatalf("SubmitPrompt code = %v (%v), want %v", got, err, tc.code)
+			}
+			var seen bool
+			for _, rec := range log.at("ERROR") {
+				if rec.Operation == "SubmitPrompt" && rec.Message == "the rpc failed" && rec.Context["code"] == tc.code.String() {
+					seen = true
+				}
+			}
+			if !seen {
+				t.Fatalf("SubmitPrompt recorded %+v, want an ERROR naming code %s", log.records(), tc.code)
+			}
+		})
+	}
+}

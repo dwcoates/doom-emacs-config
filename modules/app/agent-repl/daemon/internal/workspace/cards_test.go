@@ -121,3 +121,39 @@ func TestCardsPermissionModesReportAnUnservedPicker(t *testing.T) {
 		t.Fatal("PermissionModes answered a set no picker served")
 	}
 }
+
+// TestCardsReraiseColdGateStandsTheFleetsGateAgain covers the served-card
+// record handing a failed answer's re-raise to the fleet, where the gate lives.
+func TestCardsReraiseColdGateStandsTheFleetsGateAgain(t *testing.T) {
+	tests := []struct {
+		name  string
+		raise func(f *fleetFixture, ws ids.WorkspaceID)
+		want  bool
+	}{
+		{name: "a gate raised and taken stands again", raise: func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}, want: true},
+		{name: "a gate never raised has nothing to stand", raise: func(*fleetFixture, ids.WorkspaceID) {}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := resumable(f)
+			tt.raise(f, ws)
+			c := NewCards(&fakeServedFeed{}, &fakeServedTopbar{}, f.fleet)
+
+			// Act.
+			got := c.ReraiseColdGate(ws, "vendor-1")
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("ReraiseColdGate = %v, want %v", got, tt.want)
+			}
+			if _, standing := f.fleet.ColdGate(ws); standing != tt.want {
+				t.Fatalf("the fleet's gate standing = %v, want %v", standing, tt.want)
+			}
+		})
+	}
+}
