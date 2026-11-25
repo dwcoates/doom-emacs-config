@@ -191,7 +191,12 @@ func (s *store) RecordLogSiteDeploy(ctx context.Context, now func() time.Time) (
 }
 
 // PruneLogSiteDeploys drops every deploy older than the KEEP most recent, and
-// every tally row credited to one, answering how many rows went.
+// every tally row credited to one, answering how many rows went. ROWS AN
+// UNDECIDED PRODUCTION SPAN NEEDS ARE NEVER PRUNED: spans wait on their
+// mediator one at a time and can be older than KEEP deploys, so the cutoff
+// is the start of the deploy that was running at the oldest undecided span's
+// start (across every repository) when that is older than KEEP deploys. A
+// span older than every deploy kept prunes nothing.
 func (s *store) PruneLogSiteDeploys(ctx context.Context, keep int) (int64, error) {
 	const op = "daemon.wsm.prune_log_site_deploys"
 	fields := dlog.Context{"keep": keep}
@@ -211,6 +216,21 @@ func (s *store) PruneLogSiteDeploys(ctx context.Context, keep int) (int64, error
 		}
 		if err != nil {
 			return err
+		}
+		var oldestSpan sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT MIN(span_since) FROM production_checks WHERE decided_at IS NULL`).Scan(&oldestSpan); err != nil {
+			return err
+		}
+		if oldestSpan.Valid {
+			var spanDeploy sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM log_site_deploys WHERE started_at <= ?`, oldestSpan.Int64).Scan(&spanDeploy); err != nil {
+				return err
+			}
+			if !spanDeploy.Valid {
+				removed = 0
+				return nil
+			}
+			cutoff.Int64 = min(cutoff.Int64, spanDeploy.Int64)
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM log_site_tally WHERE deploy_at < ?`, cutoff.Int64)
 		if err != nil {
