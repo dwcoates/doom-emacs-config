@@ -61,7 +61,7 @@ func (r *resolver) rowRepository(rec wsm.Workspace, log dlog.Logger) *frontendv1
 }
 
 // row composes one workspace's row, as every list draws it. Its family is
-// its list's own row type's (openRow, hiddenRow).
+// its list's own row type's (openRow, backlogRow).
 // row composes REC's row.
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
 	// A ROW WHOSE INPUTS DID NOT MOVE IS KEPT (kept.go): its facts were
@@ -399,7 +399,7 @@ func lastUpdated(rec wsm.Workspace, live *time.Time) *frontendv1.RosterRowLastUp
 		landedAt = &rec.Landed.At
 	}
 	latest := rec.CreatedAt
-	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.HiddenAt, rec.MergedAt, landedAt, rec.StatusChangedAt, live} {
+	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.BackloggedAt, rec.MergedAt, landedAt, rec.StatusChangedAt, live} {
 		if at != nil && at.After(latest) {
 			latest = *at
 		}
@@ -485,14 +485,14 @@ func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterCloc
 	case rec.MergedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
-	case rec.HiddenAt != nil:
-		hidden := &frontendv1.RosterRowWhenBacklogged{AtMs: rec.HiddenAt.UnixMilli()}
+	case rec.BackloggedAt != nil:
+		backlogged := &frontendv1.RosterRowWhenBacklogged{AtMs: rec.BackloggedAt.UnixMilli()}
 		// THE COLUMN COUNTS DOWN TO THE LAPSE once the daemon knows it
 		// (cachelapse.Keeper), and up from the hide until then.
 		if rec.CacheLapse != nil {
-			hidden.Cache = &frontendv1.RosterRowWhenBackloggedCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
+			backlogged.Cache = &frontendv1.RosterRowWhenBackloggedCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
 		}
-		out.Shown = &frontendv1.RosterRowWhen_Backlogged{Backlogged: hidden}
+		out.Shown = &frontendv1.RosterRowWhen_Backlogged{Backlogged: backlogged}
 	case mergeStartedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_SyncMerging{
 			SyncMerging: &frontendv1.RosterRowWhenSyncMerging{StartedAtMs: *mergeStartedAt}}

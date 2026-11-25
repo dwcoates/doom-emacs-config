@@ -40,13 +40,13 @@ func sortMergedNewestFirst(in []wsm.Workspace) []wsm.Workspace {
 	return sortNewestFirst(in, "recently-merged", func(ws wsm.Workspace) *time.Time { return ws.MergedAt })
 }
 
-// sortHiddenNewestFirst puts the hidden band's top-level rows in HIDE ORDER,
+// sortBackloggedNewestFirst puts the hidden band's top-level rows in HIDE ORDER,
 // the latest hide first (owner request, 2026-10-13), roster order breaking a
 // tie. Every row it is handed is hidden, and a hidden workspace always records
 // when it was hidden (wsm), so one with no hide instant is a defect, and
 // panics. It sorts a copy, as sortWorkspaces does.
-func sortHiddenNewestFirst(in []wsm.Workspace) []wsm.Workspace {
-	return sortNewestFirst(in, "hidden", func(ws wsm.Workspace) *time.Time { return ws.HiddenAt })
+func sortBackloggedNewestFirst(in []wsm.Workspace) []wsm.Workspace {
+	return sortNewestFirst(in, "backlogged", func(ws wsm.Workspace) *time.Time { return ws.BackloggedAt })
 }
 
 // sortNewestFirst sorts a copy of IN by the instant AT names, the latest

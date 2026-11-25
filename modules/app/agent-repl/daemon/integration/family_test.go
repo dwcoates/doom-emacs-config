@@ -82,7 +82,7 @@ func TestAParentWithAnOpenChildIsNotKilled(t *testing.T) {
 	requireStillNested(t, f)
 }
 
-func TestAParentWithAnOpenChildIsNotHidden(t *testing.T) {
+func TestAParentWithAnOpenChildIsNotBacklogged(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRetargetFamily(t, harness.Opts{}, nil)
@@ -100,7 +100,7 @@ func TestAParentWithAnOpenChildIsNotHidden(t *testing.T) {
 	requireStillNested(t, f)
 }
 
-func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
+func TestAChildOfABackloggedParentIsNotCreated(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent with no children, hidden.
 	d := canonicalView(t)
@@ -123,7 +123,7 @@ func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 		t.Fatalf("CreateWorkspace(child) = error %v", err)
 	}
 	refused := resp.Msg.GetError().GetParentNotOpen()
-	if refused.GetParent().GetId() != parent.GetId() || refused.GetHidden() == nil {
+	if refused.GetParent().GetId() != parent.GetId() || refused.GetBacklogged() == nil {
 		t.Fatalf("result = %v, want parent_not_open naming the hidden parent", resp.Msg.GetResult())
 	}
 }

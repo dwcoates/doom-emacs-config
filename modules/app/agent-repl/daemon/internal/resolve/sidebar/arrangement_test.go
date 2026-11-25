@@ -409,10 +409,10 @@ func TestArrangedLeavesOutClosedAndMergedWorkspacesAndHoistsAClosedParentsChildr
 	merged := placed(workspace("w-m", "merged"), 3)
 	merged.MergedAt = at(0)
 	merged.Closed = true
-	hidden := placed(hiddenWorkspace("w-h", "hidden"), 4)
+	backlogged := placed(backloggedWorkspace("w-h", "hidden"), 4)
 
 	// Act
-	got := sidebar.Arranged(registry(parent, child, merged, hidden), dlog.NewTestLogger())
+	got := sidebar.Arranged(registry(parent, child, merged, backlogged), dlog.NewTestLogger())
 
 	// Assert
 	if ids := arrangedShape(got[0]); !equal(ids, []string{"w-k", "w-h"}) {

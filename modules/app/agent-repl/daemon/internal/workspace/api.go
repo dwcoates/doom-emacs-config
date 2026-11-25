@@ -176,10 +176,10 @@ type CreateSpec struct {
 	// in the insert's own transaction (wsm.RegisterFacts.IntakeCard). Only
 	// AskAboutCard sets it, beside Intake.
 	IntakeCard *wsm.IntakeCard
-	// Hidden makes the workspace BORN HIDDEN: its row is inserted hidden, in
+	// Backlogged makes the workspace BORN HIDDEN: its row is inserted hidden, in
 	// the insert's own transaction (agentrepl.v1.CreateWorkspaceRequest.hidden).
 	// Intake implies it.
-	Hidden bool
+	Backlogged bool
 	// Placement files the workspace into a subsection in the insert's own
 	// transaction (agentrepl.v1.CreateWorkspaceRequest.placement), nil for
 	// none. It needs a Requester, the creator of a new subsection, and is
@@ -633,10 +633,10 @@ type Verbs interface {
 	// draws it in the topbar (agentrepl.v1.SetWorkspaceSummary), answering the
 	// summary the workspace now has.
 	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary string) (string, error)
-	// SetHidden moves the workspace into the roster's hidden section, or back
+	// SetBacklogged moves the workspace into the roster's hidden section, or back
 	// out of it, and republishes the roster. A show also reveals a hidden
 	// merge workspace, so it ends with the workspace drawn or with an error.
-	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
+	SetBacklogged(ctx context.Context, ws ids.WorkspaceID, backlogged bool) error
 	// BacklogColdGate moves a shown workspace whose cold gate, lapsed at
 	// gateLapsedAt, has stood too long into the hidden section, once per gate
 	// (coldbacklog.Sweeper), and republishes the roster.
@@ -673,9 +673,9 @@ type Verbs interface {
 	// FoldMergeQueueSection records whether the Merge Queue section is
 	// collapsed and republishes the roster.
 	FoldMergeQueueSection(ctx context.Context, folded bool) error
-	// FoldHiddenSection records whether the hidden-workspaces section is
+	// FoldBacklog records whether the hidden-workspaces section is
 	// collapsed and republishes the roster.
-	FoldHiddenSection(ctx context.Context, folded bool) error
+	FoldBacklog(ctx context.Context, folded bool) error
 	// FoldOpenSection records whether the open-workspaces section is
 	// collapsed and republishes the roster.
 	FoldOpenSection(ctx context.Context, folded bool) error

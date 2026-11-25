@@ -603,7 +603,7 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			req := validAsyncMerge(nil)
 			req.Backlogged = boolPtr(true)
 			return validateCreateWorkspaceRequest(req)
-		}, field: "hidden"},
+		}, field: "backlogged"},
 		{name: "create with a placement naming no target", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.Placement = &agentreplv1.CreateWorkspacePlacement{}

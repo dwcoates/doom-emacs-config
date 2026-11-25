@@ -953,7 +953,7 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		return false
 	}
 	k.deps.Telemetry.CountLapse(ws, LapseStoodDown)
-	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed}))
+	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"backlogged": record.InBacklog(), "closed": record.Closed}))
 	k.deps.StandDowns.StandDownWithheld(ws, drain.WithheldCacheLapse)
 	return true
 }

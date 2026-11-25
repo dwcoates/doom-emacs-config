@@ -251,8 +251,8 @@ func liveShapeRegistry() sidebar.Registry {
 		ws := base("other", i)
 		switch {
 		case i%5 == 0:
-			hidden := epoch
-			ws.Hidden, ws.HiddenAt = true, &hidden
+			backlogged := epoch
+			ws.Backlogged, ws.BackloggedAt = true, &backlogged
 		case i%5 == 1 || i%5 == 2:
 			ws.Closed = true
 		}

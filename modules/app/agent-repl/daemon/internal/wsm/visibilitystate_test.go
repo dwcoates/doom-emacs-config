@@ -341,13 +341,13 @@ func TestTheVisibilitySeedDerivesFromTheRecord(t *testing.T) {
 	// Arrange: one drawn, one hidden, one selected hidden, one under a
 	// folded parent, and that parent.
 	s, _ := testStore(t)
-	drawn, hidden, picked := testWorkspaceNamed(t, s, "drawn"), testWorkspaceNamed(t, s, "hidden"), testWorkspaceNamed(t, s, "picked")
+	drawn, backlogged, picked := testWorkspaceNamed(t, s, "drawn"), testWorkspaceNamed(t, s, "hidden"), testWorkspaceNamed(t, s, "picked")
 	parent, child := testWorkspaceNamed(t, s, "parent"), testWorkspaceNamed(t, s, "child")
 	for _, stmt := range []struct {
 		q    string
 		args []any
 	}{
-		{`UPDATE workspaces SET backlogged = 1, backlogged_at = 1 WHERE id IN (?, ?)`, []any{string(hidden.ID), string(picked.ID)}},
+		{`UPDATE workspaces SET backlogged = 1, backlogged_at = 1 WHERE id IN (?, ?)`, []any{string(backlogged.ID), string(picked.ID)}},
 		{`UPDATE workspaces SET is_current = 1 WHERE id = ?`, []any{string(picked.ID)}},
 		{`UPDATE workspaces SET parent_id = ? WHERE id = ?`, []any{string(parent.ID), string(child.ID)}},
 		{`UPDATE workspaces SET children_folded = 1 WHERE id = ?`, []any{string(parent.ID)}},
@@ -358,10 +358,10 @@ func TestTheVisibilitySeedDerivesFromTheRecord(t *testing.T) {
 	}
 
 	// Act
-	got := seedOver(t, s, drawn.ID, hidden.ID, picked.ID, parent.ID, child.ID)
+	got := seedOver(t, s, drawn.ID, backlogged.ID, picked.ID, parent.ID, child.ID)
 
 	// Assert
-	want := map[WorkspaceID]Visibility{drawn.ID: UnselectedVisible, hidden.ID: NotVisible, picked.ID: Selected,
+	want := map[WorkspaceID]Visibility{drawn.ID: UnselectedVisible, backlogged.ID: NotVisible, picked.ID: Selected,
 		parent.ID: UnselectedVisible, child.ID: NotVisible}
 	for id, v := range want {
 		if got[id] != v {

@@ -8,16 +8,16 @@ import (
 )
 
 var (
-	hiddenAtInstant = time.Unix(1_700_000_000, 0)
-	lapseInstant    = time.Unix(1_700_003_600, 0).UTC()
+	backloggedAtInstant = time.Unix(1_700_000_000, 0)
+	lapseInstant        = time.Unix(1_700_003_600, 0).UTC()
 )
 
-// hiddenWorkspace is a registered workspace the user has hidden.
-func hiddenWorkspace(t *testing.T, s *store) Workspace {
+// backloggedWorkspace is a registered workspace the user has hidden.
+func backloggedWorkspace(t *testing.T, s *store) Workspace {
 	t.Helper()
 	ws := testWorkspace(t, s)
-	if err := s.SetHidden(context.Background(), ws.ID, true, hiddenAtInstant); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := s.SetBacklogged(context.Background(), ws.ID, true, backloggedAtInstant); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 	return ws
 }
@@ -26,17 +26,17 @@ func hiddenWorkspace(t *testing.T, s *store) Workspace {
 func closedWorkspace(t *testing.T, s *store) Workspace {
 	t.Helper()
 	ws := testWorkspace(t, s)
-	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: hiddenAtInstant, By: CloseByUser}); err != nil {
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: backloggedAtInstant, By: CloseByUser}); err != nil {
 		t.Fatalf("MarkClosed: %v", err)
 	}
 	return ws
 }
 
-// closedHiddenWorkspace is a registered workspace the user hid, then closed.
-func closedHiddenWorkspace(t *testing.T, s *store) Workspace {
+// closedBackloggedWorkspace is a registered workspace the user hid, then closed.
+func closedBackloggedWorkspace(t *testing.T, s *store) Workspace {
 	t.Helper()
-	ws := hiddenWorkspace(t, s)
-	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: hiddenAtInstant, By: CloseByUser}); err != nil {
+	ws := backloggedWorkspace(t, s)
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: backloggedAtInstant, By: CloseByUser}); err != nil {
 		t.Fatalf("MarkClosed: %v", err)
 	}
 	return ws
@@ -49,8 +49,8 @@ func TestSetCacheLapseIsReadBack(t *testing.T) {
 		workspace func(*testing.T, *store) Workspace
 		lapse     CacheLapse
 	}{
-		{name: "a hidden workspace's gated lapse", workspace: hiddenWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
-		{name: "a hidden workspace's ungated lapse", workspace: hiddenWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
+		{name: "a hidden workspace's gated lapse", workspace: backloggedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
+		{name: "a hidden workspace's ungated lapse", workspace: backloggedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
 		{name: "a closed workspace's gated lapse", workspace: closedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
 		{name: "a closed workspace's ungated lapse", workspace: closedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
 	}
@@ -97,11 +97,11 @@ func TestSetCacheLapseOnAVisibleWorkspaceRecordsNothing(t *testing.T) {
 	}
 }
 
-func TestSetCacheLapseOnTheCurrentHiddenWorkspaceRecordsNothing(t *testing.T) {
+func TestSetCacheLapseOnTheCurrentBackloggedWorkspaceRecordsNothing(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	ws := hiddenWorkspace(t, s)
-	if err := s.SetCurrent(context.Background(), ws.ID, hiddenAtInstant); err != nil {
+	ws := backloggedWorkspace(t, s)
+	if err := s.SetCurrent(context.Background(), ws.ID, backloggedAtInstant); err != nil {
 		t.Fatalf("SetCurrent: %v", err)
 	}
 
@@ -121,13 +121,13 @@ func TestSetCacheLapseOnTheCurrentHiddenWorkspaceRecordsNothing(t *testing.T) {
 func TestSetCurrentClearsTheCacheLapse(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	ws := hiddenWorkspace(t, s)
+	ws := backloggedWorkspace(t, s)
 	if _, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant}); err != nil {
 		t.Fatalf("SetCacheLapse: %v", err)
 	}
 
 	// Act
-	if err := s.SetCurrent(context.Background(), ws.ID, hiddenAtInstant); err != nil {
+	if err := s.SetCurrent(context.Background(), ws.ID, backloggedAtInstant); err != nil {
 		t.Fatalf("SetCurrent: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestSetCurrentKeepsAClosedWorkspacesLapse(t *testing.T) {
 	}
 
 	// Act
-	if err := s.SetCurrent(context.Background(), ws.ID, hiddenAtInstant); err != nil {
+	if err := s.SetCurrent(context.Background(), ws.ID, backloggedAtInstant); err != nil {
 		t.Fatalf("SetCurrent: %v", err)
 	}
 
@@ -162,13 +162,13 @@ func TestSetCurrentLeavesTheDeselectedWorkspacesLapse(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	other := testWorkspace(t, s)
-	ws := hiddenWorkspace(t, s)
+	ws := backloggedWorkspace(t, s)
 	if _, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant}); err != nil {
 		t.Fatalf("SetCacheLapse: %v", err)
 	}
 
 	// Act
-	if err := s.SetCurrent(context.Background(), other.ID, hiddenAtInstant); err != nil {
+	if err := s.SetCurrent(context.Background(), other.ID, backloggedAtInstant); err != nil {
 		t.Fatalf("SetCurrent: %v", err)
 	}
 
@@ -192,26 +192,26 @@ func TestSetCacheLapseOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 	}
 }
 
-func TestSetHiddenClearsTheCacheLapse(t *testing.T) {
+func TestSetBackloggedClearsTheCacheLapse(t *testing.T) {
 	tests := []struct {
-		name   string
-		hidden bool
+		name       string
+		backlogged bool
 	}{
-		{name: "showing the workspace again", hidden: false},
-		{name: "hiding it again", hidden: true},
+		{name: "showing the workspace again", backlogged: false},
+		{name: "hiding it again", backlogged: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
-			ws := hiddenWorkspace(t, s)
+			ws := backloggedWorkspace(t, s)
 			if _, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant}); err != nil {
 				t.Fatalf("SetCacheLapse: %v", err)
 			}
 
 			// Act
-			if err := s.SetHidden(context.Background(), ws.ID, tt.hidden, hiddenAtInstant); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+			if err := s.SetBacklogged(context.Background(), ws.ID, tt.backlogged, backloggedAtInstant); err != nil {
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 
 			// Assert
@@ -230,7 +230,7 @@ func TestReopenClearsAClosedWorkspacesCacheLapse(t *testing.T) {
 		kept      bool
 	}{
 		{name: "a closed workspace", workspace: closedWorkspace, kept: false},
-		{name: "a closed workspace still hidden keeps the hide's", workspace: closedHiddenWorkspace, kept: true},
+		{name: "a closed workspace still hidden keeps the hide's", workspace: closedBackloggedWorkspace, kept: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -272,7 +272,7 @@ func TestACorruptCacheLapseIsRefused(t *testing.T) {
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
 			if tt.hide {
-				ws = hiddenWorkspace(t, s)
+				ws = backloggedWorkspace(t, s)
 			}
 			corrupt(t, s, tt.update, ws.ID)
 

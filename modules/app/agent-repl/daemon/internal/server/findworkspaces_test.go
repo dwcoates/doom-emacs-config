@@ -268,7 +268,7 @@ func TestFindWorkspacesMarksAMergeWorkspace(t *testing.T) {
 			// Arrange: a hidden merge workspace the roster draws no row of.
 			h := findHarness(t)
 			h.DB.workspaces["ws-merge"] = wsm.Workspace{ID: "ws-merge", Repo: "repo-1", Dir: "/src/merge", Name: "merge-one", Branch: "merge-one",
-				CreatedAt: time.UnixMilli(1_000), Hidden: true, MergeOf: &wsm.MergeOrigin{Requester: tt.requester}}
+				CreatedAt: time.UnixMilli(1_000), Backlogged: true, MergeOf: &wsm.MergeOrigin{Requester: tt.requester}}
 
 			// Act
 			resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Text: ptrTo("merge-one")}))

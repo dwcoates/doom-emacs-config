@@ -601,10 +601,10 @@ type fakeVerbs struct {
 	// interactionErr is what it answers.
 	interactions   []interactionCall
 	interactionErr error
-	// hiddenSets records every SetWorkspaceBacklogged the verb received;
-	// setHiddenErr is what it answers.
-	hiddenSets   []hiddenSet
-	setHiddenErr error
+	// backloggedSets records every SetWorkspaceBacklogged the verb received;
+	// setBackloggedErr is what it answers.
+	backloggedSets   []backloggedSet
+	setBackloggedErr error
 	// linkChanges records every links verb received, as "<verb> <args>";
 	// linksErr is what each answers, and a success answers links.
 	linkChanges []string
@@ -1007,15 +1007,15 @@ func (f *fakeVerbs) Select(ctx context.Context, ws ids.WorkspaceID, sw workspace
 	return f.selectErr
 }
 
-// hiddenSet is one SetHidden the verb received.
-type hiddenSet struct {
-	ws     ids.WorkspaceID
-	hidden bool
+// backloggedSet is one SetBacklogged the verb received.
+type backloggedSet struct {
+	ws         ids.WorkspaceID
+	backlogged bool
 }
 
-func (f *fakeVerbs) SetHidden(_ context.Context, ws ids.WorkspaceID, hidden bool) error {
-	f.hiddenSets = append(f.hiddenSets, hiddenSet{ws: ws, hidden: hidden})
-	return f.setHiddenErr
+func (f *fakeVerbs) SetBacklogged(_ context.Context, ws ids.WorkspaceID, backlogged bool) error {
+	f.backloggedSets = append(f.backloggedSets, backloggedSet{ws: ws, backlogged: backlogged})
+	return f.setBackloggedErr
 }
 
 // linkChange records one links verb's call and answers the fake's links.
@@ -2657,8 +2657,8 @@ type harness struct {
 	Banners *fakeBanners
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
-	// HiddenKeepalives is the cache keeper SendBackloggedKeepalives delegates to.
-	HiddenKeepalives *fakeHiddenKeepalives
+	// BackloggedKeepalives is the cache keeper SendBackloggedKeepalives delegates to.
+	BackloggedKeepalives *fakeBackloggedKeepalives
 	// KeepLives is the cache keeper KeepLiveWorkspace delegates to.
 	KeepLives *fakeKeepLives
 	// NewsDigest is the news digest the two rpcs delegate to.
@@ -2843,30 +2843,30 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Banners:    &fakeBanners{},
 		WebappDist: dist,
 
-		PersistentWifi:   &fakePersistentWifi{},
-		HiddenKeepalives: &fakeHiddenKeepalives{},
-		KeepLives:        &fakeKeepLives{},
-		Latencies:        &fakeLatencies{enabled: true},
-		PageCounts:       &fakePageCounts{},
-		VendorSpend:      &fakeVendorSpend{enabled: true},
-		RPCs:             &fakeRPCs{},
-		ReconnectRecords: &restarttimingtest.Recorder{},
-		NewsDigest:       &fakeNewsDigest{},
-		Revisions:        &fakeRevisions{},
-		Storage:          &fakeStorageSweep{},
-		Worktrees:        &fakeWorktreeReaper{},
-		ClassifierPrompt: &fakeClassifierPrompt{},
-		EditorInstances:  &fakeEditorInstances{},
-		OpenWorld:        newFakeOpenWorld(),
-		ChessBoards:      &fakeChessSquares{},
-		HotReload:        &fakeHotReload{},
-		LogSites:         &fakeLogSites{},
-		SlashCommands:    commandcatalog.New(),
-		SlackChannels:    &fakeSlackChannels{},
-		Mentions:         &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
-		Selections:       &fakeSelections{},
-		StallBeat:        &fakeStallBeat{},
-		Pages:            &fakeSupersededPages{},
+		PersistentWifi:       &fakePersistentWifi{},
+		BackloggedKeepalives: &fakeBackloggedKeepalives{},
+		KeepLives:            &fakeKeepLives{},
+		Latencies:            &fakeLatencies{enabled: true},
+		PageCounts:           &fakePageCounts{},
+		VendorSpend:          &fakeVendorSpend{enabled: true},
+		RPCs:                 &fakeRPCs{},
+		ReconnectRecords:     &restarttimingtest.Recorder{},
+		NewsDigest:           &fakeNewsDigest{},
+		Revisions:            &fakeRevisions{},
+		Storage:              &fakeStorageSweep{},
+		Worktrees:            &fakeWorktreeReaper{},
+		ClassifierPrompt:     &fakeClassifierPrompt{},
+		EditorInstances:      &fakeEditorInstances{},
+		OpenWorld:            newFakeOpenWorld(),
+		ChessBoards:          &fakeChessSquares{},
+		HotReload:            &fakeHotReload{},
+		LogSites:             &fakeLogSites{},
+		SlashCommands:        commandcatalog.New(),
+		SlackChannels:        &fakeSlackChannels{},
+		Mentions:             &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
+		Selections:           &fakeSelections{},
+		StallBeat:            &fakeStallBeat{},
+		Pages:                &fakeSupersededPages{},
 	}
 	h.HeldPages = pageheld.New(h.PageCounts)
 
@@ -2925,43 +2925,43 @@ func newHarness(t *testing.T, opts ...option) *harness {
 			cold, ok := h.ColdGates[ws]
 			return cold, ok
 		},
-		Creates:           h.Creates,
-		Feed:              h.Feed,
-		Images:            h.Images,
-		Footer:            h.Footer,
-		Topbar:            h.Topbar,
-		Sidebar:           h.Sidebar,
-		Memory:            h.Memory,
-		Chat:              h.Chat,
-		Gathers:           h.Gathers,
-		LoudFaults:        &h.LoudFaults,
-		Focus:             h.Focus,
-		Emacs:             h.Emacs,
-		Banners:           h.Banners,
-		PersistentWifi:    h.PersistentWifi,
-		HiddenKeepalives:  h.HiddenKeepalives,
-		KeepLives:         h.KeepLives,
-		NewsDigest:        h.NewsDigest,
-		Revisions:         h.Revisions,
-		Storage:           h.Storage,
-		Worktrees:         h.Worktrees,
-		ClassifierPrompt:  h.ClassifierPrompt,
-		EditorInstances:   h.EditorInstances,
-		Opens:             h.Opens,
-		StallBeat:         h.StallBeat,
-		Pages:             h.Pages,
-		WebappDist:        dist,
-		ImageOrigin:       http.NotFoundHandler(),
-		ChessBoards:       h.ChessBoards,
-		Latencies:         h.Latencies,
-		HeldPages:         h.HeldPages,
-		VendorSpend:       h.VendorSpend,
-		RPCs:              h.RPCs,
-		Reconnects:        h.reconnects(),
-		HotReload:         h.HotReload,
-		ChessWidgetBundle: http.NotFoundHandler(),
-		LogSites:          h.LogSites,
-		Log:               h.Surfaces,
+		Creates:              h.Creates,
+		Feed:                 h.Feed,
+		Images:               h.Images,
+		Footer:               h.Footer,
+		Topbar:               h.Topbar,
+		Sidebar:              h.Sidebar,
+		Memory:               h.Memory,
+		Chat:                 h.Chat,
+		Gathers:              h.Gathers,
+		LoudFaults:           &h.LoudFaults,
+		Focus:                h.Focus,
+		Emacs:                h.Emacs,
+		Banners:              h.Banners,
+		PersistentWifi:       h.PersistentWifi,
+		BackloggedKeepalives: h.BackloggedKeepalives,
+		KeepLives:            h.KeepLives,
+		NewsDigest:           h.NewsDigest,
+		Revisions:            h.Revisions,
+		Storage:              h.Storage,
+		Worktrees:            h.Worktrees,
+		ClassifierPrompt:     h.ClassifierPrompt,
+		EditorInstances:      h.EditorInstances,
+		Opens:                h.Opens,
+		StallBeat:            h.StallBeat,
+		Pages:                h.Pages,
+		WebappDist:           dist,
+		ImageOrigin:          http.NotFoundHandler(),
+		ChessBoards:          h.ChessBoards,
+		Latencies:            h.Latencies,
+		HeldPages:            h.HeldPages,
+		VendorSpend:          h.VendorSpend,
+		RPCs:                 h.RPCs,
+		Reconnects:           h.reconnects(),
+		HotReload:            h.HotReload,
+		ChessWidgetBundle:    http.NotFoundHandler(),
+		LogSites:             h.LogSites,
+		Log:                  h.Surfaces,
 	}
 	for _, apply := range opts {
 		apply(&deps)
@@ -3229,12 +3229,12 @@ func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bo
 }
 
 // sectionFold is one FoldMergedSection (merged), FoldMergeQueueSection
-// (mergeQueue), FoldHiddenSection (hidden) or FoldOpenSection (open) the verb
+// (mergeQueue), FoldBacklog (hidden) or FoldOpenSection (open) the verb
 // received.
 type sectionFold struct {
 	merged     bool
 	mergeQueue bool
-	hidden     bool
+	backlogged bool
 	open       bool
 	folded     bool
 }
@@ -3249,8 +3249,8 @@ func (v *fakeVerbs) FoldMergeQueueSection(_ context.Context, folded bool) error 
 	return v.sectionFoldErr
 }
 
-func (v *fakeVerbs) FoldHiddenSection(_ context.Context, folded bool) error {
-	v.sectionFolds = append(v.sectionFolds, sectionFold{hidden: true, folded: folded})
+func (v *fakeVerbs) FoldBacklog(_ context.Context, folded bool) error {
+	v.sectionFolds = append(v.sectionFolds, sectionFold{backlogged: true, folded: folded})
 	return v.sectionFoldErr
 }
 
@@ -3264,13 +3264,13 @@ func (v *fakeVerbs) FoldOpenSection(_ context.Context, folded bool) error {
 	return v.sectionFoldErr
 }
 
-// fakeHiddenKeepalives counts every call and answers a scripted response.
-type fakeHiddenKeepalives struct {
+// fakeBackloggedKeepalives counts every call and answers a scripted response.
+type fakeBackloggedKeepalives struct {
 	calls    int
 	response *agentreplv1.SendBackloggedKeepalivesResponse
 }
 
-func (f *fakeHiddenKeepalives) SendBackloggedKeepalives(context.Context) *agentreplv1.SendBackloggedKeepalivesResponse {
+func (f *fakeBackloggedKeepalives) SendBackloggedKeepalives(context.Context) *agentreplv1.SendBackloggedKeepalivesResponse {
 	f.calls++
 	return f.response
 }

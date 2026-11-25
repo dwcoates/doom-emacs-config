@@ -399,20 +399,20 @@ func (v *verbs) ResumeDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error
 func (v *verbs) showFamily(ctx context.Context, log dlog.Logger, ws wsm.WorkspaceID) error {
 	members, err := v.deps.DB.ShowFamily(ctx, ws)
 	if err != nil {
-		if refusedByFamily(log, opSetHidden, err) {
+		if refusedByFamily(log, opSetBacklogged, err) {
 			return err
 		}
-		log.Error(opSetHidden, "could not show the deploy check workspace with its family", dlog.Context{"cause": err.Error()})
+		log.Error(opSetBacklogged, "could not show the deploy check workspace with its family", dlog.Context{"cause": err.Error()})
 		return err
 	}
-	log.Info(opSetHidden, "showed the deploy check workspace with its family", dlog.Context{"hidden": false, "family": familyIDs(members)})
+	log.Info(opSetBacklogged, "showed the deploy check workspace with its family", dlog.Context{"backlogged": false, "family": familyIDs(members)})
 	v.familyMoved(ctx, log, ws, members)
 	return nil
 }
 
-// familyMoved is hiddenRecorded for ROOT and every member moved with it.
+// familyMoved is backloggedRecorded for ROOT and every member moved with it.
 func (v *verbs) familyMoved(ctx context.Context, log dlog.Logger, root wsm.WorkspaceID, members []wsm.WorkspaceID) {
-	v.hiddenRecorded(ctx, log, root, opSetHidden)
+	v.backloggedRecorded(ctx, log, root, opSetBacklogged)
 	for _, member := range members {
 		v.deps.CacheLapses.VisibilityChanged(member)
 	}

@@ -142,8 +142,8 @@ func (c *stateCollector) collectWorkspaces(ch chan<- prometheus.Metric) {
 		switch {
 		case w.Closed:
 			state = "closed"
-		case w.Hidden:
-			state = "hidden"
+		case w.Backlogged:
+			state = "backlogged"
 		}
 		counts[key{names[w.Repo], state}]++
 	}
@@ -163,7 +163,7 @@ func (s *Surface) RegisterState(logsDir, dbPath string, lister WorkspaceLister) 
 		logsDir: logsDir, lister: lister, log: s.log,
 		logBytes:   prometheus.NewDesc(LogBytesName, "Bytes of agent-repl's log files, by the runtime that wrote them.", []string{"runtime"}, nil),
 		logFiles:   prometheus.NewDesc(LogFilesName, "agent-repl's log files, by the runtime that wrote them.", []string{"runtime"}, nil),
-		workspaces: prometheus.NewDesc(WorkspacesName, "Workspaces in the registry, by repository and state (open, hidden, closed).", []string{"repository", "state"}, nil),
+		workspaces: prometheus.NewDesc(WorkspacesName, "Workspaces in the registry, by repository and state (open, backlogged, closed).", []string{"repository", "state"}, nil),
 	}
 	if err := s.srv.Registry().Register(c); err != nil {
 		return fmt.Errorf("runtimemetrics: register the state collector: %w", err)

@@ -370,7 +370,7 @@ func TestHidingAWorkspaceAtItsColdGateTakesItsMergeOffTheQueue(t *testing.T) {
 	head := headRowID(t, h, theWorkspace)
 
 	// Act
-	h.o.OnHidden(theWorkspace)
+	h.o.OnBacklogged(theWorkspace)
 
 	// Assert
 	if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{"ws-2"}) {
@@ -389,7 +389,7 @@ func TestHidingAWorkspaceWhoseMergeIsNotAtItsColdGateLeavesItQueued(t *testing.T
 	h := twoInLine(t)
 
 	// Act
-	h.o.OnHidden(theWorkspace)
+	h.o.OnBacklogged(theWorkspace)
 
 	// Assert
 	if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace, "ws-2"}) {

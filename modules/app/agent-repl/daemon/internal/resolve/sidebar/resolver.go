@@ -677,7 +677,7 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 
 	workspaces := &frontendv1.WorkspaceRoster{
 		Repository: r.repositoryView(repos, orphans, rc, log),
-		Backlog:    r.hiddenSection(lists.hidden, rc, log),
+		Backlog:    r.backlogSection(lists.backlogged, rc, log),
 		Open:       r.openSection(),
 	}
 	for _, ws := range sortMergedNewestFirst(lists.merged) {
@@ -1092,7 +1092,7 @@ func (r *resolver) SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate 
 func (r *resolver) coldGates() []*frontendv1.RosterColdGate {
 	var out []*frontendv1.RosterColdGate
 	for _, ws := range r.state.reg.Workspaces {
-		if ws.Closed || ws.Hidden || ws.IsThread() {
+		if ws.Closed || ws.Backlogged || ws.IsThread() {
 			continue
 		}
 		g, ok := r.state.gates[ws.ID]

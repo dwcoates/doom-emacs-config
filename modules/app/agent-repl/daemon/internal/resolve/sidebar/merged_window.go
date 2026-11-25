@@ -107,7 +107,7 @@ func (e *UnknownRepositoryError) Error() string {
 // the user (owner ruling, 2026-10-11): not even in the hidden section. A
 // CHAT THREAD is listed only in the thread section. Caller holds mu.
 type partition struct {
-	hidden, merged, closed, threads []wsm.Workspace
+	backlogged, merged, closed, threads []wsm.Workspace
 }
 
 // partition answers the registry's lists, derived once per registry install
@@ -128,8 +128,8 @@ func partitionOf(workspaces []wsm.Workspace) partition {
 			out.merged = append(out.merged, ws)
 		case ws.Closed:
 			out.closed = append(out.closed, ws)
-		case ws.Hidden:
-			out.hidden = append(out.hidden, ws)
+		case ws.Backlogged:
+			out.backlogged = append(out.backlogged, ws)
 		}
 	}
 	return out

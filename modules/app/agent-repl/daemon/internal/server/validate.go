@@ -639,7 +639,7 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 			return invalid("slack_origin", "an async merge's workspace is the queue's, and no Slack message started it")
 		}
 		if req.Backlogged != nil {
-			return invalid("hidden", "an async merge's workspace is hidden by the queue already")
+			return invalid("backlogged", "an async merge's workspace is hidden by the queue already")
 		}
 	}
 	if req.Placement != nil {

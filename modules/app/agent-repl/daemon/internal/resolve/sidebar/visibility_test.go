@@ -308,12 +308,12 @@ func TestTheSelectionIsSelectedUnderAFold(t *testing.T) {
 	}
 }
 
-func TestAHiddenSelectionIsSelected(t *testing.T) {
+func TestABackloggedSelectionIsSelected(t *testing.T) {
 	// Arrange
 	r := arrange(t)
 
 	// Act
-	r.SetRegistrySelected(registry(hiddenWorkspace(string(theWS), "one")), theWS, sidebar.SelectStamp{})
+	r.SetRegistrySelected(registry(backloggedWorkspace(string(theWS), "one")), theWS, sidebar.SelectStamp{})
 
 	// Assert
 	if got := visibilities(t, r)[string(theWS)]; got != "selected" {
@@ -321,12 +321,12 @@ func TestAHiddenSelectionIsSelected(t *testing.T) {
 	}
 }
 
-func TestAHiddenWorkspaceNobodyIsOnIsNotVisible(t *testing.T) {
+func TestABackloggedWorkspaceNobodyIsOnIsNotVisible(t *testing.T) {
 	// Arrange
 	r := arrange(t)
 
 	// Act
-	r.SetRegistry(registry(hiddenWorkspace(string(theWS), "one")))
+	r.SetRegistry(registry(backloggedWorkspace(string(theWS), "one")))
 
 	// Assert
 	if got := visibilities(t, r)[string(theWS)]; got != "not_visible" {

@@ -13,13 +13,13 @@ func namedRow(name string) *frontendv1.RosterRow {
 
 // rosterOf is a workspaces stream drawing OPEN in the open section and
 // HIDDEN in the hidden section. A merged workspace is in no stream.
-func rosterOf(open, hidden []string) *frontendv1.WorkspaceRoster {
+func rosterOf(open, backlog []string) *frontendv1.WorkspaceRoster {
 	var openRows []*frontendv1.RosterRepoEntry
 	for _, name := range open {
 		openRows = append(openRows, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: namedRow(name)}}})
 	}
 	var backlogRows []*frontendv1.RosterBacklogRow
-	for _, name := range hidden {
+	for _, name := range backlog {
 		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: namedRow(name)})
 	}
 	return &frontendv1.WorkspaceRoster{

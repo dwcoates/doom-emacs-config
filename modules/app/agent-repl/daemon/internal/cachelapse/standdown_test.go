@@ -117,11 +117,11 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 			h.db.records[theWorkspace] = rec
 		}, want: ownerCold},
 		{name: "a hidden workspace whose lapse is armed", arrange: func(h *harness) {
-			h.db.records[theWorkspace] = hidden()
+			h.db.records[theWorkspace] = backlogged()
 			h.keeper.deadlines[theWorkspace] = lapseAt
 		}, want: ownerLapse},
 		{name: "a hidden workspace with no lapse armed", arrange: func(h *harness) {
-			rec := hidden()
+			rec := backlogged()
 			worked := now.Add(-2 * time.Hour)
 			rec.LastWorkAt = &worked
 			h.db.records[theWorkspace] = rec
@@ -711,7 +711,7 @@ func TestAHandoverDoesNotMoveTheParkInstant(t *testing.T) {
 // INVARIANT B: a hidden workspace's idle session is owned and parked at its
 // grace, whatever owns its stand-down: the lapse, with no lapse armed the
 // cold park, or the sweep.
-func TestAHiddenWorkspacesIdleSessionIsParked(t *testing.T) {
+func TestABackloggedWorkspacesIdleSessionIsParked(t *testing.T) {
 	tests := []struct {
 		name      string
 		arrange   func(h *harness)
@@ -723,7 +723,7 @@ func TestAHiddenWorkspacesIdleSessionIsParked(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, hidden()).idle()
+			h := newHarness(t, backlogged()).idle()
 			tt.arrange(h)
 
 			// Act
@@ -762,7 +762,7 @@ func TestASessionTheSweepOwnsIsParkedAtItsGrace(t *testing.T) {
 // session at once.
 func TestAWithheldStandDownIsTakenOnceTheWorkspaceIsHiddenAgain(t *testing.T) {
 	// Arrange: shown, in view, then hidden again.
-	h := newHarness(t, selectedHidden()).idle()
+	h := newHarness(t, selectedBacklogged()).idle()
 	h.reconcile("the workspace was hidden, shown, selected or deselected")
 	if len(h.idleDowns)+len(h.coldDowns) != 0 {
 		t.Fatalf("parks = %+v %+v, want none while in view", h.idleDowns, h.coldDowns)

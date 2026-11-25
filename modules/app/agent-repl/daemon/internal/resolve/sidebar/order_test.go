@@ -402,13 +402,13 @@ func TestTheTabBarLeavesOutClosedWorkspaces(t *testing.T) {
 	}
 }
 
-func TestAHiddenWorkspaceHasNoTab(t *testing.T) {
+func TestABackloggedWorkspaceHasNoTab(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	hidden := placed(hiddenWorkspace("w-h", "hidden"), 1)
+	backlogged := placed(backloggedWorkspace("w-h", "hidden"), 1)
 
 	// Act.
-	r.SetRegistry(registry(hidden))
+	r.SetRegistry(registry(backlogged))
 
 	// Assert.
 	if got := tabIDsOf(latest(t, r)); !equal(got, []string{}) {
@@ -477,7 +477,7 @@ func tabsRegistry() sidebar.Registry {
 	closed.Closed = true
 	mergeHidden := placed(workspace("w-q", "merge"), 5)
 	mergeHidden.MergeOf = &wsm.MergeOrigin{}
-	reg := registry(placed(workspace("w-d", "drawn"), 3), collapsed, closed, mergeHidden, placed(hiddenWorkspace("w-h", "hidden"), 1))
+	reg := registry(placed(workspace("w-d", "drawn"), 3), collapsed, closed, mergeHidden, placed(backloggedWorkspace("w-h", "hidden"), 1))
 	reg.Repositories = append(reg.Repositories, folded)
 	return reg
 }
@@ -524,16 +524,16 @@ func TestTheTabBarIsDrawnFromTabs(t *testing.T) {
 	}
 }
 
-func TestSortHiddenNewestFirst(t *testing.T) {
+func TestSortBackloggedNewestFirst(t *testing.T) {
 	// Arrange: hide order disagrees with place.
 	in := []wsm.Workspace{
-		hiddenAt(placed(workspace("w1", "first"), 1), 0),
-		hiddenAt(placed(workspace("w2", "second"), 2), 2*time.Hour),
-		hiddenAt(placed(workspace("w3", "third"), 3), time.Hour),
+		backloggedAt(placed(workspace("w1", "first"), 1), 0),
+		backloggedAt(placed(workspace("w2", "second"), 2), 2*time.Hour),
+		backloggedAt(placed(workspace("w3", "third"), 3), time.Hour),
 	}
 
 	// Act.
-	got := sidebar.SortHiddenNewestFirst(in)
+	got := sidebar.SortBackloggedNewestFirst(in)
 
 	// Assert.
 	var names []string
@@ -545,7 +545,7 @@ func TestSortHiddenNewestFirst(t *testing.T) {
 	}
 }
 
-func TestSortHiddenNewestFirstRefusesARowWithNoHideInstant(t *testing.T) {
+func TestSortBackloggedNewestFirstRefusesARowWithNoHideInstant(t *testing.T) {
 	// Arrange.
 	defer func() {
 		// Assert.
@@ -555,21 +555,21 @@ func TestSortHiddenNewestFirstRefusesARowWithNoHideInstant(t *testing.T) {
 	}()
 
 	// Act.
-	sidebar.SortHiddenNewestFirst([]wsm.Workspace{workspace("w1", "unstamped")})
+	sidebar.SortBackloggedNewestFirst([]wsm.Workspace{workspace("w1", "unstamped")})
 }
 
-func TestTheHiddenSectionListsTheLatestHideFirst(t *testing.T) {
+func TestTheBacklogListsTheLatestHideFirst(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 
 	// Act.
 	r.SetRegistry(registry(
-		hiddenAt(placed(workspace("w1", "early"), 1), 0),
-		hiddenAt(placed(workspace("w2", "late"), 2), time.Hour),
+		backloggedAt(placed(workspace("w1", "early"), 1), 0),
+		backloggedAt(placed(workspace("w2", "late"), 2), time.Hour),
 	))
 
 	// Assert.
-	got := rowNames(topHidden(latest(t, r)))
+	got := rowNames(topBacklog(latest(t, r)))
 	if !equal(got, []string{"late", "early"}) {
 		t.Fatalf("hidden rows = %v, want the latest hide first", got)
 	}

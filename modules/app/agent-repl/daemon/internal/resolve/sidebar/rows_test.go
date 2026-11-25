@@ -46,7 +46,7 @@ func TestRowNamesItsRepository(t *testing.T) {
 		},
 		{
 			name: "a hidden row, in no repository section, names its repository",
-			reg:  registry(hiddenWorkspace("w-hidden", "hidden")),
+			reg:  registry(backloggedWorkspace("w-hidden", "hidden")),
 			rows: backlogRows,
 			want: []string{"alpha"},
 		},
@@ -74,7 +74,7 @@ func TestRowNamesItsRepository(t *testing.T) {
 func TestRowOfAnUnregisteredRepositoryNamesNoneAndIsRecorded(t *testing.T) {
 	// Arrange.
 	r, surfaces := newResolver(t)
-	stray := hiddenWorkspace("w-stray", "stray")
+	stray := backloggedWorkspace("w-stray", "stray")
 	stray.Repo = ids.RepoID("repo-missing")
 
 	// Act.
@@ -578,11 +578,11 @@ func TestMergedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	}
 }
 
-func TestHiddenBeatsARunningTurnInTheWhenColumn(t *testing.T) {
+func TestBackloggedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	// Arrange.
 	ws := workspace(string(theWS), "one")
-	ws.Hidden = true
-	ws.HiddenAt = at(time.Hour)
+	ws.Backlogged = true
+	ws.BackloggedAt = at(time.Hour)
 	r := live(t, arrange(t, ws))
 
 	// Act.
@@ -729,7 +729,7 @@ func TestRowDetailListsTheWorkspacesChildren(t *testing.T) {
 		},
 		{
 			name:     "a hidden child is listed",
-			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) { ws.Hidden, ws.HiddenAt = true, &later })},
+			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) { ws.Backlogged, ws.BackloggedAt = true, &later })},
 			want:     []listed{{name: "a"}},
 		},
 		{

@@ -194,7 +194,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"prompt":                 {usage: "prompt [-as-user] [-slack-forward URL] WS TEXT", run: workspacePrompt},
 		"gather":                 {usage: "gather -workspaces A,B,C -prompt TEXT [-as-user]", run: workspaceGather},
 		"gather-status":          {usage: "gather-status GATHER", run: workspaceGatherStatus},
-		"set":                    {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
+		"set":                    {usage: "set WS [-backlogged|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
 		"summary":                {usage: "summary WS -text SUMMARY", run: workspaceSummary},
 		"link":                   {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":               {usage: "finished WS [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
@@ -806,7 +806,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 	slackThread := fs.String("slack-thread", "", "the link of the Slack message the workspace acts on; its hooks read it as AGENT_REPL_SLACK_THREAD and {{slack_thread}}")
 	slackSubscribe := fs.String("slack-subscribe", "", "subscribe the workspace to its -slack-thread at creation, in this mode: "+slackModes)
 	originator := fs.String("originator", originatorUserOrWorkspace, "who creates the workspace: emoji-ack (the Slack emoji-ack system, with -slack-thread) or user-or-workspace")
-	hidden := fs.Bool("hidden", false, "born hidden: the workspace is never drawn in the sidebar until it is shown")
+	backlogged := fs.Bool("backlogged", false, "born backlogged: the workspace is drawn only in the sidebar's backlog until it is shown")
 	subsection := fs.String("subsection", "", "file the workspace into this existing subsection of its repository, by name")
 	newSubsection := fs.String("new-subsection", "", "file the workspace into a new subsection of this name, with -gather's workspaces")
 	gather := fs.String("gather", "", "comma-separated names of open, unsectioned, top-level workspaces gathered into -new-subsection")
@@ -929,8 +929,8 @@ func workspaceCreate(c *cliCall, args []string) int {
 	if subscribe != nil {
 		req.SlackOrigin.Subscribe = subscribe
 	}
-	if *hidden {
-		req.Backlogged = hidden
+	if *backlogged {
+		req.Backlogged = backlogged
 	}
 	req.Placement = placed
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
@@ -1155,8 +1155,8 @@ func workspacePrompt(c *cliCall, args []string) int {
 
 func workspaceSet(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	hidden := fs.Bool("hidden", false, "hide the workspace")
-	shown := fs.Bool("shown", false, "show the workspace")
+	backlogged := fs.Bool("backlogged", false, "move the workspace into the sidebar's backlog")
+	shown := fs.Bool("shown", false, "move the workspace out of the sidebar's backlog")
 	priority := fs.String("priority", "", "p05, p1, p2, p3, or none")
 	parent := fs.String("parent", "", "make the workspace a child of this parent")
 	topLevel := fs.Bool("top-level", false, "make the workspace a top-level peer")
@@ -1174,17 +1174,17 @@ func workspaceSet(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	if len(rest) != 0 || (*hidden && *shown) || (*parent != "" && *topLevel) || (*oneShot && *notOneShot) || (*await != "" && *notAwaiting) {
+	if len(rest) != 0 || (*backlogged && *shown) || (*parent != "" && *topLevel) || (*oneShot && *notOneShot) || (*await != "" && *notAwaiting) {
 		return c.usageFailed("each setting is set one way, and nothing else is positional")
 	}
 	var calls []func() int
 	switch {
-	case *hidden:
+	case *backlogged:
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspaceBacklogged(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref,
 				Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}}}))
 			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceBackloggedResponse) (string, error) {
-				return describeHiddenRefusal(named, msg.GetError())
+				return describeBackloggedRefusal(named, msg.GetError())
 			})
 		})
 	case *shown:
@@ -1192,7 +1192,7 @@ func workspaceSet(c *cliCall, args []string) int {
 			resp, err := c.client.SetWorkspaceBacklogged(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref,
 				Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Show{Show: &agentreplv1.SetWorkspaceBackloggedShow{}}}))
 			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceBackloggedResponse) (string, error) {
-				return describeHiddenRefusal(named, msg.GetError())
+				return describeBackloggedRefusal(named, msg.GetError())
 			})
 		})
 	}

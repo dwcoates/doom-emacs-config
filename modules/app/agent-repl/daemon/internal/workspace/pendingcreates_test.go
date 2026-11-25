@@ -869,13 +869,13 @@ func TestAHeldCreatesRequesterIsToldOnlyWhileOpen(t *testing.T) {
 	}
 }
 
-func TestAHeldRequestKeepsItsHiddenAndPlacement(t *testing.T) {
+func TestAHeldRequestKeepsItsBacklogFlagAndPlacement(t *testing.T) {
 	tests := []struct {
-		name      string
-		hidden    bool
-		placement *CreatePlacement
+		name       string
+		backlogged bool
+		placement  *CreatePlacement
 	}{
-		{name: "hidden", hidden: true},
+		{name: "hidden", backlogged: true},
 		{name: "an existing subsection", placement: &CreatePlacement{Subsection: "auth"}},
 		{name: "a new subsection with a gather", placement: &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth", Gather: []string{"a", "b"}}}},
 		{name: "a new subsection of its own", placement: &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "solo"}}},
@@ -885,7 +885,7 @@ func TestAHeldRequestKeepsItsHiddenAndPlacement(t *testing.T) {
 			// Arrange
 			spec := CreateSpec{
 				originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it",
-				Requester: ptr(ids.WorkspaceID("asker")), Hidden: tt.hidden, Placement: tt.placement,
+				Requester: ptr(ids.WorkspaceID("asker")), Backlogged: tt.backlogged, Placement: tt.placement,
 			}
 
 			// Act
@@ -899,8 +899,8 @@ func TestAHeldRequestKeepsItsHiddenAndPlacement(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			if decoded.Hidden != tt.hidden || !reflect.DeepEqual(decoded.Placement, tt.placement) {
-				t.Fatalf("decoded hidden %v placement %+v, want %v and %+v", decoded.Hidden, decoded.Placement, tt.hidden, tt.placement)
+			if decoded.Backlogged != tt.backlogged || !reflect.DeepEqual(decoded.Placement, tt.placement) {
+				t.Fatalf("decoded hidden %v placement %+v, want %v and %+v", decoded.Backlogged, decoded.Placement, tt.backlogged, tt.placement)
 			}
 			if createKey(decoded) != createKey(spec) {
 				t.Fatal("the decoded request keys differently from the one encoded")
@@ -909,13 +909,13 @@ func TestAHeldRequestKeepsItsHiddenAndPlacement(t *testing.T) {
 	}
 }
 
-func TestCreateKeyDistinguishesHiddenAndEveryPlacement(t *testing.T) {
+func TestCreateKeyDistinguishesBackloggedAndEveryPlacement(t *testing.T) {
 	base := func() CreateSpec {
 		return CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it"}
 	}
 	variants := map[string]func(*CreateSpec){
 		"plain":        func(*CreateSpec) {},
-		"hidden":       func(s *CreateSpec) { s.Hidden = true },
+		"hidden":       func(s *CreateSpec) { s.Backlogged = true },
 		"into auth":    func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "auth"} },
 		"into billing": func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "billing"} },
 		"new auth": func(s *CreateSpec) {

@@ -87,7 +87,7 @@ const (
 // lapse stands it down as before.
 func (ws Workspace) FoldSpare() (FoldSpare, bool) {
 	switch {
-	case ws.Closed || ws.Hidden:
+	case ws.Closed || ws.Backlogged:
 		return "", false
 	case ws.OneShot:
 		return FoldSpareOneShot, true

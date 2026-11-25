@@ -23,13 +23,13 @@ func rosterRow(id string, thinking bool) *frontendv1.RosterRow {
 
 // pushOf is a push whose workspaces stream draws OPEN in the open section
 // and HIDDEN in the hidden section.
-func pushOf(open, hidden []*frontendv1.RosterRow) *frontendv1.RosterPush {
+func pushOf(open, backlog []*frontendv1.RosterRow) *frontendv1.RosterPush {
 	var openRows []*frontendv1.RosterRepoEntry
 	for _, row := range open {
 		openRows = append(openRows, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: row}}})
 	}
 	var backlogRows []*frontendv1.RosterBacklogRow
-	for _, row := range hidden {
+	for _, row := range backlog {
 		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: row})
 	}
 	return &frontendv1.RosterPush{Workspaces: &frontendv1.WorkspaceRoster{
@@ -52,7 +52,7 @@ func TestPlacementsAnswersEachDrawnWorkspacesSectionAndStatus(t *testing.T) {
 	}
 	want := map[wsm.WorkspaceID]Drawn{
 		"a": {Section: OpenSection, Status: "thinking"},
-		"b": {Section: HiddenSection, Status: "thinking"},
+		"b": {Section: BacklogSection, Status: "thinking"},
 		"c": {Section: MergedSection, Status: "thinking"},
 	}
 	if !reflect.DeepEqual(got, want) {

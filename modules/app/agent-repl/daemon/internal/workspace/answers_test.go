@@ -1370,11 +1370,11 @@ func TestARefusedColdGateStandsAgainInOneHome(t *testing.T) {
 // hideWorkspace moves a fixture workspace into the hidden section.
 func hideWorkspace(f *fixture, ws ids.WorkspaceID) {
 	record := f.db.workspaces[ws]
-	record.Hidden = true
+	record.Backlogged = true
 	f.db.workspaces[ws] = record
 }
 
-func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
+func TestAnswerColdGateShowsABackloggedWorkspaceBeforeTheReopen(t *testing.T) {
 	tests := []struct {
 		name   string
 		answer func() *agentreplv1.AnswerColdGateRequest
@@ -1391,8 +1391,8 @@ func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
 			f.workspace("w1", t.TempDir())
 			hideWorkspace(f, "w1")
 			standingGate(f)
-			hiddenAtSettle := true
-			f.queue.onGateFate = func() { hiddenAtSettle = f.db.workspaces["w1"].Hidden }
+			backloggedAtSettle := true
+			f.queue.onGateFate = func() { backloggedAtSettle = f.db.workspaces["w1"].Backlogged }
 
 			// Act.
 			err := f.verbs.AnswerColdGate(context.Background(), "w1", tt.answer())
@@ -1401,7 +1401,7 @@ func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
 			if err != nil {
 				t.Fatalf("AnswerColdGate: %v", err)
 			}
-			if hiddenAtSettle {
+			if backloggedAtSettle {
 				t.Fatal("the workspace was still hidden when the held prompts were settled, before the re-open")
 			}
 			if len(f.fleet.resumes) != 1 {
@@ -1441,7 +1441,7 @@ func TestAnswerColdGateWhoseShowFailsIsRefusedAndStandsTheGateAgain(t *testing.T
 	f.workspace("w1", t.TempDir())
 	hideWorkspace(f, "w1")
 	standingGate(f)
-	f.db.setHiddenErr = errors.New("disk I/O error")
+	f.db.setBackloggedErr = errors.New("disk I/O error")
 
 	// Act.
 	err := f.verbs.AnswerColdGate(context.Background(), "w1", payAnswer())
@@ -1456,7 +1456,7 @@ func TestAnswerColdGateWhoseShowFailsIsRefusedAndStandsTheGateAgain(t *testing.T
 	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
 		t.Fatalf("reraised = %v, want vendor-1's gate stood again", f.cards.reraised)
 	}
-	if !loggedAtError(f, opSetHidden) {
+	if !loggedAtError(f, opSetBacklogged) {
 		t.Fatal("the failed show was not recorded at error")
 	}
 	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{

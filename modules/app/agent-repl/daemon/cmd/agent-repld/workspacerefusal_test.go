@@ -190,7 +190,7 @@ func openChildrenCase(empty proto.Message, again string) refusalCase {
 // workspaceSettingRefusals is each `workspace set`, summary, link, find and
 // place describer with its cases.
 var workspaceSettingRefusals = func() []describedRefusal {
-	hidden := &agentreplv1.SetWorkspaceBackloggedError{}
+	backlogged := &agentreplv1.SetWorkspaceBackloggedError{}
 	priority := &agentreplv1.SetWorkspacePriorityError{}
 	name := &agentreplv1.SetWorkspaceNameError{}
 	remote := &agentreplv1.UpdateRemoteControlModeError{}
@@ -201,12 +201,12 @@ var workspaceSettingRefusals = func() []describedRefusal {
 	find := &agentreplv1.FindWorkspacesError{}
 	arrange := &agentreplv1.ArrangeSidebarError{}
 	return []describedRefusal{
-		{name: "hidden", empty: hidden, oneof: "cause",
-			cases: append(append(sharedWorkspaceCases(hidden, "set it again", theFourWorkspaceArms...),
-				openChildrenCase(hidden, "hide it again")),
-				parentNotOpenCases(hidden, "show ws again")...),
+		{name: "hidden", empty: backlogged, oneof: "cause",
+			cases: append(append(sharedWorkspaceCases(backlogged, "set it again", theFourWorkspaceArms...),
+				openChildrenCase(backlogged, "hide it again")),
+				parentNotOpenCases(backlogged, "show ws again")...),
 			describe: func(e proto.Message) (string, error) {
-				return describeHiddenRefusal("ws", e.(*agentreplv1.SetWorkspaceBackloggedError))
+				return describeBackloggedRefusal("ws", e.(*agentreplv1.SetWorkspaceBackloggedError))
 			}},
 		{name: "priority", empty: priority, oneof: "cause",
 			cases: sharedWorkspaceCases(priority, "set it again", theFourWorkspaceArms...),

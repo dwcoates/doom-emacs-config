@@ -432,7 +432,7 @@ func mostRecentOf(records []wsm.Workspace, threads bool) (wsm.Workspace, bool) {
 	var best wsm.Workspace
 	found := false
 	for _, r := range records {
-		if r.IsThread() != threads || r.Closed || r.Hidden {
+		if r.IsThread() != threads || r.Closed || r.Backlogged {
 			continue
 		}
 		if !found || r.LastInteractedAt().After(best.LastInteractedAt()) {

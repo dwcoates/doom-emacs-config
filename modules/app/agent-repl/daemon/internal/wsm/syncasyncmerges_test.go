@@ -464,7 +464,7 @@ func TestListedOpen(t *testing.T) {
 	}{
 		{name: "an ordinary workspace", ws: Workspace{}, want: true},
 		{name: "a closed workspace", ws: Workspace{Closed: true}, want: false},
-		{name: "a hidden workspace", ws: Workspace{Hidden: true}, want: false},
+		{name: "a hidden workspace", ws: Workspace{Backlogged: true}, want: false},
 		{name: "a withheld merge workspace", ws: Workspace{MergeOf: origin}, want: false},
 		{name: "a revealed merge workspace", ws: Workspace{MergeOf: origin, MergeRevealed: true}, want: true},
 		{name: "a merged workspace reopened", ws: Workspace{MergedAt: &landed}, want: true},

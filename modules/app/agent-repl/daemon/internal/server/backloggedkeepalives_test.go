@@ -14,7 +14,7 @@ import (
 func TestSendBackloggedKeepalivesDelegatesAndAnswersTheKeepersResponse(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.HiddenKeepalives.response = &agentreplv1.SendBackloggedKeepalivesResponse{
+	h.BackloggedKeepalives.response = &agentreplv1.SendBackloggedKeepalivesResponse{
 		Result: &agentreplv1.SendBackloggedKeepalivesResponse_Success{Success: &agentreplv1.SendBackloggedKeepalivesSuccess{
 			Workspaces: []*agentreplv1.SendBackloggedKeepalivesWorkspace{{
 				Workspace: &workspacev1.WorkspaceRef{Id: "w1", Dir: "/work/w1"},
@@ -31,15 +31,15 @@ func TestSendBackloggedKeepalivesDelegatesAndAnswersTheKeepersResponse(t *testin
 	if err != nil {
 		t.Fatalf("SendBackloggedKeepalives() error = %v", err)
 	}
-	if resp.Msg.GetSuccess().GetWorkspaces()[0].GetSent() == nil || h.HiddenKeepalives.calls != 1 {
-		t.Fatalf("response = %v after %d calls, want the keeper's success from one call", resp.Msg, h.HiddenKeepalives.calls)
+	if resp.Msg.GetSuccess().GetWorkspaces()[0].GetSent() == nil || h.BackloggedKeepalives.calls != 1 {
+		t.Fatalf("response = %v after %d calls, want the keeper's success from one call", resp.Msg, h.BackloggedKeepalives.calls)
 	}
 }
 
 func TestSendBackloggedKeepalivesAnswersTheKeepersRefusal(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.HiddenKeepalives.response = &agentreplv1.SendBackloggedKeepalivesResponse{
+	h.BackloggedKeepalives.response = &agentreplv1.SendBackloggedKeepalivesResponse{
 		Result: &agentreplv1.SendBackloggedKeepalivesResponse_Error{Error: &agentreplv1.SendBackloggedKeepalivesError{
 			Cause: &agentreplv1.SendBackloggedKeepalivesError_RegistryUnreadable{
 				RegistryUnreadable: &agentreplv1.SendBackloggedKeepalivesRegistryUnreadable{Detail: "database is locked"},
@@ -57,10 +57,10 @@ func TestSendBackloggedKeepalivesAnswersTheKeepersRefusal(t *testing.T) {
 	}
 }
 
-func TestNewRefusesAMissingHiddenKeepalivesKeeper(t *testing.T) {
+func TestNewRefusesAMissingBackloggedKeepalivesKeeper(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	deps := h.withoutDep(func(d *Deps) { d.HiddenKeepalives = nil })
+	deps := h.withoutDep(func(d *Deps) { d.BackloggedKeepalives = nil })
 
 	// Act.
 	_, err := New(deps)

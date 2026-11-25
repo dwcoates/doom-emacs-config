@@ -18,7 +18,7 @@ import (
 )
 
 // hidden registers one workspace with a live, free session, and hides it.
-func (h *harness) hidden(t *testing.T) ids.WorkspaceID {
+func (h *harness) backlogged(t *testing.T) ids.WorkspaceID {
 	t.Helper()
 	return h.hide(t, h.workspace(t, instant))
 }
@@ -26,8 +26,8 @@ func (h *harness) hidden(t *testing.T) ids.WorkspaceID {
 // hide hides ws, as the user hiding it does.
 func (h *harness) hide(t *testing.T, ws ids.WorkspaceID) ids.WorkspaceID {
 	t.Helper()
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := h.db.SetBacklogged(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 	return ws
 }
@@ -65,10 +65,10 @@ func TestNewRefusesWithoutADetachedLifetime(t *testing.T) {
 	}
 }
 
-func TestAHiddenFreeWorkspaceIsStoodDownAsTheSweepDoes(t *testing.T) {
+func TestABackloggedFreeWorkspaceIsStoodDownAsTheSweepDoes(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 
 	// Act
 	h.c.StandDownWithheld(ws, WithheldCacheLapse)
@@ -86,7 +86,7 @@ func TestAHiddenFreeWorkspaceIsStoodDownAsTheSweepDoes(t *testing.T) {
 func TestAWithheldStandDownRecordsItsOwnReason(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 
 	// Act
 	h.c.StandDownWithheld(ws, WithheldCacheLapse)
@@ -100,7 +100,7 @@ func TestAWithheldStandDownRecordsItsOwnReason(t *testing.T) {
 func TestAWithheldStandDownClearsTheShimPids(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 
 	// Act
 	h.c.StandDownWithheld(ws, WithheldCacheLapse)
@@ -146,16 +146,16 @@ func TestAClosedWorkspaceIsStoodDown(t *testing.T) {
 	}
 }
 
-// TestTheSelectedHiddenWorkspaceIsNotStoodDown pins the cold gate that stood
+// TestTheSelectedBackloggedWorkspaceIsNotStoodDown pins the cold gate that stood
 // again after every answer (2026-10-17): a hidden workspace the user selected
 // and paid to resume was stood down the moment its session came up, because
 // its cache had lapsed long before. The one they are looking at runs.
-func TestTheSelectedHiddenWorkspaceIsNotStoodDown(t *testing.T) {
+func TestTheSelectedBackloggedWorkspaceIsNotStoodDown(t *testing.T) {
 	tests := []struct {
 		name     string
 		withhold func(t *testing.T, h *harness) ids.WorkspaceID
 	}{
-		{name: "hidden", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) }},
+		{name: "hidden", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) }},
 		{name: "collapsed", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.collapsed(t) }},
 	}
 	for _, tt := range tests {
@@ -201,7 +201,7 @@ func TestAWorkspaceShownAgainIsNotStoodDown(t *testing.T) {
 func TestABusyWorkspaceIsNotStoodDownUnderItsTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.freeness.SetFree(ws, false)
 
 	// Act
@@ -219,7 +219,7 @@ func TestABusyWorkspaceIsNotStoodDownUnderItsTurn(t *testing.T) {
 func TestADeferredStandDownIsTakenOnTheTurnEndEdge(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.freeness.SetFree(ws, false)
 	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 	h.freeness.SetFree(ws, true)
@@ -239,11 +239,11 @@ func TestADeferredStandDownIsTakenOnTheTurnEndEdge(t *testing.T) {
 func TestADeferredStandDownOfAWorkspaceShownAgainIsDropped(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.freeness.SetFree(ws, false)
 	h.c.StandDownWithheld(ws, WithheldCacheLapse)
-	if err := h.db.SetHidden(context.Background(), ws, false, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := h.db.SetBacklogged(context.Background(), ws, false, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 	h.freeness.SetFree(ws, true)
 
@@ -262,7 +262,7 @@ func TestADeferredStandDownOfAWorkspaceShownAgainIsDropped(t *testing.T) {
 func TestAnEdgeForAWorkspaceWithNothingPendingStandsNothingDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 
 	// Act
 	h.c.RetryWithheld(ws)
@@ -276,7 +276,7 @@ func TestAnEdgeForAWorkspaceWithNothingPendingStandsNothingDown(t *testing.T) {
 func TestATurnInFlightRefusalKeepsTheStandDownPending(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.stand.answer[ws] = &shimv1.HibernateResponse{Result: &shimv1.HibernateResponse_Error{
 		Error: &shimv1.HibernateError{Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}}}}}
 
@@ -292,7 +292,7 @@ func TestATurnInFlightRefusalKeepsTheStandDownPending(t *testing.T) {
 func TestAStartUnderWayKeepsTheStandDownPending(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.stand.startUnderWay(ws)
 
 	// Act
@@ -307,7 +307,7 @@ func TestAStartUnderWayKeepsTheStandDownPending(t *testing.T) {
 func TestARevivalKeepsTheStandDownPending(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.reviving.Set(ws, true)
 
 	// Act
@@ -323,8 +323,8 @@ func TestAWithheldWorkspaceWithNoSessionHasNothingToStandDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := h.bare(t)
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := h.db.SetBacklogged(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Act
@@ -339,7 +339,7 @@ func TestAWithheldWorkspaceWithNoSessionHasNothingToStandDown(t *testing.T) {
 func TestAWithheldWorkspaceWithNoShimHasNothingToStandDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.stand.standDown(ws)
 
 	// Act
@@ -354,7 +354,7 @@ func TestAWithheldWorkspaceWithNoShimHasNothingToStandDown(t *testing.T) {
 func TestAFailedWithheldStandDownIsRecordedAndDropped(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.stand.failKill(ws, errFake)
 
 	// Act
@@ -375,7 +375,7 @@ func TestAFailedWithheldStandDownIsRecordedAndDropped(t *testing.T) {
 func TestADeferredStandDownIsStatedAtInfo(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.freeness.SetFree(ws, false)
 
 	// Act
@@ -396,7 +396,7 @@ func TestAnEdgeDuringARunningAttemptRunsOneMore(t *testing.T) {
 	h := newHarness(t, func(d *Deps) {
 		d.Detach = func(_ ids.WorkspaceID, run func(context.Context)) { parked = append(parked, run) }
 	})
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.freeness.SetFree(ws, false)
 	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 	h.freeness.SetFree(ws, true)
@@ -504,7 +504,7 @@ func TestAFoldSparesWhatTheRecordSpares(t *testing.T) {
 	}
 }
 
-func TestAHiddenOneShotIsStillStoodDown(t *testing.T) {
+func TestABackloggedOneShotIsStillStoodDown(t *testing.T) {
 	// Arrange: the user hid it, which no fold spare reaches.
 	h := newHarness(t)
 	ws := h.hide(t, h.linkedWorkspace(t, instant))
@@ -566,7 +566,7 @@ func TestAWorkspaceWithAMergeQueuedIsNeverStoodDown(t *testing.T) {
 		name    string
 		arrange func(t *testing.T, h *harness) ids.WorkspaceID
 	}{
-		{name: "hidden", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) }},
+		{name: "hidden", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) }},
 		{name: "closed", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
 			if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {
@@ -599,7 +599,7 @@ func TestAWorkspaceWithAMergeQueuedIsNeverStoodDown(t *testing.T) {
 func TestAWithheldStandDownWhoseQueuesCannotBeReadIsDropped(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.backlogged(t)
 	h.c.deps.DB = sweepReadErrDB{DB: h.c.deps.DB, read: "queues", err: errors.New("database is locked")}
 
 	// Act
@@ -621,9 +621,9 @@ func TestAWithheldStandDownIsCountedUnderItsTriggersReason(t *testing.T) {
 	}{
 		{name: "a fold's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.collapsed(t) },
 			trigger: WithheldCollapse, want: shimlife.StandDownFold},
-		{name: "a cache lapse's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+		{name: "a cache lapse's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
 			trigger: WithheldCacheLapse, want: shimlife.StandDownCacheLapse},
-		{name: "an ended merge's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+		{name: "an ended merge's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
 			trigger: WithheldMergeEnded, want: shimlife.StandDownMergeEnded},
 	}
 	for _, tt := range tests {
@@ -654,8 +654,8 @@ func TestAWithheldStandDownStatesItsHold(t *testing.T) {
 			h.freeness.SetFree(ws, false)
 		}, want: sessionwhy.HoldDeferredBusy},
 		{name: "a workspace shown again is kept because shown", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
-			if err := h.db.SetHidden(context.Background(), ws, false, time.Unix(1_700_000_000, 0)); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+			if err := h.db.SetBacklogged(context.Background(), ws, false, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 		}, want: sessionwhy.HoldWithheldShown},
 		{name: "a session stood down holds nothing", arrange: func(*testing.T, *harness, ids.WorkspaceID) {}, want: ""},
@@ -665,7 +665,7 @@ func TestAWithheldStandDownStatesItsHold(t *testing.T) {
 			// Arrange
 			why := sessionwhy.NewTable()
 			h := newHarness(t, func(d *Deps) { d.Why = why })
-			ws := h.hidden(t)
+			ws := h.backlogged(t)
 			why.SetHold(ws, sessionwhy.HoldDeferredBusy)
 			tt.arrange(t, h, ws)
 

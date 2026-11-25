@@ -130,21 +130,21 @@ func TestACreateWithoutAPlacementStillFilesItself(t *testing.T) {
 	}
 }
 
-func TestCreateBornHiddenRegistersTheRowHidden(t *testing.T) {
+func TestCreateBornBackloggedRegistersTheRowBacklogged(t *testing.T) {
 	tests := []struct {
-		name       string
-		hidden     bool
-		wantHidden bool
+		name           string
+		backlogged     bool
+		wantBacklogged bool
 	}{
-		{name: "hidden", hidden: true, wantHidden: true},
-		{name: "visible", hidden: false, wantHidden: false},
+		{name: "hidden", backlogged: true, wantBacklogged: true},
+		{name: "visible", backlogged: false, wantBacklogged: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			spec := standardSpec(t, f)
-			spec.Hidden = tt.hidden
+			spec.Backlogged = tt.backlogged
 
 			// Act
 			created, err := f.verbs.Create(context.Background(), spec)
@@ -153,11 +153,11 @@ func TestCreateBornHiddenRegistersTheRowHidden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			if got := f.db.registered[len(f.db.registered)-1].Hidden; got != tt.wantHidden {
-				t.Fatalf("registered Hidden = %v, want %v", got, tt.wantHidden)
+			if got := f.db.registered[len(f.db.registered)-1].Backlogged; got != tt.wantBacklogged {
+				t.Fatalf("registered Hidden = %v, want %v", got, tt.wantBacklogged)
 			}
-			if created.Hidden != tt.wantHidden {
-				t.Fatalf("created.Hidden = %v, want %v", created.Hidden, tt.wantHidden)
+			if created.Backlogged != tt.wantBacklogged {
+				t.Fatalf("created.Hidden = %v, want %v", created.Backlogged, tt.wantBacklogged)
 			}
 		})
 	}

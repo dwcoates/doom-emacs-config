@@ -11,8 +11,8 @@ type Withholding int
 const (
 	// Drawn is a workspace the tab bar draws.
 	Drawn Withholding = iota
-	// WithheldHidden is a workspace the user hid (SetWorkspaceBacklogged).
-	WithheldHidden
+	// WithheldBacklogged is a workspace the user hid (SetWorkspaceBacklogged).
+	WithheldBacklogged
 	// WithheldCollapsed is a workspace whose repository section or
 	// subsection is collapsed.
 	WithheldCollapsed
@@ -23,8 +23,8 @@ func (w Withholding) String() string {
 	switch w {
 	case Drawn:
 		return "drawn"
-	case WithheldHidden:
-		return "hidden"
+	case WithheldBacklogged:
+		return "backlogged"
 	case WithheldCollapsed:
 		return "collapsed"
 	default:
@@ -41,8 +41,8 @@ func (w Withholding) String() string {
 // is visible by, and which is the one fact every allocation reads.
 func (ws Workspace) Withheld(folded bool) Withholding {
 	switch {
-	case ws.InHiddenSection():
-		return WithheldHidden
+	case ws.InBacklog():
+		return WithheldBacklogged
 	case folded:
 		return WithheldCollapsed
 	default:
@@ -50,12 +50,12 @@ func (ws Workspace) Withheld(folded bool) Withholding {
 	}
 }
 
-// InHiddenSection reports whether the user's hide governs the workspace: it
+// InBacklog reports whether the user's hide governs the workspace: it
 // is hidden and its merge has not settled. OPEN BEATS MERGED, so a merged
 // workspace that was reopened and hidden is hidden like any other; only a
 // settled merge (merged and closed) is listed under recently merged instead.
-func (ws Workspace) InHiddenSection() bool {
-	return ws.Hidden && !ws.MergeSettled()
+func (ws Workspace) InBacklog() bool {
+	return ws.Backlogged && !ws.MergeSettled()
 }
 
 // MergeSettled reports whether the workspace's merge has settled: it is
@@ -173,7 +173,7 @@ func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 // 2026-10-17 rule): it sits in the backlog and the user is not looking at it.
 // The keeper's cadence reads it, and LetsCacheLapse is it or a close.
 func (ws Workspace) KeepaliveHeld() bool {
-	return ws.InHiddenSection() && !ws.Current && !ws.IsMediator()
+	return ws.InBacklog() && !ws.Current && !ws.IsMediator()
 }
 
 // isTopPriority reports whether P is P0.5 or P1, the priorities whose open

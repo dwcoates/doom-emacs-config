@@ -294,10 +294,10 @@ func show(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	}
 }
 
-// cutWhileHidden runs a turn, hides the workspace under it (the stand-down
+// cutWhileBacklogged runs a turn, hides the workspace under it (the stand-down
 // waits for the turn), and stands the daemon down, which cuts the turn: the
 // successor over the same state boots with a hidden workspace owed a cut turn.
-func cutWhileHidden(t *testing.T) *fixture {
+func cutWhileBacklogged(t *testing.T) *fixture {
 	t.Helper()
 	f := newOpened(t, harness.Opts{DurableState: true})
 	// BACKLOGGED FIRST: a backlog interrupts a running turn (owner ruling,
@@ -314,14 +314,14 @@ func cutWhileHidden(t *testing.T) *fixture {
 	return f
 }
 
-// TestAHiddenWorkspacesCutTurnIsResumedByTheSuccessorsBoot: an open starts no
+// TestABackloggedWorkspacesCutTurnIsResumedByTheSuccessorsBoot: an open starts no
 // shim, and the hidden workspace's shim was up when its turn was cut, so the
 // successor's boot brings it back (bringup.OnlyWasUp) and the resumption is
 // the turn it starts.
-func TestAHiddenWorkspacesCutTurnIsResumedByTheSuccessorsBoot(t *testing.T) {
+func TestABackloggedWorkspacesCutTurnIsResumedByTheSuccessorsBoot(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := cutWhileHidden(t)
+	f := cutWhileBacklogged(t)
 
 	// Act: nothing opens it.
 	st := &shimv1.StartTurnRequest{}

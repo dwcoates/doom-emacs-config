@@ -118,7 +118,7 @@ func TestAPromotionAsksAgainForTheRunEndTheBootPassWithheld(t *testing.T) {
 
 func TestAPromotionWritesTheOwingDecisionTheBootPassWithheld(t *testing.T) {
 	// Arrange: a hidden workspace nobody looks at owes no keep-alive.
-	h := joining(t, hidden())
+	h := joining(t, backlogged())
 	log, stop := runKeeper(t, h)
 	await(t, log, dlog.RecordQuery{Level: "info", Operation: opDrive, Message: bootArmed})
 	h.db.mu.Lock()

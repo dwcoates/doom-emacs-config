@@ -510,9 +510,9 @@ func lastWorked() *time.Time {
 	return &at
 }
 
-func hidden() wsm.Workspace {
+func backlogged() wsm.Workspace {
 	at := now.Add(-time.Hour)
-	return wsm.Workspace{ID: theWorkspace, Hidden: true, HiddenAt: &at, LastWorkAt: lastWorked()}
+	return wsm.Workspace{ID: theWorkspace, Backlogged: true, BackloggedAt: &at, LastWorkAt: lastWorked()}
 }
 
 func visible() wsm.Workspace {
@@ -528,9 +528,9 @@ func mergeWorkspace() wsm.Workspace {
 	return wsm.Workspace{ID: theWorkspace, MergeOf: &wsm.MergeOrigin{}, LastWorkAt: lastWorked()}
 }
 
-// selectedHidden is a hidden workspace the user is looking at.
-func selectedHidden() wsm.Workspace {
-	rec := hidden()
+// selectedBacklogged is a hidden workspace the user is looking at.
+func selectedBacklogged() wsm.Workspace {
+	rec := backlogged()
 	rec.Current = true
 	return rec
 }
@@ -750,8 +750,8 @@ func TestRecordStoresALapsingWorkspacesProjection(t *testing.T) {
 		rec   func() wsm.Workspace
 		gated *uint64
 	}{
-		{name: "a hidden workspace's gated lapse", rec: hidden, gated: &tokens},
-		{name: "a hidden workspace's ungated lapse", rec: hidden, gated: nil},
+		{name: "a hidden workspace's gated lapse", rec: backlogged, gated: &tokens},
+		{name: "a hidden workspace's ungated lapse", rec: backlogged, gated: nil},
 		{name: "a closed workspace's gated lapse", rec: closed, gated: &tokens},
 		{name: "a closed workspace's ungated lapse", rec: closed, gated: nil},
 	}
@@ -792,9 +792,9 @@ func TestRecordDropsAProjectionForAVisibleWorkspace(t *testing.T) {
 	}
 }
 
-func TestRecordDropsAProjectionForTheSelectedHiddenWorkspace(t *testing.T) {
+func TestRecordDropsAProjectionForTheSelectedBackloggedWorkspace(t *testing.T) {
 	// Arrange
-	h := newHarness(t, selectedHidden())
+	h := newHarness(t, selectedBacklogged())
 
 	// Act
 	h.keeper.record(context.Background(), theWorkspace, stated(lapseAt, nil))
@@ -807,7 +807,7 @@ func TestRecordDropsAProjectionForTheSelectedHiddenWorkspace(t *testing.T) {
 
 func TestRecordLogsAWriteThatFails(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.db.setErr = errors.New("disk full")
 
 	// Act
@@ -825,7 +825,7 @@ func TestRecordLogsAWriteThatFails(t *testing.T) {
 
 func TestRecordForAWorkspaceForgottenMeanwhileIsRecordedAtInfoAndForgotten(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.db.setErr = fmt.Errorf("wsm: workspace %s: %w", theWorkspace, wsm.ErrNotFound)
 	h.keeper.deadlines[theWorkspace] = lapseAt
 
@@ -846,7 +846,7 @@ func TestRecordForAWorkspaceForgottenMeanwhileIsRecordedAtInfoAndForgotten(t *te
 
 func TestRecordReadsAnUnnamedVerdictAsUngated(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	lapse := &conversationv1.SessionCacheLapse{LapsesAtMs: lapseAt.UnixMilli()}
 
 	// Act
@@ -874,11 +874,11 @@ func beatable(rec wsm.Workspace, turnAgo time.Duration) wsm.Workspace {
 }
 
 func TestReconcileArmsTheBeatToMatchTheVisibility(t *testing.T) {
-	merged := hidden()
+	merged := backlogged()
 	mergedAt := now
 	merged.MergedAt = &mergedAt
-	closedHidden := hidden()
-	closedHidden.Closed = true
+	closedBacklogged := backlogged()
+	closedBacklogged.Closed = true
 	closedOwed := closed()
 	closedOwed.Closure = &wsm.Closure{At: now.Add(-time.Minute), By: wsm.CloseByUser}
 	closedSpent := closed()
@@ -888,13 +888,13 @@ func TestReconcileArmsTheBeatToMatchTheVisibility(t *testing.T) {
 		rec   wsm.Workspace
 		armed bool
 	}{
-		{name: "a hidden workspace beats no more", rec: hidden(), armed: false},
+		{name: "a hidden workspace beats no more", rec: backlogged(), armed: false},
 		{name: "a visible workspace beats", rec: visible(), armed: true},
 		{name: "a reopened merged workspace the user hid beats no more", rec: merged, armed: false},
 		{name: "a closed workspace owed its last beat beats once more", rec: closedOwed, armed: true},
 		{name: "a closed workspace whose last beat is spent beats no more", rec: closedSpent, armed: false},
-		{name: "a closed hidden workspace beats no more", rec: closedHidden, armed: false},
-		{name: "a hidden workspace the user is looking at beats", rec: selectedHidden(), armed: true},
+		{name: "a closed hidden workspace beats no more", rec: closedBacklogged, armed: false},
+		{name: "a hidden workspace the user is looking at beats", rec: selectedBacklogged(), armed: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -956,7 +956,7 @@ func TestReconcileWithNoServedSessionRecordsNoError(t *testing.T) {
 
 func TestReconcileLogsAVisibilityThatCannotBeRead(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.db.readErr = errors.New("database is locked")
 
 	// Act
@@ -974,7 +974,7 @@ func TestLapseDueStandsDownALapsedWorkspace(t *testing.T) {
 		name string
 		rec  func() wsm.Workspace
 	}{
-		{name: "a hidden workspace", rec: hidden},
+		{name: "a hidden workspace", rec: backlogged},
 		{name: "a closed workspace", rec: closed},
 	}
 	for _, tt := range tests {
@@ -1007,12 +1007,12 @@ func TestLapseDueLeavesAWorkspaceItShouldNotStandDown(t *testing.T) {
 	}{
 		{name: "shown or reopened again", rec: visible},
 		{name: "selected again", rec: func() wsm.Workspace {
-			rec := selectedHidden()
+			rec := selectedBacklogged()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 			return rec
 		}},
 		{name: "a lapse that moved later", rec: func() wsm.Workspace {
-			rec := hidden()
+			rec := backlogged()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: later}
 			return rec
 		}, rearmed: true, deadline: later},
@@ -1038,7 +1038,7 @@ func TestLapseDueLeavesAWorkspaceItShouldNotStandDown(t *testing.T) {
 
 func TestLapseDueKeepsALapseNotYetDue(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.keeper.deadlines[theWorkspace] = lapseAt
 
 	// Act
@@ -1052,7 +1052,7 @@ func TestLapseDueKeepsALapseNotYetDue(t *testing.T) {
 
 func TestLapseDueLogsARecordThatCannotBeRead(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.keeper.deadlines[theWorkspace] = lapseAt
 	h.clock.Set(lapseAt)
 	h.db.readErr = errors.New("database is locked")
@@ -1069,7 +1069,7 @@ func TestLapseDueLogsARecordThatCannotBeRead(t *testing.T) {
 
 func TestRunTakesARecordedLapseWhenItComes(t *testing.T) {
 	// Arrange: idle past its grace, so no idle park is armed before the lapse.
-	rec := hidden()
+	rec := backlogged()
 	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 	worked := now.Add(-2 * time.Hour)
 	rec.LastWorkAt = &worked
@@ -1103,7 +1103,7 @@ func sent() *shimv1.SendKeepaliveSuccess {
 
 func TestRunSendsAKeepaliveAQueuedEdgeFindsDue(t *testing.T) {
 	// Arrange: shown again with its beat already due.
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.shim.answer = sent()
 	h.shim.beaten = make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1147,7 +1147,7 @@ func TestRunSendsAClosedWorkspacesLastKeepalive(t *testing.T) {
 	// Arrange
 	rec := beatable(closed(), KeepaliveInterval+time.Minute)
 	rec.Closure = &wsm.Closure{At: now, By: wsm.CloseByUser}
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.shim.answer = sent()
 	h.shim.beaten = make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1166,7 +1166,7 @@ func TestRunSendsAClosedWorkspacesLastKeepalive(t *testing.T) {
 
 func TestRunRefusesAListThatFails(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.db.listErr = errors.New("database is locked")
 
 	// Act
@@ -1213,7 +1213,7 @@ func TestAnOperationTheDaemonsExitCancelsIsRecordedAsLeaving(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, hidden())
+			h := newHarness(t, backlogged())
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
@@ -1351,7 +1351,7 @@ func TestReconcileRecordsAStandingColdGatesLapse(t *testing.T) {
 		name string
 		rec  func() wsm.Workspace
 	}{
-		{name: "a hidden workspace", rec: hidden},
+		{name: "a hidden workspace", rec: backlogged},
 		{name: "a closed workspace", rec: closed},
 	}
 	for _, tt := range tests {
@@ -1386,7 +1386,7 @@ func TestReconcileLeavesAStandingColdGateOfAWorkspaceNotLeftToLapse(t *testing.T
 		rec  func() wsm.Workspace
 	}{
 		{name: "a visible workspace", rec: visible},
-		{name: "the selected hidden workspace", rec: selectedHidden},
+		{name: "the selected hidden workspace", rec: selectedBacklogged},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1410,7 +1410,7 @@ func TestReconcileLeavesAStandingColdGateOfAWorkspaceNotLeftToLapse(t *testing.T
 
 func TestReconcileDoesNotRewriteTheGatesLapseItRecorded(t *testing.T) {
 	// Arrange
-	rec := hidden()
+	rec := backlogged()
 	lapse := gateLapse(coldLapsed())
 	rec.CacheLapse = &lapse
 	h := newHarness(t, rec)
@@ -1427,7 +1427,7 @@ func TestReconcileDoesNotRewriteTheGatesLapseItRecorded(t *testing.T) {
 
 func TestReconcileReplacesAProjectionWithTheStandingGatesLapse(t *testing.T) {
 	// Arrange
-	rec := hidden()
+	rec := backlogged()
 	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 	h := newHarness(t, rec)
 	h.gate = coldLapsed()
@@ -1444,7 +1444,7 @@ func TestReconcileReplacesAProjectionWithTheStandingGatesLapse(t *testing.T) {
 
 func TestReconcileLogsAGateLapseThatCannotBeRecorded(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.gate = coldLapsed()
 	h.db.setErr = errors.New("disk full")
 
@@ -1461,9 +1461,9 @@ func TestReconcileLogsAGateLapseThatCannotBeRecorded(t *testing.T) {
 	}
 }
 
-func TestRunStandsDownAHiddenWorkspaceWhoseSessionParkedAtItsGate(t *testing.T) {
+func TestRunStandsDownABackloggedWorkspaceWhoseSessionParkedAtItsGate(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.serving = false
 	h.gate = coldLapsed()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1566,7 +1566,7 @@ func TestRunStandsDownAMergeWorkspaceWhoseMergeLeftItsQueue(t *testing.T) {
 }
 
 func TestLapseDueKeepsAWorkspaceWithAMergeQueued(t *testing.T) {
-	for _, mk := range []func() wsm.Workspace{hidden, closed} {
+	for _, mk := range []func() wsm.Workspace{backlogged, closed} {
 		// Arrange
 		rec := mk()
 		rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
@@ -1590,7 +1590,7 @@ func TestLapseDueKeepsAWorkspaceWithAMergeQueued(t *testing.T) {
 
 func TestLapseDueLeavesASessionRunningWhenTheQueuesCannotBeRead(t *testing.T) {
 	// Arrange
-	rec := hidden()
+	rec := backlogged()
 	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 	h := newHarness(t, rec)
 	h.db.queuesErr = errors.New("database is locked")
@@ -1607,9 +1607,9 @@ func TestLapseDueLeavesASessionRunningWhenTheQueuesCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestMergeEnteredQueueArmsAHiddenWorkspacesBeat(t *testing.T) {
+func TestMergeEnteredQueueArmsABackloggedWorkspacesBeat(t *testing.T) {
 	// Arrange
-	h := newHarness(t, beatable(hidden(), 10*time.Minute))
+	h := newHarness(t, beatable(backlogged(), 10*time.Minute))
 	h.db.queued = []ids.WorkspaceID{theWorkspace}
 
 	// Act
@@ -1685,7 +1685,7 @@ func TestEveryWithheldStandDownTheKeeperAsksNamesItsTrigger(t *testing.T) {
 		want drain.WithheldTrigger
 	}{
 		{name: "a hidden workspace's cache lapse", rec: func() wsm.Workspace {
-			rec := hidden()
+			rec := backlogged()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 			return rec
 		}, ask: func(h *harness) {

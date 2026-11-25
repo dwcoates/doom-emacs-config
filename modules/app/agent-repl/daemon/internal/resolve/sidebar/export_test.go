@@ -14,9 +14,9 @@ var RenderLevel = renderLevel
 // package.
 var SortMergedNewestFirst = sortMergedNewestFirst
 
-// SortHiddenNewestFirst exposes sortHiddenNewestFirst to the external test
+// SortBackloggedNewestFirst exposes sortBackloggedNewestFirst to the external test
 // package.
-var SortHiddenNewestFirst = sortHiddenNewestFirst
+var SortBackloggedNewestFirst = sortBackloggedNewestFirst
 
 // RunningTurnStart exports runningTurnStart, the one reading of "a turn is
 // running" off the footer clock.

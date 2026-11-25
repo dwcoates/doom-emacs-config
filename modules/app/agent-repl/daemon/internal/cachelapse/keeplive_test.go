@@ -172,7 +172,7 @@ func TestAKeepLiveIsRefused(t *testing.T) {
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool { return e.GetClosed() != nil }},
 		{name: "for an unknown workspace", arrange: func(h *harness) { delete(h.db.records, theWorkspace) },
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool { return e.GetUnknownWorkspace() != nil }},
-		{name: "for a hidden workspace, which owes no keep-alive", arrange: func(h *harness) { h.db.records[theWorkspace] = beatable(hidden(), 10*time.Minute) },
+		{name: "for a hidden workspace, which owes no keep-alive", arrange: func(h *harness) { h.db.records[theWorkspace] = beatable(backlogged(), 10*time.Minute) },
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool { return e.GetOwesNoKeepalive().GetReason() != "" }},
 		{name: "when the registry cannot be read", arrange: func(h *harness) { h.db.readErr = errors.New("the store is gone") },
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool {

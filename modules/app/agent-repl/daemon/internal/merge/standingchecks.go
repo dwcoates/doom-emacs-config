@@ -293,7 +293,7 @@ func (o *orchestrator) keepMediatorShown(ctx context.Context, r mediatorRole, q 
 		o.deps.Log.Global().Error(opMediation, "could not read the mediator's workspace to keep it shown", withField(fields, "error", err.Error()))
 		return
 	}
-	if !record.Hidden {
+	if !record.Backlogged {
 		return
 	}
 	if err := o.deps.DeployChecks.Resume(ctx, mediator); err != nil {

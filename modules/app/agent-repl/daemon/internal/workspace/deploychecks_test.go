@@ -35,7 +35,7 @@ func TestAStandingMediatorIsMadeShownOnItsModelWithNoPrompt(t *testing.T) {
 	spec := mediatorSpec("/repo", "deploy-mediator", "fable")
 
 	// Assert
-	if spec.RepoDir != "/repo" || spec.Name != StandingBranch("deploy-mediator") || !spec.standing || spec.Model != "fable" || spec.Hidden || spec.InitialPrompt != "" {
+	if spec.RepoDir != "/repo" || spec.Name != StandingBranch("deploy-mediator") || !spec.standing || spec.Model != "fable" || spec.Backlogged || spec.InitialPrompt != "" {
 		t.Fatalf("spec = %+v, want an unprompted standing workspace on fable, in sight, in the reserved namespace", spec)
 	}
 }
@@ -453,7 +453,7 @@ func TestAResumedDeployCheckWorkspaceIsShownAgain(t *testing.T) {
 	err := f.verbs.(*verbs).ResumeDeployCheck(context.Background(), ws)
 
 	// Assert
-	if err != nil || f.db.workspaces[ws].Hidden {
+	if err != nil || f.db.workspaces[ws].Backlogged {
 		t.Fatalf("ResumeDeployCheck = %v, record %+v; want it shown again", err, f.db.workspaces[ws])
 	}
 }
@@ -529,7 +529,7 @@ func fixerWithChild(t *testing.T, f *fixture) (fixer, child ids.WorkspaceID) {
 	return fixer, record.ID
 }
 
-func TestResumingTheFixerShowsTheWorkspacesHiddenWithIt(t *testing.T) {
+func TestResumingTheFixerShowsTheWorkspacesBackloggedWithIt(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	fixer, child := fixerWithChild(t, f)
@@ -542,8 +542,8 @@ func TestResumingTheFixerShowsTheWorkspacesHiddenWithIt(t *testing.T) {
 	err := f.verbs.(*verbs).ResumeDeployCheck(context.Background(), fixer)
 
 	// Assert
-	if err != nil || f.db.workspaces[fixer].Hidden || f.db.workspaces[child].Hidden {
-		t.Fatalf("ResumeDeployCheck = %v, fixer hidden %v, child hidden %v; want both shown", err, f.db.workspaces[fixer].Hidden, f.db.workspaces[child].Hidden)
+	if err != nil || f.db.workspaces[fixer].Backlogged || f.db.workspaces[child].Backlogged {
+		t.Fatalf("ResumeDeployCheck = %v, fixer hidden %v, child hidden %v; want both shown", err, f.db.workspaces[fixer].Backlogged, f.db.workspaces[child].Backlogged)
 	}
 }
 
@@ -562,7 +562,7 @@ func TestAFamilyShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			fixer, _ := fixerWithChild(t, f)
-			f.db.familyHiddenErr = errors.New("database is locked")
+			f.db.familyBackloggedErr = errors.New("database is locked")
 
 			// Act
 			err := tt.act(f.verbs.(*verbs), fixer)
@@ -571,7 +571,7 @@ func TestAFamilyShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "database is locked") || len(f.shim.killedSession) != 0 {
 				t.Fatalf("err = %v, kills %v; want the store's failure surfaced and no session ended", err, f.shim.killedSession)
 			}
-			rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opSetHidden, Message: tt.message})
+			rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opSetBacklogged, Message: tt.message})
 			if !ok || rec.Context["cause"] != "database is locked" {
 				t.Fatalf("records = %+v, want the failure recorded with its cause", f.log.logger.Records())
 			}

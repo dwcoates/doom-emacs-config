@@ -684,13 +684,13 @@ func TestCreateRefusesAnUnknownOriginator(t *testing.T) {
 	}
 }
 
-func TestCreateSendsBornHiddenOnlyWhenAsked(t *testing.T) {
+func TestCreateSendsBornBackloggedOnlyWhenAsked(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 		want *bool
 	}{
-		{name: "-hidden is born hidden", args: []string{"-hidden"}, want: boolPtr(true)},
+		{name: "-backlogged is born backlogged", args: []string{"-backlogged"}, want: boolPtr(true)},
 		{name: "unnamed is unset", args: nil, want: nil},
 	}
 	for _, tt := range tests {
@@ -1002,7 +1002,7 @@ func TestSetSendsOneCallPerSettingInOrder(t *testing.T) {
 	f := newCLIFixture()
 
 	// Act
-	code := f.run(workspaceNoun, "set", "here", "-hidden", "-one-shot", "-await", "peer")
+	code := f.run(workspaceNoun, "set", "here", "-backlogged", "-one-shot", "-await", "peer")
 
 	// Assert
 	if code != exitSuccess {

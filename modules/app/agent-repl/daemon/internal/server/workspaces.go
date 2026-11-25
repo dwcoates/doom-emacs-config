@@ -153,7 +153,7 @@ func (s *server) CreateWorkspace(
 	spec.ForkFrom = forkSourceID(req.Msg.GetContextOrigin())
 	spec.SlackThread = req.Msg.GetSlackOrigin().GetThreadUrl()
 	spec.SlackSubscribe = slackSubscribeOf(req.Msg.GetSlackOrigin())
-	spec.Hidden = req.Msg.GetBacklogged()
+	spec.Backlogged = req.Msg.GetBacklogged()
 	spec.Placement = createPlacementOf(req.Msg.GetPlacement())
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt, spec.InitialImages = saidParts(standard.GetInitialPrompt())
@@ -1655,8 +1655,8 @@ func (s *server) SetWorkspaceBacklogged(
 	if done {
 		return answer(resp, cerr)
 	}
-	hidden := req.Msg.GetHide() != nil
-	if err := s.deps.Verbs.SetHidden(ctx, subject.Record.ID, hidden); err != nil {
+	backlogged := req.Msg.GetHide() != nil
+	if err := s.deps.Verbs.SetBacklogged(ctx, subject.Record.ID, backlogged); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.SetWorkspaceBackloggedResponse_Success{

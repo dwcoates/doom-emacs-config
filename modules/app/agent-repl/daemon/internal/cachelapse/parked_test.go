@@ -81,9 +81,9 @@ func TestAParkedConversationOwesNoBeat(t *testing.T) {
 	}
 }
 
-func TestAHiddenWorkspacesParkedConversationIsNotBeaten(t *testing.T) {
+func TestABackloggedWorkspacesParkedConversationIsNotBeaten(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	withParked(h, 50*time.Minute)
 
 	// Act

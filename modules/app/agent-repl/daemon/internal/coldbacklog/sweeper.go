@@ -131,7 +131,7 @@ func (s *Sweeper) backlog(ctx context.Context, ws ids.WorkspaceID, lapsedAt, sta
 	}
 	if !record.BacklogsColdGate(lapsedAt) {
 		log.Debug(opSweep, "the workspace's stale cold gate does not move it: it is not shown, the user is looking at it, or it was already moved for this gate", dlog.Context{
-			"hidden": record.Hidden, "closed": record.Closed, "current": record.Current,
+			"backlogged": record.Backlogged, "closed": record.Closed, "current": record.Current,
 		})
 		return
 	}

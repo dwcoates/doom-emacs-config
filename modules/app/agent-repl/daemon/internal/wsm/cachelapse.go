@@ -52,7 +52,7 @@ func (l CacheLapse) Lapsed(now time.Time) bool {
 }
 
 // decodeCacheLapse rebuilds a row's projected lapse. A projection belongs to a
-// hidden or closed workspace alone (SetHidden and Reopen clear it, and
+// hidden or closed workspace alone (SetBacklogged and Reopen clear it, and
 // SetCacheLapse writes only such a row), and a gated verdict without a lapse
 // is no projection at all, so either is a corrupt row.
 func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse, error) {
@@ -62,7 +62,7 @@ func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse,
 		}
 		return nil, nil
 	}
-	if !ws.Hidden && !ws.Closed {
+	if !ws.Backlogged && !ws.Closed {
 		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "cache_lapses_at", Err: errors.New("only a hidden or closed workspace carries a projected cache lapse")}
 	}
 	lapse := &CacheLapse{LapsesAt: fromNanos(lapsesAt.Int64)}

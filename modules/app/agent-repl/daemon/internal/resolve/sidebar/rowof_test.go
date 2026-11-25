@@ -95,10 +95,10 @@ func TestRowFollowsALaterResolve(t *testing.T) {
 	}
 }
 
-func TestRowFindsAHiddenWorkspace(t *testing.T) {
+func TestRowFindsABackloggedWorkspace(t *testing.T) {
 	// Arrange.
-	hidden := hiddenWorkspace(string(theWS), "one")
-	r := arrange(t, hidden)
+	backlogged := backloggedWorkspace(string(theWS), "one")
+	r := arrange(t, backlogged)
 
 	// Act.
 	_, _, ok := r.Row(theWS)

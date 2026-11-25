@@ -20,7 +20,7 @@ func locateRegistry() []wsm.Workspace {
 	landed := epoch()
 	return []wsm.Workspace{
 		{ID: "ws-open", Dir: "/wt/open", Name: "open-one"},
-		{ID: "ws-merge", Dir: "/wt/merge", Name: "merge-one", Hidden: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}},
+		{ID: "ws-merge", Dir: "/wt/merge", Name: "merge-one", Backlogged: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}},
 		{ID: "ws-nested", Dir: "/wt/open/nested", Name: "nested-one"},
 		{ID: "ws-drawn", Dir: "/wt/drawn", Name: "drawn-one", Closed: true},
 		{ID: "ws-gone", Dir: "/wt/gone", Name: "gone-one", Closed: true},

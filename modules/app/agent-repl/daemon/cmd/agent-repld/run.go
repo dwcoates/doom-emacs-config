@@ -1392,7 +1392,7 @@ func expectBootReconnects(ctx context.Context, db interface {
 	}
 	var open []ids.WorkspaceID
 	for _, w := range workspaces {
-		if !w.Closed && !w.Hidden {
+		if !w.Closed && !w.Backlogged {
 			open = append(open, w.ID)
 		}
 	}

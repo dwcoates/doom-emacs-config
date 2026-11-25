@@ -1484,7 +1484,7 @@ func TestPlacingAFamilyLeavesEveryOneShotMark(t *testing.T) {
 				parent := registerIn(t, s, repoDir, "parent", nil)
 				done := registerChild(t, s, repoDir, "done", parent.ID)
 				markOneShot(t, s, done)
-				if err := s.MarkClosed(context.Background(), done.ID, Closure{At: hiddenAtInstant, By: CloseByUser}); err != nil {
+				if err := s.MarkClosed(context.Background(), done.ID, Closure{At: backloggedAtInstant, By: CloseByUser}); err != nil {
 					t.Fatalf("MarkClosed: %v", err)
 				}
 				return parent.ID, []WorkspaceID{done.ID}

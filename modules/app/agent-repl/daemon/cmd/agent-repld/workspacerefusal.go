@@ -126,9 +126,9 @@ func describeRetargetRefusal(ws string, e *agentreplv1.SetWorkspaceParentError) 
 	return "", fmt.Errorf("%w: retargeting %s: %v", errUndescribedWorkspaceRefusal, ws, e)
 }
 
-// describeHiddenRefusal says in one plain sentence why WS was not hidden or
+// describeBackloggedRefusal says in one plain sentence why WS was not hidden or
 // shown. Every SetWorkspaceBackloggedError arm has its own sentence.
-func describeHiddenRefusal(ws string, e *agentreplv1.SetWorkspaceBackloggedError) (string, error) {
+func describeBackloggedRefusal(ws string, e *agentreplv1.SetWorkspaceBackloggedError) (string, error) {
 	switch r := e.GetCause().(type) {
 	case *agentreplv1.SetWorkspaceBackloggedError_UnknownWorkspace:
 		return sayNoWorkspace(ws), nil

@@ -771,11 +771,11 @@ func createKey(spec CreateSpec) string {
 		PreDeploy, PostDeploy                                  []string
 		// Omitted when empty, so a create of words alone keys as it did
 		// before prompts carried images.
-		Images    []string `json:",omitempty"`
-		Hidden    bool
-		Placement *heldPlacement
+		Images     []string `json:",omitempty"`
+		Backlogged bool
+		Placement  *heldPlacement
 	}{
-		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
+		Backlogged: spec.Backlogged, Placement: heldPlacementOf(spec.Placement),
 		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
 		// keys, and is refused by the create's validation rather than here.
 		SlackThread: spec.SlackThread, SlackSubscribe: string(spec.SlackSubscribe), Originator: fmt.Sprint(int(spec.originator)),
@@ -874,10 +874,10 @@ type heldSpec struct {
 	// default; a held row written before landing targets existed has none,
 	// which is what its create meant.
 	Landing *heldLanding `json:"landing,omitempty"`
-	// Hidden is the born-hidden request, and Placement the creator's filing
+	// Backlogged is the born-hidden request, and Placement the creator's filing
 	// of the workspace; a row written before either existed has neither.
-	Hidden    bool           `json:"hidden,omitempty"`
-	Placement *heldPlacement `json:"placement,omitempty"`
+	Backlogged bool           `json:"hidden,omitempty"`
+	Placement  *heldPlacement `json:"placement,omitempty"`
 }
 
 // heldPlacement is a held create's CreatePlacement.
@@ -966,7 +966,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
 		SlackThread: spec.SlackThread, SlackSubscribe: string(spec.SlackSubscribe), Originator: spec.originator.String(),
-		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
+		Backlogged: spec.Backlogged, Placement: heldPlacementOf(spec.Placement),
 	}
 	if spec.Priority != nil {
 		p := int(*spec.Priority)
@@ -1016,7 +1016,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	spec.ConsentedUngatedMode, spec.DeployHooks = held.ConsentedUngatedMode, wsm.DeployHooks{PreDeploy: pre, PostDeploy: post}
 	spec.Name, spec.Model, spec.PermissionMode, spec.SlackThread = held.Name, held.Model, held.PermissionMode, held.SlackThread
 	spec.SlackSubscribe = wsm.SlackThreadMode(held.SlackSubscribe)
-	spec.Hidden, spec.Placement = held.Hidden, createPlacementOf(held.Placement)
+	spec.Backlogged, spec.Placement = held.Backlogged, createPlacementOf(held.Placement)
 	if held.Priority != nil {
 		p := wsm.Priority(*held.Priority)
 		spec.Priority = &p

@@ -189,13 +189,13 @@ func streamsFrame(push *frontendv1.RosterPush) *agentreplv1.WatchWorkspaceRoster
 
 // workspacesStream is a workspaces stream drawing OPEN in the open section
 // and HIDDEN in the hidden section.
-func workspacesStream(open, hidden []*frontendv1.RosterClosedRow) *frontendv1.WorkspaceRoster {
+func workspacesStream(open, backlog []*frontendv1.RosterClosedRow) *frontendv1.WorkspaceRoster {
 	var entries []*frontendv1.RosterRepoEntry
 	for _, r := range open {
 		entries = append(entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: r.GetRow()}}})
 	}
 	var backlogRows []*frontendv1.RosterBacklogRow
-	for _, r := range hidden {
+	for _, r := range backlog {
 		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: r.GetRow()})
 	}
 	return &frontendv1.WorkspaceRoster{

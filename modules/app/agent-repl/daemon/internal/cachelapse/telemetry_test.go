@@ -149,18 +149,18 @@ func TestACameDueLapseIsReportedByWhatBecameOfIt(t *testing.T) {
 		outcome string
 	}{
 		{name: "stood down", rec: func() wsm.Workspace {
-			rec := hidden()
+			rec := backlogged()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 			return rec
 		}, outcome: LapseStoodDown},
 		{name: "shown first", rec: visible, outcome: LapseShownFirst},
 		{name: "kept for a queued merge", rec: func() wsm.Workspace {
-			rec := hidden()
+			rec := backlogged()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 			return rec
 		}, queued: true, outcome: LapseMergeQueued},
 		{name: "moved later", rec: func() wsm.Workspace {
-			rec := hidden()
+			rec := backlogged()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt.Add(time.Hour)}
 			return rec
 		}, outcome: LapseMovedLater},

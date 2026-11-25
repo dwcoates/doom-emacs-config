@@ -29,15 +29,15 @@ func subsectionCount(t *testing.T, s *store) int {
 	return scalar[int](t, s, `SELECT COUNT(*) FROM subsections`)
 }
 
-func TestRegisterBornHiddenWritesTheHiddenColumnsInTheInsert(t *testing.T) {
+func TestRegisterBornBackloggedWritesTheBackloggedColumnsInTheInsert(t *testing.T) {
 	tests := []struct {
-		name       string
-		facts      RegisterFacts
-		wantHidden bool
+		name           string
+		facts          RegisterFacts
+		wantBacklogged bool
 	}{
-		{name: "hidden", facts: RegisterFacts{Hidden: true}, wantHidden: true},
-		{name: "intake implies hidden", facts: RegisterFacts{Intake: true}, wantHidden: true},
-		{name: "neither", facts: RegisterFacts{}, wantHidden: false},
+		{name: "hidden", facts: RegisterFacts{Backlogged: true}, wantBacklogged: true},
+		{name: "intake implies hidden", facts: RegisterFacts{Intake: true}, wantBacklogged: true},
+		{name: "neither", facts: RegisterFacts{}, wantBacklogged: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -53,11 +53,11 @@ func TestRegisterBornHiddenWritesTheHiddenColumnsInTheInsert(t *testing.T) {
 			if err != nil {
 				t.Fatalf("RegisterWorkspace: %v", err)
 			}
-			if ws.Hidden != tt.wantHidden || (ws.HiddenAt != nil) != tt.wantHidden {
-				t.Fatalf("answered record hidden = %v at %v, want hidden %v", ws.Hidden, ws.HiddenAt, tt.wantHidden)
+			if ws.Backlogged != tt.wantBacklogged || (ws.BackloggedAt != nil) != tt.wantBacklogged {
+				t.Fatalf("answered record hidden = %v at %v, want hidden %v", ws.Backlogged, ws.BackloggedAt, tt.wantBacklogged)
 			}
-			if stored := scalar[bool](t, s, `SELECT backlogged FROM workspaces WHERE id = ?`, ws.ID); stored != tt.wantHidden {
-				t.Fatalf("stored hidden = %v, want %v", stored, tt.wantHidden)
+			if stored := scalar[bool](t, s, `SELECT backlogged FROM workspaces WHERE id = ?`, ws.ID); stored != tt.wantBacklogged {
+				t.Fatalf("stored hidden = %v, want %v", stored, tt.wantBacklogged)
 			}
 			if marked := scalar[int](t, s, `SELECT COUNT(*) FROM intake_workspaces WHERE workspace_id = ?`, ws.ID); (marked == 1) != tt.facts.Intake {
 				t.Fatalf("intake rows = %d, want one exactly when the workspace is an intake", marked)
@@ -156,8 +156,8 @@ func TestRegisterPlacedFilesTheWorkspaceInTheInsert(t *testing.T) {
 		ws, err := registerWith(t, s, repoDir, "born", RegisterFacts{Intake: true, Placement: &RegisterPlacement{Into: "auth", CreatedBy: creator.ID}})
 
 		// Assert
-		if err != nil || !ws.Hidden || ws.Subsection == nil || *ws.Subsection != sub.ID {
-			t.Fatalf("RegisterWorkspace = hidden %v subsection %v, %v; want hidden and in %s", ws.Hidden, ws.Subsection, err, sub.ID)
+		if err != nil || !ws.Backlogged || ws.Subsection == nil || *ws.Subsection != sub.ID {
+			t.Fatalf("RegisterWorkspace = hidden %v subsection %v, %v; want hidden and in %s", ws.Backlogged, ws.Subsection, err, sub.ID)
 		}
 	})
 }

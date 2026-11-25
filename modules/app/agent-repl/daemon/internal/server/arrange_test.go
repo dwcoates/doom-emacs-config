@@ -560,7 +560,7 @@ func TestGetSidebarArrangementAnswersTheArrangement(t *testing.T) {
 			{Subsection: &sidebar.ArrangedSubsection{Subsection: wsm.Subsection{ID: "sub-2", Repo: "repo-1", Name: "auth", Place: 2, CreatedBy: &parent}}},
 			{Workspace: sidebar.ArrangedWorkspace{
 				Workspace: wsm.Workspace{ID: "ws-p", Dir: "/w/p", Name: "p", Branch: "bp"},
-				Children:  []sidebar.ArrangedWorkspace{{Workspace: wsm.Workspace{ID: "ws-k", Dir: "/w/k", Name: "k", Parent: &parent, Hidden: true}}},
+				Children:  []sidebar.ArrangedWorkspace{{Workspace: wsm.Workspace{ID: "ws-k", Dir: "/w/k", Name: "k", Parent: &parent, Backlogged: true}}},
 			}},
 		},
 	}}

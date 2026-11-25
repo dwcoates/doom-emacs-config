@@ -81,7 +81,7 @@ func (s *server) foldSection(
 	case *agentreplv1.SidebarViewFoldSection_MergeQueue:
 		return false, nil, s.deps.Verbs.FoldMergeQueueSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Backlog:
-		return false, nil, s.deps.Verbs.FoldHiddenSection(ctx, folded)
+		return false, nil, s.deps.Verbs.FoldBacklog(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Open:
 		return false, nil, s.deps.Verbs.FoldOpenSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Subsection:
@@ -111,7 +111,7 @@ func bandSection(entry *agentreplv1.SidebarViewSectionSize) wsm.BandSection {
 	case *agentreplv1.SidebarViewSectionSize_RecentlyMerged:
 		return wsm.BandMerged
 	case *agentreplv1.SidebarViewSectionSize_Backlog:
-		return wsm.BandHidden
+		return wsm.BandBacklog
 	default:
 		panic(fmt.Sprintf("UpdateSidebarView: size section arm %T passed validation that no case handles", section))
 	}

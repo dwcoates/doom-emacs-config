@@ -340,7 +340,7 @@ func arrangedWorkspaces(in []sidebar.ArrangedWorkspace) []*agentreplv1.ArrangedW
 			Workspace:  ws.Ref(),
 			Name:       ws.Name,
 			Branch:     ws.Branch,
-			Backlogged: ws.Hidden,
+			Backlogged: ws.Backlogged,
 			Children:   arrangedWorkspaces(family.Children),
 		}
 		if ws.Parent != nil {

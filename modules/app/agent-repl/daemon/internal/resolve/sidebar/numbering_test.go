@@ -46,7 +46,7 @@ func numberingRegistry() sidebar.Registry {
 	c1 := placed(workspace("c1", "c1"), 8)
 	c1.Repo = folded.ID
 	reg := registry(placed(workspace("a1", "a1"), 3), b1, in(placed(workspace("a2", "a2"), 5), later), parent, kid,
-		placed(hiddenWorkspace("h", "h"), 7), c1, reopened, closed)
+		placed(backloggedWorkspace("h", "h"), 7), c1, reopened, closed)
 	reg.Repositories = append(reg.Repositories, otherRepo, folded)
 	reg.Subsections = []wsm.Subsection{later}
 	return reg

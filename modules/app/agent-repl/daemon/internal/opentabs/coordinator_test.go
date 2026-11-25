@@ -314,7 +314,7 @@ func TestARefusedWorkspaceIsAnsweredAtOnce(t *testing.T) {
 	}
 }
 
-func TestAHiddenWorkspaceIsAnsweredHiddenAndNothingIsRead(t *testing.T) {
+func TestABackloggedWorkspaceIsAnsweredHiddenAndNothingIsRead(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
 	ws := loading("a")

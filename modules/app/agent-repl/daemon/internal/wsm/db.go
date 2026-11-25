@@ -150,9 +150,9 @@ type DB interface {
 	// SetPriority sets or clears a workspace's priority; setting one moves the
 	// workspace to second-to-last within that priority.
 	SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error
-	// SetHidden records whether a workspace sits in the roster's hidden
+	// SetBacklogged records whether a workspace sits in the roster's hidden
 	// section; an unknown workspace is ErrNotFound.
-	SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error
+	SetBacklogged(ctx context.Context, id WorkspaceID, backlogged bool, at time.Time) error
 	// HideFamily hides a workspace with every open workspace its hide would
 	// be refused for, each marked as hidden with it, and answers those
 	// members (familyhide.go).
@@ -550,9 +550,9 @@ type DB interface {
 	// SetMergeQueueSectionFolded records whether the Merge Queue section is
 	// collapsed.
 	SetMergeQueueSectionFolded(ctx context.Context, folded bool) error
-	// SetHiddenSectionFolded records whether the hidden-workspaces section is
+	// SetBacklogFolded records whether the hidden-workspaces section is
 	// collapsed.
-	SetHiddenSectionFolded(ctx context.Context, folded bool) error
+	SetBacklogFolded(ctx context.Context, folded bool) error
 	// SetOpenSectionFolded records whether the open-workspaces section is
 	// collapsed.
 	SetOpenSectionFolded(ctx context.Context, folded bool) error

@@ -208,7 +208,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		case record.Closed:
 			return record.Closure == nil || !clock.Before(record.Closure.At)
 		case record.KeepaliveHeld():
-			return record.HiddenAt == nil || !clock.Before(*record.HiddenAt)
+			return record.BackloggedAt == nil || !clock.Before(*record.BackloggedAt)
 		default:
 			return false
 		}

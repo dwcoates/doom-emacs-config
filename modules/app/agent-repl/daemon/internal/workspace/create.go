@@ -476,7 +476,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		// transaction writes all three, so no roster publication between the
 		// registration and this create's return ever draws the row visible,
 		// unmarked or unsectioned.
-		Hidden: spec.Hidden || spec.Intake, Intake: spec.Intake, IntakeCard: spec.IntakeCard, Placement: spec.registerPlacement(),
+		Backlogged: spec.Backlogged || spec.Intake, Intake: spec.Intake, IntakeCard: spec.IntakeCard, Placement: spec.registerPlacement(),
 		Originator: spec.originator.String(),
 	})
 	if err != nil {

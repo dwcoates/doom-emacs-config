@@ -2080,7 +2080,7 @@ func TestABootExpectsEveryOpenWorkspacesStreamsBack(t *testing.T) {
 	var rec restarttimingtest.Recorder
 	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return started.Add(2 * time.Second) })
 	db := fakeWorkspaceList{workspaces: []wsm.Workspace{
-		{ID: "open"}, {ID: "hidden", Hidden: true}, {ID: "closed", Closed: true},
+		{ID: "open"}, {ID: "hidden", Backlogged: true}, {ID: "closed", Closed: true},
 	}}
 
 	// Act

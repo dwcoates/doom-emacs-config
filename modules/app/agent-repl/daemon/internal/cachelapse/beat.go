@@ -55,15 +55,15 @@ func (k *Keeper) SendBackloggedKeepalives(ctx context.Context) *agentreplv1.Send
 			}},
 		}}
 	}
-	var hidden []wsm.Workspace
+	var backlogged []wsm.Workspace
 	for _, ws := range workspaces {
-		if ws.InHiddenSection() {
-			hidden = append(hidden, ws)
+		if ws.InBacklog() {
+			backlogged = append(backlogged, ws)
 		}
 	}
-	outcomes := make([]*agentreplv1.SendBackloggedKeepalivesWorkspace, len(hidden))
+	outcomes := make([]*agentreplv1.SendBackloggedKeepalivesWorkspace, len(backlogged))
 	var wg sync.WaitGroup
-	for i, ws := range hidden {
+	for i, ws := range backlogged {
 		wg.Add(1)
 		// inflight: joined: the function that starts it waits for it.
 		go func() {
@@ -181,7 +181,7 @@ func outcomeName(out *agentreplv1.SendBackloggedKeepalivesWorkspace) string {
 
 // tally counts the outcomes by name for the summary record.
 func tally(outcomes []*agentreplv1.SendBackloggedKeepalivesWorkspace) dlog.Context {
-	fields := dlog.Context{"hidden": len(outcomes)}
+	fields := dlog.Context{"backlogged": len(outcomes)}
 	for _, out := range outcomes {
 		name := outcomeName(out)
 		n, _ := fields[name].(int)

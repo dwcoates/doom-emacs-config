@@ -22,8 +22,8 @@ import (
 // shim's keep-alives, the held shim projects its lapse, the hidden row counts
 // down to it, and the session is stood down when it comes.
 
-// hiddenRow finds a workspace's row in the hidden section.
-func hiddenRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
+// backlogRow finds a workspace's row in the hidden section.
+func backlogRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
 	for _, r := range rosterwalk.BacklogRows(roster.GetWorkspaces()) {
 		if r.GetWorkspace().GetWorkspace().GetId() == id {
 			return r
@@ -43,12 +43,12 @@ func cacheLapse(at time.Time, gatedTokens uint64) *conversationv1.SessionUpdate 
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CacheLapse{CacheLapse: lapse}}
 }
 
-// hiddenAndHeld opens a workspace and hides it. The daemon drives every
+// backloggedAndHeld opens a workspace and hides it. The daemon drives every
 // keep-alive (2026-10-26), so a hidden workspace is simply sent none: there is
 // no cadence to wait on, and the hide is recorded before its call answers.
-func hiddenAndHeld(t *testing.T) *fixture {
+func backloggedAndHeld(t *testing.T) *fixture {
 	t.Helper()
-	f := newInGroup(t, groupHiddenKeepalives)
+	f := newInGroup(t, groupBackloggedKeepalives)
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	hide(t, f.d, f.ws)
 	return f
@@ -57,7 +57,7 @@ func hiddenAndHeld(t *testing.T) *fixture {
 func TestHidingAWorkspaceStandsNothingDown(t *testing.T) {
 	t.Parallel()
 	// Arrange, Act
-	f := hiddenAndHeld(t)
+	f := backloggedAndHeld(t)
 
 	// Assert
 	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
@@ -65,10 +65,10 @@ func TestHidingAWorkspaceStandsNothingDown(t *testing.T) {
 	}
 }
 
-func TestAHiddenRowCountsDownToTheLapseItsShimProjected(t *testing.T) {
+func TestABackloggedRowCountsDownToTheLapseItsShimProjected(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := hiddenAndHeld(t)
+	f := backloggedAndHeld(t)
 	roster := f.d.WatchRoster()
 	lapsesAt := time.Now().Add(time.Hour)
 
@@ -77,14 +77,14 @@ func TestAHiddenRowCountsDownToTheLapseItsShimProjected(t *testing.T) {
 
 	// Assert
 	awaitRoster(t, f.d, roster, "the hidden row counting down to the lapse", func(r *frontendv1.RosterPush) bool {
-		return hiddenRow(r, f.ws.GetId()).GetWhen().GetHidden().GetCache().GetLapsesAtMs() == lapsesAt.UnixMilli()
+		return backlogRow(r, f.ws.GetId()).GetWhen().GetBacklogged().GetCache().GetLapsesAtMs() == lapsesAt.UnixMilli()
 	})
 }
 
-func TestAHiddenWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *testing.T) {
+func TestABackloggedWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := hiddenAndHeld(t)
+	f := backloggedAndHeld(t)
 	f.d.ExpectWarnings(standDownWarnings...)
 	f.remoteControlOff()
 	roster := f.d.WatchRoster()
@@ -100,7 +100,7 @@ func TestAHiddenWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *t
 		t.Fatal("the lapsed workspace's KillSession was forced, want a graceful stand-down")
 	}
 	awaitRoster(t, f.d, roster, "the hidden row struck through at its cold gate", func(r *frontendv1.RosterPush) bool {
-		return hiddenRow(r, f.ws.GetId()).GetColdGate() != nil
+		return backlogRow(r, f.ws.GetId()).GetColdGate() != nil
 	})
 }
 
@@ -117,10 +117,10 @@ func sendBackloggedKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.Send
 
 // SPC j R: one keep-alive to every hidden workspace
 // (docs/protobuf-design/hidden-keepalives-on-demand.md).
-func TestSendingTheHiddenKeepalivesAsksEachHiddenShimForOne(t *testing.T) {
+func TestSendingTheBackloggedKeepalivesAsksEachBackloggedShimForOne(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := hiddenAndHeld(t)
+	f := backloggedAndHeld(t)
 
 	// Act
 	resp := sendBackloggedKeepalives(t, f.d)
@@ -136,10 +136,10 @@ func TestSendingTheHiddenKeepalivesAsksEachHiddenShimForOne(t *testing.T) {
 	}
 }
 
-func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
+func TestTheKeepalivesAnswerMovesTheBackloggedRowsCountdown(t *testing.T) {
 	t.Parallel()
 	// Arrange: a lapse projected, then the keep-alive sent.
-	f := hiddenAndHeld(t)
+	f := backloggedAndHeld(t)
 	roster := f.d.WatchRoster()
 	shim := f.d.OpenedShim(f.ws)
 	shim.PushSessionUpdate(cacheLapse(time.Now().Add(10*time.Minute), 0))
@@ -151,7 +151,7 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 
 	// Assert
 	awaitRoster(t, f.d, roster, "the hidden row counting down to the later lapse", func(r *frontendv1.RosterPush) bool {
-		return hiddenRow(r, f.ws.GetId()).GetWhen().GetHidden().GetCache().GetLapsesAtMs() == later.UnixMilli()
+		return backlogRow(r, f.ws.GetId()).GetWhen().GetBacklogged().GetCache().GetLapsesAtMs() == later.UnixMilli()
 	})
 }
 
@@ -164,7 +164,7 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 // before its call answers.
 func closedAndLastRound(t *testing.T) *fixture {
 	t.Helper()
-	f := newInGroup(t, groupHiddenKeepalives)
+	f := newInGroup(t, groupBackloggedKeepalives)
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace = error %v", err)

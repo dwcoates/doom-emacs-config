@@ -248,7 +248,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, 
 	if visibility.Fold != nil {
 		fields = dlog.Merge(fields, visibility.Fold.Fields())
 	}
-	fields = dlog.Merge(fields, dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed})
+	fields = dlog.Merge(fields, dlog.Context{"backlogged": record.InBacklog(), "closed": record.Closed})
 	if visibility.Runs && !record.Closed {
 		log.Info(opWithheld, "the workspace was shown or reopened before its session was stood down; it keeps running", fields)
 		c.deps.Why.SetHold(ws, sessionwhy.HoldWithheldShown)

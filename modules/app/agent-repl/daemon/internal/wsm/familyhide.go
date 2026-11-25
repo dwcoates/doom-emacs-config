@@ -24,15 +24,15 @@ CREATE INDEX workspaces_by_hidden_with ON workspaces(hidden_with) WHERE hidden_w
 // it (refuseOpenChildren) -- in one write, each of them marked as hidden
 // with ROOT, and answers the members hidden with it. A
 // member already hidden stays as it is and is not marked: ROOT's show
-// leaves it hidden. A ROOT already hidden is re-stamped, as SetHidden
+// leaves it hidden. A ROOT already hidden is re-stamped, as SetBacklogged
 // re-stamps.
 //
 // THE FAMILY GOES TOGETHER, SO NO OPEN CHILD IS LEFT UNDER A HIDDEN
 // PARENT: the rule refuseOpenChildren holds for one workspace's hide holds
 // here for the whole family at once.
 func (s *store) HideFamily(ctx context.Context, root WorkspaceID, at time.Time) ([]WorkspaceID, error) {
-	var hidden []WorkspaceID
-	err := s.write(ctx, "daemon.wsm.hide_family", dlog.Context{"workspace": string(root), "hidden_at": at}, func(ctx context.Context, tx *sql.Tx) error {
+	var backlogged []WorkspaceID
+	err := s.write(ctx, "daemon.wsm.hide_family", dlog.Context{"workspace": string(root), "backlogged_at": at}, func(ctx context.Context, tx *sql.Tx) error {
 		members, err := familyOf(ctx, tx, root)
 		if err != nil {
 			return err
@@ -48,18 +48,18 @@ func (s *store) HideFamily(ctx context.Context, root WorkspaceID, at time.Time) 
 			if err := updateWorkspaceColumns(ctx, tx, id, append(hideColumns(true, at), workspaceColumn{name: "backlogged_with", value: string(root)})...); err != nil {
 				return err
 			}
-			hidden = append(hidden, id)
+			backlogged = append(backlogged, id)
 		}
 		return updateWorkspaceColumns(ctx, tx, root, hideColumns(true, at)...)
 	})
-	return hidden, err
+	return backlogged, err
 }
 
 // ShowFamily shows ROOT and then every open workspace HideFamily hid with
 // it, parent first, and answers the members shown, in the order shown. A
 // member closed since is left closed; one shown since is not shown again. A
 // ROOT whose own parent is not open is refused (ParentNotOpenError), nothing
-// written, as SetHidden refuses it.
+// written, as SetBacklogged refuses it.
 func (s *store) ShowFamily(ctx context.Context, root WorkspaceID) ([]WorkspaceID, error) {
 	var shown []WorkspaceID
 	err := s.write(ctx, "daemon.wsm.show_family", dlog.Context{"workspace": string(root)}, func(ctx context.Context, tx *sql.Tx) error {
@@ -87,7 +87,7 @@ func (s *store) ShowFamily(ctx context.Context, root WorkspaceID) ([]WorkspaceID
 		// family comes back in whatever order its places hold. A member
 		// whose parent stays out of the Open section (a workspace landing
 		// into ROOT whose own parent is hidden elsewhere) stays hidden, still
-		// marked, as SetHidden would refuse to show it.
+		// marked, as SetBacklogged would refuse to show it.
 		for progress := true; progress; {
 			progress = false
 			for i := 0; i < len(members); i++ {

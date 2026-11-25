@@ -36,13 +36,13 @@ func OpenFamily(row *frontendv1.RosterOpenRow) []*frontendv1.RosterOpenRow {
 	return out
 }
 
-// FlattenHidden lists every hidden row of the hidden section's rows
+// FlattenBacklog lists every hidden row of the hidden section's rows
 // depth-first, each row before its nested family.
-func FlattenHidden(rows []*frontendv1.RosterBacklogRow) []*frontendv1.RosterBacklogRow {
+func FlattenBacklog(rows []*frontendv1.RosterBacklogRow) []*frontendv1.RosterBacklogRow {
 	var out []*frontendv1.RosterBacklogRow
 	for _, row := range rows {
 		out = append(out, row)
-		out = append(out, FlattenHidden(row.GetChildren())...)
+		out = append(out, FlattenBacklog(row.GetChildren())...)
 	}
 	return out
 }
@@ -116,8 +116,8 @@ func OpenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterOpenRow {
 // BacklogRows lists every row of the hidden section, flattened.
 func BacklogRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
-	for _, hidden := range FlattenHidden(roster.GetBacklog().GetBacklogRows().GetRows()) {
-		out = append(out, hidden.GetRow())
+	for _, backlog := range FlattenBacklog(roster.GetBacklog().GetBacklogRows().GetRows()) {
+		out = append(out, backlog.GetRow())
 	}
 	return out
 }

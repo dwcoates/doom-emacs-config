@@ -801,7 +801,7 @@ func TestScheduleBeatsAWorkspaceWithAMergeQueued(t *testing.T) {
 		name string
 		rec  wsm.Workspace
 	}{
-		{name: "hidden, nobody looking at it", rec: hidden()},
+		{name: "hidden, nobody looking at it", rec: backlogged()},
 		{name: "closed, its last keep-alive spent", rec: spentClose},
 	}
 	for _, tt := range tests {
@@ -832,7 +832,7 @@ func TestScheduleArmsTheRestoreOfAParkedWorkspaceWithAMergeQueued(t *testing.T) 
 		rec  wsm.Workspace
 	}{
 		{name: "the workspace in view", rec: visible()},
-		{name: "hidden, nobody looking at it", rec: hidden()},
+		{name: "hidden, nobody looking at it", rec: backlogged()},
 		{name: "closed, its last keep-alive spent", rec: spentClose},
 	}
 	for _, tt := range tests {
@@ -857,9 +857,9 @@ func TestScheduleArmsTheRestoreOfAParkedWorkspaceWithAMergeQueued(t *testing.T) 
 	}
 }
 
-func TestScheduleHoldsAHiddenWorkspaceOnceItsMergeLeftTheQueue(t *testing.T) {
+func TestScheduleHoldsABackloggedWorkspaceOnceItsMergeLeftTheQueue(t *testing.T) {
 	// Arrange: no entry of it stands in any queue.
-	h := newHarness(t, beatable(hidden(), 10*time.Minute))
+	h := newHarness(t, beatable(backlogged(), 10*time.Minute))
 
 	// Act
 	h.keeper.schedule(context.Background(), theWorkspace, "test")
@@ -872,7 +872,7 @@ func TestScheduleHoldsAHiddenWorkspaceOnceItsMergeLeftTheQueue(t *testing.T) {
 
 func TestScheduleLogsQueuesThatCannotBeRead(t *testing.T) {
 	// Arrange
-	h := newHarness(t, beatable(hidden(), 10*time.Minute))
+	h := newHarness(t, beatable(backlogged(), 10*time.Minute))
 	h.db.queuesErr = errors.New("database is locked")
 
 	// Act
@@ -1110,19 +1110,19 @@ func TestTheBeatAndAKeepLiveStateOneGraceRule(t *testing.T) {
 
 func TestABackloggedWorkspaceOwesOneLastBeat(t *testing.T) {
 	tests := []struct {
-		name      string
-		hiddenAgo time.Duration
-		wantArmed bool
+		name          string
+		backloggedAgo time.Duration
+		wantArmed     bool
 	}{
-		{name: "backlogged after its cache was last written, it owes the beat that clock is due", hiddenAgo: 5 * time.Minute, wantArmed: true},
-		{name: "backlogged before its cache was last written, its last beat is spent", hiddenAgo: 20 * time.Minute, wantArmed: false},
+		{name: "backlogged after its cache was last written, it owes the beat that clock is due", backloggedAgo: 5 * time.Minute, wantArmed: true},
+		{name: "backlogged before its cache was last written, its last beat is spent", backloggedAgo: 20 * time.Minute, wantArmed: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: the cache was last written ten minutes ago.
-			rec := hidden()
-			at := now.Add(-tt.hiddenAgo)
-			rec.HiddenAt = &at
+			rec := backlogged()
+			at := now.Add(-tt.backloggedAgo)
+			rec.BackloggedAt = &at
 			h := newHarness(t, beatable(rec, 10*time.Minute))
 
 			// Act

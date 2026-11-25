@@ -148,10 +148,10 @@ type Workspace struct {
 	// where the workspace lands when it is created or its priority is set
 	// (see place.go).
 	Priority *Priority
-	// Hidden reports whether the user moved the workspace into the roster's
+	// Backlogged reports whether the user moved the workspace into the roster's
 	// hidden section (agentrepl.v1.SetWorkspaceBacklogged): off every grouping and
 	// off the editor's tab bar, its session and tab untouched.
-	Hidden bool
+	Backlogged bool
 	// ChildrenFolded reports whether the workspace's children are folded: their
 	// rows hidden in the sidebar and their tabs folded off the tab bar
 	// (SetChildrenFolded).
@@ -191,9 +191,9 @@ type Workspace struct {
 	Subsection *SubsectionID
 	// LastSelectedAt is when the user last selected the workspace.
 	LastSelectedAt *time.Time
-	// HiddenAt is when the user moved the workspace into the hidden section,
-	// set exactly while Hidden is (SetHidden).
-	HiddenAt *time.Time
+	// BackloggedAt is when the user moved the workspace into the hidden section,
+	// set exactly while Hidden is (SetBacklogged).
+	BackloggedAt *time.Time
 	// BackloggedGateAt is the lapse instant of the cold gate the daemon last
 	// moved the workspace into the backlog for (BacklogColdGate); nil when it
 	// never has. A workspace is backlogged at most once per gate, so one the
@@ -460,11 +460,11 @@ type RegisterFacts struct {
 	// created workspace never exists without its job and full merge geometry
 	// (RegisterWorkspace). There is no re-keying step for a failure to cut.
 	CreationJob WorkspaceID
-	// Hidden makes a MINTED workspace born hidden: the insert's own
+	// Backlogged makes a MINTED workspace born hidden: the insert's own
 	// transaction writes the hidden columns, so no roster ever draws the row
 	// visible for an instant. An announcement of an already-registered
 	// workspace ignores it.
-	Hidden bool
+	Backlogged bool
 	// Intake makes a MINTED workspace an ephemeral intake workspace
 	// (intake.go) born so: its intake_workspaces row is written in the
 	// insert's transaction. It implies Hidden.

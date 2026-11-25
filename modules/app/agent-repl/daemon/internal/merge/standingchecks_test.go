@@ -477,24 +477,24 @@ func TestAnEndingThatCannotBeRecordedIsAnsweredAndRecorded(t *testing.T) {
 
 // mediatorInSight records "ws-fixer" as the harness queue's deploy
 // mediator, HIDDEN or in sight.
-func mediatorInSight(t *testing.T, h *harness, hidden bool) {
+func mediatorInSight(t *testing.T, h *harness, backlogged bool) {
 	t.Helper()
 	mediatorIn(t, h, "ws-fixer", false)
 	h.db.mu.Lock()
 	record := h.db.workspaces["ws-fixer"]
-	record.Hidden = hidden
+	record.Backlogged = backlogged
 	h.db.workspaces["ws-fixer"] = record
 	h.db.mu.Unlock()
 }
 
 func TestTheMediatorIsKeptInSightWhateverItsCheck(t *testing.T) {
 	tests := []struct {
-		name      string
-		hidden    bool
-		arrange   func(t *testing.T, h *harness)
-		wantShown []ids.WorkspaceID
+		name       string
+		backlogged bool
+		arrange    func(t *testing.T, h *harness)
+		wantShown  []ids.WorkspaceID
 	}{
-		{name: "a hidden mediator a fix is dispatched for is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
+		{name: "a hidden mediator a fix is dispatched for is shown", backlogged: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(t *testing.T, h *harness) {
 				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 					t.Fatal(err)
@@ -509,7 +509,7 @@ func TestTheMediatorIsKeptInSightWhateverItsCheck(t *testing.T) {
 					t.Fatal(err)
 				}
 			}},
-		{name: "a hidden mediator whose finish is under way is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
+		{name: "a hidden mediator whose finish is under way is shown", backlogged: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(t *testing.T, h *harness) {
 				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 					t.Fatal(err)
@@ -519,14 +519,14 @@ func TestTheMediatorIsKeptInSightWhateverItsCheck(t *testing.T) {
 				}
 			}},
 		{name: "a mediator in sight that no check holds the queue for stays in sight", arrange: func(*testing.T, *harness) {}},
-		{name: "a hidden mediator no check holds the queue for is shown", hidden: true, arrange: func(*testing.T, *harness) {}, wantShown: []ids.WorkspaceID{"ws-fixer"}},
+		{name: "a hidden mediator no check holds the queue for is shown", backlogged: true, arrange: func(*testing.T, *harness) {}, wantShown: []ids.WorkspaceID{"ws-fixer"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			mediatorInSight(t, h, tt.hidden)
+			mediatorInSight(t, h, tt.backlogged)
 			tt.arrange(t, h)
 
 			// Act
@@ -540,7 +540,7 @@ func TestTheMediatorIsKeptInSightWhateverItsCheck(t *testing.T) {
 	}
 }
 
-func TestAHiddenMediatorThatCannotBeShownIsAnError(t *testing.T) {
+func TestABackloggedMediatorThatCannotBeShownIsAnError(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
@@ -573,7 +573,7 @@ func TestAReleasedEscalationsMediatorStaysInSight(t *testing.T) {
 	h.db.mu.Lock()
 	record := h.db.workspaces["ws-fixer"]
 	h.db.mu.Unlock()
-	if err != nil || record.Hidden {
+	if err != nil || record.Backlogged {
 		t.Fatalf("ReleaseEscalation = %v, record %+v; want the released mediator still in sight", err, record)
 	}
 }
@@ -734,7 +734,7 @@ func TestAnAdoptionWhoseMediatorCannotBeReadSaysSo(t *testing.T) {
 	}
 }
 
-func TestAHiddenMediatorHandedAwayBeforeItIsShownIsNoError(t *testing.T) {
+func TestABackloggedMediatorHandedAwayBeforeItIsShownIsNoError(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)

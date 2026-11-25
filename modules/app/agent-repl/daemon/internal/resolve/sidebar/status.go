@@ -77,7 +77,7 @@ func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fro
 	if rec.Closed && (!s.live(session) || parked(session)) {
 		return "inactive"
 	}
-	if hiddenColdGate(rec, now) {
+	if backloggedColdGate(rec, now) {
 		log.Debug("daemon.sidebar.status_decision", "the hidden workspace's cache lapsed with a gated verdict", dlog.Context{
 			"lapses_at": rec.CacheLapse.LapsesAt, "gated_tokens": *rec.CacheLapse.GatedTokens,
 		})
@@ -114,9 +114,9 @@ func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fro
 	return arm
 }
 
-// hiddenColdGate reports whether a hidden workspace's cache has lapsed with a
+// backloggedColdGate reports whether a hidden workspace's cache has lapsed with a
 // gated verdict at NOW.
-func hiddenColdGate(rec wsm.Workspace, now time.Time) bool {
+func backloggedColdGate(rec wsm.Workspace, now time.Time) bool {
 	return armReadsClock(rec) && rec.CacheLapse.Lapsed(now)
 }
 
@@ -125,7 +125,7 @@ func hiddenColdGate(rec wsm.Workspace, now time.Time) bool {
 // lapse whatever else changes, so no render keeps its arm (kept.go).
 func armReadsClock(rec wsm.Workspace) bool {
 	lapse := rec.CacheLapse
-	return rec.InHiddenSection() && lapse != nil && lapse.GatedTokens != nil
+	return rec.InBacklog() && lapse != nil && lapse.GatedTokens != nil
 }
 
 // projectArm names the roster arm that draws the footer's status on every rung

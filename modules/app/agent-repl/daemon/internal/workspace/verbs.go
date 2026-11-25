@@ -40,7 +40,7 @@ const (
 	opRepublishLinks       = "daemon.workspace.republish_links"
 	opAddResponseLinks     = "daemon.workspace.add_response_links"
 	opSetName              = "daemon.workspace.set_name"
-	opSetHidden            = "daemon.workspace.set_hidden"
+	opSetBacklogged        = "daemon.workspace.set_backlogged"
 	opBacklogColdGate      = "daemon.workspace.backlog_cold_gate"
 	opRevealMergeWorkspace = "daemon.workspace.reveal_merge_workspace"
 	opSwap                 = "daemon.workspace.swap"

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestTheMigrationStampsEveryHiddenRowWithAHideInstant(t *testing.T) {
+func TestTheMigrationStampsEveryBackloggedRowWithAHideInstant(t *testing.T) {
 	// Arrange: a layout-42 file holding one hidden workspace and one shown.
 	path := fixtureAt(t, 42)
 	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at, hidden)

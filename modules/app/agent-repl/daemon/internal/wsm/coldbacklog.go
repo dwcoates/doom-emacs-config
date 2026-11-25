@@ -41,7 +41,7 @@ ALTER TABLE workspaces ADD COLUMN cold_gate_backlogged_at INTEGER;
 // family rules as a hide is (HasOpenChildrenError, family.go), nothing
 // written. An unknown workspace is refused (ErrNotFound).
 func (s *store) BacklogColdGate(ctx context.Context, id WorkspaceID, gateLapsedAt, at time.Time) (bool, error) {
-	fields := dlog.Context{"workspace": string(id), "gate_lapsed_at": gateLapsedAt, "hidden_at": at}
+	fields := dlog.Context{"workspace": string(id), "gate_lapsed_at": gateLapsedAt, "backlogged_at": at}
 	moved := false
 	err := s.write(ctx, "daemon.wsm.backlog_cold_gate", fields, func(ctx context.Context, tx *sql.Tx) error {
 		ws, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))

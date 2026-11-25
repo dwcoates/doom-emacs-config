@@ -1623,7 +1623,7 @@ func TestEveryTriggerLeavesTheOnePark(t *testing.T) {
 			return ws
 		}},
 		{name: "a withheld workspace's stand-down", wantDetail: "hidden, collapsed or closed", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
-			ws := h.hidden(t)
+			ws := h.backlogged(t)
 			h.c.StandDownWithheld(ws, WithheldCacheLapse)
 			return ws
 		}},

@@ -4540,7 +4540,7 @@ func TestEachSessionStartMeasuresItsWorkspacesShimForItsWholeStart(t *testing.T)
 
 func TestWithRecordTakesTheRecordsName(t *testing.T) {
 	// Act.
-	got := source{VendorSessionID: "vendor-1"}.withRecord(wsm.Workspace{ID: "w1", Name: "parser-fix", Hidden: true})
+	got := source{VendorSessionID: "vendor-1"}.withRecord(wsm.Workspace{ID: "w1", Name: "parser-fix", Backlogged: true})
 
 	// Assert.
 	if got.WorkspaceName != "parser-fix" || got.VendorSessionID != "vendor-1" {

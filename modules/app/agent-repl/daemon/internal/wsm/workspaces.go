@@ -118,7 +118,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		started       sql.NullInt64
 		asked         sql.NullInt64
 		mergeTurn     sql.NullInt64
-		hiddenAt      sql.NullInt64
+		backloggedAt  sql.NullInt64
 		lapsesAt      sql.NullInt64
 		gated         sql.NullInt64
 		closedAt      sql.NullInt64
@@ -145,7 +145,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)
@@ -255,13 +255,13 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	}
 	ws.MergedAt = optTime(merged)
 	ws.CreatedAt = fromNanos(created)
-	// HIDDEN AND ITS INSTANT STAND AND FALL TOGETHER (SetHidden writes both in
+	// HIDDEN AND ITS INSTANT STAND AND FALL TOGETHER (SetBacklogged writes both in
 	// one statement, and layout 43 stamped every row already hidden), so a
 	// row with one and not the other is corrupt.
-	if ws.Hidden != hiddenAt.Valid {
+	if ws.Backlogged != backloggedAt.Valid {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "backlogged_at", Err: errors.New("a workspace records when it was hidden exactly while it is hidden")}
 	}
-	ws.HiddenAt = optTime(hiddenAt)
+	ws.BackloggedAt = optTime(backloggedAt)
 	lapse, err := decodeCacheLapse(ws, lapsesAt, gated)
 	if err != nil {
 		return Workspace{}, err
@@ -457,11 +457,11 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		// written in this very transaction, so no read of the roster ever
 		// finds the row visible, unmarked, unsectioned or without its name's
 		// glyph (the flash an after-the-fact write left).
-		if facts.Hidden || facts.Intake {
+		if facts.Backlogged || facts.Intake {
 			if err := updateWorkspaceColumns(ctx, tx, out.ID, hideColumns(true, out.CreatedAt)...); err != nil {
 				return err
 			}
-			out.Hidden, out.HiddenAt = true, &out.CreatedAt
+			out.Backlogged, out.BackloggedAt = true, &out.CreatedAt
 		}
 		if facts.IntakeCard != nil && !facts.Intake {
 			return fmt.Errorf("wsm: register %s: an intake card is recorded only for an intake workspace", normalized)
@@ -990,8 +990,8 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
 		var mergeOf sql.NullString
-		var hidden, closed bool
-		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, backlogged, closed", &merged, &mergeOf, &hidden, &closed); err != nil {
+		var backlogged, closed bool
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, backlogged, closed", &merged, &mergeOf, &backlogged, &closed); err != nil {
 			return err
 		}
 		// A CLOSED CHILD IS RE-OPENED ONLY UNDER AN OPEN PARENT (family.go).
@@ -1009,7 +1009,7 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 			{name: "closure_by", value: nil},
 			{name: "serving_instance", value: string(serving)},
 		}
-		if !hidden {
+		if !backlogged {
 			columns = append(columns,
 				workspaceColumn{name: "cache_lapses_at", value: nil},
 				workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
@@ -1160,7 +1160,7 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 	})
 }
 
-// SetHidden records whether a workspace sits in the roster's hidden section,
+// SetBacklogged records whether a workspace sits in the roster's hidden section,
 // and, in the same statement, WHEN it was hidden: AT while it is hidden, none
 // once it is shown again. The same statement CLEARS the projected cache lapse
 // either way: a shown workspace keeps its cache warm again, and a fresh hide
@@ -1171,12 +1171,12 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 // A WORKSPACE WITH OPEN CHILDREN IS NOT HIDDEN, and a hidden child is not
 // shown under a parent that is not open: both are refused by the family rules,
 // nothing written (family.go).
-func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error {
-	fields := dlog.Context{"workspace": string(id), "hidden": hidden}
-	if hidden {
-		fields["hidden_at"] = at
+func (s *store) SetBacklogged(ctx context.Context, id WorkspaceID, backlogged bool, at time.Time) error {
+	fields := dlog.Context{"workspace": string(id), "backlogged": backlogged}
+	if backlogged {
+		fields["backlogged_at"] = at
 	}
-	return s.write(ctx, "daemon.wsm.set_hidden", fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.write(ctx, "daemon.wsm.set_backlogged", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var was bool
 		if err := scanWorkspaceRow(ctx, tx, id, "backlogged", &was); err != nil {
 			return err
@@ -1185,16 +1185,16 @@ func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at t
 		// Only a change is judged: a re-stamp of a hide, or a show of a shown
 		// workspace, moves nothing between lists.
 		switch {
-		case hidden && !was:
+		case backlogged && !was:
 			if err := refuseOpenChildren(ctx, tx, id); err != nil {
 				return err
 			}
-		case !hidden && was:
+		case !backlogged && was:
 			if err := requireOpenParentOf(ctx, tx, id); err != nil {
 				return err
 			}
 		}
-		return updateWorkspaceColumns(ctx, tx, id, hideColumns(hidden, at)...)
+		return updateWorkspaceColumns(ctx, tx, id, hideColumns(backlogged, at)...)
 	})
 }
 
@@ -1204,14 +1204,14 @@ func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at t
 // its cache warm again and a fresh hide waits for the shim's own projection.
 // Every move into or out of the hidden section writes them, so no two moves
 // can disagree about what a hidden row holds (TestHideColumnsAreTheOneHideShape).
-func hideColumns(hidden bool, at time.Time) []workspaceColumn {
-	var hiddenAt any
-	if hidden {
-		hiddenAt = nanos(at)
+func hideColumns(backlogged bool, at time.Time) []workspaceColumn {
+	var backloggedAt any
+	if backlogged {
+		backloggedAt = nanos(at)
 	}
 	return []workspaceColumn{
-		{name: "backlogged", value: hidden},
-		{name: "backlogged_at", value: hiddenAt},
+		{name: "backlogged", value: backlogged},
+		{name: "backlogged_at", value: backloggedAt},
 		{name: "cache_lapses_at", value: nil},
 		{name: "cache_lapse_gated_tokens", value: nil},
 		// An ordinary move forgets which family hide hid the workspace;
@@ -1225,7 +1225,7 @@ func hideColumns(hidden bool, at time.Time) []workspaceColumn {
 // and the set are one transaction.
 //
 // SELECTING A WORKSPACE CLEARS ITS PROJECTED CACHE LAPSE, as showing it does
-// (SetHidden): the hidden workspace the user looks at keeps its cache warm
+// (SetBacklogged): the hidden workspace the user looks at keeps its cache warm
 // (Workspace.LetsCacheLapse), and once they move off it the lapse is the
 // shim's fresh projection, never the one that stood before the selection. A
 // CLOSED workspace keeps its lapse: it lapses whether or not it is selected.

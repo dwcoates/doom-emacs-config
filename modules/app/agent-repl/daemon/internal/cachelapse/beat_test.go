@@ -27,7 +27,7 @@ func skippedAnswer(reason *shimv1.SendKeepaliveSkipped) *shimv1.SendKeepaliveSuc
 
 // workspaceNamed is a hidden workspace with its own id and dir.
 func workspaceNamed(id string) wsm.Workspace {
-	ws := hidden()
+	ws := backlogged()
 	ws.ID, ws.Dir = ids.WorkspaceID(id), "/work/"+id
 	return ws
 }
@@ -57,13 +57,13 @@ func outcomesOf(t *testing.T, resp *agentreplv1.SendBackloggedKeepalivesResponse
 	return out
 }
 
-func TestSendBackloggedKeepalivesAsksEveryHiddenWorkspaceAndNoOther(t *testing.T) {
+func TestSendBackloggedKeepalivesAsksEveryBackloggedWorkspaceAndNoOther(t *testing.T) {
 	// Arrange
 	merged := workspaceNamed("c-merged")
-	merged.MergedAt = merged.HiddenAt
+	merged.MergedAt = merged.BackloggedAt
 	merged.Closed = true
 	shown := workspaceNamed("b-shown")
-	shown.Hidden, shown.HiddenAt = false, nil
+	shown.Backlogged, shown.BackloggedAt = false, nil
 	shims := map[ids.WorkspaceID]*fakeShim{}
 	records := []wsm.Workspace{workspaceNamed("a-hidden"), shown, merged, workspaceNamed("d-hidden")}
 	for _, rec := range records {
@@ -96,7 +96,7 @@ func TestSendBackloggedKeepalivesNamesEachWorkspaceByItsRef(t *testing.T) {
 	}
 }
 
-func TestSendBackloggedKeepalivesAnswersAnEmptyHiddenSection(t *testing.T) {
+func TestSendBackloggedKeepalivesAnswersAnEmptyBacklog(t *testing.T) {
 	// Arrange
 	h := newHarness(t, visible())
 
@@ -200,14 +200,14 @@ func TestSendBackloggedKeepalivesSummarizesTheOutcomes(t *testing.T) {
 
 	// Assert
 	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opBeat, Message: "sent the hidden section its keep-alives"})
-	if !ok || rec.Context["hidden"] != 2 || rec.Context["sent"] != 1 || rec.Context["not_running"] != 1 {
+	if !ok || rec.Context["backlogged"] != 2 || rec.Context["sent"] != 1 || rec.Context["not_running"] != 1 {
 		t.Fatalf("summary = %+v, %v; want 2 hidden, 1 sent, 1 not running", rec, ok)
 	}
 }
 
 func TestSendBackloggedKeepalivesRefusesARegistryThatCannotBeRead(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	h.db.listErr = errors.New("database is locked")
 
 	// Act

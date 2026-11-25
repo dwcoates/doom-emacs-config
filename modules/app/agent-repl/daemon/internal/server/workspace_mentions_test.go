@@ -35,13 +35,13 @@ func mentionRowIn(id, name, repository string, children ...*frontendv1.RosterOpe
 
 // mentionRoster is a roster whose one repository section holds ROWS, in no
 // subsection, and whose hidden section holds HIDDEN.
-func mentionRoster(rows []*frontendv1.RosterOpenRow, hidden ...*frontendv1.RosterOpenRow) *frontendv1.WorkspaceRoster {
+func mentionRoster(rows []*frontendv1.RosterOpenRow, backlog ...*frontendv1.RosterOpenRow) *frontendv1.WorkspaceRoster {
 	section := &frontendv1.RosterRepoSection{}
 	for _, row := range rows {
 		section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: row}})
 	}
 	var backlogRows []*frontendv1.RosterBacklogRow
-	for _, row := range hidden {
+	for _, row := range backlog {
 		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: row.GetRow()})
 	}
 	return &frontendv1.WorkspaceRoster{

@@ -17,7 +17,7 @@ import (
 // conditions it holds, each by construction:
 //
 //   - EVERY WORKSPACE IS IN ONE LIST. A workspace is OPEN (here), HIDDEN
-//     (hiddenSection) or MERGED (mergedSection), never two: open is neither
+//     (backlogSection) or MERGED (mergedSection), never two: open is neither
 //     closed nor hidden, and OPEN BEATS MERGED, so a merged workspace that was
 //     reopened is open and listed here.
 //   - IN OPEN IF AND ONLY IF IT HAS A TAB. Every open row carries a tab, and

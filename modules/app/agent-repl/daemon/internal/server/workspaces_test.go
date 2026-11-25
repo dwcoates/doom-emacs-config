@@ -932,9 +932,9 @@ func TestSetWorkspaceBackloggedHandsThePlaceToTheVerb(t *testing.T) {
 			if resp.Msg.GetSuccess() == nil {
 				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
 			}
-			want := hiddenSet{ws: testWorkspaceID, hidden: tt.want}
-			if len(h.Verbs.hiddenSets) != 1 || h.Verbs.hiddenSets[0] != want {
-				t.Fatalf("hidden sets = %+v, want %+v", h.Verbs.hiddenSets, want)
+			want := backloggedSet{ws: testWorkspaceID, backlogged: tt.want}
+			if len(h.Verbs.backloggedSets) != 1 || h.Verbs.backloggedSets[0] != want {
+				t.Fatalf("hidden sets = %+v, want %+v", h.Verbs.backloggedSets, want)
 			}
 		})
 	}
@@ -959,8 +959,8 @@ func TestSetWorkspaceBackloggedRefusesAnUnknownWorkspace(t *testing.T) {
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
-	if len(h.Verbs.hiddenSets) != 0 {
-		t.Fatalf("hidden sets = %+v, want none for an unknown workspace", h.Verbs.hiddenSets)
+	if len(h.Verbs.backloggedSets) != 0 {
+		t.Fatalf("hidden sets = %+v, want none for an unknown workspace", h.Verbs.backloggedSets)
 	}
 }
 
@@ -969,7 +969,7 @@ func TestSetWorkspaceBackloggedRefusesAnUnknownWorkspace(t *testing.T) {
 func TestSetWorkspaceBackloggedMapsTheVerbsRefusal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.Verbs.setHiddenErr = &workspace.Refusal{Arm: workspace.ArmNotYetAdopted, Reason: "still adopting"}
+	h.Verbs.setBackloggedErr = &workspace.Refusal{Arm: workspace.ArmNotYetAdopted, Reason: "still adopting"}
 
 	// Act
 	resp, err := h.Client.SetWorkspaceBacklogged(context.Background(),
@@ -1129,7 +1129,7 @@ func TestChangeWorkspaceLinksMapsTheVerbsRefusals(t *testing.T) {
 // refusal, wrapped by whichever verb carried it up, answers on the rpc's own
 // shared arm.
 func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
-	parentNotOpen := &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"}, State: wsm.ParentHidden}
+	parentNotOpen := &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"}, State: wsm.ParentBacklogged}
 	tests := []struct {
 		name  string
 		setUp func(h *harness)
@@ -1145,7 +1145,7 @@ func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
 		},
 		{
 			name:  "SetWorkspaceBacklogged has_open_children",
-			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("hide: %w", familyChildren) },
+			setUp: func(h *harness) { h.Verbs.setBackloggedErr = fmt.Errorf("hide: %w", familyChildren) },
 			call: func(h *harness) (bool, error) {
 				resp, err := h.Client.SetWorkspaceBacklogged(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref(), Visibility: hideArm()}))
 				return err == nil && resp.Msg.GetError().GetHasOpenChildren() != nil, err
@@ -1153,7 +1153,7 @@ func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
 		},
 		{
 			name:  "SetWorkspaceBacklogged parent_not_open",
-			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("show: %w", parentNotOpen) },
+			setUp: func(h *harness) { h.Verbs.setBackloggedErr = fmt.Errorf("show: %w", parentNotOpen) },
 			call: func(h *harness) (bool, error) {
 				resp, err := h.Client.SetWorkspaceBacklogged(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref(), Visibility: hideArm()}))
 				return err == nil && resp.Msg.GetError().GetParentNotOpen().GetBacklogged() != nil, err
@@ -1199,8 +1199,8 @@ func TestSetWorkspaceBackloggedRefusesAMissingVisibility(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v (%v), want InvalidArgument", connect.CodeOf(err), err)
 	}
-	if len(h.Verbs.hiddenSets) != 0 {
-		t.Fatalf("hidden sets = %+v, want none for a malformed request", h.Verbs.hiddenSets)
+	if len(h.Verbs.backloggedSets) != 0 {
+		t.Fatalf("hidden sets = %+v, want none for a malformed request", h.Verbs.backloggedSets)
 	}
 }
 
@@ -3705,16 +3705,16 @@ func TestCreateWorkspaceAnswersTheLifecycleRefusals(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceMapsHiddenAndPlacementToTheSpec(t *testing.T) {
+func TestCreateWorkspaceMapsBackloggedAndPlacementToTheSpec(t *testing.T) {
 	tests := []struct {
-		name          string
-		hidden        *bool
-		placement     *agentreplv1.CreateWorkspacePlacement
-		wantHidden    bool
-		wantPlacement *workspace.CreatePlacement
+		name           string
+		backlogged     *bool
+		placement      *agentreplv1.CreateWorkspacePlacement
+		wantBacklogged bool
+		wantPlacement  *workspace.CreatePlacement
 	}{
-		{name: "neither", wantHidden: false},
-		{name: "born hidden", hidden: boolPtr(true), wantHidden: true},
+		{name: "neither", wantBacklogged: false},
+		{name: "born hidden", backlogged: boolPtr(true), wantBacklogged: true},
 		{name: "an existing subsection", placement: &agentreplv1.CreateWorkspacePlacement{
 			Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: "auth"}},
 			wantPlacement: &workspace.CreatePlacement{Subsection: "auth"}},
@@ -3728,7 +3728,7 @@ func TestCreateWorkspaceMapsHiddenAndPlacementToTheSpec(t *testing.T) {
 			h := newHarness(t)
 			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
 			req := oneShotCreate(registeredRepoRef(h), nil)
-			req.Backlogged, req.Placement = tt.hidden, tt.placement
+			req.Backlogged, req.Placement = tt.backlogged, tt.placement
 
 			// Act
 			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
@@ -3738,8 +3738,8 @@ func TestCreateWorkspaceMapsHiddenAndPlacementToTheSpec(t *testing.T) {
 				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
 			}
 			spec := h.Verbs.createSpecs[0]
-			if spec.Hidden != tt.wantHidden || !reflect.DeepEqual(spec.Placement, tt.wantPlacement) {
-				t.Fatalf("spec hidden %v placement %+v, want %v and %+v", spec.Hidden, spec.Placement, tt.wantHidden, tt.wantPlacement)
+			if spec.Backlogged != tt.wantBacklogged || !reflect.DeepEqual(spec.Placement, tt.wantPlacement) {
+				t.Fatalf("spec hidden %v placement %+v, want %v and %+v", spec.Backlogged, spec.Placement, tt.wantBacklogged, tt.wantPlacement)
 			}
 		})
 	}

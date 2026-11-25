@@ -36,12 +36,12 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 		{
 			name: "a second write keeps the first",
 			write: func(s *store) error {
-				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
+				if err := s.SetBacklogFolded(context.Background(), true); err != nil {
 					return err
 				}
 				return s.SetMergedSectionFolded(context.Background(), true)
 			},
-			want: SidebarView{MergedFolded: true, HiddenFolded: true},
+			want: SidebarView{MergedFolded: true, BacklogFolded: true},
 		},
 		{
 			name:  "folding the merge queue section keeps the band",
@@ -60,8 +60,8 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 		},
 		{
 			name:  "folding the hidden section keeps the band",
-			write: func(s *store) error { return s.SetHiddenSectionFolded(context.Background(), true) },
-			want:  SidebarView{HiddenFolded: true},
+			write: func(s *store) error { return s.SetBacklogFolded(context.Background(), true) },
+			want:  SidebarView{BacklogFolded: true},
 		},
 		{
 			name:  "folding the open section keeps the band and the hidden section",
@@ -81,25 +81,25 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 		{
 			name: "unfolding the hidden section again replaces its fold",
 			write: func(s *store) error {
-				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
+				if err := s.SetBacklogFolded(context.Background(), true); err != nil {
 					return err
 				}
-				return s.SetHiddenSectionFolded(context.Background(), false)
+				return s.SetBacklogFolded(context.Background(), false)
 			},
 			want: SidebarView{},
 		},
 		{
 			name: "sizing two bands at once keeps the folds",
 			write: func(s *store) error {
-				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
+				if err := s.SetBacklogFolded(context.Background(), true); err != nil {
 					return err
 				}
 				return s.SetSectionHeights(context.Background(), []SectionHeightChange{
 					{Section: BandMergeQueue, Height: SizedHeight(4)},
-					{Section: BandHidden, Height: SizedHeight(0)},
+					{Section: BandBacklog, Height: SizedHeight(0)},
 				})
 			},
-			want: SidebarView{HiddenFolded: true, MergeQueueHeight: SizedHeight(4), HiddenHeight: SizedHeight(0)},
+			want: SidebarView{BacklogFolded: true, MergeQueueHeight: SizedHeight(4), BacklogHeight: SizedHeight(0)},
 		},
 		{
 			name: "sizing the recently merged section before anything else mints the view",
@@ -113,13 +113,13 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			write: func(s *store) error {
 				if err := s.SetSectionHeights(context.Background(), []SectionHeightChange{
 					{Section: BandMerged, Height: SizedHeight(2)},
-					{Section: BandHidden, Height: SizedHeight(3)},
+					{Section: BandBacklog, Height: SizedHeight(3)},
 				}); err != nil {
 					return err
 				}
 				return s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: BandMerged, Height: FittedHeight()}})
 			},
-			want: SidebarView{HiddenHeight: SizedHeight(3)},
+			want: SidebarView{BacklogHeight: SizedHeight(3)},
 		},
 		{
 			name: "unfolding the band again replaces the fold",
@@ -162,8 +162,8 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if err := first.SetHiddenSectionFolded(context.Background(), true); err != nil {
-		t.Fatalf("SetHiddenSectionFolded: %v", err)
+	if err := first.SetBacklogFolded(context.Background(), true); err != nil {
+		t.Fatalf("SetBacklogFolded: %v", err)
 	}
 	if err := first.SetOpenSectionFolded(context.Background(), true); err != nil {
 		t.Fatalf("SetOpenSectionFolded: %v", err)
@@ -181,7 +181,7 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	view, err := second.SidebarView(context.Background())
 
 	// Assert
-	want := SidebarView{HiddenFolded: true, OpenFolded: true}
+	want := SidebarView{BacklogFolded: true, OpenFolded: true}
 	if err != nil || view != want {
 		t.Fatalf("view after reopen = %+v, %v; want %+v", view, err, want)
 	}
@@ -209,9 +209,9 @@ func TestTheMigrationAddsTheSidebarView(t *testing.T) {
 	}
 }
 
-func TestTheDefaultViewExpandsTheHiddenSection(t *testing.T) {
+func TestTheDefaultViewExpandsTheBacklog(t *testing.T) {
 	// Arrange, Act, Assert
-	if DefaultSidebarView.HiddenFolded {
+	if DefaultSidebarView.BacklogFolded {
 		t.Fatalf("DefaultSidebarView = %+v, want the hidden section expanded", DefaultSidebarView)
 	}
 }
@@ -286,7 +286,7 @@ func TestAMigratedViewKeepsItsFoldsWhenTheShowsColumnLands(t *testing.T) {
 	view, err := handle.(*store).SidebarView(context.Background())
 
 	// Assert
-	want := SidebarView{MergedFolded: true, HiddenFolded: true, OpenFolded: true}
+	want := SidebarView{MergedFolded: true, BacklogFolded: true, OpenFolded: true}
 	if err != nil || view != want {
 		t.Fatalf("SidebarView after the migration = %+v, %v; want %+v", view, err, want)
 	}
@@ -309,7 +309,7 @@ func TestTheMigrationAddsTheMergeQueueSectionFold(t *testing.T) {
 	view, err := handle.(*store).SidebarView(context.Background())
 
 	// Assert
-	want := SidebarView{MergedFolded: true, HiddenFolded: true}
+	want := SidebarView{MergedFolded: true, BacklogFolded: true}
 	if err != nil || view != want {
 		t.Fatalf("SidebarView after the migration = %+v, %v; want %+v", view, err, want)
 	}
@@ -330,7 +330,7 @@ func TestSidebarViewRefusesAStoredHeightOutOfRange(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
-			if err := s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: BandHidden, Height: SizedHeight(1)}}); err != nil {
+			if err := s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: BandBacklog, Height: SizedHeight(1)}}); err != nil {
 				t.Fatalf("SetSectionHeights: %v", err)
 			}
 			if _, err := s.db().Exec(`UPDATE sidebar_view SET backlog_section_lines = ? WHERE id = 1`, tt.lines); err != nil {
@@ -380,7 +380,7 @@ func TestSectionHeightFieldsNamesEachSectionsHeight(t *testing.T) {
 	// Arrange
 	changes := []SectionHeightChange{
 		{Section: BandMergeQueue, Height: SizedHeight(3)},
-		{Section: BandHidden, Height: FittedHeight()},
+		{Section: BandBacklog, Height: FittedHeight()},
 	}
 
 	// Act

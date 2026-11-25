@@ -63,7 +63,7 @@ func (ws Workspace) MergeHidden() bool {
 // withheld by its async merge. THE ONE STATEMENT of an open row: the roster
 // draws by it, and the arrangement resolves a dragged row by it (standing).
 func (ws Workspace) ListedOpen() bool {
-	return !ws.Closed && !ws.Hidden && !ws.MergeHidden()
+	return !ws.Closed && !ws.Backlogged && !ws.MergeHidden()
 }
 
 // RevealMergeWorkspace records that merge workspace ID has been revealed, and

@@ -68,7 +68,7 @@ func TestTheStateCollectorServesLogsDatabaseAndWorkspaces(t *testing.T) {
 		repos: []wsm.Repository{{ID: "r1", Name: "doom"}},
 		workspaces: []wsm.Workspace{
 			{ID: "w1", Repo: "r1"}, {ID: "w2", Repo: "r1"},
-			{ID: "w3", Repo: "r1", Hidden: true}, {ID: "w4", Repo: "r1", Closed: true},
+			{ID: "w3", Repo: "r1", Backlogged: true}, {ID: "w4", Repo: "r1", Closed: true},
 		},
 	}
 	if err := s.RegisterState(logs, dbPath, lister); err != nil {
@@ -85,7 +85,7 @@ func TestTheStateCollectorServesLogsDatabaseAndWorkspaces(t *testing.T) {
 		`agentrepl_log_bytes{runtime="shim"} 7`,
 		`agentrepl_db_bytes{db="wsm",file="db"} 4096`,
 		`agentrepl_workspaces{repository="doom",state="open"} 2`,
-		`agentrepl_workspaces{repository="doom",state="hidden"} 1`,
+		`agentrepl_workspaces{repository="doom",state="backlogged"} 1`,
 		`agentrepl_workspaces{repository="doom",state="closed"} 1`,
 	)
 }

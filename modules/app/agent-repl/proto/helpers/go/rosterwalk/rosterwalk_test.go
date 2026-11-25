@@ -27,8 +27,8 @@ func withBlocks(row *frontendv1.RosterOpenRow, blocks ...[]*frontendv1.RosterOpe
 	return row
 }
 
-// hidden is a hidden row for id with children.
-func hidden(id string, children ...*frontendv1.RosterBacklogRow) *frontendv1.RosterBacklogRow {
+// backlogRow is a backlogRow row for id with children.
+func backlogRow(id string, children ...*frontendv1.RosterBacklogRow) *frontendv1.RosterBacklogRow {
 	return &frontendv1.RosterBacklogRow{Row: row(id), Children: children}
 }
 
@@ -112,9 +112,9 @@ func TestOpenFamilyListsChildrenThenEveryBlocksRows(t *testing.T) {
 	}
 }
 
-func TestFlattenHiddenListsAChildAfterItsParent(t *testing.T) {
+func TestFlattenBacklogListsAChildAfterItsParent(t *testing.T) {
 	// Act.
-	got := FlattenHidden([]*frontendv1.RosterBacklogRow{hidden("h", hidden("h1")), hidden("g")})
+	got := FlattenBacklog([]*frontendv1.RosterBacklogRow{backlogRow("h", backlogRow("h1")), backlogRow("g")})
 
 	// Assert.
 	var names []string
@@ -122,7 +122,7 @@ func TestFlattenHiddenListsAChildAfterItsParent(t *testing.T) {
 		names = append(names, h.GetRow().GetWorkspace().GetWorkspace().GetId())
 	}
 	if want := []string{"h", "h1", "g"}; !slices.Equal(names, want) {
-		t.Fatalf("FlattenHidden = %v, want %v", names, want)
+		t.Fatalf("FlattenBacklog = %v, want %v", names, want)
 	}
 }
 
@@ -235,7 +235,7 @@ func TestAllRows(t *testing.T) {
 			push: &frontendv1.RosterPush{
 				Workspaces: &frontendv1.WorkspaceRoster{
 					Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(entry(open("o", open("o1"))))}},
-					Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: []*frontendv1.RosterBacklogRow{hidden("h", hidden("h1"))}}},
+					Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: []*frontendv1.RosterBacklogRow{backlogRow("h", backlogRow("h1"))}}},
 				},
 				Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{Row: row("c")}}},
 			},

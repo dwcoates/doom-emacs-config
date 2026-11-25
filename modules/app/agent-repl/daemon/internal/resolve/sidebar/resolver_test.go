@@ -1069,7 +1069,7 @@ func TestEachStreamCarriesItsOwnSnapshot(t *testing.T) {
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"o"}, Line: inLine("o")})
 
 	// Act.
-	r.SetRegistry(queueView(workspace("o", "open"), hiddenWorkspace("h", "hidden"), closed, mergedAt("m", time.Hour)))
+	r.SetRegistry(queueView(workspace("o", "open"), backloggedWorkspace("h", "hidden"), closed, mergedAt("m", time.Hour)))
 
 	// Assert.
 	push := latestPush(t, r)
