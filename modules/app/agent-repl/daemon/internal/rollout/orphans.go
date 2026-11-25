@@ -202,24 +202,21 @@ func (c *controller) standDownWithheldInert(ctx context.Context, withheld []wsm.
 	}
 }
 
-// standDownInert adopts WS's inert survivor, when one listens, and stands it
-// down: WS runs nothing, and the survivor holds no session to keep. A failure
-// is the workspace's own loud error, and the survivor is left as it is.
+// standDownInert stands down WS's inert survivor, when one listens: WS runs
+// nothing, and the survivor holds no session to keep. The fleet decides it
+// under the workspace's start gate, so a session a bring-up started since the
+// takeover judged WS is never taken for the survivor. A failure is the
+// workspace's own loud error, and the survivor is left as it is.
 func (c *controller) standDownInert(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
-	client, adopted, err := c.deps.Shims.AdoptInert(ctx, ws)
-	if err != nil {
-		c.log.Error(opOrphans, "could not adopt the inert survivor of a workspace that runs nothing; it is left running", dlog.WithCause(fields, err))
-		return
+	pid, stood, err := c.deps.Shims.StandDownInert(ctx, ws)
+	switch {
+	case err != nil:
+		// The cause names which step failed: the survivor's adoption or its
+		// stand-down.
+		c.log.Error(opOrphans, "could not stand down the inert survivor of a workspace that runs nothing; it is left running", dlog.WithCause(fields, err))
+	case stood:
+		c.log.Info(opOrphans, "stood down the inert survivor of a workspace that runs nothing", dlog.Merge(fields, dlog.Context{"shim_pid": pid}))
 	}
-	if !adopted {
-		return
-	}
-	pid := client.PID()
-	if err := c.deps.Shims.StandDown(ctx, ws); err != nil {
-		c.log.Error(opOrphans, "could not stand down the inert survivor of a workspace that runs nothing", dlog.WithCause(dlog.Merge(fields, dlog.Context{"shim_pid": pid}), err))
-		return
-	}
-	c.log.Info(opOrphans, "stood down the inert survivor of a workspace that runs nothing", dlog.Merge(fields, dlog.Context{"shim_pid": pid}))
 }
 
 // settleUndecided settles every workspace nobody handed over when the orphan

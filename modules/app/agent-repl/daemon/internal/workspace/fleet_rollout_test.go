@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -474,39 +475,37 @@ func TestAdoptParkedHoldsTheShimWithNoWatcherAndRaisesTheGate(t *testing.T) {
 	}
 }
 
-func TestAdoptInertHoldsTheListeningSurvivorWithNoWatcherAndNoSession(t *testing.T) {
+func TestStandDownInertStandsDownTheListeningSurvivor(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.socketState = shimsocket.StateLive
 
 	// Act.
-	_, adopted, err := f.fleet.AdoptInert(context.Background(), ws.ID)
+	pid, stood, err := f.fleet.StandDownInert(context.Background(), ws.ID)
 
 	// Assert.
-	f.fleet.mu.RLock()
-	entry := f.fleet.sessions[ws.ID]
-	f.fleet.mu.RUnlock()
-	if err != nil || !adopted || entry == nil || entry.watcher != nil || f.fleet.sessionStarted(ws.ID) {
-		t.Fatalf("AdoptInert = (%v, %v), entry %+v; want the survivor held with no watcher and no session", adopted, err, entry)
+	_, held := f.fleet.Client(ws.ID)
+	if err != nil || !stood || pid != f.client.pid || held || !slices.Equal(f.shimLife.standDowns, []string{"w1 handover"}) {
+		t.Fatalf("StandDownInert = (%d, %v, %v) holding %v, stand-downs %v; want the survivor adopted and stood down", pid, stood, err, held, f.shimLife.standDowns)
 	}
 }
 
-func TestAdoptInertHoldsNothingWhenNoShimListens(t *testing.T) {
+func TestStandDownInertStandsNothingDownWhenNoShimListens(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 
 	// Act.
-	_, adopted, err := f.fleet.AdoptInert(context.Background(), ws.ID)
+	_, stood, err := f.fleet.StandDownInert(context.Background(), ws.ID)
 
 	// Assert.
-	if _, held := f.fleet.Client(ws.ID); err != nil || adopted || held {
-		t.Fatalf("AdoptInert = (%v, %v) holding %v; want nothing held for an absent listener", adopted, err, held)
+	if _, held := f.fleet.Client(ws.ID); err != nil || stood || held || len(f.shimLife.standDowns) != 0 {
+		t.Fatalf("StandDownInert = (%v, %v) holding %v, stand-downs %v; want nothing held or stood down for an absent listener", stood, err, held, f.shimLife.standDowns)
 	}
 }
 
-func TestAdoptInertRefusesASocketItCannotProbe(t *testing.T) {
+func TestStandDownInertRefusesASocketItCannotProbe(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
@@ -514,11 +513,91 @@ func TestAdoptInertRefusesASocketItCannotProbe(t *testing.T) {
 	f.socketErr = errors.New("arranged: the probe failed")
 
 	// Act.
-	_, adopted, err := f.fleet.AdoptInert(context.Background(), ws.ID)
+	_, stood, err := f.fleet.StandDownInert(context.Background(), ws.ID)
 
 	// Assert.
-	if err == nil || adopted {
-		t.Fatalf("AdoptInert = (%v, %v); want an undetermined socket refused, never read as absent", adopted, err)
+	if err == nil || stood || len(f.shimLife.standDowns) != 0 {
+		t.Fatalf("StandDownInert = (%v, %v), stand-downs %v; want an undetermined socket refused, never read as absent", stood, err, f.shimLife.standDowns)
+	}
+}
+
+func TestStandDownInertSurfacesAFailedAdoption(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.socketState = shimsocket.StateLive
+	f.supervisor.adoptErr = errors.New("arranged: the dial failed")
+
+	// Act.
+	_, stood, err := f.fleet.StandDownInert(context.Background(), ws.ID)
+
+	// Assert.
+	if _, held := f.fleet.Client(ws.ID); err == nil || stood || held || len(f.shimLife.standDowns) != 0 {
+		t.Fatalf("StandDownInert = (%v, %v) holding %v, stand-downs %v; want the failed adoption surfaced and nothing stood down", stood, err, held, f.shimLife.standDowns)
+	}
+}
+
+// TestStandDownInertLeavesTheSessionThisDaemonStartedServing pins the
+// 0.573.1 handover (2026-11-25 13:10:44): the takeover judged a merge
+// workspace to run nothing, a merge's pick then started its session, and the
+// stand-down that followed the adoption stopped the pick's shim under its
+// ForkSession. A client the fleet holds is this daemon's own, never the
+// survivor.
+func TestStandDownInertLeavesTheSessionThisDaemonStartedServing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.socketState = shimsocket.StateLive
+
+	// Act.
+	_, stood, err := f.fleet.StandDownInert(context.Background(), ws.ID)
+
+	// Assert.
+	_, held := f.fleet.Client(ws.ID)
+	if err != nil || stood || !held || len(f.shimLife.standDowns) != 0 {
+		t.Fatalf("StandDownInert = (%v, %v) holding %v, stand-downs %v; want the started session left serving", stood, err, held, f.shimLife.standDowns)
+	}
+	left := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opFleetRollout, Message: "the workspace's shim is this daemon's own; it is no inert survivor and keeps serving"})
+	if len(left) != 1 || left[0].Context["shim_pid"] != f.client.pid {
+		t.Fatalf("records of the session left serving = %+v, want one naming its shim", left)
+	}
+}
+
+// TestStandDownInertWaitsOutAStartUnderWay pins the window before a start
+// holds its shim: the spawned shim already listens on the workspace's socket,
+// and a stand-down that did not wait on the start gate would adopt it as the
+// survivor and stop it.
+func TestStandDownInertWaitsOutAStartUnderWay(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	type answer struct {
+		stood bool
+		err   error
+	}
+	answered := make(chan answer, 1)
+	f.supervisor.onSpawn = func() {
+		f.supervisor.onSpawn = nil
+		f.socketState = shimsocket.StateLive
+		go func() {
+			_, stood, err := f.fleet.StandDownInert(context.Background(), ws.ID)
+			answered <- answer{stood, err}
+		}()
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	got := <-answered
+
+	// Assert.
+	_, held := f.fleet.Client(ws.ID)
+	if got.err != nil || got.stood || !held || len(f.shimLife.standDowns) != 0 {
+		t.Fatalf("StandDownInert = (%v, %v) holding %v, stand-downs %v; want the started session left serving", got.stood, got.err, held, f.shimLife.standDowns)
 	}
 }
 

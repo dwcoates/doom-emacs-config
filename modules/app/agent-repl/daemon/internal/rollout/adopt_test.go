@@ -743,6 +743,36 @@ func TestAnAdoptionOfAParkedWorkspaceStandsDownItsInertSurvivor(t *testing.T) {
 	}
 }
 
+// TestAnAdoptionRecordsAnInertSurvivorItCouldNotStandDown pins the failure
+// of the inert stand-down: the workspace's own loud error, naming the cause.
+func TestAnAdoptionRecordsAnInertSurvivorItCouldNotStandDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Unix(1_700_000_000, 0)}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[dir] = sessionlock.StateFree
+	h.mu.Unlock()
+	h.fleet.mu.Lock()
+	h.fleet.listening[ws] = true
+	h.fleet.inertErr[ws] = errFake
+	h.fleet.mu.Unlock()
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	failed := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opOrphans, Message: "could not stand down the inert survivor of a workspace that runs nothing; it is left running"})
+	if len(failed) != 1 || failed[0].Context["workspace"] != string(ws) || failed[0].Context["cause"] != errFake.Error() {
+		t.Fatalf("stand-down failures recorded = %+v, want one naming the workspace and the cause", failed)
+	}
+	if _, stood := h.fleet.InertAdoptionsAndStandDowns(); len(stood) != 0 {
+		t.Fatalf("stood down %v, want nothing stood down after the failure", stood)
+	}
+}
+
 func TestAdoptionSurfacesAFailedShimAdoption(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -1234,18 +1234,49 @@ func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conve
 	return client, nil
 }
 
-// AdoptInert holds the INERT SURVIVOR of a workspace this daemon was given
-// with no shim: a process listening on the workspace's socket whose lock
-// reads free, because it never took a session (a parked shim no carry named,
-// a prelaunch). It answers false, holding nothing, when no listener is there.
-// The client is held exactly as a parked one is, with no watcher and no
-// session noted, so the caller can stand the process down (StandDown) or a
-// later bring-up attach to it: no listener is ever left with no daemon
-// serving it.
-func (f *Fleet) AdoptInert(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, bool, error) {
+// StandDownInert stands down the INERT SURVIVOR of a workspace this daemon
+// was given with no shim: a process listening on the workspace's socket whose
+// lock reads free, because it never took a session (a parked shim no carry
+// named, a prelaunch). It adopts the survivor, holding it exactly as a parked
+// one is held, and stands it down, so no listener is ever left with no daemon
+// serving it. It answers the survivor's pid and true once it is stood down,
+// and false, standing nothing down, when no survivor is there.
+//
+// IT RUNS UNDER THE WORKSPACE'S START GATE, so a bring-up can never overtake
+// it. The takeover judges that a workspace runs nothing when it adopts it,
+// and the stand-down follows only once the rest of the adoption is done: on
+// 2026-11-25 at the 0.573.1 handover that rest took nine seconds, a merge's
+// pick brought the workspace's session up meanwhile, and the stand-down took
+// the shim the pick had just spawned for the survivor and stopped it under
+// its ForkSession, failing the merge. Under the gate, a client the fleet
+// already holds was installed by this daemon's own start or adoption, so it
+// is no survivor and keeps serving; only a listener the fleet holds no
+// client for is one.
+func (f *Fleet) StandDownInert(ctx context.Context, ws ids.WorkspaceID) (int, bool, error) {
+	gate := f.startGate(ws)
+	gate.Lock()
+	defer gate.Unlock()
 	if client, ok := f.Client(ws); ok {
-		return client, true, nil
+		f.logFor(ctx, ws).Info(opFleetRollout, "the workspace's shim is this daemon's own; it is no inert survivor and keeps serving", dlog.Context{
+			"workspace": string(ws), "shim_pid": client.PID(),
+		})
+		return 0, false, nil
 	}
+	client, adopted, err := f.adoptInert(ctx, ws)
+	if err != nil || !adopted {
+		return 0, false, err
+	}
+	pid := client.PID()
+	if err := f.StandDown(ctx, ws); err != nil {
+		return pid, false, fmt.Errorf("workspace: stand down the inert survivor of %q: %w", ws, err)
+	}
+	return pid, true, nil
+}
+
+// adoptInert holds WS's inert survivor, StandDownInert's adoption, answering
+// false, holding nothing, when no listener is there. It runs under the
+// workspace's start gate, with no client held.
+func (f *Fleet) adoptInert(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, bool, error) {
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return nil, false, fmt.Errorf("workspace: adopt the inert survivor of %q: %w", ws, err)
