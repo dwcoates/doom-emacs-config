@@ -4698,8 +4698,8 @@ describe("the tool card's command grey", () => {
   });
 
   // THE ONE SHARED GROUND (owner request, 2026-11-02): every visible surface of
-  // the sidebar, the footer and both composers paint --sidebar-ground, so no
-  // surface of the sidebar can differ from the composer.
+  // the sidebar, the footer, both composers and the cold gate's card paint
+  // --sidebar-ground, so none of them can differ from the composer.
   it.each([
     ["the sidebar page", sidebarPageStylesheet, "html.agent-repl-sidebar body"],
     ["the rail", stylesheet, "#ws-sidebar"],
@@ -4707,6 +4707,11 @@ describe("the tool card's command grey", () => {
     ["the footer", stylesheet, ".pfooter"],
     ["the shell composer", stylesheet, "#composer-input"],
     ["a bubble's composer", stylesheet, ".composer-input"],
+    // The area inside the gate's colored frame matches the composer (owner
+    // request, 2026-11-25), inline and docked alike.
+    ["the cold gate's card", stylesheet, ".cold-gate"],
+    ["the docked cold gate's card", stylesheet, "#gate-dock > .cold-gate.cold-gate-docked"],
+    ["the webhost's cold gate card", stylesheet, "#webhost-gate > .cold-gate.cold-gate-docked"],
     // One shell, one header: a workspace's page and a zettel chat's page both
     // draw index.html's #topbar (owner request, 2026-11-02).
     ["the topbar, on a workspace's page and a zettel chat's", stylesheet, "#topbar"],
