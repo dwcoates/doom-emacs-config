@@ -475,8 +475,6 @@ environment. Every flag is optional.
 A lock probe that could NOT TELL is never read as free: such a workspace is
 neither adopted nor orphan-closed, and the boot report names it.
 
-A run that records which files each test executes (AGENTS.md, "Test impact selection runs in SHADOW MODE") starts the daemon from `agent-repld-impact`, built `-cover -covermode=atomic`, with `AGENT_REPL_TEST_COVERAGE_WINDOWS=1` and a `GOCOVERDIR`, and runs the chunk `-test.parallel=1`. The harness (`integration/harness/impact.go`) cuts each shared daemon's counters into one window per top-level test through `server.CoverageWindowRoute`, so a harness helper that gives a test a daemon goes through `Daemon.View` or `StartDaemon`: a new way to reach a daemon that bypasses both would run a test's work outside its window. `concurrent_workspaces_test.go` holds the cases that drive several workspaces of one daemon at once.
-
 ### A SPAWNED SHIM'S PID IS DURABLE IN THE REGISTRY FROM THE INSTANT IT IS SPAWNED
 
 The two kernel facts do not cover the STARTING WINDOW. A shim takes its

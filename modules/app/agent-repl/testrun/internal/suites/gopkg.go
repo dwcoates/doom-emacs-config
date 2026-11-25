@@ -109,38 +109,6 @@ type goPkg struct {
 	// carries it, with the programs marked instrumented, so the reach of an
 	// integration or e2e tier counts. "" spawns uninstrumented systems.
 	SpawnedCovDir string
-	// ImpactDir, when set, runs the package's chunks RECORDED
-	// (recordImpact): each chunk's harness appends the windows it cuts to
-	// its own file under it.
-	ImpactDir string
-}
-
-// ImpactParallel is how a recorded chunk runs its tests: one at a time, so a
-// counter window holds exactly one top-level test. It holds TWO core slots:
-// MEASURED in the first gate run that recorded (2026-11-21), a recorded chunk
-// used 1.8 cores (the test process, its instrumented daemon and the window
-// reductions), and a chunk that claims one seat while using 1.8 oversubscribes
-// the host, which starved four cases into their 5s log-record waits. The
-// planner runs more chunks at once to keep the run's overall parallelism, and
-// sizes them by each test's measured seconds like any other chunks: a recorded
-// run's history is each test's own serial time, so later runs cut chunks no
-// longer than the unrecorded ones were.
-var ImpactParallel = roster.Parallel{Tests: 1, Slots: 2}
-
-// recordImpact runs the package's chunks recorded, writing their windows
-// under dir: one test at a time (ImpactParallel), against each program's
-// cover-built build (roster.Program.Impact).
-func (p *goPkg) recordImpact(dir string) {
-	p.ImpactDir = dir
-	p.Parallel = ImpactParallel
-	programs := make([]string, len(p.Programs))
-	for i, name := range p.Programs {
-		programs[i] = name
-		if impact, ok := roster.ImpactProgramOf(name); ok {
-			programs[i] = impact
-		}
-	}
-	p.Programs = programs
 }
 
 // spawnedEnv is the environment a process carries whose spawned systems
@@ -217,11 +185,6 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 			return nil, nil, fmt.Errorf("suites: create %s: %w", p.Counts, err)
 		}
 	}
-	if p.ImpactDir != "" {
-		if err := os.MkdirAll(p.ImpactDir, 0o755); err != nil {
-			return nil, nil, fmt.Errorf("suites: create %s: %w", p.ImpactDir, err)
-		}
-	}
 	if p.CovDir != "" {
 		if err := os.MkdirAll(p.CovDir, 0o755); err != nil {
 			return nil, nil, fmt.Errorf("suites: create %s: %w", p.CovDir, err)
@@ -270,11 +233,6 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 				return nil, err
 			}
 			return tests, testtimes.WithLogRecords(tests, p.Rel, records)
-		}
-		if p.ImpactDir != "" {
-			windows := filepath.Join(p.ImpactDir, unitTag(id)+".jsonl")
-			sp.Env = append(sp.Env, testenv.ImpactOut+"="+windows)
-			sp.Impact = &run.ImpactChunk{Suite: p.Suite, Package: p.Rel, Tags: p.Tags, Windows: windows}
 		}
 		sp.Display = QuietGoTestOutput
 		sp.Profiler = run.GoTestProfiler

@@ -278,29 +278,3 @@ func realFixture(t *testing.T) string {
 	}
 	return module
 }
-
-func TestCoveredModulesNamesTheModuleAndTheSystemsItRequires(t *testing.T) {
-	// Arrange
-	l := systemTree(t)
-
-	// Act
-	module, required, err := CoveredModules(l, filepath.Join(l.Module, "daemon"))
-
-	// Assert: the proto module is no coverage system, so it is not covered.
-	if err != nil {
-		t.Fatal(err)
-	}
-	if module != "agent-repld" || !reflect.DeepEqual(required, []string{"agentrepl/logging"}) {
-		t.Fatalf("CoveredModules = %q, %v; want the daemon and the logging system", module, required)
-	}
-}
-
-func TestCoveredModulesRefusesAModuleItCannotRead(t *testing.T) {
-	// Act
-	_, _, err := CoveredModules(systemTree(t), t.TempDir())
-
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "read") {
-		t.Fatalf("CoveredModules = %v, want the unreadable go.mod refused", err)
-	}
-}

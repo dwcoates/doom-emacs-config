@@ -47,7 +47,6 @@ import (
 	"agentrepl/testrun/internal/gocache"
 	"agentrepl/testrun/internal/govet"
 	"agentrepl/testrun/internal/history"
-	"agentrepl/testrun/internal/impact"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/proctable"
 	"agentrepl/testrun/internal/protofile"
@@ -458,11 +457,6 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("%v", err)
 		return 1
 	}
-	impactDeps, err := newImpactDeps(reuseDeps.Repo)
-	if err != nil {
-		log.Errorf("%v", err)
-		return 1
-	}
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	var emitter *events.Emitter
@@ -553,28 +547,10 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		RunLog:      os.Getenv(ramdisk.EnvRunLog),
 		Metrics:     metricsTarget,
 		Roster:      roster.Lookup,
-		Impact:      impactDeps,
 		PushTimes: func(ctx context.Context, target testtimes.Target, report testtimes.Report, at time.Time) error {
 			return testtimes.Push(ctx, http.DefaultClient, target, report, at)
 		},
 	}, args)
-}
-
-// newImpactDeps is the shadow-mode impact recording's seams on this host: its
-// store beside the run history, the go command's listings and toolchain, and
-// the checkout's files.
-func newImpactDeps(repo string) (*cli.ImpactDeps, error) {
-	dir, err := impact.DefaultStoreDir()
-	if err != nil {
-		return nil, err
-	}
-	return &cli.ImpactDeps{
-		Store:     impact.Store{Dir: dir},
-		List:      impact.ExecLister,
-		Toolchain: impact.ExecToolchain,
-		RepoFiles: func() ([]string, error) { return reuse.ExecRepoFiles(repo) },
-		Retention: impact.DefaultRetention,
-	}, nil
 }
 
 func finishRecordCmd(log *run.Log, argv []string) int {

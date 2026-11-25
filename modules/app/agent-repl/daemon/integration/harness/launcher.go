@@ -71,7 +71,7 @@ func StartFakeLauncher(t testing.TB, sockRoot, lockDir string) *FakeLauncher {
 	// An armed daemon's teardown runs after the warning sweep, so it closes
 	// this socket itself once the daemon is dead: a banner the daemon posts
 	// while it stands down must still find the launcher listening.
-	if !coverageTeardownArmed() {
+	if !CoverageEnabled() {
 		t.Cleanup(l.Close)
 	}
 	if err := buildreport.Write(lockDir, buildreport.ServiceLauncher, buildreport.Report{PID: os.Getpid(), Build: FakeLauncherBuild}); err != nil {

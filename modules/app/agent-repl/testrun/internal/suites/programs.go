@@ -69,16 +69,6 @@ func ProgramBuild(l Layout, p roster.Program, extra ...string) ([]string, string
 		}
 		argv = append(argv, "-cover", "-coverpkg="+pkgs)
 	}
-	// An impact build's counters are cut into windows while it runs, which
-	// the runtime allows only in atomic mode. It instruments the same
-	// packages a coverage build does.
-	if p.Impact {
-		pkgs, err := coverPkg(l, dir)
-		if err != nil {
-			return nil, "", err
-		}
-		argv = append(argv, "-cover", "-covermode=atomic", "-coverpkg="+pkgs)
-	}
 	argv = append(argv, extra...)
 	argv = append(argv, "-o", filepath.Join(l.ProgramsDir(), p.Name), p.Package)
 	return argv, dir, nil

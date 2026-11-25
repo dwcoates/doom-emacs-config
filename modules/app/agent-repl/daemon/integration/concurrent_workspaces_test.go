@@ -13,13 +13,11 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
-// THE CONCURRENCY CASES. A run recorded for test impact selection runs one
-// top-level test at a time per daemon (testrun/internal/impact), so tests no
-// longer overlap inside the shared daemon, and the overlap that once
-// surfaced real bugs (the feed fan-out, the PutTurn collision, the
-// per-workspace in-flight accounting) has to be made INSIDE a test: each case
-// here drives several workspaces of one daemon at once, through one view, so
-// the daemon serves them concurrently whatever else the process runs.
+// THE CONCURRENCY CASES. Every case here drives several workspaces of one
+// daemon at once, through one view, so the daemon serves them concurrently
+// whatever else the process runs: the overlap that once surfaced real bugs
+// (the feed fan-out, the PutTurn collision, the per-workspace in-flight
+// accounting) is made INSIDE a test, not left to the suite's parallelism.
 
 // workspacesOnOneDaemon registers and opens n workspaces on the canonical
 // daemon through one view, each with its own repository and fake shim.
