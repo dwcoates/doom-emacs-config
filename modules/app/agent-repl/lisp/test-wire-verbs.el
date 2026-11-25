@@ -3449,6 +3449,13 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"noMediationOwed\":{}}"))
                    '(:cause (:arm :no-mediation-owed :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unknown-race-finding-arm ()
+  "UpdateMergeQueueError's `unknown_race_finding' arm decodes the finding it names."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownRaceFinding\":{\"finding\":{\"suite\":\"e2e\",\"test\":\"TestLanding\"}}}"))
+                   '(:cause (:arm :unknown-race-finding :value (:finding (:suite "e2e" :test "TestLanding"))))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-no-escalation-held-arm ()
   "UpdateMergeQueueError's `no_escalation_held' arm decodes empty."
   (agent-repl-test-wire-verbs--with-common

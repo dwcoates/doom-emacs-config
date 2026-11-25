@@ -513,7 +513,11 @@ func decisionOf(m *agentreplv1.UpdateMergeQueueMediation) merge.Decision {
 func problemsOf(problems []*agentreplv1.DeployProblem) []merge.DeployProblem {
 	var out []merge.DeployProblem
 	for _, p := range problems {
-		out = append(out, merge.DeployProblem{Statement: p.GetStatement(), Evidence: p.GetEvidence()})
+		problem := merge.DeployProblem{Statement: p.GetStatement(), Evidence: p.GetEvidence()}
+		for _, r := range p.GetRaceFindings() {
+			problem.RaceFindings = append(problem.RaceFindings, wsm.RaceFindingRef{Suite: r.GetSuite(), Test: r.GetTest()})
+		}
+		out = append(out, problem)
 	}
 	return out
 }

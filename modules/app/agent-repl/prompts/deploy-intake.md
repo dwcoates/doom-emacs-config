@@ -1,7 +1,12 @@
-<!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{occasion}}, {{ending}}, {{window_started}}, {{gate_log}}, {{digest}} -->
+<!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{occasion}}, {{ending}}, {{window_started}}, {{gate_log}}, {{digest}}, {{race_findings}} -->
 {{occasion}} {{ending}} The merge queue lands nothing past it until you decide it.
 
 Your job: find out whether this deploy broke anything, fix what it broke, and decide the deploy. A problem first seen before the three most recent deploys, or not seen since this one began, is not yours to address: name it on the approval. The exceptions are a failure of the deploy checks themselves and a crash of the daemon (`daemon.boot.predecessor_died`, which names the panic and the site it died at), each always yours to fix, whenever it was first logged. The decision is yours alone: you need no approval from the user, and a deploy that broke nothing is approved at once and never put before them.
+
+Races the merge queue found, each a test that failed in a merge gate and then passed on the same inputs, so its failure is a race in the code and not the doing of the branch it failed on:
+{{race_findings}}
+
+Every open race is yours to fix, whatever this deploy caused and however long ago it was first seen. Dispatch it as a problem: its statement is the symptom, its evidence the failure quoted above, and it names the finding in `race_findings` (`[{"suite": "<suite>", "test": "<test>"}]`), exactly as listed. Fix it at its source, in the production code first; change a test only where the failure is an artifact of the test itself. Never fix a race by loosening a bound, adding a retry, or adding a sleep: make the interleaving that fails impossible. A race at work is one your earlier dispatch took on: never dispatch it again.
 
 Investigate cheaply: start from the digest, and read whole records only for the sites that look like this deploy's doing.
 
@@ -20,7 +25,7 @@ What you have:
 Decide the deploy with one `agent-repld merge-queue mediation` verb:
 - `approve -summary "<one sentence>"`
   - Releases the queue, and ends this check.
-  - Call it when the deploy broke nothing, or when everything you found is transient or ignorable.
+  - Call it when the deploy broke nothing and no race is open, or when everything you found is transient or ignorable.
 - `dispatch -summary "<one sentence>"`, with the problems as JSON on standard input
   - Records the problems as yours and keeps the queue held while you fix them.
   - Call it when you can fix what the deploy broke yourself, before you start the fix. Then fix it and run `agent-repld workspace finished here`.

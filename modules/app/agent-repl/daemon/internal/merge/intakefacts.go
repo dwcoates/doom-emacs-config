@@ -367,38 +367,38 @@ func (o *orchestrator) writeDigest(window []LogRecord, left []LeftOut, owed, sin
 // records unread by every check), to now. The span between landings is the
 // production checks' (owner ruling, 2026-11-23). An intake told before,
 // whose turn is reattached, is told the window it was told then.
-func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, wsm.CheckWindow, error) {
+func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, wsm.CheckWindow, bool, error) {
 	now := o.deps.Now()
 	since, err := o.windowStart(ctx, q.key, m)
 	if err != nil {
-		return "", wsm.CheckWindow{}, err
+		return "", wsm.CheckWindow{}, false, err
 	}
 	span := now.Sub(since)
 	window, err := o.deps.ReadLogs(ctx, q.repository.Dir, since, now)
 	if err != nil {
-		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the deploy's window: %w", err)
+		return "", wsm.CheckWindow{}, false, fmt.Errorf("merge: read the deploy's window: %w", err)
 	}
 	before, err := o.deps.ReadLogs(ctx, q.repository.Dir, since.Add(-span), since)
 	if err != nil {
-		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the span before the window: %w", err)
+		return "", wsm.CheckWindow{}, false, fmt.Errorf("merge: read the span before the window: %w", err)
 	}
 	// THE KINDS OF RECORD KNOWN TO BE TRANSIENT OR IGNORABLE ARE LEFT OUT
 	// (wsm ignoredrecords.go), of the window and of the span before it alike:
 	// a window holding only such records holds nothing for the mediator.
 	kinds, err := o.deps.DB.IgnoredRecordKinds(ctx)
 	if err != nil {
-		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the kinds of record the checks leave out: %w", err)
+		return "", wsm.CheckWindow{}, false, fmt.Errorf("merge: read the kinds of record the checks leave out: %w", err)
 	}
 	window, left := leaveOut(window, kinds)
 	before, _ = leaveOut(before, kinds)
 	problems, err := o.deps.DB.DeployProblems(ctx, q.key)
 	if err != nil {
-		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the repository's deploy problems: %w", err)
+		return "", wsm.CheckWindow{}, false, fmt.Errorf("merge: read the repository's deploy problems: %w", err)
 	}
 	groups := classifyFindings(SortFindings(window, before), problems)
 	gate, gated, err := lastGateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
 	if err != nil {
-		return "", wsm.CheckWindow{}, err
+		return "", wsm.CheckWindow{}, false, err
 	}
 	gateLog := "none logged one"
 	if gated {
@@ -409,7 +409,14 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	// its count and one sample.
 	digest, err := o.writeDigest(window, left, m.OwedAt, since, now)
 	if err != nil {
-		return "", wsm.CheckWindow{}, err
+		return "", wsm.CheckWindow{}, false, err
+	}
+	// THE QUEUE'S RACE FINDINGS ARE THE CHECK'S INPUT BESIDE ITS WINDOW
+	// (owner ruling, 2026-11-25): every open one is the mediator's to
+	// dispatch, as a problem the deploy caused is.
+	races, err := o.deps.DB.RaceFindings(ctx, q.key)
+	if err != nil {
+		return "", wsm.CheckWindow{}, false, fmt.Errorf("merge: read the repository's race findings: %w", err)
 	}
 	brief, err := o.deps.Briefs(BriefDeployIntake, map[string]string{
 		"occasion":       RenderOccasion(m.DeployEnding, q.repository.Dir, m.OwedAt, mediationVersion(m)),
@@ -417,11 +424,12 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		"window_started": since.UTC().Format(time.RFC3339),
 		"gate_log":       gateLog,
 		"digest":         digest,
+		"race_findings":  RenderRaceFindings(races),
 	})
 	if err != nil {
-		return "", wsm.CheckWindow{}, err
+		return "", wsm.CheckWindow{}, false, err
 	}
-	return brief, wsm.CheckWindow{Start: since, Through: now, Groups: windowGroups(groups)}, nil
+	return brief, wsm.CheckWindow{Start: since, Through: now, Groups: windowGroups(groups)}, anyOpenRace(races), nil
 }
 
 // windowStart is where check M's window starts: the start of the window its
@@ -458,6 +466,64 @@ func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.
 		return through, nil
 	}
 	return m.LandingStartedAt, nil
+}
+
+// raceFailureBytes bounds how much of a race finding's failure the brief
+// quotes: its end, which names the failing assertion; the artifacts hold all
+// of it.
+const raceFailureBytes = 1500
+
+// anyOpenRace reports whether one of FINDINGS waits for a dispatch.
+func anyOpenRace(findings []wsm.RaceFinding) bool {
+	for _, f := range findings {
+		if f.Open() {
+			return true
+		}
+	}
+	return false
+}
+
+// RenderRaceFindings is the brief's account of the repository's race
+// findings: each open one with the merges it failed in, its latest failure
+// and its artifacts, then each a dispatch took on and is still at work on.
+// A finding whose fix deployed is not listed until it recurs.
+func RenderRaceFindings(findings []wsm.RaceFinding) string {
+	var open, atWork []string
+	for _, f := range findings {
+		switch {
+		case f.Open():
+			failure := strings.TrimSpace(f.Failure)
+			if len(failure) > raceFailureBytes {
+				failure = "..." + failure[len(failure)-raceFailureBytes:]
+			}
+			var b strings.Builder
+			fmt.Fprintf(&b, "- `%s`: failed in %d merge gate(s), last at %s, in %s", f.Ref, f.Recurrences, f.LastSeen.UTC().Format(time.RFC3339), strings.Join(f.Merges, ", "))
+			if f.Fixes > 0 {
+				fmt.Fprintf(&b, "; it came back after %d deployed fix(es)", f.Fixes)
+			}
+			fmt.Fprintf(&b, ". Artifacts: `%s`.", f.Artifacts)
+			for _, line := range strings.Split(failure, "\n") {
+				b.WriteString("\n  > " + line)
+			}
+			open = append(open, b.String())
+		case f.FixedAt == nil:
+			atWork = append(atWork, fmt.Sprintf("- `%s`: taken on at %s, failed in %d merge gate(s)", f.Ref, f.TakenOnAt.UTC().Format(time.RFC3339), f.Recurrences))
+		}
+	}
+	if len(open) == 0 && len(atWork) == 0 {
+		return "None: no test that failed in a merge gate has passed on the same inputs since the last fix."
+	}
+	var b strings.Builder
+	if len(open) > 0 {
+		b.WriteString("Open, each yours to dispatch:\n" + strings.Join(open, "\n"))
+	}
+	if len(atWork) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("At work, taken on by your earlier dispatch; never dispatch one again:\n" + strings.Join(atWork, "\n"))
+	}
+	return b.String()
 }
 
 // RenderOccasion is the brief's first sentence: what the check owed at OWED

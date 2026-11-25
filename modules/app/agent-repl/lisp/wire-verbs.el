@@ -4235,12 +4235,33 @@ a move asked for waiting place I, counted from 0, of the W merges waiting."
   "Decode UpdateMergeQueueError's `remediation_bound_reached' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-remediation-bound-reached json))
 
+(defun agent-repl-wire-decode-queue-race-finding-ref (json)
+  "Decode QueueRaceFindingRef from JSON into (:suite SUITE :test TEST):
+one race finding of the merge queue, the test in the suite that ran it."
+  (let ((message "QueueRaceFindingRef"))
+    (agent-repl-wire-verbs--check-keys message json '(suite test))
+    (list :suite (agent-repl-wire-verbs--decode-string message 'suite json)
+          :test (agent-repl-wire-verbs--decode-string message 'test json))))
+
+(defun agent-repl-wire-decode-update-merge-queue-unknown-race-finding (json)
+  "Decode UpdateMergeQueueUnknownRaceFinding from JSON into (:finding F):
+the first race finding a mediation decision named that its repository does
+not hold."
+  (let ((message "UpdateMergeQueueUnknownRaceFinding"))
+    (agent-repl-wire-verbs--check-keys message json '(finding))
+    (list :finding (agent-repl-wire-verbs--decode-optional-message
+                    message 'finding json #'agent-repl-wire-decode-queue-race-finding-ref))))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-unknown-race-finding (json)
+  "Decode UpdateMergeQueueError's `unknown_race_finding' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-unknown-race-finding json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error (json)
   "Decode UpdateMergeQueueError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld noRepairTurn placementBehindNotInLine indexOutOfRange moveBlocked))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld noRepairTurn placementBehindNotInLine indexOutOfRange moveBlocked unknownRaceFinding))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4261,7 +4282,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'moveBlocked :move-blocked #'agent-repl-wire-decode-update-merge-queue-error-move-blocked)
          (list 'remediationBoundReached :remediation-bound-reached #'agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached)
          (list 'problemsUnowned :problems-unowned #'agent-repl-wire-decode-update-merge-queue-error-problems-unowned)
-         (list 'problemsRecurring :problems-recurring #'agent-repl-wire-decode-update-merge-queue-error-problems-recurring))))))
+         (list 'problemsRecurring :problems-recurring #'agent-repl-wire-decode-update-merge-queue-error-problems-recurring)
+         (list 'unknownRaceFinding :unknown-race-finding #'agent-repl-wire-decode-update-merge-queue-error-unknown-race-finding))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."

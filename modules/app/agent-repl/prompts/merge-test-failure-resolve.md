@@ -18,13 +18,19 @@ RUN ONLY THE FAILING TEST CASES AND THIS WORKSPACE'S OWN, AND KEEP FIXING AND RE
 2. Fix what fails, then run `agent-repld test run -rerun` again. Repeat until every case it runs passes.
 3. Only then is the remediation resolved: commit and end your turn. The queue then runs the selected suites in full again (after its rebase), which is what checks everything else; a turn that ends with a failing case it was asked to fix spends an attempt and a full run of the selected suites on a known failure.
 
+A FAILING CASE THAT PASSES WHEN YOU RERUN IT, WITH NOTHING CHANGED, IS A RACE, NEVER RESOLVED:
+- Its rerun passed on the very inputs the gate failed it on, so the code it runs did not cause the failure. The daemon reads that pass itself and records the case as a race finding of the repository, which the deploy mediator dispatches a fix for. You do not report it anywhere else.
+- Do not change the code or the test to make it pass: never loosen a bound, add a retry, or add a sleep. Do not count it as fixed.
+- Name each such case in your reply as a race.
+- When every failing case is such a race, end your turn without a commit: the queue finds each one recorded as a race and runs the suites again. A case you only believe is a race, but whose rerun has not passed, is not one: fix it, or give the merge up.
+
 IF A FAILING TEST CANNOT BE RUN ON ITS OWN (its suite has no targeted invocation, or the test only fails inside the whole suite), do not stop, and do not weaken the test or the code to get around it:
 - Run the smallest selection that does reach it (its package, its file, `-suite NAME`) through `agent-repld test run`, and keep fixing until it passes there, then commit and end your turn as above.
 - Make sure the gap gets fixed, without compromising coverage or production UI/UX: the tests should be adapted so this test can be run on its own. Use the `/agent-repl-workspaces` skill: run `agent-repld workspace list` first, and if an open, non-one-shot workspace already investigates making this suite's tests runnable on their own, send it a prompt (`agent-repld workspace prompt`) naming this test and why it could not be run alone. Otherwise create a new NON-one-shot workspace cut from {{target_branch}} whose task is exactly that (`agent-repld workspace create`, a peer naming its repository, relationship and context as the skill describes). Then carry on with this fix; that workspace owns the gap, not you.
 
 Do NOT change the merge machinery while this merge is running: nothing under `modules/app/agent-repl/daemon/internal/merge/` or `modules/app/agent-repl/testrun/`, and not `modules/app/agent-repl/bin/test-all.sh`. The running daemon is what gates this merge, so a change there cannot fix it; a repair that makes one fails the merge. A fix to the merge or its gate lands through a branch of its own.
 
-NEVER END THE TURN WITHOUT A COMMITTED FIX, and never leave a fix broken on purpose to make the merge fail: a turn that commits nothing fails the merge, and a broken fix spends a whole run of the suite on a merge that cannot land. If you conclude that you cannot fix the failures correctly -- a correct fix needs an architectural change, a redesign rather than a repair, or a decision that is the user's -- give the merge up instead, then end your turn with a reply explaining the problem:
+APART FROM A FAILURE THAT IS ONLY RACES (above), NEVER END THE TURN WITHOUT A COMMITTED FIX, and never leave a fix broken on purpose to make the merge fail: a turn that commits nothing fails the merge, and a broken fix spends a whole run of the suite on a merge that cannot land. If you conclude that you cannot fix the failures correctly -- a correct fix needs an architectural change, a redesign rather than a repair, or a decision that is the user's -- give the merge up instead, then end your turn with a reply explaining the problem:
 
 `agent-repld merge-queue give-up -reason "<why the failures cannot be fixed here, in a sentence or two>"`
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agentrepl/logging/logsite"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dirpath"
@@ -78,6 +79,10 @@ const (
 	// after more than five of its fixes deployed. It stays named because the
 	// protobuf still declares its arm.
 	ArmProblemsRecurring = "problems_recurring"
+	// ArmUnknownRaceFinding refuses a decision naming a queue race finding
+	// its repository does not hold (DeployProblem.RaceFindings); its
+	// `finding` field names the first.
+	ArmUnknownRaceFinding = "unknown_race_finding"
 )
 
 // MediationDecision is what an intake decided of a deploy.
@@ -112,6 +117,9 @@ func (d MediationDecision) String() string {
 type DeployProblem struct {
 	Statement string
 	Evidence  []string
+	// RaceFindings are the queue race findings the problem is
+	// (racefindings.go), empty for a problem the deploy's logs show.
+	RaceFindings []wsm.RaceFindingRef `json:"race_findings,omitempty"`
 }
 
 // Decision is an intake's decision on the deploy its chain owes a check of
@@ -796,16 +804,18 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		o.deps.Log.Global().Info(opMediation, "this deploy's check is escalated; the queue waits for the user", fields)
 		return
 	}
-	brief, window, err := o.intakeBrief(ctx, q, m)
+	brief, window, raced, err := o.intakeBrief(ctx, q, m)
 	if err != nil {
 		o.roundFailed(ctx, q, m, "the deploy check's brief could not be composed", err, fields)
 		return
 	}
 	// A WINDOW WITH NO WARNING AND NO ERROR NEEDS NO MEDIATOR (owner ruling,
 	// 2026-11-19): there is nothing for it to investigate, so the check is
-	// released here and no session is started. A check the mediator was told
+	// released here and no session is started. AN OPEN RACE FINDING IS
+	// SOMETHING TO INVESTIGATE (owner ruling, 2026-11-25), whatever the
+	// window holds, so the mediator is told of it. A check the mediator was told
 	// of already is its own to decide, whatever the window holds now.
-	if !m.Prompted() && len(window.Groups) == 0 {
+	if !m.Prompted() && len(window.Groups) == 0 && !raced {
 		o.releaseQuiet(ctx, q, m, window, fields)
 		return
 	}
@@ -1232,6 +1242,22 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	if m.Escalated() {
 		o.deps.Log.Global().Info(opMediation, "the mediator approves a deploy that was escalated; its escalation ends with the approval", fields)
 	}
+	// A RACE FINDING THE DECISION NAMES MUST BE ONE THE REPOSITORY HOLDS: a
+	// misspelled name would be taken on as nothing, and the real finding left
+	// open with no word to the mediator.
+	if refs := raceRefs(d.Problems); len(refs) > 0 {
+		var unknown *wsm.UnknownRaceFindingError
+		switch err := o.deps.DB.CheckRaceFindings(ctx, q.key, refs); {
+		case errors.As(err, &unknown):
+			o.deps.Log.Global().Info(opMediation, "refused a decision naming a race finding the repository does not hold", withField(fields, "finding", unknown.Ref.String()))
+			r := refuse(ArmUnknownRaceFinding, ws, "the repository holds no race finding %s", unknown.Ref)
+			r.Fields = map[string]any{"finding": &agentreplv1.QueueRaceFindingRef{Suite: unknown.Ref.Suite, Test: unknown.Ref.Test}}
+			return r
+		case err != nil:
+			o.deps.Log.Global().Error(opMediation, "could not read the race findings the decision names", withField(fields, "error", err.Error()))
+			return err
+		}
+	}
 	window, err := o.toldWindow(ctx, q.key, fields)
 	if err != nil {
 		return err
@@ -1582,6 +1608,7 @@ func problemKeys(problems []DeployProblem) []wsm.ProblemKey {
 // fails is recorded at ERROR: the decision stands, and the groups come back
 // untaken to the next check.
 func (o *orchestrator) takeOnProblems(ctx context.Context, repo wsm.RepoKey, problems []DeployProblem, also []wsm.ProblemKey, unstated string, fields dlog.Context) {
+	o.takeOnRaces(ctx, repo, problems, fields)
 	keys := problemKeys(problems)
 	seen := map[wsm.ProblemKey]bool{}
 	for _, k := range keys {
@@ -1609,6 +1636,42 @@ func (o *orchestrator) takeOnProblems(ctx context.Context, repo wsm.RepoKey, pro
 		return
 	}
 	o.deps.Log.Global().Info(opMediation, "recorded the decided problems as taken on by the mediator", withField(fields, "problems", len(keys)))
+}
+
+// raceRefs is every race finding PROBLEMS name, each once, in order.
+func raceRefs(problems []DeployProblem) []wsm.RaceFindingRef {
+	seen := map[wsm.RaceFindingRef]bool{}
+	var out []wsm.RaceFindingRef
+	for _, p := range problems {
+		for _, r := range p.RaceFindings {
+			if !seen[r] {
+				seen[r] = true
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+// takeOnRaces records that the decision took on every race finding PROBLEMS
+// name in REPO: later checks list each as at work, and the fix's deploy
+// marks it fixed. A write that fails is recorded at ERROR: the decision
+// stands, and the findings come back open to the next check.
+func (o *orchestrator) takeOnRaces(ctx context.Context, repo wsm.RepoKey, problems []DeployProblem, fields dlog.Context) {
+	refs := raceRefs(problems)
+	if len(refs) == 0 {
+		return
+	}
+	names := make([]string, 0, len(refs))
+	for _, r := range refs {
+		names = append(names, r.String())
+	}
+	fields = withField(fields, "race_findings", strings.Join(names, ","))
+	if err := o.deps.DB.TakeOnRaceFindings(ctx, repo, refs, o.deps.Now()); err != nil {
+		o.deps.Log.Global().Error(opRaceFinding, "the decided race findings could not be recorded as taken on; the next check finds them open", withField(fields, "error", err.Error()))
+		return
+	}
+	o.deps.Log.Global().Info(opRaceFinding, "recorded the decided race findings as taken on by the mediator", fields)
 }
 
 // escalationBrief is what a check was escalated with, kept on the owed check

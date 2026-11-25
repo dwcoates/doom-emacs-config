@@ -50,6 +50,7 @@ cat >"$3" <<'INNER'
 printf 'testrun %s\n' "$*" >>"$STUB_LOG"
 printf 'marker=%s\n' "${AGENT_REPL_TEST_ALL_LOGGED:-}" >>"$STUB_LOG"
 printf 'runlog=%s\n' "${AGENT_REPL_TEST_RUN_LOG:-}" >>"$STUB_LOG"
+printf 'eventsenv=%s\n' "${AGENT_REPL_TEST_EVENTS_FILE:-}" >>"$STUB_LOG"
 echo "stub testrun output"
 # A recording run stages its rows where --record-out says, as testrun does;
 # any other run leaves the path unwritten.
@@ -263,7 +264,7 @@ test_runs_testrun_inside_the_git_net() {
     module="$(cd "$tree/modules/app/agent-repl" && pwd)"
     record_out="$(sed -n 's/^testrun run .*--record-out \(.*\)$/\1/p' "$STUB_LOG")"
     want="$(printf 'safe --\ntestrun run --module %s --suites ert,daemon --record-out %s' "$module" "$record_out")"
-    if [ "$RUN_RC" -eq 0 ] && [ -n "$record_out" ] && [ "$(grep -v -e '^go ' -e '^marker=' -e '^runlog=' "$STUB_LOG")" = "$want" ]; then
+    if [ "$RUN_RC" -eq 0 ] && [ -n "$record_out" ] && [ "$(grep -v -e '^go ' -e '^marker=' -e '^runlog=' -e '^eventsenv=' "$STUB_LOG")" = "$want" ]; then
         pass "testrun runs under the git net, with every argument"
     else
         fail "wrapper order or arguments (rc=$RUN_RC): $(cat "$STUB_LOG")"
@@ -301,27 +302,27 @@ test_an_events_file_is_the_runners_events_stream() {
     local tree
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
-    run_test_all "$tree" "$(stub_path "$tree")" --suites daemon --events-file "$tree/events.pb"
+    AGENT_REPL_TEST_EVENTS_FILE="$tree/events.pb" run_test_all "$tree" "$(stub_path "$tree")" --suites daemon
     local run_line
     run_line="$(grep '^testrun run ' "$STUB_LOG")"
     if [ "$RUN_RC" -eq 0 ] && [[ "$run_line" == *"--suites daemon --events-fd 9 --record-out "* ]] \
-        && [[ "$run_line" != *--events-file* ]] && [ "$(cat "$tree/events.pb")" = "stub events" ]; then
-        pass "--events-file hands the runner its events stream as --events-fd, written to the file"
+        && [ "$(cat "$tree/events.pb")" = "stub events" ] && grep -qx 'eventsenv=' "$STUB_LOG"; then
+        pass "AGENT_REPL_TEST_EVENTS_FILE hands the runner its events stream as --events-fd, written to the file, and the runner does not inherit it"
     else
-        fail "an events file (rc=$RUN_RC)" "$run_line / $(cat "$tree/events.pb" 2>&1)"
+        fail "an events file (rc=$RUN_RC)" "$run_line / $(cat "$tree/events.pb" 2>&1) / $(cat "$STUB_LOG")"
     fi
     rm -rf "$tree"
 }
 
-test_an_events_file_with_no_path_runs_nothing() {
+test_a_run_with_no_events_file_writes_no_events() {
     local tree
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
-    run_test_all "$tree" "$(stub_path "$tree")" --events-file
-    if [ "$RUN_RC" -eq 2 ] && ! grep -q '^testrun run ' "$STUB_LOG" && grep -q -- '--events-file needs a path' "$tree/stderr" "$tree/stdout"; then
-        pass "--events-file with no path fails loudly and runs nothing"
+    run_test_all "$tree" "$(stub_path "$tree")" --suites daemon
+    if [ "$RUN_RC" -eq 0 ] && ! grep -q -- '--events-fd' "$STUB_LOG"; then
+        pass "a run with no events file hands the runner no events stream"
     else
-        fail "an events file with no path (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
+        fail "a run with no events file (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
     fi
     rm -rf "$tree"
 }
@@ -562,7 +563,7 @@ test_the_runner_is_told_its_log() {
 test_runs_testrun_inside_the_git_net
 test_record_stages_inside_the_net_then_finishes_outside_it
 test_an_events_file_is_the_runners_events_stream
-test_an_events_file_with_no_path_runs_nothing
+test_a_run_with_no_events_file_writes_no_events
 test_a_run_that_records_nothing_never_finishes
 test_a_redundancy_request_runs_the_measurement_inside_the_net
 test_a_redundancy_request_names_exactly_one_file

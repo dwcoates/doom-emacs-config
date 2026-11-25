@@ -585,14 +585,21 @@ const (
 	testMetricsTriggerEnv = "AGENT_REPL_TEST_METRICS_TRIGGER"
 )
 
+// testEventsFileEnv names the file a gate's test runner writes its typed
+// events to (bin/test-all.sh), each unit's per-test results under its inputs
+// digest, which the queue reads its race findings from (racefindings.go). It
+// rides the environment so a script from before it ignores it.
+const testEventsFileEnv = "AGENT_REPL_TEST_EVENTS_FILE"
+
 // TriggerMergeQueue is the trigger the gate names (testMetricsTriggerEnv).
 const TriggerMergeQueue = "merge_queue"
 
 // gateArgv is the gate's command line: the script, told the niceness its
-// whole tree runs at (HeadNice) and, when the daemon records metrics under
-// metricsRoot, where its test runner pushes every test's time.
-func gateArgv(argv []string, metricsRoot string) []string {
-	env := []string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, HeadNice)}
+// whole tree runs at (HeadNice), the file its runner writes its events to
+// (EVENTS), and, when the daemon records metrics under metricsRoot, where its
+// test runner pushes every test's time.
+func gateArgv(argv []string, metricsRoot, events string) []string {
+	env := []string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, HeadNice), testEventsFileEnv + "=" + events}
 	if metricsRoot != "" {
 		env = append(env, testMetricsRootEnv+"="+metricsRoot, testMetricsTriggerEnv+"="+TriggerMergeQueue)
 	}

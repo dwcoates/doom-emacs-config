@@ -92,7 +92,7 @@ func TestTheIntakesBriefSortsTheWindowAgainstTheSpanBeforeTheDeploy(t *testing.T
 	}
 
 	// Act
-	_, _, err = h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+	_, _, _, err = h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
 
 	// Assert
 	if err != nil || len(spans) != 2 {
@@ -114,7 +114,7 @@ func TestTheIntakesBriefStatesTheDeployAndNothingTheWindowHolds(t *testing.T) {
 	q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
 
 	// Act
-	_, window, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+	_, window, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
 
 	// Assert: the brief's values name the deploy and where to look, and none
 	// of them carries a record; the window the store keeps still holds both
@@ -224,7 +224,7 @@ func TestTheIntakesBriefNamesADigestItWroteOfTheWindow(t *testing.T) {
 	q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
 
 	// Act
-	_, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+	_, _, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
 
 	// Assert
 	if err != nil {

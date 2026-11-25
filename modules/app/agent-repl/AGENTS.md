@@ -1480,6 +1480,17 @@ like an improvement still needs that conversation. Code:
   fails the merge in tests without running (`run.testAndFix`,
   `run.failedHead`, kept in the progress record as `fix_from_head`): it would
   spend a whole run to fail as before.
+- **A race is found by the daemon, and its fix is the deploy mediator's**
+  (owner ruling, 2026-11-25). Every gate's runner writes its typed results
+  beside its log (`AGENT_REPL_TEST_EVENTS_FILE`), each unit's tests under the
+  digest of the inputs it was confined to. A test that failed in a gate and
+  then passed on the same digest, in the repair's rerun or any later gate,
+  failed for no change of the code it ran: the daemon records it as the
+  repository's race finding (`daemon/internal/merge/racefindings.go`), one per
+  test, and every open one is put to the deploy mediator's next check, which
+  dispatches its fix. A fixing attempt that commits nothing while every test
+  its gate failed is such a finding runs the suites again on the same head;
+  any other failure keeps the rule above.
 - **A repair its agent cannot finish is given up, never left broken** (owner
   ruling, 2026-11-17). From a conflict resolution or a fixing attempt, the
   merge's own agent runs `agentrepl.v1.UpdateMergeQueueRequest.give_up`

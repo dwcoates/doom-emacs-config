@@ -92,7 +92,7 @@ func (o *orchestrator) remediationBrief(repoDir string, m wsm.Mediation, d Decis
 }
 
 // renderProblems is the problems as a brief quotes them: each statement,
-// with its evidence verbatim beneath it.
+// the race findings it is, and its evidence verbatim beneath it.
 func renderProblems(problems []DeployProblem) string {
 	var b strings.Builder
 	for i, p := range problems {
@@ -100,6 +100,9 @@ func renderProblems(problems []DeployProblem) string {
 			b.WriteString("\n")
 		}
 		b.WriteString(fmt.Sprintf("%d. %s\n", i+1, p.Statement))
+		for _, r := range p.RaceFindings {
+			b.WriteString(fmt.Sprintf("   race `%s`: fix it at its source, never by loosening a bound, a retry or a sleep\n", r))
+		}
 		for _, e := range p.Evidence {
 			b.WriteString(fmt.Sprintf("   > %s\n", e))
 		}

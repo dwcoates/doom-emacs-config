@@ -78,6 +78,8 @@ func TestMergeQueueSeriesAreServed(t *testing.T) {
 			want: []string{`agentrepl_production_checks_total{outcome="dispatched"} 1`, `agentrepl_production_children_total{event="dispatched"} 2`}},
 		{name: "a production check with nothing to do counts no child", observe: func(s *Surface) { s.ObserveProductionCheck("nothing_to_do", 0) },
 			want: []string{`agentrepl_production_checks_total{outcome="nothing_to_do"} 1`}},
+		{name: "a race finding found again after its fix", observe: func(s *Surface) { s.CountRaceFinding("reopened") },
+			want: []string{`agentrepl_merge_queue_race_findings_total{event="reopened"} 1`}},
 		{name: "a production child's event", observe: func(s *Surface) { s.ObserveProductionChild("landed") },
 			want: []string{`agentrepl_production_children_total{event="landed"} 1`}},
 	}
@@ -108,6 +110,7 @@ func TestTheOffSurfaceTimesNoMerge(t *testing.T) {
 	s.SetRemediationsInARow(1)
 	s.ObserveMergeRound("tests", "succeeded", time.Second)
 	s.ObserveMergeRounds("tests", "landed", 1)
+	s.CountRaceFinding("new")
 	s.CountQueueChange("enqueued", "")
 	s.ObserveMergeHead("landed", time.Second)
 	s.ObserveNotice("agent_sent", 1)

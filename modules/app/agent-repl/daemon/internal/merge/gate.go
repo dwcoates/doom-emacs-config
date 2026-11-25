@@ -108,7 +108,9 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (verdi
 	if err := validateSuites(selection.Suites); err != nil {
 		return gateVerdict{}, err
 	}
-	argv = gateArgv(append([]string(nil), argv...), r.o.deps.TestMetricsRoot)
+	// THE GATE'S TYPED RESULTS ARE WRITTEN BESIDE ITS LOG, and read once it
+	// ends for the queue's race findings (observeGateRaces).
+	argv = gateArgv(append([]string(nil), argv...), r.o.deps.TestMetricsRoot, g.log.events)
 	// The FULL selection passes no narrowing: running everything is the
 	// script's own default, and a repository whose script knows no --suites
 	// flag is never handed one.
@@ -141,6 +143,9 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (verdi
 	if why, broken := gateDidNotRun(result.ExitCode); broken {
 		return g.brokenGate(ctx, result, fmt.Sprintf("%s; the whole run is archived at %s", why, result.ArchivePath)), nil
 	}
+	// EVERY GATE THAT RAN IS READ FOR RACES, passed or failed: its failures
+	// are candidates, and its passes promote earlier gates' candidates.
+	r.o.observeGateRaces(ctx, r.repo, name, g.log.events, result.ArchivePath, r.o.deps.Now())
 	if result.Passed {
 		r.endRun(ctx, round, "", result.Suites, g.link(), "succeeded")
 		r.o.log(ctx, r.ws).Info(op, "the merge's suites passed", dlog.Context{

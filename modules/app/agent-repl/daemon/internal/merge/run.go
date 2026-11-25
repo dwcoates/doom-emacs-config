@@ -100,6 +100,9 @@ type run struct {
 	// pass. A head still there at the next gate committed nothing
 	// (testAndFix).
 	failedHead string
+	// failedArchive is the archive of the gate that failed on failedHead,
+	// whose events name the tests it failed (racesOnly); empty with it.
+	failedArchive string
 	// briefAhead is the workspace of the merge ahead that a speculative step's
 	// brief names, the run goroutine's own.
 	briefAhead ids.WorkspaceID

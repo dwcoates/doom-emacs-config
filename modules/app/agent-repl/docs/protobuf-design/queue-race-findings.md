@@ -48,3 +48,7 @@ dispatches their fixes as it dispatches a deploy-caused problem.
 
 - Parsing "runs (inputs X)" lines from the archive: the subject labels do not map one-to-one onto unit ids (pooled webapp units), so the join would be a parser of display text. The events are typed.
 - Refusing an approval while findings are open: the owner ruled (2026-11-19, 2026-11-20) that the mediator alone decides a check. Open findings are instead put to it on every check until it dispatches them.
+
+## Corrections
+
+- The first landing said the gate learns its per-test results from `--events-file`, an argument to `bin/test-all.sh`. That was wrong: a gate running a branch whose script predates the argument would fail on an unknown argument. The file now rides the environment (`AGENT_REPL_TEST_EVENTS_FILE`), which an older script ignores. The root cause was reasoning only about branches rebased onto the main branch, and forgetting merges into a parent's branch that may hold an older script.

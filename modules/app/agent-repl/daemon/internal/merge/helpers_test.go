@@ -20,6 +20,7 @@ import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
 
+	"google.golang.org/protobuf/encoding/protodelim"
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/bounce"
@@ -431,6 +432,34 @@ func inMemoryChecks() wsm.DB {
 		panic(fmt.Sprintf("merge test: open the in-memory store: %v", err))
 	}
 	return db
+}
+
+func (f *fakeDB) RecordGateFailures(ctx context.Context, repo wsm.RepoKey, failures []wsm.GateTestFailure) error {
+	return f.checks.RecordGateFailures(ctx, repo, failures)
+}
+
+func (f *fakeDB) PromoteRaces(ctx context.Context, repo wsm.RepoKey, passes []wsm.TestPass) ([]wsm.Promotion, error) {
+	return f.checks.PromoteRaces(ctx, repo, passes)
+}
+
+func (f *fakeDB) RaceFindings(ctx context.Context, repo wsm.RepoKey) ([]wsm.RaceFinding, error) {
+	return f.checks.RaceFindings(ctx, repo)
+}
+
+func (f *fakeDB) CheckRaceFindings(ctx context.Context, repo wsm.RepoKey, refs []wsm.RaceFindingRef) error {
+	return f.checks.CheckRaceFindings(ctx, repo, refs)
+}
+
+func (f *fakeDB) TakeOnRaceFindings(ctx context.Context, repo wsm.RepoKey, refs []wsm.RaceFindingRef, at time.Time) error {
+	return f.checks.TakeOnRaceFindings(ctx, repo, refs, at)
+}
+
+func (f *fakeDB) FixRaceFindings(ctx context.Context, repo wsm.RepoKey, at time.Time) (int, error) {
+	return f.checks.FixRaceFindings(ctx, repo, at)
+}
+
+func (f *fakeDB) UnpromotedGateFailures(ctx context.Context, repo wsm.RepoKey, merge string, failed []wsm.TestPass) ([]wsm.RaceFindingRef, error) {
+	return f.checks.UnpromotedGateFailures(ctx, repo, merge, failed)
 }
 
 func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.ReplacedMediation, error) {
@@ -3871,6 +3900,9 @@ type scriptedRun struct {
 	Output string
 	Code   int
 	Err    error
+	// Units are the unit verdicts the run's events file holds
+	// (--events-file), as the real runner writes them.
+	Units []*testrunv1.TestRunUnitEnded
 }
 
 func (r *fakeRunner) RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (scriptrunner.Run, error) {
@@ -3906,6 +3938,11 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 	}
 	run := r.runs[0]
 	r.runs = r.runs[1:]
+	if run.Err == nil {
+		if err := writeRunEvents(argv, run.Units); err != nil {
+			return "", 0, err
+		}
+	}
 	if run.Err == nil && onLine != nil {
 		for _, line := range strings.SplitAfter(run.Output, "\n") {
 			if line != "" {
@@ -3914,6 +3951,32 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 		}
 	}
 	return run.Output, run.Code, run.Err
+}
+
+// writeRunEvents writes UNITS to the events file ARGV names (testEventsFileEnv),
+// as the runner's stream: one event per unit verdict. An argv naming none
+// writes nothing.
+func writeRunEvents(argv []string, units []*testrunv1.TestRunUnitEnded) error {
+	var path string
+	for _, arg := range argv {
+		if events, ok := strings.CutPrefix(arg, testEventsFileEnv+"="); ok {
+			path = events
+		}
+	}
+	if path == "" {
+		return nil
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("fake script: %w", err)
+	}
+	defer file.Close()
+	for _, u := range units {
+		if _, err := protodelim.MarshalTo(file, &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_UnitEnded{UnitEnded: u}}); err != nil {
+			return fmt.Errorf("fake script: %w", err)
+		}
+	}
+	return nil
 }
 
 // harness is one orchestrator with every fake it was built from.
@@ -5377,6 +5440,12 @@ func (f *fakeMeter) ObserveMediatorCompaction(outcome string, took time.Duration
 	defer f.mu.Unlock()
 	f.got = append(f.got, "mediator_compaction:"+outcome)
 	f.compactionTook = append(f.compactionTook, took)
+}
+
+func (f *fakeMeter) CountRaceFinding(event string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "race_finding:"+event)
 }
 
 func (f *fakeMeter) CountMediatorRun(outcome string) {
