@@ -1,4 +1,4 @@
-<!-- used by: daemon internal/merge/production.go (productionBrief); placeholders: {{span_since}}, {{span_until}}, {{new_sites}}, {{refired_sites}}, {{site_file}}, {{baseline}}, {{open_children}}, {{metrics_window}} -->
+<!-- used by: daemon internal/merge/production.go (productionBrief); placeholders: {{span_since}}, {{span_until}}, {{new_sites}}, {{refired_sites}}, {{site_file}}, {{baseline}}, {{span_children}}, {{metrics_window}} -->
 Production ran on its own from {{span_since}} to {{span_until}}, between two landings. Nothing waits on you: no deploy and no queue is held for this check.
 
 Your job: find what went wrong in production in that span and hand each problem to a child that fixes it, or decide there is nothing to do.
@@ -7,11 +7,12 @@ What you have:
 - The log sites that warned or erred in the span, one entry per site with its template, counts and one sample: `{{site_file}}`
   - {{new_sites}} sites are new, compared with {{baseline}}.
   - {{refired_sites}} sites fired again after a child's fix for them landed.
-  - Sites an open child already owns, and sites of an ignored kind, are left out.
+  - Sites an open child already owns, sites whose fix landed only after the span ended (so production had not run it yet), and sites of an ignored kind are left out, each counted.
 - The same, read live: `agent-repld logs sites -since {{span_since}} -until {{span_until}} -level warn`
 - Performance: the `/agent-repl-metrics` skill. Compare the build that served {{metrics_window}} with the one before it: latencies, CPU and memory per runtime, and the tests' CPU (`agentrepl_test_cpu_seconds`) by landing.
 - Your own notes on records that need judgement: `docs/DEPLOY-MEDIATOR-NOTES.md`, shared with the deploy mediator.
-- The children already at work, and the sites each owns: {{open_children}}
+- Your children that were open at any moment of the span: those still at work, with the sites each owns, and those that ended since it began, with how and when each ended and the sites it was given. A site a child's landed fix covers is not a problem to dispatch again, unless it fired after that landing. {{span_children}}
+  - The same, read live: `agent-repld workspace find -parent here -ended-since {{span_since}} -all`
 
 Decide the span with one `agent-repld production-mediation` verb:
 - `decide -summary "<one sentence>"`

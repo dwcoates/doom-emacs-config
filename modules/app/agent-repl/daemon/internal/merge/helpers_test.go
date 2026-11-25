@@ -132,6 +132,8 @@ type fakeDB struct {
 	// (wsm.Mediation.LandingStartedAt): the harness's queue is this fake's,
 	// not the checks store's.
 	landingOpened time.Time
+	// spanChildrenErr fails ProductionChildrenOpenSince.
+	spanChildrenErr error
 	// endingErr fails RecordMediationEnding.
 	endingErr error
 	// owedStartErr fails OwedMediationStart.
@@ -716,6 +718,16 @@ func (f *fakeDB) FixedSites(ctx context.Context, repo wsm.RepoKey) ([]wsm.FixedS
 
 func (f *fakeDB) ProductionChildOf(ctx context.Context, ws ids.WorkspaceID) (wsm.ProductionChild, bool, error) {
 	return f.checks.ProductionChildOf(ctx, ws)
+}
+
+func (f *fakeDB) ProductionChildrenOpenSince(ctx context.Context, repo wsm.RepoKey, since time.Time) ([]wsm.ProductionChild, error) {
+	f.mu.Lock()
+	err := f.spanChildrenErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return f.checks.ProductionChildrenOpenSince(ctx, repo, since)
 }
 
 func (f *fakeDB) ProductionChildrenOf(ctx context.Context, repo wsm.RepoKey) ([]wsm.ProductionChild, error) {

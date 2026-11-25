@@ -499,9 +499,12 @@ func (o *orchestrator) productionBrief(ctx context.Context, q checkedQueue, c ws
 	if err := writeLog(path, RenderProductionSites(sites, c)); err != nil {
 		return "", fmt.Errorf("merge: write the production check's site file: %w", err)
 	}
-	children, err := o.deps.DB.ProductionChildrenOf(ctx, q.key)
+	// THE CHILDREN ARE THOSE OPEN AT ANY MOMENT OF THE SPAN (owner ruling,
+	// 2026-11-25): one that landed as the span ended is not open now, yet the
+	// build that served the span did not carry its fix.
+	children, err := o.deps.DB.ProductionChildrenOpenSince(ctx, q.key, c.Since)
 	if err != nil {
-		return "", fmt.Errorf("merge: read the open production children: %w", err)
+		return "", fmt.Errorf("merge: read the production children open during the span: %w", err)
 	}
 	return o.deps.Briefs(BriefProductionIntake, map[string]string{
 		"span_since":     c.Since.UTC().Format(time.RFC3339),
@@ -510,35 +513,80 @@ func (o *orchestrator) productionBrief(ctx context.Context, q checkedQueue, c ws
 		"refired_sites":  fmt.Sprint(len(sites.Refired)),
 		"site_file":      path,
 		"baseline":       sites.Baseline,
-		"open_children":  renderOpenChildren(o.childNames(ctx, children), children),
+		"span_children":  renderSpanChildren(o.childNames(ctx, children), children),
 		"metrics_window": fmt.Sprintf("%s to %s", c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339)),
 	})
 }
 
-// childNames answers each child's workspace name, its id when the name
-// cannot be read (recorded at ERROR).
+// childNames answers each child's workspace name, and the name of each child
+// one was folded into, its id when the name cannot be read (recorded at
+// ERROR).
 func (o *orchestrator) childNames(ctx context.Context, children []wsm.ProductionChild) map[ids.WorkspaceID]string {
 	out := map[ids.WorkspaceID]string{}
-	for _, child := range children {
-		name, err := o.workspaceName(ctx, opProduction, child.Workspace)
-		if err != nil || name == "" {
-			name = string(child.Workspace)
+	name := func(ws ids.WorkspaceID) {
+		if _, done := out[ws]; done {
+			return
 		}
-		out[child.Workspace] = name
+		named, err := o.workspaceName(ctx, opProduction, ws)
+		if err != nil || named == "" {
+			named = string(ws)
+		}
+		out[ws] = named
+	}
+	for _, child := range children {
+		name(child.Workspace)
+		if child.FoldedInto != nil {
+			name(*child.FoldedInto)
+		}
 	}
 	return out
 }
 
-// renderOpenChildren lists CHILDREN, each by name with the sites it owns.
-func renderOpenChildren(names map[ids.WorkspaceID]string, children []wsm.ProductionChild) string {
+// renderSpanChildren lists CHILDREN, the children open during the span, each
+// by name and kind with how it stands: open with the sites it owns, or how
+// and when it ended with the sites it was given.
+func renderSpanChildren(names map[ids.WorkspaceID]string, children []wsm.ProductionChild) string {
 	if len(children) == 0 {
 		return "none"
 	}
 	var b strings.Builder
 	for _, child := range children {
-		b.WriteString(fmt.Sprintf("\n- `%s` (%s): %s", names[child.Workspace], child.Kind, strings.Join(child.Sites, ", ")))
+		b.WriteString(fmt.Sprintf("\n- `%s` (%s): %s", names[child.Workspace], child.Kind, childStanding(names, child)))
 	}
 	return b.String()
+}
+
+// childStanding says how CHILD stands, naming with NAMES the child it was
+// folded into.
+func childStanding(names map[ids.WorkspaceID]string, child wsm.ProductionChild) string {
+	if child.Open() {
+		return "open, owning " + sitesOrNone(child.Sites)
+	}
+	if child.EndedAt == nil {
+		panic(fmt.Sprintf("merge: production child %s ended %s at no instant", child.Workspace, child.Ending))
+	}
+	at := child.EndedAt.UTC().Format(time.RFC3339)
+	given := sitesOrNone(child.Named)
+	switch child.Ending {
+	case wsm.ProductionChildLanded:
+		return fmt.Sprintf("landed %s, its fix for %s", at, given)
+	case wsm.ProductionChildClosed:
+		return fmt.Sprintf("closed unlanded %s, given %s", at, given)
+	case wsm.ProductionChildFolded:
+		if child.FoldedInto == nil {
+			panic(fmt.Sprintf("merge: production child %s was folded into no child", child.Workspace))
+		}
+		return fmt.Sprintf("folded into `%s` %s, given %s", names[*child.FoldedInto], at, given)
+	}
+	panic(fmt.Sprintf("merge: production child %s ended as %q", child.Workspace, child.Ending))
+}
+
+// sitesOrNone lists SITES, or says there are none.
+func sitesOrNone(sites []string) string {
+	if len(sites) == 0 {
+		return "no site"
+	}
+	return strings.Join(sites, ", ")
 }
 
 // ProductionSites are a span's sites the mediator reviews.
