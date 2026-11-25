@@ -39,7 +39,7 @@
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_NOTIFIER_CMD               the desktop banner program (a recorder)
-//	AGENT_REPL_CHIME_CMD                  the banner sound player (a recorder)
+//	AGENT_REPL_CHIME_CMD                  the banner sound player and the reading's player (a recorder)
 //	AGENT_REPL_SAY_CMD                    the banner speech program (a recorder)
 //	AGENT_REPL_AUDIO_OUTPUT_CMD           the audio-output reader (a recorder printing the built-in speakers)
 //	AGENT_REPL_BLUETOOTH_CMD              the Bluetooth class reader (a recorder printing no device)

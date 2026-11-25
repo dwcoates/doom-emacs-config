@@ -218,9 +218,10 @@ func TestNotifyProgramsResolveThroughOneHelper(t *testing.T) {
 func TestSpeechPlatformTakesTheOverrides(t *testing.T) {
 	// Arrange
 	t.Setenv(desktopnotify.EnvSayCmd, "/tmp/fake-say")
+	t.Setenv(desktopnotify.EnvChimeCmd, "/tmp/fake-chime")
 	t.Setenv(desktopnotify.EnvAudioOutputCmd, "/tmp/fake-audio")
 	t.Setenv(desktopnotify.EnvBluetoothCmd, "/tmp/fake-bluetooth")
-	want := desktopnotify.SpeechPlatformFor(runtime.GOOS, "/bin/agent-repld").WithOverrides("/tmp/fake-say", "/tmp/fake-audio", "/tmp/fake-bluetooth")
+	want := desktopnotify.SpeechPlatformFor(runtime.GOOS, "/bin/agent-repld").WithOverrides("/tmp/fake-say", "/tmp/fake-chime", "/tmp/fake-audio", "/tmp/fake-bluetooth")
 
 	// Act
 	got := speechPlatform("/bin/agent-repld")

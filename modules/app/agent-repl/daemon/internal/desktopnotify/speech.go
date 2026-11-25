@@ -2,8 +2,12 @@ package desktopnotify
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +23,8 @@ const opSpeak = "daemon.desktopnotify.speak"
 
 // EnvSayCmd overrides the speech program's binary, exactly as EnvChimeCmd
 // does the chime's: the platform's argv is unchanged, so a test points it at
-// a recorder and no test ever speaks on the host.
+// a recorder and no test ever speaks on the host. The rendered reading is
+// played by the chime's player, so EnvChimeCmd overrides that one too.
 const EnvSayCmd = "AGENT_REPL_SAY_CMD"
 
 // EnvAudioOutputCmd overrides the program the current audio output is read
@@ -41,21 +46,49 @@ const audioOutputBound = 240 * time.Millisecond
 // a load average of 8 (measured 2026-11-18), so three times the slowest.
 const bluetoothBound = 240 * time.Millisecond
 
-// The speech program's measured cost, which sayBound is sized from: `say`
-// took 1.02-1.04s to start and render a one-word line, and read a 28-word
-// banner in 10.4s, 0.37s a word (measured 2026-11-18 at a load average of 7).
+// The speech program's measured cost, which renderBound is sized from: `say`
+// took 1.02-1.04s to start and render a one-word line, and spoke a 28-word
+// banner aloud at 0.37s a word (measured 2026-11-18 at a load average of 7).
+// Rendering to a file is faster than speaking: `say -o` rendered
+// "✅ ws-name\nFixed the bug." (5 words, 2.58s of audio) in 1.34s wall, and a
+// merge_queued banner ("🔀 agent-repl-slack-links" and its label, 6.13s of
+// audio) in 1.95s wall (measured 2026-11-24). Words count what a render costs
+// only roughly (an emoji is spoken as several words, a hyphenated name as one
+// per part), so they size the render alone, where the per-word rate at three
+// times covers both measurements several times over; the playback is sized
+// from the rendered audio itself (playBound).
 const (
 	sayStartup = 1050 * time.Millisecond
 	sayPerWord = 370 * time.Millisecond
 )
 
-// sayBound bounds one reading of text aloud: three times its expected time,
-// the program's start plus its words at the measured rate. A run past it is a
-// hung program.
-func sayBound(text string) time.Duration {
+// playerStartup is the player's cost beyond the audio it plays. No
+// measurement of afplay's start exists (the chime's bound is a flat 10s, and
+// a start cannot be measured silently), so it is the speech program's
+// measured start, sayStartup.
+const playerStartup = sayStartup
+
+// renderBound bounds one render of text to audio: three times its expected
+// time, the program's start plus its words at the measured rate. A run past
+// it is a hung program.
+func renderBound(text string) time.Duration {
 	words := len(strings.Fields(text))
 	return 3 * (sayStartup + time.Duration(words)*sayPerWord)
 }
+
+// playBound bounds one playback of rendered audio: three times its expected
+// time, the player's start plus the audio's own length. A run past it is a
+// hung player.
+func playBound(audio time.Duration) time.Duration {
+	return 3 * (playerStartup + audio)
+}
+
+// The steps of one reading aloud, each one program run, as its records name
+// them.
+const (
+	stepRender = "render"
+	stepPlay   = "play"
+)
 
 // The Bluetooth device classes system_profiler reports (device_minorType)
 // that are worn: the Class of Device's audio minor classes for headphones and
@@ -113,10 +146,14 @@ type WifiStanding interface {
 }
 
 // SpeechPlatform names a platform's speech programs. A platform with no Say
-// speaks nothing.
+// or no Player speaks nothing.
 type SpeechPlatform struct {
-	// Say is the speech program's binary; its argv is `-- TEXT`.
+	// Say is the speech program's binary; its argv is `-o FILE -- TEXT`, which
+	// renders TEXT to the AIFF audio file FILE.
 	Say string
+	// Player is the program the rendered audio is played with, the chime's
+	// player; its argv is `FILE`.
+	Player string
 	// AudioOutput is the program the current audio output is read with, and
 	// AudioOutputArgs its argv: it prints one audiooutput.Device.
 	AudioOutput     string
@@ -128,10 +165,10 @@ type SpeechPlatform struct {
 }
 
 // supported reports whether the platform can speak at all.
-func (p SpeechPlatform) supported() bool { return p.Say != "" }
+func (p SpeechPlatform) supported() bool { return p.Say != "" && p.Player != "" }
 
-// SpeechPlatformFor answers the speech programs for a GOOS: on macOS `say`,
-// the daemon's own `audio-output` verb (selfExe) for CoreAudio's default
+// SpeechPlatformFor answers the speech programs for a GOOS: on macOS `say`
+// to render and afplay (the chime's player) to play, the daemon's own `audio-output` verb (selfExe) for CoreAudio's default
 // output, and system_profiler's Bluetooth report for a Bluetooth output's
 // class. Any other platform speaks nothing, which is no error: its banners
 // are drawn as ever.
@@ -147,6 +184,7 @@ func SpeechPlatformFor(goos, selfExe string) SpeechPlatform {
 	}
 	return SpeechPlatform{
 		Say:             "/usr/bin/say",
+		Player:          "/usr/bin/afplay",
 		AudioOutput:     selfExe,
 		AudioOutputArgs: []string{audiooutput.Verb},
 		Bluetooth:       "/usr/sbin/system_profiler",
@@ -155,15 +193,16 @@ func SpeechPlatformFor(goos, selfExe string) SpeechPlatform {
 }
 
 // WithOverrides answers p with each program an override names put in its
-// place: say for the speech program, audioOutput and bluetooth for the reads.
-func (p SpeechPlatform) WithOverrides(say, audioOutput, bluetooth string) SpeechPlatform {
+// place: say for the speech program, player for the player, audioOutput and
+// bluetooth for the reads.
+func (p SpeechPlatform) WithOverrides(say, player, audioOutput, bluetooth string) SpeechPlatform {
 	if !p.supported() {
 		return p
 	}
 	for _, o := range []struct {
 		field *string
 		value string
-	}{{&p.Say, say}, {&p.AudioOutput, audioOutput}, {&p.Bluetooth, bluetooth}} {
+	}{{&p.Say, say}, {&p.Player, player}, {&p.AudioOutput, audioOutput}, {&p.Bluetooth, bluetooth}} {
 		if o.value != "" {
 			*o.field = o.value
 		}
@@ -181,6 +220,10 @@ type Speech struct {
 	platform SpeechPlatform
 	runner   Runner
 	standing WifiStanding
+	// renderBound and playBound size each step's bound: the package's
+	// functions of those names, which a test replaces to see a bound pass.
+	renderBound func(text string) time.Duration
+	playBound   func(audio time.Duration) time.Duration
 
 	// unsupported records the platform speaking nothing once.
 	unsupported sync.Once
@@ -192,7 +235,7 @@ func NewSpeech(goos string, platform SpeechPlatform, runner Runner, standing Wif
 	if runner == nil || standing == nil {
 		panic("desktopnotify: NewSpeech requires a Runner and a WifiStanding")
 	}
-	return &Speech{goos: goos, platform: platform, runner: runner, standing: standing}
+	return &Speech{goos: goos, platform: platform, runner: runner, standing: standing, renderBound: renderBound, playBound: playBound}
 }
 
 // Silence is why a banner was not read aloud.
@@ -281,27 +324,148 @@ func lidName(state *agentreplv1.PersistentWifiState) string {
 }
 
 // Speak reads banner aloud when decide says so, and returns once it is read,
-// its program failed, or its bound passed. Every outcome is recorded
-// through log. The notifier calls it on a goroutine of its own, only once the
-// banner is made, so speech never holds or delays a banner.
+// a step failed, or a step's bound passed. A reading is two program runs:
+// the speech program renders the text to an audio file (stepRender), and the
+// player plays it (stepPlay) under a bound sized from the rendered audio's
+// own length, read from the file. Every outcome is recorded through log, and
+// the file is removed before Speak returns. The notifier calls it on a
+// goroutine of its own, only once the banner is made, so speech never holds
+// or delays a banner.
 func (s *Speech) Speak(ctx context.Context, banner Banner, log dlog.Logger) {
 	speak, _ := s.decide(ctx, log)
 	if !speak {
 		return
 	}
+	started := time.Now()
+	file, err := os.CreateTemp("", "agent-repl-speech-*.aiff")
+	if err != nil {
+		log.Error(opSpeak, "the file the banner's reading is rendered to could not be made; the banner is not read aloud", dlog.Context{
+			"cause": err.Error(),
+		})
+		return
+	}
+	path := file.Name()
+	defer removeRendered(path, log)
+	if err := file.Close(); err != nil {
+		log.Error(opSpeak, "the file the banner's reading is rendered to could not be closed; the banner is not read aloud", dlog.Context{
+			"file": path, "cause": err.Error(),
+		})
+		return
+	}
+
 	text := SpokenText(banner)
-	bound := sayBound(text)
-	_, err := runWithin(ctx, bound, s.runner, s.platform.Say, []string{"--", text}, nil)
+	bound := s.renderBound(text)
+	_, err = runWithin(ctx, bound, s.runner, s.platform.Say, []string{"-o", path, "--", text}, nil)
+	if !s.stepRan(ctx, log, stepRender, s.platform.Say, bound, nil, err) {
+		return
+	}
+	audio, err := renderedLength(path)
+	if err != nil {
+		log.Error(opSpeak, "the rendered reading's length could not be read; the banner is not read aloud", dlog.Context{
+			"step": stepRender, "program": s.platform.Say, "file": path, "cause": err.Error(),
+		})
+		return
+	}
+	bound = s.playBound(audio)
+	_, err = runWithin(ctx, bound, s.runner, s.platform.Player, []string{path}, nil)
+	if !s.stepRan(ctx, log, stepPlay, s.platform.Player, bound, &audio, err) {
+		return
+	}
+	log.Info(opSpeak, "the banner was read aloud", dlog.Context{
+		"duration_ms": time.Since(started).Milliseconds(), "audio_ms": audio.Milliseconds(),
+	})
+}
+
+// stepRan records how one step of a reading ended when it did not run
+// cleanly, and reports whether it did: the daemon standing down, the step's
+// bound passing, or its program failing on its own. audio is the rendered
+// reading's length, nil before it is known.
+func (s *Speech) stepRan(ctx context.Context, log dlog.Logger, step, program string, bound time.Duration, audio *time.Duration, err error) bool {
+	if err == nil {
+		return true
+	}
+	fields := dlog.Context{"step": step, "program": program, "bound_ms": bound.Milliseconds(), "cause": err.Error()}
+	if audio != nil {
+		fields["audio_ms"] = audio.Milliseconds()
+	}
+	var passed *boundPassedError
 	switch {
 	case standdown.CutShort(ctx, err):
-		log.Info(opSpeak, "the daemon stood down while the banner was read aloud", dlog.Context{"cause": err.Error()})
-	case err != nil:
-		log.Error(opSpeak, "the speech program failed; the banner was drawn but not read aloud in full", dlog.Context{
-			"program": s.platform.Say, "bound_ms": bound.Milliseconds(), "cause": err.Error(),
-		})
+		log.Info(opSpeak, "the daemon stood down while the banner was read aloud", fields)
+	case errors.As(err, &passed):
+		log.Error(opSpeak, "a step of the banner's reading ran past its bound and was killed; the banner was drawn but not read aloud in full", fields)
 	default:
-		log.Debug(opSpeak, "the banner was read aloud", nil)
+		log.Error(opSpeak, "the speech program failed; the banner was drawn but not read aloud in full", fields)
 	}
+	return false
+}
+
+// removeRendered removes the file a reading was rendered to, recording a
+// removal that fails.
+func removeRendered(path string, log dlog.Logger) {
+	if err := os.Remove(path); err != nil {
+		log.Error(opSpeak, "the file the banner's reading was rendered to could not be removed", dlog.Context{
+			"file": path, "cause": err.Error(),
+		})
+	}
+}
+
+// renderedLength answers the length of the audio rendered to the AIFF file
+// at path.
+func renderedLength(path string) (time.Duration, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return aiffDuration(data)
+}
+
+// aiffDuration answers the length of an AIFF or AIFF-C file's audio, its
+// COMM chunk's sample frames over its sample rate. The rate is an 80-bit
+// IEEE 754 extended float: a sign bit and a 15-bit exponent biased by 16383,
+// then a 64-bit mantissa whose integer bit is explicit. A file with no FORM
+// header, no COMM chunk, a COMM chunk cut short, or a rate that is not a
+// positive finite number is an error.
+func aiffDuration(data []byte) (time.Duration, error) {
+	if len(data) < 12 || string(data[0:4]) != "FORM" || (string(data[8:12]) != "AIFF" && string(data[8:12]) != "AIFC") {
+		return 0, errors.New("not an AIFF file: no FORM AIFF or AIFC header")
+	}
+	for rest := data[12:]; len(rest) >= 8; {
+		id, size := string(rest[0:4]), binary.BigEndian.Uint32(rest[4:8])
+		rest = rest[8:]
+		if id == "COMM" {
+			// channels (2), sample frames (4), sample size (2), rate (10).
+			if size < 18 || len(rest) < 18 {
+				return 0, fmt.Errorf("the COMM chunk is cut short: %d bytes", min(int(size), len(rest)))
+			}
+			frames := binary.BigEndian.Uint32(rest[2:6])
+			rate := extended80(rest[8:18])
+			if !(rate > 0) || math.IsInf(rate, 0) {
+				return 0, fmt.Errorf("the COMM chunk's sample rate %v is not a positive finite number", rate)
+			}
+			return time.Duration(float64(frames) / rate * float64(time.Second)), nil
+		}
+		skip := uint64(size) + uint64(size%2)
+		if skip > uint64(len(rest)) {
+			break
+		}
+		rest = rest[skip:]
+	}
+	return 0, errors.New("the AIFF file has no COMM chunk")
+}
+
+// extended80 decodes a big-endian 80-bit IEEE 754 extended float.
+func extended80(b []byte) float64 {
+	exponent := int(binary.BigEndian.Uint16(b[0:2]) & 0x7fff)
+	mantissa := binary.BigEndian.Uint64(b[2:10])
+	if exponent == 0x7fff {
+		return math.Inf(1)
+	}
+	value := math.Ldexp(float64(mantissa), exponent-16383-63)
+	if b[0]&0x80 != 0 {
+		value = -value
+	}
+	return value
 }
 
 // SpokenText is what a banner reads aloud: its title and its body, as drawn,

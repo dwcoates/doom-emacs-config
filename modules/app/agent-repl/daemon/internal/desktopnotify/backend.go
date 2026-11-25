@@ -67,12 +67,36 @@ type Runner interface {
 
 // runWithin runs one program through runner under bound: EVERY run of a
 // notifier program is bounded, so a hung program costs its bound and never
-// holds a banner's goroutine forever.
+// holds a banner's goroutine forever. A run its bound ended answers a
+// *boundPassedError, so a caller tells the bound passing from the program
+// failing on its own: a killed program's own error says only that it was
+// killed.
 func runWithin(ctx context.Context, bound time.Duration, runner Runner, bin string, args []string, started func()) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, bound)
+	ctx, cancel := context.WithTimeoutCause(ctx, bound, errBoundPassed)
 	defer cancel()
-	return runner.Run(ctx, bin, args, started)
+	stdout, err := runner.Run(ctx, bin, args, started)
+	if err != nil && errors.Is(context.Cause(ctx), errBoundPassed) {
+		return stdout, &boundPassedError{bound: bound, err: err}
+	}
+	return stdout, err
 }
+
+// errBoundPassed is the cause a run's bound ends its context with, so
+// runWithin tells its own bound from the end of the caller's lifetime.
+var errBoundPassed = errors.New("the run's bound passed")
+
+// boundPassedError is a run its bound ended: the program was killed because
+// it ran past its bound, whatever error the kill left it answering.
+type boundPassedError struct {
+	bound time.Duration
+	err   error
+}
+
+func (e *boundPassedError) Error() string {
+	return fmt.Sprintf("killed when its bound of %v passed: %v", e.bound, e.err)
+}
+
+func (e *boundPassedError) Unwrap() error { return e.err }
 
 // ExecRunner is the production Runner.
 type ExecRunner struct{}
