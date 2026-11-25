@@ -436,8 +436,9 @@
 
 ### A parent may pass its child's cold gate, only by compacting all its context with Haiku
 
-- A parent may pass a child's cold gate whenever its own work needs the child again, without asking me.
-  - Examples: a prompt it must send the child, or a question it must have the child answer.
+- A prompt a workspace sends a workspace parked at its cold gate passes that gate itself, so the sender runs nothing more for it.
+  - What the daemon does with such a prompt is `/agent-repl-workspaces`'.
+- A parent may pass a child's cold gate without a prompt whenever its own work needs the child's session again, without asking me.
 - It passes the gate only by a Haiku compaction of all the child's context: `agent-repld workspace pass-gate <child>`.
   - The verb takes no answer, so the daemon chooses Haiku and the whole context itself.
   - The prompts I left held at the gate stay held for me to send.
