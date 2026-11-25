@@ -23,6 +23,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { createLogger } from "../log.js";
 import { successorOf, workspaceMoved } from "./moved.js";
+import { isWithheld } from "./withheld.js";
 import { outageAnnounced, type FailureSink } from "../failure/sink.js";
 import { clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView } from "./malformed.js";
@@ -96,6 +97,15 @@ export async function callUnary<Res extends Message>(
         context: { ...context, address: successor },
       }, { name, successor });
       workspaceMoved(successor);
+      throw connectError;
+    }
+    // A CALL WITHHELD FROM A WORKSPACE THAT IS NOT VISIBLE is planned
+    // (withheld.ts): INFO, nothing filed, and the caller renders its refusal.
+    if (isWithheld(connectError)) {
+      log.info("{name} was withheld: its workspace is not visible", {
+        operation: "rpc.unary-withheld",
+        context,
+      }, { name });
       throw connectError;
     }
     // INSIDE AN ANNOUNCED OUTAGE a call the departing daemon could not serve

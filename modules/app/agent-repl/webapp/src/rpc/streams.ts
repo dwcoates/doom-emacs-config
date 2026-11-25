@@ -59,6 +59,7 @@ import { clearClientFailure, clearClientFailures, reportClientFailure } from "./
 import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
 import { successorOf, workspaceMoved } from "./moved.js";
+import { isWithheld } from "./withheld.js";
 import type { AgentReplClient } from "./client.js";
 import { pageEnded } from "../page-teardown.js";
 import { PlannedReopen } from "./planned-reopen.js";
@@ -417,6 +418,20 @@ export function watchStream<Res extends Message>(
           context: { rpc: opts.name, address: successor, backoff_ms: backoffMs },
         }, { name: opts.name, successor });
         workspaceMoved(successor);
+        await waitBackoff(backoffMs);
+        if (cancelled) return;
+        backoffMs = Math.min(backoffMs * 2, maxMs);
+        continue;
+      }
+      // A STREAM WITHHELD FROM A WORKSPACE THAT IS NOT VISIBLE is planned
+      // (withheld.ts): the editor is releasing this page, so nothing is
+      // filed, and the stream reopens on its backoff, which a workspace
+      // visible again answers.
+      if (end.kind === "transport_failure" && isWithheld(end.error)) {
+        log.info("the {name} stream was withheld: its workspace is not visible; reopening on the backoff", {
+          operation: "rpc.stream-withheld",
+          context: { rpc: opts.name, backoff_ms: backoffMs },
+        }, { name: opts.name });
         await waitBackoff(backoffMs);
         if (cancelled) return;
         backoffMs = Math.min(backoffMs * 2, maxMs);

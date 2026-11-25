@@ -11,6 +11,7 @@ import { ForwardingLogger, setLogger } from "../../src/log.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { SUCCESSOR_HEADER, registerWorkspaceMoved } from "../../src/rpc/moved.js";
+import { WITHHELD_HEADER } from "../../src/rpc/withheld.js";
 import {
   clearClientFailures,
   reportClientFailure,
@@ -311,6 +312,36 @@ describe("callUnary and the client's link verdict", () => {
 
     // Assert
     expect(lines.filter(([, line]) => line.includes("rpc.unary-quiesced")).map(([level]) => level)).toEqual(["info"]);
+  });
+});
+
+describe("callUnary when the call was withheld from a workspace that is not visible", () => {
+  const withheld = (): ConnectError =>
+    new ConnectError("not_visible", Code.FailedPrecondition, { [WITHHELD_HEADER]: "1" });
+
+  it("records the refusal at info, never as a transport failure", async () => {
+    // Arrange
+    const lines = captureLog();
+    const ctx = ctxThrowing(withheld());
+
+    // Act
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+
+    // Assert
+    const ofCall = lines.filter(([, line]) => line.includes("rpc.unary-withheld") || line.includes("rpc.unary-transport-failure"));
+    expect(ofCall.map(([level]) => level)).toEqual(["info"]);
+  });
+
+  it("files no client failure for the footer", async () => {
+    // Arrange
+    clearClientFailures();
+    const ctx = ctxThrowing(withheld());
+
+    // Act
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+
+    // Assert
+    expect(standingClientFailure()).toBeNull();
   });
 });
 
