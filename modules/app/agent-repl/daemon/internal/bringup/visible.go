@@ -21,24 +21,18 @@ import (
 // Every site that decides what to start reads this file, and this file reads
 // the one statement of visibility (wsm.Workspace.Runs).
 
-// RepositoryLister reads the arrangement, whose folds decide which
-// workspaces are collapsed, and the merge queues, which decide whether a
-// hidden merge workspace still carries a merge. wsm.DB is the production
-// one.
-type RepositoryLister interface {
-	ReadArrangement(ctx context.Context) (wsm.Arrangement, error)
+// QueueLister reads the merge queues, which decide whether a hidden merge
+// workspace still carries a merge. wsm.DB is the production one.
+type QueueLister interface {
 	AllMergeQueues(ctx context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error)
 }
 
-// WorkspaceReader reads one workspace's record. wsm.DB is the production one.
-type WorkspaceReader interface {
-	Workspace(ctx context.Context, id ids.WorkspaceID) (wsm.Workspace, error)
-}
-
-// VisibilityReader is what Visible reads.
-type VisibilityReader interface {
-	RepositoryLister
-	WorkspaceReader
+// RepositoryLister reads the arrangement, whose folds decide which
+// workspaces are collapsed, and the merge queues. wsm.DB is the production
+// one.
+type RepositoryLister interface {
+	QueueLister
+	ReadArrangement(ctx context.Context) (wsm.Arrangement, error)
 }
 
 // Folds answers which workspaces a fold keeps off the tab bar, each with the
@@ -53,23 +47,13 @@ func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[id
 		return nil, fmt.Errorf("bringup: read the arrangement to read its folds: %w", err)
 	}
 	reg := sidebar.Registry{Workspaces: arrangement.Workspaces, Repositories: arrangement.Repositories, Subsections: arrangement.Subsections, RepositoryBlocks: arrangement.RepositoryBlocks}
-	out := map[ids.WorkspaceID]sidebar.Fold{}
-	for _, tab := range sidebar.Tabs(reg, log) {
-		if tab.Withheld != wsm.WithheldCollapsed {
-			continue
-		}
-		if tab.Fold == nil {
-			panic(fmt.Sprintf("bringup: the tab bar withheld workspace %s as collapsed and named no fold", tab.Workspace.ID))
-		}
-		out[tab.Workspace.ID] = *tab.Fold
-	}
-	return out, nil
+	return sidebar.CollapsedFolds(sidebar.Tabs(reg, log)), nil
 }
 
 // queuedMerges answers which workspaces have an entry standing in a merge
 // queue, each with when it joined: every workspace's verdict reads them
 // (wsm.Workspace.Runs).
-func queuedMerges(ctx context.Context, repos RepositoryLister) (map[ids.WorkspaceID]time.Time, error) {
+func queuedMerges(ctx context.Context, repos QueueLister) (map[ids.WorkspaceID]time.Time, error) {
 	queues, err := repos.AllMergeQueues(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bringup: read the merge queues to tell which workspaces carry a merge: %w", err)
@@ -108,7 +92,7 @@ func IdleHorizon(cutoff time.Duration, engaged, queuedAt time.Time, queued bool)
 
 // MergeQueuedAt reports whether WS carries a merge, as MergeQueued does, and
 // when its entry joined its queue.
-func MergeQueuedAt(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) (time.Time, bool, error) {
+func MergeQueuedAt(ctx context.Context, repos QueueLister, ws wsm.Workspace) (time.Time, bool, error) {
 	queued, err := queuedMerges(ctx, repos)
 	if err != nil {
 		return time.Time{}, false, err
@@ -119,7 +103,7 @@ func MergeQueuedAt(ctx context.Context, repos RepositoryLister, ws wsm.Workspace
 
 // MergeQueued reports whether WS carries a merge: an entry of it stands in a
 // merge queue, waiting or running (wsm.Workspace.Runs).
-func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) (bool, error) {
+func MergeQueued(ctx context.Context, repos QueueLister, ws wsm.Workspace) (bool, error) {
 	_, queued, err := MergeQueuedAt(ctx, repos, ws)
 	return queued, err
 }
@@ -145,7 +129,12 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, log dlog.Logger, p
 		return nil, nil, err
 	}
 	for _, ws := range pending {
-		if verdict(ws, folded, queued).Runs {
+		var fold *sidebar.Fold
+		if f, isFolded := folded[ws.ID]; isFolded {
+			fold = &f
+		}
+		_, inQueue := queued[ws.ID]
+		if verdict(ws, fold, inQueue).Runs {
 			run = append(run, ws)
 			continue
 		}
@@ -182,46 +171,31 @@ func WithLiveVisibility(records []wsm.Workspace, live LiveVisibility) []wsm.Work
 	return out
 }
 
-// Visible reports whether the daemon runs one workspace, read afresh from its
-// record and the folds of its section, by the roster's live visibility.
-func Visible(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID, live LiveVisibility) (bool, error) {
-	visibility, err := VisibilityOf(ctx, db, log, ws, live)
-	return visibility.Runs, err
+// LiveStanding answers a workspace's visibility and the collapse that folds
+// its tab (nil when none does), both as the roster's last render derived them
+// (sidebar.Resolver.Standing).
+type LiveStanding func(ws ids.WorkspaceID) (wsm.Visibility, *sidebar.Fold)
+
+// Judge answers whether the daemon runs RECORD, and the fold behind the
+// verdict, by the roster's LIVE standing and QUEUED, whether the caller read
+// an entry of it standing in a merge queue. A running daemon's stand-downs
+// judge by it, so the fold a record names is the one the verdict was decided
+// on, and no stand-down reads the arrangement from the store: the roster
+// holds it, and a fleet's detach once read it whole once per withheld
+// workspace, holding the state database's one connection for seconds
+// (2026-11-25 11:36:24-31). A boot, which runs before any render, reads the
+// stored folds instead (OnlyVisible).
+func Judge(record wsm.Workspace, queued bool, live LiveStanding) Visibility {
+	visibility, fold := live(record.ID)
+	record.Visibility = visibility
+	return verdict(record, fold, queued)
 }
 
-// VisibilityOf answers Visible's verdict and the fold behind it from ONE read
-// of the record, the folds and the queues, so the fold a record names is the
-// one the verdict was decided on. The record carries the roster's LIVE
-// visibility (WithLiveVisibility).
-func VisibilityOf(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID, live LiveVisibility) (Visibility, error) {
-	record, err := db.Workspace(ctx, ws)
-	if err != nil {
-		return Visibility{}, fmt.Errorf("bringup: read the workspace record of %q: %w", ws, err)
-	}
-	record = WithLiveVisibility([]wsm.Workspace{record}, live)[0]
-	folded, err := Folds(ctx, db, log)
-	if err != nil {
-		return Visibility{}, err
-	}
-	queued, err := queuedMerges(ctx, db)
-	if err != nil {
-		return Visibility{}, err
-	}
-	return verdict(record, folded, queued), nil
-}
-
-// verdict is WS's Visibility under the FOLDED and QUEUED read once for every
-// workspace a caller judges: the one place OnlyVisible and VisibilityOf turn
-// them into wsm.Workspace.Runs.
-func verdict(ws wsm.Workspace, folded map[ids.WorkspaceID]sidebar.Fold, queued map[ids.WorkspaceID]time.Time) Visibility {
-	out := Visibility{}
-	fold, isFolded := folded[ws.ID]
-	if isFolded {
-		out.Fold = &fold
-	}
-	_, inQueue := queued[ws.ID]
-	out.Runs = ws.Runs(isFolded, inQueue)
-	return out
+// verdict is WS's Visibility under FOLD, the collapse that folds its tab, and
+// INQUEUE, whether an entry of it stands in a merge queue: the one place
+// OnlyVisible and Judge turn them into wsm.Workspace.Runs.
+func verdict(ws wsm.Workspace, fold *sidebar.Fold, inQueue bool) Visibility {
+	return Visibility{Runs: ws.Runs(fold != nil, inQueue), Fold: fold}
 }
 
 // IDs names workspaces for a record.

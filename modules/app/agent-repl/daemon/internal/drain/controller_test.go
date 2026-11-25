@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -1038,15 +1039,15 @@ func TestNewRefusesWithoutAMergeSuspension(t *testing.T) {
 func TestNewRefusesWithoutARevivalAnswer(t *testing.T) {
 	// Arrange & Act
 	_, err := New(Deps{
-		DB:         newHarness(t).db,
-		Stand:      newFakeStand(),
-		Spawns:     newFakeSpawns(),
-		Merges:     &fakeMerges{},
-		Freeness:   newFakeFreeness(),
-		Visibility: func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible },
-		Announcer:  &fakeAnnouncer{},
-		Exit:       func(context.Context) error { return nil },
-		Log:        dlog.NewTestSurfaces(),
+		DB:        newHarness(t).db,
+		Stand:     newFakeStand(),
+		Spawns:    newFakeSpawns(),
+		Merges:    &fakeMerges{},
+		Freeness:  newFakeFreeness(),
+		Standing:  func(ids.WorkspaceID) (wsm.Visibility, *sidebar.Fold) { return wsm.UnselectedVisible, nil },
+		Announcer: &fakeAnnouncer{},
+		Exit:      func(context.Context) error { return nil },
+		Log:       dlog.NewTestSurfaces(),
 	})
 
 	// Assert
@@ -1055,11 +1056,12 @@ func TestNewRefusesWithoutARevivalAnswer(t *testing.T) {
 	}
 }
 
-// TestNewRefusesWithoutAVisibilityAnswer pins that the roster's live
-// visibility is REQUIRED wiring: a stand-down that cannot read it would decide
-// whether a workspace is still withheld off the store's copy, written a moment
-// after the push that showed it again.
-func TestNewRefusesWithoutAVisibilityAnswer(t *testing.T) {
+// TestNewRefusesWithoutAStandingAnswer pins that the roster's live
+// visibility and folds are REQUIRED wiring: a stand-down that cannot read them
+// would decide whether a workspace is still withheld off the store's copies,
+// written a moment after the push that showed it again, and read only by
+// reading the whole arrangement.
+func TestNewRefusesWithoutAStandingAnswer(t *testing.T) {
 	// Arrange & Act
 	_, err := New(Deps{
 		DB:        newHarness(t).db,
@@ -1074,8 +1076,8 @@ func TestNewRefusesWithoutAVisibilityAnswer(t *testing.T) {
 	})
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "visibility answer") {
-		t.Fatalf("New = %v, want the missing visibility answer refused", err)
+	if err == nil || !strings.Contains(err.Error(), "standing answer") {
+		t.Fatalf("New = %v, want the missing standing answer refused", err)
 	}
 }
 
@@ -1085,16 +1087,16 @@ func TestNewRefusesWithoutAVisibilityAnswer(t *testing.T) {
 func TestNewRefusesWithoutADeliveryAnswer(t *testing.T) {
 	// Arrange & Act
 	_, err := New(Deps{
-		DB:         newHarness(t).db,
-		Stand:      newFakeStand(),
-		Spawns:     newFakeSpawns(),
-		Merges:     &fakeMerges{},
-		Freeness:   newFakeFreeness(),
-		Visibility: func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible },
-		Reviving:   newFakeReviving().Reviving,
-		Announcer:  &fakeAnnouncer{},
-		Exit:       func(context.Context) error { return nil },
-		Log:        dlog.NewTestSurfaces(),
+		DB:        newHarness(t).db,
+		Stand:     newFakeStand(),
+		Spawns:    newFakeSpawns(),
+		Merges:    &fakeMerges{},
+		Freeness:  newFakeFreeness(),
+		Standing:  func(ids.WorkspaceID) (wsm.Visibility, *sidebar.Fold) { return wsm.UnselectedVisible, nil },
+		Reviving:  newFakeReviving().Reviving,
+		Announcer: &fakeAnnouncer{},
+		Exit:      func(context.Context) error { return nil },
+		Log:       dlog.NewTestSurfaces(),
 	})
 
 	// Assert
@@ -1111,7 +1113,7 @@ func TestNewRefusesAMissingBounceAnswer(t *testing.T) {
 		Spawns:     newFakeSpawns(),
 		Merges:     &fakeMerges{},
 		Freeness:   newFakeFreeness(),
-		Visibility: func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible },
+		Standing:   func(ids.WorkspaceID) (wsm.Visibility, *sidebar.Fold) { return wsm.UnselectedVisible, nil },
 		Reviving:   newFakeReviving().Reviving,
 		Delivering: func(ids.WorkspaceID) bool { return false },
 		Announcer:  &fakeAnnouncer{},

@@ -55,6 +55,16 @@ func UnrenderedHolding(workspaces ...wsm.Workspace) Resolver {
 	return c.commitView()
 }
 
+// UnrenderedRegistry answers a resolver holding REG that has rendered nothing
+// yet, as a daemon that just booted or joined is until its first render.
+func UnrenderedRegistry(reg Registry) Resolver {
+	c := &core{state: newRosterState(), log: dlog.NewTestSurfaces()}
+	c.initQueue()
+	c.state.reg = reg
+	c.state.index = indexRegistry(c.state.reg)
+	return c.commitView()
+}
+
 // IndexedRecord answers rosterState.record for WS in a roster holding REG.
 func IndexedRecord(reg Registry, ws ids.WorkspaceID) (*wsm.Workspace, bool) {
 	state := newRosterState()

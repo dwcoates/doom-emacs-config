@@ -498,6 +498,10 @@ type rosterState struct {
 	// visibility sink, or read from the registry, per workspace.
 	visibility     map[ids.WorkspaceID]wsm.Visibility
 	visibilityKept map[ids.WorkspaceID]wsm.Visibility
+	// folds is every workspace a fold keeps off the tab bar, with the
+	// collapse that folds it, as the last render derived it
+	// (resolveVisibility); nil before the first render.
+	folds map[ids.WorkspaceID]Fold
 	// page is every workspace's page verdict as the last render derived it
 	// (resolvePages): true when the editor holds its page.
 	page map[ids.WorkspaceID]bool

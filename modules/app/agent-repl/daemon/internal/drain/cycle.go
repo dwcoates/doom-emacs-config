@@ -425,24 +425,21 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	// never stand it down, and it stayed up between beats (2026-11-14, 27 of
 	// 87 live sessions had a merge waiting). The next prompt the merge sends
 	// revives it, as it revives any park.
-	if record.Closed && lapseOwnsWithheld {
+	// ONE READ OF THE QUEUES serves the closed check and the visibility, and
+	// the visibility and the fold come from the roster's last render, never
+	// from a read of the whole arrangement (bringup.Judge).
+	visible := true
+	if lapseOwnsWithheld {
 		queued, err := bringup.MergeQueued(ctx, c.deps.DB, record)
 		if err != nil {
-			log.Error(op, "could not read whether the closed workspace has a merge queued; its stand-down is dropped", dlog.WithCause(fields, err))
-			return withheldSettled, CycleOutcome{Failed: true, Why: "could not read whether the closed workspace has a merge queued; its stand-down is dropped"}
+			log.Error(op, "could not read whether the workspace has a merge queued; its stand-down is dropped", dlog.WithCause(fields, err))
+			return withheldSettled, CycleOutcome{Failed: true, Why: "could not read whether the workspace has a merge queued; its stand-down is dropped"}
 		}
-		if !queued {
+		if record.Closed && !queued {
 			log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
 			return withheldSettled, CycleOutcome{Why: "the workspace is closed; its cache's lapse stands it down"}
 		}
-	}
-	visible := true
-	if lapseOwnsWithheld {
-		visible, err = bringup.Visible(ctx, c.deps.DB, log, ws, c.deps.Visibility)
-	}
-	if err != nil {
-		log.Error(op, "could not read whether the workspace is visible; its stand-down is dropped", dlog.WithCause(fields, err))
-		return withheldSettled, CycleOutcome{Failed: true, Why: "could not read whether the workspace is visible; its stand-down is dropped"}
+		visible = bringup.Judge(record, queued, c.deps.Standing).Runs
 	}
 	if !visible {
 		log.Debug(op, "the workspace is withheld; its cache's lapse stands it down", fields)

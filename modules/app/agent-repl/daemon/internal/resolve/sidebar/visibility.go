@@ -198,7 +198,8 @@ func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[id
 }
 
 // resolveVisibility derives every workspace's visibility for this render,
-// keeps it for the rows and for Visibility, and collects each change since the
+// keeps it and the folds it was derived under for the rows, for Visibility
+// and for Standing, and collects each change since the
 // value last handed to the sink (seeded from the registry's persisted one),
 // so only a real change is written. Each change is recorded once the commit
 // knows the roster it reaches (recordVisibilityMoves). The caller holds r.mu.
@@ -214,6 +215,7 @@ func (r *resolver) resolveVisibility(repos []openRepo, rc rowContext, arms map[i
 		inputOf[in.ID] = in
 	}
 	r.state.visibility = derived
+	r.state.folds = CollapsedFolds(tabsOf(repos))
 	r.countReasons(reasons)
 	if r.state.visibilityKept == nil {
 		r.state.visibilityKept = map[ids.WorkspaceID]wsm.Visibility{}
@@ -347,4 +349,36 @@ func (r *resolver) Visibility(ws ids.WorkspaceID) wsm.Visibility {
 		return rec.Visibility
 	}
 	return wsm.NotVisible
+}
+
+// Standing answers workspace WS's visibility, as Visibility does, and the
+// collapse that folds its tab off the tab bar (nil when none does), both from
+// the SAME render under one lock, so a stand-down judges a workspace by a fold
+// and a visibility that never straddle a render (bringup.Judge). It reads
+// nothing from the store: every withheld stand-down of a fleet's detach once
+// read the whole arrangement afresh to learn its one workspace's fold,
+// holding the state database's one connection for seconds (2026-11-25
+// 11:36:24-31, 20 arrangement reads for 4995ms in one second). Before the
+// first render, the fold is the one the registry the roster holds folds.
+func (r *resolver) Standing(ws ids.WorkspaceID) (wsm.Visibility, *Fold) {
+	r.awaitApplied()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	visibility := wsm.NotVisible
+	if v, derived := r.state.visibility[ws]; derived {
+		visibility = v
+	} else if rec, ok := r.state.record(ws); ok {
+		visibility = rec.Visibility
+	}
+	folds := r.state.folds
+	if folds == nil {
+		reg := r.state.reg
+		reg.Current = r.state.selected
+		folds = CollapsedFolds(Tabs(reg, r.log.Global()))
+	}
+	fold, folded := folds[ws]
+	if !folded {
+		return visibility, nil
+	}
+	return visibility, &fold
 }

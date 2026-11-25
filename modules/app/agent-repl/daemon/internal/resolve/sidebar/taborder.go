@@ -296,6 +296,26 @@ func tabsOf(repos []openRepo) []Tab {
 	return out
 }
 
+// CollapsedFolds answers which workspaces a fold keeps off the tab bar, each
+// with the collapse that folds it, from TABS (Tabs): a tab drawn in spite of
+// its fold (a top-priority one, wsm.Workspace.Withheld) is folded by nothing.
+// It is the one reading of the tab bar's folds, for the roster's own render
+// (Resolver.Standing) and for a boot's read of the stored arrangement
+// (bringup.Folds) alike.
+func CollapsedFolds(tabs []Tab) map[ids.WorkspaceID]Fold {
+	out := map[ids.WorkspaceID]Fold{}
+	for _, tab := range tabs {
+		if tab.Withheld != wsm.WithheldCollapsed {
+			continue
+		}
+		if tab.Fold == nil {
+			panic(fmt.Sprintf("sidebar: the tab bar withheld workspace %s as collapsed and named no fold", tab.Workspace.ID))
+		}
+		out[tab.Workspace.ID] = *tab.Fold
+	}
+	return out
+}
+
 // tabNumberer hands out tab numbers in the Open section's walk: 1, 2, ... to
 // every tab of an unfolded region, none to a folded one's.
 type tabNumberer struct {

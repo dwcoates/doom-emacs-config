@@ -234,15 +234,13 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, 
 		log.Info(opWithheld, "the workspace has a merge queued; its session keeps running", fields)
 		return withheldSettled
 	}
-	// SHOWN OR REOPENED MEANWHILE IS NOT STOOD DOWN: the visibility and the
-	// close are read afresh on every attempt. A CLOSED workspace is withheld
-	// whatever its visibility: its cache lapsed after its last keep-alive
-	// round (cachelapse.Keeper).
-	visibility, err := bringup.VisibilityOf(ctx, c.deps.DB, log, ws, c.deps.Visibility)
-	if err != nil {
-		log.Error(opWithheld, "could not read whether the workspace is still withheld; its stand-down is dropped", dlog.WithCause(fields, err))
-		return withheldSettled
-	}
+	// SHOWN OR REOPENED MEANWHILE IS NOT STOOD DOWN: the close is read
+	// afresh on every attempt, and the visibility and the fold from the
+	// roster's last render, never from a read of the whole arrangement
+	// (bringup.Judge). A CLOSED workspace is withheld whatever its
+	// visibility: its cache lapsed after its last keep-alive round
+	// (cachelapse.Keeper).
+	visibility := bringup.Judge(record, queued, c.deps.Standing)
 	// THE FOLD IT DECIDED ON rides every record below, whatever the trigger:
 	// which section, subsection or parent withholds the workspace now.
 	if visibility.Fold != nil {

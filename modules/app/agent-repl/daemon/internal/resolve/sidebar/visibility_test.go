@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -495,6 +496,78 @@ func TestVisibilityBeforeAnyRenderIsTheStoredOne(t *testing.T) {
 				t.Fatalf("Visibility(%s) = %v, want %v", tc.ws, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestStandingAnswersTheLastRendersVisibilityAndFold(t *testing.T) {
+	repositoryFold := &sidebar.Fold{By: sidebar.FoldedByRepository, Repository: repo.Name}
+	cases := []struct {
+		name     string
+		reg      func() sidebar.Registry
+		ws       ids.WorkspaceID
+		wantVis  wsm.Visibility
+		wantFold *sidebar.Fold
+	}{
+		{name: "an idle workspace a fold covers names the fold", reg: foldedOne, ws: theWS, wantVis: wsm.NotVisible, wantFold: repositoryFold},
+		{name: "a top-priority workspace a fold covers is visible and still names the fold", reg: func() sidebar.Registry {
+			reg := foldedOne()
+			reg.Workspaces[0] = prioritized(reg.Workspaces[0], wsm.PriorityP1)
+			return reg
+		}, ws: theWS, wantVis: wsm.UnselectedVisible, wantFold: repositoryFold},
+		{name: "a workspace no fold covers names none", reg: func() sidebar.Registry { return registry(workspace(string(theWS), "one")) },
+			ws: theWS, wantVis: wsm.UnselectedVisible},
+		{name: "a workspace the registry does not carry names none", reg: foldedOne, ws: "w-gone", wantVis: wsm.NotVisible},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			reg := tc.reg()
+			r := arrange(t, reg.Workspaces...)
+			r.SetRegistry(reg)
+			liveRegistry(r, reg)
+
+			// Act
+			vis, fold := r.Standing(tc.ws)
+
+			// Assert
+			if vis != tc.wantVis || !reflect.DeepEqual(fold, tc.wantFold) {
+				t.Fatalf("Standing(%s) = %v under %+v, want %v under %+v", tc.ws, vis, fold, tc.wantVis, tc.wantFold)
+			}
+		})
+	}
+}
+
+func TestStandingFollowsTheRenderThatUnfoldsTheWorkspace(t *testing.T) {
+	// Arrange
+	r := arrange(t, foldedOne().Workspaces...)
+	r.SetRegistry(foldedOne())
+	live(t, r)
+	if _, fold := r.Standing(theWS); fold == nil {
+		t.Fatal("Standing named no fold while the section was collapsed")
+	}
+
+	// Act
+	r.SetRegistry(registry(foldedOne().Workspaces...))
+
+	// Assert
+	if vis, fold := r.Standing(theWS); vis != wsm.UnselectedVisible || fold != nil {
+		t.Fatalf("Standing = %v under %+v, want visible under no fold once unfolded", vis, fold)
+	}
+}
+
+func TestStandingBeforeAnyRenderFoldsByTheHeldRegistry(t *testing.T) {
+	// Arrange: a resolver that booted or joined and has not rendered.
+	reg := foldedOne()
+	reg.Workspaces[0].Visibility = wsm.NotVisible
+	r := sidebar.UnrenderedRegistry(reg)
+
+	// Act
+	vis, fold := r.Standing(theWS)
+
+	// Assert
+	want := &sidebar.Fold{By: sidebar.FoldedByRepository, Repository: repo.Name}
+	if vis != wsm.NotVisible || !reflect.DeepEqual(fold, want) {
+		t.Fatalf("Standing = %v under %+v, want the stored visibility under %+v", vis, fold, want)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -622,7 +623,7 @@ type harness struct {
 	remote *fakeRemoteGate
 	spawns *fakeSpawns
 	merges *fakeMerges
-	// visibility overrides liveVisibility's derivation, by workspace.
+	// visibility overrides liveStanding's derived visibility, by workspace.
 	visibility map[ids.WorkspaceID]wsm.Visibility
 	// bridged is every workspace Deps.BridgeGate was handed, in order.
 	bridged []ids.WorkspaceID
@@ -668,7 +669,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Spawns:        h.spawns,
 		Merges:        h.merges,
 		Freeness:      h.freeness,
-		Visibility:    h.liveVisibility,
+		Standing:      h.liveStanding,
 		Reviving:      h.reviving.Reviving,
 		Delivering: func(ws ids.WorkspaceID) bool {
 			if h.delivering == nil {
@@ -710,15 +711,15 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	return h
 }
 
-// liveVisibility answers WS's visibility as the roster would derive it for an
-// idle row: the selection is selected, an open row no fold covers is visible,
-// and every other is not (wsm.Visibilities over the record and its section's
-// folds). A test that needs another answer sets h.visibility.
-func (h *harness) liveVisibility(ws ids.WorkspaceID) wsm.Visibility {
+// liveStanding answers WS's visibility and fold as the roster would derive
+// them for an idle row: the fold is the stored arrangement's, read from the
+// harness's own store and never through Deps.DB, so a test can tell a read
+// the controller made; the selection is selected, an open row no fold covers
+// is visible, and every other is not (wsm.Visibilities over the record and
+// its section's folds). A test that needs another visibility sets
+// h.visibility.
+func (h *harness) liveStanding(ws ids.WorkspaceID) (wsm.Visibility, *sidebar.Fold) {
 	h.t.Helper()
-	if v, set := h.visibility[ws]; set {
-		return v
-	}
 	ctx := context.Background()
 	record, err := h.db.Workspace(ctx, ws)
 	if err != nil {
@@ -728,13 +729,20 @@ func (h *harness) liveVisibility(ws ids.WorkspaceID) wsm.Visibility {
 	if err != nil {
 		h.t.Fatalf("Folds: %v", err)
 	}
-	_, covered := folded[ws]
+	fold, covered := folded[ws]
+	var folds *sidebar.Fold
+	if covered {
+		folds = &fold
+	}
+	if v, set := h.visibility[ws]; set {
+		return v, folds
+	}
 	return wsm.Visibilities([]wsm.VisibilityInput{{
 		ID:       ws,
 		Open:     !record.Closed && !record.Backlogged && !record.IsThread() && !record.MergeHidden(),
 		Covered:  covered,
 		Selected: record.Current,
-	}})[ws]
+	}})[ws], folds
 }
 
 // workspace registers one workspace with a live session whose workspace last worked at workedAt,

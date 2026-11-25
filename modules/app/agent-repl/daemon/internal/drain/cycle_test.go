@@ -437,7 +437,7 @@ func TestAClosedWorkspaceWhoseQueuesCannotBeReadIsNotStoodDown(t *testing.T) {
 		t.Fatal("a dropped stand-down stayed pending")
 	}
 	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opCycle,
-		Message: "could not read whether the closed workspace has a merge queued; its stand-down is dropped"})
+		Message: "could not read whether the workspace has a merge queued; its stand-down is dropped"})
 	if !ok {
 		t.Fatalf("records = %+v, want the queue read's failure at error", records(h.log, opCycle))
 	}
@@ -1304,6 +1304,49 @@ func TestAStandDownAskedBeforeABringUpForWorkIsNotTaken(t *testing.T) {
 			// Assert
 			if killed := h.stand.Killed(); len(killed) != tt.wantKills {
 				t.Fatalf("kills = %+v, want %d", killed, tt.wantKills)
+			}
+		})
+	}
+}
+
+// A KEEP-ALIVE CYCLE JUDGES A WORKSPACE BY THE ROSTER'S FOLD: it reads the
+// merge queues once and never the arrangement, so a fleet's cycles never
+// each read the whole arrangement over the state database's one connection.
+func TestACycleJudgesTheFoldByTheRosterAndReadsTheQueuesOnce(t *testing.T) {
+	tests := []struct {
+		name     string
+		withhold func(t *testing.T, h *harness, ws ids.WorkspaceID)
+		want     CycleOutcome
+		wantDown bool
+	}{
+		{name: "a workspace a collapse folds is left to its lapse", withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.inCollapsedSubsection(t, ws) },
+			want: CycleOutcome{Why: "the workspace is withheld; its cache's lapse stands it down"}},
+		{name: "a closed workspace is left to its lapse", withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.closedAt(t, ws) },
+			want: CycleOutcome{Why: "the workspace is closed; its cache's lapse stands it down"}},
+		{name: "a visible workspace is parked", withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
+			want: CycleOutcome{Down: true, Why: cycleReason.done.Template()}, wantDown: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reads := &readCountingDB{}
+			h := newHarness(t, func(d *Deps) { reads.DB = d.DB; d.DB = reads })
+			ws := h.workspace(t, instant)
+			tt.withhold(t, h, ws)
+			var got []CycleOutcome
+
+			// Act
+			h.c.CycleDownThen(ws, beatAfter, func(o CycleOutcome) { got = append(got, o) })
+
+			// Assert
+			if len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("reports = %+v, want one %+v", got, tt.want)
+			}
+			if down := len(h.stand.Killed()) == 1; down != tt.wantDown {
+				t.Fatalf("kills = %+v, want stood down %v", h.stand.Killed(), tt.wantDown)
+			}
+			if arrangements, queues := reads.counts(); arrangements != 0 || queues != 1 {
+				t.Fatalf("reads = %d arrangements and %d queue reads, want none and one", arrangements, queues)
 			}
 		})
 	}

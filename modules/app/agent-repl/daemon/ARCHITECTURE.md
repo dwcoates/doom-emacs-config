@@ -1136,10 +1136,14 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   comes only from in-flight requests, so a daemon that restarted under open
   tabs draws them as they are.
 - **Only visible workspaces run** (`wsm.Workspace.Runs`, read through
-  `bringup.OnlyVisible`/`bringup.Visible`): the boot's bring-up, the
+  `bringup.OnlyVisible`/`bringup.Judge`): the boot's bring-up, the
   takeover's session-less starts and every open skip a workspace the user hid
   or whose repository section is collapsed. A hidden MERGE workspace still
-  runs: its async merge withholds it, not the user.
+  runs: its async merge withholds it, not the user. A running daemon's
+  stand-downs judge by `bringup.Judge`, which takes the visibility and the
+  fold from the roster's last render (`sidebar.Resolver.Standing`), never by
+  reading the whole arrangement from the store: a fleet's detach once read it
+  once per withheld workspace over the state database's one connection.
 - **A backlogged workspace's cache lapses first** (`cachelapse.Keeper`,
   2026-10-13): `SetBacklogged` tells the keeper, whose one loop holds the shim's
   keep-alives (`shim.v1.SetKeepalive`), records the lapse the held shim

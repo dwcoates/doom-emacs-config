@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -135,4 +136,37 @@ func TestAFoldNamingNoCollapseRefusesItsFields(t *testing.T) {
 		}
 	}()
 	fold.Fields()
+}
+
+func TestCollapsedFoldsNamesEveryCollapsedTabAndNoOther(t *testing.T) {
+	// Arrange
+	repositoryFold := sidebar.Fold{By: sidebar.FoldedByRepository, Repository: "gamma"}
+	tabs := []sidebar.Tab{
+		{Workspace: wsm.Workspace{ID: "drawn"}, Withheld: wsm.Drawn},
+		{Workspace: wsm.Workspace{ID: "drawn-under-a-fold"}, Withheld: wsm.Drawn, Fold: &repositoryFold},
+		{Workspace: wsm.Workspace{ID: "collapsed"}, Withheld: wsm.WithheldCollapsed, Fold: &repositoryFold},
+	}
+
+	// Act
+	got := sidebar.CollapsedFolds(tabs)
+
+	// Assert
+	want := map[ids.WorkspaceID]sidebar.Fold{"collapsed": repositoryFold}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CollapsedFolds = %+v, want %+v", got, want)
+	}
+}
+
+func TestCollapsedFoldsRefusesACollapsedTabNamingNoFold(t *testing.T) {
+	// Arrange
+	tabs := []sidebar.Tab{{Workspace: wsm.Workspace{ID: "collapsed"}, Withheld: wsm.WithheldCollapsed}}
+	defer func() {
+		// Assert
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "collapsed") {
+			t.Fatalf("recover = %v, want a panic naming the collapsed workspace", r)
+		}
+	}()
+
+	// Act
+	sidebar.CollapsedFolds(tabs)
 }
