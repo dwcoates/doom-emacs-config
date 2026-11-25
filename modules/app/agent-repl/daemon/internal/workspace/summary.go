@@ -52,3 +52,19 @@ func (v *verbs) SetSummary(ctx context.Context, ws ids.WorkspaceID, summary wsm.
 	log.Info(opSetSummary, "set the workspace summary", dlog.Context{"short_summary": summary.Short, "long_summary": summary.Long})
 	return summary, nil
 }
+
+// SummaryFields answers SUMMARY's two parts as the wire's optional fields
+// (agentrepl.v1.WorkspaceStatus, agentrepl.v1.FoundWorkspace): both nil when
+// no summary stands, and the long part nil for a summary set before long
+// summaries existed. It is the ONE mapping every read that answers a summary
+// takes.
+func SummaryFields(summary *wsm.WorkspaceSummary) (short, long *string) {
+	if summary == nil {
+		return nil, nil
+	}
+	short = &summary.Short
+	if summary.Long != "" {
+		long = &summary.Long
+	}
+	return short, long
+}

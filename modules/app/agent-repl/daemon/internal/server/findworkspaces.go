@@ -13,6 +13,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/workspacefind"
 	"agent-repld/internal/wsm"
 )
@@ -305,6 +306,7 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		}
 		return record.Ref()
 	}
+	shortSummary, longSummary := workspace.SummaryFields(f.Summary)
 	var merge *agentreplv1.FoundWorkspaceMerge
 	if ws.MergeOf != nil {
 		merge = &agentreplv1.FoundWorkspaceMerge{}
@@ -328,8 +330,8 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		Name:           ws.Name,
 		Branch:         ws.Branch,
 		Repository:     &workspacev1.RepositoryRef{Id: string(f.Repository.ID), Dir: f.Repository.Dir},
-		ShortSummary:   shortSummaryOf(f.Summary),
-		LongSummary:    longSummaryOf(f.Summary),
+		ShortSummary:   shortSummary,
+		LongSummary:    longSummary,
 		CreatedAtMs:    ws.CreatedAt.UnixMilli(),
 		LastActiveAtMs: f.LastActiveAt.UnixMilli(),
 		Standing:       standing,
@@ -358,22 +360,4 @@ func foundRosterOf(drawn *workspacefind.Drawn) *agentreplv1.FoundWorkspaceRoster
 		panic(fmt.Sprintf("server: roster section %d has no FoundWorkspaceRosterSection arm", int(drawn.Section)))
 	}
 	return &agentreplv1.FoundWorkspaceRoster{Section: section, Status: &agentreplv1.FoundWorkspaceRosterStatus{Arm: drawn.Status}}
-}
-
-// shortSummaryOf answers SUMMARY's short summary for the wire, nil when no
-// summary stands.
-func shortSummaryOf(summary *wsm.WorkspaceSummary) *string {
-	if summary == nil {
-		return nil
-	}
-	return &summary.Short
-}
-
-// longSummaryOf answers SUMMARY's long summary for the wire, nil when no
-// summary stands or it has no long summary.
-func longSummaryOf(summary *wsm.WorkspaceSummary) *string {
-	if summary == nil || summary.Long == "" {
-		return nil
-	}
-	return &summary.Long
 }

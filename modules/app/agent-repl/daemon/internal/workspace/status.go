@@ -55,10 +55,7 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		Links:       LinksView(links),
 	}
 	if hasSummary {
-		out.ShortSummary = &summary.Short
-		if summary.Long != "" {
-			out.LongSummary = &summary.Long
-		}
+		out.ShortSummary, out.LongSummary = SummaryFields(&summary)
 	}
 	if record.Awaiting != nil {
 		awaited, err := v.refOf(ctx, *record.Awaiting, "the workspace it awaits")
