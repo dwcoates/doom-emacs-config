@@ -185,12 +185,12 @@ const (
 	// AgentReplSetWorkspacePriorityProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspacePriority RPC.
 	AgentReplSetWorkspacePriorityProcedure = "/agentrepl.v1.AgentRepl/SetWorkspacePriority"
-	// AgentReplSetWorkspaceHiddenProcedure is the fully-qualified name of the AgentRepl's
-	// SetWorkspaceHidden RPC.
-	AgentReplSetWorkspaceHiddenProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceHidden"
-	// AgentReplSendHiddenKeepalivesProcedure is the fully-qualified name of the AgentRepl's
-	// SendHiddenKeepalives RPC.
-	AgentReplSendHiddenKeepalivesProcedure = "/agentrepl.v1.AgentRepl/SendHiddenKeepalives"
+	// AgentReplSetWorkspaceBackloggedProcedure is the fully-qualified name of the AgentRepl's
+	// SetWorkspaceBacklogged RPC.
+	AgentReplSetWorkspaceBackloggedProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceBacklogged"
+	// AgentReplSendBackloggedKeepalivesProcedure is the fully-qualified name of the AgentRepl's
+	// SendBackloggedKeepalives RPC.
+	AgentReplSendBackloggedKeepalivesProcedure = "/agentrepl.v1.AgentRepl/SendBackloggedKeepalives"
 	// AgentReplSetWorkspaceParentProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceParent RPC.
 	AgentReplSetWorkspaceParentProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceParent"
@@ -581,8 +581,8 @@ var (
 	agentReplRestartWorkspaceMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplParkWorkspaceMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("ParkWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
-	agentReplSetWorkspaceHiddenMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
-	agentReplSendHiddenKeepalivesMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SendHiddenKeepalives")
+	agentReplSetWorkspaceBackloggedMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceBacklogged")
+	agentReplSendBackloggedKeepalivesMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SendBackloggedKeepalives")
 	agentReplSetWorkspaceParentMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceParent")
 	agentReplSwapWorkspacesMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("SwapWorkspaces")
 	agentReplMoveWorkspaceMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("MoveWorkspace")
@@ -880,12 +880,12 @@ type AgentReplClient interface {
 	// second-to-last within that priority. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
-	// Move a workspace into the hidden section or back out; a hidden workspace
-	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
-	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
-	// Send one keep-alive to every hidden workspace's session, so each cache's
-	// lapse moves later. See endpoint_send_hidden_keepalives.proto.
-	SendHiddenKeepalives(context.Context, *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error)
+	// Move a workspace into the backlog or back out; a backlogged workspace
+	// is off the Emacs tab bar. See endpoint_set_workspace_backlogged.proto.
+	SetWorkspaceBacklogged(context.Context, *connect.Request[v1.SetWorkspaceBackloggedRequest]) (*connect.Response[v1.SetWorkspaceBackloggedResponse], error)
+	// Send one keep-alive to every backlogged workspace's session, so each cache's
+	// lapse moves later. See endpoint_send_backlogged_keepalives.proto.
+	SendBackloggedKeepalives(context.Context, *connect.Request[v1.SendBackloggedKeepalivesRequest]) (*connect.Response[v1.SendBackloggedKeepalivesResponse], error)
 	// Retarget a workspace's merge: make it a child of another workspace of the
 	// same repository, or top-level. Its session is told in the same operation.
 	// See endpoint_set_workspace_parent.proto.
@@ -1620,16 +1620,16 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		setWorkspaceHidden: connect.NewClient[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse](
+		setWorkspaceBacklogged: connect.NewClient[v1.SetWorkspaceBackloggedRequest, v1.SetWorkspaceBackloggedResponse](
 			httpClient,
-			baseURL+AgentReplSetWorkspaceHiddenProcedure,
-			connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
+			baseURL+AgentReplSetWorkspaceBackloggedProcedure,
+			connect.WithSchema(agentReplSetWorkspaceBackloggedMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		sendHiddenKeepalives: connect.NewClient[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse](
+		sendBackloggedKeepalives: connect.NewClient[v1.SendBackloggedKeepalivesRequest, v1.SendBackloggedKeepalivesResponse](
 			httpClient,
-			baseURL+AgentReplSendHiddenKeepalivesProcedure,
-			connect.WithSchema(agentReplSendHiddenKeepalivesMethodDescriptor),
+			baseURL+AgentReplSendBackloggedKeepalivesProcedure,
+			connect.WithSchema(agentReplSendBackloggedKeepalivesMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		setWorkspaceParent: connect.NewClient[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse](
@@ -2441,8 +2441,8 @@ type agentReplClient struct {
 	restartWorkspace                   *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	parkWorkspace                      *connect.Client[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse]
 	setWorkspacePriority               *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
-	setWorkspaceHidden                 *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
-	sendHiddenKeepalives               *connect.Client[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse]
+	setWorkspaceBacklogged             *connect.Client[v1.SetWorkspaceBackloggedRequest, v1.SetWorkspaceBackloggedResponse]
+	sendBackloggedKeepalives           *connect.Client[v1.SendBackloggedKeepalivesRequest, v1.SendBackloggedKeepalivesResponse]
 	setWorkspaceParent                 *connect.Client[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse]
 	swapWorkspaces                     *connect.Client[v1.SwapWorkspacesRequest, v1.SwapWorkspacesResponse]
 	moveWorkspace                      *connect.Client[v1.MoveWorkspaceRequest, v1.MoveWorkspaceResponse]
@@ -2827,14 +2827,14 @@ func (c *agentReplClient) SetWorkspacePriority(ctx context.Context, req *connect
 	return c.setWorkspacePriority.CallUnary(ctx, req)
 }
 
-// SetWorkspaceHidden calls agentrepl.v1.AgentRepl.SetWorkspaceHidden.
-func (c *agentReplClient) SetWorkspaceHidden(ctx context.Context, req *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
-	return c.setWorkspaceHidden.CallUnary(ctx, req)
+// SetWorkspaceBacklogged calls agentrepl.v1.AgentRepl.SetWorkspaceBacklogged.
+func (c *agentReplClient) SetWorkspaceBacklogged(ctx context.Context, req *connect.Request[v1.SetWorkspaceBackloggedRequest]) (*connect.Response[v1.SetWorkspaceBackloggedResponse], error) {
+	return c.setWorkspaceBacklogged.CallUnary(ctx, req)
 }
 
-// SendHiddenKeepalives calls agentrepl.v1.AgentRepl.SendHiddenKeepalives.
-func (c *agentReplClient) SendHiddenKeepalives(ctx context.Context, req *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error) {
-	return c.sendHiddenKeepalives.CallUnary(ctx, req)
+// SendBackloggedKeepalives calls agentrepl.v1.AgentRepl.SendBackloggedKeepalives.
+func (c *agentReplClient) SendBackloggedKeepalives(ctx context.Context, req *connect.Request[v1.SendBackloggedKeepalivesRequest]) (*connect.Response[v1.SendBackloggedKeepalivesResponse], error) {
+	return c.sendBackloggedKeepalives.CallUnary(ctx, req)
 }
 
 // SetWorkspaceParent calls agentrepl.v1.AgentRepl.SetWorkspaceParent.
@@ -3621,12 +3621,12 @@ type AgentReplHandler interface {
 	// second-to-last within that priority. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
-	// Move a workspace into the hidden section or back out; a hidden workspace
-	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
-	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
-	// Send one keep-alive to every hidden workspace's session, so each cache's
-	// lapse moves later. See endpoint_send_hidden_keepalives.proto.
-	SendHiddenKeepalives(context.Context, *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error)
+	// Move a workspace into the backlog or back out; a backlogged workspace
+	// is off the Emacs tab bar. See endpoint_set_workspace_backlogged.proto.
+	SetWorkspaceBacklogged(context.Context, *connect.Request[v1.SetWorkspaceBackloggedRequest]) (*connect.Response[v1.SetWorkspaceBackloggedResponse], error)
+	// Send one keep-alive to every backlogged workspace's session, so each cache's
+	// lapse moves later. See endpoint_send_backlogged_keepalives.proto.
+	SendBackloggedKeepalives(context.Context, *connect.Request[v1.SendBackloggedKeepalivesRequest]) (*connect.Response[v1.SendBackloggedKeepalivesResponse], error)
 	// Retarget a workspace's merge: make it a child of another workspace of the
 	// same repository, or top-level. Its session is told in the same operation.
 	// See endpoint_set_workspace_parent.proto.
@@ -4357,16 +4357,16 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplSetWorkspaceHiddenHandler := connect.NewUnaryHandler(
-		AgentReplSetWorkspaceHiddenProcedure,
-		svc.SetWorkspaceHidden,
-		connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
+	agentReplSetWorkspaceBackloggedHandler := connect.NewUnaryHandler(
+		AgentReplSetWorkspaceBackloggedProcedure,
+		svc.SetWorkspaceBacklogged,
+		connect.WithSchema(agentReplSetWorkspaceBackloggedMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplSendHiddenKeepalivesHandler := connect.NewUnaryHandler(
-		AgentReplSendHiddenKeepalivesProcedure,
-		svc.SendHiddenKeepalives,
-		connect.WithSchema(agentReplSendHiddenKeepalivesMethodDescriptor),
+	agentReplSendBackloggedKeepalivesHandler := connect.NewUnaryHandler(
+		AgentReplSendBackloggedKeepalivesProcedure,
+		svc.SendBackloggedKeepalives,
+		connect.WithSchema(agentReplSendBackloggedKeepalivesMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplSetWorkspaceParentHandler := connect.NewUnaryHandler(
@@ -5227,10 +5227,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplParkWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspacePriorityProcedure:
 			agentReplSetWorkspacePriorityHandler.ServeHTTP(w, r)
-		case AgentReplSetWorkspaceHiddenProcedure:
-			agentReplSetWorkspaceHiddenHandler.ServeHTTP(w, r)
-		case AgentReplSendHiddenKeepalivesProcedure:
-			agentReplSendHiddenKeepalivesHandler.ServeHTTP(w, r)
+		case AgentReplSetWorkspaceBackloggedProcedure:
+			agentReplSetWorkspaceBackloggedHandler.ServeHTTP(w, r)
+		case AgentReplSendBackloggedKeepalivesProcedure:
+			agentReplSendBackloggedKeepalivesHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceParentProcedure:
 			agentReplSetWorkspaceParentHandler.ServeHTTP(w, r)
 		case AgentReplSwapWorkspacesProcedure:
@@ -5692,12 +5692,12 @@ func (UnimplementedAgentReplHandler) SetWorkspacePriority(context.Context, *conn
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspacePriority is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceHidden is not implemented"))
+func (UnimplementedAgentReplHandler) SetWorkspaceBacklogged(context.Context, *connect.Request[v1.SetWorkspaceBackloggedRequest]) (*connect.Response[v1.SetWorkspaceBackloggedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceBacklogged is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) SendHiddenKeepalives(context.Context, *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SendHiddenKeepalives is not implemented"))
+func (UnimplementedAgentReplHandler) SendBackloggedKeepalives(context.Context, *connect.Request[v1.SendBackloggedKeepalivesRequest]) (*connect.Response[v1.SendBackloggedKeepalivesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SendBackloggedKeepalives is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetWorkspaceParent(context.Context, *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error) {

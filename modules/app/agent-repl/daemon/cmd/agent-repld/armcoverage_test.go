@@ -300,7 +300,7 @@ func TestArmVariants(t *testing.T) {
 	}{
 		{name: "a message with no oneof is one empty variant", md: (&agentreplv1.SetWorkspaceOneShotClosed{}).ProtoReflect().Descriptor(), want: 1},
 		{name: "each arm of a oneof is a variant", md: (&agentreplv1.SetWorkspaceOneShotError{}).ProtoReflect().Descriptor(), want: 6},
-		{name: "a nested oneof is enumerated within its arm", md: (&agentreplv1.SetWorkspaceHiddenError{}).ProtoReflect().Descriptor(), want: 5 + 3},
+		{name: "a nested oneof is enumerated within its arm", md: (&agentreplv1.SetWorkspaceBackloggedError{}).ProtoReflect().Descriptor(), want: 5 + 3},
 		{name: "a singular field's oneof is enumerated", md: (&agentreplv1.CommentOnPullRequestNotPosted{}).ProtoReflect().Descriptor(), want: 5},
 	}
 	for _, tt := range tests {

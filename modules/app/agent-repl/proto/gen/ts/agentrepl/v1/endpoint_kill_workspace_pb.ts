@@ -179,7 +179,7 @@ export type KillWorkspaceError = Message<"agentrepl.v1.KillWorkspaceError"> & {
     case: "notYetAdopted";
   } | {
     /**
-     * The workspace has open children (hidden ones included), and killing it
+     * The workspace has open children (backlogged ones included), and killing it
      * would leave them without their parent in the Open section.
      *
      * @generated from field: agentrepl.v1.WorkspaceHasOpenChildren has_open_children = 5;

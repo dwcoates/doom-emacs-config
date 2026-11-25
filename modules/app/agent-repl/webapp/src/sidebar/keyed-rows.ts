@@ -18,10 +18,10 @@
  */
 import { clone, equals } from "@bufbuild/protobuf";
 import {
-  RosterHiddenRowSchema,
+  RosterBacklogRowSchema,
   RosterOpenRowSchema,
-  type RosterHiddenRow,
-  type RosterHiddenRows,
+  type RosterBacklogRow,
+  type RosterBacklogRows,
   type RosterOpenRow,
   type RosterOpenRows,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -73,9 +73,9 @@ export const OPEN_ROW: RowKind<RosterOpenRow> = {
   same: (a, b) => equals(RosterOpenRowSchema, withoutTabs(a), withoutTabs(b)),
 };
 
-/** A hidden row (frontend.v1.RosterHiddenRow): two draw the same when they are equal. */
-export const HIDDEN_ROW: RowKind<RosterHiddenRow> = {
-  same: (a, b) => equals(RosterHiddenRowSchema, a, b),
+/** A hidden row (frontend.v1.RosterBacklogRow): two draw the same when they are equal. */
+export const HIDDEN_ROW: RowKind<RosterBacklogRow> = {
+  same: (a, b) => equals(RosterBacklogRowSchema, a, b),
 };
 
 /** The top-level rows a region draws, each with its path and workspace id. */
@@ -124,17 +124,17 @@ export function drawKeyedRows(
 
 /** Draw U's hidden rows into a fresh box, recording each into INTO. */
 export function drawKeyedHiddenRows(
-  u: RosterHiddenRows,
+  u: RosterBacklogRows,
   rail: RailContext,
   path: string,
   place: RowPlace,
-  into: KeyedRows<RosterHiddenRow>,
+  into: KeyedRows<RosterBacklogRow>,
 ): HTMLElement {
   return drawKeyedBox(pathedHiddenRows(u, path), rail, place, into);
 }
 
 /** ROWS' top-level hidden rows, each with its path under PATH. */
-export function pathedHiddenRows(rows: RosterHiddenRows, path: string): Array<PathedRow<RosterHiddenRow>> {
+export function pathedHiddenRows(rows: RosterBacklogRows, path: string): Array<PathedRow<RosterBacklogRow>> {
   return pathedFamilies(rows.rows, `${path}.rows`).map((entry, index) => ({ row: rows.rows[index], path: entry.path }));
 }
 

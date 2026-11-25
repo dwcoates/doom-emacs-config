@@ -151,7 +151,7 @@ type LifecycleConfig struct {
 	QueueDrained []*HookScript `protobuf:"bytes,5,rep,name=queue_drained,json=queueDrained,proto3" json:"queue_drained,omitempty"`
 	// The repository's DEPLOY CHECKS: every deploy holds the queue until it is
 	// checked. A CHAIN of deploys begins at a deploy no other check was owed
-	// beside and ends when the queue advances. Each chain has one hidden
+	// beside and ends when the queue advances. Each chain has one backlogged
 	// INTAKE workspace that states the problems THIS deploy caused, from facts
 	// the daemon sorts for it, and approves the deploy, escalates it to the
 	// user, or dispatches a fix (agentrepl.v1.UpdateMergeQueueMediation). A
@@ -175,7 +175,7 @@ type LifecycleConfig struct {
 	// checks; one whose file is unusable fails the subscription's read, naming
 	// the file, until a commit fixes it.
 	PullRequests *PullRequestFollowing `protobuf:"bytes,13,opt,name=pull_requests,json=pullRequests,proto3,oneof" json:"pull_requests,omitempty"`
-	// The repository's PRODUCTION CHECKS: after each deploy, a standing hidden
+	// The repository's PRODUCTION CHECKS: after each deploy, a standing backlogged
 	// PRODUCTION MEDIATOR reviews what production logged while the version
 	// before it served alone, from the moment the previous landing finished to
 	// the moment this landing started, against the same span before it. It

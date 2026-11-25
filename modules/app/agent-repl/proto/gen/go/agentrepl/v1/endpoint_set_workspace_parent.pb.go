@@ -658,7 +658,7 @@ type SetWorkspaceParentError_ColdGate struct {
 }
 
 type SetWorkspaceParentError_ParentNotOpen struct {
-	// The named parent, or the workspace to land into, is hidden or closed,
+	// The named parent, or the workspace to land into, is backlogged or closed,
 	// and moving the workspace would make an open child of, or an open branch
 	// landing into, a workspace outside the Open section.
 	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,11,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`

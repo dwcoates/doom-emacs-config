@@ -18,7 +18,7 @@ import type {
 
 /**
  * ONE ROW OF A LIST AND ITS FAMILY, as each list of the roster spells it: an
- * open row (frontend.v1.RosterOpenRow), a hidden row (RosterHiddenRow) or a
+ * open row (frontend.v1.RosterOpenRow), a hidden row (RosterBacklogRow) or a
  * merged row (RosterMergedRow, which has no family). The list a row sits in is
  * its state, and every member of its family is in the same list, so a row
  * draws its family exactly as the wire nests it: the daemon has already put an

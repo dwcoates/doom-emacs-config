@@ -253,7 +253,7 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
     case: "briefMissing";
   } | {
     /**
-     * The workspace's parent is hidden or closed, and reopening it would make an
+     * The workspace's parent is backlogged or closed, and reopening it would make an
      * open child of a parent outside the Open section.
      *
      * @generated from field: agentrepl.v1.WorkspaceParentNotOpen parent_not_open = 13;

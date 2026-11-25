@@ -20,7 +20,7 @@ import {
   RosterColdGateSchema,
   type RosterOpenRow,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import { SetWorkspaceBackloggedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { MergedPages } from "../../src/sidebar/context.js";
 import { MERGED_MORE_CLASS, MERGED_PAGE_CLASS, MERGED_PAGE_SIZE } from "../../src/sidebar/merged-pages.js";
@@ -551,9 +551,9 @@ describe("drawHeadedSection", () => {
     const shown: string[] = [];
     const sc = sidebarContext(
       appContext({
-        setWorkspaceHidden: (request) => {
+        setWorkspaceBacklogged: (request) => {
           shown.push(request.workspace?.id ?? "");
-          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+          return create(SetWorkspaceBackloggedResponseSchema, { result: { case: "success", value: {} } });
         },
       }),
     );

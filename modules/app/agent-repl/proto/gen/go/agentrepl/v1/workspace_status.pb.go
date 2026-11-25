@@ -45,9 +45,9 @@ type WorkspaceStatus struct {
 	// Where the workspace's branch lands, fixed at its creation and changed only
 	// by a retarget (SetWorkspaceParent).
 	MergeTarget *WorkspaceStatusMergeTarget `protobuf:"bytes,4,opt,name=merge_target,json=mergeTarget,proto3" json:"merge_target,omitempty"`
-	// TRUE while the workspace is in the hidden section (off the Emacs tab bar);
-	// SetWorkspaceHidden moves it in and out.
-	Hidden bool `protobuf:"varint,5,opt,name=hidden,proto3" json:"hidden,omitempty"`
+	// TRUE while the workspace is in the backlog (off the Emacs tab bar);
+	// SetWorkspaceBacklogged moves it in and out.
+	Backlogged bool `protobuf:"varint,5,opt,name=backlogged,proto3" json:"backlogged,omitempty"`
 	// Whether the workspace is open, and what it is doing if so.
 	Standing *WorkspaceStatusStanding `protobuf:"bytes,6,opt,name=standing,proto3" json:"standing,omitempty"`
 	// TRUE while the workspace is a one-shot: created as one, or marked one
@@ -77,7 +77,7 @@ type WorkspaceStatus struct {
 	// user asked, or the workspace was registered rather than created. Recorded
 	// for every relationship, so the origin of a peer stays traceable.
 	CreatedBy *v1.WorkspaceRef `protobuf:"bytes,14,opt,name=created_by,json=createdBy,proto3,oneof" json:"created_by,omitempty"`
-	// Every OPEN child of this workspace, hidden ones included, in the roster's
+	// Every OPEN child of this workspace, backlogged ones included, in the roster's
 	// order: the workspaces this one coordinates and must account for before it
 	// can be finished or closed. Empty for a workspace with no open child.
 	Children []*v1.WorkspaceRef `protobuf:"bytes,15,rep,name=children,proto3" json:"children,omitempty"`
@@ -147,9 +147,9 @@ func (x *WorkspaceStatus) GetMergeTarget() *WorkspaceStatusMergeTarget {
 	return nil
 }
 
-func (x *WorkspaceStatus) GetHidden() bool {
+func (x *WorkspaceStatus) GetBacklogged() bool {
 	if x != nil {
-		return x.Hidden
+		return x.Backlogged
 	}
 	return false
 }
@@ -1368,13 +1368,15 @@ var File_agentrepl_v1_workspace_status_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\n" +
-	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xd5\x06\n" +
+	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xdd\x06\n" +
 	"\x0fWorkspaceStatus\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06branch\x18\x03 \x01(\tR\x06branch\x12K\n" +
-	"\fmerge_target\x18\x04 \x01(\v2(.agentrepl.v1.WorkspaceStatusMergeTargetR\vmergeTarget\x12\x16\n" +
-	"\x06hidden\x18\x05 \x01(\bR\x06hidden\x12A\n" +
+	"\fmerge_target\x18\x04 \x01(\v2(.agentrepl.v1.WorkspaceStatusMergeTargetR\vmergeTarget\x12\x1e\n" +
+	"\n" +
+	"backlogged\x18\x05 \x01(\bR\n" +
+	"backlogged\x12A\n" +
 	"\bstanding\x18\x06 \x01(\v2%.agentrepl.v1.WorkspaceStatusStandingR\bstanding\x12\x19\n" +
 	"\bone_shot\x18\a \x01(\bR\aoneShot\x12;\n" +
 	"\bawaiting\x18\b \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\bawaiting\x88\x01\x01\x12;\n" +

@@ -354,9 +354,9 @@ type ArrangedWorkspace struct {
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// The workspace's branch.
 	Branch string `protobuf:"bytes,3,opt,name=branch,proto3" json:"branch,omitempty"`
-	// Whether the user hid the workspace: the sidebar draws it in its hidden
+	// Whether the user backlogged the workspace: the sidebar draws it in its backlog
 	// section, not here, but it keeps this place for when it is shown again.
-	Hidden bool `protobuf:"varint,4,opt,name=hidden,proto3" json:"hidden,omitempty"`
+	Backlogged bool `protobuf:"varint,4,opt,name=backlogged,proto3" json:"backlogged,omitempty"`
 	// Its children, depth-first in drawn order.
 	Children []*ArrangedWorkspace `protobuf:"bytes,5,rep,name=children,proto3" json:"children,omitempty"`
 	// The workspace's recorded parent, present exactly when it has one. Such a
@@ -419,9 +419,9 @@ func (x *ArrangedWorkspace) GetBranch() string {
 	return ""
 }
 
-func (x *ArrangedWorkspace) GetHidden() bool {
+func (x *ArrangedWorkspace) GetBacklogged() bool {
 	if x != nil {
-		return x.Hidden
+		return x.Backlogged
 	}
 	return false
 }
@@ -471,12 +471,14 @@ const file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc = "" +
 	"workspaces\x12>\n" +
 	"\n" +
 	"created_by\x18\x04 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\tcreatedBy\x88\x01\x01B\r\n" +
-	"\v_created_by\"\x92\x02\n" +
+	"\v_created_by\"\x9a\x02\n" +
 	"\x11ArrangedWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
-	"\x06branch\x18\x03 \x01(\tR\x06branch\x12\x16\n" +
-	"\x06hidden\x18\x04 \x01(\bR\x06hidden\x12;\n" +
+	"\x06branch\x18\x03 \x01(\tR\x06branch\x12\x1e\n" +
+	"\n" +
+	"backlogged\x18\x04 \x01(\bR\n" +
+	"backlogged\x12;\n" +
 	"\bchildren\x18\x05 \x03(\v2\x1f.agentrepl.v1.ArrangedWorkspaceR\bchildren\x127\n" +
 	"\x06parent\x18\x06 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\x06parent\x88\x01\x01B\t\n" +
 	"\a_parentB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"

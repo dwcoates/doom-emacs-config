@@ -88,13 +88,13 @@ func TestAParentWithAnOpenChildIsNotHidden(t *testing.T) {
 	f := newRetargetFamily(t, harness.Opts{}, nil)
 
 	// Act
-	resp, err := f.d.Client().SetWorkspaceHidden(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{
-		Workspace: f.parent, Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}},
+	resp, err := f.d.Client().SetWorkspaceBacklogged(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
+		Workspace: f.parent, Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}},
 	}))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetWorkspaceHidden = error %v", err)
+		t.Fatalf("SetWorkspaceBacklogged = error %v", err)
 	}
 	requireOpenChildRefusal(t, f, resp.Msg.GetError().GetHasOpenChildren())
 	requireStillNested(t, f)

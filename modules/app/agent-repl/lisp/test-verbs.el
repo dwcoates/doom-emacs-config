@@ -247,7 +247,7 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :register-repository))
                 ((symbol-function 'agent-repl-rpc-set-workspace-priority)
                  (agent-repl-test-verbs--stub :set-priority))
-                ((symbol-function 'agent-repl-rpc-set-workspace-hidden)
+                ((symbol-function 'agent-repl-rpc-set-workspace-backlogged)
                  (agent-repl-test-verbs--stub :set-hidden))
                 ((symbol-function 'agent-repl-rpc-swap-workspaces)
                  (agent-repl-test-verbs--stub :swap))
@@ -261,7 +261,7 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :deploy))
                 ((symbol-function 'agent-repl-rpc-daemon-health)
                  (agent-repl-test-verbs--stub :daemon-health))
-                ((symbol-function 'agent-repl-rpc-send-hidden-keepalives)
+                ((symbol-function 'agent-repl-rpc-send-backlogged-keepalives)
                  (agent-repl-test-verbs--stub :hidden-keepalives))
                 ((symbol-function 'agent-repl-rpc-update-sidebar-view)
                  (agent-repl-test-verbs--stub :update-sidebar-view))
@@ -1036,22 +1036,22 @@ still says where the question stands."
   "The toggle is a command, so `SPC j C' can run it."
   (should (commandp #'agent-repl-remote-control-toggle)))
 
-;;;; ---- SendHiddenKeepalives (`SPC j R') ---------------------------------
+;;;; ---- SendBackloggedKeepalives (`SPC j R') ---------------------------------
 
 (defun agent-repl-test-verbs--keepalive (name arm &optional value)
-  "Return a decoded SendHiddenKeepalivesWorkspace for NAME with outcome ARM."
+  "Return a decoded SendBackloggedKeepalivesWorkspace for NAME with outcome ARM."
   (list :workspace (list :id (concat "id-" name) :dir (concat "/work/" name))
         :outcome (list :arm arm :value value)))
 
 (defun agent-repl-test-verbs--keepalives-answer (workspaces)
-  "Return the answers alist for a SendHiddenKeepalives success over WORKSPACES."
+  "Return the answers alist for a SendBackloggedKeepalives success over WORKSPACES."
   (list (cons :hidden-keepalives
               (list :response (list :arm :success :value (list :workspaces workspaces))))))
 
 (ert-deftest agent-repl-verbs-hidden-keepalives-sends-the-empty-request ()
   "The command asks the daemon once, naming no workspace."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--keepalives-answer nil)
-    (agent-repl-send-hidden-keepalives)
+    (agent-repl-send-backlogged-keepalives)
     (should (assq :hidden-keepalives agent-repl-test-verbs--sent))
     (should-not (agent-repl-test-verbs--request :hidden-keepalives))))
 
@@ -1061,7 +1061,7 @@ still says where the question stands."
       (agent-repl-test-verbs--keepalives-answer
        (list (agent-repl-test-verbs--keepalive "alpha" :sent)
              (agent-repl-test-verbs--keepalive "beta" :sent)))
-    (agent-repl-send-hidden-keepalives)
+    (agent-repl-send-backlogged-keepalives)
     (should (agent-repl-test-verbs--messaged-p "keep-alive sent to 2 of 2 hidden workspace(s)"))))
 
 (ert-deftest agent-repl-verbs-hidden-keepalives-names-each-one-not-sent ()
@@ -1070,14 +1070,14 @@ still says where the question stands."
       (agent-repl-test-verbs--keepalives-answer
        (list (agent-repl-test-verbs--keepalive "alpha" :sent)
              (agent-repl-test-verbs--keepalive "beta" :not-running)))
-    (agent-repl-send-hidden-keepalives)
+    (agent-repl-send-backlogged-keepalives)
     (should (agent-repl-test-verbs--messaged-p
              "keep-alive sent to 1 of 2 hidden workspace(s) · beta not running"))))
 
 (ert-deftest agent-repl-verbs-hidden-keepalives-says-so-when-none-are-hidden ()
   "An empty hidden section is an answer, said in words."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--keepalives-answer nil)
-    (agent-repl-send-hidden-keepalives)
+    (agent-repl-send-backlogged-keepalives)
     (should (agent-repl-test-verbs--messaged-p "no hidden workspaces to keep warm"))))
 
 (ert-deftest agent-repl-verbs-hidden-keepalives-words-each-outcome ()
@@ -1104,15 +1104,15 @@ still says where the question stands."
          . (:response (:arm :error
                        :value (:cause (:arm :registry-unreadable
                                        :value (:detail "database is locked")))))))
-    (agent-repl-send-hidden-keepalives)
-    (should (agent-repl-test-verbs--messaged-p "send-hidden-keepalives refused"))))
+    (agent-repl-send-backlogged-keepalives)
+    (should (agent-repl-test-verbs--messaged-p "send-backlogged-keepalives refused"))))
 
 (ert-deftest agent-repl-verbs-hidden-keepalives-transport-failure-is-loud ()
   "A daemon that does not answer is reported, never swallowed."
   (agent-repl-test-verbs--with
       '((:hidden-keepalives . (:failure (:kind :unreachable :message "boom"))))
-    (agent-repl-send-hidden-keepalives)
-    (should (agent-repl-test-verbs--messaged-p "send-hidden-keepalives failed"))))
+    (agent-repl-send-backlogged-keepalives)
+    (should (agent-repl-test-verbs--messaged-p "send-backlogged-keepalives failed"))))
 
 (ert-deftest agent-repl-verbs-roster-or-view-prefers-the-given-roster ()
   "A given roster is answered verbatim, whatever the view holds."

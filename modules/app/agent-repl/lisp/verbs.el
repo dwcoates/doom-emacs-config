@@ -133,14 +133,14 @@
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-set-workspace-hidden "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-set-workspace-backlogged "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-swap-workspaces "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-move-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-daemon-health "agent-repl-rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-send-hidden-keepalives "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-send-backlogged-keepalives "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-sidebar-view "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-retry-vendor-error "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-remote-control-mode "agent-repl-rpc" (conn request &rest keys))
@@ -996,7 +996,7 @@ exactly as a collapsed repository's tabs are.  A success draws nothing
 of its own beyond the echo: the push is the new state."
   (let ((ref (agent-repl-verbs--ref ws)))
     (agent-repl-verbs--send
-     #'agent-repl-rpc-set-workspace-hidden (agent-repl-verbs--conn ws)
+     #'agent-repl-rpc-set-workspace-backlogged (agent-repl-verbs--conn ws)
      (list :workspace ref :visibility (list :arm (if hidden :hide :show) :value nil))
      :ws ws :op (if hidden "hide" "show")
      :on-success
@@ -1012,7 +1012,7 @@ addressed by its ref on the primary link.  Once shown it is drawn, so the
 roster push marks it held and opens it, and the switch requested on success
 lands the frame on it (`agent-repl-host-request-switch-ref')."
   (agent-repl-verbs--send
-   #'agent-repl-rpc-set-workspace-hidden (agent-repl-verbs--conn)
+   #'agent-repl-rpc-set-workspace-backlogged (agent-repl-verbs--conn)
    (list :workspace ref :visibility (list :arm :show :value nil))
    :op "show"
    :on-success
@@ -1156,15 +1156,15 @@ named, by its directory's base name, beside what happened to it."
                      others))
        " · "))))
 
-(defun agent-repl-send-hidden-keepalives ()
+(defun agent-repl-send-backlogged-keepalives ()
   "Send one keep-alive to every hidden workspace's session.
 Each hidden workspace's cache is otherwise left to lapse; the keep-alive
 moves its lapse later, and the hidden section's countdowns follow on the
 roster stream.  The echo says how each one went."
   (interactive)
   (agent-repl-verbs--send
-   #'agent-repl-rpc-send-hidden-keepalives (agent-repl-verbs--conn) nil
-   :op "send-hidden-keepalives"
+   #'agent-repl-rpc-send-backlogged-keepalives (agent-repl-verbs--conn) nil
+   :op "send-backlogged-keepalives"
    :on-success
    (lambda (value)
      (let ((workspaces (plist-get value :workspaces)))
@@ -1192,7 +1192,7 @@ A SHOW lands on WS itself, which is what bringing a workspace back is for.
 
 A HIDE REQUESTS NOTHING: the daemon owns its landing.  Hiding the
 workspace the user stands on selects the most recently selected
-workspace the bar still draws (the daemon's SetWorkspaceHidden), and the
+workspace the bar still draws (the daemon's SetWorkspaceBacklogged), and the
 frame follows that selection off the roster push
 \(`agent-repl-roster-apply-current').  A second landing requested here
 raced the daemon's and won, so a hide always ended on the first tab --

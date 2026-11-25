@@ -350,7 +350,7 @@ func foundRosterOf(drawn *workspacefind.Drawn) *agentreplv1.FoundWorkspaceRoster
 	case workspacefind.OpenSection:
 		section.Section = &agentreplv1.FoundWorkspaceRosterSection_Open{Open: &agentreplv1.FoundWorkspaceRosterSectionOpen{}}
 	case workspacefind.HiddenSection:
-		section.Section = &agentreplv1.FoundWorkspaceRosterSection_Hidden{Hidden: &agentreplv1.FoundWorkspaceRosterSectionHidden{}}
+		section.Section = &agentreplv1.FoundWorkspaceRosterSection_Backlog{Backlog: &agentreplv1.FoundWorkspaceRosterSectionBacklog{}}
 	case workspacefind.MergedSection:
 		section.Section = &agentreplv1.FoundWorkspaceRosterSection_Merged{Merged: &agentreplv1.FoundWorkspaceRosterSectionMerged{}}
 	default:

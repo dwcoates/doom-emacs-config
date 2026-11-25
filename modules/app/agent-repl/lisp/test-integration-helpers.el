@@ -1497,11 +1497,11 @@ answer into the push\='s streams."
                                            (seq-map (lambda (sub) `((subsection . ,sub))) subs)))
                             (assq-delete-all 'subsections (assq-delete-all 'rows (copy-alist section))))))
                   (or (alist-get 'sections repository) []))))
-               (hidden (alist-get 'hidden roster))
+               (hidden (alist-get 'backlog roster))
                (merged (alist-get 'recentlyMerged roster)))
           (append
            `((repository . ,(cons (cons 'sections sections) (assq-delete-all 'sections (copy-alist repository))))
-             (hidden . ,(relist hidden 'hiddenRows `((rows . ,(vconcat (seq-map #'hidden-row (or (rows-of hidden) [])))))))
+             (backlog . ,(relist hidden 'backlogRows `((rows . ,(vconcat (seq-map #'hidden-row (or (rows-of hidden) [])))))))
              (closed . ((rows . ,(vconcat (nreverse closed))))))
            (when merged
              (let* ((groups (or (alist-get 'groups merged) []))
@@ -1520,7 +1520,7 @@ answer into the push\='s streams."
                                    groups)))
                      (mergedRevision . ((revision . "1")))
                      ,@(seq-filter (lambda (entry) (memq (car entry) '(expanded collapsed))) merged))))))
-           (seq-remove (lambda (entry) (memq (car entry) '(repository hidden recentlyMerged))) roster)))))))
+           (seq-remove (lambda (entry) (memq (car entry) '(repository backlog recentlyMerged))) roster)))))))
 
 (defun agent-repl-itest--streams (roster &optional revision)
   "Return the protojson `RosterPush' at REVISION carrying ROSTER\='s streams.

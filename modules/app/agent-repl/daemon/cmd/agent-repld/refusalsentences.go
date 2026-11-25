@@ -63,7 +63,7 @@ func sayOpenChildren(ws string, e *agentreplv1.WorkspaceHasOpenChildren, again s
 func sayParentNotOpen(e *agentreplv1.WorkspaceParentNotOpen, again string) (string, error) {
 	parent := e.GetParent().GetDir()
 	switch e.GetState().(type) {
-	case *agentreplv1.WorkspaceParentNotOpen_Hidden:
+	case *agentreplv1.WorkspaceParentNotOpen_Backlogged:
 		return fmt.Sprintf("the parent %s is hidden; show it, then %s", parent, again), nil
 	case *agentreplv1.WorkspaceParentNotOpen_Closed:
 		return fmt.Sprintf("the parent %s is closed; reopen it, then %s", parent, again), nil

@@ -239,7 +239,7 @@ type Deps struct {
 	// `persistent_wifi` state every Emacs WatchDaemon stream subscribes to (a
 	// webview's never does: its topbar view carries the same standing).
 	PersistentWifi PersistentWifi
-	// HiddenKeepalives backs SendHiddenKeepalives: one keep-alive to every
+	// HiddenKeepalives backs SendBackloggedKeepalives: one keep-alive to every
 	// hidden workspace's session (internal/cachelapse).
 	HiddenKeepalives HiddenKeepalives
 	// KeepLives backs KeepLiveWorkspace: the cache keeper's one keep-alive

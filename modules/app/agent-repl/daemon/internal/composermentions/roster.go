@@ -23,7 +23,7 @@ func RosterNames(roster *frontendv1.WorkspaceRoster) []string {
 	for _, open := range rosterwalk.OpenRows(roster) {
 		add(open.GetRow())
 	}
-	for _, hidden := range rosterwalk.HiddenRows(roster) {
+	for _, hidden := range rosterwalk.BacklogRows(roster) {
 		add(hidden)
 	}
 	return out

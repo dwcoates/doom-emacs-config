@@ -11,7 +11,7 @@ type Withholding int
 const (
 	// Drawn is a workspace the tab bar draws.
 	Drawn Withholding = iota
-	// WithheldHidden is a workspace the user hid (SetWorkspaceHidden).
+	// WithheldHidden is a workspace the user hid (SetWorkspaceBacklogged).
 	WithheldHidden
 	// WithheldCollapsed is a workspace whose repository section or
 	// subsection is collapsed.

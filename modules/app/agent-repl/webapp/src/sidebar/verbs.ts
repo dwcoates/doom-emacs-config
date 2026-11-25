@@ -63,10 +63,10 @@ import {
   type SelectInEditorRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import {
-  SetWorkspaceHiddenRequestSchema,
-  type SetWorkspaceHiddenError,
-  type SetWorkspaceHiddenRequest,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+  SetWorkspaceBackloggedRequestSchema,
+  type SetWorkspaceBackloggedError,
+  type SetWorkspaceBackloggedRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import {
   SetWorkspacePriorityRequestSchema,
   SetWorkspacePriorityResponseSchema,
@@ -785,14 +785,14 @@ export const KILL_WORKSPACE_SENTENCES = {
 } satisfies SentenceTable;
 
 /**
- * SetWorkspaceHidden's own arms: the family rules a hide and a show keep. A
+ * SetWorkspaceBacklogged's own arms: the family rules a hide and a show keep. A
  * table, for the cold gate's hide as for KILL_WORKSPACE_SENTENCES.
  */
 export const SET_WORKSPACE_HIDDEN_SENTENCES = {
   hasOpenChildren: (v: WorkspaceHasOpenChildren) =>
-    hasOpenChildrenSentence(v, "SetWorkspaceHiddenError.has_open_children", "hide"),
+    hasOpenChildrenSentence(v, "SetWorkspaceBackloggedError.has_open_children", "hide"),
   parentNotOpen: (v: WorkspaceParentNotOpen) =>
-    parentNotOpenSentence(v, "SetWorkspaceHiddenError.parent_not_open", "show"),
+    parentNotOpenSentence(v, "SetWorkspaceBackloggedError.parent_not_open", "show"),
 } satisfies SentenceTable;
 
 /** KillWorkspace's refusal, worded from KILL_WORKSPACE_SENTENCES. */
@@ -800,9 +800,9 @@ export function killWorkspaceRefusal(cause: CauseOf<KillWorkspaceError>): string
   return refusalOf(cause, KILL_WORKSPACE_SENTENCES, "KillWorkspaceError.cause").text;
 }
 
-/** SetWorkspaceHidden's refusal, worded from SET_WORKSPACE_HIDDEN_SENTENCES. */
-export function setWorkspaceHiddenRefusal(cause: CauseOf<SetWorkspaceHiddenError>): string {
-  return refusalOf(cause, SET_WORKSPACE_HIDDEN_SENTENCES, "SetWorkspaceHiddenError.cause").text;
+/** SetWorkspaceBacklogged's refusal, worded from SET_WORKSPACE_HIDDEN_SENTENCES. */
+export function setWorkspaceBackloggedRefusal(cause: CauseOf<SetWorkspaceBackloggedError>): string {
+  return refusalOf(cause, SET_WORKSPACE_HIDDEN_SENTENCES, "SetWorkspaceBackloggedError.cause").text;
 }
 
 /** FinishWorkspace's own arms, in plain words. */
@@ -1017,14 +1017,14 @@ export function buildSetWorkspacePriorityRequest(
 }
 
 /**
- * SetWorkspaceHidden: into the hidden section when HIDDEN, back out otherwise.
+ * SetWorkspaceBacklogged: into the hidden section when HIDDEN, back out otherwise.
  * The arm is the place asked for, never a flag beside it.
  */
-export function buildSetWorkspaceHiddenRequest(
+export function buildSetWorkspaceBackloggedRequest(
   workspace: WorkspaceRef,
   hidden: boolean,
-): SetWorkspaceHiddenRequest {
-  return create(SetWorkspaceHiddenRequestSchema, {
+): SetWorkspaceBackloggedRequest {
+  return create(SetWorkspaceBackloggedRequestSchema, {
     workspace,
     visibility: hidden ? { case: "hide", value: {} } : { case: "show", value: {} },
   });

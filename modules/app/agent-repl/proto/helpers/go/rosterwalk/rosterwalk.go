@@ -1,6 +1,6 @@
 // Package rosterwalk is THE ONE WALK over the rows of a frontend.v1.RosterPush's
 // streams. A child workspace's row nests under its parent's in its list's own
-// row type (RosterOpenRow.children, RosterHiddenRow.children), so a reader
+// row type (RosterOpenRow.children, RosterBacklogRow.children), so a reader
 // that hand-rolls its own loop can miss every child while the others see
 // them -- the merge-queue verb once refused a child's own merge that way.
 // Every Go reader of the roster, in every module, walks through here.
@@ -38,8 +38,8 @@ func OpenFamily(row *frontendv1.RosterOpenRow) []*frontendv1.RosterOpenRow {
 
 // FlattenHidden lists every hidden row of the hidden section's rows
 // depth-first, each row before its nested family.
-func FlattenHidden(rows []*frontendv1.RosterHiddenRow) []*frontendv1.RosterHiddenRow {
-	var out []*frontendv1.RosterHiddenRow
+func FlattenHidden(rows []*frontendv1.RosterBacklogRow) []*frontendv1.RosterBacklogRow {
+	var out []*frontendv1.RosterBacklogRow
 	for _, row := range rows {
 		out = append(out, row)
 		out = append(out, FlattenHidden(row.GetChildren())...)
@@ -113,10 +113,10 @@ func OpenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterOpenRow {
 	return out
 }
 
-// HiddenRows lists every row of the hidden section, flattened.
-func HiddenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+// BacklogRows lists every row of the hidden section, flattened.
+func BacklogRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
-	for _, hidden := range FlattenHidden(roster.GetHidden().GetHiddenRows().GetRows()) {
+	for _, hidden := range FlattenHidden(roster.GetBacklog().GetBacklogRows().GetRows()) {
 		out = append(out, hidden.GetRow())
 	}
 	return out
@@ -144,7 +144,7 @@ func AllRows(push *frontendv1.RosterPush) []*frontendv1.RosterRow {
 	for _, open := range OpenRows(push.GetWorkspaces()) {
 		out = append(out, open.GetRow())
 	}
-	out = append(out, HiddenRows(push.GetWorkspaces())...)
+	out = append(out, BacklogRows(push.GetWorkspaces())...)
 	return append(out, ClosedRows(push.GetClosed())...)
 }
 

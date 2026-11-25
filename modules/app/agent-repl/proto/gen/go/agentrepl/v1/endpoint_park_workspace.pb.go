@@ -8,7 +8,7 @@
 //
 // THE CYCLE'S OWN RULES HOLD. Nothing is parked under a turn or live detached
 // work (a busy session is parked when it falls free), and the workspace the
-// user is looking at, a hidden or closed one, and one with no live session
+// user is looking at, a backlogged or closed one, and one with no live session
 // are never parked. Unlike the cycle, no beat need have gone out first: the
 // next beat is still timed from the cache clock, so it may come at once.
 

@@ -855,22 +855,22 @@ func repoGroupHeader(repo wsm.Repository) *frontendv1.RosterMergedRepoGroupHeade
 }
 
 // hiddenSection resolves the hidden-workspaces section: the open workspaces
-// the user hid (SetWorkspaceHidden), which have NO TAB. Its rows nest by
+// the user hid (SetWorkspaceBacklogged), which have NO TAB. Its rows nest by
 // lineage among the hidden workspaces alone, so a hidden family keeps its
 // shape (a workspace with open children cannot be hidden, so a hidden row's
 // family is hidden too); its top-level rows go in HIDE ORDER, the latest hide
 // first (sortHiddenNewestFirst, owner request 2026-10-13), and its count is
 // the rows it draws.
-func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenSection {
+func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterBacklogSection {
 	log = log.With(dlog.Context{"section": "hidden"})
 	tree := nest(hidden, log)
-	rows := &frontendv1.RosterHiddenRows{}
+	rows := &frontendv1.RosterBacklogRows{}
 	for _, ws := range sortHiddenNewestFirst(tree.roots) {
 		rows.Rows = append(rows.Rows, r.hiddenRow(ws, tree, rc, log))
 	}
-	section := &frontendv1.RosterHiddenSection{
-		Header:     sectionHeader(HiddenSectionLabel, len(rosterwalk.FlattenHidden(rows.GetRows()))),
-		HiddenRows: rows,
+	section := &frontendv1.RosterBacklogSection{
+		Header:      sectionHeader(HiddenSectionLabel, len(rosterwalk.FlattenHidden(rows.GetRows()))),
+		BacklogRows: rows,
 	}
 	setHiddenFold(section, r.state.reg.View.HiddenFolded)
 	setHiddenHeight(section, r.state.reg.View.HiddenHeight)
@@ -878,8 +878,8 @@ func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog
 }
 
 // hiddenRow composes one hidden row and its hidden family below it.
-func (r *resolver) hiddenRow(ws wsm.Workspace, tree forest, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenRow {
-	out := &frontendv1.RosterHiddenRow{Row: r.row(ws, rc, log)}
+func (r *resolver) hiddenRow(ws wsm.Workspace, tree forest, rc rowContext, log dlog.Logger) *frontendv1.RosterBacklogRow {
+	out := &frontendv1.RosterBacklogRow{Row: r.row(ws, rc, log)}
 	for _, child := range tree.children[ws.ID] {
 		out.Children = append(out.Children, r.hiddenRow(child, tree, rc, log))
 	}
@@ -926,12 +926,12 @@ func sameWorkspaces(rows []*frontendv1.RosterClosedRow, closed []wsm.Workspace) 
 // setHiddenFold states the hidden section's fold. The fold is the daemon's so
 // every page draws the same one (UpdateSidebarView); it folds sidebar rows
 // only, never a tab.
-func setHiddenFold(section *frontendv1.RosterHiddenSection, folded bool) {
+func setHiddenFold(section *frontendv1.RosterBacklogSection, folded bool) {
 	if folded {
-		section.Fold = &frontendv1.RosterHiddenSection_Collapsed{Collapsed: &frontendv1.RosterHiddenSectionCollapsed{}}
+		section.Fold = &frontendv1.RosterBacklogSection_Collapsed{Collapsed: &frontendv1.RosterBacklogSectionCollapsed{}}
 		return
 	}
-	section.Fold = &frontendv1.RosterHiddenSection_Expanded{Expanded: &frontendv1.RosterHiddenSectionExpanded{}}
+	section.Fold = &frontendv1.RosterBacklogSection_Expanded{Expanded: &frontendv1.RosterBacklogSectionExpanded{}}
 }
 
 // openSection resolves the open-workspaces section: its heading and its fold.
@@ -990,12 +990,12 @@ func setMergedHeight(section *frontendv1.RosterMergedSection, height wsm.Section
 
 // setHiddenHeight states the hidden section's height. The height is the
 // daemon's so every page draws the same one (UpdateSidebarView).
-func setHiddenHeight(section *frontendv1.RosterHiddenSection, height wsm.SectionHeight) {
+func setHiddenHeight(section *frontendv1.RosterBacklogSection, height wsm.SectionHeight) {
 	if lines, sized := height.Lines(); sized {
-		section.Height = &frontendv1.RosterHiddenSection_Sized{Sized: &frontendv1.RosterHiddenSectionSized{Lines: lines}}
+		section.Height = &frontendv1.RosterBacklogSection_Sized{Sized: &frontendv1.RosterBacklogSectionSized{Lines: lines}}
 		return
 	}
-	section.Height = &frontendv1.RosterHiddenSection_Fitted{Fitted: &frontendv1.RosterHiddenSectionFitted{}}
+	section.Height = &frontendv1.RosterBacklogSection_Fitted{Fitted: &frontendv1.RosterBacklogSectionFitted{}}
 }
 
 // sectionHeader composes a header outside the Open section (the Backlog's):

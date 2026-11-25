@@ -91,7 +91,7 @@ export function parentNotOpenSentence(
   const parent = label(requireMessage(u.parent, `${path}.parent`));
   const state = requireCase(u.state, `${path}.state`);
   switch (state.case) {
-    case "hidden":
+    case "backlogged":
       return `${gesture} refused: its parent ${parent} is hidden; show the parent first`;
     case "closed":
       return `${gesture} refused: its parent ${parent} is closed; reopen the parent first`;

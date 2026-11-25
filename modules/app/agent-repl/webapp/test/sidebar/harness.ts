@@ -22,7 +22,7 @@ import {
   RosterRowSchema,
   RosterRowDetailSchema,
   RosterRowWhenSchema,
-  RosterHiddenSectionSchema,
+  RosterBacklogSectionSchema,
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedRowSchema,
@@ -45,7 +45,7 @@ import {
   RosterRepoSectionSchema,
   RosterSubsectionSchema,
   WorkspaceRosterSchema,
-  type RosterHiddenSection,
+  type RosterBacklogSection,
   type RosterMergeQueueHead,
   type RosterMergeQueueHeadClock,
   type RosterMergeQueueSubject,
@@ -621,10 +621,10 @@ export function hiddenSection(
   count: number = rows.length,
   collapsed: boolean = false,
   sized: number | null = null,
-): RosterHiddenSection {
-  return create(RosterHiddenSectionSchema, {
+): RosterBacklogSection {
+  return create(RosterBacklogSectionSchema, {
     header: { label: { text: "Hidden" }, count: { workspaces: count } },
-    hiddenRows: { rows: rows.map(hiddenRow) },
+    backlogRows: { rows: rows.map(hiddenRow) },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
     height: bandHeight(sized),
   });
@@ -650,7 +650,7 @@ export function roster(init: {
   repos?: RosterRepoSection[];
   merged?: RosterMergedSection;
   mergeQueue?: RosterMergeQueueSection;
-  hidden?: RosterHiddenSection;
+  hidden?: RosterBacklogSection;
   open?: RosterOpenSection;
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
   openCount?: number;
@@ -679,7 +679,7 @@ export function roster(init: {
   const workspaces: WorkspaceRoster = create(WorkspaceRosterSchema, {
     repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted, unfolded: init.openUnfolded ?? init.openCount ?? unfolded } },
     open: init.open ?? openSection(),
-    hidden: init.hidden ?? hiddenSection(),
+    backlog: init.hidden ?? hiddenSection(),
     ...rosterApps(init.chat),
     ...(init.current === undefined
       ? {}

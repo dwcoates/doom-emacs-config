@@ -83,7 +83,7 @@ interface Drawing {
 function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expanded = true, queued = 0 }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
   const folds = createDeploysFold(document, () => undefined);
   const openRows = Array.from({ length: open }, (_, i) => row({ id: `o-${i}` }));
-  const hiddenRows = Array.from({ length: hidden }, (_, i) => row({ id: `h-${i}` }));
+  const backlogRows = Array.from({ length: hidden }, (_, i) => row({ id: `h-${i}` }));
   const mergedRows = Array.from({ length: merged }, (_, i) =>
     row({
       id: `m-${i}`,
@@ -99,7 +99,7 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expan
       roster({
         repos: open === 0 ? [] : [repoSection({ id: "alpha", rows: openRows })],
         open: openSection(folded.open ?? false),
-        hidden: hiddenSection(hiddenRows, hidden, folded.hidden ?? false),
+        hidden: hiddenSection(backlogRows, hidden, folded.hidden ?? false),
         merged: mergedSection(mergedRows, folded.merged ?? false),
         mergeQueue: mergeQueueBand(
           queued === 0

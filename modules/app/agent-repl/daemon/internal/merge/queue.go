@@ -491,10 +491,10 @@ const (
 	// its bubble, and puts the merge back at its place in line, skipped until
 	// the gate is passed (coldgate.go, requeues).
 	CauseColdGate AbandonCause = "cold_gate"
-	// CauseHiddenAtColdGate is the user hiding a workspace whose merge stood
+	// CauseBackloggedAtColdGate is the user hiding a workspace whose merge stood
 	// at its cold gate: hiding passes the gate without an answer, and takes
 	// the merge off its queue.
-	CauseHiddenAtColdGate AbandonCause = "hidden_at_cold_gate"
+	CauseBackloggedAtColdGate AbandonCause = "hidden_at_cold_gate"
 	// CauseColdGateAnswerFailed is the queue's one answer to a waiting
 	// merge's cold gate, a compaction, failing (answerQueuedColdGate): the
 	// failure is final, so the merge leaves its queue as a failed merge
@@ -540,7 +540,7 @@ var abandonSummaries = map[AbandonCause]string{
 	CauseAheadDidNotLand:      "the merge this one was placed behind left the queue without landing",
 	CauseAgentGaveUp:          "the merge's own agent gave it up",
 	CauseColdGate:             "the workspace's session parked at its cold gate; the merge waits at its place in line until the gate is passed",
-	CauseHiddenAtColdGate:     "the workspace was hidden at its cold gate while this merge was waiting in the queue",
+	CauseBackloggedAtColdGate: "the workspace was hidden at its cold gate while this merge was waiting in the queue",
 	CauseColdGateAnswerFailed: "the queue could not answer the workspace's cold gate by a compaction; the merge left the queue, and the gate stands for the user to answer before the merge is requeued",
 }
 
@@ -550,12 +550,12 @@ var abandonSummaries = map[AbandonCause]string{
 // ran (2026-09-28: "a merge left the queue without running" was logged for one
 // that had run three repair rounds).
 var runningSummaries = map[AbandonCause]string{
-	CauseUserDrop:         "the operator evicted this merge while it was running",
-	CauseUserDequeue:      "the user took this merge out of the queue while it was running",
-	CauseWorkspaceClosed:  "the workspace was closed while this merge was running",
-	CauseAgentGaveUp:      "the merge's own agent gave it up from its repair turn",
-	CauseColdGate:         "the workspace's session parked at its cold gate while this merge was running; it waits at its place in line until the gate is passed, and runs again from its start",
-	CauseHiddenAtColdGate: "the workspace was hidden at its cold gate while this merge was running",
+	CauseUserDrop:             "the operator evicted this merge while it was running",
+	CauseUserDequeue:          "the user took this merge out of the queue while it was running",
+	CauseWorkspaceClosed:      "the workspace was closed while this merge was running",
+	CauseAgentGaveUp:          "the merge's own agent gave it up from its repair turn",
+	CauseColdGate:             "the workspace's session parked at its cold gate while this merge was running; it waits at its place in line until the gate is passed, and runs again from its start",
+	CauseBackloggedAtColdGate: "the workspace was hidden at its cold gate while this merge was running",
 }
 
 // releases reports whether C is a RELEASE the user or the operator asked for
@@ -563,7 +563,7 @@ var runningSummaries = map[AbandonCause]string{
 // ending (its workspace closing, the daemon shutting down). A released merge's
 // bubble is closed (closeReleasedBubble).
 func (c AbandonCause) releases() bool {
-	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseHiddenAtColdGate
+	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseBackloggedAtColdGate
 }
 
 // returnsSession reports whether a waiting merge leaving its line for C

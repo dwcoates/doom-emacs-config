@@ -53,8 +53,8 @@ import type {
   RosterRowMergePaused,
   RosterRowMergeTurn,
   RosterRowWhen,
-  RosterRowWhenHidden,
-  RosterRowWhenHiddenCache,
+  RosterRowWhenBacklogged,
+  RosterRowWhenBackloggedCache,
   RosterRowWhenMerged,
   RosterRowWhenNoTurnRunning,
   RosterRowWhenSyncMerging,
@@ -70,7 +70,7 @@ import {
   SelectInEditorResponseSchema,
   type SelectInEditorResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
-import { SetWorkspaceHiddenResponseSchema, type SetWorkspaceHiddenError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import { SetWorkspaceBackloggedResponseSchema, type SetWorkspaceBackloggedError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
@@ -108,8 +108,8 @@ import {
 } from "./detail-more.js";
 import {
   buildSelectInEditorRequest,
-  buildSetWorkspaceHiddenRequest,
-  setWorkspaceHiddenRefusal,
+  buildSetWorkspaceBackloggedRequest,
+  setWorkspaceBackloggedRefusal,
   type CauseOf,
   buildOpenWorkspaceRequest,
   buildRevertMergeRequest,
@@ -185,7 +185,7 @@ export const SURFACED_ROW_CLASS = "surfaced";
  *   - `hidden`: the hidden-workspaces section. Drawn with NO STATE (owner
  *     request, 2026-10-13): no status color, no status mark, no read greying,
  *     no reviving shimmer and no attention marker; its name is in the
- *     Recently Merged band's grey, struck through only at a cold gate. A click SHOWS it again (`SetWorkspaceHidden`), which
+ *     Recently Merged band's grey, struck through only at a cold gate. A click SHOWS it again (`SetWorkspaceBacklogged`), which
  *     is the section's one gesture.
  */
 export type RowPlace = "grouping" | "merged" | "hidden";
@@ -783,19 +783,19 @@ export function drawRosterRowWhen(
     case "merged":
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`), " ago");
       return when;
-    case "hidden":
+    case "backlogged":
       // THE COLUMN COUNTS DOWN TO THE CACHE'S LAPSE once the daemon knows it,
       // and up from the hide until then.
       if (shown.value.cache !== undefined) {
         tickCacheLapse(
           when,
           sc,
-          drawRosterRowWhenHiddenCache(shown.value.cache, `${path}.hidden.cache`),
+          drawRosterRowWhenBackloggedCache(shown.value.cache, `${path}.hidden.cache`),
           `${path}.hidden.cache`,
         );
         return when;
       }
-      tickAge(when, sc, drawRosterRowWhenHidden(shown.value, `${path}.hidden`));
+      tickAge(when, sc, drawRosterRowWhenBacklogged(shown.value, `${path}.hidden`));
       return when;
     default: {
       const other: { case: string } = shown;
@@ -833,12 +833,12 @@ export function drawRosterRowWhenMerged(u: RosterRowWhenMerged, path: string): n
 }
 
 /** When the workspace was hidden, as an epoch instant. */
-export function drawRosterRowWhenHidden(u: RosterRowWhenHidden, path: string): number {
+export function drawRosterRowWhenBacklogged(u: RosterRowWhenBacklogged, path: string): number {
   return msOf(u.atMs, `${path}.at_ms`);
 }
 
 /** When a hidden workspace's prompt cache lapses, as an epoch instant. */
-export function drawRosterRowWhenHiddenCache(u: RosterRowWhenHiddenCache, path: string): number {
+export function drawRosterRowWhenBackloggedCache(u: RosterRowWhenBackloggedCache, path: string): number {
   return msOf(u.lapsesAtMs, `${path}.lapses_at_ms`);
 }
 
@@ -1258,10 +1258,10 @@ export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readon
       bringBack: (line, sc, workspace) =>
         runVerb(line, {
           sc,
-          rpc: "SetWorkspaceHidden",
-          call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
-          schema: SetWorkspaceHiddenResponseSchema,
-          refusalText: (cause) => setWorkspaceHiddenRefusal(cause as CauseOf<SetWorkspaceHiddenError>),
+          rpc: "SetWorkspaceBacklogged",
+          call: (client) => client.setWorkspaceBacklogged(buildSetWorkspaceBackloggedRequest(workspace, false)),
+          schema: SetWorkspaceBackloggedResponseSchema,
+          refusalText: (cause) => setWorkspaceBackloggedRefusal(cause as CauseOf<SetWorkspaceBackloggedError>),
         }),
     },
   ],

@@ -44,7 +44,7 @@ func beatHarness(t *testing.T, records []wsm.Workspace, shims map[ids.WorkspaceI
 	return h
 }
 
-func outcomesOf(t *testing.T, resp *agentreplv1.SendHiddenKeepalivesResponse) []string {
+func outcomesOf(t *testing.T, resp *agentreplv1.SendBackloggedKeepalivesResponse) []string {
 	t.Helper()
 	success := resp.GetSuccess()
 	if success == nil {
@@ -57,7 +57,7 @@ func outcomesOf(t *testing.T, resp *agentreplv1.SendHiddenKeepalivesResponse) []
 	return out
 }
 
-func TestSendHiddenKeepalivesAsksEveryHiddenWorkspaceAndNoOther(t *testing.T) {
+func TestSendBackloggedKeepalivesAsksEveryHiddenWorkspaceAndNoOther(t *testing.T) {
 	// Arrange
 	merged := workspaceNamed("c-merged")
 	merged.MergedAt = merged.HiddenAt
@@ -72,7 +72,7 @@ func TestSendHiddenKeepalivesAsksEveryHiddenWorkspaceAndNoOther(t *testing.T) {
 	h := beatHarness(t, records, shims)
 
 	// Act
-	resp := h.keeper.SendHiddenKeepalives(context.Background())
+	resp := h.keeper.SendBackloggedKeepalives(context.Background())
 
 	// Assert
 	got := fmt.Sprint(outcomesOf(t, resp), shims["b-shown"].beats, shims["c-merged"].beats)
@@ -81,13 +81,13 @@ func TestSendHiddenKeepalivesAsksEveryHiddenWorkspaceAndNoOther(t *testing.T) {
 	}
 }
 
-func TestSendHiddenKeepalivesNamesEachWorkspaceByItsRef(t *testing.T) {
+func TestSendBackloggedKeepalivesNamesEachWorkspaceByItsRef(t *testing.T) {
 	// Arrange
 	ws := workspaceNamed("a-hidden")
 	h := beatHarness(t, []wsm.Workspace{ws}, map[ids.WorkspaceID]*fakeShim{ws.ID: {answer: sentAnswer()}})
 
 	// Act
-	resp := h.keeper.SendHiddenKeepalives(context.Background())
+	resp := h.keeper.SendBackloggedKeepalives(context.Background())
 
 	// Assert
 	ref := resp.GetSuccess().GetWorkspaces()[0].GetWorkspace()
@@ -96,12 +96,12 @@ func TestSendHiddenKeepalivesNamesEachWorkspaceByItsRef(t *testing.T) {
 	}
 }
 
-func TestSendHiddenKeepalivesAnswersAnEmptyHiddenSection(t *testing.T) {
+func TestSendBackloggedKeepalivesAnswersAnEmptyHiddenSection(t *testing.T) {
 	// Arrange
 	h := newHarness(t, visible())
 
 	// Act
-	resp := h.keeper.SendHiddenKeepalives(context.Background())
+	resp := h.keeper.SendBackloggedKeepalives(context.Background())
 
 	// Assert
 	if resp.GetSuccess() == nil || len(resp.GetSuccess().GetWorkspaces()) != 0 || h.shim.beats != 0 {
@@ -109,7 +109,7 @@ func TestSendHiddenKeepalivesAnswersAnEmptyHiddenSection(t *testing.T) {
 	}
 }
 
-func TestSendHiddenKeepalivesReportsEachOutcome(t *testing.T) {
+func TestSendBackloggedKeepalivesReportsEachOutcome(t *testing.T) {
 	tests := []struct {
 		name    string
 		served  bool
@@ -146,7 +146,7 @@ func TestSendHiddenKeepalivesReportsEachOutcome(t *testing.T) {
 			h := beatHarness(t, []wsm.Workspace{ws}, shims)
 
 			// Act
-			resp := h.keeper.SendHiddenKeepalives(context.Background())
+			resp := h.keeper.SendBackloggedKeepalives(context.Background())
 
 			// Assert
 			if got := outcomesOf(t, resp); len(got) != 1 || got[0] != "a-hidden:"+tt.outcome {
@@ -160,13 +160,13 @@ func TestSendHiddenKeepalivesReportsEachOutcome(t *testing.T) {
 	}
 }
 
-func TestSendHiddenKeepalivesCarriesASubmitFailuresOwnDetail(t *testing.T) {
+func TestSendBackloggedKeepalivesCarriesASubmitFailuresOwnDetail(t *testing.T) {
 	// Arrange
 	ws := workspaceNamed("a-hidden")
 	h := beatHarness(t, []wsm.Workspace{ws}, map[ids.WorkspaceID]*fakeShim{ws.ID: {beatErr: &BeatSubmitFailed{Detail: "stream closed"}}})
 
 	// Act
-	resp := h.keeper.SendHiddenKeepalives(context.Background())
+	resp := h.keeper.SendBackloggedKeepalives(context.Background())
 
 	// Assert
 	if got := resp.GetSuccess().GetWorkspaces()[0].GetFailed().GetDetail(); got != "stream closed" {
@@ -174,7 +174,7 @@ func TestSendHiddenKeepalivesCarriesASubmitFailuresOwnDetail(t *testing.T) {
 	}
 }
 
-func TestSendHiddenKeepalivesRecordsACallTheDaemonsExitCancels(t *testing.T) {
+func TestSendBackloggedKeepalivesRecordsACallTheDaemonsExitCancels(t *testing.T) {
 	// Arrange
 	ws := workspaceNamed("a-hidden")
 	h := beatHarness(t, []wsm.Workspace{ws}, map[ids.WorkspaceID]*fakeShim{ws.ID: {beatErr: context.Canceled}})
@@ -182,7 +182,7 @@ func TestSendHiddenKeepalivesRecordsACallTheDaemonsExitCancels(t *testing.T) {
 	cancel()
 
 	// Act
-	h.keeper.SendHiddenKeepalives(ctx)
+	h.keeper.SendBackloggedKeepalives(ctx)
 
 	// Assert
 	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opBeat}); ok {
@@ -190,13 +190,13 @@ func TestSendHiddenKeepalivesRecordsACallTheDaemonsExitCancels(t *testing.T) {
 	}
 }
 
-func TestSendHiddenKeepalivesSummarizesTheOutcomes(t *testing.T) {
+func TestSendBackloggedKeepalivesSummarizesTheOutcomes(t *testing.T) {
 	// Arrange
 	a, b := workspaceNamed("a-hidden"), workspaceNamed("b-hidden")
 	h := beatHarness(t, []wsm.Workspace{a, b}, map[ids.WorkspaceID]*fakeShim{a.ID: {answer: sentAnswer()}})
 
 	// Act
-	h.keeper.SendHiddenKeepalives(context.Background())
+	h.keeper.SendBackloggedKeepalives(context.Background())
 
 	// Assert
 	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opBeat, Message: "sent the hidden section its keep-alives"})
@@ -205,13 +205,13 @@ func TestSendHiddenKeepalivesSummarizesTheOutcomes(t *testing.T) {
 	}
 }
 
-func TestSendHiddenKeepalivesRefusesARegistryThatCannotBeRead(t *testing.T) {
+func TestSendBackloggedKeepalivesRefusesARegistryThatCannotBeRead(t *testing.T) {
 	// Arrange
 	h := newHarness(t, hidden())
 	h.db.listErr = errors.New("database is locked")
 
 	// Act
-	resp := h.keeper.SendHiddenKeepalives(context.Background())
+	resp := h.keeper.SendBackloggedKeepalives(context.Background())
 
 	// Assert
 	if resp.GetError().GetRegistryUnreadable().GetDetail() != "database is locked" || h.shim.beats != 0 {
@@ -235,7 +235,7 @@ func TestSetBeatOutcomeMapsEverySkipReasonTheShimNames(t *testing.T) {
 			skipped := &shimv1.SendKeepaliveSkipped{}
 			m := skipped.ProtoReflect()
 			m.Set(field, protoreflect.ValueOfMessage(m.NewField(field).Message()))
-			out := &agentreplv1.SendHiddenKeepalivesWorkspace{}
+			out := &agentreplv1.SendBackloggedKeepalivesWorkspace{}
 
 			// Act
 			SetBeatOutcome(out, skippedAnswer(skipped))
@@ -252,26 +252,28 @@ func TestSetBeatOutcomeCarriesEachSkipReasonsFacts(t *testing.T) {
 	tests := []struct {
 		name   string
 		reason *shimv1.SendKeepaliveSkipped
-		check  func(*agentreplv1.SendHiddenKeepalivesSkipped) bool
+		check  func(*agentreplv1.SendBackloggedKeepalivesSkipped) bool
 	}{
 		{name: "busy",
 			reason: &shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_MainAgentBusy{MainAgentBusy: &shimv1.SendKeepaliveSkippedMainAgentBusy{Detail: "a rollback is in progress"}}},
-			check: func(s *agentreplv1.SendHiddenKeepalivesSkipped) bool {
+			check: func(s *agentreplv1.SendBackloggedKeepalivesSkipped) bool {
 				return s.GetBusy().GetDetail() == "a rollback is in progress"
 			}},
 		{name: "detached work live",
 			reason: &shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_DetachedWorkLive{DetachedWorkLive: &shimv1.SendKeepaliveSkippedDetachedWorkLive{LiveItems: 3}}},
-			check: func(s *agentreplv1.SendHiddenKeepalivesSkipped) bool {
+			check: func(s *agentreplv1.SendBackloggedKeepalivesSkipped) bool {
 				return s.GetDetachedWorkLive().GetLiveItems() == 3
 			}},
 		{name: "cache lapsed",
 			reason: &shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_CacheLapsed{CacheLapsed: &shimv1.SendKeepaliveSkippedCacheLapsed{LapsedAtMs: 42}}},
-			check:  func(s *agentreplv1.SendHiddenKeepalivesSkipped) bool { return s.GetCacheLapsed().GetLapsedAtMs() == 42 }},
+			check: func(s *agentreplv1.SendBackloggedKeepalivesSkipped) bool {
+				return s.GetCacheLapsed().GetLapsedAtMs() == 42
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			out := &agentreplv1.SendHiddenKeepalivesWorkspace{}
+			out := &agentreplv1.SendBackloggedKeepalivesWorkspace{}
 
 			// Act
 			SetBeatOutcome(out, skippedAnswer(tt.reason))
@@ -303,7 +305,7 @@ func TestSetBeatOutcomeFailsHardOnAJudgmentItDoesNotName(t *testing.T) {
 			}()
 
 			// Act
-			SetBeatOutcome(&agentreplv1.SendHiddenKeepalivesWorkspace{}, tt.answer)
+			SetBeatOutcome(&agentreplv1.SendBackloggedKeepalivesWorkspace{}, tt.answer)
 		})
 	}
 }

@@ -225,7 +225,7 @@ export interface FocusFoldedSection {
  */
 export const FOCUS_FOLDED_SECTIONS: readonly FocusFoldedSection[] = [
   { className: MERGED_SECTION_CLASS, foldKey: MERGED_FOLD_KEY, target: { case: "recentlyMerged", value: {} } },
-  { className: HIDDEN_SECTION_CLASS, foldKey: HIDDEN_FOLD_KEY, target: { case: "hidden", value: {} } },
+  { className: HIDDEN_SECTION_CLASS, foldKey: HIDDEN_FOLD_KEY, target: { case: "backlog", value: {} } },
 ];
 
 /**

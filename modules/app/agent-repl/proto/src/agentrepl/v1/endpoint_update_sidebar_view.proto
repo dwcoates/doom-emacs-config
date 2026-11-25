@@ -8,9 +8,9 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold, RosterOpenSection.fold.
+//     RosterBacklogSection.fold, RosterOpenSection.fold.
 //   - a band section's height: RosterMergeQueueSection.height,
-//     RosterMergedSection.height, RosterHiddenSection.height.
+//     RosterMergedSection.height, RosterBacklogSection.height.
 //
 // It is DURABLE: it survives a daemon restart.
 //
@@ -77,8 +77,8 @@ message SidebarViewSectionSize {
     SidebarViewMergeQueue merge_queue = 1;
     // The Recently Merged section (frontend.v1.RosterMergedSection).
     SidebarViewRecentlyMerged recently_merged = 2;
-    // The Hidden Workspaces section (frontend.v1.RosterHiddenSection).
-    SidebarViewHidden hidden = 3;
+    // The Backlog section (frontend.v1.RosterBacklogSection).
+    SidebarViewBacklog backlog = 3;
   }
   // WHAT HEIGHT. THE ARM IS THE HEIGHT; unset is malformed.
   oneof height {
@@ -135,10 +135,10 @@ message SidebarViewFoldSection {
     // The Merge Queue section (frontend.v1.RosterMergeQueueSection); the
     // roster carries exactly one.
     SidebarViewMergeQueue merge_queue = 11;
-    // The hidden-workspaces section; the roster carries exactly one. Its
-    // fold hides rows in the sidebar only: a hidden workspace is off the
+    // The backlog; the roster carries exactly one. Its
+    // fold hides rows in the sidebar only: a backlogged workspace is off the
     // Emacs tab bar whether the section is folded or not.
-    SidebarViewHidden hidden = 7;
+    SidebarViewBacklog backlog = 7;
     // The open-workspaces section; the roster carries exactly one. Its fold
     // hides rows in the sidebar only: the Emacs tab bar draws an open
     // workspace whether the section is folded or not.
@@ -172,8 +172,8 @@ message SidebarViewRecentlyMerged {}
 // The Merge Queue section. DELIBERATELY EMPTY: the arm is the section.
 message SidebarViewMergeQueue {}
 
-// The hidden-workspaces section. DELIBERATELY EMPTY: the arm is the section.
-message SidebarViewHidden {}
+// The backlog. DELIBERATELY EMPTY: the arm is the section.
+message SidebarViewBacklog {}
 
 // The open-workspaces section. DELIBERATELY EMPTY: the arm is the section.
 message SidebarViewOpen {}

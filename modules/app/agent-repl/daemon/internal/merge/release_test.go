@@ -336,7 +336,7 @@ func TestAbandonCauseReturnsSession(t *testing.T) {
 		{cause: CauseDaemonShutdown},
 		{cause: CauseAgentGaveUp},
 		{cause: CauseColdGate},
-		{cause: CauseHiddenAtColdGate},
+		{cause: CauseBackloggedAtColdGate},
 		{cause: CauseColdGateAnswerFailed},
 	}
 	for _, tt := range tests {

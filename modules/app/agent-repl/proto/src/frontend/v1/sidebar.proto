@@ -60,7 +60,7 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // streams, each a COMPLETE SNAPSHOT of its own facts that replaces the
 // client's copy whole, never a delta:
 //
-//   workspaces       WorkspaceRoster          open, hidden, threads, selection
+//   workspaces       WorkspaceRoster          open, backlog, threads, selection
 //   merge_queue      RosterMergeQueueSection  every repository's active queue
 //   recently_merged  RosterMergedSection      the merged band's summary only
 //   closed           RosterClosedRows         the closed, never-merged rows
@@ -98,7 +98,7 @@ message RosterPush {
   // a push leaves out was unchanged since the last one sent. It orders what
   // arrives over separate streams; nothing else is read off it.
   uint64 revision = 1;
-  // The WORKSPACES stream's whole snapshot: the open and hidden workspaces,
+  // The WORKSPACES stream's whole snapshot: the open and backlogged workspaces,
   // the chat threads, the selection and the rail's chrome. UNSET when it is
   // unchanged since the last push this subscription was sent.
   optional WorkspaceRoster workspaces = 2;
@@ -115,7 +115,7 @@ message RosterPush {
   optional RosterClosedRows closed = 5;
 }
 
-// The WORKSPACES STREAM's snapshot: the open and hidden workspaces, the chat
+// The WORKSPACES STREAM's snapshot: the open and backlogged workspaces, the chat
 // threads, the selection and the rail's chrome, complete and self-contained.
 //
 // Always whole, never a delta, so a partially-applied roster is
@@ -145,8 +145,8 @@ message WorkspaceRoster {
   reserved 3, 11, 14, 19;
   reserved "recently_merged", "merge_queue", "closed", "revision";
   // THE LISTS ARE THE STATES. Every OPEN workspace is in exactly one of
-  // `repository` (OPEN) and `hidden` (HIDDEN), and each list's row type
-  // (RosterOpenRow, RosterHiddenRow) is that state, so no row also carries a
+  // `repository` (OPEN) and `backlog` (BACKLOGGED), and each list's row type
+  // (RosterOpenRow, RosterBacklogRow) is that state, so no row also carries a
   // state that could disagree with its list. A CLOSED workspace is in the
   // closed stream (RosterPush.closed) and a MERGED one in no stream. OPEN
   // BEATS MERGED: a merged workspace that was reopened is open, and listed
@@ -160,12 +160,12 @@ message WorkspaceRoster {
   // exactly when it has a tab, its repository's fold aside, and tab N is
   // always the row drawn immediately before tab N+1.
   RosterRepositoryView repository = 1;
-  // Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden). A
-  // hidden workspace may keep its session until it is gated, but it has NO
+  // Workspaces the user has backlogged (agentrepl.v1.SetWorkspaceBacklogged). A
+  // backlogged workspace may keep its session until it is gated, but it has NO
   // TAB: the Emacs tab bar never draws, numbers or steps to it. Always set.
-  RosterHiddenSection hidden = 9;
+  RosterBacklogSection backlog = 9;
   // THE OPEN-WORKSPACES SECTION's heading and fold: the box the repository
-  // sections are drawn in, under one "Open" header, above the hidden
+  // sections are drawn in, under one "Open" header, above the backlog
   // section. Its count is RosterRepositoryView.open_count. Always set.
   RosterOpenSection open = 13;
   // `tab_bar` (field 10) is RETIRED and reserved: a second list of the open
@@ -189,7 +189,7 @@ message WorkspaceRoster {
   // THE CHAT APP'S BODY: every chat thread, every open one first and then
   // every archived one, each the one last asked a question first, and the
   // new-thread button. Drawn in place of the open,
-  // hidden and recently-merged sections while Chat is shown. Threads appear
+  // backlog and recently-merged sections while Chat is shown. Threads appear
   // nowhere else in the roster: no repository section, band or tab holds
   // one. Always set, whichever app is shown, because Emacs reads it to pick
   // threads by name.
@@ -488,7 +488,7 @@ message RosterOpenRows {
 // folded, on the Emacs tab bar with the same number. Its children are open
 // rows too, so a family is one run of rows and tabs: a child sits right after
 // its parent, its siblings in their order, and no child can leave its
-// parent's run. A workspace whose parent is not open (a closed or hidden
+// parent's run. A workspace whose parent is not open (a closed or backlogged
 // parent of a family that predates the rule against one) takes its parent's
 // place instead.
 //
@@ -696,20 +696,20 @@ message RosterOpenRowTabNumbered {
 // the fact.
 message RosterOpenRowTabFolded {}
 
-// The top-level hidden rows, in the hidden section's order.
-message RosterHiddenRows {
-  // Each top-level hidden row, carrying its hidden family nested.
-  repeated RosterHiddenRow rows = 1;
+// The top-level backlogged rows, in the backlog's order.
+message RosterBacklogRows {
+  // Each top-level backlogged row, carrying its backlogged family nested.
+  repeated RosterBacklogRow rows = 1;
 }
 
-// ONE HIDDEN WORKSPACE: listed only in the hidden section, with NO TAB. It may
+// ONE BACKLOGGED WORKSPACE: listed only in the backlog, with NO TAB. It may
 // keep its session until it is gated. A workspace with open children cannot
-// be hidden, so a hidden row's children are hidden too.
-message RosterHiddenRow {
+// be backlogged, so a backlogged row's children are backlogged too.
+message RosterBacklogRow {
   // The row as every list draws it.
   RosterRow row = 1;
-  // The workspace's hidden children, in drawn order.
-  repeated RosterHiddenRow children = 2;
+  // The workspace's backlogged children, in drawn order.
+  repeated RosterBacklogRow children = 2;
 }
 
 // ONE PAGE of merged rows, as agentrepl.v1.ListMergedWorkspaces answers it:
@@ -918,7 +918,7 @@ message RosterRowOneShot {
 // section the row's when-column is inked the green the `ready` arm paints the
 // rest of the row (render-colors.json's `roster_status`), at full strength,
 // so a workspace with a pull request awaiting review stands apart. The bands
-// (Recently Merged, Hidden) draw nothing for it.
+// (Recently Merged, Backlog) draw nothing for it.
 message RosterRowOpenOwnedPullRequest {}
 
 // A WORKSPACE'S VISIBILITY: whether the user can see it, which decides every
@@ -926,7 +926,7 @@ message RosterRowOpenOwnedPullRequest {}
 //
 // THE DAEMON DECIDES IT (wsm.Workspace.Visibility), keeps it in its store,
 // and states it on every row; no other layer works it out. A workspace is
-// visible when it is OPEN (the Open section's rows: never a hidden, closed or
+// visible when it is OPEN (the Open section's rows: never a backlogged, closed or
 // hidden merge workspace, nor a thread) and either no fold covers it (a
 // repository section's, a subsection's, or any ancestor's children fold), or
 // it is WORKING (a turn or detached work runs, or it asks the user something),
@@ -970,7 +970,7 @@ message RosterVisibilitySelected {}
 // duration by `window_fill` through the same gradient the topbar's context
 // figure uses, so a long context stands out; below 400,000 tokens the marker
 // is absent and the duration keeps its ordinary ink. The bands (Recently
-// Merged, Hidden) draw nothing for it.
+// Merged, Backlog) draw nothing for it.
 message RosterRowContextHeat {
   // How full the model's context window is, 0..1: exactly
   // frontend.v1.TopbarContextChip.window_fill, the figure the topbar colors.
@@ -1180,7 +1180,7 @@ message RosterRepositoryView {
 }
 
 // The open-workspaces section: the heading over the repository sections,
-// drawn like the hidden and recently-merged sections' (fold toggle and label),
+// drawn like the backlog and recently-merged sections' (fold toggle and label),
 // with RosterRepositoryView.open_count beside the label whether the section
 // is folded or not (owner request, 2026-10-13), drawn
 // "(unfolded/workspaces)" (owner request, 2026-11-19).
@@ -1423,7 +1423,7 @@ message RosterMergeQueueMediation {
     RosterMergeQueueMediationFixing fixing = 4;
     // A remediation's or an escalation's finished fix runs its full gate
     // and then lands (`TESTING ZETTEL FIXES`). The workspace itself stands
-    // by hidden meanwhile: this label is where it is shown.
+    // by in the backlog meanwhile: this label is where it is shown.
     RosterMergeQueueMediationTesting testing = 6;
     // The check was escalated, and the queue waits on the user until the
     // escalation's fix deploys and is approved or the user closes the
@@ -1442,7 +1442,7 @@ message RosterMergeQueueMediationWaiting {
 // ASSESSING ZETTEL HEALTH.
 message RosterMergeQueueMediationChecking {
   // REQUIRED. What a click on the label selects: the deploy mediator,
-  // hidden while it checks, which the selection shows.
+  // backlogged while it checks, which the selection shows.
   RosterMergeQueueMediationTarget target = 1;
 }
 // FIXING ZETTEL.
@@ -1453,7 +1453,7 @@ message RosterMergeQueueMediationFixing {
 // TESTING ZETTEL FIXES.
 message RosterMergeQueueMediationTesting {
   // REQUIRED. What a click on the label selects: the deploy mediator, whose
-  // fix is being tested while it stands by hidden.
+  // fix is being tested while it stands by in the backlog.
   RosterMergeQueueMediationTarget target = 1;
 }
 // ZETTEL NEEDS YOU.
@@ -2107,7 +2107,7 @@ message RosterMergedSection {
   // whose merges are not all loaded, since its rows are paged on demand
   // (agentrepl.v1.ListMergedWorkspaces) and the count is then the only
   // account of the merges not drawn. The section is drawn directly under the
-  // Merge Queue section, above the Hidden section.
+  // Merge Queue section, above the Backlog section.
   RosterSectionHeader header = 1;
   reserved 2;
   reserved "rows";
@@ -2369,68 +2369,68 @@ message RosterMergeQueueRepoGroup {
   RosterRepoMergeQueue queue = 3;
 }
 
-// The hidden-workspaces section: header and rows. It has no key of its own --
+// The backlog: header and rows. It has no key of its own --
 // the roster carries exactly one, so its fold identity is fixed.
 //
 // A SECTION WITH NO ROWS IS NOT DRAWN: the wire always carries it, and the
-// client leaves it out of the rail until a workspace is hidden.
+// client leaves it out of the rail until a workspace is backlogged.
 //
-// Its rows are nested by branch lineage among the hidden workspaces alone,
-// as a repository section's are among its own, so a hidden family keeps its
-// shape. Clicking a row here asks SetWorkspaceHidden to show it again.
-message RosterHiddenSection {
+// Its rows are nested by branch lineage among the backlogged workspaces alone,
+// as a repository section's are among its own, so a backlogged family keeps its
+// shape. Clicking a row here asks SetWorkspaceBacklogged to show it again.
+message RosterBacklogSection {
   // The label and the count a folded section draws beside it.
   RosterSectionHeader header = 1;
   // `rows` (field 2) is RETIRED and reserved, as RosterRepoSection's is.
   reserved 2;
   reserved "rows";
-  // The hidden workspaces, the latest hide first.
-  RosterHiddenRows hidden_rows = 5;
+  // The backlogged workspaces, the latest hide first.
+  RosterBacklogRows backlog_rows = 5;
   // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), so every
-  // page draws the same fold. It folds the SIDEBAR's rows only: a hidden
+  // page draws the same fold. It folds the SIDEBAR's rows only: a backlogged
   // workspace is off the Emacs tab bar whichever arm is set. Never folded or
-  // unfolded by anyone, it is EXPANDED, so a hidden workspace stays in reach
+  // unfolded by anyone, it is EXPANDED, so a backlogged workspace stays in reach
   // of the click that shows it again. Never unset on the wire.
   oneof fold {
-    // The hidden rows are shown in the sidebar.
-    RosterHiddenSectionExpanded expanded = 3;
-    // The hidden rows are folded away; the header and its count stay.
-    RosterHiddenSectionCollapsed collapsed = 4;
+    // The backlogged rows are shown in the sidebar.
+    RosterBacklogSectionExpanded expanded = 3;
+    // The backlogged rows are folded away; the header and its count stay.
+    RosterBacklogSectionCollapsed collapsed = 4;
   }
   // THE SECTION'S HEIGHT. DAEMON-HELD (agentrepl.v1.UpdateSidebarView's
   // size_sections), so every page draws the same sections, set by dragging
   // the rule above or below the section. Never sized by anyone, it is
   // FITTED. Never unset on the wire.
   oneof height {
-    // The page fits the Hidden Workspaces section by its share of the rail (band-fit.ts).
-    RosterHiddenSectionFitted fitted = 6;
-    // The Hidden Workspaces section shows the number of lines the user dragged it to.
-    RosterHiddenSectionSized sized = 7;
+    // The page fits the Backlog section by its share of the rail (band-fit.ts).
+    RosterBacklogSectionFitted fitted = 6;
+    // The Backlog section shows the number of lines the user dragged it to.
+    RosterBacklogSectionSized sized = 7;
   }
 }
 
-// An expanded hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
-message RosterHiddenSectionExpanded {}
+// An expanded backlog. DELIBERATELY EMPTY: the arm is the fact.
+message RosterBacklogSectionExpanded {}
 
-// A collapsed hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
-message RosterHiddenSectionCollapsed {}
+// A collapsed backlog. DELIBERATELY EMPTY: the arm is the fact.
+message RosterBacklogSectionCollapsed {}
 
-// A Hidden Workspaces section the page fits by its share of the rail. DELIBERATELY EMPTY: the
+// A Backlog section the page fits by its share of the rail. DELIBERATELY EMPTY: the
 // arm is the fact.
-message RosterHiddenSectionFitted {}
+message RosterBacklogSectionFitted {}
 
-// A Hidden Workspaces section sized by hand: its viewport shows this many of its first lines
+// A Backlog section sized by hand: its viewport shows this many of its first lines
 // (a row, a folded header, a queue's card), or every line it holds when it
 // holds fewer. A rail too short for every sized section shrinks them, the
 // lowest first, before the Open section shows a line fewer than none.
-message RosterHiddenSectionSized {
+message RosterBacklogSectionSized {
   // How many lines the viewport shows; 0 shows the header alone.
   uint32 lines = 1;
 }
 
 // A section header as the sections outside the Open section draw it (the
 // Backlog, Merge Queue and Recently Merged sections). The fold it toggles is
-// the SECTION's (RosterHiddenSection.fold, RosterMergedSection.fold), never an
+// the SECTION's (RosterBacklogSection.fold, RosterMergedSection.fold), never an
 // element of the header. A header inside the Open section is a
 // RosterOpenHeader.
 message RosterSectionHeader {
@@ -2445,7 +2445,7 @@ message RosterSectionHeader {
 }
 
 // A section's workspace count outside the Open section: the Backlog's is
-// every hidden row, nested family rows included. Drawn smaller than the
+// every backlogged row, nested family rows included. Drawn smaller than the
 // label, in the label's own color.
 message RosterSectionCount {
   uint32 workspaces = 1;
@@ -2461,7 +2461,7 @@ message RosterLabel {
 // One workspace as every list draws it: a row line (status dot, name,
 // when-column, current highlight, receded styling) and its detail panel. Its
 // family and its state are its list's own row type's (RosterOpenRow,
-// RosterHiddenRow, RosterMergedRow).
+// RosterBacklogRow, RosterMergedRow).
 message RosterRow {
   // The workspace this row IS — its identity, and the join key every gesture
   // on the row travels back with. Names collide across repos; dirs do not.
@@ -2611,7 +2611,7 @@ message RosterRow {
   // The row's display name.
   RosterRowName name = 2;
 
-  // The repository the workspace belongs to, on every list's rows: a hidden,
+  // The repository the workspace belongs to, on every list's rows: a backlogged,
   // merged or closed row sits in no repository section, and an open child may
   // be of another repository than the section it is drawn in, so no section
   // can say it. The composer's workspace-name completion draws it beside each
@@ -2789,7 +2789,7 @@ message RosterRow {
     // GREEN, the same coarse claim as the footer's `waiting · cold_gate`. The
     // row's NAME is struck through while it stands, in every sidebar section.
     //
-    // A HIDDEN workspace wears it too once its cache has LAPSED with a gated
+    // A BACKLOGGED workspace wears it too once its cache has LAPSED with a gated
     // verdict (conversation.v1.SessionCacheLapse): its session was stood down
     // at the lapse, and showing it again will raise this gate (2026-10-13).
     RosterRowStatusColdGate cold_gate = 61;
@@ -2811,7 +2811,7 @@ message RosterRow {
   RosterRowCurrent current = 27;
 
   // `children` (field 28) is RETIRED and reserved: a family nests in its
-  // list's own row type (RosterOpenRow.children, RosterHiddenRow.children),
+  // list's own row type (RosterOpenRow.children, RosterBacklogRow.children),
   // so every member of a family is in the same list.
   reserved 28;
   reserved "children";
@@ -2935,7 +2935,7 @@ message RosterRowLastTurnEnded {
 // ENDED. A turn starts after the previous one ended and ends after it started,
 // so that one instant IS the newer of the last start and the last end; the
 // daemon states it so no client re-derives it from the when-column, whose
-// sync-merging and hidden arms mask the running turn.
+// sync-merging and backlogged arms mask the running turn.
 //
 // It is TURN-ACTIVITY RECENCY, and it exists so a client short of room can
 // keep the workspaces whose work most recently moved: the editor's one-line
@@ -3005,7 +3005,7 @@ message RosterRowClosure {
 //   - its creation;
 //   - its latest turn start or turn close (any close kind: a turn resolving);
 //   - its close, kill, hide and merge landing (the durable close record, the
-//     hidden instant, the merge's landing);
+//     backlogged instant, the merge's landing);
 //   - its latest STATUS CHANGE: the instant the row's status arm last moved
 //     (an open, a re-open, a permission ask, a fault), kept durable by the
 //     daemon so it survives a restart of the daemon and of every client.
@@ -3042,8 +3042,8 @@ message RosterRowCurrent {
 
 // The when-column: ONE value, chosen by the daemon. The daemon's precedence
 // is: MERGED wins ("the workspace is done" is the more interesting fact);
-// else HIDDEN (a workspace in the hidden section counts from when it was
-// hidden, owner request 2026-10-13); else, for every row of the open
+// else BACKLOGGED (a workspace in the backlog counts from when it was
+// backlogged, owner request 2026-10-13); else, for every row of the open
 // workspaces section, the WORK CLOCK: SYNC_MERGING while a sync merge stands
 // in the workspace (owner request, 2026-10-14), counting from when the merge
 // joined its repository's queue, and covering the turns the merge itself runs
@@ -3075,30 +3075,30 @@ message RosterRowWhen {
   reserved "last_selected", "active", "created", "turn_ended", "viewed";
   oneof shown {
     RosterRowWhenMerged merged = 2;
-    RosterRowWhenHidden hidden = 7;
+    RosterRowWhenBacklogged backlogged = 7;
     RosterRowWhenTurnRunning turn_running = 8;
     RosterRowWhenNoTurnRunning no_turn_running = 9;
     RosterRowWhenSyncMerging sync_merging = 10;
   }
 }
 
-// When the workspace was moved into the hidden section, in epoch
-// MILLISECONDS. Set for exactly the rows the hidden section draws.
+// When the workspace was moved into the backlog, in epoch
+// MILLISECONDS. Set for exactly the rows the backlog draws.
 //
-// A HIDDEN WORKSPACE'S KEEP-ALIVES ARE HELD, so its prompt cache lapses on its
+// A BACKLOGGED WORKSPACE'S KEEP-ALIVES ARE HELD, so its prompt cache lapses on its
 // own clock (the daemon sends them no more, 2026-10-13). When the daemon knows that
 // moment, `cache` carries it and the column COUNTS DOWN to it ("12m 34s"),
 // reading "cold cache" once it is reached, on a continuous green-to-red
 // gradient: green an hour or more out, the deepest red at the lapse. Unset,
 // the daemon knows no lapse (the session was stood down before it stated one,
 // or never ran), and the column counts up from `at_ms` as before.
-message RosterRowWhenHidden {
+message RosterRowWhenBacklogged {
   int64 at_ms = 1;
-  optional RosterRowWhenHiddenCache cache = 2;
+  optional RosterRowWhenBackloggedCache cache = 2;
 }
 
-// The hidden workspace's prompt cache lapse.
-message RosterRowWhenHiddenCache {
+// The backlogged workspace's prompt cache lapse.
+message RosterRowWhenBackloggedCache {
   // When the cache lapses, in epoch MILLISECONDS. At or before now, the cache
   // is cold.
   int64 lapses_at_ms = 1;

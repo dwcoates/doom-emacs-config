@@ -1364,7 +1364,7 @@ quit survived the section."
 ;;
 ;; THE ONE PLACE A DECODED FIXTURE ROSTER GETS ITS FAMILIES AND ITS TABS.  The
 ;; shared `RosterRow' holds no family: each list wraps it in its own row type
-;; (`RosterOpenRow' with its tab, `RosterHiddenRow', `RosterMergedRow',
+;; (`RosterOpenRow' with its tab, `RosterBacklogRow', `RosterMergedRow',
 ;; `RosterClosedRow') and nests the family there, so a fixture records a
 ;; row's children beside it (`agent-repl-test--with-family') and every suite
 ;; wraps its rows through these.
@@ -1423,7 +1423,7 @@ stamps every push."
                                           (t :not-visible)))))))
 
 (defun agent-repl-test--hidden-rows (rows)
-  "Return fixture ROWS as a decoded `RosterHiddenRows', families nested.
+  "Return fixture ROWS as a decoded `RosterBacklogRows', families nested.
 A hidden row is visible only while it is the selection
 \(`agent-repl-test--stamp-visibility')."
   (cl-labels ((wrap (row) (list :row (agent-repl-test--stamp-visibility row nil)

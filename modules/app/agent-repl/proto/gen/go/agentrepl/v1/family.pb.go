@@ -4,11 +4,11 @@
 // another's branch needs that branch to stay, so a parent, or a workspace
 // another lands into, may not leave the Open section while such a workspace is
 // still open: a workspace with open children
-// cannot be hidden, closed, killed, nuked, or merged by a merge that closes
+// cannot be backlogged, closed, killed, nuked, or merged by a merge that closes
 // it, and a workspace cannot be made, moved or brought back as the open child
-// of a parent that is hidden, closed, or closing (a merge waiting in its
-// repository's queue closes it once it lands). A HIDDEN CHILD COUNTS AS OPEN:
-// hiding keeps its session, so a family is hidden child first. A HIDDEN MERGE
+// of a parent that is backlogged, closed, or closing (a merge waiting in its
+// repository's queue closes it once it lands). A BACKLOGGED CHILD COUNTS AS OPEN:
+// hiding keeps its session, so a family is backlogged child first. A HIDDEN MERGE
 // WORKSPACE (an async merge's, drawn nowhere until it is revealed) is no open
 // child: it is the merge's machinery, not a member of the family.
 
@@ -46,11 +46,11 @@ type WorkspaceHasOpenChildren struct {
 	// close: the requester of a one-shot merge, or the workspace an async
 	// merge's one-shot names.
 	Parent *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=parent,proto3" json:"parent,omitempty"`
-	// Every open child of `parent`, hidden ones included, in the roster's order.
+	// Every open child of `parent`, backlogged ones included, in the roster's order.
 	// Empty only when `landing_into` is not.
 	Children []*v1.WorkspaceRef `protobuf:"bytes,2,rep,name=children,proto3" json:"children,omitempty"`
 	// Every open workspace that is NOT a child of `parent` but whose branch
-	// lands into `parent`'s branch (WorkspaceLandingTarget.workspace), hidden
+	// lands into `parent`'s branch (WorkspaceLandingTarget.workspace), backlogged
 	// ones included, in the roster's order. Empty only when `children` is not.
 	LandingInto   []*v1.WorkspaceRef `protobuf:"bytes,3,rep,name=landing_into,json=landingInto,proto3" json:"landing_into,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -119,7 +119,7 @@ type WorkspaceParentNotOpen struct {
 	//
 	// Types that are valid to be assigned to State:
 	//
-	//	*WorkspaceParentNotOpen_Hidden
+	//	*WorkspaceParentNotOpen_Backlogged
 	//	*WorkspaceParentNotOpen_Closed
 	//	*WorkspaceParentNotOpen_Closing
 	State         isWorkspaceParentNotOpen_State `protobuf_oneof:"state"`
@@ -171,10 +171,10 @@ func (x *WorkspaceParentNotOpen) GetState() isWorkspaceParentNotOpen_State {
 	return nil
 }
 
-func (x *WorkspaceParentNotOpen) GetHidden() *WorkspaceParentNotOpenHidden {
+func (x *WorkspaceParentNotOpen) GetBacklogged() *WorkspaceParentNotOpenBacklogged {
 	if x != nil {
-		if x, ok := x.State.(*WorkspaceParentNotOpen_Hidden); ok {
-			return x.Hidden
+		if x, ok := x.State.(*WorkspaceParentNotOpen_Backlogged); ok {
+			return x.Backlogged
 		}
 	}
 	return nil
@@ -202,9 +202,9 @@ type isWorkspaceParentNotOpen_State interface {
 	isWorkspaceParentNotOpen_State()
 }
 
-type WorkspaceParentNotOpen_Hidden struct {
-	// The parent is hidden.
-	Hidden *WorkspaceParentNotOpenHidden `protobuf:"bytes,2,opt,name=hidden,proto3,oneof"`
+type WorkspaceParentNotOpen_Backlogged struct {
+	// The parent is backlogged.
+	Backlogged *WorkspaceParentNotOpenBacklogged `protobuf:"bytes,2,opt,name=backlogged,proto3,oneof"`
 }
 
 type WorkspaceParentNotOpen_Closed struct {
@@ -220,33 +220,33 @@ type WorkspaceParentNotOpen_Closing struct {
 	Closing *WorkspaceParentNotOpenClosing `protobuf:"bytes,4,opt,name=closing,proto3,oneof"`
 }
 
-func (*WorkspaceParentNotOpen_Hidden) isWorkspaceParentNotOpen_State() {}
+func (*WorkspaceParentNotOpen_Backlogged) isWorkspaceParentNotOpen_State() {}
 
 func (*WorkspaceParentNotOpen_Closed) isWorkspaceParentNotOpen_State() {}
 
 func (*WorkspaceParentNotOpen_Closing) isWorkspaceParentNotOpen_State() {}
 
-// The parent is hidden. DELIBERATELY EMPTY: the arm is the fact.
-type WorkspaceParentNotOpenHidden struct {
+// The parent is backlogged. DELIBERATELY EMPTY: the arm is the fact.
+type WorkspaceParentNotOpenBacklogged struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *WorkspaceParentNotOpenHidden) Reset() {
-	*x = WorkspaceParentNotOpenHidden{}
+func (x *WorkspaceParentNotOpenBacklogged) Reset() {
+	*x = WorkspaceParentNotOpenBacklogged{}
 	mi := &file_agentrepl_v1_family_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *WorkspaceParentNotOpenHidden) String() string {
+func (x *WorkspaceParentNotOpenBacklogged) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*WorkspaceParentNotOpenHidden) ProtoMessage() {}
+func (*WorkspaceParentNotOpenBacklogged) ProtoMessage() {}
 
-func (x *WorkspaceParentNotOpenHidden) ProtoReflect() protoreflect.Message {
+func (x *WorkspaceParentNotOpenBacklogged) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_family_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -258,8 +258,8 @@ func (x *WorkspaceParentNotOpenHidden) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use WorkspaceParentNotOpenHidden.ProtoReflect.Descriptor instead.
-func (*WorkspaceParentNotOpenHidden) Descriptor() ([]byte, []int) {
+// Deprecated: Use WorkspaceParentNotOpenBacklogged.ProtoReflect.Descriptor instead.
+func (*WorkspaceParentNotOpenBacklogged) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_family_proto_rawDescGZIP(), []int{2}
 }
 
@@ -346,14 +346,16 @@ const file_agentrepl_v1_family_proto_rawDesc = "" +
 	"\x18WorkspaceHasOpenChildren\x122\n" +
 	"\x06parent\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06parent\x126\n" +
 	"\bchildren\x18\x02 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildren\x12=\n" +
-	"\flanding_into\x18\x03 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\vlandingInto\"\xaa\x02\n" +
+	"\flanding_into\x18\x03 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\vlandingInto\"\xb6\x02\n" +
 	"\x16WorkspaceParentNotOpen\x122\n" +
-	"\x06parent\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06parent\x12D\n" +
-	"\x06hidden\x18\x02 \x01(\v2*.agentrepl.v1.WorkspaceParentNotOpenHiddenH\x00R\x06hidden\x12D\n" +
+	"\x06parent\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06parent\x12P\n" +
+	"\n" +
+	"backlogged\x18\x02 \x01(\v2..agentrepl.v1.WorkspaceParentNotOpenBackloggedH\x00R\n" +
+	"backlogged\x12D\n" +
 	"\x06closed\x18\x03 \x01(\v2*.agentrepl.v1.WorkspaceParentNotOpenClosedH\x00R\x06closed\x12G\n" +
 	"\aclosing\x18\x04 \x01(\v2+.agentrepl.v1.WorkspaceParentNotOpenClosingH\x00R\aclosingB\a\n" +
-	"\x05state\"\x1e\n" +
-	"\x1cWorkspaceParentNotOpenHidden\"\x1e\n" +
+	"\x05state\"\"\n" +
+	" WorkspaceParentNotOpenBacklogged\"\x1e\n" +
 	"\x1cWorkspaceParentNotOpenClosed\"\x1f\n" +
 	"\x1dWorkspaceParentNotOpenClosingB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -371,19 +373,19 @@ func file_agentrepl_v1_family_proto_rawDescGZIP() []byte {
 
 var file_agentrepl_v1_family_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_agentrepl_v1_family_proto_goTypes = []any{
-	(*WorkspaceHasOpenChildren)(nil),      // 0: agentrepl.v1.WorkspaceHasOpenChildren
-	(*WorkspaceParentNotOpen)(nil),        // 1: agentrepl.v1.WorkspaceParentNotOpen
-	(*WorkspaceParentNotOpenHidden)(nil),  // 2: agentrepl.v1.WorkspaceParentNotOpenHidden
-	(*WorkspaceParentNotOpenClosed)(nil),  // 3: agentrepl.v1.WorkspaceParentNotOpenClosed
-	(*WorkspaceParentNotOpenClosing)(nil), // 4: agentrepl.v1.WorkspaceParentNotOpenClosing
-	(*v1.WorkspaceRef)(nil),               // 5: workspace.v1.WorkspaceRef
+	(*WorkspaceHasOpenChildren)(nil),         // 0: agentrepl.v1.WorkspaceHasOpenChildren
+	(*WorkspaceParentNotOpen)(nil),           // 1: agentrepl.v1.WorkspaceParentNotOpen
+	(*WorkspaceParentNotOpenBacklogged)(nil), // 2: agentrepl.v1.WorkspaceParentNotOpenBacklogged
+	(*WorkspaceParentNotOpenClosed)(nil),     // 3: agentrepl.v1.WorkspaceParentNotOpenClosed
+	(*WorkspaceParentNotOpenClosing)(nil),    // 4: agentrepl.v1.WorkspaceParentNotOpenClosing
+	(*v1.WorkspaceRef)(nil),                  // 5: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_family_proto_depIdxs = []int32{
 	5, // 0: agentrepl.v1.WorkspaceHasOpenChildren.parent:type_name -> workspace.v1.WorkspaceRef
 	5, // 1: agentrepl.v1.WorkspaceHasOpenChildren.children:type_name -> workspace.v1.WorkspaceRef
 	5, // 2: agentrepl.v1.WorkspaceHasOpenChildren.landing_into:type_name -> workspace.v1.WorkspaceRef
 	5, // 3: agentrepl.v1.WorkspaceParentNotOpen.parent:type_name -> workspace.v1.WorkspaceRef
-	2, // 4: agentrepl.v1.WorkspaceParentNotOpen.hidden:type_name -> agentrepl.v1.WorkspaceParentNotOpenHidden
+	2, // 4: agentrepl.v1.WorkspaceParentNotOpen.backlogged:type_name -> agentrepl.v1.WorkspaceParentNotOpenBacklogged
 	3, // 5: agentrepl.v1.WorkspaceParentNotOpen.closed:type_name -> agentrepl.v1.WorkspaceParentNotOpenClosed
 	4, // 6: agentrepl.v1.WorkspaceParentNotOpen.closing:type_name -> agentrepl.v1.WorkspaceParentNotOpenClosing
 	7, // [7:7] is the sub-list for method output_type
@@ -399,7 +401,7 @@ func file_agentrepl_v1_family_proto_init() {
 		return
 	}
 	file_agentrepl_v1_family_proto_msgTypes[1].OneofWrappers = []any{
-		(*WorkspaceParentNotOpen_Hidden)(nil),
+		(*WorkspaceParentNotOpen_Backlogged)(nil),
 		(*WorkspaceParentNotOpen_Closed)(nil),
 		(*WorkspaceParentNotOpen_Closing)(nil),
 	}

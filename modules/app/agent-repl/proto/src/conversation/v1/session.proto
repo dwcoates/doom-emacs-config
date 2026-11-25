@@ -547,7 +547,7 @@ message SessionRollbackFailed {
 // the conversation's last request, at the tier that request bought (the cold
 // gate's own reading). The daemon drives every keep-alive (owner ruling,
 // 2026-10-26; shim.v1.SendKeepalive), so the shim runs no cadence and always
-// states the projection; the daemon keeps it for a hidden or closed
+// states the projection; the daemon keeps it for a backlogged or closed
 // workspace, counts down to it and stands the session down when it comes.
 //
 // PRODUCER OBLIGATIONS: the shim states it at the session's start, whenever

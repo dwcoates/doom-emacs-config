@@ -149,7 +149,7 @@ type Workspace struct {
 	// (see place.go).
 	Priority *Priority
 	// Hidden reports whether the user moved the workspace into the roster's
-	// hidden section (agentrepl.v1.SetWorkspaceHidden): off every grouping and
+	// hidden section (agentrepl.v1.SetWorkspaceBacklogged): off every grouping and
 	// off the editor's tab bar, its session and tab untouched.
 	Hidden bool
 	// ChildrenFolded reports whether the workspace's children are folded: their

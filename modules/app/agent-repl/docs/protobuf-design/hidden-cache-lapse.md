@@ -44,7 +44,7 @@ do them all yourselves").
 
 ### `frontend.v1`
 
-- `RosterRowWhenHidden.cache` (`optional RosterRowWhenHiddenCache{lapses_at_ms}`).
+- `RosterRowWhenBacklogged.cache` (`optional RosterRowWhenBackloggedCache{lapses_at_ms}`).
   - Unset when the daemon knows no lapse, and the column then counts up from
     `at_ms` as before.
 - `RosterRowStatusColdGate`'s comment names the hidden, lapsed, gated case.
@@ -90,7 +90,7 @@ do them all yourselves").
     footer projection, as `inactive` is drawn, because no footer is drawn for
     a hidden workspace.
 - Webapp: `src/sidebar/cache-lapse.ts` and the shared `src/heat.ts` gradient.
-- Emacs: the strict roster decoder accepts `RosterRowWhenHidden.cache`.
+- Emacs: the strict roster decoder accepts `RosterRowWhenBacklogged.cache`.
 
 ## A closed workspace gets one last round, then the same lapse
 

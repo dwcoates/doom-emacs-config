@@ -40,13 +40,13 @@ func mentionRoster(rows []*frontendv1.RosterOpenRow, hidden ...*frontendv1.Roste
 	for _, row := range rows {
 		section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: row}})
 	}
-	var hiddenRows []*frontendv1.RosterHiddenRow
+	var backlogRows []*frontendv1.RosterBacklogRow
 	for _, row := range hidden {
-		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: row.GetRow()})
+		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: row.GetRow()})
 	}
 	return &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section}},
-		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
+		Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: backlogRows}},
 	}
 }
 

@@ -64,10 +64,10 @@ func openedOutcomes(frames []*agentreplv1.OpenTabsResponse) map[string]string {
 // hide moves a workspace into the hidden section.
 func hide(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
-	if _, err := d.Client().SetWorkspaceHidden(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{
-		Workspace: ws, Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}},
+	if _, err := d.Client().SetWorkspaceBacklogged(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
+		Workspace: ws, Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}},
 	})); err != nil {
-		t.Fatalf("SetWorkspaceHidden(hide) = error %v", err)
+		t.Fatalf("SetWorkspaceBacklogged(hide) = error %v", err)
 	}
 }
 
@@ -287,10 +287,10 @@ func openedIndex(frames []*agentreplv1.OpenTabsResponse, ws string) int {
 // show moves a hidden workspace back into its section.
 func show(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
-	if _, err := d.Client().SetWorkspaceHidden(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{
-		Workspace: ws, Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Show{Show: &agentreplv1.SetWorkspaceHiddenShow{}},
+	if _, err := d.Client().SetWorkspaceBacklogged(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
+		Workspace: ws, Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Show{Show: &agentreplv1.SetWorkspaceBackloggedShow{}},
 	})); err != nil {
-		t.Fatalf("SetWorkspaceHidden(show) = error %v", err)
+		t.Fatalf("SetWorkspaceBacklogged(show) = error %v", err)
 	}
 }
 

@@ -25,10 +25,10 @@ import {
   type AnswerColdGateResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
 import {
-  SetWorkspaceHiddenResponseSchema,
-  type SetWorkspaceHiddenRequest,
-  type SetWorkspaceHiddenResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+  SetWorkspaceBackloggedResponseSchema,
+  type SetWorkspaceBackloggedRequest,
+  type SetWorkspaceBackloggedResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import {
   KillWorkspaceResponseSchema,
   type KillWorkspaceRequest,
@@ -62,7 +62,7 @@ export interface AskScript {
   permission?: AnswerPermissionResponse;
   draft?: UpdateQuestionDraftResponse;
   coldGate?: AnswerColdGateResponse;
-  hide?: SetWorkspaceHiddenResponse;
+  hide?: SetWorkspaceBackloggedResponse;
   kill?: KillWorkspaceResponse;
   /** Throw instead of answering, standing in for a call that did not land. */
   fail?: boolean;
@@ -82,7 +82,7 @@ export interface AskCalls {
   permission: AnswerPermissionRequest[];
   draft: UpdateQuestionDraftRequest[];
   coldGate: AnswerColdGateRequest[];
-  hide: SetWorkspaceHiddenRequest[];
+  hide: SetWorkspaceBackloggedRequest[];
   kill: KillWorkspaceRequest[];
 }
 
@@ -120,12 +120,12 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
           create(AnswerColdGateResponseSchema, { result: { case: "success", value: {} } })
         );
       },
-      setWorkspaceHidden: (req) => {
+      setWorkspaceBacklogged: (req) => {
         calls.hide.push(req);
         if (script.fail === true) throw scriptedFailure(script);
         return (
           script.hide ??
-          create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } })
+          create(SetWorkspaceBackloggedResponseSchema, { result: { case: "success", value: {} } })
         );
       },
       killWorkspace: (req) => {

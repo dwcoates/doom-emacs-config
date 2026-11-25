@@ -76,8 +76,8 @@ var offQueueCauses = map[string]func() *agentreplv1.MergeQueueStatusOffQueueCaus
 	string(CauseAheadDidNotLand): func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_AheadDidNotLand{AheadDidNotLand: &agentreplv1.MergeQueueStatusOffQueueCauseAheadDidNotLand{}}}
 	},
-	string(CauseHiddenAtColdGate): func() *agentreplv1.MergeQueueStatusOffQueueCause {
-		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_HiddenAtColdGate{HiddenAtColdGate: &agentreplv1.MergeQueueStatusOffQueueCauseHiddenAtColdGate{}}}
+	string(CauseBackloggedAtColdGate): func() *agentreplv1.MergeQueueStatusOffQueueCause {
+		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_BackloggedAtColdGate{BackloggedAtColdGate: &agentreplv1.MergeQueueStatusOffQueueCauseBackloggedAtColdGate{}}}
 	},
 	string(CauseAgentGaveUp): func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_GaveUp{GaveUp: &agentreplv1.MergeQueueStatusOffQueueCauseGaveUp{}}}

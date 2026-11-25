@@ -18,13 +18,13 @@ func rosterOf(open, hidden []string) *frontendv1.WorkspaceRoster {
 	for _, name := range open {
 		openRows = append(openRows, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: namedRow(name)}}})
 	}
-	var hiddenRows []*frontendv1.RosterHiddenRow
+	var backlogRows []*frontendv1.RosterBacklogRow
 	for _, name := range hidden {
-		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: namedRow(name)})
+		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: namedRow(name)})
 	}
 	return &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{Entries: openRows}}},
-		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
+		Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: backlogRows}},
 	}
 }
 

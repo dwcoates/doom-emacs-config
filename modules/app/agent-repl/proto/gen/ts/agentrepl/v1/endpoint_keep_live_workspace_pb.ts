@@ -655,7 +655,7 @@ export const KeepLiveWorkspaceColdGatedSchema: GenMessage<KeepLiveWorkspaceColdG
 
 /**
  * The cache keeper owes the workspace no keep-alive, so nothing was started
- * or sent: it is hidden and its cache lapses on its own clock, its cache is
+ * or sent: it is backlogged and its cache lapses on its own clock, its cache is
  * known cold, it has no live or parked session, its run is at its break-even,
  * or it is idle past the idle sweep's cutoff.
  *

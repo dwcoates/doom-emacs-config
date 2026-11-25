@@ -66,13 +66,13 @@
                  agent-repl-set-priority
                  agent-repl-hide-workspace
                  agent-repl-show-hidden-workspace
-                 agent-repl-send-hidden-keepalives))
+                 agent-repl-send-backlogged-keepalives))
     (should (commandp cmd))))
 
 (ert-deftest agent-repl-test-keybindings-spc-j-R-sends-the-hidden-keepalives ()
   "`SPC j R' sends a keep-alive to every hidden workspace."
   (should (string-match-p
-           (regexp-quote "\"R\"  #'agent-repl-send-hidden-keepalives")
+           (regexp-quote "\"R\"  #'agent-repl-send-backlogged-keepalives")
            (agent-repl-test-keybindings--source))))
 
 (ert-deftest agent-repl-test-keybindings-spc-j-p-sets-the-priority ()

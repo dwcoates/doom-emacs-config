@@ -486,13 +486,13 @@ func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterCloc
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
 	case rec.HiddenAt != nil:
-		hidden := &frontendv1.RosterRowWhenHidden{AtMs: rec.HiddenAt.UnixMilli()}
+		hidden := &frontendv1.RosterRowWhenBacklogged{AtMs: rec.HiddenAt.UnixMilli()}
 		// THE COLUMN COUNTS DOWN TO THE LAPSE once the daemon knows it
 		// (cachelapse.Keeper), and up from the hide until then.
 		if rec.CacheLapse != nil {
-			hidden.Cache = &frontendv1.RosterRowWhenHiddenCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
+			hidden.Cache = &frontendv1.RosterRowWhenBackloggedCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
 		}
-		out.Shown = &frontendv1.RosterRowWhen_Hidden{Hidden: hidden}
+		out.Shown = &frontendv1.RosterRowWhen_Backlogged{Backlogged: hidden}
 	case mergeStartedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_SyncMerging{
 			SyncMerging: &frontendv1.RosterRowWhenSyncMerging{StartedAtMs: *mergeStartedAt}}

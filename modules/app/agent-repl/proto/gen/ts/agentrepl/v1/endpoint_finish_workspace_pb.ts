@@ -334,7 +334,7 @@ export type FinishWorkspaceError = Message<"agentrepl.v1.FinishWorkspaceError"> 
     case: "versionIncrementUnexpected";
   } | {
     /**
-     * The workspace has open children, hidden ones included. Every open child
+     * The workspace has open children, backlogged ones included. Every open child
      * must be resolved and closed before the workspace that is their parent
      * finishes.
      *

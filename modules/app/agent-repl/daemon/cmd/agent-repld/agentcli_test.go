@@ -154,8 +154,8 @@ func (c *cliClient) GetWorkspaceStatus(_ context.Context, req *connect.Request[a
 		Status: &agentreplv1.WorkspaceStatus{Repository: &workspacev1.RepositoryRef{Id: "repo-1"}}}}}), nil
 }
 
-func (c *cliClient) SetWorkspaceHidden(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceHiddenRequest]) (*connect.Response[agentreplv1.SetWorkspaceHiddenResponse], error) {
-	return connect.NewResponse(&agentreplv1.SetWorkspaceHiddenResponse{}), c.record(req.Msg)
+func (c *cliClient) SetWorkspaceBacklogged(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceBackloggedRequest]) (*connect.Response[agentreplv1.SetWorkspaceBackloggedResponse], error) {
+	return connect.NewResponse(&agentreplv1.SetWorkspaceBackloggedResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) SetWorkspaceParent(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceParentRequest]) (*connect.Response[agentreplv1.SetWorkspaceParentResponse], error) {
@@ -705,7 +705,7 @@ func TestCreateSendsBornHiddenOnlyWhenAsked(t *testing.T) {
 			if code != exitSuccess {
 				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 			}
-			if got := only[*agentreplv1.CreateWorkspaceRequest](t, f).Hidden; (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+			if got := only[*agentreplv1.CreateWorkspaceRequest](t, f).Backlogged; (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
 				t.Fatalf("hidden = %v, want %v", got, tt.want)
 			}
 		})
@@ -1012,7 +1012,7 @@ func TestSetSendsOneCallPerSettingInOrder(t *testing.T) {
 	for _, req := range f.client.requests {
 		kinds = append(kinds, string(req.ProtoReflect().Descriptor().Name()))
 	}
-	want := "SetWorkspaceHiddenRequest SetWorkspaceOneShotRequest SetWorkspaceCorrespondenceRequest"
+	want := "SetWorkspaceBackloggedRequest SetWorkspaceOneShotRequest SetWorkspaceCorrespondenceRequest"
 	if got := strings.Join(kinds, " "); !strings.HasSuffix(got, want) {
 		t.Fatalf("requests = %s, want ...%s", got, want)
 	}
@@ -2049,7 +2049,7 @@ func listedRecords() *agentreplv1.FindWorkspacesResponse {
 					Status:  &agentreplv1.FoundWorkspaceRosterStatus{Arm: "thinking"}}},
 			{Workspace: &workspacev1.WorkspaceRef{Id: "ws-peer", Dir: "/wt/peer"}, Name: "peer",
 				Roster: &agentreplv1.FoundWorkspaceRoster{
-					Section: &agentreplv1.FoundWorkspaceRosterSection{Section: &agentreplv1.FoundWorkspaceRosterSection_Hidden{Hidden: &agentreplv1.FoundWorkspaceRosterSectionHidden{}}},
+					Section: &agentreplv1.FoundWorkspaceRosterSection{Section: &agentreplv1.FoundWorkspaceRosterSection_Backlog{Backlog: &agentreplv1.FoundWorkspaceRosterSectionBacklog{}}},
 					Status:  &agentreplv1.FoundWorkspaceRosterStatus{Arm: "done"}}},
 		}}}}}}
 }
@@ -2135,7 +2135,7 @@ func TestListLinesCarryEveryLegacyFactAndTheSummary(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(f.out.String()), "\n")
 	for i, want := range [][]string{
 		{`"name":"caller"`, `"id":"ws-caller"`, `"dir":"/wt/caller"`, `"arm":"thinking"`, `"section":{"open":{}}`, `"calling":true`, `"summary":"Fix the footer"`},
-		{`"name":"peer"`, `"id":"ws-peer"`, `"dir":"/wt/peer"`, `"arm":"done"`, `"section":{"hidden":{}}`},
+		{`"name":"peer"`, `"id":"ws-peer"`, `"dir":"/wt/peer"`, `"arm":"done"`, `"section":{"backlog":{}}`},
 	} {
 		for _, fact := range want {
 			if !strings.Contains(lines[i], fact) {

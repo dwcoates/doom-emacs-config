@@ -378,7 +378,7 @@ func StatusWords(status *agentreplv1.WorkspaceStatus) string {
 	} else {
 		b.WriteString("open, " + activityWords(status.GetStanding().GetOpen().GetActivity()))
 	}
-	if status.GetHidden() {
+	if status.GetBacklogged() {
 		b.WriteString(", hidden")
 	}
 	b.WriteString(".")

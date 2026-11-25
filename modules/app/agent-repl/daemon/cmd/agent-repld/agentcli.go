@@ -930,7 +930,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 		req.SlackOrigin.Subscribe = subscribe
 	}
 	if *hidden {
-		req.Hidden = hidden
+		req.Backlogged = hidden
 	}
 	req.Placement = placed
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
@@ -1181,17 +1181,17 @@ func workspaceSet(c *cliCall, args []string) int {
 	switch {
 	case *hidden:
 		calls = append(calls, func() int {
-			resp, err := c.client.SetWorkspaceHidden(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref,
-				Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}}}))
-			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceHiddenResponse) (string, error) {
+			resp, err := c.client.SetWorkspaceBacklogged(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref,
+				Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}}}))
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceBackloggedResponse) (string, error) {
 				return describeHiddenRefusal(named, msg.GetError())
 			})
 		})
 	case *shown:
 		calls = append(calls, func() int {
-			resp, err := c.client.SetWorkspaceHidden(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref,
-				Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Show{Show: &agentreplv1.SetWorkspaceHiddenShow{}}}))
-			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceHiddenResponse) (string, error) {
+			resp, err := c.client.SetWorkspaceBacklogged(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref,
+				Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Show{Show: &agentreplv1.SetWorkspaceBackloggedShow{}}}))
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceBackloggedResponse) (string, error) {
 				return describeHiddenRefusal(named, msg.GetError())
 			})
 		})

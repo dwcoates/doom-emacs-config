@@ -96,7 +96,7 @@ type RosterPush struct {
 	// a push leaves out was unchanged since the last one sent. It orders what
 	// arrives over separate streams; nothing else is read off it.
 	Revision uint64 `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
-	// The WORKSPACES stream's whole snapshot: the open and hidden workspaces,
+	// The WORKSPACES stream's whole snapshot: the open and backlogged workspaces,
 	// the chat threads, the selection and the rail's chrome. UNSET when it is
 	// unchanged since the last push this subscription was sent.
 	Workspaces *WorkspaceRoster `protobuf:"bytes,2,opt,name=workspaces,proto3,oneof" json:"workspaces,omitempty"`
@@ -180,7 +180,7 @@ func (x *RosterPush) GetClosed() *RosterClosedRows {
 	return nil
 }
 
-// The WORKSPACES STREAM's snapshot: the open and hidden workspaces, the chat
+// The WORKSPACES STREAM's snapshot: the open and backlogged workspaces, the chat
 // threads, the selection and the rail's chrome, complete and self-contained.
 //
 // Always whole, never a delta, so a partially-applied roster is
@@ -196,8 +196,8 @@ func (x *RosterPush) GetClosed() *RosterClosedRows {
 type WorkspaceRoster struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// THE LISTS ARE THE STATES. Every OPEN workspace is in exactly one of
-	// `repository` (OPEN) and `hidden` (HIDDEN), and each list's row type
-	// (RosterOpenRow, RosterHiddenRow) is that state, so no row also carries a
+	// `repository` (OPEN) and `backlog` (BACKLOGGED), and each list's row type
+	// (RosterOpenRow, RosterBacklogRow) is that state, so no row also carries a
 	// state that could disagree with its list. A CLOSED workspace is in the
 	// closed stream (RosterPush.closed) and a MERGED one in no stream. OPEN
 	// BEATS MERGED: a merged workspace that was reopened is open, and listed
@@ -211,12 +211,12 @@ type WorkspaceRoster struct {
 	// exactly when it has a tab, its repository's fold aside, and tab N is
 	// always the row drawn immediately before tab N+1.
 	Repository *RosterRepositoryView `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
-	// Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden). A
-	// hidden workspace may keep its session until it is gated, but it has NO
+	// Workspaces the user has backlogged (agentrepl.v1.SetWorkspaceBacklogged). A
+	// backlogged workspace may keep its session until it is gated, but it has NO
 	// TAB: the Emacs tab bar never draws, numbers or steps to it. Always set.
-	Hidden *RosterHiddenSection `protobuf:"bytes,9,opt,name=hidden,proto3" json:"hidden,omitempty"`
+	Backlog *RosterBacklogSection `protobuf:"bytes,9,opt,name=backlog,proto3" json:"backlog,omitempty"`
 	// THE OPEN-WORKSPACES SECTION's heading and fold: the box the repository
-	// sections are drawn in, under one "Open" header, above the hidden
+	// sections are drawn in, under one "Open" header, above the backlog
 	// section. Its count is RosterRepositoryView.open_count. Always set.
 	Open *RosterOpenSection `protobuf:"bytes,13,opt,name=open,proto3" json:"open,omitempty"`
 	// The selected workspace — the last SelectWorkspace the daemon received.
@@ -234,7 +234,7 @@ type WorkspaceRoster struct {
 	// THE CHAT APP'S BODY: every chat thread, every open one first and then
 	// every archived one, each the one last asked a question first, and the
 	// new-thread button. Drawn in place of the open,
-	// hidden and recently-merged sections while Chat is shown. Threads appear
+	// backlog and recently-merged sections while Chat is shown. Threads appear
 	// nowhere else in the roster: no repository section, band or tab holds
 	// one. Always set, whichever app is shown, because Emacs reads it to pick
 	// threads by name.
@@ -286,9 +286,9 @@ func (x *WorkspaceRoster) GetRepository() *RosterRepositoryView {
 	return nil
 }
 
-func (x *WorkspaceRoster) GetHidden() *RosterHiddenSection {
+func (x *WorkspaceRoster) GetBacklog() *RosterBacklogSection {
 	if x != nil {
-		return x.Hidden
+		return x.Backlog
 	}
 	return nil
 }
@@ -2199,7 +2199,7 @@ func (x *RosterOpenRows) GetRows() []*RosterOpenRow {
 // folded, on the Emacs tab bar with the same number. Its children are open
 // rows too, so a family is one run of rows and tabs: a child sits right after
 // its parent, its siblings in their order, and no child can leave its
-// parent's run. A workspace whose parent is not open (a closed or hidden
+// parent's run. A workspace whose parent is not open (a closed or backlogged
 // parent of a family that predates the rule against one) takes its parent's
 // place instead.
 //
@@ -3334,29 +3334,29 @@ func (*RosterOpenRowTabFolded) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{52}
 }
 
-// The top-level hidden rows, in the hidden section's order.
-type RosterHiddenRows struct {
+// The top-level backlogged rows, in the backlog's order.
+type RosterBacklogRows struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Each top-level hidden row, carrying its hidden family nested.
-	Rows          []*RosterHiddenRow `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
+	// Each top-level backlogged row, carrying its backlogged family nested.
+	Rows          []*RosterBacklogRow `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterHiddenRows) Reset() {
-	*x = RosterHiddenRows{}
+func (x *RosterBacklogRows) Reset() {
+	*x = RosterBacklogRows{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterHiddenRows) String() string {
+func (x *RosterBacklogRows) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterHiddenRows) ProtoMessage() {}
+func (*RosterBacklogRows) ProtoMessage() {}
 
-func (x *RosterHiddenRows) ProtoReflect() protoreflect.Message {
+func (x *RosterBacklogRows) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3368,45 +3368,45 @@ func (x *RosterHiddenRows) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterHiddenRows.ProtoReflect.Descriptor instead.
-func (*RosterHiddenRows) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterBacklogRows.ProtoReflect.Descriptor instead.
+func (*RosterBacklogRows) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{53}
 }
 
-func (x *RosterHiddenRows) GetRows() []*RosterHiddenRow {
+func (x *RosterBacklogRows) GetRows() []*RosterBacklogRow {
 	if x != nil {
 		return x.Rows
 	}
 	return nil
 }
 
-// ONE HIDDEN WORKSPACE: listed only in the hidden section, with NO TAB. It may
+// ONE BACKLOGGED WORKSPACE: listed only in the backlog, with NO TAB. It may
 // keep its session until it is gated. A workspace with open children cannot
-// be hidden, so a hidden row's children are hidden too.
-type RosterHiddenRow struct {
+// be backlogged, so a backlogged row's children are backlogged too.
+type RosterBacklogRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The row as every list draws it.
 	Row *RosterRow `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
-	// The workspace's hidden children, in drawn order.
-	Children      []*RosterHiddenRow `protobuf:"bytes,2,rep,name=children,proto3" json:"children,omitempty"`
+	// The workspace's backlogged children, in drawn order.
+	Children      []*RosterBacklogRow `protobuf:"bytes,2,rep,name=children,proto3" json:"children,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterHiddenRow) Reset() {
-	*x = RosterHiddenRow{}
+func (x *RosterBacklogRow) Reset() {
+	*x = RosterBacklogRow{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterHiddenRow) String() string {
+func (x *RosterBacklogRow) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterHiddenRow) ProtoMessage() {}
+func (*RosterBacklogRow) ProtoMessage() {}
 
-func (x *RosterHiddenRow) ProtoReflect() protoreflect.Message {
+func (x *RosterBacklogRow) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3418,19 +3418,19 @@ func (x *RosterHiddenRow) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterHiddenRow.ProtoReflect.Descriptor instead.
-func (*RosterHiddenRow) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterBacklogRow.ProtoReflect.Descriptor instead.
+func (*RosterBacklogRow) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{54}
 }
 
-func (x *RosterHiddenRow) GetRow() *RosterRow {
+func (x *RosterBacklogRow) GetRow() *RosterRow {
 	if x != nil {
 		return x.Row
 	}
 	return nil
 }
 
-func (x *RosterHiddenRow) GetChildren() []*RosterHiddenRow {
+func (x *RosterBacklogRow) GetChildren() []*RosterBacklogRow {
 	if x != nil {
 		return x.Children
 	}
@@ -4205,7 +4205,7 @@ func (*RosterRowOneShot) Descriptor() ([]byte, []int) {
 // section the row's when-column is inked the green the `ready` arm paints the
 // rest of the row (render-colors.json's `roster_status`), at full strength,
 // so a workspace with a pull request awaiting review stands apart. The bands
-// (Recently Merged, Hidden) draw nothing for it.
+// (Recently Merged, Backlog) draw nothing for it.
 type RosterRowOpenOwnedPullRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -4247,7 +4247,7 @@ func (*RosterRowOpenOwnedPullRequest) Descriptor() ([]byte, []int) {
 //
 // THE DAEMON DECIDES IT (wsm.Workspace.Visibility), keeps it in its store,
 // and states it on every row; no other layer works it out. A workspace is
-// visible when it is OPEN (the Open section's rows: never a hidden, closed or
+// visible when it is OPEN (the Open section's rows: never a backlogged, closed or
 // hidden merge workspace, nor a thread) and either no fold covers it (a
 // repository section's, a subsection's, or any ancestor's children fold), or
 // it is WORKING (a turn or detached work runs, or it asks the user something),
@@ -4484,7 +4484,7 @@ func (*RosterVisibilitySelected) Descriptor() ([]byte, []int) {
 // duration by `window_fill` through the same gradient the topbar's context
 // figure uses, so a long context stands out; below 400,000 tokens the marker
 // is absent and the duration keeps its ordinary ink. The bands (Recently
-// Merged, Hidden) draw nothing for it.
+// Merged, Backlog) draw nothing for it.
 type RosterRowContextHeat struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// How full the model's context window is, 0..1: exactly
@@ -5170,7 +5170,7 @@ func (x *RosterRepositoryView) GetOpenCount() *RosterOpenCount {
 }
 
 // The open-workspaces section: the heading over the repository sections,
-// drawn like the hidden and recently-merged sections' (fold toggle and label),
+// drawn like the backlog and recently-merged sections' (fold toggle and label),
 // with RosterRepositoryView.open_count beside the label whether the section
 // is folded or not (owner request, 2026-10-13), drawn
 // "(unfolded/workspaces)" (owner request, 2026-11-19).
@@ -5926,7 +5926,7 @@ type RosterMergeQueueMediation_Fixing struct {
 type RosterMergeQueueMediation_Testing struct {
 	// A remediation's or an escalation's finished fix runs its full gate
 	// and then lands (`TESTING ZETTEL FIXES`). The workspace itself stands
-	// by hidden meanwhile: this label is where it is shown.
+	// by in the backlog meanwhile: this label is where it is shown.
 	Testing *RosterMergeQueueMediationTesting `protobuf:"bytes,6,opt,name=testing,proto3,oneof"`
 }
 
@@ -6000,7 +6000,7 @@ func (x *RosterMergeQueueMediationWaiting) GetTarget() *RosterMergeQueueMediatio
 type RosterMergeQueueMediationChecking struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. What a click on the label selects: the deploy mediator,
-	// hidden while it checks, which the selection shows.
+	// backlogged while it checks, which the selection shows.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6093,7 +6093,7 @@ func (x *RosterMergeQueueMediationFixing) GetTarget() *RosterMergeQueueMediation
 type RosterMergeQueueMediationTesting struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. What a click on the label selects: the deploy mediator, whose
-	// fix is being tested while it stands by hidden.
+	// fix is being tested while it stands by in the backlog.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -9409,7 +9409,7 @@ type RosterMergedSection struct {
 	// whose merges are not all loaded, since its rows are paged on demand
 	// (agentrepl.v1.ListMergedWorkspaces) and the count is then the only
 	// account of the merges not drawn. The section is drawn directly under the
-	// Merge Queue section, above the Hidden section.
+	// Merge Queue section, above the Backlog section.
 	Header *RosterSectionHeader `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
 	// One group per repository that has at least one merged workspace, in the
 	// repository sections' order (by repository name, then id). A repository
@@ -10563,32 +10563,32 @@ func (x *RosterMergeQueueRepoGroup) GetQueue() *RosterRepoMergeQueue {
 	return nil
 }
 
-// The hidden-workspaces section: header and rows. It has no key of its own --
+// The backlog: header and rows. It has no key of its own --
 // the roster carries exactly one, so its fold identity is fixed.
 //
 // A SECTION WITH NO ROWS IS NOT DRAWN: the wire always carries it, and the
-// client leaves it out of the rail until a workspace is hidden.
+// client leaves it out of the rail until a workspace is backlogged.
 //
-// Its rows are nested by branch lineage among the hidden workspaces alone,
-// as a repository section's are among its own, so a hidden family keeps its
-// shape. Clicking a row here asks SetWorkspaceHidden to show it again.
-type RosterHiddenSection struct {
+// Its rows are nested by branch lineage among the backlogged workspaces alone,
+// as a repository section's are among its own, so a backlogged family keeps its
+// shape. Clicking a row here asks SetWorkspaceBacklogged to show it again.
+type RosterBacklogSection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The label and the count a folded section draws beside it.
 	Header *RosterSectionHeader `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
-	// The hidden workspaces, the latest hide first.
-	HiddenRows *RosterHiddenRows `protobuf:"bytes,5,opt,name=hidden_rows,json=hiddenRows,proto3" json:"hidden_rows,omitempty"`
+	// The backlogged workspaces, the latest hide first.
+	BacklogRows *RosterBacklogRows `protobuf:"bytes,5,opt,name=backlog_rows,json=backlogRows,proto3" json:"backlog_rows,omitempty"`
 	// WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), so every
-	// page draws the same fold. It folds the SIDEBAR's rows only: a hidden
+	// page draws the same fold. It folds the SIDEBAR's rows only: a backlogged
 	// workspace is off the Emacs tab bar whichever arm is set. Never folded or
-	// unfolded by anyone, it is EXPANDED, so a hidden workspace stays in reach
+	// unfolded by anyone, it is EXPANDED, so a backlogged workspace stays in reach
 	// of the click that shows it again. Never unset on the wire.
 	//
 	// Types that are valid to be assigned to Fold:
 	//
-	//	*RosterHiddenSection_Expanded
-	//	*RosterHiddenSection_Collapsed
-	Fold isRosterHiddenSection_Fold `protobuf_oneof:"fold"`
+	//	*RosterBacklogSection_Expanded
+	//	*RosterBacklogSection_Collapsed
+	Fold isRosterBacklogSection_Fold `protobuf_oneof:"fold"`
 	// THE SECTION'S HEIGHT. DAEMON-HELD (agentrepl.v1.UpdateSidebarView's
 	// size_sections), so every page draws the same sections, set by dragging
 	// the rule above or below the section. Never sized by anyone, it is
@@ -10596,27 +10596,27 @@ type RosterHiddenSection struct {
 	//
 	// Types that are valid to be assigned to Height:
 	//
-	//	*RosterHiddenSection_Fitted
-	//	*RosterHiddenSection_Sized
-	Height        isRosterHiddenSection_Height `protobuf_oneof:"height"`
+	//	*RosterBacklogSection_Fitted
+	//	*RosterBacklogSection_Sized
+	Height        isRosterBacklogSection_Height `protobuf_oneof:"height"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterHiddenSection) Reset() {
-	*x = RosterHiddenSection{}
+func (x *RosterBacklogSection) Reset() {
+	*x = RosterBacklogSection{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[166]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterHiddenSection) String() string {
+func (x *RosterBacklogSection) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterHiddenSection) ProtoMessage() {}
+func (*RosterBacklogSection) ProtoMessage() {}
 
-func (x *RosterHiddenSection) ProtoReflect() protoreflect.Message {
+func (x *RosterBacklogSection) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[166]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -10628,132 +10628,132 @@ func (x *RosterHiddenSection) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterHiddenSection.ProtoReflect.Descriptor instead.
-func (*RosterHiddenSection) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterBacklogSection.ProtoReflect.Descriptor instead.
+func (*RosterBacklogSection) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{166}
 }
 
-func (x *RosterHiddenSection) GetHeader() *RosterSectionHeader {
+func (x *RosterBacklogSection) GetHeader() *RosterSectionHeader {
 	if x != nil {
 		return x.Header
 	}
 	return nil
 }
 
-func (x *RosterHiddenSection) GetHiddenRows() *RosterHiddenRows {
+func (x *RosterBacklogSection) GetBacklogRows() *RosterBacklogRows {
 	if x != nil {
-		return x.HiddenRows
+		return x.BacklogRows
 	}
 	return nil
 }
 
-func (x *RosterHiddenSection) GetFold() isRosterHiddenSection_Fold {
+func (x *RosterBacklogSection) GetFold() isRosterBacklogSection_Fold {
 	if x != nil {
 		return x.Fold
 	}
 	return nil
 }
 
-func (x *RosterHiddenSection) GetExpanded() *RosterHiddenSectionExpanded {
+func (x *RosterBacklogSection) GetExpanded() *RosterBacklogSectionExpanded {
 	if x != nil {
-		if x, ok := x.Fold.(*RosterHiddenSection_Expanded); ok {
+		if x, ok := x.Fold.(*RosterBacklogSection_Expanded); ok {
 			return x.Expanded
 		}
 	}
 	return nil
 }
 
-func (x *RosterHiddenSection) GetCollapsed() *RosterHiddenSectionCollapsed {
+func (x *RosterBacklogSection) GetCollapsed() *RosterBacklogSectionCollapsed {
 	if x != nil {
-		if x, ok := x.Fold.(*RosterHiddenSection_Collapsed); ok {
+		if x, ok := x.Fold.(*RosterBacklogSection_Collapsed); ok {
 			return x.Collapsed
 		}
 	}
 	return nil
 }
 
-func (x *RosterHiddenSection) GetHeight() isRosterHiddenSection_Height {
+func (x *RosterBacklogSection) GetHeight() isRosterBacklogSection_Height {
 	if x != nil {
 		return x.Height
 	}
 	return nil
 }
 
-func (x *RosterHiddenSection) GetFitted() *RosterHiddenSectionFitted {
+func (x *RosterBacklogSection) GetFitted() *RosterBacklogSectionFitted {
 	if x != nil {
-		if x, ok := x.Height.(*RosterHiddenSection_Fitted); ok {
+		if x, ok := x.Height.(*RosterBacklogSection_Fitted); ok {
 			return x.Fitted
 		}
 	}
 	return nil
 }
 
-func (x *RosterHiddenSection) GetSized() *RosterHiddenSectionSized {
+func (x *RosterBacklogSection) GetSized() *RosterBacklogSectionSized {
 	if x != nil {
-		if x, ok := x.Height.(*RosterHiddenSection_Sized); ok {
+		if x, ok := x.Height.(*RosterBacklogSection_Sized); ok {
 			return x.Sized
 		}
 	}
 	return nil
 }
 
-type isRosterHiddenSection_Fold interface {
-	isRosterHiddenSection_Fold()
+type isRosterBacklogSection_Fold interface {
+	isRosterBacklogSection_Fold()
 }
 
-type RosterHiddenSection_Expanded struct {
-	// The hidden rows are shown in the sidebar.
-	Expanded *RosterHiddenSectionExpanded `protobuf:"bytes,3,opt,name=expanded,proto3,oneof"`
+type RosterBacklogSection_Expanded struct {
+	// The backlogged rows are shown in the sidebar.
+	Expanded *RosterBacklogSectionExpanded `protobuf:"bytes,3,opt,name=expanded,proto3,oneof"`
 }
 
-type RosterHiddenSection_Collapsed struct {
-	// The hidden rows are folded away; the header and its count stay.
-	Collapsed *RosterHiddenSectionCollapsed `protobuf:"bytes,4,opt,name=collapsed,proto3,oneof"`
+type RosterBacklogSection_Collapsed struct {
+	// The backlogged rows are folded away; the header and its count stay.
+	Collapsed *RosterBacklogSectionCollapsed `protobuf:"bytes,4,opt,name=collapsed,proto3,oneof"`
 }
 
-func (*RosterHiddenSection_Expanded) isRosterHiddenSection_Fold() {}
+func (*RosterBacklogSection_Expanded) isRosterBacklogSection_Fold() {}
 
-func (*RosterHiddenSection_Collapsed) isRosterHiddenSection_Fold() {}
+func (*RosterBacklogSection_Collapsed) isRosterBacklogSection_Fold() {}
 
-type isRosterHiddenSection_Height interface {
-	isRosterHiddenSection_Height()
+type isRosterBacklogSection_Height interface {
+	isRosterBacklogSection_Height()
 }
 
-type RosterHiddenSection_Fitted struct {
-	// The page fits the Hidden Workspaces section by its share of the rail (band-fit.ts).
-	Fitted *RosterHiddenSectionFitted `protobuf:"bytes,6,opt,name=fitted,proto3,oneof"`
+type RosterBacklogSection_Fitted struct {
+	// The page fits the Backlog section by its share of the rail (band-fit.ts).
+	Fitted *RosterBacklogSectionFitted `protobuf:"bytes,6,opt,name=fitted,proto3,oneof"`
 }
 
-type RosterHiddenSection_Sized struct {
-	// The Hidden Workspaces section shows the number of lines the user dragged it to.
-	Sized *RosterHiddenSectionSized `protobuf:"bytes,7,opt,name=sized,proto3,oneof"`
+type RosterBacklogSection_Sized struct {
+	// The Backlog section shows the number of lines the user dragged it to.
+	Sized *RosterBacklogSectionSized `protobuf:"bytes,7,opt,name=sized,proto3,oneof"`
 }
 
-func (*RosterHiddenSection_Fitted) isRosterHiddenSection_Height() {}
+func (*RosterBacklogSection_Fitted) isRosterBacklogSection_Height() {}
 
-func (*RosterHiddenSection_Sized) isRosterHiddenSection_Height() {}
+func (*RosterBacklogSection_Sized) isRosterBacklogSection_Height() {}
 
-// An expanded hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
-type RosterHiddenSectionExpanded struct {
+// An expanded backlog. DELIBERATELY EMPTY: the arm is the fact.
+type RosterBacklogSectionExpanded struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterHiddenSectionExpanded) Reset() {
-	*x = RosterHiddenSectionExpanded{}
+func (x *RosterBacklogSectionExpanded) Reset() {
+	*x = RosterBacklogSectionExpanded{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[167]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterHiddenSectionExpanded) String() string {
+func (x *RosterBacklogSectionExpanded) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterHiddenSectionExpanded) ProtoMessage() {}
+func (*RosterBacklogSectionExpanded) ProtoMessage() {}
 
-func (x *RosterHiddenSectionExpanded) ProtoReflect() protoreflect.Message {
+func (x *RosterBacklogSectionExpanded) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[167]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -10765,32 +10765,32 @@ func (x *RosterHiddenSectionExpanded) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterHiddenSectionExpanded.ProtoReflect.Descriptor instead.
-func (*RosterHiddenSectionExpanded) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterBacklogSectionExpanded.ProtoReflect.Descriptor instead.
+func (*RosterBacklogSectionExpanded) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{167}
 }
 
-// A collapsed hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
-type RosterHiddenSectionCollapsed struct {
+// A collapsed backlog. DELIBERATELY EMPTY: the arm is the fact.
+type RosterBacklogSectionCollapsed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterHiddenSectionCollapsed) Reset() {
-	*x = RosterHiddenSectionCollapsed{}
+func (x *RosterBacklogSectionCollapsed) Reset() {
+	*x = RosterBacklogSectionCollapsed{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[168]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterHiddenSectionCollapsed) String() string {
+func (x *RosterBacklogSectionCollapsed) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterHiddenSectionCollapsed) ProtoMessage() {}
+func (*RosterBacklogSectionCollapsed) ProtoMessage() {}
 
-func (x *RosterHiddenSectionCollapsed) ProtoReflect() protoreflect.Message {
+func (x *RosterBacklogSectionCollapsed) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[168]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -10802,33 +10802,33 @@ func (x *RosterHiddenSectionCollapsed) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterHiddenSectionCollapsed.ProtoReflect.Descriptor instead.
-func (*RosterHiddenSectionCollapsed) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterBacklogSectionCollapsed.ProtoReflect.Descriptor instead.
+func (*RosterBacklogSectionCollapsed) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{168}
 }
 
-// A Hidden Workspaces section the page fits by its share of the rail. DELIBERATELY EMPTY: the
+// A Backlog section the page fits by its share of the rail. DELIBERATELY EMPTY: the
 // arm is the fact.
-type RosterHiddenSectionFitted struct {
+type RosterBacklogSectionFitted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterHiddenSectionFitted) Reset() {
-	*x = RosterHiddenSectionFitted{}
+func (x *RosterBacklogSectionFitted) Reset() {
+	*x = RosterBacklogSectionFitted{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[169]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterHiddenSectionFitted) String() string {
+func (x *RosterBacklogSectionFitted) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterHiddenSectionFitted) ProtoMessage() {}
+func (*RosterBacklogSectionFitted) ProtoMessage() {}
 
-func (x *RosterHiddenSectionFitted) ProtoReflect() protoreflect.Message {
+func (x *RosterBacklogSectionFitted) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[169]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -10840,16 +10840,16 @@ func (x *RosterHiddenSectionFitted) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterHiddenSectionFitted.ProtoReflect.Descriptor instead.
-func (*RosterHiddenSectionFitted) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterBacklogSectionFitted.ProtoReflect.Descriptor instead.
+func (*RosterBacklogSectionFitted) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{169}
 }
 
-// A Hidden Workspaces section sized by hand: its viewport shows this many of its first lines
+// A Backlog section sized by hand: its viewport shows this many of its first lines
 // (a row, a folded header, a queue's card), or every line it holds when it
 // holds fewer. A rail too short for every sized section shrinks them, the
 // lowest first, before the Open section shows a line fewer than none.
-type RosterHiddenSectionSized struct {
+type RosterBacklogSectionSized struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// How many lines the viewport shows; 0 shows the header alone.
 	Lines         uint32 `protobuf:"varint,1,opt,name=lines,proto3" json:"lines,omitempty"`
@@ -10857,20 +10857,20 @@ type RosterHiddenSectionSized struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterHiddenSectionSized) Reset() {
-	*x = RosterHiddenSectionSized{}
+func (x *RosterBacklogSectionSized) Reset() {
+	*x = RosterBacklogSectionSized{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[170]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterHiddenSectionSized) String() string {
+func (x *RosterBacklogSectionSized) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterHiddenSectionSized) ProtoMessage() {}
+func (*RosterBacklogSectionSized) ProtoMessage() {}
 
-func (x *RosterHiddenSectionSized) ProtoReflect() protoreflect.Message {
+func (x *RosterBacklogSectionSized) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[170]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -10882,12 +10882,12 @@ func (x *RosterHiddenSectionSized) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterHiddenSectionSized.ProtoReflect.Descriptor instead.
-func (*RosterHiddenSectionSized) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterBacklogSectionSized.ProtoReflect.Descriptor instead.
+func (*RosterBacklogSectionSized) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{170}
 }
 
-func (x *RosterHiddenSectionSized) GetLines() uint32 {
+func (x *RosterBacklogSectionSized) GetLines() uint32 {
 	if x != nil {
 		return x.Lines
 	}
@@ -10896,7 +10896,7 @@ func (x *RosterHiddenSectionSized) GetLines() uint32 {
 
 // A section header as the sections outside the Open section draw it (the
 // Backlog, Merge Queue and Recently Merged sections). The fold it toggles is
-// the SECTION's (RosterHiddenSection.fold, RosterMergedSection.fold), never an
+// the SECTION's (RosterBacklogSection.fold, RosterMergedSection.fold), never an
 // element of the header. A header inside the Open section is a
 // RosterOpenHeader.
 type RosterSectionHeader struct {
@@ -10958,7 +10958,7 @@ func (x *RosterSectionHeader) GetCount() *RosterSectionCount {
 }
 
 // A section's workspace count outside the Open section: the Backlog's is
-// every hidden row, nested family rows included. Drawn smaller than the
+// every backlogged row, nested family rows included. Drawn smaller than the
 // label, in the label's own color.
 type RosterSectionCount struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -11053,7 +11053,7 @@ func (x *RosterLabel) GetText() string {
 // One workspace as every list draws it: a row line (status dot, name,
 // when-column, current highlight, receded styling) and its detail panel. Its
 // family and its state are its list's own row type's (RosterOpenRow,
-// RosterHiddenRow, RosterMergedRow).
+// RosterBacklogRow, RosterMergedRow).
 type RosterRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace this row IS — its identity, and the join key every gesture
@@ -11161,7 +11161,7 @@ type RosterRow struct {
 	Page *RosterRowPage `protobuf:"bytes,82,opt,name=page,proto3" json:"page,omitempty"`
 	// The row's display name.
 	Name *RosterRowName `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	// The repository the workspace belongs to, on every list's rows: a hidden,
+	// The repository the workspace belongs to, on every list's rows: a backlogged,
 	// merged or closed row sits in no repository section, and an open child may
 	// be of another repository than the section it is drawn in, so no section
 	// can say it. The composer's workspace-name completion draws it beside each
@@ -12014,7 +12014,7 @@ type RosterRow_ColdGate struct {
 	// GREEN, the same coarse claim as the footer's `waiting · cold_gate`. The
 	// row's NAME is struck through while it stands, in every sidebar section.
 	//
-	// A HIDDEN workspace wears it too once its cache has LAPSED with a gated
+	// A BACKLOGGED workspace wears it too once its cache has LAPSED with a gated
 	// verdict (conversation.v1.SessionCacheLapse): its session was stood down
 	// at the lapse, and showing it again will raise this gate (2026-10-13).
 	ColdGate *RosterRowStatusColdGate `protobuf:"bytes,61,opt,name=cold_gate,json=coldGate,proto3,oneof"`
@@ -12429,7 +12429,7 @@ func (x *RosterRowLastTurnEnded) GetAtMs() int64 {
 // ENDED. A turn starts after the previous one ended and ends after it started,
 // so that one instant IS the newer of the last start and the last end; the
 // daemon states it so no client re-derives it from the when-column, whose
-// sync-merging and hidden arms mask the running turn.
+// sync-merging and backlogged arms mask the running turn.
 //
 // It is TURN-ACTIVITY RECENCY, and it exists so a client short of room can
 // keep the workspaces whose work most recently moved: the editor's one-line
@@ -12692,7 +12692,7 @@ func (*RosterRowClosure_Daemon) isRosterRowClosure_By() {}
 //   - its creation;
 //   - its latest turn start or turn close (any close kind: a turn resolving);
 //   - its close, kill, hide and merge landing (the durable close record, the
-//     hidden instant, the merge's landing);
+//     backlogged instant, the merge's landing);
 //   - its latest STATUS CHANGE: the instant the row's status arm last moved
 //     (an open, a re-open, a permission ask, a fault), kept durable by the
 //     daemon so it survives a restart of the daemon and of every client.
@@ -12945,8 +12945,8 @@ func (x *RosterRowCurrent) GetCurrent() bool {
 
 // The when-column: ONE value, chosen by the daemon. The daemon's precedence
 // is: MERGED wins ("the workspace is done" is the more interesting fact);
-// else HIDDEN (a workspace in the hidden section counts from when it was
-// hidden, owner request 2026-10-13); else, for every row of the open
+// else BACKLOGGED (a workspace in the backlog counts from when it was
+// backlogged, owner request 2026-10-13); else, for every row of the open
 // workspaces section, the WORK CLOCK: SYNC_MERGING while a sync merge stands
 // in the workspace (owner request, 2026-10-14), counting from when the merge
 // joined its repository's queue, and covering the turns the merge itself runs
@@ -12978,7 +12978,7 @@ type RosterRowWhen struct {
 	// Types that are valid to be assigned to Shown:
 	//
 	//	*RosterRowWhen_Merged
-	//	*RosterRowWhen_Hidden
+	//	*RosterRowWhen_Backlogged
 	//	*RosterRowWhen_TurnRunning
 	//	*RosterRowWhen_NoTurnRunning
 	//	*RosterRowWhen_SyncMerging
@@ -13033,10 +13033,10 @@ func (x *RosterRowWhen) GetMerged() *RosterRowWhenMerged {
 	return nil
 }
 
-func (x *RosterRowWhen) GetHidden() *RosterRowWhenHidden {
+func (x *RosterRowWhen) GetBacklogged() *RosterRowWhenBacklogged {
 	if x != nil {
-		if x, ok := x.Shown.(*RosterRowWhen_Hidden); ok {
-			return x.Hidden
+		if x, ok := x.Shown.(*RosterRowWhen_Backlogged); ok {
+			return x.Backlogged
 		}
 	}
 	return nil
@@ -13077,8 +13077,8 @@ type RosterRowWhen_Merged struct {
 	Merged *RosterRowWhenMerged `protobuf:"bytes,2,opt,name=merged,proto3,oneof"`
 }
 
-type RosterRowWhen_Hidden struct {
-	Hidden *RosterRowWhenHidden `protobuf:"bytes,7,opt,name=hidden,proto3,oneof"`
+type RosterRowWhen_Backlogged struct {
+	Backlogged *RosterRowWhenBacklogged `protobuf:"bytes,7,opt,name=backlogged,proto3,oneof"`
 }
 
 type RosterRowWhen_TurnRunning struct {
@@ -13095,7 +13095,7 @@ type RosterRowWhen_SyncMerging struct {
 
 func (*RosterRowWhen_Merged) isRosterRowWhen_Shown() {}
 
-func (*RosterRowWhen_Hidden) isRosterRowWhen_Shown() {}
+func (*RosterRowWhen_Backlogged) isRosterRowWhen_Shown() {}
 
 func (*RosterRowWhen_TurnRunning) isRosterRowWhen_Shown() {}
 
@@ -13103,38 +13103,38 @@ func (*RosterRowWhen_NoTurnRunning) isRosterRowWhen_Shown() {}
 
 func (*RosterRowWhen_SyncMerging) isRosterRowWhen_Shown() {}
 
-// When the workspace was moved into the hidden section, in epoch
-// MILLISECONDS. Set for exactly the rows the hidden section draws.
+// When the workspace was moved into the backlog, in epoch
+// MILLISECONDS. Set for exactly the rows the backlog draws.
 //
-// A HIDDEN WORKSPACE'S KEEP-ALIVES ARE HELD, so its prompt cache lapses on its
+// A BACKLOGGED WORKSPACE'S KEEP-ALIVES ARE HELD, so its prompt cache lapses on its
 // own clock (the daemon sends them no more, 2026-10-13). When the daemon knows that
 // moment, `cache` carries it and the column COUNTS DOWN to it ("12m 34s"),
 // reading "cold cache" once it is reached, on a continuous green-to-red
 // gradient: green an hour or more out, the deepest red at the lapse. Unset,
 // the daemon knows no lapse (the session was stood down before it stated one,
 // or never ran), and the column counts up from `at_ms` as before.
-type RosterRowWhenHidden struct {
-	state         protoimpl.MessageState    `protogen:"open.v1"`
-	AtMs          int64                     `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
-	Cache         *RosterRowWhenHiddenCache `protobuf:"bytes,2,opt,name=cache,proto3,oneof" json:"cache,omitempty"`
+type RosterRowWhenBacklogged struct {
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	AtMs          int64                         `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
+	Cache         *RosterRowWhenBackloggedCache `protobuf:"bytes,2,opt,name=cache,proto3,oneof" json:"cache,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterRowWhenHidden) Reset() {
-	*x = RosterRowWhenHidden{}
+func (x *RosterRowWhenBacklogged) Reset() {
+	*x = RosterRowWhenBacklogged{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[191]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterRowWhenHidden) String() string {
+func (x *RosterRowWhenBacklogged) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterRowWhenHidden) ProtoMessage() {}
+func (*RosterRowWhenBacklogged) ProtoMessage() {}
 
-func (x *RosterRowWhenHidden) ProtoReflect() protoreflect.Message {
+func (x *RosterRowWhenBacklogged) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[191]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -13146,27 +13146,27 @@ func (x *RosterRowWhenHidden) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterRowWhenHidden.ProtoReflect.Descriptor instead.
-func (*RosterRowWhenHidden) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterRowWhenBacklogged.ProtoReflect.Descriptor instead.
+func (*RosterRowWhenBacklogged) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{191}
 }
 
-func (x *RosterRowWhenHidden) GetAtMs() int64 {
+func (x *RosterRowWhenBacklogged) GetAtMs() int64 {
 	if x != nil {
 		return x.AtMs
 	}
 	return 0
 }
 
-func (x *RosterRowWhenHidden) GetCache() *RosterRowWhenHiddenCache {
+func (x *RosterRowWhenBacklogged) GetCache() *RosterRowWhenBackloggedCache {
 	if x != nil {
 		return x.Cache
 	}
 	return nil
 }
 
-// The hidden workspace's prompt cache lapse.
-type RosterRowWhenHiddenCache struct {
+// The backlogged workspace's prompt cache lapse.
+type RosterRowWhenBackloggedCache struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// When the cache lapses, in epoch MILLISECONDS. At or before now, the cache
 	// is cold.
@@ -13175,20 +13175,20 @@ type RosterRowWhenHiddenCache struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterRowWhenHiddenCache) Reset() {
-	*x = RosterRowWhenHiddenCache{}
+func (x *RosterRowWhenBackloggedCache) Reset() {
+	*x = RosterRowWhenBackloggedCache{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[192]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterRowWhenHiddenCache) String() string {
+func (x *RosterRowWhenBackloggedCache) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterRowWhenHiddenCache) ProtoMessage() {}
+func (*RosterRowWhenBackloggedCache) ProtoMessage() {}
 
-func (x *RosterRowWhenHiddenCache) ProtoReflect() protoreflect.Message {
+func (x *RosterRowWhenBackloggedCache) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[192]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -13200,12 +13200,12 @@ func (x *RosterRowWhenHiddenCache) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterRowWhenHiddenCache.ProtoReflect.Descriptor instead.
-func (*RosterRowWhenHiddenCache) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterRowWhenBackloggedCache.ProtoReflect.Descriptor instead.
+func (*RosterRowWhenBackloggedCache) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{192}
 }
 
-func (x *RosterRowWhenHiddenCache) GetLapsesAtMs() int64 {
+func (x *RosterRowWhenBackloggedCache) GetLapsesAtMs() int64 {
 	if x != nil {
 		return x.LapsesAtMs
 	}
@@ -15009,12 +15009,12 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\v_workspacesB\x0e\n" +
 	"\f_merge_queueB\x12\n" +
 	"\x10_recently_mergedB\t\n" +
-	"\a_closed\"\xd5\x05\n" +
+	"\a_closed\"\xd8\x05\n" +
 	"\x0fWorkspaceRoster\x12A\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2!.frontend.v1.RosterRepositoryViewR\n" +
-	"repository\x128\n" +
-	"\x06hidden\x18\t \x01(\v2 .frontend.v1.RosterHiddenSectionR\x06hidden\x122\n" +
+	"repository\x12;\n" +
+	"\abacklog\x18\t \x01(\v2!.frontend.v1.RosterBacklogSectionR\abacklog\x122\n" +
 	"\x04open\x18\r \x01(\v2\x1e.frontend.v1.RosterOpenSectionR\x04open\x12B\n" +
 	"\acurrent\x18\x04 \x01(\v2#.frontend.v1.RosterCurrentWorkspaceH\x00R\acurrent\x88\x01\x01\x129\n" +
 	"\aversion\x18\x0f \x01(\v2\x1a.frontend.v1.RosterVersionH\x01R\aversion\x88\x01\x01\x12A\n" +
@@ -15192,12 +15192,12 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x03tab\"2\n" +
 	"\x18RosterOpenRowTabNumbered\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\"\x18\n" +
-	"\x16RosterOpenRowTabFolded\"D\n" +
-	"\x10RosterHiddenRows\x120\n" +
-	"\x04rows\x18\x01 \x03(\v2\x1c.frontend.v1.RosterHiddenRowR\x04rows\"u\n" +
-	"\x0fRosterHiddenRow\x12(\n" +
-	"\x03row\x18\x01 \x01(\v2\x16.frontend.v1.RosterRowR\x03row\x128\n" +
-	"\bchildren\x18\x02 \x03(\v2\x1c.frontend.v1.RosterHiddenRowR\bchildren\"D\n" +
+	"\x16RosterOpenRowTabFolded\"F\n" +
+	"\x11RosterBacklogRows\x121\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1d.frontend.v1.RosterBacklogRowR\x04rows\"w\n" +
+	"\x10RosterBacklogRow\x12(\n" +
+	"\x03row\x18\x01 \x01(\v2\x16.frontend.v1.RosterRowR\x03row\x129\n" +
+	"\bchildren\x18\x02 \x03(\v2\x1d.frontend.v1.RosterBacklogRowR\bchildren\"D\n" +
 	"\x10RosterMergedRows\x120\n" +
 	"\x04rows\x18\x01 \x03(\v2\x1c.frontend.v1.RosterMergedRowR\x04rows\"D\n" +
 	"\x10RosterClosedRows\x120\n" +
@@ -15543,21 +15543,20 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x19RosterMergeQueueRepoGroup\x12,\n" +
 	"\x03key\x18\x01 \x01(\v2\x1a.frontend.v1.RosterRepoKeyR\x03key\x12@\n" +
 	"\x06header\x18\x02 \x01(\v2(.frontend.v1.RosterMergedRepoGroupHeaderR\x06header\x127\n" +
-	"\x05queue\x18\x03 \x01(\v2!.frontend.v1.RosterRepoMergeQueueR\x05queue\"\xc1\x03\n" +
-	"\x13RosterHiddenSection\x128\n" +
-	"\x06header\x18\x01 \x01(\v2 .frontend.v1.RosterSectionHeaderR\x06header\x12>\n" +
-	"\vhidden_rows\x18\x05 \x01(\v2\x1d.frontend.v1.RosterHiddenRowsR\n" +
-	"hiddenRows\x12F\n" +
-	"\bexpanded\x18\x03 \x01(\v2(.frontend.v1.RosterHiddenSectionExpandedH\x00R\bexpanded\x12I\n" +
-	"\tcollapsed\x18\x04 \x01(\v2).frontend.v1.RosterHiddenSectionCollapsedH\x00R\tcollapsed\x12@\n" +
-	"\x06fitted\x18\x06 \x01(\v2&.frontend.v1.RosterHiddenSectionFittedH\x01R\x06fitted\x12=\n" +
-	"\x05sized\x18\a \x01(\v2%.frontend.v1.RosterHiddenSectionSizedH\x01R\x05sizedB\x06\n" +
+	"\x05queue\x18\x03 \x01(\v2!.frontend.v1.RosterRepoMergeQueueR\x05queue\"\xc9\x03\n" +
+	"\x14RosterBacklogSection\x128\n" +
+	"\x06header\x18\x01 \x01(\v2 .frontend.v1.RosterSectionHeaderR\x06header\x12A\n" +
+	"\fbacklog_rows\x18\x05 \x01(\v2\x1e.frontend.v1.RosterBacklogRowsR\vbacklogRows\x12G\n" +
+	"\bexpanded\x18\x03 \x01(\v2).frontend.v1.RosterBacklogSectionExpandedH\x00R\bexpanded\x12J\n" +
+	"\tcollapsed\x18\x04 \x01(\v2*.frontend.v1.RosterBacklogSectionCollapsedH\x00R\tcollapsed\x12A\n" +
+	"\x06fitted\x18\x06 \x01(\v2'.frontend.v1.RosterBacklogSectionFittedH\x01R\x06fitted\x12>\n" +
+	"\x05sized\x18\a \x01(\v2&.frontend.v1.RosterBacklogSectionSizedH\x01R\x05sizedB\x06\n" +
 	"\x04foldB\b\n" +
-	"\x06heightJ\x04\b\x02\x10\x03R\x04rows\"\x1d\n" +
-	"\x1bRosterHiddenSectionExpanded\"\x1e\n" +
-	"\x1cRosterHiddenSectionCollapsed\"\x1b\n" +
-	"\x19RosterHiddenSectionFitted\"0\n" +
-	"\x18RosterHiddenSectionSized\x12\x14\n" +
+	"\x06heightJ\x04\b\x02\x10\x03R\x04rows\"\x1e\n" +
+	"\x1cRosterBacklogSectionExpanded\"\x1f\n" +
+	"\x1dRosterBacklogSectionCollapsed\"\x1c\n" +
+	"\x1aRosterBacklogSectionFitted\"1\n" +
+	"\x19RosterBacklogSectionSized\x12\x14\n" +
 	"\x05lines\x18\x01 \x01(\rR\x05lines\"|\n" +
 	"\x13RosterSectionHeader\x12.\n" +
 	"\x05label\x18\x01 \x01(\v2\x18.frontend.v1.RosterLabelR\x05label\x125\n" +
@@ -15701,21 +15700,23 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x17RosterRowClosureByMerge\"\x1a\n" +
 	"\x18RosterRowClosureByDaemon\",\n" +
 	"\x10RosterRowCurrent\x12\x18\n" +
-	"\acurrent\x18\x01 \x01(\bR\acurrent\"\xcd\x03\n" +
+	"\acurrent\x18\x01 \x01(\bR\acurrent\"\xd9\x03\n" +
 	"\rRosterRowWhen\x12:\n" +
-	"\x06merged\x18\x02 \x01(\v2 .frontend.v1.RosterRowWhenMergedH\x00R\x06merged\x12:\n" +
-	"\x06hidden\x18\a \x01(\v2 .frontend.v1.RosterRowWhenHiddenH\x00R\x06hidden\x12J\n" +
+	"\x06merged\x18\x02 \x01(\v2 .frontend.v1.RosterRowWhenMergedH\x00R\x06merged\x12F\n" +
+	"\n" +
+	"backlogged\x18\a \x01(\v2$.frontend.v1.RosterRowWhenBackloggedH\x00R\n" +
+	"backlogged\x12J\n" +
 	"\fturn_running\x18\b \x01(\v2%.frontend.v1.RosterRowWhenTurnRunningH\x00R\vturnRunning\x12Q\n" +
 	"\x0fno_turn_running\x18\t \x01(\v2'.frontend.v1.RosterRowWhenNoTurnRunningH\x00R\rnoTurnRunning\x12J\n" +
 	"\fsync_merging\x18\n" +
 	" \x01(\v2%.frontend.v1.RosterRowWhenSyncMergingH\x00R\vsyncMergingB\a\n" +
 	"\x05shownJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\rlast_selectedR\x06activeR\acreatedR\n" +
-	"turn_endedR\x06viewed\"v\n" +
-	"\x13RosterRowWhenHidden\x12\x13\n" +
-	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\x12@\n" +
-	"\x05cache\x18\x02 \x01(\v2%.frontend.v1.RosterRowWhenHiddenCacheH\x00R\x05cache\x88\x01\x01B\b\n" +
-	"\x06_cache\"<\n" +
-	"\x18RosterRowWhenHiddenCache\x12 \n" +
+	"turn_endedR\x06viewed\"~\n" +
+	"\x17RosterRowWhenBacklogged\x12\x13\n" +
+	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\x12D\n" +
+	"\x05cache\x18\x02 \x01(\v2).frontend.v1.RosterRowWhenBackloggedCacheH\x00R\x05cache\x88\x01\x01B\b\n" +
+	"\x06_cache\"@\n" +
+	"\x1cRosterRowWhenBackloggedCache\x12 \n" +
 	"\flapses_at_ms\x18\x01 \x01(\x03R\n" +
 	"lapsesAtMs\"*\n" +
 	"\x13RosterRowWhenMerged\x12\x13\n" +
@@ -15850,8 +15851,8 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterOpenRowTab)(nil),                    // 50: frontend.v1.RosterOpenRowTab
 	(*RosterOpenRowTabNumbered)(nil),            // 51: frontend.v1.RosterOpenRowTabNumbered
 	(*RosterOpenRowTabFolded)(nil),              // 52: frontend.v1.RosterOpenRowTabFolded
-	(*RosterHiddenRows)(nil),                    // 53: frontend.v1.RosterHiddenRows
-	(*RosterHiddenRow)(nil),                     // 54: frontend.v1.RosterHiddenRow
+	(*RosterBacklogRows)(nil),                   // 53: frontend.v1.RosterBacklogRows
+	(*RosterBacklogRow)(nil),                    // 54: frontend.v1.RosterBacklogRow
 	(*RosterMergedRows)(nil),                    // 55: frontend.v1.RosterMergedRows
 	(*RosterClosedRows)(nil),                    // 56: frontend.v1.RosterClosedRows
 	(*RosterClosedRow)(nil),                     // 57: frontend.v1.RosterClosedRow
@@ -15963,11 +15964,11 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterMergeQueueSectionFitted)(nil),       // 163: frontend.v1.RosterMergeQueueSectionFitted
 	(*RosterMergeQueueSectionSized)(nil),        // 164: frontend.v1.RosterMergeQueueSectionSized
 	(*RosterMergeQueueRepoGroup)(nil),           // 165: frontend.v1.RosterMergeQueueRepoGroup
-	(*RosterHiddenSection)(nil),                 // 166: frontend.v1.RosterHiddenSection
-	(*RosterHiddenSectionExpanded)(nil),         // 167: frontend.v1.RosterHiddenSectionExpanded
-	(*RosterHiddenSectionCollapsed)(nil),        // 168: frontend.v1.RosterHiddenSectionCollapsed
-	(*RosterHiddenSectionFitted)(nil),           // 169: frontend.v1.RosterHiddenSectionFitted
-	(*RosterHiddenSectionSized)(nil),            // 170: frontend.v1.RosterHiddenSectionSized
+	(*RosterBacklogSection)(nil),                // 166: frontend.v1.RosterBacklogSection
+	(*RosterBacklogSectionExpanded)(nil),        // 167: frontend.v1.RosterBacklogSectionExpanded
+	(*RosterBacklogSectionCollapsed)(nil),       // 168: frontend.v1.RosterBacklogSectionCollapsed
+	(*RosterBacklogSectionFitted)(nil),          // 169: frontend.v1.RosterBacklogSectionFitted
+	(*RosterBacklogSectionSized)(nil),           // 170: frontend.v1.RosterBacklogSectionSized
 	(*RosterSectionHeader)(nil),                 // 171: frontend.v1.RosterSectionHeader
 	(*RosterSectionCount)(nil),                  // 172: frontend.v1.RosterSectionCount
 	(*RosterLabel)(nil),                         // 173: frontend.v1.RosterLabel
@@ -15988,8 +15989,8 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterRowClosureByDaemon)(nil),            // 188: frontend.v1.RosterRowClosureByDaemon
 	(*RosterRowCurrent)(nil),                    // 189: frontend.v1.RosterRowCurrent
 	(*RosterRowWhen)(nil),                       // 190: frontend.v1.RosterRowWhen
-	(*RosterRowWhenHidden)(nil),                 // 191: frontend.v1.RosterRowWhenHidden
-	(*RosterRowWhenHiddenCache)(nil),            // 192: frontend.v1.RosterRowWhenHiddenCache
+	(*RosterRowWhenBacklogged)(nil),             // 191: frontend.v1.RosterRowWhenBacklogged
+	(*RosterRowWhenBackloggedCache)(nil),        // 192: frontend.v1.RosterRowWhenBackloggedCache
 	(*RosterRowWhenMerged)(nil),                 // 193: frontend.v1.RosterRowWhenMerged
 	(*RosterRowWhenTurnRunning)(nil),            // 194: frontend.v1.RosterRowWhenTurnRunning
 	(*RosterRowWhenNoTurnRunning)(nil),          // 195: frontend.v1.RosterRowWhenNoTurnRunning
@@ -16047,7 +16048,7 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	148, // 2: frontend.v1.RosterPush.recently_merged:type_name -> frontend.v1.RosterMergedSection
 	56,  // 3: frontend.v1.RosterPush.closed:type_name -> frontend.v1.RosterClosedRows
 	83,  // 4: frontend.v1.WorkspaceRoster.repository:type_name -> frontend.v1.RosterRepositoryView
-	166, // 5: frontend.v1.WorkspaceRoster.hidden:type_name -> frontend.v1.RosterHiddenSection
+	166, // 5: frontend.v1.WorkspaceRoster.backlog:type_name -> frontend.v1.RosterBacklogSection
 	84,  // 6: frontend.v1.WorkspaceRoster.open:type_name -> frontend.v1.RosterOpenSection
 	82,  // 7: frontend.v1.WorkspaceRoster.current:type_name -> frontend.v1.RosterCurrentWorkspace
 	33,  // 8: frontend.v1.WorkspaceRoster.version:type_name -> frontend.v1.RosterVersion
@@ -16116,9 +16117,9 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	237, // 71: frontend.v1.RosterOpenRowRepositoryDivider.main_workspace:type_name -> workspace.v1.WorkspaceRef
 	51,  // 72: frontend.v1.RosterOpenRowTab.numbered:type_name -> frontend.v1.RosterOpenRowTabNumbered
 	52,  // 73: frontend.v1.RosterOpenRowTab.folded:type_name -> frontend.v1.RosterOpenRowTabFolded
-	54,  // 74: frontend.v1.RosterHiddenRows.rows:type_name -> frontend.v1.RosterHiddenRow
-	174, // 75: frontend.v1.RosterHiddenRow.row:type_name -> frontend.v1.RosterRow
-	54,  // 76: frontend.v1.RosterHiddenRow.children:type_name -> frontend.v1.RosterHiddenRow
+	54,  // 74: frontend.v1.RosterBacklogRows.rows:type_name -> frontend.v1.RosterBacklogRow
+	174, // 75: frontend.v1.RosterBacklogRow.row:type_name -> frontend.v1.RosterRow
+	54,  // 76: frontend.v1.RosterBacklogRow.children:type_name -> frontend.v1.RosterBacklogRow
 	58,  // 77: frontend.v1.RosterMergedRows.rows:type_name -> frontend.v1.RosterMergedRow
 	57,  // 78: frontend.v1.RosterClosedRows.rows:type_name -> frontend.v1.RosterClosedRow
 	174, // 79: frontend.v1.RosterClosedRow.row:type_name -> frontend.v1.RosterRow
@@ -16248,12 +16249,12 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	147, // 203: frontend.v1.RosterMergeQueueRepoGroup.key:type_name -> frontend.v1.RosterRepoKey
 	159, // 204: frontend.v1.RosterMergeQueueRepoGroup.header:type_name -> frontend.v1.RosterMergedRepoGroupHeader
 	90,  // 205: frontend.v1.RosterMergeQueueRepoGroup.queue:type_name -> frontend.v1.RosterRepoMergeQueue
-	171, // 206: frontend.v1.RosterHiddenSection.header:type_name -> frontend.v1.RosterSectionHeader
-	53,  // 207: frontend.v1.RosterHiddenSection.hidden_rows:type_name -> frontend.v1.RosterHiddenRows
-	167, // 208: frontend.v1.RosterHiddenSection.expanded:type_name -> frontend.v1.RosterHiddenSectionExpanded
-	168, // 209: frontend.v1.RosterHiddenSection.collapsed:type_name -> frontend.v1.RosterHiddenSectionCollapsed
-	169, // 210: frontend.v1.RosterHiddenSection.fitted:type_name -> frontend.v1.RosterHiddenSectionFitted
-	170, // 211: frontend.v1.RosterHiddenSection.sized:type_name -> frontend.v1.RosterHiddenSectionSized
+	171, // 206: frontend.v1.RosterBacklogSection.header:type_name -> frontend.v1.RosterSectionHeader
+	53,  // 207: frontend.v1.RosterBacklogSection.backlog_rows:type_name -> frontend.v1.RosterBacklogRows
+	167, // 208: frontend.v1.RosterBacklogSection.expanded:type_name -> frontend.v1.RosterBacklogSectionExpanded
+	168, // 209: frontend.v1.RosterBacklogSection.collapsed:type_name -> frontend.v1.RosterBacklogSectionCollapsed
+	169, // 210: frontend.v1.RosterBacklogSection.fitted:type_name -> frontend.v1.RosterBacklogSectionFitted
+	170, // 211: frontend.v1.RosterBacklogSection.sized:type_name -> frontend.v1.RosterBacklogSectionSized
 	173, // 212: frontend.v1.RosterSectionHeader.label:type_name -> frontend.v1.RosterLabel
 	172, // 213: frontend.v1.RosterSectionHeader.count:type_name -> frontend.v1.RosterSectionCount
 	175, // 214: frontend.v1.RosterRow.workspace:type_name -> frontend.v1.RosterRowWorkspace
@@ -16324,11 +16325,11 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	187, // 279: frontend.v1.RosterRowClosure.merge:type_name -> frontend.v1.RosterRowClosureByMerge
 	188, // 280: frontend.v1.RosterRowClosure.daemon:type_name -> frontend.v1.RosterRowClosureByDaemon
 	193, // 281: frontend.v1.RosterRowWhen.merged:type_name -> frontend.v1.RosterRowWhenMerged
-	191, // 282: frontend.v1.RosterRowWhen.hidden:type_name -> frontend.v1.RosterRowWhenHidden
+	191, // 282: frontend.v1.RosterRowWhen.backlogged:type_name -> frontend.v1.RosterRowWhenBacklogged
 	194, // 283: frontend.v1.RosterRowWhen.turn_running:type_name -> frontend.v1.RosterRowWhenTurnRunning
 	195, // 284: frontend.v1.RosterRowWhen.no_turn_running:type_name -> frontend.v1.RosterRowWhenNoTurnRunning
 	196, // 285: frontend.v1.RosterRowWhen.sync_merging:type_name -> frontend.v1.RosterRowWhenSyncMerging
-	192, // 286: frontend.v1.RosterRowWhenHidden.cache:type_name -> frontend.v1.RosterRowWhenHiddenCache
+	192, // 286: frontend.v1.RosterRowWhenBacklogged.cache:type_name -> frontend.v1.RosterRowWhenBackloggedCache
 	200, // 287: frontend.v1.RosterRowDetail.branch:type_name -> frontend.v1.RosterRowDetailBranch
 	201, // 288: frontend.v1.RosterRowDetail.parent_branch:type_name -> frontend.v1.RosterRowDetailParentBranch
 	202, // 289: frontend.v1.RosterRowDetail.summary:type_name -> frontend.v1.RosterRowDetailSummary
@@ -16497,10 +16498,10 @@ func file_frontend_v1_sidebar_proto_init() {
 		(*RosterMergeQueueSection_Sized)(nil),
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[166].OneofWrappers = []any{
-		(*RosterHiddenSection_Expanded)(nil),
-		(*RosterHiddenSection_Collapsed)(nil),
-		(*RosterHiddenSection_Fitted)(nil),
-		(*RosterHiddenSection_Sized)(nil),
+		(*RosterBacklogSection_Expanded)(nil),
+		(*RosterBacklogSection_Collapsed)(nil),
+		(*RosterBacklogSection_Fitted)(nil),
+		(*RosterBacklogSection_Sized)(nil),
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[174].OneofWrappers = []any{
 		(*RosterRow_Submitting)(nil),
@@ -16545,7 +16546,7 @@ func file_frontend_v1_sidebar_proto_init() {
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[190].OneofWrappers = []any{
 		(*RosterRowWhen_Merged)(nil),
-		(*RosterRowWhen_Hidden)(nil),
+		(*RosterRowWhen_Backlogged)(nil),
 		(*RosterRowWhen_TurnRunning)(nil),
 		(*RosterRowWhen_NoTurnRunning)(nil),
 		(*RosterRowWhen_SyncMerging)(nil),

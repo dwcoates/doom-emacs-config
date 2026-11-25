@@ -255,7 +255,7 @@ type Orchestrator interface {
 	// came up): its merge resumes at its place in line.
 	ColdGateRetired(ws ids.WorkspaceID)
 	// OnHidden is told WS was hidden: a merge standing at its cold gate
-	// leaves its queue (CauseHiddenAtColdGate). It returns at once.
+	// leaves its queue (CauseBackloggedAtColdGate). It returns at once.
 	OnHidden(ws ids.WorkspaceID)
 	// RevealMergeWorkspace draws a hidden async merge workspace in the tab bar
 	// and the sidebar from now on, naming CAUSE in its record, and restates the

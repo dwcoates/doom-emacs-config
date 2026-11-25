@@ -36,7 +36,7 @@
  * the slot is empty rather than one this end fills with a placeholder.
  *
  * HIDING THE WORKSPACE IS NOT A REMEDIATION (owner request, 2026-10-13). The
- * light grey "hide workspace" button past pay sends `SetWorkspaceHidden`
+ * light grey "hide workspace" button past pay sends `SetWorkspaceBacklogged`
  * — the same hide `SPC TAB h` sends, which moves the workspace into the
  * sidebar's hidden section and lands the user elsewhere — and answers nothing
  * about the gate: the gate keeps standing for whenever the workspace is shown
@@ -66,7 +66,7 @@ import {
   type AnswerColdGateReopenFailed,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
 import { KillWorkspaceResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
-import { SetWorkspaceHiddenResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import { SetWorkspaceBackloggedResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
 import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
 import type {
@@ -94,7 +94,7 @@ import {
 import { callFailure, refusalOf, type Cause, type SentenceTable } from "../../rpc/refuse.js";
 import {
   buildKillWorkspaceRequest,
-  buildSetWorkspaceHiddenRequest,
+  buildSetWorkspaceBackloggedRequest,
   KILL_WORKSPACE_SENTENCES,
   SET_WORKSPACE_HIDDEN_SENTENCES,
 } from "../../sidebar/verbs.js";
@@ -699,9 +699,9 @@ function hideWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly C
   return workspaceVerbFromGate(rc, actions, buttons, {
     verb: "hide",
     message: log.message("hiding the workspace from a cold gate"),
-    rpc: "SetWorkspaceHidden",
-    call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(rc.ctx.workspace, true)),
-    schema: SetWorkspaceHiddenResponseSchema,
+    rpc: "SetWorkspaceBacklogged",
+    call: (client) => client.setWorkspaceBacklogged(buildSetWorkspaceBackloggedRequest(rc.ctx.workspace, true)),
+    schema: SetWorkspaceBackloggedResponseSchema,
     own: SET_WORKSPACE_HIDDEN_SENTENCES,
   });
 }

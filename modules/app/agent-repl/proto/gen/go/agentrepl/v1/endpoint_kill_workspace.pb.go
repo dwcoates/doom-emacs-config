@@ -401,7 +401,7 @@ type KillWorkspaceError_NotYetAdopted struct {
 }
 
 type KillWorkspaceError_HasOpenChildren struct {
-	// The workspace has open children (hidden ones included), and killing it
+	// The workspace has open children (backlogged ones included), and killing it
 	// would leave them without their parent in the Open section.
 	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,5,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
 }

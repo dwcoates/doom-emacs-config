@@ -444,7 +444,7 @@ func TestTheVerbAndTheScheduledBeatShareOneSubroutine(t *testing.T) {
 	if got, want := callers["sendBeat"], []string{"beginKeepLive", "beatsDue"}; !sameSet(got, want) {
 		t.Fatalf("sendBeat is called from %v, want only %v", got, want)
 	}
-	// SendHiddenKeepalives' beat (`SPC j R`) keeps its cadence held and owns
+	// SendBackloggedKeepalives' beat (`SPC j R`) keeps its cadence held and owns
 	// no stand-down, so it is the one other caller of the shim's keep-alive.
 	if got, want := callers["Beat"], []string{"sendBeat", "beat"}; !sameSet(got, want) {
 		t.Fatalf("the shim's keep-alive is asked from %v, want only %v", got, want)

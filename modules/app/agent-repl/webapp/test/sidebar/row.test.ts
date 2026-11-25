@@ -7,7 +7,7 @@ import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capt
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
-import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import { SetWorkspaceBackloggedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
   RosterOpenRowRepositoryBlockSchema,
@@ -616,7 +616,7 @@ describe("the when-column", () => {
 
   it("draws a hidden workspace's age from its hide", () => {
     const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "hidden", value: { atMs: BigInt(NOW - 120_000) } } }),
+      row({ id: "ws-1", when: { case: "backlogged", value: { atMs: BigInt(NOW - 120_000) } } }),
       sidebarContext(),
       "R",
       "hidden",
@@ -631,7 +631,7 @@ describe("the when-column", () => {
     const drawn = drawRosterRow(
       row({
         id: "ws-1",
-        when: { case: "hidden", value: { atMs: BigInt(NOW - 120_000), cache: { lapsesAtMs: BigInt(NOW + 754_000) } } },
+        when: { case: "backlogged", value: { atMs: BigInt(NOW - 120_000), cache: { lapsesAtMs: BigInt(NOW + 754_000) } } },
       }),
       sidebarContext(),
       "R",
@@ -644,7 +644,7 @@ describe("the when-column", () => {
     const drawn = drawRosterRow(
       row({
         id: "ws-1",
-        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 30 * 60_000) } } },
+        when: { case: "backlogged", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 30 * 60_000) } } },
       }),
       sidebarContext(),
       "R",
@@ -659,7 +659,7 @@ describe("the when-column", () => {
     const drawn = drawRosterRow(
       row({
         id: "ws-1",
-        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
+        when: { case: "backlogged", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
       }),
       sc,
       "R",
@@ -677,7 +677,7 @@ describe("the when-column", () => {
     const drawn = drawRosterRow(
       row({
         id: "ws-1",
-        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
+        when: { case: "backlogged", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
       }),
       sc,
       "R",
@@ -698,7 +698,7 @@ describe("the when-column", () => {
     const drawn = drawRosterRow(
       row({
         id: "ws-1",
-        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
+        when: { case: "backlogged", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
       }),
       sidebarContext(),
       "R",
@@ -1357,9 +1357,9 @@ describe("the row click in the hidden section", () => {
     const calls: string[] = [];
     const sc = sidebarContext(
       appContext({
-        setWorkspaceHidden: (request) => {
+        setWorkspaceBacklogged: (request) => {
           calls.push(`hidden:${request.workspace?.id ?? ""}:${request.visibility.case ?? ""}`);
-          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+          return create(SetWorkspaceBackloggedResponseSchema, { result: { case: "success", value: {} } });
         },
         selectInEditor: (request) => {
           calls.push(`select:${request.workspace?.id ?? ""}`);
@@ -1376,8 +1376,8 @@ describe("the row click in the hidden section", () => {
     const selected: string[] = [];
     const sc = sidebarContext(
       appContext({
-        setWorkspaceHidden: () =>
-          create(SetWorkspaceHiddenResponseSchema, {
+        setWorkspaceBacklogged: () =>
+          create(SetWorkspaceBackloggedResponseSchema, {
             result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
           }),
         selectInEditor: (request) => {
@@ -1395,9 +1395,9 @@ describe("the row click in the hidden section", () => {
     const shown: string[] = [];
     const sc = sidebarContext(
       appContext({
-        setWorkspaceHidden: (request) => {
+        setWorkspaceBacklogged: (request) => {
           shown.push(request.workspace?.id ?? "");
-          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+          return create(SetWorkspaceBackloggedResponseSchema, { result: { case: "success", value: {} } });
         },
         selectInEditor: () => SELECT_OK,
       }),
@@ -1410,8 +1410,8 @@ describe("the row click in the hidden section", () => {
   it("says a refusal at the row itself", async () => {
     const sc = sidebarContext(
       appContext({
-        setWorkspaceHidden: () =>
-          create(SetWorkspaceHiddenResponseSchema, {
+        setWorkspaceBacklogged: () =>
+          create(SetWorkspaceBackloggedResponseSchema, {
             result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
           }),
       }),
@@ -2286,7 +2286,7 @@ describe("the detail panel opens on hover", () => {
       make: () =>
         row({ id: "ws-1", closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(NOW) } } }),
     },
-    { place: "hidden" as const, make: () => row({ id: "ws-1", when: { case: "hidden", value: { atMs: BigInt(NOW) } } }) },
+    { place: "hidden" as const, make: () => row({ id: "ws-1", when: { case: "backlogged", value: { atMs: BigInt(NOW) } } }) },
   ])("on a $place row, whose line is the trigger as everywhere", ({ place, make }) => {
     const bandRow = (): HTMLElement => drawRosterRow(make(), sidebarContext(), "R", place);
 

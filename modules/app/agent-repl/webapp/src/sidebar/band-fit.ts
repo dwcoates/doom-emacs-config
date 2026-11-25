@@ -60,7 +60,7 @@
  *     below it by the same gap.
  *   - A SECTION SIZED BY HAND KEEPS ITS LINES (owner request, 2026-11-11:
  *     the rules between the sections are dragged; section-resize.ts). The
- *     daemon holds each band's height (`frontend.v1.RosterHiddenSection.height`
+ *     daemon holds each band's height (`frontend.v1.RosterBacklogSection.height`
  *     and its siblings), stated on the section as `BAND_SIZED_ATTRIBUTE`. A
  *     sized band shows its lines, or every line it holds when it holds fewer,
  *     whatever its share above would give it; a band nobody sized keeps the

@@ -28,13 +28,13 @@ func pushOf(open, hidden []*frontendv1.RosterRow) *frontendv1.RosterPush {
 	for _, row := range open {
 		openRows = append(openRows, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: row}}})
 	}
-	var hiddenRows []*frontendv1.RosterHiddenRow
+	var backlogRows []*frontendv1.RosterBacklogRow
 	for _, row := range hidden {
-		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: row})
+		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: row})
 	}
 	return &frontendv1.RosterPush{Workspaces: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{Entries: openRows}}},
-		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
+		Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: backlogRows}},
 	}}
 }
 

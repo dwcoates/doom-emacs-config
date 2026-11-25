@@ -22,9 +22,9 @@ import {
   KillWorkspaceResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
 import {
-  SetWorkspaceHiddenErrorSchema,
-  SetWorkspaceHiddenResponseSchema,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+  SetWorkspaceBackloggedErrorSchema,
+  SetWorkspaceBackloggedResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import {
   FinishWorkspaceErrorSchema,
   FinishWorkspaceResponseSchema,
@@ -53,7 +53,7 @@ import {
   buildCloseWorkspaceRequest,
   buildKillWorkspaceRequest,
   killWorkspaceRefusal,
-  setWorkspaceHiddenRefusal,
+  setWorkspaceBackloggedRefusal,
   buildFinishWorkspaceRequest,
   buildNukeWorkspaceRequest,
   buildOpenWorkspaceRequest,
@@ -62,7 +62,7 @@ import {
   restartWorkspaceRefusal,
   buildSelectInEditorRequest,
   buildSetWorkspacePriorityRequest,
-  buildSetWorkspaceHiddenRequest,
+  buildSetWorkspaceBackloggedRequest,
   drawKillConfirm,
   drawNukeConfirm,
   closeWorkspaceRefusal,
@@ -176,7 +176,7 @@ describe("the requests each verb is", () => {
     [true, "hide"],
     [false, "show"],
   ] as const)("asks hidden=%s as the %s arm", (hidden, arm) => {
-    const request = buildSetWorkspaceHiddenRequest(TARGET_WS, hidden);
+    const request = buildSetWorkspaceBackloggedRequest(TARGET_WS, hidden);
     expect([request.workspace, request.visibility.case]).toEqual([TARGET_WS, arm]);
   });
 
@@ -353,17 +353,17 @@ const VERBS: readonly VerbUnderTest[] = [
       }),
   },
   {
-    rpc: "SetWorkspaceHidden",
-    method: "setWorkspaceHidden",
-    responseSchema: SetWorkspaceHiddenResponseSchema,
-    errorSchema: SetWorkspaceHiddenErrorSchema,
+    rpc: "SetWorkspaceBacklogged",
+    method: "setWorkspaceBacklogged",
+    responseSchema: SetWorkspaceBackloggedResponseSchema,
+    errorSchema: SetWorkspaceBackloggedErrorSchema,
     call: (t, control) =>
       runVerb(control, {
         sc: t.sc,
-        rpc: "SetWorkspaceHidden",
-        call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(TARGET_WS, true)),
-        schema: SetWorkspaceHiddenResponseSchema,
-        refusalText: (cause) => setWorkspaceHiddenRefusal(cause as never),
+        rpc: "SetWorkspaceBacklogged",
+        call: (client) => client.setWorkspaceBacklogged(buildSetWorkspaceBackloggedRequest(TARGET_WS, true)),
+        schema: SetWorkspaceBackloggedResponseSchema,
+        refusalText: (cause) => setWorkspaceBackloggedRefusal(cause as never),
       }),
   },
   {

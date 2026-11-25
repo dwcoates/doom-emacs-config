@@ -1,6 +1,6 @@
 /**
  * cache-lapse — a hidden workspace's countdown to its prompt cache's lapse
- * (frontend.v1.RosterRowWhenHiddenCache, owner request 2026-10-13).
+ * (frontend.v1.RosterRowWhenBackloggedCache, owner request 2026-10-13).
  *
  * A hidden workspace's keep-alives are held, so its cache lapses on its own
  * clock; until then the user can show it again warm. The when-column counts

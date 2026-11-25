@@ -1024,7 +1024,7 @@ func TestFamilyRefusalMapsEachParentStateOntoItsArm(t *testing.T) {
 		state wsm.ParentState
 		want  func(*agentreplv1.WorkspaceParentNotOpen) bool
 	}{
-		{wsm.ParentHidden, func(m *agentreplv1.WorkspaceParentNotOpen) bool { return m.GetHidden() != nil }},
+		{wsm.ParentHidden, func(m *agentreplv1.WorkspaceParentNotOpen) bool { return m.GetBacklogged() != nil }},
 		{wsm.ParentClosed, func(m *agentreplv1.WorkspaceParentNotOpen) bool { return m.GetClosed() != nil }},
 		{wsm.ParentClosing, func(m *agentreplv1.WorkspaceParentNotOpen) bool { return m.GetClosing() != nil }},
 	}

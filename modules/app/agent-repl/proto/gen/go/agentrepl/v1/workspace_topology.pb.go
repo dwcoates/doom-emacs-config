@@ -487,7 +487,7 @@ type WorkspaceRelationship_Child struct {
 	// answers are not followed: a parent that drives the child's work turn by
 	// turn subscribes to them itself (SubscribeWorkspace), which replaces the
 	// one update; the parent reviews it and closes it; and the parent cannot be
-	// closed, hidden, finished or merged away while the child is open
+	// closed, backlogged, finished or merged away while the child is open
 	// (WorkspaceHasOpenChildren). Its landing target defaults to its parent's
 	// branch.
 	Child *WorkspaceRelationshipChild `protobuf:"bytes,1,opt,name=child,proto3,oneof"`
@@ -512,7 +512,7 @@ type WorkspaceRelationshipChild struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The parent, as the roster served it. A registered workspace of ANY
 	// repository; a CLOSED parent is reopened before anything else is done, so
-	// the child has a session to coordinate with, and a hidden or closing one
+	// the child has a session to coordinate with, and a backlogged or closing one
 	// refuses the create (WorkspaceParentNotOpen).
 	Parent        *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=parent,proto3" json:"parent,omitempty"`
 	unknownFields protoimpl.UnknownFields

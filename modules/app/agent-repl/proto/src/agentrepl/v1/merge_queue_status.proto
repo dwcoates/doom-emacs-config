@@ -117,8 +117,8 @@ message MergeQueueStatusOffQueueCause {
     MergeQueueStatusOffQueueCauseFinishFailed finish_failed = 7;
     // The merge it was placed behind left the queue without landing.
     MergeQueueStatusOffQueueCauseAheadDidNotLand ahead_did_not_land = 8;
-    // Its workspace was hidden while it stood at its cold gate.
-    MergeQueueStatusOffQueueCauseHiddenAtColdGate hidden_at_cold_gate = 9;
+    // Its workspace was backlogged while it stood at its cold gate.
+    MergeQueueStatusOffQueueCauseBackloggedAtColdGate backlogged_at_cold_gate = 9;
     // ADOPTED: an async merge's merge workspace found open with no request
     // standing, left by an exit from before requests outlived their place in
     // line. Its request's values were never kept, so it records no version
@@ -146,8 +146,8 @@ message MergeQueueStatusOffQueueCausePickFailed {}
 message MergeQueueStatusOffQueueCauseFinishFailed {}
 // The merge ahead did not land. No fields: the arm is the fact.
 message MergeQueueStatusOffQueueCauseAheadDidNotLand {}
-// Hidden at its cold gate. No fields: the arm is the fact.
-message MergeQueueStatusOffQueueCauseHiddenAtColdGate {}
+// Backlogged at its cold gate. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseBackloggedAtColdGate {}
 // Adopted with no request values. No fields: the arm is the fact.
 message MergeQueueStatusOffQueueCauseAdopted {}
 // Given up by its own agent. No fields: the arm is the fact, and the agent's

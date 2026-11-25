@@ -8,7 +8,7 @@
 // question about that card. While a question is held, the next prompt the
 // user sends is NOT a turn of this workspace: the daemon hands the card,
 // quoted, followed by the user's words, to an EPHEMERAL INTAKE WORKSPACE it
-// creates for the question in the home repository (hidden, with a fresh
+// creates for the question in the home repository (backlogged, with a fresh
 // context), answers the submission `question_sent`, and ends the question.
 // The intake workspace acknowledges this workspace, then sends it the answer
 // or creates, as its child, the one-shot workspace that makes the change

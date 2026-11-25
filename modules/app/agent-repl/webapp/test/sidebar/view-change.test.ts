@@ -105,7 +105,7 @@ const SIZE_TWO: MessageInitShape<typeof UpdateSidebarViewRequestSchema>["change"
   value: {
     sizes: [
       { section: { case: "recentlyMerged", value: {} }, height: { case: "lines", value: { lines: 2 } } },
-      { section: { case: "hidden", value: {} }, height: { case: "lines", value: { lines: 5 } } },
+      { section: { case: "backlog", value: {} }, height: { case: "lines", value: { lines: 5 } } },
     ],
   },
 };

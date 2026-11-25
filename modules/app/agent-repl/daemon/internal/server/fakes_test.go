@@ -601,7 +601,7 @@ type fakeVerbs struct {
 	// interactionErr is what it answers.
 	interactions   []interactionCall
 	interactionErr error
-	// hiddenSets records every SetWorkspaceHidden the verb received;
+	// hiddenSets records every SetWorkspaceBacklogged the verb received;
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
 	setHiddenErr error
@@ -2657,7 +2657,7 @@ type harness struct {
 	Banners *fakeBanners
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
-	// HiddenKeepalives is the cache keeper SendHiddenKeepalives delegates to.
+	// HiddenKeepalives is the cache keeper SendBackloggedKeepalives delegates to.
 	HiddenKeepalives *fakeHiddenKeepalives
 	// KeepLives is the cache keeper KeepLiveWorkspace delegates to.
 	KeepLives *fakeKeepLives
@@ -3267,10 +3267,10 @@ func (v *fakeVerbs) FoldOpenSection(_ context.Context, folded bool) error {
 // fakeHiddenKeepalives counts every call and answers a scripted response.
 type fakeHiddenKeepalives struct {
 	calls    int
-	response *agentreplv1.SendHiddenKeepalivesResponse
+	response *agentreplv1.SendBackloggedKeepalivesResponse
 }
 
-func (f *fakeHiddenKeepalives) SendHiddenKeepalives(context.Context) *agentreplv1.SendHiddenKeepalivesResponse {
+func (f *fakeHiddenKeepalives) SendBackloggedKeepalives(context.Context) *agentreplv1.SendBackloggedKeepalivesResponse {
 	f.calls++
 	return f.response
 }

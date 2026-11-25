@@ -40,7 +40,7 @@ this record is written without per-increment selections.
   - `name_taken { name, holder { workspace | pending } }` is the remaining
     arm.
 - WHY ITS OWN RPC: `agentrepld workspace set` calls one rpc per setting
-  (`SetWorkspaceHidden`, `SetWorkspacePriority`, `SetWorkspaceParent`,
+  (`SetWorkspaceBacklogged`, `SetWorkspacePriority`, `SetWorkspaceParent`,
   `SetWorkspaceOneShot`, `SetWorkspaceCorrespondence`,
   `SetWorkspacePrincipalLink`). The brief asked the rename to match that.
 - WHY NO REQUESTER: like the principal link, the name is a display fact. The

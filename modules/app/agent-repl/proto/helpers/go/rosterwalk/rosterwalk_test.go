@@ -28,8 +28,8 @@ func withBlocks(row *frontendv1.RosterOpenRow, blocks ...[]*frontendv1.RosterOpe
 }
 
 // hidden is a hidden row for id with children.
-func hidden(id string, children ...*frontendv1.RosterHiddenRow) *frontendv1.RosterHiddenRow {
-	return &frontendv1.RosterHiddenRow{Row: row(id), Children: children}
+func hidden(id string, children ...*frontendv1.RosterBacklogRow) *frontendv1.RosterBacklogRow {
+	return &frontendv1.RosterBacklogRow{Row: row(id), Children: children}
 }
 
 // ids names the workspace ids of rows, in order.
@@ -114,7 +114,7 @@ func TestOpenFamilyListsChildrenThenEveryBlocksRows(t *testing.T) {
 
 func TestFlattenHiddenListsAChildAfterItsParent(t *testing.T) {
 	// Act.
-	got := FlattenHidden([]*frontendv1.RosterHiddenRow{hidden("h", hidden("h1")), hidden("g")})
+	got := FlattenHidden([]*frontendv1.RosterBacklogRow{hidden("h", hidden("h1")), hidden("g")})
 
 	// Assert.
 	var names []string
@@ -235,7 +235,7 @@ func TestAllRows(t *testing.T) {
 			push: &frontendv1.RosterPush{
 				Workspaces: &frontendv1.WorkspaceRoster{
 					Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(entry(open("o", open("o1"))))}},
-					Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: []*frontendv1.RosterHiddenRow{hidden("h", hidden("h1"))}}},
+					Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: []*frontendv1.RosterBacklogRow{hidden("h", hidden("h1"))}}},
 				},
 				Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{Row: row("c")}}},
 			},
@@ -285,7 +285,7 @@ func TestClosedRowsListsTheClosedStreamInOrder(t *testing.T) {
 
 func TestHold(t *testing.T) {
 	open := &frontendv1.WorkspaceRoster{Open: &frontendv1.RosterOpenSection{}}
-	reopen := &frontendv1.WorkspaceRoster{Hidden: &frontendv1.RosterHiddenSection{}}
+	reopen := &frontendv1.WorkspaceRoster{Backlog: &frontendv1.RosterBacklogSection{}}
 	queue := &frontendv1.RosterMergeQueueSection{}
 	merged := &frontendv1.RosterMergedSection{}
 	closed := &frontendv1.RosterClosedRows{}

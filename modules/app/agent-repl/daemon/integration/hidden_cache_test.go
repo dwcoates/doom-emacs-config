@@ -24,7 +24,7 @@ import (
 
 // hiddenRow finds a workspace's row in the hidden section.
 func hiddenRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
-	for _, r := range rosterwalk.HiddenRows(roster.GetWorkspaces()) {
+	for _, r := range rosterwalk.BacklogRows(roster.GetWorkspaces()) {
 		if r.GetWorkspace().GetWorkspace().GetId() == id {
 			return r
 		}
@@ -104,13 +104,13 @@ func TestAHiddenWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *t
 	})
 }
 
-// sendHiddenKeepalives asks the daemon for SPC j R's keep-alives and answers
+// sendBackloggedKeepalives asks the daemon for SPC j R's keep-alives and answers
 // its response, failing the test on a transport error.
-func sendHiddenKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.SendHiddenKeepalivesResponse {
+func sendBackloggedKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.SendBackloggedKeepalivesResponse {
 	t.Helper()
-	resp, err := d.Client().SendHiddenKeepalives(d.Ctx(), connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{}))
+	resp, err := d.Client().SendBackloggedKeepalives(d.Ctx(), connect.NewRequest(&agentreplv1.SendBackloggedKeepalivesRequest{}))
 	if err != nil {
-		t.Fatalf("SendHiddenKeepalives = error %v", err)
+		t.Fatalf("SendBackloggedKeepalives = error %v", err)
 	}
 	return resp.Msg
 }
@@ -123,12 +123,12 @@ func TestSendingTheHiddenKeepalivesAsksEachHiddenShimForOne(t *testing.T) {
 	f := hiddenAndHeld(t)
 
 	// Act
-	resp := sendHiddenKeepalives(t, f.d)
+	resp := sendBackloggedKeepalives(t, f.d)
 
 	// Assert: the shim was asked once, and answered sent.
 	workspaces := resp.GetSuccess().GetWorkspaces()
 	if len(workspaces) != 1 || workspaces[0].GetWorkspace().GetId() != f.ws.GetId() || workspaces[0].GetSent() == nil {
-		t.Fatalf("SendHiddenKeepalives = %v, want the one hidden workspace sent", resp)
+		t.Fatalf("SendBackloggedKeepalives = %v, want the one hidden workspace sent", resp)
 	}
 	shim := f.d.OpenedShim(f.ws)
 	if n := shim.Count(harness.RPCSendKeepalive); n != 1 {
@@ -143,7 +143,7 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 	roster := f.d.WatchRoster()
 	shim := f.d.OpenedShim(f.ws)
 	shim.PushSessionUpdate(cacheLapse(time.Now().Add(10*time.Minute), 0))
-	sendHiddenKeepalives(t, f.d)
+	sendBackloggedKeepalives(t, f.d)
 	later := time.Now().Add(time.Hour)
 
 	// Act: the held shim restates its lapse once the keep-alive's answer re-anchors.

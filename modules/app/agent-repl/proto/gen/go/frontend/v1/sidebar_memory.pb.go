@@ -195,7 +195,7 @@ type SidebarMemoryWorkspacesVisible struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// How many open workspaces are visible.
 	Visible uint32 `protobuf:"varint,1,opt,name=visible,proto3" json:"visible,omitempty"`
-	// How many workspaces are open (not hidden, not closed).
+	// How many workspaces are open (not backlogged, not closed).
 	Open          uint32 `protobuf:"varint,2,opt,name=open,proto3" json:"open,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

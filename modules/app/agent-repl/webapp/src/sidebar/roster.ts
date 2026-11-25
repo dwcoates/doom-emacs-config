@@ -32,15 +32,15 @@ import { FOLDED_CLASS } from "./folded-class.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, MERGED_AT_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
 import {
-  RosterHiddenSectionSchema,
+  RosterBacklogSectionSchema,
   RosterMergedSectionSchema,
   RosterMergeQueueSectionSchema,
   RosterOpenSectionSchema,
   RosterRepoSectionSchema,
   type RosterCurrentWorkspace,
-  type RosterHiddenRow,
-  type RosterHiddenRows,
-  type RosterHiddenSection,
+  type RosterBacklogRow,
+  type RosterBacklogRows,
+  type RosterBacklogSection,
   type RosterLabel,
   type RosterMergedRepoGroup,
   type RosterMergedRepoGroupHeader,
@@ -260,7 +260,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   const removeDrag = installArrangeDrag(dragScope.context, roster, drawnRefs(() => repos.values()));
   /** The open section, and the box its repository sections are placed in. */
   let open: DrawnSection<{ open: RosterOpenSection; count: string }, Drawn & { body: HTMLElement }> | null = null;
-  let hidden: DrawnSection<RosterHiddenSection, DrawnHiddenSection> | null = null;
+  let hidden: DrawnSection<RosterBacklogSection, DrawnHiddenSection> | null = null;
   let merged: DrawnSection<{ summary: RosterMergedSection; pages: number }> | null = null;
   let mergeQueue: DrawnSection<{ queue: RosterMergeQueueSection; coldGated: ColdGated }> | null = null;
   /** The streams last drawn, null before the first draw. */
@@ -306,7 +306,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   const drawWorkspaces = (u: RosterStreams["workspaces"], discarded: Array<DrawnSection<unknown>>): WorkspacesDrawn => {
     const path = "WorkspaceRoster";
     const repository = requireMessage(u.repository, `${path}.repository`);
-    const hiddenWire = requireMessage(u.hidden, `${path}.hidden`);
+    const hiddenWire = requireMessage(u.backlog, `${path}.hidden`);
     const openWire = requireMessage(u.open, `${path}.open`);
     const openCount = openCountText(
       drawRosterOpenCount(
@@ -413,10 +413,10 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
     // THE HIDDEN SECTION'S ROWS ARE KEYED as a repository's are: a push that
     // changed only its rows keeps the section and draws the rows it changed.
     const hiddenPath = `${path}.hidden`;
-    if (hidden !== null && untouched(hidden) && !equals(RosterHiddenSectionSchema, hidden.wire, hiddenWire) && sameButHiddenRows(hidden.wire, hiddenWire)) {
+    if (hidden !== null && untouched(hidden) && !equals(RosterBacklogSectionSchema, hidden.wire, hiddenWire) && sameButHiddenRows(hidden.wire, hiddenWire)) {
       tally(
         reconcileKeyedRegions(
-          [{ kept: hidden.drawn.rows, rows: pathedHiddenRows(requireMessage(hiddenWire.hiddenRows, `${hiddenPath}.hidden_rows`), `${hiddenPath}.hidden_rows`) }],
+          [{ kept: hidden.drawn.rows, rows: pathedHiddenRows(requireMessage(hiddenWire.backlogRows, `${hiddenPath}.hidden_rows`), `${hiddenPath}.hidden_rows`) }],
           rail,
           "hidden",
           HIDDEN_ROW,
@@ -431,11 +431,11 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       hidden = keepOrDraw(
         hidden,
         hiddenWire,
-        (a, b) => equals(RosterHiddenSectionSchema, a, b),
+        (a, b) => equals(RosterBacklogSectionSchema, a, b),
         (scoped) => {
-          const rows: KeyedRows<RosterHiddenRow> = { entries: [] };
+          const rows: KeyedRows<RosterBacklogRow> = { entries: [] };
           scoped.onDispose(() => disposeKeyedRows(rows));
-          const element = drawRosterHiddenSection(hiddenWire, scoped, hiddenPath, (r, p) => drawKeyedHiddenRows(r, rail, p, "hidden", rows));
+          const element = drawRosterBacklogSection(hiddenWire, scoped, hiddenPath, (r, p) => drawKeyedHiddenRows(r, rail, p, "hidden", rows));
           return { element, rows };
         },
         discarded,
@@ -546,7 +546,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
           repo_sections: repos.size,
           merged_groups: mergedWire.groups.length,
           merge_queue_groups: mergeQueueWire.groups.length,
-          hidden_rows: hiddenDrawn.wire.hiddenRows?.rows.length ?? 0,
+          hidden_rows: hiddenDrawn.wire.backlogRows?.rows.length ?? 0,
           redrawn_sections: draw.sectionsDrawn,
           redrawn_rows: draw.rowsDrawn,
           removed_rows: draw.rowsRemoved,
@@ -590,7 +590,7 @@ interface DrawnRepoSection extends Drawn {
 
 /** A drawn hidden section: its element, and its keyed rows. */
 interface DrawnHiddenSection extends Drawn {
-  rows: KeyedRows<RosterHiddenRow>;
+  rows: KeyedRows<RosterBacklogRow>;
 }
 
 /** The rows box a drawn section ELEMENT at PATH stands its body in (`drawHeadedBox`). */
@@ -655,18 +655,18 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
 }
 
 /** Whether two hidden sections differ in their rows at most: the same header, fold and height. */
-function sameButHiddenRows(a: RosterHiddenSection, b: RosterHiddenSection): boolean {
-  // AN EMPTY HIDDEN SECTION IS LEFT OUT of the rail (`drawRosterHiddenSection`),
+function sameButHiddenRows(a: RosterBacklogSection, b: RosterBacklogSection): boolean {
+  // AN EMPTY HIDDEN SECTION IS LEFT OUT of the rail (`drawRosterBacklogSection`),
   // so a count that reaches or leaves zero draws the section anew.
-  const empty = (u: RosterHiddenSection): boolean => (u.header?.count?.workspaces ?? 0) === 0;
+  const empty = (u: RosterBacklogSection): boolean => (u.header?.count?.workspaces ?? 0) === 0;
   if (empty(a) || empty(b)) return false;
-  const left = clone(RosterHiddenSectionSchema, a);
-  const right = clone(RosterHiddenSectionSchema, b);
+  const left = clone(RosterBacklogSectionSchema, a);
+  const right = clone(RosterBacklogSectionSchema, b);
   for (const section of [left, right]) {
-    section.hiddenRows = undefined;
+    section.backlogRows = undefined;
     if (section.header !== undefined) section.header.count = undefined;
   }
-  return equals(RosterHiddenSectionSchema, left, right);
+  return equals(RosterBacklogSectionSchema, left, right);
 }
 
 /**
@@ -1427,17 +1427,17 @@ export function mergedTodayCommitsText(today: MergedRowFacts[]): string {
  * sizes its viewport against the Open section's and the Recently Merged
  * section's.
  *
- * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceHidden`), rather
+ * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceBacklogged`), rather
  * than selecting it: the push that follows moves it back into its groupings
  * and onto the tab bar.
  */
-export function drawRosterHiddenSection(
-  u: RosterHiddenSection,
+export function drawRosterBacklogSection(
+  u: RosterBacklogSection,
   sc: SidebarContext,
   path: string,
-  drawRows: (rows: RosterHiddenRows, path: string) => HTMLElement = (rows, p) => drawRosterRows(rows, sc, p, "hidden"),
+  drawRows: (rows: RosterBacklogRows, path: string) => HTMLElement = (rows, p) => drawRosterRows(rows, sc, p, "hidden"),
 ): HTMLElement {
-  const rows = requireMessage(u.hiddenRows, `${path}.hidden_rows`);
+  const rows = requireMessage(u.backlogRows, `${path}.hidden_rows`);
   return drawHeadedBox(
     u,
     sc,
@@ -1445,7 +1445,7 @@ export function drawRosterHiddenSection(
     {
       foldKey: HIDDEN_FOLD_KEY,
       className: HIDDEN_SECTION_CLASS,
-      target: { case: "hidden", value: {} },
+      target: { case: "backlog", value: {} },
       resizable: true,
       leftOut: {
         when: (header, headerPath) =>

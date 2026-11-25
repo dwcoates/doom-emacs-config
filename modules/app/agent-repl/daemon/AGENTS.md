@@ -263,7 +263,7 @@ mechanics (`integration/shareddaemon_test.go`).
   and a refusal blocks it), `groupSelection` (the selected workspace is one
   per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
   catalog its login last served; no case of it starts a session) and
-  `groupHiddenKeepalives` (SendHiddenKeepalives asks every hidden shim of
+  `groupHiddenKeepalives` (SendBackloggedKeepalives asks every hidden shim of
   the daemon), `groupTabOrder` (tab numbers run across every repository,
   and the arrangement lists them all), `groupDesktopBanner` (a banner
   turns on the one editor's focus, and a focus gain claims the newest held

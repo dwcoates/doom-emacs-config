@@ -7,8 +7,8 @@ lists beside it whether the section is folded or not, in the font and color of
 Recently Merged's "(K today)". From here on, documentation calls that list
 the OPEN WORKSPACES SECTION of the sidebar.
 
-The shapes follow the nearest precedents (`frontend.v1.RosterHiddenSection`,
-`agentrepl.v1.SidebarViewHidden`), as `hidden-workspaces.md` did.
+The shapes follow the nearest precedents (`frontend.v1.RosterBacklogSection`,
+`agentrepl.v1.SidebarViewBacklog`), as `hidden-workspaces.md` did.
 
 ## Landed changes
 

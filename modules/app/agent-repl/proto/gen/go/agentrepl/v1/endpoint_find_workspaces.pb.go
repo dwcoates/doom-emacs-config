@@ -64,7 +64,7 @@ type FindWorkspacesRequest struct {
 	// made. UNSET = whoever asked. A ref naming no registered workspace is the
 	// unknown_creator answer.
 	CreatedBy *v1.WorkspaceRef `protobuf:"bytes,6,opt,name=created_by,json=createdBy,proto3,oneof" json:"created_by,omitempty"`
-	// Only workspaces the sidebar roster draws a row for in its open, hidden or
+	// Only workspaces the sidebar roster draws a row for in its open, backlog or
 	// recently merged section (FoundWorkspace.roster set): the workspaces
 	// `workspace list` answers. UNSET = drawn or not.
 	OnRoster *FindWorkspacesOnRoster `protobuf:"bytes,7,opt,name=on_roster,json=onRoster,proto3,oneof" json:"on_roster,omitempty"`
@@ -965,7 +965,7 @@ type FoundWorkspace struct {
 	Parent *v1.WorkspaceRef `protobuf:"bytes,10,opt,name=parent,proto3,oneof" json:"parent,omitempty"`
 	// Where the sidebar roster draws the workspace and the live status it draws
 	// it with, as the roster last resolved stands. UNSET when the roster draws
-	// no row of it in its open, hidden or recently merged section: a closed
+	// no row of it in its open, backlog or recently merged section: a closed
 	// workspace that never merged.
 	Roster *FoundWorkspaceRoster `protobuf:"bytes,11,opt,name=roster,proto3,oneof" json:"roster,omitempty"`
 	// TRUE for the record of the workspace the request names as its caller
@@ -1180,7 +1180,7 @@ func (x *FoundWorkspaceMerge) GetRequester() *v1.WorkspaceRef {
 }
 
 // A found workspace as the sidebar roster draws it right now: which section
-// carries its row, and that row's status. An open or hidden workspace's are
+// carries its row, and that row's status. An open or backlogged workspace's are
 // read off the workspaces stream the daemon publishes (frontend.v1
 // WorkspaceRoster), and a merged one's off the row the recently merged band's
 // pages resolve for it (ListMergedWorkspaces), so the answer agrees with what
@@ -1246,7 +1246,7 @@ type FoundWorkspaceRosterSection struct {
 	// Types that are valid to be assigned to Section:
 	//
 	//	*FoundWorkspaceRosterSection_Open
-	//	*FoundWorkspaceRosterSection_Hidden
+	//	*FoundWorkspaceRosterSection_Backlog
 	//	*FoundWorkspaceRosterSection_Merged
 	Section       isFoundWorkspaceRosterSection_Section `protobuf_oneof:"section"`
 	unknownFields protoimpl.UnknownFields
@@ -1299,10 +1299,10 @@ func (x *FoundWorkspaceRosterSection) GetOpen() *FoundWorkspaceRosterSectionOpen
 	return nil
 }
 
-func (x *FoundWorkspaceRosterSection) GetHidden() *FoundWorkspaceRosterSectionHidden {
+func (x *FoundWorkspaceRosterSection) GetBacklog() *FoundWorkspaceRosterSectionBacklog {
 	if x != nil {
-		if x, ok := x.Section.(*FoundWorkspaceRosterSection_Hidden); ok {
-			return x.Hidden
+		if x, ok := x.Section.(*FoundWorkspaceRosterSection_Backlog); ok {
+			return x.Backlog
 		}
 	}
 	return nil
@@ -1327,10 +1327,10 @@ type FoundWorkspaceRosterSection_Open struct {
 	Open *FoundWorkspaceRosterSectionOpen `protobuf:"bytes,1,opt,name=open,proto3,oneof"`
 }
 
-type FoundWorkspaceRosterSection_Hidden struct {
-	// The hidden section (frontend.v1.WorkspaceRoster.hidden): open but
-	// hidden by the user.
-	Hidden *FoundWorkspaceRosterSectionHidden `protobuf:"bytes,2,opt,name=hidden,proto3,oneof"`
+type FoundWorkspaceRosterSection_Backlog struct {
+	// The backlog (frontend.v1.WorkspaceRoster.backlog): open but
+	// backlogged by the user.
+	Backlog *FoundWorkspaceRosterSectionBacklog `protobuf:"bytes,2,opt,name=backlog,proto3,oneof"`
 }
 
 type FoundWorkspaceRosterSection_Merged struct {
@@ -1343,7 +1343,7 @@ type FoundWorkspaceRosterSection_Merged struct {
 
 func (*FoundWorkspaceRosterSection_Open) isFoundWorkspaceRosterSection_Section() {}
 
-func (*FoundWorkspaceRosterSection_Hidden) isFoundWorkspaceRosterSection_Section() {}
+func (*FoundWorkspaceRosterSection_Backlog) isFoundWorkspaceRosterSection_Section() {}
 
 func (*FoundWorkspaceRosterSection_Merged) isFoundWorkspaceRosterSection_Section() {}
 
@@ -1384,27 +1384,27 @@ func (*FoundWorkspaceRosterSectionOpen) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{17}
 }
 
-// Drawn in the hidden section. No fields.
-type FoundWorkspaceRosterSectionHidden struct {
+// Drawn in the backlog. No fields.
+type FoundWorkspaceRosterSectionBacklog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FoundWorkspaceRosterSectionHidden) Reset() {
-	*x = FoundWorkspaceRosterSectionHidden{}
+func (x *FoundWorkspaceRosterSectionBacklog) Reset() {
+	*x = FoundWorkspaceRosterSectionBacklog{}
 	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FoundWorkspaceRosterSectionHidden) String() string {
+func (x *FoundWorkspaceRosterSectionBacklog) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FoundWorkspaceRosterSectionHidden) ProtoMessage() {}
+func (*FoundWorkspaceRosterSectionBacklog) ProtoMessage() {}
 
-func (x *FoundWorkspaceRosterSectionHidden) ProtoReflect() protoreflect.Message {
+func (x *FoundWorkspaceRosterSectionBacklog) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1416,8 +1416,8 @@ func (x *FoundWorkspaceRosterSectionHidden) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FoundWorkspaceRosterSectionHidden.ProtoReflect.Descriptor instead.
-func (*FoundWorkspaceRosterSectionHidden) Descriptor() ([]byte, []int) {
+// Deprecated: Use FoundWorkspaceRosterSectionBacklog.ProtoReflect.Descriptor instead.
+func (*FoundWorkspaceRosterSectionBacklog) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{18}
 }
 
@@ -2181,14 +2181,14 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"_requester\"\x9d\x01\n" +
 	"\x14FoundWorkspaceRoster\x12C\n" +
 	"\asection\x18\x01 \x01(\v2).agentrepl.v1.FoundWorkspaceRosterSectionR\asection\x12@\n" +
-	"\x06status\x18\x02 \x01(\v2(.agentrepl.v1.FoundWorkspaceRosterStatusR\x06status\"\x83\x02\n" +
+	"\x06status\x18\x02 \x01(\v2(.agentrepl.v1.FoundWorkspaceRosterStatusR\x06status\"\x86\x02\n" +
 	"\x1bFoundWorkspaceRosterSection\x12C\n" +
-	"\x04open\x18\x01 \x01(\v2-.agentrepl.v1.FoundWorkspaceRosterSectionOpenH\x00R\x04open\x12I\n" +
-	"\x06hidden\x18\x02 \x01(\v2/.agentrepl.v1.FoundWorkspaceRosterSectionHiddenH\x00R\x06hidden\x12I\n" +
+	"\x04open\x18\x01 \x01(\v2-.agentrepl.v1.FoundWorkspaceRosterSectionOpenH\x00R\x04open\x12L\n" +
+	"\abacklog\x18\x02 \x01(\v20.agentrepl.v1.FoundWorkspaceRosterSectionBacklogH\x00R\abacklog\x12I\n" +
 	"\x06merged\x18\x03 \x01(\v2/.agentrepl.v1.FoundWorkspaceRosterSectionMergedH\x00R\x06mergedB\t\n" +
 	"\asection\"!\n" +
-	"\x1fFoundWorkspaceRosterSectionOpen\"#\n" +
-	"!FoundWorkspaceRosterSectionHidden\"#\n" +
+	"\x1fFoundWorkspaceRosterSectionOpen\"$\n" +
+	"\"FoundWorkspaceRosterSectionBacklog\"#\n" +
 	"!FoundWorkspaceRosterSectionMerged\".\n" +
 	"\x1aFoundWorkspaceRosterStatus\x12\x10\n" +
 	"\x03arm\x18\x01 \x01(\tR\x03arm\"\xf0\x01\n" +
@@ -2252,7 +2252,7 @@ var file_agentrepl_v1_endpoint_find_workspaces_proto_goTypes = []any{
 	(*FoundWorkspaceRoster)(nil),                // 15: agentrepl.v1.FoundWorkspaceRoster
 	(*FoundWorkspaceRosterSection)(nil),         // 16: agentrepl.v1.FoundWorkspaceRosterSection
 	(*FoundWorkspaceRosterSectionOpen)(nil),     // 17: agentrepl.v1.FoundWorkspaceRosterSectionOpen
-	(*FoundWorkspaceRosterSectionHidden)(nil),   // 18: agentrepl.v1.FoundWorkspaceRosterSectionHidden
+	(*FoundWorkspaceRosterSectionBacklog)(nil),  // 18: agentrepl.v1.FoundWorkspaceRosterSectionBacklog
 	(*FoundWorkspaceRosterSectionMerged)(nil),   // 19: agentrepl.v1.FoundWorkspaceRosterSectionMerged
 	(*FoundWorkspaceRosterStatus)(nil),          // 20: agentrepl.v1.FoundWorkspaceRosterStatus
 	(*FoundWorkspaceStanding)(nil),              // 21: agentrepl.v1.FoundWorkspaceStanding
@@ -2298,7 +2298,7 @@ var file_agentrepl_v1_endpoint_find_workspaces_proto_depIdxs = []int32{
 	16, // 26: agentrepl.v1.FoundWorkspaceRoster.section:type_name -> agentrepl.v1.FoundWorkspaceRosterSection
 	20, // 27: agentrepl.v1.FoundWorkspaceRoster.status:type_name -> agentrepl.v1.FoundWorkspaceRosterStatus
 	17, // 28: agentrepl.v1.FoundWorkspaceRosterSection.open:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionOpen
-	18, // 29: agentrepl.v1.FoundWorkspaceRosterSection.hidden:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionHidden
+	18, // 29: agentrepl.v1.FoundWorkspaceRosterSection.backlog:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionBacklog
 	19, // 30: agentrepl.v1.FoundWorkspaceRosterSection.merged:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionMerged
 	22, // 31: agentrepl.v1.FoundWorkspaceStanding.open:type_name -> agentrepl.v1.FoundWorkspaceStandingOpen
 	23, // 32: agentrepl.v1.FoundWorkspaceStanding.closed:type_name -> agentrepl.v1.FoundWorkspaceStandingClosed
@@ -2344,7 +2344,7 @@ func file_agentrepl_v1_endpoint_find_workspaces_proto_init() {
 	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[14].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[16].OneofWrappers = []any{
 		(*FoundWorkspaceRosterSection_Open)(nil),
-		(*FoundWorkspaceRosterSection_Hidden)(nil),
+		(*FoundWorkspaceRosterSection_Backlog)(nil),
 		(*FoundWorkspaceRosterSection_Merged)(nil),
 	}
 	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[21].OneofWrappers = []any{

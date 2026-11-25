@@ -5,9 +5,9 @@
  *
  * Every workspace has its own page, and each page draws the view the roster
  * push carries — a section's fold (`RosterRepoSection.fold`,
- * `RosterMergedSection.fold`, `RosterHiddenSection.fold`,
+ * `RosterMergedSection.fold`, `RosterBacklogSection.fold`,
  * `RosterOpenSection.fold`), a band section's height
- * (`RosterHiddenSection.height` and its siblings, `section-resize.ts`), and whether the open section's repository
+ * (`RosterBacklogSection.height` and its siblings, `section-resize.ts`), and whether the open section's repository
  * sections show their merge queues (`RosterOpenSection.shows`,
  * `merge-queue-view.ts`) — so a change asked for in one page reaches every
  * page on the same push.

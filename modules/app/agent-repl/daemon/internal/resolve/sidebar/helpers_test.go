@@ -437,15 +437,15 @@ func innerRows(open []*frontendv1.RosterOpenRow) []*frontendv1.RosterRow {
 	return out
 }
 
-// hiddenRows reads the hidden section's shared rows, flattened.
-func hiddenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
-	return rosterwalk.HiddenRows(roster)
+// backlogRows reads the hidden section's shared rows, flattened.
+func backlogRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+	return rosterwalk.BacklogRows(roster)
 }
 
 // topHidden reads the hidden section's top-level shared rows, in order.
 func topHidden(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
-	for _, h := range roster.GetHidden().GetHiddenRows().GetRows() {
+	for _, h := range roster.GetBacklog().GetBacklogRows().GetRows() {
 		out = append(out, h.GetRow())
 	}
 	return out

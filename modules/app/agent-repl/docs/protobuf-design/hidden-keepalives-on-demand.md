@@ -46,12 +46,12 @@ countdown to it) moves later. Contracts are the owner's standing delegation
     `conversation.v1.SessionCacheLapse` on the session stream once the
     keep-alive's response re-anchors the cache, through the one existing path.
 
-### `agentrepl.v1.SendHiddenKeepalives`
+### `agentrepl.v1.SendBackloggedKeepalives`
 
 - WHAT: a daemon-scoped rpc (SIDEBAR section) with an empty request.
   - The daemon reads the hidden section (`wsm.Workspace.InHiddenSection`),
     asks each served shim concurrently, and answers one
-    `SendHiddenKeepalivesWorkspace` per hidden workspace: `sent`, `skipped`,
+    `SendBackloggedKeepalivesWorkspace` per hidden workspace: `sent`, `skipped`,
     `not_running`, or `failed{detail}`.
   - Error arm: `registry_unreadable`, when the registry list itself fails.
 - WHY: `SPC j R` reports how it went in the echo area; the countdowns

@@ -36,7 +36,7 @@ func TestAHiddenRowCountsDownToItsCacheLapse(t *testing.T) {
 	r := arrange(t, hiddenLapsing(30*time.Minute, false))
 
 	// Assert.
-	hidden := onlyHiddenRow(t, r).GetWhen().GetHidden()
+	hidden := onlyHiddenRow(t, r).GetWhen().GetBacklogged()
 	if hidden.GetCache() == nil || hidden.GetCache().GetLapsesAtMs() != epoch.Add(30*time.Minute).UnixMilli() {
 		t.Fatalf("when = %v, want the lapse 30 minutes on", hidden)
 	}
@@ -47,7 +47,7 @@ func TestAHiddenRowWithNoKnownLapseCountsUpFromItsHide(t *testing.T) {
 	r := arrange(t, hiddenWorkspace(string(theWS), "one"))
 
 	// Assert.
-	hidden := onlyHiddenRow(t, r).GetWhen().GetHidden()
+	hidden := onlyHiddenRow(t, r).GetWhen().GetBacklogged()
 	if hidden.GetCache() != nil || hidden.GetAtMs() != epoch.UnixMilli() {
 		t.Fatalf("when = %v, want the hide instant and no lapse", hidden)
 	}

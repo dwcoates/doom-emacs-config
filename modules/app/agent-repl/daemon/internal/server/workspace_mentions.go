@@ -94,7 +94,7 @@ func mentionTargets(push *frontendRoster, merged []*frontendv1.RosterRow, viewer
 	for _, open := range rosterwalk.OpenRows(roster) {
 		live = append(live, open.GetRow())
 	}
-	live = append(live, rosterwalk.HiddenRows(roster)...)
+	live = append(live, rosterwalk.BacklogRows(roster)...)
 	since := now.Add(-RecentlyClosedMentionWindow).UnixMilli()
 	for _, row := range append(append([]*frontendv1.RosterRow(nil), merged...), rosterwalk.ClosedRows(push.GetClosed())...) {
 		if row.Closure != nil && row.GetClosure().GetAtMs() >= since {

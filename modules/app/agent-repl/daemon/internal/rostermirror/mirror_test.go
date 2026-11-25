@@ -194,13 +194,13 @@ func workspacesStream(open, hidden []*frontendv1.RosterClosedRow) *frontendv1.Wo
 	for _, r := range open {
 		entries = append(entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: r.GetRow()}}})
 	}
-	var hiddenRows []*frontendv1.RosterHiddenRow
+	var backlogRows []*frontendv1.RosterBacklogRow
 	for _, r := range hidden {
-		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: r.GetRow()})
+		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: r.GetRow()})
 	}
 	return &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{Entries: entries}}},
-		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
+		Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: backlogRows}},
 	}
 }
 

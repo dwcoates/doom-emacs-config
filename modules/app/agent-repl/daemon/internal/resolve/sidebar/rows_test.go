@@ -47,7 +47,7 @@ func TestRowNamesItsRepository(t *testing.T) {
 		{
 			name: "a hidden row, in no repository section, names its repository",
 			reg:  registry(hiddenWorkspace("w-hidden", "hidden")),
-			rows: hiddenRows,
+			rows: backlogRows,
 			want: []string{"alpha"},
 		},
 	}
@@ -82,7 +82,7 @@ func TestRowOfAnUnregisteredRepositoryNamesNoneAndIsRecorded(t *testing.T) {
 
 	// Assert: the row is still drawn, names no repository, and the violation
 	// is recorded with the repository it names.
-	rows := hiddenRows(latest(t, r))
+	rows := backlogRows(latest(t, r))
 	if len(rows) != 1 || rows[0].Repository != nil {
 		t.Fatalf("hidden rows = %v, want the stray drawn with no repository", rows)
 	}
@@ -589,8 +589,8 @@ func TestHiddenBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Assert: a hidden row counts from its hide.
-	row := hiddenRows(latest(t, r))[0]
-	if got := row.GetWhen().GetHidden().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
+	row := backlogRows(latest(t, r))[0]
+	if got := row.GetWhen().GetBacklogged().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the hide instant", row.GetWhen())
 	}
 }

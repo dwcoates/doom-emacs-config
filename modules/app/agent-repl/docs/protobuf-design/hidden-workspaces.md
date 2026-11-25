@@ -27,7 +27,7 @@ agreement.
 
 ## Landed changes
 
-### `agentrepl.v1.SetWorkspaceHidden`
+### `agentrepl.v1.SetWorkspaceBacklogged`
 
 - WHAT: a new SIDEBAR rpc whose request carries the `workspace.v1.WorkspaceRef`
   and a `visibility` oneof of `hide` / `show`. Its error arms are the same four
@@ -43,7 +43,7 @@ agreement.
   - asking for the state a workspace already holds is a success, as
     `UpdateSidebarView` already rules for folds.
 
-### `frontend.v1.WorkspaceRoster.hidden` / `frontend.v1.RosterHiddenSection`
+### `frontend.v1.WorkspaceRoster.hidden` / `frontend.v1.RosterBacklogSection`
 
 - WHAT: a section shaped exactly like `RosterMergedSection` (header, rows,
   expanded/collapsed fold), always on the wire.
@@ -66,7 +66,7 @@ agreement.
 
 ### `agentrepl.v1.SidebarViewFoldSection.hidden`
 
-- WHAT: a `SidebarViewHidden` arm on the fold's section oneof.
+- WHAT: a `SidebarViewBacklog` arm on the fold's section oneof.
 - WHY: the section folds like every other, and folds are the daemon's.
 - Its fold is stored on the `sidebar_view` singleton as `hidden_folded`
   (layout 32, default 0 = expanded).

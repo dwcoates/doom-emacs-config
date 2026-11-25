@@ -238,7 +238,7 @@ func TestStatusAnswersAClosedOrHiddenWorkspace(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Status: %v", err)
 			}
-			if (got.GetStanding().GetClosed() != nil) != tt.wantClosed || got.GetHidden() != tt.wantHidden {
+			if (got.GetStanding().GetClosed() != nil) != tt.wantClosed || got.GetBacklogged() != tt.wantHidden {
 				t.Errorf("Status = %+v, want closed %v hidden %v", got, tt.wantClosed, tt.wantHidden)
 			}
 		})
@@ -273,8 +273,8 @@ func TestStatusHiddenAgreesWithWhatTheSidebarDraws(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Status: %v", err)
 			}
-			if got.GetHidden() == tt.record.ListedOpen() {
-				t.Errorf("Status hidden = %v while the sidebar lists it open = %v", got.GetHidden(), tt.record.ListedOpen())
+			if got.GetBacklogged() == tt.record.ListedOpen() {
+				t.Errorf("Status hidden = %v while the sidebar lists it open = %v", got.GetBacklogged(), tt.record.ListedOpen())
 			}
 		})
 	}
@@ -297,8 +297,8 @@ func TestStatusAfterAShowOfAHiddenMergeWorkspaceIsNotHidden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if got.GetHidden() || !drawnOpen(t, f, "ws-merge") {
-		t.Fatalf("Status hidden = %v, drawn open = %v; want shown in both", got.GetHidden(), drawnOpen(t, f, "ws-merge"))
+	if got.GetBacklogged() || !drawnOpen(t, f, "ws-merge") {
+		t.Fatalf("Status hidden = %v, drawn open = %v; want shown in both", got.GetBacklogged(), drawnOpen(t, f, "ws-merge"))
 	}
 }
 

@@ -170,7 +170,7 @@ func TestDescribeWorkspaceRefusalWithNoSentenceIsABug(t *testing.T) {
 func parentNotOpenCases(empty proto.Message, again string) []refusalCase {
 	parent := &workspacev1.WorkspaceRef{Id: "p", Dir: "/w/p"}
 	return []refusalCase{
-		{name: "parent_not_open/hidden", err: armed(empty, "parent_not_open", &agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Hidden{Hidden: &agentreplv1.WorkspaceParentNotOpenHidden{}}}),
+		{name: "parent_not_open/hidden", err: armed(empty, "parent_not_open", &agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Backlogged{Backlogged: &agentreplv1.WorkspaceParentNotOpenBacklogged{}}}),
 			want: "the parent /w/p is hidden; show it, then " + again},
 		{name: "parent_not_open/closed", err: armed(empty, "parent_not_open", &agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Closed{Closed: &agentreplv1.WorkspaceParentNotOpenClosed{}}}),
 			want: "the parent /w/p is closed; reopen it, then " + again},
@@ -190,7 +190,7 @@ func openChildrenCase(empty proto.Message, again string) refusalCase {
 // workspaceSettingRefusals is each `workspace set`, summary, link, find and
 // place describer with its cases.
 var workspaceSettingRefusals = func() []describedRefusal {
-	hidden := &agentreplv1.SetWorkspaceHiddenError{}
+	hidden := &agentreplv1.SetWorkspaceBackloggedError{}
 	priority := &agentreplv1.SetWorkspacePriorityError{}
 	name := &agentreplv1.SetWorkspaceNameError{}
 	remote := &agentreplv1.UpdateRemoteControlModeError{}
@@ -206,7 +206,7 @@ var workspaceSettingRefusals = func() []describedRefusal {
 				openChildrenCase(hidden, "hide it again")),
 				parentNotOpenCases(hidden, "show ws again")...),
 			describe: func(e proto.Message) (string, error) {
-				return describeHiddenRefusal("ws", e.(*agentreplv1.SetWorkspaceHiddenError))
+				return describeHiddenRefusal("ws", e.(*agentreplv1.SetWorkspaceBackloggedError))
 			}},
 		{name: "priority", empty: priority, oneof: "cause",
 			cases: sharedWorkspaceCases(priority, "set it again", theFourWorkspaceArms...),

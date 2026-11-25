@@ -64,7 +64,7 @@ func Placements(push *frontendv1.RosterPush, merged []*frontendv1.RosterRow) (ma
 		rows    []*frontendv1.RosterRow
 	}{
 		{OpenSection, open},
-		{HiddenSection, rosterwalk.HiddenRows(push.GetWorkspaces())},
+		{HiddenSection, rosterwalk.BacklogRows(push.GetWorkspaces())},
 		{MergedSection, merged},
 	} {
 		for _, row := range section.rows {

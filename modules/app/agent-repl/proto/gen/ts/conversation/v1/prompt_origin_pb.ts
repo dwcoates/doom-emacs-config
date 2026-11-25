@@ -524,7 +524,7 @@ export enum PromptOrigin {
    * The deploy mediator's brief: a deploy began, and the repository's merge
    * queue advances nothing until the mediator approves it, escalates it, or
    * deploys its remediation (repoconfig.v1.LifecycleConfig.deploy_mediator).
-   * Drawn as the daemon's prompt to its own hidden workspace.
+   * Drawn as the daemon's prompt to its own backlogged workspace.
    *
    * @generated from enum value: PROMPT_ORIGIN_DEPLOY_MEDIATION = 52;
    */
@@ -556,7 +556,7 @@ export enum PromptOrigin {
    * The production mediator's brief: a deploy finished, and the span the
    * version before it served alone is ready to review
    * (repoconfig.v1.LifecycleConfig.production_checks). Nothing waits on it.
-   * Drawn as the daemon's prompt to its own hidden workspace.
+   * Drawn as the daemon's prompt to its own backlogged workspace.
    *
    * @generated from enum value: PROMPT_ORIGIN_PRODUCTION_MEDIATION = 55;
    */

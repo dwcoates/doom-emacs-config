@@ -36,8 +36,8 @@ func mergeQueueSection() *agentreplv1.SidebarViewFoldSection_MergeQueue {
 	return &agentreplv1.SidebarViewFoldSection_MergeQueue{MergeQueue: &agentreplv1.SidebarViewMergeQueue{}}
 }
 
-func hiddenSection() *agentreplv1.SidebarViewFoldSection_Hidden {
-	return &agentreplv1.SidebarViewFoldSection_Hidden{Hidden: &agentreplv1.SidebarViewHidden{}}
+func hiddenSection() *agentreplv1.SidebarViewFoldSection_Backlog {
+	return &agentreplv1.SidebarViewFoldSection_Backlog{Backlog: &agentreplv1.SidebarViewBacklog{}}
 }
 
 func openSection() *agentreplv1.SidebarViewFoldSection_Open {
@@ -420,8 +420,8 @@ func sizeMerged() *agentreplv1.SidebarViewSectionSize_RecentlyMerged {
 	return &agentreplv1.SidebarViewSectionSize_RecentlyMerged{RecentlyMerged: &agentreplv1.SidebarViewRecentlyMerged{}}
 }
 
-func sizeHidden() *agentreplv1.SidebarViewSectionSize_Hidden {
-	return &agentreplv1.SidebarViewSectionSize_Hidden{Hidden: &agentreplv1.SidebarViewHidden{}}
+func sizeHidden() *agentreplv1.SidebarViewSectionSize_Backlog {
+	return &agentreplv1.SidebarViewSectionSize_Backlog{Backlog: &agentreplv1.SidebarViewBacklog{}}
 }
 
 func TestUpdateSidebarViewHandsTheSectionSizesToTheVerb(t *testing.T) {

@@ -91,7 +91,7 @@ workspace's web page was checked by Emacs alone, never by the daemon.
 ### Hide and collapse stand sessions down
 - AMENDED 2026-10-13 for the hide (hidden-cache-lapse.md): the hide holds the
   session's keep-alives and the stand-down below happens when its cache lapses.
-- WHAT: SetWorkspaceHidden(hide) and a repository collapse stand the session
+- WHAT: SetWorkspaceBacklogged(hide) and a repository collapse stand the session
   down as the idle sweep does (hibernate, conversation kept), deferred while a
   turn runs and taken once it ends (owner delegated the timing; recorded as
   the agent's decision: never interrupt a turn).

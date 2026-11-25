@@ -4,11 +4,11 @@
 // another's branch needs that branch to stay, so a parent, or a workspace
 // another lands into, may not leave the Open section while such a workspace is
 // still open: a workspace with open children
-// cannot be hidden, closed, killed, nuked, or merged by a merge that closes
+// cannot be backlogged, closed, killed, nuked, or merged by a merge that closes
 // it, and a workspace cannot be made, moved or brought back as the open child
-// of a parent that is hidden, closed, or closing (a merge waiting in its
-// repository's queue closes it once it lands). A HIDDEN CHILD COUNTS AS OPEN:
-// hiding keeps its session, so a family is hidden child first. A HIDDEN MERGE
+// of a parent that is backlogged, closed, or closing (a merge waiting in its
+// repository's queue closes it once it lands). A BACKLOGGED CHILD COUNTS AS OPEN:
+// hiding keeps its session, so a family is backlogged child first. A HIDDEN MERGE
 // WORKSPACE (an async merge's, drawn nowhere until it is revealed) is no open
 // child: it is the merge's machinery, not a member of the family.
 
@@ -29,11 +29,11 @@ message WorkspaceHasOpenChildren {
   // close: the requester of a one-shot merge, or the workspace an async
   // merge's one-shot names.
   workspace.v1.WorkspaceRef parent = 1;
-  // Every open child of `parent`, hidden ones included, in the roster's order.
+  // Every open child of `parent`, backlogged ones included, in the roster's order.
   // Empty only when `landing_into` is not.
   repeated workspace.v1.WorkspaceRef children = 2;
   // Every open workspace that is NOT a child of `parent` but whose branch
-  // lands into `parent`'s branch (WorkspaceLandingTarget.workspace), hidden
+  // lands into `parent`'s branch (WorkspaceLandingTarget.workspace), backlogged
   // ones included, in the roster's order. Empty only when `children` is not.
   repeated workspace.v1.WorkspaceRef landing_into = 3;
 }
@@ -46,8 +46,8 @@ message WorkspaceParentNotOpen {
   workspace.v1.WorkspaceRef parent = 1;
   // Why the parent is not open. Exactly one arm is set; unset is malformed.
   oneof state {
-    // The parent is hidden.
-    WorkspaceParentNotOpenHidden hidden = 2;
+    // The parent is backlogged.
+    WorkspaceParentNotOpenBacklogged backlogged = 2;
     // The parent is closed.
     WorkspaceParentNotOpenClosed closed = 3;
     // The parent is open, but a merge waiting in its repository's queue closes
@@ -58,8 +58,8 @@ message WorkspaceParentNotOpen {
   }
 }
 
-// The parent is hidden. DELIBERATELY EMPTY: the arm is the fact.
-message WorkspaceParentNotOpenHidden {}
+// The parent is backlogged. DELIBERATELY EMPTY: the arm is the fact.
+message WorkspaceParentNotOpenBacklogged {}
 
 // The parent is closed. DELIBERATELY EMPTY: the arm is the fact.
 message WorkspaceParentNotOpenClosed {}

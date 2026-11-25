@@ -703,7 +703,7 @@ type FinishWorkspaceError_VersionIncrementUnexpected struct {
 }
 
 type FinishWorkspaceError_HasOpenChildren struct {
-	// The workspace has open children, hidden ones included. Every open child
+	// The workspace has open children, backlogged ones included. Every open child
 	// must be resolved and closed before the workspace that is their parent
 	// finishes.
 	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,11,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`

@@ -592,36 +592,36 @@ nil when no turn of the workspace has ended."
            (agent-repl-wire--decode-optional-int64
             "RosterRowWhenNoTurnRunning" 'lastTurnEndedAtMs object)))))
 
-(defun agent-repl-wire-decode-roster-row-when-hidden-cache (value)
-  "Decode VALUE as `RosterRowWhenHiddenCache', a plist `(:lapses-at-ms)'.
+(defun agent-repl-wire-decode-roster-row-when-backlogged-cache (value)
+  "Decode VALUE as `RosterRowWhenBackloggedCache', a plist `(:lapses-at-ms)'.
 When the hidden workspace's prompt cache lapses, epoch MILLISECONDS."
-  (let ((object (agent-repl-wire--object "RosterRowWhenHiddenCache" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenHiddenCache" object '(lapsesAtMs))
+  (let ((object (agent-repl-wire--object "RosterRowWhenBackloggedCache" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenBackloggedCache" object '(lapsesAtMs))
     (agent-repl-wire--decoded
-     "RosterRowWhenHiddenCache"
+     "RosterRowWhenBackloggedCache"
      (list :lapses-at-ms (agent-repl-wire--decode-int64
-                          "RosterRowWhenHiddenCache" 'lapsesAtMs object)))))
+                          "RosterRowWhenBackloggedCache" 'lapsesAtMs object)))))
 
-(defun agent-repl-wire-decode-roster-row-when-hidden (value)
-  "Decode VALUE as `RosterRowWhenHidden', a plist `(:at-ms :cache)'.
+(defun agent-repl-wire-decode-roster-row-when-backlogged (value)
+  "Decode VALUE as `RosterRowWhenBacklogged', a plist `(:at-ms :cache)'.
 The instant the workspace was moved into the hidden section, and the lapse
 of its prompt cache when the daemon knows it (nil otherwise).  Emacs draws
 no hidden row, but the roster push carries them, so this decodes them whole."
-  (let ((object (agent-repl-wire--object "RosterRowWhenHidden" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenHidden" object '(atMs cache))
+  (let ((object (agent-repl-wire--object "RosterRowWhenBacklogged" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenBacklogged" object '(atMs cache))
     (agent-repl-wire--decoded
-     "RosterRowWhenHidden"
-     (list :at-ms (agent-repl-wire--decode-int64 "RosterRowWhenHidden" 'atMs object)
+     "RosterRowWhenBacklogged"
+     (list :at-ms (agent-repl-wire--decode-int64 "RosterRowWhenBacklogged" 'atMs object)
            :cache (agent-repl-wire--decode-optional-message
-                   "RosterRowWhenHidden" 'cache object
-                   #'agent-repl-wire-decode-roster-row-when-hidden-cache)))))
+                   "RosterRowWhenBacklogged" 'cache object
+                   #'agent-repl-wire-decode-roster-row-when-backlogged-cache)))))
 
 (defconst agent-repl-wire-roster-row-when-arms
   '((syncMerging :sync-merging agent-repl-wire-decode-roster-row-when-sync-merging)
     (turnRunning :turn-running agent-repl-wire-decode-roster-row-when-turn-running)
     (noTurnRunning :no-turn-running agent-repl-wire-decode-roster-row-when-no-turn-running)
     (merged :merged agent-repl-wire-decode-roster-row-when-merged)
-    (hidden :hidden agent-repl-wire-decode-roster-row-when-hidden))
+    (backlogged :hidden agent-repl-wire-decode-roster-row-when-backlogged))
   "`RosterRowWhen.shown''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
 The ONE list of the when-column's arms: the oneof decode and the key
 allow-list both read it.")
@@ -977,7 +977,7 @@ Returns `(:workspace W :attention A :viewed V
 :name N :repository REPO :status
 S :current C :when WHEN :detail D :closed CLOSED)', with the message tree
 preserved as the contract spells it.  A row carries no family: each list
-nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
+nests its rows in its own row type (`RosterOpenRow', `RosterBacklogRow')."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
     (agent-repl-wire--check-keys "RosterRow" object agent-repl-wire--roster-row-keys)
     (agent-repl-wire--decoded
@@ -1096,7 +1096,7 @@ other arm is a contract breach, refused loudly rather than drawn."
 
 (defun agent-repl-wire--decode-row-list (message-name value decode-row)
   "Decode VALUE as MESSAGE-NAME, one list's rows: a plist `(:rows LIST)'.
-Every such message (`RosterOpenRows', `RosterHiddenRows', `RosterMergedRows',
+Every such message (`RosterOpenRows', `RosterBacklogRows', `RosterMergedRows',
 `RosterClosedRows') is one repeated `rows' field in drawn order, each
 element decoded by DECODE-ROW."
   (let ((object (agent-repl-wire--object message-name value)))
@@ -1300,21 +1300,21 @@ nil when the recency walk reaches no tab of the row soon."
   "Decode VALUE as `RosterOpenRows', a plist `(:rows OPEN-ROWS)'."
   (agent-repl-wire--decode-row-list "RosterOpenRows" value #'agent-repl-wire-decode-roster-open-row))
 
-(defun agent-repl-wire-decode-roster-hidden-row (value)
-  "Decode VALUE as `RosterHiddenRow', a plist `(:row ROW :children ROWS)'.
+(defun agent-repl-wire-decode-roster-backlog-row (value)
+  "Decode VALUE as `RosterBacklogRow', a plist `(:row ROW :children ROWS)'.
 CHILDREN are the row's hidden family, each itself a hidden row."
-  (let ((object (agent-repl-wire--object "RosterHiddenRow" value)))
-    (agent-repl-wire--check-keys "RosterHiddenRow" object '(row children))
+  (let ((object (agent-repl-wire--object "RosterBacklogRow" value)))
+    (agent-repl-wire--check-keys "RosterBacklogRow" object '(row children))
     (agent-repl-wire--decoded
-     "RosterHiddenRow"
+     "RosterBacklogRow"
      (list :row (agent-repl-wire--decode-message
-                 "RosterHiddenRow" 'row object #'agent-repl-wire-decode-roster-row)
+                 "RosterBacklogRow" 'row object #'agent-repl-wire-decode-roster-row)
            :children (agent-repl-wire--decode-repeated
-                      "RosterHiddenRow" 'children object #'agent-repl-wire-decode-roster-hidden-row)))))
+                      "RosterBacklogRow" 'children object #'agent-repl-wire-decode-roster-backlog-row)))))
 
-(defun agent-repl-wire-decode-roster-hidden-rows (value)
-  "Decode VALUE as `RosterHiddenRows', a plist `(:rows HIDDEN-ROWS)'."
-  (agent-repl-wire--decode-row-list "RosterHiddenRows" value #'agent-repl-wire-decode-roster-hidden-row))
+(defun agent-repl-wire-decode-roster-backlog-rows (value)
+  "Decode VALUE as `RosterBacklogRows', a plist `(:rows HIDDEN-ROWS)'."
+  (agent-repl-wire--decode-row-list "RosterBacklogRows" value #'agent-repl-wire-decode-roster-backlog-row))
 
 (defun agent-repl-wire-decode-roster-merged-row (value)
   "Decode VALUE as `RosterMergedRow', a plist `(:row ROW)'.  It nests nothing."
@@ -2227,43 +2227,43 @@ per repository whose queue is active."
 
 ;;;; ---- The hidden-workspaces section ----
 
-(defun agent-repl-wire-decode-roster-hidden-section-header (value)
-  "Decode `RosterHiddenSection''s `header' field VALUE."
+(defun agent-repl-wire-decode-roster-backlog-section-header (value)
+  "Decode `RosterBacklogSection''s `header' field VALUE."
   (agent-repl-wire-decode-roster-section-header value))
 
-(defun agent-repl-wire-decode-roster-hidden-section-expanded (value)
-  "Decode VALUE as the empty message `RosterHiddenSectionExpanded'."
-  (agent-repl-wire--decode-empty "RosterHiddenSectionExpanded" value))
+(defun agent-repl-wire-decode-roster-backlog-section-expanded (value)
+  "Decode VALUE as the empty message `RosterBacklogSectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterBacklogSectionExpanded" value))
 
-(defun agent-repl-wire-decode-roster-hidden-section-collapsed (value)
-  "Decode VALUE as the empty message `RosterHiddenSectionCollapsed'."
-  (agent-repl-wire--decode-empty "RosterHiddenSectionCollapsed" value))
+(defun agent-repl-wire-decode-roster-backlog-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterBacklogSectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterBacklogSectionCollapsed" value))
 
-(defun agent-repl-wire-decode-roster-hidden-section-fold (object)
-  "Decode `RosterHiddenSection''s `fold' oneof from OBJECT.
+(defun agent-repl-wire-decode-roster-backlog-section-fold (object)
+  "Decode `RosterBacklogSection''s `fold' oneof from OBJECT.
 THE ARM IS THE FOLD, the daemon's view state; it is never unset.  It folds
 sidebar rows only: a hidden workspace is off the tab bar either way."
   (agent-repl-wire--decode-oneof
-   "RosterHiddenSection" 'fold object
-   '((expanded :expanded agent-repl-wire-decode-roster-hidden-section-expanded)
-     (collapsed :collapsed agent-repl-wire-decode-roster-hidden-section-collapsed))))
+   "RosterBacklogSection" 'fold object
+   '((expanded :expanded agent-repl-wire-decode-roster-backlog-section-expanded)
+     (collapsed :collapsed agent-repl-wire-decode-roster-backlog-section-collapsed))))
 
-(defun agent-repl-wire-decode-roster-hidden-section (value)
-  "Decode VALUE as `RosterHiddenSection', a plist `(:header :hidden-rows :fold)'.
+(defun agent-repl-wire-decode-roster-backlog-section (value)
+  "Decode VALUE as `RosterBacklogSection', a plist `(:header :hidden-rows :fold)'.
 It has no key of its own — the roster carries exactly one — so a `key' on
 the wire is an unknown field."
-  (let ((object (agent-repl-wire--object "RosterHiddenSection" value)))
-    (agent-repl-wire--check-keys "RosterHiddenSection" object
-                                 '(header hiddenRows expanded collapsed fitted sized))
+  (let ((object (agent-repl-wire--object "RosterBacklogSection" value)))
+    (agent-repl-wire--check-keys "RosterBacklogSection" object
+                                 '(header backlogRows expanded collapsed fitted sized))
     (agent-repl-wire--decoded
-     "RosterHiddenSection"
+     "RosterBacklogSection"
      (list :header (agent-repl-wire--decode-message
-                    "RosterHiddenSection" 'header object
-                    #'agent-repl-wire-decode-roster-hidden-section-header)
+                    "RosterBacklogSection" 'header object
+                    #'agent-repl-wire-decode-roster-backlog-section-header)
            :hidden-rows (agent-repl-wire--decode-message
-                         "RosterHiddenSection" 'hiddenRows object
-                         #'agent-repl-wire-decode-roster-hidden-rows)
-           :fold (agent-repl-wire-decode-roster-hidden-section-fold object)))))
+                         "RosterBacklogSection" 'backlogRows object
+                         #'agent-repl-wire-decode-roster-backlog-rows)
+           :fold (agent-repl-wire-decode-roster-backlog-section-fold object)))))
 
 ;;;; ---- The open-workspaces section ----
 
@@ -2364,9 +2364,9 @@ fields."
   "Decode `WorkspaceRoster''s `repository' field VALUE."
   (agent-repl-wire-decode-roster-repository-view value))
 
-(defun agent-repl-wire-decode-workspace-roster-hidden (value)
+(defun agent-repl-wire-decode-workspace-roster-backlog (value)
   "Decode `WorkspaceRoster''s `hidden' field VALUE."
-  (agent-repl-wire-decode-roster-hidden-section value))
+  (agent-repl-wire-decode-roster-backlog-section value))
 
 (defun agent-repl-wire-decode-workspace-roster-open (value)
   "Decode `WorkspaceRoster''s `open' field VALUE."
@@ -2700,7 +2700,7 @@ its own tab.  The retired `recently_merged', `merge_queue', `closed' and
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository open hidden current version appSwitcher threads coldGates))
+     '(repository open backlog current version appSwitcher threads coldGates))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -2710,8 +2710,8 @@ its own tab.  The retired `recently_merged', `merge_queue', `closed' and
                   "WorkspaceRoster" 'open object
                   #'agent-repl-wire-decode-workspace-roster-open)
            :hidden (agent-repl-wire--decode-message
-                    "WorkspaceRoster" 'hidden object
-                    #'agent-repl-wire-decode-workspace-roster-hidden)
+                    "WorkspaceRoster" 'backlog object
+                    #'agent-repl-wire-decode-workspace-roster-backlog)
            :current (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'current object
                      #'agent-repl-wire-decode-workspace-roster-current)

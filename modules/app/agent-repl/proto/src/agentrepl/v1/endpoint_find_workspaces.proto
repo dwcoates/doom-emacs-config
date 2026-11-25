@@ -47,7 +47,7 @@ message FindWorkspacesRequest {
   // made. UNSET = whoever asked. A ref naming no registered workspace is the
   // unknown_creator answer.
   optional workspace.v1.WorkspaceRef created_by = 6;
-  // Only workspaces the sidebar roster draws a row for in its open, hidden or
+  // Only workspaces the sidebar roster draws a row for in its open, backlog or
   // recently merged section (FoundWorkspace.roster set): the workspaces
   // `workspace list` answers. UNSET = drawn or not.
   optional FindWorkspacesOnRoster on_roster = 7;
@@ -206,7 +206,7 @@ message FoundWorkspace {
   optional workspace.v1.WorkspaceRef parent = 10;
   // Where the sidebar roster draws the workspace and the live status it draws
   // it with, as the roster last resolved stands. UNSET when the roster draws
-  // no row of it in its open, hidden or recently merged section: a closed
+  // no row of it in its open, backlog or recently merged section: a closed
   // workspace that never merged.
   optional FoundWorkspaceRoster roster = 11;
   // TRUE for the record of the workspace the request names as its caller
@@ -244,7 +244,7 @@ message FoundWorkspaceMerge {
 }
 
 // A found workspace as the sidebar roster draws it right now: which section
-// carries its row, and that row's status. An open or hidden workspace's are
+// carries its row, and that row's status. An open or backlogged workspace's are
 // read off the workspaces stream the daemon publishes (frontend.v1
 // WorkspaceRoster), and a merged one's off the row the recently merged band's
 // pages resolve for it (ListMergedWorkspaces), so the answer agrees with what
@@ -263,9 +263,9 @@ message FoundWorkspaceRosterSection {
     // The open section (frontend.v1.WorkspaceRoster.repository): an open,
     // shown workspace, child rows included.
     FoundWorkspaceRosterSectionOpen open = 1;
-    // The hidden section (frontend.v1.WorkspaceRoster.hidden): open but
-    // hidden by the user.
-    FoundWorkspaceRosterSectionHidden hidden = 2;
+    // The backlog (frontend.v1.WorkspaceRoster.backlog): open but
+    // backlogged by the user.
+    FoundWorkspaceRosterSectionBacklog backlog = 2;
     // The recently merged band (frontend.v1.RosterPush.recently_merged):
     // landed and closed. The band draws every such workspace, paged on
     // demand (ListMergedWorkspaces), so the registry answers it: no stream
@@ -275,8 +275,8 @@ message FoundWorkspaceRosterSection {
 }
 // Drawn in the open section. No fields.
 message FoundWorkspaceRosterSectionOpen {}
-// Drawn in the hidden section. No fields.
-message FoundWorkspaceRosterSectionHidden {}
+// Drawn in the backlog. No fields.
+message FoundWorkspaceRosterSectionBacklog {}
 // Drawn in the recently merged band. No fields.
 message FoundWorkspaceRosterSectionMerged {}
 

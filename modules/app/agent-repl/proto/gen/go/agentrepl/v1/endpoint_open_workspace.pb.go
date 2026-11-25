@@ -520,7 +520,7 @@ type OpenWorkspaceError_BriefMissing struct {
 }
 
 type OpenWorkspaceError_ParentNotOpen struct {
-	// The workspace's parent is hidden or closed, and reopening it would make an
+	// The workspace's parent is backlogged or closed, and reopening it would make an
 	// open child of a parent outside the Open section.
 	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,13,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`
 }

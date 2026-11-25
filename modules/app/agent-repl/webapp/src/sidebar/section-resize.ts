@@ -166,7 +166,7 @@ function sizeSection(foldKey: string): MessageInitShape<typeof SidebarViewSectio
     case MERGED_FOLD_KEY:
       return { case: "recentlyMerged", value: {} };
     case HIDDEN_FOLD_KEY:
-      return { case: "hidden", value: {} };
+      return { case: "backlog", value: {} };
     default:
       break;
   }

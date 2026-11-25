@@ -62,7 +62,7 @@ message NukeWorkspaceError {
     NukeWorkspaceNotYetAdopted not_yet_adopted = 4;
     // A git operation failed mid-delete.
     NukeWorkspaceGitFailed git_failed = 5;
-    // The workspace has open children (hidden ones included), and nuking it
+    // The workspace has open children (backlogged ones included), and nuking it
     // would leave them without their parent in the Open section.
     WorkspaceHasOpenChildren has_open_children = 6;
     // A zettel chat thread's graph or directory could not be deleted. The

@@ -367,7 +367,7 @@ func TestStatusWordsStatesTheStatus(t *testing.T) {
 			want: "Its status now: `followed`, on branch `agent/followed`, lands on the primary branch; open, idle."},
 		{name: "a closed hidden child of its owner", status: func() *agentreplv1.WorkspaceStatus {
 			s := idleStatus()
-			s.MergeTarget, s.Standing, s.Hidden = into, closed, true
+			s.MergeTarget, s.Standing, s.Backlogged = into, closed, true
 			s.Owner = &agentreplv1.WorkspaceStatusOwner{Workspace: ownerRef}
 			return s
 		}, want: "Its status now: `followed`, on branch `agent/followed`, lands into the workspace at `/wt/owner`; closed, hidden."},

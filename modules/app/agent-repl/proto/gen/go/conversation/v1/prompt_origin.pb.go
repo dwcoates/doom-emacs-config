@@ -298,7 +298,7 @@ const (
 	// The deploy mediator's brief: a deploy began, and the repository's merge
 	// queue advances nothing until the mediator approves it, escalates it, or
 	// deploys its remediation (repoconfig.v1.LifecycleConfig.deploy_mediator).
-	// Drawn as the daemon's prompt to its own hidden workspace.
+	// Drawn as the daemon's prompt to its own backlogged workspace.
 	PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION PromptOrigin = 52
 	// The one notice of a followed GitHub Actions workflow run
 	// (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
@@ -315,7 +315,7 @@ const (
 	// The production mediator's brief: a deploy finished, and the span the
 	// version before it served alone is ready to review
 	// (repoconfig.v1.LifecycleConfig.production_checks). Nothing waits on it.
-	// Drawn as the daemon's prompt to its own hidden workspace.
+	// Drawn as the daemon's prompt to its own backlogged workspace.
 	PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION PromptOrigin = 55
 )
 

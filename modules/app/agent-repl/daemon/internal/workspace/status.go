@@ -49,7 +49,7 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		Name:        record.Name,
 		Branch:      record.Branch,
 		MergeTarget: target,
-		Hidden:      record.Hidden || record.MergeHidden(),
+		Backlogged:  record.Hidden || record.MergeHidden(),
 		OneShot:     record.OneShot,
 		Repository:  &workspacev1.RepositoryRef{Id: string(record.Repo)},
 		Links:       LinksView(links),

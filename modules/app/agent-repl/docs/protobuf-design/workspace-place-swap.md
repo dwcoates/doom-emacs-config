@@ -372,14 +372,14 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
 ### Landed changes (2026-10-19)
 
 - **What:** `RosterOpenRow`/`RosterOpenRows`, `RosterOpenRowTab` (numbered,
-  folded), `RosterHiddenRow`/`RosterHiddenRows`, `RosterMergedRow`/
+  folded), `RosterBacklogRow`/`RosterBacklogRows`, `RosterMergedRow`/
   `RosterMergedRows`; the sections' `rows` fields become `open_rows`,
   `hidden_rows`, `merged_rows` under new field numbers (the old ones
   reserved); `RosterRow.children` retired (families nest in their list's row
   type); `RosterRows`, `RosterTabBar`, `RosterTab` and its arms removed.
   `agentrepl.v1.family.proto`: `WorkspaceHasOpenChildren` (on CloseWorkspace,
-  KillWorkspace, NukeWorkspace, SetWorkspaceHidden, MergeWorkspace) and
-  `WorkspaceParentNotOpen` (on SetWorkspaceHidden, SetWorkspaceParent,
+  KillWorkspace, NukeWorkspace, SetWorkspaceBacklogged, MergeWorkspace) and
+  `WorkspaceParentNotOpen` (on SetWorkspaceBacklogged, SetWorkspaceParent,
   CreateWorkspace, OpenWorkspace). `SwapWorkspacesError.not_siblings`.
 - **Added after (2026-10-19):** `WorkspaceParentNotOpen.closing` (a merge
   queued to close the parent would otherwise strand a child created while

@@ -337,11 +337,11 @@ func arrangedWorkspaces(in []sidebar.ArrangedWorkspace) []*agentreplv1.ArrangedW
 	for _, family := range in {
 		ws := family.Workspace
 		wire := &agentreplv1.ArrangedWorkspace{
-			Workspace: ws.Ref(),
-			Name:      ws.Name,
-			Branch:    ws.Branch,
-			Hidden:    ws.Hidden,
-			Children:  arrangedWorkspaces(family.Children),
+			Workspace:  ws.Ref(),
+			Name:       ws.Name,
+			Branch:     ws.Branch,
+			Backlogged: ws.Hidden,
+			Children:   arrangedWorkspaces(family.Children),
 		}
 		if ws.Parent != nil {
 			wire.Parent = &workspacev1.WorkspaceRef{Id: string(*ws.Parent)}

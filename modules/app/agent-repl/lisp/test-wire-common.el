@@ -1265,9 +1265,9 @@ RECORDS names a variable the caller has bound."
                   (agent-repl-wire-call 'transcode #'identity 1))))
 
 (ert-deftest agent-repl-test-wire-common-a-parent-not-open-state-names-its-own-message-in-a-breach ()
-  "Each state arm is its own empty message (`WorkspaceParentNotOpenHidden',
+  "Each state arm is its own empty message (`WorkspaceParentNotOpenBacklogged',
 `...Closed', `...Closing'), so a payload on one is refused under that name."
-  (dolist (case '(("hidden" . "WorkspaceParentNotOpenHidden")
+  (dolist (case '(("backlogged" . "WorkspaceParentNotOpenBacklogged")
                   ("closed" . "WorkspaceParentNotOpenClosed")
                   ("closing" . "WorkspaceParentNotOpenClosing")))
     (should (equal (agent-repl-test-wire-common--breach

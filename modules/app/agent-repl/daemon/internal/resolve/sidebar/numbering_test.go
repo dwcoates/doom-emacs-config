@@ -107,7 +107,7 @@ func TestEveryWorkspaceIsInOneList(t *testing.T) {
 			t.Fatalf("%s is listed %d times, want once", id, n)
 		}
 	}
-	if rowFor(hiddenRows(roster), "h") == nil || rowFor(mergedRows(t, r), "m") != nil || rowFor(rosterwalk.ClosedRows(push.GetClosed()), "x") == nil {
+	if rowFor(backlogRows(roster), "h") == nil || rowFor(mergedRows(t, r), "m") != nil || rowFor(rosterwalk.ClosedRows(push.GetClosed()), "x") == nil {
 		t.Fatalf("lists = %v, want h hidden, m open, x closed", seen)
 	}
 }

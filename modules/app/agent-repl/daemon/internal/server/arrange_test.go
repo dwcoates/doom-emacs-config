@@ -582,7 +582,7 @@ func TestGetSidebarArrangementAnswersTheArrangement(t *testing.T) {
 		sub.GetSubsection().GetId(), sub.GetName(), sub.CreatedBy == nil,
 		agents.GetSubsection().GetId(), agents.GetCreatedBy().GetId(),
 		root.GetWorkspace().GetId(), root.GetBranch(), root.Parent == nil,
-		child.GetWorkspace().GetId(), child.GetParent().GetId(), child.GetHidden(),
+		child.GetWorkspace().GetId(), child.GetParent().GetId(), child.GetBacklogged(),
 	}
 	want := []any{"repo-1", "one", 3, "sub-1", "later", true, "sub-2", "ws-p", "ws-p", "bp", true, "ws-k", "ws-p", true}
 	if !slices.Equal(got, want) {

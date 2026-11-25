@@ -148,7 +148,7 @@ message FinishWorkspaceError {
     // The deploy carries a version increment it may not carry. Nothing was
     // recorded; the caller re-sends without one.
     MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 10;
-    // The workspace has open children, hidden ones included. Every open child
+    // The workspace has open children, backlogged ones included. Every open child
     // must be resolved and closed before the workspace that is their parent
     // finishes.
     WorkspaceHasOpenChildren has_open_children = 11;

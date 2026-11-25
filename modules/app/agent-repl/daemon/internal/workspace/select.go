@@ -291,7 +291,7 @@ func (v *verbs) RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind 
 // never goes back to being drawn nowhere, which only its async merge does to
 // it, before anyone has asked to see it.
 func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error {
-	record, log, err := v.owned(ctx, "SetWorkspaceHidden", ws)
+	record, log, err := v.owned(ctx, "SetWorkspaceBacklogged", ws)
 	if err != nil {
 		return err
 	}

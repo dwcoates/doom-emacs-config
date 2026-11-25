@@ -677,7 +677,7 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 
 	workspaces := &frontendv1.WorkspaceRoster{
 		Repository: r.repositoryView(repos, orphans, rc, log),
-		Hidden:     r.hiddenSection(lists.hidden, rc, log),
+		Backlog:    r.hiddenSection(lists.hidden, rc, log),
 		Open:       r.openSection(),
 	}
 	for _, ws := range sortMergedNewestFirst(lists.merged) {

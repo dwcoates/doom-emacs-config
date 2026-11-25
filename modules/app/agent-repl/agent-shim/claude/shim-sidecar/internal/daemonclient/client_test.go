@@ -1240,13 +1240,13 @@ func TestWorkspaceRefInRosterReadsEveryStreamOfTheFirstPush(t *testing.T) {
 	push := func(open, hidden, closed *frontendv1.RosterRow) *frontendv1.RosterPush {
 		out := firstPush(&frontendv1.WorkspaceRoster{
 			Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{}}},
-			Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{}},
+			Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{}},
 		})
 		if open != nil {
 			out.Workspaces.Repository.Sections[0].Entries = rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: open}})
 		}
 		if hidden != nil {
-			out.Workspaces.Hidden.HiddenRows.Rows = []*frontendv1.RosterHiddenRow{{Row: hidden}}
+			out.Workspaces.Backlog.BacklogRows.Rows = []*frontendv1.RosterBacklogRow{{Row: hidden}}
 		}
 		if closed != nil {
 			out.Closed.Rows = []*frontendv1.RosterClosedRow{{Row: closed}}

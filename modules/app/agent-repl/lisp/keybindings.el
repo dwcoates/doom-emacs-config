@@ -307,7 +307,7 @@ structurally; see the commentary above."
        :desc "NUKE workspace (deletes data)"       "X"   #'agent-repl-nuke-workspace
        :desc "Set/clear workspace priority"       "p"   #'agent-repl-set-priority
        :desc "Workspace notes"                    "n"   #'agent-repl-notes-open
-       :desc "Keep-alive to every hidden workspace" "R"  #'agent-repl-send-hidden-keepalives
+       :desc "Keep-alive to every hidden workspace" "R"  #'agent-repl-send-backlogged-keepalives
        :desc "Reload agent-repl config"            "C-r" #'agent-repl-reload-config
        :desc "Register repository from file"       "."   #'agent-repl-register-repository
        :desc "Bind workspace to a conversation"    "c"   #'agent-repl-bind-conversation

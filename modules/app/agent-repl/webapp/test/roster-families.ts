@@ -11,13 +11,13 @@
  */
 import { create } from "@bufbuild/protobuf";
 import {
-  RosterHiddenRowSchema,
+  RosterBacklogRowSchema,
   RosterOpenRowRepositoryBlockSchema,
   RosterOpenRowSchema,
   RosterOpenRowFoldCoverSchema,
   RosterOpenRowTabSchema,
   RosterRepoEntrySchema,
-  type RosterHiddenRow,
+  type RosterBacklogRow,
   type RosterOpenRow,
   type RosterRepoEntry,
   type RosterRepoSection,
@@ -79,8 +79,8 @@ export function withRepositoryBlocks(open: RosterOpenRow, blocks: readonly TestR
 }
 
 /** ROW as a hidden row, its family nested as hidden rows. */
-export function hiddenRow(row: RosterRow): RosterHiddenRow {
-  return create(RosterHiddenRowSchema, { row, children: (familyOf.get(row) ?? []).map(hiddenRow) });
+export function hiddenRow(row: RosterRow): RosterBacklogRow {
+  return create(RosterBacklogRowSchema, { row, children: (familyOf.get(row) ?? []).map(hiddenRow) });
 }
 
 /** ROWS as a repository section's row entries, one each, in order (frontend.v1.RosterRepoEntry). */

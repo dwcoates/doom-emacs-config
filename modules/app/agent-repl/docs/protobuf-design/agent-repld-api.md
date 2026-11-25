@@ -262,7 +262,7 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing
-(`SetWorkspaceHidden` already serves `workspace set hidden`, per the owner's
+(`SetWorkspaceBacklogged` already serves `workspace set hidden`, per the owner's
 request that the API and the workspace skill cover it).
 
 Consequences, accepted:

@@ -93,7 +93,7 @@ message OpenWorkspaceError {
     // composed (the prompts directory does not hold it, or it will not
     // splice). Nothing was opened: the brief is composed before the open.
     OpenWorkspaceBriefMissing brief_missing = 12;
-    // The workspace's parent is hidden or closed, and reopening it would make an
+    // The workspace's parent is backlogged or closed, and reopening it would make an
     // open child of a parent outside the Open section.
     WorkspaceParentNotOpen parent_not_open = 13;
   }

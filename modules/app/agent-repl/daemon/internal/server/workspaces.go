@@ -153,7 +153,7 @@ func (s *server) CreateWorkspace(
 	spec.ForkFrom = forkSourceID(req.Msg.GetContextOrigin())
 	spec.SlackThread = req.Msg.GetSlackOrigin().GetThreadUrl()
 	spec.SlackSubscribe = slackSubscribeOf(req.Msg.GetSlackOrigin())
-	spec.Hidden = req.Msg.GetHidden()
+	spec.Hidden = req.Msg.GetBacklogged()
 	spec.Placement = createPlacementOf(req.Msg.GetPlacement())
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt, spec.InitialImages = saidParts(standard.GetInitialPrompt())
@@ -1640,17 +1640,17 @@ func (s *server) ListCreationModels(
 	return connect.NewResponse(resp), nil
 }
 
-// SetWorkspaceHidden moves a workspace into the roster's hidden section, or
+// SetWorkspaceBacklogged moves a workspace into the roster's hidden section, or
 // back out of it. The new state arrives on the roster stream.
-func (s *server) SetWorkspaceHidden(
+func (s *server) SetWorkspaceBacklogged(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.SetWorkspaceHiddenRequest],
-) (*connect.Response[agentreplv1.SetWorkspaceHiddenResponse], error) {
-	const rpc = "SetWorkspaceHidden"
-	if err := validateSetWorkspaceHiddenRequest(req.Msg); err != nil {
+	req *connect.Request[agentreplv1.SetWorkspaceBackloggedRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceBackloggedResponse], error) {
+	const rpc = "SetWorkspaceBacklogged"
+	if err := validateSetWorkspaceBackloggedRequest(req.Msg); err != nil {
 		return nil, err
 	}
-	resp := &agentreplv1.SetWorkspaceHiddenResponse{}
+	resp := &agentreplv1.SetWorkspaceBackloggedResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
@@ -1659,8 +1659,8 @@ func (s *server) SetWorkspaceHidden(
 	if err := s.deps.Verbs.SetHidden(ctx, subject.Record.ID, hidden); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	resp.Result = &agentreplv1.SetWorkspaceHiddenResponse_Success{
-		Success: &agentreplv1.SetWorkspaceHiddenSuccess{},
+	resp.Result = &agentreplv1.SetWorkspaceBackloggedResponse_Success{
+		Success: &agentreplv1.SetWorkspaceBackloggedSuccess{},
 	}
 	return connect.NewResponse(resp), nil
 }

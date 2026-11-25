@@ -520,7 +520,7 @@ func TestTheHiddenSectionCarriesTheHiddenRow(t *testing.T) {
 	r.SetRegistry(registry(hiddenWorkspace("w-hidden", "hidden"), workspace("w-live", "live")))
 
 	// Assert.
-	section := latest(t, r).GetHidden()
+	section := latest(t, r).GetBacklog()
 	if got := rowNames(topHidden(latest(t, r))); !equal(got, []string{"hidden"}) {
 		t.Fatalf("hidden rows = %v, want the one hidden workspace", got)
 	}
@@ -540,11 +540,11 @@ func TestTheHiddenSectionIsOnTheWireWithNothingHidden(t *testing.T) {
 	r.SetRegistry(registry(workspace("w-live", "live")))
 
 	// Assert.
-	section := latest(t, r).GetHidden()
+	section := latest(t, r).GetBacklog()
 	if section == nil || section.GetHeader() == nil || section.GetFold() == nil {
 		t.Fatalf("hidden section = %v, want it whole with no rows", section)
 	}
-	if len(section.GetHiddenRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
+	if len(section.GetBacklogRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
 		t.Fatalf("hidden section = %v, want no rows and a zero count", section)
 	}
 }
@@ -559,7 +559,7 @@ func TestAClosedHiddenWorkspaceIsInNoSection(t *testing.T) {
 	r.SetRegistry(registry(closed, hiddenWorkspace("w-open", "open")))
 
 	// Assert.
-	section := latest(t, r).GetHidden()
+	section := latest(t, r).GetBacklog()
 	if got := rowNames(topHidden(latest(t, r))); !equal(got, []string{"open"}) {
 		t.Fatalf("hidden rows = %v, want only the open one", got)
 	}
@@ -608,7 +608,7 @@ func TestHiddenSectionStatesItsFold(t *testing.T) {
 			r.SetRegistry(reg)
 
 			// Assert: the arm is always set, and it is the recorded fold.
-			section := latest(t, r).GetHidden()
+			section := latest(t, r).GetBacklog()
 			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
 				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
 			}
@@ -877,7 +877,7 @@ func TestTheHiddenSectionIsLabelledBacklog(t *testing.T) {
 	r.SetRegistry(registry(hiddenWorkspace("w-hidden", "hidden")))
 
 	// Assert.
-	if got := latest(t, r).GetHidden().GetHeader().GetLabel().GetText(); got != "Backlog" {
+	if got := latest(t, r).GetBacklog().GetHeader().GetLabel().GetText(); got != "Backlog" {
 		t.Fatalf("hidden label = %q, want %q", got, "Backlog")
 	}
 }
@@ -890,7 +890,7 @@ func TestAHiddenRowCountsFromItsHide(t *testing.T) {
 	r.SetRegistry(registry(hiddenAt(workspace("w1", "one"), time.Hour)))
 
 	// Assert.
-	got := topHidden(latest(t, r))[0].GetWhen().GetHidden()
+	got := topHidden(latest(t, r))[0].GetWhen().GetBacklogged()
 	if got == nil || got.GetAtMs() != at(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the hide instant", topHidden(latest(t, r))[0].GetWhen())
 	}
@@ -2319,7 +2319,7 @@ func TestEveryBandSectionStatesItsHeight(t *testing.T) {
 			name: "hidden",
 			set:  func(v *wsm.SidebarView, h wsm.SectionHeight) { v.HiddenHeight = h },
 			read: func(t *testing.T, r sidebar.Resolver) (bool, uint32, bool) {
-				s := latest(t, r).GetHidden()
+				s := latest(t, r).GetBacklog()
 				return s.GetFitted() != nil, s.GetSized().GetLines(), s.GetSized() != nil
 			},
 		},

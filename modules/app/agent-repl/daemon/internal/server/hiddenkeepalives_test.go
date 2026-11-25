@@ -11,49 +11,49 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
-func TestSendHiddenKeepalivesDelegatesAndAnswersTheKeepersResponse(t *testing.T) {
+func TestSendBackloggedKeepalivesDelegatesAndAnswersTheKeepersResponse(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.HiddenKeepalives.response = &agentreplv1.SendHiddenKeepalivesResponse{
-		Result: &agentreplv1.SendHiddenKeepalivesResponse_Success{Success: &agentreplv1.SendHiddenKeepalivesSuccess{
-			Workspaces: []*agentreplv1.SendHiddenKeepalivesWorkspace{{
+	h.HiddenKeepalives.response = &agentreplv1.SendBackloggedKeepalivesResponse{
+		Result: &agentreplv1.SendBackloggedKeepalivesResponse_Success{Success: &agentreplv1.SendBackloggedKeepalivesSuccess{
+			Workspaces: []*agentreplv1.SendBackloggedKeepalivesWorkspace{{
 				Workspace: &workspacev1.WorkspaceRef{Id: "w1", Dir: "/work/w1"},
-				Outcome:   &agentreplv1.SendHiddenKeepalivesWorkspace_Sent{Sent: &agentreplv1.SendHiddenKeepalivesSent{}},
+				Outcome:   &agentreplv1.SendBackloggedKeepalivesWorkspace_Sent{Sent: &agentreplv1.SendBackloggedKeepalivesSent{}},
 			}},
 		}},
 	}
 
 	// Act.
-	resp, err := h.Client.SendHiddenKeepalives(context.Background(),
-		connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{}))
+	resp, err := h.Client.SendBackloggedKeepalives(context.Background(),
+		connect.NewRequest(&agentreplv1.SendBackloggedKeepalivesRequest{}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SendHiddenKeepalives() error = %v", err)
+		t.Fatalf("SendBackloggedKeepalives() error = %v", err)
 	}
 	if resp.Msg.GetSuccess().GetWorkspaces()[0].GetSent() == nil || h.HiddenKeepalives.calls != 1 {
 		t.Fatalf("response = %v after %d calls, want the keeper's success from one call", resp.Msg, h.HiddenKeepalives.calls)
 	}
 }
 
-func TestSendHiddenKeepalivesAnswersTheKeepersRefusal(t *testing.T) {
+func TestSendBackloggedKeepalivesAnswersTheKeepersRefusal(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.HiddenKeepalives.response = &agentreplv1.SendHiddenKeepalivesResponse{
-		Result: &agentreplv1.SendHiddenKeepalivesResponse_Error{Error: &agentreplv1.SendHiddenKeepalivesError{
-			Cause: &agentreplv1.SendHiddenKeepalivesError_RegistryUnreadable{
-				RegistryUnreadable: &agentreplv1.SendHiddenKeepalivesRegistryUnreadable{Detail: "database is locked"},
+	h.HiddenKeepalives.response = &agentreplv1.SendBackloggedKeepalivesResponse{
+		Result: &agentreplv1.SendBackloggedKeepalivesResponse_Error{Error: &agentreplv1.SendBackloggedKeepalivesError{
+			Cause: &agentreplv1.SendBackloggedKeepalivesError_RegistryUnreadable{
+				RegistryUnreadable: &agentreplv1.SendBackloggedKeepalivesRegistryUnreadable{Detail: "database is locked"},
 			},
 		}},
 	}
 
 	// Act.
-	resp, err := h.Client.SendHiddenKeepalives(context.Background(),
-		connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{}))
+	resp, err := h.Client.SendBackloggedKeepalives(context.Background(),
+		connect.NewRequest(&agentreplv1.SendBackloggedKeepalivesRequest{}))
 
 	// Assert.
 	if err != nil || resp.Msg.GetError().GetRegistryUnreadable().GetDetail() != "database is locked" {
-		t.Fatalf("SendHiddenKeepalives() = %v, %v; want the keeper's refusal", resp, err)
+		t.Fatalf("SendBackloggedKeepalives() = %v, %v; want the keeper's refusal", resp, err)
 	}
 }
 

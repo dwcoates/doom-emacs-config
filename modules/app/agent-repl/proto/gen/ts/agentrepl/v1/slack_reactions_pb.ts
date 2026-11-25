@@ -16,7 +16,7 @@
 // reaction added after it fires. A typed shortcode fires only within the
 // poll's lookback window.
 //
-// WHAT A FIRE DOES. It creates a hidden INTAKE workspace in the settings'
+// WHAT A FIRE DOES. It creates a backlogged INTAKE workspace in the settings'
 // repository whose one turn reads the thread, names the task, and forks
 // itself into the workspace that does the work, with the binding's flags
 // (SlackReactionAction), then closes.

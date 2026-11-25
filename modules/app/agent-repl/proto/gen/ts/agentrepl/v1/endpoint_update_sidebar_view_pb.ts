@@ -8,9 +8,9 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold, RosterOpenSection.fold.
+//     RosterBacklogSection.fold, RosterOpenSection.fold.
 //   - a band section's height: RosterMergeQueueSection.height,
-//     RosterMergedSection.height, RosterHiddenSection.height.
+//     RosterMergedSection.height, RosterBacklogSection.height.
 //
 // It is DURABLE: it survives a daemon restart.
 //
@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_sidebar_view.proto.
  */
 export const file_agentrepl_v1_endpoint_update_sidebar_view: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIsgBChhVcGRhdGVTaWRlYmFyVmlld1JlcXVlc3QSPAoMZm9sZF9zZWN0aW9uGAEgASgLMiQuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Rm9sZFNlY3Rpb25IABI+Cg1zaXplX3NlY3Rpb25zGAQgASgLMiUuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3U2l6ZVNlY3Rpb25zSABCCAoGY2hhbmdlSgQIAhADSgQIAxAEUg1zaG93X2dyb3VwaW5nUglzaG93X29wZW4iTgoXU2lkZWJhclZpZXdTaXplU2VjdGlvbnMSMwoFc2l6ZXMYASADKAsyJC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdTZWN0aW9uU2l6ZSLSAgoWU2lkZWJhclZpZXdTZWN0aW9uU2l6ZRI6CgttZXJnZV9xdWV1ZRgBIAEoCzIjLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld01lcmdlUXVldWVIABJCCg9yZWNlbnRseV9tZXJnZWQYAiABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjEKBmhpZGRlbhgDIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEjgKBmZpdHRlZBgEIAEoCzImLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld1NlY3Rpb25GaXR0ZWRIARI2CgVsaW5lcxgFIAEoCzIlLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld1NlY3Rpb25MaW5lc0gBQgkKB3NlY3Rpb25CCAoGaGVpZ2h0IhoKGFNpZGViYXJWaWV3U2VjdGlvbkZpdHRlZCIoChdTaWRlYmFyVmlld1NlY3Rpb25MaW5lcxINCgVsaW5lcxgBIAEoDSK4BAoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjoKC21lcmdlX3F1ZXVlGAsgASgLMiMuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3TWVyZ2VRdWV1ZUgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoKc3Vic2VjdGlvbhgKIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLwoJd29ya3NwYWNlGAwgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAEjEKBmV4cGFuZBgEIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0V4cGFuZEgBEjUKCGNvbGxhcHNlGAUgASgLMiEuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Q29sbGFwc2VIAUIJCgdzZWN0aW9uQgYKBGZvbGRKBAgCEANKBAgGEAdKBAgIEAlSBnZpZXdlZFIEdGFza1IIbWF0dXJpdHkiGwoZU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZCIXChVTaWRlYmFyVmlld01lcmdlUXVldWUiEwoRU2lkZWJhclZpZXdIaWRkZW4iEQoPU2lkZWJhclZpZXdPcGVuIhMKEVNpZGViYXJWaWV3RXhwYW5kIhUKE1NpZGViYXJWaWV3Q29sbGFwc2UilwEKGVVwZGF0ZVNpZGViYXJWaWV3UmVzcG9uc2USOQoHc3VjY2VzcxgBIAEoCzImLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3NIABI1CgVlcnJvchgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld0Vycm9ySABCCAoGcmVzdWx0IhoKGFVwZGF0ZVNpZGViYXJWaWV3U3VjY2VzcyLpAgoWVXBkYXRlU2lkZWJhclZpZXdFcnJvchJOChJ1bmtub3duX3JlcG9zaXRvcnkYASABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duUmVwb3NpdG9yeUgAEk4KEnVua25vd25fc3Vic2VjdGlvbhgDIAEoCzIwLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1Vua25vd25TdWJzZWN0aW9uSAASRAoNaG9sZHNfY3VycmVudBgEIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld0hvbGRzQ3VycmVudEgAEkwKEXVua25vd25fd29ya3NwYWNlGAUgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93bldvcmtzcGFjZUgAQgcKBWNhdXNlSgQIAhADUgx1bmtub3duX3Rhc2siJAoiVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbiIkCiJVcGRhdGVTaWRlYmFyVmlld1Vua25vd25SZXBvc2l0b3J5IiMKIVVwZGF0ZVNpZGViYXJWaWV3VW5rbm93bldvcmtzcGFjZSIfCh1VcGRhdGVTaWRlYmFyVmlld0hvbGRzQ3VycmVudEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIsgBChhVcGRhdGVTaWRlYmFyVmlld1JlcXVlc3QSPAoMZm9sZF9zZWN0aW9uGAEgASgLMiQuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Rm9sZFNlY3Rpb25IABI+Cg1zaXplX3NlY3Rpb25zGAQgASgLMiUuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3U2l6ZVNlY3Rpb25zSABCCAoGY2hhbmdlSgQIAhADSgQIAxAEUg1zaG93X2dyb3VwaW5nUglzaG93X29wZW4iTgoXU2lkZWJhclZpZXdTaXplU2VjdGlvbnMSMwoFc2l6ZXMYASADKAsyJC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdTZWN0aW9uU2l6ZSLUAgoWU2lkZWJhclZpZXdTZWN0aW9uU2l6ZRI6CgttZXJnZV9xdWV1ZRgBIAEoCzIjLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld01lcmdlUXVldWVIABJCCg9yZWNlbnRseV9tZXJnZWQYAiABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjMKB2JhY2tsb2cYAyABKAsyIC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdCYWNrbG9nSAASOAoGZml0dGVkGAQgASgLMiYuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3U2VjdGlvbkZpdHRlZEgBEjYKBWxpbmVzGAUgASgLMiUuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3U2VjdGlvbkxpbmVzSAFCCQoHc2VjdGlvbkIICgZoZWlnaHQiGgoYU2lkZWJhclZpZXdTZWN0aW9uRml0dGVkIigKF1NpZGViYXJWaWV3U2VjdGlvbkxpbmVzEg0KBWxpbmVzGAEgASgNIroEChZTaWRlYmFyVmlld0ZvbGRTZWN0aW9uEjEKCnJlcG9zaXRvcnkYASABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZkgAEkIKD3JlY2VudGx5X21lcmdlZBgDIAEoCzInLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkSAASOgoLbWVyZ2VfcXVldWUYCyABKAsyIy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdNZXJnZVF1ZXVlSAASMwoHYmFja2xvZxgHIAEoCzIgLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0JhY2tsb2dIABItCgRvcGVuGAkgASgLMh0uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3T3BlbkgAEjEKCnN1YnNlY3Rpb24YCiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgAEi8KCXdvcmtzcGFjZRgMIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIxCgZleHBhbmQYBCABKAsyHy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdFeHBhbmRIARI1Cghjb2xsYXBzZRgFIAEoCzIhLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0NvbGxhcHNlSAFCCQoHc2VjdGlvbkIGCgRmb2xkSgQIAhADSgQIBhAHSgQICBAJUgZ2aWV3ZWRSBHRhc2tSCG1hdHVyaXR5IhsKGVNpZGViYXJWaWV3UmVjZW50bHlNZXJnZWQiFwoVU2lkZWJhclZpZXdNZXJnZVF1ZXVlIhQKElNpZGViYXJWaWV3QmFja2xvZyIRCg9TaWRlYmFyVmlld09wZW4iEwoRU2lkZWJhclZpZXdFeHBhbmQiFQoTU2lkZWJhclZpZXdDb2xsYXBzZSKXAQoZVXBkYXRlU2lkZWJhclZpZXdSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3U3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3RXJyb3JIAEIICgZyZXN1bHQiGgoYVXBkYXRlU2lkZWJhclZpZXdTdWNjZXNzIukCChZVcGRhdGVTaWRlYmFyVmlld0Vycm9yEk4KEnVua25vd25fcmVwb3NpdG9yeRgBIAEoCzIwLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1Vua25vd25SZXBvc2l0b3J5SAASTgoSdW5rbm93bl9zdWJzZWN0aW9uGAMgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blN1YnNlY3Rpb25IABJECg1ob2xkc19jdXJyZW50GAQgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3SG9sZHNDdXJyZW50SAASTAoRdW5rbm93bl93b3Jrc3BhY2UYBSABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duV29ya3NwYWNlSABCBwoFY2F1c2VKBAgCEANSDHVua25vd25fdGFzayIkCiJVcGRhdGVTaWRlYmFyVmlld1Vua25vd25TdWJzZWN0aW9uIiQKIlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnkiIwohVXBkYXRlU2lkZWJhclZpZXdVbmtub3duV29ya3NwYWNlIh8KHVVwZGF0ZVNpZGViYXJWaWV3SG9sZHNDdXJyZW50QipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateSidebarViewRequest
@@ -135,12 +135,12 @@ export type SidebarViewSectionSize = Message<"agentrepl.v1.SidebarViewSectionSiz
     case: "recentlyMerged";
   } | {
     /**
-     * The Hidden Workspaces section (frontend.v1.RosterHiddenSection).
+     * The Backlog section (frontend.v1.RosterBacklogSection).
      *
-     * @generated from field: agentrepl.v1.SidebarViewHidden hidden = 3;
+     * @generated from field: agentrepl.v1.SidebarViewBacklog backlog = 3;
      */
-    value: SidebarViewHidden;
-    case: "hidden";
+    value: SidebarViewBacklog;
+    case: "backlog";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -272,14 +272,14 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
     case: "mergeQueue";
   } | {
     /**
-     * The hidden-workspaces section; the roster carries exactly one. Its
-     * fold hides rows in the sidebar only: a hidden workspace is off the
+     * The backlog; the roster carries exactly one. Its
+     * fold hides rows in the sidebar only: a backlogged workspace is off the
      * Emacs tab bar whether the section is folded or not.
      *
-     * @generated from field: agentrepl.v1.SidebarViewHidden hidden = 7;
+     * @generated from field: agentrepl.v1.SidebarViewBacklog backlog = 7;
      */
-    value: SidebarViewHidden;
-    case: "hidden";
+    value: SidebarViewBacklog;
+    case: "backlog";
   } | {
     /**
      * The open-workspaces section; the roster carries exactly one. Its fold
@@ -377,18 +377,18 @@ export const SidebarViewMergeQueueSchema: GenMessage<SidebarViewMergeQueue> = /*
   messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 7);
 
 /**
- * The hidden-workspaces section. DELIBERATELY EMPTY: the arm is the section.
+ * The backlog. DELIBERATELY EMPTY: the arm is the section.
  *
- * @generated from message agentrepl.v1.SidebarViewHidden
+ * @generated from message agentrepl.v1.SidebarViewBacklog
  */
-export type SidebarViewHidden = Message<"agentrepl.v1.SidebarViewHidden"> & {
+export type SidebarViewBacklog = Message<"agentrepl.v1.SidebarViewBacklog"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.SidebarViewHidden.
- * Use `create(SidebarViewHiddenSchema)` to create a new message.
+ * Describes the message agentrepl.v1.SidebarViewBacklog.
+ * Use `create(SidebarViewBacklogSchema)` to create a new message.
  */
-export const SidebarViewHiddenSchema: GenMessage<SidebarViewHidden> = /*@__PURE__*/
+export const SidebarViewBacklogSchema: GenMessage<SidebarViewBacklog> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 8);
 
 /**

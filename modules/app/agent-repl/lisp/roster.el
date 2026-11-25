@@ -467,7 +467,7 @@ its branch is in flight.  The tab bar paints its [N] run purple from it
 
 (defun agent-repl-roster--walk-rows (rows label section acc collapsed)
   "Walk the list rows ROWS depth-first under LABEL, pushing entries onto ACC.
-ROWS are one list's own row type (`RosterOpenRow', `RosterHiddenRow',
+ROWS are one list's own row type (`RosterOpenRow', `RosterBacklogRow',
 `RosterMergedRow', `RosterClosedRow'), each a plist carrying the shared
 `:row' and, for the lists that nest, its family (`agent-repl-roster-row-kin').
 Each entry

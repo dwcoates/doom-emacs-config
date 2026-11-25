@@ -106,7 +106,7 @@ OVERRIDES replaces top-level entries (notably `current')."
              (divergence . ((pending . ()))) (expanded . ((collapsible . ()))))])
          (openCount . ((workspaces . 1)))))
      (open . ((label . ((text . "Open"))) (expanded . ())))
-     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
+     (backlog . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
      (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
@@ -163,7 +163,7 @@ order apart from declaration order."
              (divergence . ((pending . ()))) (expanded . ((collapsible . ()))))])
          (openCount . ((workspaces . 1)))))
     (open . ((label . ((text . "Open"))) (expanded . ())))
-    (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
+    (backlog . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
@@ -2007,7 +2007,7 @@ hidden, so its absence is a malformed push, dropped at ERROR."
        daemon (agent-repl-itest-roster--roster-missing
                (list (agent-repl-itest-roster--row
                       "ws-no-hidden-marker" "ws-no-hidden-marker" 'ready))
-               'hidden))
+               'backlog))
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))

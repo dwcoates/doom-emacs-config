@@ -52,7 +52,7 @@ Autonomous default: one change to an existing endpoint
   - `fitted` is a oneof arm rather than an optional `lines`, per the
     no-sentinel rule. `lines = 0` is legal: it shows the header alone.
 
-### 2. `RosterMergeQueueSection.height`, `RosterMergedSection.height`, `RosterHiddenSection.height`
+### 2. `RosterMergeQueueSection.height`, `RosterMergedSection.height`, `RosterBacklogSection.height`
 
 - WHAT: each band section carries a oneof `height { fitted; sized { lines } }`
   with its own dedicated arm messages (figma→idl: one fact in three views is

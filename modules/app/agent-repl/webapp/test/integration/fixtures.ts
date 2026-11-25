@@ -2689,9 +2689,9 @@ export function roster(init?: {
       openCount: { workspaces: rows.length },
     },
     open: { label: { text: "Open" }, fold: { case: "expanded", value: {} } },
-    hidden: {
+    backlog: {
       header: { label: { text: "Hidden" }, count: { workspaces: (init?.hidden ?? []).length } },
-      hiddenRows: { rows: (init?.hidden ?? []).map(hiddenRow) },
+      backlogRows: { rows: (init?.hidden ?? []).map(hiddenRow) },
       fold: { case: "expanded", value: {} },
       height: { case: "fitted", value: {} },
     },
