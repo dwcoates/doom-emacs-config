@@ -84,6 +84,13 @@ type Suite struct {
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
 	// which is the blast radius the merge gate gives a change under bin/.
 	Harness bool
+	// Rules marks a suite of repository-wide rule checks: tests that read the
+	// module's sources and hold them to a structural rule (gofmt, one home per
+	// pattern, the byte-compiler, shellcheck). A branch runs every rule suite,
+	// in the workspace that made it, before its merge is admitted to the queue
+	// (`workspace async-merge`, `workspace finished`), since no workspace's own
+	// targeted run ever names them.
+	Rules bool
 	// IntegrationTags, with IntegrationPackages, adds a GoModule suite's
 	// build-tagged integration package to the suite: its tests compile only
 	// under these tags, so the module's ordinary pass never sees them.
@@ -429,7 +436,7 @@ var Suites = []Suite{
 	// dependencies, the mock-rule source scan, and the scans pinning that
 	// every Go reader goes through the proto helpers. Their own module, so no
 	// system's reuse key covers the other systems' trees.
-	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans",
+	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans", Rules: true,
 		NeverReused: "its scans read the whole module, every untracked build output in it included, so no input set short of the checkout covers them"},
 	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts",
 		Reuse: &Reuse{Inputs: []string{
@@ -484,12 +491,12 @@ var Suites = []Suite{
 		Reuse: &Reuse{Inputs: []string{"tree-sitter-tldr/", "bin/"}, Generated: []string{"tree-sitter-tldr/node_modules/"}}},
 	// THE LINT GATES, each failing on any warning so none lands to
 	// accumulate. The byte-compiler over lisp/'s sources:
-	{Name: "byte-compile", Kind: Script, Path: "bin/byte-compile.sh", Reuse: harness("lisp/", "bin/compile-prelude.el")},
+	{Name: "byte-compile", Kind: Script, Path: "bin/byte-compile.sh", Rules: true, Reuse: harness("lisp/", "bin/compile-prelude.el")},
 	// shellcheck over every shell script of the module and of the
 	// repository's hooks, .claude scripts and bin/. It reads exactly the
 	// roots `bin/shellcheck.sh --roots` prints (ShellcheckRoots, which
 	// daemon/reposcans holds to the script).
-	{Name: "shellcheck", Kind: Script, Path: "bin/shellcheck.sh", Harness: true, Reuse: harness(ShellcheckRoots...)},
+	{Name: "shellcheck", Kind: Script, Path: "bin/shellcheck.sh", Harness: true, Rules: true, Reuse: harness(ShellcheckRoots...)},
 	// The density report scans every system's logging calls.
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
 	// THE E2E HARNESS and its tests: the world every scenario builds
@@ -978,6 +985,18 @@ func Harnesses() []string {
 	var out []string
 	for _, s := range Suites {
 		if s.Harness {
+			out = append(out, s.Name)
+		}
+	}
+	return out
+}
+
+// RuleSuites is the names of the rule suites (Suite.Rules), in roster
+// order: what a branch runs before its merge is admitted to the queue.
+func RuleSuites() []string {
+	var out []string
+	for _, s := range Suites {
+		if s.Rules {
 			out = append(out, s.Name)
 		}
 	}

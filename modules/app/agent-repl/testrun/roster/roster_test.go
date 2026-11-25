@@ -547,3 +547,43 @@ func TestTheProtoSuiteBuildsItsSwiftPluginOutsideTheLaunchersBuildDirectory(t *t
 		t.Fatal(err)
 	}
 }
+
+func TestRuleSuitesAreTheRulesSuitesInRosterOrder(t *testing.T) {
+	// Arrange
+	var want []string
+	for _, s := range Suites {
+		if s.Rules {
+			want = append(want, s.Name)
+		}
+	}
+
+	// Act
+	got := RuleSuites()
+
+	// Assert
+	if !slices.Equal(got, want) {
+		t.Fatalf("RuleSuites() = %v, want %v", got, want)
+	}
+	for _, name := range []string{"repo-scans", "byte-compile", "shellcheck"} {
+		if !slices.Contains(got, name) {
+			t.Fatalf("RuleSuites() = %v, missing %s", got, name)
+		}
+	}
+}
+
+// A rule suite runs before every merge is admitted, so it must run in every
+// run that selects it: one gated on a mode (coverage, naming) would pass the
+// pre-queue check by never running.
+func TestEveryRuleSuiteRunsInEveryRunThatSelectsIt(t *testing.T) {
+	for _, s := range Suites {
+		if !s.Rules {
+			continue
+		}
+		t.Run(s.Name, func(t *testing.T) {
+			// Assert
+			if s.Runs != RunsAlways {
+				t.Fatalf("rule suite %s runs only under condition %d", s.Name, s.Runs)
+			}
+		})
+	}
+}
