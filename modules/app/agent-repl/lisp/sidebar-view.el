@@ -71,9 +71,10 @@
   "The agent-repl sidebar's own window."
   :group 'agent-repl)
 
-(defcustom agent-repl-sidebar-view-width-fraction 0.2
+(defcustom agent-repl-sidebar-view-width-fraction 0.22
   "Fraction of the frame's width the sidebar's window takes when it opens.
-A fifth, as the sidebar took of the feed's window when it was drawn there.
+A tenth wider than the fifth the sidebar took of the feed's window when it
+was drawn there.
 Dragging the window's divider resizes it for as long as it stands."
   :type 'number
   :group 'agent-repl-sidebar-view)

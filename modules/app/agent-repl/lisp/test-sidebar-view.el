@@ -444,6 +444,13 @@ Binds `made' to that buffer; it is killed afterwards."
         (let ((win (agent-repl-sidebar-view-show)))
           (should (= (window-total-width win) (round (* 0.25 (frame-width))))))))))
 
+(ert-deftest agent-repl-test-sv-showing-opens-at-the-default-width ()
+  "By default the sidebar opens at 22% of the frame's width."
+  (agent-repl-test-sv--with-created
+    (agent-repl-test-sv--with-frame
+      (let ((win (agent-repl-sidebar-view-show)))
+        (should (= (window-total-width win) (round (* 0.22 (frame-width)))))))))
+
 (ert-deftest agent-repl-test-sv-showing-again-keeps-the-window-standing ()
   "Showing a sidebar already on screen answers its window and makes no other."
   (agent-repl-test-sv--with-created
