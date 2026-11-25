@@ -115,8 +115,9 @@ a cons or a float 16 bytes, a vector cell 8, a symbol 48, a string header
      string-chars-consed))
 
 (defun agent-repl-stall-culprit--charge (now)
-  "Charge the current unit its time up to NOW and its allocation since the last charge.
-Restarts its clock at NOW."
+  "Charge the current unit its time up to NOW and what it allocated meanwhile.
+The allocation is the bytes since the last charge.  Restarts its clock
+at NOW."
   (let ((key agent-repl-stall-culprit--current)
         (allocated (agent-repl-stall-culprit--allocated)))
     (when (consp key)
