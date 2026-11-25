@@ -56,6 +56,12 @@ type Git interface {
 	UnregisterMissingWorktree(ctx context.Context, repoDir, worktreeDir string) error
 	// RemoveWorktree removes a worktree, leaving its branch.
 	RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error
+	// MoveWorktree moves a worktree from one directory to another, a move
+	// already made being no failure.
+	MoveWorktree(ctx context.Context, repoDir, from, to string) error
+	// RenameBranch renames a local branch, a rename already made being no
+	// failure.
+	RenameBranch(ctx context.Context, repoDir, from, to string) error
 	// AddDetachedWorktree checks commit out at worktreeDir on a DETACHED HEAD,
 	// creating no branch. It is the merge queue's own scratch tree: the merge
 	// is made and tested there, and nothing names it but its directory.
