@@ -233,6 +233,19 @@ describe("drawFeedSessionSeparation: the compaction that did not happen", () => 
     );
   });
 
+  it("records its draw at debug, the daemon owning the failure's warning", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    drawFeedSessionSeparation(separation(failed), ctxFor());
+    // Assert
+    const record = await forwardedRecord(capture, "feed.separation-compaction-failed");
+    expect([record.level.case, record.context]).toEqual([
+      "debug",
+      expect.objectContaining({ error: "the summarizing request was refused" }),
+    ]);
+  });
+
   it("refuses a failed compaction with no marker", () => {
     const msg = separation({ case: "compactionFailed", value: { error: "x" } });
     expect(() => drawFeedSessionSeparation(msg, ctxFor())).toThrow(MalformedView);

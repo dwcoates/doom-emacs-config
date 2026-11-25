@@ -330,6 +330,48 @@ func TestAFailedCompactionWarns(t *testing.T) {
 	}
 }
 
+func TestAFailedCompactionDeliveredByTheSecondPlaneWarnsOnce(t *testing.T) {
+	// Arrange: the stream plane's delivery of the failed cut.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "compact please")
+	failed := &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
+		CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summarizer refused"},
+	}}
+	h.cutAt("entry-1", failed)
+
+	// Act: the file plane's delivery of the same entry.
+	h.cutAt("entry-1", failed)
+
+	// Assert
+	if got := len(h.recordsAt("warn", "daemon.feed.compaction_failed")); got != 1 {
+		t.Fatalf("WARN records = %d, want the failure warned once", got)
+	}
+	if !h.hasRecordWith("debug", "daemon.feed.compaction_failed", "drawn", true) {
+		t.Fatalf("records = %+v, want the second delivery recorded at DEBUG", h.records())
+	}
+}
+
+func TestAReplayedFailedCompactionDrawsItsMarkerWithNoWarning(t *testing.T) {
+	// Arrange, Act: a history page redraws a failure recorded when it happened.
+	h := newHarness(t)
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		cutEntry(&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
+			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summarizer refused"},
+		}}),
+	))
+
+	// Assert
+	if h.separationRow().GetSeparation().GetCompactionFailed() == nil {
+		t.Fatal("a replayed compaction failure drew no marker")
+	}
+	if h.hasRecord("warn", "daemon.feed.compaction_failed") {
+		t.Fatalf("records = %+v, want no WARN for a replayed failure", h.records())
+	}
+	if !h.hasRecordWith("debug", "daemon.feed.compaction_failed", "replay", true) {
+		t.Fatalf("records = %+v, want the replayed failure recorded at DEBUG", h.records())
+	}
+}
+
 // A FAILED COMPACTION IS ITS OWN MARKER ALONE (owner ruling, 2026-10-06): it
 // no longer rides the turn's headline as evidence.
 func TestAFailedCompactionNoLongerRidesTheTurnsHeadline(t *testing.T) {

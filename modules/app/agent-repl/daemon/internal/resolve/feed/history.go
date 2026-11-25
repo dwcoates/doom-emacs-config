@@ -300,7 +300,7 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 			r.drawPermission(s, agent, update.Permission)
 		case *conversationv1.AgentUpdate_ContextCut:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_ContextCut", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ContextCut"})
-			r.drawContextCut(s, agent, update.ContextCut, at)
+			r.drawContextCut(s, agent, update.ContextCut, at, true)
 		case *conversationv1.AgentUpdate_ResponseRevision:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_ResponseRevision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ResponseRevision"})
 			// A REPLAYED REVISION IS DRAWN WHOLE: it was typed out when it

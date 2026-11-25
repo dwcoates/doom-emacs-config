@@ -316,7 +316,11 @@ export function drawFeedContextCutCompactionFailed(
       `${PATH}.compaction_failed.marker`,
     ),
   );
-  log.warn("a compaction was offered and did not happen", {
+  // THE DAEMON OWNS THE FAILURE'S RECORD: it warns once, when the failure
+  // arrives live (daemon.feed.compaction_failed). This draw runs on every
+  // page that holds the marker, so a WARN here re-reported a failure of
+  // 2026-11-24 at every open of the feed (2026-11-25).
+  log.debug("drew the outcome marker of a compaction that did not happen", {
     operation: "feed.separation-compaction-failed",
     context: { error: failed.error },
   });
