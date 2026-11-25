@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"agent-repld/internal/bounce"
@@ -122,6 +123,97 @@ func TestABounceWhoseRestartHoldAMergeTookFirstIsDeferred(t *testing.T) {
 			}
 			if tt.wantDeferred && len(h.fleet.resumes) != 0 {
 				t.Fatalf("resumes = %v, want nothing replaced under the merge", h.fleet.resumes)
+			}
+		})
+	}
+}
+
+// TestABounceWhoseRestartHoldAHibernateTookFirstIsDeferred pins the race of
+// 2026-11-25 14:27:28 (plain-mediator-names-3): an idle park's hibernate took
+// the lease during the prelaunch, and the restart hold's take lost to it. A
+// park is brief and its release takes the bounce, so every bounce, forced or
+// not, is given back behind it with its prelaunch retired, recorded at INFO
+// and never at ERROR.
+func TestABounceWhoseRestartHoldAHibernateTookFirstIsDeferred(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason RelaunchReason
+		force  bool
+	}{
+		{name: "a stale skill set waits for the park", reason: ReasonSkillsChanged},
+		{name: "a stale build waits for the park", reason: ReasonBuildStale},
+		{name: "the restart verb waits for the park", reason: ReasonRestartVerb},
+		{name: "a forced bounce waits for the park", reason: ReasonSkillsChanged, force: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.fleet.onPrelaunch = func(ids.WorkspaceID) {
+				if _, err := h.db.AcquireLease(context.Background(), ws, wsm.HolderHibernate, wsm.PolicyHold); err != nil {
+					t.Errorf("AcquireLease: %v", err)
+				}
+			}
+
+			// Act.
+			err := h.c.shimBounce(tt.reason, tt.force, nil)(context.Background(), ws)
+
+			// Assert.
+			if !errors.Is(err, bounce.ErrDeferredBehindLease) {
+				t.Fatalf("bounce = %v, want it deferred behind the hibernate's lease", err)
+			}
+			if len(h.fleet.resumes) != 0 {
+				t.Fatalf("resumes = %v, want nothing replaced under the park", h.fleet.resumes)
+			}
+			relaunch := records(h.log, opRelaunch)
+			if len(levelRecords(relaunch, "error")) != 0 {
+				t.Fatalf("relaunch records = %v, want no ERROR", relaunch)
+			}
+			deferred := false
+			for _, r := range levelRecords(relaunch, "info") {
+				if r.Context["held_by"] == "hibernate" {
+					deferred = true
+				}
+			}
+			if !deferred {
+				t.Fatalf("relaunch records = %v, want the deferral stated at INFO naming the hibernate", relaunch)
+			}
+		})
+	}
+}
+
+// TestDeferredBehindLeaseNamesWhichHoldersDeferWhichBounces pins the
+// classification every take failure goes through.
+func TestDeferredBehindLeaseNamesWhichHoldersDeferWhichBounces(t *testing.T) {
+	held := func(holder wsm.LeaseHolder) error {
+		return fmt.Errorf("take: %w", &wsm.LeaseHeldError{Workspace: "ws-1", Lease: "lease-1", Holder: holder, Policy: wsm.PolicyHold})
+	}
+	tests := []struct {
+		name       string
+		reason     RelaunchReason
+		force      bool
+		err        error
+		wantHolder wsm.LeaseHolder
+		wantDefer  bool
+	}{
+		{name: "a merge defers a stale build", reason: ReasonBuildStale, err: held(wsm.HolderMerge), wantHolder: wsm.HolderMerge, wantDefer: true},
+		{name: "a merge does not defer a forced stale build", reason: ReasonBuildStale, force: true, err: held(wsm.HolderMerge), wantHolder: wsm.HolderMerge},
+		{name: "a merge does not defer the query's death", reason: ReasonQueryDied, err: held(wsm.HolderMerge), wantHolder: wsm.HolderMerge},
+		{name: "a hibernate defers the query's death", reason: ReasonQueryDied, err: held(wsm.HolderHibernate), wantHolder: wsm.HolderHibernate, wantDefer: true},
+		{name: "a hibernate defers a forced bounce", reason: ReasonRestartVerb, force: true, err: held(wsm.HolderHibernate), wantHolder: wsm.HolderHibernate, wantDefer: true},
+		{name: "a drain does not defer", reason: ReasonBuildStale, err: held(wsm.HolderDrain), wantHolder: wsm.HolderDrain},
+		{name: "another restart does not defer", reason: ReasonBuildStale, err: held(wsm.HolderRestart), wantHolder: wsm.HolderRestart},
+		{name: "a failure that is no lease refusal does not defer", reason: ReasonBuildStale, err: errors.New("the store is down")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			holder, deferred := deferredBehindLease(tt.reason, tt.force, tt.err)
+
+			// Assert.
+			if deferred != tt.wantDefer || (tt.wantDefer && holder != tt.wantHolder) {
+				t.Fatalf("deferredBehindLease = %v, %v, want %v, %v", holder, deferred, tt.wantHolder, tt.wantDefer)
 			}
 		})
 	}

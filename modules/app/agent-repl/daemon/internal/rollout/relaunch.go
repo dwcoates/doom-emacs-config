@@ -255,16 +255,21 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 			*mergeHeld = true
 			fields["held_by"] = "merge"
 			c.log.Info(opRelaunch, "the workspace's suspended merge already holds its prompts; the restart takes no hold of its own", dlog.WithCause(fields, err))
-		} else if deferredBehindMerge(reason, force, err) {
+		} else if holder, deferred := deferredBehindLease(reason, force, err); deferred {
 			// THE TAKE IS THE ARBITER. A merge admitted after the lease was
 			// read above took the workspace first (2026-11-18 13:46:37,
 			// puzzle-review-workers-push-branches: the read found no lease,
 			// the merge's admission took it, and this take failed at ERROR).
+			// So did an idle park's hibernate, which takes its lease before it
+			// reads Bouncing (2026-11-25 14:27:28, plain-mediator-names-3: a
+			// skills_changed bounce lost its take to the fleet's hibernate and
+			// failed at ERROR, and the park then hibernated the old shim).
 			// The bounce is given back unperformed, as the read above gives
-			// it back, and the merge's release reruns it.
-			c.log.Info(opRelaunch, "a merge took the workspace before the restart hold; the unforced bounce waits for the merge to release it", dlog.WithCause(fields, err))
+			// it back, and the holder's release reruns it.
+			fields["held_by"] = holder.String()
+			c.log.Info(opRelaunch, "another holder took the workspace before the restart hold; the bounce waits for that holder to release it", dlog.WithCause(fields, err))
 			c.retirePrelaunch(ctx, fresh, reason, fields)
-			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferredBehindLease)
+			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: a %s holds the workspace: %w", ws, holder, bounce.ErrDeferredBehindLease)
 		} else if errors.Is(err, wsm.ErrNotFound) {
 			// THE WORKSPACE WAS FORGOTTEN DURING ITS BOUNCE: nothing is left to
 			// replace, so the bounce ends unregistered, an outcome and never a
@@ -670,18 +675,32 @@ func killRefusal(failure *shimv1.KillSessionFailure) string {
 	}
 }
 
+// deferredBehindLease reports whether a restart hold the take refused, ERR,
+// gives the bounce back behind the lease that refused it, and that lease's
+// holder. A merge's lease defers a bounce of REASON that waits behind a merge
+// and was not forced. A hibernate's lease defers every bounce, forced or not,
+// as the prompt queue holds every bounce behind one before it is taken
+// (promptqueue heldBehindHibernationLocked): the park is brief, and its
+// release takes the bounce on the session it left.
+func deferredBehindLease(reason RelaunchReason, force bool, err error) (wsm.LeaseHolder, bool) {
+	var held *wsm.LeaseHeldError
+	if !errors.As(err, &held) {
+		return 0, false
+	}
+	switch held.Holder {
+	case wsm.HolderMerge:
+		return held.Holder, reason.waitsBehindAMerge() && !force
+	case wsm.HolderHibernate:
+		return held.Holder, true
+	default:
+		return held.Holder, false
+	}
+}
+
 // mergeHoldsTheWorkspace reports whether a restart-pending hold was refused
 // because the workspace's MERGE holds its lease, which only a RestartWorkspace
 // may take as standing in for its own hold: the verb suspended the merge
 // first. Any other bounce over a merge's lease still fails on it.
-// deferredBehindMerge reports whether a restart hold the take refused, ERR,
-// was refused because a merge holds the workspace, for a bounce of REASON
-// that waits behind a merge and was not forced.
-func deferredBehindMerge(reason RelaunchReason, force bool, err error) bool {
-	var held *wsm.LeaseHeldError
-	return reason.waitsBehindAMerge() && !force && errors.As(err, &held) && held.Holder == wsm.HolderMerge
-}
-
 func mergeHoldsTheWorkspace(reason RelaunchReason, err error) bool {
 	var held *wsm.LeaseHeldError
 	return reason == ReasonRestartVerb && errors.As(err, &held) && held.Holder == wsm.HolderMerge
