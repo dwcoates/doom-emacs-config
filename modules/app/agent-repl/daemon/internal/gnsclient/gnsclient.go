@@ -47,6 +47,10 @@ func Binary() string { return gnsBinary }
 // record; 25s is just under three times that.
 const CallBound = 25 * time.Second
 
+// callHealthy is how long the slowest healthy one-shot call takes, which a
+// call that outruns CallBound names (the measurement above).
+const callHealthy = "9s"
+
 // ChannelsBound bounds the one slow one-shot call, the user's channel list.
 // Measured 2026-11-19: `gns slack channel list-mine --all --json` answered
 // 520 channels in 13.0s, 15.4s and 13.1s on a healthy host, so 40s is between
@@ -120,8 +124,11 @@ type Client interface {
 	// ThreadRoot answers the root of the thread the message at TS is in: TS
 	// itself for a root or a message in no thread.
 	ThreadRoot(ctx context.Context, channel, ts string) (string, error)
-	// PipeHead answers the highest sequence number in PIPE.
-	PipeHead(ctx context.Context, pipe string) (int64, error)
+	// PipeHead answers the highest sequence number in PIPE, and whether GNS
+	// keeps PIPE at all: it keeps no echo pipe for a direct message, which
+	// its bot is no member of. A pipe it keeps none of is an answer, never
+	// a failure.
+	PipeHead(ctx context.Context, pipe string) (int64, bool, error)
 	// Stream reads PIPE's entries after AFTER that are in the thread rooted at
 	// THREADTS, calling EACH on every one in order, until ctx ends, and
 	// answers the highest sequence number read. ctx ending is the stream's
@@ -129,6 +136,10 @@ type Client interface {
 	Stream(ctx context.Context, pipe string, after int64, threadTS string, each func(PipeMessage)) (int64, error)
 	// Thread reads up to LIMIT messages of the thread rooted at THREADTS.
 	Thread(ctx context.Context, channel, threadTS string, limit int) ([]ThreadMessage, error)
+	// ThreadAfter reads every message of the thread rooted at THREADTS that
+	// is later than AFTER, oldest first, through the login's own Slack
+	// access: what a thread no echo pipe carries is followed by.
+	ThreadAfter(ctx context.Context, channel, threadTS, after string) ([]ThreadMessage, error)
 	// Post posts BLOCKS (Slack Block Kit JSON) into the thread, answering the
 	// posted message's timestamp, empty when `gns` did not say it.
 	Post(ctx context.Context, channel, threadTS string, blocks []byte) (string, error)
@@ -205,11 +216,22 @@ const op = "daemon.gnsclient.call"
 // run runs `gns ARGS` under CallBound, with STDIN as its input when set, and
 // answers its stdout.
 func (c *client) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	return c.runBounded(ctx, c.cfg.Bound, "9s", stdin, args...)
+	return c.runBounded(ctx, c.cfg.Bound, callHealthy, stdin, args...)
 }
 
 // runBounded is run under BOUND, a call whose healthy answer takes HEALTHY.
 func (c *client) runBounded(ctx context.Context, bound time.Duration, healthy string, stdin []byte, args ...string) ([]byte, error) {
+	out, refusal, err := c.attempt(ctx, bound, healthy, stdin, args...)
+	if err == nil && refusal != "" {
+		return nil, c.failed("gns "+strings.Join(args, " "), refusal)
+	}
+	return out, err
+}
+
+// attempt is runBounded answering what gns said when it exited non-zero as
+// REFUSAL, unrecorded, so a caller that expects one refusal can take it as
+// an answer. Every other failure is recorded and answered as the error.
+func (c *client) attempt(ctx context.Context, bound time.Duration, healthy string, stdin []byte, args ...string) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	cmd := childproc.CommandContext(ctx, childproc.Stable, c.cfg.Binary, args...)
@@ -221,21 +243,21 @@ func (c *client) runBounded(ctx context.Context, bound time.Duration, healthy st
 	stdout, stderr, runErr, captureErr := childproc.Run(cmd, nil)
 	switch {
 	case captureErr != nil:
-		return nil, c.failed(call, "could not capture gns's output: "+captureErr.Error())
+		return nil, "", c.failed(call, "could not capture gns's output: "+captureErr.Error())
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return nil, c.failed(call, fmt.Sprintf("gns did not answer within %s (healthy calls answer within %s)", bound, healthy))
+		return nil, "", c.failed(call, fmt.Sprintf("gns did not answer within %s (healthy calls answer within %s)", bound, healthy))
 	case ctx.Err() != nil:
 		// The daemon stopped the call: no fact about Slack.
-		return nil, ctx.Err()
+		return nil, "", ctx.Err()
 	case runErr != nil:
 		c.refused(stdout + stderr)
 		detail := strings.TrimSpace(stderr)
 		if detail == "" {
 			detail = runErr.Error()
 		}
-		return nil, c.failed(call, detail)
+		return nil, detail, nil
 	}
-	return []byte(stdout), nil
+	return []byte(stdout), "", nil
 }
 
 // refused shows OUTPUT, a call gns exited non-zero on, to the observer, when
@@ -302,22 +324,32 @@ func (c *client) ThreadRoot(ctx context.Context, channel, ts string) (string, er
 	return msgs[0].TS, nil
 }
 
-func (c *client) PipeHead(ctx context.Context, pipe string) (int64, error) {
+// pipeNotFound is how gns ends what it says of a pipe it keeps none of
+// (`Error: Pipe not found: <pipe> [PIPE_NOT_FOUND]`).
+const pipeNotFound = "[PIPE_NOT_FOUND]"
+
+func (c *client) PipeHead(ctx context.Context, pipe string) (int64, bool, error) {
 	call := "gns pipe read " + pipe + " --tail 1"
-	out, err := c.run(ctx, nil, "pipe", "read", pipe, "--tail", "1", "--output", "json")
-	if err != nil {
-		return 0, err
+	out, refusal, err := c.attempt(ctx, c.cfg.Bound, callHealthy, nil, "pipe", "read", pipe, "--tail", "1", "--output", "json")
+	switch {
+	case err != nil:
+		return 0, false, err
+	case strings.HasSuffix(refusal, pipeNotFound):
+		c.cfg.Log.Info(op, "gns keeps no such pipe", dlog.Context{"call": call, "pipe": pipe})
+		return 0, false, nil
+	case refusal != "":
+		return 0, false, c.failed(call, refusal)
 	}
 	var entries []struct {
 		Seq int64 `json:"seq"`
 	}
 	if err := c.decode(call, out, &entries); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if len(entries) == 0 {
-		return 0, nil
+		return 0, true, nil
 	}
-	return entries[0].Seq, nil
+	return entries[0].Seq, true, nil
 }
 
 // pipeEntry is one `gns pipe read --output json` entry.
@@ -409,8 +441,58 @@ func scanEntries(r io.Reader, each func(pipeEntry)) error {
 }
 
 func (c *client) Thread(ctx context.Context, channel, threadTS string, limit int) ([]ThreadMessage, error) {
-	call := "gns slack thread " + channel + " " + threadTS
-	out, err := c.run(ctx, nil, "slack", "thread", channel, threadTS, "--limit", strconv.Itoa(limit), "--output", "json")
+	return c.thread(ctx, "gns slack thread "+channel+" "+threadTS, "slack", "thread", channel, threadTS, "--limit", strconv.Itoa(limit), "--output", "json")
+}
+
+func (c *client) ThreadAfter(ctx context.Context, channel, threadTS, after string) ([]ThreadMessage, error) {
+	call := "gns slack thread " + channel + " " + threadTS + " --oldest " + after
+	msgs, err := c.thread(ctx, call, "slack", "thread", channel, threadTS, "--all", "--oldest", after, "--output", "json")
+	if err != nil {
+		return nil, err
+	}
+	// Slack answers the thread's root whatever the bound, so the bound is
+	// applied here as well.
+	var later []ThreadMessage
+	for _, m := range msgs {
+		newer, err := TSAfter(m.TS, after)
+		if err != nil {
+			return nil, c.failed(call, err.Error())
+		}
+		if newer {
+			later = append(later, m)
+		}
+	}
+	return later, nil
+}
+
+// TSAfter reports whether the Slack timestamp A is later than B. A timestamp
+// is `<seconds>.<microseconds>`; one that is not is an error.
+func TSAfter(a, b string) (bool, error) {
+	as, au, err := parseTS(a)
+	if err != nil {
+		return false, err
+	}
+	bs, bu, err := parseTS(b)
+	if err != nil {
+		return false, err
+	}
+	return as > bs || (as == bs && au > bu), nil
+}
+
+func parseTS(ts string) (int64, int64, error) {
+	secs, micros, ok := strings.Cut(ts, ".")
+	s, serr := strconv.ParseInt(secs, 10, 64)
+	u, uerr := strconv.ParseInt(micros, 10, 64)
+	if !ok || serr != nil || uerr != nil || len(micros) != 6 {
+		return 0, 0, fmt.Errorf("%q is no Slack timestamp", ts)
+	}
+	return s, u, nil
+}
+
+// thread runs the `gns slack thread` ARGS, CALL as its record names it, and
+// answers the messages it read, oldest first.
+func (c *client) thread(ctx context.Context, call string, args ...string) ([]ThreadMessage, error) {
+	out, err := c.run(ctx, nil, args...)
 	if err != nil {
 		return nil, err
 	}

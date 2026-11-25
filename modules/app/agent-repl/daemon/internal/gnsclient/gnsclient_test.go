@@ -128,7 +128,7 @@ func TestACallThatOutrunsItsBoundFails(t *testing.T) {
 	c, log := newClient(t, bin, 50*time.Millisecond)
 
 	// Act
-	_, err := c.PipeHead(context.Background(), "p")
+	_, _, err := c.PipeHead(context.Background(), "p")
 
 	// Assert
 	var f *Failure
@@ -171,22 +171,116 @@ func TestThreadRoot(t *testing.T) {
 
 func TestPipeHead(t *testing.T) {
 	tests := []struct {
-		name string
-		out  string
-		want int64
+		name       string
+		out        string
+		stderr     string
+		code       int
+		want       int64
+		wantExists bool
+		wantErr    bool
 	}{
-		{name: "an empty pipe", out: `[]`, want: 0},
-		{name: "a pipe's newest entry", out: `[{"seq":42,"message":"x"}]`, want: 42},
+		{name: "an empty pipe", out: `[]`, wantExists: true},
+		{name: "a pipe's newest entry", out: `[{"seq":42,"message":"x"}]`, want: 42, wantExists: true},
+		{name: "a pipe gns keeps none of", stderr: "Error: Pipe not found: user.dodge.tools.slack.channel.D1.echo [PIPE_NOT_FOUND]", code: 1},
+		{name: "any other refusal", stderr: "Error: Invalid or expired JWT", code: 1, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bin, _ := fakeGNS(t, tt.out, "", 0, "")
-			c, _ := newClient(t, bin, 0)
+			// Arrange
+			bin, _ := fakeGNS(t, tt.out, tt.stderr, tt.code, "")
+			c, log := newClient(t, bin, 0)
 
-			got, err := c.PipeHead(context.Background(), PipeFor("dodge", "C1"))
+			// Act
+			got, exists, err := c.PipeHead(context.Background(), PipeFor("dodge", "C1"))
 
-			if err != nil || got != tt.want {
-				t.Fatalf("PipeHead = %d, %v; want %d", got, err, tt.want)
+			// Assert
+			if got != tt.want || exists != tt.wantExists || (err != nil) != tt.wantErr {
+				t.Fatalf("PipeHead = %d, %v, %v; want %d, %v (error %v)", got, exists, err, tt.want, tt.wantExists, tt.wantErr)
+			}
+			if failed := failedRecord(log, "gns pipe read"); failed != tt.wantErr {
+				t.Fatalf("failure recorded %v; want %v: %+v", failed, tt.wantErr, log.Records())
+			}
+		})
+	}
+}
+
+func TestAPipeGnsKeepsNoneOfIsRecordedAsAnAnswer(t *testing.T) {
+	// Arrange
+	bin, _ := fakeGNS(t, "", "Error: Pipe not found: p [PIPE_NOT_FOUND]", 1, "")
+	c, log := newClient(t, bin, 0)
+
+	// Act
+	_, _, err := c.PipeHead(context.Background(), "p")
+
+	// Assert
+	r, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: op, Message: "gns keeps no such pipe"})
+	if err != nil || !ok || r.Context["pipe"] != "p" || r.Context["call"] != "gns pipe read p --tail 1" {
+		t.Fatalf("PipeHead = %v; records %+v", err, log.Records())
+	}
+}
+
+func TestThreadAfter(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    []ThreadMessage
+		wantErr bool
+	}{
+		{
+			name: "the root and every message up to the bound are dropped",
+			out:  `{"messages":[{"ts":"1700000000.000100","user":"U1"},{"ts":"1700000000.000200","user":"U1"},{"ts":"1700000001.000050","thread_ts":"1700000000.000100","user_name":"alice","text":"hi"}]}`,
+			want: []ThreadMessage{{TS: "1700000001.000050", ThreadTS: "1700000000.000100", Author: "alice", Text: "hi"}},
+		},
+		{name: "nothing later", out: `{"messages":[{"ts":"1700000000.000100"}]}`},
+		{name: "a message with no Slack timestamp", out: `{"messages":[{"ts":"soon"}]}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			bin, dir := fakeGNS(t, tt.out, "", 0, "")
+			c, log := newClient(t, bin, 0)
+
+			// Act
+			got, err := c.ThreadAfter(context.Background(), "D1", "1700000000.000100", "1700000000.000200")
+
+			// Assert
+			if (err != nil) != tt.wantErr || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ThreadAfter = %+v, %v; want %+v (error %v)", got, err, tt.want, tt.wantErr)
+			}
+			if tt.wantErr && !failedRecord(log, "gns slack thread D1 1700000000.000100 --oldest 1700000000.000200") {
+				t.Fatalf("the failure was not recorded: %+v", log.Records())
+			}
+			if want := []string{"slack", "thread", "D1", "1700000000.000100", "--all", "--oldest", "1700000000.000200", "--output", "json"}; !reflect.DeepEqual(argsOf(t, dir), want) {
+				t.Fatalf("args = %v", argsOf(t, dir))
+			}
+		})
+	}
+}
+
+func TestTSAfter(t *testing.T) {
+	tests := []struct {
+		name    string
+		a, b    string
+		want    bool
+		wantErr bool
+	}{
+		{name: "a later second", a: "1700000001.000000", b: "1700000000.999999", want: true},
+		{name: "a later microsecond", a: "1700000000.000002", b: "1700000000.000001", want: true},
+		{name: "the same timestamp", a: "1700000000.000001", b: "1700000000.000001"},
+		{name: "an earlier one", a: "1700000000.000001", b: "1700000000.000002"},
+		{name: "a longer seconds part compares by value", a: "10000000000.000000", b: "9999999999.000000", want: true},
+		{name: "no fraction", a: "1700000000", b: "1700000000.000001", wantErr: true},
+		{name: "a short fraction", a: "1700000000.1", b: "1700000000.000001", wantErr: true},
+		{name: "not a number", a: "1700000000.000001", b: "x.000001", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := TSAfter(tt.a, tt.b)
+
+			// Assert
+			if got != tt.want || (err != nil) != tt.wantErr {
+				t.Fatalf("TSAfter(%q, %q) = %v, %v; want %v (error %v)", tt.a, tt.b, got, err, tt.want, tt.wantErr)
 			}
 		})
 	}

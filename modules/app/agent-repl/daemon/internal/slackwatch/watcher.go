@@ -1,10 +1,14 @@
 // Package slackwatch follows Slack threads for workspaces and fires the
 // reaction initiator: the daemon's successor to the gns-sockets plugin.
 //
-// A SUBSCRIBED THREAD IS STREAMED BY ONE WORKER, for as long as its
-// subscription stands: the worker reads the channel's echo pipe through the
-// user's `gns` (gnsclient) in bounded windows, and every message it reads is
-// stored as pending with the cursor, in one transaction
+// A SUBSCRIBED THREAD IS FOLLOWED BY ONE WORKER, for as long as its
+// subscription stands, through the user's `gns` (gnsclient), by the source
+// the subscription chose when it was made (wsm.SlackThreadSource): the
+// channel's echo pipe, streamed in bounded windows, when GNS keeps one, and
+// otherwise a poll of the thread every ThreadPollEvery. GNS keeps no echo
+// pipe for a direct message, which its bot is no member of, and offers no
+// other stream of one, so a direct message's thread is polled. Every message
+// the worker reads is stored as pending with the cursor, in one transaction
 // (wsm.RecordSlackThreadMessages). The workspace's own posts are dropped
 // there, by their nonce.
 //
@@ -58,6 +62,15 @@ const Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_SLACK_THREAD_NOTICE
 // hangs without a word goes unnoticed, and what lets the serving daemon hand
 // a thread on. The gns-sockets plugin rotated its streams on the same 30s.
 const StreamWindow = 30 * time.Second
+
+// ThreadPollEvery is the gap between polls of a thread no echo pipe carries
+// (wsm.SlackThreadSourceThreadPoll). It is a cadence, not a bound: how late
+// a message in such a thread may be read. A third of LowQuiet keeps a
+// message's added delay well inside the quiet period its digest waits out
+// anyway. Measured 2026-11-24: `gns slack thread --all --oldest` of a direct
+// message's thread answered in 1.0s, so a poll keeps one `gns` running about
+// a fifteenth of the time; each poll runs under gnsclient.CallBound.
+const ThreadPollEvery = 15 * time.Second
 
 // FailureBackoff is how long a worker waits after a failed window before the
 // next, so a `gns` that fails at once is not run in a tight loop: one window.
@@ -290,11 +303,28 @@ func (w *Watcher) work(ctx context.Context, key subKey) {
 			w.wait(ctx, StreamWindow)
 			continue
 		}
-		if err := w.StreamOnce(ctx, sub); err != nil {
+		if err := w.FollowOnce(ctx, sub); err != nil {
 			w.recordStreamFailure(ctx, key, err)
 			w.wait(ctx, FailureBackoff)
+			continue
+		}
+		if sub.Source == wsm.SlackThreadSourceThreadPoll {
+			w.wait(ctx, ThreadPollEvery)
 		}
 	}
+}
+
+// FollowOnce follows SUB's thread once by its source: one window of its
+// channel's echo pipe, or one poll of the thread.
+func (w *Watcher) FollowOnce(ctx context.Context, sub wsm.SlackThreadSubscription) error {
+	switch sub.Source {
+	case wsm.SlackThreadSourceEchoPipe:
+		return w.StreamOnce(ctx, sub)
+	case wsm.SlackThreadSourceThreadPoll:
+		return w.PollOnce(ctx, sub)
+	}
+	// The store refuses to keep or read any other source.
+	panic(fmt.Sprintf("slackwatch: the subscription of %s to %s follows by source %q", sub.Subscriber, sub.Thread, sub.Source))
 }
 
 // wait waits D or until ctx ends.
@@ -346,7 +376,7 @@ func (w *Watcher) StreamOnce(ctx context.Context, sub wsm.SlackThreadSubscriptio
 	defer cancel()
 	key := keyOf(sub)
 	last, err := w.deps.GNS.Stream(window, gnsclient.PipeFor(username, sub.Thread.Channel), sub.Cursor, sub.Thread.ThreadTS, func(m gnsclient.PipeMessage) {
-		w.ingest(ctx, key, []gnsclient.PipeMessage{m}, m.Seq)
+		w.ingest(ctx, key, []incoming{{TS: m.TS, Author: m.Author, Text: m.Text}}, m.Seq, "")
 	})
 	if ctx.Err() != nil {
 		return nil
@@ -354,23 +384,55 @@ func (w *Watcher) StreamOnce(ctx context.Context, sub wsm.SlackThreadSubscriptio
 	// The window's end advances the cursor past entries that carried no
 	// message (an edit, a deletion), which the stream reads and skips.
 	if last > sub.Cursor {
-		w.ingest(ctx, key, nil, last)
+		w.ingest(ctx, key, nil, last, "")
 	}
 	return err
 }
 
-// ingest stores MSGS for KEY as pending with CURSOR, and schedules the
-// subscription's digest when any was new.
-func (w *Watcher) ingest(ctx context.Context, key subKey, msgs []gnsclient.PipeMessage, cursor int64) {
-	now := w.deps.Clock.Now()
-	read := wsm.SlackThreadRead{Subscriber: key.ws, Thread: key.thread, Cursor: cursor, At: now}
-	for _, m := range msgs {
-		read.Messages = append(read.Messages, wsm.SlackThreadMessage{TS: m.TS, Author: m.Author, Text: m.Text, Urgent: Urgent(m.Text), ReceivedAt: now})
+// PollOnce reads every message of SUB's thread later than its timestamp
+// cursor, storing them with the latest one's timestamp as the cursor. A poll
+// that reads nothing writes nothing, unless it ends a failing stretch.
+func (w *Watcher) PollOnce(ctx context.Context, sub wsm.SlackThreadSubscription) error {
+	msgs, err := w.deps.GNS.ThreadAfter(ctx, sub.Thread.Channel, sub.Thread.ThreadTS, sub.CursorTS)
+	if ctx.Err() != nil {
+		return nil
 	}
-	stored, err := w.deps.Store.RecordSlackThreadMessages(ctx, read)
+	if err != nil {
+		return err
+	}
+	if len(msgs) == 0 {
+		if sub.FailingSince != nil {
+			w.ingest(ctx, keyOf(sub), nil, 0, "")
+		}
+		return nil
+	}
+	reads := make([]incoming, len(msgs))
+	for i, m := range msgs {
+		reads[i] = incoming{TS: m.TS, Author: m.Author, Text: m.Text}
+	}
+	w.ingest(ctx, keyOf(sub), reads, 0, msgs[len(msgs)-1].TS)
+	return nil
+}
+
+// incoming is one message a worker read, from either source.
+type incoming struct {
+	TS, Author, Text string
+}
+
+// ingest stores MSGS for KEY as pending with CURSOR (an echo pipe's) or
+// CURSORTS (a poll's), and schedules the subscription's digest when any was
+// new.
+func (w *Watcher) ingest(ctx context.Context, key subKey, msgs []incoming, cursor int64, cursorTS string) {
+	now := w.deps.Clock.Now()
+	r := wsm.SlackThreadRead{Subscriber: key.ws, Thread: key.thread, Cursor: cursor, CursorTS: cursorTS, At: now}
+	for _, m := range msgs {
+		r.Messages = append(r.Messages, wsm.SlackThreadMessage{TS: m.TS, Author: m.Author, Text: m.Text, Urgent: Urgent(m.Text), ReceivedAt: now})
+	}
+	stored, err := w.deps.Store.RecordSlackThreadMessages(ctx, r)
 	if err != nil {
 		if ctx.Err() == nil {
-			w.deps.Log.Error(opStream, "could not store the thread's messages; the stream reads them again from the stored cursor", dlog.WithCause(dlog.Merge(key.fields(), dlog.Context{"read": len(msgs), "cursor": cursor}), err))
+			w.deps.Log.Error(opStream, "could not store the thread's messages; the thread is read again from the stored cursor",
+				dlog.WithCause(dlog.Merge(key.fields(), dlog.Context{"read": len(msgs), "cursor": cursor, "cursor_ts": cursorTS}), err))
 		}
 		return
 	}

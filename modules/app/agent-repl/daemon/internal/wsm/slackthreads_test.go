@@ -13,10 +13,19 @@ import (
 // slackKey is the thread every test follows.
 var slackKey = SlackThreadKey{Channel: "C0439CR3S3A", ThreadTS: "1784225803.782699"}
 
-// slackSub is SUBSCRIBER's subscription to slackKey in MODE at cursor 7.
+// slackSub is SUBSCRIBER's subscription to slackKey in MODE, followed on its
+// echo pipe at cursor 7.
 func slackSub(subscriber WorkspaceID, mode SlackThreadMode) SlackThreadSubscription {
 	return SlackThreadSubscription{Subscriber: subscriber, Thread: slackKey, URL: "https://chesscom.slack.com/archives/C0439CR3S3A/p1784225803782699",
-		Mode: mode, Origin: SlackThreadOriginRequested, SubscribedAt: instant, Cursor: 7}
+		Mode: mode, Origin: SlackThreadOriginRequested, SubscribedAt: instant, Source: SlackThreadSourceEchoPipe, Cursor: 7}
+}
+
+// polledSub is SUBSCRIBER's subscription to slackKey in MODE, followed by a
+// poll of the thread from the root's timestamp.
+func polledSub(subscriber WorkspaceID, mode SlackThreadMode) SlackThreadSubscription {
+	sub := slackSub(subscriber, mode)
+	sub.Source, sub.Cursor, sub.CursorTS = SlackThreadSourceThreadPoll, 0, slackKey.ThreadTS
+	return sub
 }
 
 // mustSubscribeSlack records SUB, failing the test on an error.
@@ -43,22 +52,33 @@ func msg(ts, text string) SlackThreadMessage {
 }
 
 func TestASlackThreadSubscriptionRoundTrips(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-
-	// Act
-	previous, held, err := s.SubscribeSlackThread(context.Background(), slackSub(ws.ID, SlackThreadModeRespond))
-
-	// Assert
-	if err != nil || held || previous != "" {
-		t.Fatalf("SubscribeSlackThread = %q, %v, %v; want a fresh subscription", previous, held, err)
+	tests := []struct {
+		name string
+		sub  func(WorkspaceID, SlackThreadMode) SlackThreadSubscription
+	}{
+		{name: "one followed on its echo pipe", sub: slackSub},
+		{name: "one followed by a poll", sub: polledSub},
 	}
-	subs := slackSubsOf(t, s, ws.ID)
-	want := slackSub(ws.ID, SlackThreadModeRespond)
-	want.UntoldMessages = []SlackThreadMessage{}
-	if len(subs) != 1 || !reflect.DeepEqual(subs[0], want) {
-		t.Fatalf("subscriptions = %+v, want %+v", subs, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			previous, held, err := s.SubscribeSlackThread(context.Background(), tt.sub(ws.ID, SlackThreadModeRespond))
+
+			// Assert
+			if err != nil || held || previous != "" {
+				t.Fatalf("SubscribeSlackThread = %q, %v, %v; want a fresh subscription", previous, held, err)
+			}
+			subs := slackSubsOf(t, s, ws.ID)
+			want := tt.sub(ws.ID, SlackThreadModeRespond)
+			want.UntoldMessages = []SlackThreadMessage{}
+			if len(subs) != 1 || !reflect.DeepEqual(subs[0], want) {
+				t.Fatalf("subscriptions = %+v, want %+v", subs, want)
+			}
+		})
 	}
 }
 
@@ -118,20 +138,39 @@ func TestSubscribingRefusesAClosedOrUnknownSubscriber(t *testing.T) {
 }
 
 func TestSubscribingRefusesAndRecordsAMalformedSubscription(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-	ws := testWorkspace(t, s)
-	bad := slackSub(ws.ID, "shout")
-
-	// Act
-	_, _, err := s.SubscribeSlackThread(context.Background(), bad)
-
-	// Assert
-	if err == nil {
-		t.Fatal("SubscribeSlackThread accepted mode \"shout\"")
+	tests := []struct {
+		name  string
+		spoil func(*SlackThreadSubscription)
+	}{
+		{name: "an undeclared mode", spoil: func(sub *SlackThreadSubscription) { sub.Mode = "shout" }},
+		{name: "no source", spoil: func(sub *SlackThreadSubscription) { sub.Source = "" }},
+		{name: "a poll with no timestamp cursor", spoil: func(sub *SlackThreadSubscription) {
+			sub.Source = SlackThreadSourceThreadPoll
+		}},
+		{name: "an echo pipe with a timestamp cursor", spoil: func(sub *SlackThreadSubscription) { sub.CursorTS = slackKey.ThreadTS }},
 	}
-	if !hasRecord(log, "error", "daemon.wsm.subscribe_slack_thread", "refused a Slack-thread subscription its caller should never have made") {
-		t.Fatalf("no error record: %+v", log.Records())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			bad := slackSub(ws.ID, SlackThreadModeRespond)
+			tt.spoil(&bad)
+
+			// Act
+			_, _, err := s.SubscribeSlackThread(context.Background(), bad)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("SubscribeSlackThread accepted %+v", bad)
+			}
+			if !hasRecord(log, "error", "daemon.wsm.subscribe_slack_thread", "refused a Slack-thread subscription its caller should never have made") {
+				t.Fatalf("no error record: %+v", log.Records())
+			}
+			if n := scalar[int](t, s, `SELECT COUNT(*) FROM slack_thread_subscriptions`); n != 0 {
+				t.Fatalf("%d subscriptions stored; want none", n)
+			}
+		})
 	}
 }
 
@@ -195,6 +234,53 @@ func TestRecordingMessagesStoresThemAndAdvancesTheCursor(t *testing.T) {
 	got := slackSubsOf(t, s, ws.ID)[0]
 	if got.Cursor != 12 || got.Pending != 2 || got.FailingSince != nil {
 		t.Fatalf("subscription = %+v, want cursor 12, two pending and healthy", got)
+	}
+}
+
+func TestRecordingAPollsReadAdvancesTheTimestampCursor(t *testing.T) {
+	tests := []struct {
+		name     string
+		cursorTS string
+		want     string
+	}{
+		{name: "a poll that read a later message", cursorTS: "1784225900.000001", want: "1784225900.000001"},
+		{name: "a poll that read nothing new", cursorTS: "", want: slackKey.ThreadTS},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			mustSubscribeSlack(t, s, polledSub(ws.ID, SlackThreadModeRespond))
+
+			// Act
+			_, err := s.RecordSlackThreadMessages(context.Background(), SlackThreadRead{Subscriber: ws.ID, Thread: slackKey, CursorTS: tt.cursorTS, At: instant})
+
+			// Assert
+			if got := slackSubsOf(t, s, ws.ID)[0]; err != nil || got.CursorTS != tt.want || got.Cursor != 0 {
+				t.Fatalf("RecordSlackThreadMessages = %v, subscription %+v; want the timestamp cursor at %s", err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheMigrationFollowsAnEarlierSubscriptionOnItsEchoPipe(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 207)
+	execRaw(t, path, `INSERT INTO slack_thread_subscriptions (subscriber, channel, thread_ts, thread_url, mode, origin, subscribed_at, cursor_seq)
+		VALUES ('ws', 'C1', '1.1', 'https://chesscom.slack.com/archives/C1/p1100000', 'listen', 'requested', 1, 7)`)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-207 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	subs, err := handle.SlackThreadSubscriptions(context.Background())
+	if err != nil || len(subs) != 1 || subs[0].Source != SlackThreadSourceEchoPipe || subs[0].Cursor != 7 || subs[0].CursorTS != "" {
+		t.Fatalf("SlackThreadSubscriptions = %+v, %v; want the echo pipe at cursor 7", subs, err)
 	}
 }
 

@@ -16,7 +16,8 @@ import (
 // This file is the durable half of SLACK-THREAD SUBSCRIPTIONS
 // (agentrepl.v1.SubscribeSlackThread, internal/slackwatch): which workspace's
 // agent is told about which Slack thread and in which mode, the daemon's
-// cursor into the channel's echo pipe, the messages waiting for the next
+// cursor into the thread (its channel's echo pipe, or a poll of the thread
+// itself), the messages waiting for the next
 // digest, the last digest submitted (so a newer one can supersede it while it
 // is still held), and the nonce of every post the daemon made for the
 // subscription.
@@ -99,6 +100,15 @@ CREATE TABLE slack_reaction_fired (
 );
 `
 
+// slackThreadPollDDL is the layout-208 addition: how a subscription's thread
+// is followed (SlackThreadSource), and the cursor of one followed by polling
+// it. Every row before was followed on its channel's echo pipe. IT IS
+// ADDITIVE: two defaulted columns the previous build never names.
+const slackThreadPollDDL = `
+ALTER TABLE slack_thread_subscriptions ADD COLUMN source TEXT NOT NULL DEFAULT 'echo_pipe';
+ALTER TABLE slack_thread_subscriptions ADD COLUMN cursor_ts TEXT NOT NULL DEFAULT '';
+`
+
 // SlackThreadKey names one Slack thread: its channel and root timestamp.
 type SlackThreadKey struct {
 	Channel  string
@@ -141,6 +151,27 @@ func (o SlackThreadOrigin) Valid() bool {
 	return o == SlackThreadOriginRequested || o == SlackThreadOriginCreation
 }
 
+// SlackThreadSource is how a subscription's thread is followed. ITS VALUES ARE
+// DURABLE.
+type SlackThreadSource string
+
+// The sources.
+const (
+	// SlackThreadSourceEchoPipe streams the channel's echo pipe, which GNS
+	// keeps for every channel its bot is a member of; its cursor is the
+	// pipe's sequence number (Cursor).
+	SlackThreadSourceEchoPipe SlackThreadSource = "echo_pipe"
+	// SlackThreadSourceThreadPoll polls the thread through the login's own
+	// Slack access, for a channel GNS keeps no echo pipe for (a direct
+	// message); its cursor is the latest message's timestamp (CursorTS).
+	SlackThreadSourceThreadPoll SlackThreadSource = "thread_poll"
+)
+
+// Valid reports whether the source is a declared one.
+func (s SlackThreadSource) Valid() bool {
+	return s == SlackThreadSourceEchoPipe || s == SlackThreadSourceThreadPoll
+}
+
 // SlackThreadMessage is one message of a thread as the daemon keeps it.
 type SlackThreadMessage struct {
 	TS     string `json:"ts"`
@@ -160,8 +191,14 @@ type SlackThreadSubscription struct {
 	Mode         SlackThreadMode
 	Origin       SlackThreadOrigin
 	SubscribedAt time.Time
-	// Cursor is the highest echo-pipe sequence number read.
+	// Source is how the thread is followed, which names its cursor.
+	Source SlackThreadSource
+	// Cursor is the highest echo-pipe sequence number read
+	// (SlackThreadSourceEchoPipe).
 	Cursor int64
+	// CursorTS is the latest message's timestamp a poll read
+	// (SlackThreadSourceThreadPoll).
+	CursorTS string
 	// PostsMade counts the posts since the count was last reset.
 	PostsMade int
 	// FailingSince is set while the stream's attempts fail, with the latest
@@ -198,8 +235,8 @@ func FindSlackThreadSubscription(subs []SlackThreadSubscription, thread slacklin
 
 // slackThreadColumns is every subscription column, in scanSlackThread's
 // order, the pending count included.
-const slackThreadColumns = `s.subscriber, s.channel, s.thread_ts, s.thread_url, s.mode, s.origin, s.subscribed_at, s.cursor_seq,
-  s.posts_made, s.failing_since, s.failure_detail, s.untold_turn, s.untold_messages,
+const slackThreadColumns = `s.subscriber, s.channel, s.thread_ts, s.thread_url, s.mode, s.origin, s.subscribed_at, s.source, s.cursor_seq,
+  s.cursor_ts, s.posts_made, s.failing_since, s.failure_detail, s.untold_turn, s.untold_messages,
   (SELECT COUNT(*) FROM slack_thread_pending p WHERE p.subscriber = s.subscriber AND p.channel = s.channel AND p.thread_ts = s.thread_ts)`
 
 func scanSlackThread(row interface{ Scan(...any) error }) (SlackThreadSubscription, error) {
@@ -211,14 +248,15 @@ func scanSlackThread(row interface{ Scan(...any) error }) (SlackThreadSubscripti
 		mode     string
 		origin   string
 		untoldJS string
+		source   string
 	)
-	if err := row.Scan(&sub.Subscriber, &sub.Thread.Channel, &sub.Thread.ThreadTS, &sub.URL, &mode, &origin, &at, &sub.Cursor,
-		&sub.PostsMade, &failing, &detail, &sub.UntoldTurn, &untoldJS, &sub.Pending); err != nil {
+	if err := row.Scan(&sub.Subscriber, &sub.Thread.Channel, &sub.Thread.ThreadTS, &sub.URL, &mode, &origin, &at, &source, &sub.Cursor,
+		&sub.CursorTS, &sub.PostsMade, &failing, &detail, &sub.UntoldTurn, &untoldJS, &sub.Pending); err != nil {
 		return SlackThreadSubscription{}, err
 	}
-	sub.Mode, sub.Origin, sub.SubscribedAt = SlackThreadMode(mode), SlackThreadOrigin(origin), fromNanos(at)
-	if !sub.Mode.Valid() || !sub.Origin.Valid() {
-		return SlackThreadSubscription{}, fmt.Errorf("wsm: the subscription of %s to %s stores mode %q and origin %q", sub.Subscriber, sub.Thread, mode, origin)
+	sub.Mode, sub.Origin, sub.Source, sub.SubscribedAt = SlackThreadMode(mode), SlackThreadOrigin(origin), SlackThreadSource(source), fromNanos(at)
+	if !sub.Mode.Valid() || !sub.Origin.Valid() || !sub.Source.Valid() {
+		return SlackThreadSubscription{}, fmt.Errorf("wsm: the subscription of %s to %s stores mode %q, origin %q and source %q", sub.Subscriber, sub.Thread, mode, origin, source)
 	}
 	if failing.Valid {
 		since := fromNanos(failing.Int64)
@@ -232,14 +270,17 @@ func scanSlackThread(row interface{ Scan(...any) error }) (SlackThreadSubscripti
 
 // SubscribeSlackThread records SUB, or sets the mode of the subscription its
 // subscriber already holds to the same thread, keeping its cursor. It
-// answers the mode the held subscription had, and whether one was held. The
+// answers the mode the held subscription had, and whether one was held. A
+// fresh subscription names its source, and a polled one its cursor. The
 // subscriber's row is checked in the same transaction: an unregistered
 // subscriber is ErrNotFound, a closed one ErrSubscriberClosed.
 func (s *store) SubscribeSlackThread(ctx context.Context, sub SlackThreadSubscription) (SlackThreadMode, bool, error) {
 	const op = "daemon.wsm.subscribe_slack_thread"
 	fields := dlog.Context{"subscriber": string(sub.Subscriber), "thread": sub.Thread.String(), "mode": string(sub.Mode)}
-	if !sub.Thread.Valid() || !sub.Mode.Valid() || !sub.Origin.Valid() || sub.URL == "" {
-		err := fmt.Errorf("wsm: a Slack-thread subscription of %s to %s names mode %q, origin %q and url %q", sub.Subscriber, sub.Thread, sub.Mode, sub.Origin, sub.URL)
+	if !sub.Thread.Valid() || !sub.Mode.Valid() || !sub.Origin.Valid() || !sub.Source.Valid() || sub.URL == "" ||
+		(sub.Source == SlackThreadSourceThreadPoll) != (sub.CursorTS != "") {
+		err := fmt.Errorf("wsm: a Slack-thread subscription of %s to %s names mode %q, origin %q, source %q, timestamp cursor %q and url %q",
+			sub.Subscriber, sub.Thread, sub.Mode, sub.Origin, sub.Source, sub.CursorTS, sub.URL)
 		s.log.Error(op, "refused a Slack-thread subscription its caller should never have made", withError(fields, err))
 		return "", false, err
 	}
@@ -257,8 +298,8 @@ func (s *store) SubscribeSlackThread(ctx context.Context, sub SlackThreadSubscri
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			_, err = tx.ExecContext(ctx,
-				`INSERT INTO slack_thread_subscriptions (subscriber, channel, thread_ts, thread_url, mode, origin, subscribed_at, cursor_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				sub.Subscriber, sub.Thread.Channel, sub.Thread.ThreadTS, sub.URL, string(sub.Mode), string(sub.Origin), nanos(sub.SubscribedAt), sub.Cursor)
+				`INSERT INTO slack_thread_subscriptions (subscriber, channel, thread_ts, thread_url, mode, origin, subscribed_at, source, cursor_seq, cursor_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				sub.Subscriber, sub.Thread.Channel, sub.Thread.ThreadTS, sub.URL, string(sub.Mode), string(sub.Origin), nanos(sub.SubscribedAt), string(sub.Source), sub.Cursor, sub.CursorTS)
 			return err
 		case err != nil:
 			return err
@@ -442,31 +483,37 @@ func nonces(ctx context.Context, q querier, subscriber WorkspaceID, thread Slack
 		}, subscriber, thread.Channel, thread.ThreadTS)
 }
 
-// SlackThreadRead is one read of a thread's echo pipe, to record.
+// SlackThreadRead is one read of a thread, to record.
 type SlackThreadRead struct {
 	Subscriber WorkspaceID
 	Thread     SlackThreadKey
-	// Messages are the messages read, in pipe order.
+	// Messages are the messages read, in the order they were read.
 	Messages []SlackThreadMessage
-	// Cursor is the highest sequence number the read reached.
+	// Cursor is the highest sequence number a pipe's read reached.
 	Cursor int64
+	// CursorTS is the latest timestamp a poll read, empty for a pipe's read
+	// and for a poll that read nothing new. A poll reads only past the
+	// stored one, so it never moves the cursor back.
+	CursorTS string
 	// At is when the read ended, which ends any failing stretch.
 	At time.Time
 }
 
 // RecordSlackThreadMessages stores R's messages as pending, dropping each that
 // carries one of the subscription's post nonces and each already pending, and
-// advances the cursor to R.Cursor when that is past it, in one transaction. It
+// advances the cursor to R.Cursor when that is past it (and the timestamp
+// cursor to R.CursorTS when that is set), in one transaction. It
 // answers the messages stored. No such subscription answers none: a thread
 // unsubscribed while it was read keeps nothing of the read.
 func (s *store) RecordSlackThreadMessages(ctx context.Context, r SlackThreadRead) ([]SlackThreadMessage, error) {
 	const op = "daemon.wsm.record_slack_thread_messages"
 	var stored []SlackThreadMessage
-	err := s.write(ctx, op, dlog.Context{"subscriber": string(r.Subscriber), "thread": r.Thread.String(), "read": len(r.Messages), "cursor": r.Cursor},
+	err := s.write(ctx, op, dlog.Context{"subscriber": string(r.Subscriber), "thread": r.Thread.String(), "read": len(r.Messages), "cursor": r.Cursor, "cursor_ts": r.CursorTS},
 		func(ctx context.Context, tx *sql.Tx) error {
 			stored = nil
-			res, err := tx.ExecContext(ctx, `UPDATE slack_thread_subscriptions SET cursor_seq = MAX(cursor_seq, ?), failing_since = NULL, failure_detail = NULL
-				WHERE subscriber = ? AND channel = ? AND thread_ts = ?`, r.Cursor, r.Subscriber, r.Thread.Channel, r.Thread.ThreadTS)
+			res, err := tx.ExecContext(ctx, `UPDATE slack_thread_subscriptions SET cursor_seq = MAX(cursor_seq, ?), cursor_ts = CASE WHEN ? = '' THEN cursor_ts ELSE ? END,
+				failing_since = NULL, failure_detail = NULL
+				WHERE subscriber = ? AND channel = ? AND thread_ts = ?`, r.Cursor, r.CursorTS, r.CursorTS, r.Subscriber, r.Thread.Channel, r.Thread.ThreadTS)
 			if err != nil {
 				return err
 			}

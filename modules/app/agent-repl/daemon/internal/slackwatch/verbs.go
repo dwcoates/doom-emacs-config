@@ -131,10 +131,12 @@ func (w *Watcher) find(ctx context.Context, ws ids.WorkspaceID, url string) (wsm
 }
 
 // Subscribe subscribes WS to the thread URL names, in MODE, answering the
-// subscription and whether WS already held one. A fresh subscription starts
-// at the channel's echo pipe's head and is announced in the thread; a held
-// one changes its mode only, announced when it changed. A closed or unknown
-// workspace is the store's error.
+// subscription and whether WS already held one. A fresh subscription is
+// announced in the thread, and follows it from now on: from the head of the
+// channel's echo pipe when GNS keeps one, and otherwise by polling the thread
+// from its latest message (a direct message, whose channel GNS keeps no echo
+// pipe for). A held one changes its mode only, announced when it changed. A
+// closed or unknown workspace is the store's error.
 func (w *Watcher) Subscribe(ctx context.Context, ws Workspace, url string, mode wsm.SlackThreadMode, origin wsm.SlackThreadOrigin) (wsm.SlackThreadSubscription, bool, error) {
 	fields := dlog.Context{"subscriber": string(ws.ID), "thread_url": url, "mode": string(mode), "origin": string(origin)}
 	thread, err := parse(url)
@@ -147,7 +149,9 @@ func (w *Watcher) Subscribe(ctx context.Context, ws Workspace, url string, mode 
 		return wsm.SlackThreadSubscription{}, false, err
 	}
 	if found {
-		sub.Thread = held.Thread
+		// The store keeps a held subscription's source and cursor; they are
+		// named as held so the subscription it is handed is whole.
+		sub.Thread, sub.Source, sub.Cursor, sub.CursorTS = held.Thread, held.Source, held.Cursor, held.CursorTS
 	} else {
 		root, err := w.deps.GNS.ThreadRoot(ctx, thread.Channel, thread.TS)
 		if err != nil {
@@ -157,11 +161,7 @@ func (w *Watcher) Subscribe(ctx context.Context, ws Workspace, url string, mode 
 		if err := w.deps.GNS.SubscribeChannel(ctx, thread.Channel); err != nil {
 			return wsm.SlackThreadSubscription{}, false, unreachable(err)
 		}
-		username, err := w.login(ctx)
-		if err != nil {
-			return wsm.SlackThreadSubscription{}, false, unreachable(err)
-		}
-		if sub.Cursor, err = w.deps.GNS.PipeHead(ctx, gnsclient.PipeFor(username, thread.Channel)); err != nil {
+		if err := w.startingPoint(ctx, &sub); err != nil {
 			return wsm.SlackThreadSubscription{}, false, unreachable(err)
 		}
 	}
@@ -185,6 +185,37 @@ func (w *Watcher) Subscribe(ctx context.Context, ws Workspace, url string, mode 
 	}
 	stored, _, err := w.lookup(ctx, keyOf(sub))
 	return stored, wasHeld, err
+}
+
+// startingPoint sets the source and cursor SUB, a fresh subscription, follows
+// its thread from: the head of its channel's echo pipe when GNS keeps one,
+// else the thread's latest message, for a poll.
+func (w *Watcher) startingPoint(ctx context.Context, sub *wsm.SlackThreadSubscription) error {
+	username, err := w.login(ctx)
+	if err != nil {
+		return err
+	}
+	pipe := gnsclient.PipeFor(username, sub.Thread.Channel)
+	head, kept, err := w.deps.GNS.PipeHead(ctx, pipe)
+	if err != nil {
+		return err
+	}
+	if kept {
+		sub.Source, sub.Cursor = wsm.SlackThreadSourceEchoPipe, head
+		return nil
+	}
+	later, err := w.deps.GNS.ThreadAfter(ctx, sub.Thread.Channel, sub.Thread.ThreadTS, sub.Thread.ThreadTS)
+	if err != nil {
+		return err
+	}
+	sub.Source, sub.CursorTS = wsm.SlackThreadSourceThreadPoll, sub.Thread.ThreadTS
+	if len(later) > 0 {
+		sub.CursorTS = later[len(later)-1].TS
+	}
+	w.deps.Log.Info(opVerb, "GNS keeps no echo pipe for the thread's channel; the thread is followed by polling it",
+		dlog.Context{"subscriber": string(sub.Subscriber), "thread": sub.Thread.String(), "channel": sub.Thread.Channel, "pipe": pipe,
+			"cursor_ts": sub.CursorTS, "poll_every": ThreadPollEvery.String()})
+	return nil
 }
 
 // Unsubscribe ends WS's subscription to the thread URL names, telling the
