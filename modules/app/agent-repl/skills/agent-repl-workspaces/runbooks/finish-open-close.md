@@ -14,12 +14,23 @@
   section).
 - `workspace close WS` closes a workspace whose work is done or abandoned; its
   worktree stays. `close here` closes this workspace once the current turn
-  ends, answering `closesWhenTurnEnds`. A close that would be refused (held
-  prompts, live detached work, a queued merge, open children or workspaces
-  landing into this one) is refused at once, naming what blocks it, and
-  nothing is marked. A close that something during the rest of the turn
-  makes refused is told to this workspace as a notice when the turn ends,
-  and the workspace stays open.
+  ends, answering `closesWhenTurnEnds`.
+  - **A close something still blocks STANDS.** Blocked by open children or
+    workspaces landing into it, a turn running, live detached work, held
+    prompts or a queued merge, the close is registered as the workspace's
+    standing close request and answers `stands` with what it waits on (also
+    said on stderr). agent-repl closes the workspace the moment nothing blocks
+    it any more, judging it again on every edge that can clear a blocker, and
+    across a daemon restart. So a workspace never promises to "close again
+    once the child closes"; its close already stands.
+  - The request is withdrawn by `workspace close WS -cancel`, by any prompt
+    the user sends the workspace, and by the user releasing one of its held
+    prompts. A notice or another agent's prompt does not withdraw it: the
+    close waits for that turn to end.
+  - While it stands, the footer reads `waiting to close` with what it waits
+    on, and `workspace status WS` reports it as `closeRequest`.
+  - The editor's close gesture never stands: it is refused at once in the
+    footer instead.
 - **A workspace closes, without asking, a workspace it created once that
   workspace has fulfilled its goal.** When this workspace has judged (from the
   child's reply, its status, or its landing) that the created workspace did

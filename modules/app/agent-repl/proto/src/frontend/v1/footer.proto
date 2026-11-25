@@ -1824,6 +1824,11 @@ message FooterStatusClosing {
     // The close is refused while work is live; the activity line carries
     // the daemon's composed reasons.
     FooterSubStatusCloseBlocked blocked = 1;
+    // The workspace's standing close request waits for what blocks it to
+    // clear, and the daemon closes the workspace then; the activity line
+    // carries the composed reasons. It yields to a turn in flight and to a
+    // wait on the user, which draw instead while they last.
+    FooterSubStatusCloseWaiting waiting = 3;
   }
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
@@ -1831,6 +1836,8 @@ message FooterStatusClosing {
 }
 // The close is refused while work is live.
 message FooterSubStatusCloseBlocked {}
+// A standing close request waits for its blockers to clear.
+message FooterSubStatusCloseWaiting {}
 
 // The session is booting. GREY: an expected step, never a fault.
 message FooterStatusStarting {

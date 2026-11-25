@@ -53,7 +53,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_requested_at, close_requested_by, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -127,7 +127,8 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		subsection    sql.NullString
 		contextFrom   sql.NullString
 		requestedBy   sql.NullString
-		selfClose     sql.NullInt64
+		closeAt       sql.NullInt64
+		closeBy       sql.NullString
 		awaiting      sql.NullString
 		kind          string
 		lastKeepalive sql.NullInt64
@@ -145,7 +146,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &closeAt, &closeBy, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)
@@ -233,7 +234,11 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	ws.LastAskedAt = optTime(asked)
 	ws.MergeTurnStartedAt = optTime(mergeTurn)
 	ws.StatusChangedAt = optTime(statusChanged)
-	ws.CloseWhenTurnEnds = optTime(selfClose)
+	standing, err := closeRequestOf(closeAt, closeBy)
+	if err != nil {
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "close_requested_by", Err: err}
+	}
+	ws.CloseRequest = standing
 	ws.LastKeepaliveAt = optTime(lastKeepalive)
 	ws.CacheColdTurnAt = optTime(cacheCold)
 	ws.ConversationBoundAt = optTime(boundAt)
@@ -889,7 +894,7 @@ func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Clo
 	// `restamp` is evaluated against the row as it stood BEFORE this
 	// update: SQLite reads every right-hand side off the old row.
 	const restamp = `(closed = 0 OR (? = 'user' AND closure_by IS NOT 'user'))`
-	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, spawned_shim_start = NULL, close_when_turn_ends = NULL, awaiting_correspondence = NULL, `+
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, spawned_shim_start = NULL, close_requested_at = NULL, close_requested_by = NULL, awaiting_correspondence = NULL, `+
 		`closure_at = CASE WHEN `+restamp+` THEN ? ELSE closure_at END, `+
 		`closure_by = CASE WHEN `+restamp+` THEN ? ELSE closure_by END WHERE id = ?`,
 		string(closure.By), nanos(closure.At), string(closure.By), string(closure.By), id)

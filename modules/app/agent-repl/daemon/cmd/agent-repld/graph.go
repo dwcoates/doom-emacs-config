@@ -420,7 +420,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Now:         time.Now,
 		Log:         p.Surfaces,
 	})
-	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)
+	intakeRetirements := workspace.NewIntakeRetirements(verbsRef.retireIntakeAtTurnEnd, log)
+	// A STANDING CLOSE REQUEST is judged again on every edge that can clear
+	// what blocks it, never by polling (workspace.StandingCloses).
+	standingCloses := workspace.NewStandingCloses(verbsRef.reconsiderCloseRequest, verbsRef.reconsiderCloseRequests, log)
 	bypassTurnEnds := workspace.NewBypassTurnEnds(verbsRef.letQueueThroughAfterBypassTurn, log)
 	// A CREATE HELD FOR ITS REQUESTER'S TURN resumes on these latches, which
 	// only the turn-end and close edges release.
@@ -435,7 +438,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Clock:   clock.System{},
 		Log:     p.Surfaces,
 	})
-	edges := wsedges.New(derivedNotices, followNotices, selfCloses, bypassTurnEnds, turnEnds, gathers.Edges())
+	edges := wsedges.New(derivedNotices, followNotices, intakeRetirements, standingCloses, bypassTurnEnds, turnEnds, gathers.Edges())
 	p.DB = wsedges.ReportingEdges(p.DB, edges, log)
 
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
@@ -935,7 +938,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	var queue promptqueue.Service
 	healthRef := &healthForwarder{}
 	rolloutRef := &rolloutForwarder{}
-	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, builds: rolloutRef, sessions: p.DB, mediation: mediation, log: log}
+	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, builds: rolloutRef, sessions: p.DB, mediation: mediation, standingCloses: standingCloses, log: log}
 
 	// THE INSTALLED SHIM BUNDLE, guarded: a spawn holds it from the hash it
 	// stamps the shim with until the shim has answered, and a deploy replaces
@@ -1311,7 +1314,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Footer:         footerResolver,
 		Sidebar:        sidebarResolver,
 		Edges:          edges,
-		Holds:          feedResolver,
+		Holds:          holdsTellingStandingCloses{Sink: feedResolver, changed: standingCloses.HoldsChanged},
 		Client:         fleet.Sender,
 		Revive:         fleet.Start,
 		Watcher:        fleet.Watcher,
@@ -1865,6 +1868,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
 		// also forgets what it held of the thread.
 		Threads: chatService,
+		// A standing close request just registered is judged again on the
+		// standing closes' own loop.
+		StandingCloses: standingCloses,
 		// Every cold gate answered lands in the metrics surface.
 		ColdGateAnswers: p.Metrics,
 		Creates:         creates,
@@ -2402,12 +2408,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { pullRequests.Run(ctx, handler) },
 				func(ctx context.Context) { slackThreads.Run(ctx, handler) },
 				func(ctx context.Context) { mainSync.Run(ctx, handler) },
-				selfCloses.Run,
+				intakeRetirements.Run,
+				standingCloses.Run,
 				bypassTurnEnds.Run)
 		}),
 		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		AwaitCreates: awaitCreatesAtExit(creates, holdoutWarnEvery, time.After, log),
-		SettleBoot:   settleThenMediate(freshBootSettle(p.Opts.joining != "", rolloutController), mediation),
+		SettleBoot:   settleThenMediate(freshBootSettle(p.Opts.joining != "", rolloutController), mediation, standingCloses),
 	}, nil
 }
 
@@ -3010,18 +3017,28 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 }
 
 // settleThenMediate is a fresh boot's settle, followed by the rounds of every
-// mediation owed: a round a crash cut short is taken up again. The check of
+// mediation owed and a judgment of every standing close request: a round or a
+// judgment a crash cut short is taken up again. The check of
 // a death the boot reaped is owed inside the settle, as its serving settles
 // (mediationHook.servingSettled), so before the rounds. A successor settles
 // nothing here (SETTLE nil); its takeover's deploy end runs them.
-func settleThenMediate(settle func(ctx context.Context), mediation *mediationHook) func(ctx context.Context) {
+func settleThenMediate(settle func(ctx context.Context), mediation *mediationHook, closes allReconsiderer) func(ctx context.Context) {
 	if settle == nil {
 		return nil
 	}
 	return func(ctx context.Context) {
 		settle(ctx)
 		mediation.rounds()
+		// A JUDGMENT A CRASH CUT SHORT is owed again: every standing close
+		// request is judged once the boot has settled what it serves.
+		closes.ReconsiderAll()
 	}
+}
+
+// allReconsiderer owes every standing close request a judgment
+// (workspace.StandingCloses).
+type allReconsiderer interface {
+	ReconsiderAll()
 }
 
 // deathsReaped records each death a reap of the life locks answered, at

@@ -27,12 +27,26 @@
 // arrived, work went live), the close is abandoned and the footer shows the
 // close-blocked state, exactly as a refused close does. Killing is not
 // subject to any of this: a kill never waits.
+//
+// A CLOSE MAY STAND (`stand`). A close the caller asks to stand is never
+// refused for a blocker that clears on its own (`CloseWorkspaceBlocked`'s
+// blockers, and open children or workspaces landing into it): it is recorded
+// as the workspace's STANDING CLOSE REQUEST, durably, and the daemon closes the
+// workspace through this same close the moment nothing blocks it any more,
+// re-judging it on every edge that can clear a blocker, never by polling. The
+// request is withdrawn by WithdrawWorkspaceClose, by any prompt the user sends
+// the workspace (a held prompt the user releases included), and by the close
+// itself. While it stands, the footer's closing status reads `waiting` with the
+// same composed reasons a refusal draws, and WorkspaceStatus.close_request
+// reports it. A self-close's request is always standing: a workspace closing
+// itself is closed once its asking turn and everything else blocking it end.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "agentrepl/v1/family.proto";
+import "agentrepl/v1/workspace_close.proto";
 import "agentrepl/v1/workspace_topology.proto";
 import "workspace/v1/workspace.proto";
 
@@ -44,6 +58,14 @@ message CloseWorkspaceRequest {
   // Who asked. A requesting workspace that IS `workspace` is a self-close,
   // carried out when its current turn ends. REQUIRED.
   WorkspaceRequester requester = 2;
+  // TRUE asks that a close refused for a blocker that clears on its own
+  // stand as the workspace's standing close request instead of being refused
+  // (`CloseWorkspaceSuccess.stands`). FALSE keeps the one-time close: such a
+  // refusal answers `blocked` or `has_open_children` and nothing stands. The
+  // editor's close gesture sends FALSE, because the user is answered at once in
+  // the footer; `agent-repld workspace close` sends TRUE. A self-close stands
+  // either way.
+  bool stand = 3;
 }
 
 // THE ARM IS THE OUTCOME. Fast by design: the quiet check is an in-memory
@@ -64,12 +86,27 @@ message CloseWorkspaceSuccess {
     // A self-close, accepted: the workspace closes when the turn that asked
     // ends. The caller's turn goes on; nothing more is answered.
     CloseWorkspaceSuccessClosesWhenTurnEnds closes_when_turn_ends = 2;
+    // The close was blocked, and it now stands as the workspace's standing
+    // close request: the daemon closes the workspace once nothing in `waits`
+    // blocks it any more, unless the request is withdrawn first. Answered only
+    // to a request that asked to stand, or to a self-close that something
+    // other than its asking turn blocks.
+    CloseWorkspaceSuccessStands stands = 3;
   }
 }
 // Closed now. No fields.
 message CloseWorkspaceSuccessClosed {}
-// Closing when the asking turn ends. No fields.
+// Closing when the asking turn ends: the self-close stands, and its asking
+// turn is the only thing it waits on. No fields.
 message CloseWorkspaceSuccessClosesWhenTurnEnds {}
+// The close stands, waiting on what blocks it now.
+message CloseWorkspaceSuccessStands {
+  // What blocked the close when it was asked, the same evidence a refusal
+  // carries. The request is judged again on every edge that can clear any of
+  // it, so this is the picture at the ask, not a promise of the order the
+  // blockers clear in.
+  WorkspaceCloseWaits waits = 1;
+}
 
 // THE ARM IS THE REFUSAL.
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
@@ -90,23 +127,6 @@ message CloseWorkspaceError {
     // would leave them without their parent in the Open section.
     WorkspaceHasOpenChildren has_open_children = 6;
   }
-}
-// WHY the close is blocked — the same evidence the footer's close-blocked
-// state draws, so a caller with no footer (a test, a log line, the host's
-// own message) can still say why. (Landing 7, 2026-09-02.)
-message CloseWorkspaceBlocked {
-  // The main thread has a turn in flight. Always FALSE for a self-close,
-  // whose own asking turn is never a blocker.
-  bool turn_in_flight = 1;
-  // Detached items live now (subagents, runs, tasks).
-  uint32 live_work = 2;
-  // Held prompts in the held section — undelivered user intent.
-  uint32 held_prompts = 3;
-  // The workspace is queued for, or inside, a merge.
-  bool merge_queued = 4;
-  // The daemon's composed sentence over the fields above — the footer's
-  // activity line, verbatim.
-  string summary = 5;
 }
 message CloseWorkspaceUnknownWorkspace {}
 message CloseWorkspaceWorkspaceRefMismatch {

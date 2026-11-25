@@ -27,6 +27,7 @@ describe("statusCellWord", () => {
 
   it.each([
     ["closing", "blocked", "close blocked"],
+    ["closing", "waiting", "waiting to close"],
     ["merging", "awaitingFree", "waiting for"],
     ["merging", "conflictResolution", "conflict resolution"],
     ["merging", "preDeploy", "pre-deploy"],

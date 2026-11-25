@@ -345,6 +345,13 @@ func (s *requestLoggingServer) CloseWorkspace(
 	return serveUnary(s, ctx, "CloseWorkspace", req, s.server.CloseWorkspace)
 }
 
+func (s *requestLoggingServer) WithdrawWorkspaceClose(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WithdrawWorkspaceCloseRequest],
+) (*connect.Response[agentreplv1.WithdrawWorkspaceCloseResponse], error) {
+	return serveUnary(s, ctx, "WithdrawWorkspaceClose", req, s.server.WithdrawWorkspaceClose)
+}
+
 func (s *requestLoggingServer) KillWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.KillWorkspaceRequest],

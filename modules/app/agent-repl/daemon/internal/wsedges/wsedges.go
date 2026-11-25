@@ -25,7 +25,10 @@
 //     reason;
 //   - a session parks at its cold gate where a shim judges it
 //     (workspace.Fleet's ColdGateRaised), not where a recorded gate is raised
-//     again.
+//     again;
+//   - a workspace is retargeted (its parent or its landing target changes)
+//     in the registry's SetParent and RestoreParent, which every retarget goes
+//     through (ReportingEdges).
 //
 // AN OBSERVER NEVER BLOCKS AN EDGE: every method only appends, and its
 // delivery runs elsewhere.
@@ -75,6 +78,9 @@ type Observer interface {
 	// ColdGated: WS's session parked at its cold gate, as a shim judged it
 	// just now.
 	ColdGated(ws ids.WorkspaceID)
+	// Retargeted: a workspace's parent or landing target changed, as CHANGE
+	// records it (wsm.ParentChange): it left one family and joined another.
+	Retargeted(change wsm.ParentChange)
 }
 
 // Hub fans every edge out to its observers, in the order they were given.
@@ -129,6 +135,13 @@ func (h *Hub) Closed(before wsm.Workspace, how wsm.CloseHow) {
 func (h *Hub) PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey) {
 	for _, o := range h.observers {
 		o.PullRequestOwned(ws, pr)
+	}
+}
+
+// Retargeted implements Observer.
+func (h *Hub) Retargeted(change wsm.ParentChange) {
+	for _, o := range h.observers {
+		o.Retargeted(change)
 	}
 }
 
@@ -224,6 +237,24 @@ func (d reportingDB) MarkClosed(ctx context.Context, id wsm.WorkspaceID, closure
 		d.hub.Closed(before, closure.How)
 	}
 	return nil
+}
+
+func (d reportingDB) SetParent(ctx context.Context, id wsm.WorkspaceID, retarget wsm.Retarget) (wsm.ParentChange, error) {
+	change, err := d.DB.SetParent(ctx, id, retarget)
+	if err != nil {
+		return wsm.ParentChange{}, err
+	}
+	d.hub.Retargeted(change)
+	return change, nil
+}
+
+func (d reportingDB) RestoreParent(ctx context.Context, change wsm.ParentChange) (bool, error) {
+	stale, err := d.DB.RestoreParent(ctx, change)
+	if err != nil || stale {
+		return stale, err
+	}
+	d.hub.Retargeted(wsm.ParentChange{Workspace: change.Workspace, Before: change.After, After: change.Before})
+	return false, nil
 }
 
 func (d reportingDB) SetWorkspaceLink(ctx context.Context, id wsm.WorkspaceID, set wsm.LinkSet) ([]wsm.WorkspaceLink, error) {

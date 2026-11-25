@@ -131,6 +131,10 @@ func (s *fakeServer) CloseWorkspace(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.CloseWorkspaceRequest, v1.CloseWorkspaceResponse](ctx, s, "CloseWorkspace", req.Msg)
 }
 
+func (s *fakeServer) WithdrawWorkspaceClose(ctx context.Context, req *connect.Request[v1.WithdrawWorkspaceCloseRequest]) (*connect.Response[v1.WithdrawWorkspaceCloseResponse], error) {
+	return handleUnary[v1.WithdrawWorkspaceCloseRequest, v1.WithdrawWorkspaceCloseResponse](ctx, s, "WithdrawWorkspaceClose", req.Msg)
+}
+
 func (s *fakeServer) KillWorkspace(ctx context.Context, req *connect.Request[v1.KillWorkspaceRequest]) (*connect.Response[v1.KillWorkspaceResponse], error) {
 	return handleUnary[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse](ctx, s, "KillWorkspace", req.Msg)
 }

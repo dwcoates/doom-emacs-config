@@ -407,6 +407,11 @@ var migrations = []migration{
 	// IT IS ADDITIVE: three new tables the previous build never names, and
 	// the races seen before their detection (racefindings.go).
 	{To: 214, Name: "queue_race_findings", Kind: MigrationAdditive, DDL: raceFindingsDDL},
+	// IT IS ADDITIVE: the standing close request's columns beside the
+	// self-close mark, kept equal by triggers while the previous build writes
+	// the mark (closerequest.go).
+	{To: 215, Name: "close_requests", Kind: MigrationAdditive, DDL: closeRequestDDL},
+	{To: 216, Name: "retired_self_close", Kind: MigrationContract, DDL: retiredSelfCloseDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

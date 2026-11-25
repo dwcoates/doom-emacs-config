@@ -70,6 +70,10 @@ type cliClient struct {
 	remote *agentreplv1.UpdateRemoteControlModeResponse
 	// prompted answers SubmitPrompt, an empty answer when nil.
 	prompted *agentreplv1.SubmitPromptResponse
+	// closed answers CloseWorkspace and withdrawn WithdrawWorkspaceClose,
+	// an empty answer when nil.
+	closed    *agentreplv1.CloseWorkspaceResponse
+	withdrawn *agentreplv1.WithdrawWorkspaceCloseResponse
 }
 
 func (c *cliClient) RegisterRepository(_ context.Context, req *connect.Request[agentreplv1.RegisterRepositoryRequest]) (*connect.Response[agentreplv1.RegisterRepositoryResponse], error) {
@@ -193,6 +197,20 @@ func (c *cliClient) GetGatherStatus(_ context.Context, req *connect.Request[agen
 		return connect.NewResponse(c.gatherStatus), c.record(req.Msg)
 	}
 	return connect.NewResponse(&agentreplv1.GetGatherStatusResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) CloseWorkspace(_ context.Context, req *connect.Request[agentreplv1.CloseWorkspaceRequest]) (*connect.Response[agentreplv1.CloseWorkspaceResponse], error) {
+	if c.closed != nil {
+		return connect.NewResponse(c.closed), c.record(req.Msg)
+	}
+	return connect.NewResponse(&agentreplv1.CloseWorkspaceResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) WithdrawWorkspaceClose(_ context.Context, req *connect.Request[agentreplv1.WithdrawWorkspaceCloseRequest]) (*connect.Response[agentreplv1.WithdrawWorkspaceCloseResponse], error) {
+	if c.withdrawn != nil {
+		return connect.NewResponse(c.withdrawn), c.record(req.Msg)
+	}
+	return connect.NewResponse(&agentreplv1.WithdrawWorkspaceCloseResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) KillWorkspace(_ context.Context, req *connect.Request[agentreplv1.KillWorkspaceRequest]) (*connect.Response[agentreplv1.KillWorkspaceResponse], error) {
@@ -4627,5 +4645,86 @@ func TestQueueMoveRefusesAPlacementItCannotReadAndSendsNothing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkspaceCloseAsksTheCloseToStandAndSaysWhenItDoes(t *testing.T) {
+	tests := []struct {
+		name     string
+		answer   *agentreplv1.CloseWorkspaceResponse
+		wantNote string
+	}{
+		{name: "a close that closed says nothing more", answer: &agentreplv1.CloseWorkspaceResponse{Result: &agentreplv1.CloseWorkspaceResponse_Success{Success: &agentreplv1.CloseWorkspaceSuccess{
+			Outcome: &agentreplv1.CloseWorkspaceSuccess_Closed{Closed: &agentreplv1.CloseWorkspaceSuccessClosed{}}}}}},
+		{name: "a close that stands says what it waits on and how to withdraw it", answer: &agentreplv1.CloseWorkspaceResponse{Result: &agentreplv1.CloseWorkspaceResponse_Success{Success: &agentreplv1.CloseWorkspaceSuccess{
+			Outcome: &agentreplv1.CloseWorkspaceSuccess_Stands{Stands: &agentreplv1.CloseWorkspaceSuccessStands{Waits: &agentreplv1.WorkspaceCloseWaits{
+				OpenChildren: &agentreplv1.WorkspaceHasOpenChildren{Children: []*workspacev1.WorkspaceRef{{Id: "ws-child"}}}}}}}}},
+			wantNote: "peer's close now stands, waiting on 1 open children and 0 open workspaces landing into it; agent-repl closes peer once nothing blocks it, unless it is withdrawn first with `agent-repld workspace close peer -cancel`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.closed = tt.answer
+
+			// Act
+			code := f.run(workspaceNoun, "close", "peer")
+
+			// Assert
+			req := only[*agentreplv1.CloseWorkspaceRequest](t, f)
+			if code != exitSuccess || !req.GetStand() || req.GetWorkspace().GetId() != "ws-peer" {
+				t.Fatalf("exit %d, request %v; want peer's close asked to stand", code, req)
+			}
+			if got := f.errOut.String(); (tt.wantNote == "") != (got == "") || !strings.Contains(got, tt.wantNote) {
+				t.Fatalf("stderr %q, want the note %q", got, tt.wantNote)
+			}
+		})
+	}
+}
+
+func TestWorkspaceCloseCancelWithdrawsTheStandingClose(t *testing.T) {
+	tests := []struct {
+		name     string
+		success  *agentreplv1.WithdrawWorkspaceCloseSuccess
+		wantNote string
+	}{
+		{name: "a close stood", success: &agentreplv1.WithdrawWorkspaceCloseSuccess{Outcome: &agentreplv1.WithdrawWorkspaceCloseSuccess_Withdrawn{Withdrawn: &agentreplv1.WithdrawWorkspaceCloseSuccessWithdrawn{}}},
+			wantNote: "withdrew peer's standing close; it stays open"},
+		{name: "none stood", success: &agentreplv1.WithdrawWorkspaceCloseSuccess{Outcome: &agentreplv1.WithdrawWorkspaceCloseSuccess_NoneStood{NoneStood: &agentreplv1.WithdrawWorkspaceCloseSuccessNoneStood{}}},
+			wantNote: "no close of peer stood, so nothing changed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.withdrawn = &agentreplv1.WithdrawWorkspaceCloseResponse{Result: &agentreplv1.WithdrawWorkspaceCloseResponse_Success{Success: tt.success}}
+
+			// Act
+			code := f.run(workspaceNoun, "close", "peer", "-cancel")
+
+			// Assert
+			req := only[*agentreplv1.WithdrawWorkspaceCloseRequest](t, f)
+			if code != exitSuccess || req.GetWorkspace().GetId() != "ws-peer" || req.GetRequester() == nil {
+				t.Fatalf("exit %d, request %v; want peer's close withdrawn", code, req)
+			}
+			if !strings.Contains(f.errOut.String(), tt.wantNote) {
+				t.Fatalf("stderr %q, want %q", f.errOut.String(), tt.wantNote)
+			}
+		})
+	}
+}
+
+func TestWorkspaceCloseCancelSaysARefusal(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.withdrawn = &agentreplv1.WithdrawWorkspaceCloseResponse{Result: &agentreplv1.WithdrawWorkspaceCloseResponse_Error{Error: &agentreplv1.WithdrawWorkspaceCloseError{
+		Cause: &agentreplv1.WithdrawWorkspaceCloseError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.WithdrawWorkspaceCloseUnknownWorkspace{}}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "close", "peer", "-cancel")
+
+	// Assert
+	if code != exitRefused || !strings.Contains(f.errOut.String(), sayNoWorkspace("peer")) || strings.Contains(f.errOut.String(), "withdrew") {
+		t.Fatalf("exit %d, stderr %q; want the refusal said and no withdrawal claimed", code, f.errOut.String())
 	}
 }

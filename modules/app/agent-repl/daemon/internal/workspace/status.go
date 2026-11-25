@@ -67,6 +67,9 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 	if err := v.relationshipOf(ctx, record, out); err != nil {
 		return nil, err
 	}
+	if err := v.closeRequestOf(ctx, record, out); err != nil {
+		return nil, err
+	}
 	if record.Closed {
 		out.Standing = &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Closed{Closed: &agentreplv1.WorkspaceStatusClosed{}}}
 		return out, nil
@@ -225,4 +228,30 @@ func ActivityOf(status *frontendv1.FooterStatus) (*agentreplv1.WorkspaceStatusAc
 // mergingActivity is the activity of a workspace its merge in flight holds.
 func mergingActivity() *agentreplv1.WorkspaceStatusActivity {
 	return &agentreplv1.WorkspaceStatusActivity{Activity: &agentreplv1.WorkspaceStatusActivity_Merging{Merging: &agentreplv1.WorkspaceStatusActivityMerging{}}}
+}
+
+// closeRequestOf fills OUT's standing close request from RECORD: when it was
+// registered, who asked, and what blocks the close as the status is read.
+// Nothing is filled while none stands.
+func (v *verbs) closeRequestOf(ctx context.Context, record wsm.Workspace, out *agentreplv1.WorkspaceStatus) error {
+	request := record.CloseRequest
+	if request == nil {
+		return nil
+	}
+	log := v.deps.Log.Global().With(dlog.Context{"workspace": string(record.ID)})
+	waits, err := v.closeWaits(ctx, log, record, request.By, false)
+	if err != nil {
+		return fmt.Errorf("status: %w", err)
+	}
+	status := &agentreplv1.WorkspaceStatusCloseRequest{RequestedAtMs: request.At.UnixMilli(), Waits: waits.Proto()}
+	switch request.By {
+	case wsm.CloseByUser:
+		status.RequestedBy = &agentreplv1.WorkspaceStatusCloseRequest_User{User: &agentreplv1.WorkspaceStatusCloseRequestByUser{}}
+	case wsm.CloseByAgent:
+		status.RequestedBy = &agentreplv1.WorkspaceStatusCloseRequest_Agent{Agent: &agentreplv1.WorkspaceStatusCloseRequestByAgent{}}
+	default:
+		panic(fmt.Sprintf("workspace: %s's standing close request names the cause %q, which the registry never stores", record.ID, request.By))
+	}
+	out.CloseRequest = status
+	return nil
 }

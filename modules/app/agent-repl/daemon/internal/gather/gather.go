@@ -238,6 +238,9 @@ func (Edges) Evicted(ids.WorkspaceID, string) {}
 // ColdGated implements wsedges.Observer.
 func (Edges) ColdGated(ids.WorkspaceID) {}
 
+// Retargeted implements wsedges.Observer: a retarget resolves no gather target.
+func (Edges) Retargeted(wsm.ParentChange) {}
+
 // ---- making a gather ----
 
 // createReply is the loop's answer to a create.

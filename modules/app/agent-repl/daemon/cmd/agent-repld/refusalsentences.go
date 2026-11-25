@@ -68,6 +68,30 @@ func sayOpenChildren(ws string, e *agentreplv1.WorkspaceHasOpenChildren, again s
 		ws, len(e.Children), len(e.LandingInto), again)
 }
 
+// sayCloseStands is the sentence a close that stands tells its caller: what
+// it waits on, that agent-repl closes WS once nothing blocks it, and how to
+// withdraw it.
+func sayCloseStands(ws string, waits *agentreplv1.WorkspaceCloseWaits) string {
+	var on []string
+	if b := waits.GetBlocked(); b != nil {
+		on = append(on, b.GetSummary())
+	}
+	if f := waits.GetOpenChildren(); f != nil {
+		on = append(on, fmt.Sprintf("%d open children and %d open workspaces landing into it", len(f.Children), len(f.LandingInto)))
+	}
+	return fmt.Sprintf("%s's close now stands, waiting on %s; agent-repl closes %s once nothing blocks it, unless it is withdrawn first with `agent-repld workspace close %s -cancel` (any prompt the user sends it withdraws it too)",
+		ws, strings.Join(on, "; and "), ws, ws)
+}
+
+// sayWithdrawn is the sentence a withdrawal of WS's standing close tells its
+// caller.
+func sayWithdrawn(ws string, success *agentreplv1.WithdrawWorkspaceCloseSuccess) string {
+	if success.GetWithdrawn() != nil {
+		return fmt.Sprintf("withdrew %s's standing close; it stays open", ws)
+	}
+	return fmt.Sprintf("no close of %s stood, so nothing changed", ws)
+}
+
 // sayParentNotOpen is the parent_not_open sentence, AGAIN being what to do
 // once the parent is open ("open it again").
 func sayParentNotOpen(e *agentreplv1.WorkspaceParentNotOpen, again string) (string, error) {

@@ -202,6 +202,11 @@ func (s *server) SubmitPrompt(
 		if err := s.deps.Verbs.TakeBackOneShot(ctx, subject.Record.ID, workspace.TakenBackByUserPrompt); err != nil {
 			return nil, fail(subject.Log, rpc, err)
 		}
+		// THE USER WORKING WITH THE WORKSPACE AGAIN WITHDRAWS ITS STANDING
+		// CLOSE, so it is never closed under them.
+		if _, err := s.deps.Verbs.WithdrawCloseRequest(ctx, subject.Record.ID, workspace.WithdrawnByUserPrompt); err != nil {
+			return nil, fail(subject.Log, rpc, err)
+		}
 	}
 	// A FORWARDED SLACK THREAD rides the prompt with the daemon's directive to
 	// tell the thread which workspace took it (slackforward.go).

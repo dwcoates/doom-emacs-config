@@ -467,6 +467,15 @@
   - A background wait left running on a merged pull request keeps the workspace from closing.
   - A pull request it does not own is followed with `pr-subscribe` and the `state` and `merge_queue` events, per `/agent-repl-workspaces`.
 
+### A close something still blocks stands, and agent-repl carries it out
+
+- A workspace's close that something still blocks stands as its close request, and agent-repl closes the workspace once nothing blocks it.
+  - The blockers are its open children and the workspaces landing into it, a turn running, live detached work, held prompts, and a queued merge.
+  - So a workspace never promises to close again once a child closes, nor asks to be prompted for it: its close already stands.
+- The request is withdrawn by `agent-repld workspace close here -cancel`, by any prompt I send the workspace, and by my releasing one of its held prompts.
+  - A workspace I start working with again is never closed under me.
+- The verb, its answer and the request's status are `/agent-repl-workspaces`'.
+
 ## Tool rejections
 
 ### A rejected tool call stops that call, never the work it served

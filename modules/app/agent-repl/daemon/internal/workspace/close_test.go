@@ -405,8 +405,8 @@ func TestTellOwnedPullRequestsMerged(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TellOwnedPullRequestsMerged: %v", err)
 			}
-			if f.db.closedFlags["w1"] || f.db.workspaces["w1"].CloseWhenTurnEnds != nil {
-				t.Fatalf("closed %v, marked %v; want the workspace left open and unmarked", f.db.closedFlags["w1"], f.db.workspaces["w1"].CloseWhenTurnEnds != nil)
+			if f.db.closedFlags["w1"] || f.db.workspaces["w1"].CloseRequest != nil {
+				t.Fatalf("closed %v, close requested %v; want the workspace left open with no close request", f.db.closedFlags["w1"], f.db.workspaces["w1"].CloseRequest != nil)
 			}
 			var told []string
 			for _, sub := range f.queue.submissions {
@@ -448,10 +448,6 @@ func TestCloseRefusesAWorkspaceWhoseMergeStandsOnItsQueueWithNoFacts(t *testing.
 		close func(f *fixture) error
 	}{
 		{name: "a close", close: func(f *fixture) error { return f.verbs.Close(context.Background(), "w1", wsm.CloseByUser) }},
-		{name: "a self-close", close: func(f *fixture) error {
-			_, err := f.verbs.CloseSelf(context.Background(), "w1")
-			return err
-		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -595,5 +591,166 @@ func TestIsCloseRefusal(t *testing.T) {
 				t.Errorf("isCloseRefusal(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+// selfClosing is a fixture whose workspace w1 runs turn t1.
+func selfClosing(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+	return f
+}
+
+func TestCloseSelfWithItsAskingTurnRunningStandsOnThatTurnAlone(t *testing.T) {
+	// Arrange
+	f := selfClosing(t)
+
+	// Act
+	later, waits, err := f.verbs.CloseSelf(context.Background(), "w1")
+
+	// Assert
+	if err != nil || !later || waits != nil {
+		t.Fatalf("CloseSelf = %v, %+v, %v; want closes when the turn ends", later, waits, err)
+	}
+	request := f.db.workspaces["w1"].CloseRequest
+	if f.db.closedFlags["w1"] || request == nil || request.By != wsm.CloseByAgent {
+		t.Fatalf("closed %v, request %+v; want open with the agent's request standing", f.db.closedFlags["w1"], request)
+	}
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want the asking turn left running", f.shim.killedTurns)
+	}
+	if got := f.standingCloses.reconsidered; len(got) != 1 || got[0] != "w1" {
+		t.Fatalf("reconsidered = %v, want w1 owed a judgment once registered", got)
+	}
+}
+
+func TestCloseSelfWithNoTurnRunningClosesNow(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	later, waits, err := f.verbs.CloseSelf(context.Background(), "w1")
+
+	// Assert
+	if err != nil || later || waits != nil {
+		t.Fatalf("CloseSelf = %v, %+v, %v; want closed now", later, waits, err)
+	}
+	if closures := f.db.closures["w1"]; len(closures) != 1 || closures[0].By != wsm.CloseByAgent {
+		t.Fatalf("closures = %+v, want one by the agent", closures)
+	}
+}
+
+func TestCloseSelfStandsOnEverythingButItsOwnTurn(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		check   func(t *testing.T, waits *CloseWaits)
+	}{
+		{name: "a held prompt", arrange: func(f *fixture) { f.db.held["w1"] = []wsm.HeldPrompt{{Turn: "held-1"}} },
+			check: func(t *testing.T, waits *CloseWaits) {
+				if waits.Blocked == nil || waits.Blocked.TurnInFlight || waits.Blocked.HeldPrompts != 1 || waits.Family != nil {
+					t.Fatalf("waits = %+v, want the held prompt alone", waits)
+				}
+			}},
+		{name: "an open child", arrange: func(f *fixture) { f.db.noOpenChildrenErr = errOpenChildren },
+			check: func(t *testing.T, waits *CloseWaits) {
+				if waits.Blocked != nil || waits.Family != errOpenChildren {
+					t.Fatalf("waits = %+v, want the open child alone", waits)
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := selfClosing(t)
+			tt.arrange(f)
+
+			// Act
+			later, waits, err := f.verbs.CloseSelf(context.Background(), "w1")
+
+			// Assert
+			if err != nil || later || waits == nil {
+				t.Fatalf("CloseSelf = %v, %+v, %v; want it to stand", later, waits, err)
+			}
+			tt.check(t, waits)
+			if f.db.workspaces["w1"].CloseRequest == nil || f.db.closedFlags["w1"] {
+				t.Fatalf("request %+v, closed %v; want standing and open", f.db.workspaces["w1"].CloseRequest, f.db.closedFlags["w1"])
+			}
+			if blocked := f.footer.closing["w1"]; blocked == nil || !blocked.Standing {
+				t.Fatalf("footer = %+v, want the standing close waiting", blocked)
+			}
+		})
+	}
+}
+
+func TestCloseSelfFails(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(f *fixture)
+		operation string
+		message   string
+	}{
+		{name: "the request cannot be registered", arrange: func(f *fixture) { f.db.requestCloseErr = errors.New("db gone") },
+			operation: opStandingClose, message: "could not register the standing close request"},
+		{name: "the open children cannot be read", arrange: func(f *fixture) { f.db.noOpenChildrenErr = errors.New("db gone") },
+			operation: opClose, message: "could not read whether the workspace has open children"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := selfClosing(t)
+			tt.arrange(f)
+
+			// Act
+			_, _, err := f.verbs.CloseSelf(context.Background(), "w1")
+
+			// Assert
+			if _, refused := AsRefusal(err); err == nil || refused {
+				t.Fatalf("CloseSelf = %v, want a hard failure", err)
+			}
+			if f.db.closedFlags["w1"] || f.db.workspaces["w1"].CloseRequest != nil || len(f.standingCloses.reconsidered) != 0 {
+				t.Fatalf("closed %v, request %+v, reconsidered %v; want nothing changed", f.db.closedFlags["w1"], f.db.workspaces["w1"].CloseRequest, f.standingCloses.reconsidered)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: tt.operation, Message: tt.message}); !ok {
+				t.Errorf("no error record %q: %+v", tt.message, f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestCloseQuietlyIsRefusedByATurnInFlight(t *testing.T) {
+	// Arrange
+	f := selfClosing(t)
+
+	// Act
+	err := f.verbs.(*verbs).closeQuietly(context.Background(), "w1", wsm.CloseByAgent)
+
+	// Assert
+	refusal := asRefusal(t, err, "blocked")
+	if refusal.Fields["turn_in_flight"] != true || len(f.shim.killedTurns) != 0 || f.db.closedFlags["w1"] {
+		t.Fatalf("fields %+v, killed %+v, closed %v; want refused for the turn, which runs on", refusal.Fields, f.shim.killedTurns, f.db.closedFlags["w1"])
+	}
+}
+
+func TestASelfCloseStandsOnAMergeStandingOnItsQueueWithNoFacts(t *testing.T) {
+	// Arrange: a merge a pause suspended, which this daemon published no
+	// facts for, still holds its queue's line.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.mergeQueues = map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "w1", State: wsm.MergeAdmitted}}}
+
+	// Act
+	_, waits, err := f.verbs.CloseSelf(context.Background(), "w1")
+
+	// Assert
+	if err != nil || waits == nil || waits.Blocked == nil || waits.Blocked.Reason != "merge_queued" {
+		t.Fatalf("CloseSelf = %+v, %v; want it to stand on the queued merge", waits, err)
+	}
+	if !strings.Contains(f.footer.closing["w1"].Detail, "on its queue") || f.db.closedFlags["w1"] {
+		t.Fatalf("footer %+v, closed %v; want the standing close naming the queue, open", f.footer.closing["w1"], f.db.closedFlags["w1"])
 	}
 }

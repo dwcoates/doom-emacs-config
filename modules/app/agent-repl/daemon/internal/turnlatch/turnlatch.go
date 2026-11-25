@@ -74,3 +74,6 @@ func (l *Latches) Evicted(ids.WorkspaceID, string) {}
 
 // ColdGated implements wsedges.Observer: no latch waits on a cold gate.
 func (l *Latches) ColdGated(ids.WorkspaceID) {}
+
+// Retargeted implements wsedges.Observer: a retarget releases no latch.
+func (l *Latches) Retargeted(wsm.ParentChange) {}

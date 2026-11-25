@@ -245,13 +245,14 @@ export const WAVING_STATUS_ARMS: ReadonlySet<string> = new Set([
  * The steps of a waving arm that stand still, keyed `arm/step`.
  *
  * A step IS the status word (`statusCellWord`), so a step that waits rather
- * than gets somewhere reads as waiting does: a close that is blocked, and a
- * merge waiting in the queue, on the deploys ahead, on a workspace coming free
- * or on the user. A turn waiting on the vendor still waves: the vendor is
+ * than gets somewhere reads as waiting does: a close that is blocked or that
+ * stands waiting for what blocks it, and a merge waiting in the queue, on the
+ * deploys ahead, on a workspace coming free or on the user. A turn waiting on the vendor still waves: the vendor is
  * producing the reply.
  */
 export const STILL_STATUS_STEPS: ReadonlySet<string> = new Set([
   statusStepKey("closing", "blocked"),
+  statusStepKey("closing", "waiting"),
   statusStepKey("merging", "enqueued"),
   statusStepKey("merging", "awaitingTurn"),
   statusStepKey("merging", "awaitingFree"),

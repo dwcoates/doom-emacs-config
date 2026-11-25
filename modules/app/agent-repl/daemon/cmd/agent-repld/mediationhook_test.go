@@ -118,7 +118,7 @@ func TestSettleThenMediate(t *testing.T) {
 	settled := false
 
 	// Act
-	settleThenMediate(func(context.Context) { settled = true }, h)(context.Background())
+	settleThenMediate(func(context.Context) { settled = true }, h, &closesOwed{})(context.Background())
 
 	// Assert
 	<-o.mediated
@@ -128,8 +128,31 @@ func TestSettleThenMediate(t *testing.T) {
 	if len(o.owed) != 0 {
 		t.Fatalf("owed %v; a boot whose predecessor withdrew owes no check", o.owed)
 	}
-	if settleThenMediate(nil, h) != nil {
+	if settleThenMediate(nil, h, &closesOwed{}) != nil {
 		t.Fatal("a successor, which settles nothing here, was given a settle")
+	}
+}
+
+// closesOwed records each judgment of every standing close request owed.
+type closesOwed struct{ owed int }
+
+func (c *closesOwed) ReconsiderAll() { c.owed++ }
+
+func TestAFreshBootJudgesEveryStandingCloseRequestOnceItSettled(t *testing.T) {
+	// Arrange
+	o := &mediationOrchestrator{mediated: make(chan struct{})}
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+	h.bind(o)
+	closes := &closesOwed{}
+	settledFirst := false
+
+	// Act
+	settleThenMediate(func(context.Context) { settledFirst = closes.owed == 0 }, h, closes)(context.Background())
+
+	// Assert
+	<-o.mediated
+	if !settledFirst || closes.owed != 1 {
+		t.Fatalf("settled before the judgment = %v, judgments owed = %d; want the settle first and one judgment", settledFirst, closes.owed)
 	}
 }
 
@@ -384,7 +407,7 @@ func TestABootAfterACrashOwesTheCheckOfItBeforeItsRounds(t *testing.T) {
 	h.deathReaped()
 
 	// Act
-	settleThenMediate(func(context.Context) { h.servingSettled() }, h)(context.Background())
+	settleThenMediate(func(context.Context) { h.servingSettled() }, h, &closesOwed{})(context.Background())
 
 	// Assert
 	<-o.mediated

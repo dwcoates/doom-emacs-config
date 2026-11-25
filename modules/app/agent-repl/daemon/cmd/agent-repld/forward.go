@@ -351,14 +351,34 @@ func (f *verbsForwarder) status(ctx context.Context, ws ids.WorkspaceID) (*agent
 	return verbs.Status(ctx, ws)
 }
 
-// carryOutSelfClose is the turn-end edge's self-close (workspace.SelfCloses),
+// retireIntakeAtTurnEnd is the turn-end edge's intake retirement (workspace.NewIntakeRetirements),
 // read out of the verbs, which are built after the edges.
-func (f *verbsForwarder) carryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error {
-	verbs, err := f.bound("a turn's end carried a self-close out")
+func (f *verbsForwarder) retireIntakeAtTurnEnd(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a turn's end retired an intake workspace")
 	if err != nil {
 		return err
 	}
-	return verbs.CarryOutSelfClose(ctx, ws)
+	return verbs.RetireIntakeAtTurnEnd(ctx, ws)
+}
+
+// reconsiderCloseRequest is the standing closes' judgment of one workspace's
+// request (workspace.StandingCloses), read out of the verbs, which are built
+// after the edges.
+func (f *verbsForwarder) reconsiderCloseRequest(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a standing close request was judged")
+	if err != nil {
+		return err
+	}
+	return verbs.ReconsiderCloseRequest(ctx, ws)
+}
+
+// reconsiderCloseRequests is the standing closes' judgment of every request.
+func (f *verbsForwarder) reconsiderCloseRequests(ctx context.Context) error {
+	verbs, err := f.bound("every standing close request was judged")
+	if err != nil {
+		return err
+	}
+	return verbs.ReconsiderCloseRequests(ctx)
 }
 
 // pullRequestEnded is a followed pull request's end (prwatch.Deps.Ended),
@@ -464,7 +484,10 @@ func (d deployChecks) CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, 
 	if err != nil {
 		return false, err
 	}
-	return verbs.CloseSelf(ctx, ws)
+	// A CLOSE SOMETHING ELSE BLOCKS STANDS, and the standing closes carry it
+	// out; what it waits on is the footer's and the workspace's status's.
+	later, _, err := verbs.CloseSelf(ctx, ws)
+	return later, err
 }
 
 func (d deployChecks) Refresh(ctx context.Context, ws ids.WorkspaceID) error {

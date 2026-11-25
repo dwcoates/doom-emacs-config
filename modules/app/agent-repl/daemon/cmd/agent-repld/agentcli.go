@@ -199,7 +199,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"link":                   {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":               {usage: "finished WS [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":                   {usage: "open WS", run: workspaceOpen},
-		"close":                  {usage: "close WS [-as-user]", run: workspaceClose},
+		"close":                  {usage: "close WS [-as-user] [-cancel]", run: workspaceClose},
 		"kill":                   {usage: "kill WS", run: workspaceKill},
 		"select":                 {usage: "select WS", run: workspaceSelect},
 		"restart":                {usage: "restart WS [-when-idle]", run: workspaceRestart},
@@ -1562,9 +1562,14 @@ func workspaceOpen(c *cliCall, args []string) int {
 	})
 }
 
+// workspaceClose closes WS, and the close STANDS when something that clears
+// on its own blocks it (agentrepl.v1.CloseWorkspaceRequest.stand): agent-repl
+// closes WS once nothing blocks it. -cancel withdraws a standing close
+// instead (WithdrawWorkspaceClose).
 func workspaceClose(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
+	cancel := fs.Bool("cancel", false, "withdraw the workspace's standing close instead of closing it")
 	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
@@ -1573,10 +1578,26 @@ func workspaceClose(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	resp, err := c.client.CloseWorkspace(c.ctx, connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref, Requester: requester}))
-	return answerDescribed(c, resp, err, func(msg *agentreplv1.CloseWorkspaceResponse) (string, error) {
+	if *cancel {
+		resp, err := c.client.WithdrawWorkspaceClose(c.ctx, connect.NewRequest(&agentreplv1.WithdrawWorkspaceCloseRequest{Workspace: ref, Requester: requester}))
+		code := answerDescribed(c, resp, err, func(msg *agentreplv1.WithdrawWorkspaceCloseResponse) (string, error) {
+			return describeWithdrawCloseRefusal(named, msg.GetError())
+		})
+		if code == exitSuccess && resp != nil {
+			c.noted("%s", sayWithdrawn(named, resp.Msg.GetSuccess()))
+		}
+		return code
+	}
+	resp, err := c.client.CloseWorkspace(c.ctx, connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref, Requester: requester, Stand: true}))
+	code := answerDescribed(c, resp, err, func(msg *agentreplv1.CloseWorkspaceResponse) (string, error) {
 		return describeCloseRefusal(named, msg.GetError())
 	})
+	if code == exitSuccess && resp != nil {
+		if stands := resp.Msg.GetSuccess().GetStands(); stands != nil {
+			c.noted("%s", sayCloseStands(named, stands.GetWaits()))
+		}
+	}
+	return code
 }
 
 func workspaceKill(c *cliCall, args []string) int {

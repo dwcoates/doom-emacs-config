@@ -13,6 +13,7 @@ import (
 var lifecycleRefusals = func() []describedRefusal {
 	open := &agentreplv1.OpenWorkspaceError{}
 	closing := &agentreplv1.CloseWorkspaceError{}
+	withdraw := &agentreplv1.WithdrawWorkspaceCloseError{}
 	kill := &agentreplv1.KillWorkspaceError{}
 	sel := &agentreplv1.SelectWorkspaceError{}
 	restart := &agentreplv1.RestartWorkspaceError{}
@@ -52,6 +53,11 @@ var lifecycleRefusals = func() []describedRefusal {
 				openChildrenCase(closing, "close it again")),
 			describe: func(e proto.Message) (string, error) {
 				return describeCloseRefusal("ws", e.(*agentreplv1.CloseWorkspaceError))
+			}},
+		{name: "withdraw close", empty: withdraw, oneof: "cause",
+			cases: sharedWorkspaceCases(withdraw, "withdraw it again", theFourWorkspaceArms...),
+			describe: func(e proto.Message) (string, error) {
+				return describeWithdrawCloseRefusal("ws", e.(*agentreplv1.WithdrawWorkspaceCloseError))
 			}},
 		{name: "kill", empty: kill, oneof: "cause",
 			cases: append(sharedWorkspaceCases(kill, "kill it again", theFourWorkspaceArms...), openChildrenCase(kill, "kill it again")),

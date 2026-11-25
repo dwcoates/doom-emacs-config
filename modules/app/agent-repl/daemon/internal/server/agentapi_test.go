@@ -312,6 +312,151 @@ func TestCloseWorkspaceClosesAsItsRequesterAsks(t *testing.T) {
 	}
 }
 
+// childWaits is a standing close waiting on one open child.
+func childWaits() *workspace.CloseWaits {
+	return &workspace.CloseWaits{Family: &wsm.HasOpenChildrenError{
+		Parent:   wsm.FamilyRef{ID: testWorkspaceID, Dir: "/tmp/test"},
+		Children: []wsm.FamilyRef{{ID: "ws-child", Dir: "/tmp/child", Name: "child"}},
+	}}
+}
+
+func TestACloseThatStandsAnswersWhatItWaitsOn(t *testing.T) {
+	tests := []struct {
+		name         string
+		requester    *agentreplv1.WorkspaceRequester
+		stand        bool
+		standing     *workspace.CloseWaits
+		selfWaits    *workspace.CloseWaits
+		wantStanding []wsm.CloseCause
+		wantStands   bool
+	}{
+		{name: "the user's standing close that stands", requester: userRequester(), stand: true, standing: childWaits(),
+			wantStanding: []wsm.CloseCause{wsm.CloseByUser}, wantStands: true},
+		{name: "another workspace's standing close that stands", requester: workspaceRequester(&workspacev1.WorkspaceRef{Id: "ws-other"}), stand: true, standing: childWaits(),
+			wantStanding: []wsm.CloseCause{wsm.CloseByAgent}, wantStands: true},
+		{name: "a standing close nothing blocks closes", requester: userRequester(), stand: true,
+			wantStanding: []wsm.CloseCause{wsm.CloseByUser}},
+		{name: "a self-close something else blocks stands, whatever stand says", requester: workspaceRequester(ref()), selfWaits: childWaits(), wantStands: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.api.standingWaits, h.Verbs.api.selfCloseWaits = tt.standing, tt.selfWaits
+
+			// Act
+			resp, err := h.Client.CloseWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref(), Requester: tt.requester, Stand: tt.stand}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("CloseWorkspace: %v", err)
+			}
+			if !reflect.DeepEqual(h.Verbs.api.standingCloses, tt.wantStanding) || len(h.Verbs.closedBy) != 0 {
+				t.Fatalf("standing closes %v, one-time closes %v; want %v and none", h.Verbs.api.standingCloses, h.Verbs.closedBy, tt.wantStanding)
+			}
+			success := resp.Msg.GetSuccess()
+			if !tt.wantStands {
+				if success.GetClosed() == nil {
+					t.Fatalf("success = %v, want closed", success)
+				}
+				return
+			}
+			children := success.GetStands().GetWaits().GetOpenChildren().GetChildren()
+			if len(children) != 1 || children[0].GetId() != "ws-child" || success.GetStands().GetWaits().GetBlocked() != nil {
+				t.Fatalf("success = %v, want stands waiting on ws-child alone", success)
+			}
+		})
+	}
+}
+
+func TestACloseThatStandsAndIsRefusedAnswersTheRefusal(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.api.standingErr = errors.New("the store is gone")
+
+	// Act
+	_, err := h.Client.CloseWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Stand: true}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("CloseWorkspace = %v, want an internal error", err)
+	}
+}
+
+// ---- WithdrawWorkspaceClose ------------------------------------------------------
+
+func TestWithdrawWorkspaceCloseAnswersWhetherARequestStood(t *testing.T) {
+	tests := []struct {
+		name      string
+		withdrawn bool
+		want      func(*agentreplv1.WithdrawWorkspaceCloseSuccess) bool
+	}{
+		{name: "a request stood", withdrawn: true, want: func(s *agentreplv1.WithdrawWorkspaceCloseSuccess) bool { return s.GetWithdrawn() != nil }},
+		{name: "none stood", want: func(s *agentreplv1.WithdrawWorkspaceCloseSuccess) bool { return s.GetNoneStood() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.api.withdrawn = tt.withdrawn
+
+			// Act
+			resp, err := h.Client.WithdrawWorkspaceClose(context.Background(), connect.NewRequest(&agentreplv1.WithdrawWorkspaceCloseRequest{Workspace: ref(), Requester: workspaceRequester(ref())}))
+
+			// Assert
+			if err != nil || !tt.want(resp.Msg.GetSuccess()) {
+				t.Fatalf("WithdrawWorkspaceClose = %v, %v", resp, err)
+			}
+			want := []fakeWithdrawal{{ws: testWorkspaceID, by: workspace.WithdrawnByRequest, submitsBefore: -1}}
+			if !reflect.DeepEqual(h.Verbs.api.withdrawals, want) {
+				t.Fatalf("withdrawals = %+v, want %+v", h.Verbs.api.withdrawals, want)
+			}
+		})
+	}
+}
+
+func TestWithdrawWorkspaceCloseRefusals(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.WithdrawWorkspaceCloseRequest
+		err  error
+		code connect.Code
+	}{
+		{name: "no requester is invalid", req: &agentreplv1.WithdrawWorkspaceCloseRequest{Workspace: ref()}, code: connect.CodeInvalidArgument},
+		{name: "a failed withdrawal fails", req: &agentreplv1.WithdrawWorkspaceCloseRequest{Workspace: ref(), Requester: userRequester()},
+			err: errors.New("the store is gone"), code: connect.CodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.api.withdrawErr = tt.err
+
+			// Act
+			_, err := h.Client.WithdrawWorkspaceClose(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if connect.CodeOf(err) != tt.code {
+				t.Fatalf("WithdrawWorkspaceClose = %v, want %v", err, tt.code)
+			}
+		})
+	}
+}
+
+func TestWithdrawWorkspaceCloseOfAnUnknownWorkspaceRefuses(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.WithdrawWorkspaceClose(context.Background(), connect.NewRequest(&agentreplv1.WithdrawWorkspaceCloseRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: "ws-none", Dir: "/tmp/none"}, Requester: userRequester()}))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetUnknownWorkspace() == nil || len(h.Verbs.api.withdrawals) != 0 {
+		t.Fatalf("WithdrawWorkspaceClose = %v, %v, withdrawals %v; want unknown_workspace and none", resp, err, h.Verbs.api.withdrawals)
+	}
+}
+
 func TestCloseWorkspaceWithNoRequesterIsInvalid(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -1020,12 +1020,14 @@ type DB interface {
 	// MarkCacheCold records a workspace's prompt cache as cold at its current
 	// turn clock, answering the clock it recorded (cachecold.go).
 	MarkCacheCold(ctx context.Context, id WorkspaceID) (*time.Time, error)
-	// MarkCloseWhenTurnEnds marks a workspace to close when its running turn
-	// ends (selfclose.go).
-	MarkCloseWhenTurnEnds(ctx context.Context, id WorkspaceID, at time.Time) error
-	// TakeCloseWhenTurnEnds clears a workspace's self-close mark in one
+	// RequestClose registers a workspace's standing close request, replacing
+	// one that stood (closerequest.go).
+	RequestClose(ctx context.Context, id WorkspaceID, request CloseRequest) error
+	// WithdrawCloseRequest clears a workspace's standing close request in one
 	// statement, answering whether one stood.
-	TakeCloseWhenTurnEnds(ctx context.Context, id WorkspaceID) (bool, error)
+	WithdrawCloseRequest(ctx context.Context, id WorkspaceID) (bool, error)
+	// CloseRequests answers every open workspace whose close request stands.
+	CloseRequests(ctx context.Context) ([]WorkspaceID, error)
 	// RefusePlacement answers the typed refusal of placing a new workspace in
 	// a repository, nil when it would be accepted (registerplacement.go).
 	RefusePlacement(ctx context.Context, repoDir string, p RegisterPlacement, parent *WorkspaceID, merge bool) error

@@ -677,13 +677,22 @@ that outcome answering the editor\='s close is a contract breach."
                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"closesWhenTurnEnds\":{}}}"))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-close-response-stands-is-a-breach ()
+  "Only a close that asked to stand is told it stands, and the editor\='s
+close never asks, so that outcome answering it is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{\"stands\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-close-success-outcome-arms-pinned ()
-  "CloseWorkspaceSuccess's outcome is `closed\', decoded here, and
-`closes_when_turn_ends\', which answers only a workspace closing itself."
+  "CloseWorkspaceSuccess's outcome is `closed\', decoded here,
+`closes_when_turn_ends\', which answers only a workspace closing itself, and
+`stands\', which answers only a close that asked to stand."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceSuccess")
                        #'string<)
-                 '("closed" "closesWhenTurnEnds"))))
+                 '("closed" "closesWhenTurnEnds" "stands"))))
 
 
 ;;;; ---- RestartWorkspace ------------------------------------------------

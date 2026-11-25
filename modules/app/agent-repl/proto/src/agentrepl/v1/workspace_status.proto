@@ -12,6 +12,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/workspace_close.proto";
 import "agentrepl/v1/workspace_links.proto";
 import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
@@ -71,7 +72,31 @@ message WorkspaceStatus {
   // (SetWorkspaceSummary). UNSET while none stands: the workspace owes one,
   // and its agent sets it.
   optional string summary = 16;
+  // The workspace's standing close request (CloseWorkspaceRequest.stand),
+  // UNSET while none stands. While it is set, the daemon closes the workspace
+  // as soon as nothing blocks the close, unless it is withdrawn first.
+  optional WorkspaceStatusCloseRequest close_request = 17;
 }
+
+// A standing close request: who asked, when, and what it waits on now.
+message WorkspaceStatusCloseRequest {
+  // When the request was registered, in epoch milliseconds.
+  int64 requested_at_ms = 1;
+  // THE ARM IS WHO ASKED. The close it carries out is recorded as theirs.
+  oneof requested_by {
+    // The user asked.
+    WorkspaceStatusCloseRequestByUser user = 2;
+    // An agent asked: the workspace's own, or another workspace's.
+    WorkspaceStatusCloseRequestByAgent agent = 3;
+  }
+  // What blocks the close as the status is read.
+  WorkspaceCloseWaits waits = 4;
+}
+// The user registered the request. No fields.
+message WorkspaceStatusCloseRequestByUser {}
+// An agent registered the request. No fields: the daemon records that an
+// agent asked, not which.
+message WorkspaceStatusCloseRequestByAgent {}
 
 // How a workspace stands to other work.
 message WorkspaceStatusRelationship {

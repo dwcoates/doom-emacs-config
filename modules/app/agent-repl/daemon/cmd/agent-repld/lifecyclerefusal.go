@@ -68,6 +68,23 @@ func describeCloseRefusal(ws string, e *agentreplv1.CloseWorkspaceError) (string
 	return "", undescribed("closing "+ws, e)
 }
 
+// describeWithdrawCloseRefusal says in one plain sentence why WS's standing
+// close was not withdrawn. Every WithdrawWorkspaceCloseError arm has its own
+// sentence.
+func describeWithdrawCloseRefusal(ws string, e *agentreplv1.WithdrawWorkspaceCloseError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.WithdrawWorkspaceCloseError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.WithdrawWorkspaceCloseError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.WithdrawWorkspaceCloseError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "withdraw it again"), nil
+	case *agentreplv1.WithdrawWorkspaceCloseError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "withdraw it again"), nil
+	}
+	return "", undescribed("withdrawing the close of "+ws, e)
+}
+
 // describeKillRefusal says in one plain sentence why WS was not killed. Every
 // KillWorkspaceError arm has its own sentence.
 func describeKillRefusal(ws string, e *agentreplv1.KillWorkspaceError) (string, error) {

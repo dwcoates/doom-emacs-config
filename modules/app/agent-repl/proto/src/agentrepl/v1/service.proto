@@ -48,6 +48,7 @@ import "agentrepl/v1/endpoint_client_log.proto";
 import "agentrepl/v1/endpoint_close_feed_image.proto";
 import "agentrepl/v1/endpoint_close_login.proto";
 import "agentrepl/v1/endpoint_close_workspace.proto";
+import "agentrepl/v1/endpoint_withdraw_workspace_close.proto";
 import "agentrepl/v1/endpoint_compact_workspace.proto";
 import "agentrepl/v1/endpoint_set_workspace_model.proto";
 import "agentrepl/v1/endpoint_create_task.proto";
@@ -374,6 +375,9 @@ service AgentRepl {
 
   // Tear down a workspace's editor state without merging — the only teardown.
   rpc CloseWorkspace(CloseWorkspaceRequest) returns (CloseWorkspaceResponse);
+  // Take back a workspace's standing close request, so it is not closed once
+  // its blockers clear.
+  rpc WithdrawWorkspaceClose(WithdrawWorkspaceCloseRequest) returns (WithdrawWorkspaceCloseResponse);
   // The big red button: forced session death, never blocks, data survives.
   rpc KillWorkspace(KillWorkspaceRequest) returns (KillWorkspaceResponse);
   // Data destruction: kill if live, then delete worktree and branch.
