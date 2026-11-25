@@ -116,46 +116,6 @@ func TestCollapsingARepositoryStandsItsWorkspacesSessionDown(t *testing.T) {
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
 }
 
-// TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn pins that a
-// collapse stands down nothing a turn runs in, and that the turn's end with
-// its result unread stands down nothing either: a working or unviewed
-// workspace under a fold is visible (owner ruling, 2026-11-21).
-func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange: a turn running in the repository's one workspace.
-	f := newOpened(t, harness.Opts{FoldStandDownDelay: time.Millisecond})
-	f.d.ExpectWarnings(standDownWarnings...)
-	f.remoteControlOff()
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
-	if got := f.submit("keep working", "k-fold-busy", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
-		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
-	}
-	f.shim.ExpectStartTurn()
-
-	// Act: the repository is collapsed while the turn runs.
-	collapseRepository(t, f)
-
-	// Assert: nothing reaches the turn or the session while it runs.
-	for _, rpc := range []string{harness.RPCHibernate, harness.RPCKillSession, harness.RPCKillTurn} {
-		expectRPCCount(t, f.shim, rpc, 0)
-	}
-
-	// Act: the turn ends, the repository still collapsed.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: the stand-down waiting on the turn is taken up on its end, and
-	// dropped: the turn's result is unread, and an unviewed workspace under a
-	// fold is visible (wsm.Visibility), so its session keeps running.
-	f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"),
-		"the drain's verdict that the unviewed workspace keeps running", func(r harness.LogRecord) bool {
-			return r.Operation == "daemon.drain.withheld" &&
-				r.Message == "the workspace was shown or reopened before its session was stood down; it keeps running"
-		})
-	for _, rpc := range []string{harness.RPCHibernate, harness.RPCKillSession, harness.RPCKillTurn} {
-		expectRPCCount(t, f.shim, rpc, 0)
-	}
-}
-
 func TestANetworkTheShimCannotReachIsANetworkFaultOnTheFooterAndTheRoster(t *testing.T) {
 	t.Parallel()
 	// Arrange

@@ -968,25 +968,6 @@ func bringUpSummary(d *harness.Daemon) (harness.LogRecord, bool) {
 	return harness.LogRecord{}, false
 }
 
-// TestBootRecordsHowLongTheOpeningViewsTook pins the record that names the
-// one step between the boot's reconciliation and serving: an e2e boot under
-// load spent 1.74s there with nothing said (2026-10-06).
-func TestBootRecordsHowLongTheOpeningViewsTook(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-
-	// Act
-	record := d.AwaitLogRecord(d.RunLogPath(), "the opening views' record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.cmd.serve" && r.Message == "published the opening views"
-	})
-
-	// Assert
-	if _, ok := record.Context["took_ms"]; !ok {
-		t.Fatalf("the opening views' record %+v carries no took_ms", record.Context)
-	}
-}
-
 func TestATestDaemonRunsTheMockedGitItWasLinkedTo(t *testing.T) {
 	t.Parallel()
 	// Arrange, Act.

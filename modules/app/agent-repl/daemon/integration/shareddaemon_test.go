@@ -88,9 +88,6 @@ const (
 	// groupShutdownSchedule is the daemon whose shutdown schedule a case
 	// sets or cancels: a schedule holds every workspace's intake.
 	groupShutdownSchedule daemonGroup = "the shutdown schedule"
-	// groupBrowserLauncher is the daemon whose external browser launcher a
-	// case makes fail: the launcher is the daemon's one stub.
-	groupBrowserLauncher daemonGroup = "the browser launcher's exit code"
 	// groupAccountUsage is the daemon whose account usage a case moves with
 	// a rate-limit event: every workspace spends as the daemon's one
 	// account, whose allowances (and a refusal's block) are the account's.

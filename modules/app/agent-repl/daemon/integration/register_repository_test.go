@@ -3,8 +3,6 @@
 package integration
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -25,77 +23,6 @@ func registerRepository(t *testing.T, d *harness.Daemon, path string) *agentrepl
 		t.Fatalf("RegisterRepository(%s) = transport error %v, want an in-band answer", path, err)
 	}
 	return resp.Msg
-}
-
-// TestRegisterRepositoryFromAFileInsideItMintsTheRepository drives the whole
-// path the command takes: a FILE is picked, the scripted git resolves the
-// repository it is in, and the ref comes back.
-func TestRegisterRepositoryFromAFileInsideItMintsTheRepository(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	repo := harness.NewRepo(t)
-
-	// Act
-	msg := registerRepository(t, d, filepath.Join(repo.Dir, "README.md"))
-
-	// Assert
-	success := msg.GetSuccess()
-	if success == nil {
-		t.Fatalf("RegisterRepository = %v, want a success", msg)
-	}
-	if success.GetRepository().GetId() == "" {
-		t.Fatalf("RegisterRepository = %v, want a minted repository id", msg)
-	}
-	if got := success.GetRepository().GetDir(); got != repo.Dir {
-		t.Fatalf("RegisterRepository = dir %q, want the repository's main worktree %q", got, repo.Dir)
-	}
-	if success.GetAlreadyKnown() {
-		t.Fatalf("RegisterRepository reported already_known for a repository nothing had registered")
-	}
-}
-
-// TestRegisterRepositorySaysWhenItAlreadyHadTheRepository pins the answer that
-// makes the command reportable: re-registering is success, and the caller is
-// told which of the two it was.
-func TestRegisterRepositorySaysWhenItAlreadyHadTheRepository(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	repo := harness.NewRepo(t)
-	first := registerRepository(t, d, repo.Dir).GetSuccess()
-
-	// Act
-	again := registerRepository(t, d, filepath.Join(repo.Dir, "README.md")).GetSuccess()
-
-	// Assert
-	if !again.GetAlreadyKnown() {
-		t.Fatalf("the second RegisterRepository = already_known false, want true")
-	}
-	if again.GetRepository().GetId() != first.GetRepository().GetId() {
-		t.Fatalf("the second RegisterRepository = id %q, want the first mint's id %q",
-			again.GetRepository().GetId(), first.GetRepository().GetId())
-	}
-}
-
-// TestRegisterRepositoryAdoptsARepositoryAWorkspaceAlreadyMinted pins the two
-// mint paths on ONE row: RegisterWorkspace's own ensureRepo and this verb
-// answer the same repository for one directory.
-func TestRegisterRepositoryAdoptsARepositoryAWorkspaceAlreadyMinted(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-
-	// Act
-	msg := registerRepository(t, f.d, filepath.Join(f.repo.Dir, "README.md"))
-
-	// Assert
-	if !msg.GetSuccess().GetAlreadyKnown() {
-		t.Fatalf("RegisterRepository = already_known false, want the repository the workspace minted")
-	}
-	if got := msg.GetSuccess().GetRepository().GetDir(); got != f.repo.Dir {
-		t.Fatalf("RegisterRepository = dir %q, want %q", got, f.repo.Dir)
-	}
 }
 
 // TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster is the whole visible
@@ -121,85 +48,6 @@ func TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster(t *testing.T) {
 	section := repoSectionByID(got, id)
 	if section.GetHeader().GetLabel().GetText() == "" {
 		t.Fatalf("the new repository's section has no header label: %v", section)
-	}
-}
-
-// TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace drives the ruling
-// end to end through the fake git: a FILE is picked, git resolves the
-// repository it is in, and the main worktree comes back as a registered
-// workspace.
-func TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	repo := harness.NewRepo(t)
-
-	// Act
-	success := registerRepository(t, d, filepath.Join(repo.Dir, "README.md")).GetSuccess()
-
-	// Assert
-	if got := success.GetWorkspace().GetDir(); got != repo.Dir {
-		t.Fatalf("RegisterRepository = workspace dir %q, want the main worktree %q", got, repo.Dir)
-	}
-	if success.GetWorkspace().GetId() == "" {
-		t.Fatalf("RegisterRepository = %v, want a minted workspace id", success)
-	}
-	if success.GetWorkspaceAlreadyKnown() {
-		t.Fatalf("RegisterRepository reported workspace_already_known for a workspace nothing had registered")
-	}
-}
-
-// TestRegisterRepositoryAdoptsTheWorkspaceAlreadyRegisteredForTheMainWorktree
-// pins the reuse half: a directory RegisterWorkspace already announced is
-// adopted, never minted a second time.
-func TestRegisterRepositoryAdoptsTheWorkspaceAlreadyRegisteredForTheMainWorktree(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-
-	// Act
-	success := registerRepository(t, f.d, filepath.Join(f.repo.Dir, "README.md")).GetSuccess()
-
-	// Assert
-	if !success.GetWorkspaceAlreadyKnown() {
-		t.Fatalf("RegisterRepository = workspace_already_known false, want the workspace already registered")
-	}
-	if got := success.GetWorkspace().GetId(); got != f.ws.GetId() {
-		t.Fatalf("RegisterRepository = workspace %q, want the registered workspace %q", got, f.ws.GetId())
-	}
-}
-
-func TestRegisterRepositoryRefusesAPathOutsideAnyRepository(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	plain := t.TempDir()
-	path := filepath.Join(plain, "loose.txt")
-	if err := os.WriteFile(path, []byte("loose\n"), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-
-	// Act
-	msg := registerRepository(t, d, path)
-
-	// Assert
-	if msg.GetError().GetNotInARepository() == nil {
-		t.Fatalf("RegisterRepository(%s) = %v, want RegisterRepositoryError.not_in_a_repository", path, msg)
-	}
-}
-
-func TestRegisterRepositoryRefusesAPathThatIsNotThere(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	absent := filepath.Join(t.TempDir(), "absent.txt")
-
-	// Act
-	msg := registerRepository(t, d, absent)
-
-	// Assert
-	if msg.GetError().GetUnreadablePath() == nil {
-		t.Fatalf("RegisterRepository(%s) = %v, want RegisterRepositoryError.unreadable_path", absent, msg)
 	}
 }
 

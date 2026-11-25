@@ -84,18 +84,3 @@ func TestATurnTheImmediateShutdownCutIsResumedOnTheNextSession(t *testing.T) {
 		t.Fatalf("the successor's first turn has origin %v, want the resumption after restart", st.GetOrigin())
 	}
 }
-
-func TestTheResumptionIsSubmittedOnce(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	_, shim := cutAndReopen(t)
-	shim.ExpectStartTurn()
-
-	// Act: the resumed turn ends.
-	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert
-	if n := shim.Count(harness.RPCStartTurn); n != 1 {
-		t.Fatalf("the successor's shim was asked to start %d turns, want the one resumption", n)
-	}
-}

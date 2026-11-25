@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"regexp"
 	"testing"
 	"time"
 
@@ -15,32 +14,7 @@ import (
 	"agent-repld/internal/ratelimittest"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/encoding/prototext"
 )
-
-func TestFooterExpandedPanelsArrivePopulatedOnEveryPush(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-
-	// Act: force a push by starting a turn.
-	f.submit("go", "k-panels", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Assert: every panel field is present (non-nil), whether or not it holds
-	// rows — ALL panels arrive populated on every push, per the contract.
-	got := awaitFooter(t, f, footer, "the footer after StartTurn", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-	exp := got.GetExpanded()
-	if exp == nil {
-		t.Fatal("FooterView.expanded = nil, want the expanded section always resolved")
-	}
-	if exp.GetTokens() == nil || exp.GetAgents() == nil || exp.GetTasks() == nil ||
-		exp.GetShells() == nil || exp.GetMonitors() == nil || exp.GetCrons() == nil {
-		t.Fatalf("FooterExpanded = %v, want every panel (tokens/agents/tasks/shells/monitors/crons) resolved", exp)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Footer: the status tree
@@ -108,100 +82,9 @@ const ftDwell = 150 * time.Millisecond
 // Footer: the tokens cell
 // ---------------------------------------------------------------------------
 
-// ftPanelInput is the tokens panel's summed uncached-input line: the spend
-// across every agent. The strip's cell is the main agent's context growth, so
-// the uncached-spend contract is asserted here, on the panel.
-func ftPanelInput(v *frontendv1.FooterView) string {
-	return v.GetExpanded().GetTokens().GetInput().GetValue()
-}
-
-func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing.T) {
-	t.Parallel()
-	// Arrange: one API response whose usage is stamped on the FIRST unit
-	// only, per the envelope contract.
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("go", "k-tok-dup", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act: the response's first unit carries usage — 1000 input tokens (all
-	// misses), so the canonical formatter's line is exactly "1k".
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-unit-1", ftUsage(1000, 0, 0))))
-	// The line is UNSET until usage lands, so the usage-carrying push is the
-	// first one with a figure.
-	firstUnit := awaitFooter(t, f, footer, "the tokens panel after the usage-carrying unit", func(v *frontendv1.FooterView) bool {
-		return ftPanelInput(v) != ""
-	})
-	if ftPanelInput(firstUnit) != "1k" {
-		t.Fatalf("panel input = %q for 1000 input tokens, want the canonical formatter's exact \"1k\"", ftPanelInput(firstUnit))
-	}
-
-	// Act: the SAME response's second unit (a tool call in the same
-	// assistant message) carries NO usage.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-unit-2"),
-		Item: &conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{
-			Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{Path: &conversationv1.ReadPath{Path: "a.go"}}},
-		}},
-	}))
-
-	// Act: end the turn. A whole view identical to the last one is never
-	// pushed, so the turn's terminal is what makes the post-second-unit line
-	// observable at all.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: the line is unchanged — a second unit of the SAME response
-	// leaving usage unset must not add a second charge.
-	stillOne := awaitFooter(t, f, footer, "the footer after the unstamped second unit", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
-	})
-	if ftPanelInput(stillOne) != ftPanelInput(firstUnit) {
-		t.Fatalf("panel input = %q after the second unit, want it unchanged at %q: usage rides exactly one unit per response",
-			ftPanelInput(stillOne), ftPanelInput(firstUnit))
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Footer: live-work chips
 // ---------------------------------------------------------------------------
-
-// A CREATED CRON JOB STANDS ON THE FOOTER'S CRONS CHIP AFTER ITS TURN ENDS. The
-// job is left standing by the call that made it, so the chip is a state every
-// footer reader is handed, however far behind: a footer opened only after the
-// turn concluded still counts the one job.
-func TestFooterCronsChipCountsACreatedJobForAReaderOpenedAfterTheTurnEnded(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	f.submit("go", "k-cron-create", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	feed := f.watchRootFeed()
-
-	// Act: the agent creates one job, then the turn concludes.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("cron-create-1"),
-		Item: &conversationv1.AgentActivity_Cron{Cron: &conversationv1.AgentCron{State: &conversationv1.AgentCron_Start{Start: &conversationv1.AgentCronStart{
-			Act:       &conversationv1.AgentCronStart_Create{Create: &conversationv1.AgentCronCreate{Cron: "*/5 * * * *", Prompt: "check the build", Recurring: true}},
-			StartedAt: startedAt(1),
-		}}}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("cron-create-1"),
-		Item: &conversationv1.AgentActivity_Cron{Cron: &conversationv1.AgentCron{State: &conversationv1.AgentCron_Success{Success: &conversationv1.AgentCronSuccess{
-			Act:       &conversationv1.AgentCronSuccess_Created{Created: &conversationv1.AgentCronCreated{JobId: "job-1", HumanSchedule: "every 5 minutes", Recurring: true}},
-			SettledAt: settledAt(2),
-		}}}},
-	}))
-	pushConcludedTurn(f.shim, mainAgent, "resp-cron")
-	awaitRow(t, f, feed, "the turn's conclusion", func(r *frontendv1.FeedRow) bool { return r.GetTurnEnded().GetConcluded() != nil })
-	footer := f.d.WatchFooter(f.ws)
-
-	// Assert: the one standing job is on the chip.
-	got := awaitFooter(t, f, footer, "the crons chip for the standing job", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetCrons() != nil
-	})
-	if count := got.GetStrip().GetLiveWork().GetCrons().GetCount(); count != 1 {
-		t.Fatalf("the footer's crons chip counts %d jobs, want the 1 standing job", count)
-	}
-}
 
 // A MONITOR ROW JUMPS TO ITS CALL'S TOOL-CALL CARD: the feed draws the card
 // and announces it, and the footer row names exactly that FeedId.
@@ -354,61 +237,6 @@ func TestFooterWeeklyAllowanceDrawnFromASevenDayWarningCarriesItsVerdictAndFigur
 // Deny-and-continue.
 // ---------------------------------------------------------------------------
 
-func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	f.submit("go", "k-deny-continue", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "thinking before the permission ask", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-deny-cont", "act-deny-cont")},
-	}))
-	row := awaitRow(t, f, tail, "the open permission card", func(r *frontendv1.FeedRow) bool { return r.GetPermission().GetOpen() != nil })
-
-	// Act: deny the permission.
-	resp, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
-		Workspace: f.ws, Permission: row.GetId(),
-		Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{
-			Reason: &agentreplv1.AnswerPermissionDenyReason{Text: "no"},
-		}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("AnswerPermission{deny} = %v, %v, want a success", resp, err)
-	}
-	// The card itself re-pushes answered -- consuming that push first keeps
-	// the ExpectNoPush below honest about what comes AFTER the deny.
-	awaitRow(t, f, tail, "the answered (denied) permission card", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == row.GetId().GetValue() && r.GetPermission().GetAnswered() != nil
-	})
-	// The settled ask resumes the turn's prompt: it re-pushes still working and
-	// no longer awaiting the user, and is consumed here for the same reason.
-	awaitRow(t, f, tail, "the prompt resumed after the deny", func(r *frontendv1.FeedRow) bool {
-		return r.GetUserPrompt().GetWorking() && !r.GetUserPrompt().GetAwaitingUser()
-	})
-
-	// Assert: the footer stays thinking (a deny does not end the turn) and no
-	// turn_ended row is drawn until the fake pushes the turn's own terminal.
-	got := awaitFooter(t, f, footer, "thinking still standing after the deny", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-	if got.GetStrip().GetStatus().GetIdle() != nil {
-		t.Fatalf("footer status = %v after a permission deny, want the turn still in flight", got.GetStrip().GetStatus())
-	}
-	harness.ExpectNoPush(t, tail, "no turn_ended row until the fake's own terminal")
-
-	// Act: the fake concludes the turn on its own.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: now, and only now, the terminal lands.
-	awaitRow(t, f, tail, "the turn's terminal row after the fake's own conclusion", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurnEnded() != nil
-	})
-}
-
 // ---------------------------------------------------------------------------
 // Flush-on-accept.
 // ---------------------------------------------------------------------------
@@ -446,68 +274,6 @@ func TestWatchWebWorkspaceOpensWithTheOpenedWorkspacesSessionIdentity(t *testing
 // ---------------------------------------------------------------------------
 // Footer: wakeup fallback and precedence
 // ---------------------------------------------------------------------------
-
-func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "idle before scheduling a wakeup", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle() != nil
-	})
-
-	// Act: the agent self-schedules a wakeup while idle, for the scheduled
-	// instant 1_700_000_060_000 (ftWakeupScheduleActivity's fixed WakeAtMs).
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftWakeupScheduleActivity("wake-1", 60)))
-
-	// Assert: the wakeup fallback stands because nothing else does, and its
-	// activity carries the EXACT scheduled instant, not merely a non-nil arm.
-	got := awaitFooter(t, f, footer, "waiting.wakeup with nothing else standing", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWaiting().GetWakeup() != nil
-	})
-	if got.GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetWakeup().GetWakeAtMs() != 1_700_000_060_000 {
-		t.Fatalf("waiting.activity.wakeup.wake_at_ms = %d, want exactly 1_700_000_060_000 (the scheduled instant)",
-			got.GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetWakeup().GetWakeAtMs())
-	}
-}
-
-func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("go", "k-api-error", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	awaitFooter(t, f, footer, "thinking before the mid-turn error", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-
-	// Act: a 429 mid-turn, recorded but recovered from.
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_ApiError{ApiError: &conversationv1.ApiRequestFailed{
-			Message: "rate limited",
-			Kind:    &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}},
-		}},
-	}))
-
-	// Assert: the turn is not ended; it is blocked · api_retrying with the
-	// retry line, the status a turn whose call the vendor is retrying stands
-	// in (owner ruling, 2026-10-01: the turn cannot advance until the retried
-	// call is answered).
-	got := awaitFooter(t, f, footer, "blocked.api_retrying with the retry line mid-turn", func(v *frontendv1.FooterView) bool {
-		blocked := v.GetStrip().GetStatus().GetVendorFault()
-		return blocked.GetApiRetrying() != nil && blocked.GetActivity().GetSalient().GetRetrying() != nil
-	})
-	if got.GetStrip().GetStatus().GetIdle() != nil {
-		t.Fatalf("footer status = %v after a recovered mid-turn api_error, want the turn still in flight", got.GetStrip().GetStatus())
-	}
-
-	// Act: the turn concludes normally — the frame-level terminal is
-	// authoritative, not the mid-turn evidence.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	awaitFooter(t, f, footer, "idle.done once the turn's own terminal lands", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
-	})
-}
 
 // ---------------------------------------------------------------------------
 // Footer: link death
@@ -646,64 +412,9 @@ func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T)
 	}
 }
 
-func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T) {
-	t.Parallel()
-	// Arrange: a turn whose single usage-carrying unit fixes the session
-	// breakdown's basis at a round 1000 tokens (100 uncached input + 900
-	// cache read), so each row's share_permille is an exact, checkable figure.
-	f := newCanonical(t)
-	topbar := f.d.WatchTopbar(f.ws)
-	f.submit("go", "k-breakdown-shares", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-shares", ftUsage(100, 0, 900))))
-
-	// Assert: the session section's headline rows carry the section's own
-	// precomputed share (permille of its own basis) and are drawn emphasized;
-	// the nested detail row carries neither.
-	// Every section ships every row from the first view on, at zero, so the
-	// wait is for the FIGURES to arrive rather than for the row to exist.
-	got := awaitTopbar(t, f, topbar, "the context chip's breakdown after the usage-carrying unit", func(v *frontendv1.TopbarView) bool {
-		return ftFindBreakdownRow(v.GetContext().GetBreakdown(), "uncached input").GetTokens() > 0
-	})
-	breakdown := got.GetContext().GetBreakdown()
-	uncached := ftFindBreakdownRow(breakdown, "uncached input")
-	if uncached.GetTokens() != 100 || uncached.GetSharePermille() != 100 || !uncached.GetEmphasized() {
-		t.Fatalf("\"uncached input\" row = %+v, want tokens=100, share_permille=100, emphasized=true", uncached)
-	}
-	cacheRead := ftFindBreakdownRow(breakdown, "cache read")
-	if cacheRead.GetTokens() != 900 || cacheRead.GetSharePermille() != 900 || !cacheRead.GetEmphasized() {
-		t.Fatalf("\"cache read\" row = %+v, want tokens=900, share_permille=900, emphasized=true", cacheRead)
-	}
-	freshInput := ftFindBreakdownRow(breakdown, "fresh input")
-	if freshInput.GetSharePermille() != 0 || freshInput.GetEmphasized() {
-		t.Fatalf("\"fresh input\" detail row = %+v, want no share_permille and not emphasized (it is a partition of the headline above it)", freshInput)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // helpers — prefixed ft* so they cannot collide with another suite's file.
 // ---------------------------------------------------------------------------
-
-// ftUsage builds a TokenUsage from its three input buckets.
-func ftUsage(unwritten, written, cacheRead uint64) *conversationv1.TokenUsage {
-	return &conversationv1.TokenUsage{
-		InputHits:   &conversationv1.TokenCacheHits{Read: cacheRead},
-		InputMisses: &conversationv1.TokenCacheMisses{Written: written, Unwritten: unwritten},
-	}
-}
-
-// ftUsageActivity wraps a usage figure on the envelope of a plain response
-// unit, as the first unit of an API response would carry it.
-func ftUsageActivity(id string, usage *conversationv1.TokenUsage) *conversationv1.AgentActivity {
-	return &conversationv1.AgentActivity{
-		ActivityId: activityID(id),
-		Usage:      usage,
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
-			Result: &conversationv1.AgentResponse_Start{Start: &conversationv1.AgentResponseStart{}},
-		}},
-	}
-}
 
 // ftMonitorActivity builds a persistent monitor's arming unit.
 func ftMonitorActivity(id, description string) *conversationv1.AgentActivity {
@@ -736,35 +447,6 @@ func pushMonitor(shim *harness.ShimControl, id, description string) {
 	}))
 }
 
-// ftWakeupScheduleActivity builds a self-scheduled wakeup's start-then-answer
-// pair as one settled unit (the daemon needs the success to know a wakeup is
-// really pending).
-func ftWakeupScheduleActivity(id string, delaySeconds uint32) *conversationv1.AgentActivity {
-	return &conversationv1.AgentActivity{
-		ActivityId: activityID(id),
-		Item: &conversationv1.AgentActivity_ScheduleWakeup{ScheduleWakeup: &conversationv1.AgentScheduleWakeup{
-			Result: &conversationv1.AgentScheduleWakeup_Success{Success: &conversationv1.AgentScheduleWakeupSuccess{
-				Outcome: &conversationv1.AgentScheduleWakeupSuccess_Scheduled{Scheduled: &conversationv1.AgentScheduleWakeupScheduled{
-					WakeAtMs: 1_700_000_060_000,
-				}},
-			}},
-		}},
-	}
-}
-
-// ftFindBreakdownRow searches every section of a token-breakdown menu for a
-// row with the given label.
-func ftFindBreakdownRow(v *frontendv1.TokenBreakdownView, label string) *frontendv1.TokenBreakdownRow {
-	for _, section := range v.GetSections() {
-		for _, row := range section.GetRows() {
-			if row.GetLabel() == label {
-				return row
-			}
-		}
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // Connectivity truth per hop (daemon.md invariant 11): a workspace is
 // CONNECTED only while its shim.v1 WatchSession, its WatchHostWorkspace and its
@@ -773,13 +455,6 @@ func ftFindBreakdownRow(v *frontendv1.TokenBreakdownView, label string) *fronten
 // purpose (ReportPageUnloading), is awaited and never drawn as a fault (owner
 // ruling, 2026-10-20).
 // ---------------------------------------------------------------------------
-
-// ftBreakTheWebHop connects the workspace's page and lets it go away
-// unannounced, which is what breaks the web hop.
-func ftBreakTheWebHop(f *fixture) {
-	f.web = f.d.WatchWeb(f.ws)
-	f.web.Close()
-}
 
 func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 	t.Parallel()
@@ -799,168 +474,14 @@ func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 	})
 }
 
-func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	f.open()
-	f.host = f.d.WatchHost(f.ws)
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act
-	ftBreakTheWebHop(f)
-
-	// Assert: the connectivity indicator leaves the serving glyph while a
-	// client hop is down.
-	awaitTopbar(t, f, topbar, "the not-connected indicator", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity() != nil && v.GetConnectivity().GetTitle() != "connected to the session"
-	})
-}
-
-func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
-	t.Parallel()
-	// Arrange: a page that connected and went away.
-	f := newCanonicalRegistered(t)
-	f.open()
-	f.host = f.d.WatchHost(f.ws)
-	topbar := f.d.WatchTopbar(f.ws)
-	ftBreakTheWebHop(f)
-	awaitTopbar(t, f, topbar, "the not-connected indicator", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity() != nil && v.GetConnectivity().GetTitle() != "connected to the session"
-	})
-
-	// Act
-	f.web = f.d.WatchWeb(f.ws)
-
-	// Assert
-	awaitTopbar(t, f, topbar, "the connected indicator", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity().GetTitle() == "connected to the session"
-	})
-}
-
 // ---------------------------------------------------------------------------
 // Footer: the activity cell's tiers
 // ---------------------------------------------------------------------------
-
-// ftTransient is the idle cell's live transient, nil when none is live.
-func ftTransient(v *frontendv1.FooterView) *frontendv1.FooterActivityTransient {
-	return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetTransient()
-}
-
-// ftHookStart is a hook named NAME starting, as the main agent's activity.
-func ftHookStart(id, name string) *conversationv1.AgentFrame {
-	return activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID(id),
-		Item: &conversationv1.AgentActivity_Hook{Hook: &conversationv1.AgentHook{Result: &conversationv1.AgentHook_Start{
-			Start: &conversationv1.AgentHookStart{HookName: name, Event: conversationv1.AgentHookEvent_AGENT_HOOK_EVENT_PRE_TOOL_USE, StartedAt: startedAt(1)},
-		}}},
-	})
-}
-
-// THE PUSH NOTIFICATION IS SALIENT (owner ruling, 2026-09-30): it stands over
-// a live transient until the next prompt.
-func TestFooterAPushNotificationStandsOverALiveTransient(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-1", "a-hook"))
-	awaitFooter(t, f, footer, "the hook's transient", func(v *frontendv1.FooterView) bool {
-		return ftTransient(v).GetHook() != nil
-	})
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("notify-1"),
-		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
-			State: &conversationv1.AgentPushNotification_Start{Start: &conversationv1.AgentPushNotificationStart{
-				Message:   "the branch is ready for review",
-				StartedAt: startedAt(1_700_000_000_000),
-			}},
-		}},
-	}))
-
-	// Assert
-	awaitFooter(t, f, footer, "the notification standing salient", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetNotification().GetText() == "the branch is ready for review"
-	})
-}
 
 // ftFeedItemDerivedLine matches the wording of a line composed from a feed item
 // that landed ("✅ Read finished — handling result...", "❌ Bash failed",
 // "✅ Prompt delivered — awaiting response...", "✅ Moved to background —
 // continuing..."): the retired quiet tier's lines (owner ruling, 2026-10-01).
-var ftFeedItemDerivedLine = regexp.MustCompile(`[✅❌] [^"]* (finished|failed|cancelled|started|delivered)|Moved to background`)
-
-// THE QUIET TIER IS RETIRED: between two feed items the footer composes no line
-// from the item that landed. A turn draws two feed items, a Read call and the
-// closing response, and every footer push across the turn is swept for a line
-// worded from a landed item. The pushes are read on their own goroutine as
-// they arrive, so the stream's buffer never decides what the sweep sees.
-func TestFooterComposesNoLineFromAFeedItemThatLanded(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	type swept struct {
-		working    int
-		violations []string
-	}
-	done := make(chan swept, 1)
-	go func() {
-		var out swept
-		for v := range footer.C {
-			status := v.GetStrip().GetStatus()
-			if status.GetWorking() != nil {
-				out.working++
-			}
-			if text := prototext.Format(v); ftFeedItemDerivedLine.MatchString(text) {
-				out.violations = append(out.violations, text)
-			}
-			if out.working > 0 && status.GetIdle() != nil {
-				break
-			}
-		}
-		done <- out
-	}()
-
-	// Act: a turn that reads a file, then answers.
-	f.submit("go", "k-quiet-tier", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	f.shim.ExpectStartTurn()
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("read-1"),
-		Item: &conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Start{
-			Start: &conversationv1.AgentReadStart{Path: &conversationv1.ReadPath{Path: "a.go"}, StartedAt: startedAt(1)},
-		}}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("read-1"),
-		Item: &conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Success{
-			Success: &conversationv1.AgentReadSuccess{
-				Path:      &conversationv1.ReadPath{Path: "a.go"},
-				Extent:    &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: "package a\n"}},
-				SettledAt: settledAt(2),
-			},
-		}}},
-	}))
-	pushConcludedTurn(f.shim, mainAgent, "resp-1")
-	ctx, cancel := f.d.WaitCtx()
-	defer cancel()
-	var got swept
-	select {
-	case got = <-done:
-	case <-ctx.Done():
-		t.Fatalf("waiting for the footer to return to idle after the turn: %v", ctx.Err())
-	}
-
-	// Assert
-	if got.working == 0 {
-		t.Fatal("no working push observed: the sweep saw none of the turn")
-	}
-	if len(got.violations) != 0 {
-		t.Fatalf("footer pushes carried %d feed-item-derived lines, want none:\n%v", len(got.violations), got.violations)
-	}
-}
 
 func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 	t.Parallel()

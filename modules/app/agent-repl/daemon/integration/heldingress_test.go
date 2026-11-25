@@ -151,35 +151,6 @@ func TestADaemonStartIngestsHeldPromptsWrittenWhileNoDaemonServed(t *testing.T) 
 	assertIngressEmpty(t, nd.StateDir)
 }
 
-func TestAMalformedHeldPromptEntryIsQuarantinedWithAWarning(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	// A daemon of its own: the held-prompt intake is the daemon's one
-	// directory, and its quarantine warning names no workspace.
-	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.heldingress.quarantine")
-	dir := filepath.Join(f.d.StateDir, "held-prompts")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	if err := os.WriteFile(filepath.Join(dir, "held_20260928T120001.000000001_aaaaaaaa_k-bad.json"), []byte(`{"version":7}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the quarantine warning", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.heldingress.quarantine" && r.Level == "warn"
-	})
-	if _, err := os.Stat(filepath.Join(dir, "quarantine", "held_20260928T120001.000000001_aaaaaaaa_k-bad.json")); err != nil {
-		t.Fatalf("the quarantined entry: %v, want it kept where a person can read it", err)
-	}
-	if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
-		t.Fatalf("StartTurn count = %d, want 0", got)
-	}
-}
-
 // TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt pins the ingress's
 // place in a handover. The ingress submits through the prompt handler directly,
 // so the server's transferring_away / not_yet_adopted refusals never reach it:

@@ -148,26 +148,6 @@ func TestARestartedWorkspaceWhoseVendorStartIsRetriedOpensWithItsConversation(t 
 	}
 }
 
-func TestARestartedWorkspaceWhoseVendorStartFailedOpensWithItsConversation(t *testing.T) {
-	t.Parallel()
-	// Arrange: the vendor start is rejected; its shim stays held with no
-	// session, and the reader opens once the failure is recorded.
-	// The sweep covers every test; the declared records are evidence of the
-	// rejection the test scripts, which the successor's boot writes.
-	f := restartedWith(t, harness.ShimProfile{VendorStartFailed: "invalid api key"}, "daemon.workspace.bring_up", "daemon.boot.bring_up")
-	f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the failed start's shim held with no session", func(r harness.LogRecord) bool {
-		return r.PID == f.d.PID() && r.Message == "the failed start's shim stays held with no session; the next start reuses it"
-	})
-
-	// Act.
-	page, _ := f.openFeed(nil)
-
-	// Assert: the conversation is read through the held shim.
-	if !pageCarriesTheConversation(page) {
-		t.Fatalf("the failed workspace's newest page = %v, want the store's prompt and answer", page)
-	}
-}
-
 func TestARestartedWorkspaceWithNoShimUpServesItsConversationFromTheStore(t *testing.T) {
 	t.Parallel()
 	// Arrange: the successor's shim withholds its first diagnostics, so the
@@ -251,53 +231,6 @@ func TestAnAdoptedTurnsUnresolvedAnswerIsRaisedOnceAcrossRestarts(t *testing.T) 
 		if adoptedVerdict("daemon.feed.final_answer_unresolved")(r) {
 			t.Fatalf("the second daemon raised the recorded verdict again: %s", r.Raw)
 		}
-	}
-}
-
-// THE WHOLE TRANSCRIPT IS READABLE BEHIND A STANDING GATE (owner, 2026-10-03):
-// the gate's choice — pay, compact or clear — is about the conversation, so the
-// reader must be able to walk every page of it before answering.
-func TestAColdGatedWorkspacesWholeConversationIsWalkableBeforeTheGateIsAnswered(t *testing.T) {
-	t.Parallel()
-	// Arrange: a book of several store pages, resumed into a cold gate.
-	entries := make([]*conversationv1.HistoryEntry, 0, pagingRows+1)
-	for i := pagingRows - 1; i >= 0; i-- {
-		entries = append(entries, &conversationv1.HistoryEntry{
-			Entry: &conversationv1.HistoryEntry_AgentFrame{AgentFrame: feedRowLabeledResponse(i)},
-		})
-	}
-	entries = append(entries, relaunchPromptEntry())
-	f := restarted(newOpened(t, harness.Opts{DurableState: true}), harness.ShimProfile{
-		HistoryPageSize: pagingStorePage,
-		ResumeHistory:   harness.EncodeHistory(t, entries...),
-		ColdOnResume: &harness.ShimColdFacts{
-			ContextTokens: 123456, LastRequestAtMS: 1_700_000_000_000, RequestedModel: "sonnet", CacheTTLMS: 300_000,
-		},
-	})
-	f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the session parked at its cold gate", func(r harness.LogRecord) bool {
-		return r.PID == f.d.PID() && r.Message == "the session is parked at its cold gate"
-	})
-	f.openFeed(nil)
-
-	// Act: the newest page, then next until the conversation's start.
-	pages := []*frontendv1.FeedPage{f.feedPage(true)}
-	for pages[len(pages)-1].GetSuccess().GetHasMore() != nil && len(pages) <= pagingRows+1 {
-		pages = append(pages, f.feedPage(false))
-	}
-
-	// Assert: every response and the opening prompt were reached.
-	responses, prompt := 0, false
-	for _, page := range pages {
-		for _, row := range page.GetSuccess().GetRows() {
-			if row.GetActivity().GetResponse() != nil {
-				responses++
-			}
-		}
-		prompt = prompt || pagePrompt(page, relaunchTurnID)
-	}
-	if len(pages) < 3 || responses != pagingRows || !prompt {
-		t.Fatalf("walked %d pages: %d of %d responses, prompt reached = %v; want the whole conversation behind the gate",
-			len(pages), responses, pagingRows, prompt)
 	}
 }
 

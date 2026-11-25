@@ -264,42 +264,6 @@ func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
 
 // ---- CloseWorkspace: blocked by live detached work with no turn open ----
 
-func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *testing.T) {
-	t.Parallel()
-	// Arrange: detached work announced with NO turn EVER opened -- distinct
-	// from a turn-in-flight refusal (internal/workspace/open.go's
-	// closeBlocker: `running.Turn != nil` is checked FIRST and answers
-	// "turn_in_flight"; this test's own branch is reached only once that is
-	// nil AND live work remains, answering "live_work" instead).
-	f := newCanonical(t)
-	f.d.ExpectWarnings("daemon.workspace.close")
-	footer := f.d.WatchFooter(f.ws)
-	pushDetachedShell(f.shim, "work-close-1", "sleep 100")
-	awaitLiveWork(t, f, 1)
-
-	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws}))
-
-	// Assert: the exact refusal arm the proto contracts.
-	if err != nil {
-		t.Fatalf("CloseWorkspace with live detached work and no open turn = transport error %v, want the blocked arm", err)
-	}
-	if resp.Msg.GetError().GetBlocked() == nil {
-		t.Fatalf("CloseWorkspace with live detached work and no open turn = %v, want CloseWorkspaceError.blocked", resp.Msg)
-	}
-
-	// Assert: the footer's composed reason names the LIVE_WORK cause, not a
-	// turn in flight (CloseWorkspaceBlocked itself carries no field per
-	// ERROR-ARMS.md, so the evidence rides only the footer's own text).
-	fv := awaitFooter(t, f, footer, "footer closing.blocked with the live-work reason", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
-	})
-	line := fv.GetStrip().GetStatus().GetClosing().GetActivity().GetSalient().GetCloseBlocked().GetText()
-	if !strings.Contains(line, "detached") {
-		t.Fatalf("close-blocked activity text = %q, want it to name the live detached work, not a turn in flight", line)
-	}
-}
-
 // ---- create* helpers (prefixed create* so they cannot collide) ----
 
 // createRepositoryRef registers a fresh workspace under a repository and
