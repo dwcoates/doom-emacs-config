@@ -2332,21 +2332,24 @@ The current tab's page, not shown here, is the nearest of all."
   "A perspective killing its buffers must not take every page with it."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--emit-warn) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
       ;; Act / Assert
       (should-not (agent-repl--webhost-refuse-kill)))))
 
-(ert-deftest agent-repl-test-wh-a-refused-kill-is-recorded ()
-  "The refusal is recorded at WARN, never silent."
+(ert-deftest agent-repl-test-wh-a-refused-kill-is-recorded-at-info ()
+  "The refusal is recorded at info, never silent and never warn."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let (warned)
-      (cl-letf (((symbol-function 'agent-repl--emit-warn)
+    (let (informed warned)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (agent-repl-test--record-into informed))
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl--webhost-refuse-kill))
       ;; Assert
-      (should (string-prefix-p "elisp.webhost.kill-refused" (car warned))))))
+      (should (string-prefix-p "elisp.webhost.kill-refused" (car informed)))
+      (should-not warned))))
 
 (ert-deftest agent-repl-test-wh-the-host-buffer-allows-its-own-kill ()
   "This module's own kill goes through."
