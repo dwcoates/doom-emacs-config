@@ -78,13 +78,7 @@ func TestTheTakeoverDialsNoShimForAFreeLock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 
 	// Act
 	takeOver(h)
@@ -120,9 +114,7 @@ func TestTheTakeoverOfAFreeLock(t *testing.T) {
 					t.Fatalf("SetSessionTerminal: %v", err)
 				}
 			}
-			h.mu.Lock()
-			h.lockStates[record.Dir] = sessionlock.StateFree
-			h.mu.Unlock()
+			h.setLock(record.Dir, sessionlock.StateFree)
 			h.fleet.mu.Lock()
 			h.fleet.listening[ws] = tt.listening
 			h.fleet.mu.Unlock()
@@ -164,8 +156,8 @@ func TestTheTakeoverDoesNotReadAnUnreadableLockAsHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
+	h.setLock(record.Dir, sessionlock.StateUnknown)
 	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateUnknown
 	h.lockErr[record.Dir] = errors.New("arranged: the lock could not be read")
 	h.mu.Unlock()
 
@@ -278,9 +270,7 @@ func TestTheTakeoverStartsNoSessionForAFreeLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(record.Dir, sessionlock.StateFree)
 
 	// Act
 	takeOver(h)
@@ -302,13 +292,7 @@ func TestTheTakeoverStartsTheSessionOfAFreeLockAtAColdGate(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 
 	// Act
@@ -352,13 +336,7 @@ func TestTheTakeoverStartsNoSessionForAClosedWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
 		t.Fatalf("MarkClosed: %v", err)
 	}
@@ -376,13 +354,7 @@ func TestTheTakeoverLeavesAHandedOverWorkspaceToItsAdoption(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 	h.c.mu.Lock()
 	if h.c.joining == nil {
 		h.c.joining = map[ids.WorkspaceID]bool{}
@@ -401,18 +373,6 @@ func TestTheTakeoverLeavesAHandedOverWorkspaceToItsAdoption(t *testing.T) {
 	if got := h.Started(); len(got) != 0 {
 		t.Fatalf("started = %v, want none: the handover's own adoption decides a handed-over workspace", got)
 	}
-}
-
-// lockOf arranges WS's lock to read STATE to the takeover's probe.
-func lockOf(t *testing.T, h *harness, ws ids.WorkspaceID, state sessionlock.State) {
-	t.Helper()
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.lockStates[record.Dir] = state
 }
 
 // EACH ROW NOBODY HANDED OVER IS SETTLED BY THE ORPHAN PASS'S OWN DECISION

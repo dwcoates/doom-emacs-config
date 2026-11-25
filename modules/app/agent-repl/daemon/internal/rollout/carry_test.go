@@ -435,9 +435,7 @@ func TestAnAdoptionOfAParkedShimWhoseLockReadsFreeDialsIt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, dir := h.workspace(t)
-	h.mu.Lock()
-	h.lockStates[dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(dir, sessionlock.StateFree)
 	raw, err := protojson.Marshal(&conversationv1.SessionCold{ContextTokens: 1234})
 	if err != nil {
 		t.Fatalf("encode the cold facts: %v", err)
@@ -474,9 +472,7 @@ func TestAnAdoptionOfAGateWhoseShimWasStoodDownDialsNothing(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			ws, dir := h.workspace(t)
-			h.mu.Lock()
-			h.lockStates[dir] = sessionlock.StateFree
-			h.mu.Unlock()
+			h.setLock(dir, sessionlock.StateFree)
 			raw, err := protojson.Marshal(&conversationv1.SessionCold{ContextTokens: 1234})
 			if err != nil {
 				t.Fatalf("encode the cold facts: %v", err)

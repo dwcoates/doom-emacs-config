@@ -2,10 +2,13 @@ package rollout
 
 import (
 	"agent-repld/internal/creategate"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sync"
@@ -1325,6 +1328,24 @@ func (h *harness) Settled() []ids.WorkspaceID {
 	return append([]ids.WorkspaceID(nil), h.settled...)
 }
 
+// setLock arranges the lock of the workspace in DIR to read STATE to the
+// controller's probe. Every test arranges a lock through it (or lockOf).
+func (h *harness) setLock(dir string, state sessionlock.State) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lockStates[dir] = state
+}
+
+// lockOf arranges WS's lock to read STATE to the controller's probe.
+func lockOf(t *testing.T, h *harness, ws ids.WorkspaceID, state sessionlock.State) {
+	t.Helper()
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.setLock(record.Dir, state)
+}
+
 // Owed answers every OweFacts edge, in order.
 func (h *harness) Owed() []markerEdge {
 	h.mu.Lock()
@@ -1665,9 +1686,7 @@ func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 	// The registry NORMALIZES the dir (macOS resolves /var to /private/var), and
 	// the lock probe is called with the registry's spelling: keying the fake
 	// probe by anything else would silently answer "could not tell".
-	h.mu.Lock()
-	h.lockStates[ws.Dir] = sessionlock.StateHeld
-	h.mu.Unlock()
+	h.setLock(ws.Dir, sessionlock.StateHeld)
 	return ws.ID, ws.Dir
 }
 
@@ -1984,4 +2003,68 @@ func (f *fakeHotReload) ShimJudged(_ context.Context, ws ids.WorkspaceID, outcom
 }
 func (f *fakeHotReload) ShimReplaceFailed(ws ids.WorkspaceID, _ error) {
 	f.record("shim_replace_failed:" + string(ws))
+}
+
+// A lock arranged through setLock, or through lockOf by the workspace's
+// directory, is what the controller's probe reads.
+func TestALockArrangedIsWhatTheProbeReads(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID, dir string)
+	}{
+		{name: "by directory", arrange: func(_ *testing.T, h *harness, _ ids.WorkspaceID, dir string) {
+			h.setLock(dir, sessionlock.StateFree)
+		}},
+		{name: "by workspace", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID, _ string) {
+			lockOf(t, h, ws, sessionlock.StateFree)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, dir := h.workspace(t)
+
+			// Act
+			tc.arrange(t, h, ws, dir)
+
+			// Assert
+			if state, err := h.c.deps.LockProbe(dir); err != nil || state != sessionlock.StateFree {
+				t.Fatalf("probe = %v, %v; want the arranged free lock", state, err)
+			}
+		})
+	}
+}
+
+// EVERY TEST ARRANGES A LOCK THROUGH setLock: a hand-rolled write to the
+// harness's lock table skips its lock, and drifts from the one shape.
+func TestEveryLockArrangedGoesThroughSetLock(t *testing.T) {
+	var stray []string
+	sourcescan.EachSourceIn(t, ".", true, func(fset *token.FileSet, file *ast.File) {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name == "setLock" || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				assign, ok := n.(*ast.AssignStmt)
+				if !ok {
+					return true
+				}
+				for _, lhs := range assign.Lhs {
+					index, ok := lhs.(*ast.IndexExpr)
+					if !ok {
+						continue
+					}
+					if sel, ok := index.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "lockStates" {
+						stray = append(stray, fset.Position(assign.Pos()).String())
+					}
+				}
+				return true
+			})
+		}
+	})
+	if len(stray) != 0 {
+		t.Fatalf("locks arranged outside setLock at %v", stray)
+	}
 }
