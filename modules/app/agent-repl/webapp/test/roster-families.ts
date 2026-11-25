@@ -27,7 +27,7 @@ import {
 /** Each row's children, as its builder was told them. */
 const familyOf = new WeakMap<RosterRow, readonly RosterRow[]>();
 
-/** Record CHILDREN as ROW's family, for `openRow` and `hiddenRow` to nest. Answers ROW. */
+/** Record CHILDREN as ROW's family, for `openRow` and `backlogRow` to nest. Answers ROW. */
 export function withFamily(row: RosterRow, children: readonly RosterRow[]): RosterRow {
   familyOf.set(row, children);
   return row;
@@ -78,9 +78,9 @@ export function withRepositoryBlocks(open: RosterOpenRow, blocks: readonly TestR
   return open;
 }
 
-/** ROW as a hidden row, its family nested as hidden rows. */
-export function hiddenRow(row: RosterRow): RosterBacklogRow {
-  return create(RosterBacklogRowSchema, { row, children: (familyOf.get(row) ?? []).map(hiddenRow) });
+/** ROW as a backlogged row, its family nested as backlogged rows. */
+export function backlogRow(row: RosterRow): RosterBacklogRow {
+  return create(RosterBacklogRowSchema, { row, children: (familyOf.get(row) ?? []).map(backlogRow) });
 }
 
 /** ROWS as a repository section's row entries, one each, in order (frontend.v1.RosterRepoEntry). */

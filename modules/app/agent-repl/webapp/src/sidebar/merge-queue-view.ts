@@ -579,10 +579,10 @@ export const MERGE_QUEUE_NEEDS_YOU_CLASS = "sb-mq-needs-you";
  * it, `fixing zettel` while a remediation workspace fixes what the
  * intake or its own gate found, `testing zettel fixes` while a
  * remediation's or an escalation's finished fix runs its gate and lands, its
- * workspace standing by hidden, `zettel needs you` while an escalated check
+ * workspace standing by in the backlog, `zettel needs you` while an escalated check
  * waits on the user. A click on it selects the workspace at work
- * (`frontend.v1.RosterMergeQueueMediationTarget`), showing a hidden one for
- * the visit as a click on any hidden workspace's link does; a rollout with no
+ * (`frontend.v1.RosterMergeQueueMediationTarget`), showing a backlogged one for
+ * the visit as a click on any backlogged workspace's link does; a rollout with no
  * intake names none, and its label selects nothing.
  */
 export function drawQueueMediationLabel(u: RosterMergeQueueMediation, sc: SidebarContext, path: string): HTMLElement {

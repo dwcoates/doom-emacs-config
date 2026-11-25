@@ -28,7 +28,7 @@ function section(cls: string, label: string, folded: boolean): string {
 /** The rail under its head, its sections folded as FOLDS says. */
 function rail(folds: Folds): string {
   const open = `<div class="repo open-section${folds.open ? " folded" : ""}"><div class="repo-head"><span class="sb-label">Open</span><span class="sb-count">(1)</span></div><div class="sb-sections">${section("repo-section", "repo", false)}</div></div>`;
-  return `<div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster"><div class="sb-pane">${open}${folds.merged === null ? "" : section("merged-section", "Deploys", folds.merged)}${section("hidden-section", "Hidden", folds.hidden)}</div></div></div>`;
+  return `<div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster"><div class="sb-pane">${open}${folds.merged === null ? "" : section("merged-section", "Deploys", folds.merged)}${section("backlog-section", "Hidden", folds.hidden)}</div></div></div>`;
 }
 
 /** How far a folded header's box falls short of the rule above and the rule below, in px. */

@@ -73,8 +73,8 @@ export const OPEN_ROW: RowKind<RosterOpenRow> = {
   same: (a, b) => equals(RosterOpenRowSchema, withoutTabs(a), withoutTabs(b)),
 };
 
-/** A hidden row (frontend.v1.RosterBacklogRow): two draw the same when they are equal. */
-export const HIDDEN_ROW: RowKind<RosterBacklogRow> = {
+/** A backlogged row (frontend.v1.RosterBacklogRow): two draw the same when they are equal. */
+export const BACKLOG_ROW: RowKind<RosterBacklogRow> = {
   same: (a, b) => equals(RosterBacklogRowSchema, a, b),
 };
 
@@ -122,19 +122,19 @@ export function drawKeyedRows(
   return drawKeyedBox(pathedOpenRows(u, path), rail, place, into);
 }
 
-/** Draw U's hidden rows into a fresh box, recording each into INTO. */
-export function drawKeyedHiddenRows(
+/** Draw U's backlogged rows into a fresh box, recording each into INTO. */
+export function drawKeyedBacklogRows(
   u: RosterBacklogRows,
   rail: RailContext,
   path: string,
   place: RowPlace,
   into: KeyedRows<RosterBacklogRow>,
 ): HTMLElement {
-  return drawKeyedBox(pathedHiddenRows(u, path), rail, place, into);
+  return drawKeyedBox(pathedBacklogRows(u, path), rail, place, into);
 }
 
-/** ROWS' top-level hidden rows, each with its path under PATH. */
-export function pathedHiddenRows(rows: RosterBacklogRows, path: string): Array<PathedRow<RosterBacklogRow>> {
+/** ROWS' top-level backlogged rows, each with its path under PATH. */
+export function pathedBacklogRows(rows: RosterBacklogRows, path: string): Array<PathedRow<RosterBacklogRow>> {
   return pathedFamilies(rows.rows, `${path}.rows`).map((entry, index) => ({ row: rows.rows[index], path: entry.path }));
 }
 

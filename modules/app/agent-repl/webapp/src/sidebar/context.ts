@@ -221,10 +221,10 @@ export const MERGED_FOLD_KEY = "merged";
 export const MERGE_QUEUE_FOLD_KEY = "merge-queue";
 
 /**
- * The hidden-workspaces section's fold key. FIXED for the same reason as
+ * The backlog's fold key. FIXED for the same reason as
  * `MERGED_FOLD_KEY`: the roster carries exactly one such section.
  */
-export const HIDDEN_FOLD_KEY = "hidden";
+export const BACKLOG_FOLD_KEY = "backlog";
 
 /**
  * The open-workspaces section's fold key. FIXED for the same reason as

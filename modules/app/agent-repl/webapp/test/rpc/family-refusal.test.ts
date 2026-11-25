@@ -145,9 +145,9 @@ describe("mergeHasOpenChildrenSentence", () => {
 describe("parentNotOpenSentence", () => {
   it.each([
     {
-      name: "a hidden parent is to be shown first",
+      name: "a backlogged parent is to be shown first",
       state: { case: "backlogged", value: {} } as const,
-      want: "reopen refused: its parent parent-ws is hidden; show the parent first",
+      want: "reopen refused: its parent parent-ws is backlogged; show the parent first",
     },
     {
       name: "a closed parent is to be reopened first",

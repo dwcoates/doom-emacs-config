@@ -6,7 +6,7 @@
  * after it, and a workspace landing into another needs that branch to stay, so
  * the daemon refuses taking a parent out of the Open section while a child or a
  * workspace landing into it is open (`WorkspaceHasOpenChildren`), and refuses making an open child
- * of a parent that is hidden or closed (`WorkspaceParentNotOpen`). Every verb
+ * of a parent that is backlogged or closed (`WorkspaceParentNotOpen`). Every verb
  * that can be refused either way says it in these words, so the sidebar's
  * menu and the feed's cold gate cannot word one refusal two ways.
  */
@@ -79,7 +79,7 @@ export function mergeHasOpenChildrenSentence(
 
 /**
  * GESTURE ("reopen", "show", "create a child of") was refused because the
- * parent (U, at PATH) is hidden, closed, or closing under a queued merge:
+ * parent (U, at PATH) is backlogged, closed, or closing under a queued merge:
  * showing or reopening the parent first is what makes the gesture possible,
  * and a closing parent's merge is what stands in the way.
  */
@@ -92,7 +92,7 @@ export function parentNotOpenSentence(
   const state = requireCase(u.state, `${path}.state`);
   switch (state.case) {
     case "backlogged":
-      return `${gesture} refused: its parent ${parent} is hidden; show the parent first`;
+      return `${gesture} refused: its parent ${parent} is backlogged; show the parent first`;
     case "closed":
       return `${gesture} refused: its parent ${parent} is closed; reopen the parent first`;
     case "closing":

@@ -43,7 +43,7 @@ const log = createLogger("webapp.sidebar.roster-streams");
 export interface RosterStreams {
   /** The push's revision: every stream here is the daemon's as of it. */
   readonly revision: bigint;
-  /** The WORKSPACES stream: open and hidden workspaces, threads, selection, the rail's chrome. */
+  /** The WORKSPACES stream: open and backlogged workspaces, threads, selection, the rail's chrome. */
   readonly workspaces: WorkspaceRoster;
   /** The MERGE QUEUE stream: every repository's active queue. */
   readonly mergeQueue: RosterMergeQueueSection;

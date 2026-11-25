@@ -19,7 +19,7 @@ import type { CauseOf } from "./verbs.js";
 /**
  * Make LABEL, a row's name, rename WORKSPACE (now named NAME) on a
  * double-click. Only a row of a live grouping takes it: a Recently Merged or
- * Hidden row's click is its band's own gesture, which a double-click would
+ * Backlog row's click is its band's own gesture, which a double-click would
  * fire twice.
  *
  * The name carries no `title`: hovering anywhere on the row opens its detail

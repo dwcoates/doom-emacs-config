@@ -71,7 +71,7 @@ import {
   startOfToday,
   startOfTomorrow,
   openRow,
-  hiddenRow,
+  backlogRow,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
 import { SELECTION_NUMBER_RISE, SELECTION_NUMBER_RISE_MS, createSelectionFade } from "../../src/sidebar/selection-fade.js";
@@ -301,7 +301,7 @@ describe("the breathing name", () => {
     expect(nameOf(drawn).classList.contains("breathes")).toBe(true);
   });
 
-  it.each(["merged", "hidden"] as const)("holds a %s band row's name still", (place) => {
+  it.each(["merged", "backlog"] as const)("holds a %s band row's name still", (place) => {
     expect(nameOf(drawArm("thinking", place)).classList.contains("breathes")).toBe(false);
   });
 
@@ -614,20 +614,20 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("34s ago");
   });
 
-  it("draws a hidden workspace's age from its hide", () => {
+  it("draws a backlogged workspace's age from its hide", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "backlogged", value: { atMs: BigInt(NOW - 120_000) } } }),
       sidebarContext(),
       "R",
-      "hidden",
+      "backlog",
     );
     expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
-      "hidden",
+      "backlogged",
       "2m",
     ]);
   });
 
-  it("counts a hidden workspace down to its cache lapse", () => {
+  it("counts a backlogged workspace down to its cache lapse", () => {
     const drawn = drawRosterRow(
       row({
         id: "ws-1",
@@ -635,7 +635,7 @@ describe("the when-column", () => {
       }),
       sidebarContext(),
       "R",
-      "hidden",
+      "backlog",
     );
     expect(drawn.querySelector(".when")?.textContent).toBe("12m 34s");
   });
@@ -648,7 +648,7 @@ describe("the when-column", () => {
       }),
       sidebarContext(),
       "R",
-      "hidden",
+      "backlog",
     );
     expect((drawn.querySelector(".when") as HTMLElement).style.color).toBe(heatColor(0.5, "p"));
   });
@@ -663,14 +663,14 @@ describe("the when-column", () => {
       }),
       sc,
       "R",
-      "hidden",
+      "backlog",
     );
     ticker.tick(NOW + 60_000);
     const when = drawn.querySelector(".when") as HTMLElement;
     expect([when.textContent, when.hasAttribute("data-cache-cold")]).toEqual(["cold cache", true]);
   });
 
-  it("draws a hidden row's cold cache clear of the row's recession, at full opacity", () => {
+  it("draws a backlogged row's cold cache clear of the row's recession, at full opacity", () => {
     // Arrange
     const ticker = fakeTicker();
     const sc = sidebarContext(appContext({}, ticker));
@@ -681,7 +681,7 @@ describe("the when-column", () => {
       }),
       sc,
       "R",
-      "hidden",
+      "backlog",
     );
     ticker.tick(NOW + 60_000);
     // Act
@@ -702,7 +702,7 @@ describe("the when-column", () => {
       }),
       sidebarContext(),
       "R",
-      "hidden",
+      "backlog",
     );
     const when = drawn.querySelector(".when") as HTMLElement;
     expect([when.hasAttribute("data-cache"), when.hasAttribute("data-cache-cold")]).toEqual([true, false]);
@@ -710,7 +710,7 @@ describe("the when-column", () => {
 
   it.each([
     { place: "grouping" as const, want: "absolute" },
-    { place: "hidden" as const, want: "static" },
+    { place: "backlog" as const, want: "static" },
   ])("takes the $place row's ⋯ off the line only in the open section", ({ place, want }) => {
     // Arrange
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R", place);
@@ -1127,7 +1127,7 @@ describe("the family", () => {
     banded.foldCover = undefined;
 
     // Act
-    const drawn = drawRosterFamily(banded, sidebarContext(), "R", "hidden");
+    const drawn = drawRosterFamily(banded, sidebarContext(), "R", "backlog");
 
     // Assert
     expect(drawn.classList.contains(COVERED_ROW_CLASS)).toBe(false);
@@ -1350,7 +1350,7 @@ describe("the row click's lockout", () => {
   });
 });
 
-describe("the row click in the hidden section", () => {
+describe("the row click in the backlog", () => {
   // OWNER REQUEST, 2026-10-13: the click shows the workspace and then
   // selects it, so the user lands on what they clicked.
   it("shows the workspace again, then selects it", async () => {
@@ -1367,7 +1367,7 @@ describe("the row click in the hidden section", () => {
         },
       }),
     );
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "backlog");
     await click(drawn.querySelector("[data-select]") as Element);
     expect(calls).toEqual(["hidden:ws-1:show", "select:ws-1"]);
   });
@@ -1386,7 +1386,7 @@ describe("the row click in the hidden section", () => {
         },
       }),
     );
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "backlog");
     await click(drawn.querySelector("[data-select]") as Element);
     expect(selected).toEqual([]);
   });
@@ -1402,7 +1402,7 @@ describe("the row click in the hidden section", () => {
         selectInEditor: () => SELECT_OK,
       }),
     );
-    const drawn = drawRosterFamily(hiddenRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sc, "R", "hidden");
+    const drawn = drawRosterFamily(backlogRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sc, "R", "backlog");
     await click(drawn.querySelector("[data-roster-row='ws-2'] [data-select]") as Element);
     expect(shown).toEqual(["ws-2"]);
   });
@@ -1417,7 +1417,7 @@ describe("the row click in the hidden section", () => {
       }),
     );
     const capture = captureLogRecords();
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "backlog");
     await click(drawn.querySelector("[data-select]") as Element);
     const record = await forwardedRecord(capture, "sidebar.verbs.refused");
     expect([drawn.querySelector(":scope > .sb-refusal")?.textContent, record.level.case]).toEqual([
@@ -1462,7 +1462,7 @@ describe("returnFromBand", () => {
   });
 
   it("resets the repository groups' folds on a reopen from each merged return, never on a hidden one's", () => {
-    expect([BAND_RETURNS.merged.map((r) => r.resetsDeploysFolds), BAND_RETURNS.hidden.map((r) => r.resetsDeploysFolds)]).toEqual([
+    expect([BAND_RETURNS.merged.map((r) => r.resetsDeploysFolds), BAND_RETURNS.backlog.map((r) => r.resetsDeploysFolds)]).toEqual([
       [true, true],
       [false],
     ]);
@@ -1506,7 +1506,7 @@ describe("returnFromBand", () => {
   // EVERY BAND'S CLICK GOES THROUGH returnFromBand: a band the table lacks
   // would be a place whose click is spelled some other way.
   it("names a return for every band a row can be drawn in", () => {
-    const bands: RowPlace[] = ["hidden", "merged"];
+    const bands: RowPlace[] = ["backlog", "merged"];
     expect(Object.keys(BAND_RETURNS).sort()).toEqual([...bands].sort());
   });
 });
@@ -1627,7 +1627,7 @@ describe("the row click in the recently-merged band", () => {
 describe("the band choice list", () => {
   it("is drawn only for a band with several returns", () => {
     const sc = sidebarContext(appContext({}));
-    const hidden = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    const hidden = drawRosterRow(row({ id: "ws-1" }), sc, "R", "backlog");
     const merged = drawRosterRow(row({ id: "ws-2", closed: true }), sc, "R", "merged");
     expect([
       hidden.querySelector(":scope > .sb-band-choices"),
@@ -2286,7 +2286,7 @@ describe("the detail panel opens on hover", () => {
       make: () =>
         row({ id: "ws-1", closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(NOW) } } }),
     },
-    { place: "hidden" as const, make: () => row({ id: "ws-1", when: { case: "backlogged", value: { atMs: BigInt(NOW) } } }) },
+    { place: "backlog" as const, make: () => row({ id: "ws-1", when: { case: "backlogged", value: { atMs: BigInt(NOW) } } }) },
   ])("on a $place row, whose line is the trigger as everywhere", ({ place, make }) => {
     const bandRow = (): HTMLElement => drawRosterRow(make(), sidebarContext(), "R", place);
 
@@ -2577,13 +2577,13 @@ describe("the unread turn end under an idle_async row", () => {
     expect(drawn.hasAttribute("data-unread-turn-end")).toBe(false);
   });
 
-  it("draws no turn-end color on a hidden row", () => {
+  it("draws no turn-end color on a backlogged row", () => {
     // Arrange, Act.
     const drawn = drawRosterRow(
       row({ id: "ws-1", status: idle, idleAsyncUnread: { turnEnd: { case: "done", value: {} } } }),
       sidebarContext(),
       "R",
-      "hidden",
+      "backlog",
     );
 
     // Assert.
@@ -3136,7 +3136,7 @@ describe("a row carrying the merge-turn marker", () => {
 });
 
 describe("the bands draw no status mark", () => {
-  it.each(["merged", "hidden"] as const)("draws no mark for a row in the %s band", (place) => {
+  it.each(["merged", "backlog"] as const)("draws no mark for a row in the %s band", (place) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R", place);
     expect(drawn.querySelector(".st")).toBeNull();
   });
@@ -3146,7 +3146,7 @@ describe("the bands draw no status mark", () => {
     expect(drawn.querySelector(".st")).not.toBeNull();
   });
 
-  it.each(["grouping", "merged", "hidden"] as const)("keeps a cold gate's arm on the %s row for its strike", (place) => {
+  it.each(["grouping", "merged", "backlog"] as const)("keeps a cold gate's arm on the %s row for its strike", (place) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R", place);
     expect(drawn.getAttribute("data-arm")).toBe("coldGate");
   });
@@ -3154,16 +3154,16 @@ describe("the bands draw no status mark", () => {
 
 // A HIDDEN ROW WEARS NO STATE (owner request, 2026-10-13): only a cold gate's
 // strike, which rides on `data-arm`.
-describe("the hidden section's rows", () => {
+describe("the backlog's rows", () => {
   it.each(["severed", "dead", "thinking", "done", "idleAsync", "turnFailed", "merging"] as const)(
     "draws a %s row in plain text, with no status color",
     (arm) => {
-      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} } }), sidebarContext(), "R", "hidden");
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} } }), sidebarContext(), "R", "backlog");
       expect([...drawn.classList].filter((c) => c.startsWith("tone-"))).toEqual(["tone-none"]);
     },
   );
 
-  it.each(["merged", "hidden"] as const)("draws a %s row's name in the bands' one name grey", (place) => {
+  it.each(["merged", "backlog"] as const)("draws a %s row's name in the bands' one name grey", (place) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R", place);
     expect(drawn.querySelector(":scope > .row > .name")?.classList.contains("band-name")).toBe(true);
   });
@@ -3173,15 +3173,15 @@ describe("the hidden section's rows", () => {
     expect(drawn.querySelector(":scope > .row > .name")?.classList.contains("band-name")).toBe(false);
   });
 
-  it("paints a hidden row's name in the repository names' grey", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R", "hidden");
+  it("paints a backlogged row's name in the repository names' grey", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R", "backlog");
     expect(inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "color"))).toBe(
       "var(--repo-head-expanded)",
     );
   });
 
   it.each([
-    { name: "a hidden row recedes", place: "hidden", closed: false, want: true },
+    { name: "a backlogged row recedes", place: "backlog", closed: false, want: true },
     { name: "a closed row recedes", place: "grouping", closed: true, want: true },
     { name: "an open grouping row does not recede", place: "grouping", closed: false, want: false },
   ] as const)("$name", ({ place, closed, want }) => {
@@ -3189,12 +3189,12 @@ describe("the hidden section's rows", () => {
     expect(drawn.classList.contains("receded")).toBe(want);
   });
 
-  it("draws a hidden row at the receded opacity a merged row wears", () => {
-    const opacityOf = (place: "hidden" | "merged", closed: boolean): string => {
+  it("draws a backlogged row at the receded opacity a merged row wears", () => {
+    const opacityOf = (place: "backlog" | "merged", closed: boolean): string => {
       const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
       return inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "opacity"));
     };
-    expect([opacityOf("hidden", false), opacityOf("merged", true)]).toEqual(["var(--receded-opacity)", "var(--receded-opacity)"]);
+    expect([opacityOf("backlog", false), opacityOf("merged", true)]).toEqual(["var(--receded-opacity)", "var(--receded-opacity)"]);
   });
 
   it("recedes at 0.55", () => {
@@ -3204,7 +3204,7 @@ describe("the hidden section's rows", () => {
 
   it.each([
     { name: "an open grouping row", place: "grouping", closed: false, row: "1", when: "var(--receded-opacity)" },
-    { name: "a hidden row", place: "hidden", closed: false, row: "1", when: "var(--receded-opacity)" },
+    { name: "a backlogged row", place: "backlog", closed: false, row: "1", when: "var(--receded-opacity)" },
     { name: "a merged row", place: "merged", closed: true, row: "1", when: "var(--receded-opacity)" },
   ] as const)("draws $name's when-column at the one receded grey", ({ place, closed, row: rowOpacity, when }) => {
     // Arrange
@@ -3236,8 +3236,8 @@ describe("the hidden section's rows", () => {
     expect(inRail(drawn, (rail) => cascadedValue(rail, "--when-counting-opacity"))).toBe("0.75");
   });
 
-  it("strikes a hidden row's name through at a cold gate", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R", "hidden");
+  it("strikes a backlogged row's name through at a cold gate", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R", "backlog");
     expect(inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "text-decoration"))).toBe(
       "line-through",
     );
@@ -3253,27 +3253,27 @@ describe("the hidden section's rows", () => {
       row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true }),
       sidebarContext(),
       "R",
-      "hidden",
+      "backlog",
     );
     expect([drawn.querySelector(".name")?.classList.contains("viewed"), drawn.hasAttribute("data-viewed")]).toEqual([false, false]);
   });
 
   it("draws no attention marker", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1", attention: true }), sidebarContext(), "R", "hidden");
+    const drawn = drawRosterRow(row({ id: "ws-1", attention: true }), sidebarContext(), "R", "backlog");
     expect([drawn.querySelector(".sb-attn"), drawn.hasAttribute("data-attention")]).toEqual([null, false]);
   });
 
   it("draws no reviving shimmer", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1", reviving: true }), sidebarContext(), "R", "hidden");
+    const drawn = drawRosterRow(row({ id: "ws-1", reviving: true }), sidebarContext(), "R", "backlog");
     expect(drawn.querySelector(".name")?.classList.contains("reviving")).toBe(false);
   });
 
   it("draws a hidden child row in plain text too", () => {
     const drawn = drawRosterFamily(
-      hiddenRow(row({ id: "ws-1", children: [row({ id: "ws-2", status: { case: "dead", value: {} } })] })),
+      backlogRow(row({ id: "ws-1", children: [row({ id: "ws-2", status: { case: "dead", value: {} } })] })),
       sidebarContext(),
       "R",
-      "hidden",
+      "backlog",
     );
     expect(drawn.querySelector('[data-roster-row="ws-2"]')?.classList.contains("tone-blue")).toBe(false);
   });
@@ -3377,7 +3377,7 @@ describe("the tab number slot", () => {
     ]).toEqual(["sb-gutter", false, "sb-num", "", true]);
   });
 
-  it.each<RowPlace>(["merged", "hidden"])("draws no gutter slot on a %s band row", (place) => {
+  it.each<RowPlace>(["merged", "backlog"])("draws no gutter slot on a %s band row", (place) => {
     // Act
     const drawn = drawRosterRow(row({ id: "ws-1", closed: place === "merged" }), sidebarContext(), "R", place);
 
@@ -3385,7 +3385,7 @@ describe("the tab number slot", () => {
     expect(drawn.querySelector(".sb-gutter")).toBeNull();
   });
 
-  it.each<RowPlace>(["merged", "hidden"])("draws no number slot on a %s band row", (place) => {
+  it.each<RowPlace>(["merged", "backlog"])("draws no number slot on a %s band row", (place) => {
     // Act
     const drawn = drawRosterRow(row({ id: "ws-1", closed: place === "merged" }), sidebarContext(), "R", place);
 
@@ -3450,7 +3450,7 @@ describe("the open owned pull request's duration", () => {
     expect([durationOf(drawn).hasAttribute("data-open-owned-pull-request"), paintOf(drawn)[0]]).toEqual([false, "var(--muted)"]);
   });
 
-  it.each(["merged", "hidden"] as const)("draws nothing for the marker in the %s band", (place) => {
+  it.each(["merged", "backlog"] as const)("draws nothing for the marker in the %s band", (place) => {
     // Arrange, Act.
     const drawn = drawRosterRow(row({ id: "ws-1", openOwnedPullRequest: true }), sidebarContext(), "R", place);
 
@@ -3487,7 +3487,7 @@ describe("the context-heat ink on the duration", () => {
     expect(durationOf(drawn).style.color).toBe(expectedColor(contextFigureColor(0.95)));
   });
 
-  it.each(["merged", "hidden"] as const)("draws nothing for the marker in the %s band", (place) => {
+  it.each(["merged", "backlog"] as const)("draws nothing for the marker in the %s band", (place) => {
     // Arrange, Act.
     const drawn = drawRosterRow(row({ id: "ws-1", contextHeat: 0.5 }), sidebarContext(), "R", place);
 

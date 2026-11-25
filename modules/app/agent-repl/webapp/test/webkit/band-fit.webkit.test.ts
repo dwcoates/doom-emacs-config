@@ -3,10 +3,10 @@
  * 2026-10-27).
  *
  * The rail never scrolls. Once it is out of room, the Open section lengthens
- * until Deploys and Hidden Workspaces below it are left three lines each, the
+ * until Deploys and the Backlog below it are left three lines each, the
  * two sharing those six lines and Deploys claiming only its queues and
  * today's merges, any room the Open section cannot use goes to
- * Deploys' today's merges, then Hidden Workspaces, then older merges, the
+ * Deploys' today's merges, then the Backlog, then older merges, the
  * lowest open section's viewport reaches the rail's foot, and each section
  * scrolls the rest. jsdom lays nothing out, so this draws a rail in
  * the shape the sidebar draws it, in real headless WebKit over the real
@@ -55,7 +55,7 @@ function mergedGroups(merged: number, today: number, groups: number, opened: boo
 /** What a rail is drawn with: its rows per section, how many merges are today's, the merged groups, and the Open section's repositories. */
 interface Drawing {
   live: number;
-  hidden: number;
+  backlog: number;
   merged: number;
   today?: number;
   groups?: number;
@@ -65,7 +65,7 @@ interface Drawing {
 }
 
 /** A rail HEIGHT px tall, under the rail's head, drawn as DRAWING says. */
-function rail(height: number, { live, hidden, merged, today = merged, groups = 1, repos = 1, expanded = false }: Drawing): string {
+function rail(height: number, { live, backlog, merged, today = merged, groups = 1, repos = 1, expanded = false }: Drawing): string {
   const ids = (prefix: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${prefix}-${i}`);
   const repoSections = Array.from({ length: repos }, (_, r) => {
     const rows = ids("live", live).filter((_, i) => Math.floor((i * repos) / live) === r);
@@ -74,7 +74,7 @@ function rail(height: number, { live, hidden, merged, today = merged, groups = 1
   return `<nav id="ws-sidebar" style="height:${height}px"><div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster">
 <div class="sb-pane"><div class="repo open-section"><div class="repo-head"><span class="sb-label">Open</span></div><div class="sb-sections">${repoSections}</div></div>
 ${bandSection("merged-section", "Deploys", merged, merged === 0 ? "" : mergedGroups(merged, today, groups, expanded))}
-${bandSection("hidden-section", "Hidden Workspaces", hidden, ids("hidden", hidden).map((id) => wsRow(id, null)).join(""))}
+${bandSection("backlog-section", "Backlog", backlog, ids("backlog", backlog).map((id) => wsRow(id, null)).join(""))}
 </div></div></div></nav>`;
 }
 
@@ -94,7 +94,7 @@ interface Viewport {
 /** What one fitted rail measured. */
 interface Fitted {
   open: Viewport;
-  hidden: Viewport;
+  backlog: Viewport;
   merged: Viewport;
   railScrolls: boolean;
   /** The rail's room left under the pane, in px. */
@@ -138,7 +138,7 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
     const region = (selector: string): HTMLElement => document.querySelector(selector) as HTMLElement;
     return {
       open: measure(region(".open-section > .sb-sections")),
-      hidden: measure(region(".hidden-section > .rows")),
+      backlog: measure(region(".backlog-section > .rows")),
       merged: measure(region(".merged-section > .rows")),
       railScrolls: scroller.scrollHeight > scroller.clientHeight,
       slack:
@@ -219,83 +219,83 @@ describe("the band fit in WebKit", () => {
     await browser.close();
   });
 
-  it("shares six lines in a rail the Open section fills: Deploys' one folded group, Hidden Workspaces five", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
+  it("shares six lines in a rail the Open section fills: Deploys' one folded group, the Backlog five", async () => {
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20 }));
+    expect([got.backlog.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
-  it("keeps an open Deploys group's five rows under its header, taking Hidden Workspaces' lines", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, expanded: true }));
-    expect([got.hidden.whole, got.merged.whole, got.open.whole > 0]).toEqual([1, 5, true]);
+  it("keeps an open Deploys group's five rows under its header, taking the Backlog's lines", async () => {
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20, expanded: true }));
+    expect([got.backlog.whole, got.merged.whole, got.open.whole > 0]).toEqual([1, 5, true]);
   });
 
   it("scrolls the Open section in a rail it fills", async () => {
-    const got = await fit(page, rail(800, { live: 40, hidden: 20, merged: 20 }));
+    const got = await fit(page, rail(800, { live: 40, backlog: 20, merged: 20 }));
     expect([got.open.whole > 4, got.open.scrolls]).toEqual([true, true]);
   });
 
   it("never scrolls the rail itself", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20 }));
     expect(got.railScrolls).toBe(false);
   });
 
   it("cuts no line of the Open section or Deploys through in a rail out of room", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20 }));
     expect([got.open.cut, got.merged.cut]).toEqual([0, 0]);
   });
 
-  it("cuts at most Hidden Workspaces' last line through, at the rail's foot", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
-    expect(got.hidden.cut).toBeLessThanOrEqual(1);
+  it("cuts at most the Backlog's last line through, at the rail's foot", async () => {
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20 }));
+    expect(got.backlog.cut).toBeLessThanOrEqual(1);
   });
 
-  it("gives Hidden Workspaces all six lines beside an empty Deploys", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 0 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([6, 0]);
+  it("gives the Backlog all six lines beside an empty Deploys", async () => {
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 0 }));
+    expect([got.backlog.whole, got.merged.whole]).toEqual([6, 0]);
   });
 
-  it("gives Hidden Workspaces five lines beside the folded group of one merge today", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 1 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
+  it("gives the Backlog five lines beside the folded group of one merge today", async () => {
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 1 }));
+    expect([got.backlog.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
   it("shows no older merge while the Open section scrolls", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, today: 0 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20, today: 0 }));
+    expect([got.backlog.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
-  it("shrinks Hidden Workspaces before Deploys, at every short rail height", async () => {
+  it("shrinks the Backlog before Deploys, at every short rail height", async () => {
     // A line the rail still has room for is never left unused, so a Deploys
-    // line too tall for the room can leave a shorter Hidden line shown; but
-    // Hidden Workspaces never keeps its share while Deploys loses a line of
-    // its own, and some rail keeps Deploys whole while Hidden shrinks.
+    // line too tall for the room can leave a shorter Backlog line shown; but
+    // the Backlog never keeps its share while Deploys loses a line of
+    // its own, and some rail keeps Deploys whole while Backlog shrinks.
     const heights = Array.from({ length: 41 }, (_, i) => 150 + i * 5);
     const fitted = [];
-    for (const height of heights) fitted.push(await fit(page, rail(height, { live: 40, hidden: 20, merged: 20, expanded: true })));
+    for (const height of heights) fitted.push(await fit(page, rail(height, { live: 40, backlog: 20, merged: 20, expanded: true })));
     expect([
-      fitted.some((got) => got.merged.whole < 3 && got.hidden.whole >= 3),
-      fitted.some((got) => got.merged.whole === 3 && got.hidden.whole < 3),
+      fitted.some((got) => got.merged.whole < 3 && got.backlog.whole >= 3),
+      fitted.some((got) => got.merged.whole === 3 && got.backlog.whole < 3),
     ]).toEqual([false, true]);
   });
 
   it("shows open Deploys groups' five rows across several repositories", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, groups: 3, expanded: true }));
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20, groups: 3, expanded: true }));
     expect(got.merged.whole).toBe(5);
   });
 
   it("never leaves a group's header dangling at a viewport's foot", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, groups: 6, expanded: true }));
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20, groups: 6, expanded: true }));
     expect([got.open.danglingHead, got.merged.danglingHead]).toEqual([false, false]);
   });
 
   it("scrolls both bands in a rail out of room", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, expanded: true }));
-    expect([got.hidden.scrolls, got.merged.scrolls]).toEqual([true, true]);
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20, expanded: true }));
+    expect([got.backlog.scrolls, got.merged.scrolls]).toEqual([true, true]);
   });
 
   it("shows every line of every section, unscrolled, in a rail that holds them", async () => {
-    const got = await fit(page, rail(880, { live: 2, hidden: 4, merged: 5, expanded: true }));
-    expect([got.open.whole, got.open.scrolls, got.hidden.whole, got.hidden.scrolls, got.merged.whole, got.merged.scrolls]).toEqual([
+    const got = await fit(page, rail(880, { live: 2, backlog: 4, merged: 5, expanded: true }));
+    expect([got.open.whole, got.open.scrolls, got.backlog.whole, got.backlog.scrolls, got.merged.whole, got.merged.scrolls]).toEqual([
       2,
       false,
       4,
@@ -306,14 +306,14 @@ describe("the band fit in WebKit", () => {
   });
 
   it("keeps the rail's head its own height when the rows overflow", async () => {
-    const short = await railBoxes(page, rail(400, { live: 1, hidden: 1, merged: 1 }));
-    const overflowing = await railBoxes(page, rail(400, { live: 40, hidden: 20, merged: 20 }));
+    const short = await railBoxes(page, rail(400, { live: 1, backlog: 1, merged: 1 }));
+    const overflowing = await railBoxes(page, rail(400, { live: 40, backlog: 20, merged: 20 }));
     expect(overflowing.head).toBe(short.head);
   });
 
   it("gives the rail's scroller the same height however many rows it holds", async () => {
-    const short = await railBoxes(page, rail(400, { live: 1, hidden: 1, merged: 1 }));
-    const overflowing = await railBoxes(page, rail(400, { live: 40, hidden: 20, merged: 20 }));
+    const short = await railBoxes(page, rail(400, { live: 1, backlog: 1, merged: 1 }));
+    const overflowing = await railBoxes(page, rail(400, { live: 40, backlog: 20, merged: 20 }));
     expect(overflowing.scroller).toBe(short.scroller);
   });
 
@@ -321,26 +321,26 @@ describe("the band fit in WebKit", () => {
     // Every pixel of rail height crosses every line boundary of every
     // section, from a rail too short for the bands' share to one holding all.
     const heights = Array.from({ length: 701 }, (_, i) => 200 + i);
-    expect(await unsettled(page, heights, { live: 12, hidden: 9, merged: 9, today: 4 })).toEqual([]);
+    expect(await unsettled(page, heights, { live: 12, backlog: 9, merged: 9, today: 4 })).toEqual([]);
     // MEASURED: 1,402 fits in one page pass run 1.0-1.2s healthy since each
     // fit also reads the open Deploys groups' floor (2026-10-27), at and over the
     // suite's 850ms. Its own bound is just over twice that.
   }, 2_500);
 
-  it("grows an open Deploys group's merges of today, not Hidden Workspaces, into the room a whole Open section leaves", async () => {
-    const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40, expanded: true }));
-    // Hidden Workspaces, the lowest section, keeps only the line at the
+  it("grows an open Deploys group's merges of today, not the Backlog, into the room a whole Open section leaves", async () => {
+    const got = await fit(page, rail(880, { live: 2, backlog: 40, merged: 40, expanded: true }));
+    // the Backlog, the lowest section, keeps only the line at the
     // rail's foot that no further merged row fits in.
-    expect([got.merged.whole > 6, got.hidden.whole, got.railScrolls]).toEqual([true, 1, false]);
+    expect([got.merged.whole > 6, got.backlog.whole, got.railScrolls]).toEqual([true, 1, false]);
   });
 
-  it("grows Hidden Workspaces, not older merges, into the room a whole Open section leaves", async () => {
-    const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40, today: 0, expanded: true }));
+  it("grows the Backlog, not older merges, into the room a whole Open section leaves", async () => {
+    const got = await fit(page, rail(880, { live: 2, backlog: 40, merged: 40, today: 0, expanded: true }));
     // Older merges past the open group's five rows take only the room left
-    // too short for one more Hidden line: a merged line is drawn shorter than
-    // a Hidden one, so that room may still hold one.
+    // too short for one more Backlog line: a merged line is drawn shorter than
+    // a Backlog one, so that room may still hold one.
     const olderPastFloor = got.merged.whole - 5;
-    expect([got.hidden.whole > 5, olderPastFloor >= 0, olderPastFloor * got.merged.line < got.hidden.line, got.railScrolls]).toEqual([
+    expect([got.backlog.whole > 5, olderPastFloor >= 0, olderPastFloor * got.merged.line < got.backlog.line, got.railScrolls]).toEqual([
       true,
       true,
       true,
@@ -348,33 +348,33 @@ describe("the band fit in WebKit", () => {
     ]);
   });
 
-  it("grows older merges into the room a whole Open section and Hidden Workspaces leave", async () => {
-    const got = await fit(page, rail(880, { live: 2, hidden: 4, merged: 40, today: 0, expanded: true }));
-    expect([got.hidden.whole, got.merged.whole > 3, got.railScrolls]).toEqual([4, true, false]);
+  it("grows older merges into the room a whole Open section and the Backlog leave", async () => {
+    const got = await fit(page, rail(880, { live: 2, backlog: 4, merged: 40, today: 0, expanded: true }));
+    expect([got.backlog.whole, got.merged.whole > 3, got.railScrolls]).toEqual([4, true, false]);
   });
 
   it("reaches the rail's foot at every rail height while a band scrolls", async () => {
     const heights = Array.from({ length: 31 }, (_, i) => 400 + i * 7);
     const short: number[] = [];
     for (const height of heights) {
-      const got = await fit(page, rail(height, { live: 12, repos: 4, hidden: 20, merged: 20, today: 0 }));
+      const got = await fit(page, rail(height, { live: 12, repos: 4, backlog: 20, merged: 20, today: 0 }));
       if (Math.abs(got.slack) > 0.5) short.push(height);
     }
     expect(short).toEqual([]);
   });
 
   it("fades the foot of a capped Deploys viewport while rows lie below it", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, expanded: true }));
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20, expanded: true }));
     expect(got.mergedMask.fitted).toContain("linear-gradient");
   });
 
   it("drops the fade once Deploys is scrolled to its end", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, expanded: true }));
+    const got = await fit(page, rail(500, { live: 40, backlog: 20, merged: 20, expanded: true }));
     expect(got.mergedMask.atEnd).toBe("none");
   });
 
   it("reaches the rail's foot when every line fits", async () => {
-    const got = await fit(page, rail(880, { live: 2, hidden: 2, merged: 2 }));
+    const got = await fit(page, rail(880, { live: 2, backlog: 2, merged: 2 }));
     expect(Math.abs(got.slack)).toBeLessThanOrEqual(0.5);
   });
 });

@@ -38,7 +38,7 @@
  * HIDING THE WORKSPACE IS NOT A REMEDIATION (owner request, 2026-10-13). The
  * light grey "hide workspace" button past pay sends `SetWorkspaceBacklogged`
  * — the same hide `SPC TAB h` sends, which moves the workspace into the
- * sidebar's hidden section and lands the user elsewhere — and answers nothing
+ * sidebar's backlog and lands the user elsewhere — and answers nothing
  * about the gate: the gate keeps standing for whenever the workspace is shown
  * again.
  *
@@ -96,7 +96,7 @@ import {
   buildKillWorkspaceRequest,
   buildSetWorkspaceBackloggedRequest,
   KILL_WORKSPACE_SENTENCES,
-  SET_WORKSPACE_HIDDEN_SENTENCES,
+  SET_WORKSPACE_BACKLOGGED_SENTENCES,
 } from "../../sidebar/verbs.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -139,7 +139,7 @@ export const COLD_GATE_COPY = {
   },
   hide: {
     label: "hide workspace",
-    hint: "move this workspace to the sidebar's hidden section; the gate stands until it is shown again",
+    hint: "move this workspace to the sidebar's backlog; the gate stands until it is shown again",
   },
   kill: {
     label: "kill workspace",
@@ -702,7 +702,7 @@ function hideWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly C
     rpc: "SetWorkspaceBacklogged",
     call: (client) => client.setWorkspaceBacklogged(buildSetWorkspaceBackloggedRequest(rc.ctx.workspace, true)),
     schema: SetWorkspaceBackloggedResponseSchema,
-    own: SET_WORKSPACE_HIDDEN_SENTENCES,
+    own: SET_WORKSPACE_BACKLOGGED_SENTENCES,
   });
 }
 

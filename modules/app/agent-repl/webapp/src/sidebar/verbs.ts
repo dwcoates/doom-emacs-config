@@ -788,7 +788,7 @@ export const KILL_WORKSPACE_SENTENCES = {
  * SetWorkspaceBacklogged's own arms: the family rules a hide and a show keep. A
  * table, for the cold gate's hide as for KILL_WORKSPACE_SENTENCES.
  */
-export const SET_WORKSPACE_HIDDEN_SENTENCES = {
+export const SET_WORKSPACE_BACKLOGGED_SENTENCES = {
   hasOpenChildren: (v: WorkspaceHasOpenChildren) =>
     hasOpenChildrenSentence(v, "SetWorkspaceBackloggedError.has_open_children", "hide"),
   parentNotOpen: (v: WorkspaceParentNotOpen) =>
@@ -800,9 +800,9 @@ export function killWorkspaceRefusal(cause: CauseOf<KillWorkspaceError>): string
   return refusalOf(cause, KILL_WORKSPACE_SENTENCES, "KillWorkspaceError.cause").text;
 }
 
-/** SetWorkspaceBacklogged's refusal, worded from SET_WORKSPACE_HIDDEN_SENTENCES. */
+/** SetWorkspaceBacklogged's refusal, worded from SET_WORKSPACE_BACKLOGGED_SENTENCES. */
 export function setWorkspaceBackloggedRefusal(cause: CauseOf<SetWorkspaceBackloggedError>): string {
-  return refusalOf(cause, SET_WORKSPACE_HIDDEN_SENTENCES, "SetWorkspaceBackloggedError.cause").text;
+  return refusalOf(cause, SET_WORKSPACE_BACKLOGGED_SENTENCES, "SetWorkspaceBackloggedError.cause").text;
 }
 
 /** FinishWorkspace's own arms, in plain words. */
@@ -1017,16 +1017,16 @@ export function buildSetWorkspacePriorityRequest(
 }
 
 /**
- * SetWorkspaceBacklogged: into the hidden section when HIDDEN, back out otherwise.
+ * SetWorkspaceBacklogged: into the backlog when BACKLOGGED, back out otherwise.
  * The arm is the place asked for, never a flag beside it.
  */
 export function buildSetWorkspaceBackloggedRequest(
   workspace: WorkspaceRef,
-  hidden: boolean,
+  backlogged: boolean,
 ): SetWorkspaceBackloggedRequest {
   return create(SetWorkspaceBackloggedRequestSchema, {
     workspace,
-    visibility: hidden ? { case: "hide", value: {} } : { case: "show", value: {} },
+    visibility: backlogged ? { case: "hide", value: {} } : { case: "show", value: {} },
   });
 }
 

@@ -50,7 +50,7 @@ import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, inRail, installStylesheet, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/section-classes.js";
+import { BACKLOG_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/section-classes.js";
 import { DEPLOYS_GROUP_CLASS } from "../src/sidebar/deploys-fold.js";
 import { MERGED_GROUP_HEAD_CLASS } from "../src/sidebar/roster.js";
 import { LABEL_LINK_CLASS } from "../src/feed/entries.js";
@@ -1930,7 +1930,7 @@ describe("regression: the response/prompt bubble collapse model", () => {
 
     // Assert — none of them collapses an assistant/user bubble's scroll box, so
     // the response/prompt bubble keeps its capped-preview model, not the tool
-    // cards' hidden-section one.
+    // cards' backlog-section one.
     // A folded held card's thumbnail (src/bubble/collapsed-thumbnail.ts)
     // hides a block inside the body, never the body.
     const insideBox = (one: string): boolean => /\.bubble-body\s*>\s*\S/.test(one);
@@ -7098,7 +7098,7 @@ describe("a band header's hover box, folded or open", () => {
   function bands(band: string, folded: boolean): HTMLElement {
     const pane = document.createElement("div");
     pane.className = "sb-pane";
-    for (const cls of [MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, HIDDEN_SECTION_CLASS]) {
+    for (const cls of [MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, BACKLOG_SECTION_CLASS]) {
       const section = document.createElement("div");
       section.className = `repo ${cls}`;
       if (cls === band && folded) section.classList.add(FOLDED_CLASS);

@@ -301,7 +301,7 @@ function mountSidebarIn(
       changed: () => redraw(),
     }),
   };
-  // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
+  // THE BAND FIT (band-fit.ts): the Open, Backlog and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
   // or a pane, and when the local date turns over.
   // A RESIZE KEEPS THE SELECTED ROW IN VIEW (selection-scroll.ts): the
@@ -392,7 +392,7 @@ function mountSidebarIn(
   // USER IS DONE WITH THE RAIL (deploys-fold.ts): the focus gone from the
   // page, or a workspace outside the groups clicked.
   const removeDeploysFoldReset = installDeploysFoldReset(host, rail.deploysFold, focusLeft);
-  // RECENTLY MERGED AND HIDDEN FOLD THEMSELVES as the focus leaves the page
+  // RECENTLY MERGED AND THE BACKLOG FOLD THEMSELVES as the focus leaves the page
   // (section-fold.ts, owner request 2026-11-01), through a scope of their own
   // that lives as long as the rail.
   const focusFoldScope = openScope(rail);

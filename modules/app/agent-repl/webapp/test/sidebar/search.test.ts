@@ -12,7 +12,7 @@ import {
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { withRepositoryBlocks } from "../roster-families.js";
 import {
-  hiddenSection,
+  backlogSection,
   mergedBand,
   mergedGroup,
   mergedSection,
@@ -76,8 +76,8 @@ describe("applySearch", () => {
     expect(missed(root.querySelector(".sb-pane") as Element, "ws-1")).toEqual([false]);
   });
 
-  it("narrows Hidden Workspaces", () => {
-    const root = drawn({ hidden: hiddenSection([row({ id: "ws-h", name: "alpha" })]) });
+  it("narrows Backlog", () => {
+    const root = drawn({ backlog: backlogSection([row({ id: "ws-h", name: "alpha" })]) });
     applySearch(root, "beta");
     expect(missed(root, "ws-h")).toEqual([true]);
   });

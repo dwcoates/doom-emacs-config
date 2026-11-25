@@ -1054,7 +1054,7 @@ body {
      between the label and the add control, in the label's color, present
      while the section is folded (owner request, 2026-10-02). A repository
      section under OPEN shows it folded or not (owner request, 2026-10-15),
-     and so does Hidden Workspaces, whose count is every row it holds,
+     and so does Backlog, whose count is every row it holds,
      scrolled out of its viewport or not (owner request, 2026-10-19).
    - The Merge Queue and Recently Merged sections' headers carry no "(N)"
      (owner requests, 2026-10-27 and 2026-11-01): each Recently Merged group
@@ -1063,7 +1063,7 @@ body {
      repository groups, below).
    - The open workspaces section's "(N)" takes the same grey and shows whether
      the section is folded or not (owner request, 2026-10-13;
-     src/sidebar/roster.ts drawRosterOpenSection), and so does Hidden
+     src/sidebar/roster.ts drawRosterOpenSection), and so does the Backlog
      Workspaces' (owner request, 2026-10-19). */
 #ws-sidebar .repo-head .sb-count,
 #ws-sidebar .repo-head .sb-open-count,
@@ -1074,10 +1074,10 @@ body {
 }
 #ws-sidebar .repo.folded > .repo-head .sb-count,
 #ws-sidebar .repo.repo-section > .repo-head .sb-count,
-#ws-sidebar .repo.hidden-section > .repo-head .sb-count { display: inline; }
+#ws-sidebar .repo.backlog-section > .repo-head .sb-count { display: inline; }
 #ws-sidebar .repo-head .sb-open-count,
 #ws-sidebar .merged-group-head .sb-open-count,
-#ws-sidebar .repo.hidden-section > .repo-head .sb-count { color: var(--muted); }
+#ws-sidebar .repo.backlog-section > .repo-head .sb-count { color: var(--muted); }
 /* THE MERGE QUEUES (owner requests, 2026-10-25 and 2026-10-26;
    src/sidebar/merge-queue-view.ts): the Merge Queue section draws each
    repository's queue, under the repository's label, as a small merge bubble
@@ -1508,10 +1508,10 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .sb-gutter[data-recency-presses="2"] { --gutter-strength: 27%; }
 
 /* THE BANDS UNDER THE REPOSITORY SECTIONS -- Merge Queue, Recently Merged,
-   then Hidden Workspaces (owner requests, 2026-10-27: the queues and merges
-   moved above Hidden; 2026-11-01: split into two sections) -- hold no repository's section, so each is set off from the list above by
+   then Backlog (owner requests, 2026-10-27: the queues and merges
+   moved above the Backlog; 2026-11-01: split into two sections) -- hold no repository's section, so each is set off from the list above by
    ONE shared light rule. Both bands' headers are drawn purple: Recently
-   Merged's matches its rows' dots, and Hidden's matches Recently Merged's
+   Merged's matches its rows' dots, and the Backlog's matches Recently Merged's
    (owner request, 2026-10-11), and so is the open workspaces section's header
    above the repository sections (owner request, 2026-10-13). The purple is THE
    ONE PURPLE, the purple status --blocked (owner ruling, 2026-10-17). The rows
@@ -1523,7 +1523,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    length below is the gap less the space a box puts between its edge and its
    text. Those spaces are the rail's font's own, MEASURED in WebKit against
    the line each rule most often follows (a row or a folded subsection above
-   Deploys, a folded Deploys group above Hidden): a header's padding sits
+   Deploys, a folded Deploys group above the Backlog): a header's padding sits
    above its cap top, a row's line box reaches below its baseline, and a
    folded group's header ends at its baseline less its bottom padding. */
 #ws-sidebar {
@@ -1533,7 +1533,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
      the rail's sections (owner request, 2026-10-31). */
   --inside-rule-gap: calc(var(--rule-gap) * 0.6);
 }
-#ws-sidebar .repo.hidden-section,
+#ws-sidebar .repo.backlog-section,
 #ws-sidebar .repo.merge-queue-section,
 #ws-sidebar .repo.merged-section {
   padding-top: 0;
@@ -1559,14 +1559,14 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    does. */
 #ws-sidebar {
   --merged-rule-lead: calc(var(--rule-gap) - 3.3px);
-  --hidden-rule-lead: calc(var(--rule-gap) - 0.8px);
+  --backlog-rule-lead: calc(var(--rule-gap) - 0.8px);
 }
 /* MERGE QUEUE AND RECENTLY MERGED (owner request, 2026-11-01) each stand
-   under a queue line or a row, as Deploys did, and so does Hidden under an
+   under a queue line or a row, as Deploys did, and so does the Backlog under an
    open Recently Merged group's last row. */
 #ws-sidebar .repo.merge-queue-section,
 #ws-sidebar .repo.merged-section,
-#ws-sidebar .repo.hidden-section { margin-top: var(--merged-rule-lead); }
+#ws-sidebar .repo.backlog-section { margin-top: var(--merged-rule-lead); }
 /* A FOLDED SECTION'S HEADER SPANS RULE TO RULE (owner request, 2026-10-31):
    its hover wash fills the whole band between the rule above it and the rule
    below, with no strip left bare at either edge. The space above the next
@@ -1575,12 +1575,12 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    padding; every line stands exactly where it stood. */
 #ws-sidebar .repo.folded + .repo.merge-queue-section,
 #ws-sidebar .repo.folded + .repo.merged-section,
-#ws-sidebar .repo.folded + .repo.hidden-section { margin-top: 0; }
+#ws-sidebar .repo.folded + .repo.backlog-section { margin-top: 0; }
 #ws-sidebar .repo.open-section.folded:has(+ .repo:is(.merge-queue-section, .merged-section)) > .repo-head {
   padding-bottom: calc(var(--repo-head-pad-bottom) + var(--merged-rule-lead));
 }
-#ws-sidebar .repo.open-section.folded:has(+ .repo.hidden-section) > .repo-head {
-  padding-bottom: calc(var(--repo-head-pad-bottom) + var(--hidden-rule-lead));
+#ws-sidebar .repo.open-section.folded:has(+ .repo.backlog-section) > .repo-head {
+  padding-bottom: calc(var(--repo-head-pad-bottom) + var(--backlog-rule-lead));
 }
 /* A BAND HEADER'S HOVER BOX IS ONE BOX, FOLDED OR OPEN (owner request,
    2026-11-17): Merge Queue's and Recently Merged's header keeps the bottom
@@ -1589,19 +1589,19 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    starts below that box (the first group's name, below) rather than eating
    into it. */
 #ws-sidebar .repo:is(.merge-queue-section, .merged-section) > .repo-head {
-  padding-bottom: var(--hidden-rule-lead);
+  padding-bottom: var(--backlog-rule-lead);
 }
 #ws-sidebar .sb-scroll:has(> .sb-roster) { padding-top: 0; }
 #ws-sidebar .repo.open-section > .repo-head { padding-top: calc(var(--repo-head-pad-top) + var(--rail-body-pad-top)); }
 /* Below the rule: the gap less the 3.6px a band header's line puts above
-   its cap top (Hidden's count line, 2.6px). */
+   its cap top (the Backlog's count line, 2.6px). */
 #ws-sidebar .repo:is(.merge-queue-section, .merged-section) > .repo-head { padding-top: calc(var(--rule-gap) - 3.6px); }
-#ws-sidebar .repo.hidden-section > .repo-head { padding-top: calc(var(--rule-gap) - 2.6px); }
+#ws-sidebar .repo.backlog-section > .repo-head { padding-top: calc(var(--rule-gap) - 2.6px); }
 /* EACH SECTION'S ROWS SCROLL once the rail is out of room (owner requests,
    2026-10-11 and 2026-10-18): src/sidebar/band-fit.ts caps the rows region's
    height at a whole number of lines, and the rest scroll inside it. */
 #ws-sidebar .repo.open-section > .sb-sections,
-#ws-sidebar .repo.hidden-section > .rows,
+#ws-sidebar .repo.backlog-section > .rows,
 #ws-sidebar .repo.merge-queue-section > .rows,
 #ws-sidebar .repo.merged-section > .rows {
   overflow-y: auto;
@@ -1611,11 +1611,11 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    last line through (band-fit.ts). While rows lie below that edge, its last
    strip, about one row tall, fades to nothing. Pure paint: a mask takes no
    part in layout or hit testing, so a faded row is still clickable.
-   HIDDEN WORKSPACES FADES THE SAME WAY WHENEVER IT SCROLLS (owner request,
+   THE BACKLOG FADES THE SAME WAY WHENEVER IT SCROLLS (owner request,
    2026-10-20): stretched or capped at whole lines, while rows lie below its
    viewport's edge its last strip fades as the lowest section's does, and so
    does Deploys (owner request, 2026-10-27), which stands between the Open
-   section and Hidden Workspaces.
+   section and Backlog.
    SO DOES THE OPEN SECTION (owner request, 2026-10-23): capped above the
    bands or stretched to the foot, its last strip fades while rows lie below.
    THE FADED STRIP IS SCROLL PADDING (owner request, 2026-10-26): it is out of
@@ -1625,7 +1625,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 #ws-sidebar .repo[data-band-stretched][data-band-more] > .rows,
 #ws-sidebar .repo.merge-queue-section[data-band-more] > .rows,
 #ws-sidebar .repo.merged-section[data-band-more] > .rows,
-#ws-sidebar .repo.hidden-section[data-band-more] > .rows,
+#ws-sidebar .repo.backlog-section[data-band-more] > .rows,
 #ws-sidebar .repo.open-section[data-band-more] > .sb-sections {
   mask-image: linear-gradient(to bottom, #000 calc(100% - var(--band-foot-fade)), transparent 100%);
   scroll-padding-bottom: var(--band-foot-fade);
@@ -1670,7 +1670,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 #ws-sidebar .repo.open-section > .repo-head,
-#ws-sidebar .repo.hidden-section > .repo-head,
+#ws-sidebar .repo.backlog-section > .repo-head,
 #ws-sidebar .repo.merge-queue-section > .repo-head,
 #ws-sidebar .repo.merged-section > .repo-head { color: var(--blocked); }
 /* A REPOSITORY'S NAME IS FLANKED BY RULES (owner request, 2026-10-27), a
@@ -1904,7 +1904,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    same message. `viewed.ts` decides which rows
    carry the class. */
 #ws-sidebar .row .name.viewed { --name-rest: var(--muted); color: var(--muted); }
-/* A BAND ROW'S NAME -- Recently Merged and Hidden alike -- is drawn in the
+/* A BAND ROW'S NAME -- Recently Merged and the Backlog alike -- is drawn in the
    repository section headers' colour (owner requests, 2026-10-03 and
    2026-10-13); a merged row's timestamp keeps its grey. */
 #ws-sidebar .row .name.band-name { --name-rest: var(--repo-head-expanded); color: var(--repo-head-expanded); }
@@ -1980,7 +1980,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
 }
-/* EVERY WHEN-COLUMN READS IN ONE GREY (owner request, 2026-10-13): a Hidden
+/* EVERY WHEN-COLUMN READS IN ONE GREY (owner request, 2026-10-13): a backlogged
    or Recently Merged row's when-column is the muted grey under its row's
    receded opacity, so an unreceded row's takes that same opacity on the
    column alone, and the two composite to the same colour. */
@@ -2117,7 +2117,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 }
 
 /* A RECEDED ROW stays listed but steps back: a closed (or merged)
-   workspace, and a hidden one (owner request, 2026-10-13: a Hidden row reads
+   workspace, and a backlogged one (owner request, 2026-10-13: a backlogged row reads
    in exactly the grey a Recently Merged row does, which is the band name
    colour at this opacity). The row's PARTS recede rather than the row, so
    one part can stand clear of it: A COLD CACHE READS IN THE FULL RED STATUS

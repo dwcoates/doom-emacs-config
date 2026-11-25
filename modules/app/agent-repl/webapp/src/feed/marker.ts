@@ -201,7 +201,7 @@ function markerHead(m: FeedOutcomeMarker, path: string): HTMLElement[] {
   return [glyph, text];
 }
 
-/** A fault's expansion as the card fold's hidden section. */
+/** A fault's expansion as the card fold's backlog. */
 function foldExpansion(expansion: HTMLElement): HTMLElement {
   expansion.classList.add("tool-output");
   return expansion;

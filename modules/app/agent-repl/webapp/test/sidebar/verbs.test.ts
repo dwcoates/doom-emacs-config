@@ -175,8 +175,8 @@ describe("the requests each verb is", () => {
   it.each([
     [true, "hide"],
     [false, "show"],
-  ] as const)("asks hidden=%s as the %s arm", (hidden, arm) => {
-    const request = buildSetWorkspaceBackloggedRequest(TARGET_WS, hidden);
+  ] as const)("asks backlogged=%s as the %s arm", (backlogged, arm) => {
+    const request = buildSetWorkspaceBackloggedRequest(TARGET_WS, backlogged);
     expect([request.workspace, request.visibility.case]).toEqual([TARGET_WS, arm]);
   });
 
@@ -302,7 +302,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   deployConfigInvalid: { path: "/r/.agent-repl/deploy.yaml", detail: "pre_deploy is required" },
   briefMissing: { detail: "the workspace-merge-revert brief is unreadable" },
   hasOpenChildren: { parent: { id: "p", dir: "/w/parent" }, children: [{ id: "c", dir: "/w/child" }] },
-  parentNotOpen: { parent: { id: "p", dir: "/w/parent" }, state: { case: "hidden", value: {} } },
+  parentNotOpen: { parent: { id: "p", dir: "/w/parent" }, state: { case: "backlogged", value: {} } },
 };
 
 /** One verb, enough to issue it and to enumerate what it can refuse with. */

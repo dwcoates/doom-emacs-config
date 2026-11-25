@@ -2,10 +2,10 @@
 /**
  * THE SECTION FIT (owner requests, 2026-10-11, 2026-10-18 and 2026-10-27):
  * the rail never scrolls. Once it is out of room, the Open section lengthens
- * until Deploys and Hidden Workspaces below it are left three lines each, the
+ * until Deploys and the Backlog below it are left three lines each, the
  * two sharing those six lines, and each section scrolls the rest. Deploys
  * claims room only for its queues and today's merges, and a short rail
- * shrinks Hidden Workspaces before it. The lowest open section
+ * shrinks the Backlog before it. The lowest open section
  * reaches the rail's foot, its cut line fading out. jsdom lays nothing out, so
  * `laidOut` states the geometry the engine would give: a rail SCROLLER px
  * tall, a pane whose content other than the sections' rows regions is
@@ -42,7 +42,7 @@ import { fireResize } from "../resize-observer.js";
 import {
   NOW,
   fakeTicker,
-  hiddenSection,
+  backlogSection,
   mergedSection,
   mergeQueueBand,
   mergingHead,
@@ -68,11 +68,11 @@ function stops(n: number): number[] {
 /** What a rail is drawn with: its rows per section, how many merges are today's, and the folds. */
 interface Drawing {
   open?: number;
-  hidden?: number;
+  backlog?: number;
   merged?: number;
   /** How many of the merged rows, the first ones, landed today. */
   today?: number;
-  folded?: { open?: boolean; hidden?: boolean; merged?: boolean };
+  folded?: { open?: boolean; backlog?: boolean; merged?: boolean };
   /** Whether the Recently Merged group stays open, as it is drawn, or was folded by hand (deploys-fold.ts); open unless said. */
   expanded?: boolean;
   /** How many lines the Merge Queue section's one queue draws, its head and the merges waiting; none unless said. */
@@ -80,10 +80,10 @@ interface Drawing {
 }
 
 /** A rail drawn as DRAWING says. */
-function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expanded = true, queued = 0 }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
+function drawn({ open = 0, backlog = 0, merged = 0, today = 0, folded = {}, expanded = true, queued = 0 }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
   const folds = createDeploysFold(document, () => undefined);
   const openRows = Array.from({ length: open }, (_, i) => row({ id: `o-${i}` }));
-  const backlogRows = Array.from({ length: hidden }, (_, i) => row({ id: `h-${i}` }));
+  const backlogRows = Array.from({ length: backlog }, (_, i) => row({ id: `h-${i}` }));
   const mergedRows = Array.from({ length: merged }, (_, i) =>
     row({
       id: `m-${i}`,
@@ -99,7 +99,7 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expan
       roster({
         repos: open === 0 ? [] : [repoSection({ id: "alpha", rows: openRows })],
         open: openSection(folded.open ?? false),
-        hidden: hiddenSection(backlogRows, hidden, folded.hidden ?? false),
+        backlog: backlogSection(backlogRows, backlog, folded.backlog ?? false),
         merged: mergedSection(mergedRows, folded.merged ?? false),
         mergeQueue: mergeQueueBand(
           queued === 0
@@ -126,7 +126,7 @@ function rect(top: number, height: number): DOMRect {
 const REGIONS = {
   "open-section": ":scope > .sb-sections",
   "merge-queue-section": ":scope > .rows",
-  "hidden-section": ":scope > .rows",
+  "backlog-section": ":scope > .rows",
   "merged-section": ":scope > .rows",
 } as const;
 
@@ -180,10 +180,10 @@ function railHeight(scroller: HTMLElement, rail: number): void {
   scroller.getBoundingClientRect = () => rect(0, rail);
 }
 
-const SECTIONS: SectionClass[] = ["open-section", "merged-section", "hidden-section"];
+const SECTIONS: SectionClass[] = ["open-section", "merged-section", "backlog-section"];
 
 /** Every section the fit lays out, the Merge Queue section's included, top to bottom. */
-const LAID_OUT: SectionClass[] = ["open-section", "merge-queue-section", "merged-section", "hidden-section"];
+const LAID_OUT: SectionClass[] = ["open-section", "merge-queue-section", "merged-section", "backlog-section"];
 
 /**
  * State the layout: the rail's height and the pane's other content. OTHERS
@@ -223,20 +223,20 @@ function heights(pane: HTMLElement): string[] {
 
 /** What `allocateSectionLines` is handed: sections of O, H and M lines, TODAY of M today's. */
 function sections(o: number, h: number, m: number, today = 0, floor = 0) {
-  return { open: stops(o), hidden: stops(h), merged: stops(m), mergedToday: today, mergedFloor: floor };
+  return { open: stops(o), backlog: stops(h), merged: stops(m), mergedToday: today, mergedFloor: floor };
 }
 
 describe("bandShare", () => {
   it.each([
-    { name: "three lines each to two long bands", hidden: 10, today: 10, want: { hidden: 3, merged: 3 } },
-    { name: "five to Hidden Workspaces beside one merge today", hidden: 10, today: 1, want: { hidden: 5, merged: 1 } },
-    { name: "four to Hidden Workspaces beside two merges today", hidden: 10, today: 2, want: { hidden: 4, merged: 2 } },
-    { name: "a short Hidden Workspaces' lines to today's merges", hidden: 2, today: 10, want: { hidden: 2, merged: 4 } },
-    { name: "only the lines two short bands need", hidden: 3, today: 2, want: { hidden: 3, merged: 2 } },
-    { name: "nothing to two empty bands", hidden: 0, today: 0, want: { hidden: 0, merged: 0 } },
-  ])("shares $name", ({ hidden, today, want }) => {
+    { name: "three lines each to two long bands", backlog: 10, today: 10, want: { backlog: 3, merged: 3 } },
+    { name: "five to the Backlog beside one merge today", backlog: 10, today: 1, want: { backlog: 5, merged: 1 } },
+    { name: "four to the Backlog beside two merges today", backlog: 10, today: 2, want: { backlog: 4, merged: 2 } },
+    { name: "a short the Backlog's lines to today's merges", backlog: 2, today: 10, want: { backlog: 2, merged: 4 } },
+    { name: "only the lines two short bands need", backlog: 3, today: 2, want: { backlog: 3, merged: 2 } },
+    { name: "nothing to two empty bands", backlog: 0, today: 0, want: { backlog: 0, merged: 0 } },
+  ])("shares $name", ({ backlog, today, want }) => {
     // Arrange / Act
-    const got = bandShare(today, hidden);
+    const got = bandShare(today, backlog);
     // Assert
     expect(got).toEqual(want);
   });
@@ -268,41 +268,41 @@ describe("splitLines", () => {
 
 describe("allocateSectionLines", () => {
   it.each([
-    { name: "every section whole when all fit", room: 12 * ROW, s: sections(2, 4, 6), want: { open: 2, hidden: 4, merged: 6 } },
-    { name: "the Open section all but three lines of each band", room: 20 * ROW, s: sections(40, 40, 40, 40), want: { open: 14, hidden: 3, merged: 3 } },
-    { name: "five lines to Hidden Workspaces beside one merge today", room: 20 * ROW, s: sections(40, 40, 1, 1), want: { open: 14, hidden: 5, merged: 1 } },
-    { name: "four lines to Hidden Workspaces beside two merges today", room: 20 * ROW, s: sections(40, 40, 2, 2), want: { open: 14, hidden: 4, merged: 2 } },
-    { name: "no line to older merges while the Open section scrolls", room: 20 * ROW, s: sections(40, 2, 10, 0), want: { open: 18, hidden: 2, merged: 0 } },
-    { name: "the lines reaching today's merges, older ones above them", room: 20 * ROW, s: sections(40, 40, 10, 2), want: { open: 14, hidden: 4, merged: 2 } },
-    { name: "older merges the room a whole Open and Hidden leave", room: 10 * ROW, s: sections(3, 2, 30, 0), want: { open: 3, hidden: 2, merged: 5 } },
-    { name: "Hidden Workspaces grown before older merges", room: 10 * ROW, s: sections(2, 10, 10, 0), want: { open: 2, hidden: 8, merged: 0 } },
-    { name: "today's merges grown before Hidden Workspaces", room: 13 * ROW, s: sections(2, 20, 20, 20), want: { open: 2, hidden: 3, merged: 8 } },
-    { name: "every merge the room a whole Hidden Workspaces leaves", room: 12 * ROW, s: sections(0, 1, 20, 9), want: { open: 0, hidden: 1, merged: 11 } },
-    { name: "a short rail's Hidden Workspaces shrunk first", room: 5 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 2, merged: 3 } },
-    { name: "a short rail's Hidden Workspaces shrunk away before Deploys gives a line", room: 2 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 2 } },
-    { name: "an open Deploys group's floor taken from Hidden Workspaces' share", room: 20 * ROW, s: sections(40, 40, 40, 0, 4), want: { open: 14, hidden: 2, merged: 4 } },
-    { name: "a floor of the whole share taken from Hidden Workspaces entirely", room: 20 * ROW, s: sections(40, 40, 40, 0, 6), want: { open: 14, hidden: 0, merged: 6 } },
-    { name: "a floor beyond the share taken from the Open section", room: 20 * ROW, s: sections(40, 40, 40, 0, 8), want: { open: 12, hidden: 0, merged: 8 } },
-    { name: "a floor shrunk only in a rail too short for it", room: 5 * ROW, s: sections(10, 10, 10, 0, 6), want: { open: 0, hidden: 0, merged: 5 } },
-    { name: "nothing in no room at all", room: -100, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 0 } },
-    { name: "a folded Open section's room to the bands", room: 9 * ROW, s: sections(0, 5, 40, 0), want: { open: 0, hidden: 5, merged: 4 } },
+    { name: "every section whole when all fit", room: 12 * ROW, s: sections(2, 4, 6), want: { open: 2, backlog: 4, merged: 6 } },
+    { name: "the Open section all but three lines of each band", room: 20 * ROW, s: sections(40, 40, 40, 40), want: { open: 14, backlog: 3, merged: 3 } },
+    { name: "five lines to the Backlog beside one merge today", room: 20 * ROW, s: sections(40, 40, 1, 1), want: { open: 14, backlog: 5, merged: 1 } },
+    { name: "four lines to the Backlog beside two merges today", room: 20 * ROW, s: sections(40, 40, 2, 2), want: { open: 14, backlog: 4, merged: 2 } },
+    { name: "no line to older merges while the Open section scrolls", room: 20 * ROW, s: sections(40, 2, 10, 0), want: { open: 18, backlog: 2, merged: 0 } },
+    { name: "the lines reaching today's merges, older ones above them", room: 20 * ROW, s: sections(40, 40, 10, 2), want: { open: 14, backlog: 4, merged: 2 } },
+    { name: "older merges the room a whole Open and Backlog leave", room: 10 * ROW, s: sections(3, 2, 30, 0), want: { open: 3, backlog: 2, merged: 5 } },
+    { name: "the Backlog grown before older merges", room: 10 * ROW, s: sections(2, 10, 10, 0), want: { open: 2, backlog: 8, merged: 0 } },
+    { name: "today's merges grown before the Backlog", room: 13 * ROW, s: sections(2, 20, 20, 20), want: { open: 2, backlog: 3, merged: 8 } },
+    { name: "every merge the room a whole Backlog leaves", room: 12 * ROW, s: sections(0, 1, 20, 9), want: { open: 0, backlog: 1, merged: 11 } },
+    { name: "a short rail's the Backlog shrunk first", room: 5 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, backlog: 2, merged: 3 } },
+    { name: "a short rail's the Backlog shrunk away before Deploys gives a line", room: 2 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, backlog: 0, merged: 2 } },
+    { name: "an open Deploys group's floor taken from the Backlog's share", room: 20 * ROW, s: sections(40, 40, 40, 0, 4), want: { open: 14, backlog: 2, merged: 4 } },
+    { name: "a floor of the whole share taken from the Backlog entirely", room: 20 * ROW, s: sections(40, 40, 40, 0, 6), want: { open: 14, backlog: 0, merged: 6 } },
+    { name: "a floor beyond the share taken from the Open section", room: 20 * ROW, s: sections(40, 40, 40, 0, 8), want: { open: 12, backlog: 0, merged: 8 } },
+    { name: "a floor shrunk only in a rail too short for it", room: 5 * ROW, s: sections(10, 10, 10, 0, 6), want: { open: 0, backlog: 0, merged: 5 } },
+    { name: "nothing in no room at all", room: -100, s: sections(10, 10, 10, 10), want: { open: 0, backlog: 0, merged: 0 } },
+    { name: "a folded Open section's room to the bands", room: 9 * ROW, s: sections(0, 5, 40, 0), want: { open: 0, backlog: 5, merged: 4 } },
     {
-      name: "the room a tall Open line cannot use to Hidden Workspaces",
+      name: "the room a tall Open line cannot use to the Backlog",
       room: 10 * ROW,
-      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(10), merged: stops(10), mergedToday: 0, mergedFloor: 0 },
-      want: { open: 2, hidden: 8, merged: 0 },
+      s: { open: [0, ROW, 2 * ROW, 5 * ROW], backlog: stops(10), merged: stops(10), mergedToday: 0, mergedFloor: 0 },
+      want: { open: 2, backlog: 8, merged: 0 },
     },
     {
-      name: "the room a tall Open line and a whole Hidden Workspaces leave to older merges",
+      name: "the room a tall Open line and a whole Backlog leave to older merges",
       room: 8 * ROW,
-      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(4), merged: stops(10), mergedToday: 0, mergedFloor: 0 },
-      want: { open: 2, hidden: 4, merged: 2 },
+      s: { open: [0, ROW, 2 * ROW, 5 * ROW], backlog: stops(4), merged: stops(10), mergedToday: 0, mergedFloor: 0 },
+      want: { open: 2, backlog: 4, merged: 2 },
     },
     {
-      name: "the room a tall Hidden line cannot use to older merges",
+      name: "the room a tall Backlog line cannot use to older merges",
       room: 9 * ROW,
-      s: { open: stops(1), hidden: [0, ROW, 2 * ROW, 3 * ROW, 4 * ROW, 8 * ROW], merged: stops(10), mergedToday: 3, mergedFloor: 0 },
-      want: { open: 1, hidden: 4, merged: 4 },
+      s: { open: stops(1), backlog: [0, ROW, 2 * ROW, 3 * ROW, 4 * ROW, 8 * ROW], merged: stops(10), mergedToday: 3, mergedFloor: 0 },
+      want: { open: 1, backlog: 4, merged: 4 },
     },
   ])("allocates $name", ({ room, s, want }) => {
     // Arrange / Act
@@ -312,7 +312,7 @@ describe("allocateSectionLines", () => {
   });
 
   it.each([
-    { name: "no stops", s: { ...sections(3, 3, 3), hidden: [] } },
+    { name: "no stops", s: { ...sections(3, 3, 3), backlog: [] } },
     { name: "stops not starting at zero", s: { ...sections(3, 3, 3), open: [5, 20] } },
     { name: "shrinking stops", s: { ...sections(3, 3, 3), merged: [0, 20, 10] } },
     { name: "more lines of today's merges than the band has", s: sections(3, 3, 3, 4) },
@@ -347,7 +347,7 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["sb-subsection-head", "row"]);
   });
 
-  it("counts a folded subsection's header as a line, and its hidden rows as none", () => {
+  it("counts a folded subsection's header as a line, and its backlog rows as none", () => {
     // Arrange: the stylesheet hides a collapsed subsection's rows and slot.
     const box = document.createElement("div");
     box.innerHTML = '<div class="sb-subsection folded"><div class="sb-subsection-head"></div><div class="rows"><div class="row"></div></div></div><div class="row"></div>';
@@ -533,19 +533,19 @@ describe("mergedTodayLines", () => {
 describe("regionStops", () => {
   it("measures one stop per line and the whole region last", () => {
     // Arrange
-    const { pane } = drawn({ hidden: 3 });
-    layRegion(pane, "hidden-section");
+    const { pane } = drawn({ backlog: 3 });
+    layRegion(pane, "backlog-section");
     // Act
-    const got = regionStops(region(pane, "hidden-section") as HTMLElement);
+    const got = regionStops(region(pane, "backlog-section") as HTMLElement);
     // Assert
     expect(got).toEqual([0, 20, 40, 60]);
   });
 
   it("measures a scrolled region as an unscrolled one", () => {
     // Arrange
-    const { pane } = drawn({ hidden: 3 });
-    const rows = region(pane, "hidden-section") as HTMLElement;
-    layRegion(pane, "hidden-section");
+    const { pane } = drawn({ backlog: 3 });
+    const rows = region(pane, "backlog-section") as HTMLElement;
+    layRegion(pane, "backlog-section");
     rows.scrollTop = 25;
     // Act
     const got = regionStops(rows);
@@ -654,7 +654,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 13, queue: 2, merged: 5, hidden: 0 });
+    expect(got).toEqual({ open: 13, queue: 2, merged: 5, backlog: 0 });
   });
 
   it("claims room for every queue line as for today's merges", () => {
@@ -664,7 +664,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 16, queue: 4, merged: 0, hidden: 0 });
+    expect(got).toEqual({ open: 16, queue: 4, merged: 0, backlog: 0 });
   });
 
   it("logs the queue's lines beside the merges'", async () => {
@@ -682,7 +682,7 @@ describe("fitBands", () => {
   it("lengthens the Open section until the bands keep their six-line share", () => {
     // Arrange — room for twenty lines below 100px of other content; a
     // folded Deploys group is its header's one line.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10, expanded: false });
     laidOut(rail, 500, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -690,9 +690,9 @@ describe("fitBands", () => {
     expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "", "", "100px"]);
   });
 
-  it("keeps an open Deploys group's five rows, Hidden Workspaces the share's last line", () => {
+  it("keeps an open Deploys group's five rows, the Backlog the share's last line", () => {
     // Arrange — room for twenty lines below 100px of other content.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 500, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -700,19 +700,19 @@ describe("fitBands", () => {
     expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "100px", "", "20px"]);
   });
 
-  it("takes an open Deploys group's five rows from the Open section once Hidden Workspaces has none", () => {
-    // Arrange — room for twenty lines, nothing hidden.
+  it("takes an open Deploys group's five rows from the Open section once the Backlog has none", () => {
+    // Arrange — room for twenty lines, nothing backlog.
     const rail = drawn({ open: 30, merged: 10 });
     laidOut(rail, 500, 100);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ queue: 0, open: 15, merged: 5, hidden: 0 });
+    expect(got).toEqual({ queue: 0, open: 15, merged: 5, backlog: 0 });
   });
 
-  it("stretches Hidden Workspaces to the rail's foot through a line it cuts", () => {
+  it("stretches the Backlog to the rail's foot through a line it cuts", () => {
     // Arrange — 410px of room: twenty whole lines and half of one more.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -722,17 +722,17 @@ describe("fitBands", () => {
 
   it("states the whole lines a stretched band shows", () => {
     // Arrange — half a line of stretch.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "hidden-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("1");
+    expect(band(rail.pane, "backlog-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("1");
   });
 
-  it("stretches Hidden Workspaces to the rail's foot when every line fits", () => {
+  it("stretches the Backlog to the rail's foot when every line fits", () => {
     // Arrange — 900px of room, 200px of lines.
-    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    const rail = drawn({ open: 3, backlog: 3, merged: 4 });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -743,7 +743,7 @@ describe("fitBands", () => {
   it("lets a viewport an earlier fit capped go before measuring its lines", () => {
     // Arrange — Deploys left capped at one line by a shorter rail's fit, in a
     // rail that now holds every line: 900px of room, 200px of lines.
-    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    const rail = drawn({ open: 3, backlog: 3, merged: 4 });
     laidOut(rail, 1000, 100);
     region(rail.pane, "merged-section")!.style.maxHeight = "20px";
     // Act
@@ -752,9 +752,9 @@ describe("fitBands", () => {
     expect([...maxHeights(rail.pane), ...heights(rail.pane)]).toEqual(["", "", "", "", "", "760px"]);
   });
 
-  it("stretches no Deploys whose lines all show over a folded Hidden Workspaces", () => {
+  it("stretches no Deploys whose lines all show over a folded Backlog", () => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true } });
+    const rail = drawn({ open: 3, backlog: 3, merged: 4, folded: { backlog: true } });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -762,9 +762,9 @@ describe("fitBands", () => {
     expect([...heights(rail.pane), ...maxHeights(rail.pane)]).toEqual(["", "", "", "", "", ""]);
   });
 
-  it("stretches no folded Deploys group over a folded Hidden Workspaces", () => {
+  it("stretches no folded Deploys group over a folded Backlog", () => {
     // Arrange — the Open section capped, room for half a line more.
-    const rail = drawn({ open: 30, hidden: 3, merged: 4, expanded: false, folded: { hidden: true } });
+    const rail = drawn({ open: 30, backlog: 3, merged: 4, expanded: false, folded: { backlog: true } });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -772,9 +772,9 @@ describe("fitBands", () => {
     expect(heights(rail.pane)[1]).toBe("");
   });
 
-  it("stretches the Open section cutting a line when Deploys over a folded Hidden Workspaces shows whole", () => {
+  it("stretches the Open section cutting a line when Deploys over a folded Backlog shows whole", () => {
     // Arrange — the Open section capped, room for half a line more.
-    const rail = drawn({ open: 30, hidden: 3, merged: 4, expanded: false, folded: { hidden: true } });
+    const rail = drawn({ open: 30, backlog: 3, merged: 4, expanded: false, folded: { backlog: true } });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -782,9 +782,9 @@ describe("fitBands", () => {
     expect([heights(rail.pane)[0], band(rail.pane, "open-section").hasAttribute(BAND_STRETCHED_ATTRIBUTE)]).toEqual(["390px", true]);
   });
 
-  it("stretches Deploys cutting a line over a folded Hidden Workspaces", () => {
+  it("stretches Deploys cutting a line over a folded Backlog", () => {
     // Arrange — 410px of room: Deploys' older merges take what the Open section leaves.
-    const rail = drawn({ open: 3, hidden: 3, merged: 30, folded: { hidden: true } });
+    const rail = drawn({ open: 3, backlog: 3, merged: 30, folded: { backlog: true } });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -794,7 +794,7 @@ describe("fitBands", () => {
 
   it("stretches no Open section whose lines all show over folded bands", () => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true, merged: true } });
+    const rail = drawn({ open: 3, backlog: 3, merged: 4, folded: { backlog: true, merged: true } });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -803,11 +803,11 @@ describe("fitBands", () => {
   });
 
   it("lets go of a stretch once a band below unfolds", () => {
-    // Arrange — fitted with Hidden Workspaces folded, Deploys stretched through a cut line.
-    const rail = drawn({ open: 3, hidden: 3, merged: 50, folded: { hidden: true } });
+    // Arrange — fitted with the Backlog folded, Deploys stretched through a cut line.
+    const rail = drawn({ open: 3, backlog: 3, merged: 50, folded: { backlog: true } });
     laidOut(rail, 1010, 100);
     fitBands(rail.scroller, rail.pane, NOW);
-    band(rail.pane, "hidden-section").classList.remove("folded");
+    band(rail.pane, "backlog-section").classList.remove("folded");
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
@@ -816,7 +816,7 @@ describe("fitBands", () => {
 
   it("measures a stretched band from its rows, not its stretch", () => {
     // Arrange — fitted once, stretched by half a line.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     const first = fitBands(rail.scroller, rail.pane, NOW);
     // Act
@@ -827,7 +827,7 @@ describe("fitBands", () => {
 
   it("marks only the lowest open section as reaching the rail's foot", () => {
     // Arrange
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -837,17 +837,17 @@ describe("fitBands", () => {
 
   it("marks a stretched band cutting a line with rows below its edge", () => {
     // Arrange — half a line of stretch.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "hidden-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(true);
+    expect(band(rail.pane, "backlog-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(true);
   });
 
   it("marks a capped Deploys band with rows below its edge", () => {
-    // Arrange — Deploys capped at its share, Hidden Workspaces lowest.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    // Arrange — Deploys capped at its share, the Backlog lowest.
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -857,8 +857,8 @@ describe("fitBands", () => {
   });
 
   it("marks a capped Open band with rows below its edge", () => {
-    // Arrange — the Open section capped above the bands, Hidden Workspaces lowest.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    // Arrange — the Open section capped above the bands, the Backlog lowest.
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -869,20 +869,20 @@ describe("fitBands", () => {
 
   it("leaves a stretched band whose rows all show unmarked", () => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    const rail = drawn({ open: 3, backlog: 3, merged: 4 });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "hidden-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(false);
+    expect(band(rail.pane, "backlog-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(false);
   });
 
   it("clears the foot mark from a band that is no longer lowest", () => {
-    // Arrange — fitted with Hidden Workspaces folded, Deploys lowest and cutting a line.
-    const rail = drawn({ open: 3, hidden: 3, merged: 50, folded: { hidden: true } });
+    // Arrange — fitted with the Backlog folded, Deploys lowest and cutting a line.
+    const rail = drawn({ open: 3, backlog: 3, merged: 50, folded: { backlog: true } });
     laidOut(rail, 1010, 100);
     fitBands(rail.scroller, rail.pane, NOW);
-    band(rail.pane, "hidden-section").classList.remove("folded");
+    band(rail.pane, "backlog-section").classList.remove("folded");
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
@@ -891,7 +891,7 @@ describe("fitBands", () => {
 
   it("stretches nothing in a rail shorter than the headers", () => {
     // Arrange — the other content alone overflows the rail.
-    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    const rail = drawn({ open: 3, backlog: 3, merged: 4 });
     laidOut(rail, 50, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -901,7 +901,7 @@ describe("fitBands", () => {
 
   it("states the lines each section shows", () => {
     // Arrange — room for twenty lines, one merge today.
-    const rail = drawn({ open: 30, hidden: 10, merged: 5, today: 1 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 5, today: 1 });
     laidOut(rail, 500, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -911,17 +911,17 @@ describe("fitBands", () => {
 
   it("gives a folded Deploys group only its header's line while the Open section scrolls", () => {
     // Arrange — room for twenty lines, no merge today.
-    const rail = drawn({ open: 30, hidden: 2, merged: 10, expanded: false });
+    const rail = drawn({ open: 30, backlog: 2, merged: 10, expanded: false });
     laidOut(rail, 500, 100);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ queue: 0, open: 17, hidden: 2, merged: 1 });
+    expect(got).toEqual({ queue: 0, open: 17, backlog: 2, merged: 1 });
   });
 
   it("leaves every section uncapped when every line fits", () => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    const rail = drawn({ open: 3, backlog: 3, merged: 4 });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -930,40 +930,40 @@ describe("fitBands", () => {
   });
 
   it("gives a folded band's share to the other band", () => {
-    // Arrange — room for ten lines, Hidden Workspaces folded.
-    const rail = drawn({ open: 5, hidden: 10, merged: 20, today: 20, folded: { hidden: true } });
+    // Arrange — room for ten lines, the Backlog folded.
+    const rail = drawn({ open: 5, backlog: 10, merged: 20, today: 20, folded: { backlog: true } });
     laidOut(rail, 300, 100);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ queue: 0, open: 4, hidden: 0, merged: 6 });
+    expect(got).toEqual({ queue: 0, open: 4, backlog: 0, merged: 6 });
   });
 
   it("re-fits a capped section from its whole content", () => {
     // Arrange — fitted short, then the rail grows to hold everything.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 180, 100);
     fitBands(rail.scroller, rail.pane, NOW);
     railHeight(rail.scroller, 1000);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ queue: 0, open: 10, hidden: 10, merged: 10 });
+    expect(got).toEqual({ queue: 0, open: 10, backlog: 10, merged: 10 });
   });
 
   it("keeps the daemon's count on a scrolling band", () => {
     // Arrange
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 180, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "hidden-section").querySelector("[data-section-count]")?.textContent).toBe("(10)");
+    expect(band(rail.pane, "backlog-section").querySelector("[data-section-count]")?.textContent).toBe("(10)");
   });
 
   it("leaves a pane that is not laid out as drawn", () => {
     // Arrange — the other grouping's pane: nothing measures.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 0, 0);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
@@ -973,7 +973,7 @@ describe("fitBands", () => {
 
   it("fits nothing when no section is open", () => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3, merged: 3, folded: { open: true, hidden: true, merged: true } });
+    const rail = drawn({ open: 3, backlog: 3, merged: 3, folded: { open: true, backlog: true, merged: true } });
     laidOut(rail, 300, 100);
     // Act / Assert
     expect(fitBands(rail.scroller, rail.pane, NOW)).toBeNull();
@@ -984,7 +984,7 @@ describe("fitBands", () => {
     { name: "Open section", cls: "open-section" as const },
   ])("refuses a $name drawn without its rows region", ({ cls }) => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3, merged: 3 });
+    const rail = drawn({ open: 3, backlog: 3, merged: 3 });
     laidOut(rail, 300, 100);
     region(rail.pane, cls)?.remove();
     // Act / Assert
@@ -993,29 +993,29 @@ describe("fitBands", () => {
 
   it("measures fractional room, unrounded", () => {
     // Arrange — 119.5px of room is short of six lines of 20px; rounded up it would hold them.
-    const rail = drawn({ merged: 6, folded: { hidden: true } });
+    const rail = drawn({ merged: 6, folded: { backlog: true } });
     laidOut(rail, 219.5, 100);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ queue: 0, open: 0, hidden: 0, merged: 5 });
+    expect(got).toEqual({ queue: 0, open: 0, backlog: 0, merged: 5 });
   });
 
   it("takes the rail's drawn borders and padding out of the room", () => {
     // Arrange — a 240px rail framed by 10px of border and 30px of padding leaves 100px past 100px of other content.
-    const rail = drawn({ merged: 6, folded: { hidden: true } });
+    const rail = drawn({ merged: 6, folded: { backlog: true } });
     laidOut(rail, 240, 100);
     rail.scroller.style.border = "5px solid";
     rail.scroller.style.padding = "10px 0 20px";
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ queue: 0, open: 0, hidden: 0, merged: 5 });
+    expect(got).toEqual({ queue: 0, open: 0, backlog: 0, merged: 5 });
   });
 
   it("refuses a rail whose border is not in px", () => {
     // Arrange
-    const rail = drawn({ merged: 6, folded: { hidden: true } });
+    const rail = drawn({ merged: 6, folded: { backlog: true } });
     laidOut(rail, 220, 100);
     rail.scroller.style.borderTopWidth = "medium";
     // Act / Assert
@@ -1025,7 +1025,7 @@ describe("fitBands", () => {
   it("logs a rail whose border is not in px", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const rail = drawn({ merged: 6, folded: { hidden: true } });
+    const rail = drawn({ merged: 6, folded: { backlog: true } });
     laidOut(rail, 220, 100);
     rail.scroller.style.borderTopWidth = "medium";
     // Act
@@ -1037,7 +1037,7 @@ describe("fitBands", () => {
 
   it("leaves the sections unsized when the rail's border is not in px", () => {
     // Arrange
-    const rail = drawn({ merged: 6, folded: { hidden: true } });
+    const rail = drawn({ merged: 6, folded: { backlog: true } });
     laidOut(rail, 220, 100);
     rail.scroller.style.borderTopWidth = "medium";
     // Act
@@ -1048,7 +1048,7 @@ describe("fitBands", () => {
 
   it("refuses a fit that moves its own room", () => {
     // Arrange — the pane's other content grows a pixel whenever Deploys is capped.
-    const rail = drawn({ merged: 10, folded: { hidden: true } });
+    const rail = drawn({ merged: 10, folded: { backlog: true } });
     laidOut(rail, 200, () => ((region(rail.pane, "merged-section") as HTMLElement).style.height === "" ? 100 : 101));
     // Act / Assert
     expect(() => fitBands(rail.scroller, rail.pane, NOW)).toThrow(/moved the room/);
@@ -1057,7 +1057,7 @@ describe("fitBands", () => {
   it("logs a fit that moves its own room", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const rail = drawn({ merged: 10, folded: { hidden: true } });
+    const rail = drawn({ merged: 10, folded: { backlog: true } });
     laidOut(rail, 200, () => ((region(rail.pane, "merged-section") as HTMLElement).style.height === "" ? 100 : 101));
     // Act
     expect(() => fitBands(rail.scroller, rail.pane, NOW)).toThrow();
@@ -1072,7 +1072,7 @@ describe("fitBands", () => {
   it("logs a band drawn without its rows region", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const rail = drawn({ hidden: 3, merged: 3 });
+    const rail = drawn({ backlog: 3, merged: 3 });
     laidOut(rail, 300, 100);
     region(rail.pane, "merged-section")?.remove();
     // Act
@@ -1086,7 +1086,7 @@ describe("fitBands", () => {
 describe("installBandFit", () => {
   it("re-fits when the rail is resized", () => {
     // Arrange — fitted out of room.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 180, 100);
     const fit = installBandFit(rail.scroller, fakeTicker());
     fit.refit();
@@ -1099,15 +1099,15 @@ describe("installBandFit", () => {
   });
 
   it("keeps a stretched section's scroll across a re-fit that lets it shrink to its rows", async () => {
-    // Arrange — Hidden Workspaces, the lowest, stretched to six of its ten
+    // Arrange — the Backlog, the lowest, stretched to six of its ten
     // lines, scrolled three lines down. Its scroll clamps to whatever height it
     // lays out at, and keeps the clamp, as the engine does.
     const capture = captureLogRecords("debug");
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 300, 100);
     const fit = installBandFit(rail.scroller, fakeTicker());
     fit.refit();
-    const rows = region(rail.pane, "hidden-section") as HTMLElement;
+    const rows = region(rail.pane, "backlog-section") as HTMLElement;
     let top = 0;
     const max = (): number => Math.max(0, rows.scrollHeight - rows.clientHeight);
     Object.defineProperty(rows, "scrollTop", {
@@ -1130,7 +1130,7 @@ describe("installBandFit", () => {
   it("leaves a section's scroll alone when the fit did not move it", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 300, 100);
     const fit = installBandFit(rail.scroller, fakeTicker());
     // Act
@@ -1143,7 +1143,7 @@ describe("installBandFit", () => {
 
   it("tells ON_RESIZED after the fit a resize provoked, with the sections already fitted", () => {
     // Arrange — fitted out of room.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 180, 100);
     const seen: string[][] = [];
     const fit = installBandFit(rail.scroller, fakeTicker(), { onResized: () => seen.push(maxHeights(rail.pane)) });
@@ -1158,7 +1158,7 @@ describe("installBandFit", () => {
 
   it("does not tell ON_RESIZED for a draw's own refit", () => {
     // Arrange
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 180, 100);
     let told = 0;
     const fit = installBandFit(rail.scroller, fakeTicker(), {
@@ -1175,7 +1175,7 @@ describe("installBandFit", () => {
 
   it("re-fits when a pane changes size", () => {
     // Arrange — fitted out of room.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 500, 400);
     const fit = installBandFit(rail.scroller, fakeTicker());
     fit.refit();
@@ -1189,7 +1189,7 @@ describe("installBandFit", () => {
 
   it("re-fits when a box inside a capped section changes size", () => {
     // Arrange — fitted out of room.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    const rail = drawn({ open: 10, backlog: 10, merged: 10 });
     laidOut(rail, 500, 400);
     const fit = installBandFit(rail.scroller, fakeTicker());
     fit.refit();
@@ -1220,7 +1220,7 @@ describe("installBandFit", () => {
   it("leaves the fit alone on a tick of the same date", () => {
     // Arrange
     const ticker = fakeTicker();
-    const rail = drawn({ open: 30, hidden: 10, merged: 1, today: 1 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 1, today: 1 });
     laidOut(rail, 500, 100);
     const fit = installBandFit(rail.scroller, ticker);
     fit.refit();
@@ -1234,7 +1234,7 @@ describe("installBandFit", () => {
 
   it("repaints a section's foot mark when its rows scroll to their end", () => {
     // Arrange — fitted with a line cut at the foot.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     const fit = installBandFit(rail.scroller, fakeTicker());
     fit.refit();
@@ -1249,7 +1249,7 @@ describe("installBandFit", () => {
 
   it("stops repainting the foot mark once disposed", () => {
     // Arrange
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     const fit = installBandFit(rail.scroller, fakeTicker());
     fit.refit();
@@ -1288,11 +1288,11 @@ describe("sectionRegions", () => {
   it("names each section's rows region by its section's class and its place among them", () => {
     // Arrange
     const root = document.createElement("div");
-    root.append(section("open-section", "sb-sections"), section("merged-section", "rows"), section("hidden-section", "rows"), section("hidden-section", "rows"));
+    root.append(section("open-section", "sb-sections"), section("merged-section", "rows"), section("backlog-section", "rows"), section("backlog-section", "rows"));
     // Act
     const names = sectionRegions(root).map((r) => r.name);
     // Assert
-    expect(names).toEqual(["open-section#0", "merged-section#0", "hidden-section#0", "hidden-section#1"]);
+    expect(names).toEqual(["open-section#0", "merged-section#0", "backlog-section#0", "backlog-section#1"]);
   });
 
   it("finds exactly the regions REGION_SELECTOR matches, so the fit and the keeper see the same viewports", () => {
@@ -1308,57 +1308,57 @@ describe("sectionRegions", () => {
 
 describe("sizeSectionLines", () => {
   /** Every section's stops, ROW px a line. */
-  const all = (o: number, q: number, m: number, h: number) => ({ open: stops(o), queue: stops(q), merged: stops(m), hidden: stops(h) });
-  const FITTED = { open: 14, queue: 3, merged: 0, hidden: 3 };
+  const all = (o: number, q: number, m: number, h: number) => ({ open: stops(o), queue: stops(q), merged: stops(m), backlog: stops(h) });
+  const FITTED = { open: 14, queue: 3, merged: 0, backlog: 3 };
 
   it.each([
     {
       name: "a sized Merge Queue section its lines, the Open section the rest",
       room: 20 * ROW,
       s: all(40, 10, 10, 10),
-      sizes: { queue: 5, merged: null, hidden: null },
+      sizes: { queue: 5, merged: null, backlog: null },
       fitted: FITTED,
-      want: { open: 12, queue: 5, merged: 0, hidden: 3 },
+      want: { open: 12, queue: 5, merged: 0, backlog: 3 },
     },
     {
       name: "a section sized beyond its lines every line it holds",
       room: 20 * ROW,
       s: all(40, 0, 0, 4),
-      sizes: { queue: null, merged: null, hidden: 50 },
-      fitted: { open: 16, queue: 0, merged: 0, hidden: 4 },
-      want: { open: 16, queue: 0, merged: 0, hidden: 4 },
+      sizes: { queue: null, merged: null, backlog: 50 },
+      fitted: { open: 16, queue: 0, merged: 0, backlog: 4 },
+      want: { open: 16, queue: 0, merged: 0, backlog: 4 },
     },
     {
       name: "a section sized to none its header alone",
       room: 20 * ROW,
       s: all(40, 0, 10, 10),
-      sizes: { queue: null, merged: 0, hidden: null },
-      fitted: { open: 14, queue: 0, merged: 3, hidden: 3 },
-      want: { open: 17, queue: 0, merged: 0, hidden: 3 },
+      sizes: { queue: null, merged: 0, backlog: null },
+      fitted: { open: 14, queue: 0, merged: 3, backlog: 3 },
+      want: { open: 17, queue: 0, merged: 0, backlog: 3 },
     },
     {
       name: "a short rail's unsized band shrunk before the sized one",
       room: 5 * ROW,
       s: all(10, 10, 0, 10),
-      sizes: { queue: 4, merged: null, hidden: null },
-      fitted: { open: 0, queue: 2, merged: 0, hidden: 3 },
-      want: { open: 0, queue: 4, merged: 0, hidden: 1 },
+      sizes: { queue: 4, merged: null, backlog: null },
+      fitted: { open: 0, queue: 2, merged: 0, backlog: 3 },
+      want: { open: 0, queue: 4, merged: 0, backlog: 1 },
     },
     {
       name: "a rail too short for the sized bands shrinking the lowest first",
       room: 3 * ROW,
       s: all(10, 10, 0, 10),
-      sizes: { queue: 2, merged: null, hidden: 4 },
-      fitted: { open: 0, queue: 2, merged: 0, hidden: 1 },
-      want: { open: 0, queue: 2, merged: 0, hidden: 1 },
+      sizes: { queue: 2, merged: null, backlog: 4 },
+      fitted: { open: 0, queue: 2, merged: 0, backlog: 1 },
+      want: { open: 0, queue: 2, merged: 0, backlog: 1 },
     },
     {
       name: "the room a whole Open section leaves to the unsized bands",
       room: 20 * ROW,
       s: all(3, 10, 30, 2),
-      sizes: { queue: 2, merged: null, hidden: null },
-      fitted: { open: 3, queue: 10, merged: 1, hidden: 2 },
-      want: { open: 3, queue: 2, merged: 13, hidden: 2 },
+      sizes: { queue: 2, merged: null, backlog: null },
+      fitted: { open: 3, queue: 10, merged: 1, backlog: 2 },
+      want: { open: 3, queue: 2, merged: 13, backlog: 2 },
     },
   ])("allocates $name", ({ room, s, sizes, fitted, want }) => {
     // Arrange / Act
@@ -1368,12 +1368,12 @@ describe("sizeSectionLines", () => {
   });
 
   it.each([
-    { name: "a negative size", sizes: { queue: -1, merged: null, hidden: null }, s: all(3, 3, 3, 3) },
-    { name: "a fractional size", sizes: { queue: null, merged: 1.5, hidden: null }, s: all(3, 3, 3, 3) },
-    { name: "stops not starting at zero", sizes: { queue: 1, merged: null, hidden: null }, s: { ...all(3, 3, 3, 3), queue: [5, 20] } },
+    { name: "a negative size", sizes: { queue: -1, merged: null, backlog: null }, s: all(3, 3, 3, 3) },
+    { name: "a fractional size", sizes: { queue: null, merged: 1.5, backlog: null }, s: all(3, 3, 3, 3) },
+    { name: "stops not starting at zero", sizes: { queue: 1, merged: null, backlog: null }, s: { ...all(3, 3, 3, 3), queue: [5, 20] } },
   ])("refuses $name", ({ sizes, s }) => {
     // Arrange / Act / Assert
-    expect(() => sizeSectionLines(100, s, sizes, { open: 0, queue: 0, merged: 0, hidden: 0 })).toThrow(RangeError);
+    expect(() => sizeSectionLines(100, s, sizes, { open: 0, queue: 0, merged: 0, backlog: 0 })).toThrow(RangeError);
   });
 });
 
@@ -1404,45 +1404,45 @@ describe("bandSize", () => {
   it("logs a stated size that is no line count", async () => {
     // Arrange
     const section = document.createElement("div");
-    section.className = "hidden-section";
+    section.className = "backlog-section";
     section.setAttribute(BAND_SIZED_ATTRIBUTE, "-3");
     const capture = captureLogRecords("error");
     // Act
     expect(() => bandSize(section)).toThrow(RangeError);
     // Assert
     const record = await forwardedRecord(capture, "sidebar.band-fit.malformed-size");
-    expect(record.context).toMatchObject({ band: "hidden-section", sized: "-3" });
+    expect(record.context).toMatchObject({ band: "backlog-section", sized: "-3" });
   });
 });
 
 describe("fitBands with a sized band", () => {
-  it("gives a sized Hidden Workspaces its lines and the Open section the rest", () => {
+  it("gives a sized the Backlog its lines and the Open section the rest", () => {
     // Arrange — room for twenty lines; a folded Deploys group is one line.
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
-    band(rail.pane, "hidden-section").setAttribute(BAND_SIZED_ATTRIBUTE, "8");
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10, expanded: false });
+    band(rail.pane, "backlog-section").setAttribute(BAND_SIZED_ATTRIBUTE, "8");
     laidOut(rail, 500, 100);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ queue: 0, open: 11, merged: 1, hidden: 8 });
+    expect(got).toEqual({ queue: 0, open: 11, merged: 1, backlog: 8 });
   });
 
   it("logs the sizes it fitted by", async () => {
     // Arrange
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
-    band(rail.pane, "hidden-section").setAttribute(BAND_SIZED_ATTRIBUTE, "8");
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10, expanded: false });
+    band(rail.pane, "backlog-section").setAttribute(BAND_SIZED_ATTRIBUTE, "8");
     laidOut(rail, 500, 100);
     const capture = captureLogRecords("debug");
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
     const record = await forwardedRecord(capture, "sidebar.band-fit");
-    expect(record.context).toMatchObject({ queue_sized: null, merged_sized: null, hidden_sized: 8 });
+    expect(record.context).toMatchObject({ queue_sized: null, merged_sized: null, backlog_sized: 8 });
   });
 
   it("keeps a fit that drew other lines than the last one in the log", async () => {
     // Arrange
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10, expanded: false });
     laidOut(rail, 500, 100);
     const capture = captureLogRecords("info");
     // Act
@@ -1454,7 +1454,7 @@ describe("fitBands with a sized band", () => {
 
   it("keeps a fit that drew the same lines as the last one out of the info log", async () => {
     // Arrange
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10, expanded: false });
     laidOut(rail, 500, 100);
     fitBands(rail.scroller, rail.pane, NOW);
     const capture = captureLogRecords("info");
@@ -1466,19 +1466,19 @@ describe("fitBands with a sized band", () => {
 
   it("records what it measured of each section for a drag of its rule", () => {
     // Arrange
-    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    const rail = drawn({ open: 30, backlog: 10, merged: 10, today: 10, expanded: false });
     laidOut(rail, 500, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    const hidden = fittedSection(band(rail.pane, "hidden-section"));
-    expect([hidden?.lines, hidden?.stops.length]).toEqual([5, 11]);
+    const backlog = fittedSection(band(rail.pane, "backlog-section"));
+    expect([backlog?.lines, backlog?.stops.length]).toEqual([5, 11]);
   });
 
   it("has measured nothing of a section never fitted", () => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3 });
+    const rail = drawn({ open: 3, backlog: 3 });
     // Act / Assert
-    expect(fittedSection(band(rail.pane, "hidden-section"))).toBeNull();
+    expect(fittedSection(band(rail.pane, "backlog-section"))).toBeNull();
   });
 });

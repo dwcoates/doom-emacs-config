@@ -47,7 +47,7 @@ import { cascadedValue, inRail } from "../stylesheet.js";
 import {
   appContext,
   drawnEntries,
-  hiddenSection,
+  backlogSection,
   primaryPointer,
   repoSection,
   roster,
@@ -1482,10 +1482,10 @@ describe("dropping a row onto another row", () => {
 });
 
 describe("what is not a grip", () => {
-  it("leaves a hidden workspace's row alone", () => {
+  it("leaves a backlogged workspace's row alone", () => {
     // Arrange
     const { sc } = arranged();
-    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })], hidden: hiddenSection([row({ id: "h" })]) }), sc);
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })], backlog: backlogSection([row({ id: "h" })]) }), sc);
     document.body.replaceChildren(drawn, sc.arrange.layer);
 
     // Act

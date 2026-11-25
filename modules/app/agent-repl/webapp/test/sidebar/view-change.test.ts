@@ -99,7 +99,7 @@ describe("changeView", () => {
   });
 });
 
-/** Size the Recently Merged and Hidden sections: the change every changeViews case asks for. */
+/** Size the Recently Merged and the Backlog sections: the change every changeViews case asks for. */
 const SIZE_TWO: MessageInitShape<typeof UpdateSidebarViewRequestSchema>["change"] = {
   case: "sizeSections",
   value: {
@@ -110,23 +110,23 @@ const SIZE_TWO: MessageInitShape<typeof UpdateSidebarViewRequestSchema>["change"
   },
 };
 const MERGED_HEIGHT = heightViewKey("merged");
-const HIDDEN_HEIGHT = heightViewKey("hidden");
+const BACKLOG_HEIGHT = heightViewKey("hidden");
 
 describe("changeViews", () => {
   it("paints every piece before the daemon answers", () => {
     const { sc } = daemon(() => OK);
     const painted: Array<number | null> = [];
     sc.view.track(MERGED_HEIGHT, null, (v) => painted.push(v));
-    sc.view.track(HIDDEN_HEIGHT, null, (v) => painted.push(v));
-    void changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: HIDDEN_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
+    sc.view.track(BACKLOG_HEIGHT, null, (v) => painted.push(v));
+    void changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: BACKLOG_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
     expect(painted).toEqual([2, 5]);
   });
 
   it("asks for every piece in one request", async () => {
     const { asked, sc } = daemon(() => OK);
     sc.view.track(MERGED_HEIGHT, null, () => undefined);
-    sc.view.track(HIDDEN_HEIGHT, null, () => undefined);
-    await changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: HIDDEN_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
+    sc.view.track(BACKLOG_HEIGHT, null, () => undefined);
+    await changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: BACKLOG_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
     expect(asked.map((r) => r.change.case)).toEqual(["sizeSections"]);
   });
 
@@ -138,8 +138,8 @@ describe("changeViews", () => {
     );
     const painted: Array<number | null> = [];
     sc.view.track(MERGED_HEIGHT, null, (v) => painted.push(v));
-    sc.view.track(HIDDEN_HEIGHT, 3, (v) => painted.push(v));
-    const took = await changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: HIDDEN_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
+    sc.view.track(BACKLOG_HEIGHT, 3, (v) => painted.push(v));
+    const took = await changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: BACKLOG_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
     expect([took, painted]).toEqual([false, [2, 5, null, 3]]);
   });
 
