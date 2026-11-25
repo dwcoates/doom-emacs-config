@@ -768,6 +768,17 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		delete(c.adopting, ws)
 		c.unlock()
 	}()
+	// THE ADOPTION OWES THE ROW'S FACTS from here (sidebar carry.go): a start
+	// it drains may end before it has taken the row's merges back, and that
+	// end must not settle the row. An adoption that ends before ownership
+	// owes nothing any more; one past it settles the row itself.
+	c.deps.OweFacts(ws, true)
+	pastOwnership := false
+	defer func() {
+		if !pastOwnership {
+			c.deps.OweFacts(ws, false)
+		}
+	}()
 	// AN ADOPTION THAT ENDS, BY ANY PATH, HOLDS NO LOWER RANK BACK.
 	defer c.order.end(ws)
 	outgoing, err := c.outgoingDaemon(ws)
@@ -1065,12 +1076,19 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		dlog.Context{"all_joining_owned": complete})
 	// THE ROW IS THIS DAEMON'S OWN FROM HERE ON: it stops drawing the
 	// incumbent's status.
+	pastOwnership = true
 	c.mirrorOwnershipChanged()
 	// BUT ITS OWN ARM WAITS FOR ITS FACTS: the roster keeps the incumbent's
 	// arm for the row until the rest of this adoption has taken its merges,
-	// raised its cold gate and started whatever it starts, on every path out
-	// of here (sidebar carry.go).
-	defer c.deps.FactsSettled(ws)
+	// on every path out of here, or, for a row whose session this adoption
+	// starts, until that start has ended: the start is what raises a cold
+	// gate, and it runs after this returns (sidebar carry.go).
+	startsSession := false
+	defer func() {
+		if !startsSession {
+			c.deps.FactsSettled(ws)
+		}
+	}()
 
 	// THE ADOPTION NAMES ITS PLACE IN THE ORDER: its rank, and how many
 	// ordered adoptions reached ownership before it and with it.
@@ -1092,6 +1110,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	c.TakeUpOwedMove(ctx, ws)
 
 	if sessionless {
+		startsSession = true
 		c.startSessionless([]wsm.Workspace{record}, fields)
 	}
 	if withheldInert {
@@ -1523,9 +1542,11 @@ func (c *controller) lastDaemonsDuties(promoted bool, wg *sync.WaitGroup, fields
 		}
 	}
 	c.adoptStragglers(wg, fields)
-	if promoted {
-		c.recoverOrphans(fields)
+	if !promoted {
+		c.settleUndecided("the state handle could not be promoted to writing", fields)
+		return
 	}
+	c.recoverOrphans(fields)
 }
 
 // recoverQueuedCreates takes up the creates an outgoing daemon held for the
@@ -1551,6 +1572,7 @@ func (c *controller) afterElders(elders []string, promoted bool, fields dlog.Con
 			return
 		}
 		c.log.Error(opAdopt, "could not wait for the older daemons to end; the contract steps, orphan recovery and held creates wait for the next daemon", dlog.WithCause(dlog.Merge(fields, dlog.Context{"elders": elders}), err))
+		c.settleUndecided("the wait for the older daemons failed", fields)
 		return
 	}
 	c.log.Info(opAdopt, "every older daemon has ended; this daemon now does what only the last daemon may",

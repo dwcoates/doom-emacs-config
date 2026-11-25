@@ -70,6 +70,21 @@ func TestAHandoverThatChangesNothingChangesNoRow(t *testing.T) {
 			},
 		},
 		{
+			// 2026-11-25 12:32:53: the row was nobody's to hand over, so the
+			// takeover's orphan pass decided it after the older daemons ended,
+			// and only its start raised the gate.
+			name: "a folded row at a cold gate nobody handed over keeps its gate until the takeover's start raises it",
+			arm:  "cold_gate",
+			adoption: func(t *testing.T, r sidebarResolver) {
+				turnFinished(r, theWS)
+				r.SetBringingUp(theWS, true)
+				footerOf(t, r).SetColdGate(theWS, footer.ColdGate{Standing: true, Cost: footer.FiguredLine{Lead: "cold"}})
+				r.FooterStatusChanged(theWS)
+				r.SetBringingUp(theWS, false)
+				r.SettleFacts(theWS)
+			},
+		},
+		{
 			name: "an open asked again across the handover draws no inactive",
 			arm:  "done",
 			adoption: func(t *testing.T, r sidebarResolver) {
@@ -151,20 +166,50 @@ func TestACarriedArmWaitsForTheFactsAndTheBringUp(t *testing.T) {
 	}
 }
 
-// Facts declared in before the mirror lets go leave nothing to carry, and
-// the takeover's settle lets go of every carried row.
-func TestSettlingBeforeTheLetGoAndAtTheTakeover(t *testing.T) {
+// Facts declared in before the mirror lets go leave nothing to carry, and a
+// carried row is let go by the event that establishes its facts: a settle, or
+// the end of a start this daemon ran while no adoption owes them. Nothing
+// else lets it go, the takeover's settle included (carry.go).
+func TestACarriedRowIsLetGoOnlyByWhatEstablishesItsFacts(t *testing.T) {
 	cases := []struct {
 		name string
 		act  func(r sidebarResolver)
+		want string
 	}{
-		{name: "facts settled before the mirror lets go carry nothing", act: func(r sidebarResolver) {
+		{name: "facts settled before the mirror lets go carry nothing", want: "ready", act: func(r sidebarResolver) {
 			r.SettleFacts(theWS)
 			r.SetIncumbentArms(nil)
 		}},
-		{name: "the takeover's settle lets go of a carried row", act: func(r sidebarResolver) {
+		{name: "a settle lets go of a carried row", want: "ready", act: func(r sidebarResolver) {
 			r.SetIncumbentArms(nil)
-			r.SettleAllFacts()
+			r.SettleFacts(theWS)
+		}},
+		{name: "the end of a start this daemon ran lets go of a carried row", want: "ready", act: func(r sidebarResolver) {
+			r.SetIncumbentArms(nil)
+			r.SetBringingUp(theWS, true)
+			r.SetBringingUp(theWS, false)
+		}},
+		{name: "a start's end while an adoption owes the facts keeps the carried arm", want: "cold_gate", act: func(r sidebarResolver) {
+			r.OweFacts(theWS, true)
+			r.SetIncumbentArms(nil)
+			r.SetBringingUp(theWS, true)
+			r.SetBringingUp(theWS, false)
+		}},
+		{name: "a settle lets go of a row an adoption owes", want: "ready", act: func(r sidebarResolver) {
+			r.OweFacts(theWS, true)
+			r.SetIncumbentArms(nil)
+			r.SettleFacts(theWS)
+		}},
+		{name: "an adoption that ended before ownership leaves the row to its next start", want: "ready", act: func(r sidebarResolver) {
+			r.OweFacts(theWS, true)
+			r.SetIncumbentArms(nil)
+			r.OweFacts(theWS, false)
+			r.SetBringingUp(theWS, true)
+			r.SetBringingUp(theWS, false)
+		}},
+		{name: "a lowered marker that was never raised is no start's end", want: "cold_gate", act: func(r sidebarResolver) {
+			r.SetIncumbentArms(nil)
+			r.SetBringingUp(theWS, false)
 		}},
 	}
 	for _, tc := range cases {
@@ -178,12 +223,30 @@ func TestSettlingBeforeTheLetGoAndAtTheTakeover(t *testing.T) {
 			tc.act(r)
 
 			// Assert
-			if got := statusName(onlyRow(t, r)); got != "ready" {
-				t.Fatalf("status = %q, want the row's own ready", got)
+			if got := statusName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
 			}
 			if _, found := dlog.FindRecord(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.arm_carried"}); found && tc.name == "facts settled before the mirror lets go carry nothing" {
 				t.Fatalf("a row whose facts were already in was carried")
 			}
 		})
+	}
+}
+
+// The end of a start that settles a carried row is recorded once, at INFO,
+// naming the arm it carried.
+func TestAStartsEndThatSettlesACarriedRowIsRecorded(t *testing.T) {
+	// Arrange
+	r, _ := joinedMirroring(t, "cold_gate")
+	r.SetIncumbentArms(nil)
+
+	// Act
+	r.SetBringingUp(theWS, true)
+	r.SetBringingUp(theWS, false)
+
+	// Assert
+	rec, found := dlog.FindRecord(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.facts_settled_by_start"})
+	if !found || rec.Level != dlog.LevelInfo || rec.Context["carried"] != "cold_gate" {
+		t.Fatalf("record = %+v (found %v), want one INFO record carrying cold_gate", rec, found)
 	}
 }

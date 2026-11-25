@@ -1805,3 +1805,60 @@ func TestAnAdoptionSettlesTheRowsFactsOnlyAfterItsMerges(t *testing.T) {
 		})
 	}
 }
+
+// A shimless adoption whose start raises a cold gate settles the row only
+// once that start has ended, never as the adoption returns: the start runs
+// after it, and only the start raises the gate (sidebar carry.go).
+func TestAnAdoptionThatStartsAColdGatedSessionSettlesTheRowAfterTheStart(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := gatedFreeLockAdoption(t, h)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.Settled(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
+		t.Fatalf("settled = %v, want the row settled once", got)
+	}
+	taken := h.order.Taken()
+	if started, settled := indexOf(taken, "start_session"), indexOf(taken, "facts_settled"); started < 0 || settled < started {
+		t.Fatalf("steps = %v, want the row settled after its start", taken)
+	}
+}
+
+// An adoption owes the row's facts from its start: past ownership its settle
+// ends the debt, and one that ends before ownership lowers it, so a later
+// start of the row settles it.
+func TestAnAdoptionOwesTheRowsFactsUntilItSettlesOrEndsUnowned(t *testing.T) {
+	cases := []struct {
+		name    string
+		midWork bool
+		want    []markerEdge
+	}{
+		{name: "an adoption past ownership leaves its settle to end the debt", midWork: false, want: []markerEdge{{up: true}}},
+		{name: "an adoption refused before ownership lowers the debt", midWork: true, want: []markerEdge{{up: true}, {up: false}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			carryFor(t, h, ws, Carry{MidWork: tc.midWork, ShimBuild: ""})
+			arm(t, h, ws, Participants{Host: true})
+
+			// Act
+			_ = h.c.AdoptHost(context.Background(), ws)
+			h.awaitAdoptionEnded(t, ws)
+
+			// Assert
+			want := make([]markerEdge, len(tc.want))
+			for i, edge := range tc.want {
+				want[i] = markerEdge{ws: ws, up: edge.up}
+			}
+			if got := h.Owed(); !slices.Equal(got, want) {
+				t.Fatalf("debt edges = %v, want %v", got, want)
+			}
+		})
+	}
+}

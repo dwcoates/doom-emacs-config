@@ -5,6 +5,7 @@ import (
 
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/wsm"
@@ -165,6 +166,8 @@ func (c *controller) bringUpSessionless(pending []wsm.Workspace, fields dlog.Con
 // goroutine. The starts
 // are joined by bringUps; each start's own failure is that workspace's fault,
 // raised by the start and counted by bringup.Run, which lowers each marker.
+// Each workspace's facts are settled the moment its own start ends, however it
+// ended: the start is what raises a cold gate (sidebar carry.go).
 func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Context) {
 	if len(pending) == 0 {
 		return
@@ -188,6 +191,7 @@ func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Conte
 			Via:          restarttiming.StartTakeover,
 			Restarts:     c.deps.Restarts,
 			Now:          c.deps.Clock.Now,
+			Done:         func(ws ids.WorkspaceID, _ error) { c.deps.FactsSettled(ws) },
 		}, pending)
 	})
 }

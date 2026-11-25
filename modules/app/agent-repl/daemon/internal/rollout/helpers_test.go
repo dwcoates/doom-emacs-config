@@ -1289,6 +1289,10 @@ type harness struct {
 	marker []markerEdge
 	// replacing records every Replacing edge, in order.
 	replacing []markerEdge
+	// settled records every FactsSettled call, in order.
+	settled []ids.WorkspaceID
+	// owed records every OweFacts edge, in order.
+	owed []markerEdge
 	// servingSettled receives once per ServingSettled call.
 	servingSettled chan struct{}
 }
@@ -1309,6 +1313,23 @@ func (h *harness) Started() []ids.WorkspaceID {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]ids.WorkspaceID(nil), h.started...)
+}
+
+// Settled answers every workspace whose facts were settled, in order, once
+// every start and straggler adoption has finished.
+func (h *harness) Settled() []ids.WorkspaceID {
+	h.c.bringUps.Wait()
+	h.c.stragglerAdoptions.Wait()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.settled...)
+}
+
+// Owed answers every OweFacts edge, in order.
+func (h *harness) Owed() []markerEdge {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]markerEdge(nil), h.owed...)
 }
 
 // Marker answers every bring-up marker edge, once every start has finished.
@@ -1493,6 +1514,14 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		ServingSettled: func(context.Context) { h.servingSettled <- struct{}{} },
 		FactsSettled: func(ws ids.WorkspaceID) {
 			order.record("facts_settled")
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.settled = append(h.settled, ws)
+		},
+		OweFacts: func(ws ids.WorkspaceID, owed bool) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.owed = append(h.owed, markerEdge{ws: ws, up: owed})
 		},
 		Replacing: func(ws ids.WorkspaceID, replacing bool) {
 			order.record(fmt.Sprintf("replacing:%v", replacing))

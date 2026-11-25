@@ -41,6 +41,11 @@ const opOrphans = "daemon.rollout.orphans"
 // serving. A lock that could not be read is never read as held or free: it is
 // named and left. No stand-down is attempted here, forced or otherwise.
 //
+// EACH WORKSPACE IT DECIDES IS SETTLED BY THAT DECISION (sidebar carry.go):
+// the row's carried arm is let go once its started session's start has ended,
+// once its recovered shim's adoption has ended, or at once when the pass
+// starts nothing for it. A workspace handed over is its adoption's to settle.
+//
 // AND A FREE LOCK HAS ITS SESSION STARTED. An open workspace this daemon was
 // never handed, with no client here and a lock nobody holds, is served by this
 // daemon from the takeover on and has nothing behind it: its feed would stay
@@ -48,7 +53,6 @@ const opOrphans = "daemon.rollout.orphans"
 // bring-up (sessionless.go), exactly as a fresh boot starts a client-less
 // workspace.
 func (c *controller) recoverOrphans(fields dlog.Context) {
-	probeUntold := logsite.Msg("the workspace lock probe could not tell; a shim that may be running is not recovered")
 	if c.deps.LockProbe == nil || c.deps.Shims == nil {
 		return
 	}
@@ -68,42 +72,32 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 	var orphans []ids.WorkspaceID
 	var sessionless []wsm.Workspace
 	for _, ws := range workspaces {
-		wsFields := dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)})
-		switch {
-		case ws.Closed:
-			continue
-		case handedOver[ws.ID]:
-			// The rendezvous (or the straggler adoption) owns it.
+		if handedOver[ws.ID] {
+			// The rendezvous (or the straggler adoption) owns it, and settles it.
 			continue
 		}
-		if _, live := c.deps.Shims.Client(ws.ID); live {
-			continue
-		}
-		if _, statErr := os.Stat(ws.Dir); statErr != nil {
-			if errors.Is(statErr, fs.ErrNotExist) {
-				c.log.Debug(opOrphans, "the workspace's worktree is gone; there is no session here to recover", wsFields)
-			} else {
-				c.log.Warn(opOrphans, "the workspace's worktree could not be stat-ed; its shim is not recovered", dlog.WithCause(wsFields, statErr))
-			}
-			continue
-		}
-		state, probeErr := c.deps.LockProbe(ws.Dir)
-		switch {
-		case probeErr != nil:
-			// "Could not tell" is never read as held or free.
-			c.log.Log(dlog.LevelWarn, opOrphans, probeUntold, dlog.WithCause(wsFields, probeErr))
-		case state == sessionlock.StateUnknown:
-			c.log.Log(dlog.LevelWarn, opOrphans, probeUntold, wsFields)
-		case state == sessionlock.StateHeld:
+		switch c.orphanVerdict(ws, fields) {
+		case orphanHeld:
 			orphans = append(orphans, ws.ID)
-		default:
-			c.log.Debug(opOrphans, "no shim holds this workspace's lock; its session is started", wsFields)
+		case orphanFree:
 			sessionless = append(sessionless, ws)
+		default:
+			c.deps.FactsSettled(ws.ID)
 		}
 	}
 	left, ok := c.bringUpSessionless(sessionless, dlog.Merge(fields, dlog.Context{"source": "orphans", "lock": sessionlock.StateFree.String()}))
 	if ok {
 		c.standDownWithheldInert(lifetime, left, fields)
+	}
+	// WHAT THE TAKEOVER DOES NOT START IS SETTLED NOW: nothing more will be
+	// established for it. A split that could not be read decided nothing,
+	// and nothing will be started for any of them either.
+	unstarted := left
+	if !ok {
+		unstarted = sessionless
+	}
+	for _, ws := range unstarted {
+		c.deps.FactsSettled(ws.ID)
 	}
 	if len(orphans) == 0 {
 		c.log.Debug(opOrphans, "no shim was left running unadopted", fields)
@@ -115,8 +109,58 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 		c.stragglerAdoptions.Add(1)
 		inflight.Go(func() {
 			defer c.stragglerAdoptions.Done()
+			defer c.deps.FactsSettled(ws)
 			c.recoverOrphan(lifetime, ws, dlog.Merge(fields, dlog.Context{"workspace": string(ws)}))
 		})
+	}
+}
+
+// orphanVerdict is what the takeover's orphan pass does with one workspace
+// nobody handed over.
+type orphanVerdict int
+
+const (
+	// orphanNone: nothing is recovered or started.
+	orphanNone orphanVerdict = iota
+	// orphanHeld: a shim nothing adopted holds its lock, and is adopted.
+	orphanHeld
+	// orphanFree: no shim holds its lock, and its session is started.
+	orphanFree
+)
+
+// orphanVerdict judges WS, one workspace nobody handed over, recording why
+// nothing is done for it where nothing is.
+func (c *controller) orphanVerdict(ws wsm.Workspace, fields dlog.Context) orphanVerdict {
+	probeUntold := logsite.Msg("the workspace lock probe could not tell; a shim that may be running is not recovered")
+	wsFields := dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)})
+	if ws.Closed {
+		return orphanNone
+	}
+	if _, live := c.deps.Shims.Client(ws.ID); live {
+		return orphanNone
+	}
+	if _, statErr := os.Stat(ws.Dir); statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			c.log.Debug(opOrphans, "the workspace's worktree is gone; there is no session here to recover", wsFields)
+		} else {
+			c.log.Warn(opOrphans, "the workspace's worktree could not be stat-ed; its shim is not recovered", dlog.WithCause(wsFields, statErr))
+		}
+		return orphanNone
+	}
+	state, probeErr := c.deps.LockProbe(ws.Dir)
+	switch {
+	case probeErr != nil:
+		// "Could not tell" is never read as held or free.
+		c.log.Log(dlog.LevelWarn, opOrphans, probeUntold, dlog.WithCause(wsFields, probeErr))
+		return orphanNone
+	case state == sessionlock.StateUnknown:
+		c.log.Log(dlog.LevelWarn, opOrphans, probeUntold, wsFields)
+		return orphanNone
+	case state == sessionlock.StateHeld:
+		return orphanHeld
+	default:
+		c.log.Debug(opOrphans, "no shim holds this workspace's lock; its session is started", wsFields)
+		return orphanFree
 	}
 }
 
@@ -176,4 +220,30 @@ func (c *controller) standDownInert(ctx context.Context, ws ids.WorkspaceID, fie
 		return
 	}
 	c.log.Info(opOrphans, "stood down the inert survivor of a workspace that runs nothing", dlog.Merge(fields, dlog.Context{"shim_pid": pid}))
+}
+
+// settleUndecided settles every workspace nobody handed over when the orphan
+// pass that would decide each of them will not run, because WHY: nothing more
+// will be established for any of them, so each is drawn from the facts this
+// daemon holds rather than from the incumbent's last arm for good (sidebar
+// carry.go). The failure itself was recorded at ERROR by the caller.
+func (c *controller) settleUndecided(why string, fields dlog.Context) {
+	workspaces, err := c.deps.DB.ListWorkspaces(c.lifetime(context.Background()))
+	if err != nil {
+		c.log.Error(opOrphans, "could not list the workspaces whose rows the orphan pass would have settled; each is settled by its next start", dlog.WithCause(dlog.Merge(fields, dlog.Context{"why": why}), err))
+		return
+	}
+	c.mu.Lock()
+	var undecided []ids.WorkspaceID
+	for _, ws := range workspaces {
+		if !c.joining[ws.ID] {
+			undecided = append(undecided, ws.ID)
+		}
+	}
+	c.unlock()
+	c.log.Info(opOrphans, "the orphan pass will not run; the rows it would have decided are drawn from this daemon's own facts",
+		dlog.Merge(fields, dlog.Context{"why": why, "workspaces": len(undecided)}))
+	for _, ws := range undecided {
+		c.deps.FactsSettled(ws)
+	}
 }
