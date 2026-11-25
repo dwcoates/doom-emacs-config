@@ -1,78 +1,68 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { NAME_STEADY_CLASS, applyNameTint, nameTint } from "../../src/sidebar/name-tint.js";
+import { NAME_STEADY_CLASS, NAME_VIEWED_CLASS, applyNameTint, nameTint, type NameFacts, type NameTint } from "../../src/sidebar/name-tint.js";
+
+/** An idle, unviewed, done row with no sync merge and no background. */
+const IDLE: NameFacts = {
+  shown: "noTurnRunning",
+  arm: "done",
+  tone: "tone-green",
+  viewed: false,
+  unreadTurnEnd: undefined,
+};
 
 describe("nameTint", () => {
-  it.each([
-    { name: "holds a running turn's name at its tone", shown: "turnRunning", tone: "tone-red", want: { kind: "steady" } },
-    { name: "holds an ended turn's name at its tone, with no fade", shown: "noTurnRunning", tone: "tone-green", want: { kind: "steady" } },
-    { name: "holds a row that never ran a turn at its tone", shown: "noTurnRunning", tone: "tone-green", want: { kind: "steady" } },
-    { name: "holds a merged row's name at its tone", shown: "merged", tone: "tone-green", want: { kind: "steady" } },
-    { name: "tints nothing on a row with no tone", shown: "turnRunning", tone: "tone-none", want: null },
-  ])("$name", ({ shown, tone, want }) => {
-    // Arrange / Act
-    const got = nameTint(shown, tone, false);
+  it.each<{ name: string; facts: Partial<NameFacts>; want: NameTint }>([
+    // Idle rows: their tone until viewed.
+    { name: "holds an unviewed idle row's name at its tone", facts: {}, want: { kind: "steady" } },
+    { name: "greys a viewed idle row's name", facts: { viewed: true }, want: { kind: "viewed" } },
+    { name: "holds an unviewed failed turn's name at its tone", facts: { arm: "turnFailed", tone: "tone-turquoise" }, want: { kind: "steady" } },
+    { name: "greys a viewed gate's name", facts: { arm: "permission", viewed: true }, want: { kind: "viewed" } },
+    { name: "draws a toneless row's name at rest", facts: { arm: "inactive", tone: "tone-none" }, want: { kind: "rest" } },
+    { name: "greys a viewed toneless row's name", facts: { arm: "inactive", tone: "tone-none", viewed: true }, want: { kind: "viewed" } },
+    // Working rows: red, viewed or not.
+    { name: "holds a running turn's name at its tone", facts: { shown: "turnRunning", arm: "thinking", tone: "tone-red" }, want: { kind: "steady" } },
+    { name: "holds a viewed running turn's name at its tone", facts: { shown: "turnRunning", arm: "thinking", tone: "tone-red", viewed: true }, want: { kind: "steady" } },
+    { name: "holds a viewed compaction's name at its tone", facts: { shown: "turnRunning", arm: "compacting", tone: "tone-red", viewed: true }, want: { kind: "steady" } },
+    // The row's own merge: purple, viewed or not.
+    { name: "holds a viewed merging row's name at its tone", facts: { arm: "merging", tone: "tone-purple", viewed: true }, want: { kind: "steady" } },
+    // Sync merges: the merge's purple over any arm.
+    { name: "holds a sync merge's name at the merge's purple", facts: { shown: "syncMerging", arm: "merging", tone: "tone-purple" }, want: { kind: "toned", tone: "tone-purple" } },
+    { name: "holds a sync merge's own turn at the merge's purple", facts: { shown: "syncMerging", arm: "thinking", tone: "tone-red" }, want: { kind: "toned", tone: "tone-purple" } },
+    { name: "holds a viewed sync merge's name at the merge's purple", facts: { shown: "syncMerging", arm: "mergeQueued", tone: "tone-purple", viewed: true }, want: { kind: "toned", tone: "tone-purple" } },
+    { name: "holds a toneless sync merge's name at the merge's purple", facts: { shown: "syncMerging", tone: "tone-none" }, want: { kind: "toned", tone: "tone-purple" } },
+    // Background rows: the unread turn end's color, else rest; viewed grey.
+    { name: "draws a background row's done turn end in green", facts: { arm: "idleAsync", tone: "tone-yellow", unreadTurnEnd: "done" }, want: { kind: "toned", tone: "tone-green" } },
+    { name: "draws a background row's interrupted turn end in green", facts: { arm: "idleAsync", tone: "tone-yellow", unreadTurnEnd: "interrupted" }, want: { kind: "toned", tone: "tone-green" } },
+    { name: "draws a background row's failed turn end in turquoise", facts: { arm: "idleAsync", tone: "tone-yellow", unreadTurnEnd: "turnFailed" }, want: { kind: "toned", tone: "tone-turquoise" } },
+    { name: "draws a background row with no unread turn end at rest", facts: { arm: "idleAsync", tone: "tone-yellow" }, want: { kind: "rest" } },
+    { name: "greys a viewed background row's name", facts: { arm: "idleAsync", tone: "tone-yellow", viewed: true }, want: { kind: "viewed" } },
+  ])("$name", ({ facts, want }) => {
+    // Arrange
+    const f = { ...IDLE, ...facts };
+
+    // Act
+    const got = nameTint(f);
 
     // Assert
     expect(got).toEqual(want);
   });
-
-  it.each([
-    { name: "tints nothing on a viewed running turn", shown: "turnRunning", tone: "tone-red" },
-    { name: "tints nothing on a viewed ended turn", shown: "noTurnRunning", tone: "tone-green" },
-  ])("$name", ({ shown, tone }) => {
-    // Arrange / Act
-    const got = nameTint(shown, tone, true);
-
-    // Assert
-    expect(got).toBeNull();
-  });
-
-  it.each([
-    ["holds a sync merge's name at the merge's purple", "tone-purple", false],
-    ["holds a sync merge's own turn's name at the merge's purple over the row's tone", "tone-red", false],
-    ["holds a viewed sync merge's name at the merge's purple", "tone-purple", true],
-    ["holds a toneless sync merge's name at the merge's purple", "tone-none", false],
-  ] as const)("%s", (_name, tone, viewed) => {
-    // Arrange / Act
-    const got = nameTint("syncMerging", tone, viewed);
-
-    // Assert
-    expect(got).toEqual({ kind: "syncMerging", tone: "tone-purple" });
-  });
 });
 
 describe("applyNameTint", () => {
-  it("marks a steady name", () => {
+  it.each<{ name: string; tint: NameTint; want: string[] }>([
+    { name: "marks a steady name", tint: { kind: "steady" }, want: [NAME_STEADY_CLASS] },
+    { name: "marks a toned name steady in its own tone", tint: { kind: "toned", tone: "tone-purple" }, want: [NAME_STEADY_CLASS, "tone-purple"] },
+    { name: "marks a viewed name grey", tint: { kind: "viewed" }, want: [NAME_VIEWED_CLASS] },
+    { name: "leaves a resting name alone", tint: { kind: "rest" }, want: [] },
+  ])("$name", ({ tint, want }) => {
     // Arrange
     const label = document.createElement("span");
 
     // Act
-    applyNameTint(label, { kind: "steady" });
+    applyNameTint(label, tint);
 
     // Assert
-    expect([label.className, label.getAttribute("style")]).toEqual([NAME_STEADY_CLASS, null]);
-  });
-
-  it("marks a sync-merging name steady in its tone", () => {
-    // Arrange
-    const label = document.createElement("span");
-
-    // Act
-    applyNameTint(label, { kind: "syncMerging", tone: "tone-purple" });
-
-    // Assert
-    expect([label.classList.contains(NAME_STEADY_CLASS), label.classList.contains("tone-purple")]).toEqual([true, true]);
-  });
-
-  it("leaves an untinted name alone", () => {
-    // Arrange
-    const label = document.createElement("span");
-
-    // Act
-    applyNameTint(label, null);
-
-    // Assert
-    expect([label.className, label.getAttribute("style")]).toEqual(["", null]);
+    expect([[...label.classList], label.getAttribute("style")]).toEqual([want, null]);
   });
 });

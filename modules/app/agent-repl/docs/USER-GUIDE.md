@@ -1123,10 +1123,14 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - Both wrap at the ends, as `s-{` and `s-}` do.
   - Switching to a workspace, by any means, does not move it in the order: only working in it does.
   - While you step, the workspace you started from stays first, so `s-]` walks back to it.
-- **A workspace's name keeps its status color until you work in it.**
+- **An idle workspace's name keeps its status color until you work in it.**
   - Its sidebar row's name and its tab's name dim the moment you scroll its feed, type in its composer, step through its feed or follow a link in its page.
   - Looking at it, for any length of time, does not dim it.
-  - The next change of its status brings the color back.
+  - The next turn's start brings the color back.
+- **A working or sync-merging workspace's sidebar name always wears its status color**, red or purple, whether or not you have worked in it.
+- **A workspace whose branch merges async shows the merge in its purple mark alone**: its name follows the same rules, so an idle one dims once you work in it.
+- **A background workspace's sidebar name is red while it runs a turn.**
+  - Otherwise it follows the idle rule, in the color of the turn end beneath the background (green, or turquoise for a failed turn) until you work in it.
 - **A colored bar left of a sidebar row's tab number shows how few presses of `s-[` or `s-]` reach it.**
   - Orange means `s-[` reaches it in fewer presses, purple means `s-]` does.
   - The bar is brightest at one press and dimmer at two.

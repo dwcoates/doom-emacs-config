@@ -2411,23 +2411,33 @@ describe("the unread turn end under an idle_async row", () => {
     inRail(drawn, () => cascadedValue(drawn.querySelector(selector) as HTMLElement, "color"));
   const idle = { case: "idleAsync", value: {} } as const;
 
-  // An unviewed idle_async row's name wears the background's tone, resting at
-  // its dark breath since the background breathes (name-tint.ts).
+  // An unviewed idle_async row's name wears the tone of the turn end beneath
+  // the background, never the background's yellow (owner ruling 2026-11-25,
+  // name-tint.ts), resting at its dark breath since the background breathes.
   it.each([
-    { name: "an unread done leaves the name in the background's tone", end: "done", want: "var(--name-dark)" },
-    { name: "an unread interrupted leaves the name in the background's tone", end: "interrupted", want: "var(--name-dark)" },
-    { name: "an unread failed turn leaves the name in the background's tone", end: "turnFailed", want: "var(--name-dark)" },
-  ] as const)("$name", ({ end, want }) => {
+    { name: "an unread done inks the name green", end: "done", tone: "tone-green" },
+    { name: "an unread interrupted inks the name green", end: "interrupted", tone: "tone-green" },
+    { name: "an unread failed turn inks the name turquoise", end: "turnFailed", tone: "tone-turquoise" },
+  ] as const)("$name", ({ end, tone }) => {
     // Arrange, Act.
     const drawn = drawRosterRow(
       row({ id: "ws-1", status: idle, idleAsyncUnread: { turnEnd: { case: end, value: {} } } }),
       sidebarContext(),
       "R",
     );
+    const name = nameOf(drawn);
 
     // Assert.
-    expect(paintOf(drawn, ":scope > .row > .name")).toBe(want);
+    expect([name.classList.contains("tinted"), name.classList.contains(tone), paintOf(drawn, ":scope > .row > .name")]).toEqual([true, true, "var(--name-dark)"]);
     expect(drawn.getAttribute("data-unread-turn-end")).toBe(end);
+  });
+
+  it("draws an unviewed idle_async row with no unread turn end at the resting ink", () => {
+    // Arrange, Act.
+    const name = nameOf(drawRosterRow(row({ id: "ws-1", status: idle }), sidebarContext(), "R"));
+
+    // Assert.
+    expect([name.classList.contains("tinted"), name.classList.contains("viewed")]).toEqual([false, false]);
   });
 
   it("keeps the status dot on the background's yellow", () => {
@@ -2584,17 +2594,30 @@ describe("the row's display mode", () => {
       expect([name.classList.contains("tinted"), name.classList.contains("tone-purple")]).toEqual([true, true]);
     });
 
-    it("leaves an async-merging row's name off the merge's purple", () => {
+    it.each([
+      ["holds an unviewed async-merging idle row's name at its tone", "done", false, { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } }, [true, false]],
+      ["greys a viewed async-merging idle row's name", "done", true, { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } }, [false, true]],
+      ["holds a viewed async-merging working row's name at its tone", "thinking", true, { case: "turnRunning", value: { startedAtMs: 1n } }, [true, false]],
+    ] as const)("%s", (_name, status, viewed, when, want) => {
       // Arrange, Act.
-      const drawn = drawRosterRow(
-        row({ id: "ws-1", status: { case: "done", value: {} }, asyncMerging: true, when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } } }),
-        sidebarContext(),
-        "R",
-      );
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: status, value: {} }, asyncMerging: true, viewed, when }), sidebarContext(), "R");
       const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
 
       // Assert.
-      expect([name.classList.contains("tone-purple"), name.classList.contains("tinted")]).toEqual([false, true]);
+      expect([name.classList.contains("tone-purple"), name.classList.contains("tinted"), name.classList.contains("viewed")]).toEqual([false, ...want]);
+    });
+
+    it("holds a viewed running turn's name at its red", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(
+        row({ id: "ws-1", status: { case: "thinking", value: {} }, viewed: true, when: { case: "turnRunning", value: { startedAtMs: 1n } } }),
+        sidebarContext(),
+        "R",
+      );
+      const name = nameOf(drawn);
+
+      // Assert.
+      expect([name.classList.contains("tinted"), name.classList.contains("viewed"), drawn.getAttribute("data-viewed")]).toEqual([true, false, "true"]);
     });
 
     it("holds an ended turn's name at its tone however long ago it ended", () => {
