@@ -514,7 +514,9 @@ it to the local zone before persisting.
   logger (`ZettelLauncher.FileLogger`): its own lifecycle (`launcher.app`), each
   banner exchange it accepted, posted or the platform refused
   (`launcher.server.accept`, `launcher.server.post`), and every click it
-  reported (`launcher.clicks.click`, `launcher.clicks.advertisement`). A
+  reported (`launcher.clicks.click`, `launcher.clicks.advertisement`), and
+every Slack notification it watched and closed, or could not
+(`launcher.slack_notifications`). A
   banner's refusal is ALSO recorded by the daemon against the banner's
   workspace, which owns that failure (`daemon.desktopnotify.launcher` for the
   daemon's side of the dial); the launcher's line is its own side of it.

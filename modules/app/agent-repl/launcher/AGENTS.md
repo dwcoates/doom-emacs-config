@@ -3,8 +3,9 @@
 Zettel.app is the launcher: the app that connects agent-repl to macOS. Opened by
 hand (Finder, Spotlight, the Dock) it opens Emacs, and Emacs's own startup
 brings up the backend exactly as opening Emacs does. Resident under launchd
-(`--resident`) it posts every desktop banner through `UNUserNotificationCenter`
-and reports each banner click. It is a background app (`LSUIElement`: no window,
+(`--resident`) it posts every desktop banner through `UNUserNotificationCenter`,
+reports each banner click, and closes each Slack notification after its time on
+screen (below). It is a background app (`LSUIElement`: no window,
 no Dock icon), bundle ID `app.zettel`, run by launchd as `app.zettel.launcher`
 (the `service-launcher` entry of `launcher/requirements.json`, rendered by
 `bin/requirements.sh`; `services/AGENTS.md`) and installed at
@@ -64,12 +65,47 @@ Because every daemon dials the socket per banner, a daemon standing down (a
 drain) or both daemons of a handover post exactly like a serving one. A banner
 is never lost to a stop or a handover.
 
+## Slack's notifications close after a set time
+
+macOS shows a temporary notification for about five seconds and offers no
+setting for longer. So the user sets Slack's alert style to Persistent, and the
+resident launcher closes each Slack notification once it has been on screen for
+`SlackNotificationSeconds` (defaults domain `app.zettel`, default 15; set with
+`defaults write app.zettel SlackNotificationSeconds -int <seconds>`, read anew
+for every notification, so no restart is needed). Slack still decides which
+messages notify, so its per-channel settings hold.
+
+- `SlackNotificationCloser` (`SlackNotifications.swift`) decides: a Slack
+  notification seen for the first time gets its deadline, one gone from the
+  screen is forgotten, and one whose time is up is closed with its `Close`
+  action. Unit-tested against a fake screen and a fake clock.
+- `AccessibilityScreen` (`AccessibilityScreen.swift`) reads Notification
+  Center's windows through the Accessibility API and acts on them. It watches
+  the Notification Center process (`AXObserver`, window creation and layout
+  changes, coalesced to one scan per run-loop turn), and attaches again when
+  macOS grants Zettel Accessibility or Notification Center restarts. The tree
+  reading itself (`scanWindows`) is pure and unit-tested against the layout
+  measured on macOS 26.2.
+- Apple does not document that layout, so EVERY WAY IT CAN STOP MATCHING IS
+  RECORDED at WARN or ERROR (`launcher.slack_notifications`): a window holding
+  no notification the launcher recognizes, a notification naming no app, one
+  offering no `Close`, a failed scan or close, Accessibility not allowed, an
+  invalid `SlackNotificationSeconds`. A macOS update that breaks the closer
+  shows in the log the first time, never as Slack notifications that silently
+  stay up.
+- The Accessibility permission is the installer's
+  `launcher-accessibility-permission` entry (`--check-accessibility`,
+  `--request-accessibility`). macOS keys it to the app's signature, which is
+  why Zettel is signed with the local identity (`bin/lib-signing.sh`) rather
+  than ad hoc: an ad hoc signature changes with every build, and every deploy
+  would lose the permission.
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `Package.swift`, `Package.resolved` | the SwiftPM package; `swift-protobuf` pinned exactly |
-| `Sources/ZettelLauncher/` | everything the launcher does, unit-tested: `BannerServer` (the exchange and the accept loop), `Delimited` (the framing, `SocketChannel`), `HolderSocket` (`takeHeldSocket`), `Resident` (the instance lock, the build report), `Clicks` (`ClickReporter`, `ConnectDaemon`), `Connect` (the unary Connect client over HTTP/1.1, binary protobuf), `DaemonAddress`, `Focus` (the Do Not Disturb store's reader), `NotificationCenter`, `Options` (`--resident`, `--log`, `--holder`, `--run-dir`, `--state-dir`, `--check-notifications`, `--request-notifications`), `Log` |
+| `Sources/ZettelLauncher/` | everything the launcher does, unit-tested: `BannerServer` (the exchange and the accept loop), `Delimited` (the framing, `SocketChannel`), `HolderSocket` (`takeHeldSocket`), `Resident` (the instance lock, the build report), `Clicks` (`ClickReporter`, `ConnectDaemon`), `Connect` (the unary Connect client over HTTP/1.1, binary protobuf), `DaemonAddress`, `Focus` (the Do Not Disturb store's reader), `NotificationCenter`, `SlackNotifications` (`SlackNotificationCloser`), `AccessibilityScreen`, `Options` (`--resident`, `--log`, `--holder`, `--run-dir`, `--state-dir`, `--check-notifications`, `--request-notifications`, `--check-accessibility`, `--request-accessibility`), `Log` |
 | `Sources/Zettel/main.swift` | the AppKit shell: the app delegate, the notification delegate, the permission modes |
 | `Sources/ZettelIcon/` | renders the icon at one size (`bin/build-launcher.sh` packs every size) |
 | `Sources/ZettelProto` | a link to `proto/gen/swift`, the generated bindings |
@@ -87,13 +123,14 @@ never committed as an image.
 ## Building and installing
 
 `bin/build-launcher.sh` builds the release products, assembles the bundle,
-signs it ad hoc, and installs it at `~/Applications/Zettel.app` (swapped in by
+signs it with the local identity (`bin/lib-signing.sh`), and installs it at `~/Applications/Zettel.app` (swapped in by
 rename), registers it with LaunchServices, and restarts the service. The deploy
 stages it through `bin/build-frontend.sh launcher` (`--out`, no install) and
 installs it itself (`daemon/AGENTS.md`, Deploy). `bin/requirements.sh` installs
 the launchd agent and its socket holder and asks for the notification permission
-(`launcher/requirements.json`: `service-launcher`, `socket-holder-launcher`,
-`launcher-notification-permission`).
+and Accessibility (`launcher/requirements.json`: `service-launcher`,
+`socket-holder-launcher`, `launcher-notification-permission`,
+`launcher-accessibility-permission`).
 
 ## The Swift bindings
 

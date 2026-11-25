@@ -3,6 +3,7 @@
 // every desktop banner a daemon hands it under its own name and icon.
 // Everything it does lives in ZettelLauncher; this file is the AppKit shell.
 import AppKit
+import ApplicationServices
 import UserNotifications
 import ZettelLauncher
 
@@ -33,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var clicks: ClickReporter!
     var watcher: AdvertisementWatcher!
     var server: BannerServer!
+    var screen: AccessibilityScreen!
+    var slackCloser: SlackNotificationCloser!
     /// The one-instance lock, held for the life of the process.
     var lock: Int32 = -1
 
@@ -103,6 +106,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
         log.info(Op.app, "the launcher serves banners on its held socket", ["holder": options.holder])
+        startClosingSlackNotifications()
+    }
+
+    /// Closes each Slack notification after SlackNotificationSeconds on
+    /// screen (SlackNotifications.swift).
+    func startClosingSlackNotifications() {
+        screen = AccessibilityScreen(log: log)
+        slackCloser = SlackNotificationCloser(screen: screen, scheduler: RunLoopDeadlines(),
+                                              duration: { slackNotificationDuration(UserDefaults.standard) }, log: log)
+        screen.onChange = { [slackCloser] in slackCloser!.screenChanged() }
+        screen.start()
     }
 
     /// Starts the resident launcher's launchd agent (`launchctl kickstart`).
@@ -183,6 +197,11 @@ do {
 // THE PERMISSION MODES answer and exit before any app runs: they are the
 // installer's check and request (bin/requirements.sh), run as the bundle's
 // own executable so macOS answers for Zettel.app.
+func exitWithAccessibility() -> Never {
+    let report = accessibilityReport(trusted: AXIsProcessTrusted())
+    print(report.line)
+    exit(report.allowed ? 0 : 1)
+}
 func exitWithAuthorization() -> Never {
     let settled = DispatchSemaphore(value: 0)
     var display = DisplaySettings(authorization: .notDetermined, alert: .notSupported, style: .none)
@@ -208,6 +227,13 @@ case .requestNotifications:
     }
     asked.wait()
     exitWithAuthorization()
+case .checkAccessibility:
+    exitWithAccessibility()
+case .requestAccessibility:
+    // Asking adds Zettel to System Settings' Accessibility list and opens it;
+    // the user's switch there is the grant, which the re-check reports.
+    _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+    exitWithAccessibility()
 }
 let delegate = AppDelegate(options: options, log: FileLogger(path: options.logPath))
 let app = NSApplication.shared

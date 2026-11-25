@@ -1,0 +1,238 @@
+import Foundation
+
+// SLACK'S NOTIFICATIONS CLOSE AFTER A SET TIME. macOS shows a temporary
+// notification for about five seconds and gives no setting for longer, so the
+// user sets Slack's alert style to Persistent and the launcher closes each
+// Slack notification itself once it has been on screen for the configured
+// number of seconds (SlackNotificationSeconds, default 15). Slack still
+// decides which messages notify, so every per-channel setting holds.
+//
+// The launcher reaches another app's notifications only through the
+// Accessibility API (AccessibilityScreen.swift), whose view of Notification
+// Center's windows Apple does not document. EVERY WAY THAT VIEW CAN STOP
+// MATCHING is recorded at WARN or ERROR, so a macOS update that changes it is
+// seen in the launcher's log the first time it happens, never as Slack
+// notifications that silently stay up.
+
+/// The app whose notifications close after the configured time, as the first
+/// part of a notification's Accessibility description names it.
+public let slackAppName = "Slack"
+
+/// The defaults key (domain `app.zettel`) holding how many seconds a Slack
+/// notification stays on screen.
+public let slackNotificationSecondsKey = "SlackNotificationSeconds"
+
+/// How many seconds a Slack notification stays on screen when the user set
+/// no SlackNotificationSeconds.
+public let defaultSlackNotificationSeconds = 15
+
+/// The action macOS's notification offers to dismiss it.
+public let closeActionName = "Close"
+
+enum SlackOp {
+    static let close = "launcher.slack_notifications"
+}
+
+/// One notification on screen, as Notification Center's Accessibility tree
+/// shows it.
+public struct ShownNotification: Equatable, Sendable {
+    /// The notification's Accessibility identifier, which names it for as
+    /// long as it is on screen.
+    public let identifier: String
+    /// Its Accessibility description, `<app>, <title>, <body>`, or nil when
+    /// it carries none.
+    public let description: String?
+    /// The names of the actions it offers (`Close`, `Show Details`, ...).
+    public let actions: [String]
+
+    public init(identifier: String, description: String?, actions: [String]) {
+        self.identifier = identifier
+        self.description = description
+        self.actions = actions
+    }
+
+    /// The app that posted it, read from its description, or nil when the
+    /// description names none.
+    public var app: String? {
+        guard let description, let comma = description.range(of: ", ") else { return nil }
+        return String(description[..<comma.lowerBound])
+    }
+}
+
+/// What one look at Notification Center's on-screen windows found.
+public struct ScreenScan: Equatable, Sendable {
+    /// Every notification on screen. Notification Center's own panel, the
+    /// history the user opens from the menu bar, is never part of it.
+    public var notifications: [ShownNotification]
+    /// Each window that held neither a notification nor the panel's list (a
+    /// layout this launcher does not recognize), by a key naming the window
+    /// for as long as it is open.
+    public var unrecognizedWindows: Set<String>
+
+    public init(notifications: [ShownNotification], unrecognizedWindows: Set<String> = []) {
+        self.notifications = notifications
+        self.unrecognizedWindows = unrecognizedWindows
+    }
+}
+
+/// Notification Center's windows, as the closer reads and acts on them.
+public protocol NotificationScreen: AnyObject {
+    /// Looks at every window Notification Center shows now.
+    func scan() throws -> ScreenScan
+    /// Performs the action named `action` on the notification `identifier`
+    /// found by the last scan.
+    func perform(_ action: String, on identifier: String) throws
+}
+
+/// A pending call the scheduler can cancel.
+public protocol ScheduledCall: AnyObject {
+    func cancel()
+}
+
+/// When the closer's deadlines fall due.
+public protocol DeadlineScheduler {
+    func now() -> Date
+    /// Calls `fire` once at `date`, on the thread the closer runs on.
+    func schedule(at date: Date, _ fire: @escaping () -> Void) -> ScheduledCall
+}
+
+/// How long a Slack notification stays on screen, as the user set it.
+public enum SlackNotificationDuration: Equatable, Sendable {
+    case seconds(Int)
+    /// The value set is not a whole number of seconds above zero.
+    case invalid(String)
+}
+
+/// Reads SlackNotificationSeconds from `defaults`: unset is the default, a
+/// whole number above zero is that many seconds, anything else is invalid.
+public func slackNotificationDuration(_ defaults: UserDefaults) -> SlackNotificationDuration {
+    guard let value = defaults.object(forKey: slackNotificationSecondsKey) else {
+        return .seconds(defaultSlackNotificationSeconds)
+    }
+    if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+       number.doubleValue == number.doubleValue.rounded(), number.intValue > 0 {
+        return .seconds(number.intValue)
+    }
+    if let text = value as? String, let seconds = Int(text), seconds > 0 {
+        return .seconds(seconds)
+    }
+    return .invalid("\(value)")
+}
+
+/// Closes every Slack notification once it has been on screen for its
+/// configured time. Runs on one thread (the main run loop): the screen calls
+/// `screenChanged` whenever Notification Center's windows change, and the
+/// scheduler calls back when a deadline falls due.
+public final class SlackNotificationCloser {
+    private let screen: NotificationScreen
+    private let scheduler: DeadlineScheduler
+    private let duration: () -> SlackNotificationDuration
+    private let log: Logger
+    /// Each Slack notification on screen, by identifier, and when it closes.
+    private var deadlines: [String: Date] = [:]
+    /// Identifiers already recorded as unreadable or refused, so each is
+    /// recorded once rather than at every change of the screen.
+    private var reported: Set<String> = []
+    /// Unrecognized windows already recorded, by key.
+    private var reportedWindows: Set<String> = []
+    private var timer: ScheduledCall?
+
+    public init(screen: NotificationScreen, scheduler: DeadlineScheduler,
+                duration: @escaping () -> SlackNotificationDuration, log: Logger) {
+        self.screen = screen
+        self.scheduler = scheduler
+        self.duration = duration
+        self.log = log
+    }
+
+    /// The Slack notifications the closer is waiting to close, by identifier.
+    public var pending: [String: Date] { deadlines }
+
+    /// Notification Center's windows changed: a Slack notification seen for
+    /// the first time gets its deadline, and one gone from the screen is
+    /// forgotten.
+    public func screenChanged() {
+        guard let scan = look() else { return }
+        for window in scan.unrecognizedWindows.subtracting(reportedWindows).sorted() {
+            log.warn(SlackOp.close, "a Notification Center window holds no notification this launcher recognizes; macOS may have changed its layout, and Slack notifications in it stay on screen",
+                     ["window": window])
+        }
+        reportedWindows = scan.unrecognizedWindows
+        let now = scheduler.now()
+        var shown: Set<String> = []
+        for notification in scan.notifications {
+            shown.insert(notification.identifier)
+            guard let app = notification.app else {
+                if reported.insert(notification.identifier).inserted {
+                    log.warn(SlackOp.close, "a notification on screen names no app in its description; macOS may have changed its layout, and a Slack notification like it stays on screen",
+                             ["identifier": notification.identifier, "description": notification.description ?? "<none>"])
+                }
+                continue
+            }
+            guard app == slackAppName, deadlines[notification.identifier] == nil,
+                  !reported.contains(notification.identifier) else { continue }
+            switch duration() {
+            case .seconds(let seconds):
+                deadlines[notification.identifier] = now.addingTimeInterval(TimeInterval(seconds))
+                log.info(SlackOp.close, "a Slack notification appeared; it closes after its time on screen",
+                         ["identifier": notification.identifier, "seconds": seconds])
+            case .invalid(let value):
+                reported.insert(notification.identifier)
+                log.error(SlackOp.close, "SlackNotificationSeconds is not a whole number of seconds above zero, so this Slack notification stays on screen; set it with defaults write app.zettel SlackNotificationSeconds -int <seconds>",
+                          ["identifier": notification.identifier, "value": value])
+            }
+        }
+        for identifier in deadlines.keys where !shown.contains(identifier) {
+            deadlines[identifier] = nil
+            log.debug(SlackOp.close, "a Slack notification left the screen before its time", ["identifier": identifier])
+        }
+        reported.formIntersection(shown)
+        reschedule()
+    }
+
+    /// The earliest deadline fell due: each Slack notification whose time is
+    /// up is closed.
+    func deadlineReached() {
+        timer = nil
+        guard let scan = look() else { return }
+        let now = scheduler.now()
+        let byIdentifier = Dictionary(scan.notifications.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+        for (identifier, deadline) in deadlines where deadline <= now {
+            deadlines[identifier] = nil
+            guard let notification = byIdentifier[identifier] else {
+                log.debug(SlackOp.close, "a Slack notification left the screen before its time", ["identifier": identifier])
+                continue
+            }
+            guard notification.actions.contains(closeActionName) else {
+                log.error(SlackOp.close, "a Slack notification offers no Close action, so it stays on screen; macOS may have changed its notifications' actions",
+                          ["identifier": identifier, "actions": notification.actions.joined(separator: ", ")])
+                continue
+            }
+            do {
+                try screen.perform(closeActionName, on: identifier)
+                log.info(SlackOp.close, "closed a Slack notification after its time on screen", ["identifier": identifier])
+            } catch {
+                log.error(SlackOp.close, "closing a Slack notification failed, so it stays on screen", ["identifier": identifier, "cause": "\(error)"])
+            }
+        }
+        reschedule()
+    }
+
+    /// One scan of the screen, or nil after recording why it failed.
+    private func look() -> ScreenScan? {
+        do {
+            return try screen.scan()
+        } catch {
+            log.error(SlackOp.close, "reading Notification Center's windows failed, so Slack notifications stay on screen", ["cause": "\(error)"])
+            return nil
+        }
+    }
+
+    /// Arms the one timer for the earliest deadline, if any.
+    private func reschedule() {
+        timer?.cancel()
+        timer = nil
+        guard let earliest = deadlines.values.min() else { return }
+        timer = scheduler.schedule(at: earliest) { [weak self] in self?.deadlineReached() }
+    }
+}

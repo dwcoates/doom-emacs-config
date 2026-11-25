@@ -31,7 +31,7 @@
 #   group                    the user belongs to a group (`name`), which only an
 #                            administrator grants
 #   app_permission           macOS allows an app one `permission`
-#                            (`notifications`): `command` (a `~/` path is the
+#                            (`notifications`, `accessibility`): `command` (a `~/` path is the
 #                            user's home) answers `--check-<permission>` (exit
 #                            0 when allowed) and asks with
 #                            `--request-<permission>`
@@ -406,8 +406,8 @@ validate_entries() {
        elif $e.kind == "env" then need($e; ["name", "doc"])
        elif $e.kind == "group" then need($e; ["name", "platforms"])
        elif $e.kind == "app_permission" then need($e; ["command", "permission", "platforms"]),
-         (select($e.permission != null and ($e.permission | IN("notifications") | not))
-           | "\($e._file): \($e.id): an app_permission permission is notifications, not \($e.permission)")
+         (select($e.permission != null and ($e.permission | IN("notifications", "accessibility") | not))
+           | "\($e._file): \($e.id): an app_permission permission is notifications or accessibility, not \($e.permission)")
        elif $e.kind == "app_build" then need($e; ["app", "build", "platforms"]),
          (select($e.build != null and $e.build.module == null) | "\($e._file): \($e.id): an app_build build is a path in the module (\"module\")")
        elif $e.kind == "location_permission" then need($e; ["app", "platforms"])
@@ -704,6 +704,7 @@ permission_command() { field "$1" .command | sed "s|^~/|$HOME/|"; }
 permission_fix() {
   case "$1" in
     notifications) printf '%s\n' "install asks macOS (its prompt, the first time); then allow it in System Settings → Notifications" ;;
+    accessibility) printf '%s\n' "install asks macOS, which opens System Settings → Privacy & Security → Accessibility; turn the app on there" ;;
   esac
 }
 

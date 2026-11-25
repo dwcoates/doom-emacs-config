@@ -12,6 +12,14 @@ public enum Mode: Equatable {
     /// Ask macOS for permission to notify (its prompt, the first time) and
     /// exit as checkNotifications does.
     case requestNotifications
+    /// Report whether macOS lets Zettel use the Accessibility API, and exit:
+    /// 0 when it may, 1 when it may not (bin/requirements.sh's
+    /// app_permission check of `accessibility`).
+    case checkAccessibility
+    /// Ask macOS to let Zettel use the Accessibility API (its prompt, which
+    /// opens System Settings, until the user allows it) and exit as
+    /// checkAccessibility does.
+    case requestAccessibility
 }
 
 /// The launcher's command line. launchd's app.zettel.launcher passes
@@ -76,6 +84,10 @@ public func parseOptions(_ arguments: [String], environment: [String: String], h
             options.mode = .checkNotifications
         case "--request-notifications":
             options.mode = .requestNotifications
+        case "--check-accessibility":
+            options.mode = .checkAccessibility
+        case "--request-accessibility":
+            options.mode = .requestAccessibility
         case "--state-dir", "--log", "--holder", "--run-dir":
             guard let value = rest.popFirst() else {
                 throw OptionsError(description: "\(argument) needs a path")
