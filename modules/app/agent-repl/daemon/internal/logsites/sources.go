@@ -11,10 +11,11 @@ import (
 )
 
 // A Dir is one directory whose log files the pass reads: every regular file
-// in it whose base Owned matches. The pass reads each sink's current file and
-// its rotated generations alike, never a warnings twin (`*.warn.log`, a copy
-// of its sink's warnings and errors, which would count them twice) or a
-// file that is not JSONL (a service's raw stdout and stderr).
+// in it whose base Owned matches. The pass reads each sink's log, its
+// warnings file (`*.warn.log`, where its runtime writes every warn and error
+// record and its log none: logging-contract.md "Warnings files"), and the
+// rotated generations of both alike, never a file that is not JSONL (a
+// service's raw stdout and stderr).
 type Dir struct {
 	Path  string
 	Owned func(base string) bool
@@ -23,15 +24,20 @@ type Dir struct {
 // generation is a rotated generation's suffix (`.1` through `.N`).
 const generation = `(\.[1-9][0-9]*)?`
 
+// warnings is a sink's warnings file's infix (logging.WarningsPath: `.warn`
+// before the final `.log`).
+const warnings = `(\.warn)?`
+
 // stateLogFile matches every JSONL log under the state root's logs
 // directory (logging-contract.md "Persistence layout"): the run logs, the
-// Emacs central log, and every workspace target of every runtime.
-var stateLogFile = regexp.MustCompile(`^((daemon|thaw-guard)\.run\.log|emacs\.central\.log|agent-repl-[0-9a-f]+-(daemon|shim|webapp|sidecar|emacs)-[A-Za-z0-9]+\.log)` + generation + `$`)
+// Emacs central log, and every workspace target of every runtime, each with
+// its warnings file.
+var stateLogFile = regexp.MustCompile(`^((daemon|thaw-guard)\.run|emacs\.central|agent-repl-[0-9a-f]+-(daemon|shim|webapp|sidecar|emacs)-[A-Za-z0-9]+)` + warnings + `\.log` + generation + `$`)
 
 // cacheLogFile matches every agent-repl service's own JSONL log under the
 // cache root's log directory: the store, the sidecar, zettel, the test
-// service and the socket holders.
-var cacheLogFile = regexp.MustCompile(`^(shim-store|shim-claude-sidecar|zettel|tests|sockethold-[a-z]+)\.log` + generation + `$`)
+// service and the socket holders, each with its warnings file.
+var cacheLogFile = regexp.MustCompile(`^(shim-store|shim-claude-sidecar|zettel|tests|sockethold-[a-z]+)` + warnings + `\.log` + generation + `$`)
 
 // StateLogs is the state root's logs directory, as a Dir.
 func StateLogs(dir string) Dir { return Dir{Path: dir, Owned: stateLogFile.MatchString} }

@@ -22,8 +22,14 @@ func TestStateLogsOwnsEverySinkAndItsGenerations(t *testing.T) {
 		{"agent-repl-99808d49-webapp-42.log", true},
 		{"agent-repl-0123456789abcdef-sidecar-7.log", true},
 		{"agent-repl-0123456789abcdef-emacs-abc.log", true},
-		{"daemon.run.warn.log", false},
-		{"agent-repl-0123456789abcdef-webapp-42.warn.log", false},
+		{"daemon.run.warn.log", true},
+		{"daemon.run.warn.log.2", true},
+		{"thaw-guard.run.warn.log", true},
+		{"emacs.central.warn.log", true},
+		{"agent-repl-0123456789abcdef-webapp-42.warn.log", true},
+		{"agent-repl-0123456789abcdef-shim-x9.warn.log.1", true},
+		{"daemon.run.log.warn", false},
+		{"daemon.stdio.warn.log", false},
 		{"daemon.stdio.log", false},
 		{"agent-repl-0123456789abcdef-notifier-1.log", false},
 		{"daemon.run.log.0", false},
@@ -53,7 +59,10 @@ func TestCacheLogsOwnsEveryServicesOwnLog(t *testing.T) {
 		{"zettel.log", true},
 		{"tests.log", true},
 		{"sockethold-daemon.log", true},
-		{"shim-store.warn.log", false},
+		{"shim-store.warn.log", true},
+		{"shim-claude-sidecar.warn.log.1", true},
+		{"sockethold-daemon.warn.log", true},
+		{"victoriametrics.warn.log", false},
 		{"shim-store.err.log", false},
 		{"shim-store.out.log", false},
 		{"victoriametrics.log", false},
@@ -95,9 +104,9 @@ func TestListSourcesAnswersEveryOwnedRegularFileSorted(t *testing.T) {
 	for _, s := range sources {
 		got = append(got, filepath.Base(s.path))
 	}
-	want := []string{"daemon.run.log", "daemon.run.log.1", "emacs.central.log"}
+	want := []string{"daemon.run.log", "daemon.run.log.1", "daemon.run.warn.log", "emacs.central.log"}
 	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("listSources = (%v, %v), want %v: every owned regular file, no warnings twin, directory or link", got, err, want)
+		t.Fatalf("listSources = (%v, %v), want %v: every owned regular file and warnings file, no directory or link", got, err, want)
 	}
 }
 

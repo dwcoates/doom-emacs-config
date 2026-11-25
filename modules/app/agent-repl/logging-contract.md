@@ -412,8 +412,9 @@ from the logs (`daemon/internal/logsites`, `daemon/internal/wsm/logsites.go`).
 
 - ONE PASS reads every JSONL log under the state root's `logs/` directory
   and the cache root's `log/` directory from each file's own cursor, to the
-  end of its last whole line. A warnings twin (`*.warn.log`) and a
-  service's raw `.out.log` and `.err.log` are never read.
+  end of its last whole line. Every log's warnings file (`*.warn.log`) is
+  read as a sink of its own, since it alone holds its runtime's warn and
+  error records; a service's raw `.out.log` and `.err.log` are never read.
 - It runs before every removal of log files the daemon makes (the hourly
   retention pass, a discarded workspace's logs), so every file the daemon
   removes was read to its end; at each deploy's start; and before every

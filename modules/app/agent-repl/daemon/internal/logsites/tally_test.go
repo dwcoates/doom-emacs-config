@@ -118,6 +118,30 @@ func TestAPassTalliesEveryKeyedRecordAndCountsTheRest(t *testing.T) {
 	}
 }
 
+func TestAPassTalliesTheWarningsEachSinkWritesOnlyToItsWarningsFile(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.write(t, "daemon.run.log", keyed(t0.Add(time.Minute), "info", "pkg.A", "said {what}", "said x"))
+	f.write(t, "daemon.run.warn.log",
+		keyed(t0.Add(2*time.Minute), "warn", "pkg.B", "failed {what}", "failed x")+
+			keyed(t0.Add(3*time.Minute), "error", "pkg.B", "failed {what}", "failed y"))
+
+	// Act
+	report := f.pass(t)
+
+	// Assert
+	if report.Records != 3 || report.Files != 2 {
+		t.Errorf("report = %+v, want 3 records from 2 files", report)
+	}
+	var levels []string
+	for _, r := range f.rows(t) {
+		levels = append(levels, r.Site+":"+r.Level)
+	}
+	if want := sorted(siteA+":info", siteB+":warn", siteB+":error"); !reflect.DeepEqual(sorted(levels...), want) {
+		t.Errorf("rows = %v, want %v: the warn and error rows read from the warnings file", levels, want)
+	}
+}
+
 func TestAPassTalliesARecordLongerThanItsReadBuffer(t *testing.T) {
 	// Arrange: a keyed record whose message alone passes the read buffer,
 	// between two short ones.
