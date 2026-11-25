@@ -66,3 +66,9 @@ One serial runner (`workspace.StandingCloses`) judges requests; nothing polls.
 ## Storage
 
 - Layout 215 (additive): `close_requested_at`, `close_requested_by` on `workspaces`, filled from `close_when_turn_ends` (by `agent`), with triggers mirroring the old column both ways while a predecessor daemon shares the file. Layout 216 (contract) drops the triggers and `close_when_turn_ends`.
+
+## Rendering (decided)
+
+- The webapp draws `closing · waiting` as "waiting to close", standing still like `close blocked`, under the closing arm's existing BLUE.
+- `composer_open_substatuses` declares `closing: [waiting]`: a standing close leaves the workspace usable, and a prompt the user sends is exactly what withdraws it, so the composer stays open.
+- Open for the owner: whether a standing close should keep the closing arm's blue (an unusable workspace) at all, or draw in another color; the color is per arm, so a different color would need its own arm.
