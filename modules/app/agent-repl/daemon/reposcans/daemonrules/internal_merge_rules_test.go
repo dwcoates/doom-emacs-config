@@ -1265,3 +1265,16 @@ func TestTheExitCauseTableNamesEveryDeclaredCause(t *testing.T) {
 		t.Fatalf("declared causes %v, classified causes %v; want the same set", declared, tabled)
 	}
 }
+
+// TestEveryBranchWorktreeLookupGoesThroughWorktreeHolding holds the merge
+// package to its one lookup of a branch's worktree: a cleanup, a rule check
+// or a subject that listed the worktrees itself could drift from it.
+func TestEveryBranchWorktreeLookupGoesThroughWorktreeHolding(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, internalMergeDir, ".ListWorktrees(ctx, main)")
+
+	// Assert
+	if !slices.Equal(sites, []string{"request.go"}) {
+		t.Fatalf("worktree listings = %v, want worktreeHolding's alone in request.go", sites)
+	}
+}

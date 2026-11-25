@@ -162,22 +162,16 @@ func (o *orchestrator) branchSubject(ctx context.Context, r *run) (subject, erro
 	if err != nil {
 		return subject{}, err
 	}
-	main, err := r.git.MainWorktree(ctx, record.Dir)
+	dir, main, held, err := worktreeHolding(ctx, r.git, record.Dir, r.source.Branch)
 	if err != nil {
-		return subject{}, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
+		return subject{}, err
 	}
 	s := subject{branch: r.source.Branch, targetDir: main}
-	worktrees, err := r.git.ListWorktrees(ctx, main)
-	if err != nil {
-		return subject{}, fmt.Errorf("merge: listing the repository's worktrees: %w", err)
-	}
-	for _, wt := range worktrees {
-		if wt.Branch == r.source.Branch {
-			s.dir = wt.Dir
-			o.log(ctx, r.ws).Info(op, "the branch has a worktree of its own; the merge works in it", dlog.Context{
-				"workspace": string(r.ws), "branch": s.branch, "worktree": s.dir})
-			return s, nil
-		}
+	if held {
+		s.dir = dir
+		o.log(ctx, r.ws).Info(op, "the branch has a worktree of its own; the merge works in it", dlog.Context{
+			"workspace": string(r.ws), "branch": s.branch, "worktree": s.dir})
+		return s, nil
 	}
 	s.dir = worktreeFor(o.deps.StateDir, r.lease.ID)
 	if err := os.MkdirAll(filepath.Dir(s.dir), 0o755); err != nil {

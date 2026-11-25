@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -910,4 +911,57 @@ func TestParkQueuedAsksOnlyForAnOwnBranchMergeWithNoPick(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorktreeHoldingFindsTheOneWorktreeWithTheBranch(t *testing.T) {
+	tests := []struct {
+		name      string
+		worktrees []gitclient.Worktree
+		wantDir   string
+		wantHeld  bool
+	}{
+		{name: "a worktree has the branch", worktrees: []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}, {Dir: "/w/fix", Branch: "fix"}}, wantDir: "/w/fix", wantHeld: true},
+		{name: "none has it", worktrees: []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}}},
+		{name: "a bare entry never holds it", worktrees: []gitclient.Worktree{{Dir: "/w/repo.git", Branch: "fix", Bare: true}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.git.mu.Lock()
+			h.git.worktrees = tt.worktrees
+			h.git.mu.Unlock()
+
+			// Act
+			dir, main, held, err := worktreeHolding(context.Background(), h.git, theWorkspaceDir(h), "fix")
+
+			// Assert
+			if err != nil || dir != tt.wantDir || held != tt.wantHeld || main == "" {
+				t.Fatalf("worktreeHolding = %q, %q, %v, %v; want %q, the main worktree, %v", dir, main, held, err, tt.wantDir, tt.wantHeld)
+			}
+		})
+	}
+}
+
+func TestWorktreeHoldingFailsWhenTheMainWorktreeCannotBeRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.mainWorktreeErr = errors.New("not a repository")
+	h.git.mu.Unlock()
+
+	// Act
+	_, _, held, err := worktreeHolding(context.Background(), h.git, theWorkspaceDir(h), "fix")
+
+	// Assert
+	if err == nil || held {
+		t.Fatalf("worktreeHolding = %v, %v; want the failure", held, err)
+	}
+}
+
+// theWorkspaceDir answers the harness workspace's worktree.
+func theWorkspaceDir(h *harness) string {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	return h.db.workspaces[theWorkspace].Dir
 }

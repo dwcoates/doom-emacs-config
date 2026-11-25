@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
@@ -476,29 +477,47 @@ func (o *orchestrator) checkAsync(ctx context.Context, requester wsm.Workspace, 
 // none does or the one that does is never a cleanup's to remove: a registered
 // workspace's, the requester's, or the repository's main worktree.
 func (o *orchestrator) cleanupDirFor(ctx context.Context, requester wsm.Workspace, branch string) (string, error) {
-	main, err := o.deps.Git.MainWorktree(ctx, requester.Dir)
-	if err != nil {
-		return "", fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
+	dir, main, held, err := worktreeHolding(ctx, o.deps.Git, requester.Dir, branch)
+	if err != nil || !held {
+		return "", err
 	}
-	worktrees, err := o.deps.Git.ListWorktrees(ctx, main)
+	if filepath.Clean(dir) == filepath.Clean(main) || filepath.Clean(dir) == filepath.Clean(requester.Dir) {
+		return "", nil
+	}
+	if _, err := o.deps.DB.WorkspaceByDir(ctx, dir); err == nil {
+		return "", nil
+	} else if !errors.Is(err, wsm.ErrNotFound) {
+		return "", fmt.Errorf("merge: asking whether %s is a workspace's worktree: %w", dir, err)
+	}
+	return dir, nil
+}
+
+// worktreeLister is what finding a branch's worktree asks of git.
+type worktreeLister interface {
+	MainWorktree(ctx context.Context, dir string) (string, error)
+	ListWorktrees(ctx context.Context, repoDir string) ([]gitclient.Worktree, error)
+}
+
+// worktreeHolding answers the worktree of the repository holding IN that has
+// BRANCH checked out (git checks a branch out in at most one), with the
+// repository's main worktree, and HELD false when none has it: THE ONE
+// LOOKUP of a branch's worktree, which an async merge's cleanup, its rule
+// check and a branch merge's subject share.
+func worktreeHolding(ctx context.Context, git worktreeLister, in, branch string) (dir, main string, held bool, err error) {
+	main, err = git.MainWorktree(ctx, in)
 	if err != nil {
-		return "", fmt.Errorf("merge: listing the repository's worktrees: %w", err)
+		return "", "", false, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
+	}
+	worktrees, err := git.ListWorktrees(ctx, main)
+	if err != nil {
+		return "", "", false, fmt.Errorf("merge: listing the repository's worktrees: %w", err)
 	}
 	for _, wt := range worktrees {
-		if wt.Bare || wt.Branch != branch {
-			continue
+		if !wt.Bare && wt.Branch == branch {
+			return wt.Dir, main, true, nil
 		}
-		if filepath.Clean(wt.Dir) == filepath.Clean(main) || filepath.Clean(wt.Dir) == filepath.Clean(requester.Dir) {
-			return "", nil
-		}
-		if _, err := o.deps.DB.WorkspaceByDir(ctx, wt.Dir); err == nil {
-			return "", nil
-		} else if !errors.Is(err, wsm.ErrNotFound) {
-			return "", fmt.Errorf("merge: asking whether %s is a workspace's worktree: %w", wt.Dir, err)
-		}
-		return wt.Dir, nil
 	}
-	return "", nil
+	return "", main, false, nil
 }
 
 // withCheckedOutBranch answers source carrying the branch checked out in the
