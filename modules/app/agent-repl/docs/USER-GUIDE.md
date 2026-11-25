@@ -453,6 +453,22 @@ A `#<channel-name>` in a prompt or response bubble, such as `#eng-help`, is draw
   - One glued to a letter before or after it is not.
 - **The bubble's text is unchanged, and a channel at the very end of a still-arriving response is linked once more text follows it.**
 
+## Skill links in prompts and responses
+
+Inline code that names one of the workspace's skills, such as `` `ceac-resource-usage` `` or `` `/ceac-resource-usage` ``, is drawn as a link reading `/ceac-resource-usage`.
+
+- **Clicking it opens that skill's `SKILL.md` in Emacs, as any file link does.**
+  - The file is the one the workspace's own session runs for that name.
+  - That is the worktree's project skill when it has one, else your own skill under `~/.claude/skills`, else a plugin's.
+- **It is styled as every other link, not as code.**
+- **Only inline code that is exactly the skill's name is linked.**
+  - Inline code inside a link or a code block is not.
+  - A name that is no skill of the workspace, or a built-in command such as `/compact`, stays plain code.
+- **The bubble's text is unchanged.**
+  - Copying it, searching it or replying to it reads the inline code as written.
+- **A bubble drawn before the workspace's session listed its skills gains its links once the session lists them.**
+- **While a response is still arriving, a skill name at its very end is linked once more text follows it.**
+
 ## Copying a code block, a prompt or a final response
 
 Every code block in the feed has a small copy icon at its top right.

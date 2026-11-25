@@ -514,8 +514,10 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 	case *conversationv1.SessionUpdate_CommandCatalog:
 		// THE CATALOG CHANGES WHICH COMMANDS A PROMPT NAMES (commands.go). The
 		// watcher installs it in the one table (Deps.Commands) before routing
-		// it here, so the re-stamp reads the catalog just stated.
+		// it here, so the re-stamp reads the catalog just stated. It also
+		// names the skills' files, which link their names (skills.go).
 		r.restampPromptCommands(s)
+		r.relinkSkills(s)
 	default:
 		log.Debug("daemon.feed.session_update_ignored",
 			"a session update changes no feed row",

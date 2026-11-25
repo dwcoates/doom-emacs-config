@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/dirpath"
 	"context"
 	"errors"
 	"fmt"
@@ -110,22 +111,8 @@ func writeLog(path, body string) error {
 func (o *orchestrator) testLogLink(log testLog) *frontendv1.FeedMergeTestLog {
 	return &frontendv1.FeedMergeTestLog{
 		Token: &frontendv1.FeedMergeTestLogToken{Value: log.token},
-		Label: &frontendv1.FeedMergeTestLogLabel{Text: tildePath(log.path, o.deps.Home)},
+		Label: &frontendv1.FeedMergeTestLogLabel{Text: dirpath.Tilde(log.path, o.deps.Home)},
 	}
-}
-
-// tildePath shortens a path inside home to start with ~.
-func tildePath(path, home string) string {
-	if home == "" {
-		return path
-	}
-	if path == home {
-		return "~"
-	}
-	if rest, inside := strings.CutPrefix(path, home+string(filepath.Separator)); inside {
-		return filepath.Join("~", rest)
-	}
-	return path
 }
 
 // The reasons a test log token is refused, spelled as the

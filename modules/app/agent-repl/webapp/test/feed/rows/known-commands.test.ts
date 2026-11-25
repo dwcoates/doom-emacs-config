@@ -93,6 +93,16 @@ describe("markKnownCommands", () => {
     expect(root.querySelector(`code > .${KNOWN_COMMAND_CLASS}`)?.textContent).toBe("/compact");
   });
 
+  it("leaves a slash word inside a link, which draws as every link does", () => {
+    // Arrange
+    const root = rendered('<p><a href="~/s/SKILL.md">/merge-queue</a> then /merge-queue</p>');
+    // Act
+    markKnownCommands(root, new Set(["merge-queue"]));
+    // Assert
+    expect(marks(root)).toEqual(["/merge-queue"]);
+    expect(root.querySelector(`a .${KNOWN_COMMAND_CLASS}`)).toBeNull();
+  });
+
   it("marks nothing for no names", () => {
     // Arrange
     const root = rendered("<p>/compact</p>");

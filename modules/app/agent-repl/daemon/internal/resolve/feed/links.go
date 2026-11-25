@@ -10,7 +10,8 @@ import (
 // drawLinks draws every link of PARSED, workspace WS's text: first every link
 // the text was written with loses its inline code markers (unmarkLinks), then
 // its pull request references are linked (linkPulls), then its Slack channels
-// (linkChannels). It is the one place a
+// (linkChannels), then every code span naming one of its skills (linkSkills).
+// It is the one place a
 // drawn text's links are drawn, a response's (parsedProse) and a prompt's
 // (DrawUserBlocks) alike, so the two cannot draw links differently. Only the
 // text's end can still grow while it is ARRIVING.
@@ -18,6 +19,7 @@ func (r *resolver) drawLinks(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse,
 	unmarkLinks(parsed)
 	r.linkPulls(ws, parsed, arriving)
 	r.linkChannels(parsed, arriving)
+	r.linkSkills(ws, parsed, arriving)
 }
 
 // DrawLinks draws PARSED's links as the workspace's feed draws its own
