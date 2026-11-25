@@ -12,7 +12,7 @@
  *     ended turn's red, and a held prompt's NONE) — the exceptions are the
  *     backgrounds the owner names: the held prompt's darker blue
  *     (2026-10-25), and a thinking or interim response's, the page's
- *     own `--bg` (2026-10-08), and a selected bubble's grey (2026-10-11);
+ *     own `--bg` (2026-10-08);
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;
