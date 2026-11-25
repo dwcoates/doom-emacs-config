@@ -202,7 +202,10 @@ export const ReportPageStateNotHeldSchema: GenMessage<ReportPageStateNotHeld> = 
  */
 export type ReportPageStateLoadReason = Message<"agentrepl.v1.ReportPageStateLoadReason"> & {
   /**
-   * The moment that loaded the page; Emacs always sets one.
+   * The moment that loaded the page; Emacs always sets one. A reason whose
+   * arm this daemon's revision does not name (an editor on another build,
+   * such as one a deploy has not reloaded yet) is recorded with its reason
+   * unnamed, never refused: the load itself is known.
    *
    * @generated from oneof agentrepl.v1.ReportPageStateLoadReason.reason
    */
@@ -367,7 +370,9 @@ export const ReportPageStateLoadAllocatedSchema: GenMessage<ReportPageStateLoadA
  */
 export type ReportPageStateUnloadReason = Message<"agentrepl.v1.ReportPageStateUnloadReason"> & {
   /**
-   * The moment that dropped the page; Emacs always sets one.
+   * The moment that dropped the page; Emacs always sets one. An arm this
+   * daemon's revision does not name is recorded with its reason unnamed,
+   * as for a load.
    *
    * @generated from oneof agentrepl.v1.ReportPageStateUnloadReason.reason
    */

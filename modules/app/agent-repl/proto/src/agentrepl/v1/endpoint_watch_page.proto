@@ -266,7 +266,20 @@ message PageSubscriptionFailed {
   // handover is planned, not a fault: the page raises its move notice and
   // files no failure. UNSET for every other refusal.
   optional PageSubscriptionHandedAway handed_away = 3;
+  // SET WHEN THE DEDICATED RPC REFUSED BECAUSE THE DAEMON SERVES NO PAGE OF
+  // THE WORKSPACE: it is not visible (WatchWebWorkspace's `not_visible`
+  // refusal). The editor holds a page only for a visible workspace and
+  // releases the page of one that stops being visible, so a page that meets
+  // this refusal is one whose workspace's visibility changed while it loaded:
+  // planned, not a fault. The page files no failure, records it at INFO, and
+  // subscribes again on its backoff, which a workspace visible again answers.
+  // UNSET for every other refusal.
+  optional PageSubscriptionWithheld withheld = 4;
 }
+
+// The daemon serves no page of the workspace because it is not visible.
+// Empty: presence is the fact.
+message PageSubscriptionWithheld {}
 
 // The successor daemon a handed-away workspace now belongs to.
 message PageSubscriptionHandedAway {

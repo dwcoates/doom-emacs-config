@@ -263,6 +263,15 @@ which restores a known prior handler rather than keeping the current one."
   (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-answered raw \"elisp.sidebar-view\"")))
   (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl-webhost-parse-answer raw)"))))
 
+(ert-deftest agent-repl-test-wh-every-held-page-entry-is-built-through-the-one-helper ()
+  "Every held page's entry is made by `agent-repl--webhost-page-entry'."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(list :url"))))
+
+(ert-deftest agent-repl-test-wh-a-page-entry-holds-its-url-and-reason-and-no-deferral ()
+  "A page entry is held at its URL for its reason, handed to the host."
+  (should (equal (agent-repl--webhost-page-entry "http://ws-a.localhost:1/" 'shown)
+                 '(:url "http://ws-a.localhost:1/" :why shown))))
+
 (defun agent-repl-test-wh--on-commit (status uri)
   "What `agent-repl--webview-on-commit' did for STATUS and URI on a view at the host's URL."
   (let (did)
@@ -1502,8 +1511,8 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
                    (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/" nil nil)
                          (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" "after" nil))))))
 
-(ert-deftest agent-repl-test-wh-a-reload-hands-its-start-with-every-page-it-replays ()
-  "A replay after a reload hands every page the reload's start, then forgets it."
+(ert-deftest agent-repl-test-wh-a-reload-hands-its-start-with-the-shown-page ()
+  "A replay after a reload hands the shown page the reload's start, then forgets it."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha" 'shown)
@@ -1515,9 +1524,112 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
     (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should (equal (agent-repl-test-wh--sent "ensure")
-                   (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/" nil 1700000000500)
-                         (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" "after" 1700000000500))))
+                   (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/" nil 1700000000500))))
     (should-not agent-repl--webhost-reload-started-ms)))
+
+(defmacro agent-repl-test-wh--after-reload (held shown &rest body)
+  "Hold pages for HELD, show SHOWN, reload the host, then run BODY.
+The calls sent before BODY are forgotten, so BODY reads only its own."
+  (declare (indent 2))
+  `(agent-repl-test-wh--with-host
+     (dolist (ws ,held) (agent-repl-webhost-ensure-page ws 'shown))
+     (agent-repl-webhost-show ,shown)
+     (setq agent-repl--webhost-reload-started-ms 1700000000500)
+     (agent-repl-test-wh--load "load-committed")
+     (setq agent-repl-test-wh--calls nil)
+     ,@body))
+
+(ert-deftest agent-repl-test-wh-a-reload-with-many-held-pages-boots-exactly-the-shown-one ()
+  "A reload with N held pages hands the host one: the shown page."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (dolist (ws '("a" "b" "c" "d" "e")) (agent-repl-webhost-ensure-page ws 'shown))
+    (agent-repl-webhost-show "c")
+    (setq agent-repl-test-wh--calls nil
+          agent-repl--webhost-reload-started-ms 1700000000500)
+    (agent-repl-test-wh--with-order '("a" "b" "c" "d" "e") "c"
+      ;; Act
+      (agent-repl-test-wh--load "load-committed"))
+    ;; Assert
+    (should (equal (agent-repl-test-wh--ensured-lanes) '(("c" . nil))))))
+
+(ert-deftest agent-repl-test-wh-a-reload-keeps-every-other-page-held-and-deferred ()
+  "Every page not shown stays held across the reload, deferred until it is shown."
+  (agent-repl-test-wh--after-reload '("alpha" "beta" "gamma") "alpha"
+    ;; Assert
+    (should (agent-repl-webhost-has-page-p "beta"))
+    (should (agent-repl-webhost-has-page-p "gamma"))
+    (should (agent-repl--webhost-deferred-p "id-beta"))
+    (should-not (agent-repl--webhost-deferred-p "id-alpha"))
+    (should (eq (agent-repl-webhost-page-reason "beta") 'shown))))
+
+(ert-deftest agent-repl-test-wh-a-hidden-page-reloads-when-it-is-shown ()
+  "Showing a deferred page hands it to the host, then shows it."
+  (agent-repl-test-wh--after-reload '("alpha" "beta") "alpha"
+    ;; Act
+    (agent-repl-webhost-show "beta")
+    ;; Assert
+    (should (equal (seq-filter (lambda (script) (or (string-search "h.ensure(" script) (string-search "h.show(" script)))
+                               (reverse (mapcar #'car agent-repl-test-wh--calls)))
+                   (list (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" nil nil)
+                         (agent-repl--webhost-script "show" "id-beta" nil))))
+    (should-not (agent-repl--webhost-deferred-p "id-beta"))))
+
+(ert-deftest agent-repl-test-wh-a-handed-over-page-is-not-handed-over-again ()
+  "A page shown once after the reload is the host's: showing it again ensures nothing."
+  (agent-repl-test-wh--after-reload '("alpha" "beta") "alpha"
+    (agent-repl-webhost-show "beta")
+    (agent-repl-webhost-show "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl-webhost-show "beta")
+    ;; Assert
+    (should-not (agent-repl-test-wh--sent "ensure"))))
+
+(ert-deftest agent-repl-test-wh-a-deferred-page-is-re-pointed-without-a-host-call ()
+  "A handover's re-point of a deferred page moves its URL here and boots nothing."
+  (agent-repl-test-wh--after-reload '("alpha" "beta") "alpha"
+    (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
+               (lambda (ws) (format "http://ws-%s.localhost:2/" ws))))
+      ;; Act
+      (agent-repl-webhost-reload-page "beta"))
+    ;; Assert
+    (should-not (agent-repl-test-wh--sent "ensure"))
+    (should-not (agent-repl-test-wh--sent "reload"))
+    (should (equal (agent-repl--webhost-page-url "id-beta") "http://ws-beta.localhost:2/"))
+    (should (agent-repl--webhost-deferred-p "id-beta"))))
+
+(ert-deftest agent-repl-test-wh-an-ensure-of-a-deferred-page-hands-it-over ()
+  "An ensure of a deferred page, for the same reason, hands it to the host."
+  (agent-repl-test-wh--after-reload '("alpha" "beta") "alpha"
+    ;; Act
+    (agent-repl-webhost-ensure-page "beta" 'shown)
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "ensure"))))
+    (should-not (agent-repl--webhost-deferred-p "id-beta"))))
+
+(ert-deftest agent-repl-test-wh-a-reload-records-the-pages-it-deferred ()
+  "A reload's replay records how many pages it deferred."
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
+      (agent-repl-test-wh--after-reload '("alpha" "beta" "gamma") "alpha"
+        nil))
+    (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-shown-only deferred=2 adopting=0" text)) logged))))
+
+(ert-deftest agent-repl-test-wh-a-reload-loads-a-mid-adopt-page-at-once ()
+  "A reload still hands over at once a page whose workspace waits on its adopt."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (dolist (ws '("a" "b" "c")) (agent-repl-webhost-ensure-page ws 'shown))
+    (agent-repl-webhost-show "a")
+    (setq agent-repl-test-wh--calls nil
+          agent-repl--webhost-reload-started-ms 1700000000500)
+    (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (ws) (equal ws "c"))))
+      ;; Act
+      (agent-repl-test-wh--load "load-committed"))
+    ;; Assert
+    (should (equal (agent-repl-test-wh--ensured-lanes) '(("a" . nil) ("c" . nil))))
+    (should (agent-repl--webhost-deferred-p "id-b"))))
 
 (ert-deftest agent-repl-test-wh-a-reload-of-the-host-records-its-start ()
   "Navigating the host for a reload records the instant the reload began."

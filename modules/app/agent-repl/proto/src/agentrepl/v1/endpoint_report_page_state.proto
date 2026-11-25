@@ -94,7 +94,10 @@ message ReportPageStateLoadReason {
   // daemon's page verdict wants it (`allocated`).
   reserved 2;
   reserved "awake";
-  // The moment that loaded the page; Emacs always sets one.
+  // The moment that loaded the page; Emacs always sets one. A reason whose
+  // arm this daemon's revision does not name (an editor on another build,
+  // such as one a deploy has not reloaded yet) is recorded with its reason
+  // unnamed, never refused: the load itself is known.
   oneof reason {
     // The user showed the workspace and its page was not held.
     ReportPageStateLoadShown shown = 1;
@@ -136,7 +139,9 @@ message ReportPageStateUnloadReason {
   // unloads when the daemon's page verdict lets it go (`deallocated`).
   reserved 1;
   reserved "dormant";
-  // The moment that dropped the page; Emacs always sets one.
+  // The moment that dropped the page; Emacs always sets one. An arm this
+  // daemon's revision does not name is recorded with its reason unnamed,
+  // as for a load.
   oneof reason {
     // Its webview slot was taken down while the workspace stays open: the
     // panel closed, a bundle remount, the restart verb's bounce.

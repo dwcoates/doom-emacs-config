@@ -1387,6 +1387,13 @@ func transportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool, 
 	if address != "" && cause == workspace.ArmTransferringAway {
 		err.Meta().Set(SuccessorHeader, address)
 	}
+	// A STREAM WITHHELD FROM A WORKSPACE THAT IS NOT VISIBLE SAYS SO BY TYPE
+	// (WithheldHeader), so a page reads the planned refusal apart from an
+	// outage; read as a transport failure, it filed the daemon unreachable
+	// at ERROR on the 2026-11-25 12:32 deploy.
+	if cause == armNotVisible {
+		err.Meta().Set(WithheldHeader, "1")
+	}
 	return err
 }
 

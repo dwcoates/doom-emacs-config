@@ -2074,7 +2074,7 @@ func TestAnAdoptionOfAFreeLockAtAColdGateStartsTheWorkspacesSession(t *testing.T
 	}
 }
 
-func TestAnAdoptionOfAFreeLockRaisesTheMarkerBeforeItPublishes(t *testing.T) {
+func TestAnAdoptionOfAGatedFreeLockPublishesThenStartsWithNoMarker(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := gatedFreeLockAdoption(t, h)
@@ -2085,15 +2085,14 @@ func TestAnAdoptionOfAFreeLockRaisesTheMarkerBeforeItPublishes(t *testing.T) {
 
 	// Assert
 	taken := h.order.Taken()
-	raised := slices.Index(taken, "bringing_up:true")
 	published := slices.Index(taken, "publish_views")
 	started := slices.Index(taken, "start_session")
-	if raised < 0 || published < 0 || started < 0 || raised > published || published > started {
-		t.Fatalf("steps = %v, want the marker raised, then the views published, then the session started", taken)
+	if slices.Contains(taken, "bringing_up:true") || published < 0 || started < 0 || published > started {
+		t.Fatalf("steps = %v, want the views published, then the session started, and no marker raised: the start only raises the gate", taken)
 	}
 }
 
-func TestAnAdoptionOfAFreeLockRaisesTheMarkerOnceAndLowersIt(t *testing.T) {
+func TestAnAdoptionOfAGatedFreeLockOnlyLowersTheMarker(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := gatedFreeLockAdoption(t, h)
@@ -2102,9 +2101,9 @@ func TestAnAdoptionOfAFreeLockRaisesTheMarkerOnceAndLowersIt(t *testing.T) {
 	arm(t, h, ws, Participants{})
 
 	// Assert
-	want := []markerEdge{{ws: ws, up: true}, {ws: ws, up: false}}
+	want := []markerEdge{{ws: ws, up: false}}
 	if got := h.Marker(); !slices.Equal(got, want) {
-		t.Fatalf("marker edges = %v, want one raise and one lower", got)
+		t.Fatalf("marker edges = %v, want only the start's lowering", got)
 	}
 }
 
@@ -2173,9 +2172,9 @@ func TestAnAdoptionWhoseViewsFailLowersTheMarkerAndStartsNothing(t *testing.T) {
 	if got := h.Started(); len(got) != 0 {
 		t.Fatalf("started = %v, want none for an adoption that failed", got)
 	}
-	want := []markerEdge{{ws: ws, up: true}, {ws: ws, up: false}}
+	want := []markerEdge{{ws: ws, up: false}}
 	if got := h.Marker(); !slices.Equal(got, want) {
-		t.Fatalf("marker edges = %v, want the raise taken back", got)
+		t.Fatalf("marker edges = %v, want only the failed adoption's lowering", got)
 	}
 }
 

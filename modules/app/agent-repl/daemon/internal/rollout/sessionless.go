@@ -84,15 +84,15 @@ func takeoverRuleOf(facts bringup.WasUp) takeoverRule {
 // of each stale record (takeoverRecordStale). A read that fails splits
 // nothing, at ERROR, and answers ok false: each still starts on its next
 // prompt.
-func (c *controller) takeoverSplit(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) (up, left []wsm.Workspace, ok bool) {
+func (c *controller) takeoverSplit(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) (up, left []wsm.Workspace, facts map[wsm.WorkspaceID]bringup.WasUp, ok bool) {
 	if len(pending) == 0 {
-		return nil, nil, true
+		return nil, nil, nil, true
 	}
 	facts, err := bringup.WasUpFacts(ctx, c.deps.DB, pending)
 	if err != nil {
 		c.log.Error(opBringUp, "could not tell which session-less workspaces' shims were up; none of them is started",
 			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	for _, ws := range pending {
 		rule := takeoverRuleOf(facts[ws.ID])
@@ -110,7 +110,7 @@ func (c *controller) takeoverSplit(ctx context.Context, pending []wsm.Workspace,
 			left = append(left, ws)
 		}
 	}
-	return up, left, true
+	return up, left, facts, true
 }
 
 // recordStale records the end of WS's session, whose record still read
@@ -146,21 +146,23 @@ func takeoverFacts(ws wsm.Workspace, facts bringup.WasUp, rule takeoverRule) dlo
 }
 
 // bringUpSessionless splits PENDING (takeoverSplit), raises the bring-up
-// marker on each workspace it brings up AT ONCE -- before the caller
-// publishes its views, so no surface draws it idle and usable -- and starts
-// their sessions (startSessionless). It answers the workspaces left, and ok
-// false when the split could not be read and nothing was decided.
+// marker AT ONCE on each workspace it brings up whose start runs a shim --
+// before the caller publishes its views, so no surface draws it idle and
+// usable -- and starts their sessions (startSessionless). A workspace at its
+// recorded cold gate, the one kind a takeover starts, runs no shim, so no
+// marker is raised for it (bringup.RaiseMarkers). It answers the workspaces
+// left, and ok false when the split could not be read and nothing was
+// decided.
 func (c *controller) bringUpSessionless(pending []wsm.Workspace, fields dlog.Context) (left []wsm.Workspace, ok bool) {
-	up, left, ok := c.takeoverSplit(c.lifetime(context.Background()), pending, fields)
-	for _, ws := range up {
-		c.deps.BringingUp(ws.ID, true)
-	}
+	up, left, facts, ok := c.takeoverSplit(c.lifetime(context.Background()), pending, fields)
+	bringup.RaiseMarkers(c.deps.BringingUp, up, facts)
 	c.startSessionless(up, fields)
 	return left, ok
 }
 
 // startSessionless starts the sessions of pending workspaces whose bring-up
-// marker the caller has ALREADY raised, off the caller's goroutine. The starts
+// marker the caller has ALREADY raised where one stands, off the caller's
+// goroutine. The starts
 // are joined by bringUps; each start's own failure is that workspace's fault,
 // raised by the start and counted by bringup.Run, which lowers each marker.
 func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Context) {

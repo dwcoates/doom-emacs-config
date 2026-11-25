@@ -1694,6 +1694,32 @@ func TestAnyOtherRefusalFailsTheSubscriptionHandedNowhere(t *testing.T) {
 	}
 }
 
+func TestANotVisibleRefusalFailsTheSubscriptionWithheld(t *testing.T) {
+	// Arrange.
+	coded := transportClosed(nil, "WatchWebWorkspace", armNotVisible, "the workspace is not_visible", false, "")
+
+	// Act.
+	failed := failedAs(coded)
+
+	// Assert.
+	if failed.Withheld == nil || failed.HandedAway != nil {
+		t.Fatalf("failed = %+v, want withheld set and handed_away unset", failed)
+	}
+}
+
+func TestAnyOtherRefusalFailsTheSubscriptionNotWithheld(t *testing.T) {
+	// Arrange.
+	coded := transportClosed(nil, "WatchWebWorkspace", "not_yet_adopted", "not adopted yet", false, "/sock/other.sock")
+
+	// Act.
+	failed := failedAs(coded)
+
+	// Assert.
+	if failed.Withheld != nil {
+		t.Fatalf("withheld = %+v, want unset for a refusal the workspace's visibility did not cause", failed.GetWithheld())
+	}
+}
+
 // TestAPageRosterSubscriptionSendsOnlyItsUnseenStreams pins the page-mux arm
 // of the roster: its first push carries every stream, and a change to one
 // stream carries that stream alone, as the dedicated rpc's do.

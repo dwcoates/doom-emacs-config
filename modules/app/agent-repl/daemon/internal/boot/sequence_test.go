@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -3076,4 +3078,34 @@ func TestNewRefusesASequenceWithNoOwedNukeFinisher(t *testing.T) {
 // recordedSpawn is the identity a spawn records for PID.
 func recordedSpawn(pid int) ids.ProcessIdentity {
 	return ids.ProcessIdentity{PID: pid, StartUnixMicros: 1795284061244774}
+}
+
+// TestAWorkspaceAtItsRecordedColdGateIsNeverMarkedBringingUp pins that a
+// boot's start of a gated workspace, which only raises its gate, draws no
+// shim coming up: it is named for bring-up and never marked.
+func TestAWorkspaceAtItsRecordedColdGateIsNeverMarkedBringingUp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	if err := h.db.SetColdGate(context.Background(), ws.ID, wsm.ColdGateRecord{
+		VendorSessionID: "vendor-" + string(ws.ID), Cold: &conversationv1.SessionCold{},
+	}); err != nil {
+		t.Fatalf("SetColdGate: %v", err)
+	}
+
+	// Act
+	report, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.PendingBringUp) != 1 || report.PendingBringUp[0].ID != ws.ID {
+		t.Fatalf("PendingBringUp = %v, want the gated workspace, whose start raises its gate", report.PendingBringUp)
+	}
+	h.bringingMu.Lock()
+	defer h.bringingMu.Unlock()
+	if len(h.bringing) != 0 {
+		t.Fatalf("bring-up marker edges = %v, want none for a workspace whose start runs no shim", h.bringing)
+	}
 }

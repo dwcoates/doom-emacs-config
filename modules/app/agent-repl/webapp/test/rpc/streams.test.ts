@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -23,6 +24,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { SUCCESSOR_HEADER, successorOf } from "../../src/rpc/moved.js";
+import { WITHHELD_HEADER } from "../../src/rpc/withheld.js";
 import { PlannedReopen } from "../../src/rpc/planned-reopen.js";
 import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
 import { registerWorkspaceMoved } from "../../src/rpc/moved.js";
@@ -1512,6 +1514,41 @@ describe("watchStream: a close that names the successor", () => {
   });
 });
 
+describe("watchStream: a close withheld from a workspace that is not visible", () => {
+  /** The daemon's not_visible close, marked withheld. */
+  const withheld = (): ConnectError =>
+    new ConnectError("WatchWebWorkspace closed the stream: not_visible", Code.FailedPrecondition, { [WITHHELD_HEADER]: "1" });
+
+  it("files nothing in the warning chip", async () => {
+    // Arrange.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([withheld()]);
+
+    // Act.
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+
+    // Assert.
+    expect(sink.reported).not.toContain("daemonUnreachable");
+  });
+
+  it("reopens once its backoff has passed", async () => {
+    // Arrange.
+    const { client, state } = scriptedClient([withheld()]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    const beforeBackoff = state.openCount;
+
+    // Act.
+    await advance(BACKOFF.initialMs * 2);
+    handle.cancel();
+
+    // Assert: no reopen inside the backoff, one after it.
+    expect([beforeBackoff, state.openCount]).toEqual([1, 2]);
+  });
+});
+
 describe("successorOf", () => {
   it("reads the successor a ConnectError's metadata names", () => {
     expect(successorOf(new ConnectError("x", Code.FailedPrecondition, { [SUCCESSOR_HEADER]: "127.0.0.1:1" }))).toBe("127.0.0.1:1");
@@ -1523,5 +1560,18 @@ describe("successorOf", () => {
 
   it("answers undefined for an error that is not a ConnectError", () => {
     expect(successorOf(new Error("x"))).toBeUndefined();
+  });
+});
+
+describe("watchStream's reopen waits", () => {
+  it("every backoff wait goes through the one helper", () => {
+    // Arrange
+    const source = readFileSync(new URL("../../src/rpc/streams.ts", import.meta.url), "utf8");
+
+    // Act
+    const waits = source.match(/await waitBackoff\(/g) ?? [];
+
+    // Assert
+    expect(waits.length).toBe(1);
   });
 });

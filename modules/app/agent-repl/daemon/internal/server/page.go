@@ -746,6 +746,11 @@ func failedAs(err error) *agentreplv1.PageSubscriptionFailed {
 		if successor := coded.Meta().Get(SuccessorHeader); successor != "" {
 			failed.HandedAway = &agentreplv1.PageSubscriptionHandedAway{Address: successor}
 		}
+		// NEITHER IS A STREAM WITHHELD FROM A WORKSPACE THAT IS NOT VISIBLE
+		// (WithheldHeader): the page files no failure for it.
+		if coded.Meta().Get(WithheldHeader) != "" {
+			failed.Withheld = &agentreplv1.PageSubscriptionWithheld{}
+		}
 		return failed
 	}
 	return &agentreplv1.PageSubscriptionFailed{

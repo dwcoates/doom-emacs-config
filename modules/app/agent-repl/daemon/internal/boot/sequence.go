@@ -196,7 +196,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		// decides. One parked between keep-alives or hibernated stays parked
 		// until a prompt, a keep-alive or a cold gate's answer brings it up,
 		// and a killed or never-started one stays as it is.
-		up, left, err := s.leaveNotUp(ctx, log, clientless)
+		up, left, facts, err := s.leaveNotUp(ctx, log, clientless)
 		if err != nil {
 			return Report{}, err
 		}
@@ -205,10 +205,9 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		// after the listener is up, so without this an editor that connected
 		// in between would read these rows as having nothing under way, open
 		// them, and draw a workspace no session is behind yet. BringUp lowers
-		// it for each one on every path.
-		for _, ws := range report.PendingBringUp {
-			s.deps.BringingUp(ws.ID, true)
-		}
+		// it for each one on every path. A workspace at its recorded cold gate
+		// runs no shim, so nothing is under way for it (bringup.RaiseMarkers).
+		bringup.RaiseMarkers(s.deps.BringingUp, report.PendingBringUp, facts)
 		// AN UNDETERMINED WORKSPACE IS SERVED BY NO SESSION OF THIS DAEMON,
 		// and it is said so on its views: nothing else would ever state a
 		// link for it, so its roster row would stay `pending` and every
@@ -1112,18 +1111,18 @@ func (s *sequence) awaitStartingSurvivor(ctx context.Context, log dlog.Logger, w
 // daemon stopped. A session record that cannot be read stops the boot:
 // reading it as up would wake a parked shim, and reading it as parked would
 // leave a live one down.
-func (s *sequence) leaveNotUp(ctx context.Context, log dlog.Logger, pending []wsm.Workspace) (up, left []wsm.Workspace, err error) {
-	up, left, err = bringup.OnlyWasUp(ctx, s.deps.DB, pending)
+func (s *sequence) leaveNotUp(ctx context.Context, log dlog.Logger, pending []wsm.Workspace) (up, left []wsm.Workspace, facts map[wsm.WorkspaceID]bringup.WasUp, err error) {
+	up, left, facts, err = bringup.OnlyWasUp(ctx, s.deps.DB, pending)
 	if err != nil {
 		log.Error("daemon.boot.run", "could not read the sessions to tell which shims were up; the boot stops", dlog.Context{
 			"error": err.Error(),
 		})
-		return nil, nil, fmt.Errorf("boot: %w", err)
+		return nil, nil, nil, fmt.Errorf("boot: %w", err)
 	}
 	if len(left) > 0 {
 		log.Info("daemon.boot.run", "workspaces whose shim was not up when the last daemon stopped are left as they are; a prompt brings each up", dlog.Context{
 			"workspaces": bringup.IDs(left),
 		})
 	}
-	return up, left, nil
+	return up, left, facts, nil
 }

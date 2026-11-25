@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -2217,7 +2218,7 @@ func TestReportPageStateRefusesAMalformedReport(t *testing.T) {
 	}{
 		{name: "no report arm", req: &agentreplv1.ReportPageStateRequest{}},
 		{name: "a load with no reason", req: &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Loaded{Loaded: &agentreplv1.ReportPageStateLoaded{}}}},
-		{name: "a held page with no reason", req: &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: &agentreplv1.ReportPageStateLoadReason{}}}}},
+		{name: "a held page with no reason", req: &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{}}}},
 		{name: "an unload with no reason", req: &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Unloaded{Unloaded: &agentreplv1.ReportPageStateUnloaded{}}}},
 	}
 	for _, tt := range tests {
@@ -2235,6 +2236,52 @@ func TestReportPageStateRefusesAMalformedReport(t *testing.T) {
 			}
 			if pages := h.HeldPages.Reported(); len(pages) != 0 {
 				t.Fatalf("held pages = %v, want none from a refused report", pages)
+			}
+		})
+	}
+}
+
+// retiredUnloadReason is an unload reason as an editor of an older build sends
+// it: the retired `dormant` arm (field 1), which this revision reads as an
+// unassigned oneof carrying an unknown field.
+func retiredUnloadReason() *agentreplv1.ReportPageStateUnloadReason {
+	reason := &agentreplv1.ReportPageStateUnloadReason{}
+	reason.ProtoReflect().SetUnknown(protowire.AppendBytes(protowire.AppendTag(nil, 1, protowire.BytesType), nil))
+	return reason
+}
+
+func TestReportPageStateRecordsAReasonItsContractDoesNotNameAsUnnamed(t *testing.T) {
+	loaded := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Loaded{Loaded: &agentreplv1.ReportPageStateLoaded{Reason: &agentreplv1.ReportPageStateLoadReason{}}}}
+	held := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: &agentreplv1.ReportPageStateLoadReason{}}}}
+	retired := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Unloaded{Unloaded: &agentreplv1.ReportPageStateUnloaded{Reason: retiredUnloadReason()}}}
+	tests := []struct {
+		name        string
+		reports     []*agentreplv1.ReportPageStateRequest
+		wantHeld    pageheld.LoadReason
+		wantLoads   []pageheld.LoadReason
+		wantUnloads []pageheld.UnloadReason
+	}{
+		{name: "a load is held and counted unnamed", reports: []*agentreplv1.ReportPageStateRequest{loaded}, wantHeld: pageheld.LoadUnnamed, wantLoads: []pageheld.LoadReason{pageheld.LoadUnnamed}},
+		{name: "a restated page is held unnamed", reports: []*agentreplv1.ReportPageStateRequest{held}, wantHeld: pageheld.LoadUnnamed},
+		{name: "a retired unload arm drops the page and is counted unnamed", reports: []*agentreplv1.ReportPageStateRequest{held, retired}, wantUnloads: []pageheld.UnloadReason{pageheld.UnloadUnnamed}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			for _, req := range tt.reports {
+				if resp := reportPageState(t, h, proto.Clone(req).(*agentreplv1.ReportPageStateRequest)); resp.GetSuccess() == nil {
+					t.Fatalf("result = %v, want success", resp.GetResult())
+				}
+			}
+
+			// Assert.
+			loads, unloads := h.PageCounts.counted()
+			if got := h.HeldPages.Reported()[testWorkspaceID]; got != tt.wantHeld || !slices.Equal(loads, tt.wantLoads) || !slices.Equal(unloads, tt.wantUnloads) {
+				t.Fatalf("held %q, loads %v, unloads %v; want held %q, loads %v, unloads %v",
+					got, loads, unloads, tt.wantHeld, tt.wantLoads, tt.wantUnloads)
 			}
 		})
 	}

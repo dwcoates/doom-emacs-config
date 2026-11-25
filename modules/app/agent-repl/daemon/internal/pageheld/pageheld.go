@@ -52,10 +52,14 @@ const (
 	// LoadHeldBeforeReasons is a page Emacs held before it recorded why, that
 	// no load rule explains now.
 	LoadHeldBeforeReasons LoadReason = "held_before_reasons"
+	// LoadUnnamed is a reason Emacs set and this daemon's contract does not
+	// name: an editor on another build, such as one a deploy has not
+	// reloaded yet. The load is known; only its reason is not.
+	LoadUnnamed LoadReason = "unnamed"
 )
 
 // LoadReasons is every load reason, for a caller that serves each from 0.
-var LoadReasons = []LoadReason{LoadShown, LoadAllocated, LoadSlot, LoadRequested, LoadUngated, LoadHeldBeforeReasons}
+var LoadReasons = []LoadReason{LoadShown, LoadAllocated, LoadSlot, LoadRequested, LoadUngated, LoadHeldBeforeReasons, LoadUnnamed}
 
 // LoadUnreported labels a page the web host holds that Emacs reports no load
 // of. It is never a reason Emacs gives: only Snapshot answers it, for the
@@ -70,10 +74,13 @@ const (
 	UnloadDeallocated UnloadReason = "deallocated"
 	UnloadDetached    UnloadReason = "detached"
 	UnloadReleased    UnloadReason = "released"
+	// UnloadUnnamed is a reason Emacs set and this daemon's contract does not
+	// name (LoadUnnamed's counterpart): the unload is known.
+	UnloadUnnamed UnloadReason = "unnamed"
 )
 
 // UnloadReasons is every unload reason, for a caller that serves each from 0.
-var UnloadReasons = []UnloadReason{UnloadDeallocated, UnloadDetached, UnloadReleased}
+var UnloadReasons = []UnloadReason{UnloadDeallocated, UnloadDetached, UnloadReleased, UnloadUnnamed}
 
 // Telemetry counts every page load and unload (runtimemetrics.Surface). Each
 // method is one counter update and never blocks.

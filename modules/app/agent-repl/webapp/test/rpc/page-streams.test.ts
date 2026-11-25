@@ -10,6 +10,7 @@
  * has to be asserted rather than the symptom.
  */
 import { successorOf } from "../../src/rpc/moved.js";
+import { isWithheld } from "../../src/rpc/withheld.js";
 import { fakePageSeen, type FakePageSeen } from "../page-seen-fake.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -861,6 +862,44 @@ describe("the page's one standing stream", () => {
 
     // Assert.
     expect(successorOf(await outcome)).toBe("/sock/successor.sock");
+    ctx.quiesce();
+  });
+
+  it("raises a withheld failure as an error marked withheld, as a dedicated stream's close is", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const controller = new AbortController();
+    const outcome = (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+      return null;
+    })().then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await settle();
+
+    // Act.
+    daemon.send(
+      ended(daemon.subscribes[0].subscription, {
+        case: "failed",
+        value: {
+          code: "failed_precondition",
+          message: "WatchWebWorkspace closed the stream: not_visible: the workspace is not_visible",
+          withheld: {},
+        },
+      }),
+    );
+    await settle();
+
+    // Assert.
+    expect(isWithheld(await outcome)).toBe(true);
     ctx.quiesce();
   });
 

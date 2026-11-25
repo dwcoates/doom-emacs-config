@@ -84,6 +84,7 @@ import { createListeners } from "../listeners.js";
 import { createLogger } from "../log.js";
 import type { PageSeen } from "../page-seen.js";
 import { SUCCESSOR_HEADER } from "./moved.js";
+import { WITHHELD_HEADER } from "./withheld.js";
 import {
   SubscribePageRequestSchema,
   SubscribePageResponseSchema,
@@ -519,11 +520,18 @@ export function startPageStreams(ctx: PageStreamContext, page: string, options: 
             // refusal carries, so the caller tells a move apart through the one
             // reader (moved.ts successorOf) and files no failure for it.
             const handedAway = ended.how.value.handedAway;
+            // SO DOES A SUBSCRIPTION WITHHELD from a workspace that is not
+            // visible (withheld.ts isWithheld): planned, and filed nowhere.
+            const withheld = ended.how.value.withheld !== undefined;
             const metadata = new Headers();
             if (handedAway !== undefined) metadata.set(SUCCESSOR_HEADER, handedAway.address);
+            if (withheld) metadata.set(WITHHELD_HEADER, "1");
             const failure = new ConnectError(ended.how.value.message, code, metadata);
-            log.log(handedAway === undefined ? "error" : "info", log.message("a page subscription failed: {message}", { message: ended.how.value.message }), {
-              operation: handedAway === undefined ? "rpc.page-subscription-failed" : "rpc.page-subscription-handed-away",
+            const planned = handedAway !== undefined || withheld;
+            log.log(planned ? "info" : "error", log.message("a page subscription failed: {message}", { message: ended.how.value.message }), {
+              operation: handedAway !== undefined
+                ? "rpc.page-subscription-handed-away"
+                : withheld ? "rpc.page-subscription-withheld" : "rpc.page-subscription-failed",
               context: {
                 page,
                 subscription: ended.subscription,
