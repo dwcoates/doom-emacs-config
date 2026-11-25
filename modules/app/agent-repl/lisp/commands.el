@@ -907,9 +907,10 @@ left alone rather than qualified for the sake of uniformity.  Everything
 else a line shows rides beside the string, in its affixes
 \(`agent-repl--switch-affixation'), so it never makes two names differ.
 
-THE SUMMARY IS SEARCHABLE: a workspace's summary rides in its string,
-invisible (`agent-repl--switch-candidate'), so the input narrows by name
-and summary alike while the summary is drawn as the last column."
+THE REPOSITORY AND THE SUMMARY ARE SEARCHABLE: a workspace's repository
+and summary ride in its string, invisible (`agent-repl--switch-candidate'),
+so the input narrows by name, repository and summary alike while each is
+drawn in its own column."
   (let ((counts (make-hash-table :test 'equal)))
     (dolist (entry entries)
       (let ((name (plist-get entry :name)))
@@ -926,20 +927,25 @@ and summary alike while the summary is drawn as the last column."
 
 (defun agent-repl--switch-candidate (base entry)
   "Return ENTRY's candidate string, displayed as BASE.
-ENTRY's summary (`agent-repl-roster-row-summary') follows BASE as
-INVISIBLE text, so completion matches against it while the line draws
-it in its own column (`agent-repl--switch-summary').  A workspace with
-no summary is BASE alone.  The summary never makes two strings differ
-that BASE did not: BASE is already unique."
-  (let ((summary (agent-repl-roster-row-summary (plist-get entry :row))))
-    (if summary
-        (concat base (propertize (concat " " summary) 'invisible t))
-      base)))
+ENTRY's repository (`agent-repl-roster-row-repository-name') and summary
+\(`agent-repl-roster-row-summary') follow BASE as INVISIBLE text, in that
+order, so completion matches against them while the line draws each in
+its own column (`agent-repl--switch-repository',
+`agent-repl--switch-summary').  A workspace stating neither is BASE
+alone.  Neither ever makes two strings differ that BASE did not: BASE
+is already unique."
+  (let* ((row (plist-get entry :row))
+         (hidden (mapconcat (lambda (text) (concat " " text))
+                            (delq nil (list (agent-repl-roster-row-repository-name row)
+                                            (agent-repl-roster-row-summary row)))
+                            "")))
+    (concat base (propertize hidden 'invisible t))))
 
 (defun agent-repl--switch-visible-name (candidate)
   "Return the part of CANDIDATE a line draws as the name.
-Everything up to the invisible summary `agent-repl--switch-candidate'
-appends, or the whole of CANDIDATE when it carries none."
+Everything up to the invisible repository and summary
+`agent-repl--switch-candidate' appends, or the whole of CANDIDATE when
+it carries neither."
   (substring candidate 0 (or (text-property-any 0 (length candidate) 'invisible t candidate)
                              (length candidate))))
 
@@ -1137,12 +1143,21 @@ the topbar draws it in (render-colors.json)."
         (propertize summary 'face (list :foreground agent-repl--color-merging-purple))
       "")))
 
+(defun agent-repl--switch-repository (entry)
+  "Return the repository column for ENTRY: its repository's name, or empty.
+The name its repository section is headed with
+\(`agent-repl-roster-row-repository-name'); empty for a row stating none
+and for a live local workspace no roster push carries yet."
+  (or (agent-repl-roster-row-repository-name (plist-get entry :row)) ""))
+
 (defun agent-repl--switch-affixation (alist now-ms)
   "Return the `affixation-function' for the switcher over ALIST, read at NOW-MS.
 ALIST is `agent-repl--switch-display-alist''s.  Each line is its status
-mark, the name, and four columns aligned past the longest name: the
-state, how long ago its last turn ended, how many commits its branch
-holds past its merge-base, and its summary (`agent-repl--switch-summary').
+mark, the name, and five columns aligned past the longest name: its
+repository (`agent-repl--switch-repository', padded to the widest one
+offered), the state, how long ago its last turn ended, how many commits
+its branch holds past its merge-base, and its summary
+\(`agent-repl--switch-summary').
 The name is the candidate's visible part (`agent-repl--switch-visible-name'),
 after the marks the daemon puts before it (`agent-repl--switch-name-prefix'),
 which ride the affixation's prefix so the candidate stays the name alone;
@@ -1154,7 +1169,11 @@ so the merged label and the summary keep their purple
                           (concat (agent-repl--switch-name-prefix (cdr cell))
                                   (agent-repl--switch-visible-name (car cell))))
                         alist))
-         (column (agent-repl-annotation-column names 4)))
+         (column (agent-repl-annotation-column names 4))
+         (repository-width (apply #'max 0 (mapcar (lambda (cell)
+                                                    (string-width
+                                                     (agent-repl--switch-repository (cdr cell))))
+                                                  alist))))
     (lambda (candidates)
       (mapcar
        (lambda (candidate)
@@ -1163,7 +1182,9 @@ so the merged label and the summary keep their purple
                  (concat (agent-repl--switch-mark entry) " "
                          (agent-repl--switch-name-prefix entry))
                  (concat (propertize " " 'display `(space :align-to ,column))
-                         (let ((columns (format "%-14s %-12s %-11s %s"
+                         (let ((columns (format (format "%%-%ds %%-14s %%-12s %%-11s %%s"
+                                                        repository-width)
+                                                (agent-repl--switch-repository entry)
                                                 (agent-repl--switch-state-label entry)
                                                 (agent-repl--switch-turn-age entry now-ms)
                                                 (agent-repl--switch-commits entry)

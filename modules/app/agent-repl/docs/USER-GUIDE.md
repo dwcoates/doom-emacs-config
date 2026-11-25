@@ -1091,10 +1091,14 @@ The top bar's phone chip, on the left after the account and just left of the wif
 - **Each line shows the workspace's status mark as the sidebar draws it.**
   - A closed or merged workspace has the grey dot.
   - A hidden workspace has a dotted ring, `◌`, in its status color.
-- **After the name, three columns.**
+- **After the name, five columns.**
+  - The repository it belongs to.
   - Whether it is closed, hidden, merged or not open in this Emacs.
   - How long ago its last turn ended.
   - How many commits its branch has past where it was cut.
+  - Its summary, the line the topbar draws over its name.
+- **Typing narrows the list by name, repository and summary alike.**
+  - Typing a repository's name, such as `explanation-engine`, keeps that repository's workspaces, and any other whose name or summary contains it.
 - **Picking a workspace that is not open here opens it first.**
   - A merged workspace opens too, to revise what it landed (see "Reopening a merged workspace").
 - **`s-{` and `s-}` step to the tab left or right of the current one, wrapping.**
