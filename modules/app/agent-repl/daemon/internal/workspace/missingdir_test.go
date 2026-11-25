@@ -273,9 +273,7 @@ func TestSettleMissingDirectoryHoldsTheWorkspacesDirectoryGateAcrossTheRestore(t
 	f := newFixture(t)
 	ws := goneWorkspace(t, f)
 	withBranch(f, ws)
-	gate := f.verbs.(*verbs).dirGates.For("w1")
-	heldDuringRestore := false
-	f.git.duringRestore = func() { heldDuringRestore = !gate.TryLock() }
+	heldDuringRestore, gate := watchDirGateDuringRestore(f, "w1")
 
 	// Act.
 	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
@@ -284,7 +282,7 @@ func TestSettleMissingDirectoryHoldsTheWorkspacesDirectoryGateAcrossTheRestore(t
 	if err != nil || !restored {
 		t.Fatalf("SettleMissingDirectory = (%v, %v), want (true, nil)", restored, err)
 	}
-	if !heldDuringRestore {
+	if !*heldDuringRestore {
 		t.Fatal("the directory gate was free while the settle restored the worktree")
 	}
 	if !gate.TryLock() {

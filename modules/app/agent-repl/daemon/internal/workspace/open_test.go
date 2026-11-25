@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1572,9 +1573,7 @@ func TestOpenHoldsTheWorkspacesDirectoryGateAcrossTheRestore(t *testing.T) {
 	f := newFixture(t)
 	ws := goneWorkspace(t, f)
 	withBranch(f, ws)
-	gate := f.verbs.(*verbs).dirGates.For("w1")
-	heldDuringRestore := false
-	f.git.duringRestore = func() { heldDuringRestore = !gate.TryLock() }
+	heldDuringRestore, gate := watchDirGateDuringRestore(f, "w1")
 
 	// Act.
 	err := f.verbs.Open(context.Background(), "w1", nil)
@@ -1583,7 +1582,7 @@ func TestOpenHoldsTheWorkspacesDirectoryGateAcrossTheRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if !heldDuringRestore {
+	if !*heldDuringRestore {
 		t.Fatal("the directory gate was free while the open restored the worktree")
 	}
 	if !gate.TryLock() {
@@ -1632,4 +1631,14 @@ func TestASecondOpenAnswersOnlyOnceTheFirstHasBoundTheRestoredViews(t *testing.T
 	if len(f.git.restored) != 1 {
 		t.Fatalf("restored = %+v, want exactly one restore", f.git.restored)
 	}
+}
+
+// watchDirGateDuringRestore answers whether WS's directory gate was held when
+// the fixture's git restored a worktree, filled in by that restore, and the
+// gate itself, for asserting it is free again once the step answers.
+func watchDirGateDuringRestore(f *fixture, ws ids.WorkspaceID) (*bool, *sync.Mutex) {
+	gate := f.verbs.(*verbs).dirGates.For(ws)
+	held := false
+	f.git.duringRestore = func() { held = !gate.TryLock() }
+	return &held, gate
 }
