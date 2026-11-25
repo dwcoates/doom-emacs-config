@@ -644,8 +644,20 @@ func (f *fakeDB) MarkMediatorBriefed(ctx context.Context, repo wsm.RepoKey) erro
 	return f.checks.MarkMediatorBriefed(ctx, repo)
 }
 
-func (f *fakeDB) OweProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (wsm.ProductionCheck, bool, error) {
+func (f *fakeDB) OweProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (wsm.ProductionCheck, wsm.ProductionOwing, error) {
 	return f.checks.OweProductionCheck(ctx, repo, at, version)
+}
+
+func (f *fakeDB) PauseProduction(ctx context.Context, repo wsm.RepoKey, at time.Time) ([]wsm.ProductionCheck, error) {
+	return f.checks.PauseProduction(ctx, repo, at)
+}
+
+func (f *fakeDB) ResumeProduction(ctx context.Context, repo wsm.RepoKey, at time.Time) error {
+	return f.checks.ResumeProduction(ctx, repo, at)
+}
+
+func (f *fakeDB) ProductionPauseOf(ctx context.Context, repo wsm.RepoKey) (wsm.ProductionPause, error) {
+	return f.checks.ProductionPauseOf(ctx, repo)
 }
 
 func (f *fakeDB) DropProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time) (bool, error) {

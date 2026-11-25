@@ -192,26 +192,31 @@ var ErrNotFoldable = errors.New("wsm: the workspace is not an open production ch
 // as Mediation.LandingStartedAt reads it), installing VERSION. The span
 // starts where the repository's last deploy check read to, or where the last
 // production span ended when that is later, so no two checks read the same
-// record; at the deploy before this one when nothing read the repository. It
-// answers the check owed and true, or false when the span is empty
-// (overlapping landings) or no earlier deploy is known to start from.
-func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, at time.Time, version string) (ProductionCheck, bool, error) {
+// record; at the deploy before this one when nothing read the repository. A
+// span skipped for a pause (productionpause.go) moves that start too. It
+// answers the check and ProductionSpanOwed; ProductionSpanEmpty when the span
+// is empty (overlapping landings) or no earlier deploy is known to start
+// from; or, owing nothing, ProductionSpanPaused for a span that ended while
+// the checks are paused and ProductionSpanBeganInPause for one that began
+// before the last resume.
+func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, at time.Time, version string) (ProductionCheck, ProductionOwing, error) {
 	const op = "daemon.wsm.owe_production_check"
 	fields := dlog.Context{"repo": string(repo), "deploy_at": nanos(at)}
 	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		return ProductionCheck{}, false, err
+		return ProductionCheck{}, "", err
 	}
 	if at.IsZero() {
 		err := fmt.Errorf("wsm: a production check of %s names no deploy", key)
 		s.log.Error(op, "refused a production check that names no deploy", withError(fields, err))
-		return ProductionCheck{}, false, err
+		return ProductionCheck{}, "", err
 	}
 	var (
-		out  ProductionCheck
-		owed bool
+		out   ProductionCheck
+		owing = ProductionSpanEmpty
 	)
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		owing = ProductionSpanEmpty
 		landing, err := landingStartedIn(ctx, tx, key, at)
 		if err != nil {
 			return err
@@ -223,9 +228,15 @@ func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, at time.Ti
 		if err := tx.QueryRowContext(ctx, `SELECT MAX(span_until) FROM production_checks WHERE repo_key = ?`, string(key)).Scan(&lastUntil); err != nil {
 			return err
 		}
+		pausedAt, resumedAt, skippedThrough, err := productionPauseIn(ctx, tx, key)
+		if err != nil {
+			return err
+		}
 		since := through
-		if lastUntil.Valid && (!since.Valid || lastUntil.Int64 > since.Int64) {
-			since = lastUntil
+		for _, later := range []sql.NullInt64{lastUntil, skippedThrough} {
+			if later.Valid && (!since.Valid || later.Int64 > since.Int64) {
+				since = later
+			}
 		}
 		// A REPOSITORY NO CHECK HAS READ starts at the deploy before this
 		// one: with no deploy check, no landing is read twice.
@@ -237,16 +248,31 @@ func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, at time.Ti
 		if !since.Valid || since.Int64 >= nanos(landing) {
 			return nil
 		}
+		// A SPAN TOUCHING A PAUSE IS SKIPPED, never owed: one ending while
+		// the checks are paused, and one that began before the last resume.
+		switch {
+		case pausedAt.Valid:
+			owing = ProductionSpanPaused
+		case resumedAt.Valid && since.Int64 < resumedAt.Int64:
+			owing = ProductionSpanBeganInPause
+		}
+		if owing != ProductionSpanEmpty {
+			out = ProductionCheck{Since: fromNanos(since.Int64), Until: landing, Version: version}
+			return skipProductionSpanIn(ctx, tx, key, landing)
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO production_checks (repo_key, span_until, span_since, deploy_at, version) VALUES (?, ?, ?, ?, ?)`,
 			string(key), nanos(landing), since.Int64, nanos(at), version); err != nil {
 			return err
 		}
 		out = ProductionCheck{Since: fromNanos(since.Int64), Until: landing, Version: version}
-		owed = true
+		owing = ProductionSpanOwed
 		return nil
 	})
-	return out, owed, err
+	if err != nil {
+		return ProductionCheck{}, "", err
+	}
+	return out, owing, nil
 }
 
 // DropProductionCheck forgets the span REPO owed for the deploy that began

@@ -414,6 +414,8 @@ var migrations = []migration{
 	{To: 216, Name: "retired_self_close", Kind: MigrationContract, DDL: retiredSelfCloseDDL},
 	// IT IS ADDITIVE: a nullable column the previous build never names.
 	{To: 217, Name: "workspace_summaries_long", Kind: MigrationAdditive, DDL: workspaceSummariesLongDDL},
+	// IT IS ADDITIVE: one new table the previous build never names.
+	{To: 218, Name: "production_pauses", Kind: MigrationAdditive, DDL: productionPauseDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

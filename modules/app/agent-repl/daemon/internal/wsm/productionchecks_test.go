@@ -34,7 +34,7 @@ func readThrough(t *testing.T, s *store, key RepoKey, at time.Time) {
 func toldCheck(t *testing.T, s *store, repo RepoKey, until time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if _, owed, err := s.OweProductionCheck(ctx, repo, until, ""); err != nil || !owed {
+	if _, owed, err := s.OweProductionCheck(ctx, repo, until, ""); err != nil || owed != ProductionSpanOwed {
 		t.Fatalf("OweProductionCheck = (%v, %v)", owed, err)
 	}
 	if _, err := s.MarkProductionChecksDue(ctx, repo, until.Add(time.Minute)); err != nil {
@@ -83,7 +83,7 @@ func TestAProductionSpanRunsFromTheLastReadToTheLanding(t *testing.T) {
 				}
 			}
 			if tc.lastSpan != 0 {
-				if _, owed, err := s.OweProductionCheck(ctx, repo, landing.Add(-tc.lastSpan), ""); err != nil || !owed {
+				if _, owed, err := s.OweProductionCheck(ctx, repo, landing.Add(-tc.lastSpan), ""); err != nil || owed != ProductionSpanOwed {
 					t.Fatalf("the previous span = (%v, %v)", owed, err)
 				}
 			}
@@ -92,10 +92,10 @@ func TestAProductionSpanRunsFromTheLastReadToTheLanding(t *testing.T) {
 			check, owed, err := s.OweProductionCheck(ctx, repo, landing, "0.2.0")
 
 			// Assert
-			if err != nil || owed != (tc.wantSince != 0) {
+			if err != nil || (owed == ProductionSpanOwed) != (tc.wantSince != 0) {
 				t.Fatalf("OweProductionCheck = (%+v, %v, %v), want owed %v", check, owed, err, tc.wantSince != 0)
 			}
-			if owed && (!check.Since.Equal(landing.Add(-tc.wantSince)) || !check.Until.Equal(landing) || check.Version != "0.2.0") {
+			if owed == ProductionSpanOwed && (!check.Since.Equal(landing.Add(-tc.wantSince)) || !check.Until.Equal(landing) || check.Version != "0.2.0") {
 				t.Fatalf("the span = %+v, want %v through %v at 0.2.0", check, landing.Add(-tc.wantSince), landing)
 			}
 		})
@@ -110,7 +110,7 @@ func TestAProductionCheckIsToldOnlyOnceDue(t *testing.T) {
 	readThrough(t, s, key, instant)
 	first, second := instant.Add(time.Hour), instant.Add(2*time.Hour)
 	for _, until := range []time.Time{first, second} {
-		if _, owed, err := s.OweProductionCheck(ctx, repo, until, ""); err != nil || !owed {
+		if _, owed, err := s.OweProductionCheck(ctx, repo, until, ""); err != nil || owed != ProductionSpanOwed {
 			t.Fatalf("OweProductionCheck = (%v, %v)", owed, err)
 		}
 	}
@@ -403,7 +403,7 @@ func TestACrashsSpanIsDroppedSoTheSpanRunsOn(t *testing.T) {
 	repo, key := productionRepo(t)
 	readThrough(t, s, key, instant)
 	crash := instant.Add(time.Hour)
-	if _, owed, err := s.OweProductionCheck(ctx, repo, crash, ""); err != nil || !owed {
+	if _, owed, err := s.OweProductionCheck(ctx, repo, crash, ""); err != nil || owed != ProductionSpanOwed {
 		t.Fatalf("OweProductionCheck = (%v, %v)", owed, err)
 	}
 
@@ -412,7 +412,7 @@ func TestACrashsSpanIsDroppedSoTheSpanRunsOn(t *testing.T) {
 	next, owed, err2 := s.OweProductionCheck(ctx, repo, instant.Add(2*time.Hour), "")
 
 	// Assert: the next span starts where the dropped one did.
-	if err != nil || err2 != nil || !dropped || !owed || !next.Since.Equal(instant) {
+	if err != nil || err2 != nil || !dropped || owed != ProductionSpanOwed || !next.Since.Equal(instant) {
 		t.Fatalf("dropped %v (%v), next %+v owed %v (%v); want the next span from %v", dropped, err, next, owed, err2, instant)
 	}
 }

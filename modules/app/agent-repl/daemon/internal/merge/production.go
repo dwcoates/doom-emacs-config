@@ -133,18 +133,26 @@ func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) er
 	var errs []error
 	for _, q := range queues {
 		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano)}
-		check, owed, err := o.deps.DB.OweProductionCheck(ctx, q.key, at, "")
+		check, owing, err := o.deps.DB.OweProductionCheck(ctx, q.key, at, "")
 		if err != nil {
 			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not owe the production check of the span the landing closed; the span runs on into the next"), err)
 			errs = append(errs, err)
 			continue
 		}
-		if !owed {
+		span := withField(withField(fields,
+			"span_since", check.Since.UTC().Format(time.RFC3339Nano)), "span_until", check.Until.UTC().Format(time.RFC3339Nano))
+		switch owing {
+		case wsm.ProductionSpanEmpty:
 			o.deps.Log.Global().Info(opProduction, "the landing closed no span between landings; it owes no production check", fields)
-			continue
+		case wsm.ProductionSpanPaused:
+			o.deps.Log.Global().Info(opProduction, "the landing closed a span while the production checks are paused; it is never reviewed", span)
+		case wsm.ProductionSpanBeganInPause:
+			o.deps.Log.Global().Info(opProduction, "the first landing after the production checks resumed closed a span begun in the pause; it is never reviewed, and the checks start at this landing", span)
+		case wsm.ProductionSpanOwed:
+			o.deps.Log.Global().Info(opProduction, "the landing owes a production check of the span before it", span)
+		default:
+			panic(fmt.Sprintf("merge: the store answered the undeclared production owing %q", owing))
 		}
-		o.deps.Log.Global().Info(opProduction, "the landing owes a production check of the span before it", withField(withField(fields,
-			"span_since", check.Since.UTC().Format(time.RFC3339Nano)), "span_until", check.Until.UTC().Format(time.RFC3339Nano)))
 	}
 	return errors.Join(errs...)
 }
