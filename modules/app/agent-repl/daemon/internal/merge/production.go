@@ -468,6 +468,11 @@ type ProductionSites struct {
 	Ignored int
 	// Baseline says what the span was compared against.
 	Baseline string
+	// From and To are the hours the tally's answer covered, and Partial
+	// that the span began before its oldest kept row, so nothing before
+	// From was read (logsites.Answer).
+	From, To time.Time
+	Partial  bool
 }
 
 // RefiredSite is a fixed site that fired again.
@@ -536,7 +541,7 @@ func DiffProductionSites(span logsites.Answer, before *logsites.Answer, owned ma
 	for _, f := range fixed {
 		fixes[f.Site] = f
 	}
-	var out ProductionSites
+	out := ProductionSites{From: span.From, To: span.To, Partial: span.Partial}
 	for _, site := range span.Sites {
 		if _, held := owned[site.Key]; held {
 			out.Owned++
@@ -568,12 +573,18 @@ func ignored(site logsites.Site, kinds []wsm.IgnoredRecordKind) bool {
 	return false
 }
 
-// RenderProductionSites is the site file of span C: its new sites, errors
-// first and the most frequent first, then its refired ones, each with its
-// template, counts and one sample.
+// RenderProductionSites is the site file of span C: how much of it the tally
+// covered, its new sites, errors first and the most frequent first, then its
+// refired ones, each with its template, counts and one sample.
 func RenderProductionSites(sites ProductionSites, c wsm.ProductionCheck) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Production span %s to %s, compared with %s.\n", c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339), sites.Baseline))
+	if sites.Partial {
+		b.WriteString(fmt.Sprintf("PARTIAL: the tally keeps no row before %s, so it read only %s to %s; what fired before then is unknown, not absent.\n",
+			sites.From.UTC().Format(time.RFC3339), sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
+	} else {
+		b.WriteString(fmt.Sprintf("Read whole from the tally: %s to %s.\n", sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
+	}
 	b.WriteString(fmt.Sprintf("Left out: %d sites open children own, %d sites of ignored kinds.\n", sites.Owned, sites.Ignored))
 	ordered := append([]logsites.Site(nil), sites.New...)
 	sort.SliceStable(ordered, func(i, j int) bool {

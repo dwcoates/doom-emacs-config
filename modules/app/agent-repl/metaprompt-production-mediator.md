@@ -25,6 +25,8 @@
   - A site is new when it fired in this span and not in the span before it.
   - A site that fired again after a child's fix for it landed is listed apart, with when the fix landed. That fix did not hold, so treat it as a problem again.
   - Sites an open child owns, and sites of an ignored kind, are left out of the file.
+  - Its head says whether the tally read the span whole or only in part.
+    - A file marked `PARTIAL` read only from the tally's oldest kept row on, so a site missing from it may still have fired earlier in the span.
 - Investigate cheaply.
   - Start from the file. Read a site's records in full (`agent-repld logs sites`, `bin/logs.sh`) only when its sample does not show what is wrong.
   - Never read every record of the span.

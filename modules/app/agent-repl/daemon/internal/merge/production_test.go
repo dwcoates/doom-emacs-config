@@ -303,6 +303,57 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 	}
 }
 
+func TestDiffProductionSitesCarriesTheHoursTheTallyCovered(t *testing.T) {
+	// Arrange
+	from, to := deployStarted.Truncate(time.Hour), deployStarted.Truncate(time.Hour).Add(time.Hour)
+	span := logsites.Answer{From: from, To: to, Partial: true}
+
+	// Act
+	got := DiffProductionSites(span, nil, nil, nil, nil)
+
+	// Assert
+	if !got.From.Equal(from) || !got.To.Equal(to) || !got.Partial {
+		t.Fatalf("coverage = %v to %v, partial %v; want %v to %v, partial", got.From, got.To, got.Partial, from, to)
+	}
+}
+
+func TestRenderProductionSitesSaysHowMuchOfTheSpanTheTallyRead(t *testing.T) {
+	from, to := time.Date(2026, 11, 25, 16, 0, 0, 0, time.UTC), time.Date(2026, 11, 25, 17, 0, 0, 0, time.UTC)
+	c := wsm.ProductionCheck{Since: time.Date(2026, 11, 25, 4, 58, 6, 0, time.UTC), Until: time.Date(2026, 11, 25, 16, 31, 21, 0, time.UTC)}
+	cases := []struct {
+		name    string
+		partial bool
+		want    string
+		notWant string
+	}{
+		{
+			name:    "a span read whole says so",
+			want:    "Read whole from the tally: 2026-11-25T16:00:00Z to 2026-11-25T17:00:00Z.\n",
+			notWant: "PARTIAL",
+		},
+		{
+			name:    "a span begun before the oldest kept row says it was read only in part",
+			partial: true,
+			want:    "PARTIAL: the tally keeps no row before 2026-11-25T16:00:00Z, so it read only 2026-11-25T16:00:00Z to 2026-11-25T17:00:00Z; what fired before then is unknown, not absent.\n",
+			notWant: "Read whole",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			sites := ProductionSites{Baseline: "no earlier span", From: from, To: to, Partial: tc.partial}
+
+			// Act
+			got := RenderProductionSites(sites, c)
+
+			// Assert
+			if !strings.Contains(got, tc.want) || strings.Contains(got, tc.notWant) {
+				t.Fatalf("site file =\n%s\nwant it to hold %q and not %q", got, tc.want, tc.notWant)
+			}
+		})
+	}
+}
+
 // toldProduction makes the production harness's mediator told of a due span.
 func toldProduction(t *testing.T, h *harness) {
 	t.Helper()
