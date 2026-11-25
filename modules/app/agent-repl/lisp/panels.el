@@ -168,6 +168,15 @@ request of 2026-11-02, and two more by the owner's request of
   :type 'integer
   :group 'agent-repl)
 
+(defcustom agent-repl-input-max-height-factor 3
+  "How many times its normal height the composer may grow to fit its text.
+The normal height (`agent-repl-window--input-height') is the composer's
+floor; text that wraps past it grows the composer, up to this many times
+that floor (owner request, 2026-11-25), and scrolls inside it beyond.
+Read by `agent-repl-window--input-target-height'."
+  :type 'integer
+  :group 'agent-repl)
+
 (defcustom agent-repl-loading-placeholder-name " *agent-loading*"
   "Buffer name for the loading placeholder shown while the agent starts."
   :type 'string

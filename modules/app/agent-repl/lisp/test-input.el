@@ -196,6 +196,31 @@ The notices it hands its page are captured in
 
 ;;;; ---- Whose text was sent (audit-3 #51) ----
 
+;; THE COMPOSER FITS ITS WINDOW TO ITS TEXT on every edit
+;; (`agent-repl--input-fit-on-change').
+
+(ert-deftest agent-repl-input-an-edit-fits-the-shown-composer ()
+  "An edit to a composer on screen fits its window, for its workspace."
+  (agent-repl-test-input--with
+    (let ((fits nil)
+          (wconf (current-window-configuration)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl-window-fit-input)
+                     (lambda (ws win) (push (list ws win) fits))))
+            (set-window-buffer (selected-window) agent-repl-test-input--buffer)
+            (with-current-buffer agent-repl-test-input--buffer (insert "x"))
+            (should (equal fits (list (list "ws-one" (selected-window))))))
+        (set-window-configuration wconf)))))
+
+(ert-deftest agent-repl-input-an-edit-to-a-hidden-composer-fits-nothing ()
+  "An edit to a composer on no window has no window to fit."
+  (agent-repl-test-input--with
+    (let ((fits nil))
+      (cl-letf (((symbol-function 'agent-repl-window-fit-input)
+                 (lambda (&rest args) (push args fits))))
+        (with-current-buffer agent-repl-test-input--buffer (insert "x"))
+        (should-not fits)))))
+
 (ert-deftest agent-repl-input-a-composer-send-clears-the-composer ()
   "The words that went out came out of here, so here is emptied."
   (agent-repl-test-input--with
