@@ -3229,7 +3229,7 @@ func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bo
 }
 
 // sectionFold is one FoldMergedSection (merged), FoldMergeQueueSection
-// (mergeQueue), FoldBacklog (hidden) or FoldOpenSection (open) the verb
+// (mergeQueue), FoldBacklog (backlogged) or FoldOpenSection (open) the verb
 // received.
 type sectionFold struct {
 	merged     bool

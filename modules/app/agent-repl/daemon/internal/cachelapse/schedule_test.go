@@ -801,7 +801,7 @@ func TestScheduleBeatsAWorkspaceWithAMergeQueued(t *testing.T) {
 		name string
 		rec  wsm.Workspace
 	}{
-		{name: "hidden, nobody looking at it", rec: backlogged()},
+		{name: "backlogged, nobody looking at it", rec: backlogged()},
 		{name: "closed, its last keep-alive spent", rec: spentClose},
 	}
 	for _, tt := range tests {
@@ -832,7 +832,7 @@ func TestScheduleArmsTheRestoreOfAParkedWorkspaceWithAMergeQueued(t *testing.T) 
 		rec  wsm.Workspace
 	}{
 		{name: "the workspace in view", rec: visible()},
-		{name: "hidden, nobody looking at it", rec: backlogged()},
+		{name: "backlogged, nobody looking at it", rec: backlogged()},
 		{name: "closed, its last keep-alive spent", rec: spentClose},
 	}
 	for _, tt := range tests {
@@ -866,7 +866,7 @@ func TestScheduleHoldsABackloggedWorkspaceOnceItsMergeLeftTheQueue(t *testing.T)
 
 	// Assert
 	if _, armed := h.keeper.beats[theWorkspace]; armed {
-		t.Fatal("a beat was armed for a hidden workspace with no merge queued")
+		t.Fatal("a beat was armed for a backlogged workspace with no merge queued")
 	}
 }
 

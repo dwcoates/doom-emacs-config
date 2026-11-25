@@ -799,7 +799,7 @@ func TestANewWorkspaceIsShown(t *testing.T) {
 
 	// Assert
 	if ws.Backlogged {
-		t.Fatalf("a newly registered workspace is hidden")
+		t.Fatalf("a newly registered workspace is backlogged")
 	}
 }
 
@@ -810,8 +810,8 @@ func TestSetBackloggedIsReadBack(t *testing.T) {
 		want   bool
 	}{
 		{name: "hiding a workspace", writes: []bool{true}, want: true},
-		{name: "showing a hidden workspace again", writes: []bool{true, false}, want: false},
-		{name: "hiding a hidden workspace again", writes: []bool{true, true}, want: true},
+		{name: "showing a backlogged workspace again", writes: []bool{true, false}, want: false},
+		{name: "hiding a backlogged workspace again", writes: []bool{true, true}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -832,7 +832,7 @@ func TestSetBackloggedIsReadBack(t *testing.T) {
 				t.Fatalf("Workspace: %v", err)
 			}
 			if got.Backlogged != tt.want {
-				t.Fatalf("hidden = %v, want %v", got.Backlogged, tt.want)
+				t.Fatalf("backlogged = %v, want %v", got.Backlogged, tt.want)
 			}
 		})
 	}
@@ -880,14 +880,14 @@ func TestSetBackloggedRecordsWhenTheWorkspaceWasBacklogged(t *testing.T) {
 				t.Fatalf("Workspace: %v", err)
 			}
 			if (got.BackloggedAt == nil) != (tt.want == nil) || got.BackloggedAt != nil && !got.BackloggedAt.Equal(*tt.want) {
-				t.Fatalf("hidden at = %v, want %v", got.BackloggedAt, tt.want)
+				t.Fatalf("backlogged at = %v, want %v", got.BackloggedAt, tt.want)
 			}
 		})
 	}
 }
 
 func TestABackloggedRowWithNoHideInstantIsCorrupt(t *testing.T) {
-	// Arrange: a row hidden with no instant, which no write path produces.
+	// Arrange: a row backlogged with no instant, which no write path produces.
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	if _, err := s.db().Exec(`UPDATE workspaces SET backlogged = 1, backlogged_at = NULL WHERE id = ?`, ws.ID); err != nil {
@@ -2255,7 +2255,7 @@ func TestHideColumnsAreTheOneHideShape(t *testing.T) {
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "workspaces.go" {
-		t.Fatalf("the hidden instant is written at %v, want only hideColumns in workspaces.go", sites)
+		t.Fatalf("the backlogged instant is written at %v, want only hideColumns in workspaces.go", sites)
 	}
 }
 

@@ -17,7 +17,7 @@ ALTER TABLE subsections ADD COLUMN folded INTEGER NOT NULL DEFAULT 0;
 `
 
 // SetSubsectionFolded records whether subsection ID is folded. A folded
-// subsection's rows are hidden in the sidebar and its workspaces' tabs are
+// subsection's rows are backlogged in the sidebar and its workspaces' tabs are
 // folded off the tab bar, as a folded repository's are (resolve/sidebar's
 // openTree). An unknown subsection is refused (UnknownSubsectionError, which
 // is ErrNotFound), never a write that touched nothing.

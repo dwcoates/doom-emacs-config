@@ -540,7 +540,7 @@ var abandonSummaries = map[AbandonCause]string{
 	CauseAheadDidNotLand:      "the merge this one was placed behind left the queue without landing",
 	CauseAgentGaveUp:          "the merge's own agent gave it up",
 	CauseColdGate:             "the workspace's session parked at its cold gate; the merge waits at its place in line until the gate is passed",
-	CauseBackloggedAtColdGate: "the workspace was hidden at its cold gate while this merge was waiting in the queue",
+	CauseBackloggedAtColdGate: "the workspace was backlogged at its cold gate while this merge was waiting in the queue",
 	CauseColdGateAnswerFailed: "the queue could not answer the workspace's cold gate by a compaction; the merge left the queue, and the gate stands for the user to answer before the merge is requeued",
 }
 
@@ -555,7 +555,7 @@ var runningSummaries = map[AbandonCause]string{
 	CauseWorkspaceClosed:      "the workspace was closed while this merge was running",
 	CauseAgentGaveUp:          "the merge's own agent gave it up from its repair turn",
 	CauseColdGate:             "the workspace's session parked at its cold gate while this merge was running; it waits at its place in line until the gate is passed, and runs again from its start",
-	CauseBackloggedAtColdGate: "the workspace was hidden at its cold gate while this merge was running",
+	CauseBackloggedAtColdGate: "the workspace was backlogged at its cold gate while this merge was running",
 }
 
 // releases reports whether C is a RELEASE the user or the operator asked for

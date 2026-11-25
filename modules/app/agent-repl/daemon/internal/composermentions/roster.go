@@ -6,7 +6,7 @@ import (
 )
 
 // RosterNames answers the name of every workspace ROSTER, the roster's
-// workspaces stream, holds open, hidden ones included, in the roster's order
+// workspaces stream, holds open, backlogged ones included, in the roster's order
 // and without repeats: the workspaces
 // the composer completes (lisp/workspace-completion.el), and so the names a
 // response's words are matched against (Deps.WorkspaceNames). A nil roster,

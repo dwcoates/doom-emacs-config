@@ -234,7 +234,7 @@ func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out Detac
 //   - A workspace the user revealed is the user's, and stays open.
 //
 // Every other end (a failure, a dequeue, a merge dropped behind one that did
-// not land, given up, or hidden at its cold gate) closes it, with the daemon
+// not land, given up, or backlogged at its cold gate) closes it, with the daemon
 // as its closer. Closing ends its request off the queue in the same write
 // (wsm.markClosedInTx), and keeps its worktree and branch, which the
 // handback names.

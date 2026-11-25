@@ -61,7 +61,7 @@ func openedOutcomes(frames []*agentreplv1.OpenTabsResponse) map[string]string {
 	return out
 }
 
-// hide moves a workspace into the hidden section.
+// hide moves a workspace into the backlog.
 func hide(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	if _, err := d.Client().SetWorkspaceBacklogged(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
@@ -284,7 +284,7 @@ func openedIndex(frames []*agentreplv1.OpenTabsResponse, ws string) int {
 	return -1
 }
 
-// show moves a hidden workspace back into its section.
+// show moves a backlogged workspace back into its section.
 func show(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	if _, err := d.Client().SetWorkspaceBacklogged(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
@@ -296,7 +296,7 @@ func show(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 
 // cutWhileBacklogged runs a turn, hides the workspace under it (the stand-down
 // waits for the turn), and stands the daemon down, which cuts the turn: the
-// successor over the same state boots with a hidden workspace owed a cut turn.
+// successor over the same state boots with a backlogged workspace owed a cut turn.
 func cutWhileBacklogged(t *testing.T) *fixture {
 	t.Helper()
 	f := newOpened(t, harness.Opts{DurableState: true})
@@ -315,7 +315,7 @@ func cutWhileBacklogged(t *testing.T) *fixture {
 }
 
 // TestABackloggedWorkspacesCutTurnIsResumedByTheSuccessorsBoot: an open starts no
-// shim, and the hidden workspace's shim was up when its turn was cut, so the
+// shim, and the backlogged workspace's shim was up when its turn was cut, so the
 // successor's boot brings it back (bringup.OnlyWasUp) and the resumption is
 // the turn it starts.
 func TestABackloggedWorkspacesCutTurnIsResumedByTheSuccessorsBoot(t *testing.T) {

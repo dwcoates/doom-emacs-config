@@ -1,5 +1,5 @@
 // Package coldbacklog moves a workspace whose cold gate has stood for over a
-// day into the sidebar's hidden section, drawn as the Backlog (owner request,
+// day into the sidebar's backlog, drawn as the Backlog (owner request,
 // 2026-10-26). WEEKENDS NEVER COUNT toward the day (owner ruling, 2026-10-26):
 // a gate is stale once a whole day of Monday-to-Friday time has passed since
 // its conversation went cold (StaleAt).

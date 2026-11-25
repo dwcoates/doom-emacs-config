@@ -8,15 +8,15 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
-// BackloggedKeepalives is the server's view of the hidden workspaces' cache
-// keeper (internal/cachelapse): one keep-alive to every hidden workspace.
+// BackloggedKeepalives is the server's view of the backlogged workspaces' cache
+// keeper (internal/cachelapse): one keep-alive to every backlogged workspace.
 type BackloggedKeepalives interface {
-	// SendBackloggedKeepalives asks every hidden workspace's shim for one
+	// SendBackloggedKeepalives asks every backlogged workspace's shim for one
 	// keep-alive and answers the response whole.
 	SendBackloggedKeepalives(ctx context.Context) *agentreplv1.SendBackloggedKeepalivesResponse
 }
 
-// SendBackloggedKeepalives sends one keep-alive to every hidden workspace's
+// SendBackloggedKeepalives sends one keep-alive to every backlogged workspace's
 // session (`SPC j R`). The keeper owns the fan-out and records each outcome;
 // this only delegates. The request is empty by design, so there is nothing to
 // validate.

@@ -874,7 +874,7 @@ type heldSpec struct {
 	// default; a held row written before landing targets existed has none,
 	// which is what its create meant.
 	Landing *heldLanding `json:"landing,omitempty"`
-	// Backlogged is the born-hidden request, and Placement the creator's filing
+	// Backlogged is the born-backlogged request, and Placement the creator's filing
 	// of the workspace; a row written before either existed has neither.
 	Backlogged bool           `json:"hidden,omitempty"`
 	Placement  *heldPlacement `json:"placement,omitempty"`

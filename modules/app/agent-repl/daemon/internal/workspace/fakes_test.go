@@ -222,7 +222,7 @@ type fakeDB struct {
 	viewErr              error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
-	// setBackloggedErr fails the hidden-flag write.
+	// setBackloggedErr fails the backlogged-flag write.
 	setBackloggedErr error
 	// familyBackloggedErr fails HideFamily and ShowFamily.
 	familyBackloggedErr error
@@ -784,7 +784,7 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	if facts.Closure != nil {
 		ws.Closed, ws.Closure = true, facts.Closure
 	}
-	// BORN HIDDEN, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR,
+	// BORN BACKLOGGED, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR,
 	// as the store's insert does.
 	if facts.Originator != "" {
 		if d.originators == nil {
@@ -1359,7 +1359,7 @@ func (d *fakeDB) RestoreParent(_ context.Context, change wsm.ParentChange) (bool
 	return d.restoreStale, d.restoreErr
 }
 
-// SetBacklogged records the hidden flag and its instant on the workspace's
+// SetBacklogged records the backlogged flag and its instant on the workspace's
 // record, as WSM does, so the republished registry carries them.
 func (d *fakeDB) SetBacklogged(_ context.Context, id ids.WorkspaceID, backlogged bool, at time.Time) error {
 	if d.setBackloggedErr != nil {
@@ -2573,7 +2573,7 @@ func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {
 	m.closed = append(m.closed, ws)
 }
 
-// OnBacklogged records the hidden workspace.
+// OnBacklogged records the backlogged workspace.
 func (m *fakeMerge) OnBacklogged(ws ids.WorkspaceID) {
 	m.backlogged = append(m.backlogged, ws)
 }
@@ -4678,7 +4678,7 @@ func (d *fakeDB) SetMergeQueueSectionFolded(_ context.Context, folded bool) erro
 	return nil
 }
 
-// SetBacklogFolded records the hidden section's fold.
+// SetBacklogFolded records the backlog's fold.
 func (d *fakeDB) SetBacklogFolded(_ context.Context, folded bool) error {
 	if d.setBacklogFoldedErr != nil {
 		return d.setBacklogFoldedErr

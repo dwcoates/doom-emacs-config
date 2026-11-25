@@ -105,7 +105,7 @@ func TestRowFindsABackloggedWorkspace(t *testing.T) {
 
 	// Assert.
 	if !ok {
-		t.Fatal("Row found no row for a hidden workspace the roster carries")
+		t.Fatal("Row found no row for a backlogged workspace the roster carries")
 	}
 }
 

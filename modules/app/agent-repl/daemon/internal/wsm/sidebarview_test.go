@@ -59,12 +59,12 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want: SidebarView{},
 		},
 		{
-			name:  "folding the hidden section keeps the band",
+			name:  "folding the backlog keeps the band",
 			write: func(s *store) error { return s.SetBacklogFolded(context.Background(), true) },
 			want:  SidebarView{BacklogFolded: true},
 		},
 		{
-			name:  "folding the open section keeps the band and the hidden section",
+			name:  "folding the open section keeps the band and the backlog",
 			write: func(s *store) error { return s.SetOpenSectionFolded(context.Background(), true) },
 			want:  SidebarView{OpenFolded: true},
 		},
@@ -79,7 +79,7 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want: SidebarView{},
 		},
 		{
-			name: "unfolding the hidden section again replaces its fold",
+			name: "unfolding the backlog again replaces its fold",
 			write: func(s *store) error {
 				if err := s.SetBacklogFolded(context.Background(), true); err != nil {
 					return err
@@ -212,7 +212,7 @@ func TestTheMigrationAddsTheSidebarView(t *testing.T) {
 func TestTheDefaultViewExpandsTheBacklog(t *testing.T) {
 	// Arrange, Act, Assert
 	if DefaultSidebarView.BacklogFolded {
-		t.Fatalf("DefaultSidebarView = %+v, want the hidden section expanded", DefaultSidebarView)
+		t.Fatalf("DefaultSidebarView = %+v, want the backlog expanded", DefaultSidebarView)
 	}
 }
 
@@ -388,6 +388,6 @@ func TestSectionHeightFieldsNamesEachSectionsHeight(t *testing.T) {
 
 	// Assert
 	if len(got) != 2 || got["merge_queue_lines"] != uint32(3) || got["backlog_section_lines"] != "fitted" {
-		t.Fatalf("fields = %v, want the queue's 3 lines and hidden fitted", got)
+		t.Fatalf("fields = %v, want the queue's 3 lines and backlogged fitted", got)
 	}
 }

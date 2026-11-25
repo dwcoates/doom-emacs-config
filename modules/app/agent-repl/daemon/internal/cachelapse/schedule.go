@@ -183,7 +183,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 	// A COLLAPSED SECTION WITHHOLDS NO KEEP-ALIVE (wsm.Workspace.KeptWarm).
 	if !record.KeptWarm(queued) {
-		return none(noBeatCold, "it is hidden, so it runs no session")
+		return none(noBeatCold, "it is backlogged, so it runs no session")
 	}
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {

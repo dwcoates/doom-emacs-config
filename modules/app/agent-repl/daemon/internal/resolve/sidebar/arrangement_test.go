@@ -416,7 +416,7 @@ func TestArrangedLeavesOutClosedAndMergedWorkspacesAndHoistsAClosedParentsChildr
 
 	// Assert
 	if ids := arrangedShape(got[0]); !equal(ids, []string{"w-k", "w-h"}) {
-		t.Fatalf("listed = %v, want the hoisted child and the hidden one", ids)
+		t.Fatalf("listed = %v, want the hoisted child and the backlogged one", ids)
 	}
 }
 

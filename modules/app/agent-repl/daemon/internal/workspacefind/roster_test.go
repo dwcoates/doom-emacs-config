@@ -22,7 +22,7 @@ func rosterRow(id string, thinking bool) *frontendv1.RosterRow {
 }
 
 // pushOf is a push whose workspaces stream draws OPEN in the open section
-// and HIDDEN in the hidden section.
+// and BACKLOGGED in the backlog.
 func pushOf(open, backlog []*frontendv1.RosterRow) *frontendv1.RosterPush {
 	var openRows []*frontendv1.RosterRepoEntry
 	for _, row := range open {
@@ -81,7 +81,7 @@ func TestPlacementsFailsOnABrokenRoster(t *testing.T) {
 		{
 			name: "a workspace drawn twice",
 			push: pushOf([]*frontendv1.RosterRow{rosterRow("a", true)}, []*frontendv1.RosterRow{rosterRow("a", true)}),
-			want: "draws workspace a twice, in its open and hidden sections",
+			want: "draws workspace a twice, in its open and backlog sections",
 		},
 		{
 			name:   "a workspace both open and merged",

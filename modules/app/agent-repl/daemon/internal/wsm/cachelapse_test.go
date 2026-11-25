@@ -12,7 +12,7 @@ var (
 	lapseInstant        = time.Unix(1_700_003_600, 0).UTC()
 )
 
-// backloggedWorkspace is a registered workspace the user has hidden.
+// backloggedWorkspace is a registered workspace the user has backlogged.
 func backloggedWorkspace(t *testing.T, s *store) Workspace {
 	t.Helper()
 	ws := testWorkspace(t, s)
@@ -49,8 +49,8 @@ func TestSetCacheLapseIsReadBack(t *testing.T) {
 		workspace func(*testing.T, *store) Workspace
 		lapse     CacheLapse
 	}{
-		{name: "a hidden workspace's gated lapse", workspace: backloggedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
-		{name: "a hidden workspace's ungated lapse", workspace: backloggedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
+		{name: "a backlogged workspace's gated lapse", workspace: backloggedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
+		{name: "a backlogged workspace's ungated lapse", workspace: backloggedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
 		{name: "a closed workspace's gated lapse", workspace: closedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
 		{name: "a closed workspace's ungated lapse", workspace: closedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
 	}
@@ -230,7 +230,7 @@ func TestReopenClearsAClosedWorkspacesCacheLapse(t *testing.T) {
 		kept      bool
 	}{
 		{name: "a closed workspace", workspace: closedWorkspace, kept: false},
-		{name: "a closed workspace still hidden keeps the hide's", workspace: closedBackloggedWorkspace, kept: true},
+		{name: "a closed workspace still backlogged keeps the hide's", workspace: closedBackloggedWorkspace, kept: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

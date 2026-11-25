@@ -374,7 +374,7 @@ func TestHidingAWorkspaceAtItsColdGateTakesItsMergeOffTheQueue(t *testing.T) {
 
 	// Assert
 	if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{"ws-2"}) {
-		t.Fatalf("queue = %v, want the hidden workspace's merge gone", got)
+		t.Fatalf("queue = %v, want the backlogged workspace's merge gone", got)
 	}
 	if got, want := h.feed.lastAbandonedSummary(), abandonSummaries[CauseBackloggedAtColdGate]; got != want {
 		t.Fatalf("the bubble ended %q, want %q", got, want)

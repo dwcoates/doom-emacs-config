@@ -95,7 +95,7 @@ func TestFoldBacklogRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
 				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
 			}
 			if got := f.sidebar.registries[0].View.BacklogFolded; got != tt.folded {
-				t.Fatalf("republished hidden fold = %v, want %v", got, tt.folded)
+				t.Fatalf("republished backlogged fold = %v, want %v", got, tt.folded)
 			}
 		})
 	}
@@ -363,7 +363,7 @@ func TestEverySingletonSectionFoldSharesOneShape(t *testing.T) {
 	}{
 		{"recently merged", opFoldMergedSection, "recently merged section", func(v Verbs) error { return v.FoldMergedSection(context.Background(), true) }},
 		{"merge queue", opFoldMergeQueueSection, "merge queue section", func(v Verbs) error { return v.FoldMergeQueueSection(context.Background(), true) }},
-		{"hidden", opFoldBacklog, "hidden section", func(v Verbs) error { return v.FoldBacklog(context.Background(), true) }},
+		{"backlogged", opFoldBacklog, "backlog", func(v Verbs) error { return v.FoldBacklog(context.Background(), true) }},
 		{"open", opFoldOpenSection, "open section", func(v Verbs) error { return v.FoldOpenSection(context.Background(), true) }},
 	}
 	for _, tt := range tests {

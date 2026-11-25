@@ -32,11 +32,11 @@ func TestAnIntakeWorkspaceIsBornMarkedAndBacklogged(t *testing.T) {
 		t.Fatalf("IsIntake = %v, %v; want the intake workspace", intake, err)
 	}
 	if !ws.Backlogged || ws.BackloggedAt == nil {
-		t.Fatalf("the record Register answered = hidden %v at %v, want an intake workspace born hidden", ws.Backlogged, ws.BackloggedAt)
+		t.Fatalf("the record Register answered = backlogged %v at %v, want an intake workspace born backlogged", ws.Backlogged, ws.BackloggedAt)
 	}
 	got, err := s.Workspace(context.Background(), ws.ID)
 	if err != nil || !got.Backlogged {
-		t.Fatalf("Workspace hidden = %v, %v; want the intake workspace hidden", got.Backlogged, err)
+		t.Fatalf("Workspace backlogged = %v, %v; want the intake workspace backlogged", got.Backlogged, err)
 	}
 }
 

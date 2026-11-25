@@ -211,7 +211,7 @@ func describe(f *agentreplv1.OpenTabsResponse) string {
 		case *agentreplv1.OpenTabsOpened_Failed:
 			return ws + " failed " + arm.Failed.GetReason()
 		case *agentreplv1.OpenTabsOpened_Hidden:
-			return ws + " hidden"
+			return ws + " backlogged"
 		case *agentreplv1.OpenTabsOpened_Refused:
 			return ws + " refused " + refusedCause(arm.Refused)
 		}
@@ -324,10 +324,10 @@ func TestABackloggedWorkspaceIsAnsweredHiddenAndNothingIsRead(t *testing.T) {
 	_, returned := w.start(ws)
 
 	// Assert
-	w.expect(t, "a hidden", "finished 0/1 failed=")
+	w.expect(t, "a backlogged", "finished 0/1 failed=")
 	awaitReturned(t, returned)
 	if len(w.openingEdges()) != 0 || w.reads["a"] != 0 {
-		t.Fatalf("a hidden workspace was marked opening (%v) or read (%d)", w.openingEdges(), w.reads["a"])
+		t.Fatalf("a backlogged workspace was marked opening (%v) or read (%d)", w.openingEdges(), w.reads["a"])
 	}
 }
 

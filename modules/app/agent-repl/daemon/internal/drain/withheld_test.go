@@ -17,7 +17,7 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// hidden registers one workspace with a live, free session, and hides it.
+// backlogged registers one workspace with a live, free session, and hides it.
 func (h *harness) backlogged(t *testing.T) ids.WorkspaceID {
 	t.Helper()
 	return h.hide(t, h.workspace(t, instant))
@@ -92,7 +92,7 @@ func TestAWithheldStandDownRecordsItsOwnReason(t *testing.T) {
 	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
-	if term := h.terminal(t, ws); term == nil || !strings.Contains(term.Detail, "hidden, collapsed or closed") {
+	if term := h.terminal(t, ws); term == nil || !strings.Contains(term.Detail, "backlogged, collapsed or closed") {
 		t.Fatalf("terminal = %+v, want the withheld reason", term)
 	}
 }
@@ -147,7 +147,7 @@ func TestAClosedWorkspaceIsStoodDown(t *testing.T) {
 }
 
 // TestTheSelectedBackloggedWorkspaceIsNotStoodDown pins the cold gate that stood
-// again after every answer (2026-10-17): a hidden workspace the user selected
+// again after every answer (2026-10-17): a backlogged workspace the user selected
 // and paid to resume was stood down the moment its session came up, because
 // its cache had lapsed long before. The one they are looking at runs.
 func TestTheSelectedBackloggedWorkspaceIsNotStoodDown(t *testing.T) {
@@ -155,7 +155,7 @@ func TestTheSelectedBackloggedWorkspaceIsNotStoodDown(t *testing.T) {
 		name     string
 		withhold func(t *testing.T, h *harness) ids.WorkspaceID
 	}{
-		{name: "hidden", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) }},
+		{name: "backlogged", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) }},
 		{name: "collapsed", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.collapsed(t) }},
 	}
 	for _, tt := range tests {
@@ -182,7 +182,7 @@ func TestTheSelectedBackloggedWorkspaceIsNotStoodDown(t *testing.T) {
 }
 
 func TestAWorkspaceShownAgainIsNotStoodDown(t *testing.T) {
-	// Arrange: asked while hidden, shown again before the attempt reads it.
+	// Arrange: asked while backlogged, shown again before the attempt reads it.
 	h := newHarness(t)
 	ws := h.workspace(t, instant)
 
@@ -515,7 +515,7 @@ func TestABackloggedOneShotIsStillStoodDown(t *testing.T) {
 
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 1 {
-		t.Fatalf("kills = %+v, want the hidden one-shot stood down", killed)
+		t.Fatalf("kills = %+v, want the backlogged one-shot stood down", killed)
 	}
 }
 
@@ -566,7 +566,7 @@ func TestAWorkspaceWithAMergeQueuedIsNeverStoodDown(t *testing.T) {
 		name    string
 		arrange func(t *testing.T, h *harness) ids.WorkspaceID
 	}{
-		{name: "hidden", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) }},
+		{name: "backlogged", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) }},
 		{name: "closed", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
 			if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {

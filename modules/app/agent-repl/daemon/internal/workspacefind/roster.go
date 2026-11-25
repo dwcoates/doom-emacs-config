@@ -46,7 +46,7 @@ type Drawn struct {
 }
 
 // Placements answers how the roster draws each workspace it draws in its
-// open, hidden and recently merged sections: the open and hidden rows off
+// open, backlogged and recently merged sections: the open and backlogged rows off
 // PUSH's workspaces stream, and the merged ones off MERGED, the rows the
 // sidebar's pages resolve for the registry's merged set
 // (sidebar.Resolver.MergedRows), since a merged workspace is in no stream. A

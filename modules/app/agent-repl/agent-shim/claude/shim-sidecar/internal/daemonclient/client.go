@@ -513,7 +513,7 @@ func (c *Client) SetLocateFailedObserver(observe func(dir, address string, err e
 }
 
 // workspaceRefInRoster answers the ref of the row at WANTEDDIR in PUSH, a
-// subscription's first push, which carries every stream: the open, hidden
+// subscription's first push, which carries every stream: the open, backlogged
 // and closed rows. Nil when none is there.
 func workspaceRefInRoster(push *frontendv1.RosterPush, wantedDir string) (*workspacev1.WorkspaceRef, error) {
 	var found *workspacev1.WorkspaceRef

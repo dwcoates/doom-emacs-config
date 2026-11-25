@@ -31,11 +31,11 @@ func (v *verbs) FoldMergeQueueSection(ctx context.Context, folded bool) error {
 	return v.foldSingletonSection(ctx, opFoldMergeQueueSection, "merge queue section", v.deps.DB.SetMergeQueueSectionFolded, folded)
 }
 
-// FoldBacklog records whether the hidden-workspaces section is
+// FoldBacklog records whether the backlog is
 // collapsed, then republishes the roster to every page. There is nothing to
-// refuse: the roster carries exactly one hidden section.
+// refuse: the roster carries exactly one backlog.
 func (v *verbs) FoldBacklog(ctx context.Context, folded bool) error {
-	return v.foldSingletonSection(ctx, opFoldBacklog, "hidden section", v.deps.DB.SetBacklogFolded, folded)
+	return v.foldSingletonSection(ctx, opFoldBacklog, "backlog", v.deps.DB.SetBacklogFolded, folded)
 }
 
 // FoldOpenSection records whether the open-workspaces section is collapsed,

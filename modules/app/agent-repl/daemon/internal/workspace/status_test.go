@@ -222,7 +222,7 @@ func TestStatusAnswersAClosedOrBackloggedWorkspace(t *testing.T) {
 		wantBacklogged bool
 	}{
 		{name: "a closed workspace", record: wsm.Workspace{ID: "ws-1", Closed: true}, wantClosed: true},
-		{name: "a hidden workspace", record: wsm.Workspace{ID: "ws-1", Backlogged: true}, wantBacklogged: true},
+		{name: "a backlogged workspace", record: wsm.Workspace{ID: "ws-1", Backlogged: true}, wantBacklogged: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,7 +239,7 @@ func TestStatusAnswersAClosedOrBackloggedWorkspace(t *testing.T) {
 				t.Fatalf("Status: %v", err)
 			}
 			if (got.GetStanding().GetClosed() != nil) != tt.wantClosed || got.GetBacklogged() != tt.wantBacklogged {
-				t.Errorf("Status = %+v, want closed %v hidden %v", got, tt.wantClosed, tt.wantBacklogged)
+				t.Errorf("Status = %+v, want closed %v backlogged %v", got, tt.wantClosed, tt.wantBacklogged)
 			}
 		})
 	}
@@ -252,7 +252,7 @@ func TestStatusBackloggedAgreesWithWhatTheSidebarDraws(t *testing.T) {
 		record wsm.Workspace
 	}{
 		{name: "a shown workspace", record: wsm.Workspace{ID: "ws-1"}},
-		{name: "a hidden workspace", record: wsm.Workspace{ID: "ws-1", Backlogged: true}},
+		{name: "a backlogged workspace", record: wsm.Workspace{ID: "ws-1", Backlogged: true}},
 		{name: "a merge workspace its merge withholds", record: wsm.Workspace{ID: "ws-1", MergeOf: merge}},
 		{name: "a revealed merge workspace", record: wsm.Workspace{ID: "ws-1", MergeOf: merge, MergeRevealed: true}},
 		{name: "a revealed merge workspace the user hid", record: wsm.Workspace{ID: "ws-1", MergeOf: merge, MergeRevealed: true, Backlogged: true}},
@@ -268,13 +268,13 @@ func TestStatusBackloggedAgreesWithWhatTheSidebarDraws(t *testing.T) {
 			// Act
 			got, err := f.verbs.Status(context.Background(), tt.record.ID)
 
-			// Assert: an open workspace is hidden exactly when the sidebar
+			// Assert: an open workspace is backlogged exactly when the sidebar
 			// does not list it open.
 			if err != nil {
 				t.Fatalf("Status: %v", err)
 			}
 			if got.GetBacklogged() == tt.record.ListedOpen() {
-				t.Errorf("Status hidden = %v while the sidebar lists it open = %v", got.GetBacklogged(), tt.record.ListedOpen())
+				t.Errorf("Status backlogged = %v while the sidebar lists it open = %v", got.GetBacklogged(), tt.record.ListedOpen())
 			}
 		})
 	}
@@ -298,7 +298,7 @@ func TestStatusAfterAShowOfAHiddenMergeWorkspaceIsNotHidden(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 	if got.GetBacklogged() || !drawnOpen(t, f, "ws-merge") {
-		t.Fatalf("Status hidden = %v, drawn open = %v; want shown in both", got.GetBacklogged(), drawnOpen(t, f, "ws-merge"))
+		t.Fatalf("Status backlogged = %v, drawn open = %v; want shown in both", got.GetBacklogged(), drawnOpen(t, f, "ws-merge"))
 	}
 }
 

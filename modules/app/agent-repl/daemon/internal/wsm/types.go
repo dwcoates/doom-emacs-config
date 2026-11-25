@@ -149,7 +149,7 @@ type Workspace struct {
 	// (see place.go).
 	Priority *Priority
 	// Backlogged reports whether the user moved the workspace into the roster's
-	// hidden section (agentrepl.v1.SetWorkspaceBacklogged): off every grouping and
+	// backlog (agentrepl.v1.SetWorkspaceBacklogged): off every grouping and
 	// off the editor's tab bar, its session and tab untouched.
 	Backlogged bool
 	// ChildrenFolded reports whether the workspace's children are folded: their
@@ -170,7 +170,7 @@ type Workspace struct {
 	// Mediator is the standing mediator the workspace is, if any: its
 	// repository's deploy mediator (deploy_mediators) or production mediator
 	// (production_mediators). A mediator runs and is kept warm like any open
-	// workspace, hidden or not (owner ruling, 2026-11-17), so a check never
+	// workspace, backlogged or not (owner ruling, 2026-11-17), so a check never
 	// waits on a cold cache.
 	Mediator MediatorRole
 	// EmojiAck reports that the Slack emoji-ack reaction system created the
@@ -191,17 +191,17 @@ type Workspace struct {
 	Subsection *SubsectionID
 	// LastSelectedAt is when the user last selected the workspace.
 	LastSelectedAt *time.Time
-	// BackloggedAt is when the user moved the workspace into the hidden section,
-	// set exactly while Hidden is (SetBacklogged).
+	// BackloggedAt is when the user moved the workspace into the backlog,
+	// set exactly while Backlogged is (SetBacklogged).
 	BackloggedAt *time.Time
 	// BackloggedGateAt is the lapse instant of the cold gate the daemon last
 	// moved the workspace into the backlog for (BacklogColdGate); nil when it
 	// never has. A workspace is backlogged at most once per gate, so one the
 	// user shows again stays shown.
 	BackloggedGateAt *time.Time
-	// CacheLapse is a HIDDEN workspace's projected cache lapse, as its shim
+	// CacheLapse is a BACKLOGGED workspace's projected cache lapse, as its shim
 	// last stated it (SetCacheLapse); nil when none is known. Never set on a
-	// workspace that is not hidden.
+	// workspace that is not backlogged.
 	CacheLapse *CacheLapse
 	// LastActivityAt is when the workspace LAST DID REAL WORK: the most recent
 	// turn start or turn close, stamped at the genuine activity edge inside the
@@ -339,7 +339,7 @@ type Repository struct {
 	// DefaultBranch is the repository's default branch.
 	DefaultBranch string
 	// Folded reports that the repository's roster section is collapsed: its
-	// rows hidden in the sidebar and its workspaces' tabs off the Emacs bar.
+	// rows backlogged in the sidebar and its workspaces' tabs off the Emacs bar.
 	Folded bool
 	// Place is the repository's position among the repositories, which the
 	// repository grouping and the tab bar both follow (arrange.go). Unique,
@@ -460,14 +460,14 @@ type RegisterFacts struct {
 	// created workspace never exists without its job and full merge geometry
 	// (RegisterWorkspace). There is no re-keying step for a failure to cut.
 	CreationJob WorkspaceID
-	// Backlogged makes a MINTED workspace born hidden: the insert's own
-	// transaction writes the hidden columns, so no roster ever draws the row
+	// Backlogged makes a MINTED workspace born backlogged: the insert's own
+	// transaction writes the backlogged columns, so no roster ever draws the row
 	// visible for an instant. An announcement of an already-registered
 	// workspace ignores it.
 	Backlogged bool
 	// Intake makes a MINTED workspace an ephemeral intake workspace
 	// (intake.go) born so: its intake_workspaces row is written in the
-	// insert's transaction. It implies Hidden.
+	// insert's transaction. It implies Backlogged.
 	Intake bool
 	// IntakeCard is the feed card an intake workspace was made for (a `?`
 	// question's), written beside its intake_workspaces row in the insert's

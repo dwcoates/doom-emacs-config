@@ -56,7 +56,7 @@ func TestOnlyVisibleSplitsPending(t *testing.T) {
 		{name: "a visible workspace runs", ws: wsm.Workspace{ID: "a", Repo: "open", Visibility: wsm.UnselectedVisible}, wantRun: true},
 		{name: "the selection runs", ws: wsm.Workspace{ID: "a", Repo: "open", Backlogged: true, Visibility: wsm.Selected}, wantRun: true},
 		{name: "a workspace persisted not visible is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Visibility: wsm.NotVisible}, wantWithheld: true},
-		{name: "a hidden workspace is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Backlogged: true}, wantWithheld: true},
+		{name: "a backlogged workspace is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Backlogged: true}, wantWithheld: true},
 		{name: "a workspace in a collapsed section is withheld", ws: wsm.Workspace{ID: "a", Repo: "folded"}, wantWithheld: true},
 		{name: "a hidden merge workspace whose merge is queued runs", ws: wsm.Workspace{ID: "queued", Repo: "open", MergeOf: &wsm.MergeOrigin{}}, wantRun: true},
 		{name: "a hidden merge workspace whose merge left every queue is withheld", ws: wsm.Workspace{ID: "ended", Repo: "open", MergeOf: &wsm.MergeOrigin{}}, wantWithheld: true},

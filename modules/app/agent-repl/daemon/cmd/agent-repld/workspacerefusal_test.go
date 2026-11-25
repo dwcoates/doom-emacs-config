@@ -170,8 +170,8 @@ func TestDescribeWorkspaceRefusalWithNoSentenceIsABug(t *testing.T) {
 func parentNotOpenCases(empty proto.Message, again string) []refusalCase {
 	parent := &workspacev1.WorkspaceRef{Id: "p", Dir: "/w/p"}
 	return []refusalCase{
-		{name: "parent_not_open/hidden", err: armed(empty, "parent_not_open", &agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Backlogged{Backlogged: &agentreplv1.WorkspaceParentNotOpenBacklogged{}}}),
-			want: "the parent /w/p is hidden; show it, then " + again},
+		{name: "parent_not_open/backlogged", err: armed(empty, "parent_not_open", &agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Backlogged{Backlogged: &agentreplv1.WorkspaceParentNotOpenBacklogged{}}}),
+			want: "the parent /w/p is backlogged; show it, then " + again},
 		{name: "parent_not_open/closed", err: armed(empty, "parent_not_open", &agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Closed{Closed: &agentreplv1.WorkspaceParentNotOpenClosed{}}}),
 			want: "the parent /w/p is closed; reopen it, then " + again},
 		{name: "parent_not_open/closing", err: armed(empty, "parent_not_open", &agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Closing{Closing: &agentreplv1.WorkspaceParentNotOpenClosing{}}}),
@@ -184,7 +184,7 @@ func parentNotOpenCases(empty proto.Message, again string) []refusalCase {
 func openChildrenCase(empty proto.Message, again string) refusalCase {
 	return refusalCase{name: "has_open_children", err: armed(empty, "has_open_children", &agentreplv1.WorkspaceHasOpenChildren{
 		Children: []*workspacev1.WorkspaceRef{{Id: "c1"}, {Id: "c2"}}, LandingInto: []*workspacev1.WorkspaceRef{{Id: "l1"}}}),
-		want: "ws has 2 open children and 1 open workspaces landing into it, hidden ones included; close or merge each, then " + again}
+		want: "ws has 2 open children and 1 open workspaces landing into it, backlogged ones included; close or merge each, then " + again}
 }
 
 // workspaceSettingRefusals is each `workspace set`, summary, link, find and
@@ -201,7 +201,7 @@ var workspaceSettingRefusals = func() []describedRefusal {
 	find := &agentreplv1.FindWorkspacesError{}
 	arrange := &agentreplv1.ArrangeSidebarError{}
 	return []describedRefusal{
-		{name: "hidden", empty: backlogged, oneof: "cause",
+		{name: "backlogged", empty: backlogged, oneof: "cause",
 			cases: append(append(sharedWorkspaceCases(backlogged, "set it again", theFourWorkspaceArms...),
 				openChildrenCase(backlogged, "hide it again")),
 				parentNotOpenCases(backlogged, "show ws again")...),

@@ -934,7 +934,7 @@ func TestSetWorkspaceBackloggedHandsThePlaceToTheVerb(t *testing.T) {
 			}
 			want := backloggedSet{ws: testWorkspaceID, backlogged: tt.want}
 			if len(h.Verbs.backloggedSets) != 1 || h.Verbs.backloggedSets[0] != want {
-				t.Fatalf("hidden sets = %+v, want %+v", h.Verbs.backloggedSets, want)
+				t.Fatalf("backlogged sets = %+v, want %+v", h.Verbs.backloggedSets, want)
 			}
 		})
 	}
@@ -960,7 +960,7 @@ func TestSetWorkspaceBackloggedRefusesAnUnknownWorkspace(t *testing.T) {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
 	if len(h.Verbs.backloggedSets) != 0 {
-		t.Fatalf("hidden sets = %+v, want none for an unknown workspace", h.Verbs.backloggedSets)
+		t.Fatalf("backlogged sets = %+v, want none for an unknown workspace", h.Verbs.backloggedSets)
 	}
 }
 
@@ -1200,7 +1200,7 @@ func TestSetWorkspaceBackloggedRefusesAMissingVisibility(t *testing.T) {
 		t.Fatalf("code = %v (%v), want InvalidArgument", connect.CodeOf(err), err)
 	}
 	if len(h.Verbs.backloggedSets) != 0 {
-		t.Fatalf("hidden sets = %+v, want none for a malformed request", h.Verbs.backloggedSets)
+		t.Fatalf("backlogged sets = %+v, want none for a malformed request", h.Verbs.backloggedSets)
 	}
 }
 
@@ -3714,7 +3714,7 @@ func TestCreateWorkspaceMapsBackloggedAndPlacementToTheSpec(t *testing.T) {
 		wantPlacement  *workspace.CreatePlacement
 	}{
 		{name: "neither", wantBacklogged: false},
-		{name: "born hidden", backlogged: boolPtr(true), wantBacklogged: true},
+		{name: "born backlogged", backlogged: boolPtr(true), wantBacklogged: true},
 		{name: "an existing subsection", placement: &agentreplv1.CreateWorkspacePlacement{
 			Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: "auth"}},
 			wantPlacement: &workspace.CreatePlacement{Subsection: "auth"}},
@@ -3739,7 +3739,7 @@ func TestCreateWorkspaceMapsBackloggedAndPlacementToTheSpec(t *testing.T) {
 			}
 			spec := h.Verbs.createSpecs[0]
 			if spec.Backlogged != tt.wantBacklogged || !reflect.DeepEqual(spec.Placement, tt.wantPlacement) {
-				t.Fatalf("spec hidden %v placement %+v, want %v and %+v", spec.Backlogged, spec.Placement, tt.wantBacklogged, tt.wantPlacement)
+				t.Fatalf("spec backlogged %v placement %+v, want %v and %+v", spec.Backlogged, spec.Placement, tt.wantBacklogged, tt.wantPlacement)
 			}
 		})
 	}

@@ -25,7 +25,7 @@ func skippedAnswer(reason *shimv1.SendKeepaliveSkipped) *shimv1.SendKeepaliveSuc
 	return &shimv1.SendKeepaliveSuccess{Outcome: &shimv1.SendKeepaliveSuccess_Skipped{Skipped: reason}}
 }
 
-// workspaceNamed is a hidden workspace with its own id and dir.
+// workspaceNamed is a backlogged workspace with its own id and dir.
 func workspaceNamed(id string) wsm.Workspace {
 	ws := backlogged()
 	ws.ID, ws.Dir = ids.WorkspaceID(id), "/work/"+id
@@ -65,7 +65,7 @@ func TestSendBackloggedKeepalivesAsksEveryBackloggedWorkspaceAndNoOther(t *testi
 	shown := workspaceNamed("b-shown")
 	shown.Backlogged, shown.BackloggedAt = false, nil
 	shims := map[ids.WorkspaceID]*fakeShim{}
-	records := []wsm.Workspace{workspaceNamed("a-hidden"), shown, merged, workspaceNamed("d-hidden")}
+	records := []wsm.Workspace{workspaceNamed("a-backlogged"), shown, merged, workspaceNamed("d-backlogged")}
 	for _, rec := range records {
 		shims[rec.ID] = &fakeShim{answer: sentAnswer()}
 	}
@@ -76,14 +76,14 @@ func TestSendBackloggedKeepalivesAsksEveryBackloggedWorkspaceAndNoOther(t *testi
 
 	// Assert
 	got := fmt.Sprint(outcomesOf(t, resp), shims["b-shown"].beats, shims["c-merged"].beats)
-	if want := fmt.Sprint([]string{"a-hidden:sent", "d-hidden:sent"}, 0, 0); got != want {
+	if want := fmt.Sprint([]string{"a-backlogged:sent", "d-backlogged:sent"}, 0, 0); got != want {
 		t.Fatalf("outcomes = %s, want %s", got, want)
 	}
 }
 
 func TestSendBackloggedKeepalivesNamesEachWorkspaceByItsRef(t *testing.T) {
 	// Arrange
-	ws := workspaceNamed("a-hidden")
+	ws := workspaceNamed("a-backlogged")
 	h := beatHarness(t, []wsm.Workspace{ws}, map[ids.WorkspaceID]*fakeShim{ws.ID: {answer: sentAnswer()}})
 
 	// Act
@@ -91,7 +91,7 @@ func TestSendBackloggedKeepalivesNamesEachWorkspaceByItsRef(t *testing.T) {
 
 	// Assert
 	ref := resp.GetSuccess().GetWorkspaces()[0].GetWorkspace()
-	if ref.GetId() != "a-hidden" || ref.GetDir() != "/work/a-hidden" {
+	if ref.GetId() != "a-backlogged" || ref.GetDir() != "/work/a-backlogged" {
 		t.Fatalf("ref = %v, want the workspace's id and dir", ref)
 	}
 }
@@ -120,25 +120,25 @@ func TestSendBackloggedKeepalivesReportsEachOutcome(t *testing.T) {
 		message string
 	}{
 		{name: "sent", served: true, answer: sentAnswer(), outcome: "sent",
-			level: "info", message: "the hidden workspace's shim answered its keep-alive"},
+			level: "info", message: "the backlogged workspace's shim answered its keep-alive"},
 		{name: "skipped, busy", served: true, outcome: "skipped_busy",
 			answer: skippedAnswer(&shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_MainAgentBusy{MainAgentBusy: &shimv1.SendKeepaliveSkippedMainAgentBusy{Detail: "a turn is in flight"}}}),
-			level:  "info", message: "the hidden workspace's shim answered its keep-alive"},
+			level:  "info", message: "the backlogged workspace's shim answered its keep-alive"},
 		{name: "no session served", served: false, outcome: "not_running",
-			level: "info", message: "no session is served for the hidden workspace; it has no cache to keep"},
+			level: "info", message: "no session is served for the backlogged workspace; it has no cache to keep"},
 		{name: "the shim holds no session", served: true, err: ErrNoSession, outcome: "not_running",
-			level: "info", message: "the hidden workspace's shim holds no session; it has no cache to keep"},
+			level: "info", message: "the backlogged workspace's shim holds no session; it has no cache to keep"},
 		{name: "the submission failed", served: true, err: &BeatSubmitFailed{Detail: "stream closed"}, outcome: "failed",
-			level: "error", message: "could not send the hidden workspace its keep-alive"},
+			level: "error", message: "could not send the backlogged workspace its keep-alive"},
 		{name: "the shim died under the call", served: true, err: fmt.Errorf("%w: unexpected EOF", shimclient.ErrShimDied), outcome: "failed",
 			level: "info", message: "the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit"},
 		{name: "the shim cannot be reached", served: true, err: errors.New("connection refused"), outcome: "failed",
-			level: "error", message: "could not send the hidden workspace its keep-alive"},
+			level: "error", message: "could not send the backlogged workspace its keep-alive"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			ws := workspaceNamed("a-hidden")
+			ws := workspaceNamed("a-backlogged")
 			shims := map[ids.WorkspaceID]*fakeShim{}
 			if tt.served {
 				shims[ws.ID] = &fakeShim{answer: tt.answer, beatErr: tt.err}
@@ -149,11 +149,11 @@ func TestSendBackloggedKeepalivesReportsEachOutcome(t *testing.T) {
 			resp := h.keeper.SendBackloggedKeepalives(context.Background())
 
 			// Assert
-			if got := outcomesOf(t, resp); len(got) != 1 || got[0] != "a-hidden:"+tt.outcome {
-				t.Fatalf("outcomes = %v, want a-hidden:%s", got, tt.outcome)
+			if got := outcomesOf(t, resp); len(got) != 1 || got[0] != "a-backlogged:"+tt.outcome {
+				t.Fatalf("outcomes = %v, want a-backlogged:%s", got, tt.outcome)
 			}
 			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: tt.level, Operation: opBeat, Message: tt.message})
-			if !ok || rec.Context["workspace"] != "a-hidden" {
+			if !ok || rec.Context["workspace"] != "a-backlogged" {
 				t.Fatalf("%s record %q = %+v, %v; want one naming the workspace", tt.level, tt.message, rec, ok)
 			}
 		})
@@ -162,7 +162,7 @@ func TestSendBackloggedKeepalivesReportsEachOutcome(t *testing.T) {
 
 func TestSendBackloggedKeepalivesCarriesASubmitFailuresOwnDetail(t *testing.T) {
 	// Arrange
-	ws := workspaceNamed("a-hidden")
+	ws := workspaceNamed("a-backlogged")
 	h := beatHarness(t, []wsm.Workspace{ws}, map[ids.WorkspaceID]*fakeShim{ws.ID: {beatErr: &BeatSubmitFailed{Detail: "stream closed"}}})
 
 	// Act
@@ -176,7 +176,7 @@ func TestSendBackloggedKeepalivesCarriesASubmitFailuresOwnDetail(t *testing.T) {
 
 func TestSendBackloggedKeepalivesRecordsACallTheDaemonsExitCancels(t *testing.T) {
 	// Arrange
-	ws := workspaceNamed("a-hidden")
+	ws := workspaceNamed("a-backlogged")
 	h := beatHarness(t, []wsm.Workspace{ws}, map[ids.WorkspaceID]*fakeShim{ws.ID: {beatErr: context.Canceled}})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -192,16 +192,16 @@ func TestSendBackloggedKeepalivesRecordsACallTheDaemonsExitCancels(t *testing.T)
 
 func TestSendBackloggedKeepalivesSummarizesTheOutcomes(t *testing.T) {
 	// Arrange
-	a, b := workspaceNamed("a-hidden"), workspaceNamed("b-hidden")
+	a, b := workspaceNamed("a-backlogged"), workspaceNamed("b-backlogged")
 	h := beatHarness(t, []wsm.Workspace{a, b}, map[ids.WorkspaceID]*fakeShim{a.ID: {answer: sentAnswer()}})
 
 	// Act
 	h.keeper.SendBackloggedKeepalives(context.Background())
 
 	// Assert
-	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opBeat, Message: "sent the hidden section its keep-alives"})
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opBeat, Message: "sent the backlog its keep-alives"})
 	if !ok || rec.Context["backlogged"] != 2 || rec.Context["sent"] != 1 || rec.Context["not_running"] != 1 {
-		t.Fatalf("summary = %+v, %v; want 2 hidden, 1 sent, 1 not running", rec, ok)
+		t.Fatalf("summary = %+v, %v; want 2 backlogged, 1 sent, 1 not running", rec, ok)
 	}
 }
 

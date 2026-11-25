@@ -385,7 +385,7 @@ func lastTurnStarted(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontend
 
 // lastUpdated resolves the row's update recency
 // (frontend.v1.RosterRowLastUpdated): the LATEST of the record's creation, its
-// latest turn start or close, its close record, its hidden instant, its merge
+// latest turn start or close, its close record, its backlogged instant, its merge
 // landing, its requester's landing, and its status change -- the durable one
 // and LIVE, the one this daemon stamped (wsState.statusChangedAt), whichever
 // is later. The selection instant is deliberately not among them: viewing a
@@ -462,7 +462,7 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 // when resolves the when-column's ONE value.
 //
 // Precedence: MERGED WINS (that the workspace is done is the more interesting
-// fact), else HIDDEN (a hidden row counts from its hide, owner request
+// fact), else BACKLOGGED (a backlogged row counts from its hide, owner request
 // 2026-10-13), else a SYNC MERGE the workspace's footer strip draws (owner
 // request, 2026-10-14), counted from when it joined the queue, else the TURN
 // CLOCK the strip shows (owner request, 2026-10-13): a running turn counts

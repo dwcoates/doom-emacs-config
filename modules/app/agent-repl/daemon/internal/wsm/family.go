@@ -20,19 +20,19 @@ import (
 // under a closed parent:
 //
 //   - A WORKSPACE WITH OPEN CHILDREN STAYS OPEN (refuseOpenChildren): it is
-//     not hidden (SetBacklogged), closed by the user or an agent (MarkClosed), or
+//     not backlogged (SetBacklogged), closed by the user or an agent (MarkClosed), or
 //     queued for a merge whose landing closes it (requestMerge). An open
 //     workspace whose merge LANDS INTO it (Workspace.LandsInto) holds it open
 //     the same way, child or not: its branch is where that work goes.
 //   - A CHILD IS ONLY EVER OPEN UNDER AN OPEN PARENT (requireOpenParent): it
 //     is not registered (RegisterWorkspace), re-parented (SetParent),
-//     re-opened (Reopen) or shown (SetBacklogged) under a parent that is hidden,
+//     re-opened (Reopen) or shown (SetBacklogged) under a parent that is backlogged,
 //     closed, or CLOSING (a merge waiting in its queue closes it on landing).
 //
-// A HIDDEN CHILD COUNTS AS OPEN: hiding keeps its session, so a family is
+// A BACKLOGGED CHILD COUNTS AS OPEN: hiding keeps its session, so a family is
 // hidden child first. A HIDDEN MERGE WORKSPACE (Workspace.MergeHidden) is no
 // open child: it is an async merge's machinery, drawn nowhere until revealed,
-// and its requester stays free to be hidden or closed while it runs.
+// and its requester stays free to be backlogged or closed while it runs.
 //
 // The daemon's own closes (CloseByMerge, CloseByDaemon) are not refused: they
 // record what already happened (a branch landed, a directory vanished). A
@@ -60,7 +60,7 @@ func (r FamilyRef) String() string {
 type HasOpenChildrenError struct {
 	// Parent is the workspace the write would have taken out of Open.
 	Parent FamilyRef
-	// Children is every open descendant of Parent, hidden ones included, in
+	// Children is every open descendant of Parent, backlogged ones included, in
 	// place order. Empty only when LandingInto is not.
 	Children []FamilyRef
 	// LandingInto is every open workspace, not among Children, whose merge
@@ -249,7 +249,7 @@ func isClosing(ctx context.Context, q rowQuerier, id WorkspaceID) (bool, error) 
 	return closing, err
 }
 
-// requireOpenParent answers ParentNotOpenError when PARENT is hidden (or a
+// requireOpenParent answers ParentNotOpenError when PARENT is backlogged (or a
 // hidden merge workspace), closed, or closing, nil when it is open. An unknown
 // parent is ErrNotFound.
 func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) error {

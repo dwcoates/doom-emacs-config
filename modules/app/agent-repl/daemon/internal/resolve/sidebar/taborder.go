@@ -16,9 +16,9 @@ import (
 // reading (Tabs) walks the very same tree, so none of them can disagree. The
 // conditions it holds, each by construction:
 //
-//   - EVERY WORKSPACE IS IN ONE LIST. A workspace is OPEN (here), HIDDEN
+//   - EVERY WORKSPACE IS IN ONE LIST. A workspace is OPEN (here), BACKLOGGED
 //     (backlogSection) or MERGED (mergedSection), never two: open is neither
-//     closed nor hidden, and OPEN BEATS MERGED, so a merged workspace that was
+//     closed nor backlogged, and OPEN BEATS MERGED, so a merged workspace that was
 //     reopened is open and listed here.
 //   - IN OPEN IF AND ONLY IF IT HAS A TAB. Every open row carries a tab, and
 //     nothing else does. A folded repository's rows, and a folded
@@ -37,7 +37,7 @@ import (
 //   - A WORKSPACE WHOSE PARENT IS NOT OPEN TAKES ITS PARENT'S PLACE. The rules
 //     against hiding or closing a parent with open children keep this from
 //     arising; a family that predates them is still drawn, its open members
-//     where the closed or hidden ancestor stood.
+//     where the closed or backlogged ancestor stood.
 
 // openNode is one open workspace of the Open section and its open family:
 // its children of its own repository, then one block per other repository
@@ -286,7 +286,7 @@ func tabsOf(repos []openRepo) []Tab {
 		for _, region := range repo.regions {
 			// THE TAB'S WITHHOLDING IS wsm.Workspace.Withheld, the one statement
 			// the daemon's Runs and Holds read, so the bar and the daemon cannot
-			// disagree about a tab. An open row is never in the hidden section,
+			// disagree about a tab. An open row is never in the backlog,
 			// so it is Drawn or WithheldCollapsed.
 			walkOpen(region.rows, region.fold(repo.repo), func(ws wsm.Workspace, fold *Fold) {
 				out = append(out, Tab{Workspace: ws, Withheld: ws.Withheld(fold != nil), Fold: fold})

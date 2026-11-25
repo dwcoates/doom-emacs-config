@@ -638,7 +638,7 @@ func (r *resolver) rowContext(cause string) rowContext {
 
 // render resolves the roster's FOUR STREAMS in one walk under the one lock
 // (frontend.v1.RosterPush): the workspaces stream (the open repository view,
-// the hidden section, the selection and the rail's chrome), the merge queue,
+// the backlog, the selection and the rail's chrome), the merge queue,
 // the Recently Merged summary and the closed rows. It answers them unstamped
 // (no revision), with the merged set they were resolved from and that set's
 // token. CAUSE is the operation whose fact is being rendered, named on every
@@ -1087,7 +1087,7 @@ func (r *resolver) SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate 
 }
 
 // coldGates resolves the shown cold gates of the workspaces listed open, in
-// the registry's order: a closed or hidden workspace's gate has no page to be
+// the registry's order: a closed or backlogged workspace's gate has no page to be
 // shown over.
 func (r *resolver) coldGates() []*frontendv1.RosterColdGate {
 	var out []*frontendv1.RosterColdGate

@@ -121,7 +121,7 @@ func TestAnEscalationThatCannotReachTheMediatorStillNotifiesTheUser(t *testing.T
 		message string
 	}{
 		{name: "a mediator that cannot be shown", message: "the mediator could not be shown for its brief; it is not briefed",
-			arrange: func(h *harness) { h.checks.resumeErr = errors.New("parent hidden") }},
+			arrange: func(h *harness) { h.checks.resumeErr = errors.New("parent backlogged") }},
 		{name: "an effort that cannot be set", byUs: true, message: "the mediator's model and effort could not be set; it is not briefed",
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no catalog") }},
 		{name: "a worktree that cannot be refreshed", byUs: true, message: "the mediator's worktree could not be brought to the main branch's tip; it is not briefed",
@@ -486,7 +486,7 @@ func TestShowMediatorAnswersAMediatorThatCannotBeShown(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	h.checks.resumeErr = errors.New("parent hidden")
+	h.checks.resumeErr = errors.New("parent backlogged")
 
 	// Act
 	_, err := h.o.showMediator(context.Background(), deployRole, queueOf(t, h), dlog.Context{})

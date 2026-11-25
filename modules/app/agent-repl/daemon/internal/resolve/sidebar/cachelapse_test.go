@@ -9,7 +9,7 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// backloggedLapsing is the one workspace, hidden, its cache lapsing D after the
+// backloggedLapsing is the one workspace, backlogged, its cache lapsing D after the
 // epoch the resolver's clock stands at, gated when GATED is set.
 func backloggedLapsing(d time.Duration, gated bool) wsm.Workspace {
 	ws := backloggedWorkspace(string(theWS), "one")
@@ -21,12 +21,12 @@ func backloggedLapsing(d time.Duration, gated bool) wsm.Workspace {
 	return ws
 }
 
-// onlyBackloggedRow is the one row the hidden section carries.
+// onlyBackloggedRow is the one row the backlog carries.
 func onlyBackloggedRow(t *testing.T, r sidebarResolver) *frontendv1.RosterRow {
 	t.Helper()
 	rows := topBacklog(latest(t, r))
 	if len(rows) != 1 {
-		t.Fatalf("the hidden section carried %d rows, want exactly 1", len(rows))
+		t.Fatalf("the backlog carried %d rows, want exactly 1", len(rows))
 	}
 	return rows[0]
 }

@@ -48,7 +48,7 @@ ALTER TABLE sidebar_view ADD COLUMN merging_folded INTEGER NOT NULL DEFAULT 0;
 `
 
 // hiddenWorkspacesDDL is the layout-32 addition: whether each workspace sits
-// in the roster's hidden section (frontend.v1.WorkspaceRoster.hidden), and
+// in the roster's backlog (frontend.v1.WorkspaceRoster.backlog), and
 // that section's fold on the sidebar_view singleton beside the merged band's.
 // Every existing workspace is shown (0) and the section is expanded (0) until
 // someone changes either.
@@ -62,7 +62,7 @@ ALTER TABLE sidebar_view ADD COLUMN hidden_folded INTEGER NOT NULL DEFAULT 0;
 
 // openFoldedDDL is the layout-46 addition: the open-workspaces section's fold
 // (frontend.v1.WorkspaceRoster.open) on the sidebar_view singleton beside the
-// hidden section's. The section is expanded (0) until someone folds it.
+// backlog's. The section is expanded (0) until someone folds it.
 //
 // Like the other column-add steps it is an ALTER, applied after sidebar_view
 // on a fresh file and as its own step on a migrated one.
@@ -113,10 +113,10 @@ ALTER TABLE sidebar_view ADD COLUMN open_shows_merge_queues INTEGER NOT NULL DEF
 
 // hiddenAndDweltAtDDL is the layout-43 addition (owner requests, 2026-10-13):
 //
-//   - workspaces.hidden_at, when the workspace was moved into the hidden
-//     section, set exactly while `hidden` is: the hidden band orders by it,
+//   - workspaces.hidden_at, when the workspace was moved into the backlog,
+//     set exactly while `hidden` is: the hidden band orders by it,
 //     newest first, and its rows' when-column counts from it. A row already
-//     hidden when the column lands has no recorded instant, so the step
+//     backlogged when the column lands has no recorded instant, so the step
 //     stamps it with the migration's own instant, the earliest moment this
 //     build can vouch for: from here on `hidden` and `hidden_at` stand and
 //     fall together.
@@ -150,7 +150,7 @@ type SidebarView struct {
 	MergedFolded bool
 	// MergeQueueFolded is whether the Merge Queue section is collapsed.
 	MergeQueueFolded bool
-	// BacklogFolded is whether the hidden-workspaces section is collapsed.
+	// BacklogFolded is whether the backlog is collapsed.
 	BacklogFolded bool
 	// OpenFolded is whether the open-workspaces section is collapsed.
 	OpenFolded bool
@@ -158,7 +158,7 @@ type SidebarView struct {
 	MergeQueueHeight SectionHeight
 	// MergedHeight is the Recently Merged section's height.
 	MergedHeight SectionHeight
-	// BacklogHeight is the hidden-workspaces section's height.
+	// BacklogHeight is the backlog's height.
 	BacklogHeight SectionHeight
 }
 
@@ -245,7 +245,7 @@ func (s *store) SetMergeQueueSectionFolded(ctx context.Context, folded bool) err
 		`UPDATE sidebar_view SET merge_queue_folded = ? WHERE id = 1`, folded)
 }
 
-// SetBacklogFolded records whether the hidden-workspaces section is
+// SetBacklogFolded records whether the backlog is
 // collapsed, leaving the rest of the view as it stands.
 func (s *store) SetBacklogFolded(ctx context.Context, folded bool) error {
 	return s.updateSidebarView(ctx, "daemon.wsm.set_backlog_folded", dlog.Context{"folded": folded},

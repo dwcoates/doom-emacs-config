@@ -16,7 +16,7 @@ import (
 // repository section or subsection is collapsed, is answered hidden by an
 // open and beats no keep-alive. Whether a boot or a takeover brings a shim
 // back is NOT this file's: only the record of which shims were up decides
-// that (wasup.go, owner ruling 2026-10-28). A hidden workspace's session
+// that (wasup.go, owner ruling 2026-10-28). A backlogged workspace's session
 // already running is kept until its cache lapses (cachelapse.Keeper).
 // Every site that decides what to start reads this file, and this file reads
 // the one statement of visibility (wsm.Workspace.Runs).
@@ -129,7 +129,7 @@ func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) 
 // visibility, widened by a queued merge, the deploy mediator and a fold's
 // spared one-shots. A boot or a redeploy reads the visibility the last daemon
 // persisted, so it starts nothing for a workspace that is not visible. A fold or a queue that cannot be read is an error and splits nothing:
-// starting a workspace that may be hidden would break the principle, and
+// starting a workspace that may be backlogged would break the principle, and
 // starting none silently would leave visible ones session-less, so the
 // caller states the failure.
 func OnlyVisible(ctx context.Context, repos RepositoryLister, log dlog.Logger, pending []wsm.Workspace) (run, withheld []wsm.Workspace, err error) {

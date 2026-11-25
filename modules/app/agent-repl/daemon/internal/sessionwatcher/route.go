@@ -191,7 +191,7 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		w.sinks.Feed.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_CacheLapse:
-		// A HIDDEN WORKSPACE'S PROJECTED LAPSE, and no view's: the keeper
+		// A BACKLOGGED WORKSPACE'S PROJECTED LAPSE, and no view's: the keeper
 		// records it on the workspace's row, which the roster then draws.
 		w.log.Log(dlog.LevelDebug, "daemon.sessionwatcher.session_update", toCacheKeeper, dlog.Context{
 			"arm":          sessionArm(update),

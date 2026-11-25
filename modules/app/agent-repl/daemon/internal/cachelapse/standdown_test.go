@@ -116,11 +116,11 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 			rec.KeepaliveRunBeats = KeepaliveRunCap
 			h.db.records[theWorkspace] = rec
 		}, want: ownerCold},
-		{name: "a hidden workspace whose lapse is armed", arrange: func(h *harness) {
+		{name: "a backlogged workspace whose lapse is armed", arrange: func(h *harness) {
 			h.db.records[theWorkspace] = backlogged()
 			h.keeper.deadlines[theWorkspace] = lapseAt
 		}, want: ownerLapse},
-		{name: "a hidden workspace with no lapse armed", arrange: func(h *harness) {
+		{name: "a backlogged workspace with no lapse armed", arrange: func(h *harness) {
 			rec := backlogged()
 			worked := now.Add(-2 * time.Hour)
 			rec.LastWorkAt = &worked
@@ -333,7 +333,7 @@ func TestAVisitEndsOnlyOnceItsSessionIsStoodDown(t *testing.T) {
 			h.db.sessions[theWorkspace] = session
 
 			// Act
-			h.reconcile("the workspace was hidden, shown, selected or deselected")
+			h.reconcile("the workspace was backlogged, shown, selected or deselected")
 
 			// Assert
 			if ended := h.db.records[theWorkspace].SettingsVisitAt == nil; ended != tt.wantEnd {
@@ -708,7 +708,7 @@ func TestAHandoverDoesNotMoveTheParkInstant(t *testing.T) {
 	}
 }
 
-// INVARIANT B: a hidden workspace's idle session is owned and parked at its
+// INVARIANT B: a backlogged workspace's idle session is owned and parked at its
 // grace, whatever owns its stand-down: the lapse, with no lapse armed the
 // cold park, or the sweep.
 func TestABackloggedWorkspacesIdleSessionIsParked(t *testing.T) {
@@ -727,7 +727,7 @@ func TestABackloggedWorkspacesIdleSessionIsParked(t *testing.T) {
 			tt.arrange(h)
 
 			// Act
-			h.reconcile("the workspace was hidden, shown, selected or deselected")
+			h.reconcile("the workspace was backlogged, shown, selected or deselected")
 
 			// Assert
 			if got := h.keeper.owners[theWorkspace].owner; got != tt.wantOwner {
@@ -761,9 +761,9 @@ func TestASessionTheSweepOwnsIsParkedAtItsGrace(t *testing.T) {
 // hide that ends the showing reconciles the keeper, which parks the idle
 // session at once.
 func TestAWithheldStandDownIsTakenOnceTheWorkspaceIsHiddenAgain(t *testing.T) {
-	// Arrange: shown, in view, then hidden again.
+	// Arrange: shown, in view, then backlogged again.
 	h := newHarness(t, selectedBacklogged()).idle()
-	h.reconcile("the workspace was hidden, shown, selected or deselected")
+	h.reconcile("the workspace was backlogged, shown, selected or deselected")
 	if len(h.idleDowns)+len(h.coldDowns) != 0 {
 		t.Fatalf("parks = %+v %+v, want none while in view", h.idleDowns, h.coldDowns)
 	}
@@ -773,7 +773,7 @@ func TestAWithheldStandDownIsTakenOnceTheWorkspaceIsHiddenAgain(t *testing.T) {
 	h.keeper.deadlines[theWorkspace] = lapseAt
 
 	// Act
-	h.reconcile("the workspace was hidden, shown, selected or deselected")
+	h.reconcile("the workspace was backlogged, shown, selected or deselected")
 
 	// Assert
 	if len(h.idleDowns) != 1 || !h.idleDowns[0].beat.Equal(now.Add(-2*time.Hour)) {

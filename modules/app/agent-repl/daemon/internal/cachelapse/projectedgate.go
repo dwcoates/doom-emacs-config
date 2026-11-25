@@ -115,10 +115,10 @@ func (k *Keeper) raiseGate(ctx context.Context, ws ids.WorkspaceID, now time.Tim
 			dlog.Context{"cause": err.Error()})
 		return
 	}
-	// A HIDDEN OR CLOSED WORKSPACE'S LAPSE IS THE LAPSE'S (lapse): its session
+	// A BACKLOGGED OR CLOSED WORKSPACE'S LAPSE IS THE LAPSE'S (lapse): its session
 	// is stood down, and the gate it will ask is shown with the workspace.
 	if record.Closed || record.InBacklog() {
-		log.Debug(opGate, "the workspace is hidden or closed; its cache lapse owns it, and no gate is raised", dlog.Context{"closed": record.Closed})
+		log.Debug(opGate, "the workspace is backlogged or closed; its cache lapse owns it, and no gate is raised", dlog.Context{"closed": record.Closed})
 		return
 	}
 	if _, standing := k.deps.ColdGate(ws); standing {

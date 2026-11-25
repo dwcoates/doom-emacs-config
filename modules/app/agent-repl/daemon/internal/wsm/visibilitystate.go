@@ -114,7 +114,7 @@ type VisibilityReason int
 // The visibility reasons, in the PRECEDENCE the derivation applies when
 // several of a workspace's inputs hold: the first that holds is its reason.
 const (
-	// ReasonNotOpen is a workspace that is no Open section row (hidden,
+	// ReasonNotOpen is a workspace that is no Open section row (backlogged,
 	// closed, a hidden merge workspace, a thread) and not the selection: not
 	// visible.
 	ReasonNotOpen VisibilityReason = iota

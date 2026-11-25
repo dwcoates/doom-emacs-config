@@ -12,7 +12,7 @@ func namedRow(name string) *frontendv1.RosterRow {
 }
 
 // rosterOf is a workspaces stream drawing OPEN in the open section and
-// HIDDEN in the hidden section. A merged workspace is in no stream.
+// BACKLOGGED in the backlog. A merged workspace is in no stream.
 func rosterOf(open, backlog []string) *frontendv1.WorkspaceRoster {
 	var openRows []*frontendv1.RosterRepoEntry
 	for _, name := range open {
@@ -35,7 +35,7 @@ func TestRosterNames(t *testing.T) {
 		want   []string
 	}{
 		{name: "no roster yet holds none", roster: nil},
-		{name: "open then hidden", roster: rosterOf([]string{"a", "b"}, []string{"c"}), want: []string{"a", "b", "c"}},
+		{name: "open then backlogged", roster: rosterOf([]string{"a", "b"}, []string{"c"}), want: []string{"a", "b", "c"}},
 		{name: "a name two rows share is listed once", roster: rosterOf([]string{"a", "a"}, []string{"a"}), want: []string{"a"}},
 		{name: "a row with no name is left out", roster: rosterOf([]string{""}, nil)},
 	}

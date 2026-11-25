@@ -338,7 +338,7 @@ func seedOver(t *testing.T, s *store, ids ...WorkspaceID) map[WorkspaceID]Visibi
 }
 
 func TestTheVisibilitySeedDerivesFromTheRecord(t *testing.T) {
-	// Arrange: one drawn, one hidden, one selected hidden, one under a
+	// Arrange: one drawn, one backlogged, one selected backlogged, one under a
 	// folded parent, and that parent.
 	s, _ := testStore(t)
 	drawn, backlogged, picked := testWorkspaceNamed(t, s, "drawn"), testWorkspaceNamed(t, s, "hidden"), testWorkspaceNamed(t, s, "picked")

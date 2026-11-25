@@ -209,7 +209,7 @@ func TestArmedPanicsOnAMisnamedArm(t *testing.T) {
 // armVariants answers one message of descriptor MD per way its oneofs can be
 // set, recursively: each arm of each oneof, and each such variant of every
 // singular message field that has oneofs of its own, so a nested choice (a
-// parent's hidden or closed state, GitHub's failure) is enumerated too. A
+// parent's backlogged or closed state, GitHub's failure) is enumerated too. A
 // message with no oneof anywhere in it is one empty variant.
 func armVariants(md protoreflect.MessageDescriptor, depth int) []protoreflect.Message {
 	out := []protoreflect.Message{newGenerated(md)}

@@ -161,7 +161,7 @@ func TestRosterRecordsAWorkspaceNamingAnUnregisteredRepository(t *testing.T) {
 }
 
 // dirsInRoster walks the roster's streams exactly as the sidecar's log
-// forwarder does -- the repository sections, the hidden section and the
+// forwarder does -- the repository sections, the backlog and the
 // closed rows, each row and its children -- and then the merged pages, and
 // answers every workspace directory it can resolve a ref for.
 func dirsInRoster(t *testing.T, r sidebar.Resolver) map[string]bool {
@@ -490,7 +490,7 @@ func backloggedWorkspace(id, name string) wsm.Workspace {
 	return backloggedAt(workspace(id, name), 0)
 }
 
-// backloggedAt is WS hidden D after the epoch: hidden and its instant, together,
+// backloggedAt is WS backlogged D after the epoch: backlogged and its instant, together,
 // as wsm records them.
 func backloggedAt(ws wsm.Workspace, d time.Duration) wsm.Workspace {
 	ws.Backlogged = true
@@ -508,7 +508,7 @@ func TestABackloggedWorkspaceHoistsOutOfTheRepositorySections(t *testing.T) {
 
 	// Assert.
 	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, []string{"live"}) {
-		t.Fatalf("repo rows = %v, want the hidden workspace hoisted out", got)
+		t.Fatalf("repo rows = %v, want the backlogged workspace hoisted out", got)
 	}
 }
 
@@ -522,13 +522,13 @@ func TestTheBacklogCarriesTheBackloggedRow(t *testing.T) {
 	// Assert.
 	section := latest(t, r).GetBacklog()
 	if got := rowNames(topBacklog(latest(t, r))); !equal(got, []string{"hidden"}) {
-		t.Fatalf("hidden rows = %v, want the one hidden workspace", got)
+		t.Fatalf("backlogged rows = %v, want the one backlogged workspace", got)
 	}
 	if got := section.GetHeader().GetLabel().GetText(); got != sidebar.BacklogSectionLabel {
-		t.Fatalf("hidden label = %q, want %q", got, sidebar.BacklogSectionLabel)
+		t.Fatalf("backlogged label = %q, want %q", got, sidebar.BacklogSectionLabel)
 	}
 	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 1 {
-		t.Fatalf("hidden count = %d, want 1", got)
+		t.Fatalf("backlogged count = %d, want 1", got)
 	}
 }
 
@@ -542,10 +542,10 @@ func TestTheBacklogIsOnTheWireWithNothingBacklogged(t *testing.T) {
 	// Assert.
 	section := latest(t, r).GetBacklog()
 	if section == nil || section.GetHeader() == nil || section.GetFold() == nil {
-		t.Fatalf("hidden section = %v, want it whole with no rows", section)
+		t.Fatalf("backlog = %v, want it whole with no rows", section)
 	}
 	if len(section.GetBacklogRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
-		t.Fatalf("hidden section = %v, want no rows and a zero count", section)
+		t.Fatalf("backlog = %v, want no rows and a zero count", section)
 	}
 }
 
@@ -561,10 +561,10 @@ func TestAClosedBackloggedWorkspaceIsInNoSection(t *testing.T) {
 	// Assert.
 	section := latest(t, r).GetBacklog()
 	if got := rowNames(topBacklog(latest(t, r))); !equal(got, []string{"open"}) {
-		t.Fatalf("hidden rows = %v, want only the open one", got)
+		t.Fatalf("backlogged rows = %v, want only the open one", got)
 	}
 	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 1 {
-		t.Fatalf("hidden count = %d, want 1", got)
+		t.Fatalf("backlogged count = %d, want 1", got)
 	}
 }
 
@@ -581,7 +581,7 @@ func TestAMergedBackloggedWorkspaceFilesUnderRecentlyMerged(t *testing.T) {
 	// Assert.
 	roster := latestPush(t, r)
 	if len(topBacklog(roster.GetWorkspaces())) != 0 {
-		t.Fatal("a merged workspace was filed under hidden")
+		t.Fatal("a merged workspace was filed under the backlog")
 	}
 	if got := rowNames(mergedRows(t, r)); !equal(got, []string{"merged"}) {
 		t.Fatalf("merged rows = %v, want the merged workspace", got)
@@ -878,7 +878,7 @@ func TestTheBacklogIsLabelledBacklog(t *testing.T) {
 
 	// Assert.
 	if got := latest(t, r).GetBacklog().GetHeader().GetLabel().GetText(); got != "Backlog" {
-		t.Fatalf("hidden label = %q, want %q", got, "Backlog")
+		t.Fatalf("backlogged label = %q, want %q", got, "Backlog")
 	}
 }
 
@@ -897,7 +897,7 @@ func TestABackloggedRowCountsFromItsHide(t *testing.T) {
 }
 
 func TestAMergedBackloggedRowCountsFromItsMerge(t *testing.T) {
-	// Arrange: merged wins over hidden, as it files under Recently Merged.
+	// Arrange: merged wins over backlogged, as it files under Recently Merged.
 	r, _ := newResolver(t)
 	ws := backloggedAt(workspace("w1", "one"), time.Hour)
 	ws.MergedAt = at(2 * time.Hour)
@@ -956,7 +956,7 @@ func TestOpenSectionStatesItsFold(t *testing.T) {
 
 func TestTheOpenCountCountsTheRowsTheOpenSectionLists(t *testing.T) {
 	// Arrange: a family of two, a workspace in another repository, a closed
-	// one, a hidden one and a merged one.
+	// one, a backlogged one and a merged one.
 	r, _ := newResolver(t)
 	parent := workspace("w-parent", "parent")
 	child := workspace("w-child", "child")
@@ -973,7 +973,7 @@ func TestTheOpenCountCountsTheRowsTheOpenSectionLists(t *testing.T) {
 	// Act.
 	r.SetRegistry(reg)
 
-	// Assert: the nested child counts; the closed, hidden and merged do not.
+	// Assert: the nested child counts; the closed, backlogged and merged do not.
 	if got := latest(t, r).GetRepository().GetOpenCount().GetWorkspaces(); got != 3 {
 		t.Fatalf("open count = %d, want 3", got)
 	}

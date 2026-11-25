@@ -475,7 +475,7 @@ func TestVisibilityBeforeAnyRenderIsTheStoredOne(t *testing.T) {
 	}{
 		{name: "a workspace stored selected", ws: "w-selected", want: wsm.Selected},
 		{name: "a workspace stored visible", ws: "w-visible", want: wsm.UnselectedVisible},
-		{name: "a workspace stored not visible", ws: "w-hidden", want: wsm.NotVisible},
+		{name: "a workspace stored not visible", ws: "w-backlogged", want: wsm.NotVisible},
 		{name: "a workspace the registry does not carry", ws: "w-unknown", want: wsm.NotVisible},
 	}
 	for _, tc := range cases {
@@ -484,7 +484,7 @@ func TestVisibilityBeforeAnyRenderIsTheStoredOne(t *testing.T) {
 			r := sidebar.UnrenderedHolding(
 				wsm.Workspace{ID: "w-selected", Visibility: wsm.Selected},
 				wsm.Workspace{ID: "w-visible", Visibility: wsm.UnselectedVisible},
-				wsm.Workspace{ID: "w-hidden", Visibility: wsm.NotVisible},
+				wsm.Workspace{ID: "w-backlogged", Visibility: wsm.NotVisible},
 			)
 
 			// Act

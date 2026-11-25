@@ -34,7 +34,7 @@ func (w Withholding) String() string {
 
 // Withheld answers whether the tab bar withholds the workspace's tab by the
 // sections alone, given whether a collapsed section covers it (its
-// repository's, its subsection's, or an ancestor's children fold). A hidden
+// repository's, its subsection's, or an ancestor's children fold). A backlogged
 // workspace has no tab at all; a covered one keeps a folded one. It is the
 // sections' half of the picture: what a fold leaves drawn is the persisted
 // visibility (Visibility), which a working or unviewed workspace under a fold
@@ -51,8 +51,8 @@ func (ws Workspace) Withheld(folded bool) Withholding {
 }
 
 // InBacklog reports whether the user's hide governs the workspace: it
-// is hidden and its merge has not settled. OPEN BEATS MERGED, so a merged
-// workspace that was reopened and hidden is hidden like any other; only a
+// is backlogged and its merge has not settled. OPEN BEATS MERGED, so a merged
+// workspace that was reopened and backlogged is backlogged like any other; only a
 // settled merge (merged and closed) is listed under recently merged instead.
 func (ws Workspace) InBacklog() bool {
 	return ws.Backlogged && !ws.MergeSettled()
@@ -104,11 +104,11 @@ func (ws Workspace) KeptWarm(mergeQueued bool) bool {
 // LetsCacheLapse reports whether the workspace's prompt cache is left to lapse
 // (cachelapse.Keeper): its keep-alives are held, its projected lapse is kept on
 // its row, and its session is stood down when the lapse comes. A workspace in
-// the hidden section does (2026-10-13), and so does a CLOSED one, once its
+// the backlog does (2026-10-13), and so does a CLOSED one, once its
 // one last keep-alive round is spent (owner request, 2026-10-17): closing
 // leaves its session up, so reopening it before the lapse finds the cache
 // warm, and reopening it after meets the cold gate like any lapsed
-// conversation. A hidden workspace the user is looking at keeps its cache
+// conversation. A backlogged workspace the user is looking at keeps its cache
 // warm (KeepaliveHeld, owner ruling 2026-10-17); a closed one lapses whether
 // or not it is still the selection.
 func (ws Workspace) LetsCacheLapse() bool {
@@ -118,15 +118,15 @@ func (ws Workspace) LetsCacheLapse() bool {
 // Runs reports whether the daemon runs the workspace's session (owner
 // principle, docs/protobuf-design/open-tabs.md: ONLY OPEN AND VISIBLE
 // WORKSPACES RUN). A workspace the user hid, or whose repository section or
-// subsection is collapsed, is started by nothing; a hidden one already running is kept until
+// subsection is collapsed, is started by nothing; a backlogged one already running is kept until
 // its cache lapses (cachelapse.Keeper).
 //
 // A STANDING DEPLOY CHECK RUNS (owner ruling, 2026-11-17): the repository's
-// deploy intake and fixer are kept warm across deploys, the hidden intake
+// deploy intake and fixer are kept warm across deploys, the backlogged intake
 // included, so no check waits on a cold cache.
 //
 // EVERY WORKSPACE IN A MERGE QUEUE RUNS (MERGEQUEUED: an entry of it stands
-// in a merge queue, waiting or running; owner ruling, 2026-10-26), hidden,
+// in a merge queue, waiting or running; owner ruling, 2026-10-26), backlogged,
 // closed or in a collapsed section alike: its session is what carries the
 // merge, and a queue can hold a merge for hours, so the session and its
 // cache are kept for as long as the entry stands (cachelapse.Keeper keeps

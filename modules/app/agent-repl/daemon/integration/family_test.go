@@ -14,7 +14,7 @@ import (
 )
 
 // family_test.go exercises the family rules (agentrepl.v1 family.proto) end to
-// end: a parent with an open child is not closed, killed or hidden, a child is
+// end: a parent with an open child is not closed, killed or backlogged, a child is
 // not made under a parent that is not open, and two workspaces that are not
 // siblings do not swap places. Each refusal names the blocking workspace and
 // changes nothing the roster shows.
@@ -102,7 +102,7 @@ func TestAParentWithAnOpenChildIsNotBacklogged(t *testing.T) {
 
 func TestAChildOfABackloggedParentIsNotCreated(t *testing.T) {
 	t.Parallel()
-	// Arrange: a parent with no children, hidden.
+	// Arrange: a parent with no children, backlogged.
 	d := canonicalView(t)
 	repository := createRepositoryRef(t, d, harness.NewRepo(t))
 	created, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository)))
@@ -124,7 +124,7 @@ func TestAChildOfABackloggedParentIsNotCreated(t *testing.T) {
 	}
 	refused := resp.Msg.GetError().GetParentNotOpen()
 	if refused.GetParent().GetId() != parent.GetId() || refused.GetBacklogged() == nil {
-		t.Fatalf("result = %v, want parent_not_open naming the hidden parent", resp.Msg.GetResult())
+		t.Fatalf("result = %v, want parent_not_open naming the backlogged parent", resp.Msg.GetResult())
 	}
 }
 

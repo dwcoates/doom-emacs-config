@@ -255,11 +255,11 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	}
 	ws.MergedAt = optTime(merged)
 	ws.CreatedAt = fromNanos(created)
-	// HIDDEN AND ITS INSTANT STAND AND FALL TOGETHER (SetBacklogged writes both in
-	// one statement, and layout 43 stamped every row already hidden), so a
+	// BACKLOGGED AND ITS INSTANT STAND AND FALL TOGETHER (SetBacklogged writes both in
+	// one statement, and layout 43 stamped every row already backlogged), so a
 	// row with one and not the other is corrupt.
 	if ws.Backlogged != backloggedAt.Valid {
-		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "backlogged_at", Err: errors.New("a workspace records when it was hidden exactly while it is hidden")}
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "backlogged_at", Err: errors.New("a workspace records when it was backlogged exactly while it is backlogged")}
 	}
 	ws.BackloggedAt = optTime(backloggedAt)
 	lapse, err := decodeCacheLapse(ws, lapsesAt, gated)
@@ -453,7 +453,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 				return err
 			}
 		}
-		// BORN HIDDEN, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR:
+		// BORN BACKLOGGED, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR:
 		// written in this very transaction, so no read of the roster ever
 		// finds the row visible, unmarked, unsectioned or without its name's
 		// glyph (the flash an after-the-fact write left).
@@ -980,7 +980,7 @@ func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects)
 //
 // A REOPENED WORKSPACE KEEPS ITS CACHE WARM AGAIN, so the same statement
 // clears the projected cache lapse its close left (cachelapse.Keeper), unless
-// the row is still hidden, whose projection is the hide's.
+// the row is still backlogged, whose projection is the hide's.
 func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) error {
 	const op = "daemon.wsm.reopen"
 	fields := dlog.Context{"workspace": string(id), "instance": string(serving)}
@@ -1160,15 +1160,15 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 	})
 }
 
-// SetBacklogged records whether a workspace sits in the roster's hidden section,
-// and, in the same statement, WHEN it was hidden: AT while it is hidden, none
+// SetBacklogged records whether a workspace sits in the roster's backlog,
+// and, in the same statement, WHEN it was backlogged: AT while it is backlogged, none
 // once it is shown again. The same statement CLEARS the projected cache lapse
 // either way: a shown workspace keeps its cache warm again, and a fresh hide
-// waits for the shim's own projection rather than reading an old one. Hiding a workspace already hidden re-stamps it, so
+// waits for the shim's own projection rather than reading an old one. Hiding a workspace already backlogged re-stamps it, so
 // the instant is always the latest hide. An unknown workspace is refused
 // (ErrNotFound), never a write that touched nothing.
 //
-// A WORKSPACE WITH OPEN CHILDREN IS NOT HIDDEN, and a hidden child is not
+// A WORKSPACE WITH OPEN CHILDREN IS NOT BACKLOGGED, and a backlogged child is not
 // shown under a parent that is not open: both are refused by the family rules,
 // nothing written (family.go).
 func (s *store) SetBacklogged(ctx context.Context, id WorkspaceID, backlogged bool, at time.Time) error {
@@ -1181,7 +1181,7 @@ func (s *store) SetBacklogged(ctx context.Context, id WorkspaceID, backlogged bo
 		if err := scanWorkspaceRow(ctx, tx, id, "backlogged", &was); err != nil {
 			return err
 		}
-		// A FAMILY IS HIDDEN CHILD FIRST AND SHOWN PARENT FIRST (family.go).
+		// A FAMILY IS BACKLOGGED CHILD FIRST AND SHOWN PARENT FIRST (family.go).
 		// Only a change is judged: a re-stamp of a hide, or a show of a shown
 		// workspace, moves nothing between lists.
 		switch {
@@ -1198,12 +1198,12 @@ func (s *store) SetBacklogged(ctx context.Context, id WorkspaceID, backlogged bo
 	})
 }
 
-// hideColumns are the columns a move into or out of the hidden section
-// writes: the flag, its instant (AT while hidden, none once shown), and the
+// hideColumns are the columns a move into or out of the backlog
+// writes: the flag, its instant (AT while backlogged, none once shown), and the
 // projected cache lapse, cleared either way, since a shown workspace keeps
 // its cache warm again and a fresh hide waits for the shim's own projection.
-// Every move into or out of the hidden section writes them, so no two moves
-// can disagree about what a hidden row holds (TestHideColumnsAreTheOneHideShape).
+// Every move into or out of the backlog writes them, so no two moves
+// can disagree about what a backlogged row holds (TestHideColumnsAreTheOneHideShape).
 func hideColumns(backlogged bool, at time.Time) []workspaceColumn {
 	var backloggedAt any
 	if backlogged {
@@ -1225,7 +1225,7 @@ func hideColumns(backlogged bool, at time.Time) []workspaceColumn {
 // and the set are one transaction.
 //
 // SELECTING A WORKSPACE CLEARS ITS PROJECTED CACHE LAPSE, as showing it does
-// (SetBacklogged): the hidden workspace the user looks at keeps its cache warm
+// (SetBacklogged): the backlogged workspace the user looks at keeps its cache warm
 // (Workspace.LetsCacheLapse), and once they move off it the lapse is the
 // shim's fresh projection, never the one that stood before the selection. A
 // CLOSED workspace keeps its lapse: it lapses whether or not it is selected.

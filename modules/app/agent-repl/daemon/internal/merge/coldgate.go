@@ -75,7 +75,7 @@ const (
 	edgeRaised coldGateEdgeKind = iota + 1
 	// edgeRetired is the gate's record retired: the gate was passed.
 	edgeRetired
-	// edgeBacklogged is the workspace hidden, which passes a standing gate
+	// edgeBacklogged is the workspace backlogged, which passes a standing gate
 	// without an answer.
 	edgeBacklogged
 	// edgeStoodAfterFailedAnswer is the gate standing again because an
@@ -537,13 +537,13 @@ func (o *orchestrator) coldGateQueue(ctx context.Context, ws ids.WorkspaceID, ed
 	return "", false
 }
 
-// OnBacklogged is told WS was hidden. It is applied in order with WS's cold
+// OnBacklogged is told WS was backlogged. It is applied in order with WS's cold
 // gate's edges (backloggedAtColdGate).
 func (o *orchestrator) OnBacklogged(ws ids.WorkspaceID) {
 	o.queueColdGateEdge(coldGateEdge{ws: ws, kind: edgeBacklogged})
 }
 
-// backloggedAtColdGate takes WS's merge off its queue when WS was hidden while
+// backloggedAtColdGate takes WS's merge off its queue when WS was backlogged while
 // its merge stood at its cold gate (CauseBackloggedAtColdGate): hiding the
 // workspace is passing its gate without an answer. A workspace with no merge,
 // or whose merge is not at a cold gate, is left as it is.
@@ -557,14 +557,14 @@ func (o *orchestrator) backloggedAtColdGate(ctx context.Context, ws ids.Workspac
 		return
 	}
 	if err != nil {
-		o.log(ctx, ws).Error(opColdGate, "could not read the queue entry of the hidden workspace", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		o.log(ctx, ws).Error(opColdGate, "could not read the queue entry of the backlogged workspace", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 		return
 	}
 	if !entry.ColdGated {
 		return
 	}
 	if err := o.dequeue(ctx, ws, CauseBackloggedAtColdGate); err != nil {
-		o.log(ctx, ws).Error(opColdGate, "could not take the merge of a workspace hidden at its cold gate off its queue", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		o.log(ctx, ws).Error(opColdGate, "could not take the merge of a workspace backlogged at its cold gate off its queue", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 	}
 }
 

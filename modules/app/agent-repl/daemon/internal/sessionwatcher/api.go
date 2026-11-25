@@ -605,7 +605,7 @@ type Sinks struct {
 	// Emacs composer completes from. REQUIRED: it is not a view, and the
 	// catalog has no other reader.
 	Commands CommandCatalogSink
-	// CacheLapse keeps a hidden workspace's cache until it lapses
+	// CacheLapse keeps a backlogged workspace's cache until it lapses
 	// (cachelapse.Keeper): every projected lapse a held shim states. REQUIRED:
 	// it is not a view, and the projection has no other reader.
 	CacheLapse CacheLapseSink
@@ -658,7 +658,7 @@ type CommandCatalogSink interface {
 	OnCommandCatalog(ws ids.WorkspaceID, catalog *conversationv1.SessionCommandCatalog)
 }
 
-// CacheLapseSink is the hidden workspaces' cache keeper, seen from the
+// CacheLapseSink is the backlogged workspaces' cache keeper, seen from the
 // watcher: every projected lapse a held shim states, as stated.
 type CacheLapseSink interface {
 	OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionCacheLapse)

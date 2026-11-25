@@ -101,7 +101,7 @@ const (
 	StandDownKeepaliveCycle StandDownReason = "keepalive_cycle"
 	// StandDownHibernate is a session idle past the cutoff.
 	StandDownHibernate StandDownReason = "hibernate"
-	// StandDownCacheLapse is a hidden or closed workspace whose cache lapsed.
+	// StandDownCacheLapse is a backlogged or closed workspace whose cache lapsed.
 	StandDownCacheLapse StandDownReason = "cache_lapse"
 	// StandDownFold is a workspace a fold withholds (a collapsed repository
 	// section or subsection, or a parent's folded children), stood down once

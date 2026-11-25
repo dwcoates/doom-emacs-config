@@ -191,7 +191,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		// listener; see BringUp.
 		//
 		// ONLY A SHIM THAT WAS UP WHEN THE LAST DAEMON STOPPED COMES BACK
-		// (owner ruling, 2026-10-28; bringup.OnlyWasUp), hidden or not: the
+		// (owner ruling, 2026-10-28; bringup.OnlyWasUp), backlogged or not: the
 		// session record states it at every park and unpark, and nothing else
 		// decides. One parked between keep-alives or hibernated stays parked
 		// until a prompt, a keep-alive or a cold gate's answer brings it up,
@@ -930,7 +930,7 @@ var _ = []rollout.DispositionKind{
 }
 
 // BringUp starts the session of every open, VISIBLE, client-less workspace
-// the reconciliation named, the hibernated ones included. A hidden or
+// the reconciliation named, the hibernated ones included. A backlogged or
 // collapsed workspace was never named (Report.WithheldBringUp).
 //
 // IT RUNS AFTER THE DAEMON ANSWERS, NOT INSIDE THE RECONCILIATION. The boot

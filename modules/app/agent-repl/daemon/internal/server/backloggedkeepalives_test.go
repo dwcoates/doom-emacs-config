@@ -66,7 +66,7 @@ func TestNewRefusesAMissingBackloggedKeepalivesKeeper(t *testing.T) {
 	_, err := New(deps)
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "the hidden workspaces' cache keeper") {
+	if err == nil || !strings.Contains(err.Error(), "the backlogged workspaces' cache keeper") {
 		t.Fatalf("New = %v, want the refusal naming the cache keeper", err)
 	}
 }

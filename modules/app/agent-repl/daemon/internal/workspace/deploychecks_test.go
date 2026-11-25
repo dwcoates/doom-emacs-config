@@ -543,7 +543,7 @@ func TestResumingTheFixerShowsTheWorkspacesBackloggedWithIt(t *testing.T) {
 
 	// Assert
 	if err != nil || f.db.workspaces[fixer].Backlogged || f.db.workspaces[child].Backlogged {
-		t.Fatalf("ResumeDeployCheck = %v, fixer hidden %v, child hidden %v; want both shown", err, f.db.workspaces[fixer].Backlogged, f.db.workspaces[child].Backlogged)
+		t.Fatalf("ResumeDeployCheck = %v, fixer backlogged %v, child backlogged %v; want both shown", err, f.db.workspaces[fixer].Backlogged, f.db.workspaces[child].Backlogged)
 	}
 }
 

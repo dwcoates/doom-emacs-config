@@ -971,7 +971,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// gate's edges reach it once it exists.
 	var coldGates merge.Orchestrator
 
-	// THE HIDDEN WORKSPACES' CACHE KEEPER, fed by the fleet's watchers (a held
+	// THE BACKLOGGED WORKSPACES' CACHE KEEPER, fed by the fleet's watchers (a held
 	// shim's projected lapse), the lifecycle sink (a session coming up) and
 	// the verbs (a hide or a show). It is built before the fleet and the drain
 	// controller it drives, so it reaches both late-bound: every edge it takes
@@ -1000,7 +1000,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StandDowns: standDownsFunc(func(ws ids.WorkspaceID, trigger drain.WithheldTrigger) {
 			drainController.StandDownWithheld(ws, trigger)
 		}),
-		PublishRegistry: verbsRef.republishRoster("a hidden workspace's cache lapse moved"),
+		PublishRegistry: verbsRef.republishRoster("a backlogged workspace's cache lapse moved"),
 		IdleCutoff:      idleCutoff,
 		Interval:        keepaliveInterval,
 		CycleDown: func(ws ids.WorkspaceID, beat time.Time, done func(drain.CycleOutcome)) {
@@ -1176,7 +1176,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// off the bring-up's goroutine: the merge put back at its place may
 		// itself be what is bringing the session up (its repair's
 		// ensureSession), and putting it back waits for that run to stop.
-		// A HIDDEN OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
+		// A BACKLOGGED OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
 		// lapse (cachelapse.Keeper.ColdGateRaised).
 		// A PROMPT TYPED ON claude.ai INTO A PARKED WORKSPACE answers its
 		// cold gate through the verb the editor's answer takes.
@@ -1931,7 +1931,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	// THE COLD-GATE BACKLOG (owner request, 2026-10-26): a shown workspace
 	// whose cold gate has stood over a day of weekday time is moved into the
-	// hidden section, drawn as the Backlog, once per gate.
+	// backlog, drawn as the Backlog, once per gate.
 	coldBacklog, err := coldbacklog.New(coldbacklog.Deps{
 		DB:       p.DB,
 		Gates:    fleet.StandingColdGates,

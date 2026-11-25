@@ -31,7 +31,7 @@ import (
 //     unless in view, so a pick through the agent API, which no switch away
 //     ever ends, ends by the same rule;
 //   - the keep-alive cycle, while a beat is owed: stood down after it;
-//   - the cache's lapse, while a hidden or closed workspace's lapse is
+//   - the cache's lapse, while a backlogged or closed workspace's lapse is
 //     armed;
 //   - the idle sweep, when the session will be idle past its cutoff first;
 //   - the cold park, when no beat is owed for any other reason: stood down

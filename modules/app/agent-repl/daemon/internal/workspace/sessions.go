@@ -929,7 +929,7 @@ func (f *Fleet) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
 
 // StandingColdGate answers the cold facts the shim stated for a STANDING cold
 // gate: the session is parked on the user's choice, so its conversation is
-// already cold (cachelapse.Keeper records the gate's lapse on a hidden or
+// already cold (cachelapse.Keeper records the gate's lapse on a backlogged or
 // closed row). A gate an answer has taken is not standing: its remediation is
 // bringing the session back warm.
 func (f *Fleet) StandingColdGate(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
@@ -3342,7 +3342,7 @@ func coldGateCost(cold *conversationv1.SessionCold, window int64) footer.Figured
 // the gate the user sees and must answer. It is the host view's gate, and the
 // feed's standing gate row holds exactly as long (the row retires the moment an
 // answer takes the gate, and returns when a failed re-open raises it again), so
-// Emacs's hidden input and the webapp's docked banner move together.
+// Emacs's backlogged input and the webapp's docked banner move together.
 func (f *Fleet) ColdGateShown(ws ids.WorkspaceID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

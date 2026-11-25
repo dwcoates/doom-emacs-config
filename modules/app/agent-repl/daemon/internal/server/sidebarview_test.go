@@ -70,8 +70,8 @@ func TestUpdateSidebarViewHandsASectionFoldToTheVerb(t *testing.T) {
 		{"collapse the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: collapseFold()}, sectionFold{merged: true, folded: true}},
 		{"expand the merge queue section", &agentreplv1.SidebarViewFoldSection{Section: mergeQueueSection(), Fold: expandFold()}, sectionFold{mergeQueue: true, folded: false}},
 		{"collapse the merge queue section", &agentreplv1.SidebarViewFoldSection{Section: mergeQueueSection(), Fold: collapseFold()}, sectionFold{mergeQueue: true, folded: true}},
-		{"collapse the hidden section", &agentreplv1.SidebarViewFoldSection{Section: backlogSection(), Fold: collapseFold()}, sectionFold{backlogged: true, folded: true}},
-		{"expand the hidden section", &agentreplv1.SidebarViewFoldSection{Section: backlogSection(), Fold: expandFold()}, sectionFold{backlogged: true, folded: false}},
+		{"collapse the backlog", &agentreplv1.SidebarViewFoldSection{Section: backlogSection(), Fold: collapseFold()}, sectionFold{backlogged: true, folded: true}},
+		{"expand the backlog", &agentreplv1.SidebarViewFoldSection{Section: backlogSection(), Fold: expandFold()}, sectionFold{backlogged: true, folded: false}},
 		{"collapse the open section", &agentreplv1.SidebarViewFoldSection{Section: openSection(), Fold: collapseFold()}, sectionFold{open: true, folded: true}},
 		{"expand the open section", &agentreplv1.SidebarViewFoldSection{Section: openSection(), Fold: expandFold()}, sectionFold{open: true, folded: false}},
 	}

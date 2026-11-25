@@ -583,7 +583,7 @@ func TestMostRecentOfPicksTheLastInteractedOpenWorkspace(t *testing.T) {
 	records := []wsm.Workspace{
 		{ID: "old-thread", Kind: wsm.WorkspaceKindThread, LastSelectedAt: at(10)},
 		{ID: "new-thread", Kind: wsm.WorkspaceKindThread, LastActivityAt: at(30)},
-		{ID: "hidden-thread", Kind: wsm.WorkspaceKindThread, LastSelectedAt: at(50), Backlogged: true},
+		{ID: "backlogged-thread", Kind: wsm.WorkspaceKindThread, LastSelectedAt: at(50), Backlogged: true},
 		{ID: "agent", Kind: wsm.WorkspaceKindRepository, LastSelectedAt: at(40)},
 		{ID: "closed-agent", Kind: wsm.WorkspaceKindRepository, LastSelectedAt: at(60), Closed: true},
 	}

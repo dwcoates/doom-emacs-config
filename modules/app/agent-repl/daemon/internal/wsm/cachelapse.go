@@ -9,19 +9,19 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// This file is the durable half of a HIDDEN WORKSPACE'S CACHE LAPSE
-// (conversation.v1.SessionCacheLapse, docs/protobuf-design/hidden-cache-lapse.md):
-// a hidden workspace's keep-alives are held, so its prompt cache lapses on its
+// This file is the durable half of a BACKLOGGED WORKSPACE'S CACHE LAPSE
+// (conversation.v1.SessionCacheLapse, docs/protobuf-design/backlogged-cache-lapse.md):
+// a backlogged workspace's keep-alives are held, so its prompt cache lapses on its
 // own clock, and the shim states when, and whether the cold gate will ask
 // after it. The daemon keeps the projection on the workspace's row so the
-// hidden section counts down to it and the daemon stands the session down at
+// backlog counts down to it and the daemon stands the session down at
 // it, across a daemon restart and whether or not the shim still runs. A CLOSED
 // workspace's cache lapses the same way once its last keep-alive round is
 // spent (owner request, 2026-10-17), so its row carries the projection too.
 
 // cacheLapseDDL is the layout-48 addition. It adds:
 //
-//   - workspaces.cache_lapses_at: when the hidden workspace's cache lapses,
+//   - workspaces.cache_lapses_at: when the backlogged workspace's cache lapses,
 //     in nanoseconds; NULL when no projection is known, which every existing
 //     row is.
 //   - workspaces.cache_lapse_gated_tokens: the context a resume after the
@@ -36,7 +36,7 @@ ALTER TABLE workspaces ADD COLUMN cache_lapses_at INTEGER;
 ALTER TABLE workspaces ADD COLUMN cache_lapse_gated_tokens INTEGER;
 `
 
-// CacheLapse is a hidden workspace's projected cache lapse.
+// CacheLapse is a backlogged workspace's projected cache lapse.
 type CacheLapse struct {
 	// LapsesAt is when the cache lapses. At or before now, it is cold.
 	LapsesAt time.Time
@@ -52,7 +52,7 @@ func (l CacheLapse) Lapsed(now time.Time) bool {
 }
 
 // decodeCacheLapse rebuilds a row's projected lapse. A projection belongs to a
-// hidden or closed workspace alone (SetBacklogged and Reopen clear it, and
+// backlogged or closed workspace alone (SetBacklogged and Reopen clear it, and
 // SetCacheLapse writes only such a row), and a gated verdict without a lapse
 // is no projection at all, so either is a corrupt row.
 func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse, error) {
@@ -63,7 +63,7 @@ func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse,
 		return nil, nil
 	}
 	if !ws.Backlogged && !ws.Closed {
-		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "cache_lapses_at", Err: errors.New("only a hidden or closed workspace carries a projected cache lapse")}
+		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "cache_lapses_at", Err: errors.New("only a backlogged or closed workspace carries a projected cache lapse")}
 	}
 	lapse := &CacheLapse{LapsesAt: fromNanos(lapsesAt.Int64)}
 	if gated.Valid {
@@ -76,10 +76,10 @@ func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse,
 	return lapse, nil
 }
 
-// SetCacheLapse records a hidden or closed workspace's projected cache lapse,
+// SetCacheLapse records a backlogged or closed workspace's projected cache lapse,
 // replacing the one that stood. It answers whether it was recorded: a
 // workspace whose cache is not left to lapse (Workspace.LetsCacheLapse:
-// neither hidden nor closed, merged, or a hidden one the user is looking at)
+// neither backlogged nor closed, merged, or a backlogged one the user is looking at)
 // takes none, IN THE SAME STATEMENT that reads its visibility, its selection
 // and its close, so a projection that arrives after the user showed, selected
 // or reopened the workspace can never land on it. An unknown workspace is

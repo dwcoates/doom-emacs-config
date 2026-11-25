@@ -60,7 +60,7 @@ func TestTheNextWindowsRecordCarriesTheExactSuppressedCount(t *testing.T) {
 		t.Fatalf("WARN records = %d, want 2 (one per window)", len(warns))
 	}
 	if warns[1].Context["suppressed"] != 2 {
-		t.Fatalf("suppressed = %v, want the exact 2 hidden inside the closed window", warns[1].Context["suppressed"])
+		t.Fatalf("suppressed = %v, want the exact 2 backlogged inside the closed window", warns[1].Context["suppressed"])
 	}
 }
 

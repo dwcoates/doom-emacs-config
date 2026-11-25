@@ -33,11 +33,11 @@ import (
 // marker, so a daemon that restarted under open tabs draws them as they are.
 // It dominates every session state, and no footer is ever drawn for it.
 //
-// A SECOND ARM SITS ABOVE IT FOR THE SAME REASON: `cold_gate`, for a HIDDEN
+// A SECOND ARM SITS ABOVE IT FOR THE SAME REASON: `cold_gate`, for a BACKLOGGED
 // workspace whose cache has lapsed with a gated verdict (cachelapse.Keeper,
 // 2026-10-13). Its session was stood down at the lapse, and showing it again
 // will raise this gate, so its name is struck through the moment the lapse
-// comes. No footer is drawn for a hidden workspace, and the gate it projects
+// comes. No footer is drawn for a backlogged workspace, and the gate it projects
 // is raised by the start that shows it again, which then makes the claim the
 // footer draws.
 //
@@ -78,7 +78,7 @@ func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fro
 		return "inactive"
 	}
 	if backloggedColdGate(rec, now) {
-		log.Debug("daemon.sidebar.status_decision", "the hidden workspace's cache lapsed with a gated verdict", dlog.Context{
+		log.Debug("daemon.sidebar.status_decision", "the backlogged workspace's cache lapsed with a gated verdict", dlog.Context{
 			"lapses_at": rec.CacheLapse.LapsesAt, "gated_tokens": *rec.CacheLapse.GatedTokens,
 		})
 		return "cold_gate"
@@ -114,13 +114,13 @@ func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fro
 	return arm
 }
 
-// backloggedColdGate reports whether a hidden workspace's cache has lapsed with a
+// backloggedColdGate reports whether a backlogged workspace's cache has lapsed with a
 // gated verdict at NOW.
 func backloggedColdGate(rec wsm.Workspace, now time.Time) bool {
 	return armReadsClock(rec) && rec.CacheLapse.Lapsed(now)
 }
 
-// armReadsClock reports whether REC's arm depends on the clock: a hidden
+// armReadsClock reports whether REC's arm depends on the clock: a backlogged
 // workspace whose cache lapses with a gated verdict turns `cold_gate` at its
 // lapse whatever else changes, so no render keeps its arm (kept.go).
 func armReadsClock(rec wsm.Workspace) bool {

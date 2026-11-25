@@ -35,8 +35,8 @@ func TestRegisterBornBackloggedWritesTheBackloggedColumnsInTheInsert(t *testing.
 		facts          RegisterFacts
 		wantBacklogged bool
 	}{
-		{name: "hidden", facts: RegisterFacts{Backlogged: true}, wantBacklogged: true},
-		{name: "intake implies hidden", facts: RegisterFacts{Intake: true}, wantBacklogged: true},
+		{name: "backlogged", facts: RegisterFacts{Backlogged: true}, wantBacklogged: true},
+		{name: "intake implies backlogged", facts: RegisterFacts{Intake: true}, wantBacklogged: true},
 		{name: "neither", facts: RegisterFacts{}, wantBacklogged: false},
 	}
 	for _, tt := range tests {
@@ -54,10 +54,10 @@ func TestRegisterBornBackloggedWritesTheBackloggedColumnsInTheInsert(t *testing.
 				t.Fatalf("RegisterWorkspace: %v", err)
 			}
 			if ws.Backlogged != tt.wantBacklogged || (ws.BackloggedAt != nil) != tt.wantBacklogged {
-				t.Fatalf("answered record hidden = %v at %v, want hidden %v", ws.Backlogged, ws.BackloggedAt, tt.wantBacklogged)
+				t.Fatalf("answered record backlogged = %v at %v, want backlogged %v", ws.Backlogged, ws.BackloggedAt, tt.wantBacklogged)
 			}
 			if stored := scalar[bool](t, s, `SELECT backlogged FROM workspaces WHERE id = ?`, ws.ID); stored != tt.wantBacklogged {
-				t.Fatalf("stored hidden = %v, want %v", stored, tt.wantBacklogged)
+				t.Fatalf("stored backlogged = %v, want %v", stored, tt.wantBacklogged)
 			}
 			if marked := scalar[int](t, s, `SELECT COUNT(*) FROM intake_workspaces WHERE workspace_id = ?`, ws.ID); (marked == 1) != tt.facts.Intake {
 				t.Fatalf("intake rows = %d, want one exactly when the workspace is an intake", marked)
@@ -145,7 +145,7 @@ func TestRegisterPlacedFilesTheWorkspaceInTheInsert(t *testing.T) {
 		}
 	})
 
-	t.Run("born hidden and placed together", func(t *testing.T) {
+	t.Run("born backlogged and placed together", func(t *testing.T) {
 		// Arrange
 		s, _ := testStore(t)
 		repoDir := arrangeRepo(t, "repo")
@@ -157,7 +157,7 @@ func TestRegisterPlacedFilesTheWorkspaceInTheInsert(t *testing.T) {
 
 		// Assert
 		if err != nil || !ws.Backlogged || ws.Subsection == nil || *ws.Subsection != sub.ID {
-			t.Fatalf("RegisterWorkspace = hidden %v subsection %v, %v; want hidden and in %s", ws.Backlogged, ws.Subsection, err, sub.ID)
+			t.Fatalf("RegisterWorkspace = backlogged %v subsection %v, %v; want backlogged and in %s", ws.Backlogged, ws.Subsection, err, sub.ID)
 		}
 	})
 }

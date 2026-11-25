@@ -1367,7 +1367,7 @@ func TestARefusedColdGateStandsAgainInOneHome(t *testing.T) {
 	}
 }
 
-// hideWorkspace moves a fixture workspace into the hidden section.
+// hideWorkspace moves a fixture workspace into the backlog.
 func hideWorkspace(f *fixture, ws ids.WorkspaceID) {
 	record := f.db.workspaces[ws]
 	record.Backlogged = true
@@ -1402,7 +1402,7 @@ func TestAnswerColdGateShowsABackloggedWorkspaceBeforeTheReopen(t *testing.T) {
 				t.Fatalf("AnswerColdGate: %v", err)
 			}
 			if backloggedAtSettle {
-				t.Fatal("the workspace was still hidden when the held prompts were settled, before the re-open")
+				t.Fatal("the workspace was still backlogged when the held prompts were settled, before the re-open")
 			}
 			if len(f.fleet.resumes) != 1 {
 				t.Fatalf("resumes = %d, want the chosen re-open", len(f.fleet.resumes))
@@ -1411,7 +1411,7 @@ func TestAnswerColdGateShowsABackloggedWorkspaceBeforeTheReopen(t *testing.T) {
 				t.Fatalf("visibility edges = %v, want the shown workspace", f.visibilityEdges)
 			}
 			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
-				Level: "info", Operation: opColdGate, Message: "the answered gate's workspace was hidden; it is shown again"}); !ok {
+				Level: "info", Operation: opColdGate, Message: "the answered gate's workspace was backlogged; it is shown again"}); !ok {
 				t.Fatalf("records = %+v, want the show recorded", f.log.logger.Records())
 			}
 		})
@@ -1461,7 +1461,7 @@ func TestAnswerColdGateWhoseShowFailsIsRefusedAndStandsTheGateAgain(t *testing.T
 	}
 	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
 		Level: "info", Operation: opColdGate, Message: "the workspace could not be shown; the answer is refused"})
-	if !ok || r.Context["cause"] != `set hidden on "w1": disk I/O error` || r.Context["gate_stands_again"] != true {
+	if !ok || r.Context["cause"] != `set backlogged on "w1": disk I/O error` || r.Context["gate_stands_again"] != true {
 		t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
 	}
 }

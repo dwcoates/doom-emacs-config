@@ -46,7 +46,7 @@ type lifecycleSink struct {
 	// it exists (graph.go): the free edge and a session coming up retry a
 	// stand-down a turn deferred.
 	standDowns withheldRetrier
-	// caches is the hidden workspaces' cache keeper, bound once it exists
+	// caches is the backlogged workspaces' cache keeper, bound once it exists
 	// (graph.go): a session coming up has its keep-alive cadence reconciled
 	// with its workspace's visibility.
 	caches sessionUpNotifiee

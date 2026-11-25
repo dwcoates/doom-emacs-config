@@ -1640,7 +1640,7 @@ func (s *server) ListCreationModels(
 	return connect.NewResponse(resp), nil
 }
 
-// SetWorkspaceBacklogged moves a workspace into the roster's hidden section, or
+// SetWorkspaceBacklogged moves a workspace into the roster's backlog, or
 // back out of it. The new state arrives on the roster stream.
 func (s *server) SetWorkspaceBacklogged(
 	ctx context.Context,

@@ -136,7 +136,7 @@ func TestCreateBornBackloggedRegistersTheRowBacklogged(t *testing.T) {
 		backlogged     bool
 		wantBacklogged bool
 	}{
-		{name: "hidden", backlogged: true, wantBacklogged: true},
+		{name: "backlogged", backlogged: true, wantBacklogged: true},
 		{name: "visible", backlogged: false, wantBacklogged: false},
 	}
 	for _, tt := range tests {
@@ -154,10 +154,10 @@ func TestCreateBornBackloggedRegistersTheRowBacklogged(t *testing.T) {
 				t.Fatalf("Create: %v", err)
 			}
 			if got := f.db.registered[len(f.db.registered)-1].Backlogged; got != tt.wantBacklogged {
-				t.Fatalf("registered Hidden = %v, want %v", got, tt.wantBacklogged)
+				t.Fatalf("registered Backlogged = %v, want %v", got, tt.wantBacklogged)
 			}
 			if created.Backlogged != tt.wantBacklogged {
-				t.Fatalf("created.Hidden = %v, want %v", created.Backlogged, tt.wantBacklogged)
+				t.Fatalf("created.Backlogged = %v, want %v", created.Backlogged, tt.wantBacklogged)
 			}
 		})
 	}

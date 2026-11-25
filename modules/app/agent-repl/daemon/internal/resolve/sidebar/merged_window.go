@@ -100,11 +100,11 @@ func (e *UnknownRepositoryError) Error() string {
 }
 
 // partition sorts the registry's workspaces into the one list each is drawn
-// in (taborder.go). OPEN is neither closed nor hidden, whatever its merge
+// in (taborder.go). OPEN is neither closed nor backlogged, whatever its merge
 // time (OPEN BEATS MERGED: a merged workspace that was reopened is open);
-// HIDDEN is open but hidden; MERGED is merged AND closed; CLOSED is closed
+// BACKLOGGED is open but backlogged; MERGED is merged AND closed; CLOSED is closed
 // and never merged. A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it needs
-// the user (owner ruling, 2026-10-11): not even in the hidden section. A
+// the user (owner ruling, 2026-10-11): not even in the backlog. A
 // CHAT THREAD is listed only in the thread section. Caller holds mu.
 type partition struct {
 	backlogged, merged, closed, threads []wsm.Workspace

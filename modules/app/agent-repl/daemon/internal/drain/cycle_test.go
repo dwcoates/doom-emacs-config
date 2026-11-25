@@ -99,7 +99,7 @@ func TestACycleStandDownSkips(t *testing.T) {
 			}
 			return ws
 		}},
-		{name: "a hidden workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+		{name: "a backlogged workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			return h.backlogged(t)
 		}},
 		{name: "a closed workspace with no merge queued, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
@@ -658,14 +658,14 @@ func TestAColdParkOrAVisitStandsDownAClosedOrWithheldWorkspace(t *testing.T) {
 		ask     func(c *controller, ws ids.WorkspaceID)
 		life    shimlife.StandDownReason
 	}{
-		{name: "a cold park of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
+		{name: "a cold park of a backlogged workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
 			ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter, false) }, life: shimlife.StandDownCacheCold},
 		{name: "a cold park of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
 			h.closedAt(t, ws)
 			return ws
 		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter, false) }, life: shimlife.StandDownCacheCold},
-		{name: "a visit of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
+		{name: "a visit of a backlogged workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
 			ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }, life: shimlife.StandDownSettingsVisit},
 		{name: "a visit of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)

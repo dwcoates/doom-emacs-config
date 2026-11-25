@@ -36,7 +36,7 @@ func OpenFamily(row *frontendv1.RosterOpenRow) []*frontendv1.RosterOpenRow {
 	return out
 }
 
-// FlattenBacklog lists every hidden row of the hidden section's rows
+// FlattenBacklog lists every backlogged row of the backlog's rows
 // depth-first, each row before its nested family.
 func FlattenBacklog(rows []*frontendv1.RosterBacklogRow) []*frontendv1.RosterBacklogRow {
 	var out []*frontendv1.RosterBacklogRow
@@ -113,7 +113,7 @@ func OpenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterOpenRow {
 	return out
 }
 
-// BacklogRows lists every row of the hidden section, flattened.
+// BacklogRows lists every row of the backlog, flattened.
 func BacklogRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
 	for _, backlog := range FlattenBacklog(roster.GetBacklog().GetBacklogRows().GetRows()) {
@@ -133,7 +133,7 @@ func ClosedRows(closed *frontendv1.RosterClosedRows) []*frontendv1.RosterRow {
 }
 
 // AllRows lists every row a push's streams carry -- the workspaces stream's
-// Open section walk and hidden section, then the closed stream. Each
+// Open section walk and backlog, then the closed stream. Each
 // workspace appears once. A MERGED WORKSPACE IS IN NO STREAM
 // (agentrepl.v1.ListMergedWorkspaces pages its row), so none is listed. The
 // push must hold every stream: a subscription's first push does, and so does

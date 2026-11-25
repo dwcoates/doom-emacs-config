@@ -706,7 +706,7 @@ func TestCreateSendsBornBackloggedOnlyWhenAsked(t *testing.T) {
 				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 			}
 			if got := only[*agentreplv1.CreateWorkspaceRequest](t, f).Backlogged; (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
-				t.Fatalf("hidden = %v, want %v", got, tt.want)
+				t.Fatalf("backlogged = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -2038,7 +2038,7 @@ func TestAMergeOrAFinishAsksForItsGateProfiledOnlyWithTheFlag(t *testing.T) {
 
 // listedRecords is a complete find answering two records: the caller's own,
 // drawn thinking in the open section with its summary, and a peer's drawn
-// done in the hidden section.
+// done in the backlog.
 func listedRecords() *agentreplv1.FindWorkspacesResponse {
 	summary := "Fix the footer"
 	return &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{

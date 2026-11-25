@@ -21,13 +21,13 @@ CREATE INDEX workspaces_by_hidden_with ON workspaces(hidden_with) WHERE hidden_w
 
 // HideFamily hides ROOT and every open workspace its hide would otherwise be
 // refused for -- its open descendants and the open workspaces landing into
-// it (refuseOpenChildren) -- in one write, each of them marked as hidden
-// with ROOT, and answers the members hidden with it. A
-// member already hidden stays as it is and is not marked: ROOT's show
-// leaves it hidden. A ROOT already hidden is re-stamped, as SetBacklogged
+// it (refuseOpenChildren) -- in one write, each of them marked as backlogged
+// with ROOT, and answers the members backlogged with it. A
+// member already backlogged stays as it is and is not marked: ROOT's show
+// leaves it backlogged. A ROOT already backlogged is re-stamped, as SetBacklogged
 // re-stamps.
 //
-// THE FAMILY GOES TOGETHER, SO NO OPEN CHILD IS LEFT UNDER A HIDDEN
+// THE FAMILY GOES TOGETHER, SO NO OPEN CHILD IS LEFT UNDER A BACKLOGGED
 // PARENT: the rule refuseOpenChildren holds for one workspace's hide holds
 // here for the whole family at once.
 func (s *store) HideFamily(ctx context.Context, root WorkspaceID, at time.Time) ([]WorkspaceID, error) {
@@ -86,7 +86,7 @@ func (s *store) ShowFamily(ctx context.Context, root WorkspaceID) ([]WorkspaceID
 		// PARENT FIRST: a member is shown once its parent is open, so the
 		// family comes back in whatever order its places hold. A member
 		// whose parent stays out of the Open section (a workspace landing
-		// into ROOT whose own parent is hidden elsewhere) stays hidden, still
+		// into ROOT whose own parent is backlogged elsewhere) stays backlogged, still
 		// marked, as SetBacklogged would refuse to show it.
 		for progress := true; progress; {
 			progress = false

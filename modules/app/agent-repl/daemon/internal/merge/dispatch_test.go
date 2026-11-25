@@ -190,7 +190,7 @@ func TestADispatchWhoseMediatorCannotBeShownStandsAndIsRecorded(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	withMediator(t, h)
-	h.checks.resumeErr = errors.New("parent hidden")
+	h.checks.resumeErr = errors.New("parent backlogged")
 
 	// Act
 	err := dispatched(h, Decision{})

@@ -17,12 +17,12 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// A HIDDEN WORKSPACE'S CACHE IS KEPT UNTIL IT LAPSES (owner request,
-// 2026-10-13; docs/protobuf-design/hidden-cache-lapse.md): hiding holds the
-// shim's keep-alives, the held shim projects its lapse, the hidden row counts
+// A BACKLOGGED WORKSPACE'S CACHE IS KEPT UNTIL IT LAPSES (owner request,
+// 2026-10-13; docs/protobuf-design/backlogged-cache-lapse.md): hiding holds the
+// shim's keep-alives, the held shim projects its lapse, the backlogged row counts
 // down to it, and the session is stood down when it comes.
 
-// backlogRow finds a workspace's row in the hidden section.
+// backlogRow finds a workspace's row in the backlog.
 func backlogRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
 	for _, r := range rosterwalk.BacklogRows(roster.GetWorkspaces()) {
 		if r.GetWorkspace().GetWorkspace().GetId() == id {
@@ -44,7 +44,7 @@ func cacheLapse(at time.Time, gatedTokens uint64) *conversationv1.SessionUpdate 
 }
 
 // backloggedAndHeld opens a workspace and hides it. The daemon drives every
-// keep-alive (2026-10-26), so a hidden workspace is simply sent none: there is
+// keep-alive (2026-10-26), so a backlogged workspace is simply sent none: there is
 // no cadence to wait on, and the hide is recorded before its call answers.
 func backloggedAndHeld(t *testing.T) *fixture {
 	t.Helper()
@@ -61,7 +61,7 @@ func TestHidingAWorkspaceStandsNothingDown(t *testing.T) {
 
 	// Assert
 	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
-		t.Fatalf("the hidden workspace was asked to hibernate %d times at the hide, want none", n)
+		t.Fatalf("the backlogged workspace was asked to hibernate %d times at the hide, want none", n)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestABackloggedRowCountsDownToTheLapseItsShimProjected(t *testing.T) {
 	f.d.OpenedShim(f.ws).PushSessionUpdate(cacheLapse(lapsesAt, 0))
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the hidden row counting down to the lapse", func(r *frontendv1.RosterPush) bool {
+	awaitRoster(t, f.d, roster, "the backlogged row counting down to the lapse", func(r *frontendv1.RosterPush) bool {
 		return backlogRow(r, f.ws.GetId()).GetWhen().GetBacklogged().GetCache().GetLapsesAtMs() == lapsesAt.UnixMilli()
 	})
 }
@@ -99,7 +99,7 @@ func TestABackloggedWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(
 	if killed.GetForce() {
 		t.Fatal("the lapsed workspace's KillSession was forced, want a graceful stand-down")
 	}
-	awaitRoster(t, f.d, roster, "the hidden row struck through at its cold gate", func(r *frontendv1.RosterPush) bool {
+	awaitRoster(t, f.d, roster, "the backlogged row struck through at its cold gate", func(r *frontendv1.RosterPush) bool {
 		return backlogRow(r, f.ws.GetId()).GetColdGate() != nil
 	})
 }
@@ -115,8 +115,8 @@ func sendBackloggedKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.Send
 	return resp.Msg
 }
 
-// SPC j R: one keep-alive to every hidden workspace
-// (docs/protobuf-design/hidden-keepalives-on-demand.md).
+// SPC j R: one keep-alive to every backlogged workspace
+// (docs/protobuf-design/backlogged-keepalives-on-demand.md).
 func TestSendingTheBackloggedKeepalivesAsksEachBackloggedShimForOne(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -128,7 +128,7 @@ func TestSendingTheBackloggedKeepalivesAsksEachBackloggedShimForOne(t *testing.T
 	// Assert: the shim was asked once, and answered sent.
 	workspaces := resp.GetSuccess().GetWorkspaces()
 	if len(workspaces) != 1 || workspaces[0].GetWorkspace().GetId() != f.ws.GetId() || workspaces[0].GetSent() == nil {
-		t.Fatalf("SendBackloggedKeepalives = %v, want the one hidden workspace sent", resp)
+		t.Fatalf("SendBackloggedKeepalives = %v, want the one backlogged workspace sent", resp)
 	}
 	shim := f.d.OpenedShim(f.ws)
 	if n := shim.Count(harness.RPCSendKeepalive); n != 1 {
@@ -150,7 +150,7 @@ func TestTheKeepalivesAnswerMovesTheBackloggedRowsCountdown(t *testing.T) {
 	shim.PushSessionUpdate(cacheLapse(later, 0))
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the hidden row counting down to the later lapse", func(r *frontendv1.RosterPush) bool {
+	awaitRoster(t, f.d, roster, "the backlogged row counting down to the later lapse", func(r *frontendv1.RosterPush) bool {
 		return backlogRow(r, f.ws.GetId()).GetWhen().GetBacklogged().GetCache().GetLapsesAtMs() == later.UnixMilli()
 	})
 }

@@ -191,7 +191,7 @@ type ParentChange struct {
 // only land in the workspace's own repository. A workspace to land into must be
 // registered in the workspace's own repository, and neither the workspace nor
 // one landing into it (ParentUnknownLandingTarget). A new parent, or a workspace
-// to land into, that is hidden, closed or closing is refused with
+// to land into, that is backlogged, closed or closing is refused with
 // ParentNotOpenError (family.go). Every check runs inside the transaction, so a
 // retarget racing another cannot close a cycle the check did not see. An
 // unknown workspace is ErrNotFound.

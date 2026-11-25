@@ -135,7 +135,7 @@ func (v *verbs) selectLocked(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if !sel.Again {
 		v.deps.Host.ReturnFeedToTail(ws)
 		// THE SELECTION IS A VISIBILITY EDGE (wsm.Workspace.Runs): the
-		// workspace the user looks at runs even hidden, and the one they left
+		// workspace the user looks at runs even backlogged, and the one they left
 		// is withheld again if it is. It is also what ends a settings visit the
 		// switch left (cachelapse.Keeper.own). The row is written above, before either
 		// edge is queued, so the keeper reads the selection either way.
@@ -267,8 +267,8 @@ func (v *verbs) RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind 
 	return nil
 }
 
-// SetBacklogged moves a workspace into the roster's hidden section, or back out of
-// it, stamping when it was hidden. The roster hoists a hidden workspace's row
+// SetBacklogged moves a workspace into the roster's backlog, or back out of
+// it, stamping when it was backlogged. The roster hoists a backlogged workspace's row
 // out of every grouping, and the editor's tab bar stops drawing its tab off
 // that same push. HIDING HOLDS ITS KEEP-ALIVES (cachelapse.Keeper): its cache
 // is left to lapse, and its session is stood down when it does, so the user
@@ -278,16 +278,16 @@ func (v *verbs) RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind 
 // (landAfterHiding). Asking for the place it already holds is success.
 //
 // A SHOW ENDS WITH THE WORKSPACE DRAWN, OR IT IS AN ERROR. Two separate facts
-// keep a workspace out of the Open section: the hidden flag, and a merge
+// keep a workspace out of the Open section: the backlogged flag, and a merge
 // workspace's unrevealed standing (wsm.Workspace.MergeHidden). A show clears
 // both (revealMergeHidden, whose reveal answers an error unless the workspace
 // ends drawable, then the flag), so it never answers success over a workspace
-// the sidebar still draws nowhere (2026-11-21: a show of a hidden
+// the sidebar still draws nowhere (2026-11-21: a show of a backlogged
 // merge workspace wrote only the flag and left it undrawn).
 //
 // A REVEAL IS ONE-WAY, SO HIDING A REVEALED MERGE WORKSPACE IS AN ORDINARY
-// HIDE: it writes the hidden flag and the workspace is listed in the hidden
-// section like any other, where the user can see it and show it again. It
+// HIDE: it writes the backlogged flag and the workspace is listed in the backlog
+// like any other, where the user can see it and show it again. It
 // never goes back to being drawn nowhere, which only its async merge does to
 // it, before anyone has asked to see it.
 func (v *verbs) SetBacklogged(ctx context.Context, ws ids.WorkspaceID, backlogged bool) error {
@@ -332,18 +332,18 @@ func (v *verbs) revealMergeHidden(ctx context.Context, record wsm.Workspace) err
 	return nil
 }
 
-// recordBacklogged is THE ONE WRITE of a workspace's hidden flag: the row, the
+// recordBacklogged is THE ONE WRITE of a workspace's backlogged flag: the row, the
 // roster push, and the cache keeper's visibility edge. SetBacklogged and an
 // answered cold gate (AnswerColdGate) both reach it.
 func (v *verbs) recordBacklogged(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, backlogged bool) error {
 	if err := v.deps.DB.SetBacklogged(ctx, ws, backlogged, v.now()); err != nil {
-		// A FAMILY IS HIDDEN CHILD FIRST AND SHOWN PARENT FIRST
+		// A FAMILY IS BACKLOGGED CHILD FIRST AND SHOWN PARENT FIRST
 		// (wsm/family.go): the refusal is the answer.
 		if refusedByFamily(log, opSetBacklogged, err) {
 			return err
 		}
 		log.Error(opSetBacklogged, "could not record whether the workspace is backlogged", dlog.Context{"backlogged": backlogged, "cause": err.Error()})
-		return fmt.Errorf("set hidden on %q: %w", ws, err)
+		return fmt.Errorf("set backlogged on %q: %w", ws, err)
 	}
 	log.Info(opSetBacklogged, "recorded whether the workspace is backlogged", dlog.Context{"backlogged": backlogged})
 	v.backloggedRecorded(ctx, log, ws, opSetBacklogged)
@@ -351,7 +351,7 @@ func (v *verbs) recordBacklogged(ctx context.Context, log dlog.Logger, ws ids.Wo
 }
 
 // backloggedRecorded is what follows every recorded move into or out of the
-// hidden section (recordBacklogged, BacklogColdGate): the roster push and the
+// backlog (recordBacklogged, BacklogColdGate): the roster push and the
 // cache keeper's visibility edge.
 func (v *verbs) backloggedRecorded(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, op string) {
 	v.republishRegistry(ctx, log, op)
@@ -361,7 +361,7 @@ func (v *verbs) backloggedRecorded(ctx context.Context, log dlog.Logger, ws ids.
 }
 
 // BacklogColdGate moves a shown workspace whose cold gate has stood too long
-// into the hidden section, drawn as the Backlog (owner request, 2026-10-26;
+// into the backlog, drawn as the Backlog (owner request, 2026-10-26;
 // coldbacklog.Sweeper), once for the gate whose cache lapsed at GATELAPSEDAT.
 // It is a hide in every other respect: the roster drops its tab, and the cache
 // keeper takes the gate's lapse and stands the parked session down.
@@ -386,7 +386,7 @@ func (v *verbs) BacklogColdGate(ctx context.Context, ws ids.WorkspaceID, gateLap
 		return fmt.Errorf("backlog %q: %w", ws, err)
 	}
 	if !moved {
-		log.Debug(opBacklogColdGate, "the workspace was selected, hidden, closed or already backlogged for this gate; it is left as it is", nil)
+		log.Debug(opBacklogColdGate, "the workspace was selected, backlogged, closed or already backlogged for this gate; it is left as it is", nil)
 		return nil
 	}
 	log.Info(opBacklogColdGate, "moved the workspace into the backlog: its cold gate stood for over a weekday", nil)
@@ -395,10 +395,10 @@ func (v *verbs) BacklogColdGate(ctx context.Context, ws ids.WorkspaceID, gateLap
 }
 
 // landAfterHiding moves the user, when they stand on the workspace just
-// hidden, to the drawn tab nearest it they selected most recently
+// backlogged, to the drawn tab nearest it they selected most recently
 // (sidebar.LandingTarget: its ancestors, then its subsection, then its
 // repository, then its repository's main workspace). The select is
-// conditional on the hidden workspace still being current, under the
+// conditional on the backlogged workspace still being current, under the
 // selection lock, so a switch the user made meanwhile stands. With no other
 // drawn tab the selection stays where it is, and the record says so.
 func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, backlogged ids.WorkspaceID) error {
@@ -406,19 +406,19 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, backlogged
 	if err != nil {
 		return fmt.Errorf("land after hiding %q: %w", backlogged, err)
 	}
-	// THE BAR IS THE ONE THE USER SAW: a hidden workspace's tab follows its
+	// THE BAR IS THE ONE THE USER SAW: a backlogged workspace's tab follows its
 	// run's drawn tabs, so the candidates (and, among never-selected ones,
 	// the neighbours) are read off the bar as it stood with the workspace
 	// still shown.
 	shown := asShown(reg, backlogged)
 	at := slices.IndexFunc(shown.Workspaces, func(ws wsm.Workspace) bool { return ws.ID == backlogged })
 	if at < 0 {
-		log.Error(opSetBacklogged, "the registry does not carry the workspace just hidden", nil)
+		log.Error(opSetBacklogged, "the registry does not carry the workspace just backlogged", nil)
 		return fmt.Errorf("land after hiding %q: the registry does not carry it", backlogged)
 	}
 	target, by, found := sidebar.LandingTarget(shown, sidebar.Tabs(shown, log), shown.Workspaces[at], nil)
 	if !found {
-		log.Info(opSetBacklogged, "the tab bar draws no other workspace beside the hidden one; the selection stays", nil)
+		log.Info(opSetBacklogged, "the tab bar draws no other workspace beside the backlogged one; the selection stays", nil)
 		return nil
 	}
 	// THE LANDING IS A SELECT LIKE ANY OTHER, so it is taken only by the
@@ -436,13 +436,13 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, backlogged
 	if !applied {
 		return nil
 	}
-	targetLog.Info(opSetBacklogged, "landed the user on the workspace selected before the hidden one",
+	targetLog.Info(opSetBacklogged, "landed the user on the workspace selected before the backlogged one",
 		dlog.Context{"place": target.Place, "by": string(by)})
 	return nil
 }
 
-// asShown answers REG with workspace WS not hidden, for the bar as it stood
-// before WS was hidden. It copies the workspaces: the slice is the
+// asShown answers REG with workspace WS not backlogged, for the bar as it stood
+// before WS was backlogged. It copies the workspaces: the slice is the
 // registry's.
 func asShown(reg sidebar.Registry, ws ids.WorkspaceID) sidebar.Registry {
 	reg.Workspaces = slices.Clone(reg.Workspaces)

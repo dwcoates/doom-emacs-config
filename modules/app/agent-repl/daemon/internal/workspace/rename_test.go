@@ -97,7 +97,7 @@ func registryNames(reg sidebar.Registry, ws ids.WorkspaceID, name string) bool {
 }
 
 func TestSetNameKeepsEverythingKeyedByTheWorkspacesID(t *testing.T) {
-	// Arrange: w1 awaits w2, is hidden and a one-shot.
+	// Arrange: w1 awaits w2, is backlogged and a one-shot.
 	f := renameFixture(t)
 	f.workspace("w2", t.TempDir())
 	awaited := ids.WorkspaceID("w2")

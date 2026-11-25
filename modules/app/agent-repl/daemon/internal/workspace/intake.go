@@ -27,7 +27,7 @@ const (
 // intake workspace (prompts/question-intake.md).
 const BriefQuestionIntake = "question-intake"
 
-// IntakeSpec is one EPHEMERAL INTAKE WORKSPACE to create: a hidden workspace
+// IntakeSpec is one EPHEMERAL INTAKE WORKSPACE to create: a backlogged workspace
 // with a fresh context whose single job is to work out what a request is and
 // hand it on, by answering the workspace that asked or by creating the
 // workspace that does the work. It does none of that work itself.
@@ -38,7 +38,7 @@ const BriefQuestionIntake = "question-intake"
 //   - it is created with its brief as its initial prompt, or not at all: a
 //     brief that will not compose creates nothing, and a create that fails
 //     after its worktree was made undoes itself (Create);
-//   - it is recorded as an intake workspace and hidden before its session
+//   - it is recorded as an intake workspace and backlogged before its session
 //     exists (wsm.MarkIntake), so no turn of it ever ends unmarked;
 //   - the daemon retires it when a turn of it ends (retireIntake), whatever
 //     its agent did or did not do.

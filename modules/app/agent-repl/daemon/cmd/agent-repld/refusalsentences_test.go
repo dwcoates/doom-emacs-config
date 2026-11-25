@@ -113,10 +113,10 @@ func TestTheSharedNestedRefusalSentences(t *testing.T) {
 	}{
 		{name: "open children", say: func() (string, error) {
 			return sayOpenChildren("ws", &agentreplv1.WorkspaceHasOpenChildren{Children: []*workspacev1.WorkspaceRef{{}}}, "close it again"), nil
-		}, want: "ws has 1 open children and 0 open workspaces landing into it, hidden ones included; close or merge each, then close it again"},
-		{name: "parent hidden", say: func() (string, error) {
+		}, want: "ws has 1 open children and 0 open workspaces landing into it, backlogged ones included; close or merge each, then close it again"},
+		{name: "parent backlogged", say: func() (string, error) {
 			return sayParentNotOpen(&agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Backlogged{Backlogged: &agentreplv1.WorkspaceParentNotOpenBacklogged{}}}, "open it again")
-		}, want: "the parent /w/p is hidden; show it, then open it again"},
+		}, want: "the parent /w/p is backlogged; show it, then open it again"},
 		{name: "parent closed", say: func() (string, error) {
 			return sayParentNotOpen(&agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Closed{Closed: &agentreplv1.WorkspaceParentNotOpenClosed{}}}, "open it again")
 		}, want: "the parent /w/p is closed; reopen it, then open it again"},

@@ -231,7 +231,7 @@ func TestAllRows(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "open then hidden then closed, each family under its parent",
+			name: "open then backlogged then closed, each family under its parent",
 			push: &frontendv1.RosterPush{
 				Workspaces: &frontendv1.WorkspaceRoster{
 					Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(entry(open("o", open("o1"))))}},

@@ -124,7 +124,7 @@ func TestAnAsyncMergeWorkspaceStaysHiddenEvenAfterItsMergeFails(t *testing.T) {
 		pushConcludedTurn(shim, mainAgent, "gave-up")
 	}
 
-	// Assert: hidden while the agent worked, and still hidden once the
+	// Assert: backlogged while the agent worked, and still backlogged once the
 	// requester's bubble has settled on the merge's failure.
 	if row := liveRow(hidden, mergeWS.GetId()); row != nil {
 		t.Fatalf("the merge workspace had a row %v while hidden, want none", row)

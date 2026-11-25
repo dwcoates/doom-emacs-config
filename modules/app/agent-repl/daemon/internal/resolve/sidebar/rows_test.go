@@ -45,7 +45,7 @@ func TestRowNamesItsRepository(t *testing.T) {
 			want: []string{"alpha", "beta", "beta"},
 		},
 		{
-			name: "a hidden row, in no repository section, names its repository",
+			name: "a backlogged row, in no repository section, names its repository",
 			reg:  registry(backloggedWorkspace("w-hidden", "hidden")),
 			rows: backlogRows,
 			want: []string{"alpha"},
@@ -84,7 +84,7 @@ func TestRowOfAnUnregisteredRepositoryNamesNoneAndIsRecorded(t *testing.T) {
 	// is recorded with the repository it names.
 	rows := backlogRows(latest(t, r))
 	if len(rows) != 1 || rows[0].Repository != nil {
-		t.Fatalf("hidden rows = %v, want the stray drawn with no repository", rows)
+		t.Fatalf("backlogged rows = %v, want the stray drawn with no repository", rows)
 	}
 	rec, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.sidebar.row_repository"})
 	if !ok || rec.Context["repo_id"] != "repo-missing" || rec.Context["workspace_id"] != "w-stray" {
@@ -588,7 +588,7 @@ func TestBackloggedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	// Act.
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
-	// Assert: a hidden row counts from its hide.
+	// Assert: a backlogged row counts from its hide.
 	row := backlogRows(latest(t, r))[0]
 	if got := row.GetWhen().GetBacklogged().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the hide instant", row.GetWhen())
@@ -728,7 +728,7 @@ func TestRowDetailListsTheWorkspacesChildren(t *testing.T) {
 			want:     []listed{{name: "a"}, {name: "b"}},
 		},
 		{
-			name:     "a hidden child is listed",
+			name:     "a backlogged child is listed",
 			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) { ws.Backlogged, ws.BackloggedAt = true, &later })},
 			want:     []listed{{name: "a"}},
 		},

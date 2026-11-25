@@ -102,7 +102,7 @@ type Found struct {
 	// LastActiveAt is LastActiveAt(Workspace), which the answer is ordered by.
 	LastActiveAt time.Time
 	// Roster is how the roster draws the workspace, nil when it draws no row
-	// of it in its open, hidden or recently merged section.
+	// of it in its open, backlogged or recently merged section.
 	Roster *Drawn
 	// ConfigDir is the Claude config dir the workspace's session last came up
 	// under, nil when it never came up.

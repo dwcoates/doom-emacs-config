@@ -30,7 +30,7 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // interrupts a turn or live detached work: a busy session stays PENDING and is
 // asked again on the daemon's own edges (RetryWithheld), never by a poll. And
 // it stands nothing down for the workspace the user is looking at, for a
-// hidden or closed one with no merge queued (the cache keeper's lapse owns
+// backlogged or closed one with no merge queued (the cache keeper's lapse owns
 // those), for one whose
 // remote control is on (claude.ai reaches it only through its shim; owner
 // ruling, 2026-10-31), or once a real turn has run since the beat -- that turn

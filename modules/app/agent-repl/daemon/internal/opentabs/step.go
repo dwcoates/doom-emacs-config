@@ -14,7 +14,7 @@
 // a prompt brings a shim up, and is held "after loading" until it is. A read
 // that fails answers `failed`. `ready` and `failed` carry the workspace's
 // roster row, taken with its roster's revision once the open no longer marks
-// it `opening`. A hidden workspace is answered at once.
+// it `opening`. A backlogged workspace is answered at once.
 //
 // A BRING-UP IN FLIGHT IS RELAYED, NEVER WAITED FOR: every step the fleet
 // reports for a workspace an open is answering (Coordinator.Step), and every

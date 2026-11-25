@@ -29,7 +29,7 @@ func openRowsAndNumbers(roster *frontendv1.WorkspaceRoster) (rows, numbers []str
 }
 
 // numberingRegistry is two repositories whose workspaces interleave in the
-// registry, a subsection, a family placed apart, a hidden workspace, a closed
+// registry, a subsection, a family placed apart, a backlogged workspace, a closed
 // one, a merged and reopened one, and a folded repository's workspace.
 func numberingRegistry() sidebar.Registry {
 	later := subsection("sub-later", "later", 1)
@@ -94,7 +94,7 @@ func TestEveryWorkspaceIsInOneList(t *testing.T) {
 	// Act.
 	r.SetRegistry(numberingRegistry())
 
-	// Assert: the hidden one only under Hidden, the reopened merge under Open
+	// Assert: the backlogged one only under Backlog, the reopened merge under Open
 	// (OPEN BEATS MERGED), the closed one only under Closed.
 	push := latestPush(t, r)
 	roster := push.GetWorkspaces()
@@ -108,7 +108,7 @@ func TestEveryWorkspaceIsInOneList(t *testing.T) {
 		}
 	}
 	if rowFor(backlogRows(roster), "h") == nil || rowFor(mergedRows(t, r), "m") != nil || rowFor(rosterwalk.ClosedRows(push.GetClosed()), "x") == nil {
-		t.Fatalf("lists = %v, want h hidden, m open, x closed", seen)
+		t.Fatalf("lists = %v, want h backlogged, m open, x closed", seen)
 	}
 }
 

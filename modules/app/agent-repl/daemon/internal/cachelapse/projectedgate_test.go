@@ -200,7 +200,7 @@ func TestRaiseGateLeavesAWorkspaceItShouldNotRaiseFor(t *testing.T) {
 		rec  wsm.Workspace
 		gate *conversationv1.SessionCold
 	}{
-		{name: "a hidden workspace, whose cache lapse owns it", rec: backlogged},
+		{name: "a backlogged workspace, whose cache lapse owns it", rec: backlogged},
 		{name: "a closed workspace, whose cache lapse owns it", rec: closed},
 		{name: "a workspace a cold gate already stands on", rec: visibleWorkspace(), gate: &conversationv1.SessionCold{ContextTokens: 1}},
 	}

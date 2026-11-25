@@ -159,7 +159,7 @@ func TestOpenTabsAnswersAWorkspaceThatIsNotVisibleHidden(t *testing.T) {
 		name    string
 		arrange func(h *harness)
 	}{
-		{name: "a hidden workspace", arrange: func(h *harness) {
+		{name: "a backlogged workspace", arrange: func(h *harness) {
 			record := h.DB.workspaces[testWorkspaceID]
 			backloggedAt := time.Unix(1_700_000_000, 0)
 			record.Backlogged, record.BackloggedAt = true, &backloggedAt
@@ -195,7 +195,7 @@ func TestOpenTabsAnswersAWorkspaceThatIsNotVisibleHidden(t *testing.T) {
 
 			// Assert
 			if opened.GetHidden() == nil {
-				t.Fatalf("opened = %v, want hidden", opened)
+				t.Fatalf("opened = %v, want backlogged", opened)
 			}
 		})
 	}

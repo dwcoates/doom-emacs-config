@@ -188,7 +188,7 @@ func streamsFrame(push *frontendv1.RosterPush) *agentreplv1.WatchWorkspaceRoster
 }
 
 // workspacesStream is a workspaces stream drawing OPEN in the open section
-// and HIDDEN in the hidden section.
+// and BACKLOGGED in the backlog.
 func workspacesStream(open, backlog []*frontendv1.RosterClosedRow) *frontendv1.WorkspaceRoster {
 	var entries []*frontendv1.RosterRepoEntry
 	for _, r := range open {
@@ -301,7 +301,7 @@ func TestAPartialPushKeepsTheStreamsItLeavesOut(t *testing.T) {
 		want  map[ids.WorkspaceID]string
 	}{
 		{
-			name: "the first push mirrors the open, hidden and closed rows",
+			name: "the first push mirrors the open, backlogged and closed rows",
 			first: &frontendv1.RosterPush{
 				Workspaces: workspacesStream([]*frontendv1.RosterClosedRow{row("ws-o", thinking)}, []*frontendv1.RosterClosedRow{row("ws-h", done)}),
 				Closed:     &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{row("ws-c", done)}},

@@ -875,7 +875,7 @@ func TestAHeldRequestKeepsItsBacklogFlagAndPlacement(t *testing.T) {
 		backlogged bool
 		placement  *CreatePlacement
 	}{
-		{name: "hidden", backlogged: true},
+		{name: "backlogged", backlogged: true},
 		{name: "an existing subsection", placement: &CreatePlacement{Subsection: "auth"}},
 		{name: "a new subsection with a gather", placement: &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth", Gather: []string{"a", "b"}}}},
 		{name: "a new subsection of its own", placement: &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "solo"}}},
@@ -900,7 +900,7 @@ func TestAHeldRequestKeepsItsBacklogFlagAndPlacement(t *testing.T) {
 				t.Fatalf("decode: %v", err)
 			}
 			if decoded.Backlogged != tt.backlogged || !reflect.DeepEqual(decoded.Placement, tt.placement) {
-				t.Fatalf("decoded hidden %v placement %+v, want %v and %+v", decoded.Backlogged, decoded.Placement, tt.backlogged, tt.placement)
+				t.Fatalf("decoded backlogged %v placement %+v, want %v and %+v", decoded.Backlogged, decoded.Placement, tt.backlogged, tt.placement)
 			}
 			if createKey(decoded) != createKey(spec) {
 				t.Fatal("the decoded request keys differently from the one encoded")
@@ -915,7 +915,7 @@ func TestCreateKeyDistinguishesBackloggedAndEveryPlacement(t *testing.T) {
 	}
 	variants := map[string]func(*CreateSpec){
 		"plain":        func(*CreateSpec) {},
-		"hidden":       func(s *CreateSpec) { s.Backlogged = true },
+		"backlogged":   func(s *CreateSpec) { s.Backlogged = true },
 		"into auth":    func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "auth"} },
 		"into billing": func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "billing"} },
 		"new auth": func(s *CreateSpec) {

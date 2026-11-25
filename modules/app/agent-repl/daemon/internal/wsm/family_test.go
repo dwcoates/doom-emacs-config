@@ -227,7 +227,7 @@ func TestSetBackloggedRefusesHidingAParentWithOpenChildren(t *testing.T) {
 	// Assert
 	requireHasOpenChildren(t, err, f.parent, f.child)
 	if workspaceNow(t, f.s, f.parent.ID).Backlogged {
-		t.Fatalf("the parent was hidden by a refused hide")
+		t.Fatalf("the parent was backlogged by a refused hide")
 	}
 }
 
@@ -247,7 +247,7 @@ func TestSetBackloggedHidesAFamilyChildFirst(t *testing.T) {
 }
 
 func TestSetBackloggedRestampsABackloggedParentOverALegacyOpenChild(t *testing.T) {
-	// Arrange -- the parent was hidden before its child was made.
+	// Arrange -- the parent was backlogged before its child was made.
 	s, _ := testStore(t)
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
@@ -269,7 +269,7 @@ func TestShowingABackloggedChildRequiresAnOpenParent(t *testing.T) {
 		setUp func(t *testing.T, f family)
 		state ParentState
 	}{
-		{name: "a hidden parent", state: ParentBacklogged, setUp: func(t *testing.T, f family) { legacyHide(t, f.s, f.parent.ID) }},
+		{name: "a backlogged parent", state: ParentBacklogged, setUp: func(t *testing.T, f family) { legacyHide(t, f.s, f.parent.ID) }},
 		{name: "a closed parent", state: ParentClosed, setUp: func(t *testing.T, f family) { mustClose(t, f.s, f.parent.ID, CloseByDaemon) }},
 		{name: "a closing parent", state: ParentClosing, setUp: func(t *testing.T, f family) { legacyQueueClosingMergeOf(t, f.s, f.parent.ID) }},
 	}
@@ -313,7 +313,7 @@ func TestReopenRefusesAChildWhoseParentIsNotOpen(t *testing.T) {
 		state ParentState
 	}{
 		{name: "a closed parent", state: ParentClosed, setUp: func(t *testing.T, f family) { mustClose(t, f.s, f.parent.ID, CloseByUser) }},
-		{name: "a hidden parent", state: ParentBacklogged, setUp: func(t *testing.T, f family) { mustHide(t, f.s, f.parent.ID) }},
+		{name: "a backlogged parent", state: ParentBacklogged, setUp: func(t *testing.T, f family) { mustHide(t, f.s, f.parent.ID) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -354,7 +354,7 @@ func TestRegisterWorkspaceRefusesAChildOfAParentThatIsNotOpen(t *testing.T) {
 		setUp func(t *testing.T, s *store, parent Workspace)
 		state ParentState
 	}{
-		{name: "a hidden parent", state: ParentBacklogged, setUp: func(t *testing.T, s *store, p Workspace) { mustHide(t, s, p.ID) }},
+		{name: "a backlogged parent", state: ParentBacklogged, setUp: func(t *testing.T, s *store, p Workspace) { mustHide(t, s, p.ID) }},
 		{name: "a closed parent", state: ParentClosed, setUp: func(t *testing.T, s *store, p Workspace) { mustClose(t, s, p.ID, CloseByUser) }},
 		{name: "a closing parent", state: ParentClosing, setUp: func(t *testing.T, s *store, p Workspace) { queueClosingMergeOf(t, s, p.ID) }},
 	}

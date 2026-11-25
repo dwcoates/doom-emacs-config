@@ -31,7 +31,7 @@ import (
 //     resync) moves the epoch, which every workspace's key carries.
 // A row's key also carries what the render decides before any row is drawn
 // (its arm, its visibility) and the selection, so a row is rebuilt whenever
-// any of them moves. The one arm read off the clock (a hidden workspace's
+// any of them moves. The one arm read off the clock (a backlogged workspace's
 // lapsing cache, armReadsClock) is derived on every render.
 
 // keptKey is the inputs of a workspace's kept facts: its own version and the

@@ -8,8 +8,8 @@ import (
 )
 
 // Landing names which rule chose where the user lands when the workspace
-// they stand on leaves the tab bar (closed, hidden, or folded away), for the
-// record.
+// they stand on leaves the tab bar (closed, backlogged, or folded away), for
+// the record.
 type Landing string
 
 const (

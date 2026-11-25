@@ -472,7 +472,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		// republish cut a create between its registration and a separate
 		// re-keying write, and the workspace could never be landed).
 		CreationJob: workspaceID,
-		// BORN HIDDEN, BORN AN INTAKE, BORN PLACED: the insert's own
+		// BORN BACKLOGGED, BORN AN INTAKE, BORN PLACED: the insert's own
 		// transaction writes all three, so no roster publication between the
 		// registration and this create's return ever draws the row visible,
 		// unmarked or unsectioned.
@@ -1407,7 +1407,7 @@ func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspac
 // live (Sessions.Start is a no-op on a live one), making the fork it still
 // owes (forking.go). A restart that cut the create short after registration
 // leaves the merge workspace with its fork owed and no session, and the boot
-// brings no hidden workspace up, so the hand-off that finds it starts it here
+// brings no backlogged workspace up, so the hand-off that finds it starts it here
 // rather than submitting its pick to a session that does not exist.
 func (v *verbs) StartMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
 	record, log, err := v.owned(ctx, "StartMergeWorkspace", ws)

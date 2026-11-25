@@ -379,7 +379,7 @@ func (v *verbs) RefreshDeployCheck(ctx context.Context, ws wsm.WorkspaceID) erro
 	return v.advanceToParent(ctx, log, record, opDeployChecks, "refresh", "standing deploy fixer")
 }
 
-// ResumeDeployCheck implements Verbs: shows hidden deploy check workspace WS
+// ResumeDeployCheck implements Verbs: shows backlogged deploy check workspace WS
 // again, for the brief that sends it back to work.
 func (v *verbs) ResumeDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "ResumeDeployCheck", ws)
@@ -393,7 +393,7 @@ func (v *verbs) ResumeDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error
 	return nil
 }
 
-// showFamily shows standing deploy check WS and the workspaces hidden with
+// showFamily shows standing deploy check WS and the workspaces backlogged with
 // it: a mediator an earlier build hid, with the workspaces it made (owner
 // ruling, 2026-11-17: "hide its kids too").
 func (v *verbs) showFamily(ctx context.Context, log dlog.Logger, ws wsm.WorkspaceID) error {

@@ -1622,7 +1622,7 @@ func TestEveryTriggerLeavesTheOnePark(t *testing.T) {
 			}
 			return ws
 		}},
-		{name: "a withheld workspace's stand-down", wantDetail: "hidden, collapsed or closed", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
+		{name: "a withheld workspace's stand-down", wantDetail: "backlogged, collapsed or closed", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.backlogged(t)
 			h.c.StandDownWithheld(ws, WithheldCacheLapse)
 			return ws
@@ -1688,7 +1688,7 @@ var sparingPaths = []standDownPath{
 	{name: "a collapse's withheld stand-down", op: opWithheld, trigger: "collapse",
 		withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.inCollapsedSubsection(t, ws) },
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.StandDownWithheld(ws, WithheldCollapse) }},
-	{name: "a hidden workspace's cache lapse", op: opWithheld, trigger: "cache_lapse",
+	{name: "a backlogged workspace's cache lapse", op: opWithheld, trigger: "cache_lapse",
 		withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.hide(t, ws) },
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.StandDownWithheld(ws, WithheldCacheLapse) }},
 	{name: "a hidden merge workspace's ended merge", op: opWithheld, trigger: "merge_ended",

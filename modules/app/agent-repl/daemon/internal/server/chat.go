@@ -426,7 +426,7 @@ func (s *server) SearchChats(
 	return connect.NewResponse(resp), nil
 }
 
-// mostRecentOf is the open, unhidden workspace of one app (the threads, or the
+// mostRecentOf is the open, shown workspace of one app (the threads, or the
 // repository workspaces) the user last interacted with.
 func mostRecentOf(records []wsm.Workspace, threads bool) (wsm.Workspace, bool) {
 	var best wsm.Workspace

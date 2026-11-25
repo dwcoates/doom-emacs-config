@@ -91,7 +91,7 @@ func TestABackloggedWorkspacesParkedConversationIsNotBeaten(t *testing.T) {
 
 	// Assert
 	if _, armed := h.keeper.beats[theWorkspace]; armed {
-		t.Fatal("a hidden workspace's parked conversation was armed a beat")
+		t.Fatal("a backlogged workspace's parked conversation was armed a beat")
 	}
 }
 

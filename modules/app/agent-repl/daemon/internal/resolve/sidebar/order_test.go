@@ -412,7 +412,7 @@ func TestABackloggedWorkspaceHasNoTab(t *testing.T) {
 
 	// Assert.
 	if got := tabIDsOf(latest(t, r)); !equal(got, []string{}) {
-		t.Fatalf("tab bar = %v, want no tab for the hidden workspace", got)
+		t.Fatalf("tab bar = %v, want no tab for the backlogged workspace", got)
 	}
 }
 
@@ -467,7 +467,7 @@ func TestAReopenedMergedWorkspaceIsOpenWithATab(t *testing.T) {
 	}
 }
 
-// tabsRegistry is one registry holding every kind of tab: drawn, hidden,
+// tabsRegistry is one registry holding every kind of tab: drawn, backlogged,
 // collapsed, closed and hidden-merge, placed out of slice order.
 func tabsRegistry() sidebar.Registry {
 	folded := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Folded: true, Place: 2}
@@ -550,7 +550,7 @@ func TestSortBackloggedNewestFirstRefusesARowWithNoHideInstant(t *testing.T) {
 	defer func() {
 		// Assert.
 		if recover() == nil {
-			t.Fatal("a hidden row with no hide instant was sorted, not refused")
+			t.Fatal("a backlogged row with no hide instant was sorted, not refused")
 		}
 	}()
 
@@ -571,6 +571,6 @@ func TestTheBacklogListsTheLatestHideFirst(t *testing.T) {
 	// Assert.
 	got := rowNames(topBacklog(latest(t, r)))
 	if !equal(got, []string{"late", "early"}) {
-		t.Fatalf("hidden rows = %v, want the latest hide first", got)
+		t.Fatalf("backlogged rows = %v, want the latest hide first", got)
 	}
 }

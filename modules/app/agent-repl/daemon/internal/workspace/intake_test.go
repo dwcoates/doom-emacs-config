@@ -58,7 +58,7 @@ func TestCreateIntakeCreatesABackloggedMarkedWorkspaceHandedItsBrief(t *testing.
 		t.Fatalf("created worktrees = %+v, want one in %q", f.git.created, repo)
 	}
 	if !f.db.intakes[created.ID] || !f.db.workspaces[created.ID].Backlogged {
-		t.Errorf("intake mark %v, hidden %v; want the workspace marked and hidden", f.db.intakes[created.ID], f.db.workspaces[created.ID].Backlogged)
+		t.Errorf("intake mark %v, backlogged %v; want the workspace marked and backlogged", f.db.intakes[created.ID], f.db.workspaces[created.ID].Backlogged)
 	}
 	if got := f.db.putSessions[0].Model; got != "opus" {
 		t.Errorf("session model = %q, want the spec's", got)
@@ -117,7 +117,7 @@ func TestAnIntakeWorkspaceIsRegisteredBornMarkedAndBacklogged(t *testing.T) {
 	}
 	facts := registeredFactsOf(f, created.ID)
 	if facts == nil || !facts.Intake || !facts.Backlogged {
-		t.Fatalf("registered facts = %+v, want the insert itself to carry Intake and Hidden", facts)
+		t.Fatalf("registered facts = %+v, want the insert itself to carry Intake and Backlogged", facts)
 	}
 }
 

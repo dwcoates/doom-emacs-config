@@ -240,7 +240,7 @@ type Deps struct {
 	// webview's never does: its topbar view carries the same standing).
 	PersistentWifi PersistentWifi
 	// BackloggedKeepalives backs SendBackloggedKeepalives: one keep-alive to every
-	// hidden workspace's session (internal/cachelapse).
+	// backlogged workspace's session (internal/cachelapse).
 	BackloggedKeepalives BackloggedKeepalives
 	// KeepLives backs KeepLiveWorkspace: the cache keeper's one keep-alive
 	// subroutine, run on one workspace now (internal/cachelapse).
@@ -718,7 +718,7 @@ func New(deps Deps) (Server, error) {
 	case deps.PersistentWifi == nil:
 		return nil, missing("the persistent-wifi controller")
 	case deps.BackloggedKeepalives == nil:
-		return nil, missing("the hidden workspaces' cache keeper")
+		return nil, missing("the backlogged workspaces' cache keeper")
 	case deps.KeepLives == nil:
 		return nil, missing("the cache keeper's keep-live")
 	case deps.NewsDigest == nil:

@@ -159,7 +159,7 @@ func TestBringUpSessionlessLeavesARecordThatReadsRunningBackloggedOrNot(t *testi
 		arrange func(t *testing.T, h *harness, record wsm.Workspace)
 	}{
 		{name: "a visible workspace", arrange: func(*testing.T, *harness, wsm.Workspace) {}},
-		{name: "a hidden workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
+		{name: "a backlogged workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
 			if err := h.db.SetBacklogged(context.Background(), record.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
 				t.Fatalf("SetBacklogged: %v", err)
 			}
@@ -284,7 +284,7 @@ func TestTheTakeoverRecordsEachDecisionWithItsFacts(t *testing.T) {
 			want:    dlog.Context{"was_up": false, "live": false, "terminal": wsm.TerminalParked, "terminal_detail": "keepalive_cycle"},
 		},
 		{
-			name: "a hidden workspace whose record still reads running",
+			name: "a backlogged workspace whose record still reads running",
 			arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
 				if err := h.db.SetBacklogged(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 					t.Fatalf("SetBacklogged: %v", err)

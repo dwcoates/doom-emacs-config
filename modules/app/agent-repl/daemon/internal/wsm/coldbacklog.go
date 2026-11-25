@@ -12,7 +12,7 @@ import (
 
 // This file is the durable half of the COLD-GATE BACKLOG (owner request,
 // 2026-10-26; coldbacklog.Sweeper): a shown workspace whose cold gate has
-// stood for over a weekday is moved into the hidden section, drawn as the
+// stood for over a weekday is moved into the backlog, drawn as the
 // Backlog, exactly as a hide moves it. The row records WHICH GATE it was
 // moved for, by the instant that gate's cache lapsed, so a workspace the user
 // shows again stays shown until a new conversation lapses into a new gate,
@@ -30,7 +30,7 @@ const coldGateBacklogDDL = `
 ALTER TABLE workspaces ADD COLUMN cold_gate_backlogged_at INTEGER;
 `
 
-// BacklogColdGate moves a shown workspace into the hidden section because the
+// BacklogColdGate moves a shown workspace into the backlog because the
 // cold gate whose cache lapsed at GATELAPSEDAT has stood too long, stamping the
 // hide at AT and recording the gate, and answers whether it moved it.
 //

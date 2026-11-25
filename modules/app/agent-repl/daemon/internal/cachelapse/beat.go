@@ -14,10 +14,10 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// This file is the user's keep-alive for the hidden section
+// This file is the user's keep-alive for the backlog
 // (agentrepl.v1.SendBackloggedKeepalives, `SPC j R`;
-// docs/protobuf-design/hidden-keepalives-on-demand.md): one keep-alive to
-// every hidden workspace's shim (shim.v1.SendKeepalive), each cadence left
+// docs/protobuf-design/backlogged-keepalives-on-demand.md): one keep-alive to
+// every backlogged workspace's shim (shim.v1.SendKeepalive), each cadence left
 // held. The keep-alive's answer re-anchors the cache, the held shim restates
 // its projected lapse, and record takes it as it takes any projection: the
 // countdown moves on the roster with no second path for it.
@@ -40,7 +40,7 @@ func (e *BeatSubmitFailed) Error() string {
 
 func (e *BeatSubmitFailed) Is(target error) bool { return target == ErrBeatSubmitFailed }
 
-// SendBackloggedKeepalives asks the shim of every workspace in the hidden section
+// SendBackloggedKeepalives asks the shim of every workspace in the backlog
 // for one keep-alive, all at once, and answers when every one has answered.
 // Each workspace's outcome is reported beside the others'; only a registry
 // that cannot be read fails the request.
@@ -48,7 +48,7 @@ func (k *Keeper) SendBackloggedKeepalives(ctx context.Context) *agentreplv1.Send
 	log := k.deps.Log.Global()
 	workspaces, err := k.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		log.Error(opBeat, "could not list the workspaces to send the hidden section its keep-alives", dlog.Context{"cause": err.Error()})
+		log.Error(opBeat, "could not list the workspaces to send the backlog its keep-alives", dlog.Context{"cause": err.Error()})
 		return &agentreplv1.SendBackloggedKeepalivesResponse{Result: &agentreplv1.SendBackloggedKeepalivesResponse_Error{
 			Error: &agentreplv1.SendBackloggedKeepalivesError{Cause: &agentreplv1.SendBackloggedKeepalivesError_RegistryUnreadable{
 				RegistryUnreadable: &agentreplv1.SendBackloggedKeepalivesRegistryUnreadable{Detail: err.Error()},
@@ -72,20 +72,20 @@ func (k *Keeper) SendBackloggedKeepalives(ctx context.Context) *agentreplv1.Send
 		}()
 	}
 	wg.Wait()
-	log.Info(opBeat, "sent the hidden section its keep-alives", tally(outcomes))
+	log.Info(opBeat, "sent the backlog its keep-alives", tally(outcomes))
 	return &agentreplv1.SendBackloggedKeepalivesResponse{Result: &agentreplv1.SendBackloggedKeepalivesResponse_Success{
 		Success: &agentreplv1.SendBackloggedKeepalivesSuccess{Workspaces: outcomes},
 	}}
 }
 
-// beat asks one hidden workspace's shim for its keep-alive, and records how
+// beat asks one backlogged workspace's shim for its keep-alive, and records how
 // it went.
 func (k *Keeper) beat(ctx context.Context, ws wsm.Workspace) *agentreplv1.SendBackloggedKeepalivesWorkspace {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws.ID)})
 	out := &agentreplv1.SendBackloggedKeepalivesWorkspace{Workspace: ws.Ref()}
 	shim, ok := k.deps.Shim(ws.ID)
 	if !ok {
-		log.Info(opBeat, "no session is served for the hidden workspace; it has no cache to keep", nil)
+		log.Info(opBeat, "no session is served for the backlogged workspace; it has no cache to keep", nil)
 		setNotRunning(out)
 		return out
 	}
@@ -95,7 +95,7 @@ func (k *Keeper) beat(ctx context.Context, ws wsm.Workspace) *agentreplv1.SendBa
 		return out
 	}
 	SetBeatOutcome(out, answer)
-	log.Info(opBeat, "the hidden workspace's shim answered its keep-alive", dlog.Context{"outcome": outcomeName(out)})
+	log.Info(opBeat, "the backlogged workspace's shim answered its keep-alive", dlog.Context{"outcome": outcomeName(out)})
 	return out
 }
 
@@ -103,15 +103,15 @@ func (k *Keeper) beat(ctx context.Context, ws wsm.Workspace) *agentreplv1.SendBa
 // a judgment, and makes its one record.
 func (k *Keeper) beatFailure(ctx context.Context, log dlog.Logger, out *agentreplv1.SendBackloggedKeepalivesWorkspace, err error) {
 	if errors.Is(err, ErrNoSession) {
-		log.Info(opBeat, "the hidden workspace's shim holds no session; it has no cache to keep", dlog.Context{"cause": err.Error()})
+		log.Info(opBeat, "the backlogged workspace's shim holds no session; it has no cache to keep", dlog.Context{"cause": err.Error()})
 		setNotRunning(out)
 		return
 	}
 	shimCallFailed(ctx, log, opBeat, shimFailure{
-		doing:     "sending a hidden workspace its keep-alive",
+		doing:     "sending a backlogged workspace its keep-alive",
 		died:      logsite.Msg("the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit"),
 		stoodDown: logsite.Msg("the shim was being stood down by this daemon under the keep-alive call"),
-		failed:    logsite.Msg("could not send the hidden workspace its keep-alive"),
+		failed:    logsite.Msg("could not send the backlogged workspace its keep-alive"),
 	}, nil, err)
 	var submit *BeatSubmitFailed
 	detail := err.Error()

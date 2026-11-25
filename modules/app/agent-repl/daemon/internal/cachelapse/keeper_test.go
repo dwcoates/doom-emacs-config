@@ -26,7 +26,7 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-const theWorkspace ids.WorkspaceID = "ws-hidden"
+const theWorkspace ids.WorkspaceID = "ws-backlogged"
 
 var (
 	now     = time.Unix(1_800_000_000, 0).UTC()
@@ -528,7 +528,7 @@ func mergeWorkspace() wsm.Workspace {
 	return wsm.Workspace{ID: theWorkspace, MergeOf: &wsm.MergeOrigin{}, LastWorkAt: lastWorked()}
 }
 
-// selectedBacklogged is a hidden workspace the user is looking at.
+// selectedBacklogged is a backlogged workspace the user is looking at.
 func selectedBacklogged() wsm.Workspace {
 	rec := backlogged()
 	rec.Current = true
@@ -750,8 +750,8 @@ func TestRecordStoresALapsingWorkspacesProjection(t *testing.T) {
 		rec   func() wsm.Workspace
 		gated *uint64
 	}{
-		{name: "a hidden workspace's gated lapse", rec: backlogged, gated: &tokens},
-		{name: "a hidden workspace's ungated lapse", rec: backlogged, gated: nil},
+		{name: "a backlogged workspace's gated lapse", rec: backlogged, gated: &tokens},
+		{name: "a backlogged workspace's ungated lapse", rec: backlogged, gated: nil},
 		{name: "a closed workspace's gated lapse", rec: closed, gated: &tokens},
 		{name: "a closed workspace's ungated lapse", rec: closed, gated: nil},
 	}
@@ -787,7 +787,7 @@ func TestRecordDropsAProjectionForAVisibleWorkspace(t *testing.T) {
 	if _, armed := h.keeper.deadlines[theWorkspace]; armed || h.publishes != 0 {
 		t.Fatalf("armed %v with %d publishes, want no deadline and no publish", armed, h.publishes)
 	}
-	if !h.found(dlog.RecordQuery{Level: "debug", Operation: opProjection, Message: "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped"}) {
+	if !h.found(dlog.RecordQuery{Level: "debug", Operation: opProjection, Message: "a cache lapse arrived for a workspace that is neither backlogged nor closed; it is dropped"}) {
 		t.Fatalf("no record of the dropped projection: %v", h.log.Records())
 	}
 }
@@ -801,7 +801,7 @@ func TestRecordDropsAProjectionForTheSelectedBackloggedWorkspace(t *testing.T) {
 
 	// Assert
 	if _, armed := h.keeper.deadlines[theWorkspace]; armed {
-		t.Fatal("the selected hidden workspace armed a lapse")
+		t.Fatal("the selected backlogged workspace armed a lapse")
 	}
 }
 
@@ -888,13 +888,13 @@ func TestReconcileArmsTheBeatToMatchTheVisibility(t *testing.T) {
 		rec   wsm.Workspace
 		armed bool
 	}{
-		{name: "a hidden workspace beats no more", rec: backlogged(), armed: false},
+		{name: "a backlogged workspace beats no more", rec: backlogged(), armed: false},
 		{name: "a visible workspace beats", rec: visible(), armed: true},
 		{name: "a reopened merged workspace the user hid beats no more", rec: merged, armed: false},
 		{name: "a closed workspace owed its last beat beats once more", rec: closedOwed, armed: true},
 		{name: "a closed workspace whose last beat is spent beats no more", rec: closedSpent, armed: false},
-		{name: "a closed hidden workspace beats no more", rec: closedBacklogged, armed: false},
-		{name: "a hidden workspace the user is looking at beats", rec: selectedBacklogged(), armed: true},
+		{name: "a closed backlogged workspace beats no more", rec: closedBacklogged, armed: false},
+		{name: "a backlogged workspace the user is looking at beats", rec: selectedBacklogged(), armed: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -974,7 +974,7 @@ func TestLapseDueStandsDownALapsedWorkspace(t *testing.T) {
 		name string
 		rec  func() wsm.Workspace
 	}{
-		{name: "a hidden workspace", rec: backlogged},
+		{name: "a backlogged workspace", rec: backlogged},
 		{name: "a closed workspace", rec: closed},
 	}
 	for _, tt := range tests {
@@ -1351,7 +1351,7 @@ func TestReconcileRecordsAStandingColdGatesLapse(t *testing.T) {
 		name string
 		rec  func() wsm.Workspace
 	}{
-		{name: "a hidden workspace", rec: backlogged},
+		{name: "a backlogged workspace", rec: backlogged},
 		{name: "a closed workspace", rec: closed},
 	}
 	for _, tt := range tests {
@@ -1386,7 +1386,7 @@ func TestReconcileLeavesAStandingColdGateOfAWorkspaceNotLeftToLapse(t *testing.T
 		rec  func() wsm.Workspace
 	}{
 		{name: "a visible workspace", rec: visible},
-		{name: "the selected hidden workspace", rec: selectedBacklogged},
+		{name: "the selected backlogged workspace", rec: selectedBacklogged},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1684,7 +1684,7 @@ func TestEveryWithheldStandDownTheKeeperAsksNamesItsTrigger(t *testing.T) {
 		ask  func(h *harness)
 		want drain.WithheldTrigger
 	}{
-		{name: "a hidden workspace's cache lapse", rec: func() wsm.Workspace {
+		{name: "a backlogged workspace's cache lapse", rec: func() wsm.Workspace {
 			rec := backlogged()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
 			return rec

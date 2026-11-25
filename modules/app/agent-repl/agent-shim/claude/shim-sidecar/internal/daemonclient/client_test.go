@@ -1260,7 +1260,7 @@ func TestWorkspaceRefInRosterReadsEveryStreamOfTheFirstPush(t *testing.T) {
 		wantErr string
 	}{
 		{name: "an open row", push: push(row("ws-o", "/w/x"), nil, nil), wantID: "ws-o"},
-		{name: "a hidden row", push: push(nil, row("ws-h", "/w/x"), nil), wantID: "ws-h"},
+		{name: "a backlogged row", push: push(nil, row("ws-h", "/w/x"), nil), wantID: "ws-h"},
 		{name: "a closed row, on the closed stream", push: push(nil, nil, row("ws-c", "/w/x")), wantID: "ws-c"},
 		{name: "a dir no stream carries", push: push(row("ws-o", "/w/other"), nil, nil)},
 		{name: "a dir two workspaces claim", push: push(row("ws-o", "/w/x"), nil, row("ws-c", "/w/x")), wantErr: "appears under both"},

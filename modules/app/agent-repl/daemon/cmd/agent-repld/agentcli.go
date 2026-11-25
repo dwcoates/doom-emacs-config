@@ -145,7 +145,7 @@ func productionCLIDeps() cliDeps {
 }
 
 // readRoster reads the workspaces stream of the first push the daemon
-// sends, which carries every stream: the open and hidden workspaces the CLI
+// sends, which carries every stream: the open and backlogged workspaces the CLI
 // names.
 func readRoster(ctx context.Context, client agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
 	stream, err := openDaemonStream(ctx, client.WatchWorkspaceRoster, &agentreplv1.WatchWorkspaceRosterRequest{})
@@ -2709,7 +2709,7 @@ func queueRecordLanding(c *cliCall, args []string) int {
 // name exactly one merge across every queue.
 //
 // THE QUEUE NAMES ITS MERGES, NOT THE ROSTER. An async merge runs in a hidden
-// workspace, and the roster leaves hidden workspaces out, so a verb that read
+// workspace, and the roster leaves backlogged workspaces out, so a verb that read
 // the name off the roster could address no async merge at all (2026-10-22:
 // `merge-queue move-down pt3-sentences` answered "the daemon's roster holds no
 // workspace named" while the queue listed it waiting).

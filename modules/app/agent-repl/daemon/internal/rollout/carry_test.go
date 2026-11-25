@@ -430,7 +430,7 @@ func TestAnAdoptionOfAParkedShimRaisesTheCarriedColdGate(t *testing.T) {
 // TestAnAdoptionOfAParkedShimWhoseLockReadsFreeDialsIt pins the parked shim
 // as production finds it: it took no lock (it refused the resume before one),
 // so its lock reads free, yet it is running and its incumbent detached it.
-// Undialed, a hidden workspace's would be served by no daemon at all.
+// Undialed, a backlogged workspace's would be served by no daemon at all.
 func TestAnAdoptionOfAParkedShimWhoseLockReadsFreeDialsIt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
