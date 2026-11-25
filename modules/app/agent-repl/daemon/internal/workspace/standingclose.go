@@ -214,6 +214,7 @@ func (v *verbs) ReconsiderCloseRequest(ctx context.Context, ws ids.WorkspaceID) 
 		return err
 	}
 	if record.Closed || record.CloseRequest == nil {
+		log.Debug(opStandingClose, "no close request stands, so there is nothing to judge", dlog.Context{"closed": record.Closed})
 		return nil
 	}
 	by := record.CloseRequest.By
@@ -226,11 +227,11 @@ func (v *verbs) ReconsiderCloseRequest(ctx context.Context, ws ids.WorkspaceID) 
 		log.Info(opStandingClose, "the standing close still waits", dlog.Context{"waits_on": waitsOn(waits)})
 		return nil
 	}
+	// RECORDED BEFORE THE CLOSE: the close evicts the workspace's log sinks,
+	// and records its own success as its last line.
+	log.Info(opStandingClose, "nothing blocks the standing close any more; it is carried out", dlog.Context{"by": string(by)})
 	err = v.closeQuietly(ctx, ws, by)
 	if !isCloseRefusal(err) {
-		if err == nil {
-			log.Info(opStandingClose, "nothing blocks the standing close any more; the workspace is closed", dlog.Context{"by": string(by)})
-		}
 		return err
 	}
 	// SOMETHING BLOCKED AGAIN between the judgment and the close (a turn
