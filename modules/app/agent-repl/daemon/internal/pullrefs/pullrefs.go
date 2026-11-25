@@ -105,34 +105,17 @@ func (t Target) PullURL(number string) string {
 // the same number means the same pull request.
 //
 // A reference is linked only where it stands as a word of prose
-// (mdinline.Text): never in a fenced code block or a code span, never inside
+// (mdinline.RewriteProse): never in a fenced code block or a code span, never inside
 // a link of any kind (its text, its destination, a bare URL, an autolink, a
 // reference definition), and never glued to what precedes it (an entity). A
 // text still ARRIVING leaves a reference at its very end alone, because the
 // next push may add digits to it.
 func Linkify(markdown string, links Links, arriving bool) (string, []Ref) {
-	var out strings.Builder
 	var named []Ref
-	out.Grow(len(markdown))
-	doc := mdinline.Read(markdown)
-	offset := 0
-	for _, line := range doc.Lines {
-		offset += len(line.Text)
-		if line.Kind != mdinline.Prose {
-			out.WriteString(line.Text)
-			continue
-		}
-		atEnd := arriving && offset == len(markdown)
-		for _, s := range doc.Spans(line.Text) {
-			if s.Kind != mdinline.Text {
-				out.WriteString(s.Raw)
-				continue
-			}
-			to := s.At + len(s.Raw)
-			named = linkifyText(&out, line.Text[:to], s.At, links, atEnd && to == len(line.Text), named)
-		}
-	}
-	return out.String(), named
+	linked := mdinline.RewriteProse(markdown, arriving, func(out *strings.Builder, s mdinline.Stretch) {
+		named = linkifyText(out, s.Line[:s.To], s.From, links, s.AtEnd, named)
+	})
+	return linked, named
 }
 
 // linkifyText writes LINE[FROM:], prose, to OUT with its references linked,
@@ -145,7 +128,7 @@ func linkifyText(out *strings.Builder, line string, from int, links Links, atEnd
 	for i < len(line) {
 		c := line[i]
 		switch {
-		case c == '#' && startsWord(line, i):
+		case c == '#' && mdinline.StartsWord(line, i):
 			number, end, ok := pullNumber(line, i, atEnd)
 			ref, linked := links.bare(number)
 			if !ok || !linked {
@@ -155,7 +138,7 @@ func linkifyText(out *strings.Builder, line string, from int, links Links, atEnd
 			}
 			writePullLink(out, "#"+number, ref.URL())
 			i = end
-		case isRepoByte(c) && startsWord(line, i):
+		case isRepoByte(c) && mdinline.StartsWord(line, i):
 			name := repoName(line, i)
 			if hash := i + len(name); hash < len(line) && line[hash] == '#' && validRepoName(name) {
 				if number, end, ok := pullNumber(line, hash, atEnd); ok {
@@ -191,30 +174,15 @@ func pullNumber(line string, hash int, atEnd bool) (number string, end int, ok b
 	for end < len(line) && line[end] >= '0' && line[end] <= '9' {
 		end++
 	}
-	if end == hash+1 || line[hash+1] == '0' || (end < len(line) && isWordByte(line[end])) || (atEnd && end == len(line)) {
+	if end == hash+1 || line[hash+1] == '0' || (end < len(line) && mdinline.IsWordByte(line[end])) || (atEnd && end == len(line)) {
 		return "", 0, false
 	}
 	return line[hash+1 : end], end, true
 }
 
-// startsWord reports whether position I begins a word of prose: the line's
-// start, after whitespace, or after an opening parenthesis. A parenthesis that
-// opens a link's destination never reaches here, because mdinline reads the
-// whole link.
-func startsWord(line string, i int) bool {
-	if i == 0 {
-		return true
-	}
-	switch line[i-1] {
-	case ' ', '\t', '(':
-		return true
-	}
-	return false
-}
-
 // isRepoByte reports whether C may appear in a GitHub repository name.
 func isRepoByte(c byte) bool {
-	return isWordByte(c) || c == '-' || c == '.'
+	return mdinline.IsWordByte(c) || c == '-' || c == '.'
 }
 
 // repoName is the run of repository-name bytes starting at I.
@@ -230,10 +198,4 @@ func repoName(line string, i int) string {
 // `..` are reserved.
 func validRepoName(name string) bool {
 	return name != "." && name != ".."
-}
-
-// isWordByte reports whether C continues a word, so a reference followed by it
-// is not a reference.
-func isWordByte(c byte) bool {
-	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }

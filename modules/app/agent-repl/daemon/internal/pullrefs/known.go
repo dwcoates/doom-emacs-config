@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"agent-repld/internal/mdinline"
 )
 
 // Ref is one pull request: pull request NUMBER of the repository it names.
@@ -62,7 +64,7 @@ func Refs(markdown string, arriving bool) []Ref {
 	var refs []Ref
 	for _, m := range pullURL.FindAllStringSubmatchIndex(markdown, -1) {
 		end := m[1]
-		if end < len(markdown) && isWordByte(markdown[end]) || arriving && end == len(markdown) {
+		if end < len(markdown) && mdinline.IsWordByte(markdown[end]) || arriving && end == len(markdown) {
 			continue
 		}
 		repo := markdown[m[4]:m[5]]
