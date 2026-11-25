@@ -626,6 +626,15 @@ type Deps struct {
 	// `#<number>` as the one before it did. nil records and loads nothing,
 	// which is what a test that is not about surviving a restart wants.
 	PullReferences PullReferenceStore
+	// SlackChannels answers the user's Slack channels by name
+	// (slackchannels.Directory), which a `#<channel-name>` of a workspace's
+	// text links to on SlackSubdomain (linkChannels). nil links no channel,
+	// which is what a test that is not about Slack channels wants.
+	SlackChannels SlackChannelSource
+	// SlackSubdomain is the subdomain of the Slack workspace SlackChannels'
+	// channels are on (the one AGENT_REPL_SLACK_TEAMS names). Empty links
+	// no channel.
+	SlackSubdomain string
 	// ResponseLinks stores the web links a settled response named as the
 	// workspace's reference links (responselinks.go). It is called off the
 	// resolver's lock, by one drainer started through Go, in draw order. nil

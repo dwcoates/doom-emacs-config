@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -432,7 +434,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the classifier: %w", err)
 	}
-	browser, err := buildBrowser(p.Opts.noBrowser, os.Getenv, externalbrowser.DefaultLauncherConfigured(), log)
+	browser, slackTeams, err := buildBrowser(p.Opts.noBrowser, os.Getenv, externalbrowser.DefaultLauncherConfigured(), log)
 	if err != nil {
 		return nil, err
 	}
@@ -875,6 +877,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A CONNECTION FAILURE THE NETWORK ANSWERED stays answered too.
 		Reconnected:    p.DB,
 		PullReferences: p.DB,
+		// A `#<channel-name>` OF A WORKSPACE'S TEXT links to the channel on
+		// the one Slack team whose links open in the Slack app.
+		SlackChannels:  slackChannels,
+		SlackSubdomain: slackChannelSubdomain(slackTeams, log),
 		// A WEB LINK A RESPONSE NAMES becomes a reference link of its workspace.
 		ResponseLinks: verbsRef,
 		// A row the feed cannot place is drawn nowhere and raised on the
@@ -3023,32 +3029,65 @@ func (silentOpenProgress) Stage(workspace.OpenStage) {}
 // no launcher at all: the opener is nil and OpenExternal answers
 // no_browser_configured rather than reporting a launch that never had
 // anything to run. A malformed $AGENT_REPL_SLACK_TEAMS is a boot refusal,
-// never a Slack team skipped.
-func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent bool, log dlog.Logger) (externalbrowser.Opener, error) {
+// never a Slack team skipped. The Slack teams are answered beside the opener,
+// none without one: a Slack link opens in the app only through it.
+func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent bool, log dlog.Logger) (externalbrowser.Opener, externalbrowser.SlackTeams, error) {
 	switch {
 	case noBrowser:
 		log.Warn(graphOperation, "no external browser is configured for this daemon: --no-browser was given", dlog.Context{
 			"reason": "--no-browser",
 		})
-		return nil, nil
+		return nil, nil, nil
 	case getenv(externalbrowser.EnvBrowserCmd) == "" && !defaultPresent:
 		log.Warn(graphOperation, "no external browser is configured for this daemon: no launcher is set and the pinned default is absent", dlog.Context{
 			"reason":  "neither $" + externalbrowser.EnvBrowserCmd + " nor the pinned default launcher is present",
 			"default": externalbrowser.Host.Binary,
 		})
-		return nil, nil
+		return nil, nil, nil
 	}
 	slackTeams, err := externalbrowser.SlackTeamsFromEnv(getenv)
 	if err != nil {
 		log.Error(opSlackTeams, "the Slack teams whose links open in the Slack app could not be read", dlog.Context{"cause": err.Error()})
-		return nil, fmt.Errorf("agent-repld: read the Slack teams whose links open in the Slack app: %w", err)
+		return nil, nil, fmt.Errorf("agent-repld: read the Slack teams whose links open in the Slack app: %w", err)
 	}
 	log.Info(opSlackTeams, "read the Slack teams whose links open in the Slack app", dlog.Context{"teams": map[string]string(slackTeams)})
 	browser, err := externalbrowser.New(externalbrowser.Config{Logger: log, SlackTeams: slackTeams})
 	if err != nil {
-		return nil, fmt.Errorf("agent-repld: build the external browser: %w", err)
+		return nil, nil, fmt.Errorf("agent-repld: build the external browser: %w", err)
 	}
-	return browser, nil
+	return browser, slackTeams, nil
+}
+
+// opSlackChannelLinks is the boot record of whether a `#<channel-name>` of a
+// workspace's text links to the channel.
+const opSlackChannelLinks = "daemon.feed.slack_channel_links"
+
+// slackChannelSubdomain answers the subdomain a `#<channel-name>` of a
+// workspace's text links its channel on, "" for none (feed.Deps.SlackSubdomain).
+// The channel list (slackchannels) carries no Slack workspace, so its
+// subdomain is the ONE Slack team TEAMS names, the one whose permalinks open
+// in the Slack app. With none, or several (which of them the list is on is not
+// known), channels stay plain text, and the record says why.
+func slackChannelSubdomain(teams externalbrowser.SlackTeams, log dlog.Logger) string {
+	switch len(teams) {
+	case 0:
+		log.Info(opSlackChannelLinks, "Slack channels in a workspace's text are not linked: no Slack team opens in the Slack app", dlog.Context{
+			"env": externalbrowser.EnvSlackTeams,
+		})
+		return ""
+	case 1:
+		for subdomain := range teams {
+			log.Info(opSlackChannelLinks, "Slack channels in a workspace's text link to the one Slack team that opens in the Slack app", dlog.Context{
+				"subdomain": subdomain,
+			})
+			return subdomain
+		}
+	}
+	subdomains := slices.Sorted(maps.Keys(teams))
+	log.Info(opSlackChannelLinks, "Slack channels in a workspace's text are not linked: several Slack teams open in the Slack app, and the channel list names none of them", dlog.Context{
+		"env": externalbrowser.EnvSlackTeams, "subdomains": subdomains,
+	})
+	return ""
 }
 
 // opSuccessorEnv is the operation a spawned daemon's environment is recorded under.

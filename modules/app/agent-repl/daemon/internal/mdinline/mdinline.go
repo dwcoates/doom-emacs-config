@@ -3,7 +3,7 @@
 // webapp/src/markdown.ts), for the daemon's rewrites of drawn markdown: which
 // lines are fenced code or link reference definitions, and which stretches of
 // a prose line are code spans, links, autolinks and bare URLs. Every daemon
-// rewrite that must leave code or links alone (codespans, pullrefs) reads them
+// rewrite that must leave code or links alone (codespans, pullrefs, slackrefs) reads them
 // here, so no two of them can disagree about where a link is.
 //
 // THE RENDERER'S GRAMMAR IS THE AUTHORITY. A bare URL here is what the

@@ -1,6 +1,7 @@
 // Package slackchannels holds the Slack channels the user is a member of on
 // their work Slack, which the Emacs composer completes after a `#`
-// (agentrepl.v1.ListSlackChannels).
+// (agentrepl.v1.ListSlackChannels) and the feed links a `#<channel-name>` of
+// a workspace's text to (ChannelIDs, slackrefs).
 //
 // THE LIST IS THE USER'S. One Directory serves every composer of the daemon:
 // channel membership belongs to the person, never to a workspace.
@@ -8,7 +9,7 @@
 // IT IS READ ON DEMAND, ONE READ AT A TIME. The first ask starts a read, and
 // so does the first ask once the list is MaxAge old; an ask never waits on
 // one, because a read takes seconds. Reads never start at boot, so a daemon
-// no composer asks never reaches Slack. The Directory alone decides whether a
+// no composer or feed asks never reaches Slack. The Directory alone decides whether a
 // read starts, under its own lock, and marks it in flight before releasing
 // it, so two reads can never run at once however many composers ask.
 //
@@ -70,6 +71,9 @@ type Directory struct {
 	// any read has succeeded (an empty membership is still a list).
 	channels []*agentreplv1.SlackChannel
 	listed   bool
+	// ids is each channel's id keyed by its name, rebuilt by every
+	// successful read and never written after: ChannelIDs hands it out.
+	ids map[string]string
 	// attemptedAt is when the last read ENDED, successful or not, which is
 	// what the list's age is measured from: a failed refresh waits MaxAge
 	// like a successful one, so a broken gns is not run at every ask.
@@ -101,10 +105,7 @@ func New(deps Deps) (*Directory, error) {
 func (d *Directory) Response() *agentreplv1.ListSlackChannelsResponse {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.dueLocked() {
-		d.reading = true
-		inflight.Go(d.read)
-	}
+	d.startDueLocked()
 	switch {
 	case d.listed:
 		return &agentreplv1.ListSlackChannelsResponse{Result: &agentreplv1.ListSlackChannelsResponse_Success{
@@ -124,6 +125,25 @@ func (d *Directory) Response() *agentreplv1.ListSlackChannelsResponse {
 				Pending: &agentreplv1.ListSlackChannelsPending{},
 			}},
 		}}
+	}
+}
+
+// ChannelIDs answers each channel's id keyed by its name, from the last
+// successful read, nil while none has succeeded. The map is never written
+// once answered. Like Response it starts a read when one is due, and never
+// waits on it.
+func (d *Directory) ChannelIDs() map[string]string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.startDueLocked()
+	return d.ids
+}
+
+// startDueLocked starts a read when one is due (dueLocked). d.mu is held.
+func (d *Directory) startDueLocked() {
+	if d.dueLocked() {
+		d.reading = true
+		inflight.Go(d.read)
 	}
 }
 
@@ -167,10 +187,24 @@ func (d *Directory) read() {
 		return
 	}
 	d.channels = channels
+	d.ids = idsByName(channels)
 	d.listed = true
 	d.failure = nil
 	d.deps.Log.Info(opRead, "read the Slack channels", dlog.Context{
 		"count": len(channels),
 		"took":  took,
 	})
+}
+
+// idsByName answers each of CHANNELS' ids keyed by its name. A name Slack
+// answers twice (a channel shared in from another organization) keeps its
+// first channel, in Slack's order.
+func idsByName(channels []*agentreplv1.SlackChannel) map[string]string {
+	ids := make(map[string]string, len(channels))
+	for _, c := range channels {
+		if _, seen := ids[c.GetName()]; !seen {
+			ids[c.GetName()] = c.GetId()
+		}
+	}
+	return ids
 }

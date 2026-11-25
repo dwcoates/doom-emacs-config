@@ -3,6 +3,7 @@ package main
 import (
 	"agent-repld/internal/lifecycleconfig"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -814,6 +815,7 @@ func TestBuildBrowser(t *testing.T) {
 		env            map[string]string
 		defaultPresent bool
 		wantOpener     bool
+		wantTeams      externalbrowser.SlackTeams
 		wantErr        bool
 		wantRecord     dlog.Record
 	}{
@@ -831,6 +833,7 @@ func TestBuildBrowser(t *testing.T) {
 			env:            map[string]string{externalbrowser.EnvSlackTeams: "acme=T0123ABCD"},
 			defaultPresent: true,
 			wantOpener:     true,
+			wantTeams:      externalbrowser.SlackTeams{"acme": "T0123ABCD"},
 			wantRecord:     dlog.Record{Level: dlog.LevelInfo, Operation: opSlackTeams},
 		},
 		{
@@ -854,7 +857,7 @@ func TestBuildBrowser(t *testing.T) {
 			getenv := func(k string) string { return tc.env[k] }
 
 			// Act.
-			browser, err := buildBrowser(tc.noBrowser, getenv, tc.defaultPresent, log)
+			browser, teams, err := buildBrowser(tc.noBrowser, getenv, tc.defaultPresent, log)
 
 			// Assert.
 			if (err != nil) != tc.wantErr {
@@ -863,11 +866,53 @@ func TestBuildBrowser(t *testing.T) {
 			if (browser != nil) != tc.wantOpener {
 				t.Fatalf("buildBrowser() opener = %v, want one: %v", browser, tc.wantOpener)
 			}
+			if len(teams) != len(tc.wantTeams) || !maps.Equal(teams, tc.wantTeams) {
+				t.Fatalf("buildBrowser() teams = %v, want %v", teams, tc.wantTeams)
+			}
 			found := slices.ContainsFunc(log.Records(), func(r dlog.Record) bool {
 				return r.Level == tc.wantRecord.Level && r.Operation == tc.wantRecord.Operation
 			})
 			if !found {
 				t.Fatalf("records = %+v, want a %s record under %s", log.Records(), tc.wantRecord.Level, tc.wantRecord.Operation)
+			}
+		})
+	}
+}
+
+// TestSlackChannelSubdomain pins which subdomain a workspace's channels link
+// on, and that the boot records why when they link on none.
+func TestSlackChannelSubdomain(t *testing.T) {
+	tests := []struct {
+		name    string
+		teams   externalbrowser.SlackTeams
+		want    string
+		wantCtx dlog.Context
+	}{
+		{name: "no team links no channel", want: "",
+			wantCtx: dlog.Context{"env": externalbrowser.EnvSlackTeams}},
+		{name: "one team links on its subdomain", teams: externalbrowser.SlackTeams{"acme": "T0123ABCD"}, want: "acme",
+			wantCtx: dlog.Context{"subdomain": "acme"}},
+		{name: "several teams link no channel", teams: externalbrowser.SlackTeams{"b": "T2", "a": "T1"}, want: "",
+			wantCtx: dlog.Context{"env": externalbrowser.EnvSlackTeams, "subdomains": []string{"a", "b"}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+
+			// Act.
+			got := slackChannelSubdomain(tc.teams, log)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("slackChannelSubdomain() = %q, want %q", got, tc.want)
+			}
+			records := log.Records()
+			if len(records) != 1 || records[0].Level != dlog.LevelInfo || records[0].Operation != opSlackChannelLinks {
+				t.Fatalf("records = %+v, want one info record under %s", records, opSlackChannelLinks)
+			}
+			if !reflect.DeepEqual(map[string]any(records[0].Context), map[string]any(tc.wantCtx)) {
+				t.Fatalf("record context = %#v, want %#v", records[0].Context, tc.wantCtx)
 			}
 		})
 	}
