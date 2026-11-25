@@ -1166,8 +1166,8 @@ test_a_signing_identity_with_no_name_is_refused() {
 
 test_the_wifi_helper_is_built_after_its_signing_identity() {
   local order
-  order="$(jq -r '.requirements[] | select(.id == "wifi-helper-signing" or .id == "wifi-helper") | .id' "$MODULE/requirements.json" | paste -sd' ' -)"
-  if [ "$order" = "wifi-helper-signing wifi-helper" ]; then
+  order="$(jq -r '.requirements[] | select(.id == "local-signing" or .id == "wifi-helper") | .id' "$MODULE/requirements.json" | paste -sd' ' -)"
+  if [ "$order" = "local-signing wifi-helper" ]; then
     pass "the Wi-Fi helper's signing identity is made before the helper is built"
   else fail "signing before build" "order: $order"; fi
 }

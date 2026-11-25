@@ -313,6 +313,7 @@ var Suites = []Suite{
 	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "deploy-stamp-lib-harness", Kind: Script, Path: "bin/test-lib-deploy-stamp.sh", Harness: true, Reuse: scripts(fakeGitScripts, "agent-shim/claude/shim/package-lock.json")},
 	{Name: "stat-lib-harness", Kind: Script, Path: "bin/test-lib-stat.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "signing-lib-harness", Kind: Script, Path: "bin/test-lib-signing.sh", Harness: true, Reuse: scripts(moduleScripts, "requirements.json", "wifi-helper/")},
 	{Name: "service-lib-harness", Kind: Script, Path: "bin/test-lib-service.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "linux-vm-harness", Kind: Script, Path: "bin/test-linux-vm.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true, Reuse: scripts(fakeGitScripts)},

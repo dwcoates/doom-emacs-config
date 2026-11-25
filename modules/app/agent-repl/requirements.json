@@ -338,9 +338,9 @@
       }
     },
     {
-      "id": "wifi-helper-signing",
+      "id": "local-signing",
       "kind": "signing_identity",
-      "why": "macOS keys an ad hoc signed app's Location Services permission to its code's hash, so every rebuild of the Wi-Fi helper lost it; signed with one certificate, the permission names the certificate and survives rebuilds (wifi-helper/build.sh)",
+      "why": "macOS keys an ad hoc signed app's permissions to its code's hash, so every rebuild of the Wi-Fi helper lost its Location Services permission; signed with one certificate, a permission names the certificate and survives rebuilds (bin/lib-signing.sh)",
       "profile": "run",
       "platforms": [
         "darwin"

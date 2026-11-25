@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds agent-repl's Wi-Fi helper app (main.swift, standing.swift, seats.swift) into OUT (default
-# ~/.cache/agent-repl/AgentReplWifi.app), signed ad hoc so macOS can hold its
+# ~/.cache/agent-repl/AgentReplWifi.app), signed with the local identity (bin/lib-signing.sh) so macOS can hold its
 # Location Services permission against a stable identity.
 #
 # THE APP CARRIES THE HASH OF ITS SOURCES (Contents/Resources/source-sha256,
@@ -53,14 +53,9 @@ source_hash "$here" >"$work/AgentReplWifi.app/Contents/Resources/source-sha256"
 # it (2026-11-18). A certificate's signature names the certificate, which a
 # rebuild keeps. The identity is self-signed, so it is chosen by its hash:
 # codesign refuses an untrusted identity by name.
-# The identity's name is the manifest's (requirements.json, wifi-helper-signing).
-signing_name="$(jq -er '.requirements[] | select(.id == "wifi-helper-signing") | .name' "$here/../requirements.json")"
-identities="$(security find-identity -p codesigning)"
-identity="$(awk -v n="\"$signing_name\"" 'index($0, n) {print $2; exit}' <<<"$identities")"
-if [ -z "$identity" ]; then
-  echo "wifi-helper/build.sh: the login keychain holds no code-signing identity \"$signing_name\"; run bin/requirements.sh install" >&2
-  exit 1
-fi
+# shellcheck source=../bin/lib-signing.sh
+. "$here/../bin/lib-signing.sh"
+identity="$(local_signing_identity "$here/..")"
 codesign --force --sign "$identity" --identifier com.agentrepl.wifi "$work/AgentReplWifi.app"
 mkdir -p "$(dirname "$out")"
 rm -rf "$out.new"
