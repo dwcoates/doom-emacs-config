@@ -141,6 +141,26 @@ func TestAssignWorkspaceTaskAcceptsAnUnsetTaskAsUnassign(t *testing.T) {
 	}
 }
 
+// TestAssignWorkspaceTaskAnswersAnUnknownTaskInBand pins that a task ref the
+// verb finds no task for is answered as AssignWorkspaceTaskError.unknown_task.
+func TestAssignWorkspaceTaskAnswersAnUnknownTaskInBand(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.assignTaskErr = &workspace.Refusal{Rpc: "AssignWorkspaceTask", Arm: workspace.ArmUnknownTask, Reason: "no task task-bogus", NotFound: true}
+
+	// Act.
+	resp, err := h.Client.AssignWorkspaceTask(context.Background(),
+		connect.NewRequest(&agentreplv1.AssignWorkspaceTaskRequest{Workspace: ref(), Task: &agentreplv1.TaskRef{Id: "task-bogus"}}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AssignWorkspaceTask = transport error %v, want the in-band arm", err)
+	}
+	if resp.Msg.GetError().GetUnknownTask() == nil {
+		t.Fatalf("result = %v, want unknown_task", resp.Msg.GetResult())
+	}
+}
+
 // TestUpdateTaskAnswersTheVerbsRefusalInBand pins that a verb refusing the
 // change (no such task) is answered as its typed arm, and recorded.
 func TestUpdateTaskAnswersTheVerbsRefusalInBand(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -220,6 +221,41 @@ func TestFleetReadHistoryReadsAStartBeingRetried(t *testing.T) {
 	// Assert.
 	if readErr != nil || len(f.store.asked) != 1 {
 		t.Fatalf("read during the retry = %v after store reads %v, want the store's page", readErr, f.store.asked)
+	}
+}
+
+func TestFleetReadHistoryOfAWorkspaceWhoseVendorStartFailedReadsItsConversation(t *testing.T) {
+	// Arrange: the vendor rejects the start, so its shim stays held with no
+	// session; the book is on record.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.books[ws] = "book-1"
+	f.store.page = storePromptPage("book-1")
+	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
+	startErr := f.fleet.Start(context.Background(), ws)
+	spawned := len(f.supervisor.spawns)
+
+	// Act.
+	page, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
+
+	// Assert.
+	if startErr == nil {
+		t.Fatal("Start = nil, want the vendor's rejection")
+	}
+	if !f.fleet.Held(ws) || f.fleet.Live(ws) {
+		t.Fatalf("held = %t, live = %t; want the shim held with no session", f.fleet.Held(ws), f.fleet.Live(ws))
+	}
+	if !recordedAt(f, dlog.LevelInfo, opBringUp, "the failed start's shim stays held with no session; the next start reuses it") {
+		t.Fatalf("records = %+v, want the held shim recorded at INFO", f.log.logger.Records())
+	}
+	if err != nil || len(page.GetEntries()) != 1 {
+		t.Fatalf("ReadHistory = %v, %v; want the store's page", page, err)
+	}
+	if len(f.supervisor.spawns) != spawned {
+		t.Fatalf("spawns = %d after the read, want %d: the held shim serves it", len(f.supervisor.spawns), spawned)
+	}
+	if !slices.Contains(f.feed.sourcesUp, ws) {
+		t.Fatalf("sources up = %v, want %q", f.feed.sourcesUp, ws)
 	}
 }
 

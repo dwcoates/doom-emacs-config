@@ -559,6 +559,40 @@ func TestTheRepositorysPreDeployHooksRun(t *testing.T) {
 	}
 }
 
+// TestAPreDeployHookTabRunsAddressedAndSettlesSucceeded covers the hook's own
+// tab: its turn is addressed to the merge's output, the tab is labeled
+// "pre-deploy", and a turn that completes settles it succeeded.
+func TestAPreDeployHookTabRunsAddressedAndSettlesSucceeded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.repoPreHooks("run the repository's checklist")
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the deploy failed: %v", err)
+	}
+
+	// Assert.
+	if len(h.feed.installed()) == 0 {
+		t.Fatal("the hook's turn was given no output address")
+	}
+	tab := h.feed.lastTabOfKind(TabPreDeploy)
+	if tab == nil {
+		t.Fatal("no pre-deploy hook tab was drawn")
+	}
+	if got := tab.GetLabel().GetText(); got != "pre-deploy" {
+		t.Fatalf("the hook tab's label = %q, want pre-deploy", got)
+	}
+	if tab.GetHookPrompt().GetSettled().GetSucceeded() == nil {
+		t.Fatalf("the hook tab = %v, want it settled succeeded", tab.GetHookPrompt())
+	}
+}
+
 // TestTheRepositorysPostDeployHooksRun covers the same for the last stage.
 func TestTheRepositorysPostDeployHooksRun(t *testing.T) {
 	// Arrange.
@@ -1480,6 +1514,57 @@ func TestAConflictResolutionThatGivesUpFailsTheMergeInConflicts(t *testing.T) {
 	// Assert.
 	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "conflicts" {
 		t.Fatalf("facts = %+v, want merge failed in conflicts", got)
+	}
+	if len(h.git.fastForwards) != 0 {
+		t.Fatalf("a failed merge moved the target: %v", h.git.fastForwards)
+	}
+}
+
+func TestAConflictResolutionThatGivesUpHandsTheWorkspaceBackInPlace(t *testing.T) {
+	// Arrange: a sync merge of the workspace's own branch whose conflicts
+	// still stand when every resolution attempt ends.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.conflicted = everyAttemptLeaves("a.go")
+
+	// Act.
+	admitted(t, h)
+
+	// Assert: the failure is handed to the workspace itself, in place, and
+	// its lease is let go, so its next prompt runs as an ordinary turn.
+	sent := h.detached.sent()
+	if len(sent) != 1 || sent[0].requester != theWorkspace || sent[0].mergeWS != theWorkspace {
+		t.Fatalf("handbacks = %+v, want one to the workspace itself", sent)
+	}
+	if out := sent[0].outcome; out.Kind != DetachedFailed || !out.InPlace {
+		t.Fatalf("outcome = %+v, want an in-place failure", out)
+	}
+	if h.leaseHeld() {
+		t.Fatal("the lease is still held after the merge gave up")
+	}
+}
+
+func TestAConflictWhoseBriefIsMissingFailsTheMergeLoudly(t *testing.T) {
+	// Arrange: the rebase stops on a conflict, and the conflict brief is not
+	// there to compose.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	delete(h.briefs, BriefConflictResolve)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "other" {
+		t.Fatalf("facts = %+v, want merge failed in other", got)
+	}
+	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.fault"); !ok {
+		t.Fatal("the missing brief was not recorded at ERROR")
+	}
+	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); n != 0 {
+		t.Fatalf("conflict repairs submitted = %d, want none", n)
 	}
 	if len(h.git.fastForwards) != 0 {
 		t.Fatalf("a failed merge moved the target: %v", h.git.fastForwards)

@@ -142,6 +142,33 @@ func TestCloseRefusesHeldPrompts(t *testing.T) {
 	if f.footer.closing["w1"].Reason != "held_prompts" {
 		t.Fatalf("footer reason = %q, want held_prompts", f.footer.closing["w1"].Reason)
 	}
+	if got, want := f.footer.closing["w1"].Detail, "1 held prompts have not been delivered; release or drop them first"; got != want {
+		t.Fatalf("footer detail = %q, want %q", got, want)
+	}
+}
+
+func TestCloseRefusesALiveDetachedShellWithNoTurnOpen(t *testing.T) {
+	// Arrange: a detached shell outlives its turn; no turn is open.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.running.Turn = nil
+	f.running.LiveWork = sessionwatcher.LiveWorkSet{Shells: []*conversationv1.DetachedWorkId{{Value: "work-close-1"}}}
+
+	// Act.
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+	// Assert.
+	asRefusal(t, err, "blocked")
+	closing := f.footer.closing["w1"]
+	if closing.Reason != "live_work" {
+		t.Fatalf("footer reason = %q, want live_work", closing.Reason)
+	}
+	if want := "0 detached agents and 1 detached shells are still live"; closing.Detail != want {
+		t.Fatalf("footer detail = %q, want %q", closing.Detail, want)
+	}
+	if f.db.closedFlags["w1"] {
+		t.Fatal("the workspace was closed although detached work was live")
+	}
 }
 
 func TestCloseIsNotBlockedByHoldsTheHeldSectionDoesNotDraw(t *testing.T) {

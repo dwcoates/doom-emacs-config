@@ -554,6 +554,28 @@ func TestAnswerPermissionPropagatesAStaleCard(t *testing.T) {
 	asRefusal(t, err, ArmShimNoOpenAsk)
 }
 
+func TestAnAnswerTheShimRefusesUnknownAgentKeepsTheShimsArmAndTheCard(t *testing.T) {
+	// Arrange: the views still stand the card, but the shim has forgotten the
+	// agent that asked; only no_open_ask settles a standing card.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.permissions["ask-1"] = ServedPermission{Agent: &conversationv1.AgentId{Value: "agent-9"}}
+	f.cards.stillStanding = map[string]bool{"permission:ask-1": true}
+	f.shim.answerErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent, Detail: "no such agent"}
+
+	// Act.
+	err := f.verbs.AnswerPermission(context.Background(), "w1", permissionAnswer("ask-1", &conversationv1.AgentPermissionDecision{Decision: DeniedByUser("")}))
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmShimUnknownAgent)
+	if refusal.Rpc != "AnswerPermission" {
+		t.Fatalf("refusal rpc = %q, want AnswerPermission", refusal.Rpc)
+	}
+	if len(f.cards.abandoned) != 0 {
+		t.Fatalf("abandoned = %v, want the card left standing", f.cards.abandoned)
+	}
+}
+
 func TestAnAnswerTheShimRefusesForAStandingCardSettlesItAbandoned(t *testing.T) {
 	tests := []struct {
 		name   string

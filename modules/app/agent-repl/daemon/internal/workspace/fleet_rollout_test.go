@@ -676,6 +676,40 @@ func TestASessionStartReportingNoSDKVersionKeepsNoneAndIsAnError(t *testing.T) {
 	}
 }
 
+// TestHostSessionFactsAnswersNoSessionUntilTheBringUpAnswers covers the host
+// stream's readiness gate: while the shim's spawn has not answered (it blocks
+// on the shim's first healthy diagnostics), the daemon operates no session for
+// the workspace, so the host view can only be `none`; once it answers, the
+// session's facts read the shim attached.
+func TestHostSessionFactsAnswersNoSessionUntilTheBringUpAnswers(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	var duringSpawn bool
+	var recordedDuringSpawn string
+	f.supervisor.onSpawn = func() {
+		_, duringSpawn = f.fleet.HostSessionFacts(ws.ID)
+		recordedDuringSpawn = f.db.sessions[ws.ID].HostSessionID
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if duringSpawn {
+		t.Fatal("HostSessionFacts reported a session while its spawn was still bringing the shim up")
+	}
+	if recordedDuringSpawn != "" {
+		t.Fatalf("the session record carried host session %q mid-spawn, want none recorded yet", recordedDuringSpawn)
+	}
+	facts, ok := f.fleet.HostSessionFacts(ws.ID)
+	if !ok || !facts.ShimAttached {
+		t.Fatalf("HostSessionFacts after the bring-up = (%+v, %v), want the shim attached", facts, ok)
+	}
+}
+
 // TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone covers the host
 // stream's `none` arm: a registered workspace that never had a session.
 func TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone(t *testing.T) {

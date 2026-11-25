@@ -500,6 +500,20 @@ func TestInterruptTurnPropagatesAnUninterruptibleTurn(t *testing.T) {
 	asRefusal(t, err, ArmShimTurnLive)
 }
 
+func TestInterruptTurnPropagatesAShimWithNoSession(t *testing.T) {
+	// Arrange: the daemon holds a turn open, but the shim reports no session.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNoSession, Detail: "no session is open on this shim"}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimNoSession)
+}
+
 func TestInterruptTurnRetiresTheFooterStatusOnAShimRefusal(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

@@ -292,6 +292,15 @@ func TestNukeLeavesTheRoster(t *testing.T) {
 	if len(f.db.forgotten) != 1 || f.db.forgotten[0] != "w1" {
 		t.Fatalf("forgotten workspaces = %v, want w1", f.db.forgotten)
 	}
+	registries := f.sidebar.snapshotRegistries()
+	if len(registries) == 0 {
+		t.Fatal("the roster was handed no registry after the nuke")
+	}
+	for _, w := range registries[len(registries)-1].Workspaces {
+		if w.ID == "w1" {
+			t.Fatalf("the roster's last registry still carries %+v, want the row gone", w)
+		}
+	}
 }
 
 func TestNukeKillsALiveSessionFirst(t *testing.T) {

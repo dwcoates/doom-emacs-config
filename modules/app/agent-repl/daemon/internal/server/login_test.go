@@ -454,6 +454,47 @@ func TestOpenExternalStillOpensTheLinkAfterRecordingTheInteraction(t *testing.T)
 	}
 }
 
+// TestOpenExternalAnswersTheVerbsRefusalsOnTheirArms pins each refusal the
+// open raises reaching OpenExternalError by name, with its fields.
+func TestOpenExternalAnswersTheVerbsRefusalsOnTheirArms(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *workspace.Refusal
+		got     func(*agentreplv1.OpenExternalError) bool
+	}{
+		{name: "an unparseable url",
+			refusal: &workspace.Refusal{Rpc: "OpenExternal", Arm: workspace.ArmInvalidUrl, Reason: "not an absolute url"},
+			got:     func(e *agentreplv1.OpenExternalError) bool { return e.GetInvalidUrl() != nil }},
+		{name: "no browser configured",
+			refusal: &workspace.Refusal{Rpc: "OpenExternal", Arm: workspace.ArmNoBrowserConfigured, Reason: "no browser"},
+			got:     func(e *agentreplv1.OpenExternalError) bool { return e.GetNoBrowserConfigured() != nil }},
+		{name: "a launcher that failed",
+			refusal: &workspace.Refusal{Rpc: "OpenExternal", Arm: workspace.ArmLaunchFailed, Reason: "did not open",
+				Fields: map[string]any{"detail": "exit status 1"}},
+			got: func(e *agentreplv1.OpenExternalError) bool { return e.GetLaunchFailed().GetDetail() == "exit status 1" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			holdHostStream(t, h)
+			h.Verbs.externalOpenErr = tt.refusal
+
+			// Act.
+			resp, err := h.Client.OpenExternal(context.Background(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
+				Workspace: ref(), Url: "https://example.com/a"}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("OpenExternal = transport error %v, want the in-band arm", err)
+			}
+			if !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.refusal.Arm)
+			}
+		})
+	}
+}
+
 func TestALinkFollowedIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

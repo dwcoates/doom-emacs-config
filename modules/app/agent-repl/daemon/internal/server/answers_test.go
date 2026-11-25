@@ -360,6 +360,103 @@ func TestAnswerPermissionMapsTheNoStandingOfferArm(t *testing.T) {
 	}
 }
 
+// TestAnswerPermissionHandsTheVerbTheDecisionAsked pins that each answer arm
+// reaches the verb as the decision it names, addressed to the card's own ask.
+func TestAnswerPermissionHandsTheVerbTheDecisionAsked(t *testing.T) {
+	tests := []struct {
+		name   string
+		req    *agentreplv1.AnswerPermissionRequest
+		assert func(t *testing.T, decision *conversationv1.AgentPermissionDecision)
+	}{
+		{
+			name: "allow once",
+			req: &agentreplv1.AnswerPermissionRequest{
+				Answer: &agentreplv1.AnswerPermissionRequest_AllowOnce{AllowOnce: &agentreplv1.AnswerPermissionAllowOnce{}},
+			},
+			assert: func(t *testing.T, decision *conversationv1.AgentPermissionDecision) {
+				if decision.GetAllowed().GetOnce() == nil {
+					t.Fatalf("decision = %v, want allowed.once", decision)
+				}
+			},
+		},
+		{
+			name: "deny with a reason",
+			req: &agentreplv1.AnswerPermissionRequest{
+				Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{
+					Reason: &agentreplv1.AnswerPermissionDenyReason{Text: "not needed"},
+				}},
+			},
+			assert: func(t *testing.T, decision *conversationv1.AgentPermissionDecision) {
+				if decision.GetDenied() == nil || decision.GetDenied().GetMessage() != "not needed" {
+					t.Fatalf("decision = %v, want denied{message: %q}", decision, "not needed")
+				}
+			},
+		},
+		{
+			name: "deny with no reason",
+			req: &agentreplv1.AnswerPermissionRequest{
+				Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
+			},
+			assert: func(t *testing.T, decision *conversationv1.AgentPermissionDecision) {
+				if decision.GetDenied() == nil || decision.GetDenied().GetMessage() != "" {
+					t.Fatalf("decision = %v, want denied with no message", decision)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.req.Workspace = ref()
+			tt.req.Permission = permissionIDFor(testWorkspaceID, "ask-1")
+
+			// Act.
+			resp, err := h.Client.AnswerPermission(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("AnswerPermission = %v, %v; want a success", resp, err)
+			}
+			if len(h.Verbs.permissionAnswers) != 1 {
+				t.Fatalf("the verb was handed %d answers, want 1", len(h.Verbs.permissionAnswers))
+			}
+			decision := h.Verbs.permissionAnswers[0].GetPermissionDecision()
+			if decision.GetAsk().GetValue() != "ask-1" {
+				t.Fatalf("decision ask = %q, want ask-1", decision.GetAsk().GetValue())
+			}
+			tt.assert(t, decision)
+		})
+	}
+}
+
+// TestAnswerPermissionAnswersAShimUnknownAgentAsUnlanded pins that the shim's
+// unknown_agent, which AnswerPermissionError does not carry, reaches the caller
+// as a FailedPrecondition naming the intended arm.
+func TestAnswerPermissionAnswersAShimUnknownAgentAsUnlanded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.answerPermissionErr = &workspace.Refusal{
+		Rpc: "AnswerPermission", Arm: workspace.ArmShimUnknownAgent, Reason: "no such agent",
+	}
+
+	// Act.
+	_, err := h.Client.AnswerPermission(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+			Workspace:  ref(),
+			Permission: permissionIDFor(testWorkspaceID, "ask-1"),
+			Answer:     &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
+		}))
+
+	// Assert.
+	if code := connect.CodeOf(err); code != connect.CodeFailedPrecondition {
+		t.Fatalf("err = %v, want FailedPrecondition", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "intended arm: ") || !strings.Contains(msg, "AnswerPermissionError.unknown_agent") {
+		t.Fatalf("err = %q, want it to name the intended arm AnswerPermissionError.unknown_agent", msg)
+	}
+}
+
 // TestAnswerPermissionRenamesUnservedToAskNotStanding pins the per-rpc rename:
 // the verbs' ArmUnservedAnswer is AnswerPermissionError.ask_not_standing.
 func TestAnswerPermissionRenamesUnservedToAskNotStanding(t *testing.T) {
@@ -414,6 +511,76 @@ func TestAnswerQuestionAnswersAskNotStanding(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetAskNotStanding() == nil {
 		t.Fatalf("result = %v, want ask_not_standing", resp.Msg.GetResult())
+	}
+}
+
+// TestAnswerQuestionHandsTheVerbTheServedTextsAndLabels pins that the
+// request's question text and chosen labels reach the verb echoed, addressed
+// to the card's own ask.
+func TestAnswerQuestionHandsTheVerbTheServedTextsAndLabels(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.AnswerQuestion(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
+			Workspace: ref(),
+			Question:  questionIDFor(testWorkspaceID, "q-1"),
+			Answers:   []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"A"}}},
+		}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerQuestion = %v, %v; want a success", resp, err)
+	}
+	if len(h.Verbs.questionAnswers) != 1 {
+		t.Fatalf("the verb was handed %d answers, want 1", len(h.Verbs.questionAnswers))
+	}
+	given := h.Verbs.questionAnswers[0].GetQuestionAnswer()
+	if given.GetAsk().GetValue() != "q-1" {
+		t.Fatalf("answer ask = %q, want q-1", given.GetAsk().GetValue())
+	}
+	sels := given.GetAnswers().GetAnswers()
+	if len(sels) != 1 || sels[0].GetQuestion().GetText() != "Pick one" {
+		t.Fatalf("selections = %v, want one echoing %q", sels, "Pick one")
+	}
+	if len(sels[0].GetChosen()) != 1 || sels[0].GetChosen()[0].GetLabel().GetLabel() != "A" {
+		t.Fatalf("chosen = %v, want [A]", sels[0].GetChosen())
+	}
+}
+
+// TestAnswerQuestionOnAnUndecodableCardAnswersAskNotStanding pins that a
+// question id that decodes to no card is the typed ask_not_standing, answered
+// before the verb is reached, with no warning.
+func TestAnswerQuestionOnAnUndecodableCardAnswersAskNotStanding(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	h.Surfaces.global = log
+
+	// Act.
+	resp, err := h.Client.AnswerQuestion(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
+			Workspace: ref(),
+			Question:  &frontendv1.FeedId{Value: "not-a-real-feed-id"},
+			Answers:   []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"A"}}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AnswerQuestion = error %v, want the typed ask_not_standing", err)
+	}
+	if resp.Msg.GetError().GetAskNotStanding() == nil {
+		t.Fatalf("result = %v, want ask_not_standing", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.questionAnswers) != 0 {
+		t.Fatalf("the verb was handed %d answers, want none", len(h.Verbs.questionAnswers))
+	}
+	for _, level := range []string{dlog.LevelWarn, dlog.LevelError} {
+		if rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level}); ok {
+			t.Fatalf("record %+v, want no warning or error", rec)
+		}
 	}
 }
 
@@ -600,6 +767,31 @@ func TestInterruptAnswersNotDetachedWorkAsTheTypedArm(t *testing.T) {
 				t.Fatalf("Interrupt = %v, want InterruptError.not_detached_work", resp.Msg)
 			}
 		})
+	}
+}
+
+// TestInterruptAnswersTheShimsNoSessionAsTheTypedArm pins that a turn kill
+// the shim refuses for want of a session is InterruptError.no_session.
+func TestInterruptAnswersTheShimsNoSessionAsTheTypedArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.interruptErr = &workspace.Refusal{
+		Rpc: "Interrupt", Arm: workspace.ArmShimNoSession, Reason: "no session is open on this shim",
+	}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt = error %v, want the typed no_session arm", err)
+	}
+	if resp.Msg.GetError().GetNoSession() == nil {
+		t.Fatalf("result = %v, want no_session", resp.Msg.GetResult())
 	}
 }
 

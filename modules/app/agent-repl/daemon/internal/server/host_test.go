@@ -77,6 +77,9 @@ func TestALiveSessionComposesTheExistingLiveArm(t *testing.T) {
 	if view.GetExisting().GetLive() == nil {
 		t.Fatalf("session arm = %v, want existing{live}", view.GetSession())
 	}
+	if !view.GetExisting().GetLive().GetShimAttached() {
+		t.Fatal("shim_attached = false, want true for an operated session whose shim is up")
+	}
 }
 
 // TestTheExistingArmCarriesTheMintedSessionIdentity pins that the identity

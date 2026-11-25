@@ -223,6 +223,9 @@ func TestUnsetClientLogLevelIsInvalidArgument(t *testing.T) {
 	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", code)
 	}
+	if err == nil || !strings.Contains(err.Error(), "level") {
+		t.Fatalf("err = %v, want it to name the field level", err)
+	}
 }
 
 // TestBlankOperatorDrainNoteIsInvalidArgument pins drain_reason.proto's own
@@ -799,6 +802,17 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			req.Placement = &agentreplv1.MergeQueuePlacement{}
 			return validateFinishWorkspaceRequest(req)
 		}, field: "placement"},
+		{name: "submit prompt with no said", check: func() *connect.Error {
+			req := submitRequest()
+			req.Said = nil
+			req.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT
+			return validateSubmitPromptRequest(req)
+		}, field: "said"},
+		{name: "submit prompt with an unspecified origin", check: func() *connect.Error {
+			req := submitRequest()
+			req.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
+			return validateSubmitPromptRequest(req)
+		}, field: "origin"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

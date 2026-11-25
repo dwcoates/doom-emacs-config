@@ -2761,6 +2761,60 @@ func TestStartStampsNothingBeforeTheIdentityIsDecided(t *testing.T) {
 	}
 }
 
+// TestStartResumesAStoodDownSessionsConversation pins that a session record
+// whose session was parked, or killed, is brought back by resuming its
+// recorded vendor conversation, never by a fresh start.
+func TestStartResumesAStoodDownSessionsConversation(t *testing.T) {
+	tests := []struct {
+		name     string
+		terminal string
+	}{
+		{name: "a parked session", terminal: wsm.TerminalParked},
+		{name: "a killed session", terminal: "killed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1",
+				Terminal: &wsm.SessionTerminal{Kind: tt.terminal}}
+
+			// Act.
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			if got := f.client.requests[0].GetResume().GetVendorSessionId(); got != "vendor-1" {
+				t.Fatalf("StartSession = %v, want a resume of vendor-1", f.client.requests[0])
+			}
+		})
+	}
+}
+
+// TestStartRefusesADeletedSessionBeforeAnySpawn pins that a session the
+// record says was deleted is refused naming the deletion and its detail, and
+// that nothing is spawned to be refused by.
+func TestStartRefusesADeletedSessionBeforeAnySpawn(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1",
+		Terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "forget"}}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "deleted") || !strings.Contains(err.Error(), "forget") {
+		t.Fatalf("Start() = %v, want the deletion and its detail named", err)
+	}
+	if f.supervisor.spawnAttempts != 0 || len(f.supervisor.spawns) != 0 {
+		t.Fatalf("spawn attempts = %d, spawns = %d; want none", f.supervisor.spawnAttempts, len(f.supervisor.spawns))
+	}
+}
+
 func TestStartRestampsTheRotatedIdentityOnAFreshRestart(t *testing.T) {
 	// Arrange: a fresh start after a stop mints a new identity, and the
 	// records of the second start must carry only that one.

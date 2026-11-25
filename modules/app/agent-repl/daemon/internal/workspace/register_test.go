@@ -14,6 +14,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/nameprefix"
@@ -666,9 +667,16 @@ func TestRegisterReopensAClosedWorkspace(t *testing.T) {
 		t.Fatalf("second Register: %v", err)
 	}
 
-	// Assert.
+	// Assert: the same workspace, re-opened through the registry's Reopen,
+	// which keeps its place on the bar.
 	if again.Closed {
 		t.Fatalf("Register answered workspace %v still closed; announcing a directory must re-open it", again.ID)
+	}
+	if again.ID != first.ID {
+		t.Fatalf("Register answered %q, want the same workspace %q", again.ID, first.ID)
+	}
+	if !slices.Equal(f.db.reopened, []ids.WorkspaceID{first.ID}) {
+		t.Fatalf("reopened = %v, want %q re-opened in place", f.db.reopened, first.ID)
 	}
 }
 
@@ -809,6 +817,46 @@ func TestRegisterBindsTheFooterToTheAccountRoot(t *testing.T) {
 	// Assert.
 	if got := f.footer.accounts[record.ID]; !slices.Equal(got, []string{"/config-work"}) {
 		t.Fatalf("footer account roots for %q = %v, want the root the session spends from", record.ID, got)
+	}
+}
+
+// TestRegisterDrawsTheRoutedRootsEmailOnTheTopbar pins that the topbar's
+// account cell carries the email of the root the workspace's session is
+// routed to, never another root's on the same machine.
+func TestRegisterDrawsTheRoutedRootsEmailOnTheTopbar(t *testing.T) {
+	roster := []account.Account{
+		{ConfigDir: "/config-default", Email: "default-acct@example.invalid", LoggedIn: true},
+		{ConfigDir: "/config-multi", Email: "multi-acct@example.invalid", LoggedIn: true},
+	}
+	tests := []struct {
+		name   string
+		routed string
+		want   string
+	}{
+		{name: "a workspace routed to the multi-repo root", routed: "/config-multi", want: "multi-acct@example.invalid"},
+		{name: "a workspace routed to the default root", routed: "/config-default", want: "default-acct@example.invalid"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.account.roster = roster
+			f.account.configDir = tt.routed
+
+			// Act.
+			if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+
+			// Assert.
+			if len(f.topbarAccounts) == 0 {
+				t.Fatal("the topbar was handed no account cell")
+			}
+			got := f.topbarAccounts[len(f.topbarAccounts)-1]
+			if got.ConfigDir != tt.routed || got.Email != tt.want {
+				t.Fatalf("account cell = %+v, want %s at %s", got, tt.want, tt.routed)
+			}
+		})
 	}
 }
 

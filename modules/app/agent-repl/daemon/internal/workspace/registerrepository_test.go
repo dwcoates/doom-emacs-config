@@ -373,6 +373,65 @@ func TestRegisterRepositoryAdoptsAWorkspaceItAlreadyHeld(t *testing.T) {
 	}
 }
 
+// registeredThenRegisterRepository registers the main worktree through
+// RegisterWorkspace's own path first, then registers its repository from a
+// file inside it, answering the first registration and the second's answer.
+func registeredThenRegisterRepository(t *testing.T, f *fixture) (wsm.Workspace, RegisteredRepository, string) {
+	t.Helper()
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	registered, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
+	if err != nil {
+		t.Fatalf("RegisterRepository: %v", err)
+	}
+	return first, registered, dir
+}
+
+// TestRegisterRepositoryAdoptsTheRepositoryAWorkspacesRegistrationMinted pins
+// the two mint paths meeting on one row: the repository RegisterWorkspace
+// minted for the directory is the one RegisterRepository answers.
+func TestRegisterRepositoryAdoptsTheRepositoryAWorkspacesRegistrationMinted(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	first, registered, dir := registeredThenRegisterRepository(t, f)
+
+	// Assert.
+	if !registered.RepositoryAlreadyKnown {
+		t.Fatal("RegisterRepository = repository already_known false, want the repository the registration minted")
+	}
+	if registered.Repository.Dir != dir || registered.Repository.ID != first.Repo {
+		t.Fatalf("repository = %+v, want %q at %q", registered.Repository, first.Repo, dir)
+	}
+}
+
+// TestRegisterRepositoryAdoptsTheWorkspaceRegisteredForTheMainWorktree pins
+// the reuse half: a directory RegisterWorkspace already registered is adopted,
+// never registered a second time.
+func TestRegisterRepositoryAdoptsTheWorkspaceRegisteredForTheMainWorktree(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	first, registered, _ := registeredThenRegisterRepository(t, f)
+
+	// Assert.
+	if !registered.WorkspaceAlreadyKnown {
+		t.Fatal("RegisterRepository = workspace already_known false, want the workspace already registered")
+	}
+	if registered.Workspace.ID != first.ID {
+		t.Fatalf("workspace = %q, want the registered %q", registered.Workspace.ID, first.ID)
+	}
+	if len(f.db.workspaces) != 1 {
+		t.Fatalf("workspace rows = %+v, want the first registration's alone", f.db.workspaces)
+	}
+}
+
 // TestRegisterRepositorySurfacesTheRegistrationsOwnRefusalUnderItsOwnRpc pins
 // that the SHARED registration's refusal is answered as RegisterRepository's.
 // The body raises it unnamed precisely because it serves two rpcs, and a
