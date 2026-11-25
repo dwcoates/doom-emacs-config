@@ -3,6 +3,7 @@ package testenv
 import (
 	"encoding/json"
 	"fmt"
+	"syscall"
 
 	"agentrepl/testrun/internal/proctable"
 )
@@ -78,3 +79,9 @@ func ReadPhases(path string) (map[string]float64, error) {
 // ProcessCPU answers the CPU seconds process PID has used, its own and its
 // reaped children's: what a harness reads of a daemon when it serves.
 func ProcessCPU(pid int) (float64, error) { return proctable.ProcessCPU(pid) }
+
+// RusageCPU is the CPU seconds RU accounts, user and system together.
+func RusageCPU(ru *syscall.Rusage) float64 {
+	seconds := func(tv syscall.Timeval) float64 { return float64(tv.Sec) + float64(tv.Usec)/1e6 }
+	return seconds(ru.Utime) + seconds(ru.Stime)
+}

@@ -126,6 +126,5 @@ func selfCPU() (float64, error) {
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
 		return 0, fmt.Errorf("getrusage: %w", err)
 	}
-	seconds := func(tv syscall.Timeval) float64 { return float64(tv.Sec) + float64(tv.Usec)/1e6 }
-	return seconds(ru.Utime) + seconds(ru.Stime), nil
+	return testenv.RusageCPU(&ru), nil
 }

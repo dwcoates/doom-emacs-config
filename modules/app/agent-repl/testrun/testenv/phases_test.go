@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -107,6 +108,28 @@ func TestReadPhases(t *testing.T) {
 			}
 			if err != nil || !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("ReadPhases = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRusageCPUSumsUserAndSystemSeconds(t *testing.T) {
+	cases := []struct {
+		name string
+		ru   syscall.Rusage
+		want float64
+	}{
+		{"nothing used is zero", syscall.Rusage{}, 0},
+		{"user and system add, microseconds included", syscall.Rusage{Utime: syscall.Timeval{Sec: 1, Usec: 250000}, Stime: syscall.Timeval{Sec: 2, Usec: 500000}}, 3.75},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := RusageCPU(&tc.ru)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("RusageCPU = %v; want %v", got, tc.want)
 			}
 		})
 	}
