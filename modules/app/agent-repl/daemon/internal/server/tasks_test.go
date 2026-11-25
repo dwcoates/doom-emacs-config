@@ -8,6 +8,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -137,5 +138,33 @@ func TestAssignWorkspaceTaskAcceptsAnUnsetTaskAsUnassign(t *testing.T) {
 	}
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+}
+
+// TestUpdateTaskAnswersTheVerbsRefusalInBand pins that a verb refusing the
+// change (no such task) is answered as its typed arm, and recorded.
+func TestUpdateTaskAnswersTheVerbsRefusalInBand(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log} })
+	h.Verbs.updateTaskErr = &workspace.Refusal{Arm: workspace.ArmUnknownTask, Reason: "no task task-1", NotFound: true}
+
+	// Act.
+	resp, err := h.Client.UpdateTask(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+			Task:   &agentreplv1.TaskRef{Id: "task-1"},
+			Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownTask() == nil {
+		t.Fatalf("result = %v, want unknown_task", resp.Msg.GetResult())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "UpdateTask", Message: "answered a typed refusal",
+		Match: func(r dlog.Record) bool { return r.Context["arm"] == workspace.ArmUnknownTask }}); !ok {
+		t.Fatalf("records = %+v, want the unknown_task refusal recorded", log.Records())
 	}
 }

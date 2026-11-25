@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,6 +203,49 @@ type hotReloadFeed struct{}
 
 func (hotReloadFeed) UpsertDurable(ids.WorkspaceID, feedid.Feed, *frontendv1.FeedRow) {
 	panic("a tracker with no deploy mediator drew a card")
+}
+
+// commonDirFailing is a git whose repository lookup fails.
+type commonDirFailing struct{ err error }
+
+func (g commonDirFailing) CommonDir(context.Context, string) (string, error) { return "", g.err }
+
+// mediatorsUnasked is a state store a hot reload must not reach: asking it
+// fails the test.
+type mediatorsUnasked struct{ t *testing.T }
+
+func (m mediatorsUnasked) DeployMediatorOf(context.Context, wsm.RepoKey) (wsm.DeployMediator, bool, error) {
+	m.t.Error("the deploy mediator was read for a repository that was never resolved")
+	return wsm.DeployMediator{}, false, nil
+}
+
+func (m mediatorsUnasked) Workspace(context.Context, wsm.WorkspaceID) (wsm.Workspace, error) {
+	m.t.Error("a workspace was read for a card that was never drawn")
+	return wsm.Workspace{}, nil
+}
+
+func TestAHotReloadWhoseRepositoryCannotBeResolvedDrawsNoCardAndSaysWhy(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	gitErr := errors.New("git rev-parse --git-common-dir exited 128")
+	tracker, err := newHotReloadTracker(commonDirFailing{err: gitErr}, mediatorsUnasked{t: t}, hotReloadFeed{}, "/checkout", false, log)
+	if err != nil {
+		t.Fatalf("newHotReloadTracker: %v", err)
+	}
+
+	// Act
+	tracker.Begin(context.Background(), time.UnixMilli(1_700_000_000_000))
+
+	// Assert
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError,
+		Message: "could not read the deploy mediator to draw the hot reload for; this deploy draws no card"})
+	if !ok {
+		t.Fatalf("records = %+v, want the unresolved repository at ERROR", log.Records())
+	}
+	cause, _ := record.Context["cause"].(string)
+	if !strings.Contains(cause, "resolve the repository of /checkout") || !strings.Contains(cause, gitErr.Error()) {
+		t.Fatalf("cause = %q, want it to name the checkout and git's failure", cause)
+	}
 }
 
 func TestADeployerIsNotBuiltWithoutItsHotReloadTracker(t *testing.T) {

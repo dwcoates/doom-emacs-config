@@ -1337,6 +1337,23 @@ func TestAnAsyncMergeCarriesABehindPlacement(t *testing.T) {
 	}
 }
 
+func TestAnAsyncMergeNamesTheWorkspaceItClosesOnLanding(t *testing.T) {
+	// Arrange
+	h, req := asyncHarness(t)
+	req.GetAsyncMerge().CloseAfter = &agentreplv1.CreateWorkspaceAsyncMergeCloseAfter{Workspace: &workspacev1.WorkspaceRef{Id: "ws-closed"}}
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if err != nil || resp.Msg.GetAsyncMergeAccepted() == nil {
+		t.Fatalf("CreateWorkspace = %v, %v; want accepted", resp, err)
+	}
+	if got := h.Merge.requests[0].Detached.CloseOnLanding; got != "ws-closed" {
+		t.Fatalf("closes on landing %q, want ws-closed", got)
+	}
+}
+
 func TestAnAsyncMergeCarriesWhetherItsGateProfiles(t *testing.T) {
 	for _, asked := range []bool{true, false} {
 		t.Run(map[bool]string{true: "asked", false: "not asked"}[asked], func(t *testing.T) {

@@ -500,10 +500,11 @@ func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, retarget 
 	return f.err
 }
 
-// AnswerColdGate records the request the handler handed it.
+// AnswerColdGate records the request the handler handed it, and answers
+// answerColdGateErr.
 func (v *fakeVerbs) AnswerColdGate(_ context.Context, _ ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
 	v.coldGateAnswers = append(v.coldGateAnswers, answer)
-	return nil
+	return v.answerColdGateErr
 }
 
 // PassColdGate records the workspace whose gate the handler handed it, and
@@ -531,8 +532,9 @@ type fakeVerbs struct {
 	externalOpens []string
 
 	// coldGateAnswers records every AnswerColdGate request the handler handed
-	// the verb, in order.
-	coldGateAnswers []*agentreplv1.AnswerColdGateRequest
+	// the verb, in order; answerColdGateErr is what it answers.
+	coldGateAnswers   []*agentreplv1.AnswerColdGateRequest
+	answerColdGateErr error
 	// passedColdGates records every workspace PassColdGate was handed, in
 	// order; passColdGateErr is what it answers.
 	passedColdGates []ids.WorkspaceID
@@ -566,8 +568,9 @@ type fakeVerbs struct {
 	moveErr error
 
 	// editorOpens records every relayed open, a workspace file's path or a
-	// daemon file's.
-	editorOpens []string
+	// daemon file's; openInEditorErr is what OpenInEditor answers.
+	editorOpens     []string
+	openInEditorErr error
 	// feedLinkUnresolved and feedLinkErr are what OpenFeedLink answers.
 	feedLinkUnresolved *workspace.UnresolvedLink
 	feedLinkErr        error
@@ -587,8 +590,10 @@ type fakeVerbs struct {
 
 	createTask    wsm.Task
 	createTaskErr error
-	// taskChanges records every UpdateTask change the handler resolved.
-	taskChanges []wsm.TaskChange
+	// taskChanges records every UpdateTask change the handler resolved, and
+	// updateTaskErr is what UpdateTask answers.
+	taskChanges   []wsm.TaskChange
+	updateTaskErr error
 
 	selectErr error
 	// selectEntered, when set, is closed as Select begins; Select then waits
@@ -1091,7 +1096,7 @@ func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspac
 
 func (f *fakeVerbs) UpdateTask(_ context.Context, _ ids.TaskID, change wsm.TaskChange) error {
 	f.taskChanges = append(f.taskChanges, change)
-	return nil
+	return f.updateTaskErr
 }
 
 func (f *fakeVerbs) RecordInteraction(_ context.Context, ws ids.WorkspaceID, kind workspace.Interaction) error {
@@ -1492,6 +1497,9 @@ type fakeMerge struct {
 	pauseScope           *merge.RepositoryScope
 	// pauser is who the last pause or hard stop was asked by.
 	pauser *merge.Pauser
+	// unpaused records whether Unpause was asked, and unpauseScope its scope.
+	unpaused     bool
+	unpauseScope *merge.RepositoryScope
 	// movesTo are the moves to a place asked of the queue, in order.
 	movesTo             []fakeMoveTo
 	places              []fakePlace
@@ -1620,7 +1628,7 @@ func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueue
 
 func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path string, _ *uint32) error {
 	v.editorOpens = append(v.editorOpens, "file:"+path)
-	return nil
+	return v.openInEditorErr
 }
 
 // OpenExternal records the url the browser would have been handed.
@@ -1751,6 +1759,12 @@ func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope, by me
 
 func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope, by merge.Pauser) error {
 	f.hardStopScope, f.hardStopped, f.pauser = scope, true, &by
+	return f.pauseErr
+}
+
+// Unpause records the resume's scope and answers pauseErr.
+func (f *fakeMerge) Unpause(_ context.Context, scope *merge.RepositoryScope) error {
+	f.unpauseScope, f.unpaused = scope, true
 	return f.pauseErr
 }
 

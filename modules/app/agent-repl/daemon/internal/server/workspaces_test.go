@@ -2091,6 +2091,35 @@ func TestEveryRepositoryRPCFailsAnUnreadableRegistryAsInternal(t *testing.T) {
 	}
 }
 
+// ---- NukeWorkspace ---------------------------------------------------------
+
+// TestANukeWhoseTeardownRefusesAnswersTheRefusalInBand pins a nuke with no
+// op_id: its teardown runs inside the request, so the teardown's refusal is
+// the request's answer, as its typed arm, and recorded.
+func TestANukeWhoseTeardownRefusesAnswersTheRefusalInBand(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	h.Verbs.teardownErr = &workspace.Refusal{Rpc: "NukeWorkspace", Arm: workspace.ArmGitFailed, Reason: "the worktree is locked"}
+
+	// Act.
+	resp, err := h.Client.NukeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.NukeWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NukeWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetGitFailed() == nil {
+		t.Fatalf("result = %v, want git_failed", resp.Msg.GetResult())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "NukeWorkspace", Message: "answered a typed refusal",
+		Match: func(r dlog.Record) bool { return r.Context["arm"] == workspace.ArmGitFailed }}); !ok {
+		t.Fatalf("records = %+v, want the git_failed refusal recorded", log.Records())
+	}
+}
+
 // ---- SwapWorkspaces --------------------------------------------------------
 
 // swapHarness is a harness whose registry holds a second workspace, ws-2.

@@ -102,6 +102,16 @@ func TestValidateStartSessionRequest(t *testing.T) {
 			}},
 			field: "StartSessionRequest.resume.cold_remediation.remediation",
 		},
+		{
+			name: "cold remediation clearing with a nil arm",
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Resume{
+				Resume: &shimv1.StartSessionResume{
+					VendorSessionId: "vendor-1",
+					ColdRemediation: &conversationv1.SessionColdRemediation{Remediation: &conversationv1.SessionColdRemediation_Clear{}},
+				},
+			}},
+			field: "StartSessionRequest.resume.cold_remediation.clear",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,6 +137,37 @@ func TestValidateStartSessionRequestAccepts(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("validateStartSessionRequest() = %v, want nil", err)
+	}
+}
+
+// TestValidateStartSessionRequestAcceptsEachColdRemediation asserts a resume
+// passes with each legal remediation arm.
+func TestValidateStartSessionRequestAcceptsEachColdRemediation(t *testing.T) {
+	tests := []struct {
+		name string
+		rem  *conversationv1.SessionColdRemediation
+	}{
+		{name: "clear", rem: &conversationv1.SessionColdRemediation{
+			Remediation: &conversationv1.SessionColdRemediation_Clear{Clear: &conversationv1.SessionColdClear{}}}},
+		{name: "compact", rem: &conversationv1.SessionColdRemediation{
+			Remediation: &conversationv1.SessionColdRemediation_Compact{Compact: &conversationv1.SessionColdCompact{
+				Model: validModel(), Scope: conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL}}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			req := &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Resume{
+				Resume: &shimv1.StartSessionResume{VendorSessionId: "vendor-1", ColdRemediation: tc.rem},
+			}}
+
+			// Act.
+			err := validateStartSessionRequest(req)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("validateStartSessionRequest() = %v, want nil", err)
+			}
+		})
 	}
 }
 

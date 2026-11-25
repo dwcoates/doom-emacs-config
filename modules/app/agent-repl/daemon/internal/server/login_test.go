@@ -258,6 +258,33 @@ func TestOpenInEditorOpensAWorkspaceFileThroughTheVerb(t *testing.T) {
 	}
 }
 
+// TestOpenInEditorAnswersTheVerbsRefusalOfAWorkspaceFile pins that a verb
+// refusing the file (it lies outside the workspace) is answered as its typed
+// arm, and recorded.
+func TestOpenInEditorAnswersTheVerbsRefusalOfAWorkspaceFile(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	h.Verbs.openInEditorErr = &workspace.Refusal{Arm: workspace.ArmPathEscapesWorkspace, Reason: "/etc/passwd lies outside the workspace"}
+
+	// Act.
+	resp, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+		Target: &agentreplv1.OpenInEditorRequest_WorkspaceFile{WorkspaceFile: &agentreplv1.OpenInEditorWorkspaceFile{Path: "/etc/passwd"}}}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenInEditor: %v", err)
+	}
+	if resp.Msg.GetError().GetPathEscapesWorkspace() == nil {
+		t.Fatalf("result = %v, want path_escapes_workspace", resp.Msg.GetResult())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "OpenInEditor", Message: "answered a typed refusal",
+		Match: func(r dlog.Record) bool { return r.Context["arm"] == workspace.ArmPathEscapesWorkspace }}); !ok {
+		t.Fatalf("records = %+v, want the path_escapes_workspace refusal recorded", log.Records())
+	}
+}
+
 func TestOpenInEditorOpensACommitLogThroughTheVerb(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

@@ -1443,6 +1443,18 @@ func TestActivityToolName(t *testing.T) {
 			want: "mcp__claude-in-chrome__navigate",
 		},
 		{
+			name: "an MCP call's success is named by the tool it restates",
+			act: &conversationv1.AgentActivity{
+				ActivityId: &conversationv1.AgentActivityId{Value: "act-1"},
+				Item: &conversationv1.AgentActivity_McpToolCall{McpToolCall: &conversationv1.AgentMcpToolCall{
+					Result: &conversationv1.AgentMcpToolCall_Success{Success: &conversationv1.AgentMcpToolCallSuccess{
+						Tool: &conversationv1.AgentMcpTool{Name: "mcp__claude-in-chrome__navigate"},
+					}},
+				}},
+			},
+			want: "mcp__claude-in-chrome__navigate",
+		},
+		{
 			name: "a subagent hand-back is named by its vendor tool",
 			act:  handbackActivity("act-1"),
 			want: "SubagentHandback",

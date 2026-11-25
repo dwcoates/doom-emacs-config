@@ -633,6 +633,15 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 				r.GetStandard().DeployHooks = &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: []*repoconfigv1.Hook{{Hook: &repoconfigv1.Hook_Builtin{Builtin: &repoconfigv1.HookBuiltIn{}}}}}
 			}))
 		}, field: "standard.deploy_hooks.pre_deploy[0]"},
+		{name: "create with a builtin post-deploy hook", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.GetStandard().DeployHooks = &agentreplv1.CreateWorkspaceDeployHooks{PostDeploy: []*repoconfigv1.Hook{{Hook: &repoconfigv1.Hook_Builtin{Builtin: &repoconfigv1.HookBuiltIn{}}}}}
+			}))
+		}, field: "standard.deploy_hooks.post_deploy[0]"},
+		{name: "a resume naming its repository by nothing", check: func() *connect.Error {
+			return validateUpdateMergeQueueRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
+				Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: &workspacev1.RepositoryRef{}}}})
+		}, field: "resume.repository"},
 		{name: "create with a slack origin that links no message", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1"}
@@ -913,6 +922,15 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			}))
 		}},
 		{name: "create an async merge", check: func() *connect.Error { return validateCreateWorkspaceRequest(validAsyncMerge(nil)) }},
+		{name: "create with a prompt post-deploy hook", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.GetStandard().DeployHooks = &agentreplv1.CreateWorkspaceDeployHooks{PostDeploy: []*repoconfigv1.Hook{{Hook: &repoconfigv1.Hook_Prompt{Prompt: &repoconfigv1.HookPrompt{Text: "announce the deploy"}}}}}
+			}))
+		}},
+		{name: "a resume scoped to one repository", check: func() *connect.Error {
+			return validateUpdateMergeQueueRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
+				Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: &workspacev1.RepositoryRef{Id: "repo-1"}}}})
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

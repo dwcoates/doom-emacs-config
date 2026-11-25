@@ -90,6 +90,41 @@ func TestHoldFirstWatcherStartFromEnvUnsetStartsUnheld(t *testing.T) {
 	}
 }
 
+func TestHoldFirstWatcherStartFromEnvSetHoldsTheFirstStart(t *testing.T) {
+	// Arrange: a test run names an absolute hold socket that is listening.
+	t.Setenv(envc.EnvForbidVendorCalls, "1")
+	socket := holdSocketPath(t)
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	calls := make(chan ids.WorkspaceID, 1)
+	start, err := HoldFirstWatcherStartFromEnv(envc.Load(), func(string) string { return socket }, countingStart(calls))
+	if err != nil {
+		t.Fatalf("HoldFirstWatcherStartFromEnv: %v", err)
+	}
+	done := callStart(start, "ws-1", dlog.NewTestLogger())
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatal("the wrapped start ran while the hold was still open")
+	}
+
+	// Act
+	conn.Close()
+
+	// Assert
+	if err := <-done; err != nil {
+		t.Fatalf("held start = %v, want a success once released", err)
+	}
+	if got := <-calls; got != "ws-1" {
+		t.Fatalf("the wrapped start ran for %q, want ws-1", got)
+	}
+}
+
 func TestTheFirstWatcherStartIsHeldUntilTheTestReleasesIt(t *testing.T) {
 	// Arrange
 	socket := holdSocketPath(t)

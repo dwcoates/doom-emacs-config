@@ -129,6 +129,32 @@ func TestAdoptHostAnswersParticipantNotExpected(t *testing.T) {
 	}
 }
 
+// TestAdoptHostAnswersNoTransferAnnouncedAtInfo pins the host's adoption on a
+// daemon that announced no transfer: answered as its typed arm, and recorded
+// at INFO as every adoption refusal is.
+func TestAdoptHostAnswersNoTransferAnnouncedAtInfo(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Rollout.adoptHostErr = rollout.ErrNoTransferAnnounced
+
+	// Act.
+	resp, err := h.Client.AdoptHostWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AdoptHostWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetNoTransferAnnounced() == nil {
+		t.Fatalf("result = %v, want no_transfer_announced", resp.Msg.GetResult())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "AdoptHostWorkspace", Message: "answered a typed refusal",
+		Match: func(r dlog.Record) bool { return r.Context["arm"] == "no_transfer_announced" }}); !ok {
+		t.Fatalf("records = %+v, want the no_transfer_announced refusal at INFO", log.Records())
+	}
+}
+
 // TestAdoptionIsReachableOnAJoiningDaemon pins that the adoption calls do NOT
 // refuse on `not_yet_adopted` standing: that is exactly the state they exist to
 // leave, and refusing would make the rendezvous unreachable.

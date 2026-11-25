@@ -288,6 +288,43 @@ func TestAPickWhoseBriefCannotBeComposedFailsTheMergeAndIsAnError(t *testing.T) 
 	}
 }
 
+func TestAnAsynchronousQueueRunsAPickToItsEndOnItsOwnWait(t *testing.T) {
+	// Arrange: a begun pick, on a queue that runs its waits on goroutines of
+	// their own; the queue is paused, so the pick's success admits nothing
+	// further.
+	h := pickHarness(t)
+	requestPick(t, h)
+	h.o.mu.Lock()
+	p, ok := h.o.picks[theMergeWorkspace]
+	h.o.mu.Unlock()
+	if !ok {
+		t.Fatal("no pick stands for the merge workspace")
+	}
+	h.db.mu.Lock()
+	h.db.paused[h.repoKey()] = true
+	h.db.mu.Unlock()
+	h.o.async = true
+
+	// Act
+	h.o.awaitPick(p, false)
+	h.o.live.Wait()
+
+	// Assert
+	tabs := pickTabs(h)
+	if last := tabs[len(tabs)-1]; last.GetSettled().GetSucceeded() == nil {
+		t.Fatalf("last pick tab = %+v, want settled succeeded", last)
+	}
+	h.o.mu.Lock()
+	_, standing := h.o.requested[theMergeWorkspace]
+	h.o.mu.Unlock()
+	if standing {
+		t.Fatal("the pick's wait still stands after the pick ended")
+	}
+	if entry, ok := h.entryOf(theMergeWorkspace); !ok || entry.Source.Pick != "" {
+		t.Fatalf("entry = %+v, %v; want the merge at the head with its pick cleared", entry, ok)
+	}
+}
+
 func TestAWithdrawnPickSettlesItsTabWithoutFailingTheMergeItself(t *testing.T) {
 	// Arrange: the pick's turn is still running when its wait is withdrawn.
 	h := pickHarness(t)
