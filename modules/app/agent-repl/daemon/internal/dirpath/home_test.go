@@ -46,3 +46,26 @@ func TestAbsolute(t *testing.T) {
 		})
 	}
 }
+
+func TestTilde(t *testing.T) {
+	tests := []struct {
+		name, path, home, want string
+	}{
+		{"beneath home", "/home/u/.claude-emacs/merge-logs/a.log", "/home/u", "~/.claude-emacs/merge-logs/a.log"},
+		{"home itself", "/home/u", "/home/u", "~"},
+		{"sibling sharing a prefix", "/home/user2/a.log", "/home/u", "/home/user2/a.log"},
+		{"outside home", "/opt/a/SKILL.md", "/home/u", "/opt/a/SKILL.md"},
+		{"no home known", "/tmp/a.log", "", "/tmp/a.log"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := Tilde(tt.path, tt.home)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("Tilde(%q, %q) = %q, want %q", tt.path, tt.home, got, tt.want)
+			}
+		})
+	}
+}

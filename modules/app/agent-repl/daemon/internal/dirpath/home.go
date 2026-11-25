@@ -40,3 +40,20 @@ func Absolute(path, home string) (string, error) {
 	}
 	return filepath.Clean(expanded), nil
 }
+
+// Tilde spells PATH from home, the inverse of Absolute: home itself is `~`, a
+// path beneath it is `~/rest`, and every other path, or any path when HOME is
+// empty, is taken as written. It is THE ONE spelling of a home-relative path
+// the daemon draws, so a file link and a label cannot spell one differently.
+func Tilde(path, home string) string {
+	if home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if rest, inside := strings.CutPrefix(path, home+string(filepath.Separator)); inside {
+		return filepath.Join("~", rest)
+	}
+	return path
+}

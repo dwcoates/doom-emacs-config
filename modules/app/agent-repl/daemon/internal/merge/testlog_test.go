@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/dirpath"
 	"context"
 	"errors"
 	"os"
@@ -177,28 +178,6 @@ func TestATokenWhoseLogAgedOutIsRefusedAtInfo(t *testing.T) {
 	}
 }
 
-func TestTildePathShortensTheHomeDirectory(t *testing.T) {
-	tests := []struct {
-		path, home, want string
-	}{
-		{path: "/home/u/.claude-emacs/merge-logs/a.log", home: "/home/u", want: "~/.claude-emacs/merge-logs/a.log"},
-		{path: "/home/u", home: "/home/u", want: "~"},
-		{path: "/home/user2/a.log", home: "/home/u", want: "/home/user2/a.log"},
-		{path: "/tmp/a.log", home: "", want: "/tmp/a.log"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			// Act.
-			got := tildePath(tt.path, tt.home)
-
-			// Assert.
-			if got != tt.want {
-				t.Fatalf("tildePath = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCreateLogMakesItsDirectoryAndTruncates(t *testing.T) {
 	// Arrange: a log path whose directory does not exist yet.
 	path := filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-1.log")
@@ -334,5 +313,22 @@ func TestEveryLogIsCreatedThroughCreateLog(t *testing.T) {
 	// tests file in the worktree (writeFailingTests), which is no log.
 	if viaHelper != 4 || byHand != 0 || written != 1 {
 		t.Fatalf("createLog( appears %d times, os.Create( %d and os.WriteFile( %d; want 4, 0 and 1", viaHelper, byHand, written)
+	}
+}
+
+// TestATestLogLabelIsTheOneHomeSpelling pins that a tests round's log label is
+// spelled by dirpath.Tilde, the spelling every home-relative path the daemon
+// draws takes, and not by a spelling of its own.
+func TestATestLogLabelIsTheOneHomeSpelling(t *testing.T) {
+	// Arrange.
+	o := &orchestrator{deps: Deps{Home: "/home/u"}}
+	log := testLog{token: "lease/1", path: "/home/u/.claude-emacs/merge-logs/a.log"}
+
+	// Act.
+	got := o.testLogLink(log).GetLabel().GetText()
+
+	// Assert.
+	if want := dirpath.Tilde(log.path, "/home/u"); got != want {
+		t.Fatalf("label = %q, want %q", got, want)
 	}
 }

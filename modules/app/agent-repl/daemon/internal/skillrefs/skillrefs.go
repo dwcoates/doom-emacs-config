@@ -17,7 +17,6 @@
 package skillrefs
 
 import (
-	"path/filepath"
 	"strings"
 
 	"agent-repld/internal/dirpath"
@@ -30,7 +29,7 @@ type Files func(name string) (file string, ok bool)
 
 // Linkify answers MARKDOWN with every inline code span that is wholly a name
 // FILES knows, optionally led by `/`, written as a link to that skill's file
-// (Href, under HOME). Only a code span of prose is linked: never one inside a
+// (dirpath.Tilde, under HOME). Only a code span of prose is linked: never one inside a
 // link of any kind, a fenced block or a reference definition, and never an
 // unknown name, which stays inline code. A text still ARRIVING leaves a code
 // span at its very end alone, because the next push may lengthen its closing
@@ -62,7 +61,7 @@ func Linkify(markdown string, files Files, home string, arriving bool) string {
 				out.WriteString(s.Raw)
 				continue
 			}
-			out.WriteString("[" + linkText(name) + "](" + destination(Href(file, home)) + ")")
+			out.WriteString("[" + linkText(name) + "](" + destination(dirpath.Tilde(file, home)) + ")")
 		}
 	}
 	return out.String()
@@ -75,17 +74,6 @@ func lookup(files Files, name string) (string, bool) {
 		return "", false
 	}
 	return files(name)
-}
-
-// Href spells FILE as a file link's destination: `~/` and the rest when FILE
-// lies beneath HOME, and FILE itself otherwise.
-func Href(file, home string) string {
-	if home != "" && dirpath.Within(file, home) {
-		if rest, err := filepath.Rel(home, file); err == nil && rest != "." {
-			return "~/" + filepath.ToSlash(rest)
-		}
-	}
-	return file
 }
 
 // linkText is the link's drawn text, `/` and NAME, with every character that

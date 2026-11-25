@@ -1,6 +1,10 @@
 package skillrefs
 
-import "testing"
+import (
+	"testing"
+
+	"agent-repld/internal/dirpath"
+)
 
 const home = "/h"
 
@@ -73,21 +77,18 @@ func TestLinkifyNeverAsksForANameNoSkillCouldHave(t *testing.T) {
 	}
 }
 
-func TestHref(t *testing.T) {
-	tests := []struct {
-		name, file, home, want string
-	}{
-		{"beneath home", "/h/a/SKILL.md", "/h", "~/a/SKILL.md"},
-		{"outside home", "/opt/a/SKILL.md", "/h", "/opt/a/SKILL.md"},
-		{"sibling sharing a prefix", "/home2/a", "/home", "/home2/a"},
-		{"home itself", "/h", "/h", "/h"},
-		{"no home known", "/h/a", "", "/h/a"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := Href(tc.file, tc.home); got != tc.want {
-				t.Fatalf("Href(%q, %q) = %q, want %q", tc.file, tc.home, got, tc.want)
-			}
-		})
+// TestADestinationIsTheOneHomeSpelling pins that a skill link's destination
+// is spelled by dirpath.Tilde, the spelling every home-relative path the
+// daemon draws takes, and not by a spelling of its own.
+func TestADestinationIsTheOneHomeSpelling(t *testing.T) {
+	// Arrange
+	file, _ := files("ceac-resource-usage")
+
+	// Act
+	got := Linkify("`ceac-resource-usage`", files, home, false)
+
+	// Assert
+	if want := "[/ceac-resource-usage](" + dirpath.Tilde(file, home) + ")"; got != want {
+		t.Fatalf("Linkify = %q, want %q", got, want)
 	}
 }
