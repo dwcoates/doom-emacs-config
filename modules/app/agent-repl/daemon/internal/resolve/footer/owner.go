@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/feedid"
 )
 
@@ -102,14 +103,18 @@ func (r *resolver) recordOwner(s *wsState, id, owner, source string) {
 // recordSpawnOwner records the CARRIER of a spawn frame as the owner of the
 // work it starts: a subagent spawn (under its unit and its created agent), a
 // shell's run and a monitor's watch, each under its unit.
+//
+// A SUBAGENT'S RUNNING UPDATE IS A SPAWN FRAME TOO: it upserts its start's row
+// in its start's book, so a replay of a run still going serves the update and
+// no start, and the update's carrier is the start's.
 func (r *resolver) recordSpawnOwner(s *wsState, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
 	unit := act.GetActivityId().GetValue()
 	carrier := agent.GetValue()
 	switch item := act.GetItem().(type) {
 	case *conversationv1.AgentActivity_Subagent:
-		if start := item.Subagent.GetStart(); start != nil {
+		if item.Subagent.GetStart() != nil || item.Subagent.GetUpdate() != nil {
 			r.recordOwner(s, unit, carrier, ownerFromSpawnFrame)
-			r.recordOwner(s, start.GetCreatedAgentId().GetValue(), carrier, ownerFromSpawnFrame)
+			r.recordOwner(s, sessionwatcher.SpawnCreatedAgent(item.Subagent).GetValue(), carrier, ownerFromSpawnFrame)
 		}
 	case *conversationv1.AgentActivity_Bash:
 		if item.Bash.GetStart() != nil {

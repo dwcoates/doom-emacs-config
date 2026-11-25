@@ -1758,10 +1758,10 @@ func TestNoSpawnFrameIsStillHeldOnceTheTurnEnds(t *testing.T) {
 }
 
 func TestASpawnWhoseStartNeverArrivedIsWarnedWhenTheTurnEnds(t *testing.T) {
-	// Arrange: a bound producer's running beat, which names no agent and is
-	// held for a start that never comes.
+	// Arrange: a running beat from a producer bound to name its agent there
+	// (revision 4), which names none and is held for a start that never comes.
 	h := newHarness(t)
-	h.send(bound(&conversationv1.AgentActivity{
+	h.send(stamped(conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT, &conversationv1.AgentActivity{
 		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
 		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
@@ -1779,6 +1779,68 @@ func TestASpawnWhoseStartNeverArrivedIsWarnedWhenTheTurnEnds(t *testing.T) {
 	// Assert.
 	if !h.hasRecord("warn", "daemon.feed.subagent_without_start") {
 		t.Fatalf("records = %+v, want a WARN daemon.feed.subagent_without_start", h.records())
+	}
+}
+
+// stamped stamps act with CONTRACT, the revision its producer wrote under.
+func stamped(contract conversationv1.AgentActivityContract, act *conversationv1.AgentActivity) *conversationv1.AgentActivity {
+	act.Contract = contract
+	return act
+}
+
+// runningSpawnUpdate is spawn-1's running beat stamped with CONTRACT, naming
+// CREATED as its created agent (nil names none).
+func runningSpawnUpdate(contract conversationv1.AgentActivityContract, created *conversationv1.AgentId) *conversationv1.AgentActivity {
+	return stamped(contract, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				CreatedAgentId: created,
+				Progress:       &conversationv1.AgentSubagentProgress{TotalTokens: 12_400},
+			}},
+		}},
+	})
+}
+
+func TestARevision3BeatThatNamesNoAgentIsRecordedAtInfoWhenTheTurnEnds(t *testing.T) {
+	// Arrange: a beat written before updates named their agent.
+	h := newHarness(t)
+	h.send(runningSpawnUpdate(conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL, nil))
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: expected old data, neither warned nor an error.
+	if !h.hasRecord("info", "daemon.feed.settle_predates_contract") ||
+		h.hasRecord("warn", "daemon.feed.subagent_without_start") || len(h.anyErrors()) != 0 {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no WARN or ERROR", h.records())
+	}
+}
+
+func TestAReplayedRunningSpawnsUpdateAddressesItsSubFeed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act: a catch-up page carries the running spawn's update, and no start.
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Activity{Activity: runningSpawnUpdate(
+			conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT, created)},
+	})))
+
+	// Assert: the head is drawn under the created agent, its sub-feed opens,
+	// and nothing is warned.
+	row := h.bubbleRow("spawn-1", created)
+	page, _ := h.openPage(feedid.Feed{Agent: created}, "reader-1")
+	crumbs := page.GetResult().(*frontendv1.FeedPage_Success).Success.GetBreadcrumbs().GetCrumbs()
+	if len(crumbs) != 1 || crumbs[0].GetTarget().GetValue() != row.GetId().GetValue() {
+		t.Fatalf("crumbs = %+v, want the replayed spawn's head", crumbs)
+	}
+	if h.hasRecord("warn", "daemon.feed.subagent_without_start") {
+		t.Fatalf("records = %+v, want no subagent_without_start", h.records())
 	}
 }
 

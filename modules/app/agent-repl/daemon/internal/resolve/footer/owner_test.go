@@ -381,3 +381,29 @@ func TestAMonitorAndAShellASubagentStartedAreNeverDrawn(t *testing.T) {
 		t.Fatalf("focus = %+v, want the main agent's launch alone to have focused", got)
 	}
 }
+
+func TestARunningSpawnsUpdateRecordsItsCarrierAsTheOwner(t *testing.T) {
+	// Arrange: a replay of a run still going carries its update and no start.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "toolu_spawn"},
+		Contract:   conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT,
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				CreatedAgentId: &conversationv1.AgentId{Value: "toolu_spawn"},
+			}},
+		}},
+	})
+
+	// Act: its detachment states no owner.
+	moved := movedSubagent("toolu_spawn", "toolu_spawn")
+	moved.Owner = nil
+	h.r.OnDetachedWork(testWS, mainAgent, moved)
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"toolu_spawn"}, nil, nil))
+
+	// Assert
+	if got, want := drawnOf(t, h), (drawnCounts{agentChip: 1, agentRows: 1}); got != want {
+		t.Fatalf("drawn = %+v, want %+v: the update's carrier is a recorded owner", got, want)
+	}
+}
