@@ -146,6 +146,9 @@ const (
 	// AgentReplCloseWorkspaceProcedure is the fully-qualified name of the AgentRepl's CloseWorkspace
 	// RPC.
 	AgentReplCloseWorkspaceProcedure = "/agentrepl.v1.AgentRepl/CloseWorkspace"
+	// AgentReplWithdrawWorkspaceCloseProcedure is the fully-qualified name of the AgentRepl's
+	// WithdrawWorkspaceClose RPC.
+	AgentReplWithdrawWorkspaceCloseProcedure = "/agentrepl.v1.AgentRepl/WithdrawWorkspaceClose"
 	// AgentReplKillWorkspaceProcedure is the fully-qualified name of the AgentRepl's KillWorkspace RPC.
 	AgentReplKillWorkspaceProcedure = "/agentrepl.v1.AgentRepl/KillWorkspace"
 	// AgentReplNukeWorkspaceProcedure is the fully-qualified name of the AgentRepl's NukeWorkspace RPC.
@@ -567,6 +570,7 @@ var (
 	agentReplListWorkspaceTranscriptsMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("ListWorkspaceTranscripts")
 	agentReplBindWorkspaceSessionMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("BindWorkspaceSession")
 	agentReplCloseWorkspaceMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("CloseWorkspace")
+	agentReplWithdrawWorkspaceCloseMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("WithdrawWorkspaceClose")
 	agentReplKillWorkspaceMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("KillWorkspace")
 	agentReplNukeWorkspaceMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("NukeWorkspace")
 	agentReplForgetWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ForgetWorkspace")
@@ -837,6 +841,9 @@ type AgentReplClient interface {
 	BindWorkspaceSession(context.Context, *connect.Request[v1.BindWorkspaceSessionRequest]) (*connect.Response[v1.BindWorkspaceSessionResponse], error)
 	// Tear down a workspace's editor state without merging — the only teardown.
 	CloseWorkspace(context.Context, *connect.Request[v1.CloseWorkspaceRequest]) (*connect.Response[v1.CloseWorkspaceResponse], error)
+	// Take back a workspace's standing close request, so it is not closed once
+	// its blockers clear.
+	WithdrawWorkspaceClose(context.Context, *connect.Request[v1.WithdrawWorkspaceCloseRequest]) (*connect.Response[v1.WithdrawWorkspaceCloseResponse], error)
 	// The big red button: forced session death, never blocks, data survives.
 	KillWorkspace(context.Context, *connect.Request[v1.KillWorkspaceRequest]) (*connect.Response[v1.KillWorkspaceResponse], error)
 	// Data destruction: kill if live, then delete worktree and branch.
@@ -1534,6 +1541,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplCloseWorkspaceProcedure,
 			connect.WithSchema(agentReplCloseWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		withdrawWorkspaceClose: connect.NewClient[v1.WithdrawWorkspaceCloseRequest, v1.WithdrawWorkspaceCloseResponse](
+			httpClient,
+			baseURL+AgentReplWithdrawWorkspaceCloseProcedure,
+			connect.WithSchema(agentReplWithdrawWorkspaceCloseMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		killWorkspace: connect.NewClient[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse](
@@ -2427,6 +2440,7 @@ type agentReplClient struct {
 	listWorkspaceTranscripts           *connect.Client[v1.ListWorkspaceTranscriptsRequest, v1.ListWorkspaceTranscriptsResponse]
 	bindWorkspaceSession               *connect.Client[v1.BindWorkspaceSessionRequest, v1.BindWorkspaceSessionResponse]
 	closeWorkspace                     *connect.Client[v1.CloseWorkspaceRequest, v1.CloseWorkspaceResponse]
+	withdrawWorkspaceClose             *connect.Client[v1.WithdrawWorkspaceCloseRequest, v1.WithdrawWorkspaceCloseResponse]
 	killWorkspace                      *connect.Client[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse]
 	nukeWorkspace                      *connect.Client[v1.NukeWorkspaceRequest, v1.NukeWorkspaceResponse]
 	forgetWorkspace                    *connect.Client[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse]
@@ -2755,6 +2769,11 @@ func (c *agentReplClient) BindWorkspaceSession(ctx context.Context, req *connect
 // CloseWorkspace calls agentrepl.v1.AgentRepl.CloseWorkspace.
 func (c *agentReplClient) CloseWorkspace(ctx context.Context, req *connect.Request[v1.CloseWorkspaceRequest]) (*connect.Response[v1.CloseWorkspaceResponse], error) {
 	return c.closeWorkspace.CallUnary(ctx, req)
+}
+
+// WithdrawWorkspaceClose calls agentrepl.v1.AgentRepl.WithdrawWorkspaceClose.
+func (c *agentReplClient) WithdrawWorkspaceClose(ctx context.Context, req *connect.Request[v1.WithdrawWorkspaceCloseRequest]) (*connect.Response[v1.WithdrawWorkspaceCloseResponse], error) {
+	return c.withdrawWorkspaceClose.CallUnary(ctx, req)
 }
 
 // KillWorkspace calls agentrepl.v1.AgentRepl.KillWorkspace.
@@ -3578,6 +3597,9 @@ type AgentReplHandler interface {
 	BindWorkspaceSession(context.Context, *connect.Request[v1.BindWorkspaceSessionRequest]) (*connect.Response[v1.BindWorkspaceSessionResponse], error)
 	// Tear down a workspace's editor state without merging — the only teardown.
 	CloseWorkspace(context.Context, *connect.Request[v1.CloseWorkspaceRequest]) (*connect.Response[v1.CloseWorkspaceResponse], error)
+	// Take back a workspace's standing close request, so it is not closed once
+	// its blockers clear.
+	WithdrawWorkspaceClose(context.Context, *connect.Request[v1.WithdrawWorkspaceCloseRequest]) (*connect.Response[v1.WithdrawWorkspaceCloseResponse], error)
 	// The big red button: forced session death, never blocks, data survives.
 	KillWorkspace(context.Context, *connect.Request[v1.KillWorkspaceRequest]) (*connect.Response[v1.KillWorkspaceResponse], error)
 	// Data destruction: kill if live, then delete worktree and branch.
@@ -4271,6 +4293,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplCloseWorkspaceProcedure,
 		svc.CloseWorkspace,
 		connect.WithSchema(agentReplCloseWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplWithdrawWorkspaceCloseHandler := connect.NewUnaryHandler(
+		AgentReplWithdrawWorkspaceCloseProcedure,
+		svc.WithdrawWorkspaceClose,
+		connect.WithSchema(agentReplWithdrawWorkspaceCloseMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplKillWorkspaceHandler := connect.NewUnaryHandler(
@@ -5199,6 +5227,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplBindWorkspaceSessionHandler.ServeHTTP(w, r)
 		case AgentReplCloseWorkspaceProcedure:
 			agentReplCloseWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplWithdrawWorkspaceCloseProcedure:
+			agentReplWithdrawWorkspaceCloseHandler.ServeHTTP(w, r)
 		case AgentReplKillWorkspaceProcedure:
 			agentReplKillWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplNukeWorkspaceProcedure:
@@ -5634,6 +5664,10 @@ func (UnimplementedAgentReplHandler) BindWorkspaceSession(context.Context, *conn
 
 func (UnimplementedAgentReplHandler) CloseWorkspace(context.Context, *connect.Request[v1.CloseWorkspaceRequest]) (*connect.Response[v1.CloseWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CloseWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) WithdrawWorkspaceClose(context.Context, *connect.Request[v1.WithdrawWorkspaceCloseRequest]) (*connect.Response[v1.WithdrawWorkspaceCloseResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WithdrawWorkspaceClose is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) KillWorkspace(context.Context, *connect.Request[v1.KillWorkspaceRequest]) (*connect.Response[v1.KillWorkspaceResponse], error) {

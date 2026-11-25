@@ -1,0 +1,80 @@
+// endpoint_withdraw_workspace_close.proto — WithdrawWorkspaceClose: take back
+// a workspace's standing close request (CloseWorkspaceRequest.stand), so the
+// daemon no longer closes it once its blockers clear. Asked by the workspace's
+// own agent (`agent-repld workspace close here -cancel`), by the user, or by
+// another workspace's agent on the user's behalf. Any prompt the user sends
+// the workspace withdraws the request too, without this call: a workspace the
+// user works with again is never closed under them.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_topology.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message WithdrawWorkspaceCloseRequest {
+  // The workspace whose standing close request is withdrawn. REQUIRED.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Who asked, recorded with the withdrawal. REQUIRED.
+  WorkspaceRequester requester = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message WithdrawWorkspaceCloseResponse {
+  oneof result {
+    WithdrawWorkspaceCloseSuccess success = 1;
+    WithdrawWorkspaceCloseError error = 2;
+  }
+}
+message WithdrawWorkspaceCloseSuccess {
+  // THE ARM IS WHAT THE WITHDRAWAL FOUND.
+  oneof outcome {
+    // A standing close request stood, and it is withdrawn: the workspace
+    // stays open until it is closed again.
+    WithdrawWorkspaceCloseSuccessWithdrawn withdrawn = 1;
+    // No close request stood, so there was nothing to withdraw; nothing
+    // changed. An answer, not a failure: the caller's wish (the workspace is
+    // not closed for a standing request) already holds.
+    WithdrawWorkspaceCloseSuccessNoneStood none_stood = 2;
+  }
+}
+// The standing close request is withdrawn. No fields.
+message WithdrawWorkspaceCloseSuccessWithdrawn {}
+// No close request stood. No fields.
+message WithdrawWorkspaceCloseSuccessNoneStood {}
+
+// THE ARM IS THE REFUSAL.
+// Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
+message WithdrawWorkspaceCloseError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    WithdrawWorkspaceCloseUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    WithdrawWorkspaceCloseWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    WithdrawWorkspaceCloseTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    WithdrawWorkspaceCloseNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// The workspace id is not in the daemon's registry. No fields.
+message WithdrawWorkspaceCloseUnknownWorkspace {}
+// The echoed dir disagrees with the registry's.
+message WithdrawWorkspaceCloseWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon handed the workspace to a successor.
+message WithdrawWorkspaceCloseTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not adopted the workspace yet.
+message WithdrawWorkspaceCloseNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves the workspace until the
+  // joining daemon adopts it, UNSET when no live daemon serves it.
+  optional string address = 1;
+}

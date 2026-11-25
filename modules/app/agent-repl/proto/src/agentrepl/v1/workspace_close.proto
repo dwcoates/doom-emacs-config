@@ -1,0 +1,44 @@
+// workspace_close.proto — WHAT BLOCKS A WORKSPACE'S CLOSE, shared by the close
+// itself (CloseWorkspace: its `blocked` refusal and its `stands` outcome) and
+// by the workspace's status (WorkspaceStatus.close_request), so a caller reads
+// one evidence whether it asked the close or reads a close that stands.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/family.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// WHY the close is blocked — the same evidence the footer's close-blocked
+// state draws, so a caller with no footer (a test, a log line, the host's
+// own message) can still say why. (Landing 7, 2026-09-02.)
+message CloseWorkspaceBlocked {
+  // The main thread has a turn in flight. Never TRUE when a self-close is
+  // asked, whose own asking turn is never a blocker; a standing close judged
+  // later counts every turn, since a turn running then is not the asking one.
+  bool turn_in_flight = 1;
+  // Detached items live now (subagents, runs, tasks).
+  uint32 live_work = 2;
+  // Held prompts in the held section — undelivered user intent.
+  uint32 held_prompts = 3;
+  // The workspace is queued for, or inside, a merge.
+  bool merge_queued = 4;
+  // The daemon's composed sentence over the fields above — the footer's
+  // activity line, verbatim.
+  string summary = 5;
+}
+
+// Everything a standing close request waits on. Each blocker clears on its
+// own (a turn or detached work ends, a held prompt is sent or dropped, a merge
+// leaves the queue, a child closes or is retargeted away), and the daemon
+// judges the request again on each such edge. Both fields UNSET means nothing
+// blocks the close any more: it is being carried out.
+message WorkspaceCloseWaits {
+  // The quietness blockers, UNSET while the workspace is quiet.
+  optional CloseWorkspaceBlocked blocked = 1;
+  // The open children, and the open workspaces landing into this one, UNSET
+  // while it has none.
+  optional WorkspaceHasOpenChildren open_children = 2;
+}

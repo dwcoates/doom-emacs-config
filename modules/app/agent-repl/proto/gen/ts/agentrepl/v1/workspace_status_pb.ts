@@ -14,6 +14,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceCloseWaits } from "./workspace_close_pb";
+import { file_agentrepl_v1_workspace_close } from "./workspace_close_pb";
 import type { WorkspaceLinks } from "./workspace_links_pb";
 import { file_agentrepl_v1_workspace_links } from "./workspace_links_pb";
 import type { FeedId } from "../../frontend/v1/feed_pb";
@@ -26,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_status.proto.
  */
 export const file_agentrepl_v1_workspace_status: GenFile = /*@__PURE__*/
-  fileDesc("CiNhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3N0YXR1cy5wcm90bxIMYWdlbnRyZXBsLnYxIsgFCg9Xb3Jrc3BhY2VTdGF0dXMSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRI+CgxtZXJnZV90YXJnZXQYBCABKAsyKC5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzTWVyZ2VUYXJnZXQSEgoKYmFja2xvZ2dlZBgFIAEoCBI3CghzdGFuZGluZxgGIAEoCzIlLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNTdGFuZGluZxIQCghvbmVfc2hvdBgHIAEoCBIxCghhd2FpdGluZxgIIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIAIgBARIvCgpyZXBvc2l0b3J5GAkgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSKwoFbGlua3MYCyABKAsyHC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua3MSPwoMcmVsYXRpb25zaGlwGAwgASgLMikuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c1JlbGF0aW9uc2hpcBI2CgVvd25lchgNIAEoCzIiLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNPd25lckgBiAEBEjMKCmNyZWF0ZWRfYnkYDiABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAKIAQESLAoIY2hpbGRyZW4YDyADKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKB3N1bW1hcnkYECABKAlIA4gBAUILCglfYXdhaXRpbmdCCAoGX293bmVyQg0KC19jcmVhdGVkX2J5QgoKCF9zdW1tYXJ5SgQIChALUg5wcmluY2lwYWxfbGluayKlAQobV29ya3NwYWNlU3RhdHVzUmVsYXRpb25zaGlwEj8KBWNoaWxkGAEgASgLMi4uYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c1JlbGF0aW9uc2hpcENoaWxkSAASPQoEcGVlchgCIAEoCzItLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNSZWxhdGlvbnNoaXBQZWVySABCBgoEa2luZCJOCiBXb3Jrc3BhY2VTdGF0dXNSZWxhdGlvbnNoaXBDaGlsZBIqCgZwYXJlbnQYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIiEKH1dvcmtzcGFjZVN0YXR1c1JlbGF0aW9uc2hpcFBlZXIiWAoUV29ya3NwYWNlU3RhdHVzT3duZXISLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkoECAIQA1ILb3duZXJfbGFuZHMisgEKGldvcmtzcGFjZVN0YXR1c01lcmdlVGFyZ2V0EkIKB3ByaW1hcnkYASABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzTWVyZ2VUYXJnZXRQcmltYXJ5SAASRgoJd29ya3NwYWNlGAIgASgLMjEuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c01lcmdlVGFyZ2V0V29ya3NwYWNlSABCCAoGdGFyZ2V0IiMKIVdvcmtzcGFjZVN0YXR1c01lcmdlVGFyZ2V0UHJpbWFyeSJnCiNXb3Jrc3BhY2VTdGF0dXNNZXJnZVRhcmdldFdvcmtzcGFjZRItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSgQIAhADUgtvd25lcl9sYW5kcyKPAQoXV29ya3NwYWNlU3RhdHVzU3RhbmRpbmcSMQoEb3BlbhgBIAEoCzIhLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNPcGVuSAASNQoGY2xvc2VkGAIgASgLMiMuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0Nsb3NlZEgAQgoKCHN0YW5kaW5nIk4KE1dvcmtzcGFjZVN0YXR1c09wZW4SNwoIYWN0aXZpdHkYASABKAsyJS5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQWN0aXZpdHkiFwoVV29ya3NwYWNlU3RhdHVzQ2xvc2VkIvcDChdXb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eRJBCghzdGFydGluZxgBIAEoCzItLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eVN0YXJ0aW5nSAASOQoEaWRsZRgCIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eUlkbGVIABJICgx0dXJuX3J1bm5pbmcYAyABKAsyMC5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlUdXJuUnVubmluZ0gAEkYKC25lZWRzX2lucHV0GAQgASgLMi8uYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0FjdGl2aXR5TmVlZHNJbnB1dEgAEj8KB21lcmdpbmcYBSABKAsyLC5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlNZXJnaW5nSAASQgoJY29sZF9nYXRlGAYgASgLMi0uYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0FjdGl2aXR5Q29sZEdhdGVIABI7CgVmYXVsdBgHIAEoCzIqLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eUZhdWx0SABCCgoIYWN0aXZpdHkiIQofV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlTdGFydGluZyIdChtXb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eUlkbGUiJAoiV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlUdXJuUnVubmluZyLIAQohV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlOZWVkc0lucHV0EksKCHF1ZXN0aW9uGAEgASgLMjcuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0FjdGl2aXR5TmVlZHNJbnB1dFF1ZXN0aW9uSAASTwoKcGVybWlzc2lvbhgCIAEoCzI5LmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eU5lZWRzSW5wdXRQZXJtaXNzaW9uSABCBQoDYXNrIisKKVdvcmtzcGFjZVN0YXR1c0FjdGl2aXR5TmVlZHNJbnB1dFF1ZXN0aW9uIi0KK1dvcmtzcGFjZVN0YXR1c0FjdGl2aXR5TmVlZHNJbnB1dFBlcm1pc3Npb24iRAofV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlDb2xkR2F0ZRIhCgRnYXRlGAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIjMKHFdvcmtzcGFjZVN0YXR1c0FjdGl2aXR5RmF1bHQSEwoLZGVzY3JpcHRpb24YASABKAkiIAoeV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlNZXJnaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_links, file_frontend_v1_feed, file_workspace_v1_workspace]);
+  fileDesc("CiNhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3N0YXR1cy5wcm90bxIMYWdlbnRyZXBsLnYxIqEGCg9Xb3Jrc3BhY2VTdGF0dXMSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRI+CgxtZXJnZV90YXJnZXQYBCABKAsyKC5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzTWVyZ2VUYXJnZXQSEgoKYmFja2xvZ2dlZBgFIAEoCBI3CghzdGFuZGluZxgGIAEoCzIlLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNTdGFuZGluZxIQCghvbmVfc2hvdBgHIAEoCBIxCghhd2FpdGluZxgIIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIAIgBARIvCgpyZXBvc2l0b3J5GAkgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSKwoFbGlua3MYCyABKAsyHC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua3MSPwoMcmVsYXRpb25zaGlwGAwgASgLMikuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c1JlbGF0aW9uc2hpcBI2CgVvd25lchgNIAEoCzIiLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNPd25lckgBiAEBEjMKCmNyZWF0ZWRfYnkYDiABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAKIAQESLAoIY2hpbGRyZW4YDyADKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKB3N1bW1hcnkYECABKAlIA4gBARJFCg1jbG9zZV9yZXF1ZXN0GBEgASgLMikuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0Nsb3NlUmVxdWVzdEgEiAEBQgsKCV9hd2FpdGluZ0IICgZfb3duZXJCDQoLX2NyZWF0ZWRfYnlCCgoIX3N1bW1hcnlCEAoOX2Nsb3NlX3JlcXVlc3RKBAgKEAtSDnByaW5jaXBhbF9saW5rIvwBChtXb3Jrc3BhY2VTdGF0dXNDbG9zZVJlcXVlc3QSFwoPcmVxdWVzdGVkX2F0X21zGAEgASgDEj8KBHVzZXIYAiABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQ2xvc2VSZXF1ZXN0QnlVc2VySAASQQoFYWdlbnQYAyABKAsyMC5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQ2xvc2VSZXF1ZXN0QnlBZ2VudEgAEjAKBXdhaXRzGAQgASgLMiEuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNsb3NlV2FpdHNCDgoMcmVxdWVzdGVkX2J5IiMKIVdvcmtzcGFjZVN0YXR1c0Nsb3NlUmVxdWVzdEJ5VXNlciIkCiJXb3Jrc3BhY2VTdGF0dXNDbG9zZVJlcXVlc3RCeUFnZW50IqUBChtXb3Jrc3BhY2VTdGF0dXNSZWxhdGlvbnNoaXASPwoFY2hpbGQYASABKAsyLi5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzUmVsYXRpb25zaGlwQ2hpbGRIABI9CgRwZWVyGAIgASgLMi0uYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c1JlbGF0aW9uc2hpcFBlZXJIAEIGCgRraW5kIk4KIFdvcmtzcGFjZVN0YXR1c1JlbGF0aW9uc2hpcENoaWxkEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiIQofV29ya3NwYWNlU3RhdHVzUmVsYXRpb25zaGlwUGVlciJYChRXb3Jrc3BhY2VTdGF0dXNPd25lchItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSgQIAhADUgtvd25lcl9sYW5kcyKyAQoaV29ya3NwYWNlU3RhdHVzTWVyZ2VUYXJnZXQSQgoHcHJpbWFyeRgBIAEoCzIvLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNNZXJnZVRhcmdldFByaW1hcnlIABJGCgl3b3Jrc3BhY2UYAiABKAsyMS5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzTWVyZ2VUYXJnZXRXb3Jrc3BhY2VIAEIICgZ0YXJnZXQiIwohV29ya3NwYWNlU3RhdHVzTWVyZ2VUYXJnZXRQcmltYXJ5ImcKI1dvcmtzcGFjZVN0YXR1c01lcmdlVGFyZ2V0V29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZKBAgCEANSC293bmVyX2xhbmRzIo8BChdXb3Jrc3BhY2VTdGF0dXNTdGFuZGluZxIxCgRvcGVuGAEgASgLMiEuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c09wZW5IABI1CgZjbG9zZWQYAiABKAsyIy5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQ2xvc2VkSABCCgoIc3RhbmRpbmciTgoTV29ya3NwYWNlU3RhdHVzT3BlbhI3CghhY3Rpdml0eRgBIAEoCzIlLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eSIXChVXb3Jrc3BhY2VTdGF0dXNDbG9zZWQi9wMKF1dvcmtzcGFjZVN0YXR1c0FjdGl2aXR5EkEKCHN0YXJ0aW5nGAEgASgLMi0uYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0FjdGl2aXR5U3RhcnRpbmdIABI5CgRpZGxlGAIgASgLMikuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0FjdGl2aXR5SWRsZUgAEkgKDHR1cm5fcnVubmluZxgDIAEoCzIwLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eVR1cm5SdW5uaW5nSAASRgoLbmVlZHNfaW5wdXQYBCABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlOZWVkc0lucHV0SAASPwoHbWVyZ2luZxgFIAEoCzIsLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eU1lcmdpbmdIABJCCgljb2xkX2dhdGUYBiABKAsyLS5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlDb2xkR2F0ZUgAEjsKBWZhdWx0GAcgASgLMiouYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0FjdGl2aXR5RmF1bHRIAEIKCghhY3Rpdml0eSIhCh9Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eVN0YXJ0aW5nIh0KG1dvcmtzcGFjZVN0YXR1c0FjdGl2aXR5SWRsZSIkCiJXb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eVR1cm5SdW5uaW5nIsgBCiFXb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eU5lZWRzSW5wdXQSSwoIcXVlc3Rpb24YASABKAsyNy5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlOZWVkc0lucHV0UXVlc3Rpb25IABJPCgpwZXJtaXNzaW9uGAIgASgLMjkuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVN0YXR1c0FjdGl2aXR5TmVlZHNJbnB1dFBlcm1pc3Npb25IAEIFCgNhc2siKwopV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlOZWVkc0lucHV0UXVlc3Rpb24iLQorV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlOZWVkc0lucHV0UGVybWlzc2lvbiJECh9Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eUNvbGRHYXRlEiEKBGdhdGUYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiMwocV29ya3NwYWNlU3RhdHVzQWN0aXZpdHlGYXVsdBITCgtkZXNjcmlwdGlvbhgBIAEoCSIgCh5Xb3Jrc3BhY2VTdGF0dXNBY3Rpdml0eU1lcmdpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_workspace_close, file_agentrepl_v1_workspace_links, file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * One workspace's status.
@@ -157,6 +159,15 @@ export type WorkspaceStatus = Message<"agentrepl.v1.WorkspaceStatus"> & {
    * @generated from field: optional string summary = 16;
    */
   summary?: string | undefined;
+
+  /**
+   * The workspace's standing close request (CloseWorkspaceRequest.stand),
+   * UNSET while none stands. While it is set, the daemon closes the workspace
+   * as soon as nothing blocks the close, unless it is withdrawn first.
+   *
+   * @generated from field: optional agentrepl.v1.WorkspaceStatusCloseRequest close_request = 17;
+   */
+  closeRequest?: WorkspaceStatusCloseRequest | undefined;
 };
 
 /**
@@ -165,6 +176,88 @@ export type WorkspaceStatus = Message<"agentrepl.v1.WorkspaceStatus"> & {
  */
 export const WorkspaceStatusSchema: GenMessage<WorkspaceStatus> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_workspace_status, 0);
+
+/**
+ * A standing close request: who asked, when, and what it waits on now.
+ *
+ * @generated from message agentrepl.v1.WorkspaceStatusCloseRequest
+ */
+export type WorkspaceStatusCloseRequest = Message<"agentrepl.v1.WorkspaceStatusCloseRequest"> & {
+  /**
+   * When the request was registered, in epoch milliseconds.
+   *
+   * @generated from field: int64 requested_at_ms = 1;
+   */
+  requestedAtMs: bigint;
+
+  /**
+   * THE ARM IS WHO ASKED. The close it carries out is recorded as theirs.
+   *
+   * @generated from oneof agentrepl.v1.WorkspaceStatusCloseRequest.requested_by
+   */
+  requestedBy: {
+    /**
+     * The user asked.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceStatusCloseRequestByUser user = 2;
+     */
+    value: WorkspaceStatusCloseRequestByUser;
+    case: "user";
+  } | {
+    /**
+     * An agent asked: the workspace's own, or another workspace's.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceStatusCloseRequestByAgent agent = 3;
+     */
+    value: WorkspaceStatusCloseRequestByAgent;
+    case: "agent";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * What blocks the close as the status is read.
+   *
+   * @generated from field: agentrepl.v1.WorkspaceCloseWaits waits = 4;
+   */
+  waits?: WorkspaceCloseWaits | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceStatusCloseRequest.
+ * Use `create(WorkspaceStatusCloseRequestSchema)` to create a new message.
+ */
+export const WorkspaceStatusCloseRequestSchema: GenMessage<WorkspaceStatusCloseRequest> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_status, 1);
+
+/**
+ * The user registered the request. No fields.
+ *
+ * @generated from message agentrepl.v1.WorkspaceStatusCloseRequestByUser
+ */
+export type WorkspaceStatusCloseRequestByUser = Message<"agentrepl.v1.WorkspaceStatusCloseRequestByUser"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceStatusCloseRequestByUser.
+ * Use `create(WorkspaceStatusCloseRequestByUserSchema)` to create a new message.
+ */
+export const WorkspaceStatusCloseRequestByUserSchema: GenMessage<WorkspaceStatusCloseRequestByUser> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_status, 2);
+
+/**
+ * An agent registered the request. No fields: the daemon records that an
+ * agent asked, not which.
+ *
+ * @generated from message agentrepl.v1.WorkspaceStatusCloseRequestByAgent
+ */
+export type WorkspaceStatusCloseRequestByAgent = Message<"agentrepl.v1.WorkspaceStatusCloseRequestByAgent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceStatusCloseRequestByAgent.
+ * Use `create(WorkspaceStatusCloseRequestByAgentSchema)` to create a new message.
+ */
+export const WorkspaceStatusCloseRequestByAgentSchema: GenMessage<WorkspaceStatusCloseRequestByAgent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_status, 3);
 
 /**
  * How a workspace stands to other work.
@@ -201,7 +294,7 @@ export type WorkspaceStatusRelationship = Message<"agentrepl.v1.WorkspaceStatusR
  * Use `create(WorkspaceStatusRelationshipSchema)` to create a new message.
  */
 export const WorkspaceStatusRelationshipSchema: GenMessage<WorkspaceStatusRelationship> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 1);
+  messageDesc(file_agentrepl_v1_workspace_status, 4);
 
 /**
  * A child's parent.
@@ -222,7 +315,7 @@ export type WorkspaceStatusRelationshipChild = Message<"agentrepl.v1.WorkspaceSt
  * Use `create(WorkspaceStatusRelationshipChildSchema)` to create a new message.
  */
 export const WorkspaceStatusRelationshipChildSchema: GenMessage<WorkspaceStatusRelationshipChild> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 2);
+  messageDesc(file_agentrepl_v1_workspace_status, 5);
 
 /**
  * A peer. DELIBERATELY EMPTY: the arm is the relationship.
@@ -237,7 +330,7 @@ export type WorkspaceStatusRelationshipPeer = Message<"agentrepl.v1.WorkspaceSta
  * Use `create(WorkspaceStatusRelationshipPeerSchema)` to create a new message.
  */
 export const WorkspaceStatusRelationshipPeerSchema: GenMessage<WorkspaceStatusRelationshipPeer> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 3);
+  messageDesc(file_agentrepl_v1_workspace_status, 6);
 
 /**
  * A workspace's owner.
@@ -258,7 +351,7 @@ export type WorkspaceStatusOwner = Message<"agentrepl.v1.WorkspaceStatusOwner"> 
  * Use `create(WorkspaceStatusOwnerSchema)` to create a new message.
  */
 export const WorkspaceStatusOwnerSchema: GenMessage<WorkspaceStatusOwner> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 4);
+  messageDesc(file_agentrepl_v1_workspace_status, 7);
 
 /**
  * Where a workspace's branch lands.
@@ -295,7 +388,7 @@ export type WorkspaceStatusMergeTarget = Message<"agentrepl.v1.WorkspaceStatusMe
  * Use `create(WorkspaceStatusMergeTargetSchema)` to create a new message.
  */
 export const WorkspaceStatusMergeTargetSchema: GenMessage<WorkspaceStatusMergeTarget> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 5);
+  messageDesc(file_agentrepl_v1_workspace_status, 8);
 
 /**
  * Onto the primary branch. No fields.
@@ -310,7 +403,7 @@ export type WorkspaceStatusMergeTargetPrimary = Message<"agentrepl.v1.WorkspaceS
  * Use `create(WorkspaceStatusMergeTargetPrimarySchema)` to create a new message.
  */
 export const WorkspaceStatusMergeTargetPrimarySchema: GenMessage<WorkspaceStatusMergeTargetPrimary> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 6);
+  messageDesc(file_agentrepl_v1_workspace_status, 9);
 
 /**
  * Into a workspace's branch.
@@ -332,7 +425,7 @@ export type WorkspaceStatusMergeTargetWorkspace = Message<"agentrepl.v1.Workspac
  * Use `create(WorkspaceStatusMergeTargetWorkspaceSchema)` to create a new message.
  */
 export const WorkspaceStatusMergeTargetWorkspaceSchema: GenMessage<WorkspaceStatusMergeTargetWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 7);
+  messageDesc(file_agentrepl_v1_workspace_status, 10);
 
 /**
  * Whether a workspace is open.
@@ -370,7 +463,7 @@ export type WorkspaceStatusStanding = Message<"agentrepl.v1.WorkspaceStatusStand
  * Use `create(WorkspaceStatusStandingSchema)` to create a new message.
  */
 export const WorkspaceStatusStandingSchema: GenMessage<WorkspaceStatusStanding> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 8);
+  messageDesc(file_agentrepl_v1_workspace_status, 11);
 
 /**
  * An open workspace.
@@ -391,7 +484,7 @@ export type WorkspaceStatusOpen = Message<"agentrepl.v1.WorkspaceStatusOpen"> & 
  * Use `create(WorkspaceStatusOpenSchema)` to create a new message.
  */
 export const WorkspaceStatusOpenSchema: GenMessage<WorkspaceStatusOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 9);
+  messageDesc(file_agentrepl_v1_workspace_status, 12);
 
 /**
  * A closed workspace. No fields.
@@ -406,7 +499,7 @@ export type WorkspaceStatusClosed = Message<"agentrepl.v1.WorkspaceStatusClosed"
  * Use `create(WorkspaceStatusClosedSchema)` to create a new message.
  */
 export const WorkspaceStatusClosedSchema: GenMessage<WorkspaceStatusClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 10);
+  messageDesc(file_agentrepl_v1_workspace_status, 13);
 
 /**
  * What an open workspace's session is doing, as the footer would say it.
@@ -489,7 +582,7 @@ export type WorkspaceStatusActivity = Message<"agentrepl.v1.WorkspaceStatusActiv
  * Use `create(WorkspaceStatusActivitySchema)` to create a new message.
  */
 export const WorkspaceStatusActivitySchema: GenMessage<WorkspaceStatusActivity> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 11);
+  messageDesc(file_agentrepl_v1_workspace_status, 14);
 
 /**
  * Being brought up. No fields.
@@ -504,7 +597,7 @@ export type WorkspaceStatusActivityStarting = Message<"agentrepl.v1.WorkspaceSta
  * Use `create(WorkspaceStatusActivityStartingSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityStartingSchema: GenMessage<WorkspaceStatusActivityStarting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 12);
+  messageDesc(file_agentrepl_v1_workspace_status, 15);
 
 /**
  * Idle. No fields.
@@ -519,7 +612,7 @@ export type WorkspaceStatusActivityIdle = Message<"agentrepl.v1.WorkspaceStatusA
  * Use `create(WorkspaceStatusActivityIdleSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityIdleSchema: GenMessage<WorkspaceStatusActivityIdle> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 13);
+  messageDesc(file_agentrepl_v1_workspace_status, 16);
 
 /**
  * A turn is running. No fields.
@@ -534,7 +627,7 @@ export type WorkspaceStatusActivityTurnRunning = Message<"agentrepl.v1.Workspace
  * Use `create(WorkspaceStatusActivityTurnRunningSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityTurnRunningSchema: GenMessage<WorkspaceStatusActivityTurnRunning> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 14);
+  messageDesc(file_agentrepl_v1_workspace_status, 17);
 
 /**
  * Waiting on the user.
@@ -571,7 +664,7 @@ export type WorkspaceStatusActivityNeedsInput = Message<"agentrepl.v1.WorkspaceS
  * Use `create(WorkspaceStatusActivityNeedsInputSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityNeedsInputSchema: GenMessage<WorkspaceStatusActivityNeedsInput> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 15);
+  messageDesc(file_agentrepl_v1_workspace_status, 18);
 
 /**
  * A question is open. No fields.
@@ -586,7 +679,7 @@ export type WorkspaceStatusActivityNeedsInputQuestion = Message<"agentrepl.v1.Wo
  * Use `create(WorkspaceStatusActivityNeedsInputQuestionSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityNeedsInputQuestionSchema: GenMessage<WorkspaceStatusActivityNeedsInputQuestion> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 16);
+  messageDesc(file_agentrepl_v1_workspace_status, 19);
 
 /**
  * A permission is open. No fields.
@@ -601,7 +694,7 @@ export type WorkspaceStatusActivityNeedsInputPermission = Message<"agentrepl.v1.
  * Use `create(WorkspaceStatusActivityNeedsInputPermissionSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityNeedsInputPermissionSchema: GenMessage<WorkspaceStatusActivityNeedsInputPermission> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 17);
+  messageDesc(file_agentrepl_v1_workspace_status, 20);
 
 /**
  * Parked at the cold gate.
@@ -623,7 +716,7 @@ export type WorkspaceStatusActivityColdGate = Message<"agentrepl.v1.WorkspaceSta
  * Use `create(WorkspaceStatusActivityColdGateSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityColdGateSchema: GenMessage<WorkspaceStatusActivityColdGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 18);
+  messageDesc(file_agentrepl_v1_workspace_status, 21);
 
 /**
  * A standing fault.
@@ -645,7 +738,7 @@ export type WorkspaceStatusActivityFault = Message<"agentrepl.v1.WorkspaceStatus
  * Use `create(WorkspaceStatusActivityFaultSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityFaultSchema: GenMessage<WorkspaceStatusActivityFault> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 19);
+  messageDesc(file_agentrepl_v1_workspace_status, 22);
 
 /**
  * The workspace's own merge is queued or running. No fields: the queue's
@@ -661,5 +754,5 @@ export type WorkspaceStatusActivityMerging = Message<"agentrepl.v1.WorkspaceStat
  * Use `create(WorkspaceStatusActivityMergingSchema)` to create a new message.
  */
 export const WorkspaceStatusActivityMergingSchema: GenMessage<WorkspaceStatusActivityMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_status, 20);
+  messageDesc(file_agentrepl_v1_workspace_status, 23);
 
