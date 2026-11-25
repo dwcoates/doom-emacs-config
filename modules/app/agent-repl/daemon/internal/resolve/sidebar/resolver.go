@@ -165,9 +165,13 @@ type core struct {
 	batches   uint64
 	reporting map[uint64]struct{}
 	reported  *sync.Cond
-	// onQueued is the tests' one look at the queue: told its depth each time
-	// a change joins it, under qmu. nil outside a test.
+	// onQueued is the tests' look at the queue: told its depth each time a
+	// change joins it, under qmu. nil outside a test.
 	onQueued func(depth int)
+	// onSettleWaits is the tests' look at Settle: told each time Settle
+	// waits for a batch led before its own to be reported, under qmu. nil
+	// outside a test.
+	onSettleWaits func()
 }
 
 // resultChange is one workspace's changed last turn result.

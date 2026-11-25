@@ -38,6 +38,10 @@ var PatchedRegistry = patchedRegistry
 // each time a change joins it (combine.go).
 func SetOnQueued(r Resolver, hook func(depth int)) { r.(*resolver).onQueued = hook }
 
+// SetOnSettleWaits installs the hook Settle tells each time it waits for an
+// earlier batch's report (combine.go).
+func SetOnSettleWaits(r Resolver, hook func()) { r.(*resolver).onSettleWaits = hook }
+
 // OwnMergeDrawn exposes ownMergeDrawn to the external test package.
 var OwnMergeDrawn = ownMergeDrawn
 
