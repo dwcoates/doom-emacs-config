@@ -44,6 +44,7 @@ type options struct {
 	until             string
 	minLevel          string
 	runtimes          string
+	match             string
 	follow            bool
 	bases             repeatedFlag
 	baseRuntimes      repeatedFlag
@@ -59,11 +60,12 @@ type options struct {
 	sampleN           int
 	fields            string
 	width             int
+	orderedLimit      int
 }
 
-// renderOptions carries only what emit and follow need to render a batch,
-// resolved once in run() so every emit call site agrees on mode, group
-// sample count, message width, and field projection.
+// renderOptions carries only what a renderer needs, resolved once in run()
+// so the initial read and every follow batch agree on mode, group sample
+// count, message width, and field projection.
 type renderOptions struct {
 	mode    string
 	sampleN int
@@ -72,6 +74,16 @@ type renderOptions struct {
 	// names maps a daemon workspace ID to the workspace's name, so every
 	// renderer names a workspace and never shows only its ID.
 	names map[string]string
+}
+
+// ordered answers whether the mode prints every record in time order, so the
+// read must place every record before it prints the first.
+func (r renderOptions) ordered() bool {
+	switch r.mode {
+	case "human", "json", "timeline", "fields":
+		return true
+	}
+	return false
 }
 
 type sink struct {
@@ -159,7 +171,7 @@ type record struct {
 	WorkspaceDir string         `json:"workspace_dir"`
 	WorkspaceID  string         `json:"workspace_id"`
 	// WorkspaceName is SYNTHETIC: the daemon's current name for WorkspaceID,
-	// stamped by nameWorkspaces at emit. A record never writes it itself.
+	// stamped by nameWorkspace as it is handed to its renderer. A record never writes it itself.
 	WorkspaceName      string `json:"workspace_name,omitempty"`
 	AgentReplSessionID string `json:"agent_repl_session_id"`
 	ClaudeSessionID    string `json:"claude_session_id"`
@@ -177,6 +189,10 @@ type filters struct {
 	until    *time.Time
 	minLevel int
 	runtimes map[string]struct{}
+	// match, when set, is tested against each line as it is written, before
+	// the line is decoded: a line it does not match is passed over unread,
+	// as a line stamped before the window is.
+	match *regexp.Regexp
 }
 
 type followState struct {
@@ -201,6 +217,7 @@ func run() error {
 	flag.StringVar(&opts.until, "until", "", "inclusive upper time bound")
 	flag.StringVar(&opts.minLevel, "level", "debug", "minimum level")
 	flag.StringVar(&opts.runtimes, "runtime", "", "comma-separated runtime filter")
+	flag.StringVar(&opts.match, "match", "", "regular expression each line must match as written, tested before the line is decoded")
 	flag.BoolVar(&opts.follow, "follow", false, "follow current generations")
 	flag.StringVar(&opts.harvestFrom, "harvest-from", "", "harvest lower bound")
 	flag.StringVar(&opts.harvestTo, "harvest-to", "", "harvest upper bound")
@@ -216,6 +233,7 @@ func run() error {
 	flag.IntVar(&opts.sampleN, "sample-n", 0, "representative records per group (0 disables sampling)")
 	flag.StringVar(&opts.fields, "fields", "", "comma-separated field projection")
 	flag.IntVar(&opts.width, "width", 120, "message truncation width for compact renderers")
+	flag.IntVar(&opts.orderedLimit, "ordered-limit", orderedRecordLimit, "most records an ordered read (human, json, timeline, fields) holds before it fails")
 	args, err := argsFrom(os.Args[1:])
 	if err != nil {
 		return err
@@ -283,14 +301,52 @@ func run() error {
 		return err
 	}
 
+	if opts.orderedLimit <= 0 {
+		return errors.New("ordered-limit must be positive")
+	}
+	stdout := bufio.NewWriter(os.Stdout)
+	out := newRenderer(render, stdout)
+	deliver := func(rec record) error {
+		if err := nameWorkspace(&rec, names); err != nil {
+			return err
+		}
+		return out.add(rec)
+	}
+	// AN ORDERED READ HOLDS NO DECODED RECORD: each one goes to a spill file
+	// as it is read, and only its place in time is kept, so what the read
+	// holds is bounded by --ordered-limit whatever its window matches. Every
+	// record was held decoded until it printed, and a windowless --all read
+	// of 6.2 GB grew to 22 GB (2026-11-24). A tally, sample or harvest folds
+	// each record in as it is read and holds only its groups.
+	collect := deliver
+	var order *spillOrder
+	if render.ordered() {
+		order, err = newSpillOrder(opts.orderedLimit)
+		if err != nil {
+			return err
+		}
+		defer order.close()
+		collect = order.add
+	}
+
 	sinks = warningsSinks(sinks, filter.minLevel)
-	records, findings, readable, sequence, states, orphanCount, err := readInitial(sinks, filter)
+	findings, readable, sequence, states, orphanCount, err := readInitial(sinks, filter, collect)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "logs-reader: included %d orphan generation(s) left by earlier daemon instances\n", orphanCount)
-	sortRecords(records)
-	if err := emit(records, findings, render); err != nil {
+	if order != nil {
+		if err := order.replay(deliver); err != nil {
+			return err
+		}
+	}
+	if err := out.finish(findings); err != nil {
+		return err
+	}
+	if err := stdout.Flush(); err != nil {
+		return err
+	}
+	if err := reportFindings(findings, render); err != nil {
 		return err
 	}
 	if readable == 0 {
@@ -299,8 +355,15 @@ func run() error {
 	if !opts.follow {
 		return nil
 	}
-	return follow(render, states, filter, sequence)
+	return follow(states, filter, sequence, deliver, stdout)
 }
+
+// orderedRecordLimit is the most records an ordered read holds by default.
+// Each costs the read 32 bytes of order plus its slice's growth, so the
+// limit holds an ordered read under 64 MB whatever its window matches; a
+// read that matches more is narrowed or counted with --tally, since no person
+// or agent reads a million lines.
+const orderedRecordLimit = 1_000_000
 
 // parseFieldsList validates a comma-separated --fields value, matching the
 // style of the existing --runtime list.
@@ -393,7 +456,14 @@ func makeFilters(opts options, now time.Time) (filters, error) {
 			runtimes[runtime] = struct{}{}
 		}
 	}
-	return filters{since: from, until: to, minLevel: minimum, runtimes: runtimes}, nil
+	var match *regexp.Regexp
+	if opts.match != "" {
+		match, err = regexp.Compile(opts.match)
+		if err != nil {
+			return filters{}, fmt.Errorf("invalid --match: %w", err)
+		}
+	}
+	return filters{since: from, until: to, minLevel: minimum, runtimes: runtimes, match: match}, nil
 }
 
 func parseBound(value string, now time.Time, durationAllowed bool) (*time.Time, error) {
@@ -419,8 +489,9 @@ func parseBound(value string, now time.Time, durationAllowed bool) (*time.Time, 
 	return &instant, nil
 }
 
-func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, int64, []followState, int, error) {
-	var records []record
+// readInitial reads every selected sink's generations, handing visit each
+// record the filter accepts, in the order the files hold them.
+func readInitial(sinks []sink, filter filters, visit func(record) error) ([]sinkFinding, int, int64, []followState, int, error) {
 	var findings []sinkFinding
 	var sequence int64
 	states := make([]followState, 0, len(sinks))
@@ -461,18 +532,17 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 				skippedBeforeWindow++
 				continue
 			}
-			loaded, next, nextLine, err := readFile(selectedSink, path, sequence, filter)
+			next, nextLine, err := readFile(selectedSink, path, sequence, filter, visit)
 			if err != nil {
 				if unreadable, ok := err.(*unreadableLogError); ok {
 					findings = append(findings, unreadableFinding(selectedSink, path, unreadable.err))
 					sinkFailed = true
 					continue
 				}
-				return nil, nil, 0, 0, nil, 0, err
+				return nil, 0, 0, nil, 0, err
 			}
 			seen[path] = struct{}{}
 			sinkReadable = true
-			records = append(records, loaded...)
 			sequence = next
 			if path == current {
 				state.line = nextLine
@@ -491,7 +561,7 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 		}
 		states = append(states, state)
 	}
-	return records, findings, readable, sequence, states, orphanCount, nil
+	return findings, readable, sequence, states, orphanCount, nil
 }
 
 func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
@@ -713,37 +783,40 @@ func endsBeforeWindow(path string, filter filters) bool {
 	return info.ModTime().Before(*filter.since)
 }
 
-func readFile(selectedSink sink, path string, sequence int64, filter filters) ([]record, int64, int, error) {
+// readFile hands visit every record of the generation at PATH the filter
+// accepts. A record visit was handed before the file failed stays handed: a
+// sink that fails part way is a finding, and the records read before it are
+// as good as any.
+func readFile(selectedSink sink, path string, sequence int64, filter filters, visit func(record) error) (int64, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, sequence, 1, &unreadableLogError{fmt.Errorf("open log %q: %w", path, err)}
+		return sequence, 1, &unreadableLogError{fmt.Errorf("open log %q: %w", path, err)}
 	}
-	var records []record
 	var next int64
 	var nextLine int
 	var scanErr error
 	if selectedSink.format == "jsonl" {
-		records, next, nextLine, scanErr = scanRecords(file, path, 1, sequence, filter)
+		next, nextLine, scanErr = scanRecords(file, path, 1, sequence, filter, visit)
 	} else {
 		info, statErr := file.Stat()
 		if statErr != nil {
 			scanErr = &unreadableLogError{fmt.Errorf("stat log %q: %w", path, statErr)}
 		} else {
-			records, next, nextLine, scanErr = scanTextRecords(file, path, selectedSink, info.ModTime(), 1, sequence, filter)
+			next, nextLine, scanErr = scanTextRecords(file, path, selectedSink, info.ModTime(), 1, sequence, filter, visit)
 		}
 	}
 	closeErr := file.Close()
 	if scanErr != nil {
 		if closeErr != nil {
-			return nil, sequence, 1, errors.Join(scanErr,
+			return sequence, 1, errors.Join(scanErr,
 				&unreadableLogError{fmt.Errorf("close log %q: %w", path, closeErr)})
 		}
-		return nil, sequence, 1, scanErr
+		return sequence, 1, scanErr
 	}
 	if closeErr != nil {
-		return nil, sequence, 1, &unreadableLogError{fmt.Errorf("close log %q: %w", path, closeErr)}
+		return sequence, 1, &unreadableLogError{fmt.Errorf("close log %q: %w", path, closeErr)}
 	}
-	return records, next, nextLine, nil
+	return next, nextLine, nil
 }
 
 // timestampLead is how every structured record begins: its stamp is the
@@ -797,8 +870,7 @@ func eachLine(reader io.Reader, path string, visit func(line []byte) error) erro
 	}
 }
 
-func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, filter filters) ([]record, int64, int, error) {
-	var records []record
+func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, filter filters, visit func(record) error) (int64, int, error) {
 	line := firstLine
 	err := eachLine(reader, path, func(text []byte) error {
 		raw := bytes.TrimSpace(text)
@@ -815,21 +887,26 @@ func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, f
 			line++
 			return nil
 		}
+		// A LINE --match DOES NOT MATCH IS PASSED OVER UNDECODED, as an
+		// early one is: decoding is most of a read's cost, and a decoded
+		// record a later grep threw away was held until the read ended.
+		if filter.match != nil && !filter.match.Match(raw) {
+			sequence++
+			line++
+			return nil
+		}
 		record, err := parseRecord(raw, sequence)
 		if err != nil {
 			return fmt.Errorf("%s:%d: malformed JSONL: %w", path, line, err)
 		}
 		sequence++
-		if filter.accepts(record) {
-			records = append(records, record)
-		}
 		line++
+		if filter.accepts(record) {
+			return visit(record)
+		}
 		return nil
 	})
-	if err != nil {
-		return nil, sequence, line, err
-	}
-	return records, sequence, line, nil
+	return sequence, line, err
 }
 
 // scanTextRecords reads a non-JSONL sink (stderr or a captured Messages
@@ -837,10 +914,14 @@ func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, f
 // sources the contract permits alongside structured JSONL are queryable
 // through the exact same tally/sample/timeline/fields/human/json renderers.
 // See AGENTS.md "Logs" for the synthetic fields this manufactures.
-func scanTextRecords(reader io.Reader, path string, selectedSink sink, mtime time.Time, firstLine int, sequence int64, filter filters) ([]record, int64, int, error) {
-	var records []record
+func scanTextRecords(reader io.Reader, path string, selectedSink sink, mtime time.Time, firstLine int, sequence int64, filter filters, visit func(record) error) (int64, int, error) {
 	line := firstLine
 	err := eachLine(reader, path, func(raw []byte) error {
+		if filter.match != nil && !filter.match.Match(raw) {
+			sequence++
+			line++
+			return nil
+		}
 		text := string(raw)
 		var rec record
 		var ok bool
@@ -855,14 +936,11 @@ func scanTextRecords(reader io.Reader, path string, selectedSink sink, mtime tim
 		sequence++
 		line++
 		if ok && filter.accepts(rec) {
-			records = append(records, rec)
+			return visit(rec)
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, sequence, line, err
-	}
-	return records, sequence, line, nil
+	return sequence, line, err
 }
 
 // stderrErrorRe recognizes a line that plainly names an error, so a caller
@@ -1009,78 +1087,361 @@ func (f filters) accepts(rec record) bool {
 	return true
 }
 
-func sortRecords(records []record) {
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].instant.Equal(records[j].instant) {
-			return records[i].seq < records[j].seq
-		}
-		return records[i].instant.Before(records[j].instant)
-	})
+// recordBefore orders two records by instant, then by the order they were
+// read in.
+func recordBefore(a, b record) bool {
+	if a.instant.Equal(b.instant) {
+		return a.seq < b.seq
+	}
+	return a.instant.Before(b.instant)
 }
 
-func emit(records []record, findings []sinkFinding, render renderOptions) error {
-	if err := nameWorkspaces(records, render.names); err != nil {
-		return err
+func sortRecords(records []record) {
+	sort.Slice(records, func(i, j int) bool { return recordBefore(records[i], records[j]) })
+}
+
+// spillEntry is where one spilled record sits and when it happened: all an
+// ordered read holds of a record until it prints it.
+type spillEntry struct {
+	instant int64
+	seq     int64
+	offset  int64
+	length  int64
+}
+
+// spillOrder puts an ordered read's records in time order without holding
+// them: each record's bytes go to an unlinked temporary file as it is read,
+// and the read keeps only its spillEntry. replay sorts the entries and hands
+// each record back, decoded afresh, one at a time.
+type spillOrder struct {
+	file    *os.File
+	writer  *bufio.Writer
+	offset  int64
+	entries []spillEntry
+	limit   int
+}
+
+func newSpillOrder(limit int) (*spillOrder, error) {
+	file, err := os.CreateTemp("", "logs-reader-order-*")
+	if err != nil {
+		return nil, fmt.Errorf("create the ordering spill file: %w", err)
 	}
+	// UNLINKED AT ONCE: the descriptor keeps the file, and nothing is left
+	// on disk however the read ends.
+	if err := os.Remove(file.Name()); err != nil {
+		closeErr := file.Close()
+		return nil, errors.Join(fmt.Errorf("unlink the ordering spill file %q: %w", file.Name(), err), closeErr)
+	}
+	return &spillOrder{file: file, writer: bufio.NewWriterSize(file, 1<<20), limit: limit}, nil
+}
+
+// add spills REC, failing once the read has matched more records than its
+// limit: what an ordered read holds is bounded, never grown to fit.
+func (s *spillOrder) add(rec record) error {
+	if len(s.entries) >= s.limit {
+		return fmt.Errorf("the read matched more than %d records, the most an ordered read holds: "+
+			"narrow it with --since, --until, --level, --runtime or --match, or count it with --tally", s.limit)
+	}
+	written, err := s.writer.Write(rec.raw)
+	if err != nil {
+		return fmt.Errorf("write the ordering spill file: %w", err)
+	}
+	s.entries = append(s.entries, spillEntry{instant: rec.instant.UnixNano(), seq: rec.seq, offset: s.offset, length: int64(written)})
+	s.offset += int64(written)
+	return nil
+}
+
+// replay hands visit every spilled record in time order, then by the order
+// it was read in.
+func (s *spillOrder) replay(visit func(record) error) error {
+	if err := s.writer.Flush(); err != nil {
+		return fmt.Errorf("flush the ordering spill file: %w", err)
+	}
+	sort.Slice(s.entries, func(i, j int) bool {
+		a, b := s.entries[i], s.entries[j]
+		if a.instant != b.instant {
+			return a.instant < b.instant
+		}
+		return a.seq < b.seq
+	})
+	var buffer []byte
+	for _, entry := range s.entries {
+		if int64(cap(buffer)) < entry.length {
+			buffer = make([]byte, entry.length)
+		}
+		raw := buffer[:entry.length]
+		if _, err := s.file.ReadAt(raw, entry.offset); err != nil {
+			return fmt.Errorf("read the ordering spill file at %d: %w", entry.offset, err)
+		}
+		// Every spilled record was decoded once already, so one that no
+		// longer decodes is a broken spill, never a malformed log.
+		rec, err := parseRecord(raw, entry.seq)
+		if err != nil {
+			return fmt.Errorf("the ordering spill file's record at %d no longer decodes: %w", entry.offset, err)
+		}
+		if err := visit(rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *spillOrder) close() {
+	// The file is unlinked, so closing it only frees its descriptor; the
+	// read's outcome is already decided by then.
+	_ = s.file.Close()
+}
+
+// renderer prints records handed to it one at a time: a line mode prints
+// each as it comes, and a counting mode folds it into its groups and prints
+// them at finish.
+type renderer interface {
+	add(rec record) error
+	finish(findings []sinkFinding) error
+}
+
+func newRenderer(render renderOptions, out io.Writer) renderer {
 	switch render.mode {
 	case "json":
-		for _, rec := range records {
-			if _, err := fmt.Fprintln(os.Stdout, string(rec.raw)); err != nil {
-				return err
-			}
-		}
-	case "human":
-		for _, rec := range records {
-			contextJSON, err := json.Marshal(rec.Context)
-			if err != nil {
-				return fmt.Errorf("encode context for %s: %w", rec.Operation, err)
-			}
-			if _, err := fmt.Fprintf(os.Stdout, "%s %-5s %-7s %s %s%s context=%s\n",
-				rec.instant.Local().Format("2006-01-02T15:04:05.000000-07:00"),
-				strings.ToUpper(rec.Level), rec.Runtime, rec.Operation,
-				oneLine(rec.Message), compactIdentity(rec), contextJSON); err != nil {
-				return err
-			}
-		}
-	case "harvest":
-		return emitHarvest(records, findings)
-	case "tally":
-		if err := emitTally(records, render.sampleN, render.width); err != nil {
+		return lineRenderer{out: out, line: func(out io.Writer, rec record) error {
+			_, err := fmt.Fprintln(out, string(rec.raw))
 			return err
-		}
-	case "sample":
-		if err := emitSampleOnly(records, render.sampleN, render.width); err != nil {
-			return err
-		}
+		}}
 	case "timeline":
-		if err := emitTimeline(records, render.width); err != nil {
+		return lineRenderer{out: out, line: func(out io.Writer, rec record) error {
+			_, err := fmt.Fprintf(out, "%s %-5s %s %s\n",
+				rec.instant.Local().Format("15:04:05.000000"),
+				strings.ToUpper(rec.Level), rec.Operation, truncate(rec.Message, render.width))
 			return err
-		}
+		}}
 	case "fields":
-		if err := emitFields(records, render.fields); err != nil {
+		return lineRenderer{out: out, line: func(out io.Writer, rec record) error {
+			parts := make([]string, 0, len(render.fields))
+			for _, name := range render.fields {
+				parts = append(parts, name+"="+oneLine(fieldValue(rec, name)))
+			}
+			_, err := fmt.Fprintln(out, strings.Join(parts, " "))
+			return err
+		}}
+	case "harvest":
+		return &harvestRenderer{out: out, counts: make(map[harvestKey]int)}
+	case "tally", "sample":
+		return &groupRenderer{out: out, table: render.mode == "tally", sampleN: render.sampleN, width: render.width,
+			counts: make(map[groupKey]int), samples: make(map[groupKey][]record)}
+	}
+	return lineRenderer{out: out, line: printHumanLine}
+}
+
+// lineRenderer prints one line per record as it is handed over.
+type lineRenderer struct {
+	out  io.Writer
+	line func(out io.Writer, rec record) error
+}
+
+func (r lineRenderer) add(rec record) error       { return r.line(r.out, rec) }
+func (r lineRenderer) finish([]sinkFinding) error { return nil }
+
+func printHumanLine(out io.Writer, rec record) error {
+	contextJSON, err := json.Marshal(rec.Context)
+	if err != nil {
+		return fmt.Errorf("encode context for %s: %w", rec.Operation, err)
+	}
+	_, err = fmt.Fprintf(out, "%s %-5s %-7s %s %s%s context=%s\n",
+		rec.instant.Local().Format("2006-01-02T15:04:05.000000-07:00"),
+		strings.ToUpper(rec.Level), rec.Runtime, rec.Operation,
+		oneLine(rec.Message), compactIdentity(rec), contextJSON)
+	return err
+}
+
+// reportFindings summarizes the read's sink findings on stderr. A harvest
+// prints its findings as rows of its own table instead.
+func reportFindings(findings []sinkFinding, render renderOptions) error {
+	if render.mode == "harvest" || len(findings) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(os.Stderr, "logs-reader: %d sink finding(s)\n", len(findings)); err != nil {
+		return err
+	}
+	for _, finding := range findings {
+		identity := finding.sink.workspaceDir
+		if name := render.names[finding.sink.workspaceID]; name != "" {
+			identity = name
+		} else if finding.sink.workspaceID != "" {
+			identity = finding.sink.workspaceID + " " + identity
+		}
+		if identity == "" {
+			identity = "central"
+		}
+		if _, err := fmt.Fprintf(os.Stderr, "logs-reader: %s [%s]\n", finding.message, identity); err != nil {
 			return err
 		}
 	}
-	if len(findings) != 0 {
-		if _, err := fmt.Fprintf(os.Stderr, "logs-reader: %d sink finding(s)\n", len(findings)); err != nil {
+	return nil
+}
+
+type harvestKey struct {
+	workspaceID  string
+	workspaceDir string
+	level        string
+	runtime      string
+	operation    string
+	message      string
+}
+
+// harvestRenderer counts every record and finding by where it was written
+// and what it said, and prints the counts as one table at finish.
+type harvestRenderer struct {
+	out    io.Writer
+	counts map[harvestKey]int
+}
+
+func (r *harvestRenderer) add(rec record) error {
+	workspaceID, workspaceDir := rec.WorkspaceID, rec.WorkspaceDir
+	if workspaceID == "" && workspaceDir == "" {
+		workspaceID, workspaceDir = "central", "-"
+	} else if workspaceID == "" || workspaceDir == "" {
+		return fmt.Errorf("harvest record %s at %s has incomplete workspace attribution: workspace_id=%q workspace_dir=%q",
+			rec.Operation, rec.Timestamp, workspaceID, workspaceDir)
+	}
+	r.counts[harvestKey{workspaceID, workspaceDir, rec.Level, rec.Runtime, rec.Operation, oneLine(rec.Message)}]++
+	return nil
+}
+
+func (r *harvestRenderer) finish(findings []sinkFinding) error {
+	for _, finding := range findings {
+		workspaceID, workspaceDir := finding.sink.workspaceID, finding.sink.workspaceDir
+		if workspaceID == "" && workspaceDir == "" {
+			workspaceID, workspaceDir = "central", "-"
+		} else if workspaceID == "" || workspaceDir == "" {
+			return fmt.Errorf("harvest finding has incomplete workspace attribution: workspace_id=%q workspace_dir=%q message=%q",
+				workspaceID, workspaceDir, finding.message)
+		}
+		r.counts[harvestKey{workspaceID, workspaceDir, "finding", finding.sink.runtime,
+			"logs.sink", oneLine(finding.message)}]++
+	}
+	keys := make([]harvestKey, 0, len(r.counts))
+	for key := range r.counts {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := keys[i], keys[j]
+		return strings.Join([]string{a.workspaceID, a.workspaceDir, a.level, a.runtime, a.operation, a.message}, "\x00") <
+			strings.Join([]string{b.workspaceID, b.workspaceDir, b.level, b.runtime, b.operation, b.message}, "\x00")
+	})
+	writer := tabwriter.NewWriter(r.out, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(writer, "WORKSPACE_ID\tWORKSPACE_DIR\tLEVEL\tRUNTIME\tOPERATION\tMESSAGE\tCOUNT"); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			key.workspaceID, key.workspaceDir, key.level, key.runtime, key.operation, key.message, r.counts[key]); err != nil {
 			return err
 		}
-		for _, finding := range findings {
-			identity := finding.sink.workspaceDir
-			if name := render.names[finding.sink.workspaceID]; name != "" {
-				identity = name
-			} else if finding.sink.workspaceID != "" {
-				identity = finding.sink.workspaceID + " " + identity
+	}
+	return writer.Flush()
+}
+
+// groupKey is how --tally and --sample group records: level, runtime, and
+// operation, with no workspace or message in the key, so the same three
+// questions ("what happened, of what severity, on what runtime") answer for
+// one workspace or for --all in a single small table.
+type groupKey struct {
+	level     string
+	runtime   string
+	operation string
+}
+
+// groupRenderer is --tally and --sample: it counts each group's records and
+// keeps only each group's sampleN earliest, so it holds the groups, never
+// the records.
+type groupRenderer struct {
+	out     io.Writer
+	table   bool
+	sampleN int
+	width   int
+	counts  map[groupKey]int
+	samples map[groupKey][]record
+}
+
+func (r *groupRenderer) add(rec record) error {
+	key := groupKey{rec.Level, rec.Runtime, rec.Operation}
+	r.counts[key]++
+	if r.sampleN <= 0 {
+		return nil
+	}
+	kept := r.samples[key]
+	if len(kept) == r.sampleN {
+		if !recordBefore(rec, kept[len(kept)-1]) {
+			return nil
+		}
+		kept = kept[:len(kept)-1]
+	}
+	at := sort.Search(len(kept), func(i int) bool { return recordBefore(rec, kept[i]) })
+	kept = append(kept, record{})
+	copy(kept[at+1:], kept[at:])
+	kept[at] = rec
+	r.samples[key] = kept
+	return nil
+}
+
+// finish prints the count table when the read asked for one and then, when
+// it asked for samples, each group's earliest records in the table's order.
+func (r *groupRenderer) finish([]sinkFinding) error {
+	keys := sortedGroupKeys(r.counts)
+	if r.table {
+		writer := tabwriter.NewWriter(r.out, 0, 4, 2, ' ', 0)
+		if _, err := fmt.Fprintln(writer, "COUNT\tLEVEL\tRUNTIME\tOPERATION"); err != nil {
+			return err
+		}
+		for _, key := range keys {
+			if _, err := fmt.Fprintf(writer, "%d\t%s\t%s\t%s\n", r.counts[key], key.level, key.runtime, key.operation); err != nil {
+				return err
 			}
-			if identity == "" {
-				identity = "central"
-			}
-			if _, err := fmt.Fprintf(os.Stderr, "logs-reader: %s [%s]\n", finding.message, identity); err != nil {
+		}
+		if err := writer.Flush(); err != nil {
+			return err
+		}
+		if r.sampleN <= 0 {
+			return nil
+		}
+		if _, err := fmt.Fprintln(r.out); err != nil {
+			return err
+		}
+	}
+	for _, key := range keys {
+		for _, rec := range r.samples[key] {
+			if _, err := fmt.Fprintf(r.out, "%s %-5s %-7s %s %s\n",
+				rec.instant.Local().Format("15:04:05.000000"),
+				strings.ToUpper(rec.Level), rec.Runtime, rec.Operation, truncate(rec.Message, r.width)); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// sortedGroupKeys orders groups by count descending — the cheapest way to
+// see "what happened most" — breaking ties deterministically so repeated
+// runs against the same window render identically.
+func sortedGroupKeys(counts map[groupKey]int) []groupKey {
+	keys := make([]groupKey, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := keys[i], keys[j]
+		if counts[a] != counts[b] {
+			return counts[a] > counts[b]
+		}
+		if a.level != b.level {
+			return a.level < b.level
+		}
+		if a.runtime != b.runtime {
+			return a.runtime < b.runtime
+		}
+		return a.operation < b.operation
+	})
+	return keys
 }
 
 func compactIdentity(rec record) string {
@@ -1114,196 +1475,6 @@ func compactIdentity(rec record) string {
 func oneLine(value string) string {
 	replacer := strings.NewReplacer("\n", "\\n", "\r", "\\r", "\t", "\\t")
 	return replacer.Replace(value)
-}
-
-type harvestKey struct {
-	workspaceID  string
-	workspaceDir string
-	level        string
-	runtime      string
-	operation    string
-	message      string
-}
-
-func emitHarvest(records []record, findings []sinkFinding) error {
-	counts := make(map[harvestKey]int)
-	for _, rec := range records {
-		workspaceID, workspaceDir := rec.WorkspaceID, rec.WorkspaceDir
-		if workspaceID == "" && workspaceDir == "" {
-			workspaceID, workspaceDir = "central", "-"
-		} else if workspaceID == "" || workspaceDir == "" {
-			return fmt.Errorf("harvest record %s at %s has incomplete workspace attribution: workspace_id=%q workspace_dir=%q",
-				rec.Operation, rec.Timestamp, workspaceID, workspaceDir)
-		}
-		counts[harvestKey{workspaceID, workspaceDir, rec.Level, rec.Runtime, rec.Operation, oneLine(rec.Message)}]++
-	}
-	for _, finding := range findings {
-		workspaceID, workspaceDir := finding.sink.workspaceID, finding.sink.workspaceDir
-		if workspaceID == "" && workspaceDir == "" {
-			workspaceID, workspaceDir = "central", "-"
-		} else if workspaceID == "" || workspaceDir == "" {
-			return fmt.Errorf("harvest finding has incomplete workspace attribution: workspace_id=%q workspace_dir=%q message=%q",
-				workspaceID, workspaceDir, finding.message)
-		}
-		counts[harvestKey{workspaceID, workspaceDir, "finding", finding.sink.runtime,
-			"logs.sink", oneLine(finding.message)}]++
-	}
-	keys := make([]harvestKey, 0, len(counts))
-	for key := range counts {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		a, b := keys[i], keys[j]
-		return strings.Join([]string{a.workspaceID, a.workspaceDir, a.level, a.runtime, a.operation, a.message}, "\x00") <
-			strings.Join([]string{b.workspaceID, b.workspaceDir, b.level, b.runtime, b.operation, b.message}, "\x00")
-	})
-	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "WORKSPACE_ID\tWORKSPACE_DIR\tLEVEL\tRUNTIME\tOPERATION\tMESSAGE\tCOUNT"); err != nil {
-		return err
-	}
-	for _, key := range keys {
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-			key.workspaceID, key.workspaceDir, key.level, key.runtime, key.operation, key.message, counts[key]); err != nil {
-			return err
-		}
-	}
-	return writer.Flush()
-}
-
-// groupKey is how --tally and --sample group records: level, runtime, and
-// operation, with no workspace or message in the key, so the same three
-// questions ("what happened, of what severity, on what runtime") answer for
-// one workspace or for --all in a single small table.
-type groupKey struct {
-	level     string
-	runtime   string
-	operation string
-}
-
-func groupCounts(records []record) map[groupKey]int {
-	counts := make(map[groupKey]int)
-	for _, rec := range records {
-		counts[groupKey{rec.Level, rec.Runtime, rec.Operation}]++
-	}
-	return counts
-}
-
-// sortedGroupKeys orders groups by count descending — the cheapest way to
-// see "what happened most" — breaking ties deterministically so repeated
-// runs against the same window render identically.
-func sortedGroupKeys(counts map[groupKey]int) []groupKey {
-	keys := make([]groupKey, 0, len(counts))
-	for key := range counts {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		a, b := keys[i], keys[j]
-		if counts[a] != counts[b] {
-			return counts[a] > counts[b]
-		}
-		if a.level != b.level {
-			return a.level < b.level
-		}
-		if a.runtime != b.runtime {
-			return a.runtime < b.runtime
-		}
-		return a.operation < b.operation
-	})
-	return keys
-}
-
-// emitTally prints the count table and, when sampleN is positive, follows it
-// with up to sampleN representative records per group in the table's own
-// order.
-func emitTally(records []record, sampleN, width int) error {
-	counts := groupCounts(records)
-	keys := sortedGroupKeys(counts)
-	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "COUNT\tLEVEL\tRUNTIME\tOPERATION"); err != nil {
-		return err
-	}
-	for _, key := range keys {
-		if _, err := fmt.Fprintf(writer, "%d\t%s\t%s\t%s\n", counts[key], key.level, key.runtime, key.operation); err != nil {
-			return err
-		}
-	}
-	if err := writer.Flush(); err != nil {
-		return err
-	}
-	if sampleN <= 0 {
-		return nil
-	}
-	if _, err := fmt.Println(); err != nil {
-		return err
-	}
-	return emitSamplesForGroups(records, keys, sampleN, width)
-}
-
-// emitSampleOnly is --sample used without --tally: the same per-group
-// representative lines, with no count table ahead of them.
-func emitSampleOnly(records []record, sampleN, width int) error {
-	counts := groupCounts(records)
-	keys := sortedGroupKeys(counts)
-	return emitSamplesForGroups(records, keys, sampleN, width)
-}
-
-// emitSamplesForGroups prints, for each group in order, the first sampleN
-// records belonging to it (records are already time-sorted by the caller),
-// so a reader sees the earliest representative occurrence of each kind of
-// event without scanning the whole window.
-func emitSamplesForGroups(records []record, order []groupKey, sampleN, width int) error {
-	for _, key := range order {
-		taken := 0
-		for _, rec := range records {
-			if rec.Level != key.level || rec.Runtime != key.runtime || rec.Operation != key.operation {
-				continue
-			}
-			if err := printSampleLine(rec, width); err != nil {
-				return err
-			}
-			taken++
-			if taken >= sampleN {
-				break
-			}
-		}
-	}
-	return nil
-}
-
-func printSampleLine(rec record, width int) error {
-	_, err := fmt.Printf("%s %-5s %-7s %s %s\n",
-		rec.instant.Local().Format("15:04:05.000000"),
-		strings.ToUpper(rec.Level), rec.Runtime, rec.Operation, truncate(rec.Message, width))
-	return err
-}
-
-// emitTimeline prints one line per record in time order: time, level,
-// operation, and the truncated message, for "what happened during this
-// window" without runtime or context noise.
-func emitTimeline(records []record, width int) error {
-	for _, rec := range records {
-		if _, err := fmt.Printf("%s %-5s %s %s\n",
-			rec.instant.Local().Format("15:04:05.000000"),
-			strings.ToUpper(rec.Level), rec.Operation, truncate(rec.Message, width)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// emitFields prints exactly the named fields, resolved from the record's top
-// level or, failing that, its context map, so a caller gets nothing else.
-func emitFields(records []record, fieldNames []string) error {
-	for _, rec := range records {
-		parts := make([]string, 0, len(fieldNames))
-		for _, name := range fieldNames {
-			parts = append(parts, name+"="+oneLine(fieldValue(rec, name)))
-		}
-		if _, err := fmt.Println(strings.Join(parts, " ")); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // fieldValue resolves one named field against a record's top-level columns
@@ -1375,7 +1546,9 @@ func truncate(value string, width int) string {
 	return string(runes[:width-3]) + "..."
 }
 
-func follow(render renderOptions, states []followState, filter filters, sequence int64) error {
+// follow reads what the current generations gain, handing deliver each
+// batch's records in time order and flushing OUT after every batch.
+func follow(states []followState, filter filters, sequence int64, deliver func(record) error, out *bufio.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -1386,85 +1559,92 @@ func follow(render renderOptions, states []followState, filter filters, sequence
 			return nil
 		case <-ticker.C:
 			var batch []record
+			collect := func(rec record) error {
+				batch = append(batch, rec)
+				return nil
+			}
 			for index := range states {
-				loaded, next, err := readFollow(&states[index], sequence, filter)
+				next, err := readFollow(&states[index], sequence, filter, collect)
 				if err != nil {
 					return err
 				}
 				sequence = next
-				batch = append(batch, loaded...)
 			}
 			sortRecords(batch)
-			if err := emit(batch, nil, render); err != nil {
+			for _, rec := range batch {
+				if err := deliver(rec); err != nil {
+					return err
+				}
+			}
+			if err := out.Flush(); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func readFollow(state *followState, sequence int64, filter filters) ([]record, int64, error) {
+func readFollow(state *followState, sequence int64, filter filters, visit func(record) error) (int64, error) {
 	_, current, _, _ := generationFiles(state.sink)
 	if current == "" {
-		return nil, sequence, nil
+		return sequence, nil
 	}
 	info, err := os.Stat(current)
 	if err != nil {
-		return nil, sequence, fmt.Errorf("stat followed log %q: %w", current, err)
+		return sequence, fmt.Errorf("stat followed log %q: %w", current, err)
 	}
 	if state.info == nil || state.path != current || !os.SameFile(state.info, info) || info.Size() < state.offset {
 		state.path, state.info, state.offset, state.line = current, info, 0, 1
 	}
 	if info.Size() == state.offset {
 		state.info = info
-		return nil, sequence, nil
+		return sequence, nil
 	}
 	file, err := os.Open(current)
 	if err != nil {
-		return nil, sequence, fmt.Errorf("open followed log %q: %w", current, err)
+		return sequence, fmt.Errorf("open followed log %q: %w", current, err)
 	}
 	if _, seekErr := file.Seek(state.offset, io.SeekStart); seekErr != nil {
 		closeErr := file.Close()
 		if closeErr != nil {
-			return nil, sequence, errors.Join(
+			return sequence, errors.Join(
 				fmt.Errorf("seek followed log %q: %w", current, seekErr),
 				fmt.Errorf("close followed log %q: %w", current, closeErr))
 		}
-		return nil, sequence, fmt.Errorf("seek followed log %q: %w", current, seekErr)
+		return sequence, fmt.Errorf("seek followed log %q: %w", current, seekErr)
 	}
 	bytesAvailable := info.Size() - state.offset
 	data, err := io.ReadAll(io.LimitReader(file, bytesAvailable))
 	closeErr := file.Close()
 	if err != nil {
 		if closeErr != nil {
-			return nil, sequence, errors.Join(
+			return sequence, errors.Join(
 				fmt.Errorf("read followed log %q: %w", current, err),
 				fmt.Errorf("close followed log %q: %w", current, closeErr))
 		}
-		return nil, sequence, fmt.Errorf("read followed log %q: %w", current, err)
+		return sequence, fmt.Errorf("read followed log %q: %w", current, err)
 	}
 	if closeErr != nil {
-		return nil, sequence, fmt.Errorf("close followed log %q: %w", current, closeErr)
+		return sequence, fmt.Errorf("close followed log %q: %w", current, closeErr)
 	}
 	lastNewline := bytes.LastIndexByte(data, '\n')
 	if lastNewline < 0 {
-		return nil, sequence, nil
+		return sequence, nil
 	}
 	complete := data[:lastNewline+1]
-	var records []record
 	var next int64
 	var nextLine int
 	if state.sink.format == "jsonl" {
-		records, next, nextLine, err = scanRecords(bytes.NewReader(complete), current, state.line, sequence, filter)
+		next, nextLine, err = scanRecords(bytes.NewReader(complete), current, state.line, sequence, filter, visit)
 	} else {
-		records, next, nextLine, err = scanTextRecords(bytes.NewReader(complete), current, state.sink, info.ModTime(), state.line, sequence, filter)
+		next, nextLine, err = scanTextRecords(bytes.NewReader(complete), current, state.sink, info.ModTime(), state.line, sequence, filter, visit)
 	}
 	if err != nil {
-		return nil, sequence, err
+		return sequence, err
 	}
 	state.offset += int64(len(complete))
 	state.info = info
 	state.line = nextLine
-	return records, next, nil
+	return next, nil
 }
 
 // workspaceRow is one row of the daemon's workspace table (wsm.db
@@ -1566,35 +1746,33 @@ func withWorkspaceSinks(selected []sink, rows []workspaceRow, opts options) ([]s
 	return append(sinks, selected[split:]...), nil
 }
 
-// nameWorkspaces stamps each record's synthetic workspace_name from its
+// nameWorkspace stamps a record's synthetic workspace_name from its
 // workspace_id, into the decoded record and into the raw JSON the json mode
 // prints, so every output mode can name the workspace. The name is appended
 // as the object's last key, leaving the record's own bytes and key order
 // untouched. A record whose ID the daemon does not know keeps no name.
-func nameWorkspaces(records []record, names map[string]string) error {
-	for i := range records {
-		name := names[records[i].WorkspaceID]
-		if name == "" || records[i].WorkspaceName != "" {
-			continue
-		}
-		records[i].WorkspaceName = name
-		raw := bytes.TrimRight(records[i].raw, " \t\r\n")
-		if len(raw) < 2 || raw[len(raw)-1] != '}' {
-			return fmt.Errorf("record %s at %s is not a JSON object", records[i].Operation, records[i].Timestamp)
-		}
-		encoded, err := json.Marshal(name)
-		if err != nil {
-			return fmt.Errorf("encode workspace name %q: %w", name, err)
-		}
-		body := bytes.TrimRight(raw[:len(raw)-1], " \t\r\n")
-		separator := ","
-		if len(body) > 0 && body[len(body)-1] == '{' {
-			separator = ""
-		}
-		named := append(append([]byte(nil), body...), []byte(separator+`"workspace_name":`)...)
-		named = append(named, encoded...)
-		records[i].raw = append(named, '}')
+func nameWorkspace(rec *record, names map[string]string) error {
+	name := names[rec.WorkspaceID]
+	if name == "" || rec.WorkspaceName != "" {
+		return nil
 	}
+	rec.WorkspaceName = name
+	raw := bytes.TrimRight(rec.raw, " \t\r\n")
+	if len(raw) < 2 || raw[len(raw)-1] != '}' {
+		return fmt.Errorf("record %s at %s is not a JSON object", rec.Operation, rec.Timestamp)
+	}
+	encoded, err := json.Marshal(name)
+	if err != nil {
+		return fmt.Errorf("encode workspace name %q: %w", name, err)
+	}
+	body := bytes.TrimRight(raw[:len(raw)-1], " \t\r\n")
+	separator := ","
+	if len(body) > 0 && body[len(body)-1] == '{' {
+		separator = ""
+	}
+	named := append(append([]byte(nil), body...), []byte(separator+`"workspace_name":`)...)
+	named = append(named, encoded...)
+	rec.raw = append(named, '}')
 	return nil
 }
 
