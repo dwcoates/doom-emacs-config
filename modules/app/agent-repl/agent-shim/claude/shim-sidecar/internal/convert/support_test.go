@@ -261,14 +261,21 @@ func sha256Hex(s string) string {
 }
 
 // levelForMessage returns the level of the ONE captured record whose message
-// contains substring, failing unless exactly one does. It reads a
-// loggedConverter's JSONL sink, so a test can pin the SEVERITY a conversion
-// recorded at — the subject of the benign-re-scan reclassifications — rather
-// than only the message text.
+// contains substring, failing unless exactly one does. It lets a test pin the
+// SEVERITY a conversion recorded at — the subject of the benign-re-scan
+// reclassifications — rather than only the message text.
 func levelForMessage(t *testing.T, sink *bytes.Buffer, substring string) string {
 	t.Helper()
-	var level string
-	count := 0
+	level, _ := recordForMessage(t, sink, substring)["level"].(string)
+	return level
+}
+
+// recordForMessage returns the ONE captured record whose message contains
+// substring, failing unless exactly one does. It reads a loggedConverter's
+// JSONL sink.
+func recordForMessage(t *testing.T, sink *bytes.Buffer, substring string) map[string]any {
+	t.Helper()
+	var found []map[string]any
 	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
 		if line == "" {
 			continue
@@ -278,14 +285,13 @@ func levelForMessage(t *testing.T, sink *bytes.Buffer, substring string) string 
 			t.Fatalf("captured log line is not JSON: %v: %q", err, line)
 		}
 		if msg, _ := rec["message"].(string); strings.Contains(msg, substring) {
-			level, _ = rec["level"].(string)
-			count++
+			found = append(found, rec)
 		}
 	}
-	if count != 1 {
-		t.Fatalf("message mentioning %q: got %d records, want exactly 1; log:\n%s", substring, count, sink.String())
+	if len(found) != 1 {
+		t.Fatalf("message mentioning %q: got %d records, want exactly 1; log:\n%s", substring, len(found), sink.String())
 	}
-	return level
+	return found[0]
 }
 
 // corpusFixtureDir is the shared golden corpus, relative to this package.
