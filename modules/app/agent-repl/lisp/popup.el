@@ -2,10 +2,12 @@
 
 ;;; Commentary:
 
-;; ONE SUBROUTINE BACKS EVERY VERTICAL-SPLIT POPUP AGENT-REPL SHOWS.  Every
-;; such popup is a Doom popup on the RIGHT, 40% of the frame's width, focused
-;; when it opens, and closed by `q' in command mode, which also kills its
-;; buffer.  Only the buffer's own major and minor modes differ between them.
+;; ONE SUBROUTINE BACKS EVERY POPUP AGENT-REPL SHOWS.  Every such popup
+;; takes the place of the current workspace's VIEW (the webapp's window): it
+;; is shown in that window, focused, and closed by `q' in command mode, which
+;; kills its buffer and puts the view back.  The composer below the view and
+;; the sidebar beside it are never touched, so neither moves nor narrows.
+;; Only the buffer's own major and minor modes differ between popups.
 ;;
 ;; Two entry points share that one display:
 ;;
@@ -21,15 +23,19 @@
 ;;     (`HostOpenInEditor {path, optional line}').
 ;;
 ;; DIVERGENCE BETWEEN CALL SITES IS A DEFECT: the consistency requirement is
-;; code-level, the same ruling as the blink cadence.  A call site never calls
-;; `display-buffer' for one of these windows itself, and adding a per-caller
+;; code-level, the same ruling as the blink cadence.  A call site never
+;; chooses a window for one of these buffers itself, and adding a per-caller
 ;; variant here is the defect this file exists to prevent.
 ;;
-;; THE GEOMETRY LIVES IN ONE DOOM POPUP RULE (`agent-repl-popup-rule').  A
-;; buffer is routed to it by a buffer-local mark that `agent-repl-popup-show'
-;; sets, never by its name: a file buffer's name cannot tell it apart from the
-;; same file opened any other way.  `:ttl 0' is what kills the buffer the
-;; moment its popup closes, which is Doom's own mechanism for that.
+;; THE WINDOW A POPUP TAKES (`agent-repl-popup--host-window'), in order:
+;; the window another popup already stands in (the new popup replaces it,
+;; and inherits what it stood in for); the current workspace's view window;
+;; the selected window when it is in the main area; the main area's largest
+;; window.  The popup buffer records what it stands in for
+;; (`agent-repl-popup--stand-in'), and its `kill-buffer-hook' puts that back,
+;; so the view returns however the popup's buffer dies.  While a popup
+;; stands in for the view, the layout reconciler leaves the lone composer
+;; alone (`agent-repl-popup-standing-in-for').
 ;;
 ;; LINE is 1-INDEXED, exactly as `HostOpenInEditor.line' is; nil means the
 ;; file's top (and it is always nil for a directory, which has no lines).
@@ -39,26 +45,27 @@
 ;; Every log call is a log-site macro (log-site.el), needed where this
 ;; file is expanded; config.el loads it first.
 (require 'log-site)
+(require 'seq)
 
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
-(declare-function +popup/quit-window "ext:popup" (&optional arg))
+(declare-function agent-repl--ws-current-name "workspace" ())
+(declare-function agent-repl-window--panel-window "window" (kind &optional ws frame))
+(declare-function agent-repl-window--side-window-p "window" (win &optional ws))
+(declare-function agent-repl--frontend-largest-main-area-window "frontend" ())
 
 (defconst agent-repl-popup--log-scope
   '(:agent-repl-central "the popup utility is buffer-scoped, not workspace-scoped")
   "The log scope every popup record is filed under.")
 
-(defconst agent-repl-popup-rule
-  '(:side right :size 0.4 :select t :quit t :ttl 0 :autosave t)
-  "The ONE Doom popup rule every agent-repl popup is displayed by.
-Right side at 40% of the frame's width, focused on open.  `:ttl 0' kills
-the buffer when its popup closes, and `:autosave t' saves a file buffer
-first, so closing a notes or source popup never loses an edit.  `:quit t'
-is Doom's default escape behavior, kept so a popup closes the way every
-other Doom popup does.")
-
 (defvar-local agent-repl-popup--owned nil
-  "Non-nil in a buffer `agent-repl-popup-show' displayed.
-The mark the popup rule's predicate reads; it dies with the buffer.")
+  "Non-nil in a buffer `agent-repl-popup-show' displayed; it dies with the buffer.")
+
+(defvar-local agent-repl-popup--stand-in nil
+  "What this popup buffer's window showed before the popup took it.
+A plist: `:window' the window, `:buffer' the buffer it showed and
+`:dedicated' its dedication then.  Put back when this buffer dies
+\=(`agent-repl-popup--put-back'); nil once put back or handed to a popup
+that replaced this one.")
 
 (defvar agent-repl-popup-mode-map (make-sparse-keymap)
   "Keymap of `agent-repl-popup-mode'; `q' is bound in Evil normal state.")
@@ -76,57 +83,145 @@ Normal state only: in insert state `q' is a letter."
 (with-eval-after-load 'evil
   (agent-repl-popup--bind-keys))
 
-(defun agent-repl-popup-buffer-p (buffer-or-name &optional _action)
-  "Return non-nil when BUFFER-OR-NAME was displayed by `agent-repl-popup-show'.
-The predicate of `agent-repl-popup-rule'.  Doom hands it a buffer name."
+(defun agent-repl-popup-buffer-p (buffer-or-name)
+  "Return non-nil when BUFFER-OR-NAME was displayed by `agent-repl-popup-show'."
   (let ((buffer (get-buffer buffer-or-name)))
     (and (buffer-live-p buffer)
          (buffer-local-value 'agent-repl-popup--owned buffer)
          t)))
 
-(defun agent-repl-popup-install-rule ()
-  "Install `agent-repl-popup-rule' with Doom's popup system.
-Returns non-nil when installed.  `set-popup-rule!' is absent only under
-`emacs -Q' (the batch ERT suite), which has no popup system to configure."
-  (if (fboundp 'set-popup-rule!)
-      (progn
-        (apply 'set-popup-rule! #'agent-repl-popup-buffer-p agent-repl-popup-rule)
-        (agent-repl--info agent-repl-popup--log-scope "elisp.popup.rule-installed rule={rule}"
-                          :rule (prin1-to-string agent-repl-popup-rule))
-        t)
-    (agent-repl--info agent-repl-popup--log-scope
-                      "elisp.popup.rule-skipped reason=no-popup-module rule={rule}"
-                      :rule (prin1-to-string agent-repl-popup-rule))
-    nil))
+(defun agent-repl-popup--standing-window (&optional frame)
+  "Return FRAME's window a popup stands in, or nil.
+A popup stands in a window while that window shows it and its
+`agent-repl-popup--stand-in' names that window.  FRAME defaults to the
+selected frame."
+  (seq-find (lambda (win)
+              (let ((buffer (window-buffer win)))
+                (and (agent-repl-popup-buffer-p buffer)
+                     (eq (plist-get (buffer-local-value 'agent-repl-popup--stand-in buffer)
+                                    :window)
+                         win))))
+            (window-list frame 'nomini)))
+
+(defun agent-repl-popup-standing-in-for (buffer &optional frame)
+  "Return FRAME's window where a popup stands in for BUFFER, or nil.
+The layout reconciler asks this of a workspace's view buffer: a view a
+popup replaced is not a view that went missing."
+  (let ((win (agent-repl-popup--standing-window frame)))
+    (and win
+         buffer
+         (eq (plist-get (buffer-local-value 'agent-repl-popup--stand-in (window-buffer win))
+                        :buffer)
+             buffer)
+         win)))
+
+(defun agent-repl-popup--host-window ()
+  "Return the window the next popup takes, and why, as (WINDOW . REASON).
+See the Commentary for the order.  A frame with no main-area window at
+all breaks the frame's own invariant, and signals."
+  (let ((standing (agent-repl-popup--standing-window))
+        (view (let ((ws (agent-repl--ws-current-name)))
+                (and ws (agent-repl-window--panel-window :view ws))))
+        (selected (selected-window)))
+    (cond
+     (standing (cons standing "replaces-popup"))
+     (view (cons view "view"))
+     ((not (agent-repl-window--side-window-p selected)) (cons selected "selected"))
+     (t
+      (let ((largest (agent-repl--frontend-largest-main-area-window)))
+        (unless (window-live-p largest)
+          (agent-repl--error agent-repl-popup--log-scope "elisp.popup.host-window: rejected reason=no-main-area-window frame={frame}"
+                             :frame (prin1-to-string (selected-frame)))
+          (error "agent-repl: the frame has no main-area window to show a popup in"))
+        (cons largest "largest-main-area"))))))
+
+(defun agent-repl-popup--put-back ()
+  "Put back what the current popup buffer's window showed before it.
+The popup buffer's `kill-buffer-hook'.  Does nothing once the popup has
+handed its window to a popup that replaced it, or when its window no
+longer shows it.  A put-back buffer that died meanwhile leaves the
+window to Emacs, which shows another buffer there as it does for every
+killed buffer."
+  (let* ((stand-in agent-repl-popup--stand-in)
+         (win (plist-get stand-in :window))
+         (prior (plist-get stand-in :buffer)))
+    (setq agent-repl-popup--stand-in nil)
+    (cond
+     ((null stand-in) nil)
+     ((not (and (window-live-p win) (eq (window-buffer win) (current-buffer))))
+      (agent-repl--log agent-repl-popup--log-scope "elisp.popup.put-back: skipped reason=window-moved-on buffer={buffer} window={window}"
+                       :buffer (buffer-name) :window (prin1-to-string win)))
+     ((not (buffer-live-p prior))
+      (agent-repl--info agent-repl-popup--log-scope "elisp.popup.put-back: skipped reason=prior-buffer-dead buffer={buffer} window={window}"
+                        :buffer (buffer-name) :window (prin1-to-string win)))
+     (t
+      (set-window-buffer win prior)
+      (set-window-dedicated-p win (plist-get stand-in :dedicated))
+      (agent-repl--log agent-repl-popup--log-scope "elisp.popup.put-back: buffer={buffer} window={window} restored={restored}"
+                       :buffer (buffer-name) :window (prin1-to-string win) :restored (buffer-name prior))))))
+
+(defun agent-repl-popup--save-if-visiting ()
+  "Save the current buffer when it visits a file and has unsaved edits.
+A popup's close never loses an edit to a notes or source file."
+  (when (and buffer-file-name (buffer-modified-p))
+    (agent-repl--info agent-repl-popup--log-scope "elisp.popup.autosave: buffer={buffer} file={file}"
+                      :buffer (buffer-name) :file buffer-file-name)
+    (save-buffer)))
+
+(defun agent-repl-popup--close (buffer)
+  "Close the popup BUFFER: save its file edits, then kill it.
+Its `kill-buffer-hook' puts back what it stood in for."
+  (with-current-buffer buffer
+    (agent-repl-popup--save-if-visiting))
+  (kill-buffer buffer))
 
 ;;;###autoload
 (defun agent-repl-popup-show (buffer)
   "Show BUFFER in the shared agent-repl popup and return its window.
-Marks BUFFER for `agent-repl-popup-rule' and enables `agent-repl-popup-mode'
-in it, so it opens on the right at 40% width and `q' closes it and kills it.
-A display that yields no window is a broken popup system, and signals."
+Takes the window `agent-repl-popup--host-window' names (the current
+workspace's view, normally), selects it, and enables
+`agent-repl-popup-mode' in BUFFER, so `q' closes it, kills it and puts
+back what the window showed.  No other window moves or resizes."
   (unless (buffer-live-p buffer)
     (agent-repl--error agent-repl-popup--log-scope "elisp.popup.show: rejected reason=dead-buffer buffer={buffer}"
                        :buffer (prin1-to-string buffer))
     (error "agent-repl: cannot show a dead buffer in a popup: %S" buffer))
-  (with-current-buffer buffer
-    (setq agent-repl-popup--owned t)
-    (agent-repl-popup-mode 1))
-  (let ((window (display-buffer buffer)))
-    (unless (window-live-p window)
-      (agent-repl--error agent-repl-popup--log-scope "elisp.popup.show: rejected reason=no-window buffer={buffer}"
-                         :buffer (buffer-name buffer))
-      (error "agent-repl: the popup system showed no window for %s" (buffer-name buffer)))
-    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.show: buffer={buffer} window={window}"
-                     :buffer (buffer-name buffer) :window (prin1-to-string window))
-    window))
+  (let* ((host (agent-repl-popup--host-window))
+         (win (car host))
+         (shown (window-buffer win))
+         (replaced (and (equal (cdr host) "replaces-popup") (not (eq shown buffer)) shown)))
+    (cond
+     ((eq shown buffer) nil)
+     (replaced
+      ;; The replaced popup hands over what it stood in for, so the view
+      ;; comes back when the NEW popup closes, never the old popup.
+      (let ((stand-in (buffer-local-value 'agent-repl-popup--stand-in replaced)))
+        (with-current-buffer replaced (setq agent-repl-popup--stand-in nil))
+        (with-current-buffer buffer (setq agent-repl-popup--stand-in stand-in))))
+     (t
+      (with-current-buffer buffer
+        (setq agent-repl-popup--stand-in
+              (list :window win :buffer shown :dedicated (window-dedicated-p win))))))
+    (with-current-buffer buffer
+      (setq agent-repl-popup--owned t)
+      (add-hook 'kill-buffer-hook #'agent-repl-popup--put-back nil t)
+      (agent-repl-popup-mode 1))
+    (set-window-dedicated-p win nil)
+    (set-window-buffer win buffer)
+    (select-window win)
+    (when replaced
+      (agent-repl-popup--close replaced))
+    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.show: buffer={buffer} window={window} host={host} replaced={replaced}"
+                     :buffer (buffer-name buffer) :window (prin1-to-string win) :host (cdr host)
+                     :replaced (if replaced (buffer-name replaced) "none"))
+    win))
 
 (defun agent-repl-popup-quit ()
-  "Close the current agent-repl popup; its `:ttl 0' kills the buffer.
+  "Close the current agent-repl popup and put back what it stood in for.
 Bound to `q' in Evil normal state inside every agent-repl popup."
   (interactive)
   (agent-repl--log agent-repl-popup--log-scope "elisp.popup.quit: buffer={buffer}" :buffer (buffer-name))
-  (+popup/quit-window))
+  (agent-repl-popup--close (current-buffer)))
 
 (defun agent-repl-popup--path-buffer (path)
   "Return the buffer showing PATH: dired for a directory, the file otherwise.
