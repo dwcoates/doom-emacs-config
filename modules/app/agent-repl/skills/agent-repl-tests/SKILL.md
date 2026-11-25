@@ -562,6 +562,17 @@ coverage impact (always none).
     - Fix: a wait helper bounds its own wait (`w.WaitCtx()`, or `grantedclock.WithBound` for a named window) and takes no context from its caller, so a step cannot stretch one bound over several waits (`e2e/detachedbash_e2e_test.go`'s `dbAwait*`, `e2e/detachedlost_e2e_test.go`'s `dlAwait*`). `harness.DefaultTimeout`'s doc already says it bounds ONE wait; a longer chain gets its own named, measured bound, as `HibernationChainTimeout` does.
     - Coverage impact: none; every wait asserts the same event.
 
+23. **A migration fixture rebuilt for every case, one raw connection per statement.**
+    - Evidence (2026-11-25, `-profile` of `daemon/internal/wsm`, High Power): the package's units cost 77.3 CPU-s, 30 of them in `fixtureAt`, which rebuilt the layout-3 file and replayed every step's DDL and version stamp on a fresh raw connection per statement, for every case and table row; each new connection re-read the whole schema.
+    - Fix: `fixtureFor`/`builtFixture` (`daemon/internal/wsm/migrate_test.go`) build each chain of steps ONCE per test binary, on one connection, from a copy of its longest chain already built, keyed by every step's target and DDL (so a test that swaps the migration list never reads another list's file); every case gets its own copy of the file. Measured after: 48.4 CPU-s.
+    - What remains is not setup: the migrations the tests are about (17.5 CPU-s), schema creation on fresh files (14), and, under both, `modernc.org/memory` unmapping a shared page the moment its last slot frees, so SQLite's allocations pay an `mmap` and a `munmap` each time they cross one (63% of the remaining CPU).
+    - Coverage impact: none; every case opens the same file it did, through the same migrations, with every assertion unchanged.
+
+24. **A test binary relinked when nothing it links changed.**
+    - Evidence (2026-11-25, the go command's `-debug-actiongraph` over all 208 daemon test binaries at the build unit's width): warm, compiling took 1.3s and linking 55s, so a warm `daemon:build` is almost all linking; cold, 86s compiling and 53s linking. In the latest gate, 40 of the 44 daemon units that ran did so only because they declare the whole `daemon/` tree (or `daemon/internal/`) for their source scans (`daemonUnitInputs` in `testrun/roster/roster.go`); only 3 binaries linked the package whose test file changed.
+    - Fix: a source scan lives in `daemon/reposcans`, never in a package whose binary the scan's tree input would then rerun and relink on every daemon change.
+    - Coverage impact: none; a scan moved keeps every check.
+
 ## Changes that LOOK faster and are refused
 
 - Skipping a test, or moving it behind a flag nobody sets: coverage loss.

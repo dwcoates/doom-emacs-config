@@ -2,7 +2,9 @@ package wsm
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -340,27 +343,121 @@ const (
 // layout3Fixture builds a real layout-3 database from the FROZEN old schema in
 // testdata and seeds it with a repository and a workspace, so what a migration
 // carries forward is the shape a previous build actually wrote — never one the
-// current code produced.
+// current code produced. The caller gets its own copy (fixtureFor).
 func layout3Fixture(t *testing.T) string {
+	t.Helper()
+	return fixtureFor(t, nil)
+}
+
+// builtFixtures holds every fixture file this test binary has built, by the
+// exact chain of steps it was carried through (fixtureKey), so each chain is
+// built ONCE per binary however many cases ask for it. Building one cost a
+// raw connection per step, each re-reading the whole schema: 30 of the
+// package's 77 CPU-seconds were spent rebuilding identical files (2026-11-25).
+var builtFixtures struct {
+	sync.Mutex
+	dir   string
+	paths map[string]string
+}
+
+// fixtureFor answers a fresh copy of the layout-3 fixture carried through
+// steps raw, in the test's own temporary directory: every case still owns
+// an isolated file, and only the building is shared.
+func fixtureFor(t *testing.T, steps []migration) string {
+	t.Helper()
+	data, err := os.ReadFile(builtFixture(t, steps))
+	if err != nil {
+		t.Fatalf("read the built fixture: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("copy the built fixture to %s: %v", path, err)
+	}
+	return path
+}
+
+// fixtureKey names a chain of steps by every step's target and DDL, so a test
+// that swaps the migration list (withSteps) never reads a file another list
+// built. A step's kind changes nothing in the file, so it is not part of it.
+func fixtureKey(steps []migration) string {
+	h := sha256.New()
+	for _, m := range steps {
+		fmt.Fprintf(h, "%d\x00%s\x00", m.To, m.DDL)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// builtFixture answers the path of the one file built for steps, building it
+// on the first ask: a copy of the longest prefix of steps already built (else
+// the frozen layout-3 schema and its seed rows), then each remaining step's
+// DDL and its layout stamp, in order, on one raw connection.
+func builtFixture(t *testing.T, steps []migration) string {
+	t.Helper()
+	builtFixtures.Lock()
+	defer builtFixtures.Unlock()
+	key := fixtureKey(steps)
+	if path, ok := builtFixtures.paths[key]; ok {
+		return path
+	}
+	if builtFixtures.paths == nil {
+		dir, err := os.MkdirTemp("", "wsm-fixtures")
+		if err != nil {
+			t.Fatalf("make the fixtures' directory: %v", err)
+		}
+		builtFixtures.dir, builtFixtures.paths = dir, map[string]string{}
+	}
+	path := filepath.Join(builtFixtures.dir, key+".db")
+	from := len(steps)
+	for ; from >= 0; from-- {
+		if base, ok := builtFixtures.paths[fixtureKey(steps[:from])]; ok {
+			data, err := os.ReadFile(base)
+			if err != nil {
+				t.Fatalf("read the built fixture %s: %v", base, err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatalf("copy the built fixture to %s: %v", path, err)
+			}
+			break
+		}
+	}
+	withRawDB(t, path, func(db *sql.DB) {
+		if from < 0 {
+			seedLayout3(t, db)
+			from = 0
+		}
+		for _, m := range steps[from:] {
+			if m.DDL != "" {
+				if _, err := db.Exec(m.DDL); err != nil {
+					t.Fatalf("exec %q: %v", m.DDL, err)
+				}
+			}
+			if _, err := db.Exec(`UPDATE layout SET version = ? WHERE id = 1`, m.To); err != nil {
+				t.Fatalf("stamp layout %d: %v", m.To, err)
+			}
+		}
+	})
+	builtFixtures.paths[key] = path
+	return path
+}
+
+// seedLayout3 writes the frozen layout-3 schema and its seed rows, a
+// repository and a workspace, into the empty database db.
+func seedLayout3(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ddl, err := os.ReadFile(filepath.Join("testdata", "layout3.sql"))
 	if err != nil {
 		t.Fatalf("read the layout-3 schema: %v", err)
 	}
-	path := filepath.Join(t.TempDir(), "wsm.db")
-	withRawDB(t, path, func(db *sql.DB) {
-		if _, err := db.Exec(string(ddl)); err != nil {
-			t.Fatalf("create the layout-3 fixture: %v", err)
-		}
-		if _, err := db.Exec(`INSERT INTO repositories (id, dir, name, default_branch) VALUES ('repo-1', '/tmp/repo-1', 'repo', 'master')`); err != nil {
-			t.Fatalf("seed the fixture's repository: %v", err)
-		}
-		if _, err := db.Exec(`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
-			VALUES (?, 'repo-1', '/tmp/ws-1', ?, 'feature', 'master', 0, 0, 0, 1)`, string(fixtureWorkspaceID), fixtureWorkspaceName); err != nil {
-			t.Fatalf("seed the fixture's workspace: %v", err)
-		}
-	})
-	return path
+	if _, err := db.Exec(string(ddl)); err != nil {
+		t.Fatalf("create the layout-3 fixture: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO repositories (id, dir, name, default_branch) VALUES ('repo-1', '/tmp/repo-1', 'repo', 'master')`); err != nil {
+		t.Fatalf("seed the fixture's repository: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
+		VALUES (?, 'repo-1', '/tmp/ws-1', ?, 'feature', 'master', 0, 0, 0, 1)`, string(fixtureWorkspaceID), fixtureWorkspaceName); err != nil {
+		t.Fatalf("seed the fixture's workspace: %v", err)
+	}
 }
 
 // withRawDB opens the file with the bare driver, so a test can write what the
@@ -924,9 +1021,6 @@ func TestTheMigratedHeldPromptsAreUncoalescedPrompts(t *testing.T) {
 	}
 }
 
-// fixtureAt answers a database carried from layout 3 up to version by the
-// migration list's own steps, applied raw, so a test stands in for the file
-// the build at that layout left.
 // tableColumns answers a table's declared columns in the file at path, in
 // order, comma-joined: the one shape every migrated-versus-fresh comparison
 // and every column-drop pin reads.
@@ -935,19 +1029,19 @@ func tableColumns(t *testing.T, path, table string) string {
 	return rawScalar[string](t, path, `SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_table_info(?) ORDER BY cid)`, table)
 }
 
+// fixtureAt answers a database carried from layout 3 up to version by the
+// migration list's own steps, applied raw, so a test stands in for the file
+// the build at that layout left.
 func fixtureAt(t *testing.T, version int) string {
 	t.Helper()
-	path := layout3Fixture(t)
+	var steps []migration
 	for _, m := range migrations {
 		if m.To > version {
 			break
 		}
-		if m.DDL != "" {
-			execRaw(t, path, m.DDL)
-		}
-		stampRaw(t, path, m.To)
+		steps = append(steps, m)
 	}
-	return path
+	return fixtureFor(t, steps)
 }
 
 // EVERY STEP SAYS WHAT IT MEANS FOR THE BUILD BEFORE IT: the deploy decides
@@ -1557,5 +1651,117 @@ func TestTheUserAttentionStepIsAdditiveAndCreatesItsTable(t *testing.T) {
 	}
 	if got := rawScalar[int](t, path, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'user_attention'`); got != 1 {
 		t.Fatalf("table user_attention exists %d times, want once", got)
+	}
+}
+
+// masterOf answers every schema object of the file at path, with its SQL, in
+// name order, and its layout version: everything a raw build writes.
+func masterOf(t *testing.T, path string) []string {
+	t.Helper()
+	var out []string
+	withRawDB(t, path, func(db *sql.DB) {
+		rows, err := db.Query(`SELECT type || ' ' || name || ' ' || coalesce(sql, '') FROM sqlite_master ORDER BY type, name`)
+		if err != nil {
+			t.Fatalf("read the schema of %q: %v", path, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatalf("scan the schema of %q: %v", path, err)
+			}
+			out = append(out, line)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("read the schema of %q: %v", path, err)
+		}
+	})
+	return append(out, fmt.Sprintf("layout %d", rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`)))
+}
+
+// A FIXTURE BUILT ONCE IS THE FILE A BUILD STEP BY STEP WOULD LEAVE: the
+// shared build runs every step on one connection, and must write exactly what
+// a raw connection per statement wrote, seed rows included.
+func TestAFixtureBuiltOnceMatchesOneBuiltStatementByStatement(t *testing.T) {
+	for _, version := range []int{3, stepNamed(t, "workspaces_backlogged") - 1, migrations[len(migrations)-1].To} {
+		t.Run(fmt.Sprintf("layout %d", version), func(t *testing.T) {
+			// Arrange
+			want := layout3Fixture(t)
+			for _, m := range migrations {
+				if m.To > version {
+					break
+				}
+				if m.DDL != "" {
+					execRaw(t, want, m.DDL)
+				}
+				stampRaw(t, want, m.To)
+			}
+
+			// Act
+			got := fixtureAt(t, version)
+
+			// Assert
+			if g, w := masterOf(t, got), masterOf(t, want); !slices.Equal(g, w) {
+				t.Errorf("fixtureAt(%d) schema differs from a statement-by-statement build:\n got %q\nwant %q", version, g, w)
+			}
+			if name := rawScalar[string](t, got, `SELECT name FROM workspaces WHERE id = ?`, string(fixtureWorkspaceID)); name != fixtureWorkspaceName {
+				t.Errorf("fixtureAt(%d) seed workspace name = %q, want %q", version, name, fixtureWorkspaceName)
+			}
+		})
+	}
+}
+
+// EVERY CASE OWNS ITS FIXTURE: two asks for one chain get two files, and a
+// write to one is never read through the other or through the shared build.
+func TestEachFixtureCopyIsItsOwnFile(t *testing.T) {
+	// Arrange
+	version := stepNamed(t, "workspaces_backlogged") - 1
+	first := fixtureAt(t, version)
+	second := fixtureAt(t, version)
+
+	// Act
+	execRaw(t, first, `DELETE FROM workspaces`)
+
+	// Assert
+	if first == second {
+		t.Fatalf("two fixtureAt(%d) calls answered one path %q", version, first)
+	}
+	if n := rawScalar[int](t, second, `SELECT count(*) FROM workspaces`); n != 1 {
+		t.Errorf("the second copy holds %d workspaces after the first was emptied, want 1", n)
+	}
+	if n := rawScalar[int](t, fixtureAt(t, version), `SELECT count(*) FROM workspaces`); n != 1 {
+		t.Errorf("a later copy holds %d workspaces after the first was emptied, want 1", n)
+	}
+}
+
+// A CHAIN IS BUILT ONCE AND ONLY FOR ITSELF: the same steps answer the same
+// built file, and a swapped list whose DDL differs builds its own.
+func TestAFixtureIsBuiltOncePerChainOfSteps(t *testing.T) {
+	steps := slices.Clone(migrations[:2])
+	changed := slices.Clone(steps)
+	changed[1].DDL += "\nCREATE TABLE fixture_key_probe (id INTEGER);"
+	rekinded := slices.Clone(steps)
+	rekinded[1].Kind = MigrationContract
+	tests := []struct {
+		name     string
+		a, b     []migration
+		samePath bool
+	}{
+		{name: "the same steps share one build", a: steps, b: slices.Clone(steps), samePath: true},
+		{name: "a step's kind changes nothing in the file", a: steps, b: rekinded, samePath: true},
+		{name: "a step's DDL builds its own file", a: steps, b: changed, samePath: false},
+		{name: "a longer chain builds its own file", a: steps, b: migrations[:3], samePath: false},
+		{name: "a shorter chain builds its own file", a: steps, b: migrations[:1], samePath: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			a, b := builtFixture(t, tt.a), builtFixture(t, tt.b)
+
+			// Assert
+			if (a == b) != tt.samePath {
+				t.Errorf("builtFixture paths %q and %q: same = %v, want %v", a, b, a == b, tt.samePath)
+			}
+		})
 	}
 }
