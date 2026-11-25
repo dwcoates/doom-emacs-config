@@ -1252,6 +1252,36 @@ func TestSweepRecordsALostSessionDirectiveAtDebug(t *testing.T) {
 	}
 }
 
+// TestSweepRecordsAnOrderedStandDownUnderTheDirectiveAtInfo covers the
+// other race: a teardown this daemon ordered (a landed merge closing its
+// workspace) ended the shim while the hibernate directive was in flight. The
+// session is gone by this daemon's own choice, so it is no fault.
+func TestSweepRecordsAnOrderedStandDownUnderTheDirectiveAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.hibernateErr[ws] = fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, errors.New("unavailable: use of closed network connection"))
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert.
+	found := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" {
+			t.Fatalf("a stand-down this daemon ordered was recorded at error: %+v", r)
+		}
+		if r.Level == "info" && r.Message == "this daemon stood the session down under the hibernate directive; deferring the park" && r.Context["workspace"] == string(ws) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the sweep deferred an ordered stand-down without recording it")
+	}
+}
+
 // TestSweepStillRecordsAGenuineDirectiveFailureAtError is the other side of
 // that narrowing: a directive that failed against a shim that WAS there is a
 // fault, and stays one.
