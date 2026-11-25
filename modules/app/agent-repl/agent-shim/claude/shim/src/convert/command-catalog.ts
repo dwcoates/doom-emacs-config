@@ -13,7 +13,7 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
-import type { SlashCommandLike } from "../sdk/types.js";
+import type { ContextUsageLike, SlashCommandLike } from "../sdk/types.js";
 
 const LOGGER = bindLog("shim.convert.command-catalog", { component: "shim-convert-command-catalog", operation: "shim.convert.command_catalog" });
 
@@ -24,27 +24,61 @@ function stated(text: string | undefined): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
+/**
+ * The `SKILL.md` of every skill the vendor loaded, by the name it answers to.
+ *
+ * THE VENDOR'S CONTEXT READING IS WHERE IT SAYS WHICH FILE A SKILL IS. Its
+ * command rows name no file, and its `skills.skillFrontmatter` rows name each
+ * loaded skill under the same name the command rows use (a plugin's as
+ * `plugin:skill`), with the path of the file it resolved that name to. A row
+ * with no path (a built-in skill) names no file.
+ */
+export type SkillFiles = ReadonlyMap<string, string>;
+
+/** The skill files CONTEXT states; none when it states no skills. */
+export function skillFilesOf(context: ContextUsageLike): SkillFiles {
+  const files = new Map<string, string>();
+  for (const skill of context.skills?.skillFrontmatter ?? []) {
+    const file = stated(skill.path);
+    if (file !== undefined && !files.has(skill.name)) files.set(skill.name, file);
+  }
+  return files;
+}
+
+/** Whether A and B name the same file for every skill. */
+export function sameSkillFiles(a: SkillFiles, b: SkillFiles): boolean {
+  if (a.size !== b.size) return false;
+  for (const [name, file] of a) if (b.get(name) !== file) return false;
+  return true;
+}
+
 /** One catalog entry from one vendor command row. */
-function catalogEntry(command: SlashCommandLike): conversationv1.SessionCommandCatalogEntry {
+function catalogEntry(command: SlashCommandLike, skillFiles: SkillFiles): conversationv1.SessionCommandCatalogEntry {
   const description = stated(command.description);
   const argumentHint = stated(command.argumentHint);
+  const skillFile = skillFiles.get(command.name);
   return create(conversationv1.SessionCommandCatalogEntrySchema, {
     name: command.name,
     ...(description === undefined ? {} : { description }),
     ...(argumentHint === undefined ? {} : { argumentHint }),
+    ...(skillFile === undefined ? {} : { skillFile }),
     aliases: (command.aliases ?? []).filter((alias) => alias.trim() !== ""),
   });
 }
 
 /**
- * The catalog the vendor's command rows state, in the vendor's order.
+ * The catalog the vendor's command rows state, in the vendor's order, each
+ * skill with the file SKILL_FILES names for it.
  *
  * A ROW THAT NAMES NO COMMAND IS NOT A COMMAND: `SessionCommandCatalogEntry.name`
  * is never empty, and nothing can complete to a bare `/`. A REPEATED NAME keeps
  * its first row, because names are unique within one statement and the vendor
  * lists the one it resolves first.
  */
-export function commandCatalogOf(commands: readonly SlashCommandLike[]): conversationv1.SessionCommandCatalog {
+export function commandCatalogOf(
+  commands: readonly SlashCommandLike[],
+  skillFiles: SkillFiles,
+): conversationv1.SessionCommandCatalog {
   const seen = new Set<string>();
   const entries: conversationv1.SessionCommandCatalogEntry[] = [];
   for (const command of commands) {
@@ -62,7 +96,7 @@ export function commandCatalogOf(commands: readonly SlashCommandLike[]): convers
       continue;
     }
     seen.add(command.name);
-    entries.push(catalogEntry(command));
+    entries.push(catalogEntry(command, skillFiles));
   }
   return create(conversationv1.SessionCommandCatalogSchema, { commands: entries });
 }

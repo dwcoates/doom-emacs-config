@@ -18203,6 +18203,93 @@ describe("the slash-command catalog", () => {
     );
   });
 
+  /** Every catalog the engine pushed, as each entry's skill file, in push order. */
+  function statedSkillFiles(spy: PushSpy): Array<Array<string | undefined>> {
+    return pushedOfArm(spy, "commandCatalog").map((update) =>
+      update.update.case === "commandCatalog" ? update.update.value.commands.map((entry) => entry.skillFile) : [],
+    );
+  }
+
+  /** QUERY's context reading, listing SKILL with FILE. */
+  function contextNaming(query: { contextUsage: ContextUsageLike }, skill: string, file: string): ContextUsageLike {
+    return {
+      ...query.contextUsage,
+      skills: { totalSkills: 1, includedSkills: 1, tokens: 1, skillFrontmatter: [{ name: skill, source: "projectSettings", path: file, tokens: 1 }] },
+    } as ContextUsageLike;
+  }
+
+  it("restates the catalog with each skill's file once the context reading lands", async () => {
+    // Arrange: the context reading answers only once released.
+    let release: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => (release = resolve));
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.commands = commands("ceac-resource-usage", "compact");
+        const usage = contextNaming(query, "ceac-resource-usage", "/w/.claude/skills/ceac-resource-usage/SKILL.md");
+        query.getContextUsage = async (): Promise<ContextUsageLike> => {
+          await answered;
+          return usage;
+        };
+      },
+    });
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    await started(h);
+    await untilPushed(h.engine.pushes, "expect(statedSkillFiles(pushed)).toEqual([[undefined, undefined]]);", () =>
+      holds(() => {
+        expect(statedSkillFiles(pushed)).toEqual([[undefined, undefined]]);
+      }),
+    );
+
+    // Act.
+    release();
+
+    // Assert.
+    await untilPushed(h.engine.pushes, "expect(statedSkillFiles(pushed).at(-1)).toEqual([file, undefined]);", () =>
+      holds(() => {
+        expect(statedSkillFiles(pushed).at(-1)).toEqual(["/w/.claude/skills/ceac-resource-usage/SKILL.md", undefined]);
+      }),
+    );
+  });
+
+  it("states the catalog with each skill's file when the context reading landed first", async () => {
+    // Arrange: the command read answers only once released.
+    let release: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => (release = resolve));
+    let contextRead = false;
+    const h = harness({
+      onQueryCreated: (query) => {
+        const usage = contextNaming(query, "ceac-resource-usage", "/w/SKILL.md");
+        query.getContextUsage = async (): Promise<ContextUsageLike> => {
+          contextRead = true;
+          return usage;
+        };
+        query.supportedCommands = async (): Promise<SlashCommandLike[]> => {
+          await answered;
+          return commands("ceac-resource-usage");
+        };
+      },
+    });
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    await started(h);
+    await untilPushed(h.engine.pushes, "expect(contextRead).toBe(true);", () =>
+      holds(() => {
+        expect(contextRead).toBe(true);
+        expect(pushedOfArm(pushed, "contextUsage")).not.toHaveLength(0);
+      }),
+    );
+    expect(statedSkillFiles(pushed)).toEqual([]);
+
+    // Act.
+    release();
+
+    // Assert.
+    await untilPushed(h.engine.pushes, "expect(statedSkillFiles(pushed)).toEqual([['/w/SKILL.md']]);", () =>
+      holds(() => {
+        expect(statedSkillFiles(pushed)).toEqual([["/w/SKILL.md"]]);
+      }),
+    );
+  });
+
   it("faults the catalog's own component when the read fails, and states no catalog", async () => {
     // Arrange.
     const h = harness({

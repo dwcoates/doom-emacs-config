@@ -100,6 +100,7 @@ import type {
   ContextUsageLike,
   McpServerStatusLike,
   ModelInfoLike,
+  SlashCommandLike,
 } from "../sdk/types.js";
 import { RemoteControl } from "./remote-control.js";
 import { ParkedBridge, parkedBridgeRefused, type ParkedBridgeRefusal } from "./parked-bridge.js";
@@ -181,7 +182,7 @@ import {
 } from "./cold.js";
 import { TranscriptTitleTail } from "./title.js";
 import { sessionTitleUpdate } from "../convert/session-title.js";
-import { commandCatalogOf, commandCatalogUpdate } from "../convert/command-catalog.js";
+import { commandCatalogOf, commandCatalogUpdate, sameSkillFiles, skillFilesOf, type SkillFiles } from "../convert/command-catalog.js";
 import { ForegroundUnitTable } from "./foreground.js";
 import { LiveWorkTable, ShellRunStarts, type LiveWorkEntry } from "./detached.js";
 import {
@@ -2348,7 +2349,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       component: CONTEXT_USAGE_COMPONENT,
       call: "getContextUsage",
       read: (active) => active.getContextUsage(),
-      take: (usage) => pushes.push(contextUsageUpdate(usage)),
+      take: (usage) => {
+        pushes.push(contextUsageUpdate(usage));
+        noteSkillFiles(skillFilesOf(usage));
+      },
     }, closedBySession);
   }
 
@@ -2442,11 +2446,43 @@ export function createEngine(deps: EngineDeps): SessionEngine {
             "a bypassing session lists the merge-queue skill its start switched off",
           );
         }
-        const catalog = commandCatalogOf(commands);
-        const changed = pushes.push(commandCatalogUpdate(catalog));
-        LOGGER.debug({ commands: catalog.commands.length, changed }, "read the runtime's slash-command catalog");
+        catalogCommands = commands;
+        stateCommandCatalog("commands_read");
       },
     }, closedBySession);
+  }
+
+  /**
+   * THE CATALOG IS TWO READINGS JOINED. The command rows come from
+   * `supportedCommands()`, and each skill's file from the context reading
+   * (`skillFilesOf`), which name no file and no command respectively. Either
+   * can land first, so each keeps its last answer and every landing of either
+   * restates the joined catalog; the push table drops an unchanged one.
+   */
+  let catalogCommands: readonly SlashCommandLike[] | undefined;
+  let catalogSkillFiles: SkillFiles = new Map();
+
+  /** The skill files the context reading just stated, joined onto the catalog. */
+  function noteSkillFiles(files: SkillFiles): void {
+    // Every context reading lists the skills, and most list the same files.
+    if (sameSkillFiles(files, catalogSkillFiles)) return;
+    catalogSkillFiles = files;
+    // A catalog not yet read is stated by its own read, files and all.
+    if (catalogCommands === undefined) return;
+    stateCommandCatalog("skill_files_read");
+  }
+
+  /** State the catalog the last command rows and skill files make. */
+  function stateCommandCatalog(cause: "commands_read" | "skill_files_read"): void {
+    if (catalogCommands === undefined) {
+      throw new Error("session: the command catalog was stated before its commands were read");
+    }
+    const catalog = commandCatalogOf(catalogCommands, catalogSkillFiles);
+    const changed = pushes.push(commandCatalogUpdate(catalog));
+    LOGGER.debug(
+      { commands: catalog.commands.length, skill_files: catalogSkillFiles.size, changed, cause },
+      "stated the runtime's slash-command catalog",
+    );
   }
 
   /** Probe every declared mcp server's health and state each one. */
