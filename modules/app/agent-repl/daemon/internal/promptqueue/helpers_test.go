@@ -1901,6 +1901,9 @@ type harness struct {
 	clientReaped bool
 	// coldGate is the standing gate's own account, empty when no gate stands.
 	coldGate string
+	// gateAnswering is a cold gate an answer has taken, its resume bringing the
+	// session up (GateAnswering). A test may flip it from a revive hook.
+	gateAnswering atomic.Bool
 	// noWatcher keeps the shim client while the session has no watcher: a shim
 	// parked at its cold gate, or a session between its start and its watch.
 	noWatcher bool
@@ -1988,8 +1991,14 @@ func newHarness(t *testing.T) *harness {
 		BounceEnded: func(ws ids.WorkspaceID) {
 			h.bounceEnds.note(ws, h.q.Bouncing(ws))
 		},
-		ColdGate: func(ids.WorkspaceID) (string, bool) {
-			return h.coldGate, h.coldGate != ""
+		ColdGate: func(ids.WorkspaceID) (string, GateState) {
+			switch {
+			case h.coldGate != "":
+				return h.coldGate, GateStanding
+			case h.gateAnswering.Load():
+				return "", GateAnswering
+			}
+			return "", GateNone
 		},
 		ColdGateHeld: func(_ ids.WorkspaceID, held int) {
 			h.gateMu.Lock()

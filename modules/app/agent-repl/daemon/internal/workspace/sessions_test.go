@@ -3803,6 +3803,41 @@ func TestATakenColdGateRefusesNoPromptButIsCarried(t *testing.T) {
 	}
 }
 
+func TestColdGateStage(t *testing.T) {
+	tests := []struct {
+		name                        string
+		raise, take                 bool
+		wantStanding, wantAnswering bool
+		wantDetail                  bool
+	}{
+		{name: "no gate is neither", raise: false},
+		{name: "a standing gate is standing with its detail", raise: true, wantStanding: true, wantDetail: true},
+		{name: "a taken gate is answering with no detail", raise: true, take: true, wantAnswering: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-stage")
+			if tt.raise {
+				f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
+			}
+			if tt.take {
+				f.fleet.TakeColdGate(ws.ID, "vendor-1")
+			}
+
+			// Act
+			detail, standing, answering := f.fleet.ColdGateStage(ws.ID)
+
+			// Assert
+			if standing != tt.wantStanding || answering != tt.wantAnswering || (detail != "") != tt.wantDetail {
+				t.Fatalf("ColdGateStage = (%q, standing %t, answering %t), want standing %t, answering %t, detail %t",
+					detail, standing, answering, tt.wantStanding, tt.wantAnswering, tt.wantDetail)
+			}
+		})
+	}
+}
+
 func TestEndColdGateRetiresOnlyTheTakenGateItNames(t *testing.T) {
 	tests := []struct {
 		name      string

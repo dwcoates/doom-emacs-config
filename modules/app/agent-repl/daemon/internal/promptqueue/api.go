@@ -615,10 +615,11 @@ type Deps struct {
 	// ordered meanwhile (a kill, a forget) explains a session that is gone,
 	// rather than a revival that lied. REQUIRED.
 	StandDowns func(ws ids.WorkspaceID) uint64
-	// ColdGate answers the STANDING cold gate's own account for a workspace,
-	// false when no gate stands. A gate is a refusal with a name of its own,
-	// and this is what lets the queue give it rather than reporting a missing
-	// session. Nil means no workspace is ever read as gated.
+	// ColdGate answers where a workspace's cold gate stands (GateState) and a
+	// standing gate's own account. A standing gate is a refusal with a name of
+	// its own, and this is what lets the queue give it rather than reporting a
+	// missing session; an answered one is a bring-up already under way. Nil
+	// means no workspace is ever read as gated.
 	ColdGate ColdGateFunc
 	// ColdGateHeld is told, on every republish of the hold tray, how many
 	// prompts are held at a cold gate (gatefate.go), so the standing gate
@@ -733,9 +734,42 @@ func (e *ColdGateRefusal) Error() string {
 // Unwrap answers the sentinel, so `errors.Is(err, ErrColdGate)` holds.
 func (e *ColdGateRefusal) Unwrap() error { return ErrColdGate }
 
-// ColdGateFunc answers the standing cold gate's detail for a workspace,
-// reporting false when no gate stands. workspace.Fleet.ColdGateDetail is it.
-type ColdGateFunc func(ws ids.WorkspaceID) (string, bool)
+// GateState is where a workspace's cold gate stands, as the queue reads it.
+type GateState int
+
+const (
+	// GateNone: no cold gate stands and no answer to one is under way.
+	GateNone GateState = iota
+	// GateStanding: the gate stands unanswered. It refuses or holds by its
+	// own name, and its detail is its sentence.
+	GateStanding
+	// GateAnswering: an answer has taken the gate and its resume is bringing
+	// the session up. THE ANSWER OWNS THAT BRING-UP: nothing else starts one
+	// beside it, and its session coming up (ReleaseReconnectHolds) delivers
+	// what waits. A revival started beside it found no gate and no session and
+	// recorded a revival that lied (2026-11-25 11:20:56).
+	GateAnswering
+)
+
+// GateStateOf reads a fleet's one-step gate read (workspace.Fleet.ColdGateStage)
+// as the queue's GateState: a standing gate keeps its detail, an answered one
+// has none. A gate read as both standing and answering is a broken fleet, and
+// panics.
+func GateStateOf(detail string, standing, answering bool) (string, GateState) {
+	switch {
+	case standing && answering:
+		panic("promptqueue: a cold gate was read as both standing and answering")
+	case standing:
+		return detail, GateStanding
+	case answering:
+		return "", GateAnswering
+	}
+	return "", GateNone
+}
+
+// ColdGateFunc answers where a workspace's cold gate stands and, while it
+// stands, its detail. workspace.Fleet.ColdGateStage is it.
+type ColdGateFunc func(ws ids.WorkspaceID) (detail string, state GateState)
 
 // ClientFunc resolves a workspace's live shim client, reporting false when the
 // workspace has none. It is injected so the queue does not own the fleet.

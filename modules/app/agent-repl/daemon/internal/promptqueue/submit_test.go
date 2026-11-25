@@ -1166,6 +1166,123 @@ func TestARevivalWhoseWatcherStillRunsIsRecordedAtError(t *testing.T) {
 	}
 }
 
+// TestNoRevivalStartsWhileAColdGateAnswerBringsTheSessionUp pins that a
+// submission held while an answered gate's resume runs starts no revival: the
+// answer owns the bring-up, and its session coming up delivers the prompt.
+func TestNoRevivalStartsWhileAColdGateAnswerBringsTheSessionUp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.gateAnswering.Store(true)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held for the answer's session", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if h.revivals != 0 {
+		t.Fatalf("revivals = %d, want none beside the gate's answer", h.revivals)
+	}
+	if !logged(h.log.Records(), "info", opSubmit, "a cold gate's answer is bringing the session up; no revival starts beside it") {
+		t.Fatalf("records = %+v, want the skipped revival recorded", h.log.Records())
+	}
+	if logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("records = %+v, want no revival that lied", h.log.Records())
+	}
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("reading the standing holds: %v", err)
+	}
+	if len(standing) != 1 {
+		t.Fatalf("standing holds = %+v, want the prompt held for the answer's session", standing)
+	}
+}
+
+// TestAColdGateAnsweredWhileTheRevivalRanIsNotARevivalThatLied pins the
+// 2026-11-25 11:20:56 race: the answer takes the gate while the revival runs,
+// the fleet's start finds the answered gate and starts nothing, and the
+// missing session is the answer's to bring up, never an ERROR.
+func TestAColdGateAnsweredWhileTheRevivalRanIsNotARevivalThatLied(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { h.gateAnswering.Store(true) }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("records = %+v, want no revival that lied", h.log.Records())
+	}
+	if !logged(h.log.Records(), "info", opSubmit, "a cold gate's answer took the bring-up while the revival ran; its session coming up delivers the held prompts") {
+		t.Fatalf("records = %+v, want the answer's bring-up recorded", h.log.Records())
+	}
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("reading the standing holds: %v", err)
+	}
+	if len(standing) != 1 {
+		t.Fatalf("standing holds = %+v, want the prompt held for the answer's session", standing)
+	}
+}
+
+// TestASubmissionToAStartingAnsweredSessionNamesTheAnswer pins sessionWait's
+// answered arm: a shim the answer spawned holds no started session yet, and
+// the hold says the answer is bringing it up.
+func TestASubmissionToAStartingAnsweredSessionNamesTheAnswer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+	h.gateAnswering.Store(true)
+
+	// Act
+	_, why, waiting := h.q.sessionWait(theWorkspace)
+
+	// Assert
+	if !waiting || why != "the cold gate's answer is bringing the session up" {
+		t.Fatalf("sessionWait = (%q, %v), want the answer named", why, waiting)
+	}
+}
+
+func TestGateStateOf(t *testing.T) {
+	tests := []struct {
+		name                string
+		detail              string
+		standing, answering bool
+		wantDetail          string
+		want                GateState
+	}{
+		{name: "no gate", want: GateNone},
+		{name: "standing keeps its detail", detail: "cold at 1 token", standing: true, wantDetail: "cold at 1 token", want: GateStanding},
+		{name: "answering has no detail", detail: "stale", answering: true, want: GateAnswering},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			detail, got := GateStateOf(tt.detail, tt.standing, tt.answering)
+
+			// Assert
+			if detail != tt.wantDetail || got != tt.want {
+				t.Fatalf("GateStateOf = (%q, %d), want (%q, %d)", detail, got, tt.wantDetail, tt.want)
+			}
+		})
+	}
+	t.Run("standing and answering at once panics", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("GateStateOf did not panic on a gate both standing and answering")
+			}
+		}()
+		GateStateOf("", true, true)
+	})
+}
+
 func TestARevivalThatLeavesNoSessionAtAllIsRecordedAtError(t *testing.T) {
 	// Arrange: the revival answers success and nothing serves the workspace.
 	h := newHarness(t)
