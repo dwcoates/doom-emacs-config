@@ -1,28 +1,35 @@
 // endpoint_set_workspace_summary.proto — SetWorkspaceSummary: set the
-// one-sentence summary of a workspace's task that the topbar draws. AGENT
-// API section.
+// summary of a workspace's task that the topbar draws, as a long summary and
+// the short summary distilled from it. AGENT API section.
 //
 // THE WORKSPACE'S OWN AGENT WRITES ITS SUMMARY. The summary is the agent's
 // own statement of the workspace's high-level task, so the agent, which holds
 // the whole conversation, is the one that states it; the daemon distills
-// nothing. It draws the summary verbatim as the topbar's title line
+// nothing. It draws the short summary verbatim as the topbar's title line
 // (frontend.v1.TopbarTitle), first in precedence over the vendor's own
-// conversation title, and every find and status read answers it.
+// conversation title, and the long summary in the popup a hover on that title
+// shows (frontend.v1.TopbarTitleDescription). Every find and status read
+// answers both.
 //
-// WHEN IT IS SET. A workspace with no summary owes one: while none stands,
+// WHEN IT IS SET. A workspace with no summary owes one: while none stands (or
+// only a short summary stands, set before the long one existed),
 // the daemon closes every user's or agent's prompt to the workspace with a
 // note asking for it, so a new workspace sets it on its first prompt, and a
 // workspace whose /clear dropped it sets it again on the prompt after. Once
 // one stands, the agent sets it again only when the workspace's high-level
 // task materially changes, which for a one-shot is typically never.
 //
-// WHAT A SUMMARY IS. One plain imperative sentence stating the workspace's
-// task, opened by its verb ("Fix the footer's stall detail for cold gates."),
-// of at most fifteen words, shorter being better. The daemon refuses any
-// other text (`invalid_summary`) with the reason, so every summary drawn
-// fits the title line.
+// WHAT A SUMMARY IS. Two parts, always set together. The LONG summary is one
+// paragraph of two to four sentences describing the task in more detail than
+// a title can. The SHORT summary is distilled from it: one plain imperative
+// sentence stating the task, opened by its verb ("Fix the footer's stall
+// detail for cold gates."), of at most fifteen words, shorter being better.
+// The long summary is declared first so an agent writes it first and
+// distills the short one from it. The daemon refuses either part when it
+// breaks its form (`invalid_summary`) with the part and the reason, so every
+// summary drawn fits its slot.
 //
-// DURABLE: the daemon records the summary on the workspace, so it stands
+// DURABLE: the daemon records both parts on the workspace, so it stands
 // across a daemon restart, and drops it at the workspace's /clear, which
 // ends the conversation it described.
 
@@ -40,7 +47,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_summary.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_summary: GenFile = /*@__PURE__*/
-  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9zdW1tYXJ5LnByb3RvEgxhZ2VudHJlcGwudjEiXAoaU2V0V29ya3NwYWNlU3VtbWFyeVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIPCgdzdW1tYXJ5GAIgASgJIp0BChtTZXRXb3Jrc3BhY2VTdW1tYXJ5UmVzcG9uc2USOwoHc3VjY2VzcxgBIAEoCzIoLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VTdW1tYXJ5U3VjY2Vzc0gAEjcKBWVycm9yGAIgASgLMiYuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVN1bW1hcnlFcnJvckgAQggKBnJlc3VsdCItChpTZXRXb3Jrc3BhY2VTdW1tYXJ5U3VjY2VzcxIPCgdzdW1tYXJ5GAEgASgJIrMDChhTZXRXb3Jrc3BhY2VTdW1tYXJ5RXJyb3ISTgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyMS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlU3VtbWFyeVVua25vd25Xb3Jrc3BhY2VIABJXChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVN1bW1hcnlXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEk4KEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMjEuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVN1bW1hcnlUcmFuc2ZlcnJpbmdBd2F5SAASSQoPbm90X3lldF9hZG9wdGVkGAQgASgLMi4uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVN1bW1hcnlOb3RZZXRBZG9wdGVkSAASSgoPaW52YWxpZF9zdW1tYXJ5GAUgASgLMi8uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVN1bW1hcnlJbnZhbGlkU3VtbWFyeUgAQgcKBWNhdXNlIiUKI1NldFdvcmtzcGFjZVN1bW1hcnlVbmtub3duV29ya3NwYWNlIj8KJ1NldFdvcmtzcGFjZVN1bW1hcnlXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNgojU2V0V29ya3NwYWNlU3VtbWFyeVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSJECiBTZXRXb3Jrc3BhY2VTdW1tYXJ5Tm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiRAohU2V0V29ya3NwYWNlU3VtbWFyeUludmFsaWRTdW1tYXJ5Eg8KB3N1bW1hcnkYASABKAkSDgoGcmVhc29uGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9zdW1tYXJ5LnByb3RvEgxhZ2VudHJlcGwudjEieAoaU2V0V29ya3NwYWNlU3VtbWFyeVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIUCgxsb25nX3N1bW1hcnkYAyABKAkSFQoNc2hvcnRfc3VtbWFyeRgCIAEoCSKdAQobU2V0V29ya3NwYWNlU3VtbWFyeVJlc3BvbnNlEjsKB3N1Y2Nlc3MYASABKAsyKC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlU3VtbWFyeVN1Y2Nlc3NIABI3CgVlcnJvchgCIAEoCzImLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VTdW1tYXJ5RXJyb3JIAEIICgZyZXN1bHQiSQoaU2V0V29ya3NwYWNlU3VtbWFyeVN1Y2Nlc3MSFAoMbG9uZ19zdW1tYXJ5GAIgASgJEhUKDXNob3J0X3N1bW1hcnkYASABKAkiswMKGFNldFdvcmtzcGFjZVN1bW1hcnlFcnJvchJOChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIxLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VTdW1tYXJ5VW5rbm93bldvcmtzcGFjZUgAElcKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyNS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlU3VtbWFyeVdvcmtzcGFjZVJlZk1pc21hdGNoSAASTgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyMS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlU3VtbWFyeVRyYW5zZmVycmluZ0F3YXlIABJJCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlU3VtbWFyeU5vdFlldEFkb3B0ZWRIABJKCg9pbnZhbGlkX3N1bW1hcnkYBSABKAsyLy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlU3VtbWFyeUludmFsaWRTdW1tYXJ5SABCBwoFY2F1c2UiJQojU2V0V29ya3NwYWNlU3VtbWFyeVVua25vd25Xb3Jrc3BhY2UiPwonU2V0V29ya3NwYWNlU3VtbWFyeVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSI2CiNTZXRXb3Jrc3BhY2VTdW1tYXJ5VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkQKIFNldFdvcmtzcGFjZVN1bW1hcnlOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyLkAQohU2V0V29ya3NwYWNlU3VtbWFyeUludmFsaWRTdW1tYXJ5EksKDGxvbmdfc3VtbWFyeRgDIAEoCzIzLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VTdW1tYXJ5SW52YWxpZExvbmdTdW1tYXJ5SAASTQoNc2hvcnRfc3VtbWFyeRgEIAEoCzI0LmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VTdW1tYXJ5SW52YWxpZFNob3J0U3VtbWFyeUgAQgYKBHBhcnRKBAgBEAJKBAgCEANSB3N1bW1hcnlSBnJlYXNvbiJNCiVTZXRXb3Jrc3BhY2VTdW1tYXJ5SW52YWxpZExvbmdTdW1tYXJ5EhQKDGxvbmdfc3VtbWFyeRgBIAEoCRIOCgZyZWFzb24YAiABKAkiTwomU2V0V29ya3NwYWNlU3VtbWFyeUludmFsaWRTaG9ydFN1bW1hcnkSFQoNc2hvcnRfc3VtbWFyeRgBIAEoCRIOCgZyZWFzb24YAiABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspaceSummaryRequest
@@ -54,15 +61,26 @@ export type SetWorkspaceSummaryRequest = Message<"agentrepl.v1.SetWorkspaceSumma
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * The summary, stored and drawn verbatim: one line, one sentence, two to
-   * fifteen words, with no comma, semicolon, colon, parenthesis or dash
-   * joining clauses, and no whitespace at either end. Any other summary is
-   * refused (`invalid_summary`). A blank summary is a malformed request
-   * (Connect InvalidArgument).
+   * The long summary, stored and drawn verbatim in the title's hover popup:
+   * one paragraph (no line break) of two to four sentences and at most
+   * eighty words, the last word ending its last sentence, with no whitespace
+   * at either end. Any other text is refused (`invalid_summary`). A blank
+   * long summary is a malformed request (Connect InvalidArgument).
    *
-   * @generated from field: string summary = 2;
+   * @generated from field: string long_summary = 3;
    */
-  summary: string;
+  longSummary: string;
+
+  /**
+   * The short summary, distilled from the long one, stored and drawn
+   * verbatim as the title: one line, one sentence, two to fifteen words, with
+   * no comma, semicolon, colon, parenthesis or dash joining clauses, and no
+   * whitespace at either end. Any other text is refused (`invalid_summary`).
+   * A blank short summary is a malformed request (Connect InvalidArgument).
+   *
+   * @generated from field: string short_summary = 2;
+   */
+  shortSummary: string;
 };
 
 /**
@@ -111,11 +129,18 @@ export const SetWorkspaceSummaryResponseSchema: GenMessage<SetWorkspaceSummaryRe
  */
 export type SetWorkspaceSummarySuccess = Message<"agentrepl.v1.SetWorkspaceSummarySuccess"> & {
   /**
-   * The summary the workspace now has, exactly as the topbar draws it.
+   * The long summary the workspace now has, exactly as the hover shows it.
    *
-   * @generated from field: string summary = 1;
+   * @generated from field: string long_summary = 2;
    */
-  summary: string;
+  longSummary: string;
+
+  /**
+   * The short summary the workspace now has, exactly as the topbar draws it.
+   *
+   * @generated from field: string short_summary = 1;
+   */
+  shortSummary: string;
 };
 
 /**
@@ -170,7 +195,7 @@ export type SetWorkspaceSummaryError = Message<"agentrepl.v1.SetWorkspaceSummary
     case: "notYetAdopted";
   } | {
     /**
-     * The summary is not one plain sentence of two to fifteen words.
+     * A part of the summary breaks its form.
      *
      * @generated from field: agentrepl.v1.SetWorkspaceSummaryInvalidSummary invalid_summary = 5;
      */
@@ -270,26 +295,34 @@ export const SetWorkspaceSummaryNotYetAdoptedSchema: GenMessage<SetWorkspaceSumm
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_summary, 7);
 
 /**
- * The summary is not one the title line draws.
+ * A part of the summary breaks its form. The long summary is judged first,
+ * so a request breaking both names the long one.
  *
  * @generated from message agentrepl.v1.SetWorkspaceSummaryInvalidSummary
  */
 export type SetWorkspaceSummaryInvalidSummary = Message<"agentrepl.v1.SetWorkspaceSummaryInvalidSummary"> & {
   /**
-   * The summary exactly as the request named it.
+   * THE ARM IS THE PART REFUSED.
    *
-   * @generated from field: string summary = 1;
+   * @generated from oneof agentrepl.v1.SetWorkspaceSummaryInvalidSummary.part
    */
-  summary: string;
-
-  /**
-   * Why it was refused (too few words, too many, more than one sentence, a
-   * line break, a clause-joining mark), for the agent to shorten or reword
-   * the summary from. Prose to be read, not a vocabulary to switch on.
-   *
-   * @generated from field: string reason = 2;
-   */
-  reason: string;
+  part: {
+    /**
+     * The long summary is not two to four sentences in one paragraph.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceSummaryInvalidLongSummary long_summary = 3;
+     */
+    value: SetWorkspaceSummaryInvalidLongSummary;
+    case: "longSummary";
+  } | {
+    /**
+     * The short summary is not one plain sentence of two to fifteen words.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceSummaryInvalidShortSummary short_summary = 4;
+     */
+    value: SetWorkspaceSummaryInvalidShortSummary;
+    case: "shortSummary";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -298,4 +331,64 @@ export type SetWorkspaceSummaryInvalidSummary = Message<"agentrepl.v1.SetWorkspa
  */
 export const SetWorkspaceSummaryInvalidSummarySchema: GenMessage<SetWorkspaceSummaryInvalidSummary> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_summary, 8);
+
+/**
+ * The long summary is not one the title's hover popup shows.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceSummaryInvalidLongSummary
+ */
+export type SetWorkspaceSummaryInvalidLongSummary = Message<"agentrepl.v1.SetWorkspaceSummaryInvalidLongSummary"> & {
+  /**
+   * The long summary exactly as the request named it.
+   *
+   * @generated from field: string long_summary = 1;
+   */
+  longSummary: string;
+
+  /**
+   * Why it was refused (a line break, too few sentences, too many, too many
+   * words, no sentence end at its close), for the agent to reword it from.
+   * Prose to be read, not a vocabulary to switch on.
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceSummaryInvalidLongSummary.
+ * Use `create(SetWorkspaceSummaryInvalidLongSummarySchema)` to create a new message.
+ */
+export const SetWorkspaceSummaryInvalidLongSummarySchema: GenMessage<SetWorkspaceSummaryInvalidLongSummary> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_summary, 9);
+
+/**
+ * The short summary is not one the title line draws.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceSummaryInvalidShortSummary
+ */
+export type SetWorkspaceSummaryInvalidShortSummary = Message<"agentrepl.v1.SetWorkspaceSummaryInvalidShortSummary"> & {
+  /**
+   * The short summary exactly as the request named it.
+   *
+   * @generated from field: string short_summary = 1;
+   */
+  shortSummary: string;
+
+  /**
+   * Why it was refused (too few words, too many, more than one sentence, a
+   * line break, a clause-joining mark), for the agent to shorten or reword
+   * it from. Prose to be read, not a vocabulary to switch on.
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceSummaryInvalidShortSummary.
+ * Use `create(SetWorkspaceSummaryInvalidShortSummarySchema)` to create a new message.
+ */
+export const SetWorkspaceSummaryInvalidShortSummarySchema: GenMessage<SetWorkspaceSummaryInvalidShortSummary> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_summary, 10);
 

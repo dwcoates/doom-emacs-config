@@ -1,8 +1,8 @@
 // topbar.proto — THE TOPBAR: one THIN strip, edge to edge. Left, tight: the
 // connectivity dot and, right beside it, the account label it qualifies —
 // one cell — then the status chips in order: remote-control chip,
-// persistent-wifi chip, warning chip. Center: the heading — the workspace's
-// generated summary, and on a line beneath it the workspace's name — centered
+// persistent-wifi chip. Center: the heading — the workspace's short summary,
+// and on a line beneath it the workspace's name — centered
 // on the strip between the flank groups, which never spread and never push
 // it. Right, tight, in order: model selector, effort selector,
 // permission-mode picker, context chip at the far edge. The status chips ride
@@ -11,14 +11,16 @@
 // stand off each other. The flanks and the summary share the strip's top
 // band; the name line is a band below it, and is centered under the summary
 // text rather than under the strip. A workspace with no summary draws its
-// name in the summary's place on the top band.
+// name in the summary's place on the top band. A hover on the summary shows
+// the workspace's long summary beneath it; a click on the name, underlined
+// while the workspace shows links, opens them.
 //
-//   │● work@…com  ☎  ᯤ  ⚠ 2    Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k│
+//   │● work@…com  ☎  ᯤ        Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k│
 //   │                              fix-flaky-reconnect                              │
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
-// options, the context chip's usage breakdown, the warning dropdown and
-// its overlays) renders BELOW the strip and CLAMPS within the viewport —
+// options, the context chip's usage breakdown, the summary's long summary and
+// the name's link menu) renders BELOW the strip and CLAMPS within the viewport —
 // never off-screen left or right.
 //
 // EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
@@ -41,11 +43,10 @@
 // cold gate, or its session has simply not stated the fact yet — draws its OWN "no session" content in its OWN slot: the model
 // selector and the permission-mode picker are ABSENT (presence is
 // how "unknown" is said) and the client draws a dash in the slot rather than
-// omitting it, while the context chip and the warning strip are ALWAYS SET
-// and always drawn. The session-less FACTS are not lost: the chip carries the
-// cold context size (0 when none is known) with the reason in
-// its hover content, and the warning strip carries the state as one warning
-// line. Two whole-view states, `hibernated` (tag 11) and `cold_gate` (tag
+// omitting it, while the context chip is ALWAYS SET and always drawn. The
+// session-less FACTS are not lost: the chip carries the cold context size (0
+// when none is known) with the reason in its hover content. Two whole-view
+// states, `hibernated` (tag 11) and `cold_gate` (tag
 // 12), were landed and then RETIRED the same day under this ruling; their
 // tags are reserved below and must not be revived.
 //
@@ -76,14 +77,11 @@ message TopbarView {
   optional TopbarModelSelector model_selector = 3;
   // The connectivity glyph.
   TopbarConnectivity connectivity = 4;
-  // The warnings, drawn through the heading: while the list holds any, the
-  // heading's title is a control that opens it, in the strip's severity color
-  // (TopbarWarningStrip.severity). ALWAYS SET, session or no session: a
-  // session-less workspace's state rides it as one warning line, so the fact
-  // the retired whole-view states used to carry is still stated. An EMPTY
-  // list remains the daemon saying nothing is wrong, and the heading is then
-  // plain text.
-  TopbarWarningStrip warnings = 5;
+  // Tag 5 RETIRED (TopbarWarningStrip warnings): the topbar draws no
+  // warnings. A condition the daemon meets is recorded in its log, and a
+  // session's health is the footer's to state.
+  reserved 5;
+  reserved "warnings";
   // Tag 6 RETIRED (TokenBreakdownView token_breakdown): the breakdown now
   // rides the context chip's hover content.
   reserved 6;
@@ -104,15 +102,14 @@ message TopbarView {
   // Tag 11 RETIRED (TopbarHibernated hibernated): the whole-view hibernated
   // state, landed and reversed on 2026-09-13 by the FIXED SCHEMA AND
   // ORGANIZATION ruling above. The park now rides the context chip's hover
-  // reason and one warning line.
+  // reason.
   reserved 11;
   // Tag 12 RETIRED (TopbarColdGate cold_gate): the whole-view cold-gate
   // state, landed and reversed the same day and for the same reason. The
-  // gate's figure is the context chip's, its reason the chip's hover, and its
-  // standing is one warning line.
+  // gate's figure is the context chip's, and its reason the chip's hover.
   reserved 12;
-  // The persistent-wifi chip, in the left group's status run between the
-  // remote-control chip and the warning chip.
+  // The persistent-wifi chip, last in the left group's status run, after the
+  // remote-control chip.
   // ALWAYS SET: the machine's standing is a daemon fact that every workspace's
   // strip draws alike, session or no session, and a fact the daemon could not
   // read is stated INSIDE the chip rather than by its absence.
@@ -446,41 +443,52 @@ message TopbarAccountOption {
   bool current = 4;
 }
 
-// The title line the topbar shows: the workspace's generated summary, one
-// imperative sentence stating the workspace's task. It is a summary ONLY —
-// the one the workspace's own agent set (agentrepl.v1.SetWorkspaceSummary),
-// or the vendor's own conversation title while none stands — and never carries
-// the workspace's name or its branch, as a suffix or as a stand-in; the name
-// is TopbarWorkspaceName's, drawn on its own line.
+// The title line the topbar shows: the workspace's short summary, one
+// imperative sentence stating the workspace's task, drawn in the summary's
+// purple whatever else the topbar states, never underlined and never a
+// control. It is a summary ONLY — the one the workspace's own agent set
+// (agentrepl.v1.SetWorkspaceSummary), or the vendor's own conversation title
+// while none stands — and never carries the workspace's name or its branch,
+// as a suffix or as a stand-in; the name is TopbarWorkspaceName's, drawn on
+// its own line.
 message TopbarTitle {
-  // The summary sentence, verbatim. Never empty when the title is set.
+  // The short summary sentence, verbatim. Never empty when the title is set.
   string text = 1;
-  reserved 2;
-  reserved "link";
-  // What a click on the summary opens: the workspace's shown links
-  // (agentrepl.v1.ChangeWorkspaceLinks). UNSET while the menu shows none, and
-  // the summary is then plain text. It rides the TITLE rather than the view,
-  // so a workspace with no summary has nothing clickable by construction.
-  optional TopbarTitleLinks links = 3;
+  reserved 2, 3;
+  reserved "link", "links";
+  // The popup a hover on the summary shows: the workspace's long summary.
+  // UNSET when no long summary stands (the title is the vendor's own
+  // conversation title), and a hover then shows nothing.
+  optional TopbarTitleDescription description = 4;
 }
 
-// The summary's links: the summary is drawn underlined, and a click on it
-// opens what the arm names, never the heading's own session-line reveal.
+// The popup a hover on the summary shows beneath it: the long summary the
+// workspace's agent set (agentrepl.v1.SetWorkspaceSummaryRequest.long_summary),
+// two to four sentences describing the workspace's task in more detail than
+// the one-sentence title can.
+message TopbarTitleDescription {
+  // The long summary, verbatim: one paragraph of two to four sentences.
+  string text = 1;
+}
+
+// The workspace's shown links: the workspace's name is drawn underlined, and
+// a click on it opens what the arm names, never the heading's own
+// session-line reveal.
 // THE ARM IS WHAT THE CLICK DOES, resolved by the daemon from how many links
 // the menu shows, so the client never counts them to decide.
-message TopbarTitleLinks {
+message TopbarWorkspaceNameLinks {
   oneof opens {
     // Exactly one link is shown: the click opens it directly.
-    TopbarTitleLink single = 1;
+    TopbarWorkspaceNameLink single = 1;
     // Two or more links are shown: the click drops their menu.
-    TopbarTitleLinkMenu menu = 2;
+    TopbarWorkspaceNameLinkMenu menu = 2;
   }
 }
 
 // The one shown link a click opens directly, through OpenExternal (the Chrome
 // profile of the account the workspace's session spends as). Its tooltip
-// names the label and the url beneath the whole summary.
-message TopbarTitleLink {
+// names the label and the url beneath the workspace's name.
+message TopbarWorkspaceNameLink {
   // The agent's label for the link, two to eight words, verbatim.
   string label = 1;
   // The absolute http or https url, verbatim as the agent set it. The daemon
@@ -489,17 +497,17 @@ message TopbarTitleLink {
   string url = 2;
 }
 
-// The menu a click on the summary drops beneath the heading: one row per
+// The menu a click on the workspace's name drops beneath the heading: one row per
 // shown link, at most five.
-message TopbarTitleLinkMenu {
+message TopbarWorkspaceNameLinkMenu {
   // The shown links, MOST RECENTLY SET FIRST, in the order drawn. At least
   // two.
-  repeated TopbarTitleLinkMenuItem items = 1;
+  repeated TopbarWorkspaceNameLinkMenuItem items = 1;
 }
 
-// One row of the summary's menu: the label drawn as a link, which a pick
+// One row of the name's link menu: the label drawn as a link, which a pick
 // opens through OpenExternal, closing the menu.
-message TopbarTitleLinkMenuItem {
+message TopbarWorkspaceNameLinkMenuItem {
   // The agent's label for the link, two to eight words, drawn verbatim as the
   // row's text.
   string label = 1;
@@ -513,14 +521,14 @@ message TopbarTitleLinkMenuItem {
   // reorders.
   bool owned = 3;
   // The service the url's host names, drawn as an icon on the row's left.
-  TopbarTitleLinkIcon icon = 4;
+  TopbarWorkspaceNameLinkIcon icon = 4;
   // How the GitHub pull request the url names stands, drawn as a small
   // colored badge in the row's right margin. UNSET for a url that names no
   // pull request, and for a pull request the daemon has not yet read; the row
   // then draws no badge. The daemon reads every linked pull request on its
   // pull-request cadence, so the badge follows a merge or a close without the
   // link being set again.
-  optional TopbarTitleLinkBadge badge = 5;
+  optional TopbarWorkspaceNameLinkBadge badge = 5;
   // Whether the workspace is subscribed to the link's updates through
   // agent-repl: a GitHub pull request it follows and has not stopped
   // following (agentrepl.v1.WorkspaceLinkOwnedFollowFollowing), or a Slack
@@ -534,53 +542,53 @@ message TopbarTitleLinkMenuItem {
 // the menu's own words: the client draws the arm's word and color and never
 // reads the pull request itself. A set badge with no arm set is a state this
 // schema revision does not name, and draws no badge.
-message TopbarTitleLinkBadge {
+message TopbarWorkspaceNameLinkBadge {
   // How the pull request stands, as the daemon's latest read of it found.
   oneof state {
     // Open for review: "open", in the foreground white.
-    TopbarTitleLinkBadgeOpen open = 1;
+    TopbarWorkspaceNameLinkBadgeOpen open = 1;
     // Open and still a draft: "draft", in the muted grey.
-    TopbarTitleLinkBadgeDraft draft = 2;
+    TopbarWorkspaceNameLinkBadgeDraft draft = 2;
     // Merged: "merged", in green.
-    TopbarTitleLinkBadgeMerged merged = 3;
+    TopbarWorkspaceNameLinkBadgeMerged merged = 3;
     // Closed without merging: "closed", in red. A reopened pull request
     // draws open again at the next read.
-    TopbarTitleLinkBadgeClosed closed = 4;
+    TopbarWorkspaceNameLinkBadgeClosed closed = 4;
   }
 }
 
 // The pull request is open. DELIBERATELY EMPTY: the arm is the state.
-message TopbarTitleLinkBadgeOpen {}
+message TopbarWorkspaceNameLinkBadgeOpen {}
 
 // The pull request is a draft. DELIBERATELY EMPTY: the arm is the state.
-message TopbarTitleLinkBadgeDraft {}
+message TopbarWorkspaceNameLinkBadgeDraft {}
 
 // The pull request merged. DELIBERATELY EMPTY: the arm is the state.
-message TopbarTitleLinkBadgeMerged {}
+message TopbarWorkspaceNameLinkBadgeMerged {}
 
 // The pull request closed unmerged. DELIBERATELY EMPTY: the arm is the state.
-message TopbarTitleLinkBadgeClosed {}
+message TopbarWorkspaceNameLinkBadgeClosed {}
 
 // The service icon a menu row draws before its label, decided by the daemon
 // from the url's host so the client never inspects a url.
-enum TopbarTitleLinkIcon {
+enum TopbarWorkspaceNameLinkIcon {
   // No known service: the row draws no icon.
-  TOPBAR_TITLE_LINK_ICON_UNSPECIFIED = 0;
+  TOPBAR_WORKSPACE_NAME_LINK_ICON_UNSPECIFIED = 0;
   // A GitHub pull request: the GitHub mark.
-  TOPBAR_TITLE_LINK_ICON_GITHUB = 1;
+  TOPBAR_WORKSPACE_NAME_LINK_ICON_GITHUB = 1;
   // A Slack workspace link: the Slack mark.
-  TOPBAR_TITLE_LINK_ICON_SLACK = 2;
+  TOPBAR_WORKSPACE_NAME_LINK_ICON_SLACK = 2;
   // A GNS link: the GNS mark.
-  TOPBAR_TITLE_LINK_ICON_GNS = 3;
+  TOPBAR_WORKSPACE_NAME_LINK_ICON_GNS = 3;
   // A Notion link: the Notion mark.
-  TOPBAR_TITLE_LINK_ICON_NOTION = 4;
+  TOPBAR_WORKSPACE_NAME_LINK_ICON_NOTION = 4;
 }
 
 // The workspace's name as the registry holds it: drawn on the heading's
 // second line, centered under the title's text, or in the title's place when
 // there is no title. Its own element because it is drawn in its own place and
-// styled its own way (bold, and larger than the summary), apart from the
-// summary above it.
+// styled its own way (bold, larger than the summary, and always in the
+// foreground white), apart from the summary above it.
 message TopbarWorkspaceName {
   // The workspace's registry name, verbatim: always a slug, never carrying a
   // mark drawn before it.
@@ -589,6 +597,11 @@ message TopbarWorkspaceName {
   // workspace's sidebar row wears (frontend.v1.RosterRowName.prefix), at the
   // name's own size. UNSET for a name that wears no mark.
   optional WorkspaceNamePrefix prefix = 2;
+  // What a click on the name opens: the workspace's shown links
+  // (agentrepl.v1.ChangeWorkspaceLinks), and the name is then drawn
+  // underlined. UNSET while the menu shows none, and the name is then plain
+  // text.
+  optional TopbarWorkspaceNameLinks links = 3;
 }
 
 // The session identity line, shown in the hover/expanded state.
@@ -699,186 +712,6 @@ message TopbarAgentReplSession {
 message TopbarSessionBeganLogin {}
 // This Emacs starting began the session.
 message TopbarSessionBeganEditorStart {}
-
-// The warning strip: everything the topbar has to WARN about right now.
-//
-// THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. An empty list is the daemon
-// saying there is nothing wrong, and the client draws no indicator at all
-// rather than a quiet one — a control over an empty list only invites the
-// click that proves it is empty. It is a LIST because a warning is not a
-// property of accounting: a second concern (a degraded watcher, a skewed
-// build) joins this list and reaches the same affordance.
-// The warning dropdown: the last warnings, newest first, capped by the
-// daemon. Each entry is one line in the list; clicking it opens the
-// entry's DETAIL OVERLAY, whose content the kind arm carries.
-message TopbarWarningStrip {
-  // The list, newest first. Empty = nothing is wrong; the strip draws
-  // nothing.
-  repeated TopbarWarning warnings = 1;
-  // The list's severity, resolved by the daemon: the color the heading's title
-  // is drawn in while the list is open to it. UNSET exactly when the list is
-  // empty. The client raises it to `errors` only for a failure of its own
-  // that no push can state.
-  optional TopbarWarningStripSeverity severity = 2;
-}
-// How bad the listed warnings are, taken together.
-message TopbarWarningStripSeverity {
-  // The worst of the list: any error makes the whole list an error.
-  oneof severity {
-    TopbarWarningStripErrors errors = 1;
-    TopbarWarningStripWarningsOnly warnings_only = 2;
-  }
-}
-// At least one listed warning is an error: a session fault the shim reported,
-// or a failed deploy. The title is drawn red.
-message TopbarWarningStripErrors {}
-// Every listed warning is a warning, not an error. The title is drawn yellow.
-message TopbarWarningStripWarningsOnly {}
-
-// One warning: its list line, and the overlay behind the click.
-message TopbarWarning {
-  // The dropdown row's sentence, drawn verbatim. Never empty.
-  TopbarWarningLine line = 1;
-  // WHICH concern, carrying that kind's overlay content — the expanded
-  // detail a click reveals.
-  //
-  // UNSET IS A WARNING WITH NO OVERLAY: the line is the whole warning, and
-  // the row is a statement rather than a control. That is what the FIXED
-  // SCHEMA ruling's session-less line is — "cold context, awaiting your
-  // answer", "no session yet" — a fact with nothing further to reveal
-  // and, for the cold gate, nothing to answer HERE (the feed's gate card is
-  // the one place a gate is answered).
-  oneof detail {
-    TopbarAccountingWarningDetail accounting = 2;
-    TopbarUnmodeledToolWarningDetail unmodeled_tool = 3;
-    TopbarDetachedUnmodeledWarningDetail detached_unmodeled = 4;
-    // A session fault the shim reported — the workspace's session is
-    // unhealthy in a named way.
-    TopbarSessionFaultWarningDetail session_fault = 5;
-    // A degraded window: a span in which a shim component was dropping or
-    // delaying what it observed — evidence that what is on screen may have
-    // holes from that span.
-    TopbarDegradedWindowWarningDetail degraded_window = 6;
-    // A failed deploy: the daemon-scoped `deploy_failed` fault, standing on
-    // every workspace's strip (owner request, 2026-09-28). The row's line is
-    // the footer's own detail under "deploy failed: "; the overlay is what
-    // failed, whole.
-    TopbarDeployFailedWarningDetail deploy_failed = 7;
-  }
-}
-// The list-line element.
-message TopbarWarningLine {
-  // The sentence, drawn verbatim.
-  string text = 1;
-}
-
-// The accounting overlay: the reconciliation's evidence, composed — this
-// component's OWN resolved copy (duplicate, don't share: the footer's
-// verdict line is the same fact drawn in its place; the resolver
-// re-publishes both).
-message TopbarAccountingWarningDetail {
-  // One composed evidence line each ("2 responses missing usage"), in
-  // display order.
-  repeated TopbarWarningDetailLine lines = 1;
-}
-// A shared detail-line element WITHIN this dropdown family.
-message TopbarWarningDetailLine {
-  // The line, drawn verbatim.
-  string text = 1;
-}
-
-// The unmodeled-tool overlay: what ran, in an ABBREVIATED, LEGIBLE form a
-// reader can act on (decide whether the tool deserves an arm) — never a raw
-// argument dump, and never drawn as a failure: the tool very likely ran
-// fine; the only thing wrong is that this contract cannot describe it.
-message TopbarUnmodeledToolWarningDetail {
-  // The tool's name, verbatim from the producer.
-  TopbarUnmodeledToolName tool_name = 1;
-  // The daemon's abbreviated account of the call's arguments, one legible
-  // line each. Empty when the daemon could not compose any — the name alone
-  // then carries the overlay.
-  repeated TopbarWarningDetailLine argument_lines = 2;
-}
-// The name element.
-message TopbarUnmodeledToolName {
-  // Verbatim.
-  string text = 1;
-}
-
-// The detached-unmodeled overlay: unmodeled work running DETACHED — the
-// live-work fact the footer's chips deliberately do not carry; surfaced
-// here so it can never vanish. One warning per live item.
-message TopbarDetachedUnmodeledWarningDetail {
-  // The tool's name, verbatim.
-  TopbarUnmodeledToolName tool_name = 1;
-  // When it started, epoch ms — the overlay's clock; the client ticks.
-  int64 started_at_ms = 2;
-}
-
-// The session-fault overlay. The daemon pulls GetSessionDiagnostics at its
-// own cadence and projects unhealthy faults into entries — one warning per
-// fault; a healthy pull retracts them on the next push.
-message TopbarSessionFaultWarningDetail {
-  // Which shim component faulted, verbatim.
-  TopbarWarningComponent component = 1;
-  // The fault's detail, verbatim from the shim.
-  TopbarWarningDetailLine detail = 2;
-}
-// A component-name element, shared WITHIN the dropdown family.
-message TopbarWarningComponent {
-  // Verbatim.
-  string text = 1;
-}
-
-// The degraded-window overlay — one warning per window. Data, drawn by the
-// client: the span's bounds tick and format client-side.
-message TopbarDegradedWindowWarningDetail {
-  // Which component degraded, verbatim.
-  TopbarWarningComponent component = 1;
-  // The shim's stated reason, verbatim.
-  TopbarWarningDetailLine reason = 2;
-  // When the window opened, epoch ms.
-  int64 began_at_ms = 3;
-  // Whether the window has closed. THE ARM IS THE EXTENT.
-  oneof extent {
-    // Still degraded now — the loudest state.
-    TopbarDegradedWindowOpen open = 4;
-    // Closed: when, and what was dropped inside it.
-    TopbarDegradedWindowClosed closed = 5;
-  }
-}
-// The failed-deploy overlay: what failed, whole. Every line is composed by
-// the daemon out of the fault's own evidence (the very refusal the Deploy
-// rpc answered its caller with), so the overlay, the row's line and the
-// footer's activity line cannot say different things about one failure.
-message TopbarDeployFailedWarningDetail {
-  // The step that failed, in words: "build", "install", "restart services",
-  // or "rollback" for a failed deploy's rollback that did not restore the
-  // previous build (a fault of its own, beside the step's).
-  TopbarWarningDetailLine step = 1;
-  // What the step failed on: the build step for a build, the component for
-  // every other step. Verbatim.
-  TopbarWarningComponent component = 2;
-  // What became of the install, in words: nothing was installed, it was
-  // rolled back to the previous build, or the rollback did not restore it.
-  TopbarWarningDetailLine rollback = 3;
-  // The failure's own account, WHOLE and verbatim — the build's output tail,
-  // the install's or the restart's error. The row's line carries only its
-  // last line.
-  TopbarWarningDetailLine detail = 4;
-  // Where the build's whole output is archived. UNSET for every step but a
-  // build, and for a build that archived none: draw nothing.
-  optional TopbarWarningDetailLine log = 5;
-}
-// Still open. Empty: the arm is the fact.
-message TopbarDegradedWindowOpen {}
-// Closed, with its cost.
-message TopbarDegradedWindowClosed {
-  // When it closed, epoch ms.
-  int64 ended_at_ms = 1;
-  // How many observations were dropped inside the window.
-  int64 dropped_count = 2;
-}
 
 // ==========================================================================
 // THE TOKEN-BREAKDOWN MENU the topbar opens: titled sections of rows. The

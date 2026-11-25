@@ -62,7 +62,7 @@ type WorkspaceStatus struct {
 	// repository (CreateWorkspaceRequest.repository).
 	Repository *v1.RepositoryRef `protobuf:"bytes,9,opt,name=repository,proto3" json:"repository,omitempty"`
 	// Every link the workspace holds (ChangeWorkspaceLinks) and which of them
-	// the topbar's summary menu shows. An agent reads it to judge whether a
+	// the topbar's link menu (a click on the workspace's name) shows. An agent reads it to judge whether a
 	// link it was just given is already stored, and which links to show once
 	// the menu is full.
 	Links *WorkspaceLinks `protobuf:"bytes,11,opt,name=links,proto3" json:"links,omitempty"`
@@ -81,10 +81,13 @@ type WorkspaceStatus struct {
 	// order: the workspaces this one coordinates and must account for before it
 	// can be finished or closed. Empty for a workspace with no open child.
 	Children []*v1.WorkspaceRef `protobuf:"bytes,15,rep,name=children,proto3" json:"children,omitempty"`
-	// The one-sentence summary of the workspace's task its topbar draws
-	// (SetWorkspaceSummary). UNSET while none stands: the workspace owes one,
-	// and its agent sets it.
-	Summary *string `protobuf:"bytes,16,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
+	// The long summary of the workspace's task, two to four sentences, that a
+	// hover on its topbar title shows (SetWorkspaceSummary). UNSET while none
+	// stands: the workspace owes a summary, and its agent sets one.
+	LongSummary *string `protobuf:"bytes,18,opt,name=long_summary,json=longSummary,proto3,oneof" json:"long_summary,omitempty"`
+	// The one-sentence short summary of the workspace's task its topbar draws
+	// as its title (SetWorkspaceSummary). UNSET while none stands.
+	ShortSummary *string `protobuf:"bytes,16,opt,name=short_summary,json=shortSummary,proto3,oneof" json:"short_summary,omitempty"`
 	// The workspace's standing close request (CloseWorkspaceRequest.stand),
 	// UNSET while none stands. While it is set, the daemon closes the workspace
 	// as soon as nothing blocks the close, unless it is withdrawn first.
@@ -221,9 +224,16 @@ func (x *WorkspaceStatus) GetChildren() []*v1.WorkspaceRef {
 	return nil
 }
 
-func (x *WorkspaceStatus) GetSummary() string {
-	if x != nil && x.Summary != nil {
-		return *x.Summary
+func (x *WorkspaceStatus) GetLongSummary() string {
+	if x != nil && x.LongSummary != nil {
+		return *x.LongSummary
+	}
+	return ""
+}
+
+func (x *WorkspaceStatus) GetShortSummary() string {
+	if x != nil && x.ShortSummary != nil {
+		return *x.ShortSummary
 	}
 	return ""
 }
@@ -1559,7 +1569,7 @@ var File_agentrepl_v1_workspace_status_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\n" +
-	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_close.proto\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc4\a\n" +
+	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_close.proto\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8e\b\n" +
 	"\x0fWorkspaceStatus\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -1579,14 +1589,15 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\x05owner\x18\r \x01(\v2\".agentrepl.v1.WorkspaceStatusOwnerH\x01R\x05owner\x88\x01\x01\x12>\n" +
 	"\n" +
 	"created_by\x18\x0e \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x02R\tcreatedBy\x88\x01\x01\x126\n" +
-	"\bchildren\x18\x0f \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildren\x12\x1d\n" +
-	"\asummary\x18\x10 \x01(\tH\x03R\asummary\x88\x01\x01\x12S\n" +
-	"\rclose_request\x18\x11 \x01(\v2).agentrepl.v1.WorkspaceStatusCloseRequestH\x04R\fcloseRequest\x88\x01\x01B\v\n" +
+	"\bchildren\x18\x0f \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildren\x12&\n" +
+	"\flong_summary\x18\x12 \x01(\tH\x03R\vlongSummary\x88\x01\x01\x12(\n" +
+	"\rshort_summary\x18\x10 \x01(\tH\x04R\fshortSummary\x88\x01\x01\x12S\n" +
+	"\rclose_request\x18\x11 \x01(\v2).agentrepl.v1.WorkspaceStatusCloseRequestH\x05R\fcloseRequest\x88\x01\x01B\v\n" +
 	"\t_awaitingB\b\n" +
 	"\x06_ownerB\r\n" +
-	"\v_created_byB\n" +
-	"\n" +
-	"\b_summaryB\x10\n" +
+	"\v_created_byB\x0f\n" +
+	"\r_long_summaryB\x10\n" +
+	"\x0e_short_summaryB\x10\n" +
 	"\x0e_close_requestJ\x04\b\n" +
 	"\x10\vR\x0eprincipal_link\"\x9f\x02\n" +
 	"\x1bWorkspaceStatusCloseRequest\x12&\n" +

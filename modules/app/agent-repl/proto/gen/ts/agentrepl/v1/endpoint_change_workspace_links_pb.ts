@@ -1,13 +1,13 @@
 // endpoint_change_workspace_links.proto — ChangeWorkspaceLinks: store, relabel
 // or remove one of a workspace's links, choose which of them the topbar's
-// summary menu shows, or clear them all. AGENT API section.
+// link menu shows, or clear them all. AGENT API section.
 //
-// THE LINKS ARE THE TOPBAR SUMMARY'S MENU. While the menu shows one link, a
-// click on the workspace's summary opens it; while it shows several, the click
-// drops a menu of their labels, most recently set first, and a pick opens that
-// link the way every outward link opens: OpenExternal, in the Chrome profile of
-// the account the workspace's session spends as. A workspace with no summary
-// draws nothing clickable, whatever its links.
+// THE LINKS ARE THE TOPBAR NAME'S MENU. While the menu shows any link, the
+// workspace's name beneath the topbar's summary is drawn underlined. While it
+// shows one link, a click on the name opens it; while it shows several, the
+// click drops a menu of their labels, most recently set first, and a pick
+// opens that link the way every outward link opens: OpenExternal, in the
+// Chrome profile of the account the workspace's session spends as.
 //
 // OWNED OR A REFERENCE. Every link says whether the workspace's work made
 // what it points at (WorkspaceLinkOwnership). The daemon follows an owned

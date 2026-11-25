@@ -907,7 +907,7 @@ export const AgentRepl: GenService<{
   },
   /**
    * Store, relabel or remove a workspace's links, choose which of them the
-   * topbar's summary menu shows, or clear them. See
+   * topbar's link menu shows, or clear them. See
    * endpoint_change_workspace_links.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.ChangeWorkspaceLinks
@@ -929,7 +929,7 @@ export const AgentRepl: GenService<{
     output: typeof SetWorkspaceNameResponseSchema;
   },
   /**
-   * Set the one-sentence summary of a workspace's task that its topbar
+   * Set the long and short summary of a workspace's task that its topbar
    * draws. See endpoint_set_workspace_summary.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.SetWorkspaceSummary

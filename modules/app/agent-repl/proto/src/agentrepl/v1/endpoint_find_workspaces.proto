@@ -35,7 +35,8 @@ message FindWorkspacesRequest {
   optional FindWorkspacesWindow window = 2;
   // Only workspaces in this standing. UNSET = every standing.
   optional FindWorkspacesStanding standing = 3;
-  // Only workspaces whose name, branch or summary contains this text,
+  // Only workspaces whose name, branch, short summary or long summary
+  // contains this text,
   // compared case-insensitively. UNSET = no text filter. A blank string is
   // malformed (Connect InvalidArgument), never "match everything".
   optional string text = 4;
@@ -185,12 +186,16 @@ message FoundWorkspace {
   // The repository the workspace belongs to, by its registry id and its main
   // checkout.
   workspace.v1.RepositoryRef repository = 4;
-  // The workspace's summary: the one-sentence statement of its task the
-  // topbar draws as its title, as the daemon last distilled it from the
-  // user's prompts and kept across restarts and the workspace's close. UNSET
-  // while no summary was ever distilled (a workspace that never took a
-  // prompt, or one whose summary was dropped with its conversation).
-  optional string summary = 5;
+  // The workspace's long summary: two to four sentences describing its task,
+  // as its agent last set it (SetWorkspaceSummary), kept across restarts and
+  // the workspace's close. UNSET while none stands (a workspace that never
+  // took a prompt, one whose summary was dropped with its conversation, or
+  // one whose agent has set only a short summary).
+  optional string long_summary = 16;
+  // The workspace's short summary: the one-sentence statement of its task the
+  // topbar draws as its title, as its agent last set it and kept across
+  // restarts and the workspace's close. UNSET while none stands.
+  optional string short_summary = 5;
   // When the workspace was created, unix milliseconds.
   int64 created_at_ms = 6;
   // When the workspace was last active, unix milliseconds: the instant

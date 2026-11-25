@@ -1,8 +1,8 @@
 // topbar.proto — THE TOPBAR: one THIN strip, edge to edge. Left, tight: the
 // connectivity dot and, right beside it, the account label it qualifies —
 // one cell — then the status chips in order: remote-control chip,
-// persistent-wifi chip, warning chip. Center: the heading — the workspace's
-// generated summary, and on a line beneath it the workspace's name — centered
+// persistent-wifi chip. Center: the heading — the workspace's short summary,
+// and on a line beneath it the workspace's name — centered
 // on the strip between the flank groups, which never spread and never push
 // it. Right, tight, in order: model selector, effort selector,
 // permission-mode picker, context chip at the far edge. The status chips ride
@@ -11,14 +11,16 @@
 // stand off each other. The flanks and the summary share the strip's top
 // band; the name line is a band below it, and is centered under the summary
 // text rather than under the strip. A workspace with no summary draws its
-// name in the summary's place on the top band.
+// name in the summary's place on the top band. A hover on the summary shows
+// the workspace's long summary beneath it; a click on the name, underlined
+// while the workspace shows links, opens them.
 //
-//   │● work@…com  ☎  ᯤ  ⚠ 2    Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k│
+//   │● work@…com  ☎  ᯤ        Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k│
 //   │                              fix-flaky-reconnect                              │
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
-// options, the context chip's usage breakdown, the warning dropdown and
-// its overlays) renders BELOW the strip and CLAMPS within the viewport —
+// options, the context chip's usage breakdown, the summary's long summary and
+// the name's link menu) renders BELOW the strip and CLAMPS within the viewport —
 // never off-screen left or right.
 //
 // EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
@@ -41,11 +43,10 @@
 // cold gate, or its session has simply not stated the fact yet — draws its OWN "no session" content in its OWN slot: the model
 // selector and the permission-mode picker are ABSENT (presence is
 // how "unknown" is said) and the client draws a dash in the slot rather than
-// omitting it, while the context chip and the warning strip are ALWAYS SET
-// and always drawn. The session-less FACTS are not lost: the chip carries the
-// cold context size (0 when none is known) with the reason in
-// its hover content, and the warning strip carries the state as one warning
-// line. Two whole-view states, `hibernated` (tag 11) and `cold_gate` (tag
+// omitting it, while the context chip is ALWAYS SET and always drawn. The
+// session-less FACTS are not lost: the chip carries the cold context size (0
+// when none is known) with the reason in its hover content. Two whole-view
+// states, `hibernated` (tag 11) and `cold_gate` (tag
 // 12), were landed and then RETIRED the same day under this ruling; their
 // tags are reserved below and must not be revived.
 //
@@ -66,7 +67,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/topbar.proto.
  */
 export const file_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIvEGCgpUb3BiYXJWaWV3EiwKBXRpdGxlGAEgASgLMhguZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVIAIgBARI0CgxzZXNzaW9uX2xpbmUYAiABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJTZXNzaW9uTGluZRI9Cg5tb2RlbF9zZWxlY3RvchgDIAEoCzIgLmZyb250ZW5kLnYxLlRvcGJhck1vZGVsU2VsZWN0b3JIAYgBARI1Cgxjb25uZWN0aXZpdHkYBCABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSMQoId2FybmluZ3MYBSABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nU3RyaXASLwoHY29udGV4dBgHIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhckNvbnRleHRDaGlwEisKB2FjY291bnQYCCABKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50EkwKFnBlcm1pc3Npb25fbW9kZV9waWNrZXIYCSABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJtaXNzaW9uTW9kZVBpY2tlckgCiAEBEjoKD3BlcnNpc3RlbnRfd2lmaRgNIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpEj8KD2VmZm9ydF9zZWxlY3RvchgOIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9ySAOIAQESOAoOd29ya3NwYWNlX25hbWUYDyABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lEjkKDHF1ZXVlX2J5cGFzcxgRIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzSASIAQESOAoOcmVtb3RlX2NvbnRyb2wYECABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sQggKBl90aXRsZUIRCg9fbW9kZWxfc2VsZWN0b3JCGQoXX3Blcm1pc3Npb25fbW9kZV9waWNrZXJCEgoQX2VmZm9ydF9zZWxlY3RvckIPCg1fcXVldWVfYnlwYXNzSgQIBhAHSgQIChALSgQICxAMSgQIDBANUglmYXN0X21vZGUi/AEKEVRvcGJhclF1ZXVlQnlwYXNzEi4KAm9uGAEgASgLMiAuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NPbkgAEjAKA29mZhgCIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzT2ZmSAASRQoOaGVsZF9lbHNld2hlcmUYAyABKAsyKy5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0hlbGRFbHNld2hlcmVIABI2Cgd0b29sdGlwGAQgASgLMiUuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NUb29sdGlwQgYKBG1vZGUiFQoTVG9wYmFyUXVldWVCeXBhc3NPbiJUChRUb3BiYXJRdWV1ZUJ5cGFzc09mZhI8CgdvcHRpb25zGAEgAygLMisuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0T3B0aW9uIm4KHlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dE9wdGlvbhI2Cgdjb250ZXh0GAEgASgLMiUuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0EhQKDGRpc3BsYXlfbmFtZRgCIAEoCSLiAgoYVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0EkIKCWZ1bGxfbWFpbhgBIAEoCzItLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEZ1bGxNYWluSAASTAoOY29tcGFjdGVkX21haW4YAiABKAsyMi5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRDb21wYWN0ZWRNYWluSAASQQoIZXhpc3RpbmcYAyABKAsyLS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRFeGlzdGluZ0gAEmYKHGV4aXN0aW5nX3BsdXNfY29tcGFjdGVkX21haW4YBCABKAsyPi5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRFeGlzdGluZ1BsdXNDb21wYWN0ZWRNYWluSABCCQoHY29udGV4dCIiCiBUb3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRGdWxsTWFpbiInCiVUb3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRDb21wYWN0ZWRNYWluIiIKIFRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEV4aXN0aW5nIjMKMVRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEV4aXN0aW5nUGx1c0NvbXBhY3RlZE1haW4iOAoeVG9wYmFyUXVldWVCeXBhc3NIZWxkRWxzZXdoZXJlEhYKDndvcmtzcGFjZV9uYW1lGAEgASgJIigKGFRvcGJhclF1ZXVlQnlwYXNzVG9vbHRpcBIMCgR0ZXh0GAEgASgJIsUBChNUb3BiYXJSZW1vdGVDb250cm9sEjQKAm9uGAEgASgLMiYuZnJvbnRlbmQudjEuVG9wYmFyUmVtb3RlQ29udHJvbE1vZGVPbkgAEjYKA29mZhgCIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclJlbW90ZUNvbnRyb2xNb2RlT2ZmSAASOAoHdG9vbHRpcBgDIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclJlbW90ZUNvbnRyb2xUb29sdGlwQgYKBG1vZGUiGwoZVG9wYmFyUmVtb3RlQ29udHJvbE1vZGVPbiIcChpUb3BiYXJSZW1vdGVDb250cm9sTW9kZU9mZiIqChpUb3BiYXJSZW1vdGVDb250cm9sVG9vbHRpcBIMCgR0ZXh0GAEgASgJItcEChRUb3BiYXJQZXJzaXN0ZW50V2lmaRI5CgZqb2luZWQYASABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaUpvaW5lZEgAEkAKCm5vdF9qb2luZWQYAiABKAsyKi5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaU5vdEpvaW5lZEgAEjUKAm9uGAMgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlNb2RlT25IARI3CgNvZmYYBCABKAsyKC5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPZmZIARI5Cgd0b29sdGlwGAUgASgLMiguZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlUb29sdGlwEjwKCGxpZF9vcGVuGAYgASgLMiguZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRPcGVuSAISQAoKbGlkX2Nsb3NlZBgHIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTGlkQ2xvc2VkSAISOAoGbm9fbGlkGAggASgLMiYuZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlOb0xpZEgCEkYKDWxpZF91bndhdGNoZWQYCSABKAsyLS5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaUxpZFVud2F0Y2hlZEgCQgYKBHdpZmlCBgoEbW9kZUIFCgNsaWQiHAoaVG9wYmFyUGVyc2lzdGVudFdpZmlKb2luZWQiHwodVG9wYmFyUGVyc2lzdGVudFdpZmlOb3RKb2luZWQiHAoaVG9wYmFyUGVyc2lzdGVudFdpZmlNb2RlT24iHQobVG9wYmFyUGVyc2lzdGVudFdpZmlNb2RlT2ZmIh0KG1RvcGJhclBlcnNpc3RlbnRXaWZpTGlkT3BlbiIfCh1Ub3BiYXJQZXJzaXN0ZW50V2lmaUxpZENsb3NlZCIbChlUb3BiYXJQZXJzaXN0ZW50V2lmaU5vTGlkIiIKIFRvcGJhclBlcnNpc3RlbnRXaWZpTGlkVW53YXRjaGVkIisKG1RvcGJhclBlcnNpc3RlbnRXaWZpVG9vbHRpcBIMCgR0ZXh0GAEgASgJIpABChpUb3BiYXJQZXJtaXNzaW9uTW9kZVBpY2tlchI4CgdjdXJyZW50GAEgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVybWlzc2lvbk1vZGVPcHRpb24SOAoHb3B0aW9ucxgCIAMoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uIkAKGlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uEgwKBG1vZGUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJIoYBChFUb3BiYXJDb250ZXh0Q2hpcBIMCgR0ZXh0GAEgASgJEjIKCWJyZWFrZG93bhgCIAEoCzIfLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duVmlldxITCgt3aW5kb3dfZmlsbBgDIAEoARIaChJzZXNzaW9uX3RvdGFsX3RleHQYBCABKAkimgIKDVRvcGJhckFjY291bnQSNwoJbG9nZ2VkX2luGAEgASgLMiIuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudExvZ2dlZEluSAASOQoKbG9nZ2VkX291dBgCIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRPdXRIABIxCgdvcHRpb25zGAMgAygLMiAuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudE9wdGlvbhJFCg9zaWduX2luX3JlcXVlc3QYBCABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50U2lnbkluUmVxdWVzdEgBiAEBQgcKBXN0YXRlQhIKEF9zaWduX2luX3JlcXVlc3QiMAoaVG9wYmFyQWNjb3VudFNpZ25JblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCSImChVUb3BiYXJBY2NvdW50TG9nZ2VkSW4SDQoFZW1haWwYASABKAkiGAoWVG9wYmFyQWNjb3VudExvZ2dlZE91dCK3AQoTVG9wYmFyQWNjb3VudE9wdGlvbhISCgpjb25maWdfZGlyGAEgASgJEjcKCWxvZ2dlZF9pbhgCIAEoCzIiLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRJbkgAEjkKCmxvZ2dlZF9vdXQYAyABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50TG9nZ2VkT3V0SAASDwoHY3VycmVudBgEIAEoCEIHCgVzdGF0ZSJkCgtUb3BiYXJUaXRsZRIMCgR0ZXh0GAEgASgJEjEKBWxpbmtzGAMgASgLMh0uZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVMaW5rc0gAiAEBQggKBl9saW5rc0oECAIQA1IEbGluayJ9ChBUb3BiYXJUaXRsZUxpbmtzEi4KBnNpbmdsZRgBIAEoCzIcLmZyb250ZW5kLnYxLlRvcGJhclRpdGxlTGlua0gAEjAKBG1lbnUYAiABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJUaXRsZUxpbmtNZW51SABCBwoFb3BlbnMiLQoPVG9wYmFyVGl0bGVMaW5rEg0KBWxhYmVsGAEgASgJEgsKA3VybBgCIAEoCSJKChNUb3BiYXJUaXRsZUxpbmtNZW51EjMKBWl0ZW1zGAEgAygLMiQuZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVMaW5rTWVudUl0ZW0iyQEKF1RvcGJhclRpdGxlTGlua01lbnVJdGVtEg0KBWxhYmVsGAEgASgJEgsKA3VybBgCIAEoCRINCgVvd25lZBgDIAEoCBIuCgRpY29uGAQgASgOMiAuZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVMaW5rSWNvbhI1CgViYWRnZRgFIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhclRpdGxlTGlua0JhZGdlSACIAQESEgoKc3Vic2NyaWJlZBgGIAEoCEIICgZfYmFkZ2UihQIKFFRvcGJhclRpdGxlTGlua0JhZGdlEjUKBG9wZW4YASABKAsyJS5mcm9udGVuZC52MS5Ub3BiYXJUaXRsZUxpbmtCYWRnZU9wZW5IABI3CgVkcmFmdBgCIAEoCzImLmZyb250ZW5kLnYxLlRvcGJhclRpdGxlTGlua0JhZGdlRHJhZnRIABI5CgZtZXJnZWQYAyABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJUaXRsZUxpbmtCYWRnZU1lcmdlZEgAEjkKBmNsb3NlZBgEIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclRpdGxlTGlua0JhZGdlQ2xvc2VkSABCBwoFc3RhdGUiGgoYVG9wYmFyVGl0bGVMaW5rQmFkZ2VPcGVuIhsKGVRvcGJhclRpdGxlTGlua0JhZGdlRHJhZnQiHAoaVG9wYmFyVGl0bGVMaW5rQmFkZ2VNZXJnZWQiHAoaVG9wYmFyVGl0bGVMaW5rQmFkZ2VDbG9zZWQiZQoTVG9wYmFyV29ya3NwYWNlTmFtZRIMCgR0ZXh0GAEgASgJEjUKBnByZWZpeBgCIAEoCzIgLmZyb250ZW5kLnYxLldvcmtzcGFjZU5hbWVQcmVmaXhIAIgBAUIJCgdfcHJlZml4IiEKEVRvcGJhclNlc3Npb25MaW5lEgwKBHRleHQYASABKAkiugEKE1RvcGJhck1vZGVsU2VsZWN0b3ISMwoIc2VsZWN0ZWQYASABKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb25IAIgBARItCgdvcHRpb25zGAIgAygLMhwuY29udmVyc2F0aW9uLnYxLk1vZGVsT3B0aW9uEjIKDWRlZmF1bHRfbW9kZWwYAyABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEILCglfc2VsZWN0ZWQipwEKFFRvcGJhckVmZm9ydFNlbGVjdG9yEj8KCXN1cHBvcnRlZBgBIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9yU3VwcG9ydGVkSAASQwoLdW5zdXBwb3J0ZWQYAiABKAsyLC5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRTZWxlY3RvclVuc3VwcG9ydGVkSABCCQoHc3VwcG9ydCKDAQodVG9wYmFyRWZmb3J0U2VsZWN0b3JTdXBwb3J0ZWQSMAoHY3VycmVudBgBIAEoCzIfLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydE9wdGlvbhIwCgdvcHRpb25zGAIgAygLMh8uZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0T3B0aW9uIiEKH1RvcGJhckVmZm9ydFNlbGVjdG9yVW5zdXBwb3J0ZWQiXAoSVG9wYmFyRWZmb3J0T3B0aW9uEjAKBWxldmVsGAEgASgOMiEuY29udmVyc2F0aW9uLnYxLkFnZW50RWZmb3J0TGV2ZWwSFAoMZGlzcGxheV9uYW1lGAIgASgJIocBChJUb3BiYXJDb25uZWN0aXZpdHkSDAoEdG9uZRgBIAEoCRINCgVnbHlwaBgCIAEoCRINCgV0aXRsZRgDIAEoCRI5CgdzZXNzaW9uGAQgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyQWdlbnRSZXBsU2Vzc2lvbkgAiAEBQgoKCF9zZXNzaW9uItsBChZUb3BiYXJBZ2VudFJlcGxTZXNzaW9uEhUKDXN0YXJ0ZWRfYXRfbXMYASABKAMSNQoFbG9naW4YAiABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJTZXNzaW9uQmVnYW5Mb2dpbkgAEkIKDGVkaXRvcl9zdGFydBgDIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclNlc3Npb25CZWdhbkVkaXRvclN0YXJ0SABCBwoFYmVnYW5KBAgEEAVKBAgFEAZSDmJ5dGVzX3JlY2VpdmVkUgpieXRlc19zZW50IhkKF1RvcGJhclNlc3Npb25CZWdhbkxvZ2luIh8KHVRvcGJhclNlc3Npb25CZWdhbkVkaXRvclN0YXJ0Io8BChJUb3BiYXJXYXJuaW5nU3RyaXASLAoId2FybmluZ3MYASADKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nEj4KCHNldmVyaXR5GAIgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ1N0cmlwU2V2ZXJpdHlIAIgBAUILCglfc2V2ZXJpdHkipwEKGlRvcGJhcldhcm5pbmdTdHJpcFNldmVyaXR5EjcKBmVycm9ycxgBIAEoCzIlLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdTdHJpcEVycm9yc0gAEkQKDXdhcm5pbmdzX29ubHkYAiABKAsyKy5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nU3RyaXBXYXJuaW5nc09ubHlIAEIKCghzZXZlcml0eSIaChhUb3BiYXJXYXJuaW5nU3RyaXBFcnJvcnMiIAoeVG9wYmFyV2FybmluZ1N0cmlwV2FybmluZ3NPbmx5IvwDCg1Ub3BiYXJXYXJuaW5nEiwKBGxpbmUYASABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nTGluZRJACgphY2NvdW50aW5nGAIgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdEZXRhaWxIABJHCg51bm1vZGVsZWRfdG9vbBgDIAEoCzItLmZyb250ZW5kLnYxLlRvcGJhclVubW9kZWxlZFRvb2xXYXJuaW5nRGV0YWlsSAASTwoSZGV0YWNoZWRfdW5tb2RlbGVkGAQgASgLMjEuZnJvbnRlbmQudjEuVG9wYmFyRGV0YWNoZWRVbm1vZGVsZWRXYXJuaW5nRGV0YWlsSAASRQoNc2Vzc2lvbl9mYXVsdBgFIAEoCzIsLmZyb250ZW5kLnYxLlRvcGJhclNlc3Npb25GYXVsdFdhcm5pbmdEZXRhaWxIABJJCg9kZWdyYWRlZF93aW5kb3cYBiABKAsyLi5mcm9udGVuZC52MS5Ub3BiYXJEZWdyYWRlZFdpbmRvd1dhcm5pbmdEZXRhaWxIABJFCg1kZXBsb3lfZmFpbGVkGAcgASgLMiwuZnJvbnRlbmQudjEuVG9wYmFyRGVwbG95RmFpbGVkV2FybmluZ0RldGFpbEgAQggKBmRldGFpbCIhChFUb3BiYXJXYXJuaW5nTGluZRIMCgR0ZXh0GAEgASgJIlQKHVRvcGJhckFjY291bnRpbmdXYXJuaW5nRGV0YWlsEjMKBWxpbmVzGAEgAygLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUiJwoXVG9wYmFyV2FybmluZ0RldGFpbExpbmUSDAoEdGV4dBgBIAEoCSKZAQogVG9wYmFyVW5tb2RlbGVkVG9vbFdhcm5pbmdEZXRhaWwSNwoJdG9vbF9uYW1lGAEgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyVW5tb2RlbGVkVG9vbE5hbWUSPAoOYXJndW1lbnRfbGluZXMYAiADKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZSInChdUb3BiYXJVbm1vZGVsZWRUb29sTmFtZRIMCgR0ZXh0GAEgASgJInYKJFRvcGJhckRldGFjaGVkVW5tb2RlbGVkV2FybmluZ0RldGFpbBI3Cgl0b29sX25hbWUYASABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJVbm1vZGVsZWRUb29sTmFtZRIVCg1zdGFydGVkX2F0X21zGAIgASgDIo8BCh9Ub3BiYXJTZXNzaW9uRmF1bHRXYXJuaW5nRGV0YWlsEjYKCWNvbXBvbmVudBgBIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdDb21wb25lbnQSNAoGZGV0YWlsGAIgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUiJgoWVG9wYmFyV2FybmluZ0NvbXBvbmVudBIMCgR0ZXh0GAEgASgJIqICCiFUb3BiYXJEZWdyYWRlZFdpbmRvd1dhcm5pbmdEZXRhaWwSNgoJY29tcG9uZW50GAEgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0NvbXBvbmVudBI0CgZyZWFzb24YAiABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZRITCgtiZWdhbl9hdF9tcxgDIAEoAxI1CgRvcGVuGAQgASgLMiUuZnJvbnRlbmQudjEuVG9wYmFyRGVncmFkZWRXaW5kb3dPcGVuSAASOQoGY2xvc2VkGAUgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyRGVncmFkZWRXaW5kb3dDbG9zZWRIAEIICgZleHRlbnQiuwIKH1RvcGJhckRlcGxveUZhaWxlZFdhcm5pbmdEZXRhaWwSMgoEc3RlcBgBIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdEZXRhaWxMaW5lEjYKCWNvbXBvbmVudBgCIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdDb21wb25lbnQSNgoIcm9sbGJhY2sYAyABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZRI0CgZkZXRhaWwYBCABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZRI2CgNsb2cYBSABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZUgAiAEBQgYKBF9sb2ciGgoYVG9wYmFyRGVncmFkZWRXaW5kb3dPcGVuIkgKGlRvcGJhckRlZ3JhZGVkV2luZG93Q2xvc2VkEhMKC2VuZGVkX2F0X21zGAEgASgDEhUKDWRyb3BwZWRfY291bnQYAiABKAMiSgoSVG9rZW5CcmVha2Rvd25WaWV3EjQKCHNlY3Rpb25zGAEgAygLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25TZWN0aW9uInoKFVRva2VuQnJlYWtkb3duU2VjdGlvbhIzCgdoZWFkaW5nGAEgASgLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25IZWFkaW5nEiwKBHJvd3MYAiADKAsyHi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blJvdyIlChVUb2tlbkJyZWFrZG93bkhlYWRpbmcSDAoEdGV4dBgBIAEoCSKFAQoRVG9rZW5CcmVha2Rvd25Sb3cSDQoFbGFiZWwYASABKAkSDgoGdG9rZW5zGAIgASgDEhsKDnNoYXJlX3Blcm1pbGxlGAMgASgFSACIAQESEgoKZW1waGFzaXplZBgEIAEoCBINCgVkZXB0aBgFIAEoBUIRCg9fc2hhcmVfcGVybWlsbGUqxQEKE1RvcGJhclRpdGxlTGlua0ljb24SJgoiVE9QQkFSX1RJVExFX0xJTktfSUNPTl9VTlNQRUNJRklFRBAAEiEKHVRPUEJBUl9USVRMRV9MSU5LX0lDT05fR0lUSFVCEAESIAocVE9QQkFSX1RJVExFX0xJTktfSUNPTl9TTEFDSxACEh4KGlRPUEJBUl9USVRMRV9MSU5LX0lDT05fR05TEAMSIQodVE9QQkFSX1RJVExFX0xJTktfSUNPTl9OT1RJT04QBEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_api, file_frontend_v1_workspace_name_prefix]);
+  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIs4GCgpUb3BiYXJWaWV3EiwKBXRpdGxlGAEgASgLMhguZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVIAIgBARI0CgxzZXNzaW9uX2xpbmUYAiABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJTZXNzaW9uTGluZRI9Cg5tb2RlbF9zZWxlY3RvchgDIAEoCzIgLmZyb250ZW5kLnYxLlRvcGJhck1vZGVsU2VsZWN0b3JIAYgBARI1Cgxjb25uZWN0aXZpdHkYBCABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSLwoHY29udGV4dBgHIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhckNvbnRleHRDaGlwEisKB2FjY291bnQYCCABKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50EkwKFnBlcm1pc3Npb25fbW9kZV9waWNrZXIYCSABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJtaXNzaW9uTW9kZVBpY2tlckgCiAEBEjoKD3BlcnNpc3RlbnRfd2lmaRgNIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpEj8KD2VmZm9ydF9zZWxlY3RvchgOIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9ySAOIAQESOAoOd29ya3NwYWNlX25hbWUYDyABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lEjkKDHF1ZXVlX2J5cGFzcxgRIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzSASIAQESOAoOcmVtb3RlX2NvbnRyb2wYECABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sQggKBl90aXRsZUIRCg9fbW9kZWxfc2VsZWN0b3JCGQoXX3Blcm1pc3Npb25fbW9kZV9waWNrZXJCEgoQX2VmZm9ydF9zZWxlY3RvckIPCg1fcXVldWVfYnlwYXNzSgQIBRAGSgQIBhAHSgQIChALSgQICxAMSgQIDBANUgh3YXJuaW5nc1IJZmFzdF9tb2RlIvwBChFUb3BiYXJRdWV1ZUJ5cGFzcxIuCgJvbhgBIAEoCzIgLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzT25IABIwCgNvZmYYAiABKAsyIS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc09mZkgAEkUKDmhlbGRfZWxzZXdoZXJlGAMgASgLMisuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NIZWxkRWxzZXdoZXJlSAASNgoHdG9vbHRpcBgEIAEoCzIlLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzVG9vbHRpcEIGCgRtb2RlIhUKE1RvcGJhclF1ZXVlQnlwYXNzT24iVAoUVG9wYmFyUXVldWVCeXBhc3NPZmYSPAoHb3B0aW9ucxgBIAMoCzIrLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dE9wdGlvbiJuCh5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRPcHRpb24SNgoHY29udGV4dBgBIAEoCzIlLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dBIUCgxkaXNwbGF5X25hbWUYAiABKAki4gIKGFRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dBJCCglmdWxsX21haW4YASABKAsyLS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRGdWxsTWFpbkgAEkwKDmNvbXBhY3RlZF9tYWluGAIgASgLMjIuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0Q29tcGFjdGVkTWFpbkgAEkEKCGV4aXN0aW5nGAMgASgLMi0uZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RXhpc3RpbmdIABJmChxleGlzdGluZ19wbHVzX2NvbXBhY3RlZF9tYWluGAQgASgLMj4uZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RXhpc3RpbmdQbHVzQ29tcGFjdGVkTWFpbkgAQgkKB2NvbnRleHQiIgogVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RnVsbE1haW4iJwolVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0Q29tcGFjdGVkTWFpbiIiCiBUb3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRFeGlzdGluZyIzCjFUb3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRFeGlzdGluZ1BsdXNDb21wYWN0ZWRNYWluIjgKHlRvcGJhclF1ZXVlQnlwYXNzSGVsZEVsc2V3aGVyZRIWCg53b3Jrc3BhY2VfbmFtZRgBIAEoCSIoChhUb3BiYXJRdWV1ZUJ5cGFzc1Rvb2x0aXASDAoEdGV4dBgBIAEoCSLFAQoTVG9wYmFyUmVtb3RlQ29udHJvbBI0CgJvbhgBIAEoCzImLmZyb250ZW5kLnYxLlRvcGJhclJlbW90ZUNvbnRyb2xNb2RlT25IABI2CgNvZmYYAiABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sTW9kZU9mZkgAEjgKB3Rvb2x0aXAYAyABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sVG9vbHRpcEIGCgRtb2RlIhsKGVRvcGJhclJlbW90ZUNvbnRyb2xNb2RlT24iHAoaVG9wYmFyUmVtb3RlQ29udHJvbE1vZGVPZmYiKgoaVG9wYmFyUmVtb3RlQ29udHJvbFRvb2x0aXASDAoEdGV4dBgBIAEoCSLXBAoUVG9wYmFyUGVyc2lzdGVudFdpZmkSOQoGam9pbmVkGAEgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlKb2luZWRIABJACgpub3Rfam9pbmVkGAIgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlOb3RKb2luZWRIABI1CgJvbhgDIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9uSAESNwoDb2ZmGAQgASgLMiguZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlNb2RlT2ZmSAESOQoHdG9vbHRpcBgFIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpVG9vbHRpcBI8CghsaWRfb3BlbhgGIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTGlkT3BlbkgCEkAKCmxpZF9jbG9zZWQYByABKAsyKi5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaUxpZENsb3NlZEgCEjgKBm5vX2xpZBgIIAEoCzImLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTm9MaWRIAhJGCg1saWRfdW53YXRjaGVkGAkgASgLMi0uZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWRIAkIGCgR3aWZpQgYKBG1vZGVCBQoDbGlkIhwKGlRvcGJhclBlcnNpc3RlbnRXaWZpSm9pbmVkIh8KHVRvcGJhclBlcnNpc3RlbnRXaWZpTm90Sm9pbmVkIhwKGlRvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9uIh0KG1RvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9mZiIdChtUb3BiYXJQZXJzaXN0ZW50V2lmaUxpZE9wZW4iHwodVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRDbG9zZWQiGwoZVG9wYmFyUGVyc2lzdGVudFdpZmlOb0xpZCIiCiBUb3BiYXJQZXJzaXN0ZW50V2lmaUxpZFVud2F0Y2hlZCIrChtUb3BiYXJQZXJzaXN0ZW50V2lmaVRvb2x0aXASDAoEdGV4dBgBIAEoCSKQAQoaVG9wYmFyUGVybWlzc2lvbk1vZGVQaWNrZXISOAoHY3VycmVudBgBIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uEjgKB29wdGlvbnMYAiADKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJtaXNzaW9uTW9kZU9wdGlvbiJAChpUb3BiYXJQZXJtaXNzaW9uTW9kZU9wdGlvbhIMCgRtb2RlGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSKGAQoRVG9wYmFyQ29udGV4dENoaXASDAoEdGV4dBgBIAEoCRIyCglicmVha2Rvd24YAiABKAsyHy5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blZpZXcSEwoLd2luZG93X2ZpbGwYAyABKAESGgoSc2Vzc2lvbl90b3RhbF90ZXh0GAQgASgJIpoCCg1Ub3BiYXJBY2NvdW50EjcKCWxvZ2dlZF9pbhgBIAEoCzIiLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRJbkgAEjkKCmxvZ2dlZF9vdXQYAiABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50TG9nZ2VkT3V0SAASMQoHb3B0aW9ucxgDIAMoCzIgLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRPcHRpb24SRQoPc2lnbl9pbl9yZXF1ZXN0GAQgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudFNpZ25JblJlcXVlc3RIAYgBAUIHCgVzdGF0ZUISChBfc2lnbl9pbl9yZXF1ZXN0IjAKGlRvcGJhckFjY291bnRTaWduSW5SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkiJgoVVG9wYmFyQWNjb3VudExvZ2dlZEluEg0KBWVtYWlsGAEgASgJIhgKFlRvcGJhckFjY291bnRMb2dnZWRPdXQitwEKE1RvcGJhckFjY291bnRPcHRpb24SEgoKY29uZmlnX2RpchgBIAEoCRI3Cglsb2dnZWRfaW4YAiABKAsyIi5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50TG9nZ2VkSW5IABI5Cgpsb2dnZWRfb3V0GAMgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudExvZ2dlZE91dEgAEg8KB2N1cnJlbnQYBCABKAhCBwoFc3RhdGUigwEKC1RvcGJhclRpdGxlEgwKBHRleHQYASABKAkSPQoLZGVzY3JpcHRpb24YBCABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJUaXRsZURlc2NyaXB0aW9uSACIAQFCDgoMX2Rlc2NyaXB0aW9uSgQIAhADSgQIAxAEUgRsaW5rUgVsaW5rcyImChZUb3BiYXJUaXRsZURlc2NyaXB0aW9uEgwKBHRleHQYASABKAkilQEKGFRvcGJhcldvcmtzcGFjZU5hbWVMaW5rcxI2CgZzaW5nbGUYASABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua0gAEjgKBG1lbnUYAiABKAsyKC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua01lbnVIAEIHCgVvcGVucyI1ChdUb3BiYXJXb3Jrc3BhY2VOYW1lTGluaxINCgVsYWJlbBgBIAEoCRILCgN1cmwYAiABKAkiWgobVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtNZW51EjsKBWl0ZW1zGAEgAygLMiwuZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtNZW51SXRlbSLhAQofVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtNZW51SXRlbRINCgVsYWJlbBgBIAEoCRILCgN1cmwYAiABKAkSDQoFb3duZWQYAyABKAgSNgoEaWNvbhgEIAEoDjIoLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rSWNvbhI9CgViYWRnZRgFIAEoCzIpLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rQmFkZ2VIAIgBARISCgpzdWJzY3JpYmVkGAYgASgIQggKBl9iYWRnZSKtAgocVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZRI9CgRvcGVuGAEgASgLMi0uZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZU9wZW5IABI/CgVkcmFmdBgCIAEoCzIuLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rQmFkZ2VEcmFmdEgAEkEKBm1lcmdlZBgDIAEoCzIvLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rQmFkZ2VNZXJnZWRIABJBCgZjbG9zZWQYBCABKAsyLy5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlQ2xvc2VkSABCBwoFc3RhdGUiIgogVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZU9wZW4iIwohVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZURyYWZ0IiQKIlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rQmFkZ2VNZXJnZWQiJAoiVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZUNsb3NlZCKqAQoTVG9wYmFyV29ya3NwYWNlTmFtZRIMCgR0ZXh0GAEgASgJEjUKBnByZWZpeBgCIAEoCzIgLmZyb250ZW5kLnYxLldvcmtzcGFjZU5hbWVQcmVmaXhIAIgBARI5CgVsaW5rcxgDIAEoCzIlLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rc0gBiAEBQgkKB19wcmVmaXhCCAoGX2xpbmtzIiEKEVRvcGJhclNlc3Npb25MaW5lEgwKBHRleHQYASABKAkiugEKE1RvcGJhck1vZGVsU2VsZWN0b3ISMwoIc2VsZWN0ZWQYASABKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb25IAIgBARItCgdvcHRpb25zGAIgAygLMhwuY29udmVyc2F0aW9uLnYxLk1vZGVsT3B0aW9uEjIKDWRlZmF1bHRfbW9kZWwYAyABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEILCglfc2VsZWN0ZWQipwEKFFRvcGJhckVmZm9ydFNlbGVjdG9yEj8KCXN1cHBvcnRlZBgBIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9yU3VwcG9ydGVkSAASQwoLdW5zdXBwb3J0ZWQYAiABKAsyLC5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRTZWxlY3RvclVuc3VwcG9ydGVkSABCCQoHc3VwcG9ydCKDAQodVG9wYmFyRWZmb3J0U2VsZWN0b3JTdXBwb3J0ZWQSMAoHY3VycmVudBgBIAEoCzIfLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydE9wdGlvbhIwCgdvcHRpb25zGAIgAygLMh8uZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0T3B0aW9uIiEKH1RvcGJhckVmZm9ydFNlbGVjdG9yVW5zdXBwb3J0ZWQiXAoSVG9wYmFyRWZmb3J0T3B0aW9uEjAKBWxldmVsGAEgASgOMiEuY29udmVyc2F0aW9uLnYxLkFnZW50RWZmb3J0TGV2ZWwSFAoMZGlzcGxheV9uYW1lGAIgASgJIocBChJUb3BiYXJDb25uZWN0aXZpdHkSDAoEdG9uZRgBIAEoCRINCgVnbHlwaBgCIAEoCRINCgV0aXRsZRgDIAEoCRI5CgdzZXNzaW9uGAQgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyQWdlbnRSZXBsU2Vzc2lvbkgAiAEBQgoKCF9zZXNzaW9uItsBChZUb3BiYXJBZ2VudFJlcGxTZXNzaW9uEhUKDXN0YXJ0ZWRfYXRfbXMYASABKAMSNQoFbG9naW4YAiABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJTZXNzaW9uQmVnYW5Mb2dpbkgAEkIKDGVkaXRvcl9zdGFydBgDIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclNlc3Npb25CZWdhbkVkaXRvclN0YXJ0SABCBwoFYmVnYW5KBAgEEAVKBAgFEAZSDmJ5dGVzX3JlY2VpdmVkUgpieXRlc19zZW50IhkKF1RvcGJhclNlc3Npb25CZWdhbkxvZ2luIh8KHVRvcGJhclNlc3Npb25CZWdhbkVkaXRvclN0YXJ0IkoKElRva2VuQnJlYWtkb3duVmlldxI0CghzZWN0aW9ucxgBIAMoCzIiLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duU2VjdGlvbiJ6ChVUb2tlbkJyZWFrZG93blNlY3Rpb24SMwoHaGVhZGluZxgBIAEoCzIiLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duSGVhZGluZxIsCgRyb3dzGAIgAygLMh4uZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25Sb3ciJQoVVG9rZW5CcmVha2Rvd25IZWFkaW5nEgwKBHRleHQYASABKAkihQEKEVRva2VuQnJlYWtkb3duUm93Eg0KBWxhYmVsGAEgASgJEg4KBnRva2VucxgCIAEoAxIbCg5zaGFyZV9wZXJtaWxsZRgDIAEoBUgAiAEBEhIKCmVtcGhhc2l6ZWQYBCABKAgSDQoFZGVwdGgYBSABKAVCEQoPX3NoYXJlX3Blcm1pbGxlKvoBChtUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0ljb24SLworVE9QQkFSX1dPUktTUEFDRV9OQU1FX0xJTktfSUNPTl9VTlNQRUNJRklFRBAAEioKJlRPUEJBUl9XT1JLU1BBQ0VfTkFNRV9MSU5LX0lDT05fR0lUSFVCEAESKQolVE9QQkFSX1dPUktTUEFDRV9OQU1FX0xJTktfSUNPTl9TTEFDSxACEicKI1RPUEJBUl9XT1JLU1BBQ0VfTkFNRV9MSU5LX0lDT05fR05TEAMSKgomVE9QQkFSX1dPUktTUEFDRV9OQU1FX0xJTktfSUNPTl9OT1RJT04QBEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_api, file_frontend_v1_workspace_name_prefix]);
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -110,19 +111,6 @@ export type TopbarView = Message<"frontend.v1.TopbarView"> & {
   connectivity?: TopbarConnectivity | undefined;
 
   /**
-   * The warnings, drawn through the heading: while the list holds any, the
-   * heading's title is a control that opens it, in the strip's severity color
-   * (TopbarWarningStrip.severity). ALWAYS SET, session or no session: a
-   * session-less workspace's state rides it as one warning line, so the fact
-   * the retired whole-view states used to carry is still stated. An EMPTY
-   * list remains the daemon saying nothing is wrong, and the heading is then
-   * plain text.
-   *
-   * @generated from field: frontend.v1.TopbarWarningStrip warnings = 5;
-   */
-  warnings?: TopbarWarningStrip | undefined;
-
-  /**
    * The context chip — a NUMBER, not an icon. ALWAYS SET. A session-less
    * workspace's chip states the context the session HELD (what a cold read
    * would re-read), 0 when none is
@@ -148,8 +136,8 @@ export type TopbarView = Message<"frontend.v1.TopbarView"> & {
   permissionModePicker?: TopbarPermissionModePicker | undefined;
 
   /**
-   * The persistent-wifi chip, in the left group's status run between the
-   * remote-control chip and the warning chip.
+   * The persistent-wifi chip, last in the left group's status run, after the
+   * remote-control chip.
    * ALWAYS SET: the machine's standing is a daemon fact that every workspace's
    * strip draws alike, session or no session, and a fact the daemon could not
    * read is stated INSIDE the chip rather than by its absence.
@@ -1155,32 +1143,33 @@ export const TopbarAccountOptionSchema: GenMessage<TopbarAccountOption> = /*@__P
   messageDesc(file_frontend_v1_topbar, 33);
 
 /**
- * The title line the topbar shows: the workspace's generated summary, one
- * imperative sentence stating the workspace's task. It is a summary ONLY —
- * the one the workspace's own agent set (agentrepl.v1.SetWorkspaceSummary),
- * or the vendor's own conversation title while none stands — and never carries
- * the workspace's name or its branch, as a suffix or as a stand-in; the name
- * is TopbarWorkspaceName's, drawn on its own line.
+ * The title line the topbar shows: the workspace's short summary, one
+ * imperative sentence stating the workspace's task, drawn in the summary's
+ * purple whatever else the topbar states, never underlined and never a
+ * control. It is a summary ONLY — the one the workspace's own agent set
+ * (agentrepl.v1.SetWorkspaceSummary), or the vendor's own conversation title
+ * while none stands — and never carries the workspace's name or its branch,
+ * as a suffix or as a stand-in; the name is TopbarWorkspaceName's, drawn on
+ * its own line.
  *
  * @generated from message frontend.v1.TopbarTitle
  */
 export type TopbarTitle = Message<"frontend.v1.TopbarTitle"> & {
   /**
-   * The summary sentence, verbatim. Never empty when the title is set.
+   * The short summary sentence, verbatim. Never empty when the title is set.
    *
    * @generated from field: string text = 1;
    */
   text: string;
 
   /**
-   * What a click on the summary opens: the workspace's shown links
-   * (agentrepl.v1.ChangeWorkspaceLinks). UNSET while the menu shows none, and
-   * the summary is then plain text. It rides the TITLE rather than the view,
-   * so a workspace with no summary has nothing clickable by construction.
+   * The popup a hover on the summary shows: the workspace's long summary.
+   * UNSET when no long summary stands (the title is the vendor's own
+   * conversation title), and a hover then shows nothing.
    *
-   * @generated from field: optional frontend.v1.TopbarTitleLinks links = 3;
+   * @generated from field: optional frontend.v1.TopbarTitleDescription description = 4;
    */
-  links?: TopbarTitleLinks | undefined;
+  description?: TopbarTitleDescription | undefined;
 };
 
 /**
@@ -1191,51 +1180,76 @@ export const TopbarTitleSchema: GenMessage<TopbarTitle> = /*@__PURE__*/
   messageDesc(file_frontend_v1_topbar, 34);
 
 /**
- * The summary's links: the summary is drawn underlined, and a click on it
- * opens what the arm names, never the heading's own session-line reveal.
+ * The popup a hover on the summary shows beneath it: the long summary the
+ * workspace's agent set (agentrepl.v1.SetWorkspaceSummaryRequest.long_summary),
+ * two to four sentences describing the workspace's task in more detail than
+ * the one-sentence title can.
+ *
+ * @generated from message frontend.v1.TopbarTitleDescription
+ */
+export type TopbarTitleDescription = Message<"frontend.v1.TopbarTitleDescription"> & {
+  /**
+   * The long summary, verbatim: one paragraph of two to four sentences.
+   *
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleDescription.
+ * Use `create(TopbarTitleDescriptionSchema)` to create a new message.
+ */
+export const TopbarTitleDescriptionSchema: GenMessage<TopbarTitleDescription> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 35);
+
+/**
+ * The workspace's shown links: the workspace's name is drawn underlined, and
+ * a click on it opens what the arm names, never the heading's own
+ * session-line reveal.
  * THE ARM IS WHAT THE CLICK DOES, resolved by the daemon from how many links
  * the menu shows, so the client never counts them to decide.
  *
- * @generated from message frontend.v1.TopbarTitleLinks
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinks
  */
-export type TopbarTitleLinks = Message<"frontend.v1.TopbarTitleLinks"> & {
+export type TopbarWorkspaceNameLinks = Message<"frontend.v1.TopbarWorkspaceNameLinks"> & {
   /**
-   * @generated from oneof frontend.v1.TopbarTitleLinks.opens
+   * @generated from oneof frontend.v1.TopbarWorkspaceNameLinks.opens
    */
   opens: {
     /**
      * Exactly one link is shown: the click opens it directly.
      *
-     * @generated from field: frontend.v1.TopbarTitleLink single = 1;
+     * @generated from field: frontend.v1.TopbarWorkspaceNameLink single = 1;
      */
-    value: TopbarTitleLink;
+    value: TopbarWorkspaceNameLink;
     case: "single";
   } | {
     /**
      * Two or more links are shown: the click drops their menu.
      *
-     * @generated from field: frontend.v1.TopbarTitleLinkMenu menu = 2;
+     * @generated from field: frontend.v1.TopbarWorkspaceNameLinkMenu menu = 2;
      */
-    value: TopbarTitleLinkMenu;
+    value: TopbarWorkspaceNameLinkMenu;
     case: "menu";
   } | { case: undefined; value?: undefined };
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinks.
- * Use `create(TopbarTitleLinksSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinks.
+ * Use `create(TopbarWorkspaceNameLinksSchema)` to create a new message.
  */
-export const TopbarTitleLinksSchema: GenMessage<TopbarTitleLinks> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 35);
+export const TopbarWorkspaceNameLinksSchema: GenMessage<TopbarWorkspaceNameLinks> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 36);
 
 /**
  * The one shown link a click opens directly, through OpenExternal (the Chrome
  * profile of the account the workspace's session spends as). Its tooltip
- * names the label and the url beneath the whole summary.
+ * names the label and the url beneath the workspace's name.
  *
- * @generated from message frontend.v1.TopbarTitleLink
+ * @generated from message frontend.v1.TopbarWorkspaceNameLink
  */
-export type TopbarTitleLink = Message<"frontend.v1.TopbarTitleLink"> & {
+export type TopbarWorkspaceNameLink = Message<"frontend.v1.TopbarWorkspaceNameLink"> & {
   /**
    * The agent's label for the link, two to eight words, verbatim.
    *
@@ -1254,42 +1268,42 @@ export type TopbarTitleLink = Message<"frontend.v1.TopbarTitleLink"> & {
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLink.
- * Use `create(TopbarTitleLinkSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLink.
+ * Use `create(TopbarWorkspaceNameLinkSchema)` to create a new message.
  */
-export const TopbarTitleLinkSchema: GenMessage<TopbarTitleLink> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 36);
+export const TopbarWorkspaceNameLinkSchema: GenMessage<TopbarWorkspaceNameLink> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 37);
 
 /**
- * The menu a click on the summary drops beneath the heading: one row per
+ * The menu a click on the workspace's name drops beneath the heading: one row per
  * shown link, at most five.
  *
- * @generated from message frontend.v1.TopbarTitleLinkMenu
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinkMenu
  */
-export type TopbarTitleLinkMenu = Message<"frontend.v1.TopbarTitleLinkMenu"> & {
+export type TopbarWorkspaceNameLinkMenu = Message<"frontend.v1.TopbarWorkspaceNameLinkMenu"> & {
   /**
    * The shown links, MOST RECENTLY SET FIRST, in the order drawn. At least
    * two.
    *
-   * @generated from field: repeated frontend.v1.TopbarTitleLinkMenuItem items = 1;
+   * @generated from field: repeated frontend.v1.TopbarWorkspaceNameLinkMenuItem items = 1;
    */
-  items: TopbarTitleLinkMenuItem[];
+  items: TopbarWorkspaceNameLinkMenuItem[];
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinkMenu.
- * Use `create(TopbarTitleLinkMenuSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinkMenu.
+ * Use `create(TopbarWorkspaceNameLinkMenuSchema)` to create a new message.
  */
-export const TopbarTitleLinkMenuSchema: GenMessage<TopbarTitleLinkMenu> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 37);
+export const TopbarWorkspaceNameLinkMenuSchema: GenMessage<TopbarWorkspaceNameLinkMenu> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 38);
 
 /**
- * One row of the summary's menu: the label drawn as a link, which a pick
+ * One row of the name's link menu: the label drawn as a link, which a pick
  * opens through OpenExternal, closing the menu.
  *
- * @generated from message frontend.v1.TopbarTitleLinkMenuItem
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinkMenuItem
  */
-export type TopbarTitleLinkMenuItem = Message<"frontend.v1.TopbarTitleLinkMenuItem"> & {
+export type TopbarWorkspaceNameLinkMenuItem = Message<"frontend.v1.TopbarWorkspaceNameLinkMenuItem"> & {
   /**
    * The agent's label for the link, two to eight words, drawn verbatim as the
    * row's text.
@@ -1320,9 +1334,9 @@ export type TopbarTitleLinkMenuItem = Message<"frontend.v1.TopbarTitleLinkMenuIt
   /**
    * The service the url's host names, drawn as an icon on the row's left.
    *
-   * @generated from field: frontend.v1.TopbarTitleLinkIcon icon = 4;
+   * @generated from field: frontend.v1.TopbarWorkspaceNameLinkIcon icon = 4;
    */
-  icon: TopbarTitleLinkIcon;
+  icon: TopbarWorkspaceNameLinkIcon;
 
   /**
    * How the GitHub pull request the url names stands, drawn as a small
@@ -1332,9 +1346,9 @@ export type TopbarTitleLinkMenuItem = Message<"frontend.v1.TopbarTitleLinkMenuIt
    * pull-request cadence, so the badge follows a merge or a close without the
    * link being set again.
    *
-   * @generated from field: optional frontend.v1.TopbarTitleLinkBadge badge = 5;
+   * @generated from field: optional frontend.v1.TopbarWorkspaceNameLinkBadge badge = 5;
    */
-  badge?: TopbarTitleLinkBadge | undefined;
+  badge?: TopbarWorkspaceNameLinkBadge | undefined;
 
   /**
    * Whether the workspace is subscribed to the link's updates through
@@ -1350,11 +1364,11 @@ export type TopbarTitleLinkMenuItem = Message<"frontend.v1.TopbarTitleLinkMenuIt
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinkMenuItem.
- * Use `create(TopbarTitleLinkMenuItemSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinkMenuItem.
+ * Use `create(TopbarWorkspaceNameLinkMenuItemSchema)` to create a new message.
  */
-export const TopbarTitleLinkMenuItemSchema: GenMessage<TopbarTitleLinkMenuItem> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 38);
+export const TopbarWorkspaceNameLinkMenuItemSchema: GenMessage<TopbarWorkspaceNameLinkMenuItem> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 39);
 
 /**
  * A menu row's pull request badge. THE ARM IS THE STATE the badge draws, in
@@ -1362,123 +1376,123 @@ export const TopbarTitleLinkMenuItemSchema: GenMessage<TopbarTitleLinkMenuItem> 
  * reads the pull request itself. A set badge with no arm set is a state this
  * schema revision does not name, and draws no badge.
  *
- * @generated from message frontend.v1.TopbarTitleLinkBadge
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinkBadge
  */
-export type TopbarTitleLinkBadge = Message<"frontend.v1.TopbarTitleLinkBadge"> & {
+export type TopbarWorkspaceNameLinkBadge = Message<"frontend.v1.TopbarWorkspaceNameLinkBadge"> & {
   /**
    * How the pull request stands, as the daemon's latest read of it found.
    *
-   * @generated from oneof frontend.v1.TopbarTitleLinkBadge.state
+   * @generated from oneof frontend.v1.TopbarWorkspaceNameLinkBadge.state
    */
   state: {
     /**
      * Open for review: "open", in the foreground white.
      *
-     * @generated from field: frontend.v1.TopbarTitleLinkBadgeOpen open = 1;
+     * @generated from field: frontend.v1.TopbarWorkspaceNameLinkBadgeOpen open = 1;
      */
-    value: TopbarTitleLinkBadgeOpen;
+    value: TopbarWorkspaceNameLinkBadgeOpen;
     case: "open";
   } | {
     /**
      * Open and still a draft: "draft", in the muted grey.
      *
-     * @generated from field: frontend.v1.TopbarTitleLinkBadgeDraft draft = 2;
+     * @generated from field: frontend.v1.TopbarWorkspaceNameLinkBadgeDraft draft = 2;
      */
-    value: TopbarTitleLinkBadgeDraft;
+    value: TopbarWorkspaceNameLinkBadgeDraft;
     case: "draft";
   } | {
     /**
      * Merged: "merged", in green.
      *
-     * @generated from field: frontend.v1.TopbarTitleLinkBadgeMerged merged = 3;
+     * @generated from field: frontend.v1.TopbarWorkspaceNameLinkBadgeMerged merged = 3;
      */
-    value: TopbarTitleLinkBadgeMerged;
+    value: TopbarWorkspaceNameLinkBadgeMerged;
     case: "merged";
   } | {
     /**
      * Closed without merging: "closed", in red. A reopened pull request
      * draws open again at the next read.
      *
-     * @generated from field: frontend.v1.TopbarTitleLinkBadgeClosed closed = 4;
+     * @generated from field: frontend.v1.TopbarWorkspaceNameLinkBadgeClosed closed = 4;
      */
-    value: TopbarTitleLinkBadgeClosed;
+    value: TopbarWorkspaceNameLinkBadgeClosed;
     case: "closed";
   } | { case: undefined; value?: undefined };
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinkBadge.
- * Use `create(TopbarTitleLinkBadgeSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinkBadge.
+ * Use `create(TopbarWorkspaceNameLinkBadgeSchema)` to create a new message.
  */
-export const TopbarTitleLinkBadgeSchema: GenMessage<TopbarTitleLinkBadge> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 39);
+export const TopbarWorkspaceNameLinkBadgeSchema: GenMessage<TopbarWorkspaceNameLinkBadge> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 40);
 
 /**
  * The pull request is open. DELIBERATELY EMPTY: the arm is the state.
  *
- * @generated from message frontend.v1.TopbarTitleLinkBadgeOpen
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinkBadgeOpen
  */
-export type TopbarTitleLinkBadgeOpen = Message<"frontend.v1.TopbarTitleLinkBadgeOpen"> & {
+export type TopbarWorkspaceNameLinkBadgeOpen = Message<"frontend.v1.TopbarWorkspaceNameLinkBadgeOpen"> & {
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinkBadgeOpen.
- * Use `create(TopbarTitleLinkBadgeOpenSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinkBadgeOpen.
+ * Use `create(TopbarWorkspaceNameLinkBadgeOpenSchema)` to create a new message.
  */
-export const TopbarTitleLinkBadgeOpenSchema: GenMessage<TopbarTitleLinkBadgeOpen> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 40);
+export const TopbarWorkspaceNameLinkBadgeOpenSchema: GenMessage<TopbarWorkspaceNameLinkBadgeOpen> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 41);
 
 /**
  * The pull request is a draft. DELIBERATELY EMPTY: the arm is the state.
  *
- * @generated from message frontend.v1.TopbarTitleLinkBadgeDraft
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinkBadgeDraft
  */
-export type TopbarTitleLinkBadgeDraft = Message<"frontend.v1.TopbarTitleLinkBadgeDraft"> & {
+export type TopbarWorkspaceNameLinkBadgeDraft = Message<"frontend.v1.TopbarWorkspaceNameLinkBadgeDraft"> & {
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinkBadgeDraft.
- * Use `create(TopbarTitleLinkBadgeDraftSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinkBadgeDraft.
+ * Use `create(TopbarWorkspaceNameLinkBadgeDraftSchema)` to create a new message.
  */
-export const TopbarTitleLinkBadgeDraftSchema: GenMessage<TopbarTitleLinkBadgeDraft> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 41);
+export const TopbarWorkspaceNameLinkBadgeDraftSchema: GenMessage<TopbarWorkspaceNameLinkBadgeDraft> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 42);
 
 /**
  * The pull request merged. DELIBERATELY EMPTY: the arm is the state.
  *
- * @generated from message frontend.v1.TopbarTitleLinkBadgeMerged
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinkBadgeMerged
  */
-export type TopbarTitleLinkBadgeMerged = Message<"frontend.v1.TopbarTitleLinkBadgeMerged"> & {
+export type TopbarWorkspaceNameLinkBadgeMerged = Message<"frontend.v1.TopbarWorkspaceNameLinkBadgeMerged"> & {
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinkBadgeMerged.
- * Use `create(TopbarTitleLinkBadgeMergedSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinkBadgeMerged.
+ * Use `create(TopbarWorkspaceNameLinkBadgeMergedSchema)` to create a new message.
  */
-export const TopbarTitleLinkBadgeMergedSchema: GenMessage<TopbarTitleLinkBadgeMerged> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 42);
+export const TopbarWorkspaceNameLinkBadgeMergedSchema: GenMessage<TopbarWorkspaceNameLinkBadgeMerged> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 43);
 
 /**
  * The pull request closed unmerged. DELIBERATELY EMPTY: the arm is the state.
  *
- * @generated from message frontend.v1.TopbarTitleLinkBadgeClosed
+ * @generated from message frontend.v1.TopbarWorkspaceNameLinkBadgeClosed
  */
-export type TopbarTitleLinkBadgeClosed = Message<"frontend.v1.TopbarTitleLinkBadgeClosed"> & {
+export type TopbarWorkspaceNameLinkBadgeClosed = Message<"frontend.v1.TopbarWorkspaceNameLinkBadgeClosed"> & {
 };
 
 /**
- * Describes the message frontend.v1.TopbarTitleLinkBadgeClosed.
- * Use `create(TopbarTitleLinkBadgeClosedSchema)` to create a new message.
+ * Describes the message frontend.v1.TopbarWorkspaceNameLinkBadgeClosed.
+ * Use `create(TopbarWorkspaceNameLinkBadgeClosedSchema)` to create a new message.
  */
-export const TopbarTitleLinkBadgeClosedSchema: GenMessage<TopbarTitleLinkBadgeClosed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 43);
+export const TopbarWorkspaceNameLinkBadgeClosedSchema: GenMessage<TopbarWorkspaceNameLinkBadgeClosed> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 44);
 
 /**
  * The workspace's name as the registry holds it: drawn on the heading's
  * second line, centered under the title's text, or in the title's place when
  * there is no title. Its own element because it is drawn in its own place and
- * styled its own way (bold, and larger than the summary), apart from the
- * summary above it.
+ * styled its own way (bold, larger than the summary, and always in the
+ * foreground white), apart from the summary above it.
  *
  * @generated from message frontend.v1.TopbarWorkspaceName
  */
@@ -1499,6 +1513,16 @@ export type TopbarWorkspaceName = Message<"frontend.v1.TopbarWorkspaceName"> & {
    * @generated from field: optional frontend.v1.WorkspaceNamePrefix prefix = 2;
    */
   prefix?: WorkspaceNamePrefix | undefined;
+
+  /**
+   * What a click on the name opens: the workspace's shown links
+   * (agentrepl.v1.ChangeWorkspaceLinks), and the name is then drawn
+   * underlined. UNSET while the menu shows none, and the name is then plain
+   * text.
+   *
+   * @generated from field: optional frontend.v1.TopbarWorkspaceNameLinks links = 3;
+   */
+  links?: TopbarWorkspaceNameLinks | undefined;
 };
 
 /**
@@ -1506,7 +1530,7 @@ export type TopbarWorkspaceName = Message<"frontend.v1.TopbarWorkspaceName"> & {
  * Use `create(TopbarWorkspaceNameSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameSchema: GenMessage<TopbarWorkspaceName> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 44);
+  messageDesc(file_frontend_v1_topbar, 45);
 
 /**
  * The session identity line, shown in the hover/expanded state.
@@ -1527,7 +1551,7 @@ export type TopbarSessionLine = Message<"frontend.v1.TopbarSessionLine"> & {
  * Use `create(TopbarSessionLineSchema)` to create a new message.
  */
 export const TopbarSessionLineSchema: GenMessage<TopbarSessionLine> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 45);
+  messageDesc(file_frontend_v1_topbar, 46);
 
 /**
  * The model selector: what is selected, and what may be.
@@ -1570,7 +1594,7 @@ export type TopbarModelSelector = Message<"frontend.v1.TopbarModelSelector"> & {
  * Use `create(TopbarModelSelectorSchema)` to create a new message.
  */
 export const TopbarModelSelectorSchema: GenMessage<TopbarModelSelector> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 46);
+  messageDesc(file_frontend_v1_topbar, 47);
 
 /**
  * THE EFFORT SELECTOR: the reasoning effort the workspace's session runs at,
@@ -1614,7 +1638,7 @@ export type TopbarEffortSelector = Message<"frontend.v1.TopbarEffortSelector"> &
  * Use `create(TopbarEffortSelectorSchema)` to create a new message.
  */
 export const TopbarEffortSelectorSchema: GenMessage<TopbarEffortSelector> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 47);
+  messageDesc(file_frontend_v1_topbar, 48);
 
 /**
  * The effort in effect and the levels the selected model accepts.
@@ -1644,7 +1668,7 @@ export type TopbarEffortSelectorSupported = Message<"frontend.v1.TopbarEffortSel
  * Use `create(TopbarEffortSelectorSupportedSchema)` to create a new message.
  */
 export const TopbarEffortSelectorSupportedSchema: GenMessage<TopbarEffortSelectorSupported> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 48);
+  messageDesc(file_frontend_v1_topbar, 49);
 
 /**
  * The selected model takes no effort level.
@@ -1659,7 +1683,7 @@ export type TopbarEffortSelectorUnsupported = Message<"frontend.v1.TopbarEffortS
  * Use `create(TopbarEffortSelectorUnsupportedSchema)` to create a new message.
  */
 export const TopbarEffortSelectorUnsupportedSchema: GenMessage<TopbarEffortSelectorUnsupported> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 49);
+  messageDesc(file_frontend_v1_topbar, 50);
 
 /**
  * One effort level the selector offers.
@@ -1687,7 +1711,7 @@ export type TopbarEffortOption = Message<"frontend.v1.TopbarEffortOption"> & {
  * Use `create(TopbarEffortOptionSchema)` to create a new message.
  */
 export const TopbarEffortOptionSchema: GenMessage<TopbarEffortOption> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 50);
+  messageDesc(file_frontend_v1_topbar, 51);
 
 /**
  * The connectivity indicator, fully resolved: a literal glyph, a literal
@@ -1739,7 +1763,7 @@ export type TopbarConnectivity = Message<"frontend.v1.TopbarConnectivity"> & {
  * Use `create(TopbarConnectivitySchema)` to create a new message.
  */
 export const TopbarConnectivitySchema: GenMessage<TopbarConnectivity> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 51);
+  messageDesc(file_frontend_v1_topbar, 52);
 
 /**
  * agent-repl's session: since the LATER of the last login made through
@@ -1788,7 +1812,7 @@ export type TopbarAgentReplSession = Message<"frontend.v1.TopbarAgentReplSession
  * Use `create(TopbarAgentReplSessionSchema)` to create a new message.
  */
 export const TopbarAgentReplSessionSchema: GenMessage<TopbarAgentReplSession> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 52);
+  messageDesc(file_frontend_v1_topbar, 53);
 
 /**
  * A login made through agent-repl began the session.
@@ -1803,7 +1827,7 @@ export type TopbarSessionBeganLogin = Message<"frontend.v1.TopbarSessionBeganLog
  * Use `create(TopbarSessionBeganLoginSchema)` to create a new message.
  */
 export const TopbarSessionBeganLoginSchema: GenMessage<TopbarSessionBeganLogin> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 53);
+  messageDesc(file_frontend_v1_topbar, 54);
 
 /**
  * This Emacs starting began the session.
@@ -1818,560 +1842,7 @@ export type TopbarSessionBeganEditorStart = Message<"frontend.v1.TopbarSessionBe
  * Use `create(TopbarSessionBeganEditorStartSchema)` to create a new message.
  */
 export const TopbarSessionBeganEditorStartSchema: GenMessage<TopbarSessionBeganEditorStart> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 54);
-
-/**
- * The warning strip: everything the topbar has to WARN about right now.
- *
- * THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. An empty list is the daemon
- * saying there is nothing wrong, and the client draws no indicator at all
- * rather than a quiet one — a control over an empty list only invites the
- * click that proves it is empty. It is a LIST because a warning is not a
- * property of accounting: a second concern (a degraded watcher, a skewed
- * build) joins this list and reaches the same affordance.
- * The warning dropdown: the last warnings, newest first, capped by the
- * daemon. Each entry is one line in the list; clicking it opens the
- * entry's DETAIL OVERLAY, whose content the kind arm carries.
- *
- * @generated from message frontend.v1.TopbarWarningStrip
- */
-export type TopbarWarningStrip = Message<"frontend.v1.TopbarWarningStrip"> & {
-  /**
-   * The list, newest first. Empty = nothing is wrong; the strip draws
-   * nothing.
-   *
-   * @generated from field: repeated frontend.v1.TopbarWarning warnings = 1;
-   */
-  warnings: TopbarWarning[];
-
-  /**
-   * The list's severity, resolved by the daemon: the color the heading's title
-   * is drawn in while the list is open to it. UNSET exactly when the list is
-   * empty. The client raises it to `errors` only for a failure of its own
-   * that no push can state.
-   *
-   * @generated from field: optional frontend.v1.TopbarWarningStripSeverity severity = 2;
-   */
-  severity?: TopbarWarningStripSeverity | undefined;
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarningStrip.
- * Use `create(TopbarWarningStripSchema)` to create a new message.
- */
-export const TopbarWarningStripSchema: GenMessage<TopbarWarningStrip> = /*@__PURE__*/
   messageDesc(file_frontend_v1_topbar, 55);
-
-/**
- * How bad the listed warnings are, taken together.
- *
- * @generated from message frontend.v1.TopbarWarningStripSeverity
- */
-export type TopbarWarningStripSeverity = Message<"frontend.v1.TopbarWarningStripSeverity"> & {
-  /**
-   * The worst of the list: any error makes the whole list an error.
-   *
-   * @generated from oneof frontend.v1.TopbarWarningStripSeverity.severity
-   */
-  severity: {
-    /**
-     * @generated from field: frontend.v1.TopbarWarningStripErrors errors = 1;
-     */
-    value: TopbarWarningStripErrors;
-    case: "errors";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TopbarWarningStripWarningsOnly warnings_only = 2;
-     */
-    value: TopbarWarningStripWarningsOnly;
-    case: "warningsOnly";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarningStripSeverity.
- * Use `create(TopbarWarningStripSeveritySchema)` to create a new message.
- */
-export const TopbarWarningStripSeveritySchema: GenMessage<TopbarWarningStripSeverity> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 56);
-
-/**
- * At least one listed warning is an error: a session fault the shim reported,
- * or a failed deploy. The title is drawn red.
- *
- * @generated from message frontend.v1.TopbarWarningStripErrors
- */
-export type TopbarWarningStripErrors = Message<"frontend.v1.TopbarWarningStripErrors"> & {
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarningStripErrors.
- * Use `create(TopbarWarningStripErrorsSchema)` to create a new message.
- */
-export const TopbarWarningStripErrorsSchema: GenMessage<TopbarWarningStripErrors> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 57);
-
-/**
- * Every listed warning is a warning, not an error. The title is drawn yellow.
- *
- * @generated from message frontend.v1.TopbarWarningStripWarningsOnly
- */
-export type TopbarWarningStripWarningsOnly = Message<"frontend.v1.TopbarWarningStripWarningsOnly"> & {
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarningStripWarningsOnly.
- * Use `create(TopbarWarningStripWarningsOnlySchema)` to create a new message.
- */
-export const TopbarWarningStripWarningsOnlySchema: GenMessage<TopbarWarningStripWarningsOnly> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 58);
-
-/**
- * One warning: its list line, and the overlay behind the click.
- *
- * @generated from message frontend.v1.TopbarWarning
- */
-export type TopbarWarning = Message<"frontend.v1.TopbarWarning"> & {
-  /**
-   * The dropdown row's sentence, drawn verbatim. Never empty.
-   *
-   * @generated from field: frontend.v1.TopbarWarningLine line = 1;
-   */
-  line?: TopbarWarningLine | undefined;
-
-  /**
-   * WHICH concern, carrying that kind's overlay content — the expanded
-   * detail a click reveals.
-   *
-   * UNSET IS A WARNING WITH NO OVERLAY: the line is the whole warning, and
-   * the row is a statement rather than a control. That is what the FIXED
-   * SCHEMA ruling's session-less line is — "cold context, awaiting your
-   * answer", "no session yet" — a fact with nothing further to reveal
-   * and, for the cold gate, nothing to answer HERE (the feed's gate card is
-   * the one place a gate is answered).
-   *
-   * @generated from oneof frontend.v1.TopbarWarning.detail
-   */
-  detail: {
-    /**
-     * @generated from field: frontend.v1.TopbarAccountingWarningDetail accounting = 2;
-     */
-    value: TopbarAccountingWarningDetail;
-    case: "accounting";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TopbarUnmodeledToolWarningDetail unmodeled_tool = 3;
-     */
-    value: TopbarUnmodeledToolWarningDetail;
-    case: "unmodeledTool";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TopbarDetachedUnmodeledWarningDetail detached_unmodeled = 4;
-     */
-    value: TopbarDetachedUnmodeledWarningDetail;
-    case: "detachedUnmodeled";
-  } | {
-    /**
-     * A session fault the shim reported — the workspace's session is
-     * unhealthy in a named way.
-     *
-     * @generated from field: frontend.v1.TopbarSessionFaultWarningDetail session_fault = 5;
-     */
-    value: TopbarSessionFaultWarningDetail;
-    case: "sessionFault";
-  } | {
-    /**
-     * A degraded window: a span in which a shim component was dropping or
-     * delaying what it observed — evidence that what is on screen may have
-     * holes from that span.
-     *
-     * @generated from field: frontend.v1.TopbarDegradedWindowWarningDetail degraded_window = 6;
-     */
-    value: TopbarDegradedWindowWarningDetail;
-    case: "degradedWindow";
-  } | {
-    /**
-     * A failed deploy: the daemon-scoped `deploy_failed` fault, standing on
-     * every workspace's strip (owner request, 2026-09-28). The row's line is
-     * the footer's own detail under "deploy failed: "; the overlay is what
-     * failed, whole.
-     *
-     * @generated from field: frontend.v1.TopbarDeployFailedWarningDetail deploy_failed = 7;
-     */
-    value: TopbarDeployFailedWarningDetail;
-    case: "deployFailed";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarning.
- * Use `create(TopbarWarningSchema)` to create a new message.
- */
-export const TopbarWarningSchema: GenMessage<TopbarWarning> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 59);
-
-/**
- * The list-line element.
- *
- * @generated from message frontend.v1.TopbarWarningLine
- */
-export type TopbarWarningLine = Message<"frontend.v1.TopbarWarningLine"> & {
-  /**
-   * The sentence, drawn verbatim.
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarningLine.
- * Use `create(TopbarWarningLineSchema)` to create a new message.
- */
-export const TopbarWarningLineSchema: GenMessage<TopbarWarningLine> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 60);
-
-/**
- * The accounting overlay: the reconciliation's evidence, composed — this
- * component's OWN resolved copy (duplicate, don't share: the footer's
- * verdict line is the same fact drawn in its place; the resolver
- * re-publishes both).
- *
- * @generated from message frontend.v1.TopbarAccountingWarningDetail
- */
-export type TopbarAccountingWarningDetail = Message<"frontend.v1.TopbarAccountingWarningDetail"> & {
-  /**
-   * One composed evidence line each ("2 responses missing usage"), in
-   * display order.
-   *
-   * @generated from field: repeated frontend.v1.TopbarWarningDetailLine lines = 1;
-   */
-  lines: TopbarWarningDetailLine[];
-};
-
-/**
- * Describes the message frontend.v1.TopbarAccountingWarningDetail.
- * Use `create(TopbarAccountingWarningDetailSchema)` to create a new message.
- */
-export const TopbarAccountingWarningDetailSchema: GenMessage<TopbarAccountingWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 61);
-
-/**
- * A shared detail-line element WITHIN this dropdown family.
- *
- * @generated from message frontend.v1.TopbarWarningDetailLine
- */
-export type TopbarWarningDetailLine = Message<"frontend.v1.TopbarWarningDetailLine"> & {
-  /**
-   * The line, drawn verbatim.
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarningDetailLine.
- * Use `create(TopbarWarningDetailLineSchema)` to create a new message.
- */
-export const TopbarWarningDetailLineSchema: GenMessage<TopbarWarningDetailLine> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 62);
-
-/**
- * The unmodeled-tool overlay: what ran, in an ABBREVIATED, LEGIBLE form a
- * reader can act on (decide whether the tool deserves an arm) — never a raw
- * argument dump, and never drawn as a failure: the tool very likely ran
- * fine; the only thing wrong is that this contract cannot describe it.
- *
- * @generated from message frontend.v1.TopbarUnmodeledToolWarningDetail
- */
-export type TopbarUnmodeledToolWarningDetail = Message<"frontend.v1.TopbarUnmodeledToolWarningDetail"> & {
-  /**
-   * The tool's name, verbatim from the producer.
-   *
-   * @generated from field: frontend.v1.TopbarUnmodeledToolName tool_name = 1;
-   */
-  toolName?: TopbarUnmodeledToolName | undefined;
-
-  /**
-   * The daemon's abbreviated account of the call's arguments, one legible
-   * line each. Empty when the daemon could not compose any — the name alone
-   * then carries the overlay.
-   *
-   * @generated from field: repeated frontend.v1.TopbarWarningDetailLine argument_lines = 2;
-   */
-  argumentLines: TopbarWarningDetailLine[];
-};
-
-/**
- * Describes the message frontend.v1.TopbarUnmodeledToolWarningDetail.
- * Use `create(TopbarUnmodeledToolWarningDetailSchema)` to create a new message.
- */
-export const TopbarUnmodeledToolWarningDetailSchema: GenMessage<TopbarUnmodeledToolWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 63);
-
-/**
- * The name element.
- *
- * @generated from message frontend.v1.TopbarUnmodeledToolName
- */
-export type TopbarUnmodeledToolName = Message<"frontend.v1.TopbarUnmodeledToolName"> & {
-  /**
-   * Verbatim.
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-};
-
-/**
- * Describes the message frontend.v1.TopbarUnmodeledToolName.
- * Use `create(TopbarUnmodeledToolNameSchema)` to create a new message.
- */
-export const TopbarUnmodeledToolNameSchema: GenMessage<TopbarUnmodeledToolName> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 64);
-
-/**
- * The detached-unmodeled overlay: unmodeled work running DETACHED — the
- * live-work fact the footer's chips deliberately do not carry; surfaced
- * here so it can never vanish. One warning per live item.
- *
- * @generated from message frontend.v1.TopbarDetachedUnmodeledWarningDetail
- */
-export type TopbarDetachedUnmodeledWarningDetail = Message<"frontend.v1.TopbarDetachedUnmodeledWarningDetail"> & {
-  /**
-   * The tool's name, verbatim.
-   *
-   * @generated from field: frontend.v1.TopbarUnmodeledToolName tool_name = 1;
-   */
-  toolName?: TopbarUnmodeledToolName | undefined;
-
-  /**
-   * When it started, epoch ms — the overlay's clock; the client ticks.
-   *
-   * @generated from field: int64 started_at_ms = 2;
-   */
-  startedAtMs: bigint;
-};
-
-/**
- * Describes the message frontend.v1.TopbarDetachedUnmodeledWarningDetail.
- * Use `create(TopbarDetachedUnmodeledWarningDetailSchema)` to create a new message.
- */
-export const TopbarDetachedUnmodeledWarningDetailSchema: GenMessage<TopbarDetachedUnmodeledWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 65);
-
-/**
- * The session-fault overlay. The daemon pulls GetSessionDiagnostics at its
- * own cadence and projects unhealthy faults into entries — one warning per
- * fault; a healthy pull retracts them on the next push.
- *
- * @generated from message frontend.v1.TopbarSessionFaultWarningDetail
- */
-export type TopbarSessionFaultWarningDetail = Message<"frontend.v1.TopbarSessionFaultWarningDetail"> & {
-  /**
-   * Which shim component faulted, verbatim.
-   *
-   * @generated from field: frontend.v1.TopbarWarningComponent component = 1;
-   */
-  component?: TopbarWarningComponent | undefined;
-
-  /**
-   * The fault's detail, verbatim from the shim.
-   *
-   * @generated from field: frontend.v1.TopbarWarningDetailLine detail = 2;
-   */
-  detail?: TopbarWarningDetailLine | undefined;
-};
-
-/**
- * Describes the message frontend.v1.TopbarSessionFaultWarningDetail.
- * Use `create(TopbarSessionFaultWarningDetailSchema)` to create a new message.
- */
-export const TopbarSessionFaultWarningDetailSchema: GenMessage<TopbarSessionFaultWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 66);
-
-/**
- * A component-name element, shared WITHIN the dropdown family.
- *
- * @generated from message frontend.v1.TopbarWarningComponent
- */
-export type TopbarWarningComponent = Message<"frontend.v1.TopbarWarningComponent"> & {
-  /**
-   * Verbatim.
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-};
-
-/**
- * Describes the message frontend.v1.TopbarWarningComponent.
- * Use `create(TopbarWarningComponentSchema)` to create a new message.
- */
-export const TopbarWarningComponentSchema: GenMessage<TopbarWarningComponent> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 67);
-
-/**
- * The degraded-window overlay — one warning per window. Data, drawn by the
- * client: the span's bounds tick and format client-side.
- *
- * @generated from message frontend.v1.TopbarDegradedWindowWarningDetail
- */
-export type TopbarDegradedWindowWarningDetail = Message<"frontend.v1.TopbarDegradedWindowWarningDetail"> & {
-  /**
-   * Which component degraded, verbatim.
-   *
-   * @generated from field: frontend.v1.TopbarWarningComponent component = 1;
-   */
-  component?: TopbarWarningComponent | undefined;
-
-  /**
-   * The shim's stated reason, verbatim.
-   *
-   * @generated from field: frontend.v1.TopbarWarningDetailLine reason = 2;
-   */
-  reason?: TopbarWarningDetailLine | undefined;
-
-  /**
-   * When the window opened, epoch ms.
-   *
-   * @generated from field: int64 began_at_ms = 3;
-   */
-  beganAtMs: bigint;
-
-  /**
-   * Whether the window has closed. THE ARM IS THE EXTENT.
-   *
-   * @generated from oneof frontend.v1.TopbarDegradedWindowWarningDetail.extent
-   */
-  extent: {
-    /**
-     * Still degraded now — the loudest state.
-     *
-     * @generated from field: frontend.v1.TopbarDegradedWindowOpen open = 4;
-     */
-    value: TopbarDegradedWindowOpen;
-    case: "open";
-  } | {
-    /**
-     * Closed: when, and what was dropped inside it.
-     *
-     * @generated from field: frontend.v1.TopbarDegradedWindowClosed closed = 5;
-     */
-    value: TopbarDegradedWindowClosed;
-    case: "closed";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message frontend.v1.TopbarDegradedWindowWarningDetail.
- * Use `create(TopbarDegradedWindowWarningDetailSchema)` to create a new message.
- */
-export const TopbarDegradedWindowWarningDetailSchema: GenMessage<TopbarDegradedWindowWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 68);
-
-/**
- * The failed-deploy overlay: what failed, whole. Every line is composed by
- * the daemon out of the fault's own evidence (the very refusal the Deploy
- * rpc answered its caller with), so the overlay, the row's line and the
- * footer's activity line cannot say different things about one failure.
- *
- * @generated from message frontend.v1.TopbarDeployFailedWarningDetail
- */
-export type TopbarDeployFailedWarningDetail = Message<"frontend.v1.TopbarDeployFailedWarningDetail"> & {
-  /**
-   * The step that failed, in words: "build", "install", "restart services",
-   * or "rollback" for a failed deploy's rollback that did not restore the
-   * previous build (a fault of its own, beside the step's).
-   *
-   * @generated from field: frontend.v1.TopbarWarningDetailLine step = 1;
-   */
-  step?: TopbarWarningDetailLine | undefined;
-
-  /**
-   * What the step failed on: the build step for a build, the component for
-   * every other step. Verbatim.
-   *
-   * @generated from field: frontend.v1.TopbarWarningComponent component = 2;
-   */
-  component?: TopbarWarningComponent | undefined;
-
-  /**
-   * What became of the install, in words: nothing was installed, it was
-   * rolled back to the previous build, or the rollback did not restore it.
-   *
-   * @generated from field: frontend.v1.TopbarWarningDetailLine rollback = 3;
-   */
-  rollback?: TopbarWarningDetailLine | undefined;
-
-  /**
-   * The failure's own account, WHOLE and verbatim — the build's output tail,
-   * the install's or the restart's error. The row's line carries only its
-   * last line.
-   *
-   * @generated from field: frontend.v1.TopbarWarningDetailLine detail = 4;
-   */
-  detail?: TopbarWarningDetailLine | undefined;
-
-  /**
-   * Where the build's whole output is archived. UNSET for every step but a
-   * build, and for a build that archived none: draw nothing.
-   *
-   * @generated from field: optional frontend.v1.TopbarWarningDetailLine log = 5;
-   */
-  log?: TopbarWarningDetailLine | undefined;
-};
-
-/**
- * Describes the message frontend.v1.TopbarDeployFailedWarningDetail.
- * Use `create(TopbarDeployFailedWarningDetailSchema)` to create a new message.
- */
-export const TopbarDeployFailedWarningDetailSchema: GenMessage<TopbarDeployFailedWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 69);
-
-/**
- * Still open. Empty: the arm is the fact.
- *
- * @generated from message frontend.v1.TopbarDegradedWindowOpen
- */
-export type TopbarDegradedWindowOpen = Message<"frontend.v1.TopbarDegradedWindowOpen"> & {
-};
-
-/**
- * Describes the message frontend.v1.TopbarDegradedWindowOpen.
- * Use `create(TopbarDegradedWindowOpenSchema)` to create a new message.
- */
-export const TopbarDegradedWindowOpenSchema: GenMessage<TopbarDegradedWindowOpen> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 70);
-
-/**
- * Closed, with its cost.
- *
- * @generated from message frontend.v1.TopbarDegradedWindowClosed
- */
-export type TopbarDegradedWindowClosed = Message<"frontend.v1.TopbarDegradedWindowClosed"> & {
-  /**
-   * When it closed, epoch ms.
-   *
-   * @generated from field: int64 ended_at_ms = 1;
-   */
-  endedAtMs: bigint;
-
-  /**
-   * How many observations were dropped inside the window.
-   *
-   * @generated from field: int64 dropped_count = 2;
-   */
-  droppedCount: bigint;
-};
-
-/**
- * Describes the message frontend.v1.TopbarDegradedWindowClosed.
- * Use `create(TopbarDegradedWindowClosedSchema)` to create a new message.
- */
-export const TopbarDegradedWindowClosedSchema: GenMessage<TopbarDegradedWindowClosed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 71);
 
 /**
  * The token-breakdown menu, fully resolved. Sections and rows arrive in
@@ -2396,7 +1867,7 @@ export type TokenBreakdownView = Message<"frontend.v1.TokenBreakdownView"> & {
  * Use `create(TokenBreakdownViewSchema)` to create a new message.
  */
 export const TokenBreakdownViewSchema: GenMessage<TokenBreakdownView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 72);
+  messageDesc(file_frontend_v1_topbar, 56);
 
 /**
  * One titled section of the breakdown menu.
@@ -2424,7 +1895,7 @@ export type TokenBreakdownSection = Message<"frontend.v1.TokenBreakdownSection">
  * Use `create(TokenBreakdownSectionSchema)` to create a new message.
  */
 export const TokenBreakdownSectionSchema: GenMessage<TokenBreakdownSection> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 73);
+  messageDesc(file_frontend_v1_topbar, 57);
 
 /**
  * A section's heading.
@@ -2445,7 +1916,7 @@ export type TokenBreakdownHeading = Message<"frontend.v1.TokenBreakdownHeading">
  * Use `create(TokenBreakdownHeadingSchema)` to create a new message.
  */
 export const TokenBreakdownHeadingSchema: GenMessage<TokenBreakdownHeading> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 74);
+  messageDesc(file_frontend_v1_topbar, 58);
 
 /**
  * One row of the breakdown menu — the row IS the element, and these are its
@@ -2499,54 +1970,54 @@ export type TokenBreakdownRow = Message<"frontend.v1.TokenBreakdownRow"> & {
  * Use `create(TokenBreakdownRowSchema)` to create a new message.
  */
 export const TokenBreakdownRowSchema: GenMessage<TokenBreakdownRow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 75);
+  messageDesc(file_frontend_v1_topbar, 59);
 
 /**
  * The service icon a menu row draws before its label, decided by the daemon
  * from the url's host so the client never inspects a url.
  *
- * @generated from enum frontend.v1.TopbarTitleLinkIcon
+ * @generated from enum frontend.v1.TopbarWorkspaceNameLinkIcon
  */
-export enum TopbarTitleLinkIcon {
+export enum TopbarWorkspaceNameLinkIcon {
   /**
    * No known service: the row draws no icon.
    *
-   * @generated from enum value: TOPBAR_TITLE_LINK_ICON_UNSPECIFIED = 0;
+   * @generated from enum value: TOPBAR_WORKSPACE_NAME_LINK_ICON_UNSPECIFIED = 0;
    */
   UNSPECIFIED = 0,
 
   /**
    * A GitHub pull request: the GitHub mark.
    *
-   * @generated from enum value: TOPBAR_TITLE_LINK_ICON_GITHUB = 1;
+   * @generated from enum value: TOPBAR_WORKSPACE_NAME_LINK_ICON_GITHUB = 1;
    */
   GITHUB = 1,
 
   /**
    * A Slack workspace link: the Slack mark.
    *
-   * @generated from enum value: TOPBAR_TITLE_LINK_ICON_SLACK = 2;
+   * @generated from enum value: TOPBAR_WORKSPACE_NAME_LINK_ICON_SLACK = 2;
    */
   SLACK = 2,
 
   /**
    * A GNS link: the GNS mark.
    *
-   * @generated from enum value: TOPBAR_TITLE_LINK_ICON_GNS = 3;
+   * @generated from enum value: TOPBAR_WORKSPACE_NAME_LINK_ICON_GNS = 3;
    */
   GNS = 3,
 
   /**
    * A Notion link: the Notion mark.
    *
-   * @generated from enum value: TOPBAR_TITLE_LINK_ICON_NOTION = 4;
+   * @generated from enum value: TOPBAR_WORKSPACE_NAME_LINK_ICON_NOTION = 4;
    */
   NOTION = 4,
 }
 
 /**
- * Describes the enum frontend.v1.TopbarTitleLinkIcon.
+ * Describes the enum frontend.v1.TopbarWorkspaceNameLinkIcon.
  */
-export const TopbarTitleLinkIconSchema: GenEnum<TopbarTitleLinkIcon> = /*@__PURE__*/
+export const TopbarWorkspaceNameLinkIconSchema: GenEnum<TopbarWorkspaceNameLinkIcon> = /*@__PURE__*/
   enumDesc(file_frontend_v1_topbar, 0);
 

@@ -1,11 +1,11 @@
 // workspace_links.proto — A WORKSPACE'S LINKS AS AN AGENT READS THEM: every
 // link an agent stored for the workspace's task, each with its short label,
-// and which of them the topbar's summary menu shows. Shared by
+// and which of them the topbar's link menu shows. Shared by
 // ChangeWorkspaceLinks's answer and WorkspaceStatus, so the answer to a change
 // and a later read describe the links identically.
 //
 // UNLIMITED STORAGE, A CAPPED MENU. A workspace holds any number of links, but
-// the summary's menu shows at most five of them. While the menu has room, a
+// the link menu shows at most five of them. While the menu has room, a
 // newly set link is shown. Once it is full, a newly set OWNED link takes the
 // place of the oldest shown reference, a new reference is stored unshown, the
 // answer's `menu` is `full`, and the agent chooses which links the menu shows
@@ -44,7 +44,7 @@ export const file_agentrepl_v1_workspace_links: GenFile = /*@__PURE__*/
   fileDesc("CiJhZ2VudHJlcGwvdjEvd29ya3NwYWNlX2xpbmtzLnByb3RvEgxhZ2VudHJlcGwudjEibAoOV29ya3NwYWNlTGlua3MSKgoFbGlua3MYASADKAsyGy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGluaxIuCgRtZW51GAIgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtzTWVudSKdAQoNV29ya3NwYWNlTGluaxILCgN1cmwYASABKAkSDQoFbGFiZWwYAiABKAkSNwoJcGxhY2VtZW50GAMgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtQbGFjZW1lbnQSNwoJb3duZXJzaGlwGAQgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtPd25lcnNoaXAikwEKFldvcmtzcGFjZUxpbmtPd25lcnNoaXASMQoFb3duZWQYASABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkSAASOQoJcmVmZXJlbmNlGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtSZWZlcmVuY2VIAEILCglvd25lcnNoaXAiqwEKEldvcmtzcGFjZUxpbmtPd25lZBI7CgZmb2xsb3cYASABKAsyJi5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkRm9sbG93SACIAQESPwoJYW5ub3VuY2VzGAIgASgLMicuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtBbm5vdW5jZW1lbnRIAYgBAUIJCgdfZm9sbG93QgwKCl9hbm5vdW5jZXMiKAoZV29ya3NwYWNlTGlua0Fubm91bmNlbWVudBILCgN1cmwYASABKAkiGAoWV29ya3NwYWNlTGlua1JlZmVyZW5jZSKhAQoWV29ya3NwYWNlTGlua1BsYWNlbWVudBI6CgVzaG93bhgBIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VMaW5rUGxhY2VtZW50U2hvd25IABI+Cgd1bnNob3duGAIgASgLMisuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtQbGFjZW1lbnRVbnNob3duSABCCwoJcGxhY2VtZW50Ih0KG1dvcmtzcGFjZUxpbmtQbGFjZW1lbnRTaG93biIfCh1Xb3Jrc3BhY2VMaW5rUGxhY2VtZW50VW5zaG93biKMAQoSV29ya3NwYWNlTGlua3NNZW51EjQKBHJvb20YASABKAsyJC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua3NNZW51Um9vbUgAEjQKBGZ1bGwYAiABKAsyJC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua3NNZW51RnVsbEgAQgoKCHN0YW5kaW5nIiYKFldvcmtzcGFjZUxpbmtzTWVudVJvb20SDAoEZnJlZRgBIAEoDSI4ChZXb3Jrc3BhY2VMaW5rc01lbnVGdWxsEg0KBWxpbWl0GAEgASgNEg8KB3Vuc2hvd24YAiABKA0ixQIKGFdvcmtzcGFjZUxpbmtPd25lZEZvbGxvdxJECglmb2xsb3dpbmcYASABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkRm9sbG93Rm9sbG93aW5nSAASPAoFZW5kZWQYAiABKAsyKy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkRm9sbG93RW5kZWRIABJKCgx1bnN1YnNjcmliZWQYAyABKAsyMi5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkRm9sbG93VW5zdWJzY3JpYmVkSAASTQoObm90X2ZvbGxvd2FibGUYBCABKAsyMy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkRm9sbG93Tm90Rm9sbG93YWJsZUgAQgoKCHN0YW5kaW5nImAKIVdvcmtzcGFjZUxpbmtPd25lZEZvbGxvd0ZvbGxvd2luZxI7CgxzdWJzY3JpcHRpb24YASABKAsyJS5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdWJzY3JpcHRpb24iTgodV29ya3NwYWNlTGlua093bmVkRm9sbG93RW5kZWQSLQoFc3RhdGUYASABKAsyHi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0ZSImCiRXb3Jrc3BhY2VMaW5rT3duZWRGb2xsb3dVbnN1YnNjcmliZWQiJwolV29ya3NwYWNlTGlua093bmVkRm9sbG93Tm90Rm9sbG93YWJsZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_pull_request]);
 
 /**
- * Every link a workspace holds, and the standing of its summary menu.
+ * Every link a workspace holds, and the standing of its link menu.
  *
  * @generated from message agentrepl.v1.WorkspaceLinks
  */
@@ -98,7 +98,7 @@ export type WorkspaceLink = Message<"agentrepl.v1.WorkspaceLink"> & {
   label: string;
 
   /**
-   * Whether the summary's menu shows this link.
+   * Whether the link menu shows this link.
    *
    * @generated from field: agentrepl.v1.WorkspaceLinkPlacement placement = 3;
    */
@@ -232,7 +232,7 @@ export const WorkspaceLinkReferenceSchema: GenMessage<WorkspaceLinkReference> = 
   messageDesc(file_agentrepl_v1_workspace_links, 5);
 
 /**
- * Whether the summary's menu shows a link. THE ARM IS THE PLACEMENT.
+ * Whether the link menu shows a link. THE ARM IS THE PLACEMENT.
  *
  * @generated from message agentrepl.v1.WorkspaceLinkPlacement
  */
@@ -298,7 +298,7 @@ export const WorkspaceLinkPlacementUnshownSchema: GenMessage<WorkspaceLinkPlacem
   messageDesc(file_agentrepl_v1_workspace_links, 8);
 
 /**
- * The summary menu's standing against its cap. THE ARM IS THE STANDING.
+ * The link menu's standing against its cap. THE ARM IS THE STANDING.
  *
  * @generated from message agentrepl.v1.WorkspaceLinksMenu
  */
