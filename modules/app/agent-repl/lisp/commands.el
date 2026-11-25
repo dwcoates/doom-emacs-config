@@ -114,6 +114,7 @@
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name-prefix "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-repository-name "agent-repl-roster" (row))
 (declare-function agent-repl-name-prefix-string "agent-repl-status" (prefix &optional height frame))
 (declare-function agent-repl-verbs--roster-or-view "agent-repl-verbs" (roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
