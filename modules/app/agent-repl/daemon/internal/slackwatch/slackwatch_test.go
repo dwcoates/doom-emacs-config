@@ -913,6 +913,31 @@ func TestAnIntakeThatCannotBeCreatedIsRecordedAndNotFiredAgain(t *testing.T) {
 	}
 }
 
+func TestATriggerSlackNamesNoLinkForIsRecordedOnceAndNotFiredAgain(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	r.w.PollReactions(context.Background(), Lookback)
+	linkless := reacted("1.2", "agent-ack")
+	linkless.Permalink = ""
+	r.gns.reacted = []gnsclient.ReactedMessage{linkless}
+	message := "Slack named no link for a triggering message; the trigger is recorded fired and creates nothing"
+
+	// Act
+	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background(), Lookback)
+
+	// Assert
+	rec := r.record(t, "error", opReactions, message)
+	if rec.Context["dispatch_id"] != DispatchID("C1", "1.2", "agent-ack") || rec.Context["ts"] != "1.2" || rec.Context["channel"] != "C1" {
+		t.Fatalf("record context = %+v", rec.Context)
+	}
+	n := len(dlog.FilterRecords(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opReactions, Message: message}))
+	if n != 1 || len(r.intakes.got) != 0 {
+		t.Fatalf("logged %d times and fired %+v; want one record and no intake", n, r.intakes.got)
+	}
+}
+
 func TestForkCommand(t *testing.T) {
 	p2 := wsm.PriorityP2
 	const link = "https://x.slack.com/archives/C1/p1"
