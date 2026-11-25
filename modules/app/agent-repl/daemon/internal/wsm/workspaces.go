@@ -53,7 +53,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_requested_at, close_requested_by, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, closure_how, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_requested_at, close_requested_by, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -123,6 +123,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		gated         sql.NullInt64
 		closedAt      sql.NullInt64
 		closedBy      sql.NullString
+		closedHow     sql.NullString
 		statusChanged sql.NullInt64
 		subsection    sql.NullString
 		contextFrom   sql.NullString
@@ -146,7 +147,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &closeAt, &closeBy, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &closedHow, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &closeAt, &closeBy, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)
@@ -272,7 +273,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		return Workspace{}, err
 	}
 	ws.CacheLapse = lapse
-	closure, err := decodeClosure(ws, closedAt, closedBy)
+	closure, err := decodeClosure(ws, closedAt, closedBy, closedHow)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -428,19 +429,22 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		// A WORKSPACE BORN CLOSED carries its close record from the insert,
 		// so the row is never open for an instant (closure.go: the instant and
 		// the cause stand and fall with `closed`).
-		var closureAt, closureBy any
+		var closureAt, closureBy, closureHow any
 		if facts.Closure != nil {
 			if !facts.Closure.By.valid() {
 				return fmt.Errorf("wsm: register %s: unknown close cause %q", normalized, facts.Closure.By)
 			}
+			if !facts.Closure.How.stored() {
+				return fmt.Errorf("wsm: register %s: a close is never written as %s", normalized, facts.Closure.How)
+			}
 			out.Closed = true
 			out.Closure = facts.Closure
-			closureAt, closureBy = nanos(facts.Closure.At), string(facts.Closure.By)
+			closureAt, closureBy, closureHow = nanos(facts.Closure.At), string(facts.Closure.By), facts.Closure.How.String()
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, context_from, requested_by, closure_at, closure_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy)
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, context_from, requested_by, closure_at, closure_by, closure_how)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy, closureHow)
 		if err != nil {
 			return err
 		}
@@ -844,6 +848,11 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		s.log.Error(op, "refused a close with no declared cause", withError(fields, err))
 		return err
 	}
+	if !closure.How.stored() {
+		err := fmt.Errorf("wsm: workspace %s: a close is never written as %s", id, closure.How)
+		s.log.Error(op, "refused a close of a kind no close writes", withError(fields, err))
+		return err
+	}
 	var effects closeEffects
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -896,8 +905,9 @@ func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Clo
 	const restamp = `(closed = 0 OR (? = 'user' AND closure_by IS NOT 'user'))`
 	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, spawned_shim_start = NULL, close_requested_at = NULL, close_requested_by = NULL, awaiting_correspondence = NULL, `+
 		`closure_at = CASE WHEN `+restamp+` THEN ? ELSE closure_at END, `+
-		`closure_by = CASE WHEN `+restamp+` THEN ? ELSE closure_by END WHERE id = ?`,
-		string(closure.By), nanos(closure.At), string(closure.By), string(closure.By), id)
+		`closure_by = CASE WHEN `+restamp+` THEN ? ELSE closure_by END, `+
+		`closure_how = CASE WHEN `+restamp+` THEN ? ELSE closure_how END WHERE id = ?`,
+		string(closure.By), nanos(closure.At), string(closure.By), string(closure.By), string(closure.By), closure.How.String(), id)
 	if err != nil {
 		return closeEffects{}, err
 	}
@@ -1012,6 +1022,7 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 			{name: "closed", value: false},
 			{name: "closure_at", value: nil},
 			{name: "closure_by", value: nil},
+			{name: "closure_how", value: nil},
 			{name: "serving_instance", value: string(serving)},
 		}
 		if !backlogged {
