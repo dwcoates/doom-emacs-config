@@ -175,6 +175,12 @@ type wsState struct {
 	// rather than landing on the root — the root is the main agent's because it
 	// IS the main agent, never as a default.
 	mainAgent string
+	// newConversation is set when the session came up on a NEW conversation
+	// (NoteFreshBook: a fresh start or a fork) and cleared by the naming that
+	// follows. A new conversation has a new main agent, so the naming it
+	// awaits replaces the one standing because the conversation changed,
+	// never because the main agent was renamed under the same one.
+	newConversation bool
 	// agentFeeds maps a created subagent's id to its sub-feed key.
 	agentFeeds map[string]string
 
