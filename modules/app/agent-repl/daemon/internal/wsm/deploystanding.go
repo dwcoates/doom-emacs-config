@@ -260,21 +260,6 @@ func (s *store) MarkStandingMediatorBriefed(ctx context.Context, role MediatorRo
 	})
 }
 
-// updateQueueRow runs QUERY, whose one argument is REPO, against REPO's
-// queue row, refusing a queue that has none.
-func updateQueueRow(ctx context.Context, tx *sql.Tx, repo RepoKey, query string) error {
-	res, err := tx.ExecContext(ctx, query, string(repo))
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n != 1 {
-		return fmt.Errorf("wsm: no merge queue %s", repo)
-	}
-	return nil
-}
-
 // OweCompaction records that workspace WS's next session start compacts the
 // conversation it resumes (OwedStartWork.Compact), answering whether it now
 // owes it. A workspace with no conversation to resume owes nothing, and one
