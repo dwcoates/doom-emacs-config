@@ -639,6 +639,18 @@ func TestAHandedAwayStreamNamesItsSuccessorAsARefusedVerbDoes(t *testing.T) {
 	}
 }
 
+// TestANotVisibleStreamIsMarkedWithheld pins the header a page reads a
+// refusal for a workspace that is not visible from.
+func TestANotVisibleStreamIsMarkedWithheld(t *testing.T) {
+	// Arrange / Act.
+	cerr := transportClosed(nil, "WatchWebWorkspace", armNotVisible, "not visible", false, "")
+
+	// Assert.
+	if cerr.Meta().Get(WithheldHeader) == "" || cerr.Code() != connect.CodeFailedPrecondition {
+		t.Fatalf("withheld header = %q, code = %v; want the header on a failed_precondition", cerr.Meta().Get(WithheldHeader), cerr.Code())
+	}
+}
+
 // TestANotYetAdoptedStreamNamesNoSuccessor pins that only a handover names
 // one: a daemon that has not adopted the workspace yet moved nothing.
 func TestANotYetAdoptedStreamNamesNoSuccessor(t *testing.T) {

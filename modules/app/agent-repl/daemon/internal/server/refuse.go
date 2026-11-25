@@ -289,6 +289,16 @@ func (s *server) refuse(log dlog.Logger, rpc string, resp proto.Message, r refus
 // as an error names its successor's address under.
 const SuccessorHeader = "Agent-Repl-Successor"
 
+// WithheldHeader is the error metadata a stream's not_visible refusal carries
+// (any value; presence is the fact): the daemon serves no page of a workspace
+// that is not visible, which the editor is releasing, so a page reads it as
+// planned rather than as an outage (agentrepl.v1.PageSubscriptionWithheld).
+const WithheldHeader = "Agent-Repl-Withheld"
+
+// armNotVisible is the refusal arm of a page stream opened for a workspace
+// that is not visible (watchWebWorkspace).
+const armNotVisible = "not_visible"
+
 // setResponseError populates resp's `result.error` arm with the named
 // `<Rpc>Error` arm, reporting false when this rpc's error message carries no
 // such arm.

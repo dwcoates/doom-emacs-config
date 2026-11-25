@@ -585,7 +585,7 @@ func (s *server) watchWebWorkspace(
 	// roster's live value, the one the editor loaded the page on, never by the
 	// store's copy written a moment after it.
 	if v := s.deps.Sidebar.Visibility(subject.Record.ID); !v.Visible() {
-		return refuseStream(subject.Log, rpc, refusal{Arm: "not_visible", Reason: "the workspace is " + v.String() + ", so no page of it is served"})
+		return refuseStream(subject.Log, rpc, refusal{Arm: armNotVisible, Reason: "the workspace is " + v.String() + ", so no page of it is served"})
 	}
 	s.holdParticipant(subject.Record.ID, false, +1)
 	defer s.holdParticipant(subject.Record.ID, false, -1)
