@@ -39,7 +39,7 @@ func TestLoadedPagesAreServedByReasonAndSessionState(t *testing.T) {
 	pages.Held("n", pageheld.LoadSlot)
 	pages.HostAttached("host")
 	pages.HostReported("host", []ids.WorkspaceID{"a", "k", "i", "p", "n"}, false)
-	recorded := func(_ context.Context, ws ids.WorkspaceID) (bool, error) { return ws == "p", nil }
+	recorded := func(context.Context) (map[ids.WorkspaceID]bool, error) { return map[ids.WorkspaceID]bool{"p": true}, nil }
 	if err := s.RegisterPages(pages, pagesCensus(), recorded); err != nil {
 		t.Fatalf("RegisterPages: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestTheLoadedPagesAreTheHostsFrames(t *testing.T) {
 	pages.Held("gone", pageheld.LoadShown)
 	pages.HostAttached("host")
 	pages.HostReported("host", []ids.WorkspaceID{"a", "k"}, false)
-	none := func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil }
+	none := func(context.Context) (map[ids.WorkspaceID]bool, error) { return nil, nil }
 	if err := s.RegisterPages(pages, pagesCensus(), none); err != nil {
 		t.Fatalf("RegisterPages: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestNoPageIsServedBeforeTheHostsFirstCensus(t *testing.T) {
 	s, _ := openSurface(t)
 	pages := pageheld.New(s)
 	pages.Held("a", pageheld.LoadAllocated)
-	none := func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil }
+	none := func(context.Context) (map[ids.WorkspaceID]bool, error) { return nil, nil }
 	if err := s.RegisterPages(pages, pagesCensus(), none); err != nil {
 		t.Fatalf("RegisterPages: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestNoPageIsServedBeforeTheHostsFirstCensus(t *testing.T) {
 	}
 }
 
-func TestAPageWhoseSessionCannotBeReadIsOmittedAndSaidOnce(t *testing.T) {
+func TestPagesWhoseSessionsCannotBeReadAreOmittedAndSaidOnce(t *testing.T) {
 	// Arrange
 	s, logs := openSurface(t)
 	pages := pageheld.New(s)
@@ -110,7 +110,7 @@ func TestAPageWhoseSessionCannotBeReadIsOmittedAndSaidOnce(t *testing.T) {
 	pages.Held("a", pageheld.LoadAllocated)
 	pages.HostAttached("host")
 	pages.HostReported("host", []ids.WorkspaceID{"p", "a"}, false)
-	failing := func(context.Context, ids.WorkspaceID) (bool, error) { return false, errors.New("state closed") }
+	failing := func(context.Context) (map[ids.WorkspaceID]bool, error) { return nil, errors.New("state closed") }
 	if err := s.RegisterPages(pages, pagesCensus(), failing); err != nil {
 		t.Fatalf("RegisterPages: %v", err)
 	}
@@ -121,18 +121,87 @@ func TestAPageWhoseSessionCannotBeReadIsOmittedAndSaidOnce(t *testing.T) {
 
 	// Assert
 	mustContain(t, body, `agentrepl_pages_loaded{reason="allocated",session="working"} 1`)
-	if strings.Contains(body, `session="parked"`) {
+	if strings.Contains(body, `session="parked"`) || strings.Contains(body, `session="no_session"`) {
 		t.Fatalf("an unread page was served:\n%s", body)
 	}
-	var n int
+	var errs []map[string]any
 	for _, rec := range logs.Records() {
-		if rec.Level == "error" && strings.HasPrefix(rec.Message, "a loaded page's session could not be read") {
-			n++
+		if rec.Level == "error" && strings.HasPrefix(rec.Message, "the loaded pages' session records could not be read") {
+			errs = append(errs, rec.Context)
 		}
 	}
-	if n != 1 {
-		t.Fatalf("errors recorded = %d, want one for the one cause", n)
+	if len(errs) != 1 {
+		t.Fatalf("errors recorded = %d, want one for the one cause", len(errs))
 	}
+	if got := errs[0]["error"]; got != "read the session records of 1 loaded pages: state closed" {
+		t.Fatalf("error = %v, want the read's cause and the pages it omits", got)
+	}
+	if got := errs[0]["pages_omitted"]; got != 1 {
+		t.Fatalf("pages_omitted = %v (%T), want 1", got, got)
+	}
+}
+
+func TestAScrapeReadsTheSessionRecordsOnceHoweverManyPagesItServes(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	pages := pageheld.New(s)
+	served := []ids.WorkspaceID{"a", "p1", "p2", "p3", "n1", "n2"}
+	for _, ws := range served {
+		pages.Held(ws, pageheld.LoadShown)
+	}
+	pages.HostAttached("host")
+	pages.HostReported("host", served, false)
+	var reads int
+	recorded := func(context.Context) (map[ids.WorkspaceID]bool, error) {
+		reads++
+		return map[ids.WorkspaceID]bool{"p1": true, "p2": true, "p3": true}, nil
+	}
+	if err := s.RegisterPages(pages, pagesCensus(), recorded); err != nil {
+		t.Fatalf("RegisterPages: %v", err)
+	}
+
+	// Act
+	body := scrape(t, s)
+
+	// Assert
+	if reads != 1 {
+		t.Fatalf("session record reads = %d, want one per scrape", reads)
+	}
+	mustContain(t, body,
+		`agentrepl_pages_loaded{reason="shown",session="working"} 1`,
+		`agentrepl_pages_loaded{reason="shown",session="parked"} 3`,
+		`agentrepl_pages_loaded{reason="shown",session="no_session"} 2`,
+	)
+}
+
+func TestAScrapeWhosePagesAllHoldAShimReadsNoSessionRecord(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	pages := pageheld.New(s)
+	pages.Held("a", pageheld.LoadAllocated)
+	pages.Held("k", pageheld.LoadSlot)
+	pages.HostAttached("host")
+	pages.HostReported("host", []ids.WorkspaceID{"a", "k"}, false)
+	var reads int
+	recorded := func(context.Context) (map[ids.WorkspaceID]bool, error) {
+		reads++
+		return nil, errors.New("not to be read")
+	}
+	if err := s.RegisterPages(pages, pagesCensus(), recorded); err != nil {
+		t.Fatalf("RegisterPages: %v", err)
+	}
+
+	// Act
+	body := scrape(t, s)
+
+	// Assert
+	if reads != 0 {
+		t.Fatalf("session record reads = %d, want none when every page's workspace holds a shim", reads)
+	}
+	mustContain(t, body,
+		`agentrepl_pages_loaded{reason="allocated",session="working"} 1`,
+		`agentrepl_pages_loaded{reason="slot",session="keepalive"} 1`,
+	)
 }
 
 func TestPageLoadsAndUnloadsAreCountedFromZero(t *testing.T) {

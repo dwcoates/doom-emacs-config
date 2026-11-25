@@ -90,16 +90,22 @@ func (s *Surface) CountPageUnload(reason pageheld.UnloadReason) {
 	s.pages.byUnload.of(reason).Inc()
 }
 
-// SessionRecorded answers whether WS has a session on record, read for a
-// loaded page whose workspace holds no shim (parked or no session).
-type SessionRecorded func(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+// SessionsRecorded answers every workspace with a session on record, in ONE
+// read, for the loaded pages whose workspace holds no shim (parked or no
+// session).
+//
+// A SCRAPE READS THE SESSION RECORDS AT ONCE. It used to read them one page
+// at a time, and the state database has one connection: on 2026-11-25 11:36 a
+// withheld stand-down's burst starved it, each page's read queued behind it in
+// turn, and the scrape ran past stateReadBound.
+type SessionsRecorded func(ctx context.Context) (map[ids.WorkspaceID]bool, error)
 
 // pagesCollector serves agentrepl_pages_loaded from the held-page table and
 // the sessions census at scrape.
 type pagesCollector struct {
 	pages    *pageheld.Table
 	census   sessionwhy.Census
-	recorded SessionRecorded
+	recorded SessionsRecorded
 	log      dlog.Logger
 	causes   causelog.Tracker
 	loaded   *prometheus.Desc
@@ -108,25 +114,26 @@ type pagesCollector struct {
 // Describe implements prometheus.Collector.
 func (c *pagesCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.loaded }
 
-// Collect implements prometheus.Collector. A session record that cannot be
-// read omits only that page, recorded once per cause.
+// Collect implements prometheus.Collector. When the session records cannot be
+// read, only the pages whose workspace holds no shim are omitted, recorded
+// once per cause.
 func (c *pagesCollector) Collect(ch chan<- prometheus.Metric) {
-	ctx, cancel := context.WithTimeout(context.Background(), stateReadBound)
-	defer cancel()
 	up := c.census.Up()
 	type key struct{ reason, session string }
 	counts := map[key]float64{}
-	var readErr error
+	unheld := map[ids.WorkspaceID]pageheld.LoadReason{}
 	for ws, reason := range c.pages.Snapshot() {
-		state, err := c.sessionState(ctx, ws, up)
-		if err != nil {
-			readErr = fmt.Errorf("read the session record of %s: %w", ws, err)
+		if state, held := heldSessionState(ws, up); held {
+			counts[key{string(reason), state}]++
 			continue
 		}
-		counts[key{string(reason), state}]++
+		unheld[ws] = reason
 	}
+	readErr := c.countUnheld(unheld, func(reason pageheld.LoadReason, state string) {
+		counts[key{string(reason), state}]++
+	})
 	c.causes.Note("page_sessions", readErr, func(cause string) {
-		c.log.Error(Operation, "a loaded page's session could not be read; that page is omitted from agentrepl_pages_loaded until it reads", dlog.Context{"step": "page_sessions", "error": cause})
+		c.log.Error(Operation, "the loaded pages' session records could not be read; the pages whose workspace holds no shim are omitted from agentrepl_pages_loaded until they read", dlog.Context{"step": "page_sessions", "pages_omitted": len(unheld), "error": cause})
 	}, func() {
 		c.log.Info(Operation, "every loaded page's session reads again", dlog.Context{"step": "page_sessions"})
 	})
@@ -135,32 +142,49 @@ func (c *pagesCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-// sessionState answers the state of WS's session, from the census's UP when
-// a shim is held, else from its session record.
-func (c *pagesCollector) sessionState(ctx context.Context, ws ids.WorkspaceID, up map[ids.WorkspaceID]sessionwhy.Reason) (string, error) {
-	if why, held := up[ws]; held {
-		switch why {
-		case sessionwhy.Working, sessionwhy.DetachedWork:
-			return PageSessionWorking, nil
-		case sessionwhy.Keepalive:
-			return PageSessionKeepalive, nil
-		default:
-			return PageSessionIdle, nil
+// countUnheld counts each of UNHELD's pages under its session state, parked
+// or no session, from one read of the session records; a scrape whose every
+// page's workspace holds a shim reads nothing.
+func (c *pagesCollector) countUnheld(unheld map[ids.WorkspaceID]pageheld.LoadReason, count func(pageheld.LoadReason, string)) error {
+	if len(unheld) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stateReadBound)
+	defer cancel()
+	recorded, err := c.recorded(ctx)
+	if err != nil {
+		return fmt.Errorf("read the session records of %d loaded pages: %w", len(unheld), err)
+	}
+	for ws, reason := range unheld {
+		if recorded[ws] {
+			count(reason, PageSessionParked)
+		} else {
+			count(reason, PageSessionNone)
 		}
 	}
-	recorded, err := c.recorded(ctx, ws)
-	if err != nil {
-		return "", err
+	return nil
+}
+
+// heldSessionState answers the state of WS's session from the census's UP,
+// and whether a shim is held for it at all.
+func heldSessionState(ws ids.WorkspaceID, up map[ids.WorkspaceID]sessionwhy.Reason) (string, bool) {
+	why, held := up[ws]
+	if !held {
+		return "", false
 	}
-	if recorded {
-		return PageSessionParked, nil
+	switch why {
+	case sessionwhy.Working, sessionwhy.DetachedWork:
+		return PageSessionWorking, true
+	case sessionwhy.Keepalive:
+		return PageSessionKeepalive, true
+	default:
+		return PageSessionIdle, true
 	}
-	return PageSessionNone, nil
 }
 
 // RegisterPages registers the loaded-pages collector over PAGES, CENSUS and
 // RECORDED. The off surface registers nothing.
-func (s *Surface) RegisterPages(pages *pageheld.Table, census sessionwhy.Census, recorded SessionRecorded) error {
+func (s *Surface) RegisterPages(pages *pageheld.Table, census sessionwhy.Census, recorded SessionsRecorded) error {
 	if s == nil {
 		return nil
 	}

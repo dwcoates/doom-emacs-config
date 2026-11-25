@@ -29,7 +29,9 @@ const (
 // directory is counted under "other".
 var logRuntimes = map[string]bool{"daemon": true, "shim": true, "webapp": true, "sidecar": true, "emacs": true}
 
-// stateReadBound bounds the workspace read a scrape makes.
+// stateReadBound bounds each state database read a scrape makes: the
+// workspaces (collectWorkspaces) and the loaded pages' session records
+// (pagesCollector.countUnheld).
 const stateReadBound = 2 * time.Second
 
 // WorkspaceLister reads the registry's workspaces and repositories. wsm.DB
