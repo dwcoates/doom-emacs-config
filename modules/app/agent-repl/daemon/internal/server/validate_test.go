@@ -255,6 +255,9 @@ func TestBlankOperatorDrainNoteIsInvalidArgument(t *testing.T) {
 	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", code)
 	}
+	if !strings.Contains(err.Error(), "note") {
+		t.Fatalf("err = %v, want it to name the field note", err)
+	}
 }
 
 // TestOperatorDrainNoteIsAccepted pins that a real note passes: the presence

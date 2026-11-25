@@ -3714,6 +3714,9 @@ type fakeShim struct {
 	answerErr      error
 	killedSession  []bool
 	killSessionErr error
+	// onKillSession, when set, runs as KillSession is asked, so a test reads
+	// what had already happened at that instant.
+	onKillSession func()
 	// standDownRefused makes StandDown answer false, the shape a DETACHED
 	// client has: this daemon is ordering no teardown of that process.
 	standDownRefused bool
@@ -3829,6 +3832,9 @@ func (s *fakeShim) StandDown() bool {
 
 func (s *fakeShim) KillSession(_ context.Context, force bool) error {
 	s.standDownBeforeKill = s.stoodDown > 0
+	if s.onKillSession != nil {
+		s.onKillSession()
+	}
 	if s.killSessionErr != nil {
 		return s.killSessionErr
 	}

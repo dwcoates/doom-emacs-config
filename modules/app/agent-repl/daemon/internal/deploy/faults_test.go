@@ -345,22 +345,25 @@ func TestAFailedStepsFaultSaysWhatBecameOfTheInstall(t *testing.T) {
 		arrange func(t *testing.T, h *harness)
 		want    string
 		clause  string
+		// rollbackFault is whether the rollback's own fault stands beside
+		// the step's.
+		rollbackFault bool
 	}{
 		{"a failed build installed nothing", func(t *testing.T, h *harness) {
 			h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc"}
-		}, health.RollbackNone, "nothing was installed"},
+		}, health.RollbackNone, "nothing was installed", false},
 		{"a failed install was rolled back", func(t *testing.T, h *harness) {
 			failInstall(t, h)
-		}, health.RollbackRestored, "it was rolled back to the previous build"},
+		}, health.RollbackRestored, "it was rolled back to the previous build", false},
 		{"a failed restart was rolled back", func(t *testing.T, h *harness) {
 			h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theOld.sidecar))
 			h.services.sidecarErr = errors.New("kickstart refused")
 			h.services.recovers = true
-		}, health.RollbackRestored, "it was rolled back to the previous build"},
+		}, health.RollbackRestored, "it was rolled back to the previous build", false},
 		{"a failed restart whose rollback failed", func(t *testing.T, h *harness) {
 			h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theOld.sidecar))
 			h.services.sidecarErr = errors.New("kickstart refused")
-		}, health.RollbackIncomplete, "its rollback did NOT restore the previous build"},
+		}, health.RollbackIncomplete, "its rollback did NOT restore the previous build", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -384,6 +387,9 @@ func TestAFailedStepsFaultSaysWhatBecameOfTheInstall(t *testing.T) {
 			}
 			if !strings.Contains(fault.Detail, tc.clause) {
 				t.Fatalf("fault detail = %q, want it to say %q", fault.Detail, tc.clause)
+			}
+			if _, stands := standingOfStep(t, h, health.DeployStepRollback, ""); stands != tc.rollbackFault {
+				t.Fatalf("rollback fault standing = %v beside the step's, want %v: %+v", stands, tc.rollbackFault, h.faults.standing(t))
 			}
 		})
 	}

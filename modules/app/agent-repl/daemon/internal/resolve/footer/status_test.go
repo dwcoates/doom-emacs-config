@@ -337,6 +337,29 @@ func TestInterruptingOutranksEveryOtherWaitingStep(t *testing.T) {
 	}
 }
 
+// TestAClearedInterruptRetiresTheInterruptingStatus pins the other edge: an
+// interrupt that did not happen (a refused interject) takes interrupting down,
+// and the running turn reads working again.
+func TestAClearedInterruptRetiresTheInterruptingStatus(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.SetInterrupting(testWS, true)
+
+	// Act
+	h.r.SetInterrupting(testWS, false)
+
+	// Assert
+	status := h.view(t).GetStrip().GetStatus()
+	if status.GetWaiting().GetInterrupting() != nil {
+		t.Fatalf("status = %v, want interrupting cleared", status)
+	}
+	if status.GetWorking() == nil {
+		t.Fatalf("status = %v, want the running turn working again", status)
+	}
+}
+
 func TestTheColdGateIsAWaitingStep(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

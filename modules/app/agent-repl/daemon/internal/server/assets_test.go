@@ -33,22 +33,40 @@ func TestEntryPointIsNoStore(t *testing.T) {
 // TestAssetIsNotNoStore pins that NOTHING BUT the entry point gets no-store:
 // the hashed bundles are immutable by name and must stay cacheable.
 func TestAssetIsNotNoStore(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	if err := os.WriteFile(filepath.Join(h.WebappDist, "app.js"), []byte("//"), 0o644); err != nil {
-		t.Fatalf("write the asset: %v", err)
+	tests := []struct {
+		name string
+		file string
+	}{
+		{name: "an asset at the root", file: "app.js"},
+		{name: "an asset under /assets/", file: "assets/app.js"},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			path := filepath.Join(h.WebappDist, filepath.FromSlash(tt.file))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("make the asset's directory: %v", err)
+			}
+			if err := os.WriteFile(path, []byte("//"), 0o644); err != nil {
+				t.Fatalf("write the asset: %v", err)
+			}
 
-	// Act.
-	resp, err := h.HTTP.Client().Get(h.HTTP.URL + "/app.js")
-	if err != nil {
-		t.Fatalf("get the asset: %v", err)
-	}
-	defer resp.Body.Close()
+			// Act.
+			resp, err := h.HTTP.Client().Get(h.HTTP.URL + "/" + tt.file)
+			if err != nil {
+				t.Fatalf("get the asset: %v", err)
+			}
+			defer resp.Body.Close()
 
-	// Assert.
-	if got := resp.Header.Get("Cache-Control"); got == "no-store" {
-		t.Fatal("a hashed asset was answered no-store; only the entry point may be")
+			// Assert.
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want the asset served", resp.StatusCode)
+			}
+			if got := resp.Header.Get("Cache-Control"); got == "no-store" {
+				t.Fatal("a hashed asset was answered no-store; only the entry point may be")
+			}
+		})
 	}
 }
 

@@ -153,39 +153,57 @@ func TestGlobalRecordLandsInTheRunLog(t *testing.T) {
 	}
 }
 
+// workspaceRecordLevels are the levels a workspace-bound record is routed
+// at: a WARN is bound to its workspace exactly as an INFO is.
+var workspaceRecordLevels = []struct {
+	name  string
+	write func(log Logger)
+}{
+	{name: "info", write: func(log Logger) { log.Info("daemon.workspace.opened", "opened", nil) }},
+	{name: "warn", write: func(log Logger) { log.Warn("daemon.workspace.opened", "opened with a warning", nil) }},
+}
+
 func TestWorkspaceRecordLandsInTheWorkspaceSink(t *testing.T) {
-	// Arrange.
-	s, _ := testSurfaces(t)
-	dir := t.TempDir()
-	log, err := s.Workspace(dir)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
+	for _, tt := range workspaceRecordLevels {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			dir := t.TempDir()
+			log, err := s.Workspace(dir)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
 
-	// Act.
-	log.Info("daemon.workspace.opened", "opened", nil)
+			// Act.
+			tt.write(log)
 
-	// Assert.
-	if !hasOperation(workspaceRecords(t, dir, "daemon"), "daemon.workspace.opened") {
-		t.Fatalf("the workspace sink does not carry the record")
+			// Assert.
+			if !hasOperation(workspaceRecords(t, dir, "daemon"), "daemon.workspace.opened") {
+				t.Fatalf("the workspace sink does not carry the record")
+			}
+		})
 	}
 }
 
 func TestWorkspaceRecordNeverLandsInTheGlobalSink(t *testing.T) {
-	// Arrange.
-	s, runLogPath := testSurfaces(t)
-	dir := t.TempDir()
-	log, err := s.Workspace(dir)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
+	for _, tt := range workspaceRecordLevels {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, runLogPath := testSurfaces(t)
+			dir := t.TempDir()
+			log, err := s.Workspace(dir)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
 
-	// Act.
-	log.Info("daemon.workspace.opened", "opened", nil)
+			// Act.
+			tt.write(log)
 
-	// Assert.
-	if hasOperation(readRecords(t, runLogPath), "daemon.workspace.opened") {
-		t.Fatalf("a workspace record reached the global sink")
+			// Assert.
+			if hasOperation(readRecords(t, runLogPath), "daemon.workspace.opened") {
+				t.Fatalf("a workspace record reached the global sink")
+			}
+		})
 	}
 }
 
@@ -349,13 +367,16 @@ func TestWorkspaceOrCentralReportsTheFallbackAtDebug(t *testing.T) {
 	// Act.
 	s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
 
-	// Assert.
+	// Assert: at debug, naming the workspace it could not route.
 	for _, rec := range readRecords(t, runLogPath) {
 		if rec["operation"] != "daemon.dlog.central_fallback" {
 			continue
 		}
 		if rec["level"] != LevelDebug {
 			t.Fatalf("central_fallback level = %v, want %q", rec["level"], LevelDebug)
+		}
+		if context, _ := rec["context"].(map[string]any); context[KeyUnroutableWorkspace] != dir {
+			t.Fatalf("central_fallback context = %v, want unroutable_workspace %q", rec["context"], dir)
 		}
 		return
 	}

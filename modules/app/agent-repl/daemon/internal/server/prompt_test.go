@@ -316,22 +316,33 @@ func TestSubmitPromptAnswersARecognizedPanel(t *testing.T) {
 // TestSubmitPromptAnswersARecognizedRefusal pins the refusal-card path, which
 // names the literal command as typed.
 func TestSubmitPromptAnswersARecognizedRefusal(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Prompts.outcome = prompthandler.Outcome{
-		Recognition:    prompthandler.RecognizedRefused,
-		RefusedCommand: "/agents",
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "an unsupported command", command: "/agents"},
+		{name: "a bare /model", command: "/model"},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Prompts.outcome = prompthandler.Outcome{
+				Recognition:    prompthandler.RecognizedRefused,
+				RefusedCommand: tt.command,
+			}
 
-	// Act.
-	resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+			// Act.
+			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
 
-	// Assert.
-	if err != nil {
-		t.Fatalf("SubmitPrompt: %v", err)
-	}
-	if got := resp.Msg.GetSuccess().GetCommandRefused().GetCommand(); got != "/agents" {
-		t.Fatalf("command = %q, want /agents", got)
+			// Assert.
+			if err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+			if got := resp.Msg.GetSuccess().GetCommandRefused().GetCommand(); got != tt.command {
+				t.Fatalf("command = %q, want %s", got, tt.command)
+			}
+		})
 	}
 }
 

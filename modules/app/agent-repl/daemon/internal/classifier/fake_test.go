@@ -6,16 +6,27 @@ import (
 )
 
 func TestFakeJudgeInterjectsOnTheExplicitFastPath(t *testing.T) {
-	// Arrange
-	j := NewFake()
-	// Act
-	got, err := j.Judge(context.Background(), "running", "abort")
-	// Assert
-	if err != nil {
-		t.Fatalf("Judge: %v", err)
+	tests := []struct {
+		name   string
+		prompt string
+	}{
+		{name: "a bare fast-path word", prompt: "abort"},
+		{name: "a prompt beginning with stop", prompt: "stop and rebase instead"},
 	}
-	if got.Route != RouteInterrupt || !got.FastPath {
-		t.Fatalf("verdict = %+v, want an interrupting fast-path verdict", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			j := NewFake()
+			// Act
+			got, err := j.Judge(context.Background(), "running", tt.prompt)
+			// Assert
+			if err != nil {
+				t.Fatalf("Judge: %v", err)
+			}
+			if got.Route != RouteInterrupt || !got.FastPath {
+				t.Fatalf("verdict = %+v, want an interrupting fast-path verdict", got)
+			}
+		})
 	}
 }
 

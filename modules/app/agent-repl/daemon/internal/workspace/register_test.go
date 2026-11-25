@@ -69,6 +69,51 @@ func TestRegisterIsIdempotentByDirectory(t *testing.T) {
 	}
 }
 
+// TestRegisterIsIdempotentAcrossSpellings covers that a directory is one
+// workspace however it is spelled: with a trailing slash, through dot
+// segments, or through a symlink.
+func TestRegisterIsIdempotentAcrossSpellings(t *testing.T) {
+	tests := []struct {
+		name  string
+		spell func(t *testing.T, dir string) string
+	}{
+		{name: "trailing slash", spell: func(_ *testing.T, dir string) string { return dir + string(filepath.Separator) }},
+		{name: "dot segments", spell: func(_ *testing.T, dir string) string {
+			sep := string(filepath.Separator)
+			return dir + sep + "." + sep + ".." + sep + filepath.Base(dir)
+		}},
+		{name: "symlink", spell: func(t *testing.T, dir string) string {
+			link := filepath.Join(t.TempDir(), "link")
+			if err := os.Symlink(dir, link); err != nil {
+				t.Fatalf("symlink: %v", err)
+			}
+			return link
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			dir := worktreeDir(t)
+			first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+			if err != nil {
+				t.Fatalf("first Register: %v", err)
+			}
+
+			// Act.
+			again, err := f.verbs.Register(context.Background(), tt.spell(t, dir), wsm.RegisterFacts{})
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Register(%s): %v", tt.name, err)
+			}
+			if again.ID != first.ID {
+				t.Fatalf("Register minted %q then %q, want one identity", first.ID, again.ID)
+			}
+		})
+	}
+}
+
 // TestRegisterTellsTheOwnershipOnlyOfAWorkspaceItCreated covers the
 // creation half of the 2026-10-30 stranding: a workspace is owned by the
 // daemon that minted it, and only a minting registration says so. A
