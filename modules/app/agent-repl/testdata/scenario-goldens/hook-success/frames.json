@@ -178,7 +178,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -226,7 +226,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -270,7 +270,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -352,7 +352,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -383,7 +383,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -431,7 +431,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -465,7 +465,7 @@
             "response": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -498,7 +498,7 @@
                 "newMarkdown": "The hook allo"
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -531,7 +531,7 @@
                 "newMarkdown": "wed the read."
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -573,7 +573,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {

@@ -178,7 +178,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -226,7 +226,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -276,7 +276,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -307,7 +307,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -355,7 +355,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-sonnet-5"
             }
@@ -389,7 +389,7 @@
             "response": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -422,7 +422,7 @@
                 "newMarkdown": "Reading the modul"
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -455,7 +455,7 @@
                 "newMarkdown": "e's conventions."
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -497,7 +497,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -528,7 +528,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -576,7 +576,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-sonnet-5"
             }
@@ -620,7 +620,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -666,7 +666,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -697,7 +697,7 @@
             "response": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -730,7 +730,7 @@
                 "newMarkdown": "The module's test co"
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -763,7 +763,7 @@
                 "newMarkdown": "mmand is `npm test`."
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -817,7 +817,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-sonnet-5"
             }
@@ -898,7 +898,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -929,7 +929,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -977,7 +977,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -1011,7 +1011,7 @@
             "response": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -1044,7 +1044,7 @@
                 "newMarkdown": "The subagent r"
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -1077,7 +1077,7 @@
                 "newMarkdown": "eported back."
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -1119,7 +1119,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {

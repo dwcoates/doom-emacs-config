@@ -189,7 +189,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {

@@ -178,7 +178,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -226,7 +226,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -270,7 +270,7 @@
                 "pending": {}
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -301,7 +301,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -349,7 +349,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -393,7 +393,7 @@
                 "pending": {}
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -424,7 +424,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -472,7 +472,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -513,7 +513,7 @@
               "changed": {},
               "state": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -550,7 +550,7 @@
               "changed": {},
               "state": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -581,7 +581,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -629,7 +629,7 @@
               "outputThinkingTokens": "30",
               "provisional": true
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -663,7 +663,7 @@
             "response": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -696,7 +696,7 @@
                 "newMarkdown": "Created two tasks"
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -729,7 +729,7 @@
                 "newMarkdown": " and linked them."
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
@@ -771,7 +771,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
+            "contract": "AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT"
           }
         },
         "agentId": {
