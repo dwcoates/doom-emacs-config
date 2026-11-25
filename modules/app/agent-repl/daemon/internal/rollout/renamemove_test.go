@@ -168,3 +168,26 @@ func TestAnAdoptionTakesUpTheWorkspacesOwedMove(t *testing.T) {
 		t.Fatal("the adoption did not take up the workspace's owed move")
 	}
 }
+
+func TestAnOwedMoveTakeUpTheStandDownCutIsNoFailure(t *testing.T) {
+	// Arrange: the daemon is stopping, and the read is cut under it.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.moves.owedErr = context.Canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	h.c.TakeUpOwedMove(ctx, ws)
+
+	// Assert
+	if _, failed := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opOwedMove}); failed {
+		t.Fatalf("records = %v, want no error for a cut take-up", records(h.log, opOwedMove))
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opOwedMove}); !ok {
+		t.Fatalf("records = %v, want the cut recorded at INFO", records(h.log, opOwedMove))
+	}
+	if renameAsked(h, ws) {
+		t.Fatal("a cut take-up asked for the move")
+	}
+}

@@ -5,6 +5,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/standdown"
 )
 
 // opOwedMove is the operation taking up an owed move is recorded under.
@@ -15,6 +16,10 @@ const opOwedMove = "daemon.rollout.owed_move"
 // in memory, so a move registered before the stop is registered again.
 func (c *controller) takeUpOwedMoves(ctx context.Context) {
 	moves, err := c.deps.DB.OwedMoves(ctx)
+	if standdown.CutShort(ctx, err) {
+		c.log.Info(opOwedMove, "the daemon stood down before the moves renames owe were taken up; the next daemon that serves their workspaces takes them up", dlog.WithCause(nil, err))
+		return
+	}
 	if err != nil {
 		c.log.Error(opOwedMove, "could not list the moves renames owe; they wait for the next daemon that serves their workspaces", dlog.Context{"cause": err.Error()})
 		return
@@ -33,6 +38,10 @@ func (c *controller) takeUpOwedMoves(ctx context.Context) {
 func (c *controller) TakeUpOwedMove(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
 	owed, err := c.deps.Moves.MoveOwed(ctx, ws)
+	if standdown.CutShort(ctx, err) {
+		c.log.Info(opOwedMove, "the daemon stood down before the workspace's owed move was taken up; the next daemon that serves it takes it up", dlog.WithCause(fields, err))
+		return
+	}
 	if err != nil {
 		c.log.Error(opOwedMove, "could not read whether a rename owes the workspace a move; any owed move waits for the next daemon that serves it", dlog.WithCause(fields, err))
 		return

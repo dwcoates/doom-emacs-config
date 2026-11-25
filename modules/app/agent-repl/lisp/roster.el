@@ -84,6 +84,7 @@
 (declare-function agent-repl--ws-revive "workspace" (ws))
 (declare-function agent-repl--ws-land-then-kill "workspace" (ws))
 (declare-function agent-repl--ws-rename-state "workspace" (old new dir))
+(declare-function agent-repl--ws-move-dir "workspace" (ws new-dir))
 (declare-function agent-repl--ws-rename-persp "workspace" (old new))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
 (declare-function agent-repl--when-minibuffer-free "workspace" (scope label key fn))
