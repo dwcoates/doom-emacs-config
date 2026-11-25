@@ -976,6 +976,58 @@ func TestTheBootRecordsHowLongItWaitedForTheClaim(t *testing.T) {
 	t.Fatal("no daemon.cmd.claim record said the boot claim was taken")
 }
 
+// --- the opening views ---------------------------------------------------
+
+func TestPrimeOpeningViewsRecordsHowLongThePublishTook(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	err := primeOpeningViews(context.Background(), log, func(context.Context) error { return nil })
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("primeOpeningViews = %v, want nil", err)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.cmd.serve", Message: "published the opening views"})
+	if !ok {
+		t.Fatalf("records = %+v, want the publish recorded at INFO", log.Records())
+	}
+	if _, ok := rec.Context["took_ms"]; !ok {
+		t.Fatalf("the opening views' record %+v carries no took_ms", rec.Context)
+	}
+}
+
+func TestPrimeOpeningViewsWithNoPrimeDoesNothing(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	err := primeOpeningViews(context.Background(), log, nil)
+
+	// Assert.
+	if err != nil || len(log.Records()) != 0 {
+		t.Fatalf("primeOpeningViews(nil) = %v with records %+v, want nil and none", err, log.Records())
+	}
+}
+
+func TestPrimeOpeningViewsThatFailFailTheBootAtError(t *testing.T) {
+	// Arrange: the registry publish refuses, as a corrupt tasks row makes it.
+	log := dlog.NewTestLogger()
+	cause := errors.New("workspace: publish the registry: read the tasks: wsm: corrupt row")
+
+	// Act.
+	err := primeOpeningViews(context.Background(), log, func(context.Context) error { return cause })
+
+	// Assert.
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "agent-repld: publish the opening views") {
+		t.Fatalf("primeOpeningViews = %v, want the failure wrapped naming the boot step", err)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.cmd.serve", Message: "the opening views could not be published"}); !ok {
+		t.Fatalf("records = %+v, want the failure recorded at ERROR", log.Records())
+	}
+}
+
 // --- the exit joins the background loops ----------------------------------
 //
 // A loop's iteration reads and writes the state client off its own goroutine.
