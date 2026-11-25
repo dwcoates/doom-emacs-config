@@ -6454,8 +6454,9 @@ elisp spelling to reach for by accident.")
   "How the editor came to a daemon, keyword to the `daemon' oneof's arm.")
 
 (defun agent-repl-wire-verbs--editor-seconds (message field seconds)
-  "Answer SECONDS as a float, failing MESSAGE's FIELD unless finite and non-negative.
-THE ONE check of every duration the editor reports."
+  "Answer SECONDS as a float, failing MESSAGE's FIELD unless it is valid.
+Valid is finite and non-negative.  THE ONE check of every duration the
+editor reports."
   (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
     (agent-repl-wire-verbs--fail message field "not a finite, non-negative number"))
   (float seconds))

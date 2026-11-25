@@ -3,10 +3,10 @@ package runtimemetrics
 import (
 	"errors"
 	"math"
-	"os"
-	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
@@ -127,29 +127,11 @@ func TestValidSeconds(t *testing.T) {
 }
 
 func TestEveryReportedDurationIsCheckedByValidSeconds(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Act
-	var rolled []string
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.Count(string(src), "math.IsNaN("); n > 0 && !(f == "latency.go" && n == 1) {
-			rolled = append(rolled, f)
-		}
-	}
+	sites := sourcescan.Sites(t, "math.IsNaN(")
 
 	// Assert
-	if len(rolled) > 0 {
-		t.Fatalf("%v check a duration by hand; use validSeconds", rolled)
+	if want := []string{"latency.go"}; !slices.Equal(sites, want) {
+		t.Fatalf("math.IsNaN( sites = %v, want %v: check a duration with validSeconds", sites, want)
 	}
 }
