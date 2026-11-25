@@ -1125,13 +1125,13 @@ type agentAPI struct {
 	withdrawals []fakeWithdrawal
 	withdrawn   bool
 	withdrawErr error
-	oneShots     []fakeOneShot
-	directive    string
-	oneShotErr   error
-	awaits       []fakeAwait
-	awaitErr     error
-	takeBacks    []fakeTakeBack
-	takeBackErr  error
+	oneShots    []fakeOneShot
+	directive   string
+	oneShotErr  error
+	awaits      []fakeAwait
+	awaitErr    error
+	takeBacks   []fakeTakeBack
+	takeBackErr error
 	// prompts, when set, is read at each take-back, so a test can tell
 	// whether the take-back came before the prompt was handed on.
 	prompts *fakePrompts
