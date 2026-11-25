@@ -27,18 +27,31 @@
 (defvar agent-repl-test-pr--errors nil
   "Every ERROR record's text, newest first.")
 
+(defvar agent-repl-test-pr--answers nil
+  "Every call's answers not yet given, oldest first, each (ON-SUCCESS . ON-NOT-SENT).")
+
+(defun agent-repl-test-pr--answer (how)
+  "Answer the oldest call not yet answered: HOW `:success' or `:not-sent'."
+  (let ((answer (pop agent-repl-test-pr--answers)))
+    (funcall (if (eq how :success) (car answer) (cdr answer)))))
+
 (defmacro agent-repl-test-pr--with (&rest body)
   "Run BODY with the sender and the host stubbed."
   (declare (indent 0))
   `(agent-repl-test--with-clean-state
      (let ((agent-repl-test-pr--sent nil)
            (agent-repl-test-pr--pages nil)
-           (agent-repl-test-pr--errors nil))
-       (cl-letf (((symbol-function 'agent-repl-host--send-subject-verb)
-                  (lambda (ws op rpc _on-success _on-not-sent &optional extra)
+           (agent-repl-test-pr--errors nil)
+           (agent-repl-test-pr--answers nil))
+       (cl-letf (((symbol-function 'agent-repl-host-ref)
+                  (lambda (ws) (and (not (equal ws "unreffed")) (list :id (concat "id-" ws)))))
+                 ((symbol-function 'agent-repl-host--send-subject-verb)
+                  (lambda (ws op rpc on-success on-not-sent &optional extra)
                     (should (equal op "page-state"))
                     (should (eq rpc #'agent-repl-rpc-report-page-state))
-                    (push (list ws (plist-get extra :report)) agent-repl-test-pr--sent)))
+                    (push (list ws (plist-get extra :report)) agent-repl-test-pr--sent)
+                    (setq agent-repl-test-pr--answers
+                          (append agent-repl-test-pr--answers (list (cons on-success on-not-sent))))))
                  ((symbol-function 'agent-repl-webhost-has-page-p)
                   (lambda (ws) (and (assoc ws agent-repl-test-pr--pages) t)))
                  ((symbol-function 'agent-repl-webhost-page-reason)
@@ -101,6 +114,78 @@
     ;; Assert
     (should-not agent-repl-test-pr--sent)
     (should agent-repl-test-pr--errors)))
+
+;;;; ---- One report in flight per workspace ----
+
+(ert-deftest agent-repl-test-pr-a-report-waits-for-the-one-in-flight ()
+  "A second report of a workspace is not sent while the first is unanswered.
+2026-11-25 12:33: a load and the release's unload were in flight at once and
+the load landed last, so the daemon counted a page no web view held."
+  (agent-repl-test-pr--with
+    ;; Arrange
+    (agent-repl-page-report-loaded "alpha" 'allocated)
+    ;; Act
+    (agent-repl-page-report-unloaded "alpha" 'released)
+    ;; Assert
+    (should (equal agent-repl-test-pr--sent '(("alpha" (:arm :loaded :value :allocated)))))))
+
+(ert-deftest agent-repl-test-pr-an-answered-report-sends-the-next-in-order ()
+  "Once the report in flight is answered, the waiting reports go one at a time, oldest first."
+  (agent-repl-test-pr--with
+    ;; Arrange
+    (agent-repl-page-report-loaded "alpha" 'allocated)
+    (agent-repl-page-report-unloaded "alpha" 'released)
+    (agent-repl-page-report-restate "alpha")
+    ;; Act
+    (agent-repl-test-pr--answer :success)
+    ;; Assert
+    (should (equal (reverse agent-repl-test-pr--sent)
+                   '(("alpha" (:arm :loaded :value :allocated))
+                     ("alpha" (:arm :unloaded :value :released)))))))
+
+(ert-deftest agent-repl-test-pr-a-failed-report-still-sends-the-next ()
+  "A report the daemon never took (a refusal, a transport failure) frees its workspace's line."
+  (agent-repl-test-pr--with
+    ;; Arrange
+    (agent-repl-page-report-loaded "alpha" 'allocated)
+    (agent-repl-page-report-unloaded "alpha" 'released)
+    ;; Act
+    (agent-repl-test-pr--answer :not-sent)
+    ;; Assert
+    (should (equal (car agent-repl-test-pr--sent) '("alpha" (:arm :unloaded :value :released))))))
+
+(ert-deftest agent-repl-test-pr-the-last-answer-leaves-no-line ()
+  "Once every report of a workspace is answered, no report stands in flight for it."
+  (agent-repl-test-pr--with
+    ;; Arrange
+    (agent-repl-page-report-loaded "alpha" 'allocated)
+    ;; Act
+    (agent-repl-test-pr--answer :success)
+    (agent-repl-page-report-unloaded "alpha" 'released)
+    ;; Assert
+    (should (equal (car agent-repl-test-pr--sent) '("alpha" (:arm :unloaded :value :released))))
+    (agent-repl-test-pr--answer :success)
+    (should (zerop (hash-table-count agent-repl-page-report--lines)))))
+
+(ert-deftest agent-repl-test-pr-workspaces-do-not-wait-on-each-other ()
+  "A report in flight holds back only its own workspace's reports."
+  (agent-repl-test-pr--with
+    ;; Arrange
+    (agent-repl-page-report-loaded "alpha" 'allocated)
+    ;; Act
+    (agent-repl-page-report-loaded "beta" 'shown)
+    ;; Assert
+    (should (equal (car agent-repl-test-pr--sent) '("beta" (:arm :loaded :value :shown))))))
+
+(ert-deftest agent-repl-test-pr-a-workspace-with-no-ref-is-sent-at-once-on-no-line ()
+  "A workspace with no daemon ref goes straight to the sender, which skips it, and opens no line."
+  (agent-repl-test-pr--with
+    ;; Act
+    (agent-repl-page-report-loaded "unreffed" 'allocated)
+    (agent-repl-page-report-unloaded "unreffed" 'released)
+    ;; Assert
+    (should (equal (length agent-repl-test-pr--sent) 2))
+    (should (zerop (hash-table-count agent-repl-page-report--lines)))))
 
 ;;;; ---- Restatements ----
 

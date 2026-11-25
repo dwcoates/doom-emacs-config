@@ -25,6 +25,14 @@
 ;; FIRE AND FORGET: a report that does not land is recorded by
 ;; `agent-repl-host--send-subject-verb' and changes nothing here; the next
 ;; report or restatement corrects the daemon's view.
+;;
+;; A WORKSPACE'S REPORTS REACH THE DAEMON IN THE ORDER THEY WERE MADE.  Each
+;; is a separate unary call, and two in flight at once can land in either
+;; order (2026-11-25 12:33, a load sent before a release landed after the
+;; release's unload, and the daemon counted a page no web view held).  So a
+;; workspace has at most one report in flight, and the next is sent only
+;; once the daemon has answered it or the call has failed
+;; (`agent-repl-page-report--lines').
 
 ;;; Code:
 
@@ -33,6 +41,7 @@
 (require 'log-site)
 
 (declare-function agent-repl-host--send-subject-verb "host" (ws op rpc on-success on-not-sent &optional extra))
+(declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-rpc-report-page-state "rpc" (conn request &rest keys))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-page-reason "webhost" (ws))
@@ -57,12 +66,43 @@ load's.")
   "WHY, a reason symbol, as the wire's keyword."
   (intern (concat ":" (symbol-name why))))
 
+(defvar agent-repl-page-report--lines (make-hash-table :test 'equal)
+  "Each workspace's reports not yet answered, by its daemon id: the report
+in flight first, then every report waiting behind it, oldest first.
+A workspace with no entry has no report in flight.")
+
 (defun agent-repl-page-report--send (ws arm reason)
-  "Send WS's page report ARM with REASON (a symbol, or nil for `:not-held')."
-  (agent-repl-host--send-subject-verb
-   ws "page-state" #'agent-repl-rpc-report-page-state
-   #'ignore #'ignore
-   (list :report (list :arm arm :value (and reason (agent-repl-page-report--keyword reason))))))
+  "Send WS's page report ARM with REASON (a symbol, or nil for `:not-held'),
+once every earlier report of WS's daemon id has been answered.
+A workspace with no daemon ref yet is sent at once, which skips it
+\(`agent-repl-host--send-subject-verb')."
+  (let ((report (list ws (list :arm arm :value (and reason (agent-repl-page-report--keyword reason)))))
+        (id (plist-get (agent-repl-host-ref ws) :id)))
+    (cond
+     ((null id) (agent-repl-page-report--call report nil))
+     ((gethash id agent-repl-page-report--lines)
+      (puthash id (append (gethash id agent-repl-page-report--lines) (list report))
+               agent-repl-page-report--lines))
+     (t
+      (puthash id (list report) agent-repl-page-report--lines)
+      (agent-repl-page-report--call report id)))))
+
+(defun agent-repl-page-report--call (report id)
+  "Send REPORT, `(WS REPORT-PLIST)', then the next report waiting on ID.
+ID is the line REPORT heads, or nil when it waits on none."
+  (let ((answered (lambda () (when id (agent-repl-page-report--next id)))))
+    (agent-repl-host--send-subject-verb
+     (car report) "page-state" #'agent-repl-rpc-report-page-state
+     answered answered
+     (list :report (cadr report)))))
+
+(defun agent-repl-page-report--next (id)
+  "Drop ID's answered report and send the one waiting behind it, if any."
+  (let ((rest (cdr (gethash id agent-repl-page-report--lines))))
+    (if (null rest)
+        (remhash id agent-repl-page-report--lines)
+      (puthash id rest agent-repl-page-report--lines)
+      (agent-repl-page-report--call (car rest) id))))
 
 (defun agent-repl-page-report-check-load-reason (ws why)
   "Signal unless WHY is a reason WS's page is loaded for.

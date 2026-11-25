@@ -1110,6 +1110,10 @@ signals."
                 (agent-repl--log-decisions (make-hash-table :test 'equal))
                 (agent-repl--webhost-buffer nil)
                 (agent-repl--webhost-pages (make-hash-table :test 'equal))
+                ;; Each workspace's page reports in flight (page-report.el):
+                ;; a report one scenario left unanswered must not hold the
+                ;; next scenario's.
+                (agent-repl-page-report--lines (make-hash-table :test 'equal))
                 (agent-repl--webhost-shown nil)
                 (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
                 (agent-repl--webhost-held-ingress (make-hash-table :test 'equal))
