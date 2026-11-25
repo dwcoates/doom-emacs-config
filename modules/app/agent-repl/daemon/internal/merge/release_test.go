@@ -2,12 +2,16 @@ package merge
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
+	"agent-repld/internal/wsm"
 )
 
 // headRowID is the row value of WS's bubble head for its current ledger.
@@ -317,5 +321,129 @@ func TestOnlyAnAbandonmentReleasedByItsCauseIsReleased(t *testing.T) {
 				t.Fatalf("Released() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAbandonCauseReturnsSession(t *testing.T) {
+	tests := []struct {
+		cause AbandonCause
+		want  bool
+	}{
+		{cause: CauseUserDrop, want: true},
+		{cause: CauseUserDequeue, want: true},
+		{cause: CauseAheadDidNotLand, want: true},
+		{cause: CauseWorkspaceClosed},
+		{cause: CauseDaemonShutdown},
+		{cause: CauseAgentGaveUp},
+		{cause: CauseColdGate},
+		{cause: CauseHiddenAtColdGate},
+		{cause: CauseColdGateAnswerFailed},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.cause), func(t *testing.T) {
+			// Act / Assert.
+			if got := tt.cause.returnsSession(); got != tt.want {
+				t.Fatalf("%s.returnsSession() = %v, want %v", tt.cause, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAWaitingMergeLeavingItsLineHandsBackTheSessionItsWaitParked(t *testing.T) {
+	tests := []struct {
+		name      string
+		cause     AbandonCause
+		wantStart bool
+	}{
+		{name: "an evict hands it back", cause: CauseUserDrop, wantStart: true},
+		{name: "a dequeue hands it back", cause: CauseUserDequeue, wantStart: true},
+		{name: "a close leaves it parked", cause: CauseWorkspaceClosed},
+		{name: "a shutdown leaves it parked", cause: CauseDaemonShutdown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			enqueue(t, h)
+
+			// Act.
+			if err := h.o.dequeue(context.Background(), theWorkspace, tt.cause); err != nil {
+				t.Fatalf("dequeue: %v", err)
+			}
+
+			// Assert.
+			h.mu.Lock()
+			causes := append([]shimlife.StartCause(nil), h.startCauses...)
+			h.mu.Unlock()
+			want := []shimlife.StartCause(nil)
+			if tt.wantStart {
+				want = []shimlife.StartCause{shimlife.StartMergeLeftLine}
+			}
+			if !slices.Equal(causes, want) {
+				t.Fatalf("starts = %v, want %v", causes, want)
+			}
+			rec, found := h.recordFor("info", "daemon.merge.return_session")
+			if found != tt.wantStart {
+				t.Fatalf("return_session INFO record found = %v, want %v", found, tt.wantStart)
+			}
+			if found && (rec.Context["workspace"] != string(theWorkspace) || rec.Context["cause"] != string(tt.cause) || rec.Context["repo"] != string(h.repoKey())) {
+				t.Fatalf("record context = %v, want the workspace, repo and cause", rec.Context)
+			}
+		})
+	}
+}
+
+func TestOnlyAnOwnBranchMergeWithNoPickHandsBackItsSession(t *testing.T) {
+	tests := []struct {
+		name   string
+		source wsm.MergeSource
+		want   int
+	}{
+		{name: "an own-branch merge", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, want: 1},
+		{name: "a merge workspace's merge with a pick", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Pick: "fix it"}},
+		{name: "another workspace's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace}},
+		{name: "a named branch's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "feature"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.o.returnSession(context.Background(), theWorkspace, h.repoKey(), tt.source, CauseUserDrop)
+
+			// Assert.
+			h.mu.Lock()
+			started := len(h.startedSessions)
+			h.mu.Unlock()
+			if started != tt.want {
+				t.Fatalf("sessions started = %d, want %d", started, tt.want)
+			}
+		})
+	}
+}
+
+func TestAFailedHandBackOfAParkedSessionIsRecordedAndTheDropStands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.startSessionErr = errors.New("the shim would not start")
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Evict = %v, want the drop to stand", err)
+	}
+	if _, err := h.o.queueOf(context.Background(), theWorkspace); err == nil {
+		t.Fatalf("the merge is still queued after its evict")
+	}
+	rec, found := h.recordFor("error", "daemon.merge.return_session")
+	if !found {
+		t.Fatalf("no ERROR record of the failed hand-back: %+v", h.logs.Records())
+	}
+	if rec.Context["error"] != "the shim would not start" || rec.Context["workspace"] != string(theWorkspace) || rec.Context["cause"] != string(CauseUserDrop) {
+		t.Fatalf("record context = %v, want the cause, the workspace and the error", rec.Context)
 	}
 }

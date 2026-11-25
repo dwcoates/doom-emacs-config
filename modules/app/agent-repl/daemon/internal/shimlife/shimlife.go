@@ -50,6 +50,11 @@ const (
 	// session of its own yet, its session started fresh on it (queue bypass
 	// mode's switch, workspace.verbs.swapConversation, not a rebind).
 	StartSwap StartCause = "swap"
+	// StartMergeLeftLine is a workspace's session brought back up once its own
+	// branch's merge, whose wait in line parked it, left the line without
+	// landing and without its workspace ending: evicted, dequeued, or behind
+	// a merge that did not land (merge.AbandonCause.returnsSession).
+	StartMergeLeftLine StartCause = "merge_left_line"
 	// StartUnstated is a start no caller stated a cause for: a wiring gap,
 	// which the fleet records at INFO so it is seen.
 	StartUnstated StartCause = "unstated"
@@ -74,12 +79,13 @@ func (c StartCause) ForWork() bool {
 // UserStarted reports whether a start of this cause is one the user asked for
 // that runs no turn of its own for certain: the restart verb, a relaunch of a
 // dead shim, a rebind, a swap, a cold gate's answer (a "pay" resumes with no
-// turn unless prompts were held at the gate). Such a session is held for wsm.ShimIdleHold from its
-// bring-up (wsm.Session.UserBroughtUpAt), so it is never parked the moment it
-// comes up.
+// turn unless prompts were held at the gate), and the session a merge's wait
+// in line parked handed back once the merge leaves the line without landing.
+// Such a session is held for wsm.ShimIdleHold from its bring-up
+// (wsm.Session.UserBroughtUpAt), so it is never parked the moment it comes up.
 func (c StartCause) UserStarted() bool {
 	switch c {
-	case StartRestart, StartRelaunch, StartRebind, StartSwap, StartColdGateAnswer:
+	case StartRestart, StartRelaunch, StartRebind, StartSwap, StartColdGateAnswer, StartMergeLeftLine:
 		return true
 	default:
 		return false

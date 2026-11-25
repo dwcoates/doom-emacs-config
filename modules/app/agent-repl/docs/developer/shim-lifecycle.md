@@ -28,6 +28,7 @@ shim still draws its whole conversation.
 | A swap onto a conversation with no vendor session yet (queue bypass mode's switch) | `workspace.verbs.swapConversation`, cause `swap` |
 | A deploy check's owed compaction, carried out at once | `workspace.verbs.CompactDeployCheck`, cause `compaction` |
 | A merge's prompt or repair, and a merge workspace's hand-off | `merge.orchestrator.ensureSession`, `workspace.verbs.StartMergeWorkspace`, cause `merge` |
+| An own-branch merge leaving its line without landing (evicted, dequeued, or behind a merge that did not land), handing back the session its wait parked | `merge.orchestrator.returnSession`, cause `merge_left_line` |
 | A model, permission-mode or effort pick on a workspace with no shim | `promptqueue` settings revival (`SubmitSessionAct`, `ReviveForSettings`) |
 | A boot, only for a shim that was up when the last daemon stopped | `bringup.OnlyWasUp`, in `boot` |
 | A handover, only to raise a recorded cold gate, which spawns nothing; every other session is handed over as it was (owner ruling, 2026-11-23) | `rollout.takeoverSplit` |

@@ -3963,6 +3963,11 @@ type harness struct {
 	turnCloses []wsm.TurnClose
 	// startedSessions records the revivals a configured prompt caused.
 	startedSessions []ids.WorkspaceID
+	// startCauses is the start cause each StartSession stated, in order.
+	startCauses []shimlife.StartCause
+	// startSessionErr is what StartSession answers, nil for a bring-up that
+	// succeeds.
+	startSessionErr error
 	// stoppedSessions records the landed workspaces whose sessions were reaped
 	// before their worktrees were removed.
 	stoppedSessions []ids.WorkspaceID
@@ -4450,10 +4455,16 @@ func (h *harness) deps() Deps {
 			h.registryPublishes++
 			return h.publishErr
 		},
-		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
+		StartSession: func(ctx context.Context, ws ids.WorkspaceID) error {
+			cause, _ := shimlife.StartOf(ctx)
 			h.mu.Lock()
 			h.startedSessions = append(h.startedSessions, ws)
+			h.startCauses = append(h.startCauses, cause)
+			err := h.startSessionErr
 			h.mu.Unlock()
+			if err != nil {
+				return err
+			}
 			h.db.mu.Lock()
 			h.db.sessions[ws] = wsm.Session{Workspace: ws}
 			h.db.mu.Unlock()

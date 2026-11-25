@@ -22,6 +22,7 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -565,6 +566,15 @@ func (c AbandonCause) releases() bool {
 	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseHiddenAtColdGate
 }
 
+// returnsSession reports whether a waiting merge leaving its line for C
+// leaves its workspace standing with nothing else to answer for its session:
+// an evict, a dequeue, or the merge ahead not landing. The session its wait
+// parked (parkQueued) is brought back up for it (returnSession). A close, a
+// shutdown, a backlog at a cold gate or a failed gate answer leave it parked.
+func (c AbandonCause) returnsSession() bool {
+	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseAheadDidNotLand
+}
+
 // requeues reports whether C puts the merge back at its place in line rather
 // than ending it (CauseColdGate): its run and its bubble end, its entry stays.
 func (c AbandonCause) requeues() bool {
@@ -1067,11 +1077,44 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	}
 	o.publishAbandonedWith(ctx, ws, ledger, entry, cause, o.queuedSentence(ws, cause, entry))
 	o.clearOffer(ws)
+	o.returnSession(ctx, ws, repo, entry.Source, cause)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}
 	o.kick(repo)
 	return nil
+}
+
+// returnSession brings WS's session back up once its own branch's merge,
+// whose wait in line parked it (parkQueued), left REPO's line for CAUSE
+// without landing while its workspace stands (AbandonCause.returnsSession).
+// The bring-up is the user's session handed back, held for wsm.ShimIdleHold
+// (shimlife.StartMergeLeftLine), so the park lasted only while the merge
+// waited. It runs on its own goroutine in a running daemon, so the drop never
+// waits on a revival; a failed bring-up is recorded here, and the workspace's
+// next prompt revives it as any parked session's does.
+func (o *orchestrator) returnSession(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource, cause AbandonCause) {
+	const op = "daemon.merge.return_session"
+	if source.Kind != wsm.MergeSourceOwnBranch || source.Pick != "" || !cause.returnsSession() {
+		return
+	}
+	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)}
+	log.Info(op, "the merge left its line without landing; the session its wait parked is brought back up", fields)
+	start := func(ctx context.Context) {
+		if err := o.deps.StartSession(shimlife.WithStart(ctx, shimlife.StartMergeLeftLine), ws); err != nil {
+			log.Error(op, "could not bring back up the session a merge's wait in line parked", withField(fields, "error", err.Error()))
+		}
+	}
+	if !o.async {
+		start(ctx)
+		return
+	}
+	o.live.Add(1)
+	inflight.Standing(func() {
+		defer o.live.Done()
+		start(context.WithoutCancel(ctx))
+	})
 }
 
 // takeOffQueue reads WS's entry in REPO and removes it for CAUSE, under WS's
