@@ -691,7 +691,15 @@ func (s Session) BringUpHold(lastTurnEnded *time.Time, now time.Time) ShimHold {
 	if lastTurnEnded != nil && lastTurnEnded.After(*s.UserBroughtUpAt) {
 		return ShimHold{}
 	}
-	if until := s.UserBroughtUpAt.Add(ShimIdleHold); now.Before(until) {
+	return IdleHoldFrom(*s.UserBroughtUpAt, now)
+}
+
+// IdleHoldFrom answers the hold of an idle shim AT NOW that ShimIdleHold
+// after AT keeps up: until then, and none once it has passed. Every
+// fifteen-minute shim clock (a user-asked bring-up, a turn's end, an
+// interaction) is read through it.
+func IdleHoldFrom(at, now time.Time) ShimHold {
+	if until := at.Add(ShimIdleHold); now.Before(until) {
 		return ShimHold{Until: until}
 	}
 	return ShimHold{}

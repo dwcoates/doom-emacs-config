@@ -153,10 +153,7 @@ func shimHoldOf(in pageInputs, now time.Time) wsm.ShimHold {
 	if idle == nil {
 		return wsm.ShimHold{}
 	}
-	if deadline := idle.Add(ShimIdleHold); now.Before(deadline) {
-		return wsm.ShimHold{Until: deadline}
-	}
-	return wsm.ShimHold{}
+	return wsm.IdleHoldFrom(*idle, now)
 }
 
 // laterOf answers the later of A and B, either nil when unknown; nil when

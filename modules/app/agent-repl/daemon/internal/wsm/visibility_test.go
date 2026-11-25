@@ -419,3 +419,36 @@ func TestShimHoldLater(t *testing.T) {
 		})
 	}
 }
+
+func TestIdleHoldFrom(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	tests := []struct {
+		name string
+		at   time.Time
+		want ShimHold
+	}{
+		{name: "inside the hold it runs until the hold's end", at: now.Add(-time.Minute), want: ShimHold{Until: now.Add(ShimIdleHold - time.Minute)}},
+		{name: "at the hold's end it holds none", at: now.Add(-ShimIdleHold), want: ShimHold{}},
+		{name: "past the hold it holds none", at: now.Add(-2 * ShimIdleHold), want: ShimHold{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := IdleHoldFrom(tt.at, now); got != tt.want {
+				t.Fatalf("IdleHoldFrom = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAUserBringUpHoldIsTheIdleHoldFromItsBringUp(t *testing.T) {
+	// Arrange
+	now := time.UnixMilli(1_700_000_000_000)
+	up := now.Add(-time.Minute)
+	s := Session{UserBroughtUpAt: &up}
+
+	// Act / Assert
+	if got, want := s.BringUpHold(nil, now), IdleHoldFrom(up, now); got != want {
+		t.Fatalf("BringUpHold = %+v, want IdleHoldFrom's %+v", got, want)
+	}
+}

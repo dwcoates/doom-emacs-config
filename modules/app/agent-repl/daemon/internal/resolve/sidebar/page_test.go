@@ -206,3 +206,15 @@ func TestLastTurnEnd(t *testing.T) {
 		})
 	}
 }
+
+func TestAnIdleWorkspacesShimHoldIsTheIdleHoldFromItsLaterClock(t *testing.T) {
+	// Arrange
+	now := time.UnixMilli(1_700_000_000_000)
+	ended, interacted := now.Add(-2*time.Minute), now.Add(-time.Minute)
+	in := pageInputs{visible: true, turnEndedAt: &ended, interactedAt: &interacted}
+
+	// Act / Assert
+	if got, want := shimHoldOf(in, now), wsm.IdleHoldFrom(interacted, now); got != want {
+		t.Fatalf("shimHoldOf = %+v, want IdleHoldFrom's %+v", got, want)
+	}
+}
