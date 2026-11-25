@@ -69,6 +69,16 @@ export function setWorkspaceNameRefusal(cause: CauseOf<SetWorkspaceNameError>): 
       if (holder === "pending") return `${cause.value.name} is being given to a workspace that is being created`;
       return unreachableArm("SetWorkspaceNameTaken.holder", String(holder));
     }
+    case "merging":
+      return "a merge is landing this workspace; rename it once the merge has landed or left the queue";
+    case "branchPublished":
+      return `its branch tracks ${cause.value.upstream}, so moving it would part it from that remote branch`;
+    case "branchExists":
+      return `a branch named ${cause.value.branch} already exists`;
+    case "directoryExists":
+      return `the directory ${cause.value.dir} already exists`;
+    case "moving":
+      return "it is moving for its previous rename right now; rename it again in a moment";
     default:
       return unreachableArm("SetWorkspaceNameError.cause", cause.case);
   }

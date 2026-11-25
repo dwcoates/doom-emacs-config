@@ -2,10 +2,7 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"strings"
 	"sync"
 
@@ -153,7 +150,7 @@ func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (strin
 		log.Error(opNaming, "could not resolve the repository the async merge's worktree would be cut in", dlog.WithCause(fields, err))
 		return "", nil, false, fmt.Errorf("resolve the main worktree of %q: %w", repoDir, err)
 	}
-	occupied, dir, err := worktreeOccupied(main, branch)
+	occupied, dir, err := v.worktreeOccupied(ctx, main, branch)
 	if err != nil {
 		log.Error(opNaming, "could not ask whether the async merge's worktree directory is free", dlog.WithCause(fields, err))
 		return "", nil, false, err
@@ -168,26 +165,35 @@ func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (strin
 
 // worktreeOccupied answers whether the directory BRANCH's worktree would be
 // materialized at in the repository REPODIR names (WorktreeDir, the same
-// derivation Create materializes by) is already on disk, and that directory.
+// derivation Create materializes by) is already taken, and that directory:
+// on disk, or by a rename's move owed to go there (wsm.OwedMove), which
+// stands there once the workspace falls free.
 //
-// A DIRECTORY IS A NAME TOO. The directory is the branch's BARE component, so
-// "fix/outage-recovery" and "outage-recovery" are two branches with one
-// directory: an async merge named after a branch whose worktree still stood
-// passed every branch check, was recorded, and then failed `git worktree add`
-// at the fork after the requesting turn had ended (2026-10-20). Asked when the
-// name is chosen, the name is refused, or passed over, before anything is
-// recorded.
-func worktreeOccupied(repoDir, branch string) (bool, string, error) {
+// The directory is a fact apart from the branch: an async merge named after a
+// branch whose worktree still stood passed every branch check, was recorded,
+// and then failed `git worktree add` at the fork after the requesting turn had
+// ended (2026-10-20). Asked when the name is chosen, the name is refused, or
+// passed over, before anything is recorded.
+func (v *verbs) worktreeOccupied(ctx context.Context, repoDir, branch string) (bool, string, error) {
 	dir, err := WorktreeDir(repoDir, branch)
 	if err != nil {
 		return false, "", fmt.Errorf("derive the worktree directory of %q: %w", branch, err)
 	}
-	switch _, err := os.Lstat(dir); {
-	case err == nil:
-		return true, dir, nil
-	case errors.Is(err, fs.ErrNotExist):
-		return false, dir, nil
-	default:
+	present, err := pathPresent(dir)
+	if err != nil {
 		return false, dir, fmt.Errorf("stat the worktree directory %q: %w", dir, err)
 	}
+	if present {
+		return true, dir, nil
+	}
+	moves, err := v.deps.DB.OwedMoves(ctx)
+	if err != nil {
+		return false, dir, fmt.Errorf("read the owed moves: %w", err)
+	}
+	for _, m := range moves {
+		if m.To.Dir == dir {
+			return true, dir, nil
+		}
+	}
+	return false, dir, nil
 }

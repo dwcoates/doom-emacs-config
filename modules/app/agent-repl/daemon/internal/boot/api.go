@@ -240,6 +240,11 @@ type Deps struct {
 	// is its own ERROR and stays owed, and only an unreadable registry fails
 	// the boot. Required.
 	FinishOwedNukes func(ctx context.Context) error
+	// FinishMovingMoves finishes every rename's move that had stood its
+	// workspace's shim down (workspace.Verbs.FinishMovingMoves). It runs
+	// before the registry is read, so the boot reads each workspace at the
+	// branch and directory it actually has.
+	FinishMovingMoves func(ctx context.Context) error
 	// OpenThreads opens every chat thread in the chat service, naming each
 	// after its first question and abbreviating its questions
 	// (workspace.Verbs.OpenThreads). It runs beside
@@ -427,6 +432,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a home-repository ensurer")
 	case deps.FinishOwedNukes == nil:
 		return nil, missing("an owed-nuke finisher")
+	case deps.FinishMovingMoves == nil:
+		return nil, missing("an owed-move finisher")
 	case deps.OpenThreads == nil:
 		return nil, missing("a thread opener")
 	case deps.SettleMissingDirectory == nil:

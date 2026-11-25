@@ -90,6 +90,12 @@ func TestAStoppedGateRefusesThePathScopedCommands(t *testing.T) {
 			_, err := g.CommitPath(context.Background(), "/repo", "/repo/a.md", "m")
 			return err
 		}},
+		{name: "MoveWorktree", call: func(g *gatedGit) error {
+			return g.MoveWorktree(context.Background(), "/repo", "/a", "/b")
+		}},
+		{name: "RenameBranch", call: func(g *gatedGit) error {
+			return g.RenameBranch(context.Background(), "/repo", "a", "b")
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

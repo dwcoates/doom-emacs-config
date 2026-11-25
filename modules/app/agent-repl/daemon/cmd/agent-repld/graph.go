@@ -1287,6 +1287,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE ORCHESTRATOR, through the forwarder: it is built below, and is
 	// told each lease change through the queue's lease sink.
 	mergeMover := &mergeForwarder{}
+	moves := &moveForwarder{}
 	// A SETTINGS PICK'S SHIM IS A VISIT: the queue notes its start on the
 	// workspace's row, and the cache keeper owns its stand-down until it ends
 	// (cachelapse/standdown.go).
@@ -1483,6 +1484,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Reconnects:              p.Reconnects,
 		Reports:                 detachedRef,
 		Merges:                  mergeMover,
+		Moves:                   moves,
 		QueuedCreates:           queuedCreates,
 		HoldoutWarnEvery:        holdoutWarnEvery,
 		FactsBound:              factsBound,
@@ -1911,6 +1913,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the workspace verbs: %w", err)
 	}
+	moves.bind(verbs)
 	verbsRef.bind(verbs)
 	foldSweeper, err := foldsweep.New(foldsweep.Deps{DB: p.DB, Folder: verbs, Log: p.Surfaces})
 	if err != nil {
@@ -2307,6 +2310,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				return verbs.EnsureHomeRepository(ctx, homeRepositoryCheckout(paths.Checkout, os.Getenv))
 			},
 			FinishOwedNukes:        verbs.FinishOwedNukes,
+			FinishMovingMoves:      verbs.FinishMovingMoves,
 			OpenThreads:            verbs.OpenThreads,
 			SettleMissingDirectory: verbs.SettleMissingDirectory,
 			Layout:                 p.Layout,

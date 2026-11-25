@@ -915,6 +915,7 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 		c.log.Error(opTransfer, "the taken-back workspace's merges could not be taken back", dlog.WithCause(fields, err))
 		failures = append(failures, fmt.Errorf("rollout: reclaim %q: take its merges back: %w", ws, err))
 	}
+	c.TakeUpOwedMove(ctx, ws)
 	if c.deps.PublishViews != nil {
 		if err := c.deps.PublishViews(ctx, ws); err != nil {
 			c.log.Error(opTransfer, "the taken-back workspace's views could not be republished", dlog.WithCause(fields, err))

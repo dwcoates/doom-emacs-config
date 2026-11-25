@@ -3,15 +3,20 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 )
 
@@ -22,8 +27,24 @@ func renameFixture(t *testing.T) *fixture {
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "")
 	t.Setenv(LegacyPrefixEnv, "")
-	f.workspace("w1", t.TempDir())
+	f.workspace("w1", renameWorktree(t))
 	return f
+}
+
+// renameWorktree is a linked worktree's directory inside a repository whose
+// main worktree holds a `.git` directory, so the directory a rename moves it
+// to (WorktreeDir) is derived, under the test's own temp dir.
+func renameWorktree(t *testing.T) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	dir := filepath.Join(repo, "w1")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // renamePublished reports what the rename republished, for a test that
@@ -55,7 +76,8 @@ func TestSetNameRecordsTheNameAndRepublishesEverySurface(t *testing.T) {
 	registries := len(f.sidebar.registries)
 
 	// Act.
-	name, err := f.verbs.SetName(context.Background(), "w1", "  better-name  ")
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "  better-name  ")
+	name := renamed.Name
 
 	// Assert: the name alone changed, and every surface drawing it was told.
 	if err != nil || name != "better-name" {
@@ -125,7 +147,8 @@ func TestSetNameAppliesTheWorkspaceNamePrefix(t *testing.T) {
 	t.Setenv(PrefixEnv, "ABC")
 
 	// Act.
-	name, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+	name := renamed.Name
 
 	// Assert.
 	if err != nil || name != "ABC/better-name" || f.db.workspaces["w1"].Name != "ABC/better-name" {
@@ -134,12 +157,14 @@ func TestSetNameAppliesTheWorkspaceNamePrefix(t *testing.T) {
 }
 
 func TestSetNameToTheNameItHasChangesNothing(t *testing.T) {
-	// Arrange.
+	// Arrange: w1's branch and directory already carry its name.
 	f := renameFixture(t)
+	carriesName(t, f, "w1", "sample")
 	registries := len(f.sidebar.registries)
 
 	// Act.
-	name, err := f.verbs.SetName(context.Background(), "w1", "sample")
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "sample")
+	name := renamed.Name
 
 	// Assert.
 	if err != nil || name != "sample" {
@@ -159,7 +184,8 @@ func TestSetNameMayNameTheWorkspaceAfterItsOwnBranch(t *testing.T) {
 	f := renameFixture(t)
 
 	// Act.
-	name, err := f.verbs.SetName(context.Background(), "w1", "ABC/sample")
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "ABC/sample")
+	name := renamed.Name
 
 	// Assert.
 	if err != nil || name != "ABC/sample" {
@@ -188,7 +214,8 @@ func TestSetNameGivesAMediatorItsOwnRolesName(t *testing.T) {
 			f.db.workspaces["w1"] = ws
 
 			// Act.
-			name, err := f.verbs.SetName(context.Background(), "w1", tc.requested)
+			renamed, err := f.verbs.SetName(context.Background(), "w1", tc.requested)
+			name := renamed.Name
 
 			// Assert.
 			if tc.wantArm == "" {
@@ -406,7 +433,8 @@ func TestSetNameStandsWhenASurfaceCannotBeRepublished(t *testing.T) {
 			tt.arrange(f)
 
 			// Act.
-			name, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+			renamed, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+			name := renamed.Name
 
 			// Assert: the rename is recorded and answered, and the surface that
 			// could not follow is on the record.
@@ -416,6 +444,422 @@ func TestSetNameStandsWhenASurfaceCannotBeRepublished(t *testing.T) {
 			r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tt.level, Operation: opSetName, Message: tt.message})
 			if !ok || r.Context["cause"] == nil {
 				t.Errorf("no %s %s record %q naming the cause: %+v", tt.level, opSetName, tt.message, f.log.logger.Records())
+			}
+		})
+	}
+}
+
+// carriesName moves WS's record to the branch NAME and the directory a rename to
+// NAME derives, creating that directory, so the workspace already carries the
+// name everywhere.
+func carriesName(t *testing.T, f *fixture, ws ids.WorkspaceID, name string) {
+	t.Helper()
+	record := f.db.workspaces[ws]
+	repo, _ := wsm.RepositoryWithID(f.db.repositories, record.Repo)
+	dir, err := WorktreeDir(repo.Dir, name)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record.Name, record.Branch, record.Dir = name, name, dir
+	f.db.workspaces[ws] = record
+}
+
+// targetOf is the directory a rename of WS to NAME moves it to.
+func targetOf(t *testing.T, f *fixture, ws ids.WorkspaceID, name string) string {
+	t.Helper()
+	repo, _ := wsm.RepositoryWithID(f.db.repositories, f.db.workspaces[ws].Repo)
+	dir, err := WorktreeDir(repo.Dir, name)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	return dir
+}
+
+func TestSetNameOwesTheMoveOfAnOpenWorkspaceAndAsksForIt(t *testing.T) {
+	// Arrange
+	f := renameFixture(t)
+	before := f.db.workspaces["w1"]
+
+	// Act
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+
+	// Assert: the name is recorded, the move is owed to the derived branch
+	// and directory, and the bounce registry is asked to run it unforced.
+	if err != nil || renamed.Move != MoveOwed || renamed.To.Branch != "better-name" || renamed.To.Dir != targetOf(t, f, "w1", "better-name") {
+		t.Fatalf("SetName = (%+v, %v), want the move owed to better-name", renamed, err)
+	}
+	if m, owed := f.db.owedMoves["w1"]; !owed || m.From.Dir != before.Dir || m.From.Branch != before.Branch {
+		t.Fatalf("owed move = %+v (%v), want one from w1's branch and directory", m, owed)
+	}
+	if calls := f.rollout.relaunches; len(calls) != 1 || calls[0].Reason != rollout.ReasonRename || calls[0].Force {
+		t.Fatalf("bounces = %+v, want one unforced rename", calls)
+	}
+}
+
+func TestSetNameToItsOwnNameMovesABranchThatDiffers(t *testing.T) {
+	// Arrange: w1 is named "sample" on branch "ABC/sample".
+	f := renameFixture(t)
+
+	// Act
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "sample")
+
+	// Assert
+	if err != nil || renamed.Move != MoveOwed || renamed.To.Branch != "sample" {
+		t.Fatalf("SetName = (%+v, %v), want its branch and directory moved to its name", renamed, err)
+	}
+}
+
+func TestSetNameOfAClosedWorkspaceMovesItAtOnce(t *testing.T) {
+	// Arrange
+	f := renameFixture(t)
+	ws := f.db.workspaces["w1"]
+	ws.Closed = true
+	f.db.workspaces["w1"] = ws
+	f.git.existingBranches = map[string]bool{"ABC/sample": true}
+	to := targetOf(t, f, "w1", "better-name")
+
+	// Act
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+
+	// Assert
+	if err != nil || renamed.Move != MoveMoved {
+		t.Fatalf("SetName = (%+v, %v), want the move made before the answer", renamed, err)
+	}
+	after := f.db.workspaces["w1"]
+	if after.Branch != "better-name" || after.Dir != to {
+		t.Fatalf("record = (%q, %q), want the moved branch and directory %s", after.Branch, after.Dir, to)
+	}
+	if _, err := os.Stat(to); err != nil {
+		t.Fatalf("the worktree is not at its new directory: %v", err)
+	}
+	if len(f.rollout.relaunches) != 0 {
+		t.Fatalf("bounces = %+v, want none for a closed workspace", f.rollout.relaunches)
+	}
+}
+
+func TestSetNameOfAMainCheckoutMovesNothing(t *testing.T) {
+	// Arrange: w1 is its repository's main checkout.
+	f := renameFixture(t)
+	ws := f.db.workspaces["w1"]
+	f.db.repositories = []wsm.Repository{{ID: ws.Repo, Dir: ws.Dir}}
+
+	// Act
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+
+	// Assert
+	if err != nil || renamed.Move != MoveNone || f.db.workspaces["w1"].Name != "better-name" {
+		t.Fatalf("SetName = (%+v, %v), want the name alone changed", renamed, err)
+	}
+	if len(f.db.owedMoves) != 0 || len(f.rollout.relaunches) != 0 {
+		t.Fatalf("owed moves %v, bounces %v; want none", f.db.owedMoves, f.rollout.relaunches)
+	}
+}
+
+func TestSetNameRefusesAMoveItCannotMake(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture)
+		arm     string
+		field   string
+	}{
+		{name: "its merge stands in a queue", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
+			ws := f.db.workspaces["w1"]
+			ws.MergePending = true
+			f.db.workspaces["w1"] = ws
+		}},
+		{name: "a merge holds its lease", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
+			f.db.lease = &wsm.Lease{Holder: wsm.HolderMerge}
+		}},
+		{name: "an async merge waits on its branch", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
+			f.db.asyncRequests = []wsm.AsyncMergeRequest{{Source: wsm.MergeSource{Branch: "ABC/sample"}}}
+		}},
+		{name: "its branch tracks a remote one", arm: ArmBranchPublished, field: "upstream", arrange: func(_ *testing.T, f *fixture) {
+			f.git.existingBranches = map[string]bool{"ABC/sample": true}
+			f.git.upstreams = map[string]gitclient.Upstream{"ABC/sample": {Remote: "origin", Ref: "origin/ABC/sample", Branch: "ABC/sample"}}
+		}},
+		{name: "a branch by the new name exists", arm: ArmBranchExists, field: "branch", arrange: func(_ *testing.T, f *fixture) {
+			f.git.existingBranches = map[string]bool{"better-name": true}
+		}},
+		{name: "the new directory exists", arm: ArmDirectoryExists, field: "dir", arrange: func(t *testing.T, f *fixture) {
+			if err := os.MkdirAll(targetOf(t, f, "w1", "better-name"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "its previous move is under way", arm: ArmMoving, arrange: func(_ *testing.T, f *fixture) {
+			f.db.owedMoves = map[ids.WorkspaceID]wsm.OwedMove{"w1": {Workspace: "w1", Moving: true}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := renameFixture(t)
+			tt.arrange(t, f)
+			registries := len(f.sidebar.registries)
+
+			// Act
+			_, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+
+			// Assert: refused on its arm, nothing recorded or asked for.
+			refusal := asRefusal(t, err, tt.arm)
+			if tt.field != "" && refusal.Fields[tt.field] == nil {
+				t.Errorf("refusal fields = %v, want %s", refusal.Fields, tt.field)
+			}
+			if got := f.db.workspaces["w1"].Name; got != "sample" {
+				t.Errorf("name = %q, want the unchanged sample", got)
+			}
+			if published := renamePublished(f, registries); len(published) != 0 {
+				t.Errorf("republished %v for a refused rename", published)
+			}
+			if len(f.rollout.relaunches) != 0 {
+				t.Errorf("bounces = %+v, want none", f.rollout.relaunches)
+			}
+		})
+	}
+}
+
+func TestSetNameWhoseMoveTheRegistryRefusesStaysOwed(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		level string
+	}{
+		{name: "a workspace moving to another daemon is that daemon's to move", err: bounce.ErrMovedAway, level: dlog.LevelInfo},
+		{name: "any other refusal is an error", err: errors.New("registry closed"), level: dlog.LevelError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := renameFixture(t)
+			f.rollout.refuseErr = tt.err
+
+			// Act
+			renamed, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+
+			// Assert
+			if err != nil || renamed.Move != MoveOwed {
+				t.Fatalf("SetName = (%+v, %v), want the move owed", renamed, err)
+			}
+			if _, owed := f.db.owedMoves["w1"]; !owed {
+				t.Fatal("the move is not owed")
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tt.level, Operation: opRenameMove}); !ok {
+				t.Fatalf("records = %v, want one at %s", f.log.logger.Records(), tt.level)
+			}
+		})
+	}
+}
+
+func TestApplyOwedMoveMovesEverythingThenTheRecords(t *testing.T) {
+	// Arrange
+	f := renameFixture(t)
+	from := f.db.workspaces["w1"].Dir
+	f.git.existingBranches = map[string]bool{"ABC/sample": true}
+	if _, err := f.verbs.SetName(context.Background(), "w1", "better-name"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	to := targetOf(t, f, "w1", "better-name")
+	registries := len(f.sidebar.registries)
+
+	// Act
+	err := f.verbs.ApplyOwedMove(context.Background(), "w1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ApplyOwedMove: %v", err)
+	}
+	if !slices.Equal(f.git.moves, [][2]string{{from, to}}) || !slices.Equal(f.git.renamedBranches, [][2]string{{"ABC/sample", "better-name"}}) {
+		t.Fatalf("git moves %v, renames %v; want the worktree and the branch moved", f.git.moves, f.git.renamedBranches)
+	}
+	if !slices.Equal(f.account.projectMoves, [][2]string{{from, to}}) {
+		t.Fatalf("project moves = %v, want the vendor folder moved", f.account.projectMoves)
+	}
+	after := f.db.workspaces["w1"]
+	if after.Branch != "better-name" || after.Dir != to || len(f.db.owedMoves) != 0 {
+		t.Fatalf("record = (%q, %q), owed %v; want the move completed", after.Branch, after.Dir, f.db.owedMoves)
+	}
+	if len(f.sidebar.registries) == registries {
+		t.Fatal("the roster was not republished with the moved directory")
+	}
+}
+
+func TestApplyOwedMoveWithNothingOwedDoesNothing(t *testing.T) {
+	// Arrange
+	f := renameFixture(t)
+
+	// Act
+	err := f.verbs.ApplyOwedMove(context.Background(), "w1")
+
+	// Assert
+	if err != nil || len(f.git.moves) != 0 {
+		t.Fatalf("ApplyOwedMove = %v, moves %v; want nothing done", err, f.git.moves)
+	}
+}
+
+func TestApplyOwedMoveSkipsWhatIsNotOnDisk(t *testing.T) {
+	// Arrange: the worktree and the branch are gone (a landed workspace).
+	f := renameFixture(t)
+	if _, err := f.verbs.SetName(context.Background(), "w1", "better-name"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	if err := os.RemoveAll(f.db.workspaces["w1"].Dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := f.verbs.ApplyOwedMove(context.Background(), "w1")
+
+	// Assert
+	if err != nil || len(f.git.moves) != 0 || len(f.git.renamedBranches) != 0 {
+		t.Fatalf("ApplyOwedMove = %v, moves %v, renames %v; want only the records moved", err, f.git.moves, f.git.renamedBranches)
+	}
+	if f.db.workspaces["w1"].Branch != "better-name" {
+		t.Fatal("the records did not take the new branch")
+	}
+}
+
+func TestApplyOwedMoveFailsLoudlyAndStaysOwed(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture) error
+		message string
+	}{
+		{name: "the move cannot be marked begun", message: "could not record that the move begins; nothing is moved", arrange: func(f *fixture) error {
+			f.db.markMovingErr = errors.New("disk full")
+			return f.db.markMovingErr
+		}},
+		{name: "the worktree cannot move", arrange: func(f *fixture) error {
+			f.git.moveErr = errors.New("locked")
+			return f.git.moveErr
+		}},
+		{name: "the vendor folder cannot move", arrange: func(f *fixture) error {
+			f.account.projectMoveErr = errors.New("collision")
+			return f.account.projectMoveErr
+		}},
+		{name: "the records cannot take the move", message: "the branch and directory moved but the records could not take them; the next boot finishes the move", arrange: func(f *fixture) error {
+			f.db.completeMoveErr = errors.New("disk full")
+			return f.db.completeMoveErr
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := renameFixture(t)
+			if _, err := f.verbs.SetName(context.Background(), "w1", "better-name"); err != nil {
+				t.Fatalf("SetName: %v", err)
+			}
+			cause := tt.arrange(f)
+
+			// Act
+			err := f.verbs.ApplyOwedMove(context.Background(), "w1")
+
+			// Assert: the cause surfaces, the move stays owed, and the
+			// verb's own step is recorded at ERROR when it is the verb's.
+			if !errors.Is(err, cause) {
+				t.Fatalf("ApplyOwedMove = %v, want %v", err, cause)
+			}
+			if _, owed := f.db.owedMoves["w1"]; !owed {
+				t.Fatal("the failed move is no longer owed")
+			}
+			if tt.message != "" {
+				if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRenameMove, Message: tt.message}); !ok {
+					t.Fatalf("records = %v, want %q at ERROR", f.log.logger.Records(), tt.message)
+				}
+			}
+		})
+	}
+}
+
+func TestFinishMovingMovesFinishesOnlyTheMovesUnderWay(t *testing.T) {
+	// Arrange: w1's move had begun; w2's had not.
+	f := renameFixture(t)
+	f.workspace("w2", renameWorktree(t))
+	for _, ws := range []ids.WorkspaceID{"w1", "w2"} {
+		if _, err := f.verbs.SetName(context.Background(), ws, "moved-"+string(ws)); err != nil {
+			t.Fatalf("SetName(%s): %v", ws, err)
+		}
+	}
+	m := f.db.owedMoves["w1"]
+	m.Moving = true
+	f.db.owedMoves["w1"] = m
+
+	// Act
+	err := f.verbs.FinishMovingMoves(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FinishMovingMoves: %v", err)
+	}
+	if _, owed := f.db.owedMoves["w1"]; owed {
+		t.Fatal("the move under way was not finished")
+	}
+	if _, owed := f.db.owedMoves["w2"]; !owed {
+		t.Fatal("the move not yet begun was run at boot; its bounce runs it")
+	}
+}
+
+func TestMoveOwedIsTrueOnlyForAMoveNotUnderWay(t *testing.T) {
+	tests := []struct {
+		name  string
+		moves map[ids.WorkspaceID]wsm.OwedMove
+		want  bool
+	}{
+		{name: "no move owed", want: false},
+		{name: "a move owed", moves: map[ids.WorkspaceID]wsm.OwedMove{"w1": {Workspace: "w1"}}, want: true},
+		{name: "a move under way", moves: map[ids.WorkspaceID]wsm.OwedMove{"w1": {Workspace: "w1", Moving: true}}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := renameFixture(t)
+			f.db.owedMoves = tt.moves
+
+			// Act
+			got, err := f.verbs.MoveOwed(context.Background(), "w1")
+
+			// Assert
+			if err != nil || got != tt.want {
+				t.Fatalf("MoveOwed = (%v, %v), want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorktreeOccupied(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture, repo string)
+		want    bool
+	}{
+		{name: "a free directory", want: false},
+		{name: "a directory on disk", want: true, arrange: func(t *testing.T, f *fixture, repo string) {
+			dir, _ := WorktreeDir(repo, "better-name")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "a directory a rename's move is owed to", want: true, arrange: func(t *testing.T, f *fixture, repo string) {
+			dir, _ := WorktreeDir(repo, "better-name")
+			f.db.owedMoves = map[ids.WorkspaceID]wsm.OwedMove{"w1": {Workspace: "w1", To: wsm.MoveTarget{Branch: "better-name", Dir: dir}}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := renameFixture(t)
+			repo, _ := wsm.RepositoryWithID(f.db.repositories, f.db.workspaces["w1"].Repo)
+			if tt.arrange != nil {
+				tt.arrange(t, f, repo.Dir)
+			}
+
+			// Act: a prefixed name shares the bare name's directory.
+			occupied, _, err := f.verbs.(*verbs).worktreeOccupied(context.Background(), repo.Dir, "ABC/better-name")
+
+			// Assert
+			if err != nil || occupied != tt.want {
+				t.Fatalf("worktreeOccupied = (%v, %v), want %v", occupied, err, tt.want)
 			}
 		})
 	}

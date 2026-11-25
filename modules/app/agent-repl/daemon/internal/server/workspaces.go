@@ -1524,8 +1524,10 @@ func (s *server) ChangeWorkspaceLinks(
 	return connect.NewResponse(resp), nil
 }
 
-// SetWorkspaceName renames the workspace: its name only, never its branch or
-// its directory. The new name arrives on the roster and topbar streams.
+// SetWorkspaceName renames the workspace totally: its branch and directory
+// move with its name, now or at its next freeness (workspace.Verbs.SetName).
+// The new name arrives on the roster and topbar streams, and the moved
+// directory on the roster once the move has run.
 func (s *server) SetWorkspaceName(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceNameRequest],
@@ -1539,14 +1541,29 @@ func (s *server) SetWorkspaceName(
 	if done {
 		return answer(resp, cerr)
 	}
-	name, err := s.deps.Verbs.SetName(ctx, subject.Record.ID, req.Msg.GetName())
+	renamed, err := s.deps.Verbs.SetName(ctx, subject.Record.ID, req.Msg.GetName())
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.SetWorkspaceNameResponse_Success{
-		Success: &agentreplv1.SetWorkspaceNameSuccess{Name: name, RosterRevision: s.deps.Sidebar.Revision()},
+		Success: &agentreplv1.SetWorkspaceNameSuccess{Name: renamed.Name, RosterRevision: s.deps.Sidebar.Revision(), Move: renameMove(renamed)},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// renameMove is where RENAMED's move stands, on the wire.
+func renameMove(renamed workspace.Renamed) *agentreplv1.SetWorkspaceNameMove {
+	switch renamed.Move {
+	case workspace.MoveOwed:
+		return &agentreplv1.SetWorkspaceNameMove{State: &agentreplv1.SetWorkspaceNameMove_Owed{
+			Owed: &agentreplv1.SetWorkspaceNameMoveOwed{Branch: renamed.To.Branch, Dir: renamed.To.Dir}}}
+	case workspace.MoveMoved:
+		return &agentreplv1.SetWorkspaceNameMove{State: &agentreplv1.SetWorkspaceNameMove_Moved{
+			Moved: &agentreplv1.SetWorkspaceNameMoved{Branch: renamed.To.Branch, Dir: renamed.To.Dir}}}
+	case workspace.MoveNone:
+		return &agentreplv1.SetWorkspaceNameMove{State: &agentreplv1.SetWorkspaceNameMove_None{None: &agentreplv1.SetWorkspaceNameMoveNone{}}}
+	}
+	panic(fmt.Sprintf("SetWorkspaceName: a rename's move %d has no wire arm", renamed.Move))
 }
 
 // SetWorkspaceSummary records the one-sentence summary of a workspace's task

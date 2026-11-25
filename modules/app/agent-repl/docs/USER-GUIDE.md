@@ -309,9 +309,16 @@ A rename changes the workspace's name and nothing else.
   - the top bar;
   - the footer of any workspace waiting on it;
   - the merge queue.
-- **The branch and the worktree directory keep their names.**
-  - The running session keeps working where it was.
-  - `agent-repld workspace status WS` still shows the branch.
+- **The branch and the worktree directory move with the name.**
+  - The old name, branch and directory are free for any other workspace afterwards.
+  - A workspace in the middle of a turn finishes it first; the move runs as soon as nothing is running in it.
+  - While it moves, prompts you send wait, and then the same conversation carries on in the new directory.
+  - The Emacs tab and every buffer working in the workspace follow it to the new directory.
+  - A repository's main checkout keeps its branch and directory: only its name changes.
+- **A move is refused while it could not be made safely:**
+  - a merge is landing the workspace;
+  - its branch tracks a branch on a remote, which a pull request names;
+  - a branch or a directory by the new name already exists.
 - **Every agent CLI call names the workspace by its new name from then on.** The old name no longer resolves.
 - **A name follows the same rule as `workspace create -name`:**
   - lowercase words joined by hyphens;

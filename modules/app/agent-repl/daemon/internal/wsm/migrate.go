@@ -400,6 +400,8 @@ var migrations = []migration{
 	// (backlogged.go).
 	{To: 210, Name: "workspaces_backlogged", Kind: MigrationAdditive, DDL: backloggedDDL},
 	{To: 211, Name: "retired_hidden_columns", Kind: MigrationContract, DDL: retiredHiddenColumnsDDL},
+	// IT IS ADDITIVE: one new table the previous build never names.
+	{To: 212, Name: "owed_moves", Kind: MigrationAdditive, DDL: owedMovesDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

@@ -1231,7 +1231,9 @@ type harness struct {
 	restarts *restarttimingtest.Recorder
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
 	// "adopt <ws>"; suspendErr and adoptErr fail them.
-	merges        *fakeMerges
+	merges *fakeMerges
+	// moves is the rename moves' applier.
+	moves         *fakeMoves
 	queuedCreates *fakeQueuedCreates
 	reports       *fakeReports
 	// endLifetime ends the controller's lifetime, as the daemon's stand-down
@@ -1392,6 +1394,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		hotReload:      &fakeHotReload{},
 		startErr:       make(map[ids.WorkspaceID]error),
 		merges:         &fakeMerges{order: order},
+		moves:          &fakeMoves{order: order, owed: map[ids.WorkspaceID]bool{}},
 		queuedCreates:  &fakeQueuedCreates{},
 		restarts:       &restarttimingtest.Recorder{},
 		creates:        creategate.New(),
@@ -1418,6 +1421,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		Creates:               h.creates,
 		Reports:               h.reports,
 		Merges:                h.merges,
+		Moves:                 h.moves,
 		QueuedCreates:         h.queuedCreates,
 		SelfExe:               filepath.Join(state, "agent-repld"),
 		SelfAddress:           "127.0.0.1:7777",
@@ -1763,6 +1767,32 @@ func (h *harness) Unreported() []stateUnreportedCall {
 
 // fakeMerges is the merge mover: it records each call on the harness's shared
 // order, so a test asserts a merge stops before its shim moves.
+// fakeMoves applies the rename moves: each apply is recorded as "move" in the
+// step order, applyErr fails it, owed is what MoveOwed answers, and owedErr
+// fails that read.
+type fakeMoves struct {
+	order    *steps
+	mu       sync.Mutex
+	applied  []ids.WorkspaceID
+	applyErr error
+	owed     map[ids.WorkspaceID]bool
+	owedErr  error
+}
+
+func (f *fakeMoves) ApplyOwedMove(_ context.Context, ws ids.WorkspaceID) error {
+	f.order.record("move")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.applied = append(f.applied, ws)
+	return f.applyErr
+}
+
+func (f *fakeMoves) MoveOwed(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.owed[ws], f.owedErr
+}
+
 type fakeMerges struct {
 	order      *steps
 	mu         sync.Mutex

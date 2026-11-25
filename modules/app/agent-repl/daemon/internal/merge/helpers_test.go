@@ -3048,6 +3048,18 @@ func (g *fakeGit) UnregisterMissingWorktree(context.Context, string, string) err
 	return errors.New("fakeGit: the merge never unregisters a missing worktree")
 }
 
+// MoveWorktree is never the merge's to call: only a rename moves a worktree.
+func (g *fakeGit) MoveWorktree(context.Context, string, string, string) error {
+	g.record("move_worktree")
+	return errors.New("fakeGit: the merge never moves a worktree")
+}
+
+// RenameBranch is never the merge's to call: only a rename renames a branch.
+func (g *fakeGit) RenameBranch(context.Context, string, string, string) error {
+	g.record("rename_branch")
+	return errors.New("fakeGit: the merge never renames a branch")
+}
+
 // FetchBranch is never the merge's to call: a merge runs no network git.
 func (g *fakeGit) FetchBranch(context.Context, string, string, string) (string, error) {
 	g.record("fetch_branch")

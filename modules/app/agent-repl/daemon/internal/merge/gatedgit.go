@@ -193,6 +193,22 @@ func (g *gatedGit) RemoveWorktree(ctx context.Context, repoDir, worktreeDir stri
 	return g.inner.RemoveWorktree(ctx, repoDir, worktreeDir)
 }
 
+func (g *gatedGit) MoveWorktree(ctx context.Context, repoDir, from, to string) error {
+	if err := g.enter("MoveWorktree"); err != nil {
+		return err
+	}
+	defer g.leave()
+	return g.inner.MoveWorktree(ctx, repoDir, from, to)
+}
+
+func (g *gatedGit) RenameBranch(ctx context.Context, repoDir, from, to string) error {
+	if err := g.enter("RenameBranch"); err != nil {
+		return err
+	}
+	defer g.leave()
+	return g.inner.RenameBranch(ctx, repoDir, from, to)
+}
+
 func (g *gatedGit) AddDetachedWorktree(ctx context.Context, repoDir, worktreeDir, commit string) error {
 	if err := g.enter("AddDetachedWorktree"); err != nil {
 		return err

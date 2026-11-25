@@ -1340,6 +1340,42 @@ that follows must not care which of the two got there first."
     ;; Assert
     (should (equal (agent-repl-test-roster--tabs) '("new-name")))))
 
+(ert-deftest agent-repl-test-roster-a-moved-row-moves-its-tab ()
+  "A row whose directory changed under its id moves its kept tab's directory."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "name" :ready :dir "/w/old"))))))
+    ;; Act
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "name" :ready :dir "/w/new")))))))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--tabs) '("name")))
+    (should (equal (agent-repl--ws-get "name" :project-dir) "/w/new"))))
+
+(ert-deftest agent-repl-test-roster-a-renamed-and-moved-row-renames-and-moves-its-tab ()
+  "A row whose name and directory both changed renames its tab at the new directory."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "old-name" :ready :dir "/w/old-name"))))))
+    ;; Act
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready :dir "/w/new-name")))))))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--tabs) '("new-name")))
+    (should (equal (agent-repl--ws-get "new-name" :project-dir) "/w/new-name"))))
+
 (ert-deftest agent-repl-test-roster-a-rename-re-keys-host-state ()
   "Host state is keyed on the name too, so the NEW name answers with the ref."
   ;; Arrange

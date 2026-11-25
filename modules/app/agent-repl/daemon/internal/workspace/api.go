@@ -624,11 +624,24 @@ type Verbs interface {
 	ShowLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) ([]wsm.WorkspaceLink, error)
 	// ClearLinks removes every stored link.
 	ClearLinks(ctx context.Context, ws ids.WorkspaceID) ([]wsm.WorkspaceLink, error)
-	// SetName renames the workspace (agentrepl.v1.SetWorkspaceName): its name
-	// only, never its branch or its worktree directory. It answers the name
-	// the workspace now has, with the workspace-name prefix applied, and
-	// republishes every surface that draws the name.
-	SetName(ctx context.Context, ws ids.WorkspaceID, name string) (string, error)
+	// SetName renames the workspace (agentrepl.v1.SetWorkspaceName), totally:
+	// its branch and its worktree directory move with its name, at once when
+	// nothing serves its session and at its next freeness otherwise. It
+	// answers the name the workspace now has, with the workspace-name prefix
+	// applied, and where the move stands, and republishes every surface that
+	// draws the name.
+	SetName(ctx context.Context, ws ids.WorkspaceID, name string) (Renamed, error)
+	// ApplyOwedMove runs the move a rename owes WS, once nothing serves its
+	// session: the worktree, the branch and the vendor's project folder, then
+	// the records. Each step checks the disk first, so a move a crash
+	// interrupted is finished by running it again. No owed move is nothing to
+	// do.
+	ApplyOwedMove(ctx context.Context, ws ids.WorkspaceID) error
+	// MoveOwed reports whether a rename owes WS a move not yet under way.
+	MoveOwed(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// FinishMovingMoves finishes, at boot and before the registry is read,
+	// every owed move that had stood its workspace's shim down.
+	FinishMovingMoves(ctx context.Context) error
 	// SetSummary records the workspace's one-sentence summary of its task and
 	// draws it in the topbar (agentrepl.v1.SetWorkspaceSummary), answering the
 	// summary the workspace now has.

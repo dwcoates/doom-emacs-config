@@ -1086,6 +1086,10 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.log.Error(opAdopt, "could not take the adopted workspace's merges", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: take its merges: %w", ws, err)
 	}
+	// AN OWED MOVE IS THIS DAEMON'S NOW: a rename whose move the incumbent
+	// could not register (the workspace was already moving here) is taken
+	// up, and one the move carried joins the registration it made.
+	c.TakeUpOwedMove(ctx, ws)
 
 	if sessionless {
 		c.startSessionless([]wsm.Workspace{record}, fields)
@@ -1777,6 +1781,7 @@ func (c *controller) SettleBoot(ctx context.Context) {
 	c.judgeLiveShims(fields)
 	c.deps.Reports.PayOwed(ctx, false, nil)
 	c.deps.ServingSettled(ctx)
+	c.takeUpOwedMoves(ctx)
 }
 
 // judgeLiveShims judges every live shim against the installed build, and

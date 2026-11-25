@@ -1,14 +1,24 @@
 // endpoint_set_workspace_name.proto — SetWorkspaceName: rename a workspace.
 // AGENT API section.
 //
-// A RENAME CHANGES THE NAME AND NOTHING ELSE. The name is what the sidebar,
-// the Emacs tab bar, the topbar and every agent CLI verb call the workspace.
-// The workspace's branch and its worktree directory keep the names they were
-// created with: moving the directory would pull the live session's working
-// directory and its vendor transcript out from under it, and the branch is a
-// fact about the repository that merges and deploys name. So after a rename
-// the name and the branch may differ, and every reader that needs the branch
-// reads WorkspaceStatus.branch, never the name.
+// A RENAME IS TOTAL: the workspace's branch and its worktree directory move
+// with its name, so the old name, branch and directory are held by nothing
+// afterwards and are free for any later workspace. The name is what the
+// sidebar, the Emacs tab bar, the topbar and every agent CLI verb call the
+// workspace; the branch becomes the name with the same prefix a create
+// applies, and the directory the one a create of that branch would get.
+//
+// THE NAME CHANGES AT ONCE; THE MOVE RUNS WHEN THE WORKSPACE IS FREE. The
+// live session works in the directory and the vendor files its transcript
+// under a folder named for it, so the move replaces the workspace's shim: it
+// waits until no turn and no detached work runs, holds the workspace's
+// prompts while it moves the branch, the directory and the transcript
+// folder, and resumes the same conversation in the new directory. The
+// success says whether the move is done or owed (SetWorkspaceNameSuccess.
+// move). An owed move survives a daemon restart and a handover.
+//
+// A REPOSITORY'S MAIN CHECKOUT KEEPS ITS BRANCH AND DIRECTORY: they are the
+// repository's, not the workspace's, so its rename changes the name alone.
 //
 // EVERYTHING KEYED BY THE WORKSPACE'S ID SURVIVES IT: its subscriptions, what
 // it awaits and who awaits it, its held prompts, its links, its
@@ -50,7 +60,8 @@ message SetWorkspaceNameResponse {
 }
 
 // Recorded, and the roster republished with the new name. Renaming a
-// workspace to the name it already has is no change and succeeds.
+// workspace to the name it already has moves its branch and directory when
+// they still differ from it, and is otherwise no change.
 message SetWorkspaceNameSuccess {
   // The name the workspace now has, with the prefix applied: what the
   // sidebar draws and what every later CLI call names the workspace by.
@@ -62,7 +73,50 @@ message SetWorkspaceNameSuccess {
   // ArrangeSidebarSuccess.roster_revision. 0 when the daemon has resolved no
   // roster yet.
   uint64 roster_revision = 2;
+  // Where the move of the branch and the directory stands. The roster
+  // carries the workspace's directory (workspace.v1.WorkspaceRef.dir) under
+  // the same id, so every client learns the new directory from the roster
+  // once the move has run, whichever arm this is.
+  SetWorkspaceNameMove move = 3;
 }
+
+// Where a rename's move of the branch and the worktree directory stands.
+// The arms are exclusive: a move either ran before the answer, waits for
+// the workspace to fall free, or has nothing to move.
+message SetWorkspaceNameMove {
+  oneof state {
+    // The branch and the directory moved before the answer: nothing served
+    // the workspace's session, so nothing had to wait.
+    SetWorkspaceNameMoved moved = 1;
+    // The move is recorded and runs once no turn and no detached work runs
+    // in the workspace. Until it runs, the old branch and directory stay
+    // the workspace's.
+    SetWorkspaceNameMoveOwed owed = 2;
+    // Nothing moves: the branch and the directory already carry the name,
+    // or they are the repository's own (its main checkout).
+    SetWorkspaceNameMoveNone none = 3;
+  }
+}
+
+// The branch and the directory the rename moved the workspace to.
+message SetWorkspaceNameMoved {
+  // The workspace's branch now.
+  string branch = 1;
+  // The workspace's worktree directory now.
+  string dir = 2;
+}
+
+// The move a rename recorded, to run when the workspace falls free.
+message SetWorkspaceNameMoveOwed {
+  // The branch the workspace will have.
+  string branch = 1;
+  // The worktree directory the workspace will have.
+  string dir = 2;
+}
+
+// Nothing moves. DELIBERATELY EMPTY: the workspace's branch and directory
+// already carry the name, or they belong to the repository.
+message SetWorkspaceNameMoveNone {}
 
 // The daemon's refusals; nothing was recorded and the workspace keeps its
 // name. Validation failures (an unset workspace, a blank name) are Connect
@@ -84,7 +138,50 @@ message SetWorkspaceNameError {
     // Another workspace, or a merge or create in flight, already holds the
     // name.
     SetWorkspaceNameTaken name_taken = 6;
+    // A merge holds the workspace or stands in a queue for its branch, and
+    // the merge names that branch and directory until it ends. Rename it
+    // once the merge has landed or left the queue.
+    SetWorkspaceNameMerging merging = 7;
+    // The workspace's branch tracks a branch on a remote, which a pull
+    // request or a push names by its name; moving the local branch would
+    // part it from that one.
+    SetWorkspaceNameBranchPublished branch_published = 8;
+    // A git branch by the new name exists that no workspace holds.
+    SetWorkspaceNameBranchExists branch_exists = 9;
+    // The worktree directory the new name resolves to already exists.
+    SetWorkspaceNameDirectoryExists directory_exists = 10;
+    // The workspace's previous rename is moving its branch and directory
+    // right now; the move takes moments, and a rename asked again once it
+    // has ended is answered.
+    SetWorkspaceNameMoving moving = 11;
   }
+}
+
+// A merge holds the workspace or stands in a merge queue for its branch.
+// DELIBERATELY EMPTY: the merge queue's status names the merge.
+message SetWorkspaceNameMerging {}
+
+// The workspace's branch tracks a remote branch.
+message SetWorkspaceNameBranchPublished {
+  // The upstream the branch tracks, as git spells it (`origin/<branch>`).
+  string upstream = 1;
+}
+
+// A git branch by the new name exists that no workspace holds.
+message SetWorkspaceNameBranchExists {
+  // The branch the new name resolves to.
+  string branch = 1;
+}
+
+// The workspace's previous rename is moving its branch and directory.
+// DELIBERATELY EMPTY: the move's steps are under way, so where it goes can no
+// longer change.
+message SetWorkspaceNameMoving {}
+
+// The worktree directory the new name resolves to already exists.
+message SetWorkspaceNameDirectoryExists {
+  // The directory the workspace would move to.
+  string dir = 1;
 }
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.

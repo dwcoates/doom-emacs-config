@@ -227,6 +227,16 @@ var workspaceSettingRefusals = func() []describedRefusal {
 				refusalCase{name: "name_taken/pending", err: armed(name, "name_taken", &agentreplv1.SetWorkspaceNameTaken{Name: "x/y",
 					Holder: &agentreplv1.SetWorkspaceNameTaken_Pending{Pending: &agentreplv1.SetWorkspaceNameTakenPending{}}}),
 					want: "the name x/y is reserved by a pending async merge or claimed by a create in flight"},
+				refusalCase{name: "merging", err: armed(name, "merging", nil),
+					want: "a merge holds or names ws, and its branch and directory cannot move until the merge has landed or left the queue"},
+				refusalCase{name: "branch_published", err: armed(name, "branch_published", &agentreplv1.SetWorkspaceNameBranchPublished{Upstream: "origin/y"}),
+					want: "ws's branch tracks origin/y, and moving it would part it from that remote branch"},
+				refusalCase{name: "branch_exists", err: armed(name, "branch_exists", &agentreplv1.SetWorkspaceNameBranchExists{Branch: "x/y"}),
+					want: "a branch named x/y already exists that no workspace holds"},
+				refusalCase{name: "directory_exists", err: armed(name, "directory_exists", &agentreplv1.SetWorkspaceNameDirectoryExists{Dir: "/w/y"}),
+					want: "the directory /w/y already exists"},
+				refusalCase{name: "moving", err: armed(name, "moving", nil),
+					want: "ws's branch and directory are moving for its previous rename right now; rename it again once that ends"},
 			),
 			describe: func(e proto.Message) (string, error) {
 				return describeNameRefusal("ws", e.(*agentreplv1.SetWorkspaceNameError))

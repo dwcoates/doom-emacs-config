@@ -920,3 +920,30 @@ func (f *foldSweepForwarder) Sweep(ctx context.Context) error {
 	}
 	return target.Sweep(ctx)
 }
+
+// moveForwarder carries the rollout's rename moves to the workspace verbs,
+// which are built after the rollout controller.
+type moveForwarder struct {
+	lateBound[rollout.MoveApplier]
+}
+
+var _ rollout.MoveApplier = (*moveForwarder)(nil)
+
+// errMoveApplierUnbound refuses a move asked before the verbs are bound.
+var errMoveApplierUnbound = errors.New("agent-repld: the workspace verbs are not bound; a rename's move cannot run")
+
+func (f *moveForwarder) ApplyOwedMove(ctx context.Context, ws ids.WorkspaceID) error {
+	m, ok := f.load()
+	if !ok {
+		return errMoveApplierUnbound
+	}
+	return m.ApplyOwedMove(ctx, ws)
+}
+
+func (f *moveForwarder) MoveOwed(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	m, ok := f.load()
+	if !ok {
+		return false, errMoveApplierUnbound
+	}
+	return m.MoveOwed(ctx, ws)
+}

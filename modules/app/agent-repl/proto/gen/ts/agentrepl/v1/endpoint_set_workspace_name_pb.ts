@@ -1,14 +1,24 @@
 // endpoint_set_workspace_name.proto — SetWorkspaceName: rename a workspace.
 // AGENT API section.
 //
-// A RENAME CHANGES THE NAME AND NOTHING ELSE. The name is what the sidebar,
-// the Emacs tab bar, the topbar and every agent CLI verb call the workspace.
-// The workspace's branch and its worktree directory keep the names they were
-// created with: moving the directory would pull the live session's working
-// directory and its vendor transcript out from under it, and the branch is a
-// fact about the repository that merges and deploys name. So after a rename
-// the name and the branch may differ, and every reader that needs the branch
-// reads WorkspaceStatus.branch, never the name.
+// A RENAME IS TOTAL: the workspace's branch and its worktree directory move
+// with its name, so the old name, branch and directory are held by nothing
+// afterwards and are free for any later workspace. The name is what the
+// sidebar, the Emacs tab bar, the topbar and every agent CLI verb call the
+// workspace; the branch becomes the name with the same prefix a create
+// applies, and the directory the one a create of that branch would get.
+//
+// THE NAME CHANGES AT ONCE; THE MOVE RUNS WHEN THE WORKSPACE IS FREE. The
+// live session works in the directory and the vendor files its transcript
+// under a folder named for it, so the move replaces the workspace's shim: it
+// waits until no turn and no detached work runs, holds the workspace's
+// prompts while it moves the branch, the directory and the transcript
+// folder, and resumes the same conversation in the new directory. The
+// success says whether the move is done or owed (SetWorkspaceNameSuccess.
+// move). An owed move survives a daemon restart and a handover.
+//
+// A REPOSITORY'S MAIN CHECKOUT KEEPS ITS BRANCH AND DIRECTORY: they are the
+// repository's, not the workspace's, so its rename changes the name alone.
 //
 // EVERYTHING KEYED BY THE WORKSPACE'S ID SURVIVES IT: its subscriptions, what
 // it awaits and who awaits it, its held prompts, its links, its
@@ -35,7 +45,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_name.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_name: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9uYW1lLnByb3RvEgxhZ2VudHJlcGwudjEiVgoXU2V0V29ya3NwYWNlTmFtZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJIpQBChhTZXRXb3Jrc3BhY2VOYW1lUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVFcnJvckgAQggKBnJlc3VsdCJAChdTZXRXb3Jrc3BhY2VOYW1lU3VjY2VzcxIMCgRuYW1lGAEgASgJEhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBCLVAwoVU2V0V29ya3NwYWNlTmFtZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lTm90WWV0QWRvcHRlZEgAEkAKDGludmFsaWRfbmFtZRgFIAEoCzIoLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VJbnZhbGlkTmFtZUgAEjkKCm5hbWVfdGFrZW4YBiABKAsyIy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVRha2VuSABCBwoFY2F1c2UiIgogU2V0V29ya3NwYWNlTmFtZVVua25vd25Xb3Jrc3BhY2UiPAokU2V0V29ya3NwYWNlTmFtZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBTZXRXb3Jrc3BhY2VOYW1lVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkEKHVNldFdvcmtzcGFjZU5hbWVOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyKfAQoVU2V0V29ya3NwYWNlTmFtZVRha2VuEgwKBG5hbWUYASABKAkSLwoJd29ya3NwYWNlGAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAEj0KB3BlbmRpbmcYAyABKAsyKi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVRha2VuUGVuZGluZ0gAQggKBmhvbGRlciIeChxTZXRXb3Jrc3BhY2VOYW1lVGFrZW5QZW5kaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9uYW1lLnByb3RvEgxhZ2VudHJlcGwudjEiVgoXU2V0V29ya3NwYWNlTmFtZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJIpQBChhTZXRXb3Jrc3BhY2VOYW1lUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVFcnJvckgAQggKBnJlc3VsdCJyChdTZXRXb3Jrc3BhY2VOYW1lU3VjY2VzcxIMCgRuYW1lGAEgASgJEhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBBIwCgRtb3ZlGAMgASgLMiIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZlIsUBChRTZXRXb3Jrc3BhY2VOYW1lTW92ZRI0CgVtb3ZlZBgBIAEoCzIjLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lTW92ZWRIABI2CgRvd2VkGAIgASgLMiYuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZlT3dlZEgAEjYKBG5vbmUYAyABKAsyJi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZU1vdmVOb25lSABCBwoFc3RhdGUiNAoVU2V0V29ya3NwYWNlTmFtZU1vdmVkEg4KBmJyYW5jaBgBIAEoCRILCgNkaXIYAiABKAkiNwoYU2V0V29ya3NwYWNlTmFtZU1vdmVPd2VkEg4KBmJyYW5jaBgBIAEoCRILCgNkaXIYAiABKAkiGgoYU2V0V29ya3NwYWNlTmFtZU1vdmVOb25lIqIGChVTZXRXb3Jrc3BhY2VOYW1lRXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEksKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi4uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVUcmFuc2ZlcnJpbmdBd2F5SAASRgoPbm90X3lldF9hZG9wdGVkGAQgASgLMisuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVOb3RZZXRBZG9wdGVkSAASQAoMaW52YWxpZF9uYW1lGAUgASgLMiguYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZUludmFsaWROYW1lSAASOQoKbmFtZV90YWtlbhgGIAEoCzIjLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lVGFrZW5IABI4CgdtZXJnaW5nGAcgASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNZXJnaW5nSAASSQoQYnJhbmNoX3B1Ymxpc2hlZBgIIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoUHVibGlzaGVkSAASQwoNYnJhbmNoX2V4aXN0cxgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoRXhpc3RzSAASSQoQZGlyZWN0b3J5X2V4aXN0cxgKIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lRGlyZWN0b3J5RXhpc3RzSAASNgoGbW92aW5nGAsgASgLMiQuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZpbmdIAEIHCgVjYXVzZSIZChdTZXRXb3Jrc3BhY2VOYW1lTWVyZ2luZyIzCh9TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoUHVibGlzaGVkEhAKCHVwc3RyZWFtGAEgASgJIi4KHFNldFdvcmtzcGFjZU5hbWVCcmFuY2hFeGlzdHMSDgoGYnJhbmNoGAEgASgJIhgKFlNldFdvcmtzcGFjZU5hbWVNb3ZpbmciLgofU2V0V29ya3NwYWNlTmFtZURpcmVjdG9yeUV4aXN0cxILCgNkaXIYASABKAkiIgogU2V0V29ya3NwYWNlTmFtZVVua25vd25Xb3Jrc3BhY2UiPAokU2V0V29ya3NwYWNlTmFtZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBTZXRXb3Jrc3BhY2VOYW1lVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkEKHVNldFdvcmtzcGFjZU5hbWVOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyKfAQoVU2V0V29ya3NwYWNlTmFtZVRha2VuEgwKBG5hbWUYASABKAkSLwoJd29ya3NwYWNlGAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAEj0KB3BlbmRpbmcYAyABKAsyKi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVRha2VuUGVuZGluZ0gAQggKBmhvbGRlciIeChxTZXRXb3Jrc3BhY2VOYW1lVGFrZW5QZW5kaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspaceNameRequest
@@ -102,7 +112,8 @@ export const SetWorkspaceNameResponseSchema: GenMessage<SetWorkspaceNameResponse
 
 /**
  * Recorded, and the roster republished with the new name. Renaming a
- * workspace to the name it already has is no change and succeeds.
+ * workspace to the name it already has moves its branch and directory when
+ * they still differ from it, and is otherwise no change.
  *
  * @generated from message agentrepl.v1.SetWorkspaceNameSuccess
  */
@@ -126,6 +137,16 @@ export type SetWorkspaceNameSuccess = Message<"agentrepl.v1.SetWorkspaceNameSucc
    * @generated from field: uint64 roster_revision = 2;
    */
   rosterRevision: bigint;
+
+  /**
+   * Where the move of the branch and the directory stands. The roster
+   * carries the workspace's directory (workspace.v1.WorkspaceRef.dir) under
+   * the same id, so every client learns the new directory from the roster
+   * once the move has run, whichever arm this is.
+   *
+   * @generated from field: agentrepl.v1.SetWorkspaceNameMove move = 3;
+   */
+  move?: SetWorkspaceNameMove | undefined;
 };
 
 /**
@@ -134,6 +155,127 @@ export type SetWorkspaceNameSuccess = Message<"agentrepl.v1.SetWorkspaceNameSucc
  */
 export const SetWorkspaceNameSuccessSchema: GenMessage<SetWorkspaceNameSuccess> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 2);
+
+/**
+ * Where a rename's move of the branch and the worktree directory stands.
+ * The arms are exclusive: a move either ran before the answer, waits for
+ * the workspace to fall free, or has nothing to move.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameMove
+ */
+export type SetWorkspaceNameMove = Message<"agentrepl.v1.SetWorkspaceNameMove"> & {
+  /**
+   * @generated from oneof agentrepl.v1.SetWorkspaceNameMove.state
+   */
+  state: {
+    /**
+     * The branch and the directory moved before the answer: nothing served
+     * the workspace's session, so nothing had to wait.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameMoved moved = 1;
+     */
+    value: SetWorkspaceNameMoved;
+    case: "moved";
+  } | {
+    /**
+     * The move is recorded and runs once no turn and no detached work runs
+     * in the workspace. Until it runs, the old branch and directory stay
+     * the workspace's.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameMoveOwed owed = 2;
+     */
+    value: SetWorkspaceNameMoveOwed;
+    case: "owed";
+  } | {
+    /**
+     * Nothing moves: the branch and the directory already carry the name,
+     * or they are the repository's own (its main checkout).
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameMoveNone none = 3;
+     */
+    value: SetWorkspaceNameMoveNone;
+    case: "none";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameMove.
+ * Use `create(SetWorkspaceNameMoveSchema)` to create a new message.
+ */
+export const SetWorkspaceNameMoveSchema: GenMessage<SetWorkspaceNameMove> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 3);
+
+/**
+ * The branch and the directory the rename moved the workspace to.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameMoved
+ */
+export type SetWorkspaceNameMoved = Message<"agentrepl.v1.SetWorkspaceNameMoved"> & {
+  /**
+   * The workspace's branch now.
+   *
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+
+  /**
+   * The workspace's worktree directory now.
+   *
+   * @generated from field: string dir = 2;
+   */
+  dir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameMoved.
+ * Use `create(SetWorkspaceNameMovedSchema)` to create a new message.
+ */
+export const SetWorkspaceNameMovedSchema: GenMessage<SetWorkspaceNameMoved> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 4);
+
+/**
+ * The move a rename recorded, to run when the workspace falls free.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameMoveOwed
+ */
+export type SetWorkspaceNameMoveOwed = Message<"agentrepl.v1.SetWorkspaceNameMoveOwed"> & {
+  /**
+   * The branch the workspace will have.
+   *
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+
+  /**
+   * The worktree directory the workspace will have.
+   *
+   * @generated from field: string dir = 2;
+   */
+  dir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameMoveOwed.
+ * Use `create(SetWorkspaceNameMoveOwedSchema)` to create a new message.
+ */
+export const SetWorkspaceNameMoveOwedSchema: GenMessage<SetWorkspaceNameMoveOwed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 5);
+
+/**
+ * Nothing moves. DELIBERATELY EMPTY: the workspace's branch and directory
+ * already carry the name, or they belong to the repository.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameMoveNone
+ */
+export type SetWorkspaceNameMoveNone = Message<"agentrepl.v1.SetWorkspaceNameMoveNone"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameMoveNone.
+ * Use `create(SetWorkspaceNameMoveNoneSchema)` to create a new message.
+ */
+export const SetWorkspaceNameMoveNoneSchema: GenMessage<SetWorkspaceNameMoveNone> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 6);
 
 /**
  * The daemon's refusals; nothing was recorded and the workspace keeps its
@@ -197,6 +339,52 @@ export type SetWorkspaceNameError = Message<"agentrepl.v1.SetWorkspaceNameError"
      */
     value: SetWorkspaceNameTaken;
     case: "nameTaken";
+  } | {
+    /**
+     * A merge holds the workspace or stands in a queue for its branch, and
+     * the merge names that branch and directory until it ends. Rename it
+     * once the merge has landed or left the queue.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameMerging merging = 7;
+     */
+    value: SetWorkspaceNameMerging;
+    case: "merging";
+  } | {
+    /**
+     * The workspace's branch tracks a branch on a remote, which a pull
+     * request or a push names by its name; moving the local branch would
+     * part it from that one.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameBranchPublished branch_published = 8;
+     */
+    value: SetWorkspaceNameBranchPublished;
+    case: "branchPublished";
+  } | {
+    /**
+     * A git branch by the new name exists that no workspace holds.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameBranchExists branch_exists = 9;
+     */
+    value: SetWorkspaceNameBranchExists;
+    case: "branchExists";
+  } | {
+    /**
+     * The worktree directory the new name resolves to already exists.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameDirectoryExists directory_exists = 10;
+     */
+    value: SetWorkspaceNameDirectoryExists;
+    case: "directoryExists";
+  } | {
+    /**
+     * The workspace's previous rename is moving its branch and directory
+     * right now; the move takes moments, and a rename asked again once it
+     * has ended is answered.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameMoving moving = 11;
+     */
+    value: SetWorkspaceNameMoving;
+    case: "moving";
   } | { case: undefined; value?: undefined };
 };
 
@@ -205,7 +393,103 @@ export type SetWorkspaceNameError = Message<"agentrepl.v1.SetWorkspaceNameError"
  * Use `create(SetWorkspaceNameErrorSchema)` to create a new message.
  */
 export const SetWorkspaceNameErrorSchema: GenMessage<SetWorkspaceNameError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 3);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 7);
+
+/**
+ * A merge holds the workspace or stands in a merge queue for its branch.
+ * DELIBERATELY EMPTY: the merge queue's status names the merge.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameMerging
+ */
+export type SetWorkspaceNameMerging = Message<"agentrepl.v1.SetWorkspaceNameMerging"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameMerging.
+ * Use `create(SetWorkspaceNameMergingSchema)` to create a new message.
+ */
+export const SetWorkspaceNameMergingSchema: GenMessage<SetWorkspaceNameMerging> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 8);
+
+/**
+ * The workspace's branch tracks a remote branch.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameBranchPublished
+ */
+export type SetWorkspaceNameBranchPublished = Message<"agentrepl.v1.SetWorkspaceNameBranchPublished"> & {
+  /**
+   * The upstream the branch tracks, as git spells it (`origin/<branch>`).
+   *
+   * @generated from field: string upstream = 1;
+   */
+  upstream: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameBranchPublished.
+ * Use `create(SetWorkspaceNameBranchPublishedSchema)` to create a new message.
+ */
+export const SetWorkspaceNameBranchPublishedSchema: GenMessage<SetWorkspaceNameBranchPublished> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 9);
+
+/**
+ * A git branch by the new name exists that no workspace holds.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameBranchExists
+ */
+export type SetWorkspaceNameBranchExists = Message<"agentrepl.v1.SetWorkspaceNameBranchExists"> & {
+  /**
+   * The branch the new name resolves to.
+   *
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameBranchExists.
+ * Use `create(SetWorkspaceNameBranchExistsSchema)` to create a new message.
+ */
+export const SetWorkspaceNameBranchExistsSchema: GenMessage<SetWorkspaceNameBranchExists> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 10);
+
+/**
+ * The workspace's previous rename is moving its branch and directory.
+ * DELIBERATELY EMPTY: the move's steps are under way, so where it goes can no
+ * longer change.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameMoving
+ */
+export type SetWorkspaceNameMoving = Message<"agentrepl.v1.SetWorkspaceNameMoving"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameMoving.
+ * Use `create(SetWorkspaceNameMovingSchema)` to create a new message.
+ */
+export const SetWorkspaceNameMovingSchema: GenMessage<SetWorkspaceNameMoving> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 11);
+
+/**
+ * The worktree directory the new name resolves to already exists.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameDirectoryExists
+ */
+export type SetWorkspaceNameDirectoryExists = Message<"agentrepl.v1.SetWorkspaceNameDirectoryExists"> & {
+  /**
+   * The directory the workspace would move to.
+   *
+   * @generated from field: string dir = 1;
+   */
+  dir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameDirectoryExists.
+ * Use `create(SetWorkspaceNameDirectoryExistsSchema)` to create a new message.
+ */
+export const SetWorkspaceNameDirectoryExistsSchema: GenMessage<SetWorkspaceNameDirectoryExists> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 12);
 
 /**
  * The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
@@ -220,7 +504,7 @@ export type SetWorkspaceNameUnknownWorkspace = Message<"agentrepl.v1.SetWorkspac
  * Use `create(SetWorkspaceNameUnknownWorkspaceSchema)` to create a new message.
  */
 export const SetWorkspaceNameUnknownWorkspaceSchema: GenMessage<SetWorkspaceNameUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 4);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 13);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -241,7 +525,7 @@ export type SetWorkspaceNameWorkspaceRefMismatch = Message<"agentrepl.v1.SetWork
  * Use `create(SetWorkspaceNameWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const SetWorkspaceNameWorkspaceRefMismatchSchema: GenMessage<SetWorkspaceNameWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 5);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 14);
 
 /**
  * This daemon released the workspace to a successor.
@@ -262,7 +546,7 @@ export type SetWorkspaceNameTransferringAway = Message<"agentrepl.v1.SetWorkspac
  * Use `create(SetWorkspaceNameTransferringAwaySchema)` to create a new message.
  */
 export const SetWorkspaceNameTransferringAwaySchema: GenMessage<SetWorkspaceNameTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 6);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 15);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -288,7 +572,7 @@ export type SetWorkspaceNameNotYetAdopted = Message<"agentrepl.v1.SetWorkspaceNa
  * Use `create(SetWorkspaceNameNotYetAdoptedSchema)` to create a new message.
  */
 export const SetWorkspaceNameNotYetAdoptedSchema: GenMessage<SetWorkspaceNameNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 7);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 16);
 
 /**
  * The name is already held. Names and branches are one namespace: a
@@ -339,7 +623,7 @@ export type SetWorkspaceNameTaken = Message<"agentrepl.v1.SetWorkspaceNameTaken"
  * Use `create(SetWorkspaceNameTakenSchema)` to create a new message.
  */
 export const SetWorkspaceNameTakenSchema: GenMessage<SetWorkspaceNameTaken> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 8);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 17);
 
 /**
  * The name is reserved by a pending async merge or claimed by a create in
@@ -355,5 +639,5 @@ export type SetWorkspaceNameTakenPending = Message<"agentrepl.v1.SetWorkspaceNam
  * Use `create(SetWorkspaceNameTakenPendingSchema)` to create a new message.
  */
 export const SetWorkspaceNameTakenPendingSchema: GenMessage<SetWorkspaceNameTakenPending> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 9);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 18);
 

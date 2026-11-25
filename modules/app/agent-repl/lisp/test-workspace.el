@@ -131,6 +131,82 @@
             (should-not (agent-repl--ws-of-composer composer)))
         (kill-buffer composer)))))
 
+;;;; ---- Tests: ws-move-dir ----------------------------------------------
+
+(ert-deftest agent-repl-test-ws-move-dir-moves-the-state-and-its-buffers ()
+  "A moved directory moves the workspace's dir, its hash, and its buffers."
+  (agent-repl-test--with-clean-state
+    (let* ((root (make-temp-file "ws-move" t))
+           (old (expand-file-name "old" root))
+           (new (expand-file-name "new" root))
+           (visiting nil)
+           (dired nil))
+      (unwind-protect
+          (progn
+            (make-directory new)
+            (with-temp-file (expand-file-name "a.txt" new) (insert "a"))
+            (agent-repl--ws-put "w" :project-dir old)
+            (agent-repl--ws-put "w" :ws-dir-hash "stale")
+            (setq visiting (generate-new-buffer " visiting"))
+            (with-current-buffer visiting
+              (setq buffer-file-name (expand-file-name "a.txt" old)
+                    default-directory (file-name-as-directory old)))
+            (setq dired (generate-new-buffer " cwd"))
+            (with-current-buffer dired
+              (setq default-directory (file-name-as-directory (expand-file-name "sub" old))))
+            ;; Act
+            (should (agent-repl--ws-move-dir "w" new))
+            ;; Assert
+            (should (equal (agent-repl--ws-get "w" :project-dir) (agent-repl--path-canonical new)))
+            (should-not (agent-repl--ws-get "w" :ws-dir-hash))
+            (with-current-buffer visiting
+              (should (equal buffer-file-name
+                             (concat (file-name-as-directory (agent-repl--path-canonical new)) "a.txt")))
+              (should-not (buffer-modified-p)))
+            (with-current-buffer dired
+              (should (string-suffix-p "/sub/" default-directory))
+              (should (string-prefix-p (file-name-as-directory (agent-repl--path-canonical new)) default-directory))))
+        (when (buffer-live-p visiting) (kill-buffer visiting))
+        (when (buffer-live-p dired) (kill-buffer dired))
+        (delete-directory root t)))))
+
+(ert-deftest agent-repl-test-ws-move-dir-to-where-it-stands-moves-nothing ()
+  "A row naming the directory the workspace already has changes nothing."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :project-dir "/w/a")
+    (agent-repl--ws-put "w" :ws-dir-hash "kept")
+    ;; Act
+    (should-not (agent-repl--ws-move-dir "w" "/w/a"))
+    ;; Assert
+    (should (equal (agent-repl--ws-get "w" :ws-dir-hash) "kept"))))
+
+(ert-deftest agent-repl-test-ws-move-dir-leaves-a-sibling-directory-alone ()
+  "A buffer in a directory that merely shares the old one's prefix stays."
+  (agent-repl-test--with-clean-state
+    (let ((sibling (generate-new-buffer " sibling")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "w" :project-dir "/w/foo")
+            (with-current-buffer sibling (setq default-directory "/w/foo-bar/"))
+            ;; Act
+            (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+              (agent-repl--ws-move-dir "w" "/w/baz"))
+            ;; Assert
+            (with-current-buffer sibling (should (equal default-directory "/w/foo-bar/"))))
+        (kill-buffer sibling)))))
+
+(ert-deftest agent-repl-test-ws-move-dir-refuses-an-unknown-workspace ()
+  "Moving a workspace the registry does not know is refused."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--ws-move-dir "missing" "/w/x") :type 'user-error)))
+
+(ert-deftest agent-repl-test-ws-move-dir-refuses-a-blank-directory ()
+  "A blank directory is refused before anything changes."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :project-dir "/w/a")
+    (should-error (agent-repl--ws-move-dir "w" "") :type 'user-error)
+    (should (equal (agent-repl--ws-get "w" :project-dir) "/w/a"))))
+
 ;;;; ---- Tests: ws-rename-state -------------------------------------------
 
 (ert-deftest agent-repl-test-ws-rename-state-moves-complete-live-state ()

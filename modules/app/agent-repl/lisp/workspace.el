@@ -310,6 +310,55 @@ violations signal `user-error'."
       (setq agent-repl--recency-walk-landing new-ws))
     new-ws))
 
+;; A WORKSPACE'S DIRECTORY MAY MOVE UNDER THE SAME ID: a rename moves its
+;; branch and worktree with its name (agentrepl.v1.SetWorkspaceName), and the
+;; roster then carries the new directory in the row's ref.
+(defun agent-repl--ws-move-dir (ws new-dir)
+  "Point live WS, and every buffer working in it, at NEW-DIR.
+NEW-DIR is the directory WS's worktree moved to.  The workspace's
+`:project-dir' and `:dir' take it and its cached `:ws-dir-hash' is
+cleared, so the log sink and every reader derive the new directory; a
+buffer visiting a file under the old directory visits the same file at
+its new path, unmodified; a buffer whose `default-directory' is under
+the old one moves with it; and every workspace whose source was WS's
+old directory names the new one.  Returns non-nil when WS moved, nil
+when it already stands at NEW-DIR."
+  (agent-repl--ws-require-known ws "ws-move-dir")
+  (unless (and (stringp new-dir) (not (string-empty-p new-dir)))
+    (user-error "agent-repl: ws-move-dir: invalid directory %S" new-dir))
+  ;; THE ROSTER CALLS THIS FOR EVERY ROW OF EVERY PUSH, and the daemon's dir
+  ;; is already canonical, so the common unchanged case is one comparison
+  ;; and resolves no path.
+  (let* ((old (agent-repl--ws-get ws :project-dir))
+         (new (and old (not (equal old new-dir)) (agent-repl--path-canonical new-dir))))
+    (when (and new (not (equal (agent-repl--path-canonical old) new)))
+      (let ((from (file-name-as-directory (agent-repl--path-canonical old)))
+            (to (file-name-as-directory new))
+            (buffers 0))
+        (agent-repl--ws-put ws :project-dir new)
+        (agent-repl--ws-put ws :dir new-dir)
+        (agent-repl--ws-put ws :ws-dir-hash nil)
+        ;; A BUFFER'S PATH IS COMPARED RESOLVED, as the workspace's own is:
+        ;; a file visited through a symlinked parent (`/tmp') is still under
+        ;; the directory it resolves to.  The old directory is gone, so its
+        ;; resolution reads only the parents that still stand.
+        (dolist (buffer (buffer-list))
+          (with-current-buffer buffer
+            (let ((file (and buffer-file-name (agent-repl--path-canonical buffer-file-name)))
+                  (cwd (and (stringp default-directory)
+                            (file-name-as-directory (agent-repl--path-canonical default-directory)))))
+              (cond
+               ((and file (string-prefix-p from file))
+                (set-visited-file-name (concat to (substring file (length from))) t t)
+                (cl-incf buffers))
+               ((and cwd (string-prefix-p from cwd))
+                (setq default-directory (concat to (substring cwd (length from))))
+                (cl-incf buffers))))))
+        (agent-repl--ws-rewrite-source-back-refs (directory-file-name from) new)
+        (agent-repl--info ws "elisp.workspace.dir-moved: ws={ws} from={from} to={to} buffers={buffers}"
+                          :ws ws :from (directory-file-name from) :to new :buffers buffers)
+        t))))
+
 (defun agent-repl--ws-rewrite-source-back-refs
     (old-source-dir new-source-dir)
   "Rewrite workspace source back-references from OLD-SOURCE-DIR to NEW-SOURCE-DIR.
