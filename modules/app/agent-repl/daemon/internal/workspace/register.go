@@ -598,9 +598,13 @@ func (v *verbs) bindResolvers(ctx context.Context, log dlog.Logger, record wsm.W
 // outranks the name in the title.
 // Until they are installed the topbar is not complete and publishes NO view at
 // all, so this is part of registration rather than of a session's bring-up.
+//
+// EVERY FAILURE IS RECORDED HERE, at ERROR, before it is returned, so its
+// callers propagate it and never record it again.
 func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
 	configDir, err := v.accountRoot(ctx, record)
 	if err != nil {
+		log.Error(opRegister, "could not read the workspace's account root for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
 		return err
 	}
 	if err := v.publishAccount(ctx, log, record, configDir); err != nil {

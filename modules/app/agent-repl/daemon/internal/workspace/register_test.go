@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1683,5 +1684,28 @@ func TestRegistrationStatesTheNamesPrefixOnTheNaming(t *testing.T) {
 				t.Fatalf("namings = %+v, want the last carrying prefix %v", f.topbarNamings, want)
 			}
 		})
+	}
+}
+
+func TestPublishNamingRecordsAnUnreadableAccountRootAtError(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	v := f.verbs.(*verbs)
+	record := f.workspace("w1", worktreeDir(t))
+	f.db.sessionErr = errors.New("the state client is closed")
+
+	// Act.
+	err := v.publishNaming(context.Background(), v.deps.Log.Global(), record)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the state client is closed") {
+		t.Fatalf("publishNaming = %v, want the session read's failure", err)
+	}
+	got, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRegister, Message: "could not read the workspace's account root for its topbar"})
+	if !ok {
+		t.Fatalf("no ERROR record of the account root: %+v", f.log.logger.Records())
+	}
+	if got.Context["workspace"] != "w1" || !strings.Contains(fmt.Sprint(got.Context["cause"]), "the state client is closed") {
+		t.Fatalf("record = %+v, want the workspace and the cause", got)
 	}
 }
