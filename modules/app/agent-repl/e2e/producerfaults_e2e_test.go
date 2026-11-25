@@ -207,7 +207,7 @@ func testQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 // SessionHealth asked after it answers that verdict.
 func pfAwaitVerdictFolded(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, what string, unhealthy bool) {
 	t.Helper()
-	w.Daemon.AwaitLogRecord(w.Daemon.RunLogPath(), what, func(r harness.LogRecord) bool {
+	w.Daemon.AwaitOwnRunLogRecord(what, func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.cmd.lifecycle" && r.Context["workspace"] == ws.GetId() &&
 			r.Message == "the shim's health verdict was folded into the session faults" && r.Context["unhealthy"] == unhealthy
 	})
@@ -234,7 +234,7 @@ func testConverterDefectStandsUntilACleanTurn(t *testing.T) {
 	// Arrange
 	w := stack.SharedWorld(t)
 	ws, configDir := pfNewWorkspace(t, w)
-	w.ExpectWarningsFor(ws, "daemon.health.open_fault")
+	w.ExpectWarningsFor(ws, "daemon.health.open_fault", "daemon.health.session")
 
 	// Act
 	stack.DriveScenarioToCompletion(t, w, ws, configDir, "fault-converter")
