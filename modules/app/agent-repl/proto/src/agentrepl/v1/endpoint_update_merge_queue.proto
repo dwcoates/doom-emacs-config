@@ -345,6 +345,29 @@ message DeployProblem {
   // remediation workspace starts from the evidence rather than from the
   // intake's reading of it.
   repeated string evidence = 2;
+  // The queue race findings this problem is, each named as the deploy
+  // check's brief names it. A race finding is a test the daemon saw fail in
+  // a merge gate and then pass on the same inputs, so its failure is a race
+  // and not the branch's doing; the daemon hands every open one to the
+  // deploy mediator's next check. A dispatch naming one takes it on: the
+  // brief of every later check lists it as at work instead of open, until
+  // the fix's deploy marks it fixed. EMPTY for a problem the deploy's logs
+  // show, which is every problem but a race. A dispatch naming a finding
+  // the repository does not hold is refused with
+  // UpdateMergeQueueError.unknown_race_finding.
+  repeated QueueRaceFindingRef race_findings = 3;
+}
+
+// The identity of one queue race finding: the test, in the suite that ran
+// it. A repository holds at most one finding per test, so the pair names it.
+message QueueRaceFindingRef {
+  // REQUIRED. The roster suite whose unit ran the test, as the test runner
+  // names it ("daemon", "webapp", "e2e").
+  string suite = 1;
+  // REQUIRED. The test as its framework names it, a Go test by its
+  // top-level name only (TestLanding, never TestLanding/a_case): a failure
+  // of any of its subtests is a failure of the test.
+  string test = 2;
 }
 
 message UpdateMergeQueueResponse {
@@ -423,6 +446,10 @@ message UpdateMergeQueueError {
     // moved, and the arm says what keeps it where it stands. A move that
     // moves nothing is never answered as a success. (Added 2026-11-21.)
     UpdateMergeQueueMoveBlocked move_blocked = 25;
+    // A mediation decision naming a queue race finding its repository does
+    // not hold, by DeployProblem.race_findings. Nothing was decided.
+    // (Added 2026-11-25.)
+    UpdateMergeQueueUnknownRaceFinding unknown_race_finding = 26;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -464,6 +491,12 @@ message UpdateMergeQueueNoMediationOwed {}
 message UpdateMergeQueueNoEscalationHeld {}
 // The no-repair-turn refusal. No fields: the caller knows its own turn.
 message UpdateMergeQueueNoRepairTurn {}
+// The unknown-race-finding refusal: the first finding the decision named that
+// the repository does not hold.
+message UpdateMergeQueueUnknownRaceFinding {
+  // The finding as the decision named it.
+  QueueRaceFindingRef finding = 1;
+}
 
 // ---- Move up or down: why a one-place move moved nothing ----
 
