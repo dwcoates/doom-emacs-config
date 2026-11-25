@@ -87,6 +87,9 @@ func (r *TurnEdgeRunner) Evicted(ids.WorkspaceID, string) {}
 // gate.
 func (r *TurnEdgeRunner) ColdGated(ids.WorkspaceID) {}
 
+// Retargeted implements wsedges.Observer: no turn-edge work waits on a retarget.
+func (r *TurnEdgeRunner) Retargeted(wsm.ParentChange) {}
+
 // Run carries out every reported edge's work, in order, until ctx ends, then
 // carries out every one still pending before it returns.
 func (r *TurnEdgeRunner) Run(ctx context.Context) {

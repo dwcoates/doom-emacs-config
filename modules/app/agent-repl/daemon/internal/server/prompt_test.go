@@ -826,6 +826,59 @@ func TestSubmitPromptTakesAOneShotBack(t *testing.T) {
 	}
 }
 
+func TestSubmitPromptWithdrawsTheStandingCloseOfTheUsersPromptAlone(t *testing.T) {
+	sender := &workspacev1.WorkspaceRef{Id: string(senderWorkspaceID), Dir: "/tmp/sender"}
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		sentBy *workspacev1.WorkspaceRef
+		want   []fakeWithdrawal
+	}{
+		{name: "a prompt the user typed in the editor", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+			want: []fakeWithdrawal{{ws: testWorkspaceID, by: workspace.WithdrawnByUserPrompt}}},
+		{name: "a prompt the user typed in the webapp", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+			want: []fakeWithdrawal{{ws: testWorkspaceID, by: workspace.WithdrawnByUserPrompt}}},
+		{name: "a prompt another workspace's agent sent", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy: sender},
+		{name: "a prompt the daemon submitted", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			registerSender(h)
+			h.Verbs.api.prompts = h.Prompts
+			h.Prompts.outcome = prompthandler.Outcome{Turn: "turn-1", Disposition: promptqueue.Disposition{Delivered: true}}
+			req := submitRequest()
+			req.Origin, req.SentBy = tt.origin, tt.sentBy
+
+			// Act
+			_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+			if got := h.Verbs.api.withdrawals; !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("withdrawals = %+v, want %+v, each before the prompt was handed on", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubmitPromptWhoseWithdrawalFailsDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.api.withdrawErr = errors.New("the store is gone")
+
+	// Act
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal || h.Prompts.submits != 0 {
+		t.Fatalf("SubmitPrompt = %v with %d submissions, want an internal error and none", err, h.Prompts.submits)
+	}
+}
+
 func TestSubmitPromptWhoseTakeBackFailsDeliversNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

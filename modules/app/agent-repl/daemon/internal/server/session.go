@@ -165,6 +165,12 @@ func (s *server) UpdateHeldPrompt(
 	var err error
 	switch {
 	case req.Msg.GetRelease() != nil:
+		// RELEASING A HELD PROMPT DELIVERS THE USER'S OWN INTENT: the user
+		// works with the workspace again, so its standing close is withdrawn
+		// before the prompt reaches the session.
+		if _, err := s.deps.Verbs.WithdrawCloseRequest(ctx, subject.Record.ID, workspace.WithdrawnByHeldPromptRelease); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
 		err = s.deps.Queue.Release(ctx, subject.Record.ID, turn)
 	default:
 		err = s.deps.Queue.Drop(ctx, subject.Record.ID, turn)

@@ -212,6 +212,9 @@ func (s *Service) Evicted(ids.WorkspaceID, string) {}
 // ColdGated implements wsedges.Observer: a cold gate is no derived event.
 func (s *Service) ColdGated(ids.WorkspaceID) {}
 
+// Retargeted implements wsedges.Observer: a retarget derives no notice.
+func (s *Service) Retargeted(wsm.ParentChange) {}
+
 // Run delivers every reported event, in order, until ctx ends, then delivers
 // every event still pending before it returns.
 func (s *Service) Run(ctx context.Context, prompts prompthandler.Submitter) {

@@ -197,7 +197,7 @@ func (v *verbs) handToAddressee(ctx context.Context, log dlog.Logger, card wsm.I
 // its session stopped, its worktree and branch destroyed, the workspace
 // closed by the daemon. Its record stays, so its feed can still be read.
 //
-// IT RUNS AT EVERY TURN END OF AN INTAKE WORKSPACE (CarryOutSelfClose), so a
+// IT RUNS AT EVERY TURN END OF AN INTAKE WORKSPACE (RetireIntakeAtTurnEnd), so a
 // retirement something blocks (work still running in the background, a held
 // prompt) is tried again when the turn that work wakes has ended, and one a
 // git failure cut short is finished by the next.

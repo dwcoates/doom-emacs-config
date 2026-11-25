@@ -314,12 +314,13 @@ type fakeDB struct {
 	resolvedForks    []resolvedFork
 	bindSessionCalls []wsm.Session
 	closedFlags      map[ids.WorkspaceID]bool
-	// onMarkSelfClose runs once a self-close mark is written, for a test that
-	// moves the session between the mark and the recheck; markSelfCloseErr
-	// fails the mark and takeSelfCloseErr the take.
-	onMarkSelfClose func()
-	setOneShotErr   error
-	setAwaitingErr  error
+	// onRequestClose runs once a close request is registered, for a test
+	// that moves the session between the judgment and the write;
+	// requestCloseErr fails the registration, withdrawCloseErr a withdrawal
+	// and closeRequestsErr the read of every request.
+	onRequestClose func()
+	setOneShotErr  error
+	setAwaitingErr error
 	// links are each workspace's stored links, most recently set first;
 	// linksErr fails every change to them and linksReadErr every read.
 	links map[ids.WorkspaceID][]wsm.WorkspaceLink
@@ -345,8 +346,9 @@ type fakeDB struct {
 	// reads after a rename is recorded.
 	setNameErr                   error
 	listWorkspacesErrAfterRename error
-	markSelfCloseErr             error
-	takeSelfCloseErr             error
+	requestCloseErr              error
+	withdrawCloseErr             error
+	closeRequestsErr             error
 	// intakes are the workspaces registered born an intake workspace;
 	// isIntakeErr fails the read.
 	intakes     map[ids.WorkspaceID]bool
@@ -1264,21 +1266,49 @@ func (d *fakeDB) AllAsyncMergeRequests(context.Context) ([]wsm.AsyncMergeRequest
 	return d.asyncRequests, nil
 }
 
-// MarkCloseWhenTurnEnds marks the fake's record.
-func (d *fakeDB) MarkCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID, at time.Time) error {
-	if d.markSelfCloseErr != nil {
-		return d.markSelfCloseErr
+// RequestClose registers the fake's record's close request.
+func (d *fakeDB) RequestClose(_ context.Context, id ids.WorkspaceID, request wsm.CloseRequest) error {
+	if d.requestCloseErr != nil {
+		return d.requestCloseErr
 	}
 	ws, ok := d.workspaces[id]
 	if !ok {
 		return fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
 	}
-	ws.CloseWhenTurnEnds = &at
+	ws.CloseRequest = &request
 	d.workspaces[id] = ws
-	if d.onMarkSelfClose != nil {
-		d.onMarkSelfClose()
+	if d.onRequestClose != nil {
+		d.onRequestClose()
 	}
 	return nil
+}
+
+// WithdrawCloseRequest clears the fake's request, answering whether one
+// stood.
+func (d *fakeDB) WithdrawCloseRequest(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.withdrawCloseErr != nil {
+		return false, d.withdrawCloseErr
+	}
+	ws := d.workspaces[id]
+	stood := ws.CloseRequest != nil
+	ws.CloseRequest = nil
+	d.workspaces[id] = ws
+	return stood, nil
+}
+
+// CloseRequests answers every open record whose request stands, sorted.
+func (d *fakeDB) CloseRequests(context.Context) ([]ids.WorkspaceID, error) {
+	if d.closeRequestsErr != nil {
+		return nil, d.closeRequestsErr
+	}
+	var out []ids.WorkspaceID
+	for id, ws := range d.workspaces {
+		if ws.CloseRequest != nil && !ws.Closed {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // RefusePlacement records the placement asked about and answers the scripted
@@ -1301,18 +1331,6 @@ func (d *fakeDB) CardAddressees(context.Context, wsm.IntakeCard) (wsm.CardAddres
 	return d.cardAddressees, d.cardAddresseesErr
 }
 
-// TakeCloseWhenTurnEnds clears the fake's mark, answering whether one stood.
-func (d *fakeDB) TakeCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID) (bool, error) {
-	if d.takeSelfCloseErr != nil {
-		return false, d.takeSelfCloseErr
-	}
-	ws := d.workspaces[id]
-	taken := ws.CloseWhenTurnEnds != nil
-	ws.CloseWhenTurnEnds = nil
-	d.workspaces[id] = ws
-	return taken, nil
-}
-
 func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.Closure) error {
 	if d.setClosedErr != nil {
 		return d.setClosedErr
@@ -1323,6 +1341,7 @@ func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.C
 	// roster read after the close carries it closed.
 	if ws, ok := d.workspaces[id]; ok {
 		ws.Closed = true
+		ws.CloseRequest = nil
 		d.workspaces[id] = ws
 	}
 	return nil
@@ -4166,6 +4185,9 @@ type fixture struct {
 	// turnEnds are the turn-end latches a create held for its requester's
 	// turn resumes on.
 	turnEnds *turnlatch.Latches
+	// standingCloses records every workspace a registered close request
+	// owed a judgment (CloseRequestReporter).
+	standingCloses *fakeStandingCloses
 	// recovered are the reporters answered for a held create's ops, by op.
 	recovered map[string]*recordingProgress
 	// recoveredMu guards recovered.
@@ -4283,37 +4305,38 @@ func newFixture(t *testing.T) *fixture {
 		db:      newFakeDB(),
 		// The main worktree is a REAL worktree directory: every registration
 		// of a linked worktree registers it first.
-		git:        &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t), defaultOrigin: "git@github.com:ChessCom/fixture-repo.git"},
-		account:    &fakeAccounts{configDir: "/config"},
-		pullOwners: pullrefs.Owners{},
-		queue:      newFakeQueue(),
-		merge:      newFakeMerge(),
-		rollout:    &fakeRollout{done: make(chan struct{}, 8)},
-		feed:       &fakeFeed{},
-		footer:     newFakeFooter(),
-		sidebar:    &fakeSidebar{},
-		health:     &fakeHealth{},
-		host:       &fakeHost{},
-		banners:    &fakeBanners{},
-		browser:    &fakeBrowser{},
-		hooks:      &fakeHookRunner{},
-		lifecycle:  &fakeLifecycle{},
-		stateDir:   t.TempDir(),
-		anchors:    &fakeAnchors{},
-		slack:      &fakeSlackThreads{},
-		fleet:      newFakeSessions(),
-		threads:    &fakeThreadGraphs{},
-		shim:       &fakeShim{},
-		owner:      &fakeOwnership{standing: StandingOwned},
-		cards:      newFakeCards(),
-		summaries:  &fakeSummaries{},
-		log:        newFakeSurfaces(),
-		headless:   &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
-		network:    newFakeNetwork(),
-		turnEnds:   turnlatch.New(),
-		recovered:  map[string]*recordingProgress{},
-		briefs:     map[string]prompts.Prompt{},
-		derived:    &fakeDerived{},
+		git:            &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t), defaultOrigin: "git@github.com:ChessCom/fixture-repo.git"},
+		account:        &fakeAccounts{configDir: "/config"},
+		pullOwners:     pullrefs.Owners{},
+		queue:          newFakeQueue(),
+		merge:          newFakeMerge(),
+		rollout:        &fakeRollout{done: make(chan struct{}, 8)},
+		feed:           &fakeFeed{},
+		footer:         newFakeFooter(),
+		sidebar:        &fakeSidebar{},
+		health:         &fakeHealth{},
+		host:           &fakeHost{},
+		banners:        &fakeBanners{},
+		browser:        &fakeBrowser{},
+		hooks:          &fakeHookRunner{},
+		lifecycle:      &fakeLifecycle{},
+		stateDir:       t.TempDir(),
+		anchors:        &fakeAnchors{},
+		slack:          &fakeSlackThreads{},
+		fleet:          newFakeSessions(),
+		threads:        &fakeThreadGraphs{},
+		shim:           &fakeShim{},
+		owner:          &fakeOwnership{standing: StandingOwned},
+		cards:          newFakeCards(),
+		summaries:      &fakeSummaries{},
+		log:            newFakeSurfaces(),
+		headless:       &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
+		network:        newFakeNetwork(),
+		turnEnds:       turnlatch.New(),
+		standingCloses: &fakeStandingCloses{},
+		recovered:      map[string]*recordingProgress{},
+		briefs:         map[string]prompts.Prompt{},
+		derived:        &fakeDerived{},
 	}
 	f.queue.db = f.db
 	f.fleet.db = f.db
@@ -4334,10 +4357,11 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(endLife)
 	f.life = life
 	verbs, err := New(Deps{
-		Instance: fixtureInstance,
-		Network:  f.network,
-		TurnEnds: f.turnEnds,
-		Lifetime: life,
+		Instance:       fixtureInstance,
+		Network:        f.network,
+		TurnEnds:       f.turnEnds,
+		StandingCloses: f.standingCloses,
+		Lifetime:       life,
 		CreateProgressFor: func(opID string) CreateProgress {
 			f.recoveredMu.Lock()
 			defer f.recoveredMu.Unlock()
@@ -5495,4 +5519,13 @@ func (a *fakeAccounts) MoveProject(_ context.Context, from, to string) error {
 	}
 	a.projectMoves = append(a.projectMoves, [2]string{from, to})
 	return nil
+}
+
+// fakeStandingCloses records each workspace whose standing close request was
+// owed a judgment.
+type fakeStandingCloses struct{ reconsidered []ids.WorkspaceID }
+
+// Reconsider implements CloseRequestReporter.
+func (f *fakeStandingCloses) Reconsider(ws ids.WorkspaceID) {
+	f.reconsidered = append(f.reconsidered, ws)
 }

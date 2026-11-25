@@ -517,14 +517,26 @@ type Verbs interface {
 	RefreshDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// ResumeDeployCheck shows a backlogged deploy check workspace again.
 	ResumeDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
-	// CloseSelf is the workspace's own agent closing it: the asking turn is
-	// never a blocker, and a workspace whose turn still runs is marked to
-	// close when that turn ends, answering true (close.go). A workspace with
-	// no turn running closes now, answering false.
-	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
-	// CarryOutSelfClose carries out the close a workspace asked of itself,
-	// when one is marked (SelfCloses calls it at each turn's end).
-	CarryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error
+	// CloseSelf is the workspace's own agent closing it, which always stands
+	// (close.go): it closes now when nothing blocks it and no turn runs, and
+	// otherwise registers the standing close request, answering true when the
+	// asking turn is all it waits on, and what else it waits on otherwise.
+	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, *CloseWaits, error)
+	// CloseStanding is a close by BY that stands when something that clears
+	// on its own blocks it (standingclose.go), answering nil when it closed
+	// now and what the standing request waits on otherwise.
+	CloseStanding(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) (*CloseWaits, error)
+	// ReconsiderCloseRequest judges WS's standing close request again and
+	// closes the workspace once nothing blocks it (StandingCloses calls it).
+	ReconsiderCloseRequest(ctx context.Context, ws ids.WorkspaceID) error
+	// ReconsiderCloseRequests judges every standing close request again.
+	ReconsiderCloseRequests(ctx context.Context) error
+	// WithdrawCloseRequest withdraws WS's standing close request, as BY says,
+	// answering whether one stood.
+	WithdrawCloseRequest(ctx context.Context, ws ids.WorkspaceID, by CloseWithdrawal) (bool, error)
+	// RetireIntakeAtTurnEnd retires an intake workspace at each of its turns'
+	// ends (IntakeRetirements calls it); any other workspace is left alone.
+	RetireIntakeAtTurnEnd(ctx context.Context, ws ids.WorkspaceID) error
 	// TellOwnedPullRequestsMerged tells WS, once, that every pull request it
 	// owns has merged (wsm.OwnedPullRequestsMerged), and that closing it is
 	// its own to do; nothing closes it for its merged pull requests.
@@ -950,9 +962,13 @@ type Deps struct {
 	Derived DerivedReporter
 	Feed    feed.Resolver
 	Footer  footer.Resolver
-	Topbar  topbar.Resolver
-	Sidebar sidebar.Resolver
-	Host    HostRelay
+	// StandingCloses is told each workspace whose standing close request was
+	// just registered, so it judges the request again on its own loop
+	// (StandingCloses.Reconsider).
+	StandingCloses CloseRequestReporter
+	Topbar         topbar.Resolver
+	Sidebar        sidebar.Resolver
+	Host           HostRelay
 	// PullRequests answers the subscription an owned pull-request link takes,
 	// anchored by the watcher's first read (prwatch.Watcher.FollowFromFirstRead).
 	PullRequests PullRequestFollower
@@ -1439,6 +1455,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a feed resolver")
 	case deps.Footer == nil:
 		return nil, missing("a footer resolver")
+	case deps.StandingCloses == nil:
+		return nil, missing("the standing closes")
 	case deps.Topbar == nil:
 		return nil, missing("a topbar resolver")
 	case deps.Sidebar == nil:
@@ -1569,4 +1587,10 @@ func (h SelectionHistory) String() string {
 		return "keep"
 	}
 	panic(fmt.Sprintf("workspace: unknown SelectionHistory %d", int(h)))
+}
+
+// CloseRequestReporter is told a workspace whose standing close request must
+// be judged again (StandingCloses implements it). It only appends.
+type CloseRequestReporter interface {
+	Reconsider(ws ids.WorkspaceID)
 }

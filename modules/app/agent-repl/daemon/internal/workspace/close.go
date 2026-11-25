@@ -31,6 +31,19 @@ import (
 // Closing leaves the SESSION alone: Close is view-level, Kill is what ends a
 // session, and the worktree is untouched either way.
 func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error {
+	return v.close(ctx, ws, by, true)
+}
+
+// closeQuietly is Close with no turn interrupted: a turn in flight refuses
+// it, as every other quietness blocker does. A standing close request is
+// carried out this way (ReconsiderCloseRequest), so a turn that started since
+// the request was judged is never cut short by it.
+func (v *verbs) closeQuietly(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error {
+	return v.close(ctx, ws, by, false)
+}
+
+// close is Close, interrupting a running turn first when INTERRUPT says so.
+func (v *verbs) close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause, interrupt bool) error {
 	record, log, err := v.owned(ctx, "CloseWorkspace", ws)
 	if err != nil {
 		return err
@@ -38,9 +51,12 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause
 
 	// A RUNNING TURN IS INTERRUPTED AHEAD OF THE CLOSE (owner ruling,
 	// 2026-11-24), so the close is never refused for it.
-	interrupted, err := v.interruptBeforeLeaving(ctx, log, ws, opClose, "close")
-	if err != nil {
-		return err
+	interrupted := false
+	if interrupt {
+		interrupted, err = v.interruptBeforeLeaving(ctx, log, ws, opClose, "close")
+		if err != nil {
+			return err
+		}
 	}
 	if err := v.refuseClose(ctx, log, record, by, interrupted); err != nil {
 		return err
@@ -83,37 +99,27 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause
 	return nil
 }
 
-// refuseClose judges EVERY RULE a close of RECORD by BY applies, answering
-// the refusal Close would answer, a read that failed (recorded at ERROR), or
-// nil when the close may go ahead. OWNTURN discounts the turn in flight
-// (blockedClose).
+// refuseClose judges EVERY RULE a close of RECORD by BY applies
+// (closeWaits), answering the refusal Close would answer, a read that failed
+// (recorded at ERROR), or nil when the close may go ahead. OWNTURN discounts
+// the turn in flight (blockedClose). The quietness blockers answer first and
+// stand in the footer; the family rule answers has_open_children.
 //
-// IT IS THE ONE JUDGMENT both Close and CloseSelf make, so a self-close is
-// never accepted as deferred when Close is already certain to refuse it at
-// the turn's end (2026-11-16, torch-human-cancel-hang: marked to close over
-// two open children, refused at the turn's end, and never told):
-//   - the quietness blockers (blockedClose), standing in the footer;
-//   - for a gesture, the family rule (wsm.HasOpenChildrenError), read ahead
-//     of the write as wsm.MarkClosed applies it: never for a row already
-//     closed.
+// IT IS THE ONE JUDGMENT Close, CloseSelf and CloseStanding make, so a close
+// is never accepted to stand, or to happen at a turn's end, on a reading the
+// close itself would not share.
 func (v *verbs) refuseClose(ctx context.Context, log dlog.Logger, record wsm.Workspace, by wsm.CloseCause, ownTurn bool) error {
-	blocked, err := v.blockedClose(ctx, record.ID, ownTurn)
-	if err != nil {
-		log.Error(opClose, "could not judge whether the workspace is quiet", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("close %q: %w", record.ID, err)
-	}
-	if blocked != nil {
-		return v.refuseBlockedClose(log, record.ID, blocked)
-	}
-	if record.Closed || !by.IsGesture() {
-		return nil
-	}
-	err = v.deps.DB.RequireNoOpenChildren(ctx, record.ID)
-	if err == nil || refusedByFamily(log, opClose, err) {
+	waits, err := v.closeWaits(ctx, log, record, by, ownTurn)
+	switch {
+	case err != nil:
 		return err
+	case waits.Blocked != nil:
+		return v.refuseBlockedClose(log, record.ID, waits.Blocked)
+	case waits.Family != nil:
+		refusedByFamily(log, opClose, waits.Family)
+		return waits.Family
 	}
-	log.Error(opClose, "could not read whether the workspace has open children", dlog.Context{"cause": err.Error()})
-	return fmt.Errorf("close %q: read its open children: %w", record.ID, err)
+	return nil
 }
 
 // isCloseRefusal reports whether ERR, from Close, is a refusal (the close's
@@ -169,91 +175,34 @@ func (v *verbs) interruptBeforeLeaving(ctx context.Context, log dlog.Logger, ws 
 	return true, nil
 }
 
-// CloseSelf is a workspace's agent closing its own workspace. The asking turn
-// is never a blocker: when every other rule Close applies lets it close
-// (refuseClose) and that turn still runs, the workspace is MARKED to close
-// when the turn ends and the answer is true; a workspace with no turn running
-// closes now, answering false. A close any other rule refuses is refused NOW,
-// with nothing marked, so the asking agent reads the refusal.
-//
-// THE MARK IS TAKEN ONCE. The turn may end between the read that saw it
-// running and the mark's write, so the turn is read again after the mark: a
-// turn that has ended by then leaves the mark to whichever of this call and
-// the turn-end edge (SelfCloses) takes it first, and only the taker closes.
-func (v *verbs) CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+// CloseSelf is a workspace's agent closing its own workspace, and it always
+// STANDS (agentrepl.v1.CloseWorkspaceRequest.stand): the asking turn is never
+// a blocker, so a workspace with nothing blocking it and no turn running
+// closes now (answering false and nil). Otherwise the close is registered as
+// the workspace's standing close request (standClose), carried out by the
+// standing closes once nothing blocks it: it answers true when the asking
+// turn is all it waits on (closes_when_turn_ends), and what else it waits on
+// otherwise (stands).
+func (v *verbs) CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, *CloseWaits, error) {
 	record, log, err := v.owned(ctx, "CloseWorkspace", ws)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	if err := v.refuseClose(ctx, log, record, wsm.CloseByAgent, true); err != nil {
-		return false, err
-	}
-	if !v.turnRunning(ws) {
-		return false, v.Close(ctx, ws, wsm.CloseByAgent)
-	}
-	if err := v.deps.DB.MarkCloseWhenTurnEnds(ctx, ws, v.now()); err != nil {
-		log.Error(opClose, "could not mark the workspace to close when its asking turn ends", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("close %q: mark: %w", ws, err)
-	}
-	log.Info(opClose, "the workspace asked to close itself; it closes when its asking turn ends", nil)
-	if v.turnRunning(ws) {
-		return true, nil
-	}
-	return false, v.takeSelfClose(ctx, log, ws)
-}
-
-// takeSelfClose takes WS's self-close mark and, when this caller took it,
-// carries the close out. A close something changed during the turn now
-// refuses (CloseSelf judged every rule before it marked) is abandoned and
-// REPORTED, never swallowed: recorded at WARN with its cause, and told to the
-// workspace's agent as a notice (tellSelfCloseRefused), which is the one
-// surface every refusal reaches. A quietness refusal also stands in the
-// footer's close-blocked state (refuseBlockedClose); a family refusal has no
-// footer state.
-func (v *verbs) takeSelfClose(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
-	taken, err := v.deps.DB.TakeCloseWhenTurnEnds(ctx, ws)
+	waits, err := v.closeWaits(ctx, log, record, wsm.CloseByAgent, true)
 	if err != nil {
-		log.Error(opClose, "could not take the workspace's self-close mark", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("close %q: take the mark: %w", ws, err)
+		return false, nil, err
 	}
-	if !taken {
-		return nil
+	if waits.None() && !v.turnRunning(ws) {
+		return false, nil, v.Close(ctx, ws, wsm.CloseByAgent)
 	}
-	err = v.Close(ctx, ws, wsm.CloseByAgent)
-	if !isCloseRefusal(err) {
-		return err
+	if err := v.standClose(ctx, log, ws, wsm.CloseByAgent, waits); err != nil {
+		return false, nil, err
 	}
-	// A REFUSED SELF-CLOSE IS AN ANSWER, NOT A FAULT (owner ruling,
-	// 2026-11-18): the refusal names a standing reason (an open pull request
-	// it owns, a main workspace), and the workspace is told it, so it is INFO.
-	log.Info(opClose, "the close the workspace asked for was refused when its turn ended; it stays open", dlog.Context{"cause": err.Error()})
-	v.tellSelfCloseRefused(ctx, log, ws, err)
-	return nil
-}
-
-// BriefSelfCloseRefused is the notice a workspace's agent is told when the
-// close it asked for was refused as its turn ended.
-const BriefSelfCloseRefused = "workspace-self-close-refused"
-
-// tellSelfCloseRefused tells WS's agent, as a deferred notice, that the close
-// it asked for was refused with REFUSAL and that it stays open. A notice that
-// cannot be composed or queued is recorded at ERROR by composeBrief or
-// queueBrief.
-func (v *verbs) tellSelfCloseRefused(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, refusal error) {
-	why := refusal.Error()
-	if r, ok := AsRefusal(refusal); ok {
-		why = r.Reason
+	if waits.None() {
+		log.Info(opClose, "the workspace asked to close itself; it closes when its asking turn ends", nil)
+		return true, nil, nil
 	}
-	notice, err := v.composeBrief(ctx, log, opClose, BriefSelfCloseRefused, map[string]string{"why": why})
-	if err != nil {
-		return
-	}
-	turn, _, err := v.queueDeferredBrief(ctx, log, opClose, ws, notice, conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
-		"the workspace's", "the refused self-close's notice")
-	if err != nil {
-		return
-	}
-	log.Info(opClose, "told the workspace its close was refused", dlog.Context{"turn": string(turn)})
+	return false, &waits, nil
 }
 
 // turnRunning reports whether a turn runs in WS now.

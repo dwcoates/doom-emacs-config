@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -762,5 +763,49 @@ func TestFoldHeldPromptSurfacesAnOrdinaryFailureAsAnError(t *testing.T) {
 	// Assert.
 	if code := connectCode(t, err); code != connect.CodeInternal {
 		t.Fatalf("code = %v, want Internal for a fold the store could not record", code)
+	}
+}
+
+// RELEASING A HELD PROMPT WITHDRAWS THE STANDING CLOSE, and a drop does not:
+// a release delivers the user's own intent, a drop clears a blocker.
+func TestUpdateHeldPromptWithdrawsTheStandingCloseOnlyOnARelease(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.UpdateHeldPromptRequest
+		want []fakeWithdrawal
+	}{
+		{name: "a release", req: releaseRequest(), want: []fakeWithdrawal{{ws: testWorkspaceID, by: workspace.WithdrawnByHeldPromptRelease, submitsBefore: -1}}},
+		{name: "a drop", req: dropRequest()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.UpdateHeldPrompt(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("UpdateHeldPrompt = %v, %v", resp, err)
+			}
+			if !reflect.DeepEqual(h.Verbs.api.withdrawals, tt.want) {
+				t.Fatalf("withdrawals = %+v, want %+v", h.Verbs.api.withdrawals, tt.want)
+			}
+		})
+	}
+}
+
+func TestAReleaseWhoseWithdrawalFailsReleasesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.api.withdrawErr = errors.New("the store is gone")
+
+	// Act.
+	_, err := h.Client.UpdateHeldPrompt(context.Background(), connect.NewRequest(releaseRequest()))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal || len(h.Queue.released) != 0 {
+		t.Fatalf("UpdateHeldPrompt = %v, released %v; want an internal error and nothing released", err, h.Queue.released)
 	}
 }

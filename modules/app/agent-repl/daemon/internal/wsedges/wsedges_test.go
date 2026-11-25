@@ -34,6 +34,18 @@ func (r *recorder) Evicted(ws ids.WorkspaceID, reason string) {
 	r.got = append(r.got, "evicted:"+string(ws)+":"+reason)
 }
 func (r *recorder) ColdGated(ws ids.WorkspaceID) { r.got = append(r.got, "cold_gated:"+string(ws)) }
+func (r *recorder) Retargeted(change wsm.ParentChange) {
+	r.got = append(r.got, "retargeted:"+string(change.Workspace)+":"+parentName(change.Before)+"->"+parentName(change.After))
+}
+
+// parentName spells a target's parent for a recorded edge, "top" for none.
+func parentName(target wsm.MergeTarget) string {
+	if target.Parent == nil {
+		return "top"
+	}
+	return string(*target.Parent)
+}
+
 func (r *recorder) PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey) {
 	r.got = append(r.got, "pull_request:"+string(ws)+":"+pr.String())
 }
@@ -59,6 +71,7 @@ func TestTheHubTellsEveryObserverEveryEdge(t *testing.T) {
 		{name: "an eviction", edge: func(h *Hub) { h.Evicted(ws, "dequeued") }, want: "evicted:ws-1:dequeued"},
 		{name: "a cold gate", edge: func(h *Hub) { h.ColdGated(ws) }, want: "cold_gated:ws-1"},
 		{name: "a pull request taken as the workspace's own", edge: func(h *Hub) { h.PullRequestOwned(ws, pr) }, want: "pull_request:ws-1:acme/definitions#7"},
+		{name: "a retarget", edge: func(h *Hub) { h.Retargeted(retarget) }, want: "retargeted:ws-1:parent-a->top"},
 		{name: "a merge queue landing", edge: func(h *Hub) {
 			h.QueueChanged(merge.QueueChange{Kind: merge.QueueChangeLanded, Subject: merge.QueueMember{Workspace: ws}})
 		}, want: "landed:ws-1"},
@@ -325,4 +338,103 @@ func TestReportingEdgesPanicsOnASubscriptionNamingNoPullRequest(t *testing.T) {
 
 	// Act
 	_, _ = db.SetWorkspaceLink(context.Background(), ws, set)
+}
+
+// parentA is the parent a retarget takes ws-1 away from.
+var parentA = wsm.WorkspaceID("parent-a")
+
+// retarget moves ws-1 from under parent-a to the top level.
+var retarget = wsm.ParentChange{Workspace: ws, Before: wsm.MergeTarget{Parent: &parentA}}
+
+// parentsDB is a registry whose retargets answer CHANGE, STALE or ERR.
+type parentsDB struct {
+	wsm.DB
+	change wsm.ParentChange
+	stale  bool
+	err    error
+}
+
+func (d *parentsDB) SetParent(context.Context, wsm.WorkspaceID, wsm.Retarget) (wsm.ParentChange, error) {
+	return d.change, d.err
+}
+
+func (d *parentsDB) RestoreParent(context.Context, wsm.ParentChange) (bool, error) {
+	return d.stale, d.err
+}
+
+func TestReportingEdgesTellsEveryRetarget(t *testing.T) {
+	tests := []struct {
+		name  string
+		inner *parentsDB
+		act   func(db wsm.DB) error
+		want  []string
+	}{
+		{name: "a retarget is told as it changed",
+			inner: &parentsDB{change: retarget},
+			act: func(db wsm.DB) error {
+				_, err := db.SetParent(context.Background(), ws, wsm.Retarget{})
+				return err
+			},
+			want: []string{"retargeted:ws-1:parent-a->top"}},
+		{name: "a restore is told as the reverse of the retarget it undid",
+			inner: &parentsDB{},
+			act: func(db wsm.DB) error {
+				_, err := db.RestoreParent(context.Background(), retarget)
+				return err
+			},
+			want: []string{"retargeted:ws-1:top->parent-a"}},
+		{name: "a stale restore changed nothing and tells nothing",
+			inner: &parentsDB{stale: true},
+			act: func(db wsm.DB) error {
+				_, err := db.RestoreParent(context.Background(), retarget)
+				return err
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &recorder{}
+			db := ReportingEdges(tt.inner, New(r), dlog.NewTestLogger())
+
+			// Act
+			err := tt.act(db)
+
+			// Assert
+			if err != nil || !slices.Equal(r.got, tt.want) {
+				t.Fatalf("err = %v, told %v; want %v", err, r.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReportingEdgesTellsNothingOfARetargetThatFailed(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(db wsm.DB) error
+	}{
+		{name: "a refused retarget", act: func(db wsm.DB) error {
+			_, err := db.SetParent(context.Background(), ws, wsm.Retarget{})
+			return err
+		}},
+		{name: "a failed restore", act: func(db wsm.DB) error {
+			_, err := db.RestoreParent(context.Background(), retarget)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &recorder{}
+			cause := errors.New("disk gone")
+			db := ReportingEdges(&parentsDB{err: cause}, New(r), dlog.NewTestLogger())
+
+			// Act
+			err := tt.act(db)
+
+			// Assert
+			if !errors.Is(err, cause) || len(r.got) != 0 {
+				t.Fatalf("err = %v, told %v; want the failure and nothing told", err, r.got)
+			}
+		})
+	}
 }

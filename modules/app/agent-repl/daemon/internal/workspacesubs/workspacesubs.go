@@ -170,6 +170,9 @@ func (s *Service) ColdGated(ws ids.WorkspaceID) {
 	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventColdGated})
 }
 
+// Retargeted implements wsedges.Observer: no subscription follows a retarget.
+func (s *Service) Retargeted(wsm.ParentChange) {}
+
 // PullRequestOwned implements wsedges.Observer.
 func (s *Service) PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey) {
 	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventPullRequest, pr: pr})

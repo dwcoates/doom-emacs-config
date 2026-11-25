@@ -53,7 +53,10 @@ type lifecycleSink struct {
 	// mediation settles a dispatched fixer's check at each of its turns'
 	// ends, after the queue stamped the turn's close.
 	mediation turnEndNotifiee
-	log       dlog.Logger
+	// standingCloses judges a standing close request again when its
+	// workspace falls free: its last turn or detached item ended.
+	standingCloses freeNotifiee
+	log            dlog.Logger
 	// linksMu guards detached: the workspaces whose link is down, so a link
 	// coming back is told from its first attachment (reattached).
 	linksMu  sync.Mutex
@@ -459,11 +462,12 @@ func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchR
 }
 
 // OnFree is the freeness edge, which a turn's end raises: the queue bounces a
-// shim registered for it, and a withheld workspace's stand-down the turn
-// deferred is taken.
+// shim registered for it, a withheld workspace's stand-down the turn
+// deferred is taken, and a standing close request is judged again.
 func (s *lifecycleSink) OnFree(ws ids.WorkspaceID, workEnded bool) {
 	s.queue.OnFree(ws)
 	s.retryWithheld(ws, "free")
+	s.standingCloses.FellFree(ws)
 	if s.caches == nil {
 		s.log.Error("daemon.cmd.lifecycle", "a session fell free before the cache keeper was wired; its next keep-alive was not timed", dlog.Context{
 			"workspace": string(ws), "invariant_violation": "the cache keeper is bound before any session starts",
@@ -612,4 +616,9 @@ func shimFaultRecordKind(fault *conversationv1.SessionFault) string {
 // so the adoption record and this evidence can never spell an arm differently.
 func shimFaultKind(fault *conversationv1.SessionFault) string {
 	return shimclient.FaultKind(fault)
+}
+
+// freeNotifiee is told each workspace that fell free (workspace.StandingCloses).
+type freeNotifiee interface {
+	FellFree(ws ids.WorkspaceID)
 }

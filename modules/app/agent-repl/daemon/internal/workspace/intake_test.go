@@ -205,11 +205,11 @@ func TestATurnEndRetiresAQuietIntakeWorkspace(t *testing.T) {
 	ws := intakeWorkspace(t, f)
 
 	// Act
-	err := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+	err := f.verbs.RetireIntakeAtTurnEnd(context.Background(), ws.ID)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("CarryOutSelfClose: %v", err)
+		t.Fatalf("RetireIntakeAtTurnEnd: %v", err)
 	}
 	if len(f.fleet.stopped) != 1 {
 		t.Errorf("stopped %+v, want the session stopped once", f.fleet.stopped)
@@ -235,16 +235,16 @@ func TestATurnEndRetiresAnIntakeWorkspaceThatAlsoAskedToCloseItself(t *testing.T
 	// Arrange
 	f := newFixture(t)
 	ws := intakeWorkspace(t, f)
-	if err := f.db.MarkCloseWhenTurnEnds(context.Background(), ws.ID, f.verbs.(*verbs).now()); err != nil {
-		t.Fatalf("MarkCloseWhenTurnEnds: %v", err)
+	if err := f.db.RequestClose(context.Background(), ws.ID, wsm.CloseRequest{At: f.verbs.(*verbs).now(), By: wsm.CloseByAgent}); err != nil {
+		t.Fatalf("RequestClose: %v", err)
 	}
 
 	// Act
-	err := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+	err := f.verbs.RetireIntakeAtTurnEnd(context.Background(), ws.ID)
 
 	// Assert
 	if err != nil || len(f.git.nuked) != 1 {
-		t.Fatalf("CarryOutSelfClose = %v, nuked %+v; want the worktree destroyed", err, f.git.nuked)
+		t.Fatalf("RetireIntakeAtTurnEnd = %v, nuked %+v; want the worktree destroyed", err, f.git.nuked)
 	}
 }
 
@@ -255,14 +255,14 @@ func TestAnIntakeWorkspaceWithSomethingStandingIsRetiredAtALaterTurnEnd(t *testi
 	f.db.held[ws.ID] = []wsm.HeldPrompt{{Turn: "held-1"}}
 
 	// Act
-	first := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+	first := f.verbs.RetireIntakeAtTurnEnd(context.Background(), ws.ID)
 	keptClosed, keptNuked := f.db.closedFlags[ws.ID], len(f.git.nuked)
 	delete(f.db.held, ws.ID)
-	second := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+	second := f.verbs.RetireIntakeAtTurnEnd(context.Background(), ws.ID)
 
 	// Assert
 	if first != nil || second != nil {
-		t.Fatalf("CarryOutSelfClose = %v, then %v", first, second)
+		t.Fatalf("RetireIntakeAtTurnEnd = %v, then %v", first, second)
 	}
 	if keptClosed || keptNuked != 0 {
 		t.Errorf("after the blocked turn end: closed %v, nuked %d; want it kept whole", keptClosed, keptNuked)
@@ -281,11 +281,11 @@ func TestAnIntakeWorkspaceWhoseWorktreeIsGoneIsLeftAlone(t *testing.T) {
 	}
 
 	// Act
-	err := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+	err := f.verbs.RetireIntakeAtTurnEnd(context.Background(), ws.ID)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("CarryOutSelfClose: %v", err)
+		t.Fatalf("RetireIntakeAtTurnEnd: %v", err)
 	}
 	if len(f.fleet.stopped) != 0 || len(f.git.nuked) != 0 || f.db.closedFlags[ws.ID] {
 		t.Fatalf("stopped %+v, nuked %+v, closed %v; want nothing done twice", f.fleet.stopped, f.git.nuked, f.db.closedFlags[ws.ID])
@@ -299,7 +299,7 @@ func TestRetiringAnIntakeWorkspaceFailsLoudly(t *testing.T) {
 		operation string
 		wantNuked int
 	}{
-		{name: "the intake mark cannot be read", arrange: func(f *fixture) { f.db.isIntakeErr = errors.New("disk I/O error") }, operation: opSelfClose},
+		{name: "the intake mark cannot be read", arrange: func(f *fixture) { f.db.isIntakeErr = errors.New("disk I/O error") }, operation: opIntakeRetirement},
 		{name: "the close cannot be recorded", arrange: func(f *fixture) { f.db.setClosedErr = errors.New("disk I/O error") }, operation: opIntakeRetire},
 		{name: "git will not destroy the worktree", arrange: func(f *fixture) { f.git.nukeErr = errors.New("fatal: worktree is locked") }, operation: opIntakeRetire},
 	}
@@ -311,11 +311,11 @@ func TestRetiringAnIntakeWorkspaceFailsLoudly(t *testing.T) {
 			tt.arrange(f)
 
 			// Act
-			err := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+			err := f.verbs.RetireIntakeAtTurnEnd(context.Background(), ws.ID)
 
 			// Assert
 			if err == nil {
-				t.Fatal("CarryOutSelfClose succeeded")
+				t.Fatal("RetireIntakeAtTurnEnd succeeded")
 			}
 			if len(f.git.nuked) != 0 {
 				t.Fatalf("nuked %+v, want the worktree kept", f.git.nuked)
@@ -532,11 +532,11 @@ func TestARetirementJudgesQuietnessUnderTheHandoffLock(t *testing.T) {
 	}
 
 	// Act
-	err := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+	err := f.verbs.RetireIntakeAtTurnEnd(context.Background(), ws.ID)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("CarryOutSelfClose: %v", err)
+		t.Fatalf("RetireIntakeAtTurnEnd: %v", err)
 	}
 	if !heldDuringCheck {
 		t.Fatal("the intake's quietness was judged without the handoff lock a card's question takes")

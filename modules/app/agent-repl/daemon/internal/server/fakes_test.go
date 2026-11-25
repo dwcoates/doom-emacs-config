@@ -1113,6 +1113,18 @@ type agentAPI struct {
 	selfCloses   []ids.WorkspaceID
 	closesLater  bool
 	closeSelfErr error
+	// selfCloseWaits is what a self-close answers it stands on.
+	selfCloseWaits *workspace.CloseWaits
+	// standingCloses records every CloseStanding's cause; standingWaits is
+	// what each answers it waits on, and standingErr refuses it.
+	standingCloses []wsm.CloseCause
+	standingWaits  *workspace.CloseWaits
+	standingErr    error
+	// withdrawals records every WithdrawCloseRequest; withdrawn is what each
+	// answers, and withdrawErr fails it.
+	withdrawals []fakeWithdrawal
+	withdrawn   bool
+	withdrawErr error
 	oneShots     []fakeOneShot
 	directive    string
 	oneShotErr   error
@@ -1123,6 +1135,15 @@ type agentAPI struct {
 	// prompts, when set, is read at each take-back, so a test can tell
 	// whether the take-back came before the prompt was handed on.
 	prompts *fakePrompts
+}
+
+// fakeWithdrawal is one WithdrawCloseRequest the fake verbs were asked for.
+type fakeWithdrawal struct {
+	ws ids.WorkspaceID
+	by workspace.CloseWithdrawal
+	// submitsBefore is how many prompts had been handed on when it was asked
+	// for, -1 when the test wired no prompts.
+	submitsBefore int
 }
 
 // fakeTakeBack is one TakeBackOneShot the fake verbs were asked for.
@@ -1152,9 +1173,19 @@ func (f *fakeVerbs) Status(context.Context, ids.WorkspaceID) (*agentreplv1.Works
 	return f.api.status, f.api.statusErr
 }
 
-func (f *fakeVerbs) CloseSelf(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+func (f *fakeVerbs) CloseSelf(_ context.Context, ws ids.WorkspaceID) (bool, *workspace.CloseWaits, error) {
 	f.api.selfCloses = append(f.api.selfCloses, ws)
-	return f.api.closesLater, f.api.closeSelfErr
+	return f.api.closesLater, f.api.selfCloseWaits, f.api.closeSelfErr
+}
+
+func (f *fakeVerbs) CloseStanding(_ context.Context, _ ids.WorkspaceID, by wsm.CloseCause) (*workspace.CloseWaits, error) {
+	f.api.standingCloses = append(f.api.standingCloses, by)
+	return f.api.standingWaits, f.api.standingErr
+}
+
+func (f *fakeVerbs) WithdrawCloseRequest(_ context.Context, ws ids.WorkspaceID, by workspace.CloseWithdrawal) (bool, error) {
+	f.api.withdrawals = append(f.api.withdrawals, fakeWithdrawal{ws: ws, by: by, submitsBefore: f.promptsHandedOn()})
+	return f.api.withdrawn, f.api.withdrawErr
 }
 
 func (f *fakeVerbs) SetOneShot(_ context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error) {

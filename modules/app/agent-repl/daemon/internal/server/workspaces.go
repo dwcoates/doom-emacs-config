@@ -813,21 +813,36 @@ func (s *server) CloseWorkspace(
 	}
 	ws := subject.Record.ID
 	success := &agentreplv1.CloseWorkspaceSuccess{Outcome: &agentreplv1.CloseWorkspaceSuccess_Closed{Closed: &agentreplv1.CloseWorkspaceSuccessClosed{}}}
-	switch by, asker := askerOf(req.Msg.GetRequester()); {
-	case by == merge.RequestedByUser:
-		if err := s.deps.Verbs.Close(ctx, ws, wsm.CloseByUser); err != nil {
-			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	// A CLOSE THAT STANDS answers what it waits on, and the daemon carries it
+	// out once nothing blocks it (workspace.StandingCloses).
+	stands := func(waits *workspace.CloseWaits) {
+		if waits != nil {
+			success.Outcome = &agentreplv1.CloseWorkspaceSuccess_Stands{Stands: &agentreplv1.CloseWorkspaceSuccessStands{Waits: waits.Proto()}}
 		}
-	case asker == ws:
-		later, err := s.deps.Verbs.CloseSelf(ctx, ws)
+	}
+	by, asker := askerOf(req.Msg.GetRequester())
+	cause := wsm.CloseByAgent
+	if by == merge.RequestedByUser {
+		cause = wsm.CloseByUser
+	}
+	switch {
+	case by == merge.RequestedByAgent && asker == ws:
+		later, waits, err := s.deps.Verbs.CloseSelf(ctx, ws)
 		if err != nil {
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 		}
 		if later {
 			success.Outcome = &agentreplv1.CloseWorkspaceSuccess_ClosesWhenTurnEnds{ClosesWhenTurnEnds: &agentreplv1.CloseWorkspaceSuccessClosesWhenTurnEnds{}}
 		}
+		stands(waits)
+	case req.Msg.GetStand():
+		waits, err := s.deps.Verbs.CloseStanding(ctx, ws, cause)
+		if err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+		stands(waits)
 	default:
-		if err := s.deps.Verbs.Close(ctx, ws, wsm.CloseByAgent); err != nil {
+		if err := s.deps.Verbs.Close(ctx, ws, cause); err != nil {
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 		}
 	}
@@ -835,6 +850,33 @@ func (s *server) CloseWorkspace(
 	// view is recomposed from what the change left behind.
 	s.PublishHostWorkspace(ctx, ws)
 	resp.Result = &agentreplv1.CloseWorkspaceResponse_Success{Success: success}
+	return connect.NewResponse(resp), nil
+}
+
+// WithdrawWorkspaceClose takes back the workspace's standing close request,
+// answering whether one stood.
+func (s *server) WithdrawWorkspaceClose(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WithdrawWorkspaceCloseRequest],
+) (*connect.Response[agentreplv1.WithdrawWorkspaceCloseResponse], error) {
+	const rpc = "WithdrawWorkspaceClose"
+	if err := validateWorkspaceRequester("requester", req.Msg.GetRequester()); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.WithdrawWorkspaceCloseResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	withdrawn, err := s.deps.Verbs.WithdrawCloseRequest(ctx, subject.Record.ID, workspace.WithdrawnByRequest)
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	success := &agentreplv1.WithdrawWorkspaceCloseSuccess{Outcome: &agentreplv1.WithdrawWorkspaceCloseSuccess_NoneStood{NoneStood: &agentreplv1.WithdrawWorkspaceCloseSuccessNoneStood{}}}
+	if withdrawn {
+		success.Outcome = &agentreplv1.WithdrawWorkspaceCloseSuccess_Withdrawn{Withdrawn: &agentreplv1.WithdrawWorkspaceCloseSuccessWithdrawn{}}
+	}
+	resp.Result = &agentreplv1.WithdrawWorkspaceCloseResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 

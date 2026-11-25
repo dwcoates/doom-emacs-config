@@ -946,7 +946,8 @@ type DeployCheckWorkspaces interface {
 	// again on its branch at the main branch's tip.
 	Reopen(ctx context.Context, ws ids.WorkspaceID) error
 	// CloseSelf closes a deploy check workspace, at its running turn's end
-	// when one runs, answering whether it waits for that end.
+	// when one runs, answering whether it waits for that end. A close
+	// something else blocks stands until that clears.
 	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// Resume shows a backlogged deploy check workspace again: the mediator
 	// stands in sight for good, so any hide of it is undone.

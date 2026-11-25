@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -537,5 +538,72 @@ func TestStatusRefusesWhenTheLinksCannotBeRead(t *testing.T) {
 	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opStatus})
 	if !ok || r.Context["workspace"] != "ws-1" {
 		t.Errorf("record = %+v, want an ERROR naming the workspace", r)
+	}
+}
+
+func TestStatusAnswersTheStandingCloseRequest(t *testing.T) {
+	at := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		request  *wsm.CloseRequest
+		children error
+		check    func(t *testing.T, got *agentreplv1.WorkspaceStatusCloseRequest)
+	}{
+		{name: "none stands", check: func(t *testing.T, got *agentreplv1.WorkspaceStatusCloseRequest) {
+			if got != nil {
+				t.Fatalf("close request = %v, want none", got)
+			}
+		}},
+		{name: "an agent's request waiting on a child", request: &wsm.CloseRequest{At: at, By: wsm.CloseByAgent}, children: errOpenChildren,
+			check: func(t *testing.T, got *agentreplv1.WorkspaceStatusCloseRequest) {
+				if got.GetAgent() == nil || got.GetRequestedAtMs() != at.UnixMilli() {
+					t.Fatalf("close request = %v, want the agent's, at %d", got, at.UnixMilli())
+				}
+				if kids := got.GetWaits().GetOpenChildren().GetChildren(); len(kids) != 1 || kids[0].GetId() != "w2" || got.GetWaits().GetBlocked() != nil {
+					t.Fatalf("waits = %v, want the open child w2 alone", got.GetWaits())
+				}
+			}},
+		{name: "the user's request nothing blocks any more", request: &wsm.CloseRequest{At: at, By: wsm.CloseByUser},
+			check: func(t *testing.T, got *agentreplv1.WorkspaceStatusCloseRequest) {
+				if got.GetUser() == nil || got.GetWaits() == nil || got.GetWaits().GetBlocked() != nil || got.GetWaits().GetOpenChildren() != nil {
+					t.Fatalf("close request = %v, want the user's, waiting on nothing", got)
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Name: "one", CloseRequest: tt.request}
+			f.db.noOpenChildrenErr = tt.children
+			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
+
+			// Act
+			got, err := f.verbs.Status(context.Background(), "ws-1")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			tt.check(t, got.GetCloseRequest())
+		})
+	}
+}
+
+func TestStatusFailsWhenTheStandingClosesBlockersCannotBeRead(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Name: "one", CloseRequest: &wsm.CloseRequest{By: wsm.CloseByAgent}}
+	f.db.noOpenChildrenErr = errors.New("db gone")
+
+	// Act
+	_, err := f.verbs.Status(context.Background(), "ws-1")
+
+	// Assert
+	if err == nil {
+		t.Fatal("Status = nil, want the failed read")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opClose, Message: "could not read whether the workspace has open children"}); !ok {
+		t.Fatalf("no error record: %+v", f.log.logger.Records())
 	}
 }
