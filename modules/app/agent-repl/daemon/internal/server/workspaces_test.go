@@ -3292,10 +3292,14 @@ func TestSetWorkspaceNameMapsTheVerbsRefusals(t *testing.T) {
 			}},
 		{name: "branch_exists, with its branch", refusal: &workspace.Refusal{Arm: workspace.ArmBranchExists, Reason: "exists",
 			Fields: map[string]any{"branch": "better-name"}},
-			check: func(e *agentreplv1.SetWorkspaceNameError) bool { return e.GetBranchExists().GetBranch() == "better-name" }},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool {
+				return e.GetBranchExists().GetBranch() == "better-name"
+			}},
 		{name: "directory_exists, with its dir", refusal: &workspace.Refusal{Arm: workspace.ArmDirectoryExists, Reason: "exists",
 			Fields: map[string]any{"dir": "/trees/better-name"}},
-			check: func(e *agentreplv1.SetWorkspaceNameError) bool { return e.GetDirectoryExists().GetDir() == "/trees/better-name" }},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool {
+				return e.GetDirectoryExists().GetDir() == "/trees/better-name"
+			}},
 		{name: "moving", refusal: &workspace.Refusal{Arm: workspace.ArmMoving, Reason: "moving"},
 			check: func(e *agentreplv1.SetWorkspaceNameError) bool { return e.GetMoving() != nil }},
 	}

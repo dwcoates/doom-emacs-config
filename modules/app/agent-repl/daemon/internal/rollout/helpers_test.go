@@ -1231,9 +1231,9 @@ type harness struct {
 	restarts *restarttimingtest.Recorder
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
 	// "adopt <ws>"; suspendErr and adoptErr fail them.
-	merges        *fakeMerges
+	merges *fakeMerges
 	// moves is the rename moves' applier.
-	moves *fakeMoves
+	moves         *fakeMoves
 	queuedCreates *fakeQueuedCreates
 	reports       *fakeReports
 	// endLifetime ends the controller's lifetime, as the daemon's stand-down
