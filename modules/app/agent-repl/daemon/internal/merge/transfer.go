@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -70,15 +69,7 @@ var errAlreadyHandedOn = errors.New("merge: the workspace's merges were already 
 // just handed on, and this daemon rebased a worktree whose session the
 // successor drove, the session's turn still writing it).
 func (o *orchestrator) lockMove(ws ids.WorkspaceID) func() {
-	o.mu.Lock()
-	lock, ok := o.moveLocks[ws]
-	if !ok {
-		lock = &sync.Mutex{}
-		o.moveLocks[ws] = lock
-	}
-	o.mu.Unlock()
-	lock.Lock()
-	return lock.Unlock
+	return o.moveLocks.Lock(ws)
 }
 
 // SuspendForRestart is SuspendForTransfer's stopping point taken for a

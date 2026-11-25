@@ -30,6 +30,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/keyedmutex"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
@@ -455,9 +456,9 @@ type Fleet struct {
 	generation map[ids.WorkspaceID]int
 	// startGates serialize the STARTS of one workspace. See Start: the
 	// liveness check cannot do it, because a session is remembered only once
-	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
-	// whole start, which is why it is not mu itself.
-	startGates map[ids.WorkspaceID]*sync.Mutex
+	// its shim is up. Each gate is held ACROSS a whole start, which is why it
+	// is not mu itself.
+	startGates keyedmutex.Set[ids.WorkspaceID]
 	// fenced are the workspaces a forget is removing (FenceStarts): a start
 	// reads the mark under the start gate and begins nothing. Guarded by mu.
 	fenced map[ids.WorkspaceID]bool
@@ -467,8 +468,8 @@ type Fleet struct {
 	startCancels map[ids.WorkspaceID]context.CancelCauseFunc
 	// remoteControlGates serialize, per workspace, every read of the
 	// remote-control mode with the SetSessionRemoteControl that puts it in
-	// force (remotecontrol.go). The map is guarded by mu.
-	remoteControlGates map[ids.WorkspaceID]*sync.Mutex
+	// force (remotecontrol.go).
+	remoteControlGates keyedmutex.Set[ids.WorkspaceID]
 	// startSlots caps the vendor starts in flight across every workspace,
 	// shared with the bounce registry's shim restarts (startslots).
 	startSlots *startslots.Pool
@@ -597,14 +598,7 @@ func (f *Fleet) DrainStarts(bound time.Duration) bool {
 // daemon has ever started, and dropping one while a waiter held it would hand
 // the next caller a gate nobody is behind.
 func (f *Fleet) startGate(ws ids.WorkspaceID) *sync.Mutex {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	gate, ok := f.startGates[ws]
-	if !ok {
-		gate = &sync.Mutex{}
-		f.startGates[ws] = gate
-	}
-	return gate
+	return f.startGates.For(ws)
 }
 
 // NewFleet builds the session fleet.
@@ -721,23 +715,21 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 			Exit:    deps.ShimExit,
 		},
 
-		sessions:           map[ids.WorkspaceID]*live{},
-		coldGates:          map[ids.WorkspaceID]coldGate{},
-		heldAtGate:         map[ids.WorkspaceID]int{},
-		handedOver:         map[ids.WorkspaceID]bool{},
-		lastCold:           map[ids.WorkspaceID]*conversationv1.SessionCold{},
-		reapedAt:           map[ids.WorkspaceID]time.Time{},
-		generation:         map[ids.WorkspaceID]int{},
-		startGates:         map[ids.WorkspaceID]*sync.Mutex{},
-		fenced:             map[ids.WorkspaceID]bool{},
-		startCancels:       map[ids.WorkspaceID]context.CancelCauseFunc{},
-		remoteControlGates: map[ids.WorkspaceID]*sync.Mutex{},
-		startSlots:         startSlotsOf(deps.StartSlots),
-		startsUnderWay:     map[ids.WorkspaceID]bool{},
-		standDowns:         map[ids.WorkspaceID]uint64{},
-		watched:            map[ids.WorkspaceID]sessionwatcher.Watcher{},
-		carried:            map[ids.WorkspaceID]sessionwatcher.Pointers{},
-		selected:           map[ids.WorkspaceID]bool{},
+		sessions:       map[ids.WorkspaceID]*live{},
+		coldGates:      map[ids.WorkspaceID]coldGate{},
+		heldAtGate:     map[ids.WorkspaceID]int{},
+		handedOver:     map[ids.WorkspaceID]bool{},
+		lastCold:       map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		reapedAt:       map[ids.WorkspaceID]time.Time{},
+		generation:     map[ids.WorkspaceID]int{},
+		fenced:         map[ids.WorkspaceID]bool{},
+		startCancels:   map[ids.WorkspaceID]context.CancelCauseFunc{},
+		startSlots:     startSlotsOf(deps.StartSlots),
+		startsUnderWay: map[ids.WorkspaceID]bool{},
+		standDowns:     map[ids.WorkspaceID]uint64{},
+		watched:        map[ids.WorkspaceID]sessionwatcher.Watcher{},
+		carried:        map[ids.WorkspaceID]sessionwatcher.Pointers{},
+		selected:       map[ids.WorkspaceID]bool{},
 	}, nil
 }
 

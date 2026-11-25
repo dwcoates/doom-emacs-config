@@ -612,7 +612,7 @@ func (o *orchestrator) drawBackInLine(ctx context.Context, ws ids.WorkspaceID, r
 
 // lineLock answers REPO's line lock (orchestrator.lines).
 func (o *orchestrator) lineLock(repo wsm.RepoKey) *sync.Mutex {
-	return keyedLock(o, o.lines, repo)
+	return o.lines.For(repo)
 }
 
 // lineWrite makes WRITE, a store write that moves an entry of REPO's line
