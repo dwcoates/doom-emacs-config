@@ -87,9 +87,10 @@ type Workspace struct {
 	// (lastkeepalive.go); nil when it never has. CacheClock combines it with
 	// LastTurnEndedAt.
 	LastKeepaliveAt *time.Time
-	// ConversationBoundAt is when a queue-bypass switch last bound the
-	// workspace to the conversation it runs (queuebypass.go,
-	// SwapParkedConversation); nil when no switch ever did. A turn that
+	// ConversationBoundAt is when a queue-bypass switch or a bring-up that
+	// started another conversation last bound the workspace to the
+	// conversation it runs (queuebypass.go, SwapParkedConversation;
+	// lastkeepalive.go, BindNewConversation); nil when neither ever did. A turn that
 	// closed before it was the other conversation's, so CacheClock leaves it
 	// out.
 	ConversationBoundAt *time.Time

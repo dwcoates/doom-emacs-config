@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -70,5 +71,47 @@ func TestCacheClock(t *testing.T) {
 				t.Fatalf("CacheClock() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBindNewConversationEmptiesTheCacheClock(t *testing.T) {
+	// Arrange: the lost conversation's turn and keep-alive both stand.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	ctx := context.Background()
+	if err := s.SetLastKeepalive(ctx, ws.ID, instant); err != nil {
+		t.Fatalf("SetLastKeepalive: %v", err)
+	}
+	bound := instant.Add(time.Hour)
+
+	// Act
+	bindErr := s.BindNewConversation(ctx, ws.ID, bound)
+	got, readErr := s.Workspace(ctx, ws.ID)
+
+	// Assert
+	if bindErr != nil || readErr != nil {
+		t.Fatalf("errors = %v, %v", bindErr, readErr)
+	}
+	if got.LastKeepaliveAt != nil {
+		t.Fatalf("LastKeepaliveAt = %v, want nil", got.LastKeepaliveAt)
+	}
+	if got.ConversationBoundAt == nil || !got.ConversationBoundAt.Equal(bound) {
+		t.Fatalf("ConversationBoundAt = %v, want %v", got.ConversationBoundAt, bound)
+	}
+	if clock := got.CacheClock(); clock != nil {
+		t.Fatalf("CacheClock() = %v, want nil", clock)
+	}
+}
+
+func TestBindNewConversationRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	err := s.BindNewConversation(context.Background(), "missing", instant)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("BindNewConversation() = %v, want ErrNotFound", err)
 	}
 }

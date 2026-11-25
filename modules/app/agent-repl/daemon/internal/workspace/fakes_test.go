@@ -414,7 +414,11 @@ type fakeDB struct {
 	setTerminalErr error
 	// setVendorErr fails the resume-handle write, which the map cannot.
 	setVendorErr error
-	orphanReport wsm.OrphanReport
+	// newConversationBound records each BindNewConversation write, in order;
+	// bindNewErr fails it.
+	newConversationBound []boundConversation
+	bindNewErr           error
+	orphanReport         wsm.OrphanReport
 	// orphanCtxErrs is the context's error each CloseOrphans ran under.
 	orphanCtxErrs []error
 	createdTasks  []string
@@ -4924,6 +4928,21 @@ func (d *fakeDB) SetVendorSessionID(_ context.Context, id ids.WorkspaceID, vendo
 	session.Workspace, session.VendorSessionID = id, vendorSessionID
 	d.sessions[id] = session
 	return replaced, nil
+}
+
+// boundConversation is one BindNewConversation write the fake took.
+type boundConversation struct {
+	ws ids.WorkspaceID
+	at time.Time
+}
+
+// BindNewConversation records the write; bindNewErr fails it.
+func (d *fakeDB) BindNewConversation(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	if d.bindNewErr != nil {
+		return d.bindNewErr
+	}
+	d.newConversationBound = append(d.newConversationBound, boundConversation{ws: id, at: at})
+	return nil
 }
 
 // SetSessionModel records the workspace's model on the fake's session row; a

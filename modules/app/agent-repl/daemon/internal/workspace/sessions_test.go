@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -3934,6 +3935,113 @@ func TestClassifySourceAbandonsLoudlyWhenAnUnaccountedWriterMayHoldTheTranscript
 	}
 	if !recordedAt(f, dlog.LevelWarn, opBringUp, abandonedMessage) || len(abandonedFaults(f.db)) != 1 {
 		t.Fatalf("records = %+v, want the abandonment warning and its fault", f.log.logger.Records())
+	}
+}
+
+// THE NEW CONVERSATION'S CACHE CLOCK STARTS EMPTY: a bring-up that starts a
+// conversation other than the recorded one records it before the shim is
+// served, so no keep-alive is timed from the lost conversation's clock.
+func TestClassifySourceBindsTheNewConversationsCacheClock(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(t *testing.T) (*fleetFixture, wsm.Session)
+		wantBound bool
+	}{
+		{
+			name: "a fresh start for a lost transcript binds it",
+			arrange: func(t *testing.T) (*fleetFixture, wsm.Session) {
+				f := newFleetFixture(t)
+				loseRecordedTranscript(f)
+				engage(f)
+				return f, wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}
+			},
+			wantBound: true,
+		},
+		{
+			name: "a restored directory transcript binds it",
+			arrange: func(t *testing.T) (*fleetFixture, wsm.Session) {
+				return engagedWithLostTranscript(t, fixedNow.Add(-2*TranscriptAdoptionIdleWindow))
+			},
+			wantBound: true,
+		},
+		{
+			name: "a conversation that never took a turn binds nothing",
+			arrange: func(t *testing.T) (*fleetFixture, wsm.Session) {
+				f := newFleetFixture(t)
+				loseRecordedTranscript(f)
+				return f, wsm.Session{Workspace: "w1", VendorSessionID: "vendor-never-turned"}
+			},
+		},
+		{
+			name: "a resume of the recorded conversation binds nothing",
+			arrange: func(t *testing.T) (*fleetFixture, wsm.Session) {
+				return newFleetFixture(t), wsm.Session{Workspace: "w1", VendorSessionID: "vendor-live"}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f, session := tt.arrange(t)
+
+			// Act
+			_, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("classifySource: %v", err)
+			}
+			want := []boundConversation(nil)
+			if tt.wantBound {
+				want = []boundConversation{{ws: "w1", at: fixedNow}}
+			}
+			if !reflect.DeepEqual(f.db.newConversationBound, want) {
+				t.Fatalf("bound = %+v, want %+v", f.db.newConversationBound, want)
+			}
+		})
+	}
+}
+
+func TestClassifySourceFailsTheBringUpWhenTheNewConversationCannotBeBound(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T) (*fleetFixture, wsm.Session)
+	}{
+		{
+			name: "a fresh start",
+			arrange: func(t *testing.T) (*fleetFixture, wsm.Session) {
+				f := newFleetFixture(t)
+				loseRecordedTranscript(f)
+				engage(f)
+				return f, wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}
+			},
+		},
+		{
+			name: "a restored transcript",
+			arrange: func(t *testing.T) (*fleetFixture, wsm.Session) {
+				return engagedWithLostTranscript(t, fixedNow.Add(-2*TranscriptAdoptionIdleWindow))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f, session := tt.arrange(t)
+			f.db.bindNewErr = errFake
+
+			// Act
+			got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+			// Assert
+			if !errors.Is(err, errFake) || got != (source{}) {
+				t.Fatalf("classifySource() = (%+v, %v), want no source and the write's error", got, err)
+			}
+			r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opBringUp,
+				Message: "could not record that the session runs a new conversation; the bring-up stops so no keep-alive is timed from the lost conversation's clock"})
+			if !ok || r.Context["recorded_vendor_session_id"] != session.VendorSessionID || r.Context["cause"] != errFake.Error() {
+				t.Fatalf("records = %+v, want the failed write at error with its context", f.log.logger.Records())
+			}
+		})
 	}
 }
 

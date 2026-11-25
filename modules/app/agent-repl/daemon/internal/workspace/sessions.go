@@ -1108,18 +1108,43 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 				"cause":                      err.Error(),
 			})
 			f.recordAdopted(ctx, log, ws, candidate.VendorSessionID)
+			if err := f.bindNewConversation(ctx, log, ws, session.VendorSessionID); err != nil {
+				return source{}, err
+			}
 			return source{VendorSessionID: candidate.VendorSessionID}, nil
 		}
 		log.Warn(opBringUp, "the recorded conversation has no transcript on disk; the session comes up FRESH", dlog.Context{
 			"vendor_session_id": session.VendorSessionID, "cause": err.Error(),
 		})
 		f.noteConversationAbandoned(ctx, log, ws, session.VendorSessionID, err)
+		if err := f.bindNewConversation(ctx, log, ws, session.VendorSessionID); err != nil {
+			return source{}, err
+		}
 		return source{Fresh: true}, nil
 	}
 	log.Debug(opBringUp, "the classifier found the transcript; the session resumes", dlog.Context{
 		"vendor_session_id": session.VendorSessionID,
 	})
 	return source{VendorSessionID: session.VendorSessionID}, nil
+}
+
+// bindNewConversation records that WS's session runs a conversation other
+// than RECORDED, the one its cache clock timed, before the shim is served
+// (wsm.DB.BindNewConversation): the cache keeper then owes the new
+// conversation no keep-alive until a turn of its own closes. A write that
+// fails fails the bring-up, since a session served under the old clock would
+// be beaten for a cache it never had.
+func (f *Fleet) bindNewConversation(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, recorded string) error {
+	if err := f.deps.DB.BindNewConversation(ctx, ws, f.now()); err != nil {
+		log.Error(opBringUp, "could not record that the session runs a new conversation; the bring-up stops so no keep-alive is timed from the lost conversation's clock", dlog.Context{
+			"recorded_vendor_session_id": recorded, "cause": err.Error(),
+		})
+		return fmt.Errorf("record the new conversation's cache clock: %w", err)
+	}
+	log.Debug(opBringUp, "recorded that the session runs a new conversation; its cache clock starts empty", dlog.Context{
+		"recorded_vendor_session_id": recorded,
+	})
+	return nil
 }
 
 // TranscriptAdoptionIdleWindow is how quiet a transcript must have been on disk

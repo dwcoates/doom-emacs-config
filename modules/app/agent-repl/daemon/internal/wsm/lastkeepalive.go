@@ -34,14 +34,32 @@ func (s *store) SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Ti
 	})
 }
 
+// BindNewConversation records that workspace ID's session runs, from AT, a
+// conversation other than the one its cache clock timed: a bring-up that came
+// up FRESH because the recorded conversation's transcript is gone, or one
+// that restored another transcript of the directory (workspace.Fleet
+// .classifySource). The keep-alive half is cleared and ConversationBoundAt
+// stamped, so CacheClock is nil until a turn of the new conversation closes.
+//
+// IT IS WRITTEN BEFORE THE SESSION'S SHIM IS SERVED, so the cache keeper can
+// never time a beat for the new conversation from the old one's clock
+// (2026-11-25 12:33:52: a keep-alive owed since 2026-10-14 went into a
+// conversation started thirteen seconds before, which had no cache to keep).
+func (s *store) BindNewConversation(ctx context.Context, id WorkspaceID, at time.Time) error {
+	return s.setWorkspaceColumns(ctx, "daemon.wsm.bind_new_conversation", id, dlog.Context{"at": at},
+		workspaceColumn{name: "last_keepalive_at", value: nil},
+		workspaceColumn{name: "conversation_bound_at", value: nanos(at)})
+}
+
 // CacheClock is when the prompt cache of the conversation the workspace runs
 // was last written: the later of its last turn's end and its last keep-alive.
 // Nil when neither happened.
 //
 // A TURN FROM BEFORE THE BINDING IS THE OTHER CONVERSATION'S. A queue-bypass
 // switch records the bound-in conversation's own clock as the keep-alive
-// half and stamps ConversationBoundAt, so a turn that closed before the stamp
-// times nothing.
+// half and stamps ConversationBoundAt, and a bring-up that starts another
+// conversation clears that half and stamps it (BindNewConversation), so a
+// turn that closed before the stamp times nothing.
 func (w Workspace) CacheClock() *time.Time {
 	turn := w.LastTurnEndedAt
 	if turn != nil && w.ConversationBoundAt != nil && !turn.After(*w.ConversationBoundAt) {

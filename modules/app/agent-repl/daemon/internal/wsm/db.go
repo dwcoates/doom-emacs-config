@@ -999,6 +999,11 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was last sent
 	// (lastkeepalive.go).
 	SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
+	// BindNewConversation records that a workspace's session runs, from AT,
+	// a conversation other than the one its cache clock timed
+	// (lastkeepalive.go), so the cache clock is empty until a turn of the
+	// new conversation closes.
+	BindNewConversation(ctx context.Context, id WorkspaceID, at time.Time) error
 	// EndKeepaliveRun records the end of a workspace's keep-alive run once
 	// it has ended, answering the run and whether an end was recorded
 	// (keepaliverun.go).
