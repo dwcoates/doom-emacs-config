@@ -406,6 +406,12 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 	card := o.newFixGateRun(f, fields)
 	archive := card.log.path
 	argv = gateArgv(append([]string(nil), argv...), o.deps.TestMetricsRoot, card.log.events)
+	// THE RESULTS FILE'S DIRECTORY EXISTS BEFORE THE RUNNER OPENS IT: the
+	// remediation's archive is written only after its run.
+	if err := os.MkdirAll(filepath.Dir(card.log.events), 0o755); err != nil {
+		card.failed("the gate could not run: " + err.Error())
+		return fmt.Errorf("merge: make the remediation gate's log directory: %w", err)
+	}
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate started", withField(fields, "archive", archive))
 	result, err := o.runRemediationGate(ctx, record.Dir, argv, archive, card.line)
 	if err != nil {

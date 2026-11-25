@@ -274,17 +274,40 @@ func TestAPassingGatePromotesAnEarlierGatesFailure(t *testing.T) {
 	}
 }
 
-func TestAGateWhoseResultsCannotBeReadIsRecordedAtError(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
+func TestAGatesUnreadableResultsAreRecordedByWhyTheyCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    func(t *testing.T) string
+		level   string
+		message string
+	}{
+		{name: "a script that wrote no results proves nothing, at INFO",
+			path:  func(t *testing.T) string { return filepath.Join(t.TempDir(), "gone") },
+			level: "info", message: "the gate's script wrote no test results; its failures are no race candidates and its passes promote none"},
+		{name: "results that do not decode are an ERROR",
+			path: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "bad")
+				if err := os.WriteFile(path, []byte{0xff, 0xff, 0xff, 0xff, 0x0f}, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+			level: "error", message: "could not read the gate's test results; its failures are no race candidates and its passes promote none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
 
-	// Act
-	h.o.observeGateRaces(context.Background(), h.repoKey(), "m", filepath.Join(t.TempDir(), "gone"), "/archive", time.Unix(1, 0))
+			// Act
+			h.o.observeGateRaces(context.Background(), h.repoKey(), "m", tt.path(t), "/archive", time.Unix(1, 0))
 
-	// Assert
-	logged := h.recordsFor("error", opRaceFinding, "could not read the gate's test results; its failures are no race candidates and its passes promote none")
-	if len(logged) != 1 || logged[0].Context["merge"] != "m" {
-		t.Fatalf("records %+v, want the unread results recorded at ERROR", logged)
+			// Assert
+			logged := h.recordsFor(tt.level, opRaceFinding, tt.message)
+			if len(logged) != 1 || logged[0].Context["merge"] != "m" {
+				t.Fatalf("records %+v, want one %s record naming the merge", logged, tt.level)
+			}
+		})
 	}
 }
 

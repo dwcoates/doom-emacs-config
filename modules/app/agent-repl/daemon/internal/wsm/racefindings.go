@@ -511,9 +511,9 @@ func (s *store) TakeOnRaceFindings(ctx context.Context, repo RepoKey, refs []Rac
 			if err != nil {
 				return err
 			}
-			if n, err := res.RowsAffected(); err != nil {
+			if touched, err := touchedRow(res); err != nil {
 				return err
-			} else if n == 0 {
+			} else if !touched {
 				return &UnknownRaceFindingError{Ref: r}
 			}
 		}

@@ -497,11 +497,11 @@ func RenderRaceFindings(findings []wsm.RaceFinding) string {
 				failure = "..." + failure[len(failure)-raceFailureBytes:]
 			}
 			var b strings.Builder
-			fmt.Fprintf(&b, "- `%s`: failed in %d merge gate(s), last at %s, in %s", f.Ref, f.Recurrences, f.LastSeen.UTC().Format(time.RFC3339), strings.Join(f.Merges, ", "))
+			b.WriteString(fmt.Sprintf("- `%s`: failed in %d merge gate(s), last at %s, in %s", f.Ref, f.Recurrences, f.LastSeen.UTC().Format(time.RFC3339), strings.Join(f.Merges, ", ")))
 			if f.Fixes > 0 {
-				fmt.Fprintf(&b, "; it came back after %d deployed fix(es)", f.Fixes)
+				b.WriteString(fmt.Sprintf("; it came back after %d deployed fix(es)", f.Fixes))
 			}
-			fmt.Fprintf(&b, ". Artifacts: `%s`.", f.Artifacts)
+			b.WriteString(fmt.Sprintf(". Artifacts: `%s`.", f.Artifacts))
 			for _, line := range strings.Split(failure, "\n") {
 				b.WriteString("\n  > " + line)
 			}

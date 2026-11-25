@@ -131,7 +131,7 @@ func TestTheIntakesBriefStatesTheDeployAndNothingTheWindowHolds(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got := strings.Join(names, ","); got != "digest,ending,gate_log,occasion,window_started" {
+	if got := strings.Join(names, ","); got != "digest,ending,gate_log,occasion,race_findings,window_started" {
 		t.Fatalf("the brief was given %s", got)
 	}
 	if !strings.HasPrefix(values["occasion"], "A deploy of ") || !strings.Contains(values["occasion"], deployStarted.UTC().Format(time.RFC3339)) {

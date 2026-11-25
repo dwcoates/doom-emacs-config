@@ -382,8 +382,9 @@ func TestGateArchivesEveryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the archive directory: %v", err)
 	}
-	if len(entries) != 1 || !strings.Contains(entries[0].Name(), "-tests-1.log") {
-		t.Fatalf("the archive holds %v, want one round-numbered log", names(entries))
+	got := names(entries)
+	if len(got) != 2 || !strings.HasSuffix(got[0], "-tests-1-events.log") || !strings.HasSuffix(got[1], "-tests-1.log") {
+		t.Fatalf("the archive holds %v, want one round-numbered log and its results file", got)
 	}
 }
 

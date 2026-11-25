@@ -3742,7 +3742,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld" "noRepairTurn" "placementBehindNotInLine" "indexOutOfRange" "moveBlocked")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld" "noRepairTurn" "placementBehindNotInLine" "indexOutOfRange" "moveBlocked" "unknownRaceFinding")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-placement-behind-not-in-line-arm ()

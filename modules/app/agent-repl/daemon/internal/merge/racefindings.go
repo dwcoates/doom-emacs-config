@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
@@ -153,6 +154,13 @@ func ReadRunEvents(path string) ([]*testrunv1.TestRunUnitEnded, error) {
 func (o *orchestrator) observeGateRaces(ctx context.Context, repo wsm.RepoKey, merge, events, archive string, at time.Time) {
 	fields := dlog.Context{"repo": string(repo), "merge": merge, "events": events}
 	units, err := ReadRunEvents(events)
+	// A GATE WHOSE SCRIPT WROTE NO RESULTS PROVES NOTHING: its script is one
+	// from before the results file (bin/test-all.sh opens it before its
+	// runner starts), as a merge into a parent's branch may still run.
+	if errors.Is(err, fs.ErrNotExist) {
+		o.deps.Log.Global().Info(opRaceFinding, "the gate's script wrote no test results; its failures are no race candidates and its passes promote none", fields)
+		return
+	}
 	if err != nil {
 		o.deps.Log.Global().Error(opRaceFinding, "could not read the gate's test results; its failures are no race candidates and its passes promote none", withField(fields, "error", err.Error()))
 		return
@@ -188,6 +196,9 @@ func (r *run) racesOnly(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	units, err := ReadRunEvents(eventsOf(r.failedArchive))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
