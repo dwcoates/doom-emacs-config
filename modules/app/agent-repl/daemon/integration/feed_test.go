@@ -734,3 +734,54 @@ func TestABoardCallOnADaemonWithNoCheckoutDrawsTheBoardUnavailable(t *testing.T)
 		t.Fatalf("heading = %q, want the call's session", got)
 	}
 }
+
+func TestQuestionAnsweredRepushesWithEchoedLabels(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonical(t)
+	f.submit("go", "k-qanswer", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
+			Id: &conversationv1.AgentQuestionId{Value: "q-2"},
+			Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
+				Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
+					Question: &conversationv1.AgentQuestionText{Text: "Which env?"},
+					Header:   "Env",
+					Choices: &conversationv1.AgentQuestionAsked_SingleSelect{SingleSelect: &conversationv1.AgentQuestionSingleSelect{
+						Options: []*conversationv1.AgentQuestionOption{{Label: &conversationv1.AgentQuestionOptionLabel{Label: "prod"}}},
+					}},
+				}}},
+				StartedAt: startedAt(1),
+			}},
+		}},
+	}))
+	opened := awaitRow(t, f, tail, "the open question", func(r *frontendv1.FeedRow) bool { return r.GetQuestion().GetOpen() != nil })
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
+			Id: &conversationv1.AgentQuestionId{Value: "q-2"},
+			Result: &conversationv1.AgentQuestion_Success{Success: &conversationv1.AgentQuestionSuccess{
+				Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
+					Question: &conversationv1.AgentQuestionText{Text: "Which env?"}, Header: "Env",
+				}}},
+				Outcome: &conversationv1.AgentQuestionSuccess_Answered{Answered: &conversationv1.AgentQuestionAnswers{
+					Answers: []*conversationv1.AgentQuestionSelection{{
+						Question: &conversationv1.AgentQuestionText{Text: "Which env?"},
+						Chosen:   []*conversationv1.AgentQuestionChoice{{Label: &conversationv1.AgentQuestionOptionLabel{Label: "prod"}}},
+					}},
+				}},
+			}},
+		}},
+	}))
+
+	// Assert
+	answered := awaitRow(t, f, tail, "the answered question on the same row", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == opened.GetId().GetValue() && r.GetQuestion().GetAnswered() != nil
+	})
+	got := answered.GetQuestion().GetAnswered().GetAnswers()
+	if len(got) != 1 || len(got[0].GetChosen()) != 1 || got[0].GetChosen()[0] != "prod" {
+		t.Fatalf("the answered question's echoed choices = %v, want [\"prod\"]", got)
+	}
+}

@@ -1546,3 +1546,174 @@ func TestAWorkspaceOwingItsSummaryAsksForItUntilItsAgentSetsOne(t *testing.T) {
 		t.Fatalf("StartTurn.said once the summary is set = %q, want the user's words alone", got)
 	}
 }
+
+func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonical(t)
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
+	row := awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedSubagent() != nil
+	})
+	first := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("first"), IdempotencyKey: "k-bubble-1", Origin: origin, Feed: row.GetId(),
+	})
+	if first.GetError() != nil {
+		t.Fatalf("the first bubble submit = %v, want a success", first)
+	}
+	f.shim.ExpectUpdateAgent()
+	// The SHIM is what judges a subagent's own turn, so the fake states the
+	// verdict: the next UpdateAgent is refused agent_busy
+	// (shim.v1 UpdateAgentFailure.agent_busy, landing 7).
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: "the addressed agent's own turn is already open",
+			Kind:   &shimv1.UpdateAgentFailure_AgentBusy{AgentBusy: &shimv1.UpdateAgentAgentBusy{}},
+		}},
+	})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("second"), IdempotencyKey: "k-bubble-2", Origin: origin, Feed: row.GetId(),
+	})
+
+	// Assert
+	// LANDING 7: the shim's refusal is relayed by kind on the landed arm
+	// SubmitPromptError.bubble_refused, and the daemon never judges the
+	// subagent's turn itself.
+	refused := resp.GetError().GetBubbleRefused()
+	if refused == nil || refused.GetAgentBusy() == nil {
+		t.Fatalf("a second bubble submit while the agent's turn runs = %v, want error.bubble_refused{kind: agent_busy}", resp)
+	}
+	if refused.GetDetail() == "" {
+		t.Fatalf("bubble_refused.detail is empty, want the shim's own words as evidence")
+	}
+}
+
+// A PROMPT ADDRESSED AT A SETTLED SUBAGENT'S BUBBLE IS REFUSED not_deliverable,
+// by the shim's own verdict (a subagent has no SDK route for a prompt), relayed
+// by kind on SubmitPromptError.bubble_refused with the shim's words as detail.
+func TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonical(t)
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
+	row := awaitRow(t, f, feed, "the settled sync-subagent bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSubagent().GetSettled() != nil
+	})
+	const detail = "a subagent has no SDK route for a prompt"
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: detail,
+			Kind:   &shimv1.UpdateAgentFailure_NotDeliverable{NotDeliverable: &shimv1.UpdateAgentNotDeliverable{}},
+		}},
+	})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("are you still there?"), IdempotencyKey: "k-bubble-settled", Origin: origin, Feed: row.GetId(),
+	})
+
+	// Assert
+	refused := resp.GetError().GetBubbleRefused()
+	if refused == nil || refused.GetNotDeliverable() == nil {
+		t.Fatalf("a submit to a settled subagent's bubble = %v, want error.bubble_refused{kind: not_deliverable}", resp)
+	}
+	if refused.GetDetail() != detail {
+		t.Fatalf("bubble_refused.detail = %q, want the shim's own words %q", refused.GetDetail(), detail)
+	}
+}
+
+// A SECOND PUSH MOVES THE PANEL: the daemon's held usage is what /context
+// reads, so a larger figure pushed between two reads shows in the second
+// header without the reader asking the vendor anything.
+func TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonical(t)
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
+	first := contextPanelAfter(t, f, topbar, "142.3k", "k-context-first")
+
+	// Act
+	f.shim.PushSessionUpdate(ctxUsage(168_900, 84))
+	second := contextPanelAfter(t, f, topbar, "168.9k", "k-context-second")
+
+	// Assert
+	if second.GetHeader().GetUsed() == first.GetHeader().GetUsed() && second.GetHeader().GetPercent() == first.GetHeader().GetPercent() {
+		t.Fatalf("the /context header did not move between pushes: used %q/percent %d then used %q/percent %d",
+			first.GetHeader().GetUsed(), first.GetHeader().GetPercent(), second.GetHeader().GetUsed(), second.GetHeader().GetPercent())
+	}
+	if second.GetHeader().GetUsed() == "" {
+		t.Fatalf("the second /context header = %v, want it composed", second.GetHeader())
+	}
+}
+
+// AN ANSWER TO AN AGENT THE SHIM NO LONGER KNOWS IS REFUSED BY ITS LEDGERED
+// ARM. AnswerPermissionError carries no `unknown_agent` arm
+// (endpoint_answer_permission.proto); the gap is a row in daemon/ERROR-ARMS.md,
+// and server.UnlandedArm refuses it failed_precondition naming the intended
+// arm, recorded under daemon.refusal.unlanded_arm so the ledger reconciles
+// against the log.
+func TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm(t *testing.T) {
+	t.Parallel()
+	// Arrange: an open ask, and a shim that no longer knows its agent.
+	f := newCanonical(t)
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	feed := f.watchRootFeed()
+	f.shim.AwaitAgentWatch()
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-gone", "act-gone")},
+	}))
+	row := awaitRow(t, f, feed, "the permission card", func(r *frontendv1.FeedRow) bool { return r.GetPermission() != nil })
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: "no such agent",
+			Kind:   &shimv1.UpdateAgentFailure_UnknownAgent{UnknownAgent: &shimv1.UpdateAgentUnknownAgent{}},
+		}},
+	})
+
+	// Act
+	_, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+		Workspace: f.ws, Permission: row.GetId(),
+		Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
+	}))
+
+	// Assert
+	if code := connect.CodeOf(err); code != connect.CodeFailedPrecondition {
+		t.Fatalf("AnswerPermission to a forgotten agent = %v, want failed_precondition", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "intended arm: ") || !strings.Contains(msg, "AnswerPermissionError.unknown_agent") {
+		t.Fatalf("AnswerPermission refusal = %q, want it to name the intended arm AnswerPermissionError.unknown_agent", msg)
+	}
+}
+
+// promptOpenQuestion builds a single-select question batch of one.
+func promptOpenQuestion(id, question string, options ...string) *conversationv1.AgentQuestion {
+	var opts []*conversationv1.AgentQuestionOption
+	for _, o := range options {
+		opts = append(opts, &conversationv1.AgentQuestionOption{Label: &conversationv1.AgentQuestionOptionLabel{Label: o}})
+	}
+	return &conversationv1.AgentQuestion{
+		Id: &conversationv1.AgentQuestionId{Value: id},
+		Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
+			Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
+				Question: &conversationv1.AgentQuestionText{Text: question},
+				Header:   "Choice",
+				Choices: &conversationv1.AgentQuestionAsked_SingleSelect{SingleSelect: &conversationv1.AgentQuestionSingleSelect{
+					Options: opts,
+				}},
+			}}},
+			StartedAt: startedAt(1_700_000_000_000),
+		}},
+	}
+}
