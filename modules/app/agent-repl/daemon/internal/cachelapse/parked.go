@@ -29,9 +29,10 @@ import (
 // loop asks for meanwhile can cut it off.
 
 // parkedDue answers when WS's parked conversation's next beat is due, false
-// when it parks none, its cache is known cold, SPENT judges its last beat
-// spent, or one of its keep-alives is out.
-func (k *Keeper) parkedDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, spent func(time.Time) bool) (time.Time, bool) {
+// when it parks none, its cache is known cold, OWED judges its clock owes no
+// beat (its last beat spent, or its cache past CacheWindow), or one of its
+// keep-alives is out.
+func (k *Keeper) parkedDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, owed func(time.Time) bool) (time.Time, bool) {
 	if k.parkedFlying[ws] {
 		return time.Time{}, false
 	}
@@ -44,7 +45,7 @@ func (k *Keeper) parkedDue(ctx context.Context, log dlog.Logger, ws ids.Workspac
 		return time.Time{}, false
 	}
 	clock := *standing.ParkedClockAt
-	if spent(clock) {
+	if !owed(clock) {
 		return time.Time{}, false
 	}
 	due := clock.Add(k.deps.Interval)
