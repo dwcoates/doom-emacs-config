@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/skillrefs"
+	"agentrepl/logging/logsite"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
@@ -59,9 +60,13 @@ func (r *resolver) relinkSkills(s *wsState) {
 	relinked := 0
 	for key, f := range s.feeds {
 		for _, id := range f.order {
-			row, ok := proto.Clone(f.rows[id]).(*frontendv1.FeedRow)
+			row, ok := r.snapshotRow(s, f.rows[id], unclonable{
+				operation: "daemon.feed.skills_relink_unclonable",
+				message:   logsite.Msg("a row whose skill names were to be linked could not be cloned; it was not re-pushed"),
+				context:   dlog.Context{"feed": f.key, "row": id},
+			})
 			if !ok {
-				panic("feed: a stored feed row cloned to another type")
+				continue
 			}
 			eachParsedProse(row.ProtoReflect(), func(parsed *frontendv1.ParsedProse) {
 				r.linkSkills(s.id, parsed, false)
