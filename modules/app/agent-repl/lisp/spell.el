@@ -83,6 +83,7 @@
 (defvar ispell-program-name)
 (defvar ispell-local-dictionary)
 (defvar ispell-local-dictionary-alist)
+(defvar ispell-filter-continue)
 
 
 (defcustom agent-repl-input-spellcheck t
@@ -381,9 +382,19 @@ stays unmarked as the as-you-type check leaves it."
 ;; `ispell-process' accepts output from that process only and runs no timer
 ;; (an integer JUST-THIS-ONE), so nothing can re-enter the exchange; and it is
 ;; bounded by `agent-repl--spell-reply-bound'.  A wait that trips, or a spell
-;; process that is not running, is a failure: the spell process is reset, the
-;; word and the process are named on the log at ERROR and in the echo area,
-;; and the word is left unchecked for the next command to check again.
+;; process that is not running, is a failure: the word and the process are
+;; named on the log at ERROR and in the echo area, and the word is left
+;; unchecked for the next command to check again.
+;;
+;; A SLOW REPLY IS NOT A DEAD PROCESS.  Only a spell process that is not
+;; running is reset.  Resetting one that is merely slow answered a slow host
+;; with a cold process, whose first exchange tripped the same bound a second
+;; later (2026-11-25, "shouldnt" on two pids a second apart).  So a tripped
+;; wait keeps the process, which still owes the abandoned word's reply, and
+;; that reply is drained by a wrapper on the process's own filter
+;; (`agent-repl--spell-owe-reply'): every byte hunspell writes passes through
+;; it, in the order hunspell wrote it, so an owed reply can never reach a
+;; later exchange, whenever it arrives.
 
 (defconst agent-repl--spell-reply-bound 0.1
   "Seconds one flyspell exchange may wait for hunspell's reply.
@@ -395,19 +406,22 @@ worst.")
   "The word `flyspell-word' is checking, while its exchange is in flight.")
 
 (define-error 'agent-repl-spell-no-reply "hunspell did not answer flyspell")
+(define-error 'agent-repl-spell-not-running "the spell process is not running")
 
 (defun agent-repl--spell-bounded-accept (accept &optional process seconds millisec just-this-one)
   "Around ACCEPT (`accept-process-output'): bound flyspell's wait on hunspell.
 Only a wait on `ispell-process' with no timeout, from inside `flyspell-word',
 is changed: it takes output from that process alone, runs no timer, and
 gives up after `agent-repl--spell-reply-bound', signalling
-`agent-repl-spell-no-reply'.  Every other call passes through untouched."
+`agent-repl-spell-no-reply' (`agent-repl-spell-not-running', without
+waiting, when the process is not running).  Every other call passes
+through untouched."
   (if (not (and agent-repl--spell-exchange-word
                 process (eq process (bound-and-true-p ispell-process))
                 (null seconds) (null millisec)))
       (funcall accept process seconds millisec just-this-one)
     (unless (process-live-p process)
-      (signal 'agent-repl-spell-no-reply (list "the spell process is not running")))
+      (signal 'agent-repl-spell-not-running (list "the spell process is not running")))
     (or (funcall accept process agent-repl--spell-reply-bound nil 0)
         (signal 'agent-repl-spell-no-reply
                 (list (format "no reply within %.0f ms" (* 1000 agent-repl--spell-reply-bound)))))))
@@ -420,15 +434,85 @@ put each typed space before the word it followed."
   (save-excursion
     (or (car-safe (flyspell-get-word)) 'unknown)))
 
+(defun agent-repl--spell-owed-replies (process)
+  "Return how many abandoned replies PROCESS still owes; 0 when none."
+  (let ((drain (process-get process 'agent-repl--spell-drain)))
+    (if drain (car drain) 0)))
+
+(defun agent-repl--spell-drain-output (process output)
+  "Take PROCESS's owed replies out of OUTPUT; return what follows them.
+The drain on PROCESS is (OWED AT-LINE-START WS PID): every reply ends with an
+empty line, and a reply's first line never is one, so each newline that
+starts a line ends one owed reply.  Answers nil while replies are still
+owed, else the rest of OUTPUT, the drain then cleared."
+  (let* ((drain (process-get process 'agent-repl--spell-drain))
+         (owed (nth 0 drain))
+         (at-line-start (nth 1 drain))
+         (pos 0)
+         (len (length output)))
+    (while (and (> owed 0) (< pos len))
+      (let ((newline (eq (aref output pos) ?\n)))
+        (when (and newline at-line-start)
+          (setq owed (1- owed)))
+        (setq at-line-start newline
+              pos (1+ pos))))
+    (if (> owed 0)
+        (progn (setf (nth 0 drain) owed (nth 1 drain) at-line-start) nil)
+      (process-put process 'agent-repl--spell-drain nil)
+      (agent-repl--log (nth 2 drain)
+                       "elisp.spell.drained ws={ws} process={process} pid={pid} outcome=drained"
+                       :ws (nth 2 drain) :process (prin1-to-string (process-name process))
+                       :pid (nth 3 drain))
+      (substring output pos))))
+
+(defun agent-repl--spell-drain-filter (filter process output)
+  "Around FILTER (PROCESS's own): hand it only what follows the owed replies."
+  (if (null (process-get process 'agent-repl--spell-drain))
+      (funcall filter process output)
+    (let ((rest (agent-repl--spell-drain-output process output)))
+      (when (and rest (not (string-empty-p rest)))
+        (funcall filter process rest)))))
+
+(defun agent-repl--spell-owe-reply (process ws at-line-start)
+  "Record that PROCESS owes one more abandoned reply, for WS; return the count.
+AT-LINE-START says whether the abandoned exchange's output ended a line,
+which it did when nothing of the reply had come.  The drain wraps
+PROCESS's filter once, and lives and dies with PROCESS."
+  (let ((drain (process-get process 'agent-repl--spell-drain)))
+    (if drain
+        (setf (nth 0 drain) (1+ (nth 0 drain)))
+      (process-put process 'agent-repl--spell-drain
+                   (list 1 at-line-start ws (process-id process)))
+      (unless (advice-function-member-p #'agent-repl--spell-drain-filter
+                                        (process-filter process))
+        (add-function :around (process-filter process) #'agent-repl--spell-drain-filter)))
+    (agent-repl--spell-owed-replies process)))
+
 (defun agent-repl--spell-guarded-word (flyspell-word &rest args)
-  "Around FLYSPELL-WORD: run its exchange atomically, and reset on no reply.
+  "Around FLYSPELL-WORD: run its exchange atomically, and survive no reply.
 A tripped wait is recorded at ERROR naming the word and the process, said
-in the echo area, and answered by resetting the spell process, so the next
-check starts on a fresh one; the word itself is left unchecked."
+in the echo area, and the process is kept: it owes the word's reply, which
+`agent-repl--spell-owe-reply' drains.  A process that is not running is
+reset, so the next check starts on a fresh one.  Either way the word itself
+is left unchecked."
   (let ((agent-repl--spell-exchange-word (agent-repl--spell-word-of-point)))
     (condition-case err
         (apply flyspell-word args)
       (agent-repl-spell-no-reply
+       (let* ((process (bound-and-true-p ispell-process))
+              (word agent-repl--spell-exchange-word)
+              (ws (agent-repl--spell-ws))
+              (owed (agent-repl--spell-owe-reply
+                     process ws (not (bound-and-true-p ispell-filter-continue)))))
+         (agent-repl--error ws
+                            "elisp.spell.no-reply ws={ws} buffer={buffer} word={word} process={process} pid={pid} cause={cause} owed={owed} outcome=kept"
+                            :ws ws :buffer (buffer-name) :word (prin1-to-string word)
+                            :process (prin1-to-string (process-name process))
+                            :pid (process-id process) :cause (cadr err) :owed owed)
+         (message "Spellcheck: %s did not answer for %S (%s); the word was left unchecked"
+                  (process-name process) word (cadr err))
+         nil))
+      (agent-repl-spell-not-running
        (let ((process (bound-and-true-p ispell-process))
              (word agent-repl--spell-exchange-word)
              (ws (agent-repl--spell-ws)))
