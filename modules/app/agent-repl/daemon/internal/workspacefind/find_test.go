@@ -65,6 +65,7 @@ func fixture() Records {
 	landed.MergedAt = ptr(at(6))
 	creator := wsm.WorkspaceID("open")
 	landed.RequestedBy = &creator
+	landed.Parent = &creator
 	summaries := map[wsm.WorkspaceID]wsm.WorkspaceSummary{
 		"open":   {Long: "The footer's clock drifts. Fix its tick.", Short: "Fix the footer's clock"},
 		"landed": {Long: "Old rows pile up. Prune them on a schedule.", Short: "Prune the store's old rows"},
@@ -111,6 +112,13 @@ func TestFindNarrowsByEveryCriterion(t *testing.T) {
 		{name: "criteria combine", query: Query{Repository: ptr(doom.ID), Standing: ClosedStanding}, want: []string{"closed"}},
 		{name: "a creator keeps only what it asked for", query: Query{CreatedBy: ptr(wsm.WorkspaceID("open"))}, want: []string{"landed"}},
 		{name: "a creator that asked for nothing finds nothing", query: Query{CreatedBy: ptr(wsm.WorkspaceID("closed"))}, want: nil},
+		{name: "a parent keeps only its children", query: Query{Parent: ptr(wsm.WorkspaceID("open"))}, want: []string{"landed"}},
+		{name: "a parent with no children finds nothing", query: Query{Parent: ptr(wsm.WorkspaceID("closed"))}, want: nil},
+		{name: "ended since keeps the open and those ended at or after it", query: Query{EndedSince: ptr(at(6))}, want: []string{"open", "landed"}},
+		{name: "ended since drops a workspace closed before it", query: Query{EndedSince: ptr(at(5))}, want: []string{"open", "landed"}},
+		{name: "ended since keeps a workspace closed at it", query: Query{EndedSince: ptr(at(4))}, want: []string{"open", "landed", "closed"}},
+		{name: "ended since judges a landed workspace by its landing", query: Query{EndedSince: ptr(at(7))}, want: []string{"open"}},
+		{name: "a parent and ended since combine", query: Query{Parent: ptr(wsm.WorkspaceID("open")), EndedSince: ptr(at(7))}, want: nil},
 		{name: "a turn window keeps a workspace with an agent turn inside it", query: Query{Turned: &TurnWindow{Since: ptr(at(4)), Until: ptr(at(6))}}, want: []string{"landed"}},
 		{name: "a turn window is inclusive at both ends", query: Query{Turned: &TurnWindow{Since: ptr(at(5)), Until: ptr(at(9))}}, want: []string{"open", "landed"}},
 		{name: "a turn window since alone is open-ended up to now", query: Query{Turned: &TurnWindow{Since: ptr(at(6))}}, want: []string{"open"}},
@@ -136,6 +144,20 @@ func TestFindNarrowsByEveryCriterion(t *testing.T) {
 				t.Fatalf("Find = %v (omitted %d), want %v", ids(got), got.Omitted, tt.want)
 			}
 		})
+	}
+}
+
+func TestFindEndedSinceDropsACloseWithNoRecordedInstant(t *testing.T) {
+	// Arrange: a workspace a build before close records closed.
+	records := fixture()
+	records.Workspaces[1].Closure = nil
+
+	// Act
+	got, err := Find(records, Query{EndedSince: ptr(at(0))})
+
+	// Assert
+	if err != nil || !reflect.DeepEqual(ids(got), []string{"open", "landed"}) {
+		t.Fatalf("Find = %v, %v; want the unrecorded close left out", ids(got), err)
 	}
 }
 

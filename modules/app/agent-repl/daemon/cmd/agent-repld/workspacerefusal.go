@@ -335,6 +335,8 @@ func describeFindRefusal(e *agentreplv1.FindWorkspacesError) (string, error) {
 		return "the daemon has no workspace for the calling directory", nil
 	case *agentreplv1.FindWorkspacesError_UnknownLoginWorkspace:
 		return "the daemon has no workspace by the one -login named", nil
+	case *agentreplv1.FindWorkspacesError_UnknownParent:
+		return "the daemon has no workspace by the one -parent named", nil
 	case *agentreplv1.FindWorkspacesError_UnknownLoginRoot:
 		return fmt.Sprintf("the -login-root root is not an account root the daemon knows; it knows %s", strings.Join(r.UnknownLoginRoot.GetKnown(), ", ")), nil
 	}

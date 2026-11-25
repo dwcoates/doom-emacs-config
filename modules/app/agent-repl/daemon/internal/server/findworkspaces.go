@@ -62,6 +62,15 @@ func (s *server) FindWorkspaces(
 		}
 		query.CreatedBy = &creator.ID
 	}
+	if ref := req.Msg.Parent; ref != nil {
+		parent, ok := registeredRef(byID, ref)
+		if !ok {
+			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+				Arm: "unknown_parent", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
+			})))
+		}
+		query.Parent = &parent.ID
+	}
 	var caller *wsm.WorkspaceID
 	if ref := req.Msg.Caller; ref != nil {
 		record, ok := registeredRef(byID, ref)
@@ -128,6 +137,10 @@ func (s *server) FindWorkspaces(
 	if err != nil {
 		return nil, fail(s.log, rpc, fmt.Errorf("list the turn starts: %w", err))
 	}
+	folds, err := s.deps.DB.FoldedChildren(ctx)
+	if err != nil {
+		return nil, fail(s.log, rpc, fmt.Errorf("list the folded production children: %w", err))
+	}
 	result, err := workspacefind.Find(workspacefind.Records{
 		Workspaces: records, Repositories: repositories, Summaries: workspacefind.Summaries(summaries, titles),
 		Drawn: drawn, Sessions: sessions, Turns: turns,
@@ -137,7 +150,7 @@ func (s *server) FindWorkspaces(
 	}
 	found := make([]*agentreplv1.FoundWorkspace, 0, len(result.Found))
 	for _, f := range result.Found {
-		found = append(found, foundWorkspaceOf(f, byID, caller))
+		found = append(found, foundWorkspaceOf(f, byID, caller, folds))
 	}
 	success := &agentreplv1.FindWorkspacesSuccess{}
 	if result.Omitted > 0 {
@@ -151,7 +164,8 @@ func (s *server) FindWorkspaces(
 		"text": req.Msg.GetText(), "standing": fmt.Sprint(query.Standing), "created_by": req.Msg.GetCreatedBy().GetId(),
 		"on_roster": query.OnRoster, "caller": req.Msg.GetCaller().GetId(), "login_workspace": req.Msg.GetLogin().GetOfWorkspace().GetId(),
 		"login_root": req.Msg.GetLogin().GetAccountRoot(), "login_repositories": len(query.LoginRepos), "roster_revision": roster.GetRevision(),
-		"turned": req.Msg.Turned != nil, "turned_since_ms": req.Msg.GetTurned().GetSinceMs(), "turned_until_ms": req.Msg.GetTurned().GetUntilMs()})
+		"turned": req.Msg.Turned != nil, "turned_since_ms": req.Msg.GetTurned().GetSinceMs(), "turned_until_ms": req.Msg.GetTurned().GetUntilMs(),
+		"parent": req.Msg.GetParent().GetId(), "ended_since_ms": req.Msg.GetEndedSinceMs()})
 	resp.Result = &agentreplv1.FindWorkspacesResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
@@ -228,6 +242,11 @@ func validateFindWorkspacesRequest(req *agentreplv1.FindWorkspacesRequest) *conn
 	if w := req.Turned; w != nil && w.SinceMs != nil && w.UntilMs != nil && w.GetUntilMs() < w.GetSinceMs() {
 		return invalid("turned", "a turn window's end precedes its start")
 	}
+	if req.Parent != nil {
+		if err := validateWorkspaceRef("parent", req.GetParent()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -262,6 +281,7 @@ func findQueryOf(req *agentreplv1.FindWorkspacesRequest) workspacefind.Query {
 	if w := req.Turned; w != nil {
 		q.Turned = &workspacefind.TurnWindow{Since: instantOf(w.SinceMs), Until: instantOf(w.UntilMs)}
 	}
+	q.EndedSince = instantOf(req.EndedSinceMs)
 	return q
 }
 
@@ -277,17 +297,18 @@ func instantOf(ms *int64) *time.Time {
 // foundWorkspaceOf renders one found workspace, naming its creator and its
 // parent (and a merge workspace's requester) by their records in BYID, the
 // same listing, and answering calling
-// for the record of CALLER, nil when the request names none. Both references are SET
+// for the record of CALLER, nil when the request names none. FOLDS maps each
+// folded production child to the child it was folded into. Both references are SET
 // NULL when their row is forgotten, so one the listing does not hold is an
 // invariant violation and panics.
-func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Workspace, caller *wsm.WorkspaceID) *agentreplv1.FoundWorkspace {
+func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Workspace, caller *wsm.WorkspaceID, folds map[wsm.WorkspaceID]wsm.WorkspaceID) *agentreplv1.FoundWorkspace {
 	ws := f.Workspace
 	standing := &agentreplv1.FoundWorkspaceStanding{}
 	switch {
 	case ws.MergedAt != nil:
 		standing.Standing = &agentreplv1.FoundWorkspaceStanding_Landed{Landed: &agentreplv1.FoundWorkspaceStandingLanded{LandedAtMs: ws.MergedAt.UnixMilli()}}
 	case ws.Closed:
-		closed := &agentreplv1.FoundWorkspaceStandingClosed{}
+		closed := &agentreplv1.FoundWorkspaceStandingClosed{How: closedHowOf(ws, byID, folds)}
 		if ws.Closure != nil {
 			at := ws.Closure.At.UnixMilli()
 			closed.ClosedAtMs = &at
@@ -340,6 +361,38 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		ConfigDir:      f.ConfigDir,
 		LastTurnAtMs:   lastTurnAtMs,
 	}
+}
+
+// closedHowOf renders how closed workspace WS ended: folded when FOLDS names
+// it (naming the child it went into by its record in BYID, when the listing
+// still holds it), else by the kind its close recorded.
+func closedHowOf(ws wsm.Workspace, byID map[wsm.WorkspaceID]wsm.Workspace, folds map[wsm.WorkspaceID]wsm.WorkspaceID) *agentreplv1.FoundWorkspaceClosedHow {
+	how := &agentreplv1.FoundWorkspaceClosedHow{}
+	if into, folded := folds[ws.ID]; folded {
+		arm := &agentreplv1.FoundWorkspaceClosedHowFolded{}
+		// A FOLD RECORDS ITS SURVIVOR BY ID ALONE (no foreign key), so a
+		// survivor the listing no longer holds is answered as none.
+		if record, ok := byID[into]; ok {
+			arm.Into = record.Ref()
+		}
+		how.How = &agentreplv1.FoundWorkspaceClosedHow_Folded{Folded: arm}
+		return how
+	}
+	kind := wsm.HowUnrecorded
+	if ws.Closure != nil {
+		kind = ws.Closure.How
+	}
+	switch kind {
+	case wsm.HowClosed:
+		how.How = &agentreplv1.FoundWorkspaceClosedHow_Closed{Closed: &agentreplv1.FoundWorkspaceClosedHowClosed{}}
+	case wsm.HowKilled:
+		how.How = &agentreplv1.FoundWorkspaceClosedHow_Killed{Killed: &agentreplv1.FoundWorkspaceClosedHowKilled{}}
+	case wsm.HowUnrecorded:
+		how.How = &agentreplv1.FoundWorkspaceClosedHow_Unrecorded{Unrecorded: &agentreplv1.FoundWorkspaceClosedHowUnrecorded{}}
+	default:
+		panic(fmt.Sprintf("server: workspace %s is registered closed as %s, which no registered workspace can be", ws.ID, kind))
+	}
+	return how
 }
 
 // foundRosterOf renders how the roster draws a found workspace, nil when it

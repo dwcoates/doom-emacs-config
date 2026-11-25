@@ -943,6 +943,7 @@ type DB interface {
 	ProductionChildOf(ctx context.Context, ws WorkspaceID) (ProductionChild, bool, error)
 	ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]ProductionChild, error)
 	ProductionChildrenOpenSince(ctx context.Context, repo RepoKey, since time.Time) ([]ProductionChild, error)
+	FoldedChildren(ctx context.Context) (map[WorkspaceID]WorkspaceID, error)
 	FoldProductionChild(ctx context.Context, folded, surviving WorkspaceID, at time.Time) error
 	EndProductionChild(ctx context.Context, ws WorkspaceID, how ProductionChildEnding, at time.Time) (bool, error)
 	// RecordMediationEnding records how the checked deploy ended on its check.

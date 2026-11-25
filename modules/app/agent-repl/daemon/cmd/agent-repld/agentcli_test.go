@@ -3272,6 +3272,12 @@ func TestFindSendsEveryNarrowingItNames(t *testing.T) {
 		{name: "-created-by here is the caller", args: []string{"-created-by", "here"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
 			return r.GetCreatedBy().GetId() == "ws-caller"
 		}},
+		{name: "-parent here is the caller", args: []string{"-parent", "here"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetParent().GetId() == "ws-caller"
+		}},
+		{name: "-ended-since an age", args: []string{"-ended-since", "2h"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetEndedSinceMs() == cliNow.Add(-2*time.Hour).UnixMilli() && r.Window == nil
+		}},
 		{name: "the calling workspace is named the caller", args: nil, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
 			return r.GetCaller().GetId() == "ws-caller" && r.OnRoster == nil
 		}},
@@ -3367,6 +3373,7 @@ func TestFindRefusesAMalformedCommandBeforeCallingTheDaemon(t *testing.T) {
 		{name: "an unknown standing", args: []string{"-standing", "merged"}, want: `-standing is open, closed or landed, not "merged"`},
 		{name: "an unreadable since", args: []string{"-since", "last week"}, want: `-since: "last week" is no age`},
 		{name: "an unreadable turned-since", args: []string{"-turned-since", "yesterday"}, want: `-turned-since: "yesterday" is no age`},
+		{name: "an unreadable ended-since", args: []string{"-ended-since", "yesterday"}, want: `-ended-since: "yesterday" is no age`},
 		{name: "an unreadable turned-until", args: []string{"-turned-until", "soon"}, want: `-turned-until: "soon" is no age`},
 		{name: "a relative login root", args: []string{"-login-root", ".claude"}, want: `-login-root: dirpath: ".claude" is not an absolute path`},
 		{name: "another user's login root", args: []string{"-login-root", "~other/.claude"}, want: `-login-root: dirpath: "~other/.claude" names another user's home directory`},

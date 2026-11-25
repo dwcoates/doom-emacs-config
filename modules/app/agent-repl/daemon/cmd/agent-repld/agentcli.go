@@ -209,7 +209,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"model":                  {usage: agentverbs.ModelUsage, run: workspaceModel},
 		"status":                 {usage: "status WS", run: workspaceStatus},
 		"list":                   {usage: "list [-login here|WS | -login-root ROOT]", run: workspaceList},
-		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-turned-since WHEN] [-turned-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-login here|WS | -login-root ROOT] [-limit N|-all]", run: workspaceFind},
+		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-turned-since WHEN] [-turned-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-parent WS] [-ended-since WHEN] [-login here|WS | -login-root ROOT] [-limit N|-all]", run: workspaceFind},
 		"subscribe":              {usage: "subscribe WS -events " + allNoticeEvents, run: workspaceSubscribe},
 		"unsubscribe":            {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"pr-subscribe":           {usage: "pr-subscribe WS -pr URL|#N|OWNER/REPO#N [-events " + allPullRequestEvents + "]", run: workspacePullRequestSubscribe},
@@ -1819,6 +1819,8 @@ func workspaceFind(c *cliCall, args []string) int {
 	standing := fs.String("standing", "", "only workspaces open, closed (landed or not), or landed")
 	text := fs.String("text", "", "only workspaces whose name, branch or summary contains TEXT, case-insensitively")
 	createdBy := fs.String("created-by", "", "only workspaces whose creation WS's agent asked for")
+	parent := fs.String("parent", "", "only WS's children, open or ended")
+	endedSince := fs.String("ended-since", "", "only workspaces open now or that landed or closed at or after WHEN, spelled as -since is")
 	turnedSince := fs.String("turned-since", "", "only workspaces with an agent turn that started at or after WHEN, spelled as -since is")
 	turnedUntil := fs.String("turned-until", "", "only workspaces with an agent turn that started at or before WHEN, spelled as -since is")
 	login := loginFlags(fs)
@@ -1866,6 +1868,13 @@ func workspaceFind(c *cliCall, args []string) int {
 	if turned.SinceMs != nil || turned.UntilMs != nil {
 		req.Turned = turned
 	}
+	if *endedSince != "" {
+		ms, ok := c.whenFlag("ended-since", *endedSince)
+		if !ok {
+			return exitFailure
+		}
+		req.EndedSinceMs = &ms
+	}
 	switch *standing {
 	case "":
 	case "open":
@@ -1890,6 +1899,11 @@ func workspaceFind(c *cliCall, args []string) int {
 	req.Repository = scope
 	if *createdBy != "" {
 		if req.CreatedBy, ok = c.named(*createdBy); !ok {
+			return exitFailure
+		}
+	}
+	if *parent != "" {
+		if req.Parent, ok = c.named(*parent); !ok {
 			return exitFailure
 		}
 	}

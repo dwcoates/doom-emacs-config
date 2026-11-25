@@ -687,6 +687,38 @@ func (s *store) productionChildren(ctx context.Context, op string, repo RepoKey,
 	return out, err
 }
 
+// FoldedChildren answers every production child that was folded, mapped to
+// the child it was folded into.
+func (s *store) FoldedChildren(ctx context.Context) (map[WorkspaceID]WorkspaceID, error) {
+	const op = "daemon.wsm.folded_children"
+	type fold struct{ folded, into WorkspaceID }
+	var rows []fold
+	err := s.read(ctx, op, dlog.Context{}, func(ctx context.Context) error {
+		var err error
+		rows, err = listRows(ctx, s.q(ctx), `SELECT workspace_id, folded_into FROM production_children WHERE ending = 'folded'`, func(row interface{ Scan(...any) error }) (fold, error) {
+			var f fold
+			var into sql.NullString
+			if err := row.Scan(&f.folded, &into); err != nil {
+				return fold{}, err
+			}
+			if !into.Valid {
+				return fold{}, &DecodeError{Table: "production_children", Row: string(f.folded), Field: "folded_into", Err: errors.New("a folded child names the child it was folded into")}
+			}
+			f.into = WorkspaceID(into.String)
+			return f, nil
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[WorkspaceID]WorkspaceID, len(rows))
+	for _, f := range rows {
+		out[f.folded] = f.into
+	}
+	return out, nil
+}
+
 // namedSites answers every site WS was given, in order.
 func (s *store) namedSites(ctx context.Context, ws WorkspaceID) ([]string, error) {
 	return listRows(ctx, s.q(ctx), `SELECT site FROM production_child_named_sites WHERE workspace_id = ? ORDER BY site`, scanSite, string(ws))

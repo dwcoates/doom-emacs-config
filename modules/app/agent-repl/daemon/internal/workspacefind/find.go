@@ -56,6 +56,13 @@ type Query struct {
 	LoginRepos map[wsm.RepoID]bool
 	// Turned keeps only workspaces that had an agent turn inside it.
 	Turned *TurnWindow
+	// Parent keeps only the children of this workspace (wsm.Workspace.Parent).
+	Parent *wsm.WorkspaceID
+	// EndedSince keeps only workspaces that had not ended before it: open
+	// ones, and those that landed or closed at or after it
+	// (wsm.Workspace.EndedAt). One that ended at no recorded instant ended
+	// before it.
+	EndedSince *time.Time
 }
 
 // TurnWindow is a window an agent turn's start must fall in, both ends
@@ -287,6 +294,12 @@ func matches(f Found, q Query, turned bool) bool {
 	if q.CreatedBy != nil && (ws.RequestedBy == nil || *ws.RequestedBy != *q.CreatedBy) {
 		return false
 	}
+	if q.Parent != nil && (ws.Parent == nil || *ws.Parent != *q.Parent) {
+		return false
+	}
+	if q.EndedSince != nil && endedBefore(ws, *q.EndedSince) {
+		return false
+	}
 	if q.OnRoster && f.Roster == nil {
 		return false
 	}
@@ -294,6 +307,13 @@ func matches(f Found, q Query, turned bool) bool {
 		return false
 	}
 	return true
+}
+
+// endedBefore reports whether WS ended before AT: at an instant before it,
+// or at none recorded.
+func endedBefore(ws wsm.Workspace, at time.Time) bool {
+	ended, done := ws.EndedAt()
+	return done && (ended == nil || ended.Before(at))
 }
 
 // ofLogin reports whether WS belongs to the login whose repositories are

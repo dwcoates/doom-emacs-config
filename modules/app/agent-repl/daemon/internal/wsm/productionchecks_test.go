@@ -290,6 +290,10 @@ func TestAFoldMovesTheFoldedChildsSitesToTheSurvivor(t *testing.T) {
 	if folded.FoldedInto == nil || *folded.FoldedInto != b.ID {
 		t.Fatalf("folded into = %v, want %s", folded.FoldedInto, b.ID)
 	}
+	folds, err := s.FoldedChildren(ctx)
+	if err != nil || len(folds) != 1 || folds[a.ID] != b.ID {
+		t.Fatalf("FoldedChildren = %v, %v; want %s folded into %s", folds, err, a.ID, b.ID)
+	}
 	children, err := s.ProductionChildrenOpenSince(ctx, repo, until)
 	if err != nil || len(children) != 2 || !slices.Equal(children[0].Named, []string{"aaaaaaaaaaaa"}) || !slices.Equal(children[1].Named, []string{"aaaaaaaaaaaa", "bbbbbbbbbbbb"}) {
 		t.Fatalf("children = %+v, %v; want the folded child keeping its site and the survivor given both", children, err)
@@ -522,5 +526,29 @@ func TestAnUnansweredCheckIsRecordedOnlyAfterItsResumption(t *testing.T) {
 				t.Fatalf("DecideProductionCheck = %v, still to decide %+v; want error %v", err, next, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestFoldedChildrenRefusesAFoldNamingNoSurvivor(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo, key := productionRepo(t)
+	readThrough(t, s, key, instant)
+	until := instant.Add(time.Hour)
+	toldCheck(t, s, repo, until)
+	child := testWorkspaceNamed(t, s, "child")
+	if err := s.DecideProductionCheck(ctx, repo, until, until, ProductionDispatched, "one", []ProductionChild{{Workspace: child.ID, Kind: ProductionRemediation, Sites: []string{"aaaaaaaaaaaa"}}}); err != nil {
+		t.Fatal(err)
+	}
+	corrupt(t, s, `UPDATE production_children SET ending = 'folded', ended_at = 1 WHERE workspace_id = ?`, child.ID)
+
+	// Act
+	_, err := s.FoldedChildren(ctx)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "folded_into" {
+		t.Fatalf("FoldedChildren = %v, want a folded_into decode error", err)
 	}
 }

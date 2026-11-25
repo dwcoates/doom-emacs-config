@@ -175,3 +175,29 @@ func TestTheNameOfNoMediatorRoleIsABug(t *testing.T) {
 	// Act
 	_ = NotMediator.Name()
 }
+
+func TestWorkspaceEndedAt(t *testing.T) {
+	merged, closed := time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC), time.Date(2026, 11, 25, 8, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name      string
+		ws        Workspace
+		want      *time.Time
+		wantEnded bool
+	}{
+		{name: "an open workspace has not ended", ws: Workspace{}},
+		{name: "a landed workspace ended at its landing", ws: Workspace{Closed: true, MergedAt: &merged, Closure: &Closure{At: closed}}, want: &merged, wantEnded: true},
+		{name: "a closed workspace ended at its close", ws: Workspace{Closed: true, Closure: &Closure{At: closed}}, want: &closed, wantEnded: true},
+		{name: "a close with no record ended at no known instant", ws: Workspace{Closed: true}, wantEnded: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, ended := tc.ws.EndedAt()
+
+			// Assert
+			if ended != tc.wantEnded || (got == nil) != (tc.want == nil) || (got != nil && !got.Equal(*tc.want)) {
+				t.Fatalf("EndedAt = (%v, %v), want (%v, %v)", got, ended, tc.want, tc.wantEnded)
+			}
+		})
+	}
+}
