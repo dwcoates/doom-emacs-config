@@ -702,7 +702,8 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
   "Answer the stall-culprit keys timed while OPEN dials an exchange that is answered and ended.
 OPEN is called with a connection and opens one exchange on it."
   (let ((agent-repl-stall-culprit--current nil)
-        (agent-repl-stall-culprit--window nil))
+        (agent-repl-stall-culprit--window nil)
+        (agent-repl-stall-culprit--allocations nil))
     (funcall open (agent-repl-test-connect--conn))
     (let ((record (agent-repl-test-connect--last-spawn)))
       (agent-repl-test-connect--feed record (agent-repl-test-connect--http 200 "{}"))

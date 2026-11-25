@@ -26,6 +26,7 @@
          (agent-repl-stall-culprit--since 0.0)
          (agent-repl-stall-culprit--window nil)
          (agent-repl-stall-culprit--gc-at gc-elapsed)
+         (agent-repl-stall-culprit--allocations nil)
          (agent-repl-test-stall--pending nil)
          (agent-repl-test-stall--reported nil)
          (agent-repl-test-stall--records nil))
