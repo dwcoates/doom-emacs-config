@@ -52,10 +52,15 @@ const PageAwayGrace = time.Minute
 // user looks at it, and for PageAwayGrace after.
 var syncMergeArms = map[string]bool{"merge_queued": true, "merging": true}
 
-// syncMergeActiveArm is the arm of a synchronous merge at an active step (a
-// rebase, its gate, a repair, a conflict resolution): its shim is held up.
-// Waiting in line (merge_queued) its merge parks it.
-const syncMergeActiveArm = "merging"
+// mergeWaitsInLine reports whether STATUS is a synchronous merge waiting in
+// its queue's line (frontend.v1.FooterStatusMerging.enqueued): the one state
+// whose shim its merge parks (drain.Controller.MergeQueuedDown), so the
+// allocation holds none. A merge awaiting the workspace's freedom, or at any
+// active step, runs on that session and holds it up; the roster draws both
+// as `merge_queued`, so the footer's own arm tells them apart.
+func mergeWaitsInLine(status *frontendv1.FooterStatus) bool {
+	return status.GetMerging().GetEnqueued() != nil
+}
 
 // pageInputs is what one workspace's page verdict is derived from.
 type pageInputs struct {
@@ -69,7 +74,8 @@ type pageInputs struct {
 	// awayFrom is the later of when the user left it and when it became a
 	// one-shot or entered its merge, nil when this daemon saw neither.
 	awayFrom *time.Time
-	// mergeActive reports a synchronous merge at an active step.
+	// mergeActive reports a synchronous merge that is not waiting in line:
+	// awaiting the workspace's freedom, or at an active step.
 	mergeActive bool
 	// oneShot reports a one-shot, whose shim keeps running whatever else
 	// holds.
@@ -123,8 +129,9 @@ func pageVerdict(in pageInputs, now time.Time) (bool, time.Time) {
 // up AT NOW (wsm.ShimHold), the first rule that holds deciding:
 //   - a workspace that is not visible holds none;
 //   - the selection, a working workspace, a standing mediator, a queue-bypass
-//     holder, a one-shot, and a synchronous merge at an active step hold it
-//     for as long as that stands;
+//     holder, a one-shot, and a synchronous merge not waiting in line (one
+//     awaiting the workspace's freedom, or at an active step) hold it for as
+//     long as that stands;
 //   - a synchronous merge waiting in line holds none (its merge parks it,
 //     drain.Controller.MergeQueuedDown);
 //   - any other holds it for ShimIdleHold after the later of its last turn's
@@ -286,7 +293,7 @@ func (r *resolver) pageInputsOf(rec wsm.Workspace, rc rowContext, arm string) pa
 		selected:        selected,
 		awayUnloaded:    away,
 		awayFrom:        laterOf(s.awaySince, s.leftAt),
-		mergeActive:     arm == syncMergeActiveArm,
+		mergeActive:     syncMergeArms[arm] && !mergeWaitsInLine(r.footer.Status(rec.ID)),
 		interactedAt:    laterOf(s.interactedAt, rec.InteractedAt),
 		oneShot:         rec.OneShot,
 		alwaysShown:     rec.AlwaysShown(),

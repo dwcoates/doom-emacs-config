@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -413,6 +414,46 @@ func TestDisplacedTurnIsResubmittedExactlyOnce(t *testing.T) {
 	n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME)
 	if n != 1 {
 		t.Fatalf("the displaced turn was resubmitted %d times, want exactly once", n)
+	}
+}
+
+// TestTheDisplacedTurnGoesBackBeforeTheMergeLeavesItsLine pins the order the
+// allocation needs: leaving the line lets the cache keeper park the
+// workspace's session, so the displaced turn must be back in the prompt queue
+// while the merge's entry still stands.
+func TestTheDisplacedTurnGoesBackBeforeTheMergeLeavesItsLine(t *testing.T) {
+	// Arrange: a merge that displaced a user turn.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.displaceTurn("carry on with the refactor")
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+	var entryStood []bool
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME {
+			return
+		}
+		h.db.mu.Lock()
+		defer h.db.mu.Unlock()
+		stood := false
+		for _, q := range h.db.queues {
+			for _, entry := range q {
+				stood = stood || entry.Workspace == sub.WS
+			}
+		}
+		entryStood = append(entryStood, stood)
+	}
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if len(entryStood) != 1 || !entryStood[0] {
+		t.Fatalf("the queue entry stood at the resubmission = %v, want once and true", entryStood)
 	}
 }
 

@@ -615,6 +615,17 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		log.Error(op, "could not settle the finished merge's queue tab", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
 	}
+	// THE DISPLACED TURN GOES BACK BEFORE THE RUN LEAVES ITS LINE, and so
+	// before any tree goes away. Leaving the line is what lets the cache keeper
+	// park the workspace's session (wsm.Session.Initializing,
+	// cachelapse.Keeper.ShimHoldChanged): put back after it, the turn met a
+	// parked session and a revival, the gap between work owed and work running
+	// the allocation forbids. The resubmission is also a workspace-bound act
+	// -- it records a turn and writes to that workspace's own log sink, which
+	// is a symlink INSIDE the worktree -- so a removal ahead of it makes the
+	// "exactly once" guarantee unreachable.
+	r.resubmitDisplaced(ctx)
+
 	// THE RUN LEAVES ITS LINE BEFORE ITS CHAIN (leaveLine). The exit keeps
 	// the request off the queue unless the merge landed or its workspace is
 	// closed (wsm.leaveQueueInTx): the terminal above already closed an async
@@ -658,12 +669,6 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	}
 	r.o.mu.Unlock()
 	r.o.clearOffer(r.ws)
-
-	// THE DISPLACED TURN GOES BACK BEFORE ANY TREE GOES AWAY. The
-	// resubmission is a workspace-bound act -- it records a turn and writes to
-	// that workspace's own log sink, which is a symlink INSIDE the worktree --
-	// so a removal ahead of it makes the "exactly once" guarantee unreachable.
-	r.resubmitDisplaced(ctx)
 
 	// THE WORKSPACE A LANDING CLOSES goes only after the terminal was
 	// published, and only for a merge that landed: a failed merge's branch
