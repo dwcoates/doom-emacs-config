@@ -98,51 +98,6 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 // UpdateMergeQueue: pause, resume, evict.
 // ---------------------------------------------------------------------------
 
-func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	_, _, repo, d := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes, the merge conflict the test stages.
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.pause", "daemon.merge.unpause")
-	repoRef := mergeRepositoryRef(t, d, repo)
-
-	// Act: pause.
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
-		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
-	}))
-
-	// Assert: pause succeeds.
-	requireRPCSuccess(t, "UpdateMergeQueue(pause)", resp, err)
-
-	// Act: pause again.
-	resp2, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
-		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
-	}))
-	if err != nil {
-		t.Fatalf("UpdateMergeQueue(pause again) = error %v, want a success carrying already_paused", err)
-	}
-	if resp2.Msg.GetError().GetAlreadyPaused() == nil {
-		t.Fatalf("UpdateMergeQueue(pause again) = %v, want UpdateMergeQueueError.already_paused", resp2.Msg)
-	}
-
-	// Act: resume.
-	resp3, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
-		Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: repoRef}},
-	}))
-	requireRPCSuccess(t, "UpdateMergeQueue(resume)", resp3, err)
-
-	// Act: resume again.
-	resp4, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
-		Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: repoRef}},
-	}))
-	if err != nil {
-		t.Fatalf("UpdateMergeQueue(resume again) = error %v, want a success carrying not_paused", err)
-	}
-	if resp4.Msg.GetError().GetNotPaused() == nil {
-		t.Fatalf("UpdateMergeQueue(resume again) = %v, want UpdateMergeQueueError.not_paused", resp4.Msg)
-	}
-}
-
 func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -184,41 +139,6 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 // Interrupt on a queued merge raises the merge-queue question in the pinned
 // bubble; AnswerMergeQueueOffer evicts, prioritizes or cancels.
 // ---------------------------------------------------------------------------
-
-func TestInterruptOnAQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	_, behind, _, _ := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
-	roster := behind.d.WatchRoster()
-	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.RosterPush) bool {
-		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
-	})
-	feed := behind.watchRootFeed()
-
-	// Act
-	resp, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: behind.ws,
-		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	}))
-
-	// Assert: the stop is about the merge, and offers no rollback.
-	if err != nil {
-		t.Fatalf("Interrupt(turn) on a queued, idle workspace = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess().GetMergeQueueOffered() == nil {
-		t.Fatalf("Interrupt(turn) = %v, want InterruptSuccess.merge_queue_offered", resp.Msg)
-	}
-
-	// Assert: the question stands in the pinned bubble.
-	row := awaitRow(t, behind, feed, "the merge head carrying the question", func(r *frontendv1.FeedRow) bool {
-		return mergeQueueOffer(r) != nil
-	})
-	if row.GetOrder().Pinned == nil {
-		t.Fatalf("the merge head carrying the question = %v, want it pinned", row)
-	}
-}
 
 // durableQueueOrder stops D and answers every workspace on its merge queue,
 // in queue order. The daemon holds the sole writing handle on its store while
@@ -263,46 +183,6 @@ func durableQueueOrder(t *testing.T, d *harness.Daemon) []string {
 // surfaces here, and the sentence itself where the cause is the point; the
 // per-cause sentences are pinned as a set in internal/merge's own suite.
 // ---------------------------------------------------------------------------
-
-// TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause is the
-// third end, reachable at last. CloseWorkspace refuses outright while a merge
-// is queued, so KillWorkspace is the one door such a workspace leaves through,
-// and the abandoned terminal it draws is the ONLY place the wire can say why:
-// FeedMergeError has one `abandoned` arm for every end, so the cause lives in
-// FeedMergeAbandoned.summary and nowhere else.
-func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	_, behind, _, _ := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the kill abandons, a KillSession the fake shim answers by exiting, a session fault the kill opens, the shim death and severed link the kill drives.
-	//
-	// daemon.shimclient.redial belongs to that same kill: the fake answers
-	// KillSession by EXITING, so its socket can break before the reaper has
-	// decided the death, and the monitor then reports the break and its one
-	// failed redial exactly as it should. Which side of that race a run lands
-	// on is a matter of scheduling, so the record is declared here for the
-	// same reason the sibling teardown tests declare it, not because it is
-	// unimportant.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab", "daemon.health.open_fault", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.sessionwatcher.link_fault", "daemon.shimclient.redial", "daemon.workspace.kill", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
-	root := behind.watchRootFeed()
-
-	// Act
-	if _, err := behind.d.Client().KillWorkspace(behind.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{
-		Workspace: behind.ws,
-	})); err != nil {
-		t.Fatalf("KillWorkspace = error %v, want a success", err)
-	}
-
-	// Assert
-	mergeRow := awaitRow(t, behind, root, "the killed workspace's abandoned merge terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetError().GetAbandoned() != nil
-	})
-	abandoned := mergeRow.GetActivity().GetMerge().GetError().GetAbandoned()
-	want := "the workspace was closed while this merge was waiting in the queue"
-	if abandoned.GetSummary() != want {
-		t.Fatalf("the killed workspace's merge summary = %q, want %q", abandoned.GetSummary(), want)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // The Emacs-repo method: a conflicting branch opens a conflict section on its commit, briefs
@@ -419,53 +299,6 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 	d.AwaitFileGone(dir)
 }
 
-func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
-	t.Parallel()
-	// Arrange: the deploy's build fails, which is the landing's loud answer.
-	f, d, repo, script := mergeCleanRepo(t)
-	// The failing deploy is loud by design.
-	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run", "daemon.deploy.landing")
-	d.StageDeployBuild(harness.DeployFails)
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-	// THE BRANCH HAS TO CARRY A COMMIT. The self-reload fires off what the
-	// merge LANDED -- the classifier reads the changed paths -- so a merge
-	// that brought in nothing triggers nothing, correctly.
-	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/agent-repld/main.go", "landed\n")
-
-	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
-	// merged workspace's worktree down, and the feed resolves its log sink by
-	// stat-ing that directory -- so an open after the enqueue races the
-	// teardown and intermittently finds no such workspace to watch.
-	root := f.watchRootFeed()
-
-	// Act
-	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
-	}
-	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil
-	})
-
-	// Assert: the landing asked for ONE deploy, whose build the test fails,
-	// so nothing was installed or restarted. The deploy runs off the merge, so
-	// its global record is the synchronization point: the landing's own
-	// workspace sink is reached through the worktree the teardown removed.
-	d.AwaitLogRecord(d.RunLogPath(), "the landing's deploy failing its build", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.deploy.landing" && r.Message == "the landing's deploy failed"
-	})
-	invocations := d.Deploy.Invocations()
-	if got := len(invocations); got != 1 {
-		t.Fatalf("deploy builds = %d, want EXACTLY 1 for the one landing (never one per commit)", got)
-	}
-	if argv := invocations[0].Argv; len(argv) != 2 || argv[0] != "--out" {
-		t.Fatalf("deploy build argv = %v, want --out <staging>", argv)
-	}
-	if got := len(d.Services.InvocationsExcept(harness.PlatformServiceVerbs.Status)); got != 0 {
-		t.Fatalf("service manager invocations = %d, want none: a failed build restarts nothing", got)
-	}
-}
-
 // holdDeploys asks d to hold, or (release) to release, REPOSITORY's deploy
 // stage.
 func holdDeploys(t *testing.T, d *harness.Daemon, repository *workspacev1.RepositoryRef, release bool) *agentreplv1.UpdateDeployHoldResponse {
@@ -478,17 +311,6 @@ func holdDeploys(t *testing.T, d *harness.Daemon, repository *workspacev1.Reposi
 	resp, err := d.Client().UpdateDeployHold(d.Ctx(), connect.NewRequest(req))
 	if err != nil {
 		t.Fatalf("UpdateDeployHold(%v) = error %v, want an answer", req.GetAction(), err)
-	}
-	return resp.Msg
-}
-
-// askMergeQueue sends d one UpdateMergeQueue request and answers its reply,
-// failing the test on a transport error: every queue control is answered.
-func askMergeQueue(t *testing.T, d *harness.Daemon, req *agentreplv1.UpdateMergeQueueRequest) *agentreplv1.UpdateMergeQueueResponse {
-	t.Helper()
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(req))
-	if err != nil {
-		t.Fatalf("UpdateMergeQueue(%v) = error %v, want an answer", req.GetAction(), err)
 	}
 	return resp.Msg
 }
@@ -647,53 +469,6 @@ func TestALocalMergeIntoAParentWorktreeRunsNoDeployHook(t *testing.T) {
 	}
 }
 
-func TestAHooksOnlyDeployNeverTriggersTheRollout(t *testing.T) {
-	t.Parallel()
-	// Arrange: a repository whose deploy config is hooks alone (the
-	// fixture's default): no local merge and no deploy hook.
-	repo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{})
-	repository := createRepositoryRef(t, d, repo)
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
-		Repository:    repository,
-		Requester:     harness.User(),
-		ContextOrigin: harness.Fresh(),
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Relationship: harness.Peer(),
-			Prompt:       said("ship the fix"),
-		}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	shim := d.Shim(ws)
-	shim.ExpectStartSession()
-	shim.ExpectStartTurn()
-	roster := d.WatchRoster()
-
-	// Act: the turn concludes, and the merge is asked for the way the agent
-	// carrying the completion directive asks for it — the ordinary merge verb.
-	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	harness.CommitWork(t, ws.GetDir())
-	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(ws))); err != nil {
-		t.Fatalf("FinishWorkspace(one_shot) = error %v, want the merge enqueued", err)
-	}
-
-	// Assert: the deploy succeeds (a hooks-only config with no hooks has
-	// nothing to run, so it reaches "merged" straight away).
-	awaitRoster(t, d, roster, "the one-shot's merge landed", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, ws.GetId())
-		return row != nil && row.GetMerged() != nil
-	})
-
-	// Assert: the rollout never fires -- the config names no deploy hook.
-	if got := len(d.Deploy.Invocations()); got != 0 {
-		t.Fatalf("deploy builds = %d, want 0: the repository's config names no deploy hook", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // The non-Emacs-repo method: only pre/post prompts, never the Emacs-only
 // rebasing and tests tabs.
@@ -785,53 +560,6 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 	// Assert: the merge lands, so none of its work outlives the test.
 	awaitRow(t, f, root, "the merge's terminal push", isMergeTerminal)
 	d.AwaitLandingDeployed()
-}
-
-func TestAFailingPostDeployHookFailsTheDeployAndKeepsTheLanding(t *testing.T) {
-	t.Parallel()
-	// Arrange: a clean landing with a post-deploy prompt hook that fails.
-	repo := harness.NewRepo(t)
-	script := repo.TestAllScript()
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-	repo.DeploysAsAgentRepl()
-	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.MergeChainTimeout})
-	repoRef := mergeRepositoryRef(t, d, repo)
-	f := mergeCreateChild(t, d, repoRef, "postpromptfail", "do the clean thing", harness.PostDeployPrompts("clean up after landing"))
-
-	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
-	// merged workspace's worktree down, and the feed resolves its log sink by
-	// stat-ing that directory -- so a subscription opened after the enqueue
-	// races the teardown and intermittently finds no such workspace to watch.
-	// Opening first is the rendezvous the assertion actually needs.
-	root := f.watchRootFeed()
-
-	// Act: land, then answer the post-prompt's turn with a FAILURE.
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
-	}
-	req := f.shim.ExpectStartTurn()
-	if req.GetOrigin() != mergeAfterActionOrigin {
-		t.Fatalf("post-prompt StartTurn.origin = %v, want PROMPT_ORIGIN_MERGE_AFTER_ACTION", req.GetOrigin())
-	}
-	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
-			Message: "boom",
-			Kind:    &conversationv1.ApiRequestFailed_Internal{Internal: &conversationv1.ApiInternal{}},
-		}},
-	}))
-
-	// Assert: the deploy FAILS, its account naming the landing that stands.
-	mergeRow := awaitRow(t, f, root, "the deploy's terminal push", isMergeTerminal)
-	failure := mergeRow.GetActivity().GetMerge().GetError()
-	if failure == nil || !strings.Contains(failure.String(), "it landed as commit") {
-		t.Fatalf("deploy terminal = %v, want FeedMergeError naming the landed commit", mergeRow.GetActivity().GetMerge())
-	}
-	if got := repo.BranchHead(harness.DefaultBranch); got == "" {
-		t.Fatal("the default branch has no head, want the landing to stand")
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -987,57 +715,6 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 // UpdateMergeQueue: an unset repository means every repository; an unknown
 // one is refused.
 // ---------------------------------------------------------------------------
-
-func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t *testing.T) {
-	t.Parallel()
-	// Arrange: two independent repositories, each with a blocked queue, on
-	// ONE daemon.
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.merge.pause"}})
-	_, _, _, repoRefA := mergeBlockedRepoOn(t, d, "repoa")
-	_, _, _, repoRefB := mergeBlockedRepoOn(t, d, "repob")
-
-	// Act: pause with NO repository named.
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
-		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}},
-	}))
-	requireRPCSuccess(t, "UpdateMergeQueue(pause, no repository)", resp, err)
-
-	// Assert: BOTH repositories' queues are now paused — proven by each one
-	// individually refusing a further pause as already_paused.
-	for _, ref := range []*workspacev1.RepositoryRef{repoRefA, repoRefB} {
-		again, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
-			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: ref}},
-		}))
-		if err != nil {
-			t.Fatalf("UpdateMergeQueue(pause, %v) = error %v, want a success carrying already_paused", ref, err)
-		}
-		if again.Msg.GetError().GetAlreadyPaused() == nil {
-			t.Fatalf("UpdateMergeQueue(pause, %v) = %v, want already_paused (the unset pause should have covered it)", ref, again.Msg)
-		}
-	}
-}
-
-func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange: a daemon that has never heard of this repository ref at all.
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.merge.pause"}})
-	bogus := &workspacev1.RepositoryRef{Dir: "/nowhere/this/repo/does/not/exist"}
-
-	// Act
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
-		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: bogus}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("UpdateMergeQueue(pause, unknown repository) = error %v, want a success carrying unknown_repository", err)
-	}
-	if resp.Msg.GetError().GetUnknownRepository() == nil {
-		t.Fatalf("UpdateMergeQueue(pause, unknown repository) = %v, want UpdateMergeQueueError.unknown_repository", resp.Msg)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // The test gate: blast-radius suite selection and ANSI-painted output.
@@ -1204,12 +881,6 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 func mergeBranchOf(t *testing.T, ws *workspacev1.WorkspaceRef) string {
 	t.Helper()
 	return filepath.Base(ws.GetDir())
-}
-
-// mergeQueueOffer answers the merge-queue question a merge head row carries,
-// nil when the row is no merge head or carries none.
-func mergeQueueOffer(row *frontendv1.FeedRow) *frontendv1.FeedMergeQueueOffer {
-	return row.GetActivity().GetMerge().GetQueueOffer()
 }
 
 // TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork covers

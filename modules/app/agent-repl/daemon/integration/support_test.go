@@ -702,16 +702,6 @@ func sameOrder(got, want []string) bool {
 	return true
 }
 
-// createTask creates a task and answers its ref.
-func createTask(t *testing.T, f *fixture, title string) *agentreplv1.TaskRef {
-	t.Helper()
-	resp, err := f.d.Client().CreateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: title}))
-	if err != nil {
-		t.Fatalf("CreateTask(%q) = error %v, want a task ref", title, err)
-	}
-	return resp.Msg.GetSuccess().GetTask()
-}
-
 // openPermission is a permission ask in its opening state.
 func openPermission(id, gated string) *conversationv1.AgentPermission {
 	return &conversationv1.AgentPermission{

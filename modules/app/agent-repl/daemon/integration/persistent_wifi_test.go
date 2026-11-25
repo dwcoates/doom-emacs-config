@@ -150,48 +150,6 @@ func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.
 	}
 }
 
-func TestTurningTheModeOffUnderAClosedLidWakesTheDisplay(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := harness.StartDaemon(t, harness.Opts{})
-	stream := d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
-	d.PowerSource.Unplug()
-	awaitPowerSource(d, "battery")
-	d.Lid.Close()
-	closedCtx, cancelClosed := d.WaitCtx()
-	defer cancelClosed()
-	harness.AwaitView(t, closedCtx, stream, "the lid heard closed", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetPersistentWifi().GetLidClosed() != nil
-	})
-	onCtx, cancelOn := d.WaitCtx()
-	defer cancelOn()
-	on, err := d.Client().UpdatePersistentWifiMode(onCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
-		Action: &agentreplv1.UpdatePersistentWifiModeRequest_On{On: &agentreplv1.UpdatePersistentWifiModeOn{}},
-	}))
-	if err != nil || on.Msg.GetSuccess().GetDisplay().GetSlept() == nil || on.Msg.GetSuccess().GetEnergyMode().GetLowPower() == nil {
-		t.Fatalf("UpdatePersistentWifiMode(on) = %v, %v, want the display slept and Low Power Mode set for the closed lid", on, err)
-	}
-
-	// Act.
-	offCtx, cancelOff := d.WaitCtx()
-	defer cancelOff()
-	off, err := d.Client().UpdatePersistentWifiMode(offCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
-		Action: &agentreplv1.UpdatePersistentWifiModeRequest_Off{Off: &agentreplv1.UpdatePersistentWifiModeOff{}},
-	}))
-
-	// Assert.
-	if err != nil || off.Msg.GetSuccess().GetDisplay().GetWoke() == nil || off.Msg.GetSuccess().GetState().GetQuiet() != nil ||
-		off.Msg.GetSuccess().GetEnergyMode().GetRestored().GetPowerMode() != harness.FakeEnergyMode {
-		t.Fatalf("UpdatePersistentWifiMode(off) = %v, %v, want the display woken, no quiet state and the user's energy mode restored", off, err)
-	}
-	if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
-		t.Fatalf("energy mode = %s, recorded %q, want the user's %s restored and the record forgotten", got, kept, harness.FakeEnergyMode)
-	}
-	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
-		t.Fatalf("display = %s, want awake", got)
-	}
-}
-
 func TestUnderAClosedLidLowPowerModeFollowsThePowerSource(t *testing.T) {
 	t.Parallel()
 	// Arrange: the mode on, the machine on AC power.

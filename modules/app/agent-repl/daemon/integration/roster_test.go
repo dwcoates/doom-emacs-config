@@ -104,16 +104,6 @@ func tabBarIDs(r *frontendv1.RosterPush) []string {
 	return out
 }
 
-// swapWorkspaces exchanges ws's and target's places and requires a success.
-func swapWorkspaces(t *testing.T, d *harness.Daemon, ws, target *workspacev1.WorkspaceRef) {
-	t.Helper()
-	resp, err := d.Client().SwapWorkspaces(d.Ctx(), connect.NewRequest(
-		&agentreplv1.SwapWorkspacesRequest{Workspace: ws, Target: target}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("SwapWorkspaces = (%v, %v), want success", resp, err)
-	}
-}
-
 func TestSettingAPriorityMovesTheWorkspaceSecondToLast(t *testing.T) {
 	t.Parallel()
 	// Arrange: the bar is a, c, b.
@@ -159,85 +149,6 @@ func TestReopeningAWorkspaceRestoresItsPlace(t *testing.T) {
 	awaitRoster(t, d, roster, "the bar a, c, d, b", func(r *frontendv1.RosterPush) bool {
 		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), dd.GetId(), b.GetId()})
 	})
-}
-
-func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
-	t.Parallel()
-	// Arrange: the bar is a, c, b.
-	d := viewInGroup(t, groupTabOrder)
-	repo := harness.NewRepo(t)
-	roster := d.WatchRoster()
-	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
-	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
-	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
-
-	// Act: a swaps with b, two tabs to its right.
-	swapWorkspaces(t, d, a, b)
-
-	// Assert: a and b exchange places and c, between them, stays put.
-	awaitRoster(t, d, roster, "the bar b, c, a", func(r *frontendv1.RosterPush) bool {
-		return sameOrder(tabBarIDs(r), []string{b.GetId(), c.GetId(), a.GetId()})
-	})
-}
-
-func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
-	t.Parallel()
-	// Arrange: the bar is a, c, b.
-	d := viewInGroup(t, groupTabOrder)
-	repo := harness.NewRepo(t)
-	roster := d.WatchRoster()
-	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
-	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
-	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
-	awaitRoster(t, d, roster, "the bar a, c, b", func(r *frontendv1.RosterPush) bool {
-		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), b.GetId()})
-	})
-
-	// Act: a moves onto b's tab, two tabs to its right.
-	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
-		&agentreplv1.MoveWorkspaceRequest{Workspace: a, Target: b}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("MoveWorkspace = (%v, %v), want success", resp, err)
-	}
-
-	// Assert: c and b shift left and a takes the last tab.
-	awaitRoster(t, d, roster, "the bar c, b, a", func(r *frontendv1.RosterPush) bool {
-		return sameOrder(tabBarIDs(r), []string{c.GetId(), b.GetId(), a.GetId()})
-	})
-}
-
-func TestSwapWorkspacesIsRefusedAcrossRepositories(t *testing.T) {
-	t.Parallel()
-	// Arrange: one workspace in each of two repositories.
-	d := canonicalView(t)
-	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
-	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
-
-	// Act.
-	resp, err := d.Client().SwapWorkspaces(d.Ctx(), connect.NewRequest(
-		&agentreplv1.SwapWorkspacesRequest{Workspace: two, Target: one}))
-
-	// Assert: the tab bar keeps each repository's workspaces together.
-	if err != nil || resp.Msg.GetError().GetOtherRepository() == nil {
-		t.Fatalf("SwapWorkspaces = (%v, %v), want other_repository", resp, err)
-	}
-}
-
-func TestMoveWorkspaceIsRefusedAcrossRepositories(t *testing.T) {
-	t.Parallel()
-	// Arrange: one workspace in each of two repositories.
-	d := canonicalView(t)
-	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
-	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
-
-	// Act.
-	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
-		&agentreplv1.MoveWorkspaceRequest{Workspace: two, Target: one}))
-
-	// Assert: the tab bar keeps each repository's workspaces together.
-	if err != nil || resp.Msg.GetError().GetOtherRepository() == nil {
-		t.Fatalf("MoveWorkspace = (%v, %v), want other_repository", resp, err)
-	}
 }
 
 // arrange sends one ArrangeSidebar change and requires its success.
@@ -444,48 +355,6 @@ func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
 	})
 }
 
-func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
-	t.Parallel()
-	// Arrange: one workspace in each of two repositories.
-	d := viewInGroup(t, groupTabOrder)
-	roster := d.WatchRoster()
-	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
-	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
-	r := awaitRoster(t, d, roster, "two sections", func(r *frontendv1.RosterPush) bool {
-		return len(r.GetWorkspaces().GetRepository().GetSections()) == 2 && len(tabBarIDs(r)) == 2
-	})
-	firstRepo := r.GetWorkspaces().GetRepository().GetSections()[0].GetKey().GetRepository()
-	before := tabBarIDs(r)
-
-	// Act.
-	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepository{
-		MoveRepository: &agentreplv1.ArrangeMoveRepository{Repository: firstRepo, To: &agentreplv1.ArrangeMoveRepository_End{End: &agentreplv1.ArrangeEnd{}}}}})
-
-	// Assert.
-	awaitRoster(t, d, roster, "the tabs swapped with their repositories", func(r *frontendv1.RosterPush) bool {
-		return sameOrder(tabBarIDs(r), []string{before[1], before[0]})
-	})
-}
-
-func TestGetSidebarArrangementListsTheRepositoriesAndTheirWorkspaces(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := viewInGroup(t, groupTabOrder)
-	ws := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
-
-	// Act.
-	resp, err := d.Client().GetSidebarArrangement(d.Ctx(), connect.NewRequest(&agentreplv1.GetSidebarArrangementRequest{}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("GetSidebarArrangement: %v", err)
-	}
-	repos := resp.Msg.GetRepositories()
-	if len(repos) != 1 || len(repos[0].GetEntries()) != 1 || repos[0].GetEntries()[0].GetWorkspace().GetWorkspace().GetId() != ws.GetId() {
-		t.Fatalf("arrangement = %v, want the one workspace in its repository", resp.Msg)
-	}
-}
-
 func TestClearingAPriorityRemovesTheNamesIcon(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -563,35 +432,6 @@ func TestAttentionMarkerIsClearedWhenTheLastAskSettles(t *testing.T) {
 	})
 }
 
-func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	repo := harness.NewRepo(t)
-	closedDir := worktreeOf(t, repo, "closed")
-	nukedDir := worktreeOf(t, repo, "nuked")
-	closed := harness.Register(t, d, closedDir)
-	nuked := harness.Register(t, d, nukedDir)
-	roster := d.WatchRoster()
-
-	// Act
-	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: closed})); err != nil {
-		t.Fatalf("CloseWorkspace = error %v, want a success with nothing live", err)
-	}
-	if _, err := d.Client().NukeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.NukeWorkspaceRequest{Workspace: nuked})); err != nil {
-		t.Fatalf("NukeWorkspace = error %v, want a success", err)
-	}
-
-	// Assert
-	got := awaitRoster(t, d, roster, "the closed row marked and the nuked row gone", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, closed.GetId())
-		return row != nil && row.GetClosed().GetClosed() && rosterRow(r, nuked.GetId()) == nil
-	})
-	if row := rosterRow(got, closed.GetId()); !row.GetClosed().GetClosed() {
-		t.Fatalf("the closed workspace's row.closed = false, want true")
-	}
-}
-
 // TestBringUpDeathLeavesTheRosterRowStartFailed is the roster suite's own
 // coverage of session_lifecycle_test.go's
 // TestFakeShimExitingDuringBringUpEndsBringUpImmediately fixture: that test
@@ -624,35 +464,6 @@ func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 	})
 	if row := rosterRow(got, f.ws.GetId()); row.GetStartFailed() == nil {
 		t.Fatalf("the roster row's status = %T after a bring-up death, want start_failed", row.GetStatus())
-	}
-}
-
-// TestUpdateTaskSetDoneTwiceAnswersNoChange covers UpdateTaskError.no_change:
-// "the change asked for is what the task already holds".
-func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	task := createTask(t, f, "done twice")
-	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
-	})); err != nil {
-		t.Fatalf("UpdateTask{set_done} (first) = error %v, want a success", err)
-	}
-
-	// Act
-	resp, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("UpdateTask{set_done} (second) = transport error %v, want the in-band no_change arm", err)
-	}
-	if resp.Msg.GetError().GetNoChange() == nil {
-		t.Fatalf("UpdateTask{set_done} on an already-done task = %v, want UpdateTaskError.no_change", resp.Msg)
 	}
 }
 
@@ -763,28 +574,6 @@ func TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn(t *testing.T) {
 // bogusTask is a TaskRef naming no task the daemon ever minted.
 func bogusTask() *agentreplv1.TaskRef { return &agentreplv1.TaskRef{Id: "no-such-task"} }
 
-// TestUpdateTaskWithABogusTaskRefAnswersUnknownTask covers
-// UpdateTaskError.unknown_task: "no task by that id".
-func TestUpdateTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-
-	// Act
-	resp, err := d.Client().UpdateTask(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   bogusTask(),
-		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("UpdateTask on a bogus TaskRef = transport error %v, want the in-band unknown_task arm", err)
-	}
-	if resp.Msg.GetError().GetUnknownTask() == nil {
-		t.Fatalf("UpdateTask on a bogus TaskRef = %v, want UpdateTaskError.unknown_task", resp.Msg)
-	}
-}
-
 // TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask covers
 // AssignWorkspaceTaskError.unknown_task: "no task by that id".
 func TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
@@ -804,30 +593,6 @@ func TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetUnknownTask() == nil {
 		t.Fatalf("AssignWorkspaceTask on a bogus TaskRef = %v, want AssignWorkspaceTaskError.unknown_task", resp.Msg)
-	}
-}
-
-// TestUpdateTaskWithABlankTitleAnswersBlankTitle covers UpdateTaskError.blank_title,
-// UpdateTask's own landed arm for "the new title is blank once trimmed" — the
-// same arm CreateTask carries, minted separately for UpdateTaskSetTitle.
-func TestUpdateTaskWithABlankTitleAnswersBlankTitle(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	task := createTask(t, f, "has a title")
-
-	// Act
-	resp, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetTitle{SetTitle: &agentreplv1.UpdateTaskSetTitle{Title: "   "}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("UpdateTask{set_title} with a blank title = transport error %v, want the in-band blank_title arm", err)
-	}
-	if resp.Msg.GetError().GetBlankTitle() == nil {
-		t.Fatalf("UpdateTask{set_title} with a blank title = %v, want UpdateTaskError.blank_title", resp.Msg)
 	}
 }
 

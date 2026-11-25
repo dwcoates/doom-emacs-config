@@ -119,22 +119,10 @@ const (
 	// there is one per account root, and every case's workspace signs in as
 	// the same default account.
 	groupLoginTerminal daemonGroup = "the login terminal"
-	// groupDefaultModel is the daemon whose login's default model a case
-	// moves: every workspace signs in as the one login, and its topbar
-	// offers that login's default.
-	groupDefaultModel daemonGroup = "the login's default model"
-	// groupEditorSession is the daemon an Emacs stream connects to as a new
-	// editor: agent-repl's session is begun by the editor, one per daemon.
-	groupEditorSession daemonGroup = "the editor's session"
 	// groupDaemonStream is the daemon whose daemon-wide stream a case reads
 	// whole and then waits on for quiet: the barrier that wait takes is the
 	// daemon's, so no other case may be submitting on it.
 	groupDaemonStream daemonGroup = "a daemon-wide stream read for quiet"
-	// groupEditorStream is the daemon a case connects an Emacs stream to for
-	// what the stream draws, not for the session it begins: the first stream
-	// of a daemon begins its session, so a case that asserts the session
-	// began during it shares its daemon with no other case that connects one.
-	groupEditorStream daemonGroup = "an editor's stream"
 	// groupDerived is the daemon a case creates a child or a fork on: the
 	// derived workspace's notice reaches its source after the case is
 	// answered (newDerivingDaemon).

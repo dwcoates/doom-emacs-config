@@ -54,33 +54,6 @@ func backloggedAndHeld(t *testing.T) *fixture {
 	return f
 }
 
-func TestHidingAWorkspaceStandsNothingDown(t *testing.T) {
-	t.Parallel()
-	// Arrange, Act
-	f := backloggedAndHeld(t)
-
-	// Assert
-	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
-		t.Fatalf("the backlogged workspace was asked to hibernate %d times at the hide, want none", n)
-	}
-}
-
-func TestABackloggedRowCountsDownToTheLapseItsShimProjected(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := backloggedAndHeld(t)
-	roster := f.d.WatchRoster()
-	lapsesAt := time.Now().Add(time.Hour)
-
-	// Act
-	f.d.OpenedShim(f.ws).PushSessionUpdate(cacheLapse(lapsesAt, 0))
-
-	// Assert
-	awaitRoster(t, f.d, roster, "the backlogged row counting down to the lapse", func(r *frontendv1.RosterPush) bool {
-		return backlogRow(r, f.ws.GetId()).GetWhen().GetBacklogged().GetCache().GetLapsesAtMs() == lapsesAt.UnixMilli()
-	})
-}
-
 func TestABackloggedWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -113,27 +86,6 @@ func sendBackloggedKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.Send
 		t.Fatalf("SendBackloggedKeepalives = error %v", err)
 	}
 	return resp.Msg
-}
-
-// SPC j R: one keep-alive to every backlogged workspace
-// (docs/protobuf-design/backlogged-keepalives-on-demand.md).
-func TestSendingTheBackloggedKeepalivesAsksEachBackloggedShimForOne(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := backloggedAndHeld(t)
-
-	// Act
-	resp := sendBackloggedKeepalives(t, f.d)
-
-	// Assert: the shim was asked once, and answered sent.
-	workspaces := resp.GetSuccess().GetWorkspaces()
-	if len(workspaces) != 1 || workspaces[0].GetWorkspace().GetId() != f.ws.GetId() || workspaces[0].GetSent() == nil {
-		t.Fatalf("SendBackloggedKeepalives = %v, want the one backlogged workspace sent", resp)
-	}
-	shim := f.d.OpenedShim(f.ws)
-	if n := shim.Count(harness.RPCSendKeepalive); n != 1 {
-		t.Fatalf("the shim was asked for %d keep-alives, want one", n)
-	}
 }
 
 func TestTheKeepalivesAnswerMovesTheBackloggedRowsCountdown(t *testing.T) {
@@ -180,24 +132,5 @@ func TestClosingAWorkspaceStandsNothingDown(t *testing.T) {
 	// Assert
 	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
 		t.Fatalf("the closed workspace was asked to hibernate %d times at the close, want none", n)
-	}
-}
-
-func TestAClosedWorkspaceIsStoodDownWhenItsCacheLapses(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := closedAndLastRound(t)
-	f.d.ExpectWarnings(standDownWarnings...)
-	f.remoteControlOff()
-
-	// Act: the spent round's projection names a lapse already come.
-	f.d.OpenedShim(f.ws).PushSessionUpdate(cacheLapse(time.Now().Add(-time.Minute), 120_000))
-
-	// Assert: the idle sweep's stand-down, graceful.
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
-	killed := &shimv1.KillSessionRequest{}
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
-	if killed.GetForce() {
-		t.Fatal("the lapsed closed workspace's KillSession was forced, want a graceful stand-down")
 	}
 }

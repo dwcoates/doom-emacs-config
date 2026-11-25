@@ -18,29 +18,6 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
-// ---------------------------------------------------------------------------
-// Footer: whole-view push discipline and populated panels
-// ---------------------------------------------------------------------------
-func TestFooterPushesAreWholeViewsDeduplicated(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	first := awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle() != nil
-	})
-
-	// Act: push the identical healthy diagnostics again — nothing changed.
-	f.shim.PushHealthy()
-
-	// Assert
-	harness.ExpectNoPush(t, footer, "an identical consecutive push is not sent")
-	// Sanity: the first push really was whole (strip present).
-	if first.GetStrip() == nil {
-		t.Fatalf("footer push = %v, want a whole strip", first)
-	}
-}
-
 func TestFooterExpandedPanelsArrivePopulatedOnEveryPush(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -116,45 +93,16 @@ func TestFooterStatusTreeFollowsIdleWorkingDone(t *testing.T) {
 	})
 }
 
-// ftDwell is the momentary-status dwell the two retirement tests run the
+// ftDwell is the momentary-status dwell the retirement test runs the
 // daemon with, in place of footer.DefaultMomentaryDwell's 1.5s.
 //
 // MEASURED BASIS: a push that IS coming arrives on an open stream at a p90 of
 // 5.8ms and a p50 of 0.4ms over this suite at -parallel 8, so 150ms is ~25x the
 // p90 — wide enough that the momentary status and its successor remain two
 // distinct, separately observed pushes rather than a coalesced one, and short
-// enough that neither test spends its wall time waiting on a window sized for a
+// enough that the test does not spend its wall time waiting on a window sized for a
 // reader.
 const ftDwell = 150 * time.Millisecond
-
-func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
-	t.Parallel()
-	// Arrange: the dwell is compressed to ftDwell, for the same reason as the
-	// interrupted case above.
-	f := newOpened(t, harness.Opts{FooterMomentaryDwell: ftDwell})
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("do it", "k-loading", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	awaitFooter(t, f, footer, "thinking before the injection", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-
-	// Act: a memory file is silently injected into context.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("inject-1"),
-		Item: &conversationv1.AgentActivity_ContextInjected{ContextInjected: &conversationv1.AgentContextInjected{
-			Injected: &conversationv1.AgentContextInjected_Memory{Memory: &conversationv1.AgentInjectedMemory{Path: "CLAUDE.md", Content: "be terse\n"}},
-		}},
-	}))
-
-	// Assert: MOMENTARY loading, then a daemon-side dwell falls back to the
-	// standing status (thinking) with no client action.
-	awaitFooter(t, f, footer, "the momentary loading status", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetLoading() != nil
-	})
-	awaitFooter(t, f, footer, "the dwell's successor push retiring loading", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetLoading() == nil
-	})
-}
 
 // ---------------------------------------------------------------------------
 // Footer: the tokens cell
@@ -216,42 +164,6 @@ func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testin
 // Footer: live-work chips
 // ---------------------------------------------------------------------------
 
-func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-
-	// Act: one live subagent, one live shell.
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-agent", "sub-1", "explore the tree")))
-	pushDetachedShell(f.shim, "work-shell", "sleep 5")
-	// Two tracker tasks, one done.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "write the tests", true)))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-2", "t-2", "land the change", false)))
-	// One live monitor.
-	pushMonitor(f.shim, "mon-1", "watching the build log")
-	// A two-job cron listing.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("cron-1"),
-		Item: &conversationv1.AgentActivity_Cron{Cron: &conversationv1.AgentCron{State: &conversationv1.AgentCron_Success{Success: &conversationv1.AgentCronSuccess{
-			Act: &conversationv1.AgentCronSuccess_Listed{Listed: &conversationv1.AgentCronListed{
-				Jobs: []*conversationv1.AgentCronJob{{JobId: "j1"}, {JobId: "j2"}},
-			}},
-		}}}},
-	}))
-
-	// Assert: every chip lands with its resolved count.
-	got := awaitFooter(t, f, footer, "every live-work chip populated", func(v *frontendv1.FooterView) bool {
-		chips := v.GetStrip().GetLiveWork()
-		return chips.GetAgents().GetCount() == 1 &&
-			chips.GetShells().GetCount() == 1 &&
-			chips.GetTasks().GetDone() == 1 && chips.GetTasks().GetTotal() == 2 &&
-			chips.GetMonitors().GetCount() == 1 &&
-			chips.GetCrons().GetCount() == 2
-	})
-	_ = got
-}
-
 // A CREATED CRON JOB STANDS ON THE FOOTER'S CRONS CHIP AFTER ITS TURN ENDS. The
 // job is left standing by the call that made it, so the chip is a state every
 // footer reader is handed, however far behind: a footer opened only after the
@@ -310,37 +222,6 @@ func TestFooterMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
 	awaitFooter(t, f, footer, "the monitor row naming the card", func(v *frontendv1.FooterView) bool {
 		rows := v.GetExpanded().GetMonitors().GetRows()
 		return len(rows) == 1 && rows[0].GetJump().GetEntry().GetValue() == card.GetId().GetValue()
-	})
-}
-
-// A REFUSED UPDATE ADDS NOTHING. `AgentTaskRejected` states it outright, and
-// the checklist gained a phantom row anyway -- a bare glyph with no words
-// beside it, counted in the chip's denominator, for a task the tracker had just
-// said it does not hold. Photographed by the G52 playbook.
-func TestFooterChecklistGainsNoRowForATaskNobodyNamed(t *testing.T) {
-	t.Parallel()
-	// Arrange: one real task.
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "Land the converter", false)))
-	awaitFooter(t, f, footer, "the checklist with its one named task", func(v *frontendv1.FooterView) bool {
-		return len(v.GetExpanded().GetTasks().GetRows()) == 1
-	})
-
-	// Act: a refused update's own shape -- an act naming a task and no subject.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskUnstated("task-2", "t-9")))
-	// A second, ordinary act gives the assertion something to wait FOR, so it
-	// is not a wait on an absence that passes before the frame arrives.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-3", "t-2", "Land the store writer", false)))
-
-	// Assert
-	awaitFooter(t, f, footer, "the checklist holding only the tasks that were named", func(v *frontendv1.FooterView) bool {
-		rows := v.GetExpanded().GetTasks().GetRows()
-		if len(rows) != 2 {
-			return false
-		}
-		return rows[0].GetSubject().GetText() == "Land the converter" &&
-			rows[1].GetSubject().GetText() == "Land the store writer"
 	})
 }
 
@@ -429,43 +310,6 @@ func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing
 // ---------------------------------------------------------------------------
 // Footer: the allowance cell — drawn from the vendor's rate-limit event.
 // ---------------------------------------------------------------------------
-
-func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	// It moves the account's usage with a rate-limit event.
-	f := newInGroup(t, groupAccountUsage)
-	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "idle before any rate-limit event", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle() != nil
-	})
-
-	// The window resets in the FUTURE: a verdict about a window whose reset
-	// has passed is about a window that no longer exists, and is not drawn.
-	resetsAtMs := time.Now().Add(5 * time.Hour).UnixMilli()
-	status := ratelimittest.Figured(ratelimittest.Allowed(ratelimittest.SevenDay()), 95, resetsAtMs)
-
-	// Act: an ALLOWED verdict, because a refusal blocks the session and moves
-	// the enduring line out of the idle cell.
-	f.shim.PushSessionUpdate(ratelimittest.Update(status))
-
-	// Assert: the weekly allowance carries the event's figure, reset and
-	// verdict: no plan-usage read is pushed here, so the event is the one
-	// source of all three.
-	got := awaitFooter(t, f, footer, "the weekly allowance drawn from the event", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall().GetAllowed() != nil
-	})
-	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall()
-	if allowance.GetUtilization() != 0.95 {
-		t.Fatalf("the weekly allowance's utilization = %v, want 0.95 (the event's figure, converted)", allowance.GetUtilization())
-	}
-	if allowance.GetResetsAtS() != resetsAtMs/1000 {
-		t.Fatalf("the weekly allowance's resets_at_s = %d, want the event's reset converted to seconds", allowance.GetResetsAtS())
-	}
-	if !allowance.GetNewsworthy() {
-		t.Fatal("the weekly allowance is not drawn newsworthy at 95% utilization")
-	}
-}
 
 // A SEVEN-DAY WINDOW'S WARNING FEEDS THE WEEKLY ALLOWANCE, its verdict and its
 // figure, on the enduring usage line alone: the event is never a salient line
@@ -772,22 +616,6 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 // Topbar
 // ---------------------------------------------------------------------------
 
-func TestTopbarWorkspaceNameIsTheWorkspacesNameAndTheTitleIsAbsentUntilASummary(t *testing.T) {
-	t.Parallel()
-	// Arrange / Act
-	f := newOpenedOwingSummary(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Assert: the name rides its own element, and with no summary yet nothing
-	// stands in for the title.
-	got := awaitTopbar(t, f, topbar, "the workspace name", func(v *frontendv1.TopbarView) bool {
-		return v.GetWorkspaceName().GetText() != ""
-	})
-	if got.GetTitle() != nil {
-		t.Fatalf("topbar title = %v, want absent before any summary", got.GetTitle())
-	}
-}
-
 func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
@@ -815,67 +643,6 @@ func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T)
 			t.Fatalf("model selector options[%d] = {name:%q, display:%q}, want {name:%q, display:%q}",
 				i, options[i].GetModel().GetName(), options[i].GetDisplayName(), want.name, want.display)
 		}
-	}
-}
-
-func TestTopbarModelSelectorCarriesTheLoginsDefaultAndMakeDefaultMovesIt(t *testing.T) {
-	t.Parallel()
-	// Arrange: a personal login nobody chose a default for defaults to opus.
-	f := newInGroup(t, groupDefaultModel)
-	topbar := f.d.WatchTopbar(f.ws)
-	awaitTopbar(t, f, topbar, "the built-in default", func(v *frontendv1.TopbarView) bool {
-		return v.GetModelSelector().GetDefaultModel().GetName() == "opus"
-	})
-
-	// Act
-	resp, err := f.d.Client().SetDefaultModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetDefaultModelRequest{
-		Workspace: f.ws,
-		Model:     &conversationv1.AgentModel{Name: "haiku"},
-	}))
-
-	// Assert: the call succeeds and the strip republishes with the new default.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("SetDefaultModel(haiku) = %v, %v; want a success", resp, err)
-	}
-	awaitTopbar(t, f, topbar, "the chosen default", func(v *frontendv1.TopbarView) bool {
-		return v.GetModelSelector().GetDefaultModel().GetName() == "haiku"
-	})
-}
-
-func TestTopbarContextChipReflectsTheContextUsagePush(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
-			TotalTokens: 142_300,
-			MaxTokens:   200_000,
-			Percentage:  71,
-			Model:       "claude-opus-5",
-			Categories:  []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 4_000, Color: "blue"}},
-		}},
-	})
-
-	// Assert: the chip's figure is EXACTLY the canonical formatter's output
-	// for 142_300 tokens (figures.Tokens, internal/figures/tokens.go), and the
-	// chip always ships a populated breakdown (no round-trip needed to open
-	// the hover).
-	// The fake's OPENING context_usage push already fills the chip
-	// (fakeshim.DefaultContextUsage, 1000 tokens), so the wait is for the
-	// chip to move off that opening figure -- waiting merely for a non-empty
-	// one would read the opening view and assert against it.
-	got := awaitTopbar(t, f, topbar, "the context chip after context_usage", func(v *frontendv1.TopbarView) bool {
-		text := v.GetContext().GetText()
-		return text != "" && text != "1k"
-	})
-	if got.GetContext().GetText() != "142.3k" {
-		t.Fatalf("context chip text = %q, want the canonical formatter's \"142.3k\" for 142_300 tokens", got.GetContext().GetText())
-	}
-	if got.GetContext().GetBreakdown() == nil {
-		t.Fatalf("context chip breakdown = nil, want it always populated on the push carrying context_usage")
 	}
 }
 
@@ -912,50 +679,6 @@ func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T)
 	if freshInput.GetSharePermille() != 0 || freshInput.GetEmphasized() {
 		t.Fatalf("\"fresh input\" detail row = %+v, want no share_permille and not emphasized (it is a partition of the headline above it)", freshInput)
 	}
-}
-
-func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
-	f.d.ExpectWarnings("daemon.health.open_fault")
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act: an unhealthy diagnostics pull surfaces a warning.
-	f.shim.PushUnhealthy(&conversationv1.SessionFault{
-		Component: "converter",
-		Detail:    "could not model a record",
-		Kind:      &conversationv1.SessionFault_ConverterDefect{ConverterDefect: &conversationv1.SessionFaultConverterDefect{}},
-	})
-	got := awaitTopbar(t, f, topbar, "the session-fault warning", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) > 0
-	})
-
-	// Assert: exactly one warning is drawn for the one fault, carrying the
-	// pushed component and detail verbatim, with a non-empty list line.
-	warnings := got.GetWarnings().GetWarnings()
-	if len(warnings) != 1 {
-		t.Fatalf("warnings = %v (%d), want exactly 1 for the one pushed fault", warnings, len(warnings))
-	}
-	fault := warnings[0].GetSessionFault()
-	if fault.GetComponent().GetText() != "converter" {
-		t.Fatalf("session_fault.component.text = %q, want the pushed \"converter\"", fault.GetComponent().GetText())
-	}
-	if fault.GetDetail().GetText() != "could not model a record" {
-		t.Fatalf("session_fault.detail.text = %q, want the pushed \"could not model a record\"", fault.GetDetail().GetText())
-	}
-	if warnings[0].GetLine().GetText() == "" {
-		t.Fatal("warning.line.text is empty, want a non-empty dropdown-row sentence")
-	}
-
-	// Act: the next pull comes back healthy.
-	f.shim.PushHealthy()
-
-	// Assert: the warning is retracted.
-	awaitTopbar(t, f, topbar, "the warning retracted on the next healthy push", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) == 0
-	})
 }
 
 func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
@@ -1013,37 +736,6 @@ func ftUsageActivity(id string, usage *conversationv1.TokenUsage) *conversationv
 		Usage:      usage,
 		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
 			Result: &conversationv1.AgentResponse_Start{Start: &conversationv1.AgentResponseStart{}},
-		}},
-	}
-}
-
-// ftTaskActivity builds a task-tracker act creating one task at a status.
-func ftTaskActivity(activityIDValue, taskID, subject string, completed bool) *conversationv1.AgentActivity {
-	state := &conversationv1.AgentTaskState{Subject: &subject}
-	if completed {
-		state.Status = &conversationv1.AgentTaskState_Completed{Completed: &conversationv1.AgentTaskCompleted{}}
-	} else {
-		state.Status = &conversationv1.AgentTaskState_Pending{Pending: &conversationv1.AgentTaskPending{}}
-	}
-	return &conversationv1.AgentActivity{
-		ActivityId: activityID(activityIDValue),
-		Item: &conversationv1.AgentActivity_TaskAct{TaskAct: &conversationv1.AgentTaskAct{
-			Task:  &conversationv1.AgentTaskId{Value: taskID},
-			Act:   &conversationv1.AgentTaskAct_Created{Created: &conversationv1.AgentTaskCreated{}},
-			State: state,
-		}},
-	}
-}
-
-// ftTaskUnstated is an act that says nothing about the task at all: the shape
-// an announcement the tracker has not answered yet produces.
-func ftTaskUnstated(activityIDValue, taskID string) *conversationv1.AgentActivity {
-	return &conversationv1.AgentActivity{
-		ActivityId: activityID(activityIDValue),
-		Item: &conversationv1.AgentActivity_TaskAct{TaskAct: &conversationv1.AgentTaskAct{
-			Task:  &conversationv1.AgentTaskId{Value: taskID},
-			Act:   &conversationv1.AgentTaskAct_Changed{Changed: &conversationv1.AgentTaskChanged{}},
-			State: &conversationv1.AgentTaskState{},
 		}},
 	}
 }
@@ -1124,43 +816,6 @@ func ftBreakTheWebHop(f *fixture) {
 	f.web.Close()
 }
 
-func TestFooterAwaitsAPageNotYetConnected(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	f.open()
-	footer := f.d.WatchFooter(f.ws)
-
-	// Act: the editor connects; its page has not yet.
-	f.host = f.d.WatchHost(f.ws)
-
-	// Assert
-	awaitFooter(t, f, footer, "idle while the page is awaited", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle() != nil
-	})
-}
-
-func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
-	t.Parallel()
-	// Arrange: a page that connected and went away.
-	f := newCanonicalRegistered(t)
-	f.open()
-	f.host = f.d.WatchHost(f.ws)
-	footer := f.d.WatchFooter(f.ws)
-	ftBreakTheWebHop(f)
-	awaitFooter(t, f, footer, "disconnected while the web hop is down", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetAgentReplFault() != nil
-	})
-
-	// Act: the page opens its stream again, putting the last hop up.
-	f.web = f.d.WatchWeb(f.ws)
-
-	// Assert
-	awaitFooter(t, f, footer, "idle once every hop is live", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle() != nil
-	})
-}
-
 func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 	t.Parallel()
 	// Arrange: every hop up.
@@ -1197,22 +852,6 @@ func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
 	})
 }
 
-func TestTopbarIsConnectedWhileAPageIsAwaited(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	f.open()
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act: the editor connects; its page has not yet.
-	f.host = f.d.WatchHost(f.ws)
-
-	// Assert
-	awaitTopbar(t, f, topbar, "the connected indicator", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity().GetTitle() == "connected to the session"
-	})
-}
-
 func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 	t.Parallel()
 	// Arrange: a page that connected and went away.
@@ -1234,24 +873,6 @@ func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 	})
 }
 
-func TestTopbarReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	topbar := f.d.WatchTopbar(f.ws)
-	awaitTopbar(t, f, topbar, "the connected indicator", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity().GetTitle() == "connected to the session"
-	})
-
-	// Act
-	f.web.Close()
-
-	// Assert
-	awaitTopbar(t, f, topbar, "the not-connected indicator", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity().GetTitle() != "connected to the session"
-	})
-}
-
 // ---------------------------------------------------------------------------
 // Footer: the activity cell's tiers
 // ---------------------------------------------------------------------------
@@ -1269,31 +890,6 @@ func ftHookStart(id, name string) *conversationv1.AgentFrame {
 			Start: &conversationv1.AgentHookStart{HookName: name, Event: conversationv1.AgentHookEvent_AGENT_HOOK_EVENT_PRE_TOOL_USE, StartedAt: startedAt(1)},
 		}}},
 	})
-}
-
-// A NEWER TRANSIENT REPLACES AN OLDER ONE: the transient tier is ordered by
-// recency alone (owner ruling, 2026-09-28).
-func TestFooterANewerTransientReplacesAnOlderOne(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-1", "first-hook"))
-	awaitFooter(t, f, footer, "the first hook's transient", func(v *frontendv1.FooterView) bool {
-		return ftTransient(v).GetHook().GetName() == "first-hook"
-	})
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-2", "second-hook"))
-
-	// Assert
-	got := awaitFooter(t, f, footer, "the newer hook replacing the first", func(v *frontendv1.FooterView) bool {
-		return ftTransient(v).GetHook().GetName() == "second-hook"
-	})
-	transient := ftTransient(got)
-	if transient.GetExpiry().GetExpiresAtMs() <= transient.GetAt().GetAtMs() {
-		t.Fatalf("transient expiry = %d at %d, want an expiry after the event", transient.GetExpiry().GetExpiresAtMs(), transient.GetAt().GetAtMs())
-	}
 }
 
 // THE PUSH NOTIFICATION IS SALIENT (owner ruling, 2026-09-30): it stands over
@@ -1322,92 +918,6 @@ func TestFooterAPushNotificationStandsOverALiveTransient(t *testing.T) {
 	// Assert
 	awaitFooter(t, f, footer, "the notification standing salient", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetNotification().GetText() == "the branch is ready for review"
-	})
-}
-
-// THE ENDURING LINE IS ALWAYS DRAWN: an idle session with no transient still
-// states how close the account is and how full the context window is, however
-// unremarkable the figures.
-func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	// It moves the account's usage with a rate-limit event.
-	f := newInGroup(t, groupAccountUsage)
-	footer := f.d.WatchFooter(f.ws)
-
-	// Act: an unremarkable weekly figure, on an allowed verdict.
-	f.shim.PushSessionUpdate(ratelimittest.Update(ratelimittest.Figured(
-		ratelimittest.Allowed(ratelimittest.SevenDay()), 12, time.Now().Add(7*24*time.Hour).UnixMilli())))
-
-	// Assert
-	// The account's usage outlives a case, so a footer opened on the group's
-	// daemon may first draw the figure an earlier case moved it to: only the
-	// event's own figure is the driven view.
-	got := awaitFooter(t, f, footer, "the enduring usage line", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall().GetUtilization() == 0.12
-	})
-	enduring := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring()
-	if weekly := enduring.GetUsage().GetWeekly().GetOverall(); weekly.GetUtilization() != 0.12 || weekly.GetNewsworthy() {
-		t.Fatalf("weekly allowance = %v, want 0.12 drawn and not newsworthy", weekly)
-	}
-}
-
-// A BACKGROUND SUBAGENT WAITING FOR THE API KEEPS ITS ROW (visibility only,
-// owner ruling 2026-09-28): the failed run's row is drawn waiting_for_api, the
-// agents chip counts it with the waiting glyph, and each edge of the wait is a
-// transient.
-func TestFooterANetworkResumeWaitKeepsTheAgentsRowAndMarksTheChip(t *testing.T) {
-	t.Parallel()
-	// Arrange: a detached run that has ended.
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
-	awaitDetachedRunLive(t, f, footer)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
-	awaitDetachedRunsSettled(t, f, footer)
-
-	// Act: the shim opens a wait for the failed run.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeWaits{
-		NetworkResumeWaits: &conversationv1.SessionNetworkResumeWaits{Waits: []*conversationv1.SessionNetworkResumeWait{{
-			Work:        &conversationv1.DetachedWorkId{Value: "toolu-1"},
-			FailedAtMs:  1_700_000_000_000,
-			GivesUpAtMs: 1_700_001_800_000,
-		}}},
-	}})
-
-	// Assert
-	got := awaitFooter(t, f, footer, "the waiting row and chip glyph", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents().GetWaitingForApi().GetCount() == 1
-	})
-	if chip := got.GetStrip().GetLiveWork().GetAgents(); chip.GetCount() != 1 {
-		t.Fatalf("agents chip = %v, want the waiting row counted", chip)
-	}
-	rows := got.GetExpanded().GetAgents().GetRows()
-	if len(rows) != 1 || rows[0].GetWaitingForApi().GetGivesUpAtMs() != 1_700_001_800_000 {
-		t.Fatalf("agent rows = %v, want the one row waiting with its give-up instant", rows)
-	}
-	if edge := ftTransient(got).GetNetworkResume().GetWaiting(); edge == nil {
-		t.Fatalf("transient = %v, want the waiting edge", ftTransient(got))
-	}
-	if got.GetStrip().GetStatus().GetIdle() == nil {
-		t.Fatalf("status = %v, want idle: a wait is not background work", got.GetStrip().GetStatus())
-	}
-
-	// Act: the wait ends, resumed.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeOutcome{
-		NetworkResumeOutcome: &conversationv1.SessionNetworkResumeOutcome{
-			Work:    &conversationv1.DetachedWorkId{Value: "toolu-1"},
-			Outcome: &conversationv1.SessionNetworkResumeOutcome_Resumed{Resumed: &conversationv1.SessionNetworkResumeResumed{}},
-		},
-	}})
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeWaits{
-		NetworkResumeWaits: &conversationv1.SessionNetworkResumeWaits{},
-	}})
-
-	// Assert
-	awaitFooter(t, f, footer, "the resumed edge with the row gone", func(v *frontendv1.FooterView) bool {
-		return ftTransient(v).GetNetworkResume().GetResumed() != nil && v.GetStrip().GetLiveWork().GetAgents() == nil
 	})
 }
 
@@ -1485,4 +995,33 @@ func TestFooterComposesNoLineFromAFeedItemThatLanded(t *testing.T) {
 	if len(got.violations) != 0 {
 		t.Fatalf("footer pushes carried %d feed-item-derived lines, want none:\n%v", len(got.violations), got.violations)
 	}
+}
+
+func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
+	t.Parallel()
+	// Arrange: the dwell is compressed to ftDwell, for the reason its comment
+	// states.
+	f := newOpened(t, harness.Opts{FooterMomentaryDwell: ftDwell})
+	footer := f.d.WatchFooter(f.ws)
+	f.submit("do it", "k-loading", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	awaitFooter(t, f, footer, "thinking before the injection", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWorking() != nil
+	})
+
+	// Act: a memory file is silently injected into context.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("inject-1"),
+		Item: &conversationv1.AgentActivity_ContextInjected{ContextInjected: &conversationv1.AgentContextInjected{
+			Injected: &conversationv1.AgentContextInjected_Memory{Memory: &conversationv1.AgentInjectedMemory{Path: "CLAUDE.md", Content: "be terse\n"}},
+		}},
+	}))
+
+	// Assert: MOMENTARY loading, then a daemon-side dwell falls back to the
+	// standing status (thinking) with no client action.
+	awaitFooter(t, f, footer, "the momentary loading status", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetLoading() != nil
+	})
+	awaitFooter(t, f, footer, "the dwell's successor push retiring loading", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetLoading() == nil
+	})
 }

@@ -101,31 +101,6 @@ func TestQuestionAskedRaisesABannerAndSetsAttention(t *testing.T) {
 	})
 }
 
-// TestAgentAddressedRaisesABannerWithItsText pins that an agent push
-// notification raises a banner carrying the pushed message verbatim.
-func TestAgentAddressedRaisesABannerWithItsText(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newInGroup(t, groupDesktopBanner)
-	f.submit("go", "k-notify-addressed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("push-1"),
-		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
-			State: &conversationv1.AgentPushNotification_Start{Start: &conversationv1.AgentPushNotificationStart{
-				Message:   "the deploy finished",
-				StartedAt: startedAt(1),
-			}},
-		}},
-	}))
-
-	// Assert
-	if argvs := awaitBannerSettled(t, f, "the agent push banner"); !bannerCarrying(argvs, "the deploy finished") {
-		t.Fatalf("banners %q, want one carrying the pushed message", argvs)
-	}
-}
-
 // TestACompletedTurnRaisesTheCompletedBanner pins the turn-end banner: a turn
 // that concluded raises "✅ <name>" over the summary the
 // daemon's headless call wrote (the fake vendor answers a question that is

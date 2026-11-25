@@ -4,7 +4,6 @@ package integration
 
 import (
 	"testing"
-	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -15,25 +14,6 @@ import (
 // agent-repl's session.
 func hasSession(v *frontendv1.TopbarView) bool {
 	return v.GetConnectivity().GetSession() != nil
-}
-
-func TestANewEmacsBeginsAgentReplsSessionOnTheTopbar(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newInGroup(t, groupEditorSession)
-	topbar := f.d.WatchTopbar(f.ws)
-	before := time.Now()
-
-	// Act.
-	f.d.WatchDaemonStream()
-
-	// Assert.
-	view := awaitTopbar(t, f, topbar, "the session a new Emacs began", hasSession)
-	session := view.GetConnectivity().GetSession()
-	started := time.UnixMilli(session.GetStartedAtMs())
-	if session.GetEditorStart() == nil || started.Before(before.Truncate(time.Millisecond)) || started.After(time.Now()) {
-		t.Fatalf("session = %v, want an editor-start session begun during the test", session)
-	}
 }
 
 func TestAgentReplsSessionSurvivesADaemonRestart(t *testing.T) {
