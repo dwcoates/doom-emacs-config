@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -675,6 +676,89 @@ func TestAWithheldStandDownStatesItsHold(t *testing.T) {
 			// Assert
 			if got := why.Facts(ws).Hold; got != tt.want {
 				t.Fatalf("hold = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// readCountingDB counts the arrangement and merge-queue reads made through it.
+type readCountingDB struct {
+	wsm.DB
+	mu                   sync.Mutex
+	arrangements, queues int
+}
+
+func (d *readCountingDB) ReadArrangement(ctx context.Context) (wsm.Arrangement, error) {
+	d.mu.Lock()
+	d.arrangements++
+	d.mu.Unlock()
+	return d.DB.ReadArrangement(ctx)
+}
+
+func (d *readCountingDB) AllMergeQueues(ctx context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
+	d.mu.Lock()
+	d.queues++
+	d.mu.Unlock()
+	return d.DB.AllMergeQueues(ctx)
+}
+
+// counts answers the arrangement and merge-queue reads made so far.
+func (d *readCountingDB) counts() (arrangements, queues int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.arrangements, d.queues
+}
+
+// A WITHHELD STAND-DOWN JUDGES THE FOLD BY THE ROSTER: one attempt reads the
+// merge queues once and never the arrangement, so a fleet's detach never
+// holds the state database's one connection for an arrangement read per
+// workspace (2026-11-25 11:36:24-31).
+func TestAWithheldStandDownReadsNoArrangementAndTheQueuesOnce(t *testing.T) {
+	tests := []struct {
+		name     string
+		withhold func(t *testing.T, h *harness) ids.WorkspaceID
+		trigger  WithheldTrigger
+		wantDown bool
+		wantFold any
+	}{
+		{name: "a collapsed workspace is stood down under the roster's fold", withhold: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.inCollapsedSubsection(t, ws)
+			return ws
+		}, trigger: WithheldCollapse, wantDown: true, wantFold: "subsection"},
+		{name: "a backlogged workspace is stood down under no fold", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
+			trigger: WithheldCacheLapse, wantDown: true},
+		{name: "a workspace the roster shows again keeps running", withhold: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.inCollapsedSubsection(t, ws)
+			h.visibility = map[ids.WorkspaceID]wsm.Visibility{ws: wsm.UnselectedVisible}
+			return ws
+		}, trigger: WithheldCollapse, wantFold: "subsection"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reads := &readCountingDB{}
+			h := newHarness(t, func(d *Deps) { reads.DB = d.DB; d.DB = reads })
+			ws := tt.withhold(t, h)
+
+			// Act
+			h.c.StandDownWithheld(ws, tt.trigger)
+
+			// Assert
+			if down := len(h.stand.Killed()) == 1; down != tt.wantDown {
+				t.Fatalf("kills = %+v, want stood down %v", h.stand.Killed(), tt.wantDown)
+			}
+			if arrangements, queues := reads.counts(); arrangements != 0 || queues != 1 {
+				t.Fatalf("reads = %d arrangements and %d queue reads, want none and one", arrangements, queues)
+			}
+			message := "the workspace was shown or reopened before its session was stood down; it keeps running"
+			if tt.wantDown {
+				message = "stood a withheld workspace's session down"
+			}
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opWithheld, Message: message})
+			if !ok || rec.Context["fold"] != tt.wantFold {
+				t.Fatalf("record = %+v, %v; want its fold %v", rec, ok, tt.wantFold)
 			}
 		})
 	}

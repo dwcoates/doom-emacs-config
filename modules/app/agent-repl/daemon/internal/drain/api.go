@@ -167,11 +167,13 @@ type Deps struct {
 	// Freeness answers, and waits for, a workspace's freeness. Teardown never
 	// interrupts: the wait is the whole mechanism.
 	Freeness Freeness
-	// Visibility answers a workspace's visibility as the roster derived it
-	// last (sidebar.Resolver.Visibility). REQUIRED: a stand-down decides
-	// whether the workspace is still withheld by it, never by the store's
-	// copy, which is written a moment after the push that changed it.
-	Visibility bringup.LiveVisibility
+	// Standing answers a workspace's visibility and the fold of its tab as
+	// the roster derived them last (sidebar.Resolver.Standing). REQUIRED: a
+	// stand-down decides whether the workspace is still withheld by it, never
+	// by the store's copies: the visibility is written a moment after the
+	// push that changed it, and the folds are read only by reading the whole
+	// arrangement (bringup.Judge).
+	Standing bringup.LiveStanding
 	// Reviving reports whether the prompt queue is reviving the workspace's
 	// session for a held prompt. REQUIRED: a revival's bring-up serves the
 	// session before its prompt is delivered, and a sweep that cannot see the
@@ -431,8 +433,8 @@ func New(deps Deps) (Controller, error) {
 	if deps.Freeness == nil {
 		return nil, errors.New("drain: a freeness answer is required")
 	}
-	if deps.Visibility == nil {
-		return nil, errors.New("drain: a visibility answer is required")
+	if deps.Standing == nil {
+		return nil, errors.New("drain: a standing answer is required")
 	}
 	if deps.Reviving == nil {
 		return nil, errors.New("drain: a revival answer is required")

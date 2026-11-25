@@ -3,6 +3,7 @@ package daemonrules
 import (
 	"go/ast"
 	"go/token"
+	"slices"
 	"strings"
 	"testing"
 
@@ -99,5 +100,21 @@ func TestTheSidebarFilesFamiliesThroughTheSharedWalk(t *testing.T) {
 	// Assert
 	if shared == 0 || byHand != 0 {
 		t.Fatalf("shared family walks = %d, hand-rolled = %d; want some and none", shared, byHand)
+	}
+}
+
+// THE ROSTER AND A BOOT READ THE TAB BAR'S FOLDS ONE WAY: every reader of
+// sidebar.Tabs for its folds goes through sidebar.CollapsedFolds, so neither
+// the roster's render nor bringup.Folds reads a tab's collapse by a rule of
+// its own.
+func TestEveryReadOfTheTabBarsFoldsGoesThroughCollapsedFolds(t *testing.T) {
+	sourcescan.InPackage(t, internalResolveSidebarDir)
+	// Act
+	sidebarSites := sourcescan.Sites(t, internalResolveSidebarDir, "tab.Withheld != wsm.WithheldCollapsed")
+	bringupSites := sourcescan.Sites(t, "internal/bringup", "wsm.WithheldCollapsed")
+
+	// Assert
+	if !slices.Equal(sidebarSites, []string{"taborder.go"}) || len(bringupSites) != 0 {
+		t.Fatalf("sites = %v in sidebar and %v in bringup, want sidebar.CollapsedFolds alone to read a tab's collapse", sidebarSites, bringupSites)
 	}
 }

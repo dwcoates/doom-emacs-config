@@ -9,7 +9,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -170,17 +169,4 @@ func TestCollapsedFoldsRefusesACollapsedTabNamingNoFold(t *testing.T) {
 
 	// Act
 	sidebar.CollapsedFolds(tabs)
-}
-
-// THE ROSTER AND A BOOT READ THE TAB BAR'S FOLDS ONE WAY: every reader of
-// Tabs for its folds goes through CollapsedFolds, so no site reads the
-// collapsed tabs by a rule of its own.
-func TestEveryReadOfTheTabBarsFoldsGoesThroughCollapsedFolds(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "tab.Withheld != wsm.WithheldCollapsed")
-
-	// Assert
-	if len(sites) != 1 || !strings.HasSuffix(sites[0], "taborder.go") {
-		t.Fatalf("sites = %+v, want CollapsedFolds alone to read a tab's collapse", sites)
-	}
 }

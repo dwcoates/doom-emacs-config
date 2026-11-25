@@ -170,37 +170,6 @@ func TestOnlyVisibleReadsNothingForNothingPending(t *testing.T) {
 	}
 }
 
-func TestVisibleReadsTheRecordAfresh(t *testing.T) {
-	cases := []struct {
-		name   string
-		stored wsm.Visibility
-		live   wsm.Visibility
-		want   bool
-	}{
-		{name: "a workspace the roster shows runs", stored: wsm.UnselectedVisible, live: wsm.UnselectedVisible, want: true},
-		{name: "a workspace the roster does not show does not run", stored: wsm.NotVisible, live: wsm.NotVisible, want: false},
-		{name: "the roster's live visibility beats a stale stored one", stored: wsm.UnselectedVisible, live: wsm.NotVisible, want: false},
-		{name: "a workspace shown before its visibility was stored runs", stored: wsm.NotVisible, live: wsm.Selected, want: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			reg := &fakeRegistry{repos: []wsm.Repository{{ID: "r"}}, workspaces: map[ids.WorkspaceID]wsm.Workspace{
-				"a": {ID: "a", Repo: "r", Visibility: tc.stored},
-			}}
-
-			// Act
-			got, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "a",
-				func(ids.WorkspaceID) wsm.Visibility { return tc.live })
-
-			// Assert
-			if err != nil || got != tc.want {
-				t.Fatalf("Visible = %v, %v; want %v", got, err, tc.want)
-			}
-		})
-	}
-}
-
 func TestWithLiveVisibilityStampsEachRecordAndLeavesTheRestAlone(t *testing.T) {
 	// Arrange
 	records := []wsm.Workspace{{ID: "a", Name: "one", Visibility: wsm.NotVisible}, {ID: "b", Name: "two", Visibility: wsm.Selected}}
@@ -216,20 +185,6 @@ func TestWithLiveVisibilityStampsEachRecordAndLeavesTheRestAlone(t *testing.T) {
 	}
 	if records[0].Visibility != wsm.NotVisible {
 		t.Fatalf("the records handed in were changed: %+v", records)
-	}
-}
-
-func TestVisibleRefusesAnUnreadableRecord(t *testing.T) {
-	// Arrange
-	reg := &fakeRegistry{workspaces: map[ids.WorkspaceID]wsm.Workspace{}}
-
-	// Act
-	_, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "missing",
-		func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible })
-
-	// Assert
-	if !errors.Is(err, wsm.ErrNotFound) {
-		t.Fatalf("Visible = %v, want the record's own error", err)
 	}
 }
 
@@ -308,63 +263,42 @@ func TestMergeQueuedAtSurfacesAQueueReadFailure(t *testing.T) {
 	}
 }
 
-func TestVisibilityOfNamesTheFoldItDecidedOn(t *testing.T) {
-	folded := ids.SubsectionID("folded-sub")
+func TestJudgeDecidesByTheRostersStanding(t *testing.T) {
+	subsectionFold := &sidebar.Fold{By: sidebar.FoldedBySubsection, Repository: "alpha", Subsection: "folded"}
 	cases := []struct {
 		name     string
 		ws       wsm.Workspace
 		live     wsm.Visibility
+		fold     *sidebar.Fold
+		queued   bool
 		wantRuns bool
-		wantFold *sidebar.Fold
 	}{
-		{name: "a drawn workspace runs under no fold", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a"}, live: wsm.UnselectedVisible, wantRuns: true},
-		{name: "a workspace in a collapsed repository names it", ws: wsm.Workspace{ID: "a", Repo: "folded", Place: 1, Dir: "/worktrees/a"},
-			wantFold: &sidebar.Fold{By: sidebar.FoldedByRepository, Repository: "gamma"}},
-		{name: "a workspace in a collapsed subsection names it", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded},
-			wantFold: &sidebar.Fold{By: sidebar.FoldedBySubsection, Repository: "alpha", Subsection: "folded"}},
-		{name: "a one-shot under a fold runs and still names it", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded, OneShot: true},
-			wantRuns: true, wantFold: &sidebar.Fold{By: sidebar.FoldedBySubsection, Repository: "alpha", Subsection: "folded"}},
+		{name: "a workspace the roster shows runs under no fold", ws: wsm.Workspace{ID: "a"}, live: wsm.UnselectedVisible, wantRuns: true},
+		{name: "the roster's live visibility beats a stale stored one", ws: wsm.Workspace{ID: "a", Visibility: wsm.UnselectedVisible}, live: wsm.NotVisible},
+		{name: "a workspace shown before its visibility was stored runs", ws: wsm.Workspace{ID: "a", Visibility: wsm.NotVisible}, live: wsm.Selected, wantRuns: true},
+		{name: "a workspace the roster folds names the fold and does not run", ws: wsm.Workspace{ID: "a"}, live: wsm.NotVisible, fold: subsectionFold},
+		{name: "a one-shot the roster folds runs and still names the fold", ws: wsm.Workspace{ID: "a", OneShot: true}, live: wsm.NotVisible, fold: subsectionFold, wantRuns: true},
+		{name: "a backlogged workspace with a merge queued runs", ws: wsm.Workspace{ID: "a", Backlogged: true}, live: wsm.NotVisible, queued: true, wantRuns: true},
+		{name: "a backlogged workspace with no merge queued does not run", ws: wsm.Workspace{ID: "a", Backlogged: true}, live: wsm.NotVisible},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			reg := &fakeRegistry{
-				repos:       []wsm.Repository{{ID: "r", Name: "alpha", Place: 1, Dir: "/repo"}, {ID: "folded", Name: "gamma", Folded: true, Place: 2, Dir: "/folded"}},
-				subsections: []wsm.Subsection{{ID: folded, Repo: "r", Name: "folded", Place: 1, Folded: true}},
-				workspaces:  map[ids.WorkspaceID]wsm.Workspace{"a": tc.ws},
+			var asked []ids.WorkspaceID
+			live := func(ws ids.WorkspaceID) (wsm.Visibility, *sidebar.Fold) {
+				asked = append(asked, ws)
+				return tc.live, tc.fold
 			}
 
 			// Act
-			got, err := VisibilityOf(context.Background(), reg, dlog.NewTestLogger(), "a",
-				func(ids.WorkspaceID) wsm.Visibility { return tc.live })
+			got := Judge(tc.ws, tc.queued, live)
 
 			// Assert
-			if err != nil || got.Runs != tc.wantRuns || !reflect.DeepEqual(got.Fold, tc.wantFold) {
-				t.Fatalf("VisibilityOf = %+v (fold %+v), %v; want runs %v under %+v", got, got.Fold, err, tc.wantRuns, tc.wantFold)
+			if got.Runs != tc.wantRuns || got.Fold != tc.fold {
+				t.Fatalf("Judge = runs %v under %+v; want runs %v under %+v", got.Runs, got.Fold, tc.wantRuns, tc.fold)
 			}
-		})
-	}
-}
-
-func TestVisibilityOfRefusesWhatItCannotRead(t *testing.T) {
-	cases := []struct {
-		name string
-		reg  *fakeRegistry
-		want error
-	}{
-		{name: "an unreadable record", reg: &fakeRegistry{workspaces: map[ids.WorkspaceID]wsm.Workspace{}}, want: wsm.ErrNotFound},
-		{name: "unreadable folds", reg: &fakeRegistry{reposErr: errFolds, workspaces: map[ids.WorkspaceID]wsm.Workspace{"a": {ID: "a", Repo: "r"}}}, want: errFolds},
-		{name: "unreadable queues", reg: &fakeRegistry{queuesErr: errFolds, workspaces: map[ids.WorkspaceID]wsm.Workspace{"a": {ID: "a", Repo: "r"}}}, want: errFolds},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			got, err := VisibilityOf(context.Background(), tc.reg, dlog.NewTestLogger(), "a",
-				func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible })
-
-			// Assert
-			if !errors.Is(err, tc.want) || got.Runs || got.Fold != nil {
-				t.Fatalf("VisibilityOf = %+v, %v; want nothing and %v", got, err, tc.want)
+			if !slices.Equal(asked, []ids.WorkspaceID{"a"}) {
+				t.Fatalf("the roster was asked for %v, want the judged workspace once", asked)
 			}
 		})
 	}
