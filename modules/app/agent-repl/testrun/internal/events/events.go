@@ -81,6 +81,9 @@ func UnitEndedOf(res run.Result, output []byte) *testrunv1.TestRunUnitEnded {
 	default:
 		panic("events: a unit result with no outcome the runner defines")
 	}
+	if res.Spec.InputsDigest != "" {
+		ended.InputsDigest = &res.Spec.InputsDigest
+	}
 	for _, t := range res.Tests {
 		ended.Tests = append(ended.Tests, testResultOf(t))
 	}

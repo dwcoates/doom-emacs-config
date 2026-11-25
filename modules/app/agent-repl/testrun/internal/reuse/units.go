@@ -620,32 +620,41 @@ func Confine(self string, v SuiteVerdict, u suites.Units) suites.Units {
 		return u
 	}
 	owner, infra := specOwners(v.SuiteUnits, u)
-	profileOf := func(id string) string {
+	// confinement is one spec's profile and the digest of the inputs it
+	// pins: a keyed unit's own, none for infra, which no test of its own
+	// runs in.
+	type confinement struct{ profile, digest string }
+	confinementOf := func(id string) confinement {
 		if i, ok := owner[id]; ok {
-			return v.Units[i].Profile
+			c := confinement{profile: v.Units[i].Profile}
+			if c.profile != "" && v.Units[i].Keyed {
+				c.digest = v.Units[i].Key.Digest
+			}
+			return c
 		}
 		if !infra[id] {
 			panic(fmt.Sprintf("reuse: %s's %s belongs to no unit and is no infra", v.Suite.Name, id))
 		}
-		return v.EnvelopeProfile
+		return confinement{profile: v.EnvelopeProfile}
 	}
-	wrap := func(profile string, sp run.Spec) run.Spec {
-		if profile == "" {
+	wrap := func(c confinement, sp run.Spec) run.Spec {
+		if c.profile == "" {
 			return sp
 		}
-		sp.Argv = ConfineCommand(self, profile, sp.Env, sp.Argv)
+		sp.Argv = ConfineCommand(self, c.profile, sp.Env, sp.Argv)
+		sp.InputsDigest = c.digest
 		return sp
 	}
 	out := suites.Units{Programs: u.Programs}
 	for _, sp := range u.Atomic {
-		out.Atomic = append(out.Atomic, wrap(profileOf(sp.ID), sp))
+		out.Atomic = append(out.Atomic, wrap(confinementOf(sp.ID), sp))
 	}
 	for _, sp := range u.Splits {
-		chunk, profile := sp.Chunk, profileOf(sp.Group)
-		sp.Chunk = func(id string, items []string) run.Spec { return wrap(profile, chunk(id, items)) }
+		chunk, c := sp.Chunk, confinementOf(sp.Group)
+		sp.Chunk = func(id string, items []string) run.Spec { return wrap(c, chunk(id, items)) }
 		if named := sp.Named; named != nil {
 			sp.Named = func(id string, items []string, names map[string][]string) run.Spec {
-				return wrap(profile, named(id, items, names))
+				return wrap(c, named(id, items, names))
 			}
 		}
 		out.Splits = append(out.Splits, sp)
