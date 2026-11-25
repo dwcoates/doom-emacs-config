@@ -342,19 +342,34 @@ func (r *resolver) networkFault(s *wsState, log dlog.Logger) *frontendv1.FooterS
 }
 
 // closing resolves the close step, or nil when no close is blocked.
+//
+// A STANDING CLOSE REQUEST YIELDS TO WORK: it may wait for hours on a child,
+// and the closing rung outranks thinking and waiting, so while a turn runs or
+// the user is asked something it claims nothing and those rungs draw. A
+// one-time refusal keeps its rung: the user just asked, and is answered.
 func (r *resolver) closing(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.closing == nil {
 		return nil
 	}
-	return &frontendv1.FooterStatus{
-		Status: &frontendv1.FooterStatus_Closing{
-			Closing: &frontendv1.FooterStatusClosing{
-				Substatus: &frontendv1.FooterStatusClosing_Blocked{
-					Blocked: &frontendv1.FooterSubStatusCloseBlocked{}},
-				Activity: r.closingActivity(s),
-			},
-		},
+	arm := &frontendv1.FooterStatusClosing{Activity: r.closingActivity(s)}
+	switch {
+	case !s.closing.Standing:
+		arm.Substatus = &frontendv1.FooterStatusClosing_Blocked{Blocked: &frontendv1.FooterSubStatusCloseBlocked{}}
+	case s.turnRunning() || waitsOnUser(s):
+		log.Debug("daemon.footer.status_decision", "the standing close yields to the work in flight", dlog.Context{"function": "closing", "branch": "standing close yields"})
+		return nil
+	default:
+		arm.Substatus = &frontendv1.FooterStatusClosing_Waiting{Waiting: &frontendv1.FooterSubStatusCloseWaiting{}}
 	}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Closing{Closing: arm}}
+}
+
+// waitsOnUser reports whether the waiting rung draws for S: the conditions of
+// waiting's steps, which a standing close request yields to.
+// TestAStandingCloseYieldsExactlyWhereTheWaitingRungDraws holds the two
+// together.
+func waitsOnUser(s *wsState) bool {
+	return s.interrupting || len(s.permissionOrder) > 0 || len(s.questionOrder) > 0 || s.coldGate.Standing
 }
 
 // interrupted resolves the momentary interrupted status.

@@ -181,7 +181,8 @@ const (
 // refusal MANIFESTS IN THE FOOTER rather than only in the rpc's answer.
 type CloseBlocked struct {
 	// Reason names what is not quiet: "turn_in_flight", "live_work",
-	// "held_prompts", "merge_queued".
+	// "held_prompts", "merge_queued", or, for a standing close request alone,
+	// "open_children".
 	Reason string
 	// Detail is the human-readable sentence the footer draws. It is also the
 	// `summary` CloseWorkspaceBlocked carries: ONE composed sentence, so a
@@ -198,6 +199,12 @@ type CloseBlocked struct {
 	HeldPrompts uint32
 	// MergeQueued reports a merge that still owes this workspace work.
 	MergeQueued bool
+	// Standing marks the workspace's standing close request waiting on what
+	// blocks it (agentrepl.v1.CloseWorkspaceRequest.stand), drawn as the
+	// closing status's `waiting` step, rather than a one-time close refused.
+	// A standing close yields to a turn in flight and to a wait on the user,
+	// which the footer draws instead while they last.
+	Standing bool
 }
 
 // StartFailed is a session bring-up that FAILED, which the footer alone

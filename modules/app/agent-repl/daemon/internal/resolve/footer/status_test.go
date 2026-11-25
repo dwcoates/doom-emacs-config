@@ -2475,3 +2475,96 @@ func TestATurnEndUnderAnImpairedDaemonDrawsDaemonImpaired(t *testing.T) {
 		t.Fatalf("substatus = %q, want daemon_impaired once the turn ends", got)
 	}
 }
+
+// standingClose is a standing close request waiting on a child.
+var standingClose = &CloseBlocked{Reason: "open_children", Detail: "waiting to close until its open children close: child", Standing: true}
+
+func TestAStandingCloseDrawsTheClosingWaitingStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetClosing(testWS, standingClose)
+
+	// Assert
+	closing := h.view(t).GetStrip().GetStatus().GetClosing()
+	if closing.GetWaiting() == nil {
+		t.Fatalf("status = %q, substatus %+v; want closing · waiting", h.status(t), closing.GetSubstatus())
+	}
+	if got := closing.GetActivity().GetSalient().GetCloseBlocked().GetText(); got != standingClose.Detail {
+		t.Fatalf("activity = %q, want the composed reasons %q", got, standingClose.Detail)
+	}
+}
+
+func TestAStandingCloseYieldsToWorkInFlight(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    string
+	}{
+		{name: "a turn in flight draws its turn", arrange: inTurn, want: "working"},
+		{name: "an interrupt draws its wait", arrange: func(h *harness) { connected(h); h.r.SetInterrupting(testWS, true) }, want: "waiting"},
+		{name: "a cold gate draws its wait", arrange: func(h *harness) { connected(h); gateStanding(h) }, want: "waiting"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act
+			h.r.SetClosing(testWS, standingClose)
+
+			// Assert
+			if got := h.status(t); got != tt.want {
+				t.Fatalf("status = %q, want %q: a standing close yields to the work in flight", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAOneTimeCloseRefusalKeepsItsRungOverATurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	h.r.SetClosing(testWS, &CloseBlocked{Reason: "live_work", Detail: "work is live"})
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetClosing().GetBlocked() == nil {
+		t.Fatalf("status = %q, want closing · blocked", h.status(t))
+	}
+}
+
+// THE YIELD READS THE WAITING RUNG'S OWN CONDITIONS: waitsOnUser answers true
+// exactly where the waiting rung draws, so the two cannot drift apart.
+func TestAStandingCloseYieldsExactlyWhereTheWaitingRungDraws(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "nothing waits", arrange: connected},
+		{name: "an interrupt", arrange: func(h *harness) { connected(h); h.r.SetInterrupting(testWS, true) }},
+		{name: "a cold gate", arrange: func(h *harness) { connected(h); gateStanding(h) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act
+			h.r.mu.Lock()
+			s := h.r.stateLocked(testWS)
+			yields, draws := waitsOnUser(s), h.r.waiting(s, dlog.NewTestLogger()) != nil
+			h.r.mu.Unlock()
+
+			// Assert
+			if yields != draws {
+				t.Fatalf("waitsOnUser = %v, the waiting rung draws = %v; want them equal", yields, draws)
+			}
+		})
+	}
+}
