@@ -21,7 +21,6 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1657,18 +1656,6 @@ func TestWithNoteOpensOrClosesTheSaid(t *testing.T) {
 				t.Fatalf("blocks = %q, want %q", texts, tt.want)
 			}
 		})
-	}
-}
-
-// TestNoNoteSiteHandRollsItsBlocks pins every daemon note to withNote: a site
-// that splices a note block by hand fails here rather than drifting from it.
-func TestNoNoteSiteHandRollsItsBlocks(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "&conversationv1.UserContentBlock{")
-
-	// Assert
-	if !reflect.DeepEqual(sites, []string{"handler.go"}) || sourcescan.Count(t, "&conversationv1.UserContentBlock{") != 1 {
-		t.Fatalf("note blocks built in %v; build them only in withNote", sites)
 	}
 }
 

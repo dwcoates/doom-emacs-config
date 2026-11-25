@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { codeOf } from "./source-text.js";
-import { fileURLToPath } from "node:url";
-import { codeUnder } from "./files-under.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -67,7 +62,6 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   launchFailed: { detail: "no such file" },
   unknownMergeTestLog: { reason: { case: "agedOut", value: {} } },
 };
-
 
 /**
  * The refusal a click left at the link.
@@ -201,14 +195,6 @@ describe("claimsClick", () => {
       expect(claimsClick(event)).toBe(tc.want);
     });
   }
-
-  it("is the claim every href-less link shares, never re-spelled", () => {
-    // ARRANGE
-    const mentions = codeOf(readFileSync(path.join(process.cwd(), "src/feed/workspace-mentions.ts"), "utf8"));
-    // ACT + ASSERT
-    expect(mentions).toContain("claimsClick(event)");
-    expect(mentions).not.toMatch(/event\.button\s*!==\s*0|event\.metaKey/);
-  });
 });
 
 describe("editorTargetAnchor", () => {
@@ -249,12 +235,6 @@ describe("editorTargetAnchor", () => {
     await settle();
     expect(editor).toHaveLength(0);
   });
-
-  it("is the one place an OpenInEditor link is armed: no link hand-rolls its own", () => {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(path.join(here, "..", "src", "link.ts"), "utf8");
-    expect(source.match(/armButtonRole\(/g)).toHaveLength(1);
-  });
 });
 
 describe("renderMergeCommitLink", () => {
@@ -290,14 +270,6 @@ describe("renderMergeCommitLink", () => {
     await settle();
     const target = editor[0].target;
     expect([a.textContent, target.case === "commitLog" ? target.value.commit : null]).toEqual(["4f2a1c012345", "4f2a1c0123456789"]);
-  });
-
-  it("is the one place a page builds a commit_log target", () => {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const spelling = [...codeUnder(path.join(here, "..", "src"))]
-      .filter(([, code]) => code.includes('"commitLog"'))
-      .map(([file]) => path.basename(file));
-    expect(spelling).toEqual(["link.ts"]);
   });
 
   it("warns on a refusal, naming the commit it was opening", async () => {

@@ -1,9 +1,6 @@
-import { readFileSync } from "node:fs";
-import { relative } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/failure_pb";
-import { filesUnder } from "./files-under.js";
 import { recordingFailures } from "./failure-sink.js";
 
 const undecodable = () => create(FailureKindSchema, { kind: { case: "frameUndecodable", value: { cause: "c", frameHead: "h" } } });
@@ -55,21 +52,5 @@ describe("recordingFailures", () => {
 
     // Assert
     expect(sink.cases).toEqual(["frameUndecodable"]);
-  });
-});
-
-describe("the tests' recording failure sinks", () => {
-  it("are all recordingFailures rather than a hand-rolled push", () => {
-    // Arrange
-    const root = new URL(".", import.meta.url).pathname;
-    const handRolled = /report: \(kind\) => (?:void )?\w+\.push\(/;
-
-    // Act
-    const offenders = filesUnder(root)
-      .filter((path) => handRolled.test(readFileSync(path, "utf8")))
-      .map((path) => relative(root, path));
-
-    // Assert
-    expect(offenders).toEqual([]);
   });
 });

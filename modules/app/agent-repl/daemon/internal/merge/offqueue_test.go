@@ -3,9 +3,6 @@ package merge
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,7 +13,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/semver"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -610,7 +606,8 @@ func TestAnUndeclaredOffQueueCausePanics(t *testing.T) {
 
 // exitCauses names every cause constant this package declares, by its Go
 // name, with its value: the table TestEveryExitCauseKeepsOrEndsItsRequest
-// classifies.
+// classifies. That it names every declared cause is a rule over the sources,
+// held in reposcans (daemonrules.TestTheExitCauseTableNamesEveryDeclaredCause).
 var exitCauses = map[string]string{
 	"CauseUserDrop":             string(CauseUserDrop),
 	"CauseUserDequeue":          string(CauseUserDequeue),
@@ -637,70 +634,28 @@ var exitCauses = map[string]string{
 // (wsm.RequeueColdGatedMerge).
 var notQueueExits = map[string]bool{causeDetachedForkFailed: true, string(CauseColdGate): true}
 
-// declaredCauseNames reads, from the package's production sources, the name
-// of every constant that is a cause: typed AbandonCause, or named cause*.
-func declaredCauseNames(t *testing.T) []string {
-	t.Helper()
-	var names []string
-	for _, file := range sourcescan.Production(t) {
-		parsed, err := parser.ParseFile(token.NewFileSet(), file.Name, file.Source, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", file.Name, err)
-		}
-		for _, decl := range parsed.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.CONST {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				value := spec.(*ast.ValueSpec)
-				typed := false
-				if ident, ok := value.Type.(*ast.Ident); ok && ident.Name == "AbandonCause" {
-					typed = true
-				}
-				for _, name := range value.Names {
-					if typed || (strings.HasPrefix(name.Name, "cause") && len(name.Name) > len("cause")) {
-						names = append(names, name.Name)
-					}
-				}
-			}
-		}
-	}
-	slices.Sort(names)
-	return names
-}
-
 // TestEveryExitCauseKeepsOrEndsItsRequest holds every cause a merge leaves its
 // queue for to exactly one fate: it ends the request (wsm.EndsRequest), or it
 // keeps it off the queue under a declared arm and words (OffQueueCause,
 // OffQueueWords), or it is no queue exit at all. A cause with no fate would
 // reach OffQueueWords undeclared and panic the daemon.
 func TestEveryExitCauseKeepsOrEndsItsRequest(t *testing.T) {
-	// Arrange
-	var tabled []string
-	for name := range exitCauses {
-		tabled = append(tabled, name)
-	}
-	slices.Sort(tabled)
-
-	// Act
-	declared := declaredCauseNames(t)
-
-	// Assert: the table names every declared cause, and each has one fate.
-	if !slices.Equal(declared, tabled) {
-		t.Fatalf("declared causes %v, classified causes %v; want the same set", declared, tabled)
-	}
 	for name, cause := range exitCauses {
-		_, kept := offQueueCauses[cause]
-		fates := 0
-		for _, fate := range []bool{wsm.EndsRequest(cause), kept, notQueueExits[cause]} {
-			if fate {
-				fates++
+		t.Run(name, func(t *testing.T) {
+			// Act
+			_, kept := offQueueCauses[cause]
+			fates := 0
+			for _, fate := range []bool{wsm.EndsRequest(cause), kept, notQueueExits[cause]} {
+				if fate {
+					fates++
+				}
 			}
-		}
-		if fates != 1 {
-			t.Errorf("%s (%q): ends %v, kept %v, no exit %v; want exactly one fate", name, cause, wsm.EndsRequest(cause), kept, notQueueExits[cause])
-		}
+
+			// Assert
+			if fates != 1 {
+				t.Errorf("%s (%q): ends %v, kept %v, no exit %v; want exactly one fate", name, cause, wsm.EndsRequest(cause), kept, notQueueExits[cause])
+			}
+		})
 	}
 }
 

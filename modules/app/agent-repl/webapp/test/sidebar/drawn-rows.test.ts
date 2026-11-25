@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { drawnRowsOf } from "../../src/sidebar/drawn-rows.js";
-import selectionFadeSource from "../../src/sidebar/selection-fade.ts?raw";
-import foldFadeSource from "../../src/sidebar/fold-fade.ts?raw";
 
 /** A ROOT holding rows for IDS, in order. */
 const rail = (ids: string[]): HTMLElement => {
@@ -30,16 +28,5 @@ describe("drawnRowsOf", () => {
   it("answers none for a workspace with no drawn row", () => {
     // Act / Assert
     expect(drawnRowsOf(rail(["ws-2"]), "ws-1")).toEqual([]);
-  });
-
-  it("is the lookup both fades paint through", () => {
-    // Arrange
-    const sources = [selectionFadeSource, foldFadeSource];
-
-    // Assert
-    expect(sources.map((source) => [source.includes("drawnRowsOf(root, id)"), source.includes('getAttribute("data-roster-row") === id')])).toEqual([
-      [true, false],
-      [true, false],
-    ]);
   });
 });

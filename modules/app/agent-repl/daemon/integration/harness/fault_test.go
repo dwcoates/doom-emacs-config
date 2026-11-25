@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"agent-repld/integration/grantedclock"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestProcessEndFaultClassifiesEveryEnd(t *testing.T) {
@@ -249,30 +248,6 @@ func TestTheRecordLatchOfTheOwnerLeavesAViewsClaimedRecords(t *testing.T) {
 	}
 	if viewCause == nil || !strings.Contains(viewCause.Error(), "daemon.mine") {
 		t.Fatalf("the view's latch = %v, want its claimed record", viewCause)
-	}
-}
-
-// Every daemonProc is made by newDaemonProc, so none lacks its fault latch.
-func TestEveryDaemonProcIsMadeByNewDaemonProc(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "&daemonProc{")
-
-	// Assert
-	if strings.Join(sites, ",") != "daemon.go" {
-		t.Fatalf("&daemonProc{ literals in %v, want only newDaemonProc's in daemon.go", sites)
-	}
-}
-
-// Every run budget is a child of the record latch, so no test-facing wait
-// outlives its daemon's fault.
-func TestEveryRunBudgetIsAChildOfTheFaultLatches(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "WithBound(d.watchRecords(t, d.fault.ctx)")
-	views := sourcescan.Sites(t, "WithBound(v.watchRecords(t, d.fault.ctx)")
-
-	// Assert
-	if strings.Join(sites, ",") != "daemon.go" || strings.Join(views, ",") != "view.go" {
-		t.Fatalf("run budgets under the latches: owner %v, view %v; want StartDaemon's and View's", sites, views)
 	}
 }
 

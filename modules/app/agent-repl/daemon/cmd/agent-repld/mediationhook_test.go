@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -370,18 +368,6 @@ func TestTheHooksOrchestratorIsUnboundUntilBound(t *testing.T) {
 	// Assert
 	if before != nil || h.orchestrator() != o {
 		t.Fatalf("orchestrator = %v before and %v after the binding, want nil then the bound one", before, h.orchestrator())
-	}
-}
-
-// TestEveryReadOfTheHooksBindingGoesThroughOrchestrator keeps one read of the
-// binding: an edge reading h.o by hand fails here.
-func TestEveryReadOfTheHooksBindingGoesThroughOrchestrator(t *testing.T) {
-	source, err := os.ReadFile("mediationhook.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(source), "return h.o\n"); n != 1 || strings.Count(string(source), ":= h.o\n") != 0 {
-		t.Fatalf("the binding is read %d times by return and some by assignment, want orchestrator alone", n)
 	}
 }
 

@@ -1,9 +1,6 @@
 package harness
 
 import (
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"testing"
 )
@@ -63,32 +60,6 @@ func TestSuccessorOptsAreFreshPerCall(t *testing.T) {
 	// Assert
 	if len(second.ExtraArgs) != 2 {
 		t.Fatalf("a later SuccessorOpts().ExtraArgs = %q, want it untouched by an earlier caller's extension", second.ExtraArgs)
-	}
-}
-
-// handRolledSuccessor is a StartDaemon option copying another daemon's
-// profile directory: the successor shape SuccessorOpts owns.
-var handRolledSuccessor = regexp.MustCompile(`ProfileDir:\s+[\w.]+\.ProfileDir\b`)
-
-// TestEverySuccessorStartsThroughSuccessorOpts keeps the integration suite's
-// successors on the one shape, so a hand-rolled one cannot drift from it (a
-// successor on a fresh account root resumes nothing).
-func TestEverySuccessorStartsThroughSuccessorOpts(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob(filepath.Join("..", "*.go"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("glob the integration suite: %v (%d files)", err, len(files))
-	}
-
-	// Act, Assert
-	for _, file := range files {
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if loc := handRolledSuccessor.FindIndex(src); loc != nil {
-			t.Errorf("%s hand-rolls a successor (%q); start it with SuccessorOpts", file, src[loc[0]:loc[1]])
-		}
 	}
 }
 

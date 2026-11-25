@@ -2,9 +2,6 @@ package feed
 
 import (
 	"context"
-	"os"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -474,23 +471,6 @@ func TestAnIngressCardKeepsWhatWasSaidWhole(t *testing.T) {
 	// Assert
 	if got := h.heldNow().GetItems()[0].GetIngress().GetSaid(); !proto.Equal(got, entry.Said) {
 		t.Fatalf("ingress card's said = %v, want the entry's payload %v", got, entry.Said)
-	}
-}
-
-func TestBothHeldCardsDrawThroughTheOneDrawing(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("held.go")
-	if err != nil {
-		t.Fatalf("read held.go: %v", err)
-	}
-
-	// Act
-	hands, draws := len(regexp.MustCompile(`, draw[,)]`).FindAllString(string(src), -1)), strings.Count(string(src), "r.drawUserBlocks(")
-
-	// Assert: a held prompt's card and an ingress card are each handed the
-	// one draw closure, and it is the only drawing of what was said.
-	if hands != 2 || draws != 1 {
-		t.Fatalf("held.go hands draw %d times and calls drawUserBlocks %d times, want 2 and 1", hands, draws)
 	}
 }
 

@@ -2,14 +2,12 @@ package desktopnotify
 
 import (
 	"context"
-	"regexp"
 	"testing"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/ladder"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -167,27 +165,5 @@ func TestEventTitle(t *testing.T) {
 				t.Fatalf("eventTitle = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// TestEveryEventTitleIsComposedByEventTitle pins the shared shape: every
-// banner title in the package is the workspace's name, either bare (an agent
-// notification) or behind its mark through eventTitle.
-func TestEveryEventTitleIsComposedByEventTitle(t *testing.T) {
-	titled := regexp.MustCompile(`Title: (.+?), Body`)
-	allowed := regexp.MustCompile(`^(name|eventTitle\(mark, name\)|TurnTitle\(end, name\)|MergeQueuedTitle\(name\)|DeployMediatedTitle\(name\)|CommentTitle\(name\))$`)
-	// Arrange / Act
-	seen := 0
-	for _, file := range sourcescan.Production(t) {
-		for _, m := range titled.FindAllStringSubmatch(string(file.Source), -1) {
-			seen++
-			// Assert
-			if !allowed.MatchString(m[1]) {
-				t.Errorf("%s titles a banner %q: compose titles through eventTitle", file.Name, m[1])
-			}
-		}
-	}
-	if seen == 0 {
-		t.Fatal("found no banner titles to check")
 	}
 }

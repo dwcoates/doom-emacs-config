@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -226,29 +225,6 @@ func TestRequestBoundaryRecordsNoErrorWhenTheWorkspaceSinkCannotBeResolved(t *te
 		if rec.Operation == "daemon.server.request_boundary" {
 			t.Fatalf("the boundary recorded an error for an unsinkable workspace: %+v", rec)
 		}
-	}
-}
-
-// TestEveryWrapperIsOneCallToTheSharedBoundary fails a wrapper that hand-rolls
-// its own boundary instead of delegating through serveUnary or serveStream.
-func TestEveryWrapperIsOneCallToTheSharedBoundary(t *testing.T) {
-	// Arrange.
-	raw, err := os.ReadFile("requestlog_server.go")
-	if err != nil {
-		t.Fatalf("read requestlog_server.go: %v", err)
-	}
-	source := string(raw)
-
-	// Act.
-	wrappers := strings.Count(source, "func (s *requestLoggingServer) ")
-	shared := strings.Count(source, "return serveUnary(s, ctx, ") + strings.Count(source, "return serveStream(s, ctx, ")
-
-	// Assert.
-	if wrappers == 0 || wrappers != shared {
-		t.Fatalf("%d wrappers and %d delegate through serveUnary or serveStream; every wrapper must", wrappers, shared)
-	}
-	if got := strings.Count(source, "s.server.beginRequest("); got != 2 {
-		t.Fatalf("beginRequest is called %d times, want once in each shared boundary", got)
 	}
 }
 

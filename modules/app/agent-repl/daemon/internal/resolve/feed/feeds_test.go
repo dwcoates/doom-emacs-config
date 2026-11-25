@@ -2,13 +2,11 @@ package feed
 
 import (
 	"slices"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/feedid"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestEachStoredRowVisitsEveryRowFeedByFeedInOrder(t *testing.T) {
@@ -55,25 +53,5 @@ func TestEachStoredRowToleratesRetiringRowsMidWalk(t *testing.T) {
 	// Assert: each visit retired two rows, and no retired row was visited.
 	if want := (total + 1) / 2; visited != want {
 		t.Fatalf("visited %d rows of %d, want %d", visited, total, want)
-	}
-}
-
-func TestEveryStoredRowSweepGoesThroughEachStoredRow(t *testing.T) {
-	// Arrange: the order snapshot a safe sweep needs is taken in one place.
-	var offenders []string
-
-	// Act
-	for _, file := range sourcescan.Production(t) {
-		if file.Name == "feeds.go" {
-			continue
-		}
-		if strings.Contains(string(file.Source), "append([]string(nil), f.order...)") {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) > 0 {
-		t.Fatalf("hand-rolled stored-row sweeps (use eachStoredRow): %s", strings.Join(offenders, ", "))
 	}
 }

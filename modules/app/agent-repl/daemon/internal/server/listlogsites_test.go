@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -264,24 +263,5 @@ func TestLogSitesMinimumRefusesWhatNamesNoLevel(t *testing.T) {
 	// Assert
 	if ok || m != nil || nameOK || name != "" {
 		t.Fatalf("an unknown name = (%v, %v), an unset arm = (%q, %v); want both refused", m, ok, name, nameOK)
-	}
-}
-
-// TestEveryMinimumLevelArmIsSpelledOnlyInTheOneTable fails a second
-// hand-kept mapping of the minimum level's arms in the server
-// (logscli_test.go holds the CLI to none).
-func TestEveryMinimumLevelArmIsSpelledOnlyInTheOneTable(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("listlogsites.go")
-	if err != nil {
-		t.Fatalf("read listlogsites.go: %v", err)
-	}
-
-	// Act
-	got := strings.Count(string(src), "ListLogSitesMinimumLevel_")
-
-	// Assert
-	if got != 4 {
-		t.Fatalf("listlogsites.go spells a minimum level arm %d times, want 4, each once in logSitesMinimums", got)
 	}
 }

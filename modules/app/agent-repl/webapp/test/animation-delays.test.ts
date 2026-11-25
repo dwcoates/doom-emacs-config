@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 // Reading and moving a page's CSS animations by their delays, never by asking
 // WebKit for one. See src/animation-delays.ts.
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -18,11 +16,6 @@ import {
   writeDelays,
 } from "../src/animation-delays.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
-import { codeUnder } from "./files-under.js";
-import { readFileSync } from "node:fs";
-import { codeOf } from "./source-text.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** A computed style listing these animation properties. */
 function computed(fields: Partial<Record<"animationName" | "animationDuration" | "animationIterationCount" | "animationDirection" | "animationDelay", string>>): CSSStyleDeclaration {
@@ -203,32 +196,6 @@ describe("reading a computed duration", () => {
   });
 });
 
-describe("the call sites", () => {
-  const code = codeUnder(path.join(here, "../src"));
-
-  it("ask WebKit for no animation anywhere in the webapp", () => {
-    // Arrange / Act
-    const asking = [...code].filter(([, text]) => text.includes("getAnimations(")).map(([file]) => file);
-
-    // Assert
-    expect(asking).toEqual([]);
-  });
-
-  it.each(["sidebar/wall-phase.ts", "host/unshown-animations.ts", "page-census.ts"])(
-    "%s reads animations through the shared helpers, with no time parsing of its own",
-    (file) => {
-      // Arrange
-      const text = code.get(file) ?? "";
-
-      // Act
-      const shape = [text.includes('from "../animation-delays.js"') || text.includes('from "./animation-delays.js"'), /function cssTimeMs|function cssList/.test(text)];
-
-      // Assert
-      expect(shape).toEqual([true, false]);
-    },
-  );
-});
-
 describe("placeOneShot", () => {
   it.each([
     { name: "hands the element the length and minus the time already run", elapsed: 1_250, want: ["5000ms", "-1250ms"] },
@@ -244,17 +211,4 @@ describe("placeOneShot", () => {
     // Assert
     expect([el.style.getPropertyValue("--length"), el.style.getPropertyValue("--delay")]).toEqual(want);
   });
-
-  // EVERY ONE-SHOT IS PLACED BY THE ONE HELPER: a site that spells its own
-  // length and negative delay would drift from the others' format.
-  it.each(["sidebar/fold-fade.ts", "sidebar/selection-fade.ts"])(
-    "places %s's one-shot through placeOneShot",
-    (file) => {
-      // Arrange
-      const code = codeOf(readFileSync(path.join(here, "../src", file), "utf8"));
-
-      // Act / Assert
-      expect([code.includes("placeOneShot("), /setProperty\([^)]*`\$\{-|setProperty\([^)]*`-\$\{/.test(code)]).toEqual([true, false]);
-    },
-  );
 });

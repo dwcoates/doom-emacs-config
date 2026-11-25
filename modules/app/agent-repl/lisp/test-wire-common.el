@@ -81,20 +81,6 @@ does not write to the durable sink."
                   "{\"f\":\"x\"}")
                  "x")))
 
-(ert-deftest agent-repl-test-wire-common-every-required-string-is-checked-by-the-helper ()
-  "No codec file hand-rolls the empty-string breach: only the helpers raise it."
-  (dolist (file '("wire-host.el" "wire-common.el"))
-    (let ((source (with-temp-buffer
-                    (insert-file-contents (expand-file-name file agent-repl-test--module-dir))
-                    (buffer-string))))
-      (should (equal (list file (cl-count-if (lambda (_) t)
-                                             (let (hits (start 0))
-                                               (while (string-match "\"required string is empty\"" source start)
-                                                 (push (match-beginning 0) hits)
-                                                 (setq start (match-end 0)))
-                                               hits)))
-                     (list file (if (equal file "wire-common.el") 1 0)))))))
-
 ;;;; ---- Required message fields ----
 
 (ert-deftest agent-repl-test-wire-common-require-fields-passes-a-complete-value ()
@@ -110,20 +96,6 @@ does not write to the durable sink."
     (should (equal (agent-repl-test-wire-common--breach
                     (lambda () (agent-repl-wire--require-fields "M" (car case) '(:a :b))))
                    (cadr case)))))
-
-(ert-deftest agent-repl-test-wire-common-every-required-field-is-checked-by-the-helper ()
-  "No encoder hand-rolls the absent-field breach: the helpers raise it.
-The one other site, AnswerEditorEvaluation's, refuses a nil value as well
-as a missing key, so it is not the helper's check."
-  (dolist (file '(("wire-common.el" . 2) ("wire-host.el" . 1) ("wire-roster.el" . 0)
-                  ("wire-chat.el" . 0) ("wire-verbs.el" . 0)))
-    (let ((source (with-temp-buffer
-                    (insert-file-contents (expand-file-name (car file) agent-repl-test--module-dir))
-                    (buffer-string)))
-          (hits 0) (start 0))
-      (while (string-match "\"required message field is absent\"" source start)
-        (setq hits (1+ hits) start (match-end 0)))
-      (should (equal (cons (car file) hits) file)))))
 
 ;;;; ---- Repeated strings ----
 

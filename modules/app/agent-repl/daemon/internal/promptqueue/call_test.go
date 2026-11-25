@@ -12,7 +12,6 @@ import (
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -863,28 +862,6 @@ func TestTakeAllAnswersTheLedgerAndClearsIt(t *testing.T) {
 				if taken[i].Turn != tc.ledger[i].Turn {
 					t.Fatalf("taken[%d] = %s, want %s in order", i, taken[i].Turn, tc.ledger[i].Turn)
 				}
-			}
-		})
-	}
-}
-
-func TestEveryLedgerARedriveSettlesIsTakenThroughTakeAll(t *testing.T) {
-	tests := []struct {
-		ledger string
-	}{
-		{ledger: "parked"},
-		{ledger: "deferredJoins"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.ledger, func(t *testing.T) {
-			// Arrange, Act
-			taken := sourcescan.Count(t, "takeAll(q, &d.state."+tc.ledger+")")
-			byHand := sourcescan.Count(t, "state."+tc.ledger+" = nil")
-
-			// Assert: a ledger cleared by hand would drift from takeAll's
-			// take-exactly-once shape.
-			if taken != 1 || byHand != 0 {
-				t.Fatalf("%s taken through takeAll %d times and cleared by hand %d times, want once and never", tc.ledger, taken, byHand)
 			}
 		})
 	}

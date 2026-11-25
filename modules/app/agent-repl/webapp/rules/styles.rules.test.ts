@@ -1,0 +1,7210 @@
+// @vitest-environment jsdom
+/**
+ * THE STYLESHEET'S SELECTABILITY CONTRACT.
+ *
+ * Owner ruling, 2026-09-14: "ensure that everything in the webapp (all text)
+ * can be copied to clipboard; I need to be able to do this to easily relay
+ * errors." A reader relays an error by dragging across it and pressing Cmd-C,
+ * and the one thing in this codebase that can take that away wholesale is a
+ * `user-select: none` rule. Two of them used to: the workspaces rail's blanket
+ * rule and the thinking fold's summary.
+ *
+ * So the rule is absolute here (owner ruling, 2026-10-02: "all text must be
+ * supported, everywhere in the webapp"): `user-select: none` is FORBIDDEN on
+ * every selector, fold glyphs and disclosure markers included. The allowlist
+ * that once admitted those is gone.
+ *
+ * ONE EXCEPTION, AND IT HOLDS NO TEXT AWAY FROM A READER: while a sidebar drag
+ * carries an item, the page's root wears the drag's class and nothing selects
+ * (owner request, 2026-10-23: a drag highlighted every row between pickup and
+ * drop; src/drag.ts). The class comes off at the drop.
+ */
+import { FOLDED_CLASS } from "../src/sidebar/folded-class.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import stylesheet from "../src/styles.css?raw";
+import { WALK_HOLD_ATTRIBUTE } from "../src/scroll.js";
+import sidebarPageStylesheet from "../src/host/sidebar-page.css?raw";
+import renderColors from "../../proto/vocab/render-colors.json";
+import { colorValuesStylesheet } from "../src/vocab.js";
+import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
+import {
+  BUBBLE_CAP_LINES,
+  BUBBLE_FOLD_UNBOUNDED,
+  BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_FOOTER_CLASS,
+  BUBBLE_MORE_ELLIPSIS,
+  BUBBLE_UNCAPPED,
+  BUBBLE_VARIANTS,
+  ELLIPSIS_CAP_LINES,
+  drawBubble,
+  type BubbleCapLines,
+} from "../src/bubble/draw.js";
+import { EXPANDED_CLASS } from "../src/expand.js";
+import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
+import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../src/bubble/quote.js";
+import { BUBBLE_EXPANDED_ONLY_CLASS } from "../src/bubble/expanded-only.js";
+import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../src/bubble/collapsed-thumbnail.js";
+import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
+import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
+import { cascadedValue, cascadedValueIn, inDocument, inRail, installStylesheet } from "../test/stylesheet.js";
+import { isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet-text.js";
+import { withoutBlockComments } from "../test/source-text.js";
+import { BACKLOG_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/section-classes.js";
+import { DEPLOYS_GROUP_CLASS } from "../src/sidebar/deploys-fold.js";
+import { MERGED_GROUP_HEAD_CLASS } from "../src/sidebar/roster.js";
+import { LABEL_LINK_CLASS } from "../src/feed/entries.js";
+import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS } from "../src/feed/entry-tree.js";
+import { TREE_LABEL_CLASS } from "../src/metaprompt-tree.js";
+import { createControl } from "../src/control.js";
+import { DRAGGING_CLASS } from "../src/drag.js";
+import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
+import { REVEAL_HIGHLIGHT_MS } from "../src/feed/feed.js";
+import { EMPTY_SUBSECTION_ATTRIBUTE } from "../src/sidebar/band-fit.js";
+
+/** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
+function selectorsSuppressingSelection(css: string): string[] {
+  const suppressing: string[] = [];
+  for (const rule of rulesOf(css)) {
+    if (!/(?:^|[\s;])-?(?:webkit-)?user-select\s*:\s*none/.test(rule.declarations)) continue;
+    suppressing.push(...rule.selectors);
+  }
+  return suppressing;
+}
+
+/** The one selector that suppresses selection: everything, while a sidebar drag stands. */
+const DRAGGING_SELECTOR = `html.${DRAGGING_CLASS} *`;
+
+describe("the stylesheet's selectability contract", () => {
+  it("suppresses selection nowhere but under a sidebar drag", () => {
+    // Arrange / Act
+    const suppressing = selectorsSuppressingSelection(stylesheet);
+
+    // Assert
+    expect(suppressing).toEqual([DRAGGING_SELECTOR]);
+  });
+
+  it("suppresses selection under a sidebar drag in WebKit's prefixed property too", () => {
+    // Arrange / Act
+    const dragRule = rulesOf(stylesheet).find((rule) => rule.selectors.includes(DRAGGING_SELECTOR) && /user-select/.test(rule.declarations));
+
+    // Assert
+    expect(dragRule?.declarations).toMatch(/-webkit-user-select\s*:\s*none/);
+  });
+
+  it("leaves the thinking fold's summary text selectable", () => {
+    // Arrange / Act
+    const summaryRule = rulesOf(stylesheet).find((rule) =>
+      rule.selectors.includes(".thinking summary"),
+    );
+
+    // Assert
+    expect(summaryRule?.declarations).toMatch(/user-select\s*:\s*text/);
+  });
+
+  it("lets the topbar's objective line take pointer events, so it can be dragged over", () => {
+    // Arrange / Act
+    const taskSummary = rulesOf(stylesheet).find((rule) => rule.selectors.includes("#task-summary"));
+
+    // Assert
+    expect(taskSummary?.declarations).not.toMatch(/pointer-events\s*:\s*none/);
+  });
+});
+
+/**
+ * THE BUBBLE GEOMETRY (owner ruling, 2026-09-14).
+ *
+ * "make the max width of response bubbles about 10% wider, and also make the
+ * max response bubble length about 10% longer. Also ensure the scrollbar of the
+ * response bubble (and all bubbles, in fact) abuts (or close to) the right hand
+ * side of the bubble (currently there's quite a bit of gap), and starts UNDER
+ * the token count / metadata in the top right corner of the bubble."
+ *
+ * Plus the owner's addition: the bar must be VISIBLE whenever the box overflows
+ * and absent when it does not — the platform's hover-only overlay bar tells a
+ * reader nothing about whether the answer continues below the fold.
+ *
+ * These read the file's TEXT rather than a computed style: every figure here is
+ * written with `var()` and `calc()`, which jsdom hands back unresolved, so the
+ * declaration is the only thing an assertion can honestly pin.
+ */
+/** The declarations of the FIRST rule whose selector list contains SELECTOR. */
+function declarationsOf(selector: string): string | undefined {
+  return rulesOf(stylesheet).find((rule) => rule.selectors.includes(selector))?.declarations;
+}
+
+/** The declarations of the first rule whose selector list is SELECTOR alone. */
+function ownDeclarationsOf(selector: string): string | undefined {
+  return rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))
+    ?.declarations;
+}
+
+/**
+ * The one-line clamp's shared shape (styles.css "THE ONE-LINE CLAMP'S SHAPE"):
+ * the selectors of the one rule both clamps' shape is declared in.
+ */
+const CLAMP_SHAPE_SELECTORS = [
+  ".title-fold",
+  '.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body',
+];
+
+/**
+ * The border declarations every non-base rule a bubble so marked matches sets,
+ * in source order: the cascade asked as a bubble with those attributes and hook
+ * classes would ask it, beyond the base rule's transparent reservation. Module
+ * scope because both the prompt and the response border suites ask it.
+ */
+function bordersOn(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string[] {
+  const el = document.createElement("div");
+  el.className = ["bubble", "md", ...hooks].join(" ");
+  for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+  return rulesOf(stylesheet)
+    .filter((rule) =>
+      rule.selectors.some((sel) => sel !== ".bubble" && sel.includes(".bubble") && !sel.includes("::") && el.matches(sel)),
+    )
+    .flatMap((rule) => rule.declarations.match(/(?:^|;)\s*border(?:-color)?\s*:[^;]*/g) ?? [])
+    .map((decl) => decl.replace(/^;?\s*/, "").trim());
+}
+
+/** The value `:root` declares for the custom property NAME. */
+function rootToken(name: string): string | undefined {
+  return new RegExp(`${name}:\\s*([^;]+);`).exec(declarationsOf(":root") ?? "")?.[1]?.trim();
+}
+
+/**
+ * The raw text of the `@media (prefers-color-scheme: dark)` block, found by
+ * balancing braces from its opening `{` — `rulesOf`'s flat scan cannot tell a
+ * media block's own `:root` apart from the top-level one, so a dark-theme
+ * override is asserted against this substring instead. Module scope because
+ * more than one suite below pins a dark-theme token.
+ */
+function darkThemeBlock(): string {
+  const [dark] = mediaBlocksOf("prefers-color-scheme: dark");
+  if (dark === undefined) throw new Error("no dark-theme media query found");
+  return dark.body;
+}
+
+/**
+ * Each theme's name and the raw text of its token block: the top-level `:root`
+ * for the light theme, the media query's for the dark. The one table every
+ * per-theme token test iterates, so no suite hand-rolls its own pair.
+ */
+const THEME_BLOCKS = [
+  ["light", (): string => declarationsOf(":root") ?? ""],
+  ["dark", darkThemeBlock],
+] as const;
+
+/**
+ * The color and percentage TOKEN's transparent wash mixes in, read from its
+ * `TOKEN: color-mix(in srgb, #rrggbb N%, transparent)` declaration in BLOCK.
+ * Comments are stripped first, so a note quoting the declaration never stands
+ * in for it. Module scope because more than one suite pins a wash's strength.
+ */
+function washOf(block: string, token: string): { color: string; percent: number } {
+  const declaration = new RegExp(`${token}:\\s*color-mix\\(in srgb,\\s*(#[0-9a-f]{6})\\s*([\\d.]+)%,\\s*transparent\\)`).exec(
+    withoutBlockComments(block),
+  );
+  if (declaration === null) throw new Error(`no ${token} wash found`);
+  return { color: declaration[1], percent: Number(declaration[2]) };
+}
+
+/**
+ * The boxes that CLIP while collapsed (owner ruling, 2026-09-15: "remove the
+ * scroll from the collapsed bubble views"). Every click-to-expand capped section
+ * and the response/prompt bubble's scroll box: no inner scroll while collapsed,
+ * scroll revealed only once expanded. The nested subagent panel
+ * (`.fold-fixed > .agent-panel`) is deliberately absent — it stays a fixed,
+ * scrollable window, outside the collapse/expand model.
+ */
+const COLLAPSED_BOXES: readonly string[] = [
+  ".bubble > .bubble-scroll",
+  ".tool-input",
+  ".tool-output",
+  ".tool-read-output",
+  ".bash-input",
+  ".bash-output",
+  ".diff-output",
+  ".skill-input",
+  ".skill-content",
+];
+
+describe("the bubble geometry: the two caps", () => {
+  it("widens the agent column cap by exactly ten percent, 75% to 82.5%", () => {
+    // Arrange / Act
+    const column = declarationsOf("#main-col");
+
+    // Assert
+    expect(column).toMatch(/--agent-bubble-cap:\s*82\.5%/);
+  });
+
+  it("lengthens the shared visible-line budget by exactly ten percent, 25 to 27.5", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root");
+
+    // Assert
+    expect(root).toMatch(/--feed-cap-lines:\s*27\.5\s*;/);
+  });
+
+  it("caps every bubble at the one 77% token", () => {
+    // Arrange / Act
+    const column = declarationsOf("#main-col");
+    const bubble = declarationsOf(".bubble");
+
+    // Assert — 77% (owner ruling 2026-09-15), one token for every bubble (2026-09-23).
+    expect(column).toMatch(/--bubble-max-width:\s*77%/);
+    expect(bubble).toMatch(/max-width:\s*var\(--bubble-max-width\)/);
+  });
+
+  it("hangs a response on the left rail, its margin biased off the unscaled cap", () => {
+    // Arrange / Act
+    const role = declarationsOf('.bubble[data-role="response"]');
+
+    // Assert
+    expect(role).toMatch(/margin-left:\s*var\(--agent-rail-inset\)/);
+  });
+
+  it("hangs a prompt on the right rail, its margin biased off the unscaled cap", () => {
+    // Arrange / Act
+    const role = declarationsOf('.bubble[data-role="prompt"]');
+
+    // Assert
+    expect(role).toMatch(/margin-right:\s*var\(--agent-rail-inset\)/);
+  });
+
+  it("declares the rail inset once on the column, as half the cap's leftover", () => {
+    // Arrange / Act
+    const column = declarationsOf("#main-col");
+
+    // Assert
+    expect(column).toMatch(/--agent-rail-inset:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+  });
+
+  it("restates the rail arithmetic nowhere but the inset's declaration", () => {
+    // Arrange / Act
+    const copies = withoutBlockComments(stylesheet).match(/100% - var\(--agent-bubble-cap\)/g) ?? [];
+
+    // Assert
+    expect(copies).toHaveLength(1);
+  });
+
+  it("hangs a titled card on the response's rail through the inset", () => {
+    // Arrange / Act
+    const rule = rulesOfSelector(".feed-item > .tool-card:has(> .tool-head)");
+
+    // Assert
+    expect(rule).toMatch(/margin-left:\s*var\(--agent-rail-inset\)/);
+  });
+
+  it("leaves no second copy of the old 75% cap behind", () => {
+    // Arrange / Act / Assert
+    expect(withoutBlockComments(stylesheet)).not.toMatch(
+      /--agent-bubble-cap:\s*75%/,
+    );
+  });
+
+  it("leaves no second copy of the old 25-line budget behind", () => {
+    // Arrange / Act / Assert
+    expect(withoutBlockComments(stylesheet)).not.toMatch(
+      /--feed-cap-lines:\s*25\s*;/,
+    );
+  });
+});
+
+describe("the bubble geometry: the scrollbar on the inner edge", () => {
+  it("drops the bubble's own right inset to the shared gap, so the box reaches the edge", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/padding:\s*var\(--bubble-pad-y\)\s+var\(--bubble-scroll-gap\)\s+var\(--bubble-pad-y\)\s+var\(--bubble-pad-x\)/);
+  });
+
+  it("states every bubble's unshrunk vertical padding once, as the base the padding reads", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect([
+      /--bubble-pad-y-base:\s*0\.6rem/.test(bubble ?? ""),
+      /--bubble-pad-y:\s*var\(--bubble-pad-y-base\)/.test(bubble ?? ""),
+    ]).toEqual([true, true]);
+  });
+
+  it("states every bubble's unshrunk horizontal padding once, as the base the padding reads", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect([
+      /--bubble-pad-x-base:\s*0\.9rem/.test(bubble ?? ""),
+      /--bubble-pad-x:\s*var\(--bubble-pad-x-base\)/.test(bubble ?? ""),
+    ]).toEqual([true, true]);
+  });
+
+  it("keeps the gap itself hairline, so 'abuts' is a promise the token can keep", () => {
+    // Arrange / Act
+    const column = declarationsOf("#main-col");
+
+    // Assert
+    expect(column).toMatch(/--bubble-scroll-gap:\s*2px/);
+  });
+
+  it("gives every bubble box no horizontal padding of its own", () => {
+    // Arrange / Act
+    const scroll = declarationsOf(".bubble > .bubble-box");
+
+    // Assert
+    expect(scroll).toMatch(/padding-left:\s*0\s*;[\s\S]*padding-right:\s*0\s*;/);
+  });
+
+  it("clips the bubble's horizontal axis so a bubble never side-scrolls", () => {
+    // Arrange / Act
+    const scroll = declarationsOf(".bubble > .bubble-box");
+
+    // Assert — overflow-x is pinned to clip (not left unset, which the CSS
+    // overflow spec would promote to auto once overflow-y is hidden/auto).
+    expect(scroll).toMatch(/overflow-x:\s*clip\s*;/);
+  });
+
+  it("never lets the bubble scroll box compute a horizontal scrollbar", () => {
+    // Arrange / Act — no overflow-x:auto/scroll anywhere on the bubble box,
+    // capped or not.
+    const scroll = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => /^\.bubble > \.bubble-(?:box|scroll)$/.test(sel)))
+      .map((rule) => rule.declarations)
+      .join(";");
+
+    // Assert
+    expect(scroll).not.toMatch(/overflow-x:\s*(auto|scroll)/);
+    expect(scroll).not.toMatch(/overflow:\s*(auto|scroll)/);
+  });
+
+  it("hands the inset the bubble gave up to the CONTENT wrapper inside the box", () => {
+    // Arrange / Act
+    const body = declarationsOf(".bubble-body");
+
+    // Assert
+    expect(body).toMatch(/padding-right:\s*var\(--bubble-content-inset\)/);
+  });
+
+  it("steps a tool card's scroll boxes out of the card's own inset", () => {
+    // Arrange / Act
+    const boxes = declarationsOf(".tool-card > .tool-output");
+
+    // Assert
+    expect(boxes).toMatch(/margin-right:\s*calc\(var\(--bubble-scroll-gap\) - 0\.75rem\)/);
+  });
+
+  it("caps the SCROLL BOX rather than the content wrapper, so the strip cannot scroll away", () => {
+    // Arrange / Act
+    const capped = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.includes(".bubble > .bubble-scroll"),
+    );
+
+    // Assert — FIX1 (2026-09-15): the cap rides the scroll box, now expressed as
+    // min(the line budget, the 50vh ceiling) rather than the bare calc.
+    expect(
+      capped.some((rule) =>
+        /max-height:\s*min\(calc\(var\(--bubble-cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
+      ),
+    ).toBe(true);
+  });
+
+  it("no longer caps the bubble body, which is now the content wrapper", () => {
+    // Arrange / Act / Assert
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes(".bubble > .bubble-body"))).toBe(
+      false,
+    );
+  });
+
+  it("retires the prompt bubble's one-cell grid, which put the stamp BESIDE the box", () => {
+    // Arrange / Act
+    const prompt = declarationsOf('.bubble[data-role="prompt"]');
+
+    // Assert
+    expect(prompt).not.toMatch(/display:\s*grid/);
+  });
+
+  it("stacks every bubble, so the metadata strip sits over the scroll box", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/flex-direction:\s*column/);
+  });
+});
+
+describe("the bubble geometry: a scrollbar that is there whenever it can scroll", () => {
+  it.each(COLLAPSED_BOXES)("clips %s while collapsed, so it shows no inner scroll", (selector) => {
+    // Arrange / Act — owner ruling, 2026-09-15: a collapsed section/bubble has
+    // no inner scrollbar; the first overflow-y rule on the selector is the clip.
+    const capping = rulesOf(stylesheet).find(
+      (rule) => rule.selectors.includes(selector) && /overflow-y/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(capping?.declarations).toMatch(/overflow-y:\s*hidden\s*;/);
+  });
+
+  it("keeps the nested subagent panel scrollable, outside the collapse model", () => {
+    // Arrange / Act — the fixed subagent activity panel is not click-to-expand,
+    // so it stays a scrollable N-line window rather than a collapsed clip.
+    const capping = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".fold-fixed > .agent-panel") && /overflow-y/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(capping?.declarations).toMatch(/overflow-y:\s*auto\s*;/);
+  });
+
+  it("styles no ::-webkit-scrollbar anywhere, so every box wears the system bar", () => {
+    // Arrange / Act — owner ruling 2026-09-24: the system default bar everywhere.
+    const custom = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes("::-webkit-scrollbar")),
+    );
+
+    // Assert
+    expect(custom).toEqual([]);
+  });
+
+  it("declares no --scrollbar-gutter-width token", () => {
+    // Arrange / Act
+    const declared = rulesOf(stylesheet).flatMap(
+      (rule) => rule.declarations.match(/--scrollbar-gutter-width[^;]*/g) ?? [],
+    );
+
+    // Assert
+    expect(declared).toEqual([]);
+  });
+
+  it("reserves a stable gutter on the bubble scroll box", () => {
+    // Arrange / Act
+    const box = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /scrollbar-gutter/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(box?.declarations).toMatch(/scrollbar-gutter:\s*stable\s*;/);
+  });
+
+  it("never parks a dead channel on a box that fits, which overflow-y: scroll would", () => {
+    // Arrange / Act / Assert
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/overflow-y:\s*scroll/);
+  });
+});
+
+/**
+ * SHRINK-TO-FIT, CAPPED AT THE MAX (owner ruling, 2026-09-15, reversing the
+ * fill-cap pin of the same date).
+ *
+ * Every response/prompt bubble sizes to its widest RENDERED line via
+ * `width: fit-content`, capped at the `max-width: 77%` ceiling — for ALL
+ * bubbles, including those whose body drew a metaprompt tree. The old
+ * `.bubble.bubble-fill-cap { width: 77% }` pin that stopped tree bubbles from
+ * shrinking is gone, so no rule may pin any bubble's `width` to the cap.
+ */
+describe("the shrink-to-fit width: bubbles fit their content, capped at the max", () => {
+  it("carries no `.bubble.bubble-fill-cap` rule: the full-cap width pin is gone", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.bubble-fill-cap");
+
+    // Assert — the pin was removed with `markFillCap`; nothing pins width to cap.
+    expect(rule).toBeUndefined();
+  });
+
+  it("sizes every bubble to fit-content, capped at the one bubble width", () => {
+    // Arrange / Act — the one rule every bubble kind takes.
+    const bubble = declarationsOf(".bubble") ?? "";
+
+    // Assert — fit-content up to the shared cap.
+    expect(bubble).toMatch(/width:\s*fit-content/);
+    expect(bubble).toMatch(/max-width:\s*var\(--bubble-max-width\)/);
+  });
+});
+
+/**
+ * THE COLLAPSE / EXPAND HEIGHT MODEL (owner ruling, 2026-09-15).
+ *
+ * "remove the scroll from the collapsed bubble views. clicking bubbles to expand
+ * them ... will only expand to a max size (half the height of the window), and
+ * only when expanded ... is the scroll bar/scrollability revealed." So a
+ * collapsed box clips (asserted in the scrollbar suite above), and `.expanded`
+ * grows to at most 50vh and only then turns overflow back on.
+ */
+describe("the collapse/expand height model", () => {
+  it("expands a capped section to at most half the viewport height", () => {
+    // Arrange / Act
+    const expanded = declarationsOf(".expanded");
+
+    // Assert
+    expect(expanded).toMatch(/max-height:\s*50vh/);
+  });
+
+  it("reveals scrolling only once expanded, via overflow-y auto", () => {
+    // Arrange / Act
+    const expanded = declarationsOf(".expanded");
+
+    // Assert
+    expect(expanded).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it.each([".expanded", ".bubble > .bubble-scroll.expanded", ".tool-fold.expanded > .tool-output"])(
+    "contains the overscroll of the open box %s, so it never chains to the feed",
+    (selector) => {
+      // Arrange / Act
+      const containing = rulesOf(stylesheet).filter(
+        (rule) => rule.selectors.includes(selector) && /overscroll-behavior:\s*contain/.test(rule.declarations),
+      );
+
+      // Assert
+      expect(containing).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    '.bubble-fold[data-merge-bubble][data-expanded="true"] > .bubble-subfeed',
+    '.bubble-fold[data-merge-bubble][data-expanded="true"] .merge-run',
+  ])("contains the overscroll of the open merge bubble's box %s, so it never chains to the feed", (selector) => {
+    // Arrange / Act
+    const containing = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.includes(selector) && /overscroll-behavior:\s*contain/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(containing).toHaveLength(1);
+  });
+
+  it("contains no collapsed box's overscroll, whose wheel stays the feed's", () => {
+    // Arrange / Act — a box is open by its own `.expanded`, or by sitting in an
+    // expanded sub-feed bubble (`[data-expanded="true"]`).
+    const containing = rulesOf(stylesheet)
+      .filter((rule) => /overscroll-behavior/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((selector) => !selector.includes(".expanded") && !selector.includes('[data-expanded="true"]'));
+
+    // Assert
+    expect(containing).toEqual([]);
+  });
+
+  it("retires the old expand-to-full-length model, which never revealed a bar", () => {
+    // Arrange / Act
+    const expanded = declarationsOf(".expanded");
+
+    // Assert — no `max-height: none` and no `overflow-y: visible` on expand.
+    expect(expanded).not.toMatch(/max-height:\s*none/);
+    expect(expanded).not.toMatch(/overflow-y:\s*visible/);
+  });
+
+  it("caps an expanded response bubble at 50vh too, outranking its own cap", () => {
+    // Arrange / Act — the bumped-specificity variant that beats the bubble scroll
+    // box's own (0,2,0) cap and clip rules.
+    const rule = declarationsOf(".bubble > .bubble-scroll.expanded");
+
+    // Assert
+    expect(rule).toMatch(/max-height:\s*50vh/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("FIX1: caps the COLLAPSED bubble at min(the line budget, the 50vh ceiling)", () => {
+    // Arrange / Act — the collapsed bubble's max-height rule (several rules carry
+    // the `.bubble > .bubble-scroll` selector; the cap is the one that names it).
+    const capRule = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /max-height/.test(rule.declarations),
+    );
+
+    // Assert — the same 50vh the expanded rule caps at is the ceiling here too,
+    // so expanded (50vh) can never be smaller than collapsed (min(lines, 50vh)).
+    expect(capRule?.declarations).toMatch(
+      /max-height:\s*min\(calc\(var\(--bubble-cap-lines\) \* var\(--md-line-h\) \* 1em\),\s*50vh\)/,
+    );
+  });
+
+  it("FIX1: expresses the collapsed and expanded caps against the SAME 50vh, so expanded >= collapsed", () => {
+    // Arrange / Act
+    const collapsedCap = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /max-height/.test(rule.declarations),
+    );
+    const expanded = declarationsOf(".bubble > .bubble-scroll.expanded");
+
+    // Assert — both caps name 50vh: collapsed = min(lines, 50vh) <= 50vh = expanded.
+    expect(collapsedCap?.declarations).toMatch(/50vh/);
+    expect(expanded).toMatch(/max-height:\s*50vh/);
+  });
+});
+
+/**
+ * THE "MORE BELOW" AFFORDANCE (owner ruling, 2026-09-15: "a signal that there's
+ * more to reveal"). FIX2 draws a bottom fade on a collapsed bubble that
+ * overflows its cap, keyed entirely on `has-more` — the fade ONLY, never a
+ * chevron (owner ruling, 2026-09-23)
+ * (bubble-more.ts toggles the class). The signal is SCOPED to the two speaker
+ * bubbles — never a tool-call section — and fades into each bubble's own bg.
+ */
+describe("the 'more below' affordance", () => {
+  it("draws the fade from has-more, over the last 1.5em plus its reach", () => {
+    // Arrange / Act
+    const fade = declarationsOf(".bubble > .bubble-scroll.has-more::after");
+
+    // Assert
+    expect(fade).toMatch(/height:\s*calc\(1\.5em \+ var\(--bubble-fade-reach\)\)/);
+    expect(fade).toMatch(/border-radius:\s*0 0 var\(--bubble-fade-radius\) var\(--bubble-fade-radius\)/);
+    expect(fade).toMatch(/bottom:\s*0/);
+    expect(fade).toMatch(/pointer-events:\s*none/);
+  });
+
+  it("fades every bubble into its own background token", () => {
+    // Arrange / Act — the gradient rule (the selector also names a base ::after
+    // rule for geometry, so pick the copy carrying the background).
+    const gradient = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll.has-more::after") &&
+        /linear-gradient/.test(rule.declarations),
+    );
+
+    // Assert — dissolves into the bubble's OWN fill (its role's or held's), not a hard edge.
+    expect(gradient?.declarations).toMatch(
+      /linear-gradient\(to bottom, transparent, var\(--bubble-bg\)\)/,
+    );
+  });
+
+  it("draws no chevron from has-more: the fade is the whole signal", () => {
+    // Arrange / Act — every ::before a has-more rule draws, on any bubble or title.
+    const chevrons = rulesOf(stylesheet)
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => sel.includes(".has-more") && sel.endsWith("::before"));
+
+    // Assert
+    expect(chevrons).toEqual([]);
+  });
+
+  it("draws no chevron glyph anywhere in the sheet", () => {
+    // Arrange / Act — the ⌄ glyph (\2304) the old chevron was.
+    const glyphs = rulesOf(stylesheet).filter((rule) => /\\2304/.test(rule.declarations));
+
+    // Assert
+    expect(glyphs.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("draws the affordance only out of flow, so toggling has-more changes no layout", () => {
+    // Arrange / Act — every rule keyed on has-more. THE USER OWNS THE SCROLL
+    // (owner rule, 2026-09-23): the measurer toggles the class under a reader,
+    // so it may add nothing but out-of-flow pseudo-elements and a cursor.
+    const withHasMore = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes(".has-more")),
+    );
+    const inFlow = withHasMore.filter((rule) => {
+      const pseudo = rule.selectors.every((sel) => /::(?:before|after)$/.test(sel));
+      if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
+      const positioned = /position:\s*absolute/.test(rule.declarations);
+      // A rule that only repaints or re-places a pseudo-element the base rule
+      // already took out of flow (the fade's per-kind gradient).
+      const decorative = rule.declarations
+        .split(";")
+        .map((decl) => decl.split(":")[0]?.trim() ?? "")
+        .every((prop) => prop === "" || ["background", "left", "right", "transform"].includes(prop));
+      return !positioned && !decorative;
+    });
+
+    // Assert
+    expect(inFlow.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  /** The position every rule naming exactly SELECTOR sets, in source order. */
+  const positionsOf = (selector: string): string[] =>
+    rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .flatMap((rule) => [...rule.declarations.matchAll(/position:\s*([a-z]+)/g)].map((m) => m[1] ?? ""));
+
+  it("makes the bubble the affordance's containing block whether or not it wears has-more", () => {
+    // Arrange / Act — every position the bare bubble rules set.
+    const positions = positionsOf(".bubble");
+
+    // Assert
+    expect(positions).toEqual(["relative"]);
+  });
+
+  it("leaves a box no footer follows unpositioned, reaching to the bubble's rounded edge", () => {
+    // Arrange / Act — the bare scroll box rules, which a box no footer follows keeps.
+    const anchor = rulesOf(stylesheet).find(
+      (rule) => rule.selectors.includes(".bubble > .bubble-scroll") && /--bubble-fade-reach/.test(rule.declarations),
+    )?.declarations;
+    const positions = positionsOf(".bubble > .bubble-scroll");
+
+    // Assert
+    expect(anchor).toMatch(/--bubble-fade-reach:\s*var\(--bubble-pad-y\)/);
+    expect(anchor).toMatch(/--bubble-fade-radius:\s*var\(--bubble-radius\)/);
+    expect(positions).toEqual([]);
+  });
+
+  it("makes a box a footer follows the affordance's containing block, reaching no further", () => {
+    // Arrange / Act
+    const box = declarationsOf(`.bubble > .bubble-scroll:has(~ .${BUBBLE_FOOTER_CLASS})`);
+
+    // Assert
+    expect(box).toMatch(/position:\s*relative/);
+    expect(box).toMatch(/--bubble-fade-reach:\s*0px/);
+    expect(box).toMatch(/--bubble-fade-radius:\s*0px/);
+  });
+
+  it("names the bubble's radius the fade's rounding reads", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/--bubble-radius:\s*8px/);
+    expect(bubble).toMatch(/border-radius:\s*var\(--bubble-radius\)/);
+  });
+
+  it("never puts the affordance on a tool-call section", () => {
+    // Arrange / Act — every rule that keys on has-more.
+    const withHasMore = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes(".has-more")),
+    );
+
+    // Assert — every such selector is scoped to a response/prompt bubble scroll
+    // box or to a card's TITLE fold (owner ruling, 2026-09-23, which extended the
+    // affordance to tool titles), and none names a tool-call section's capped box.
+    expect(withHasMore.length).toBeGreaterThan(0);
+    const toolBoxes = [
+      ".tool-input",
+      ".tool-output",
+      ".tool-read-output",
+      ".bash-input",
+      ".bash-output",
+      ".diff-output",
+      ".skill-input",
+      ".skill-content",
+    ];
+    for (const rule of withHasMore) {
+      for (const sel of rule.selectors) {
+        expect(sel).toMatch(
+          /^(?:\.bubble(?:\[data-cap-lines="0"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
+        );
+        for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
+      }
+    }
+  });
+});
+
+/**
+ * THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
+ * spec chooses it (`data-more="ellipsis"`) clamps its collapsed body to its one
+ * line, which the engine ends in `…` exactly when anything follows, and draws
+ * no fade; a bubble under the fade keeps it.
+ */
+describe("the ellipsis instead of the fade", () => {
+  const CLAMP = '.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body';
+  const NO_FADE = '.bubble[data-role][data-more="ellipsis"] > .bubble-scroll::after';
+  const FADE = ".bubble > .bubble-scroll.has-more::after";
+
+  /** A mounted, collapsed bubble wearing has-more, under the ellipsis or the fade. */
+  function drawnBox(ellipsis: boolean): { box: HTMLElement; body: HTMLElement; remove: () => void } {
+    const { bubble, body } = drawBubble(
+      ellipsis
+        ? { role: "prompt", variant: "held", content: [], capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }
+        : { role: "prompt", variant: "user", content: [], capLines: "feed" },
+    );
+    document.body.append(bubble);
+    const box = body.parentElement as HTMLElement;
+    box.classList.add(HAS_MORE_CLASS);
+    return { box, body, remove: () => bubble.remove() };
+  }
+
+  /** The number of classes, attributes and pseudo-classes in SELECTOR. */
+  const weight = (selector: string): number => (selector.match(/\.[\w-]+|\[[^\]]+\]|:not\(/g) ?? []).length;
+
+  it("clamps the collapsed body as a vertical box", () => {
+    // Arrange / Act
+    const rule = declarationsOf(CLAMP) ?? "";
+    // Assert
+    expect([/display:\s*-webkit-box\s*;/.test(rule), /-webkit-box-orient:\s*vertical\s*;/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("clamps it at the bubble's own line cap", () => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf(CLAMP) ?? "";
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*var\(--bubble-cap-lines\)\s*;/);
+  });
+
+  it("maps the ellipsis's one-line cap to one line", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.bubble[data-cap-lines="${ELLIPSIS_CAP_LINES}"]`) ?? "";
+    // Assert
+    expect(rule.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("clamps a collapsed ellipsis bubble's body", () => {
+    // Arrange
+    const { body, remove } = drawnBox(true);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(true);
+  });
+
+  it("lifts the clamp once the bubble is expanded, so everything shows", () => {
+    // Arrange
+    const { box, body, remove } = drawnBox(true);
+    box.classList.add(EXPANDED_CLASS);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(false);
+  });
+
+  it("never clamps a bubble under the fade", () => {
+    // Arrange
+    const { body, remove } = drawnBox(false);
+    // Act
+    const clamped = body.matches(CLAMP);
+    remove();
+    // Assert
+    expect(clamped).toBe(false);
+  });
+
+  it("hides the fade on an ellipsis bubble", () => {
+    // Arrange
+    const { box, remove } = drawnBox(true);
+    // Act
+    const hidden = box.matches(NO_FADE.replace("::after", "")) && /display:\s*none/.test(declarationsOf(NO_FADE) ?? "");
+    remove();
+    // Assert
+    expect(hidden).toBe(true);
+  });
+
+  it("outranks the fade's own selector, whatever the order", () => {
+    // Arrange / Act / Assert
+    expect(weight(NO_FADE)).toBeGreaterThan(weight(FADE));
+  });
+
+  it("keeps the fade on a bubble under the fade", () => {
+    // Arrange
+    const { box, remove } = drawnBox(false);
+    // Act
+    const faded = [box.matches(FADE.replace("::after", "")), box.matches(NO_FADE.replace("::after", ""))];
+    remove();
+    // Assert
+    expect(faded).toEqual([true, false]);
+  });
+
+  it("keeps the fade on a capped non-thinking response bubble", () => {
+    // Arrange — an agentic card: a response-role bubble under the default fade.
+    const { bubble, body } = drawBubble({ role: "response", variant: "agentic", content: [], capLines: "feed" });
+    document.body.append(bubble);
+    const box = body.parentElement as HTMLElement;
+    box.classList.add(HAS_MORE_CLASS);
+    // Act
+    const faded = [box.matches(FADE.replace("::after", "")), box.matches(NO_FADE.replace("::after", "")), body.matches(CLAMP)];
+    bubble.remove();
+    // Assert
+    expect(faded).toEqual([true, false, false]);
+  });
+
+  it("keys neither the clamp nor the hidden fade on has-more, so the measurer moves nothing", () => {
+    // Arrange / Act / Assert
+    expect([CLAMP, NO_FADE].filter((sel) => sel.includes(".has-more"))).toEqual([]);
+  });
+});
+
+/**
+ * THE FOOTER STATUS WAVE'S STYLESHEET CONTRACT.
+ *
+ * Three facts live only in the file — the letters never re-measure, the wave
+ * runs at the period the inline delays are computed against, and a reader who
+ * asked for reduced motion gets none of it — so they are asserted here rather
+ * than in the drawing suite, which can only see classes.
+ */
+describe("the footer status wave's stylesheet contract", () => {
+  /** The declarations of the rule whose selector list contains SELECTOR. */
+  function ruleFor(css: string, selector: string): string | undefined {
+    return rulesOf(css).find((rule) => rule.selectors.includes(selector))?.declarations;
+  }
+
+  /**
+   * The `prefers-reduced-motion: reduce` block, and the file without it.
+   *
+   * Split by brace matching rather than by a slice, because the same selector
+   * appears on both sides: a plain `indexOf` walk would hand the base rule's
+   * lookup the override's declarations, which is exactly backwards.
+   */
+  function reducedMotionSplit(): { block: string; rest: string } {
+    const [reduced] = mediaBlocksOf("prefers-reduced-motion: reduce");
+    if (reduced === undefined) throw new Error("no reduced-motion block in the stylesheet");
+    return { block: reduced.body, rest: stylesheet.slice(0, reduced.start) + stylesheet.slice(reduced.end) };
+  }
+
+  /** The reduced-motion override's body. */
+  function reducedMotionBlock(): string {
+    return reducedMotionSplit().block;
+  }
+
+  /** The stylesheet with the reduced-motion overrides taken out. */
+  function baseSheet(): string {
+    return reducedMotionSplit().rest;
+  }
+
+  /**
+   * The full body of the `@keyframes pfooter-status-color` block. The spectrum
+   * sweep has many stops, so the body is captured up to the closing brace on its
+   * own line rather than by the two-stop pattern the lighten keyframe used.
+   */
+  function colorKeyframeBody(): string {
+    return keyframesOf("pfooter-status-color");
+  }
+
+  it("scales the letter rather than resizing it, so the word's width never moves", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("pfooter-status-wave");
+
+    // Assert — 1.18, nudged up from 1.15 (owner ruling, 2026-09-14).
+    expect(keyframes).toMatch(/transform:\s*scale\(1\.18\)/);
+  });
+
+  it("never touches font-size, which would re-lay the whole strip out", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/font-size/);
+  });
+
+  it("makes the letter an inline-block, which is what lets a transform apply", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/display:\s*inline-block/);
+  });
+
+  it("alternates the pass, so the bulge travels forwards and then backwards", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/animation:\s*pfooter-status-wave 2\.6s ease-in-out infinite alternate/);
+  });
+
+  it("promotes no layer, so WebKit rasterises the glyph at the scale it paints", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/will-change|translateZ|backface-visibility/);
+  });
+
+  it("declares no animation-delay, which every letter overrides inline", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/animation-delay/);
+  });
+
+  it("stops the wave outright under prefers-reduced-motion", () => {
+    // Arrange / Act
+    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/animation:\s*none/);
+  });
+
+  it("runs the colour sweep on the whole word holder", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-status-word") ?? "";
+
+    // Assert — the word changes hue as one (owner ruling, 2026-10-17).
+    expect(declarations).toMatch(/animation:\s*pfooter-status-color 3\.64s ease-in-out infinite alternate/);
+  });
+
+  it("keeps the colour sweep off the letters, so no letter changes hue on its own stagger", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert — the letter carries the bulge alone.
+    expect(declarations).toMatch(/animation:\s*pfooter-status-wave 2\.6s ease-in-out infinite alternate;/);
+    expect(declarations).not.toMatch(/pfooter-status-color/);
+  });
+
+  it("runs the colour sweep 40% slower than the scale wave's 2.6s period", () => {
+    // Arrange / Act
+    const word = ruleFor(baseSheet(), ".pfooter-status-word") ?? "";
+    const letter = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+    const durations = [word, letter].map((rule) => /pfooter-status-\w+ (\d\.\d+)s/.exec(rule)?.[1]);
+
+    // Assert — the sweep's duration is the bulge's times 1.4 (owner ruling, 2026-10-18).
+    expect(durations).toEqual(["3.64", "2.6"]);
+  });
+
+  it("stops the word's colour sweep outright under prefers-reduced-motion", () => {
+    // Arrange / Act
+    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-status-word") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/animation:\s*none/);
+  });
+
+  it("sweeps pastel hues, light and never fully saturated", () => {
+    // Arrange / Act — every hsl() stop's saturation and lightness.
+    const stops = [...colorKeyframeBody().matchAll(/hsl\(\d+ (\d+)% (\d+)%\)/g)].map((m) => ({
+      saturation: Number(m[1]),
+      lightness: Number(m[2]),
+    }));
+
+    // Assert — pastel (owner ruling, 2026-10-17): light, softened saturation.
+    expect(stops.length).toBeGreaterThan(0);
+    for (const { saturation, lightness } of stops) {
+      expect(lightness).toBeGreaterThanOrEqual(68);
+      expect(saturation).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("rests the word at its arm tone (currentColor), so the word is never transparent", () => {
+    // Arrange / Act
+    const keyframes = colorKeyframeBody();
+
+    // Assert — the 0% stop is the inherited arm colour, legible at rest, so a
+    // word caught stopped shows the arm tone rather than a mid-spectrum hue.
+    expect(keyframes).toMatch(/0%\s*\{\s*color:\s*currentColor/);
+  });
+
+  it("returns to the arm tone at the end of each pass, not to a random hue", () => {
+    // Arrange / Act
+    const keyframes = colorKeyframeBody();
+
+    // Assert — the 100% stop is currentColor too, so `alternate` departs from
+    // and returns to the arm tone rather than snapping between two hues.
+    expect(keyframes).toMatch(/100%\s*\{\s*color:\s*currentColor/);
+  });
+
+  it("sweeps the full spectrum, not a single-hue lighten", () => {
+    // Arrange / Act — the distinct HSL hues the running sweep steps through.
+    const keyframes = colorKeyframeBody();
+    const hues = new Set([...keyframes.matchAll(/hsl\((\d+)\s/g)].map((m) => Number(m[1])));
+
+    // Assert — a rainbow of many hues (red..violet), never the old lone lighten.
+    expect(keyframes).not.toMatch(/color-mix/);
+    expect(hues.size).toBeGreaterThanOrEqual(5);
+  });
+
+  it("keeps every keyframe stop a fully opaque colour, never transparent", () => {
+    // Arrange / Act — every stop is currentColor or an opaque hsl(), no alpha.
+    const keyframes = colorKeyframeBody();
+    const colors = [...keyframes.matchAll(/color:\s*([^;]+);/g)].map((m) => m[1].trim());
+
+    // Assert
+    expect(colors.length).toBeGreaterThan(0);
+    for (const colour of colors) {
+      expect(colour === "currentColor" || /^hsl\(\d+ \d+% \d+%\)$/.test(colour)).toBe(true);
+    }
+  });
+
+  it("never clips a gradient to the word's text on the status-word path (the bug that shipped)", () => {
+    // Arrange / Act — the whole letter/word path, base and reduced-motion alike.
+    const word = ruleFor(stylesheet, ".pfooter-status-word") ?? "";
+    const letter = ruleFor(stylesheet, ".pfooter-wave-letter") ?? "";
+    const colorKeyframes = colorKeyframeBody();
+
+    // Assert — none of background-clip:text, transparent text-fill, or color:transparent.
+    for (const path of [word, letter, colorKeyframes]) {
+      expect(path).not.toMatch(/background-clip:\s*text/);
+      expect(path).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+      expect(path).not.toMatch(/color:\s*transparent/);
+    }
+  });
+
+  it("carries no whole-word gradient class at all, so the blanking bug cannot recur", () => {
+    // Arrange / Act / Assert — the reverted approach's class must not exist.
+    expect(stylesheet).not.toMatch(/pfooter-status-gradient/);
+  });
+
+  it("leaves the letter its legible arm colour under reduced motion, not a transparent fill", () => {
+    // Arrange / Act
+    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-wave-letter") ?? "";
+
+    // Assert — stopping the animation must not park a transparent colour.
+    expect(declarations).not.toMatch(/color:\s*transparent/);
+    expect(declarations).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+  });
+
+  it("sets no static colour on the letter, so a stopped letter falls back to the arm tone", () => {
+    // Arrange / Act — the base rule carries only the animation, no fixed colour;
+    // with the animation stopped (reduced motion, or seeked to rest) the letter
+    // then inherits currentColor — the legible arm tone — never a keyframe hue.
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/(?:^|;|\{)\s*color:/);
+  });
+});
+
+/**
+ * THE PROMPT BORDERS (owner rulings, 2026-09-23 and 2026-09-27). A user's own
+ * prompt is never bordered, in flight or after its turn resolves; an
+ * agent-to-agent prompt (the agent-addressed row
+ * and the peer message) wears the one amber; a held prompt in the tray wears
+ * none. Each case is asked of the stylesheet as the cascade would: which
+ * border-setting rules a bubble with that role, variant and hook classes
+ * matches, beyond the base rule's transparent reservation.
+ */
+describe("the prompt borders", () => {
+  /** A prompt bubble's attributes. */
+  function prompt(variant: string): Record<string, string> {
+    return { "data-role": "prompt", "data-variant": variant };
+  }
+
+  it("reserves a 0.3px transparent border on every bubble, prompt included", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/border:\s*0\.3px solid transparent/);
+  });
+
+  it("gives a user prompt no border", () => {
+    // Arrange / Act
+    const borders = bordersOn(prompt("user"), ["user"]);
+
+    // Assert — the user's own prompt is never bordered (owner ruling, 2026-09-27).
+    expect(borders).toEqual([]);
+  });
+
+  it.each([
+    ["an agent-addressed prompt", "agent", ["user", "prompt-agent"]],
+    ["a peer message", "peer", ["peer"]],
+  ] as const)("gives %s no border: its header alone marks it", (_label, variant, hooks) => {
+    // Arrange / Act
+    const borders = bordersOn(prompt(variant), hooks);
+
+    // Assert — every agent-to-agent bubble is borderless (owner spec, 2026-10-17).
+    expect(borders).toEqual([]);
+  });
+
+  it.each([
+    ["a prompt held behind the turn", ["held-right"]],
+    ["a prompt held by a bounce", ["held-right", "lease-card"]],
+  ] as const)("gives %s no border", (_label, hooks) => {
+    // Arrange / Act
+    const borders = bordersOn(prompt("held"), hooks);
+
+    // Assert
+    expect(borders).toEqual([]);
+  });
+
+  it("defines no agent-to-agent border token any more", () => {
+    // Arrange / Act
+    const sheet = stylesheet;
+
+    // Assert
+    expect(sheet).not.toMatch(/--agent-prompt-border/);
+  });
+});
+
+describe("the agent-to-agent header's arrow", () => {
+  it("takes the header's own font size", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".peer-arrow") ?? "";
+
+    // Assert
+    expect([rule.match(/width:\s*1em/) !== null, rule.match(/height:\s*1em/) !== null]).toEqual([true, true]);
+  });
+
+  it("takes the header's own color", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".peer-arrow") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/stroke:\s*currentColor/);
+  });
+});
+
+describe("the arriving response indicator", () => {
+  it("carries no `.response-arriving` rule: the arriving ellipsis is gone", () => {
+    // Arrange / Act — the response-specific arriving-indicator rule.
+    const rule = declarationsOf(".response-arriving");
+
+    // Assert — the rule was removed with the indicator node (owner ruling
+    // 2026-09-15: a streaming response shows its prose only). The shared
+    // `.animated-ellipsis` base stays: it still dresses the footer status
+    // words (highlight.ts) and the plan card's planning indicator (plan.ts).
+    expect(rule).toBeUndefined();
+  });
+});
+
+describe("the thinking bubble", () => {
+  /** A response bubble's attributes: its variant and its daemon-stated state. */
+  function responseBubble(variant: string, state: string): Record<string, string> {
+    return { "data-role": "response", "data-variant": variant, "data-state": state };
+  }
+
+  it.each([
+    ["arriving", "update"],
+    ["settled", "success"],
+    ["cut short", "error"],
+  ] as const)("gives a %s thinking bubble no border", (_label, state) => {
+    // Arrange / Act — every border rule a thinking bubble, as response.ts marks it, matches.
+    const borders = bordersOn(responseBubble("thinking", state), ["assistant", "thinking-bubble"]);
+
+    // Assert — none: it keeps the base's transparent 0.3px reservation.
+    expect(borders).toEqual([]);
+  });
+
+  it("keeps the green off a thinking bubble even were it marked the answer", () => {
+    // Arrange / Act
+    const borders = bordersOn(responseBubble("thinking", "success"), ["assistant", "thinking-bubble", "final-response"]);
+
+    // Assert
+    expect(borders).toEqual([]);
+  });
+
+  it("gives a settled mid-turn response no border", () => {
+    // Arrange / Act
+    const borders = bordersOn(responseBubble("response", "success"), ["assistant", "interim-response"]);
+
+    // Assert — none: it keeps the base's transparent 0.3px reservation.
+    expect(borders).toEqual([]);
+  });
+
+  it("gives the turn's answer no border (owner request, 2026-10-28)", () => {
+    // Arrange / Act
+    const borders = bordersOn(responseBubble("response", "success"), ["assistant", "final-response"]);
+
+    // Assert — none: it keeps the base's transparent 0.3px reservation.
+    expect(borders).toEqual([]);
+  });
+
+  it("carries no final-response border token any more", () => {
+    // Arrange / Act / Assert — the retired green and its strength are defined in neither theme.
+    expect(stylesheet).not.toMatch(/--final-response\s*:/);
+    expect(stylesheet).not.toMatch(/--response-border-strength\s*:/);
+  });
+
+  it("carries no interim-response-border token any more", () => {
+    // Arrange / Act / Assert — the retired pear is defined in neither theme.
+    expect(stylesheet).not.toMatch(/--interim-response-border\s*:/);
+  });
+
+  it("carries no thinking-border token any more", () => {
+    // Arrange / Act / Assert — the retired yellow is defined in neither theme.
+    expect(stylesheet).not.toMatch(/--thinking-border\s*:/);
+  });
+
+  it("caps a thinking bubble at one line and sets nothing else", () => {
+    // Arrange / Act — the thinking bubble's cap value (its spec, response.ts).
+    const rule = declarationsOf(`.bubble[data-cap-lines="${THINKING_CAP_LINES}"]`);
+
+    // Assert — only the line budget changes; the clip, ellipsis and expand
+    // rules stay every bubble's own.
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("caps an interim response at one line and sets nothing else", () => {
+    // Arrange / Act — the interim response's cap value (its spec, response.ts).
+    const rule = declarationsOf(`.bubble[data-cap-lines="${INTERIM_CAP_LINES}"]`);
+
+    // Assert
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("caps the held prompt at one line", () => {
+    // Arrange / Act — the held prompt's cap value (its spec, held-prompt.ts,
+    // pinned there to "1"; owner ruling, 2026-09-27).
+    const rule = declarationsOf('.bubble[data-cap-lines="1"]');
+
+    // Assert
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("maps the two-line cap an agent-to-agent prompt collapses at", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-cap-lines="2"]');
+
+    // Assert
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*2\s*;?$/);
+  });
+});
+
+/**
+ * THE AMBER ASYNC BORDER IS GONE (owner ruling, 2026-09-16: "remove the amber
+ * async-quiescence border on response/prompt bubbles ENTIRELY — I never wanted
+ * it"). A settled final response goes GREEN unconditionally; no bubble ever
+ * wears the amber `--async` border while background/detached work is still
+ * running. The `--async` token itself stays — the async-catalog badge, the
+ * topbar/sidebar monitoring rows still use it.
+ */
+describe("the removed amber async border", () => {
+  it("paints the amber async token on no bubble", () => {
+    // Arrange — every rule that colors a border with the amber async token.
+    const amberBorders = rulesOf(stylesheet).filter((r) =>
+      /border-color:\s*var\(--async\)/.test(r.declarations),
+    );
+
+    // Assert — no rule paints an amber border on any .bubble selector.
+    for (const rule of amberBorders) {
+      for (const selector of rule.selectors) {
+        expect(selector).not.toContain(".bubble");
+      }
+    }
+  });
+});
+
+describe("a coalesced run of final responses (response-run.ts)", () => {
+  it("colors no border on the run, as a lone answer wears none (owner request, 2026-10-28)", () => {
+    const colored = rulesOf(stylesheet).filter((r) => r.selectors.includes(".feed-item > .response-run") && r.declarations.includes("border-color"));
+    expect(colored).toEqual([]);
+  });
+
+  it("hangs the run on the response's rail at the bubble cap", () => {
+    const rule = rulesOfSelector(".feed-item > .response-run");
+    expect(rule).toMatch(/margin-left:\s*var\(--agent-rail-inset\)/);
+    expect(rule).toMatch(/max-width:\s*var\(--bubble-max-width\)/);
+    expect(rule).toMatch(/width:\s*fit-content/);
+  });
+
+  it("reserves the bubble's transparent border and corners once, on the run, with no shadow", () => {
+    const rule = rulesOfSelector(".feed-item > .response-run");
+    expect(rule).toMatch(/border:\s*0\.3px solid transparent/);
+    expect(rule).toMatch(/border-radius:\s*8px/);
+    expect(rule).not.toMatch(/box-shadow/);
+  });
+
+  it("strips each member bubble's own border, corners, shadow and margins", () => {
+    const rule = declarationsOf(".response-run > .feed-item > .bubble") ?? "";
+    for (const declaration of [/margin:\s*0/, /width:\s*auto/, /max-width:\s*none/, /border-width:\s*0/, /border-radius:\s*0/, /box-shadow:\s*none/]) {
+      expect(rule).toMatch(declaration);
+    }
+  });
+
+  it("separates each member from the one above with a subtle grey line", () => {
+    const rule = declarationsOf(".response-run > .feed-item:has(> .bubble) ~ .feed-item:has(> .bubble)");
+    expect(rule).toMatch(/border-top:\s*1px solid color-mix\(in srgb, var\(--muted\) 35%, transparent\)/);
+  });
+});
+
+/** Every declaration of the rules whose selector list includes SELECTOR, joined. */
+function rulesOfSelector(selector: string): string {
+  return rulesOf(stylesheet)
+    .filter((rule) => rule.selectors.includes(selector))
+    .map((rule) => rule.declarations)
+    .join("\n");
+}
+
+describe("the selected-entry mark (a jump's landing, the feed selection)", () => {
+  it("rings the selected card with the selection token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".entry-selected:not(.bubble)");
+
+    // Assert
+    expect(rule).toMatch(/outline:\s*1px solid var\(--selected-entry\)/);
+  });
+
+  it("pulls the ring inside the card's own box, so nothing reflows or clips", () => {
+    // Arrange / Act — an outline takes no layout space; a negative offset of
+    // its own width keeps it inside the row's paint containment.
+    const rule = declarationsOf(".entry-selected:not(.bubble)");
+
+    // Assert
+    expect(rule).toMatch(/outline-offset:\s*-1px/);
+  });
+
+  it("flashes the ring once, in and back out, over the reveal's whole life", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".entry-selected:not(.bubble)") ?? "";
+    const duration = /animation:\s*entry-selected-flash\s+(\d+(?:\.\d+)?)s\s+ease-in-out\s+1\s+both/.exec(rule);
+
+    // Assert — the flash ends exactly when feed.ts lifts the reveal's mark.
+    expect(duration).not.toBeNull();
+    expect(Number(duration?.[1]) * 1000).toBe(REVEAL_HIGHLIGHT_MS);
+  });
+
+  it("starts and ends the flash transparent", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("entry-selected-flash");
+
+    // Assert
+    expect(keyframes).toMatch(/0%,\s*100%\s*\{\s*outline-color:\s*transparent;?\s*\}/);
+  });
+
+  it("peaks the flash at the selection token halfway through", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("entry-selected-flash");
+
+    // Assert
+    expect(keyframes).toMatch(/50%\s*\{\s*outline-color:\s*var\(--selected-entry\);?\s*\}/);
+  });
+
+  it("never changes a border width or the card's own shadow to mark a card", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".entry-selected:not(.bubble)") ?? "";
+
+    // Assert
+    expect(/\bborder(-width)?\s*:|box-shadow\s*:/.test(rule)).toBe(false);
+  });
+
+  it("no longer marks the full-width row wrapper", () => {
+    // Arrange / Act
+    const css = withoutBlockComments(stylesheet);
+
+    // Assert
+    expect(css.includes(".row-revealed")).toBe(false);
+  });
+
+  it("keeps the flash ring off a selected final response, whose purple ring is its mark", () => {
+    // Arrange
+    const card = document.createElement("div");
+    card.className = "bubble final-response entry-selected";
+
+    // Act, Assert — the flash ring's selector does not match it.
+    expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
+  });
+
+  it("keeps the flash ring off a selected prompt, whose purple ring is its mark", () => {
+    // Arrange
+    const card = document.createElement("div");
+    card.className = "bubble user entry-selected";
+    card.setAttribute("data-role", "prompt");
+
+    // Act, Assert — the flash ring's selector does not match it.
+    expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
+  });
+
+  it("rings a selected bubble with a very thin outline of the canonical purple", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.entry-selected") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/outline:\s*0\.5px solid var\(--blocked\);/);
+  });
+
+  it("pulls the selected bubble's ring inside its own box by the ring's width", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.entry-selected") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/outline-offset:\s*-0\.5px;/);
+  });
+
+  it("sets the ring alone, so selecting never recolors a fill or border, reflows, or flashes", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.entry-selected") ?? "";
+
+    // Assert
+    expect(rule.trim().split(/;\s*/).filter(Boolean)).toEqual([
+      "outline: 0.5px solid var(--blocked)",
+      "outline-offset: -0.5px",
+    ]);
+  });
+
+  it.each([
+    ["a user prompt", "bubble entry-selected", "prompt", "user"],
+    ["an agent-addressed prompt", "bubble entry-selected", "prompt", "agent"],
+    ["a held prompt", "bubble entry-selected", "prompt", "held"],
+    ["an interim response", "bubble interim-response entry-selected", "response", "response"],
+    ["a final response", "bubble final-response entry-selected", "response", "response"],
+  ])("keeps %s's own fill while it is selected", (_kind, className, role, variant) => {
+    // Arrange
+    const selected = selectedBubble(className, role, variant);
+    const unselected = selectedBubble(className.replace(" entry-selected", ""), role, variant);
+
+    // Act
+    const [selectedFill, ownFill] = [selected, unselected].map((el) => inDocument(el, (e) => cascadedValue(e, "--bubble-bg")));
+
+    // Assert
+    expect(selectedFill).toBe(ownFill);
+  });
+
+  it("rings a selected member of a coalesced run, whose border width is 0", () => {
+    // Arrange
+    const run = document.createElement("div");
+    run.className = "response-run";
+    const item = document.createElement("div");
+    item.className = "feed-item";
+    const bubble = selectedBubble("bubble final-response entry-selected", "response", "response");
+    item.append(bubble);
+    run.append(item);
+
+    // Act
+    const outline = inDocument(run, () => cascadedValue(bubble, "outline"));
+
+    // Assert
+    expect(outline).toBe("0.5px solid var(--blocked)");
+  });
+
+  it("declares no selected-bubble fill token any more", () => {
+    // Arrange / Act
+    const css = withoutBlockComments(stylesheet);
+
+    // Assert
+    expect(/--selected-(bubble|prompt|final-response)-bg/.test(css)).toBe(false);
+  });
+
+  it("defines the --selected-entry token so the blue rule resolves", () => {
+    // Arrange / Act — comments are stripped, so a bare token declaration remains.
+    const declared = /--selected-entry:\s*#[0-9a-fA-F]{3,6}/.test(
+      withoutBlockComments(stylesheet),
+    );
+
+    // Assert
+    expect(declared).toBe(true);
+  });
+
+});
+
+/**
+ * THE FEED TEXT ZOOM SCOPING (owner-requested, RPC-driven).
+ *
+ * The daemon-owned zoom rides ONE custom property, `--feed-text-scale`, which
+ * multiplies into every feed-scroll font-size as `calc(<base> * var(...))`.
+ * jsdom does not resolve calc()/var(), so these read the file's TEXT: the proof
+ * that "only the feed, only text" scales is that the property is referenced
+ * ONLY inside font-size declarations, and NEVER by the sidebar, topbar, footer,
+ * composer or login chrome.
+ */
+const FEED_SCALE_VAR = "var(--feed-text-scale)";
+
+/** The forbidden chrome: no selector containing any of these may reference the var. */
+const FORBIDDEN_CHROME: readonly string[] = [
+  "#composer",
+  "#footer",
+  ".pfooter",
+  "#ws-sidebar",
+  "#topbar",
+  "#login",
+];
+
+describe("the feed text zoom scoping", () => {
+  it("defines the scale property once, at :root, with a unity default", () => {
+    // Arrange / Act
+    const root = rulesOf(stylesheet).find((rule) => rule.selectors.includes(":root"));
+
+    // Assert
+    expect(root?.declarations).toMatch(/--feed-text-scale\s*:\s*1\b/);
+  });
+
+  it("references the scale only inside font-size declarations, never layout", () => {
+    // Arrange / Act: every declaration in the sheet that mentions the var.
+    const offenders: string[] = [];
+    for (const rule of rulesOf(stylesheet)) {
+      for (const decl of rule.declarations.split(";")) {
+        if (!decl.includes(FEED_SCALE_VAR)) continue;
+        if (!/^\s*font-size\s*:/.test(decl)) offenders.push(decl.trim());
+      }
+    }
+
+    // Assert
+    expect(offenders).toEqual([]);
+  });
+
+  it("never scales the sidebar, topbar, footer, composer or login chrome", () => {
+    // Arrange / Act
+    const leaks: string[] = [];
+    for (const rule of rulesOf(stylesheet)) {
+      if (!rule.declarations.includes(FEED_SCALE_VAR)) continue;
+      for (const selector of rule.selectors) {
+        if (FORBIDDEN_CHROME.some((chrome) => selector.includes(chrome))) leaks.push(selector);
+      }
+    }
+
+    // Assert
+    expect(leaks).toEqual([]);
+  });
+
+  it("does scale the core feed text: the bubble, markdown and tool cards", () => {
+    // Arrange / Act
+    const scaled = new Set<string>();
+    for (const rule of rulesOf(stylesheet)) {
+      if (!rule.declarations.includes(FEED_SCALE_VAR)) continue;
+      for (const selector of rule.selectors) scaled.add(selector);
+    }
+
+    // Assert: the feed's spine carries the scale.
+    expect(scaled.has("#feed")).toBe(true);
+    expect(scaled.has(".bubble")).toBe(true);
+    expect(scaled.has(".tool-card")).toBe(true);
+  });
+});
+
+/**
+ * THE CARD-LEVEL TOOL FOLD (owner ruling, 2026-09-15).
+ *
+ * A tool-call and a skill card are ONE click-to-expand unit: collapsed shows
+ * the head (the title in full) and the input line (capped at one row), with the
+ * output section HIDDEN — no preview — until the whole `.tool-fold` card is
+ * `.expanded`. These pin that model to the file, and — the load-bearing part —
+ * that it never reaches the response/prompt bubble.
+ */
+describe("the card-level tool fold", () => {
+  it("hides a collapsed card's output section entirely, showing no preview", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold:not(.expanded) > .tool-output");
+
+    // Assert — the section is removed from layout while collapsed, not capped.
+    expect(rule).toMatch(/display:\s*none/);
+  });
+
+  it("reveals the section, which gives way and scrolls, once the card is expanded", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded > .tool-output");
+
+    // Assert — the card's ceiling bounds it, not a cap of its own.
+    expect(rule).toMatch(/max-height:\s*none/);
+    expect(rule).toMatch(/min-height:\s*0/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("caps the expanded card itself at the expanded-item ceiling", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded");
+
+    // Assert
+    expect(rule).toMatch(/max-height:\s*var\(--feed-item-max-h\)/);
+    expect(rule).toMatch(/flex-direction:\s*column/);
+  });
+
+  it("scopes the whole fold model to tool cards, never to a bubble", () => {
+    // Arrange / Act — every SELECTOR that mentions the card fold. Per selector
+    // rather than per rule: the title fold's lift rule lists each fold that can
+    // own a title, the `.tool-fold` card beside the `.bubble-fold` head (itself a
+    // tool card), in one selector list.
+    const foldSelectors = rulesOf(stylesheet).flatMap((r) =>
+      r.selectors.filter((sel) => sel.includes("tool-fold")),
+    );
+
+    // Assert — not one of them reaches a response/prompt/peer bubble.
+    expect(foldSelectors.length).toBeGreaterThan(0);
+    for (const sel of foldSelectors) expect(sel.includes("bubble")).toBe(false);
+  });
+});
+
+/**
+ * THE TITLE FOLD (owner ruling, 2026-10-07, superseding the two-line fade of
+ * 2026-09-23). A tool card's TITLE — the shell bubble's command, a tool call's
+ * input line, a skill's invocation, a hook's headline, a subagent's
+ * description — is capped at ONE line while the fold that owns it is
+ * collapsed, and the clamp ends that line in `…` when anything follows it: no
+ * fade, never a chevron. It replaced the tool-call card's own input-line clamp
+ * (`.tool-fold:not(.expanded) > .bash-input` and its three siblings), which had
+ * no fade; the input line is now one of the title fold's sites.
+ */
+describe("the one-line clamp's shared shape", () => {
+  /** The one rule whose selector list is exactly CLAMP_SHAPE_SELECTORS. */
+  const shapeRule = (): string | undefined =>
+    rulesOf(stylesheet).find(
+      (r) => r.selectors.length === CLAMP_SHAPE_SELECTORS.length && CLAMP_SHAPE_SELECTORS.every((sel) => r.selectors.includes(sel)),
+    )?.declarations;
+
+  it("is one rule naming both clamps", () => {
+    // Arrange / Act
+    const rule = shapeRule();
+
+    // Assert
+    expect(rule).toBeDefined();
+  });
+
+  it("lays both clamps out as a vertical box", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert
+    expect([/display:\s*-webkit-box\s*;/.test(rule), /-webkit-box-orient:\s*vertical\s*;/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("hides what both clamps drop", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert
+    expect(rule).toMatch(/overflow:\s*hidden\s*;/);
+  });
+
+  it("lets both clamps break their kept line anywhere, so the ellipsis reaches the edge", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert
+    expect(rule).toMatch(/line-break:\s*anywhere\s*;/);
+  });
+
+  it("draws both clamps' ellipsis trim as a transparent right border, so the box never moves", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert -- the property is the one ellipsis-trim.ts sets, defaulting to no trim.
+    expect(rule).toContain(`border-right: var(${ELLIPSIS_TRIM_PROPERTY}, 0px) solid transparent;`);
+  });
+
+  it("is the only rule stating the shape for either clamp", () => {
+    // Arrange / Act — any other rule re-declaring the box on one clamp alone.
+    const handRolled = rulesOf(stylesheet).filter(
+      (r) =>
+        CLAMP_SHAPE_SELECTORS.some((selector) => isOwnRule(r, selector)) &&
+        /display:\s*-webkit-box|-webkit-box-orient/.test(r.declarations),
+    );
+
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+});
+
+describe("the title fold", () => {
+  /** The title-level classes a card draws its title line with. */
+  const TITLE_CLASSES = [
+    ".tool-input",
+    ".bash-input",
+    ".file-path",
+    ".tool-query",
+    ".shell-command",
+    ".tool-name",
+    ".subagent-description",
+  ];
+
+  it("caps a collapsed title at one text row", () => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf(".title-fold");
+
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*1\s*;/);
+    expect(declarationsOf(".title-fold")).toMatch(/overflow:\s*hidden/);
+  });
+
+  it("clamps as a vertical box, the shape that makes the engine write the ellipsis", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".title-fold");
+
+    // Assert
+    expect(rule).toMatch(/display:\s*-webkit-box/);
+    expect(rule).toMatch(/-webkit-box-orient:\s*vertical/);
+  });
+
+  it("drops each title line's own preview cap so one row is the only limit", () => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf(".title-fold");
+
+    // Assert
+    expect(rule).toMatch(/max-height:\s*none/);
+  });
+
+  it("is the only literal one-row clamp: no title class is clamped by its own name", () => {
+    // Arrange / Act — every rule that clamps to a literal row count.
+    const clamps = rulesOf(stylesheet).filter((r) => /-webkit-line-clamp:\s*\d/.test(r.declarations));
+
+    // Assert — one shared cap, keyed on the one class every title site wears.
+    expect(clamps.map((r) => r.selectors)).toEqual([[".title-fold"]]);
+  });
+
+  it("has retired the tool-call card's own input-line clamp", () => {
+    // Arrange / Act — any rule still naming a title class under the card fold.
+    const handRolled = rulesOf(stylesheet).filter((r) =>
+      r.selectors.some((sel) => sel.startsWith(".tool-fold") && TITLE_CLASSES.some((c) => sel.endsWith(c))),
+    );
+
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+
+  it("lifts the cap on exactly the folds that can own a title", () => {
+    // Arrange / Act
+    const lift = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes(".title-fold.expanded") && /line-clamp:\s*none/.test(r.declarations),
+    );
+
+    // Assert — the stylesheet and the measurer read the same owners.
+    expect(lift?.selectors).toEqual(TITLE_FOLD_OPEN_SELECTOR.split(",").map((one) => one.trim()));
+  });
+
+  it("shows the whole title once its fold is expanded", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded .title-fold");
+
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*none/);
+    expect(rule).toMatch(/max-height:\s*none/);
+    expect(rule).toMatch(/overflow:\s*visible/);
+  });
+
+  it("wraps an expanded title at its word breaks again", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded .title-fold");
+
+    // Assert
+    expect(rule).toMatch(/line-break:\s*auto\s*;/);
+  });
+
+  it("drops an expanded title's ellipsis trim, so its whole width shows", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded .title-fold");
+
+    // Assert
+    expect(rule).toMatch(/border-right-width:\s*0\s*;/);
+  });
+
+  it("draws no fade on a title: the ellipsis is its whole signal", () => {
+    // Arrange / Act — every selector drawing a pseudo-element on a title fold.
+    const pseudo = rulesOf(stylesheet).flatMap((r) =>
+      r.selectors.filter((sel) => sel.includes(".title-fold") && sel.includes("::after")),
+    );
+
+    // Assert
+    expect(pseudo).toEqual([]);
+  });
+
+  it("draws no chevron on a title", () => {
+    // Arrange / Act
+    const chevron = rulesOf(stylesheet).find((r) => r.selectors.includes(".title-fold.has-more::before"));
+
+    // Assert
+    expect(chevron).toBeUndefined();
+  });
+
+  it("lets a subagent's description wrap so the clamp writes its ellipsis, not nowrap", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".subagent-description");
+
+    // Assert
+    expect(rule).not.toMatch(/white-space:\s*nowrap/);
+  });
+
+  it("leaves no title fade background behind", () => {
+    // Arrange / Act
+    const fadeBg = rulesOf(stylesheet).filter((r) => /--title-fold-bg/.test(r.declarations));
+
+    // Assert
+    expect(fadeBg).toEqual([]);
+  });
+});
+
+/**
+ * REGRESSION GUARD: the response/prompt bubble collapse model is UNCHANGED by
+ * the card-level tool fold. The bubble's scroll box must still cap-and-clip
+ * exactly as it did, and the tool cards' hide-while-collapsed model must NOT
+ * have leaked onto the response/prompt bubble (which shows a capped preview, not
+ * a hidden body — only the PEER bubble hides its body while collapsed).
+ */
+describe("regression: the response/prompt bubble collapse model", () => {
+  it("still caps the bubble scroll box at min(the line budget, 50vh)", () => {
+    // Arrange / Act
+    const capped = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.includes(".bubble > .bubble-scroll"),
+    );
+
+    // Assert — the same min(calc(...), 50vh) cap FIX1 established.
+    expect(
+      capped.some((rule) =>
+        /max-height:\s*min\(calc\(var\(--bubble-cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
+      ),
+    ).toBe(true);
+  });
+
+  it("still clips the collapsed bubble scroll box, revealing scroll only on expand", () => {
+    // Arrange / Act — the first overflow-y rule on the box is the collapsed clip.
+    const clip = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /overflow-y/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(clip?.declarations).toMatch(/overflow-y:\s*hidden\s*;/);
+  });
+
+  it("gives the peer message its header-only face through a zero-line cap, not a hider", () => {
+    // Arrange / Act — the peer's own hide-while-collapsed rule is gone; its
+    // collapsed face is the one cap mechanism's zero (peer-message.ts).
+    const peer = declarationsOf(".bubble.peer > .bubble-scroll:not(.expanded)");
+
+    // Assert
+    expect([peer, declarationsOf('.bubble[data-cap-lines="0"]')]).toEqual([
+      undefined,
+      " --bubble-cap-lines: 0; ",
+    ]);
+  });
+
+  it("never hides any bubble's body while collapsed", () => {
+    // Arrange / Act — every rule that removes an element from layout.
+    const hiders = rulesOf(stylesheet).filter((rule) => /display:\s*none/.test(rule.declarations));
+
+    // Assert — none of them collapses an assistant/user bubble's scroll box, so
+    // the response/prompt bubble keeps its capped-preview model, not the tool
+    // cards' backlog-section one.
+    // A folded held card's thumbnail (src/bubble/collapsed-thumbnail.ts)
+    // hides a block inside the body, never the body.
+    const insideBox = (one: string): boolean => /\.bubble-body\s*>\s*\S/.test(one);
+    for (const rule of hiders) {
+      for (const sel of rule.selectors.filter((one) => !insideBox(one))) {
+        expect(/^\.bubble\S*\s*>\s*\.bubble-scroll(?!\S*::)/.test(sel)).toBe(false);
+      }
+    }
+  });
+});
+
+/**
+ * THE REVIVING SHIMMER'S STYLESHEET CONTRACT. The endless loops the rail's
+ * wall-clock seek keeps in phase, the band carried by a `transform` with the
+ * text held still under it, and the reduced-motion stop all live only in the
+ * file.
+ */
+describe("the reviving shimmer's stylesheet contract", () => {
+  const band = "#ws-sidebar .row .name.reviving > .name-ink";
+  const copies = ["#ws-sidebar .row .name.reviving > .name-ink::before", "#ws-sidebar .row .name.reviving > .name-ink::after"];
+
+  /** The bodies of every `@media (QUERY)` block. */
+  function mediaBodies(query: string): string[] {
+    return mediaBlocksOf(query).map((block) => block.body);
+  }
+
+  /** The declarations of the first rule whose selector list holds SELECTOR in CSS. */
+  function ruleIn(css: string, selector: string): string {
+    return rulesOf(css).find((rule) => rule.selectors.includes(selector))?.declarations ?? "";
+  }
+
+  /** A `translateX(N%)` stop's N, in the order the KEYFRAMES state them. */
+  function shifts(keyframes: string): number[] {
+    return [...keyframes.matchAll(/transform:\s*translateX\((-?\d+)%?\)/g)].map((m) => Number(m[1]));
+  }
+
+  /** A width declaration's percentage in DECLS. */
+  function widthPercent(decls: string): number {
+    return Number(/(?:^|;)\s*width:\s*(\d+)%/.exec(decls)?.[1]);
+  }
+
+  it("loops endlessly, so the rail's wall-clock seek keeps it in phase", () => {
+    // Arrange / Act
+    const decls = ruleIn(stylesheet, band);
+
+    // Assert
+    expect(decls).toContain("ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite");
+  });
+
+  // THE BAND MOVES ON THE COMPOSITOR (2026-11-16): `transform`, never `mask-position`.
+  it("moves the band by transform alone", () => {
+    // Arrange / Act
+    const keyframes = [keyframesOf("ws-revive-shimmer"), keyframesOf("ws-revive-counter")].join("\n");
+
+    // Assert
+    expect([/mask-position/.test(keyframes), /transform:/.test(keyframes)]).toEqual([false, true]);
+  });
+
+  it("carries the band from 1.5 names left of the name to the name's left edge, so it always covers the text", () => {
+    // Arrange
+    const boxWidth = widthPercent(ruleIn(stylesheet, band)) / 100;
+
+    // Act: the box's shift is a share of its own width, which is the band's.
+    const travel = shifts(keyframesOf("ws-revive-shimmer")).map((shift) => (shift / 100) * boxWidth);
+
+    // Assert
+    expect([boxWidth, travel]).toEqual([2.5, [-1.5, 0]]);
+  });
+
+  it("moves the copies back by exactly the band's travel, so the text stands still", () => {
+    // Arrange
+    const boxWidth = widthPercent(ruleIn(stylesheet, band)) / 100;
+    const copyWidth = (widthPercent(ruleIn(stylesheet, copies[0] ?? "")) / 100) * boxWidth;
+
+    // Act: a copy's shift is a share of its own width, the name's.
+    const back = shifts(keyframesOf("ws-revive-counter")).map((shift) => (shift / 100) * copyWidth);
+    const travel = shifts(keyframesOf("ws-revive-shimmer")).map((shift) => (shift / 100) * boxWidth);
+
+    // Assert
+    expect([copyWidth, back.map((shift, i) => shift + (travel[i] ?? NaN))]).toEqual([1, [0, 0]]);
+  });
+
+  it.each([
+    "#ws-sidebar .row .name.reviving > .name-ink::before",
+    "#ws-sidebar .row .name.breathes.reviving > .name-ink::before",
+    "#ws-sidebar .row .name.breathes.reviving > .name-ink::after",
+  ])("moves %s back on the band's own timing", (selector) => {
+    // Arrange / Act
+    const decls = rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))?.declarations ?? "";
+
+    // Assert
+    expect(decls).toContain("ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite");
+  });
+
+  // Reduced motion drops the shimmer: every rule of it is drawn only under
+  // `no-preference`, so the name is drawn in plain ink.
+  it("draws every rule of the shimmer only under prefers-reduced-motion: no-preference", () => {
+    // Arrange
+    const shimmer = (css: string): number =>
+      rulesOf(css).filter((rule) => rule.selectors.some((sel) => sel.includes(".reviving > .name-ink"))).length;
+
+    // Act
+    const inside = mediaBodies("prefers-reduced-motion: no-preference").reduce((n, body) => n + shimmer(body), 0);
+
+    // Assert
+    expect([shimmer(stylesheet), inside]).toEqual([inside, 5]);
+  });
+
+  it("leaves nothing of the shimmer to undo under prefers-reduced-motion: reduce", () => {
+    // Arrange / Act
+    const named = mediaBodies("prefers-reduced-motion: reduce").filter((body) => body.includes(".reviving"));
+
+    // Assert
+    expect(named).toEqual([]);
+  });
+
+  it("draws the band as a mask's 40% alpha", () => {
+    // Arrange / Act
+    const decls = ruleIn(stylesheet, band);
+
+    // Assert
+    expect(decls).toMatch(/(?<!-webkit-)mask-image:\s*linear-gradient\(90deg,[^;]*rgb\(0 0 0 \/ 40%\) 50%/);
+  });
+
+  // WebKitGTK ended every page of the webhost when a gradient mixed
+  // currentColor (2026-10-28), so no gradient anywhere in the stylesheet does.
+  it("mixes currentColor into no gradient anywhere in the stylesheet", () => {
+    // Arrange / Act
+    const mixed = rulesOf(stylesheet).filter((rule) =>
+      /gradient\([^;]*color-mix\([^;)]*currentColor/i.test(rule.declarations),
+    );
+
+    // Assert
+    expect(mixed.map((rule) => rule.selectors)).toEqual([]);
+  });
+});
+
+/**
+ * THE PROMPT BUBBLE IS STILL (owner ruling, 2026-10-26: "no animation should be
+ * done there"). The thinking wave that once crossed a working prompt's fill is
+ * gone, and nothing replaces it: no rule that paints a bubble element itself
+ * declares an animation, so no prompt state (in flight, awaiting the user, at
+ * rest) can move it. The one exception is the HELD GLIMMER (owner request,
+ * 2026-10-28): a held prompt's edge ring, its `::before`, travels a faint arc.
+ */
+/**
+ * THE HELD GLIMMER (owner request, 2026-10-28): a faint arc of light travels
+ * around a held prompt's edge, a 1px ring that reflows nothing.
+ */
+describe("the held glimmer", () => {
+  const RING = '.bubble[data-variant="held"]::before';
+
+  it("anchors the ring on the held bubble itself", () => {
+    // Arrange / Act
+    const held = rulesOf(stylesheet).filter((rule) => isOwnRule(rule, '.bubble[data-variant="held"]'));
+    // Assert
+    expect(held.some((rule) => /position:\s*relative/.test(rule.declarations))).toBe(true);
+  });
+
+  it.each([
+    ["sits the ring 1px outside the bubble's padding box", /inset:\s*-1px/],
+    ["draws the ring 1px wide", /padding:\s*1px/],
+    ["follows the bubble's corners", /border-radius:\s*inherit/],
+    ["masks the gradient to the ring alone", /mask-composite:\s*exclude/],
+    ["draws the arc from the --fg ink at 22%", /color-mix\(in srgb, var\(--fg\) 22%, transparent\)/],
+    ["turns the arc by the animated angle", /conic-gradient\(from var\(--held-glimmer-angle\)/],
+    ["never takes a click", /pointer-events:\s*none/],
+  ])("%s", (_label, pattern) => {
+    // Arrange / Act
+    const ring = declarationsOf(RING) ?? "";
+    // Assert
+    expect(ring).toMatch(pattern);
+  });
+
+  it("registers the angle so the browser can animate it", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(/@property --held-glimmer-angle\s*\{[^}]*syntax:\s*"<angle>"/);
+  });
+
+  it("turns the angle one full lap", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("held-glimmer");
+    // Assert
+    expect(keyframes).toMatch(/to\s*\{\s*--held-glimmer-angle:\s*360deg;?\s*\}/);
+  });
+
+  it("travels one lap every four seconds, only where motion is welcome", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(
+      /@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.bubble\[data-variant="held"\]::before\s*\{\s*animation:\s*held-glimmer 4s linear infinite;\s*\}/,
+    );
+  });
+
+  it("declares the animation nowhere outside the motion query", () => {
+    // Arrange / Act
+    const ring = declarationsOf(RING) ?? "";
+    // Assert
+    expect(ring).not.toMatch(/(?:^|;)\s*animation/);
+  });
+});
+
+/**
+ * THE REVISING SHIMMER (owner request, 2026-10-30): a final response whose
+ * revision is on its way carries a soft band sweeping across it, never the
+ * purple border it once wore.
+ */
+describe("the revising shimmer", () => {
+  const BAND = ".bubble.response-revising::after";
+
+  it.each([
+    ["covers the whole bubble", /inset:\s*0/],
+    ["follows the bubble's corners", /border-radius:\s*inherit/],
+    ["draws the band from the --fg ink at 6%", /color-mix\(in srgb, var\(--fg\) 6%, transparent\)/],
+    ["never takes a click", /pointer-events:\s*none/],
+    ["sweeps every 2.4 seconds", /animation:\s*response-revising-shimmer 2\.4s ease-in-out infinite/],
+  ])("%s", (_label, pattern) => {
+    // Arrange / Act
+    const band = declarationsOf(BAND) ?? "";
+    // Assert
+    expect(band).toMatch(pattern);
+  });
+
+  it("draws the band only where motion is welcome", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(
+      /@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.bubble\.response-revising::after\s*\{/,
+    );
+  });
+
+  it("sweeps the band across the bubble", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("response-revising-shimmer");
+    // Assert
+    expect(keyframes).toMatch(/from\s*\{\s*background-position:\s*100% 0;?\s*\}\s*to\s*\{\s*background-position:\s*0% 0;?\s*\}/);
+  });
+
+  it("no longer turns the border purple", () => {
+    // Arrange / Act
+    const own = rulesOf(stylesheet).filter((rule) => rule.selectors.includes(".bubble.response-revising"));
+    // Assert
+    expect(own.filter((rule) => /border-color/.test(rule.declarations))).toEqual([]);
+  });
+});
+
+describe("the still prompt bubble", () => {
+  /** The rightmost compound of SELECTOR: the element the rule paints. */
+  function subjectOf(selector: string): string {
+    const parts = selector.split(/[\s>+~]+/).filter((part) => part !== "");
+    return parts[parts.length - 1] ?? "";
+  }
+
+  it("declares no animation on any rule painting a bubble element but the held glimmer and the revising shimmer", () => {
+    // Arrange / Act
+    const animated = rulesOf(stylesheet).filter(
+      (rule) =>
+        /(?:^|;)\s*animation/.test(rule.declarations) &&
+        rule.selectors.some((sel) => /\.bubble(?![\w-])/.test(subjectOf(sel).replace(/:not\([^)]*\)/g, ""))),
+    );
+
+    // Assert
+    expect(animated.flatMap((rule) => rule.selectors)).toEqual([
+      '.bubble[data-variant="held"]::before',
+      ".bubble.response-revising::after",
+    ]);
+  });
+
+  it.each([
+    ["the wave's keyframes", "@keyframes bubble-wave"],
+    ["the wave's wash token", "--bubble-wave"],
+    ["the wave's marker", "data-wave"],
+    ["the hidden-page flag the wave's driver stamped", "data-page-hidden"],
+  ])("keeps no trace of %s", (_label, literal) => {
+    // Arrange / Act
+    const found = stylesheet.includes(literal);
+
+    // Assert
+    expect(found).toBe(false);
+  });
+});
+
+// THE ASYNC BUBBLE'S EXPANDED CAP (owner ruling, 2026-09-23) is `75cqh`, which
+// only means "three quarters of the feed" while the feed's scrolling viewport is
+// the size container `cqh` resolves against. The cap itself is asserted on a
+// mounted bubble in test/feed/bubble.test.ts; this pins the unit's anchor.
+describe("the feed viewport as the async bubble cap's size container", () => {
+  it("makes #feed-scroll a size container so cqh measures the feed's visible height", () => {
+    // Arrange / Act
+    const feedScroll = rulesOf(stylesheet).filter((rule) => rule.selectors.includes("#feed-scroll"));
+
+    // Assert
+    expect(
+      feedScroll.some((rule) => /(?:^|[\s;])container-type\s*:\s*size\s*(?:;|$)/.test(rule.declarations)),
+    ).toBe(true);
+  });
+});
+
+/**
+ * THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the space between the
+ * conversation and the footer dock holds at EVERY scroll position, not only at
+ * the end of the content. One token sizes both the band at the bottom of
+ * #feed-scroll's viewport, which a mask fades content out across, and the
+ * trailing spacer the last card rests on once the reader reaches the end.
+ */
+const GAP_VAR = "var(--feed-bottom-gap)";
+
+/** Every declaration block whose selector list names SELECTOR exactly, joined. */
+function allDeclarationsOf(selector: string): string {
+  return rulesOf(stylesheet)
+    .filter((rule) => rule.selectors.includes(selector))
+    .map((rule) => rule.declarations)
+    .join(";");
+}
+
+/** The value of PROPERTY in DECLS (the last one wins, as in the cascade), trimmed. */
+function valueOf(decls: string, property: string): string | undefined {
+  const pattern = new RegExp(`(?:^|[;{\\s])${property}\\s*:\\s*([^;]+)`, "g");
+  return [...decls.matchAll(pattern)].at(-1)?.[1]?.replace(/\s+/g, " ").trim();
+}
+
+/** A `rem` length's number, failing loudly on anything else. */
+function rem(length: string | undefined): number {
+  const match = /^(-?[\d.]+)rem$/.exec(length ?? "");
+  if (match === null) throw new Error(`not a rem length: ${String(length)}`);
+  return Number(match[1]);
+}
+
+/** The top padding of a `padding` shorthand (its first component). */
+function paddingTop(decls: string): string | undefined {
+  return valueOf(decls, "padding")?.split(" ")[0];
+}
+
+/** The bottom padding of a `padding` shorthand, per the CSS 1-to-4 value rule. */
+function paddingBottom(decls: string): string | undefined {
+  const parts = valueOf(decls, "padding")?.split(" ") ?? [];
+  return parts.length >= 3 ? parts[2] : parts[0];
+}
+
+describe("the feed's bottom gap", () => {
+  it("declares the gap token once, at :root, as the 1rem #feed's padding used to be", () => {
+    // Arrange / Act
+    const declared = [...stylesheet.matchAll(/--feed-bottom-gap\s*:\s*([^;]+);/g)].map((m) => m[1]?.trim());
+
+    // Assert
+    expect(declared).toEqual(["1rem"]);
+  });
+
+  it("fades the viewport's bottom band out across exactly one gap, from the token", () => {
+    // Arrange / Act
+    const mask = valueOf(allDeclarationsOf("#feed-scroll"), "mask-image");
+
+    // Assert
+    expect(mask).toBe(`linear-gradient( to bottom, #000 calc(100% - ${GAP_VAR}), transparent 100% )`);
+  });
+
+  it("draws the fade as a mask, which is no element and so intercepts no pointer event", () => {
+    // Arrange / Act
+    const overlays = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /^#feed-scroll::(?:before|after)$/.test(sel)) && /background/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(overlays.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("makes the trailing spacer pointer-transparent", () => {
+    // Arrange / Act
+    const spacer = allDeclarationsOf("#feed-scroll::after");
+
+    // Assert
+    expect(valueOf(spacer, "pointer-events")).toBe("none");
+  });
+
+  it("sizes the trailing spacer by the same token, so the band is empty at the end", () => {
+    // Arrange / Act
+    const spacer = allDeclarationsOf("#feed-scroll::after");
+
+    // Assert
+    expect(valueOf(spacer, "height")).toBe(GAP_VAR);
+  });
+
+  it("lays the trailing spacer out as a block, so it adds its height to the scrolled content", () => {
+    // Arrange / Act
+    const spacer = allDeclarationsOf("#feed-scroll::after");
+
+    // Assert
+    expect(valueOf(spacer, "display")).toBe("block");
+  });
+
+  it("pads #feed-scroll nowhere, so the cqh size container keeps its full content box", () => {
+    // Arrange / Act
+    const padding = valueOf(allDeclarationsOf("#feed-scroll"), "padding(?:-bottom)?");
+
+    // Assert
+    expect(padding).toBeUndefined();
+  });
+
+  it("takes the bottom gap off #feed, which no longer carries it inside the scroll box", () => {
+    // Arrange / Act
+    const bottom = paddingBottom(allDeclarationsOf("#feed"));
+
+    // Assert
+    expect(bottom).toBe("0");
+  });
+
+  it("keeps #feed's top padding, so the top of the feed is unchanged", () => {
+    // Arrange / Act
+    const top = paddingTop(allDeclarationsOf("#feed"));
+
+    // Assert
+    expect(top).toBe("1rem");
+  });
+
+  it("keeps the at-bottom distance from the last card to the dock at 1.25rem", () => {
+    // Arrange
+    const token = /--feed-bottom-gap\s*:\s*([^;]+);/.exec(stylesheet)?.[1]?.trim();
+    const footerTop = paddingTop(allDeclarationsOf("#footer"));
+
+    // Act
+    const total = rem(token) + rem(footerTop);
+
+    // Assert
+    expect(total).toBe(1.25);
+  });
+
+  it("gives the held section no bottom gap of its own, so it rests on the same one", () => {
+    // Arrange / Act
+    const bottom = paddingBottom(allDeclarationsOf("#hold-tray"));
+
+    // Assert
+    expect(bottom).toBe("0");
+  });
+
+  it("puts the feed's own row gap between the last row and the first held item", () => {
+    // Arrange / Act — a held prompt that settles out of the held section into
+    // the rows then lands where it already stood (owner ruling, 2026-10-10).
+    const top = paddingTop(allDeclarationsOf("#hold-tray"));
+
+    // Assert
+    expect(top).toBe(valueOf(allDeclarationsOf("#feed"), "gap"));
+  });
+
+  it("spaces the held items by the feed's own row gap", () => {
+    // Arrange / Act
+    const gap = valueOf(allDeclarationsOf(".held-section-items"), "gap");
+
+    // Assert
+    expect(gap).toBe(valueOf(allDeclarationsOf(".feed-rows"), "gap"));
+  });
+
+  it("draws the held section at the feed's own text scale", () => {
+    // Arrange / Act
+    const size = valueOf(allDeclarationsOf("#hold-tray"), "font-size");
+
+    // Assert
+    expect(size).toBe(valueOf(allDeclarationsOf("#feed"), "font-size"));
+  });
+});
+
+/** THE HELD PROMPT'S CONTROL ROW (owner requests, 2026-10-13 and 2026-10-14): compact, even, plain. */
+describe("the held prompt's control row", () => {
+  it.each([
+    ["grid", "display"],
+    ["column", "grid-auto-flow"],
+    ["1fr", "grid-auto-columns"],
+    ["max-content", "width"],
+  ])("gives every control one width through %s %s", (value, property) => {
+    // Arrange / Act
+    const decls = allDeclarationsOf(".queued-actions");
+    // Assert
+    expect(valueOf(decls, property)).toBe(value);
+  });
+
+  it("keeps a control's vertical padding near zero", () => {
+    // Arrange / Act
+    const padding = valueOf(allDeclarationsOf(".queued-actions ar-button"), "padding");
+    // Assert
+    expect(rem(padding?.split(" ")[0])).toBeLessThanOrEqual(0.05);
+  });
+
+  it("sets a control's text smaller than the bubble's", () => {
+    // Arrange / Act
+    const size = valueOf(allDeclarationsOf(".queued-actions ar-button"), "font-size");
+    // Assert
+    expect(size).toBe("calc(0.68rem * var(--feed-text-scale))");
+  });
+
+  it("keeps a control's line box at a 0.75rem text's 1.15 leading, so the smaller label leaves the control's height alone", () => {
+    // Arrange
+    const decls = allDeclarationsOf(".queued-actions ar-button");
+    const size = Number(/calc\(([\d.]+)rem \* var\(--feed-text-scale\)\)/.exec(valueOf(decls, "font-size") ?? "")?.[1]);
+    const leading = /calc\(([\d.]+) \* ([\d.]+) \/ ([\d.]+)\)/.exec(valueOf(decls, "line-height") ?? "");
+    // Act
+    const lineBox = size * (Number(leading?.[1]) * Number(leading?.[2])) / Number(leading?.[3]);
+    // Assert
+    expect(lineBox).toBeCloseTo(0.75 * 1.15, 10);
+  });
+
+  it("draws every control in the one plain border, none in a color of its own", () => {
+    // Arrange / Act — every rule naming one held control by its action class.
+    const own = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /\.queued-actions ar-button\.queued-action-/.test(sel)),
+    );
+    // Assert
+    expect(own.filter((rule) => /border/.test(rule.declarations))).toEqual([]);
+  });
+});
+
+/**
+ * THE HELD PROMPT IS A BUBBLE (owner rulings, 2026-09-23, superseding the
+ * one-line fold of the same day): it collapses at two lines through the one cap
+ * rule, and keeps no private fold of its own.
+ */
+describe("the held prompt's collapse", () => {
+  it("keeps no private fold rule", () => {
+    // Arrange / Act
+    const folds = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /\.held-(?:fold|line|foldable)\b|\.queued-content\b/.test(sel)),
+    );
+    // Assert
+    expect(folds.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("frames a held prompt with no border of its variant's", () => {
+    // Arrange / Act — a held prompt is not yet received (owner ruling, 2026-09-23).
+    const frames = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((sel) => sel.includes('[data-variant="held"]')) &&
+        /(?:^|;)\s*border(?:-(?:width|style|color))?\s*:/.test(rule.declarations),
+    );
+    // Assert
+    expect(frames.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+});
+
+/**
+ * THE WARNING CHIP IS RED, AND IS THE ONE PLACE AN ERROR SHOWS (owner ruling,
+ * 2026-09-23). The chip took the alarm `--err`, and the client-local failure
+ * overlay it replaced — cards drawn over the page — left no rule behind.
+ */
+describe("the warning chip as the one error surface", () => {
+  it("paints the heading's errors in the alarm red: the LAST color the cascade reaches them with is --err", () => {
+    // Arrange — every rule naming the heading's errors that sets its color, in
+    // file order; with equal specificity the last one is what paints it.
+    const coloring = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.includes('.topbar-heading-warnings[data-severity="errors"]') &&
+        /(?:^|[\s;{])color\s*:/.test(rule.declarations),
+    );
+
+    // Act
+    const last = coloring.at(-1)?.declarations ?? "";
+
+    // Assert
+    expect(last).toMatch(/(?:^|[\s;{])color\s*:\s*var\(--err\)\s*(?:;|$)/);
+  });
+
+  it("carries no rule for a failure overlay", () => {
+    // Arrange / Act
+    const overlay = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes("#failure-overlay")),
+    );
+
+    // Assert
+    expect(overlay).toEqual([]);
+  });
+
+  it("carries no rule for a failure card", () => {
+    // Arrange / Act
+    const cards = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes(".failure-card")),
+    );
+
+    // Assert
+    expect(cards).toEqual([]);
+  });
+});
+
+/**
+ * THE BORDER LADDER: the turn's answer stays green; a settled mid-turn
+ * response (owner request, 2026-10-14) and thinking wear no border at all.
+ */
+describe("the expanded response's eggshell border", () => {
+  /** The one rule that paints it. */
+  const EGGSHELL_SELECTOR =
+    '.bubble[data-role="response"]:not(.entry-selected):not([data-variant="thinking"]):not(.interim-response):has(> .bubble-scroll.expanded)';
+
+  /** A bubble wearing ATTRS and HOOKS, its scroll box open when OPEN. */
+  function bubbleOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[], open: boolean): HTMLElement {
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    const box = document.createElement("div");
+    box.className = open ? "bubble-scroll expanded" : "bubble-scroll";
+    el.append(box);
+    return el;
+  }
+
+  /**
+   * The border color an `!important` rule matching EL forces, or null when no
+   * such rule matches and the ladder's own cascade decides. jsdom's cascade
+   * cannot answer this directly: it neither honors `!important` nor expands a
+   * `border-color: var(...)` shorthand into the longhands it reports. An
+   * important declaration outranks every normal one by the CSS cascade itself,
+   * and the uniqueness test below keeps it the only one, so this is the paint.
+   */
+  function borderOf(el: HTMLElement): string | null {
+    for (const rule of rulesOf(stylesheet)) {
+      const forced = /(?:^|;)\s*border-color\s*:\s*([^;!]*?)\s*!important/.exec(rule.declarations);
+      if (forced !== null && rule.selectors.some((sel) => el.matches(sel))) return forced[1];
+    }
+    return null;
+  }
+
+  const RESPONSES = [
+    ["a streaming response", { "data-role": "response", "data-variant": "response" }, []],
+    ["a settled response that is its turn's latest row", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
+    ["the turn's answer (green)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response"]],
+    ["an agentic card", { "data-role": "response", "data-variant": "agentic" }, []],
+    ["a compaction summary", { "data-role": "response", "data-variant": "compaction" }, []],
+  ] as const;
+
+  it.each(RESPONSES)("borders %s eggshell while its box is open", (_label, attrs, hooks) => {
+    // Arrange
+    const el = bubbleOf(attrs, hooks, true);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBe("var(--expanded-response-border)");
+  });
+
+  const PROMPTS = [
+    ["a user prompt", { "data-role": "prompt", "data-variant": "user" }, ["user"]],
+    ["an agent-addressed prompt", { "data-role": "prompt", "data-variant": "agent" }, ["user", "prompt-agent"]],
+    ["a peer message", { "data-role": "prompt", "data-variant": "peer" }, ["peer"]],
+    ["a held prompt", { "data-role": "prompt", "data-variant": "held" }, ["held-right"]],
+  ] as const;
+
+  it.each(PROMPTS)("never borders %s eggshell, open or not", (_label, attrs, hooks) => {
+    // Arrange
+    const el = bubbleOf(attrs, hooks, true);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  // A CLICK ON A THINKING BUBBLE ONLY EXPANDS IT (owner specification,
+  // 2026-10-14): an open thinking bubble wears no highlight a closed one does
+  // not, so the eggshell never reaches it.
+  it("never borders an open thinking bubble eggshell", () => {
+    // Arrange
+    const el = bubbleOf({ "data-role": "response", "data-variant": "thinking" }, [], true);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  // A CLICK ON AN INTERIM RESPONSE ONLY EXPANDS IT TOO (owner specification,
+  // 2026-10-14): its open box wears no highlight its closed one does not.
+  it("never borders an open interim response eggshell", () => {
+    // Arrange
+    const el = bubbleOf(
+      { "data-role": "response", "data-variant": "response", "data-state": "success" },
+      ["assistant", "interim-response"],
+      true,
+    );
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  it("never borders an open tool card eggshell", () => {
+    // Arrange
+    const card = document.createElement("div");
+    card.className = "tool-card tool-fold expanded";
+    // Act
+    const border = borderOf(card);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  it("keys on the bubble's OWN box, not an open section nested deeper inside it", () => {
+    // Arrange — a closed response holding an open box further down.
+    const el = bubbleOf({ "data-role": "response", "data-variant": "response" }, [], false);
+    const nested = document.createElement("div");
+    nested.className = "bubble-scroll expanded";
+    el.querySelector(".bubble-scroll")?.append(nested);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  it.each([
+    ["the answer's green", ["final-response"], '.bubble.final-response:not([data-variant="thinking"])'],
+  ] as const)("hands back %s once the box closes", (_label, hooks, prior) => {
+    // Arrange — opened, then closed through the one collapse's class change.
+    const el = bubbleOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, hooks, true);
+    el.querySelector(".bubble-scroll")?.classList.remove("expanded");
+    // Act — nothing forces a color any more, and the ladder's rule still applies.
+    const state = [borderOf(el), el.matches(prior)];
+    // Assert
+    expect(state).toEqual([null, true]);
+  });
+
+  it("recolors the reserved hairline only, so opening a response never reflows it", () => {
+    // Arrange / Act
+    const rule = declarationsOf(EGGSHELL_SELECTOR) ?? "";
+    // Assert
+    expect(rule.trim()).toBe("border-color: var(--expanded-response-border) !important;");
+  });
+
+  it("is the one !important border, so it outranks every other by construction", () => {
+    // Arrange / Act
+    const important = rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*border[\w-]*\s*:[^;]*!important/.test(rule.declarations))
+      .map((rule) => rule.selectors.join(", "));
+    // Assert
+    expect(important).toEqual([EGGSHELL_SELECTOR]);
+  });
+
+  /** Every selected bubble kind: its fill is the mark, so no border is forced on it, open or not, never eggshell. */
+  const SELECTED = [
+    ["a selected final response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response", "entry-selected"]],
+    ["a selected interim response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["entry-selected"]],
+    ["a selected thinking bubble", { "data-role": "response", "data-variant": "thinking" }, ["entry-selected"]],
+    ["a selected user prompt", { "data-role": "prompt", "data-variant": "user" }, ["user", "entry-selected"]],
+    ["a selected agent prompt", { "data-role": "prompt", "data-variant": "agent" }, ["user", "prompt-agent", "entry-selected"]],
+  ] as const;
+
+  it.each(SELECTED)("forces no border on %s, open or not", (_label, attrs, hooks) => {
+    // Arrange
+    const states = [bubbleOf(attrs, hooks, true), bubbleOf(attrs, hooks, false)];
+    // Act
+    const borders = states.map((el) => borderOf(el));
+    // Assert
+    expect(borders).toEqual([null, null]);
+  });
+
+  it.each(THEME_BLOCKS)("defines the eggshell token in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const declared = block();
+    // Assert
+    expect(declared).toMatch(/--expanded-response-border:\s*#[0-9a-fA-F]{6}/);
+  });
+});
+
+describe("the response border ladder", () => {
+  it("draws no bubble for a turn that ended abnormally: its outcome marker replaced it (owner ruling 2026-10-06)", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="turn-ended"]');
+    // Assert
+    expect(rule).toBeUndefined();
+  });
+});
+
+/**
+ * NO BUBBLE SCROLLS HORIZONTALLY (owner ruling, 2026-09-23). A bubble's content
+ * wraps when it reaches the bubble's max width and never side-scrolls; no text
+ * is ever off the bubble. So no rule over bubble content — the bubble, its
+ * markdown (`.md`), a metaprompt tree (`.mp-*`) or a code block — may turn a
+ * horizontal scroller on, and each wide kind wraps instead.
+ */
+describe("no bubble content scrolls horizontally", () => {
+  /** A selector that reaches content drawn inside a bubble. */
+  const bubbleContent = (selector: string): boolean => /\.bubble|\.md\b|\.mp-|pre\.md-code/.test(selector);
+
+  it("has no bubble-content rule that turns on a horizontal scroller", () => {
+    // Arrange / Act — every bubble-content rule allowing horizontal overflow.
+    const scrolling = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some(bubbleContent))
+      .filter((rule) => /overflow(?:-x)?\s*:\s*(?:auto|scroll)/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors);
+    // Assert
+    expect(scrolling).toEqual([]);
+  });
+
+  it.each([".mp-tree", ".mp-prefix, .mp-content"])("wraps %s rather than holding every line whole", (selector) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.join(", ") === selector)?.declarations ?? "";
+    // Assert
+    expect(rule).toMatch(/white-space:\s*pre-wrap/);
+  });
+
+  it("wraps a wide display formula between its pieces rather than holding its line whole", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md eqn .katex-display > .katex") ?? "";
+    // Assert
+    expect(rule).toMatch(/white-space:\s*normal/);
+  });
+
+  it("breaks an unsplittable word in bubble prose rather than letting it run off", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble-body") ?? "";
+    // Assert
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("breaks a table cell's unsplittable word rather than widening the table", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md td") ?? "";
+    // Assert
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it.each([".md pre.md-code", ".md table"])(
+    "starts %s below the copy control's reservation, so its box is the body's full width",
+    (selector) => {
+      // Arrange / Act
+      const rule = declarationsOf(selector) ?? "";
+      // Assert
+      expect(rule).toMatch(/clear:\s*right/);
+    },
+  );
+
+  it("never starts a tree below the copy control's reservation, so its first line sits beside the control", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".mp-tree") ?? "";
+    // Assert
+    expect(rule).not.toMatch(/clear\s*:/);
+  });
+});
+
+describe("a bubble's copy control is one line tall", () => {
+  /** The bubble's copy tokens, as declared. */
+  const tokens = (): string => allDeclarationsOf(".bubble");
+
+  it("sizes its box one line of the text, at the tightest leading", () => {
+    // Act + Assert
+    expect(valueOf(tokens(), "--bubble-copy-box")).toBe("calc(var(--tree-line-h) * 1em)");
+  });
+
+  it.each(["--bubble-copy-box", "--bubble-copy-pad", "--bubble-copy-text-gap"])(
+    "states %s in em of the text, never px, so it scales with the line",
+    (token) => {
+      // Act
+      const value = valueOf(tokens(), token) ?? "";
+      // Assert
+      expect([/\dem\b/.test(value), /\dpx\b/.test(value)]).toEqual([true, false]);
+    },
+  );
+
+  it.each([".bubble-copy", ".bubble > :has(> .bubble-copy)::before", ".copy-room"])(
+    "sets %s in the bubble's text size, scaled with the feed text zoom",
+    (selector) => {
+      // Act + Assert
+      expect(valueOf(allDeclarationsOf(selector), "font-size")).toBe("calc(var(--bubble-font-rem) * 1rem * var(--feed-text-scale))");
+    },
+  );
+
+  it("lies over the first line: its gap is the bubble's top padding", () => {
+    // Act + Assert
+    expect(valueOf(tokens(), "--bubble-copy-gap")).toBe("var(--bubble-pad-y)");
+  });
+
+  it.each(["top", "right"])("sits the one gap from the bubble's %s edge", (edge) => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".bubble-copy"), edge)).toBe("var(--bubble-copy-gap)");
+  });
+
+  it.each([
+    ["--copy-control-box", "var(--bubble-copy-box)"],
+    ["--copy-control-pad", "var(--bubble-copy-pad)"],
+  ])("sizes the control's %s from the bubble's tokens", (token, want) => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".bubble-copy"), token)).toBe(want);
+  });
+
+  it.each(["width", "height"])("fills the box with the icon inside its padding: %s", (property) => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".copy-control svg"), property)).toBe(
+      "calc(var(--copy-control-box) - 2 * var(--copy-control-pad))",
+    );
+  });
+
+  it("keeps the reservation inside the first line, so a second line is never narrowed", () => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".bubble > :has(> .bubble-copy)::before"), "height")).toBe("calc(var(--bubble-copy-box) / 2)");
+  });
+
+  it("keeps a header strip's first line clear of the control by the same room", () => {
+    // Act + Assert
+    expect(
+      valueOf(allDeclarationsOf(".bubble:has(> .bubble-scroll > .bubble-copy) > .bubble-strip:first-child"), "padding-right"),
+    ).toBe("var(--bubble-copy-room)");
+  });
+});
+
+describe("a double-width character in a tree", () => {
+  it("is drawn in an inline box exactly two columns of its face wide", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".mp-wide") ?? "";
+    // Assert
+    expect([/display:\s*inline-block/.test(rule), /width:\s*2ch/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("keeps the tree's own font, so `ch` is one of the tree's columns", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".mp-wide") ?? "";
+    // Assert — no font of its own to change what `ch` measures.
+    expect(rule).not.toMatch(/font/);
+  });
+});
+
+describe("the response body custom element", () => {
+  it("is laid out as a block, not a custom element's default inline", () => {
+    // Arrange / Act
+    const rule = declarationsOf("bubble-body.bubble-body") ?? "";
+    // Assert
+    expect(rule).toMatch(/display:\s*block/);
+  });
+});
+
+/**
+ * THE SHELL HEAD'S CLOCKS NEVER RE-WRAP IT (owner rule, 2026-09-23: the user
+ * owns the scroll). The head is a wrapping flex row, and a clock repainted
+ * every second must hold a fixed footprint so its growth cannot push a
+ * neighbor onto a new line under the reader.
+ */
+describe("a card head's clock holds a fixed footprint", () => {
+  it.each([
+    ["one unbreakable run", /white-space:\s*nowrap/],
+    ["tabular figures", /font-variant-numeric:\s*tabular-nums/],
+    ["a box that takes its ghost's width", /display:\s*inline-block/],
+  ])("draws a reserved clock as %s", (_name, declaration) => {
+    // Arrange / Act
+    const decls = declarationsOf(".reserved-clock") ?? "";
+    // Assert
+    expect(decls).toMatch(declaration);
+  });
+
+  it.each([
+    ["reads the clock's reserved labels", /content:\s*var\(--clock-reserve-labels\)/],
+    ["takes no height", /height:\s*0/],
+    ["is never painted", /visibility:\s*hidden/],
+    ["lays its labels out a line each", /white-space:\s*pre/],
+  ])("draws a ghost that %s", (_name, declaration) => {
+    // Arrange / Act
+    const decls = declarationsOf(".reserved-clock::before") ?? "";
+    // Assert
+    expect(decls).toMatch(declaration);
+  });
+
+  it.each([".shell-clock", ".shell-quiet"])("leaves %s no guessed minimum width of its own", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).not.toMatch(/min-width/);
+  });
+
+  it.each([".shell-stop", ".subagent-stop", ".merge-tab-stop"])("keeps %s and its answer on one line", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).toMatch(/white-space:\s*nowrap/);
+  });
+});
+
+/**
+ * THE ONE BUBBLE RULE SET (owner rulings, 2026-09-23, and 2026-10-25 for a
+ * prompt's type). Every blue and purple bubble is drawn by
+ * src/bubble/draw.ts and styled by the rules on `.bubble`: the role sets the
+ * side and the fill, and a prompt's role also sets its text in a metaprompt
+ * tree's face, size and leading;
+ * a variant or state sets only the border, `data-cap-lines` sets the collapsed
+ * limit, and one size rule serves every kind (a thinking bubble and an interim
+ * response narrow only the `--bubble-font-rem` token it reads, 2026-10-14).
+ */
+describe("the one bubble rule set", () => {
+  /** Whether SELECTOR styles a bubble ITSELF (not its strip, box, content or pseudo-element). */
+  const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector) && !selector.includes("::");
+
+  it("sets the response's 1.5 leading on the base bubble rule", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble") ?? "";
+    // Assert
+    expect([bubble.match(/--md-line-h:\s*1\.5\s*;/) !== null, /line-height:\s*var\(--md-line-h\)/.test(bubble)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("sets one font size for every bubble, the response's", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble") ?? "";
+    // Assert
+    expect(bubble).toMatch(/font-size:\s*calc\(var\(--bubble-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+  });
+
+  it("sets a prompt's leading from the metaprompt tree's token", () => {
+    // Arrange / Act
+    const prompt = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+    // Assert
+    expect(prompt).toMatch(/--md-line-h:\s*var\(--tree-line-h\)/);
+  });
+
+  it("leaves a prompt at every bubble's one size", () => {
+    // Arrange / Act
+    const prompt = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+    // Assert
+    expect(prompt).not.toMatch(/--bubble-font-rem\s*:/);
+  });
+
+  it.each([
+    ["size", /font-size:\s*calc\(var\(--bubble-base-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/],
+    ["leading", /line-height:\s*var\(--tree-line-h\)/],
+  ] as const)("sets a metaprompt tree's %s from the token a bubble reads", (_label, pattern) => {
+    // Arrange / Act
+    const tree = declarationsOf(".mp-tree") ?? "";
+    // Assert
+    expect(tree).toMatch(pattern);
+  });
+
+  it.each([
+    [".bubble", ".bubble", "--bubble-font-family"],
+    ["the chat column", ".chat-col", "--serif-font-family"],
+  ])("sets %s's face from its token", (_label, selector, token) => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf(selector) ?? "";
+    // Assert
+    expect(rule).toMatch(new RegExp(`font-family:\\s*var\\(${token}\\)`));
+  });
+
+  it.each([
+    ["--serif-font-family", /--serif-font-family:\s*"Source Serif 4 Variable", ui-serif, Georgia, serif;/],
+    ["--bubble-font-family", /--bubble-font-family:\s*ui-monospace, monospace;/],
+    ["--tree-rail-font-family", /--tree-rail-font-family:\s*ui-monospace, monospace;/],
+  ] as const)("declares %s once, on the root", (token, pattern) => {
+    // Arrange / Act
+    const declarations = withoutBlockComments(stylesheet).match(new RegExp(`${token}\\s*:`, "g")) ?? [];
+    // Assert
+    expect([declarations.length, pattern.test(declarationsOf(":root") ?? "")]).toEqual([1, true]);
+  });
+
+  it.each([
+    ["a prompt", "prompt", "user", "", "var(--bubble-font-family)"],
+    ["a final response", "response", "response", "final-response", "var(--bubble-font-family)"],
+    ["a thinking bubble", "response", "thinking", "", "var(--serif-font-family)"],
+    ["an interim response", "response", "response", "interim-response", "var(--serif-font-family)"],
+  ])("hands %s its face through the cascade", (_label, role, variant, extra, want) => {
+    // Arrange
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${extra}`.trim();
+    bubble.setAttribute("data-role", role);
+    bubble.setAttribute("data-variant", variant);
+    // Act
+    const face = inDocument(bubble, (el) => cascadedValue(el, "font-family"));
+    // Assert
+    expect(face).toBe(want);
+  });
+
+  it("lets a metaprompt tree inherit its bubble's face", () => {
+    // Arrange / Act
+    const tree = ownDeclarationsOf(".mp-tree") ?? "";
+    // Assert
+    expect(tree).not.toMatch(/font-family\s*:/);
+  });
+
+  it.each([".mp-connectors", ".mp-label-pad"])("sets %s in the rail face", (selector) => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf(selector) ?? "";
+    // Assert
+    expect(rule).toMatch(/font-family:\s*var\(--tree-rail-font-family\)/);
+  });
+
+  it("lets no rule on a bubble but the prompt's set its size or leading", () => {
+    // Arrange / Act
+    const others = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((sel) => onBubble(sel) && sel !== ".bubble" && sel !== '.bubble[data-role="prompt"]') &&
+        /(?:^|;)\s*(?:font-size|line-height|--md-line-h)\s*:/.test(rule.declarations),
+    );
+    // Assert
+    expect(others.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("sets a tool card head from its own head size token", () => {
+    // Arrange / Act
+    const head = ownDeclarationsOf(".tool-head") ?? "";
+    // Assert
+    expect(head).toMatch(/font-size:\s*calc\(var\(--tool-head-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+  });
+
+  it.each([
+    [".tool-card.tool-fold"],
+    [".tool-card.tool-fold pre"],
+    [".tool-card.tool-fold .tool-diagnostic"],
+    [".tool-card.tool-skill"],
+    [".tool-card.tool-skill pre"],
+    [".tool-card.tool-skill .md pre.md-code code"],
+    [".tool-card.tool-skill .md table"],
+  ])("sets %s at the thinking bubble's size", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(decls).toMatch(/font-size:\s*calc\(var\(--small-prose-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+  });
+
+  it("keeps the tool card's head and badge out of its contents' size", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".tool-card.tool-fold pre"));
+
+    // Assert
+    expect(rule?.selectors.some((sel) => /tool-head|badge|tool-name/.test(sel))).toBe(false);
+  });
+
+  it("leaves the merge and subagent folds that wear the card shell at the card's size", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".tool-card.tool-fold pre"));
+
+    // Assert
+    expect(rule?.selectors.some((sel) => sel.includes("bubble-fold"))).toBe(false);
+  });
+
+  it("sizes a tool card head below the thinking bubble's prose", () => {
+    // Arrange / Act
+    const head = Number(rootToken("--tool-head-font-rem"));
+    const thinking = Number(rootToken("--small-prose-font-rem"));
+    // Assert
+    expect([head, head < thinking]).toEqual([0.75, true]);
+  });
+
+  it("carries no second leading token for prompts", () => {
+    // Arrange / Act / Assert
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/--prompt-line-h/);
+  });
+
+
+  it("places and fills a bubble only through its role, and the named fills", () => {
+    // Arrange / Act — every rule on a bubble that sets a side margin or its fill.
+    const placing = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some(onBubble) &&
+        /(?:^|;)\s*(?:margin-left|margin-right|--bubble-bg|background(?:-color)?)\s*:/.test(rule.declarations),
+    );
+    // Assert — the base rule paints the role's token; the roles choose it, and
+    // so do the owner-named fills: the held variant's (2026-09-23), the
+    // page-colored thinking and interim fill (2026-10-08) and the
+    // agent-to-agent bubbles' prompt fill (2026-10-28). A selected bubble
+    // keeps its own fill (2026-11-24).
+    expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
+      [
+        ".bubble",
+        '.bubble[data-role="prompt"]',
+        '.bubble[data-role="response"]',
+        '.bubble[data-variant="agent"]',
+        '.bubble[data-variant="peer"]',
+        '.bubble[data-variant="held"]',
+        '.bubble[data-variant="thinking"]',
+        ".bubble.interim-response",
+      ].sort(),
+    );
+  });
+
+  it("lets a variant or state rule set the border and nothing else", () => {
+    // Arrange / Act — every rule keyed on a variant, a state or a hook class.
+    const keyed = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some(
+        (sel) => onBubble(sel) && sel !== ".bubble" && !/^\.bubble\[data-(?:role|cap-lines)=/.test(sel) && !sel.includes("[hidden]"),
+      ),
+    );
+    const beyondBorder = keyed.filter((rule) =>
+      rule.declarations
+        .split(";")
+        .map((decl) => decl.split(":")[0]?.trim() ?? "")
+        .some(
+          (prop) =>
+            prop !== "" &&
+            !prop.startsWith("border") &&
+            prop !== "--bubble-bg" &&
+            // The vertical padding ladder (owner requests, 2026-10-12 and
+            // 2026-10-13) is the one padding token a variant sets; its own
+            // suite pins it.
+            !(PAD_TOKENS.includes(prop) && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
+            // The dimmed prose of a thinking or interim bubble (owner request,
+            // 2026-10-08) is the one text color a variant sets, their narrower
+            // `--bubble-font-rem` the one size, the thinking prose's italic
+            // (owner requests, 2026-10-14) the one font style, and the
+            // chat's serif (owner request, 2026-10-27) the one face; their
+            // own suites pin all four.
+            !(
+              (prop === "color" || prop === "--bubble-font-rem" || prop === "font-family") &&
+              rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
+            ) &&
+            !(prop === "font-style" && isOwnRule(rule, THINKING_SELECTOR)) &&
+            // THE SELECTED BUBBLE'S RING (owner request, 2026-11-24) is an
+            // inset outline, which never reflows; "the selected-entry mark"
+            // pins it.
+            !((prop === "outline" || prop === "outline-offset") && isOwnRule(rule, ".bubble.entry-selected")) &&
+            // THE HELD GLIMMER (owner request, 2026-10-28) anchors its ring
+            // on the held bubble; "the held glimmer" pins it.
+            !(prop === "position" && isOwnRule(rule, '.bubble[data-variant="held"]')) &&
+            // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
+            // selectors also turn off the base rule's box-shadow, the one
+            // remaining visible highlight once their fill is already the
+            // page's own --bg; its own suite below pins it. Every response
+            // drops it too (owner request, 2026-10-28).
+            !(prop === "box-shadow" && rule.selectors.every((sel) => ON_FEED_SELECTORS.includes(sel))) &&
+            // THE WORKING PROSE ENDS AT THE CARDS' EDGE (owner request,
+            // 2026-10-27): the same two widen to the cards' cap and drop the
+            // gap beside the bar; "the working prose's right edge" pins both.
+            !(
+              (prop === "max-width" || prop === "--bubble-scroll-gap") &&
+              rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
+            )
+        ),
+    );
+    // Assert
+    expect(beyondBorder.flatMap((rule) => rule.selectors)).toEqual([]);
+  });
+
+  it("draws a fenced code block through the one markdown rule, with no per-kind copy", () => {
+    // Arrange / Act
+    const copies = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /pre\.md-code$/.test(sel)),
+    );
+    // Assert
+    expect(copies.flatMap((rule) => rule.selectors)).toEqual([".md pre.md-code"]);
+  });
+
+  it.each(BUBBLE_CAP_LINES.filter((cap) => cap !== BUBBLE_FOLD_UNBOUNDED).map((cap) => [String(cap)]))("maps the %s cap to a line count", (cap) => {
+    // Arrange / Act
+    const rule = declarationsOf(`.bubble[data-cap-lines="${cap}"]`) ?? "";
+    // Assert
+    expect(rule).toMatch(cap === "feed" ? /--bubble-cap-lines:\s*var\(--feed-cap-lines\)/ : new RegExp(`--bubble-cap-lines:\\s*${cap}\\s*;`));
+  });
+
+  it("lifts both the folded and the open cap on the unbounded fold", () => {
+    // Arrange / Act
+    const lift = rulesOf(stylesheet).find((rule) =>
+      rule.selectors.includes(`.bubble[data-cap-lines="${BUBBLE_FOLD_UNBOUNDED}"] > .bubble-scroll`),
+    );
+    // Assert
+    expect([lift?.selectors, lift?.declarations.trim()]).toEqual([
+      [
+        `.bubble[data-cap-lines="${BUBBLE_FOLD_UNBOUNDED}"] > .bubble-scroll`,
+        `.bubble[data-cap-lines="${BUBBLE_FOLD_UNBOUNDED}"] > .bubble-scroll.expanded`,
+      ],
+      "max-height: none;",
+    ]);
+  });
+
+  it("caps the scroll box in the one leading, at most the 50vh the expanded box takes", () => {
+    // Arrange / Act
+    const cap = rulesOf(stylesheet).find(
+      (rule) => rule.selectors.includes(".bubble > .bubble-scroll") && /max-height/.test(rule.declarations),
+    );
+    // Assert
+    expect(cap?.declarations).toMatch(
+      /max-height:\s*min\(calc\(var\(--bubble-cap-lines\) \* var\(--md-line-h\) \* 1em\),\s*50vh\)/,
+    );
+  });
+
+});
+
+/**
+ * THE UNCAPPED BUBBLE (owner request, 2026-09-27): an interim or final
+ * response, and the ended-turn notice, show their full height, always. The
+ * mode is `BUBBLE_UNCAPPED` in src/bubble/draw.ts, and its box wears only
+ * `.bubble-box`; these hold the stylesheet to leaving that box alone.
+ */
+/**
+ * THE WORKING PROSE ENDS AT THE CARDS' EDGE (owner request, 2026-10-27): a
+ * thinking bubble and an interim response hang on the response's left rail
+ * and reach the tool cards' right edge, and their collapsed line keeps no
+ * right inset, so its `…` ends on that edge. Every other bubble keeps the one
+ * bubble width and its inset.
+ */
+describe("the working prose's right edge", () => {
+  /** A bubble of ROLE, VARIANT and EXTRA classes holding a box (EXPANDED or not) and a body. */
+  function bubbleOf(role: string, variant: string, extra: string, expanded: boolean): HTMLElement {
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${extra}`.trim();
+    bubble.setAttribute("data-role", role);
+    bubble.setAttribute("data-variant", variant);
+    bubble.setAttribute("data-more", "ellipsis");
+    const box = document.createElement("div");
+    box.className = expanded ? `bubble-box bubble-scroll ${EXPANDED_CLASS}` : "bubble-box bubble-scroll";
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    box.append(body);
+    bubble.append(box);
+    return bubble;
+  }
+
+  const WORKING = [
+    ["a thinking bubble", "response", "thinking", ""],
+    ["an interim response", "response", "response", "interim-response"],
+  ] as const;
+  const OTHERS = [
+    ["a final response", "response", "response", "final-response"],
+    ["a prompt", "prompt", "user", ""],
+  ] as const;
+
+  it.each(WORKING)("hangs %s on the response's left rail", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const margin = inDocument(bubbleOf(role, variant, extra, false), (el) => cascadedValue(el, "margin-left"));
+    // Assert -- the rail inset plus the cap is the centered cards' right edge.
+    expect(margin).toBe("var(--agent-rail-inset)");
+  });
+
+  it.each(WORKING)("caps %s at the cards' width", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const cap = inDocument(bubbleOf(role, variant, extra, false), (el) => cascadedValue(el, "max-width"));
+    // Assert
+    expect(cap).toBe("var(--agent-bubble-cap)");
+  });
+
+  it.each(OTHERS)("keeps %s at the one bubble width", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const cap = inDocument(bubbleOf(role, variant, extra, false), (el) => cascadedValue(el, "max-width"));
+    // Assert
+    expect(cap).toBe("var(--bubble-max-width)");
+  });
+
+  it("caps the feed's cards at the same width the working prose takes", () => {
+    // Arrange / Act
+    const cards = declarationsOf(".feed-item > .tool-card") ?? "";
+    // Assert
+    expect(cards).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
+  });
+
+  /** An unreadable row's placeholder, mounted as a feed row's body the way `feed-view.ts` draws it. */
+  function malformedRow(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "feed-item";
+    const placeholder = document.createElement("div");
+    placeholder.className = "row-malformed";
+    row.append(placeholder);
+    return row;
+  }
+
+  it.each([
+    ["max-width", "var(--agent-bubble-cap)"],
+    ["margin-left", "auto"],
+    ["margin-right", "auto"],
+  ])("bounds an unreadable row's placeholder by the stream through its %s", (property, expected) => {
+    // Arrange / Act
+    const value = inDocument(malformedRow(), (row) => cascadedValue(row.firstElementChild!, property));
+    // Assert
+    expect(value).toBe(expected);
+  });
+
+  it("outlines an unreadable row's placeholder with a solid line", () => {
+    // Arrange / Act -- jsdom leaves a `var()` border shorthand unexpanded, so the declaration is what is pinned.
+    const border = ownDeclarationsOf(".row-malformed") ?? "";
+    // Assert
+    expect(border).toMatch(/(?:^|[\s;])border:\s*1px solid var\(--err\)/);
+  });
+
+  /** The `--bubble-scroll-gap` BUBBLE inherits or sets, mounted in the main column that declares it. */
+  function scrollGapOf(bubble: HTMLElement): string {
+    const column = document.createElement("div");
+    column.id = "main-col";
+    column.append(bubble);
+    return inDocument(column, () => cascadedValue(bubble, "--bubble-scroll-gap"));
+  }
+
+  it.each(WORKING)("drops the gap beside the bar on %s", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const gap = scrollGapOf(bubbleOf(role, variant, extra, false));
+    // Assert
+    expect(gap).toBe("0px");
+  });
+
+  it.each(OTHERS)("keeps the gap beside the bar on %s", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const gap = scrollGapOf(bubbleOf(role, variant, extra, false));
+    // Assert
+    expect(gap).toBe("2px");
+  });
+
+  it.each(WORKING)("reserves no gutter on %s's collapsed box", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const gutter = declarationsOf(
+      variant === "thinking"
+        ? '.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded)'
+        : ".bubble.interim-response > .bubble-scroll:not(.expanded)",
+    );
+    const matches = inDocument(bubbleOf(role, variant, extra, false), (el) =>
+      (el.firstElementChild as HTMLElement).matches(
+        '.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded), .bubble.interim-response > .bubble-scroll:not(.expanded)',
+      ),
+    );
+    // Assert
+    expect([/scrollbar-gutter:\s*auto/.test(gutter ?? ""), matches]).toEqual([true, true]);
+  });
+
+  it.each(WORKING)("keeps the gutter on %s's expanded box", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const matches = inDocument(bubbleOf(role, variant, extra, true), (el) =>
+      (el.firstElementChild as HTMLElement).matches(
+        '.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded), .bubble.interim-response > .bubble-scroll:not(.expanded)',
+      ),
+    );
+    // Assert
+    expect(matches).toBe(false);
+  });
+
+  it.each(WORKING)("lets %s's collapsed line reach its right edge", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const inset = inDocument(bubbleOf(role, variant, extra, false), (el) =>
+      cascadedValue(el.querySelector(".bubble-body") as HTMLElement, "padding-right"),
+    );
+    // Assert
+    expect(inset).toBe("0px");
+  });
+
+  it.each(WORKING)("keeps %s's expanded text off the bar", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const inset = inDocument(bubbleOf(role, variant, extra, true), (el) =>
+      cascadedValue(el.querySelector(".bubble-body") as HTMLElement, "padding-right"),
+    );
+    // Assert
+    expect(inset).toBe("var(--bubble-content-inset)");
+  });
+
+  it.each(OTHERS)("keeps %s's collapsed text off the bar", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const inset = inDocument(bubbleOf(role, variant, extra, false), (el) =>
+      cascadedValue(el.querySelector(".bubble-body") as HTMLElement, "padding-right"),
+    );
+    // Assert
+    expect(inset).toBe("var(--bubble-content-inset)");
+  });
+});
+
+describe("the uncapped bubble", () => {
+  /** A drawn bubble of CAPLINES, the answer's hooks and state, mounted. */
+  function boxOf(capLines: BubbleCapLines): HTMLElement {
+    const { bubble } = drawBubble(
+      capLines === BUBBLE_UNCAPPED
+        ? { role: "response", variant: "response", state: "success", hooks: ["assistant", "final-response"], content: [], capLines }
+        : { role: "response", variant: "thinking", state: "success", hooks: ["assistant"], content: [], capLines },
+    );
+    document.body.append(bubble);
+    return bubble.firstElementChild as HTMLElement;
+  }
+
+  /** The selectors of every rule that caps, clips, scrolls, reserves a gutter or sets a cursor, matching EL. */
+  function limitingSelectorsOn(el: HTMLElement): string[] {
+    return rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*(?:max-height|overflow-y|overflow|scrollbar-gutter|cursor|overscroll-behavior)\s*:/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => !sel.includes("::") && el.matches(sel));
+  }
+
+  it("maps no line count for the uncapped mode", () => {
+    // Arrange / Act / Assert
+    expect(declarationsOf(`.bubble[data-cap-lines="${BUBBLE_UNCAPPED}"]`)).toBeUndefined();
+  });
+
+  it("lets no cap, clip, scroll, gutter or cursor rule reach an uncapped bubble's box", () => {
+    // Arrange
+    const box = boxOf(BUBBLE_UNCAPPED);
+    // Act
+    const limiting = limitingSelectorsOn(box);
+    box.parentElement?.remove();
+    // Assert
+    expect(limiting).toEqual([]);
+  });
+
+  it("still caps a capped bubble's box through the same rules", () => {
+    // Arrange
+    const box = boxOf(THINKING_CAP_LINES);
+    // Act
+    const limiting = limitingSelectorsOn(box);
+    box.parentElement?.remove();
+    // Assert
+    expect(limiting).toContain(".bubble > .bubble-scroll");
+  });
+
+  it("gives the structural box rules nothing but structure", () => {
+    // Arrange
+    const structural = new Set(["padding-left", "padding-right", "min-width", "overflow-x", "position"]);
+    // Act
+    const props = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.includes(".bubble-box")))
+      .flatMap((rule) => rule.declarations.split(";").map((decl) => decl.split(":")[0]?.trim() ?? ""))
+      .filter((prop) => prop !== "" && !structural.has(prop));
+    // Assert
+    expect(props).toEqual([]);
+  });
+});
+
+/**
+ * TOKEN's color in the theme whose token block is BLOCK, as [r, g, b], following
+ * `var()` references the way the cascade does on `:root`: a token the block does
+ * not declare is the light theme's own declaration (the dark media query only
+ * overrides), and every reference resolves against the same theme. Throws on a
+ * token neither block declares, or a value that is neither a six-digit hex nor
+ * a lone `var()`.
+ */
+function themeRgbOf(block: string, token: string): [number, number, number] {
+  const value = themeValueOf(block, token) ?? themeValueOf(declarationsOf(":root") ?? "", token);
+  if (value === undefined) throw new Error(`no ${token} in either theme`);
+  const ref = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
+  if (ref !== undefined) return themeRgbOf(block, ref);
+  return rgbOf(`${token}: ${value};`, token);
+}
+
+/**
+ * TOKEN's own declared value in BLOCK, trimmed, or undefined when BLOCK does not
+ * declare it. Comments are stripped first, so a note quoting the declaration
+ * never stands in for it. No `var()` is followed: the value is the text written.
+ */
+function themeValueOf(block: string, token: string): string | undefined {
+  return new RegExp(`(?:^|[\\s;{])${token}:\\s*([^;]+);`).exec(withoutBlockComments(block))?.[1]?.trim();
+}
+
+describe("themeValueOf", () => {
+  it.each([
+    ["a value the block declares", "--a: #010203;", "--a", "#010203"],
+    ["a var() left unfollowed", "--a: var(--b); --b: #000000;", "--a", "var(--b)"],
+    ["a color-mix kept whole", "--a: color-mix(in srgb, var(--b), var(--c));", "--a", "color-mix(in srgb, var(--b), var(--c))"],
+    ["a token only a comment names", "/* --a: #ffffff; */ --b: #000000;", "--a", undefined],
+    ["a token whose name only ends another's", "--xa: #ffffff;", "--a", undefined],
+  ] as const)("reads %s", (_case, block, token, expected) => {
+    // Arrange / Act
+    const value = themeValueOf(block, token);
+
+    // Assert
+    expect(value).toBe(expected);
+  });
+
+  it("is the one value reader themeRgbOf resolves through", () => {
+    // Arrange / Act — the source of themeRgbOf, read back from this module.
+    const source = themeRgbOf.toString();
+
+    // Assert — no hand-rolled declaration regex beside the shared reader.
+    expect([source.includes("themeValueOf"), source.includes("RegExp")]).toEqual([true, false]);
+  });
+});
+
+describe("themeRgbOf", () => {
+  it.each([
+    ["a hex the block declares", "--a: #010203;", "--a", [1, 2, 3]],
+    ["a var() chain inside the block", "--a: var(--b); --b: var(--c); --c: #0a0b0c;", "--a", [10, 11, 12]],
+    ["a reference the block overrides", "--card: #102030;", "--panel-bg", [16, 32, 48]],
+  ] as const)("resolves %s", (_case, block, token, expected) => {
+    // Arrange / Act
+    const rgb = themeRgbOf(block, token);
+
+    // Assert
+    expect(rgb).toEqual(expected);
+  });
+
+  it("falls back to the light theme for a token the block leaves alone", () => {
+    // Arrange
+    const light = themeRgbOf(declarationsOf(":root") ?? "", "--card");
+
+    // Act
+    const fallen = themeRgbOf("--unrelated: #000000;", "--card");
+
+    // Assert
+    expect(fallen).toEqual(light);
+  });
+
+  it("throws on a token neither theme declares", () => {
+    // Arrange / Act / Assert
+    expect(() => themeRgbOf("", "--no-such-token")).toThrow("no --no-such-token in either theme");
+  });
+});
+
+/**
+ * THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S FILL (owner rulings,
+ * 2026-10-11 and 2026-10-25): `--assistant` is derived from `--tool-card-bg`
+ * once, on the light `:root`, so the dark theme's tool-card fill carries
+ * through without a copied override, and the two cannot drift apart.
+ */
+describe("the response bubble's fill", () => {
+  it("derives --assistant from --tool-card-bg on the light :root", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(declarationsOf(":root") ?? "");
+
+    // Assert
+    expect(decls).toMatch(/--assistant:\s*var\(--tool-card-bg\)\s*;/);
+  });
+
+  it.each(THEME_BLOCKS)("resolves the %s theme's response and tool card to one RGB", (_theme, block) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [response, card] = ["--assistant", "--tool-card-bg"].map((token) => themeRgbOf(css, token));
+
+    // Assert
+    expect(response).toEqual(card);
+  });
+
+  it("leaves --assistant unset in the dark theme so the derivation carries", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(darkThemeBlock());
+
+    // Assert
+    expect(decls).not.toMatch(/--assistant:/);
+  });
+
+  it.each([
+    ["light", () => withoutBlockComments(declarationsOf(":root") ?? ""), 0.1],
+    ["dark", () => darkThemeBlock(), 0.6],
+  ] as const)("paints the %s theme's tool card --panel-bg moved a set share of the way to --bg (owner request, 2026-10-27, slightly darker than 2026-10-25's 20%%)", (_theme, block, share) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [panel, bg, card] = ["--panel-bg", "--bg", "--tool-card-bg"].map((token) => themeRgbOf(css, token));
+
+    // Assert
+    expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * share)));
+  });
+
+  it("paints the dark theme's --assistant a touch dimmer than 2026-10-28's #181818 (owner request, 2026-10-29)", () => {
+    // Arrange
+    const css = darkThemeBlock();
+
+    // Act
+    const response = themeRgbOf(css, "--assistant");
+
+    // Assert
+    expect(response).toEqual([0x16, 0x16, 0x16]);
+  });
+
+  it("is what a response bubble paints", () => {
+    // Arrange / Act
+    const decls = declarationsOf('.bubble[data-role="response"]') ?? "";
+
+    // Assert
+    expect(decls).toMatch(/--bubble-bg:\s*var\(--assistant\)/);
+  });
+});
+
+/** The six hex digits of TOKEN's declaration in BLOCK, as [r, g, b]. */
+/** A bubble of CLASSNAME, ROLE and VARIANT, as the selection tests mount one. */
+function selectedBubble(className: string, role: string, variant: string): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = className;
+  bubble.setAttribute("data-role", role);
+  bubble.setAttribute("data-variant", variant);
+  return bubble;
+}
+
+/**
+ * `color-mix(in srgb, A SHARE, B)` as WebKit paints it: each channel mixed
+ * SHARE (0..1) of the way from B to A, rounded to 8 bits. Module scope so
+ * every suite that computes a mixed token reads the one rule.
+ */
+function srgbMix(a: readonly number[], b: readonly number[], share: number): number[] {
+  return [0, 1, 2].map((i) => Math.round(share * a[i] + (1 - share) * b[i]));
+}
+
+describe("srgbMix", () => {
+  it.each([
+    ["the dark sidebar base 88% over black", [0x1a, 0x1a, 0x1a], [0, 0, 0], 0.88, [0x17, 0x17, 0x17]],
+    ["an even split, rounded", [0xff, 0x00, 0x10], [0x00, 0xff, 0x11], 0.5, [128, 128, 17]],
+    ["all of the first color", [1, 2, 3], [9, 9, 9], 1, [1, 2, 3]],
+    ["none of the first color", [1, 2, 3], [9, 9, 9], 0, [9, 9, 9]],
+  ] as const)("mixes %s", (_case, a, b, share, want) => {
+    // Arrange / Act
+    const got = srgbMix(a, b, share);
+
+    // Assert
+    expect(got).toEqual(want);
+  });
+
+  it("is the one mixing rule: no case in this file mixes channels by hand", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+
+    // Act
+    const handRolled = source.match(/Math\.round\(share \*/g) ?? [];
+
+    // Assert
+    expect(handRolled).toHaveLength(1);
+  });
+});
+
+function rgbOf(block: string, token: string): [number, number, number] {
+  const hex = new RegExp(`${token}:\\s*#([0-9a-fA-F]{6})\\s*;`).exec(block)?.[1];
+  if (hex === undefined) throw new Error(`no six-digit ${token} in the block`);
+  return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+/**
+ * THE HELD PROMPT'S FILL (owner requests, 2026-10-25 and 2026-10-28): a held
+ * prompt looks like the user prompt it becomes, through one token per theme.
+ * The light theme draws it on a markedly darker blue than --user; the dark
+ * theme on --user itself, its glimmer telling it apart.
+ */
+describe("the held prompt's fill", () => {
+  it("feeds --bubble-bg from --held-prompt-bg", () => {
+    // Arrange / Act
+    const held = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    // Assert
+    expect(held).toMatch(/--bubble-bg:\s*var\(--held-prompt-bg\)\s*;/);
+  });
+
+  it("hardcodes no fill color on the variant's rule", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    // Assert
+    expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
+  });
+
+  it("sits markedly darker than --user in the light theme", () => {
+    // Arrange
+    const block = declarationsOf(":root") ?? "";
+    // Act
+    const step = Math.abs(lightness(themeRgbOf(block, "--user")) - lightness(themeRgbOf(block, "--held-prompt-bg")));
+    // Assert
+    expect(step).toBeGreaterThan(10);
+  });
+
+  it.each([
+    ["--held-prompt-bg", "var(--user)"],
+  ])("feeds the dark theme's %s from %s (owner request, 2026-10-28)", (token, want) => {
+    // Arrange / Act
+    const got = themeValueOf(darkThemeBlock(), token);
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it.each(THEME_BLOCKS)("is a neutral grey in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const [r, g, b] = themeRgbOf(block(), "--held-prompt-bg");
+    // Assert
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(4);
+  });
+
+  it("leaves the held variant at the one bubble width every prompt takes", () => {
+    // Arrange / Act — every rule keyed on the held variant (owner request,
+    // 2026-10-13, superseding 2026-09-23's halved cap).
+    const held = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes('[data-variant="held"]')),
+    );
+    // Assert
+    expect(held.filter((rule) => /(?:^|;)\s*(?:max-)?width\s*:/.test(rule.declarations))).toEqual([]);
+  });
+
+  it.each([
+    ["border", "none"],
+    ["padding-left", "0"],
+    ["padding-right", "0"],
+  ])("draws the held status badge as its words alone (%s %s)", (property, value) => {
+    // Arrange / Act
+    const got = valueOf(allDeclarationsOf(".badge.held-badge"), property);
+    // Assert
+    expect(got).toBe(value);
+  });
+
+  it("draws the held status badge a little bolder than the plain badge", () => {
+    // Arrange / Act
+    const got = [valueOf(allDeclarationsOf(".badge.held-badge"), "font-weight"), valueOf(allDeclarationsOf(".badge"), "font-weight")];
+    // Assert
+    expect(got).toEqual(["500", undefined]);
+  });
+
+  it.each(["font-size", "color"])("keeps the held status badge at the plain badge's %s", (property) => {
+    // Arrange / Act
+    const got = valueOf(allDeclarationsOf(".badge.held-badge"), property);
+    // Assert
+    expect(got).toBeUndefined();
+  });
+
+  it("draws a held prompt's queued age smaller than the status badge", () => {
+    // Arrange / Act
+    const age = valueOf(allDeclarationsOf(".queued-age"), "font-size");
+    const badge = valueOf(allDeclarationsOf(".badge"), "font-size");
+    // Assert
+    expect([age, badge]).toEqual(["0.62rem", "calc(0.7rem * var(--feed-text-scale))"]);
+  });
+
+  it("inks a held prompt's queued age with the darker queued-age token", () => {
+    // Arrange / Act
+    const got = valueOf(allDeclarationsOf(".queued-age"), "color");
+    // Assert
+    expect(got).toBe("var(--queued-age-ink)");
+  });
+
+  it("derives the queued-age ink from --muted mixed toward black, so it is darker in either theme", () => {
+    // Arrange / Act
+    const got = valueOf(declarationsOf(":root") ?? "", "--queued-age-ink");
+    // Assert
+    expect(got).toBe("color-mix(in srgb, var(--muted) 65%, #000000)");
+  });
+
+  it("keeps the outline on every other badge, a further fact's quiet note pill among them", () => {
+    // Arrange / Act / Assert
+    expect([valueOf(allDeclarationsOf(".badge"), "border"), allDeclarationsOf(".badge.queued-status-note")]).toEqual([
+      "1px solid var(--border)",
+      expect.not.stringMatching(/border/),
+    ]);
+  });
+
+  it.each([".prompt-block-quote", ".known-command"])("styles a held prompt's %s exactly as a user prompt's", (part) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(`.bubble[data-variant="user"] ${part}`));
+    // Assert
+    expect(rule?.selectors).toContain(`.bubble[data-variant="held"] ${part}`);
+  });
+});
+
+/**
+ * AN AGENT-TO-AGENT BUBBLE TAKES THE USER PROMPT'S FILL (owner request,
+ * 2026-10-28, superseding 2026-10-17's response fill): the agent-addressed
+ * prompt and the peer message both feed --bubble-bg from --user, never a
+ * copied value.
+ */
+describe("the agent-to-agent bubbles' fill: the user prompt's own token", () => {
+  it.each([["agent"], ["peer"]] as const)("feeds the %s variant's --bubble-bg from --user", (variant) => {
+    // Arrange / Act
+    const fills = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.trim() === `.bubble[data-variant="${variant}"]`))
+      .map((rule) => /--bubble-bg:\s*([^;]+);/.exec(rule.declarations)?.[1]?.trim())
+      .filter((fill) => fill !== undefined);
+    // Assert
+    expect(fills).toEqual(["var(--user)"]);
+  });
+});
+
+describe("the compaction summary's border is the compaction divider bar's", () => {
+  it("borders the summary with the divider bar's own token", () => {
+    // Arrange / Act
+    const summary = declarationsOf('.bubble[data-variant="compaction"]') ?? "";
+    const bar = declarationsOf(".sep-accent-compacted") ?? "";
+    // Assert — one token, read by both; no copied value.
+    expect([/border-color:\s*var\(--compact-rule\)/.test(summary), /background:\s*var\(--compact-rule\)/.test(bar)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("gives the summary no fill of its own: it is a response bubble", () => {
+    // Arrange / Act / Assert
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/--compact-summary-bg/);
+  });
+});
+
+/**
+ * THE EXPAND-ONLY REGION (src/bubble/draw.ts `expandOnly`): chrome after a
+ * bubble's scroll box that shows only while the one toggle has that box open.
+ */
+describe("the bubble's expand-only region", () => {
+  /** Every rule whose selector names the expand-only class. */
+  const regionRules = (): CssRule[] =>
+    rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_EXPAND_ONLY_CLASS}`)));
+
+  it("hides the region only behind a scroll box that is not expanded", () => {
+    // Arrange / Act
+    const selectors = regionRules().flatMap((rule) => rule.selectors);
+    // Assert
+    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) ~ .${BUBBLE_EXPAND_ONLY_CLASS}`]);
+  });
+
+  it("takes the hidden region out of layout", () => {
+    // Arrange / Act
+    const declarations = regionRules().map((rule) => rule.declarations.trim());
+    // Assert
+    expect(declarations).toEqual(["display: none;"]);
+  });
+});
+
+/**
+ * AN EXPANDED-ONLY BLOCK (src/bubble/expanded-only.ts): a reply's quote or an
+ * image in a prompt bubble's body, shown only while the one toggle has the
+ * bubble's own box open.
+ */
+describe("an expanded-only block in a prompt bubble", () => {
+  /** Every rule whose selector names the expanded-only class. */
+  const expandedOnlyRules = (): CssRule[] =>
+    rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_EXPANDED_ONLY_CLASS}`)));
+
+  it("hides the block only in the body of a scroll box that is not expanded", () => {
+    // Arrange / Act
+    const selectors = expandedOnlyRules().flatMap((rule) => rule.selectors);
+    // Assert
+    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_EXPANDED_ONLY_CLASS}`]);
+  });
+
+  it("takes the hidden block out of layout", () => {
+    // Arrange / Act
+    const declarations = expandedOnlyRules().map((rule) => rule.declarations.trim());
+    // Assert
+    expect(declarations).toEqual(["display: none;"]);
+  });
+});
+
+/**
+ * A COLLAPSED PROMPT'S IMAGE (src/bubble/collapsed-thumbnail.ts): drawn small
+ * while the bubble is folded, at the full thumbnail height once it is opened,
+ * and hidden in a folded ellipsis-mode bubble (a held card's one line).
+ */
+describe("a collapsed prompt's image", () => {
+  /** A bubble (MORE its data-more, when set) whose body holds one marked image; EXPANDED opens it. */
+  function bubbleWithImage(expanded: boolean, more?: string): { bubble: HTMLElement; image: HTMLImageElement } {
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    if (more !== undefined) bubble.setAttribute("data-more", more);
+    const scroll = document.createElement("div");
+    scroll.className = expanded ? `bubble-scroll ${EXPANDED_CLASS}` : "bubble-scroll";
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    const image = document.createElement("img");
+    image.className = `prompt-block prompt-block-image ${BUBBLE_COLLAPSED_THUMBNAIL_CLASS}`;
+    body.append(image);
+    scroll.append(body);
+    bubble.append(scroll);
+    return { bubble, image };
+  }
+
+  it.each([
+    ["caps the folded image's width at about a dozen characters", "max-width", "12ch"],
+    ["caps the folded image's height at a few lines", "max-height", "3em"],
+    ["sizes the folded image's height by its aspect ratio", "height", "auto"],
+  ])("%s", (_name, property, expected) => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(false);
+    // Act
+    const value = inDocument(bubble, () => cascadedValue(image, property));
+    // Assert
+    expect(value).toBe(expected);
+  });
+
+  it("draws the opened image at the full thumbnail height", () => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(true);
+    // Act
+    const height = inDocument(bubble, () => cascadedValue(image, "height"));
+    // Assert
+    expect(height).toBe("120px");
+  });
+
+  it("hides the image in a folded ellipsis-mode bubble", () => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(false, "ellipsis");
+    // Act
+    const display = inDocument(bubble, () => cascadedValue(image, "display"));
+    // Assert
+    expect(display).toBe("none");
+  });
+
+  it("shows the image once an ellipsis-mode bubble is opened", () => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(true, "ellipsis");
+    // Act
+    const display = inDocument(bubble, () => cascadedValue(image, "display"));
+    // Assert
+    expect(display).toBe("block");
+  });
+});
+
+/**
+ * A FEED PROMPT'S QUOTE, drawn from its parts (src/bubble/quote.ts): its
+ * heading shows folded, and every other part hides with the fold.
+ */
+describe("a feed prompt's quote parts", () => {
+  /** Every rule whose selector names the quote class. */
+  const quoteRules = (): CssRule[] =>
+    rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_QUOTE_CLASS}`)));
+
+  it("hides every part but the heading in the body of a scroll box that is not expanded", () => {
+    // Arrange / Act
+    const selectors = quoteRules().flatMap((rule) => rule.selectors);
+    // Assert
+    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) > .bubble-body > .${QUOTE_PARTS_CLASS} .${BUBBLE_QUOTE_CLASS}`]);
+  });
+
+  it("takes the hidden parts out of layout", () => {
+    // Arrange / Act
+    const declarations = quoteRules().map((rule) => rule.declarations.trim());
+    // Assert
+    expect(declarations).toEqual(["display: none;"]);
+  });
+
+  it("draws the quote's heading and closing marker smaller than the prompt's words", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.${QUOTE_MARKER_CLASS}`) ?? "";
+    // Assert
+    expect(rule).toMatch(/font-size:\s*0\.88em/);
+  });
+
+  it("draws the quote's heading and closing marker greyer than the prompt's words", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.${QUOTE_MARKER_CLASS}`) ?? "";
+    // Assert
+    expect(rule).toMatch(/color:\s*color-mix\(in srgb, var\(--fg\) 55%, var\(--muted\)\)/);
+  });
+});
+
+/**
+ * THE HELD STATUS BADGES' COLORS (owner spec, 2026-09-23): each tone the one
+ * table (src/held/held-prompt.ts) assigns resolves to its semantic token, on the
+ * tool cards' own `.badge`. WAITING red and INTERRUPTING green are the owner's.
+ */
+describe("the held status badges' colors", () => {
+  const TOKENS: Readonly<Record<string, string>> = {
+    ok: "--ok",
+    err: "--err",
+    run: "--thinking",
+    muted: "--muted",
+    amber: "--merge-border",
+    teal: "--revival",
+  };
+
+  /**
+   * The color a `.badge` of TONE is painted: the held card's own rule's when it
+   * sets one, else the shared `.badge` rule's (a held rule may add only motion).
+   */
+  function toneColor(tone: string): string | undefined {
+    const colorOf = (rule: string | undefined): string | undefined =>
+      /(?:^|;)\s*color:\s*([^;]+);/.exec(rule ?? "")?.[1]?.trim();
+    return colorOf(declarationsOf(`.badge.held-badge.${tone}`)) ?? colorOf(declarationsOf(`.badge.${tone}`));
+  }
+
+  it.each(Object.entries(TOKENS))("paints the %s tone in %s", (tone, token) => {
+    // Arrange / Act
+    const color = toneColor(tone);
+    // Assert
+    expect(color).toBe(`var(${token})`);
+  });
+
+  it("assigns only tones the stylesheet paints", () => {
+    // Arrange / Act
+    const unpainted = [...new Set(Object.values(HELD_STATUS_BADGES))].filter((tone) => toneColor(tone) === undefined);
+    // Assert
+    expect(unpainted).toEqual([]);
+  });
+
+  it("paints a prompt waiting for the turn's end red", () => {
+    // Arrange / Act / Assert
+    expect(toneColor(HELD_STATUS_BADGES.holdForTurnEnd)).toBe("var(--err)");
+  });
+
+  it("paints an interrupting prompt green", () => {
+    // Arrange / Act / Assert
+    expect(toneColor(HELD_STATUS_BADGES.interject)).toBe("var(--ok)");
+  });
+
+  it("leaves no rule for the retired queued badge classes", () => {
+    // Arrange / Act
+    const retired = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /\.queued-(?:badge|accepted)\b/.test(sel)),
+    );
+    // Assert
+    expect(retired.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+});
+
+/** An RGB triple's relative luminance (WCAG), enough to order two fills by lightness. */
+const luminance = ([r, g, b]: [number, number, number]): number => {
+  const lin = (c: number): number => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+
+/**
+ * An RGB triple's CIE L*, so "clearly darker, but not much darker" is one step
+ * size in both themes rather than a luminance ratio that reads differently at
+ * each end of the scale.
+ */
+const lightness = (rgb: [number, number, number]): number => {
+  const y = luminance(rgb);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+};
+
+describe("lightness, the CIE L* every fill-step test measures in", () => {
+  it.each([
+    ["black", [0, 0, 0], 0],
+    ["white", [255, 255, 255], 100],
+  ] as const)("puts %s at L* %d", (_name, rgb, want) => {
+    // Arrange / Act
+    const got = lightness([...rgb]);
+    // Assert
+    expect(got).toBeCloseTo(want, 1);
+  });
+
+  it("takes the linear segment below the CIE threshold", () => {
+    // Arrange — #0e0e0e's luminance, 0.00439, sits below 0.008856.
+    // Act
+    const got = lightness([0x0e, 0x0e, 0x0e]);
+    // Assert
+    expect(got).toBeCloseTo(903.3 * luminance([0x0e, 0x0e, 0x0e]), 6);
+  });
+
+  it("takes the cube-root segment above the CIE threshold", () => {
+    // Arrange / Act
+    const got = lightness([0x80, 0x80, 0x80]);
+    // Assert — mid grey is L* 53.6.
+    expect(got).toBeCloseTo(53.6, 1);
+  });
+
+  it("is the one L* formula in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — the formula's cube-root segment, written out.
+    const copies = source.split("116 * Math." + "cbrt").length - 1;
+    // Assert
+    expect(copies).toBe(1);
+  });
+});
+
+describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
+  it("paints a prompt a step above the sidebar (owner requests, 2026-10-28)", () => {
+    // Arrange
+    const block = darkThemeBlock();
+    // Act
+    const [user, sidebar] = [luminance(rgbOf(block, "--user")), luminance(rgbOf(block, "--sidebar-base"))];
+    // Assert
+    expect(user).toBeGreaterThan(sidebar);
+  });
+
+  it.each([
+    ["the tool card sits lighter than the feed", "--bg", "--tool-card-bg"],
+    ["the shared panel fill sits darker than the old card grey", "--panel-bg", "--card"],
+  ])("%s", (_name, darker, lighter) => {
+    // Arrange
+    const block = darkThemeBlock();
+    // Act
+    const [low, high] = [luminance(rgbOf(block, darker)), luminance(rgbOf(block, lighter))];
+    // Assert
+    expect(low).toBeLessThan(high);
+  });
+
+  it("paints a prompt in the light theme the feed's --bg halfway to --sidebar-base (owner request, 2026-10-27)", () => {
+    // Arrange
+    const root = declarationsOf(":root") ?? "";
+    // Act
+    const [bg, sidebar] = [rgbOf(root, "--bg"), rgbOf(root, "--sidebar-base")];
+    const user = rgbOf(root, "--user");
+
+    // Assert
+    expect(user).toEqual(srgbMix(bg, sidebar, 0.5));
+  });
+
+  it("paints a response a neutral grey rather than a hue", () => {
+    // Arrange / Act
+    const [r, g, b] = themeRgbOf(darkThemeBlock(), "--assistant");
+    // Assert — no channel strays far from the others.
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(12);
+  });
+
+  it("dims an expanded repository header below --fg, still above the collapsed grey (owner request, 2026-10-24)", () => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const [collapsed, expanded, fg] = ["--repo-head-collapsed", "--repo-head-expanded", "--fg"].map((token) =>
+      luminance(rgbOf(block, token)),
+    );
+
+    // Assert
+    expect([collapsed < expanded, expanded < fg]).toEqual([true, true]);
+  });
+
+  it("sits the rail lighter than the feed (owner request, 2026-10-28)", () => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const [rail, feed] = [luminance(rgbOf(block, "--sidebar-base")), luminance(rgbOf(block, "--bg"))];
+
+    // Assert
+    expect(rail).toBeGreaterThan(feed);
+  });
+
+  it.each([
+    [".tool-card", "--tool-card-bg"],
+    [".pfooter", "--sidebar-ground"],
+    [".merge-strip", "--tool-card-bg"],
+  ])("fills %s with %s", (selector, token) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes(selector) && /(^|;)\s*background:/.test(r.declarations),
+    );
+    // Assert
+    expect(rule?.declarations).toMatch(new RegExp(`background:\\s*var\\(${token}\\)`));
+  });
+
+  it("paints the footer's own box from --sidebar-ground alone, so it always matches the sidebar (owner request, 2026-10-28)", () => {
+    // Arrange — every rule that paints the footer box itself.
+    const painting = rulesOf(stylesheet).filter(
+      (r) => r.selectors.some((sel) => /(?:^|[\s>])\.pfooter(?![-\w])[^\s>+~]*$/.test(sel)) && /(^|;)\s*background(?:-color)?\s*:/.test(r.declarations),
+    );
+    // Act
+    const grounds = painting.map((r) => /background(?:-color)?\s*:\s*([^;]+);/.exec(r.declarations)?.[1]?.trim());
+    // Assert
+    expect([painting.length > 0, grounds.every((ground) => ground === "var(--sidebar-ground)")]).toEqual([true, true]);
+  });
+
+  it("gives a merge bubble no fill of its own, so it wears the tool card's (owner request, 2026-10-24)", () => {
+    // Arrange / Act
+    const painting = rulesOf(stylesheet).filter(
+      (r) => r.selectors.some((sel) => sel.includes("[data-merge-bubble]")) && /(^|;)\s*background:/.test(r.declarations),
+    );
+
+    // Assert
+    expect(painting.map((r) => r.selectors)).toEqual([]);
+  });
+
+  it("draws a tool card's border transparent (owner request, 2026-10-24)", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".tool-card") && /(^|;)\s*border:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.declarations).toMatch(/border:\s*1px solid transparent/);
+  });
+});
+
+describe("a known command in a prompt bubble (owner request, 2026-11-10)", () => {
+  it("is the canonical purple, the purple status --blocked", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect(root).toMatch(/--known-command:\s*var\(--blocked\)/);
+  });
+
+  it("is not overridden by the dark theme", () => {
+    // Arrange / Act
+    const block = darkThemeBlock();
+    // Assert
+    expect(block).not.toMatch(/--known-command:/);
+  });
+});
+
+/** The hue (degrees) and saturation of a literal color, or undefined for a form this scan does not read. */
+function hueOfLiteral(literal: string): { hue: number; saturation: number } | undefined {
+  const hsl = /^hsla?\(\s*(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)%/.exec(literal);
+  if (hsl) return { hue: Number(hsl[1]), saturation: Number(hsl[2]) / 100 };
+  let channels: number[];
+  const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(literal);
+  if (rgb) channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  else {
+    const hex = literal.slice(1);
+    const full = hex.length === 3 ? [...hex].map((c) => c + c).join("") : hex.slice(0, 6);
+    channels = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+  }
+  const [r, g, b] = channels.map((c) => c / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max === min) return { hue: 0, saturation: 0 };
+  const d = max - min;
+  const hue = max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return { hue: hue * 60, saturation: max === 0 ? 0 : d / max };
+}
+
+describe("every purple in the feed's styles is the canonical purple (owner ruling, 2026-11-15)", () => {
+  // The footer's rainbow status cycle is a deliberate walk through every hue, not a purple element.
+  const withoutRainbow = (css: string): string =>
+    css.replace(/@keyframes pfooter-status-color[\s\S]*?\n\}/, "");
+  const purpleLiterals = (css: string): string[] =>
+    (withoutRainbow(withoutBlockComments(css)).match(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|(?:rgba?|hsla?)\([^)]*\)/g) ?? []).filter((literal) => {
+      const read = hueOfLiteral(literal);
+      return read !== undefined && read.saturation > 0.12 && read.hue >= 250 && read.hue <= 325;
+    });
+
+  it.each([
+    ["styles.css", stylesheet],
+    ["sidebar-page.css", sidebarPageStylesheet],
+  ])("spells no purple literal in %s", (_name, css) => {
+    // Arrange / Act
+    const found = purpleLiterals(css);
+    // Assert
+    expect(found).toEqual([]);
+  });
+
+  it.each(["--tool-title", "--retry", "--info-agents", "--hl-keyword"])("%s is the token", (name) => {
+    // Arrange / Act
+    const root = withoutBlockComments(stylesheet);
+    // Assert
+    expect(root).toMatch(new RegExp(`${name}:\\s*var\\(--blocked\\);`));
+  });
+
+  it("the scan finds a purple spelled out", () => {
+    // Arrange / Act / Assert
+    expect(purpleLiterals(".a { color: #8b5cf6; } .b { color: hsl(280 55% 62%); } .c { color: #15803d; }")).toEqual([
+      "#8b5cf6",
+      "hsl(280 55% 62%)",
+    ]);
+  });
+});
+
+describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
+  it("is the known command's purple", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect(root).toMatch(/--prompt-link:\s*var\(--known-command\)/);
+  });
+
+  it("is not overridden by the dark theme", () => {
+    // Arrange / Act
+    const block = darkThemeBlock();
+    // Assert
+    expect(block).not.toMatch(/--prompt-link:/);
+  });
+
+  it("colors links in every prompt, a held one included", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"] a') ?? "";
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--prompt-link\)/);
+  });
+});
+
+describe("the one code wash (owner request, 2026-10-28)", () => {
+  it("is the ink at 4% over whatever bubble holds the code, declared once on :root", () => {
+    // Arrange / Act
+    const declarations = withoutBlockComments(stylesheet).match(/--code-bg\s*:[^;]+;/g) ?? [];
+    // Assert — no theme or bubble restates it, so every bubble's code is the
+    // same step from its own fill; only a reply's quoted response (below)
+    // fills its quote as the response it came from.
+    expect(declarations).toEqual(["--code-bg: color-mix(in srgb, var(--fg) 4%, transparent);", "--code-bg: var(--assistant);"]);
+  });
+
+  it.each([
+    ["a fenced block", ".md pre.md-code"],
+  ])("paints %s from the one wash", (_name, selector) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(selector) && /background:/.test(r.declarations));
+    // Assert
+    expect(rule?.declarations).toMatch(/background:\s*var\(--code-bg\)/);
+  });
+
+  it.each(["user", "held", "agent", "peer"])("lets a %s prompt's code take the same wash as a response's", (variant) => {
+    // Arrange
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.setAttribute("data-role", "prompt");
+    bubble.setAttribute("data-variant", variant);
+    // Act
+    const set = inDocument(bubble, (el) => cascadedValue(el, "--code-bg"));
+    // Assert — no prompt rule restates the wash: it inherits the root's.
+    expect(set.replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--fg)4%,transparent)");
+  });
+
+  it("keeps no per-bubble code token", () => {
+    // Arrange / Act / Assert
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/--(?:code-block-bg|prompt-code-bg|held-prompt-code-bg|response-code-bg)\s*:/);
+  });
+
+  it("fills a reply's quoted response as the response it came from", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="user"] .prompt-block-quote') ?? "";
+    // Assert
+    expect(rule.trim()).toBe("--code-bg: var(--assistant);");
+  });
+
+  it("leaves a code block's inner code unfilled", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md pre.md-code code") ?? "";
+    // Assert
+    expect(rule).toMatch(/background:\s*none/);
+  });
+
+  it("leaves a code block's inner code in the block's own ink, not inline code's", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md pre.md-code code") ?? "";
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*inherit;/);
+  });
+});
+
+describe("inline code's ground, halfway between the highlight grey and a response bubble (owner request, 2026-11-22)", () => {
+  it("is halfway from the highlight grey to the response bubble's fill, once, on :root", () => {
+    // Arrange / Act
+    const declarations = withoutBlockComments(stylesheet).match(/--inline-code-bg\s*:[^;]+;/g) ?? [];
+    // Assert
+    expect(declarations).toEqual(["--inline-code-bg: color-mix(in srgb, var(--highlight-grey) 50%, var(--assistant));"]);
+  });
+
+  it.each([["background", "var(--inline-code-bg)"], ["color", "var(--inline-code-ink)"]])(
+    "paints inline code's %s from it",
+    (property, want) => {
+      // Arrange / Act
+      const rule = declarationsOf(".md code") ?? "";
+      // Assert
+      expect(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+);`).exec(rule)?.[1]?.trim()).toBe(want);
+    },
+  );
+});
+
+// THE TWO COLORED MERGE GLYPHS (owner rulings, 2026-09-28). The merge glyph
+// rule paints every merge mark the accent, so the two arms the vocabulary
+// colors must be repainted after it, or the rail would draw a blue failure
+// and a green conflict in the accent.
+// THE TONE WINS (owner ruling, 2026-09-28): every rail mark — a disc's fill
+// and a merge glyph's ink alike — is its arm's shared tone. The six tones are
+// restated at the rail's own specificity, and no LATER rule may set a mark's
+// color, so no hand-picked hue can override the vocabulary.
+describe("the rail's tone rules", () => {
+  it.each([
+    ["blue", "var(--init)"],
+    ["purple", "var(--blocked)"],
+    ["red", "var(--err)"],
+    ["turquoise", "var(--turquoise)"],
+    ["yellow", "var(--async)"],
+    ["green", "var(--ok)"],
+  ])("paints #ws-sidebar .st.tone-%s with %s", (tone, color) => {
+    const rules = rulesOf(stylesheet).filter(
+      (rule) => isOwnRule(rule, `#ws-sidebar .st.tone-${tone}`),
+    );
+    expect(rules.at(-1)?.declarations).toContain(`color: ${color}`);
+  });
+
+  // THE ONE DECLARED EXCEPTION is a mark's own ink, which must come after the
+  // tones: an arm's (render-colors.json glyph_inks, owner ruling 2026-10-13)
+  // an async merge's (async_merge_mark.ink, owner request 2026-10-13), or a
+  // paused queue's merge indicators' (paused_merge_mark.ink, owner ruling
+  // 2026-10-14).
+  const DECLARED_INKS = [
+    ...new Set([...Object.values(renderColors.glyph_inks), renderColors.async_merge_mark.ink, renderColors.paused_merge_mark.ink]),
+  ];
+
+  it("lets no rail status rule but a declared ink set a color after the tone rules", () => {
+    const rules = rulesOf(stylesheet);
+    let lastTone = -1;
+    rules.forEach((rule, index) => {
+      if (rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-"))) lastTone = index;
+    });
+    const inks = new Set(DECLARED_INKS.map((ink) => `#ws-sidebar .st.ink-${ink}`));
+    const later = rules
+      .slice(lastTone + 1)
+      .filter((rule) =>
+        rule.selectors.some((sel) => /^#ws-sidebar \.st(-|\[|\.)/.test(sel)) &&
+        /(?:^|;)\s*color\s*:/.test(rule.declarations) &&
+        !rule.selectors.every((sel) => inks.has(sel)),
+      );
+    expect(later.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it.each(DECLARED_INKS)("inks a mark %s after the tone rules", (ink) => {
+    const rules = rulesOf(stylesheet);
+    const lastIndex = (pred: (rule: (typeof rules)[number]) => boolean): number =>
+      rules.reduce((found, rule, index) => (pred(rule) ? index : found), -1);
+    const lastTone = lastIndex((rule) => rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-")));
+    const inkAt = lastIndex((rule) => isOwnRule(rule, `#ws-sidebar .st.ink-${ink}`));
+    expect(inkAt).toBeGreaterThan(lastTone);
+    expect(rules[inkAt].declarations).toMatch(/(?:^|;)\s*color\s*:/);
+  });
+
+  it("inks a paused queue's merge indicators in the paused merge bubble's amber", () => {
+    const rules = rulesOf(stylesheet).filter(
+      (rule) => isOwnRule(rule, `#ws-sidebar .st.ink-${renderColors.paused_merge_mark.ink}`),
+    );
+    expect(rules.at(-1)?.declarations).toContain("color: var(--merge-paused)");
+  });
+});
+
+describe("the turquoise token", () => {
+  it("defines --turquoise in both themes, from the shared vocabulary", () => {
+    const defs = rulesOf(colorValuesStylesheet()).filter((rule) =>
+      /(?:^|;)\s*--turquoise\s*:/.test(rule.declarations),
+    );
+    expect(defs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("gives .tone-turquoise its token", () => {
+    const rules = rulesOf(stylesheet).filter(
+      (rule) => isOwnRule(rule, ".tone-turquoise"),
+    );
+    expect(rules.at(-1)?.declarations).toContain("color: var(--turquoise)");
+  });
+});
+
+/*
+ * THE FOOTER'S ACTIVITY SECTION IS ALWAYS EXACTLY ONE LINE (webapp AGENTS.md):
+ * a line longer than the cell is truncated with an ellipsis, and the strip
+ * never grows in height for it.
+ */
+describe("the footer's one-line activity section", () => {
+  it("never wraps a strip cell's text", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".pfooter-cell") ?? "";
+    // Assert
+    expect(rule).toMatch(/white-space:\s*nowrap\s*;/);
+  });
+
+  it("truncates the activity cell with an ellipsis", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".pfooter-grow") ?? "";
+    // Assert
+    expect(rule).toMatch(/overflow:\s*hidden\s*;/);
+    expect(rule).toMatch(/text-overflow:\s*ellipsis\s*;/);
+  });
+});
+
+/**
+ * THE FOOTER'S STATUS WORD SIZE (owner ruling, 2026-09-29): it reads
+ * `--footer-status-font-size`, the old substatus's size. A step is drawn as
+ * the status (owner request, 2026-10-31), so no substatus rule remains.
+ */
+describe("the footer's status size", () => {
+  it("sets the status word from the one size", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const strip = document.createElement("div");
+    strip.className = "pfooter";
+    const status = document.createElement("div");
+    status.className = "pfooter-cell pfooter-phase footer-status";
+    strip.append(status);
+    document.body.replaceChildren(strip);
+
+    // Act
+    const statusSize = cascadedValue(status, "font-size");
+
+    // Assert
+    expect(statusSize).toBe("var(--footer-status-font-size)");
+    teardown();
+  });
+
+  it("gives that size its value", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(/\.pfooter \{ --footer-status-font-size: 0\.74rem; \}/);
+  });
+
+  it("keeps no substatus rule, the step being drawn as the status", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).not.toMatch(/\.footer-substatus/);
+  });
+
+  it("sets a step's figure in tabular figures", () => {
+    // Arrange / Act / Assert
+    expect(declarationsOf(".footer-status-figure")).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+});
+
+describe("the expanded-item ceiling", () => {
+  it("is 80% of the feed's own visible height, declared once on the feed's size container", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#feed-scroll");
+
+    // Assert
+    expect(rule).toMatch(/container-type:\s*size/);
+    expect(rule).toMatch(/--feed-item-max-h:\s*80cqh/);
+    expect(stylesheet.match(/--feed-item-max-h:/g)).toHaveLength(1);
+  });
+
+  it.each([
+    ".tool-fold.expanded",
+    ".tool-card.bubble-fold[data-expanded=\"true\"]",
+    ".shell-bubble:has(.shell-tail.expanded)",
+    ".tool-card:has(> .hook-output.expanded)",
+    ".title-fold-standalone.expanded",
+  ])("caps %s at the ceiling", (selector) => {
+    expect(declarationsOf(selector)).toMatch(/max-height:\s*var\(--feed-item-max-h\)/);
+  });
+
+  it("caps an expanded merge bubble at 45% of the ceiling", () => {
+    expect(declarationsOf('.tool-card.bubble-fold[data-merge-bubble][data-expanded="true"]')).toMatch(
+      /max-height:\s*calc\(var\(--feed-item-max-h\) \* 0\.45\)/,
+    );
+  });
+
+  it("keeps an expanded bubble's head at its full height under the cap", () => {
+    expect(declarationsOf('.bubble-fold[data-expanded="true"] > .bubble-head')).toMatch(/flex:\s*0 0 auto/);
+  });
+
+  it("lets only an expanded bubble's sub-feed shrink and scroll under the cap", () => {
+    // Arrange
+    const rule = declarationsOf('.bubble-fold[data-expanded="true"] > .bubble-subfeed');
+
+    // Assert
+    expect(rule).toMatch(/flex:\s*0 1 auto/);
+    expect(rule).toMatch(/min-height:\s*0/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("pins the merge bubble's tab strip so the cut comes out of the tab content", () => {
+    // Arrange
+    const rule = declarationsOf(".merge-strip");
+
+    // Assert
+    expect(rule).toMatch(/position:\s*sticky/);
+    expect(rule).toMatch(/top:\s*0/);
+  });
+
+  it("never caps a response or prompt bubble's scroll box at the item ceiling", () => {
+    expect(declarationsOf(".bubble > .bubble-scroll.expanded")).not.toMatch(/--feed-item-max-h/);
+  });
+});
+
+describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => {
+  it("makes the glyph black", () => {
+    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-glyph")).toEqual([0, 0, 0]);
+  });
+
+  it("paints the glyph with the chip's color, whatever the wifi arm", () => {
+    expect(declarationsOf(".topbar-wifi") ?? "").toMatch(/color:\s*var\(--wifi-glyph\)/);
+  });
+
+  it("paints no color off the wifi arm", () => {
+    expect(stylesheet).not.toMatch(/\.topbar-wifi\[data-wifi=/);
+  });
+
+  it("makes the mode-off disc light grey", () => {
+    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-off-disc")).toEqual([229, 231, 235]);
+  });
+
+  it("fills the disc white by default", () => {
+    expect(declarationsOf(".topbar-wifi-disc") ?? "").toMatch(/fill:\s*var\(--wifi-mode-off-disc\)/);
+  });
+
+  it("makes the mode-on disc green", () => {
+    // Arrange / Act
+    const [r, g, b] = rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-on-disc");
+    // Assert
+    expect(g > r && g > b).toBe(true);
+  });
+
+  it("fills the disc, not the chip, when the mode is on", () => {
+    const rule = declarationsOf('.topbar-wifi[data-mode="on"] .topbar-wifi-disc') ?? "";
+    expect(rule).toMatch(/fill:\s*var\(--wifi-mode-on-disc\)/);
+  });
+
+  it("strokes the glyph's arcs and never the disc", () => {
+    expect(declarationsOf(".topbar-wifi-disc") ?? "").toMatch(/stroke:\s*none/);
+  });
+
+  it("pulses a chip whose toggle is settling", () => {
+    expect(declarationsOf(".topbar-wifi[data-settling]") ?? "").toMatch(/animation:\s*topbar-wifi-settling/);
+  });
+
+  it("holds the pulse still under prefers-reduced-motion", () => {
+    expect(stylesheet).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-queue-bypass\[data-settling\],\s*\.topbar-remote-control\[data-settling\],\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
+    );
+  });
+});
+
+/**
+ * The rule that names one wifi hook and each of its TWINS' (the same hook on
+ * the twin chip), alone: the remote-control chip shares the wifi chip's look
+ * and feel (owner ruling, 2026-10-31), and so does the queue-bypass chip
+ * (owner request, 2026-11-10), so each of the wifi chip's paint rules is
+ * theirs too. The mode-on disc is the one paint the queue-bypass chip does not
+ * share (it lights in the canonical orange), so that rule names the
+ * remote-control twin alone.
+ */
+function sharedChipRule(
+  wifi: string,
+  twins: readonly string[] = ["topbar-remote-control", "topbar-queue-bypass"],
+): string | undefined {
+  const hooks = [wifi, ...twins.map((twin) => wifi.replaceAll("topbar-wifi", twin))];
+  return rulesOf(stylesheet).find(
+    (rule) => rule.selectors.length === hooks.length && hooks.every((hook) => rule.selectors.includes(hook)),
+  )?.declarations;
+}
+
+describe("the remote-control chip's paints (owner ruling, 2026-10-31)", () => {
+  it("paints the glyph with the wifi chip's black", () => {
+    expect(sharedChipRule(".topbar-wifi") ?? "").toMatch(/color:\s*var\(--wifi-glyph\)/);
+  });
+
+  it("fills the disc white by default, as the wifi chip's", () => {
+    expect(sharedChipRule(".topbar-wifi-disc") ?? "").toMatch(/fill:\s*var\(--wifi-mode-off-disc\)/);
+  });
+
+  it("fills the disc green when the mode is on, as the wifi chip's", () => {
+    expect(sharedChipRule('.topbar-wifi[data-mode="on"] .topbar-wifi-disc', ["topbar-remote-control"]) ?? "").toMatch(
+      /fill:\s*var\(--wifi-mode-on-disc\)/,
+    );
+  });
+
+  it("strokes the glyph at the wifi glyph's size and weight", () => {
+    expect(sharedChipRule(".topbar-wifi-glyph") ?? "").toMatch(/width:\s*16px;[\s\S]*stroke-width:\s*2\.25/);
+  });
+
+  it("pulses a chip whose toggle is settling with the wifi chip's pulse", () => {
+    expect(sharedChipRule(".topbar-wifi[data-settling]") ?? "").toMatch(/animation:\s*topbar-wifi-settling/);
+  });
+
+  it("takes the right group's quiet button box", () => {
+    expect(declarationsOf(".topbar-remote-control-button") ?? "").toMatch(/cursor:\s*pointer/);
+  });
+});
+
+describe("the persistent-wifi glyph button", () => {
+  it("carries the chip's color, which is the glyph's black", () => {
+    expect(sharedChipRule(".topbar-wifi-button") ?? "").toMatch(/color:\s*inherit/);
+  });
+
+  it("takes the right group's quiet button box", () => {
+    expect(declarationsOf(".topbar-wifi-button") ?? "").toMatch(/cursor:\s*pointer/);
+  });
+});
+
+describe("the cold gate's lead sentence", () => {
+  it("is drawn in the ordinary foreground, leaving color to its token figure alone", () => {
+    // Arrange
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".cold-gate-context"));
+
+    // Act
+    const declarations = rule?.declarations ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/color:\s*var\(--fg\)/);
+  });
+
+  it("draws its token figure bold", () => {
+    // Arrange
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".cold-gate-tokens"));
+
+    // Act
+    const declarations = rule?.declarations ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/font-weight:\s*700/);
+  });
+});
+
+/**
+ * THE TOOL CARD'S HEADER CONTENT IS GREY (owner request, 2026-10-08): the
+ * input line a tool card titles itself with (the Bash command, the Grep
+ * pattern, both `.cmd`) is a medium-dark grey, readable but not prominent,
+ * where it was the `--accent` blue.
+ */
+describe("the tool card's command grey", () => {
+  it("colors the command line with the command grey token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".cmd");
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--tool-command\)/);
+  });
+
+  it("leaves no tool card input line in the accent blue", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".cmd") ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/var\(--accent\)/);
+  });
+
+  it.each([
+    ["light", "#4b5563"],
+    ["dark", "#898782"],
+  ] as const)("defines the %s theme's command grey as %s", (theme, want) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+
+    // Act
+    const got = /--tool-command:\s*(#[0-9a-fA-F]{3,6})/.exec(block)?.[1];
+
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  // Emacs's input window is the host-native composer, so its
+  // `agent-repl-input-background' (lisp/input.el) wears the dark shared
+  // ground. Neither suite may read the other's file, so lisp/test-input.el
+  // pins #171717 too.
+  it("defines the dark theme's shared ground as Emacs's input background, #171717", () => {
+    // Arrange
+    const mix = /^color-mix\(in srgb,\s*var\(--sidebar-base\)\s*([\d.]+)%,\s*#([0-9a-fA-F]{6})\)$/.exec(
+      themeValueOf(declarationsOf(":root") ?? "", "--sidebar-ground") ?? "",
+    );
+    if (mix === null) throw new Error("--sidebar-ground is not a color-mix of --sidebar-base");
+    const share = Number(mix[1]) / 100;
+    const other = rgbOf(`--other: #${mix[2]};`, "--other");
+    const base = rgbOf(darkThemeBlock(), "--sidebar-base");
+
+    // Act — srgb color-mix, each channel rounded to 8 bits as WebKit paints it.
+    const got = srgbMix(base, other, share);
+
+    // Assert
+    expect(got).toEqual([0x17, 0x17, 0x17]);
+  });
+
+  // THE ONE SHARED GROUND (owner request, 2026-11-02): every visible surface of
+  // the sidebar, the footer and both composers paint --sidebar-ground, so no
+  // surface of the sidebar can differ from the composer.
+  it.each([
+    ["the sidebar page", sidebarPageStylesheet, "html.agent-repl-sidebar body"],
+    ["the rail", stylesheet, "#ws-sidebar"],
+    ["a subsection's header band", stylesheet, "#ws-sidebar .sb-subsection-head"],
+    ["the footer", stylesheet, ".pfooter"],
+    ["the shell composer", stylesheet, "#composer-input"],
+    ["a bubble's composer", stylesheet, ".composer-input"],
+    // One shell, one header: a workspace's page and a zettel chat's page both
+    // draw index.html's #topbar (owner request, 2026-11-02).
+    ["the topbar, on a workspace's page and a zettel chat's", stylesheet, "#topbar"],
+  ] as const)("paints %s with var(--sidebar-ground)", (_surface, css, selector) => {
+    // Arrange
+    const painting = rulesOf(css).filter((r) => r.selectors.includes(selector) && /(^|;)\s*background(?:-color)?\s*:/.test(r.declarations));
+
+    // Act
+    const grounds = painting.map((r) => /background(?:-color)?\s*:\s*([^;]+);/.exec(withoutBlockComments(r.declarations))?.[1]?.trim());
+
+    // Assert
+    expect(grounds).toEqual(["var(--sidebar-ground)"]);
+  });
+
+  it("leaves no --composer-bg alias that could point the composer at another ground", () => {
+    // Arrange / Act
+    const aliases = withoutBlockComments(stylesheet).match(/--composer-bg\b/g) ?? [];
+
+    // Assert
+    expect(aliases).toEqual([]);
+  });
+
+  // The Settings page (lisp/settings.el) is grounded with the dark sidebar's
+  // color, and the help bar's buttons are filled a little darker than the
+  // sidebar's selected row. Neither suite may read the other's file, so the
+  // lisp suites pin both colors too.
+  it("defines the dark theme's sidebar base as the Settings page's ground, #1a1a1a", () => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const got = rgbOf(block, "--sidebar-base");
+
+    // Assert
+    expect(got).toEqual([0x1a, 0x1a, 0x1a]);
+  });
+
+  it("fills the dark theme's selected sidebar row with #303030, 25% brighter than the 69% mix and lighter than a help button", () => {
+    // Arrange
+    const block = darkThemeBlock();
+    const card = rgbOf(block, "--card");
+    const ground = rgbOf(block, "--sidebar-base");
+    const share = 0.69;
+
+    // Act
+    const tint = srgbMix([255, 255, 255], srgbMix(card, ground, share), 0.044);
+
+    // Assert
+    expect(withoutBlockComments(stylesheet)).toContain(
+      "--highlight-grey: color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)));",
+    );
+    expect(tint).toEqual([0x30, 0x30, 0x30]);
+  });
+
+  // The Settings page (lisp/settings.el, agent-repl-settings--colors) wears the
+  // dark theme's ink, muted ink, card, border and selected-entry accent.
+  // Neither suite may read the other's file, so lisp/test-settings.el pins
+  // these colors too.
+  it.each([
+    ["--fg", [0xf1, 0xef, 0xe9]],
+    ["--muted", [0x89, 0x87, 0x82]],
+    ["--card", [0x2c, 0x2c, 0x2c]],
+    ["--border", [0x2a, 0x2a, 0x2a]],
+    ["--selected-entry", [0x64, 0x98, 0xda]],
+  ] as const)("defines the dark theme's %s as the Settings page's", (token, want) => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const got = rgbOf(block, token);
+
+    // Assert
+    expect(got).toEqual(want);
+  });
+});
+
+/**
+ * A QUESTION OPTION IS NEVER INDENTED: the base control (`:where(ar-button)`)
+ * centers its text, so an option whose label and description wrap drew its
+ * first `1. label description` line pushed in from the left edge.
+ */
+describe("the question option's alignment", () => {
+  it("aligns an option's text to the start rather than the control's center", () => {
+    // Arrange
+    const list = document.createElement("div");
+    list.className = "q-opts";
+    const option = createControl();
+    option.className = "q-opt";
+    list.append(option);
+
+    // Act
+    const align = inDocument(list, () => cascadedValue(option, "text-align"));
+
+    // Assert
+    expect(align).toBe("start");
+  });
+
+  /**
+   * An option drawn as `drawFeedQuestionOption` draws it, mounted in a list:
+   * the numeral, the label and the description, in that order.
+   */
+  function optionRow(): { list: HTMLElement; option: HTMLElement; parts: Record<string, HTMLElement> } {
+    const list = document.createElement("div");
+    list.className = "q-opts";
+    const option = createControl();
+    option.className = "q-opt";
+    const parts: Record<string, HTMLElement> = {};
+    for (const name of ["q-opt-number", "q-opt-label", "q-opt-description"]) {
+      const part = document.createElement("span");
+      part.className = name;
+      option.append(part);
+      parts[name] = part;
+    }
+    list.append(option);
+    return { list, option, parts };
+  }
+
+  it("lays an option's numeral, label and description out as one flex row", () => {
+    // Arrange
+    const { list, option } = optionRow();
+
+    // Act
+    const display = inDocument(list, () => cascadedValue(option, "display"));
+
+    // Assert
+    expect(display).toBe("flex");
+  });
+
+  it("lines the row's parts up on their shared baseline", () => {
+    // Arrange
+    const { list, option } = optionRow();
+
+    // Act
+    const align = inDocument(list, () => cascadedValue(option, "align-items"));
+
+    // Assert
+    expect(align).toBe("baseline");
+  });
+
+  it("keeps the numeral from shrinking, so the description's column never reaches under it", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const shrink = inDocument(list, () => cascadedValue(parts["q-opt-number"], "flex-shrink"));
+
+    // Assert
+    expect(shrink).toBe("0");
+  });
+
+  it("lets the description shrink below its content width, so its text wraps inside its own column", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const got = inDocument(list, () => [
+      cascadedValue(parts["q-opt-description"], "flex-shrink"),
+      cascadedValue(parts["q-opt-description"], "min-width"),
+    ]);
+
+    // Assert
+    expect(got).toEqual(["1", "0px"]);
+  });
+
+  it("lets the label shrink below its content width, so a long label wraps beside the description", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const got = inDocument(list, () => [
+      cascadedValue(parts["q-opt-label"], "flex-shrink"),
+      cascadedValue(parts["q-opt-label"], "min-width"),
+    ]);
+
+    // Assert
+    expect(got).toEqual(["1", "0px"]);
+  });
+
+  it("draws the description in italics", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const style = inDocument(list, () => cascadedValue(parts["q-opt-description"], "font-style"));
+
+    // Assert
+    expect(style).toBe("italic");
+  });
+});
+
+/**
+ * THE QUESTION HEADER CHIP IS THE COMMAND GREY (owner request, 2026-10-16):
+ * a question's header badge reads in the same grey as a tool card's `.cmd`
+ * input line, where it was the `--accent` blue.
+ */
+describe("the question header chip's grey", () => {
+  it("colors the header chip with the command grey token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".q-chip");
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--tool-command\)/);
+  });
+
+  it("leaves the header chip out of the accent blue", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".q-chip") ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/var\(--accent\)/);
+  });
+
+  it("cascades the command grey onto a settled verdict's header chip", () => {
+    // Arrange / Act
+    const color = cascadedValueIn("q-verdict", "badge q-chip", "color");
+
+    // Assert
+    expect(color).toBe("var(--tool-command)");
+  });
+});
+
+/**
+ * THE PAGE-COLORED FILL (owner request, 2026-10-08): a thinking bubble and an
+ * interim response are filled with the page's own `--bg`, so the bubble's
+ * background is not there in either theme; every other response keeps the
+ * purple.
+ */
+/** A bubble variant's selector. */
+const variantSelector = (variant: string): string => `.bubble[data-variant="${variant}"]`;
+/**
+ * The padding ladder: each rule that sets a padding token, by its selectors,
+ * and the tokens it sets (owner requests, 2026-10-12, 2026-10-13 and
+ * 2026-10-14). The shares themselves are pinned by "the padding ladder" suite.
+ */
+const PAD_LADDER: readonly { selectors: readonly string[]; props: readonly string[] }[] = [
+  { selectors: [variantSelector("response")], props: ["--bubble-pad-y"] },
+  { selectors: ["agent", "peer"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: ["user", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: [`${variantSelector("response")}.final-response`], props: ["--bubble-pad-y"] },
+  { selectors: [variantSelector("thinking")], props: ["--bubble-pad-y"] },
+];
+/** The two padding tokens a ladder rung may set. */
+const PAD_TOKENS: readonly string[] = ["--bubble-pad-y", "--bubble-pad-x"];
+/** Every variant selector the ladder pads. */
+const TIGHTER_PAD_SELECTORS: readonly string[] = PAD_LADDER.flatMap((rung) => rung.selectors);
+/** The thinking bubble's own selector. */
+const THINKING_SELECTOR = variantSelector("thinking");
+/** The two bubble kinds whose prose is dimmed: the interim's `--interim-text`, the thinking bubble's greyer `--thinking-text`. */
+const DIMMED_TEXT_SELECTORS: readonly string[] = [THINKING_SELECTOR, ".bubble.interim-response"];
+
+/** The bubbles drawn as text on the feed, with no fill or shadow: the dimmed pair and every response (owner request, 2026-10-28). */
+const ON_FEED_SELECTORS: readonly string[] = [THINKING_SELECTOR, '.bubble[data-variant="response"]', ".bubble.interim-response"];
+
+describe("the page-colored fill", () => {
+  /** The `--bubble-bg` the cascade hands a bubble with ATTRS and HOOKS. */
+  function fillOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    return inDocument(el, () => cascadedValue(el, "--bubble-bg"));
+  }
+
+  it("fills a thinking bubble with the page background", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "thinking", "data-state": "success" }, ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("var(--bg)");
+  });
+
+  it("fills an interim response with the page background", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("var(--bg)");
+  });
+
+  it("fills the turn's answer with the tool card's fill (owner request, 2026-10-28)", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).toBe("var(--assistant)");
+  });
+
+  it("paints the page itself with the same background token", () => {
+    // Arrange / Act
+    const body = declarationsOf("body") ?? "";
+
+    // Assert
+    expect(body).toMatch(/background:\s*var\(--bg\)/);
+  });
+});
+
+/**
+ * NO BUBBLE AT ALL (owner ruling, 2026-10-08). A thinking bubble and an
+ * interim response already carry the page's own `--bg` as their fill (see
+ * "the page-colored fill" above); this is the one thing that still painted a
+ * visible bubble around them with no fill at all — the base rule's
+ * box-shadow, a soft drop shadow plus an inset top-edge highlight
+ * (--bubble-shadow). It is turned off for exactly these two kinds, and only
+ * these two: every other response and prompt kind keeps it.
+ */
+describe("the box-shadow neither a thinking nor an interim bubble may carry", () => {
+  /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
+  const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector);
+
+  /** The `box-shadow` the cascade resolves for a bubble with ATTRS and HOOKS. */
+  function shadowOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    return inDocument(el, () => cascadedValue(el, "box-shadow"));
+  }
+
+  it("drops the bubble shadow and highlight on a thinking bubble", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "response", "data-variant": "thinking", "data-state": "success" }, ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("none");
+  });
+
+  it("drops the bubble shadow and highlight on an interim response", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("none");
+  });
+
+  it("drops the bubble shadow on the turn's final answer (owner request, 2026-10-28)", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).toBe("none");
+  });
+
+  it("keeps the bubble shadow on a user prompt", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "prompt", "data-variant": "user" }, ["user"]);
+
+    // Assert
+    expect(got).toBe("var(--bubble-shadow)");
+  });
+
+  it("sets box-shadow on no other selector than the base rule and these two kinds", () => {
+    // Arrange / Act — every rule in the sheet that sets box-shadow at all.
+    const shadowRules = rulesOf(stylesheet).filter((rule) => /(?:^|;)\s*box-shadow\s*:/.test(rule.declarations));
+    const onABubble = shadowRules.filter((rule) => rule.selectors.some(onBubble));
+
+    // Assert — the base rule (every bubble's default) plus the bubbles drawn on the feed.
+    expect(onABubble.flatMap((rule) => rule.selectors).sort()).toEqual(
+      [".bubble", ...ON_FEED_SELECTORS].sort(),
+    );
+  });
+});
+
+/**
+ * THE RAIL'S MARK COLUMN (owner request, 2026-10-08): a merge glyph's box is
+ * the dot's width, so its centered character shares the dots' center and every
+ * name starts at one edge. Measured in real WebKit by
+ * test/webkit/sidebar-mark.webkit.test.ts.
+ */
+describe("the rail's mark column", () => {
+  it("sizes the dot by the mark column token", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
+  });
+
+  it("sizes a glyph's box by the same token, never by its picture", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
+  });
+
+  it("centers the glyph's picture in its box", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/justify-content:\s*center/);
+  });
+});
+
+/**
+ * THE MARKS' ONE SIZE AND ONE CYCLE (owner ruling, 2026-10-13): every rail
+ * mark draws at the dot's size, a breath shrinks a mark 30% less far than it once
+ * did, and one breath takes exactly as long as one turn of a spinning glyph.
+ */
+/** The selectors every rail glyph control wearing the bare look carries. */
+const BARE_GLYPH_CONTROLS = ["#ws-sidebar .sb-search-btn"];
+
+/**
+ * The one rule the rail's bare glyph controls share (styles.css "THE RAIL'S
+ * BARE GLYPH CONTROLS"): the rule that strips the search button's look.
+ */
+function isBareGlyphRule(rule: CssRule): boolean {
+  return rule.selectors.includes("#ws-sidebar .sb-search-btn") && /appearance:\s*none/.test(rule.declarations);
+}
+
+function bareGlyphRule(): CssRule | undefined {
+  return rulesOf(stylesheet).find(isBareGlyphRule);
+}
+
+/** Whether DECLARATIONS declare PROPERTY as WANT. */
+function declares(declarations: string, property: string, want: string): boolean {
+  return new RegExp(`(?:^|;)\\s*${property}:\\s*${want.replace(/[()]/g, "\\$&")}\\s*;`).test(declarations);
+}
+
+/**
+ * THE RAIL'S BARE GLYPH CONTROLS: no fill, border, focus ring or native
+ * button look around the glyph, declared once for every such control.
+ */
+describe("the rail's bare glyph controls", () => {
+  it.each([
+    { name: "draws no fill", property: "background", want: "none" },
+    { name: "draws no border", property: "border", want: "none" },
+    { name: "draws no focus ring", property: "outline", want: "none" },
+    { name: "draws no native button look", property: "appearance", want: "none" },
+  ])("$name", ({ property, want }) => {
+    // Arrange / Act
+    const rule = bareGlyphRule()?.declarations ?? "";
+
+    // Assert
+    expect(declares(rule, property, want)).toBe(true);
+  });
+
+  it("is shared by every bare glyph control", () => {
+    // Arrange / Act
+    const rule = bareGlyphRule();
+
+    // Assert
+    expect(rule?.selectors).toEqual(BARE_GLYPH_CONTROLS);
+  });
+
+  it("is declared by no bare glyph control on its own", () => {
+    // Arrange / Act
+    const divergent = rulesOf(stylesheet).filter(
+      (rule) =>
+        !isBareGlyphRule(rule) &&
+        rule.selectors.some((sel) => BARE_GLYPH_CONTROLS.includes(sel)) &&
+        /(?:^|;)\s*(?:background|border|outline|appearance):/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(divergent).toEqual([]);
+  });
+});
+
+/**
+ * THE SEARCH TOGGLE IS A FLOATING PURPLE MAGNIFIER (owner request,
+ * 2026-10-13): bare as the rail's glyph controls are, the bands' purple on
+ * the glyph, and the same padded click square.
+ */
+describe("the rail's search toggle", () => {
+  it.each([
+    { name: "wears the bands' header purple", property: "color", want: "var(--blocked)" },
+    { name: "keeps its padded click square", property: "padding", want: "0.1rem" },
+  ])("$name", ({ property, want }) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes("#ws-sidebar .sb-search-btn") && !isBareGlyphRule(r),
+    )?.declarations ?? "";
+
+    // Assert
+    expect(declares(rule, property, want)).toBe(true);
+  });
+
+  it("brightens to full on hover, keyboard focus and while open", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .sb-search-btn:focus-visible"));
+
+    // Assert
+    expect(rule?.selectors).toEqual([
+      "#ws-sidebar:not(.sb-hover-suspended) .sb-search-btn:hover",
+      "#ws-sidebar .sb-search-btn:focus-visible",
+      "#ws-sidebar .sb-search-btn.active",
+    ]);
+    expect(rule?.declarations).toMatch(/opacity:\s*1\b/);
+  });
+});
+
+describe("no name fades or recedes on a timer", () => {
+  it.each(["name-fade", "name-view-dwell-in", "name-view-dwell-out"])("declares no %s keyframes", (name) => {
+    // Arrange / Act / Assert
+    expect(stylesheet).not.toMatch(new RegExp(`@keyframes ${name}\\b`));
+  });
+
+  it.each(["#ws-sidebar .row .name.fading", "#ws-sidebar .row .name.viewing"])("draws no %s rule", (selector) => {
+    // Arrange / Act / Assert
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes(selector))).toBe(false);
+  });
+});
+
+describe("the rail's marks", () => {
+  it.each([
+    ["the peak copy", "#ws-sidebar .row .name.breathes > .name-ink::after", "ws-pulse"],
+    ["the resting copy", "#ws-sidebar .row .name.breathes > .name-ink::before", "ws-pulse-rest"],
+  ])("times %s's breath by the one mark cycle", (_copy, selector, keyframes) => {
+    // Arrange / Act
+    const rule = declarationsOf(selector);
+
+    // Assert
+    expect(rule).toMatch(new RegExp(`animation:\\s*${keyframes}\\s+var\\(--ws-mark-cycle\\)\\s+ease-in-out\\s+infinite`));
+  });
+
+  // THE BREATH RUNS ON THE COMPOSITOR (2026-11-16): a breathing name's own
+  // text animates nothing, so the fade loop it outranks stops too.
+  it("animates nothing on a breathing name's own text, which keeps its state's own color", () => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf("#ws-sidebar .row .name.breathes") ?? "";
+
+    // Assert
+    expect([/animation:\s*none/.test(rule), /(?:^|;)\s*color:/.test(rule)]).toEqual([true, false]);
+  });
+
+  it("hides an animated name's own text and strike line while its copies draw them", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .row .name.breathes") && r.selectors.includes("#ws-sidebar .row .name.reviving"))?.declarations ?? "";
+
+    // Assert
+    expect([/-webkit-text-fill-color:\s*transparent/.test(rule), /text-decoration-color:\s*transparent/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("draws the copies' own ink and strike line in the copy's own color", () => {
+    // Arrange / Act
+    const rule =
+      rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .row .name > .name-ink::before") && r.selectors.includes("#ws-sidebar .row .name > .name-ink::after"))?.declarations ?? "";
+
+    // Assert
+    expect([
+      /content:\s*attr\(data-name\)/.test(rule),
+      /-webkit-text-fill-color:\s*currentColor/.test(rule),
+      /text-decoration-line:\s*inherit/.test(rule),
+      /text-decoration-color:\s*currentColor/.test(rule),
+      /text-overflow:\s*ellipsis/.test(rule),
+    ]).toEqual([true, true, true, true, true]);
+  });
+
+  // The peak copy is ADDED to the resting one in the ink box's own group, so
+  // their weights sum to one and the crossfade is the color mix it replaced.
+  it("adds the peak copy to the resting one inside the ink box's own group", () => {
+    // Arrange / Act
+    const [box, peak] = [declarationsOf("#ws-sidebar .row .name > .name-ink") ?? "", declarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after") ?? ""];
+
+    // Assert
+    expect([/isolation:\s*isolate/.test(box), /pointer-events:\s*none/.test(box), /mix-blend-mode:\s*plus-lighter/.test(peak)]).toEqual([true, true, true]);
+  });
+
+  // A WORKING ROW NEVER TINTS ITS SUBSECTION'S NAME (owner request,
+  // 2026-11-24): no rule gives a subsection's name a tone, a held tint, a
+  // breath or an ink box.
+  it("tints and breathes no subsection name", () => {
+    // Arrange / Act
+    const tinted = rulesOf(stylesheet)
+      .flatMap((r) => r.selectors)
+      .filter((sel) => /\.sb-subsection-label[^,]*(\.tone-|\.breathes|\.tinted|\.name-ink)/.test(sel));
+
+    // Assert
+    expect(tinted).toEqual([]);
+  });
+
+  // THE MARK STANDS STILL (owner request, 2026-10-14): the name breathes in
+  // its place.
+  it("animates no rail mark", () => {
+    // Arrange / Act
+    const animated = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((sel) => /^#ws-sidebar \.st(\.|\[|-|$)/.test(sel)) &&
+        /(?:^|;)\s*animation\s*:/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(animated).toEqual([]);
+  });
+
+  it.each([
+    ["peak", "#ws-sidebar .row .name.breathes.reviving > .name-ink::after", "ws-pulse"],
+    ["resting", "#ws-sidebar .row .name.breathes.reviving > .name-ink::before", "ws-pulse-rest"],
+  ])("runs the shimmer and the breath together on a reviving name's %s copy", (_copy, selector, keyframes) => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf(selector);
+
+    // Assert
+    expect(rule).toMatch(
+      new RegExp(`animation:\\s*ws-revive-counter var\\(--ws-revive-cycle\\) ease-in-out infinite,\\s*${keyframes} var\\(--ws-mark-cycle\\) ease-in-out infinite`),
+    );
+  });
+
+  it("states the mark cycle once", () => {
+    // Arrange / Act
+    const defs = stylesheet.match(/--ws-mark-cycle\s*:/g) ?? [];
+
+    // Assert
+    expect(defs).toHaveLength(1);
+  });
+
+  // THE BREATH ONLY FADES (owner ruling, 2026-10-14): no size change.
+  it("never changes a breathing name's size", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("ws-pulse");
+
+    // Assert
+    expect(keyframes).not.toBe("");
+    expect(keyframes).not.toMatch(/transform|scale|width|height|font-size/);
+  });
+
+  it("swings a breathing name between its resting ink and its peak, never dimmer (owner request, 2026-10-29)", () => {
+    // Arrange
+    const at = (name: string, stop: string): string =>
+      new RegExp(`${stop}\\s*\\{[^}]*opacity:\\s*([^;]+);`).exec(keyframesOf(name))?.[1] ?? "";
+
+    // Act: the peak copy's and the resting copy's weights at rest and at the peak.
+    const weights = ["0%, 100%", "50%"].map((stop) => [at("ws-pulse", stop), at("ws-pulse-rest", stop)]);
+
+    // Assert
+    expect([weights, declarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after")?.match(/(?:^|;)\s*color:\s*([^;]+);/)?.[1]]).toEqual([
+      [["0", "1"], ["1", "0"]],
+      "var(--name-peak)",
+    ]);
+  });
+
+  it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => /(?:^|;)\s*--ws-mark-cycle\s*:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.selectors).toEqual(["#ws-sidebar"]);
+    expect(rule?.declarations).toMatch(/(?:^|;)\s*--ws-mark-cycle:\s*2s\s*;/);
+  });
+
+  it("shimmers a reviving name once every 2.4s, stated once", () => {
+    // Arrange / Act
+    const defs = stylesheet.match(/--ws-revive-cycle\s*:/g) ?? [];
+
+    // Assert
+    expect(defs).toHaveLength(1);
+    expect(stylesheet).toMatch(/--ws-revive-cycle:\s*2\.4s\s*;/);
+  });
+
+  it("shares the one shimmer period between the reviving rules", () => {
+    // Arrange / Act
+    const shimmers = rulesOf(stylesheet).filter((r) => /ws-revive-(?:shimmer|counter)\s/.test(r.declarations));
+
+    // Assert
+    expect(shimmers.length).toBeGreaterThan(1);
+    for (const r of shimmers) expect(r.declarations).toMatch(/ws-revive-(?:shimmer|counter) var\(--ws-revive-cycle\)/);
+  });
+
+  it("sizes a glyph's box at the dot's size", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
+  });
+
+  it("draws a glyph's picture at its box's full height", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph > svg");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*height:\s*100%/);
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*auto/);
+  });
+
+  it("sizes the dot by the same mark size", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
+  });
+
+  it("strikes a cold-gated workspace's name", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated");
+
+    // Assert
+    expect(rule).toMatch(/text-decoration:\s*line-through/);
+  });
+
+  it("keeps an unviewed cold-gated name in its status tone", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated.tinted");
+
+    // Assert: owner request, 2026-11-23.
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*var\(--name-tone\)/);
+  });
+
+  it("offers no click on a row still opening", () => {
+    // Arrange / Act
+    const rule = declarationsOf('#ws-sidebar .ws[data-opening="true"] > .row');
+
+    // Assert
+    expect(rule).toMatch(/cursor:\s*default/);
+  });
+
+  it("draws a grey arm's dot muted", () => {
+    // Arrange / Act
+    const rule = declarationsOf('#ws-sidebar .st.tone-none[data-glyph="dot"]');
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--muted\)/);
+  });
+
+  it("keeps no per-arm status rule", () => {
+    // Arrange / Act
+    const perArm = stylesheet.match(/#ws-sidebar \.st-(?!glyph\b)[a-z-]+/g) ?? [];
+
+    // Assert
+    expect(perArm).toEqual([]);
+  });
+});
+
+/**
+ * A REPOSITORY'S "+" SITS AT THE RIGHT EDGE (owner request, 2026-10-13), over
+ * the when-column of the rows beneath it.
+ */
+describe("the repository header's add control", () => {
+  it("pushes the add control to the header's right edge", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .repo-head .sb-add");
+
+    // Assert
+    expect(rule).toMatch(/margin-left:\s*auto/);
+  });
+
+  it("pads the header's right edge as a row's", () => {
+    // Arrange / Act
+    const head = declarationsOf("#ws-sidebar .repo-head") ?? "";
+    const row = declarationsOf("#ws-sidebar .row") ?? "";
+    // The header states its sides as longhands (jsdom drops a block's padding
+    // longhands after a var() one), the row as the shorthand's second value.
+    const headRight = /padding-right:\s*([^;]+);/.exec(head)?.[1].trim();
+    const rowParts = /padding:\s*([^;]+)/.exec(row)?.[1].trim().split(/\s+/) ?? [];
+    const rowRight = rowParts.length >= 2 ? rowParts[1] : undefined;
+    // The row's side is the rail's one right padding token; the header states
+    // the token's value, since jsdom would drop its padding longhands after a var().
+    const token = /^var\((--[\w-]+)\)$/.exec(rowRight ?? "")?.[1];
+    const tokenValue = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes("#ws-sidebar"))
+      .map((rule) => new RegExp(`${token}:\\s*([^;]+);`).exec(rule.declarations)?.[1])
+      .find((value) => value !== undefined);
+
+    // Assert
+    expect([headRight, token, tokenValue]).toEqual(["0.7rem", "--row-pad-right", "0.7rem"]);
+  });
+});
+
+/**
+ * THE DIMMED PROSE (owner request, 2026-10-10): an interim response's text
+ * sits half way between the tool card's header grey (the Bash command's
+ * `--tool-command`) and the body text (`--fg`) in either theme, by mixing those
+ * two tokens. A thinking bubble's text (owner request, 2026-10-14) mixes the
+ * same two tokens a touch nearer the grey, and is italic.
+ */
+describe("the dimmed prose of a thinking or interim bubble", () => {
+  /** A settled response bubble with HOOKS and VARIANT. */
+  function responseBubble(variant: string, hooks: readonly string[]): HTMLElement {
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    el.setAttribute("data-role", "response");
+    el.setAttribute("data-variant", variant);
+    el.setAttribute("data-state", "success");
+    return el;
+  }
+
+  /** The PROPERTY the cascade hands a settled response bubble with HOOKS and VARIANT. */
+  function cascadedOnResponse(variant: string, hooks: readonly string[], property: string): string {
+    const el = responseBubble(variant, hooks);
+    return inDocument(el, () => cascadedValue(el, property));
+  }
+
+  /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
+  const textOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "color");
+
+  /** The `font-weight` the cascade hands the body of a response bubble with HOOKS and VARIANT. */
+  function bodyWeightOf(variant: string, hooks: readonly string[]): string {
+    const bubble = responseBubble(variant, hooks);
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    bubble.append(body);
+    return inDocument(bubble, () => cascadedValue(body, "font-weight"));
+  }
+
+  /** The `font-style` the cascade hands a response bubble with HOOKS and VARIANT. */
+  const fontStyleOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "font-style");
+
+  it("dims a thinking bubble's prose to the thinking grey", () => {
+    // Arrange / Act
+    const got = textOf("thinking", ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("var(--thinking-text)");
+  });
+
+  it("sets a thinking bubble's prose in italic", () => {
+    // Arrange / Act
+    const got = fontStyleOf("thinking", ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("italic");
+  });
+
+  it("sets a thinking bubble's prose a touch smaller than every other bubble's", () => {
+    // Arrange / Act
+    const got = cascadedOnResponse("thinking", ["assistant", "thinking-bubble"], "--bubble-font-rem");
+
+    // Assert
+    expect([got, rootToken("--small-prose-font-rem")]).toEqual(["var(--small-prose-font-rem)", "0.8"]);
+  });
+
+  it("scales an interim response's padding against the bubble size it was ruled at, not the moved base", () => {
+    // Arrange / Act
+    const got = [rootToken("--small-prose-pad-ref-rem"), rootToken("--bubble-base-font-rem")];
+
+    // Assert — 0.9 was every bubble's size on 2026-10-14; the base has since moved to 0.83.
+    expect(got).toEqual(["0.9", "0.83"]);
+  });
+
+  it("sets an interim response's prose at the thinking bubble's smaller size", () => {
+    // Arrange / Act
+    const got = [
+      cascadedOnResponse("response", ["assistant", "interim-response"], "--bubble-font-rem"),
+      cascadedOnResponse("thinking", ["assistant", "thinking-bubble"], "--bubble-font-rem"),
+    ];
+
+    // Assert
+    expect(got[0]).toBe(got[1]);
+  });
+
+  it("declares the smaller size once, on the rule both kinds share", () => {
+    // Arrange / Act: no other rule narrows the token (a prompt's override
+    // went when every bubble took the tree's size, 2026-10-27).
+    const declaring = rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*--bubble-font-rem\s*:/.test(rule.declarations) && rule.selectors.some((sel) => sel !== ":root"))
+      .map((rule) => rule.selectors);
+
+    // Assert
+    expect(declaring).toEqual([[...DIMMED_TEXT_SELECTORS]]);
+  });
+
+  it("sets an interim response's prose in bold", () => {
+    // Arrange / Act
+    const got = bodyWeightOf("response", ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("bold");
+  });
+
+  it("bolds an interim's body alone, so its usage corner keeps its own weight", () => {
+    // Arrange / Act
+    const got = cascadedOnResponse("response", ["assistant", "interim-response"], "font-weight");
+
+    // Assert
+    expect(got).not.toBe("bold");
+  });
+
+  it("leaves a thinking bubble's prose at its own weight", () => {
+    // Arrange / Act
+    const got = bodyWeightOf("thinking", ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).not.toBe("bold");
+  });
+
+  it("registers the feed text scale as a number the engine can glide", () => {
+    // Arrange / Act
+    const registration = /@property\s+--feed-text-scale\s*\{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    // Assert
+    expect([/syntax:\s*"<number>"/.test(registration), /inherits:\s*true/.test(registration), /initial-value:\s*1;/.test(registration)]).toEqual([true, true, true]);
+  });
+
+  it.each([
+    ["glides the feed text scale on the root", ":root", /transition:\s*--feed-text-scale var\(--feed-text-zoom-ms\)/],
+    ["takes it at once on a page the webhost is not showing", "html[data-page-unshown]", /transition:\s*none/],
+  ])("%s", (_name, selector, pattern) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => isOwnRule(r, selector) && /transition/.test(r.declarations))?.declarations ?? "";
+    // Assert
+    expect(rule).toMatch(pattern);
+  });
+
+  it("takes the feed text scale at once for a reader who asked for reduced motion", () => {
+    // Arrange / Act
+    const block = /@media \(prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    // Assert
+    expect(block).toMatch(/transition:\s*none/);
+  });
+
+  it("declares the base size on the root as the one value every bubble starts from", () => {
+    // Arrange / Act
+    const got = [rootToken("--bubble-base-font-rem"), rootToken("--bubble-font-rem")];
+
+    // Assert
+    expect(got).toEqual(["0.83", "var(--bubble-base-font-rem)"]);
+  });
+
+  it("leaves the turn's answer at every bubble's size", () => {
+    // Arrange / Act
+    const got = cascadedOnResponse("response", ["assistant", "final-response"], "--bubble-font-rem");
+
+    // Assert
+    expect(got).toBe(rootToken("--bubble-font-rem"));
+  });
+
+  it("leaves an interim response's prose upright", () => {
+    // Arrange / Act
+    const got = fontStyleOf("response", ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).not.toBe("italic");
+  });
+
+  it("leaves the turn's answer upright", () => {
+    // Arrange / Act
+    const got = fontStyleOf("response", ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).not.toBe("italic");
+  });
+
+  it("defines the thinking grey as the same two tokens leaning further to the command grey", () => {
+    // Arrange / Act
+    const got = rootToken("--thinking-text");
+
+    // Assert
+    expect(got).toBe("color-mix(in srgb, var(--tool-command) 65%, var(--fg))");
+  });
+
+  it("declares the thinking grey once, so no theme redefines it away from the mix", () => {
+    // Arrange
+    const declaration = /--thinking-text\s*:/g;
+
+    // Act
+    const count = stylesheet.match(declaration)?.length ?? 0;
+
+    // Assert
+    expect(count).toBe(1);
+  });
+
+  it("dims an interim response's prose", () => {
+    // Arrange / Act
+    const got = textOf("response", ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("var(--interim-text)");
+  });
+
+  it("leaves the turn's answer in the body text", () => {
+    // Arrange / Act
+    const got = textOf("response", ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).not.toBe("var(--interim-text)");
+  });
+
+  it("defines the dimmed prose as an even mix of the command grey and the body text", () => {
+    // Arrange / Act
+    const got = rootToken("--interim-text");
+
+    // Assert
+    expect(got).toBe("color-mix(in srgb, var(--tool-command), var(--fg))");
+  });
+
+  it("declares the dimmed prose once, so no theme redefines it away from the mix", () => {
+    // Arrange
+    const declaration = /--interim-text\s*:/g;
+
+    // Act
+    const count = stylesheet.match(declaration)?.length ?? 0;
+
+    // Assert
+    expect(count).toBe(1);
+  });
+});
+
+/**
+ * THE LOAD-MORE CONTROL IS ITS SPINNER ALONE (owner request, 2026-10-25): no
+ * pill, no label, no bar marks the load point, so the control paints no border
+ * and no background of its own, and sits centered.
+ */
+describe("the load-more control's face", () => {
+  it("draws no border", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*border:\s*none/);
+  });
+
+  it("draws no background", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*background:\s*transparent/);
+  });
+
+  it("centers the control in its feed", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*align-self:\s*center/);
+  });
+
+  it("leaves no rule giving the control a border color or a background", () => {
+    // Arrange / Act
+    const painted = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((selector) => /^\.feed-load-more(?![-\w])/.test(selector) && !/\s/.test(selector)) &&
+        /(?:^|;)\s*(?:border-color|background(?:-color)?)\s*:(?!\s*transparent)/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(painted.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+});
+
+/**
+ * THE ARC SPINNER'S SHAPE (styles.css): one rule draws every spinner's ring
+ * from the `--arc-color` each spinner names, so the spinners cannot drift
+ * apart in shape.
+ */
+describe("the arc spinner's shape", () => {
+  const ARC_SPINNERS = [".thinking-spinner", ".tool-spinner", ".feed-load-more-spinner"];
+  const shared = (): CssRule | undefined =>
+    rulesOf(stylesheet).find((rule) => ARC_SPINNERS.every((selector) => rule.selectors.includes(selector)));
+
+  it("rings each spinner in its token at a quarter strength", () => {
+    expect(shared()?.declarations).toMatch(
+      /(?:^|;)\s*border:\s*2px solid color-mix\(in srgb, var\(--arc-color\) 25%, transparent\)/,
+    );
+  });
+
+  it("draws the top arc in the full token", () => {
+    expect(shared()?.declarations).toMatch(/(?:^|;)\s*border-top-color:\s*var\(--arc-color\)/);
+  });
+
+  it("rounds the ring", () => {
+    expect(shared()?.declarations).toMatch(/(?:^|;)\s*border-radius:\s*50%/);
+  });
+
+  it.each([
+    [".thinking-spinner", "var(--thinking)"],
+    [".tool-spinner", "var(--thinking)"],
+    [".feed-load-more-spinner", "var(--muted)"],
+  ])("has %s name its token as %s", (selector, token) => {
+    const own = rulesOf(stylesheet).filter((rule) => isOwnRule(rule, selector));
+    expect(own.map((rule) => rule.declarations).join(";")).toContain(`--arc-color: ${token}`);
+  });
+
+  it("leaves no spinner drawing its own ring", () => {
+    const ringed = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((selector) => /spinner/.test(selector)) &&
+        !ARC_SPINNERS.every((selector) => rule.selectors.includes(selector)) &&
+        /(?:^|;)\s*border(?:-top-color)?\s*:/.test(rule.declarations),
+    );
+    expect(ringed.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+});
+
+/**
+ * THE LOAD-MORE CONTROL WHILE ITS PAGE LOADS (feed/walk-control.ts): its
+ * spinner, in the muted token, turns on the thinking spinner's keyframes, and
+ * rests otherwise.
+ */
+describe("the load-more control's loading face", () => {
+  /** Every rule naming SELECTOR, joined. */
+  const everyDeclarationOf = (selector: string): string =>
+    rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .map((rule) => rule.declarations)
+      .join(";");
+
+  it("draws the spinner in the control's muted token", () => {
+    // Arrange / Act
+    const rule = everyDeclarationOf(".feed-load-more-spinner");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*--arc-color:\s*var\(--muted\)/);
+  });
+
+  it("spins the spinner while loading", () => {
+    // Arrange / Act
+    const rule = everyDeclarationOf(".feed-load-more[data-loading] .feed-load-more-spinner");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*animation:\s*thinking-spin\b/);
+  });
+
+  it("rests the spinner while idle", () => {
+    // Arrange / Act
+    const rule = everyDeclarationOf(".feed-load-more-spinner");
+
+    // Assert
+    expect(rule).not.toMatch(/(?:^|;)\s*animation(?:-name)?\s*:/);
+  });
+
+  it("slows the spinner under reduced motion, after the rule it slows", () => {
+    // Arrange / Act
+    const css = withoutBlockComments(stylesheet);
+    const spin = css.indexOf(".feed-load-more[data-loading] .feed-load-more-spinner {\n  animation: thinking-spin");
+    const after = css.slice(spin + 1);
+
+    // Assert
+    expect(after).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.feed-load-more\[data-loading\] \.feed-load-more-spinner\s*\{\s*animation-duration:\s*1\.4s;/,
+    );
+  });
+});
+
+/**
+ * THE CLASSIC DIFF (owner request, 2026-10-08): an added line on a green
+ * background and a removed one on a red, each a block of its own, in theme
+ * tokens both themes define.
+ */
+describe("the classic diff", () => {
+  it.each([
+    [".diff-classic .add", "var(--diff-add-bg)"],
+    [".diff-classic .del", "var(--diff-del-bg)"],
+  ])("paints %s with the %s background", (selector, want) => {
+    // Arrange / Act
+    const rule = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(rule).toContain(`background: ${want}`);
+  });
+
+  it.each([".diff-classic .add", ".diff-classic .del"])("leaves the text of %s in the card's own color", (selector) => {
+    // Arrange / Act
+    const rule = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*inherit/);
+  });
+
+  it("lays each line out as its own block", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".diff-classic .diff-line") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/display:\s*block/);
+  });
+
+  it.each([
+    ["light", "--diff-add-bg"],
+    ["light", "--diff-del-bg"],
+    ["dark", "--diff-add-bg"],
+    ["dark", "--diff-del-bg"],
+  ] as const)("defines the %s theme's %s", (theme, token) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+
+    // Act
+    const got = new RegExp(`${token}:\\s*(#[0-9a-fA-F]{6})`).exec(block)?.[1];
+
+    // Assert
+    expect(got).toBeDefined();
+  });
+});
+
+describe("washOf, a token's transparent wash", () => {
+  it("reads the mixed-in color and percentage", () => {
+    // Arrange
+    const block = "--x: color-mix(in srgb, #ffffff 12.5%, transparent);";
+    // Act
+    const wash = washOf(block, "--x");
+    // Assert
+    expect(wash).toEqual({ color: "#ffffff", percent: 12.5 });
+  });
+
+  it("ignores a declaration quoted inside a comment", () => {
+    // Arrange
+    const block = "/* --x: color-mix(in srgb, #000000 1%, transparent) */ --x: color-mix(in srgb, #ffffff 9%, transparent);";
+    // Act
+    const wash = washOf(block, "--x");
+    // Assert
+    expect(wash).toEqual({ color: "#ffffff", percent: 9 });
+  });
+
+  it("throws when the token is not a wash", () => {
+    // Arrange
+    const block = "--x: #ffffff;";
+    // Act / Assert
+    expect(() => washOf(block, "--x")).toThrow("no --x wash found");
+  });
+
+  it("is the only wash parser in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — a hand-rolled parser is a regex literal naming its token.
+    const handRolled = source.match(/\/--[a-z-]+:\\s\*color-mix\\\(in srgb/g) ?? [];
+    // Assert
+    expect(handRolled).toHaveLength(0);
+  });
+});
+
+describe("THEME_BLOCKS, the per-theme token table", () => {
+  it.each([
+    ["light", "#ffffff"],
+    ["dark", "#121212"],
+  ] as const)("hands the %s theme its own token block", (theme, bg) => {
+    // Arrange
+    const block = THEME_BLOCKS.find(([name]) => name === theme)?.[1];
+    // Act
+    const declared = block?.() ?? "";
+    // Assert
+    expect(declared).toMatch(new RegExp(`--bg:\\s*${bg};`));
+  });
+
+  it("is the only per-theme table in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — a hand-rolled pair repeats the light entry outside the helper.
+    const lightEntries = source.match(/\["light", \(\)(?:: string)? => declarationsOf\(":root"\)/g) ?? [];
+    // Assert
+    expect(lightEntries).toHaveLength(1);
+  });
+});
+
+/**
+ * THE ASK CARDS' SQUARE CONTROLS (owner ruling, 2026-10-11): a question's
+ * options and a settled ask's verdict badges wear the feed tab's corner, and
+ * the verdict badges read at the given answer's size.
+ */
+describe("the ask cards' square controls", () => {
+  it.each([
+    ["a feed tab", "feed-group-tab-strip", "feed-group-tab"],
+    ["a merge tab", "merge-tabs", "merge-tab"],
+    ["a question option", "q-opts", "q-opt"],
+    ["a question verdict's header chip", "q-verdict", "badge q-chip"],
+  ])("rounds %s by the one tab corner", (_name, parentClass, childClass) => {
+    // Arrange / Act
+    const radius = cascadedValueIn(parentClass, childClass, "border-radius");
+    // Assert
+    expect(radius).toBe("var(--tab-radius)");
+  });
+
+  it.each([
+    ["the given answers", "tool-card", "q-verdicts"],
+    ["a question verdict's header chip", "q-verdict", "badge q-chip"],
+  ])("sizes %s by the one settled-answer size", (_name, parentClass, childClass) => {
+    // Arrange / Act
+    const size = cascadedValueIn(parentClass, childClass, "font-size");
+    // Assert
+    expect(size).toBe("var(--ask-verdict-size)");
+  });
+
+  it("declares the tab corner square and the settled-answer size once", () => {
+    // Arrange / Act / Assert
+    expect([stylesheet.match(/--tab-radius: 0\.25rem;/g)?.length, stylesheet.match(/--ask-verdict-size: 0\.85rem;/g)?.length]).toEqual([1, 1]);
+  });
+});
+
+/**
+ * EVERY ROW IS LAID OUT AT ITS REAL HEIGHT (owner ruling, 2026-10-11). A row
+ * skipped under `content-visibility: auto` stood in a guessed height, so a new
+ * row at the tail drew a frame of blank placeholder and the scrollbar was sized
+ * from guesses. No rule may skip a box's layout or stand in a guessed size.
+ */
+describe("the stylesheet's real-height contract", () => {
+  it.each(["content-visibility", "contain-intrinsic-size"])("declares %s nowhere", (property) => {
+    // Arrange
+    const declaring = new RegExp(`(?:^|[\\s;])${property}\\s*:`);
+
+    // Act
+    const selectors = rulesOf(stylesheet).filter((rule) => declaring.test(rule.declarations)).flatMap((rule) => rule.selectors);
+
+    // Assert
+    expect(selectors).toEqual([]);
+  });
+});
+
+/**
+ * THE PADDING LADDER: response bubbles sit 30% tighter top and bottom (owner
+ * request, 2026-10-12), an interim response 30% tighter again and thinking
+ * bubbles at about a third of the base (owner requests, 2026-10-13), and a
+ * prompt bubble 30% tighter again than a response ON EVERY SIDE (owner
+ * request, 2026-10-14), while the agentic tool and monitor cards and the
+ * compaction summary keep the base. An interim's gap then shrinks on every side
+ * by as much as its narrower text did (owner request, 2026-10-14). Only a
+ * prompt's and an interim's rungs move the horizontal token, so no other
+ * bubble's sides move with the vertical ladder. Every prompt, and the green
+ * answer, then sit 30% wider top and bottom (owner request, 2026-10-17), and
+ * 10% wider again (owner request, 2026-10-20). A held prompt shares the user
+ * prompt's rung (owner request, 2026-10-25).
+ */
+describe("the padding ladder", () => {
+  const RESPONSE = "calc(var(--bubble-pad-y-base)*0.7)";
+  const PROMPT_Y = "calc(var(--bubble-pad-y-base)*0.49*1.3*1.1)";
+  const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
+  const BASE = "var(--bubble-pad-y-base)";
+  const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
+  const USER_Y = "calc(var(--bubble-pad-y-base)*0.49*1.15*1.3*1.1)";
+  const USER_X = "calc(var(--bubble-pad-x-base)*0.7*1.15)";
+  const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--small-prose-pad-ref-rem))";
+  const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--small-prose-pad-ref-rem))";
+  const BASE_X = "var(--bubble-pad-x-base)";
+  const ANSWER_Y = "calc(var(--bubble-pad-y-base)*0.7*1.25*1.3*1.1)";
+
+  /** The PROPERTY the cascade hands a bubble of VARIANT, wearing CLASSES. */
+  function tokenOf(property: string, variant: string, classes: readonly string[] = []): string {
+    const el = document.createElement("div");
+    el.classList.add("bubble", ...classes);
+    el.setAttribute("data-role", BUBBLE_VARIANTS[variant as keyof typeof BUBBLE_VARIANTS]);
+    el.setAttribute("data-variant", variant);
+    return inDocument(el, () => cascadedValue(el, property));
+  }
+
+  const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; y: string; x: string }[] = [
+    { variant: "response", y: RESPONSE, x: BASE_X },
+    { variant: "user", y: USER_Y, x: USER_X },
+    { variant: "agent", y: PROMPT_Y, x: PROMPT_X },
+    { variant: "peer", y: PROMPT_Y, x: PROMPT_X },
+    { variant: "held", y: USER_Y, x: USER_X },
+    { variant: "thinking", y: THINKING, x: BASE_X },
+    { variant: "agentic", y: BASE, x: BASE_X },
+    { variant: "compaction", y: BASE, x: BASE_X },
+  ];
+
+  it("states an expectation for every bubble variant", () => {
+    // Arrange / Act
+    const stated = cases.map((c) => c.variant).sort();
+
+    // Assert
+    expect(stated).toEqual(Object.keys(BUBBLE_VARIANTS).sort());
+  });
+
+  it("gives an interim response 30% less than a plain response, shrunk with its text", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "response", ["interim-response"]), tokenOf("--bubble-pad-y", "response")];
+
+    // Assert
+    expect(got).toEqual([INTERIM_Y, RESPONSE]);
+  });
+
+  it("gives a user prompt 15% more on every side than a subagent prompt", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "user"), tokenOf("--bubble-pad-x", "user"), tokenOf("--bubble-pad-y", "agent"), tokenOf("--bubble-pad-x", "agent")];
+
+    // Assert
+    expect(got).toEqual([USER_Y, USER_X, PROMPT_Y, PROMPT_X]);
+  });
+
+  it("pads a held prompt exactly as a user prompt on every side", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "held"), tokenOf("--bubble-pad-x", "held")];
+
+    // Assert
+    expect(got).toEqual([tokenOf("--bubble-pad-y", "user"), tokenOf("--bubble-pad-x", "user")]);
+  });
+
+  it("gives the green answer 1.25 then 1.3 then 1.1 times a plain response's top and bottom", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "response", ["final-response"]), tokenOf("--bubble-pad-y", "response")];
+
+    // Assert
+    expect(got).toEqual([ANSWER_Y, RESPONSE]);
+  });
+
+  it("shrinks an interim response's sides with its text, where the green answer keeps the base", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-x", "response", ["interim-response"]), tokenOf("--bubble-pad-x", "response", ["final-response"])];
+
+    // Assert
+    expect(got).toEqual([INTERIM_X, BASE_X]);
+  });
+
+  it("leaves a thinking bubble's padding unscaled by its smaller text", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "thinking"), tokenOf("--bubble-pad-x", "thinking")];
+
+    // Assert
+    expect(got).toEqual([THINKING, BASE_X]);
+  });
+
+  it.each(cases)("gives a $variant bubble the expected vertical padding", ({ variant, y }) => {
+    // Arrange / Act
+    const got = tokenOf("--bubble-pad-y", variant);
+
+    // Assert
+    expect(got).toBe(y);
+  });
+
+  it.each(cases)("gives a $variant bubble the expected horizontal padding", ({ variant, x }) => {
+    // Arrange / Act
+    const got = tokenOf("--bubble-pad-x", variant);
+
+    // Assert
+    expect(got).toBe(x);
+  });
+
+  it("re-derives the content's right inset on the bubble itself, so a prompt's tighter sides reach its text", () => {
+    // Arrange / Act
+    const got = tokenOf("--bubble-content-inset", "user");
+
+    // Assert
+    expect(got).toBe("calc(var(--bubble-pad-x) - var(--bubble-scroll-gap))");
+  });
+
+  it("keys each rung of the ladder on exactly its variants, and no other rule pads a variant", () => {
+    // Arrange / Act
+    const rungs = rulesOf(stylesheet)
+      .filter((r) => /--bubble-pad-[xy]\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble")
+      .map((r) => r.selectors);
+
+    // Assert
+    expect(rungs).toEqual(PAD_LADDER.map((rung) => rung.selectors));
+  });
+
+  it.each(PAD_LADDER)("sets nothing but its padding tokens on the $selectors rung", ({ selectors, props }) => {
+    // Arrange / Act
+    // The fill rules key on the same selectors, so the rung is the one of them that pads.
+    const got = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === selectors.join(",") && /--bubble-pad-[xy]\s*:/.test(r.declarations))?.declarations ?? "")
+      .split(";")
+      .map((decl) => decl.split(":")[0]?.trim() ?? "")
+      .filter((prop) => prop !== "");
+
+    // Assert
+    expect(got).toEqual(props);
+  });
+});
+
+
+/** EL's cascaded PROPERTY, mounted with the real stylesheet. */
+function mountedPaint(el: HTMLElement, property: string): string {
+  return inDocument(el, () => cascadedValue(el, property));
+}
+
+/** A merge run's badge is about half a tab (owner request, 2026-10-13). */
+describe("the merge bubble's run badge", () => {
+  /** A merge tab badge of KIND. */
+  function badge(kind: string): HTMLElement {
+    const el = document.createElement("ar-button");
+    el.className = "merge-tab";
+    el.setAttribute("data-merge-tab", kind);
+    return el;
+  }
+
+  it("draws a run's badge at about half a tab's size", () => {
+    expect(mountedPaint(badge("testsRun"), "font-size")).toBe("0.7em");
+  });
+
+  it("leaves every other tab's badge at its own size", () => {
+    expect(mountedPaint(badge("tests"), "font-size")).not.toBe("0.7em");
+  });
+});
+
+/**
+ * THE SCROLL FLOOR IS HELD BY LAYOUT (src/scroll.ts `scrollFloor`): one
+ * box-height tall at its top, out of the flow, against the box that holds it.
+ */
+describe("the scroll floor's layout", () => {
+  /** The floor inside its host; answers CHECK's result. */
+  function inHost<T>(check: (host: HTMLElement, floor: HTMLElement) => T): T {
+    const host = document.createElement("div");
+    host.className = "scroll-floor-host";
+    const floor = document.createElement("div");
+    floor.className = "scroll-floor";
+    host.append(floor);
+    return inDocument(host, () => check(host, floor));
+  }
+
+  it("makes its host the containing block", () => {
+    expect(inHost((host) => cascadedValue(host, "position"))).toBe("relative");
+  });
+
+  it("takes the block out of the flow, one host-height tall", () => {
+    expect(inHost((_, floor) => ["position", "height"].map((p) => cascadedValue(floor, p)))).toEqual(["absolute", "100%"]);
+  });
+
+  it("neither paints nor takes a click", () => {
+    expect(inHost((_, floor) => ["visibility", "pointer-events"].map((p) => cascadedValue(floor, p)))).toEqual(["hidden", "none"]);
+  });
+});
+
+/** A merge test row's head: its glyph, its name and its counts (src/feed/merge/tests-tab.ts). */
+function suiteHead(): { suite: HTMLElement; glyph: HTMLElement; counts: HTMLElement } {
+  const suite = document.createElement("div");
+  suite.className = "merge-suite";
+  const head = document.createElement("div");
+  head.className = "merge-suite-head";
+  const glyph = document.createElement("span");
+  glyph.className = "merge-suite-glyph is-live is-passing";
+  const name = document.createElement("span");
+  name.className = "merge-suite-name";
+  const counts = document.createElement("span");
+  counts.className = "merge-suite-counts";
+  head.append(glyph, name, counts);
+  suite.append(head);
+  return { suite, glyph, counts };
+}
+
+/** A merge test row's indicator and counts draw smaller than its name (owner request, 2026-10-17). */
+describe("the merge test row's indicator and counts", () => {
+  it("draws the indicator 30% smaller than the row", () => {
+    const { suite, glyph } = suiteHead();
+    expect(inDocument(suite, () => cascadedValue(glyph, "font-size"))).toBe("0.7em");
+  });
+
+  it("draws the counts at 80% of the suite's name", () => {
+    const { suite, counts } = suiteHead();
+    expect(inDocument(suite, () => cascadedValue(counts, "font-size"))).toBe("0.8em");
+  });
+
+  it("leaves the run tally's counts at the strip's own size", () => {
+    const tally = document.createElement("span");
+    tally.className = "merge-run-tally";
+    const counts = document.createElement("span");
+    counts.className = "merge-suite-counts";
+    tally.append(counts);
+    expect(inDocument(tally, () => cascadedValue(counts, "font-size"))).not.toBe("0.8em");
+  });
+});
+
+/**
+ * THE MERGE QUEUE'S HEADER (owner request, 2026-10-13): the column names sit a
+ * shade darker than the muted grey, above a thicker line than the rows' own.
+ */
+describe("the merge queue's header", () => {
+  /** A queue table, a header then two rows, mounted with the real stylesheet; answers CHECK's result. */
+  function inQueue<T>(check: (rows: { header: HTMLElement; first: HTMLElement; second: HTMLElement }) => T): T {
+    const table = document.createElement("div");
+    table.className = "merge-queue list-rows";
+    const header = document.createElement("div");
+    header.className = "merge-queue-header footer-columns";
+    const first = document.createElement("div");
+    const second = document.createElement("div");
+    table.append(header, first, second);
+    return inDocument(table, () => check({ header, first, second }));
+  }
+
+  it("paints the column names a shade darker than the muted grey", () => {
+    expect(inQueue(({ header }) => cascadedValue(header, "color"))).toBe("color-mix(in srgb, var(--muted) 70%, black)");
+  });
+
+  it("sets the first row off from the column names by a thicker line, the header's own border on the row's delimiter", () => {
+    // The extra pixel is the header's, so every row keeps one box height
+    // (test/webkit/merge-queue-columns.webkit.test.ts).
+    expect(
+      inQueue(({ header, first }) => [cascadedValue(header, "border-bottom-width"), cascadedValue(first, "border-top-width") === "2px"]),
+    ).toEqual(["1px", false]);
+  });
+
+  it("keeps the rows' own delimiter between the rows", () => {
+    expect(inQueue(({ second }) => cascadedValue(second, "border-top-width"))).not.toBe("2px");
+  });
+});
+
+describe("the bubble content's right inset", () => {
+  it("is declared once, on the bubble, as the horizontal padding less the gap it keeps", () => {
+    // Arrange / Act
+    const declared = stylesheet.match(/--bubble-content-inset:\s*([^;]+);/g) ?? [];
+
+    // Assert
+    expect([declared, /--bubble-content-inset:/.test(declarationsOf(".bubble") ?? "")]).toEqual([
+      ["--bubble-content-inset: calc(var(--bubble-pad-x) - var(--bubble-scroll-gap));"],
+      true,
+    ]);
+  });
+
+  it.each([".bubble > .bubble-strip"])("is the right padding %s reads", (selector) => {
+    // Arrange / Act
+    const declarations = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/padding-right:\s*var\(--bubble-content-inset\)/);
+  });
+
+  it("is never hand-rolled outside its token", () => {
+    // Arrange / Act
+    const rolled = (withoutBlockComments(stylesheet).match(/calc\(var\(--bubble-pad-x\) - var\(--bubble-scroll-gap\)\)/g) ?? []).length;
+
+    // Assert: the one occurrence is the token's own declaration.
+    expect(rolled).toBe(1);
+  });
+});
+
+/**
+ * A REPOSITORY'S SUBSECTIONS and THE DRAG that arranges them
+ * (src/sidebar/subsections.ts, src/drag.ts).
+ */
+describe("the repository's subsections and the drag", () => {
+  it("hides a covered row that neither is surfaced nor holds a surfaced row", () => {
+    expect(declarationsOf("#ws-sidebar .ws.covered:not(.surfaced):not(:has(.surfaced))")).toMatch(/display:\s*none/);
+  });
+
+  it("keeps only the kids box of a covered row standing between a fold and a surfaced row", () => {
+    expect(declarationsOf("#ws-sidebar .ws.covered:not(.surfaced):has(.surfaced) > :not(.kids)")).toMatch(/display:\s*none/);
+  });
+
+  it("folds a repository block away with its divider when every row in it is covered and none surfaced", () => {
+    expect(declarationsOf("#ws-sidebar .sb-repo-block:not(:has(.ws:not(.covered))):not(:has(.surfaced))")).toMatch(/display:\s*none/);
+  });
+
+  it("hides a folded band's whole body, and never a repository section's", () => {
+    expect(declarationsOf("#ws-sidebar .repo.folded:not(.repo-section) > .rows")).toMatch(/display:\s*none/);
+  });
+
+  it("never hides a row, subsection or header by the folds drawn around it, only by the row's own fold cover", () => {
+    // Arrange: every rule whose declarations hide something.
+    const hiding = rulesOf(stylesheet).filter((rule) => /display:\s*none/.test(rule.declarations));
+
+    // Act: the selectors that reach into a repository section's rows through its fold.
+    const derived = hiding.flatMap((rule) => rule.selectors).filter((selector) => /\.repo\.folded \.rows|\.sb-subsection:not\(:has\(\.surfaced\)\)/.test(selector));
+
+    // Assert
+    expect(derived).toEqual([]);
+  });
+
+  it("folds a collapsed subsection's and a folded row's children away unless a surfaced row stands in them", () => {
+    expect([
+      declarationsOf("#ws-sidebar .sb-subsection.folded > .rows:not(:has(.surfaced))"),
+      declarationsOf("#ws-sidebar .ws.folded > .kids:not(:has(.surfaced))"),
+    ]).toEqual([expect.stringMatching(/display:\s*none/), expect.stringMatching(/display:\s*none/)]);
+  });
+
+  it("indents a subsection's top-level rows one generation step under its header", () => {
+    expect([
+      declarationsOf("#ws-sidebar .sb-subsection > .rows"),
+      declarationsOf("#ws-sidebar .sb-subsection > .rows > .ws"),
+    ]).toEqual([
+      expect.stringMatching(/--row-indent-parent:\s*var\(--row-indent\)/),
+      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/),
+    ]);
+  });
+
+  it("draws a subsection's guide as a parent's family guide", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection > .rows::before")).toBe(declarationsOf("#ws-sidebar .kids::before"));
+  });
+
+  it("lights the subsection a dragged row would join, subtly", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection.drop-target")).toMatch(
+      /background-color:\s*color-mix\(in srgb, var\(--card\) 50%, transparent\)/,
+    );
+  });
+
+  it("lights the row a dragged row would become a child of as it lights a subsection", () => {
+    expect(declarationsOf("#ws-sidebar .ws.drop-target")).toBe(declarationsOf("#ws-sidebar .sb-subsection.drop-target"));
+  });
+
+  it("draws a subsection's name in the repository names' ink", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-expanded\)/);
+  });
+
+  it("greys a folded subsection's name as a folded repository's", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-collapsed\)/);
+  });
+
+  it("greys an empty subsection's name as a folded one's", () => {
+    expect(declarationsOf(`#ws-sidebar .sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head .sb-subsection-label`)).toMatch(
+      /color:\s*var\(--repo-head-collapsed\)/,
+    );
+  });
+
+  it("greys an empty subsection's header as a folded one's", () => {
+    expect([
+      declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head"),
+      declarationsOf(`#ws-sidebar .sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`),
+    ]).toEqual([expect.stringMatching(/color:\s*var\(--repo-head-collapsed\)/), expect.stringMatching(/color:\s*var\(--repo-head-collapsed\)/)]);
+  });
+
+  it("draws a row's child count in the subsection count's ink and size", () => {
+    expect(declarationsOf("#ws-sidebar .row .sb-child-count")).toMatch(/font-size:\s*0\.85em;\s*color:\s*var\(--repo-head-expanded\)/);
+  });
+
+  it("draws a subsection's nonzero count in the open name's ink, folded, empty or open", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-head .sb-count")).toMatch(
+      /color:\s*var\(--repo-head-expanded\)/,
+    );
+  });
+
+  // SUBSECTIONS WITH NOTHING UNDER THEM STAND CLOSE TOGETHER (owner request,
+  // 2026-11-13). The empty mark is band-fit.ts's, so the selector is built
+  // from it; test/webkit/subsection-gaps.webkit.test.ts measures the gaps.
+  const BARE_SUBSECTIONS = [".sb-subsection.folded", `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}]`];
+
+  it("names a subsection header's padding above and below through its tokens", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(
+      /--subsection-head-pad-top:\s*0\.3rem;[\s\S]*--subsection-head-pad-bottom:\s*0\.15rem;[\s\S]*padding:\s*var\(--subsection-head-pad-top\) 0\.7rem var\(--subsection-head-pad-bottom\) 1\.55rem/,
+    );
+  });
+
+  it.each(BARE_SUBSECTIONS)("cuts a %s header's padding below to a fifth when a subsection follows it", (bare) => {
+    expect(declarationsOf(`#ws-sidebar ${bare}:has(+ .sb-subsection) > .sb-subsection-head`)).toMatch(
+      /padding-bottom:\s*calc\(var\(--subsection-head-pad-bottom\) \* 0\.2\)/,
+    );
+  });
+
+  it.each(BARE_SUBSECTIONS)("cuts a subsection header's padding above to a fifth under a %s", (bare) => {
+    expect(declarationsOf(`#ws-sidebar ${bare} + .sb-subsection > .sb-subsection-head`)).toMatch(
+      /padding-top:\s*calc\(var\(--subsection-head-pad-top\) \* 0\.2\)/,
+    );
+  });
+
+  it("lays a subsection's header row on a band slightly darker than the rail", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(/background:\s*var\(--sidebar-ground\)/);
+    expect(declarationsOf("#ws-sidebar")).toMatch(/background:\s*var\(--sidebar-ground\)/);
+  });
+
+  it("draws the name popup's input with a hairline border and no focus ring", () => {
+    const input = declarationsOf("#ws-sidebar .sb-subsection-name") ?? "";
+    expect([/border:\s*1px solid var\(--border\)/.test(input), /outline:\s*none/.test(input)]).toEqual([true, true]);
+  });
+
+  it("sinks the name popup's placeholder toward the input's background", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-name::placeholder")).toMatch(
+      /color:\s*color-mix\(in srgb, var\(--muted\) 55%, var\(--bg\)\)/,
+    );
+  });
+
+  it("lifts the drag's copy above the rail and out of the pointer's way", () => {
+    const ghost = declarationsOf(".drag-ghost") ?? "";
+    expect([/position:\s*fixed/.test(ghost), /pointer-events:\s*none/.test(ghost)]).toEqual([true, true]);
+  });
+
+  it("tucks the drag's copy in one row-indent step over a subsection that shows no rows", () => {
+    expect(declarationsOf(".drag-ghost.drag-ghost-into")).toMatch(/transform:\s*translateX\(0\.9rem\) scale\(0\.94\)/);
+  });
+
+  it("slides the drag's copy into its tucked pose only when motion is welcome", () => {
+    const welcome = mediaBlocksOf("prefers-reduced-motion: no-preference").map((block) => block.body).join("\n");
+    const sliding = (css: string): string[] =>
+      rulesOf(css)
+        .filter((rule) => rule.selectors.includes(".drag-ghost") && /transition/.test(rule.declarations))
+        .map((rule) => rule.declarations.trim());
+    // Every rule that slides the copy is one the welcome blocks hold.
+    expect([sliding(welcome).some((d) => /transition:\s*transform 160ms ease-out/.test(d)), sliding(stylesheet)]).toEqual([true, sliding(welcome)]);
+  });
+
+  it("glows a subsection's header once, inward, as a row is drawn going inside it", () => {
+    const welcome = mediaBlocksOf("prefers-reduced-motion: no-preference").map((block) => block.body).join("\n");
+    const head = rulesOf(welcome).find((rule) => rule.selectors.includes("#ws-sidebar .sb-subsection.drop-into > .sb-subsection-head"));
+    expect([head?.declarations.match(/animation:\s*([^;]+);/)?.[1]?.trim(), /inset/.test(keyframesOf("sb-drop-into"))]).toEqual([
+      "sb-drop-into 450ms ease-out 1",
+      true,
+    ]);
+  });
+
+  it("dims the dragged item's slot", () => {
+    expect(declarationsOf(".drag-slot")).toMatch(/opacity:\s*0\.35/);
+  });
+
+  it("floats the name popup over the rail", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-popup")).toMatch(/position:\s*fixed/);
+  });
+});
+
+/**
+ * THE OUTCOME CARD (styles.css; owner request, 2026-10-20): a fault marker and
+ * a vendor notice share the tool card's shell and width, framed by the
+ * response bubble's 0.3px hairline in the family's color, which the root's
+ * `.tone-*` sets as currentColor.
+ */
+describe("the outcome card", () => {
+  it("frames the card with the response's hairline in the family's color", () => {
+    expect(declarationsOf(".tool-card.outcome-card")).toMatch(/border:\s*0\.3px solid currentColor/);
+  });
+
+  it("draws the vendor's words as wrapped plain text in the foreground", () => {
+    const rule = declarationsOf(".outcome-card-said") ?? "";
+    expect([/white-space:\s*pre-wrap/.test(rule), /color:\s*var\(--fg\)/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("leaves no rule for the retired notice bubble or the fault pill's chevron", () => {
+    const selectors = rulesOf(stylesheet).flatMap((r) => r.selectors);
+    expect(selectors.filter((sel) => /response-notice|outcome-marker-chevron|ar-button\.outcome-marker-pill/.test(sel))).toEqual([]);
+  });
+});
+
+/**
+ * THE ROW INDENT: a nested row indents its mark and name only; its tab
+ * number, gutter bar and highlight start at the section's left edge.
+ */
+describe("the row indent", () => {
+  it("starts at no indent", () => {
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes("#ws-sidebar") && /--row-indent:\s*0rem/.test(rule.declarations))).toBe(true);
+  });
+
+  it("pads a row's line by its indent", () => {
+    expect(declarationsOf("#ws-sidebar .row")).toMatch(/padding:\s*var\(--row-pad-y\) var\(--row-pad-right\) var\(--row-pad-y\) calc\(0\.9rem \+ var\(--row-indent\)\)/);
+  });
+
+  it("pulls the tab number back to one column and hands the indent to the mark", () => {
+    const num = declarationsOf("#ws-sidebar .sb-num") ?? "";
+    expect([
+      /margin-left:\s*calc\(-0\.4rem - var\(--row-indent\)\)/.test(num),
+      /margin-right:\s*calc\(0\.1rem \+ var\(--row-indent\)\)/.test(num),
+    ]).toEqual([true, true]);
+  });
+
+  it("indents a child one generation step, its box itself not indented", () => {
+    const kids = declarationsOf("#ws-sidebar .kids") ?? "";
+    expect([
+      /margin-left/.test(kids),
+      /--row-indent-parent:\s*var\(--row-indent\)/.test(kids),
+      declarationsOf("#ws-sidebar .kids > .ws"),
+    ]).toEqual([false, true, expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/)]);
+  });
+
+  it("indents a repository block's rows one generation step, as an own-repository child", () => {
+    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-block > .ws")).toMatch(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/);
+  });
+
+  it("starts a block's divider at its rows' indent, adding none of its own", () => {
+    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider")).toMatch(
+      /margin:\s*0\.15rem calc\(0\.7rem \+ var\(--when-col-w\)\) 0\.05rem calc\(0\.9rem \+ var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/,
+    );
+  });
+
+  it("leaves no rule indenting a block or stepping its rows back", () => {
+    expect([
+      declarationsOf("#ws-sidebar .kids > .sb-repo-block"),
+      declarationsOf("#ws-sidebar .kids > .sb-repo-divider ~ .ws"),
+      declarationsOf("#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider ~ .ws"),
+    ]).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("steps one generation by one token", () => {
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes("#ws-sidebar") && /--row-indent-step:\s*1\.2rem/.test(rule.declarations))).toBe(true);
+  });
+
+  it("draws the family guide down the middle of the parent's status mark", () => {
+    expect(declarationsOf("#ws-sidebar .kids::before")).toMatch(/left:\s*calc\(var\(--row-indent-parent\) \+ var\(--ws-mark-center\) - 0\.5px\)/);
+  });
+
+  it("builds the mark's center from the row's parts left of the mark", () => {
+    expect(
+      rulesOf(stylesheet).some(
+        (rule) =>
+          rule.selectors.includes("#ws-sidebar") &&
+          /--ws-mark-center:\s*calc\(0\.9rem - 0\.4rem \+ var\(--tab-number-w\) \+ 0\.1rem \+ var\(--row-gap\) \+ var\(--ws-mark-width\) \/ 2\)/.test(rule.declarations),
+      ),
+    ).toBe(true);
+  });
+
+  it("pads the current row as every row, the indent included", () => {
+    expect(declarationsOf("#ws-sidebar .ws.current > .row")).not.toMatch(/padding/);
+  });
+
+  it("leaves no rule indenting a nested row's box or line by itself", () => {
+    expect([declarationsOf("#ws-sidebar .kids .row"), declarationsOf("#ws-sidebar .kids .ws.current > .row")]).toEqual([undefined, undefined]);
+  });
+});
+
+/**
+ * THE CHAT COLUMN (owner request, 2026-10-25): a zettel chat thread's stream
+ * is the footer's column, an answer fits its text up to that whole column on
+ * the left rail, and a question fits its text up to 60% of it on the right.
+ */
+describe("the chat column", () => {
+  it("is the footer's width: the one bubble cap, centered", () => {
+    expect([declarationsOf(".chat-col"), declarationsOf(".pfooter")]).toEqual([
+      expect.stringMatching(/(?:^|[\s;])width:\s*var\(--agent-bubble-cap\);[\s\S]*margin:\s*0 auto/),
+      expect.stringMatching(/max-width:\s*var\(--agent-bubble-cap\);[\s\S]*margin:\s*0 auto/),
+    ]);
+  });
+
+  it("carries no fixed max-width of its own", () => {
+    expect(declarationsOf(".chat-col")).not.toMatch(/max-width/);
+  });
+
+  it("insets nothing at its sides, so its edges are the footer's", () => {
+    expect(declarationsOf(".chat-col")).toMatch(/padding:\s*\S+ 0 \S+;/);
+  });
+
+  it("hangs an answer on the left rail, up to the whole column", () => {
+    expect(declarationsOf(".chat-a")).toMatch(/align-self:\s*flex-start;\s*max-width:\s*100%/);
+  });
+
+  it("hangs a question on the right rail, up to 60% of the column", () => {
+    expect(declarationsOf(".chat-q-wrap")).toMatch(/align-self:\s*flex-end;\s*max-width:\s*60%/);
+  });
+});
+
+/**
+ * THE MERGE QUEUE VIEW SHARES THE RULES IT READS AS (owner request,
+ * 2026-10-25): its clock is a row's when-column, its hover a row's, and its
+ * stage glyphs the bubble's tab glyphs, each declared once for both.
+ */
+describe("the sidebar's merge queue view", () => {
+  it.each([
+    { name: "ticks its clock as a row's when-column", shared: "#ws-sidebar .row .when", own: "#ws-sidebar .sb-mq-clock" },
+    { name: "highlights its head card on hover as a row", shared: "#ws-sidebar:not(.sb-hover-suspended) .row:hover", own: "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover" },
+    { name: "highlights a waiting merge on hover as a row", shared: "#ws-sidebar:not(.sb-hover-suspended) .row:hover", own: "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover" },
+    { name: "colours a live stage's glyph as the bubble's live tab", shared: ".merge-tab-glyph.is-live", own: '#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph' },
+    { name: "colours a held stage's glyph as the bubble's held tab", shared: ".merge-tab-glyph.is-held", own: '#ws-sidebar .sb-mq-stage[data-state="held"] .sb-mq-stage-glyph' },
+    { name: "colours a passed stage's glyph as the bubble's passed tab", shared: ".merge-tab-glyph.is-succeeded", own: '#ws-sidebar .sb-mq-stage[data-state="succeeded"] .sb-mq-stage-glyph' },
+    { name: "colours a failed stage's glyph as the bubble's failed tab", shared: ".merge-tab-glyph.is-failed", own: '#ws-sidebar .sb-mq-stage[data-state="failed"] .sb-mq-stage-glyph' },
+  ])("$name", ({ shared, own }) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(shared) && /(?:color|background|margin-left)\s*:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.selectors).toContain(own);
+  });
+
+  it("declares the queue's clock, hover and stage glyph colours in no rule of their own", () => {
+    // Arrange
+    const own = [
+      "#ws-sidebar .sb-mq-clock",
+      "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover",
+      "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover",
+      '#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph',
+      '#ws-sidebar .sb-mq-stage[data-state="held"] .sb-mq-stage-glyph',
+      '#ws-sidebar .sb-mq-stage[data-state="succeeded"] .sb-mq-stage-glyph',
+      '#ws-sidebar .sb-mq-stage[data-state="failed"] .sb-mq-stage-glyph',
+    ];
+
+    // Act
+    const alone = rulesOf(stylesheet).filter((r) => own.some((selector) => isOwnRule(r, selector)));
+
+    // Assert
+    expect(alone).toEqual([]);
+  });
+});
+
+describe("the chat's quieter emphasis", () => {
+  it("draws a chat answer's TeX in the same grey as a list item's lead, through one rule", () => {
+    // Arrange / Act
+    const lead = declarationsOf(".chat-a strong.md-lead");
+    const tex = [declarationsOf(".chat-a eq"), declarationsOf(".chat-a eqn")];
+    // Assert
+    expect(lead).toMatch(/color:\s*color-mix\(in srgb, currentColor 90%, var\(--muted\)\)/);
+    expect(tex).toEqual([lead, lead]);
+  });
+});
+
+describe("a response's level-2 sections", () => {
+  it("divides a ## from an earlier ## sibling with a short, dark, centered rule", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md > h2 ~ h2::before") ?? "";
+    // Assert
+    expect([rule.match(/left:\s*20%/) !== null, rule.match(/right:\s*20%/) !== null, rule.match(/height:\s*1px/) !== null,
+      rule.match(/background:\s*color-mix\(in srgb, black 30%, transparent\)/) !== null]).toEqual([true, true, true, true]);
+  });
+
+  it("draws no rule above any other heading level", () => {
+    // Arrange / Act
+    const others = ["h1", "h3", "h4", "h5", "h6"].map((h) => declarationsOf(`.md > ${h} ~ ${h}::before`));
+    // Assert
+    expect(others).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  });
+});
+
+describe("the response subtree box (feed/subtree-box.ts)", () => {
+  it("fills the box in greyscale, the ink a little stronger than a response's code wash (owner request, 2026-10-28)", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    const strength = (token: string): number =>
+      Number(new RegExp(`${token}: color-mix\\(in srgb, var\\(--fg\\) (\\d+(?:\\.\\d+)?)%, transparent\\);`).exec(root)?.[1]);
+    // Assert
+    expect([strength("--composer-entry-bg"), strength("--code-bg")]).toEqual([12, 4]);
+  });
+
+  // Owner request, 2026-10-26: a highlighted tree entry carries no accent bar
+  // on its left margin, whichever highlight draws it.
+  it.each([
+    [".mp-line.mp-line-composing", "--composer-entry-bg"],
+    [".mp-line.mp-line-revealed", "--composer-entry-bg"],
+    [".mp-line.mp-line-hovered", "--composer-entry-bg"],
+    [".mp-line.mp-line-referenced", "--reference-bg"],
+  ])("%s paints the one shared box in %s, without the accent's left bar", (selector, fill) => {
+    // Arrange / Act
+    const rule = rulesOfSelector(selector);
+
+    // Assert
+    expect(rule).toMatch(/var\(--box-bg\) var\(--box-left\)/);
+    expect(rule).toContain(`--box-bg: var(${fill})`);
+    expect(rule).not.toMatch(/--accent/);
+  });
+
+  // Owner request, 2026-11-22: a prompt entry lit by its response's label wears
+  // the highlight grey with the canonical orange as its text.
+  it.each([["background", "var(--highlight-grey)"], ["color", "var(--canonical-orange)"]])(
+    "lights a prompt entry's %s as %s",
+    (property, want) => {
+      // Arrange / Act
+      const rule = declarationsOf(".mp-entry.mp-entry-lit") ?? "";
+      // Assert
+      expect(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+);`).exec(rule)?.[1]?.trim()).toBe(want);
+    },
+  );
+
+  it("shares the sidebar's selected row fill as the one highlight grey", () => {
+    // Arrange / Act
+    const sheet = withoutBlockComments(stylesheet);
+    // Assert
+    expect(sheet).toContain("--row-highlight-tint: var(--highlight-grey)");
+  });
+
+  // Owner request, 2026-10-26: every citation wears the subtle orange its
+  // cited node's box is drawn in, so it reads as hoverable.
+  it("draws every citation in the orange its cited node's box wears", () => {
+    // Arrange / Act
+    const citation = declarationsOf(".mp-ref") ?? "";
+    const fill = declarationsOf(":root") ?? "";
+
+    // Assert
+    expect([citation, fill]).toEqual([
+      expect.stringMatching(/color:\s*var\(--reference\)/),
+      expect.stringContaining("--reference-bg: var(--highlight-grey)"),
+    ]);
+  });
+});
+
+/**
+ * AN ANSWERED BRANCH'S LABEL IS PASTEL ORANGE (owner request, 2026-10-26): the
+ * prompt's entry labels, its implied ancestors' labels, and the response's
+ * linked labels all wear the one `--answer-label` token, an ancestor the very
+ * same shade, never dimmed (owner request, 2026-10-27).
+ */
+describe("the answered label's pastel orange", () => {
+  it.each([
+    ["a prompt's entry label", `${TREE_LABEL_CLASS} ${ENTRY_LABEL_CLASS}`],
+    ["a response's linked label", `${TREE_LABEL_CLASS} ${LABEL_LINK_CLASS}`],
+  ])("paints %s the answer-label token", (_name, classes) => {
+    // Arrange
+    const label = document.createElement("span");
+    label.className = classes;
+
+    // Act
+    const got = inDocument(label, (drawn) => cascadedValue(drawn, "color"));
+
+    // Assert
+    expect(got).toBe("var(--answer-label)");
+  });
+
+  it.each([
+    ["a prompt's entry label", (property: string) => cascadedValueIn("", `${TREE_LABEL_CLASS} ${ENTRY_LABEL_CLASS}`, property)],
+    ["an implied ancestor's label", (property: string) => cascadedValueIn(ENTRY_PATH_CLASS, TREE_LABEL_CLASS, property)],
+  ])("paints %s in the response's linked label's one shade, never dimmed", (_name, read) => {
+    // Arrange
+    const linked = (property: string): string => cascadedValueIn("", `${TREE_LABEL_CLASS} ${LABEL_LINK_CLASS}`, property);
+
+    // Act
+    const got = [read("color"), read("opacity")];
+
+    // Assert
+    expect(got).toEqual([linked("color"), linked("opacity")]);
+  });
+
+  it("keeps the response's linked label underlined", () => {
+    // Arrange
+    const label = document.createElement("span");
+    label.className = `${TREE_LABEL_CLASS} ${LABEL_LINK_CLASS}`;
+
+    // Act
+    const got = inDocument(label, (drawn) => cascadedValue(drawn, "text-decoration"));
+
+    // Assert
+    expect(got).toContain("underline");
+  });
+
+  it.each([
+    ["light", () => rootToken("--canonical-orange"), "#cc4d00"],
+    ["dark", () => /--canonical-orange:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#c26404"],
+  ])("defines the %s theme's pastel orange as the canonical orange", (_theme, read, want) => {
+    // Act
+    const got = read();
+
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
+describe("the prompt bubble's edge highlight (owner requests, 2026-10-27 and 2026-10-28)", () => {
+  it("feeds only a held prompt's --bubble-shadow from --prompt-bubble-shadow", () => {
+    // Arrange / Act
+    const feeding = rulesOf(stylesheet)
+      .filter((r) => /--bubble-shadow:\s*var\(--prompt-bubble-shadow\)/.test(r.declarations))
+      .flatMap((r) => r.selectors);
+
+    // Assert
+    expect(feeding).toEqual(['.bubble[data-role="prompt"][data-variant="held"]']);
+  });
+
+  it.each(["user", "agent", "peer"])("leaves a %s prompt the shared bubble shadow", (variant) => {
+    // Arrange
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.setAttribute("data-role", "prompt");
+    bubble.setAttribute("data-variant", variant);
+    // Act
+    const shadow = inDocument(bubble, (el) => cascadedValue(el, "--bubble-shadow"));
+    // Assert
+    expect(shadow).not.toBe("var(--prompt-bubble-shadow)");
+  });
+
+  it("fades a faint inset glow in from the top right, ahead of the shared shadow", () => {
+    // Arrange / Act
+    const value = themeValueOf(declarationsOf(":root") ?? "", "--prompt-bubble-shadow");
+
+    // Assert
+    expect(value).toBe("inset -1px 1px 3px var(--prompt-edge), var(--bubble-shadow)");
+  });
+
+  it("draws no border on a prompt", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/(?:^|;)\s*border\s*:/);
+  });
+
+  it("derives --prompt-edge from --fg at a few percent", () => {
+    // Arrange / Act
+    const value = themeValueOf(declarationsOf(":root") ?? "", "--prompt-edge") ?? "";
+
+    // Assert
+    expect(value).toMatch(/^color-mix\(in srgb, var\(--fg\) [1-9]%, transparent\)$/);
+  });
+});
+
+describe("the topbar's ground (owner request, 2026-11-02)", () => {
+  it("leaves no --topbar-bg token that could point the topbar at another ground", () => {
+    // Arrange / Act
+    const declared = /--topbar-bg\s*:/.test(withoutBlockComments(stylesheet));
+
+    // Assert
+    expect(declared).toBe(false);
+  });
+});
+
+describe("footer readouts that wear a status color (2026-10-28)", () => {
+  it.each([
+    ["--info-model", "var(--turquoise)"],
+    ["--info-tokens", "var(--async)"],
+  ])("feeds the dark theme's %s from the status token %s, never a copied hex", (token, want) => {
+    // Arrange / Act
+    const got = themeValueOf(darkThemeBlock(), token);
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
+describe("the held-prompt and merge fades swing as narrowly as the workspace-name fade (owner request, 2026-10-29)", () => {
+  it.each([["hold-breathe"], ["merge-breathe"]])("fades %s from 1 to 0.67", (name) => {
+    // Arrange
+    const frames = new RegExp(`@keyframes ${name} \\{([^}]*\\}[^}]*)\\}`).exec(stylesheet)?.[1] ?? "";
+
+    // Act
+    const opacities = [...frames.matchAll(/opacity:\s*([\d.]+)/g)].map((m) => m[1]);
+
+    // Assert
+    expect(opacities).toEqual(["1", "0.67"]);
+  });
+});
+
+describe("the bubbles' resting copy icon (owner request, 2026-10-29)", () => {
+  it.each([
+    ["prompt", "0.3"],
+    ["response", "0.6"],
+  ])("rests a %s bubble's copy icon at %s", (role, rest) => {
+    // Arrange
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(`.bubble[data-role="${role}"] .bubble-copy`) && /--copy-control-rest/.test(r.declarations));
+
+    // Act
+    const got = /--copy-control-rest:\s*([0-9.]+)/.exec(rule?.declarations ?? "")?.[1];
+
+    // Assert
+    expect(got).toBe(rest);
+  });
+
+  it("falls back to 0.7 for every other copy control", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".copy-control") && /opacity:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.declarations).toMatch(/opacity:\s*var\(--copy-control-rest, 0\.7\)/);
+  });
+});
+
+describe("a code block's run control (owner request, 2026-11-10)", () => {
+  const declarations = (): string =>
+    rulesOf(stylesheet).find((r) => r.selectors.includes(".md pre.md-code > .md-code-run"))?.declarations ?? "";
+
+  it("draws its icon in the canonical orange", () => {
+    // Act / Assert
+    expect(declarations()).toMatch(/(^|;)\s*color:\s*var\(--canonical-orange\)/);
+  });
+
+  it("rests at full strength, so the orange it shows is the canonical one", () => {
+    // Act / Assert
+    expect(/--copy-control-rest:\s*([0-9.]+)/.exec(declarations())?.[1]).toBe("1");
+  });
+});
+
+describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
+  const ruleFor = (selector: string): string =>
+    rulesOf(stylesheet).find((r) => r.selectors.includes(selector) && /--name-|animation:|color:/.test(r.declarations))
+      ?.declarations ?? "";
+  // Each tone class and the color its name is tinted with, for the row's
+  // class and for a class on the name itself alike.
+  const NAME_TONES = [
+    ["tone-blue", "--init"],
+    ["tone-purple", "--blocked"],
+    ["tone-red", "--err"],
+    ["tone-turquoise", "--turquoise"],
+    ["tone-yellow", "--async"],
+    ["tone-green", "--ok"],
+  ] as const;
+
+  it.each(NAME_TONES)("names the %s row's tone color %s for its name", (tone, token) => {
+    // Arrange / Act
+    const decls = ruleFor(`#ws-sidebar .ws.${tone}`);
+
+    // Assert
+    expect(decls).toMatch(new RegExp(`--name-tone:\\s*var\\(${token}\\)`));
+  });
+
+  it.each(NAME_TONES)("names a name's own %s class its tone color %s", (tone, token) => {
+    // Arrange / Act
+    const decls = ruleFor(`#ws-sidebar .row .name.${tone}`);
+
+    // Assert
+    expect(decls).toMatch(new RegExp(`--name-tone:\\s*var\\(${token}\\)`));
+  });
+
+  it("holds a tinted name at its tone", () => {
+    // Arrange / Act
+    const decls = ruleFor("#ws-sidebar .row .name.tinted");
+
+    // Assert
+    expect(decls).toMatch(/color:\s*var\(--name-tone\)/);
+  });
+
+  it.each([
+    ["an unviewed name", "#ws-sidebar .row .name", "--repo-head-expanded"],
+    ["a viewed name", "#ws-sidebar .row .name.viewed", "--muted"],
+  ])("rests %s at its grey", (_name, selector, token) => {
+    // Arrange / Act
+    const decls = ruleFor(selector);
+
+    // Assert
+    expect(decls).toMatch(new RegExp(`--name-rest:\\s*var\\(${token}\\)`));
+  });
+
+  it("breathes a colored name both darker and brighter about its tone", () => {
+    // Arrange
+    const tinted = ruleFor("#ws-sidebar .row .name.tinted");
+
+    // Act / Assert: the name rests dark, and its peak copy is bright.
+    expect([
+      ruleFor("#ws-sidebar .row .name.tinted.breathes"),
+      ruleFor("#ws-sidebar .row .name.tinted.breathes > .name-ink::after"),
+      tinted.includes("--name-dark: color-mix(in srgb, var(--name-tone) 74%, var(--bg));"),
+      tinted.includes("--name-bright: color-mix(in srgb, var(--name-tone) 86%, var(--fg));"),
+    ]).toEqual([expect.stringMatching(/color:\s*var\(--name-dark\)/), expect.stringMatching(/color:\s*var\(--name-bright\)/), true, true]);
+  });
+});
+
+describe("a card's question control (owner request, 2026-11-09)", () => {
+  it("sits at the card's top right, out of flow", () => {
+    // Arrange / Act
+    const decls = ownDeclarationsOf(".card-question") ?? "";
+
+    // Assert
+    expect([/position:\s*absolute/.test(decls), /top:\s*2px/.test(decls), /right:\s*2px/.test(decls)]).toEqual([true, true, true]);
+  });
+
+  it.each([
+    [".card-question", "0"],
+    [":hover > .card-question", "var(--copy-control-rest, 0.7)"],
+    [".card-question[data-asking]", "1"],
+  ])("rests unseen, and %s shows it at %s", (selector, want) => {
+    // Arrange / Act
+    const decls = (selector === ".card-question" ? ownDeclarationsOf(selector) : declarationsOf(selector)) ?? "";
+
+    // Assert
+    expect(/(?:^|;)\s*opacity:\s*([^;]+);/.exec(decls)?.[1]?.trim()).toBe(want);
+  });
+});
+
+describe("the canonical orange (owner ruling, 2026-10-30)", () => {
+  it("is what an answered branch's label reads", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(declarationsOf(":root") ?? "");
+
+    // Assert
+    expect([decls.includes("--answer-label: var(--canonical-orange);"), darkThemeBlock().includes("--answer-label:")]).toEqual([true, false]);
+  });
+
+  // Owner request, 2026-11-09: a tree's citations wear the canonical orange.
+  it("is what a tree citation's orange reads, in both themes", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(declarationsOf(":root") ?? "");
+
+    // Assert
+    expect([decls.includes("--reference: var(--canonical-orange);"), darkThemeBlock().includes("--reference:")]).toEqual([true, false]);
+  });
+
+  // Owner request, 2026-11-09: the pressed question mark wears the citations' orange.
+  it.each([["color"], ["background"]])("is what a pressed question control's %s reads", (property) => {
+    // Arrange / Act
+    const decls = declarationsOf(".question-control[data-asking]") ?? "";
+    const value = new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+);`).exec(decls)?.[1] ?? "";
+
+    // Assert
+    expect([value.includes("var(--canonical-orange)"), value.includes("--accent")]).toEqual([true, false]);
+  });
+});
+
+describe("the feed content's text cursor (owner ruling, 2026-11-08)", () => {
+  const TEXT_BLOCKS = ["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "td", "th", "dt", "dd", ".mp-content"].map(
+    (element) => `:where(#feed) ${element}`,
+  );
+
+  /** Every cursor declared in a rule whose selector list holds SELECTOR. */
+  function cursorsOf(selector: string): string[] {
+    return rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .flatMap((rule) => [...rule.declarations.matchAll(/(?:^|;)\s*cursor\s*:\s*([^;]+)/g)].map((m) => m[1].trim()));
+  }
+
+  it.each(TEXT_BLOCKS)("shows the I-beam over %s", (selector) => {
+    // Arrange / Act
+    const cursors = cursorsOf(selector);
+
+    // Assert
+    expect(cursors).toEqual(["text"]);
+  });
+
+  it("declares the text cursor in the feed only through its one rule", () => {
+    // Arrange / Act
+    const selectors = rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*cursor\s*:\s*text/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((selector) => selector.includes("#feed"));
+
+    // Assert
+    expect(selectors).toEqual(TEXT_BLOCKS);
+  });
+
+  it("keeps the pointer on a hovered tree line, so its rails and label still say a click answers it", () => {
+    // Arrange / Act
+    const cursors = cursorsOf(".mp-line.mp-line-hovered");
+
+    // Assert
+    expect(cursors).toEqual(["pointer"]);
+  });
+
+  it("keeps the expand cursor on a capped box", () => {
+    // Arrange / Act
+    const cursors = cursorsOf(".tool-output");
+
+    // Assert
+    expect(cursors).toEqual(["zoom-in"]);
+  });
+
+  it("keeps the page's default arrow everywhere else", () => {
+    // Arrange / Act
+    const cursors = cursorsOf("body");
+
+    // Assert
+    expect(cursors).toEqual(["default"]);
+  });
+});
+
+/**
+ * A BAND HEADER'S HOVER BOX IS ONE BOX, FOLDED OR OPEN (owner request,
+ * 2026-11-17): Merge Queue's and Recently Merged's header draws its hover wash
+ * over its own box, so that box keeps the same padding and margins whether the
+ * band is folded or open, and an open band's first repository group starts
+ * below it rather than eating into it.
+ */
+describe("a band header's hover box, folded or open", () => {
+  /** The rail's bands with BAND folded as FOLDED, each open band holding one repository group. */
+  function bands(band: string, folded: boolean): HTMLElement {
+    const pane = document.createElement("div");
+    pane.className = "sb-pane";
+    for (const cls of [MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, BACKLOG_SECTION_CLASS]) {
+      const section = document.createElement("div");
+      section.className = `repo ${cls}`;
+      if (cls === band && folded) section.classList.add(FOLDED_CLASS);
+      const head = document.createElement("div");
+      head.className = "repo-head";
+      const rows = document.createElement("div");
+      rows.className = "rows";
+      const group = document.createElement("div");
+      group.className = DEPLOYS_GROUP_CLASS;
+      const groupHead = document.createElement("div");
+      groupHead.className = MERGED_GROUP_HEAD_CLASS;
+      group.append(groupHead);
+      rows.append(group);
+      section.append(head, rows);
+      pane.append(section);
+    }
+    return pane;
+  }
+
+  const BOX = ["padding-top", "padding-bottom", "margin-top", "margin-bottom", "line-height", "font-size"] as const;
+
+  /** BAND's header box declarations, BAND folded as FOLDED. */
+  function headBox(band: string, folded: boolean): Record<string, string> {
+    return inRail(bands(band, folded), (rail) => {
+      const head = rail.querySelector(`.${band} > .repo-head`) as HTMLElement;
+      return Object.fromEntries(BOX.map((property) => [property, cascadedValue(head, property)]));
+    });
+  }
+
+  it.each([MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS])("draws %s's header box the same open as folded", (band) => {
+    // Arrange / Act
+    const open = headBox(band, false);
+    const folded = headBox(band, true);
+
+    // Assert
+    expect(open).toEqual(folded);
+  });
+});
+
+describe("the escalation's release", () => {
+  const release = "#ws-sidebar .merged-group-head > .sb-mq-release";
+
+  it("is muted text, never the label's purple and never a button's chrome", () => {
+    const rule = declarationsOf(release) ?? "";
+    expect([/color:\s*var\(--muted\)/.test(rule), /var\(--blocked\)/.test(rule), /border:\s*0/.test(rule), /background:\s*none/.test(rule), /text-transform:\s*none/.test(rule)]).toEqual([
+      true,
+      false,
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("says it acts only on a hover, and only while the rail's hovers are not suspended", () => {
+    const hover = "#ws-sidebar:not(.sb-hover-suspended) .merged-group-head > .sb-mq-release:hover";
+    expect([declarationsOf(release), declarationsOf(hover)].map((rule) => /text-decoration:\s*underline/.test(rule ?? ""))).toEqual([false, true]);
+  });
+});
+
+describe("the recency gutter", () => {
+  it("paints `s-[` the canonical orange and `s-]` the canonical purple", () => {
+    expect([
+      declarationsOf('#ws-sidebar .sb-gutter[data-recency="older"]')?.trim(),
+      declarationsOf('#ws-sidebar .sb-gutter[data-recency="newer"]')?.trim(),
+    ]).toEqual(["--gutter-hue: var(--canonical-orange);", "--gutter-hue: var(--blocked);"]);
+  });
+
+  it("mutes the bar with every press after the first", () => {
+    // Arrange
+    const strength = (presses: number): number => {
+      const declarations =
+        presses === 1
+          ? declarationsOf("#ws-sidebar .sb-gutter")
+          : declarationsOf(`#ws-sidebar .sb-gutter[data-recency-presses="${presses}"]`);
+      return Number(/--gutter-strength:\s*(\d+)%/.exec(declarations ?? "")?.[1]);
+    };
+
+    // Act
+    const strengths = [1, 2].map(strength);
+
+    // Assert
+    expect(strengths[0]).toBe(100);
+    for (let i = 1; i < strengths.length; i++) expect(strengths[i]).toBeLessThan(strengths[i - 1]);
+  });
+
+  it("draws the bar only on a reached row's slot", () => {
+    expect(declarationsOf("#ws-sidebar .sb-gutter[data-recency]::before")).toContain("var(--gutter-hue) var(--gutter-strength)");
+    expect(declarationsOf("#ws-sidebar .sb-gutter")).not.toContain("background");
+  });
+
+  it("hands back exactly the row's gap token, so the slot takes no width", () => {
+    expect(declarationsOf("#ws-sidebar .sb-gutter")).toMatch(/margin-right:\s*calc\(-1 \* var\(--row-gap\)\)/);
+  });
+});
+
+// THE WALK'S HOLD (scroll.ts createWalkHold): the attribute the hold sets on
+// the feed's scroll box takes its scrollability away, which is what stops a
+// flick's momentum while an older page loads.
+describe("the walk's hold on the feed", () => {
+  it("hides the feed's overflow while the hold stands", () => {
+    // Arrange
+    const selector = `#feed-scroll[${WALK_HOLD_ATTRIBUTE}]`;
+    // Act
+    const rules = rulesOf(stylesheet).filter((rule) => rule.selectors.includes(selector));
+    // Assert
+    expect(rules.map((rule) => rule.declarations.trim())).toEqual(["overflow-y: hidden;"]);
+  });
+});

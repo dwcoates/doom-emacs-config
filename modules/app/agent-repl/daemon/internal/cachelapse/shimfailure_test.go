@@ -8,7 +8,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
-	"agent-repld/internal/sourcescan"
 	"agentrepl/logging/logsite"
 )
 
@@ -64,17 +63,5 @@ func TestShimCallFailedKeepsTheCallersFields(t *testing.T) {
 	rec, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "error", Operation: "op.test"})
 	if !ok || rec.Context["cadence"] != "hold" {
 		t.Fatalf("error record = %+v, %v; want the caller's fields kept", rec, ok)
-	}
-}
-
-// TestShimCallFailureTriageHasOneHome fails when a source file in this
-// package triages a dead shim by hand instead of through shimCallFailed.
-func TestShimCallFailureTriageHasOneHome(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "shimclient.ErrShimDied")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "keeper.go" {
-		t.Fatalf("shimclient.ErrShimDied is triaged at %v, want only shimCallFailed in keeper.go", sites)
 	}
 }

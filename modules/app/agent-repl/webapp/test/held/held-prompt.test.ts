@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
 import { drawnBodyOf, servedSrcOf } from "./drawn-body.js";
-import { FeedUserPromptBodySchema, FeedUserPromptSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedUserPromptSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawFeedUserPrompt } from "../../src/feed/rows/user-prompt.js";
 import { BUBBLE_COPY_CLASS } from "../../src/bubble/copy-room.js";
 import { boundCopyText } from "../../src/copy-control.js";
 import { type Control } from "../../src/control.js";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import {
   EditHeldPromptResponseSchema,
@@ -31,23 +29,17 @@ import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   HeldPromptBadgeSchema,
   HeldPromptStatusNoteSchema,
-  HeldPromptEditingSchema,
   HeldPromptSentNowSchema,
-  HeldPromptCoalescedSchema,
   HeldPromptFoldAboveSchema,
   HeldPromptSchema,
   HeldSessionActSchema,
   type HeldPrompt,
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_command_pb";
-import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { receivedFromWorkspace } from "../feed/addresses.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import type { Ticker } from "../../src/clock.js";
-import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
   BEING_DELIVERED,
@@ -92,169 +84,33 @@ import {
   treeLineWidths,
   useTreeLayout,
 } from "../tree-layout.js";
-import { installClickExpand } from "../../src/expand.js";
 import { resetLoggingForTests } from "../../src/log.js";
-import { cascadedValue, installStylesheet, selectorOf } from "../stylesheet.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { servedProse } from "../prose.js";
-import { codeOf } from "../source-text.js";
-import heldPromptSource from "../../src/held/held-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { filesUnder } from "../files-under.js";
 import { recordingFailures } from "../failure-sink.js";
-
-const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
-const NOW = 1_700_000_000_000;
-
-/** A ticker whose subscribers this test drives by hand. */
-function fakeTicker(): Ticker & {
-  tick(nowMs: number): void;
-  subscribers(): number;
-} {
-  const listeners = new Set<(nowMs: number) => void>();
-  return {
-    now: () => NOW,
-    subscribe(fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
-    },
-    tick(nowMs: number) {
-      for (const fn of [...listeners]) fn(nowMs);
-    },
-    subscribers: () => listeners.size,
-  };
-}
-
-const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
-
-/** A context whose UpdateHeldPrompt answers with ANSWER and records requests. */
-function trayContext(
-  answer: () => ReturnType<typeof successResponse> = successResponse,
-  seen: UpdateHeldPromptRequest[] = [],
-  ticker: Ticker = fakeTicker(),
-): { tc: HeldContext; seen: UpdateHeldPromptRequest[]; ctx: AppContext } {
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
-      updateHeldPrompt: (request) => {
-        seen.push(request);
-        return answer();
-      },
-    });
-  });
-  const ctx = testAppContext({
-    client: createAgentReplClient(transport),
-    workspace: WORKSPACE,
-    ticker,
-    failures: SINK,
-    composerEnabled: false,
-  });
-  return { tc: testHeldContext(ctx), seen, ctx };
-}
-
-const successResponse = () =>
-  create(UpdateHeldPromptResponseSchema, {
-    result: { case: "success", value: {} },
-  });
-/** What each fact-carrying arm must carry for its sentence to be complete. */
-const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
-  workspaceRefMismatch: { registryDir: "/w/registry" },
-  transferringAway: { address: "127.0.0.1:7777" },
-  releaseRefused: { cause: { case: "coldGate", value: {} } },
-};
-
-/** A refusal carrying ARM, with the payload that arm's sentence needs. */
-const refusalResponse = (arm: string) => () =>
-  create(UpdateHeldPromptResponseSchema, {
-    result: {
-      case: "error",
-      value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } },
-    },
-  } as never);
-const errorResponse = refusalResponse("noSuchHold");
-
-/** A held prompt with every required field, overridden by OVERRIDES. */
-type HeldPromptInit = Exclude<
-  MessageInitShape<typeof HeldPromptSchema>,
-  HeldPrompt
->;
-
-function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
-  const prompt = create(HeldPromptSchema, {
-    turn: { value: "turn-1" },
-    queuedAt: { atMs: BigInt(NOW - 12_000) },
-    said: overrides.said ?? {
-      content: {
-        blocks: [{ block: { case: "text", value: { text: "fix the test" } } }],
-      },
-    },
-    body: overrides.body,
-    classification: overrides.classification ?? {
-      case: "classifying",
-      value: {},
-    },
-    ...(overrides.hold !== undefined ? { hold: overrides.hold } : {}),
-    ...(overrides.badge !== undefined ? { badge: overrides.badge } : {}),
-    ...(overrides.notes !== undefined ? { notes: overrides.notes } : {}),
-  });
-  // THE DAEMON'S DRAWN BODY, as feed.DrawUserBlocks resolves the said.
-  if (overrides.body === undefined) prompt.body = drawnBodyOf(prompt.said);
-  else prompt.body = create(FeedUserPromptBodySchema, overrides.body);
-  // THE DAEMON'S ONE BADGE and its notes, ranked as feed_held.proto fixes.
-  // Their words are deliberately ones no card would compose (`wire <status>`),
-  // so an assertion on them proves the card drew the wire verbatim.
-  if (overrides.badge === undefined) serveStatus(prompt);
-  return prompt;
-}
-
-/** Mark U as being edited, and serve the status the daemon then sends. */
-function markEditing(u: HeldPrompt): void {
-  u.editing = create(HeldPromptEditingSchema, {});
-  serveStatus(u);
-}
-
-/** Mark U as coalesced, and serve the status the daemon then sends. */
-function markCoalesced(u: HeldPrompt): void {
-  u.coalesced = create(HeldPromptCoalescedSchema, {});
-  serveStatus(u);
-}
-
-/** The label the test daemon sends for STATUS. */
-const wireLabel = (status: HeldStatus): string => `wire ${status}`;
-/** The detail the test daemon sends for STATUS. */
-const wireDetail = (status: HeldStatus): string =>
-  `the daemon's whole sentence for ${status}`;
-/** The note the test daemon sends for the verdict's confirmation. */
-/** The note the test daemon sends for a coalescence. */
-const COALESCED_NOTE = "wire note coalesced";
-
-/** The standing facts that can claim the badge, strongest first. */
-function rankedStatuses(prompt: HeldPrompt): HeldStatus[] {
-  const ranked: HeldStatus[] = [];
-  if (prompt.editing !== undefined) ranked.push("editing");
-  if (prompt.sentNow !== undefined) ranked.push("sentNow");
-  if (prompt.hold.case !== undefined) ranked.push(prompt.hold.case);
-  const arm = prompt.classification.case;
-  // daemon_held claims nothing: the hold arm beside it is what holds it.
-  if (arm !== undefined && arm !== "daemonHeld") ranked.push(arm);
-  return ranked;
-}
-
-/** Serve PROMPT the badge and notes the daemon composes for it. */
-function serveStatus(prompt: HeldPrompt): void {
-  const [top, ...rest] = rankedStatuses(prompt);
-  if (top === undefined) throw new Error("a test prompt with no fact to badge");
-  prompt.badge = create(HeldPromptBadgeSchema, {
-    label: wireLabel(top),
-    detail: wireDetail(top),
-    standsFor: { case: top, value: {} } as never,
-  });
-  const notes = rest.map((status) => wireDetail(status));
-  if (prompt.coalesced !== undefined) notes.push(COALESCED_NOTE);
-  prompt.notes = notes.map((sentence) => create(HeldPromptStatusNoteSchema, { sentence }));
-}
-
-/** Let the click's promise chain settle. */
-const settle = (): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, 0));
+import {
+  CAUSE_FILL,
+  COALESCED_NOTE,
+  NOW,
+  SINK,
+  WORKSPACE,
+  errorResponse,
+  fakeTicker,
+  heldPrompt,
+  markCoalesced,
+  markEditing,
+  mountedFull,
+  refusalResponse,
+  saying,
+  serveStatus,
+  settle,
+  successResponse,
+  trayContext,
+  wireDetail,
+  wireLabel,
+  withTallHeld,
+} from "./held-fixtures.js";
 
 describe("drawHeldPrompt identity", () => {
   it("carries the echoed TurnId on the card", () => {
@@ -1237,14 +1093,6 @@ describe("the drawn body", () => {
   });
 });
 
-/** A held prompt whose words are TEXT. */
-const saying = (text: string): HeldPrompt =>
-  heldPrompt({
-    said: {
-      content: { blocks: [{ block: { case: "text", value: { text } } }] },
-    },
-  });
-
 describe("the held prompt's spec: a user prompt's look on the held fill", () => {
   it("is a prompt-role bubble", () => {
     const { tc } = trayContext();
@@ -1409,7 +1257,6 @@ describe("a held prompt's redraw", () => {
       box,
     ]);
   });
-
 });
 
 describe("the Cancel control", () => {
@@ -1845,28 +1692,6 @@ describe("the daemon's badge words", () => {
     const record = await forwardedRecord(capture, "held.held-prompt.note-empty");
     expect(record.level.case).toBe("error");
   });
-
-  it("composes no status sentence of its own", () => {
-    // Arrange: every sentence the card used to compose for a badge.
-    const composed = [
-      '"queued — classifying"',
-      '"interjects"',
-      '"after this turn"',
-      '"waits for "',
-      '" to finish"',
-      '"unclassified"',
-      '"confirmed"',
-      "held for the scheduled restart",
-      "held until the session reconnects",
-      "held for the build refresh",
-    ];
-    // Act
-    const source = codeOf(heldPromptSource);
-    // Assert
-    expect(composed.filter((sentence) => source.includes(sentence))).toEqual(
-      [],
-    );
-  });
 });
 
 describe("the held status badge table", () => {
@@ -2073,51 +1898,9 @@ describe("every status a held card shows is a badge in the table's tone", () => 
       ).toBe(`badge held-badge ${EXPECTED_BADGES[status]}`);
     },
   );
-
 });
 
-/** The stylesheet's selector for an expand-only element the toggle has not opened. */
-const HIDDEN_WHILE_COLLAPSED = selectorOf(
-  /([^{}]*\.bubble-expand-only)\s*\{\s*display:\s*none;\s*\}/,
-  "hidden expand-only region",
-);
-
 describe("a held prompt collapsed", () => {
-  /** A held prompt carrying every part a card draws, mounted under the one toggle. */
-  function mountedFull(): HTMLElement {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: {
-          case: "holdForTurnEnd",
-          value: { rationale: "it can wait" },
-        },
-        hold: { case: "shutdown", value: { scheduleId: "sched-9" } },
-      }),
-      tc,
-    );
-    const host = document.createElement("div");
-    installClickExpand(host, () => "");
-    host.append(card);
-    document.body.append(host);
-    return card;
-  }
-
-  const ALWAYS_SHOWN: Array<[string, string]> = [
-    ["the status badge", ".held-badge"],
-    ["a further fact's note", `.${HELD_NOTE_CLASS}`],
-    ["the queued age", "[data-queued]"],
-    ["the Send now button", '[data-held-action="release"]'],
-    ["the Meta button", '[data-held-action="update-classifier"]'],
-    ["the Cancel button", '[data-held-action="drop"]'],
-  ];
-
-  it.each(ALWAYS_SHOWN)("shows %s while collapsed", (_name, selector) => {
-    // Arrange / Act
-    const part = mountedFull().querySelector(selector);
-    // Assert
-    expect([part === null, part?.closest(HIDDEN_WHILE_COLLAPSED) ?? null]).toEqual([false, null]);
-  });
 
   it("keeps nothing expand-only, so expanding reveals only more words", () => {
     // Arrange / Act
@@ -2447,23 +2230,6 @@ describe("the editing badge", () => {
   });
 });
 
-describe("the retired Release label", () => {
-
-  /** The files among PATHS holding a string literal that is exactly "Release". */
-  function holdingTheLabel(paths: string[]): string[] {
-    return paths.filter((path) =>
-      /(["'`])Release\1/.test(readFileSync(path, "utf8")),
-    );
-  }
-
-  it("is drawn by no webapp source", () => {
-    // Arrange
-    const sources = filesUnder(join(process.cwd(), "src"));
-    // Act, Assert
-    expect(holdingTheLabel(sources)).toEqual([]);
-  });
-});
-
 /**
  * THE KEEP-ALIVE HOLD IS RETIRED. The shim makes a prompt that arrives during
  * its own keep-alive wait inside the shim, so the daemon never holds one behind
@@ -2510,37 +2276,12 @@ describe("the retired keep-alive hold", () => {
   });
 });
 
-/** The ellipsis clamp on a collapsed body, as the stylesheet writes it. */
-const CLAMPED_BODY = selectorOf(
-  /([^{}]*\.bubble-body)\s*\{[^{}]*-webkit-line-clamp/,
-  "ellipsis clamp",
-);
-
 /**
  * A HELD PROMPT FOLDS AS A USER PROMPT DOES (owner request, 2026-10-25):
  * folded, it shows every line the person typed, under its badges and above its
  * controls, on the held prompt's darker blue.
  */
 describe("a held prompt folded", () => {
-  /** Run CHECK on a held prompt of forty lines, mounted with the real stylesheet. */
-  function withTallHeld(check: (card: HTMLElement, box: HTMLElement) => void): void {
-    const restore = installStylesheet();
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(saying(Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n\n")), tc);
-    document.body.append(card);
-    try {
-      check(card, card.querySelector<HTMLElement>(":scope > .bubble-scroll") as HTMLElement);
-    } finally {
-      card.remove();
-      restore();
-    }
-  }
-
-  it("clamps nothing, so every line shows", () => {
-    // Arrange / Act / Assert
-    withTallHeld((_card, box) => expect(box.querySelector(".bubble-body")?.matches(CLAMPED_BODY)).toBe(false));
-  });
-
   it("puts no height cap on the folded bubble", () => {
     // Arrange / Act / Assert
     withTallHeld((_card, box) => expect(cascadedValue(box, "max-height")).toBe("none"));
@@ -2605,11 +2346,6 @@ describe("a held prompt folded", () => {
       card.remove();
       restore();
     }
-  });
-
-  it("keeps its badges shown while folded", () => {
-    // Arrange / Act / Assert
-    withTallHeld((card) => expect(card.querySelector(".held-badge")?.closest(HIDDEN_WHILE_COLLAPSED)).toBeNull());
   });
 });
 

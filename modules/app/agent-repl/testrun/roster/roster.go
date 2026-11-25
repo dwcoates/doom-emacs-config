@@ -72,6 +72,15 @@ type Suite struct {
 	// Batch is a vitest or ERT suite's own batching, measured for that suite;
 	// nil is DefaultBatching. Any other kind declares none (Check).
 	Batch *Batching
+	// ERTFiles is an ERT suite's own test files: a glob (filepath.Match) of
+	// file names in Path. The suite runs exactly the files it matches, each
+	// chunk loading the shared helpers (test-helpers.el) first as every ERT
+	// chunk does, and the helpers' own tests stay the suite's whose roster is
+	// the aggregator's. Empty is every file lisp/test-agent-repl.el loads; that
+	// aggregator may load no file another ERT suite of its directory matches
+	// (suites.ERTFiles), so a file runs in one ERT suite alone. Any other kind
+	// declares none (Check).
+	ERTFiles string
 	// Path is relative to the agent-repl module root: the script for a Script
 	// suite (or, when it starts with "/", relative to the repository root),
 	// the module or package directory otherwise.
@@ -105,6 +114,18 @@ type Suite struct {
 	// IntegrationConfig adds a Vitest suite's integration config (relative to
 	// Path) to the suite: its files are a second split run under that config.
 	IntegrationConfig string
+	// VitestConfig is a Vitest suite's own config (relative to Path), whose
+	// files are the suite's only ones, with VitestDir the directory (relative
+	// to Path, ending in "/") every one of them lies in. A suite sharing its
+	// package with the package's ordinary suite runs exactly its own files:
+	// a file selected under VitestDir is its, the ordinary suite may run none
+	// there (suites.vitestUnits refuses either config straying), and it runs
+	// neither the package's typecheck nor its knip, which are the ordinary
+	// suite's, nor coverage, since its files read sources rather than run
+	// them. Empty is the package's vitest.config.ts. Any other kind declares
+	// none (Check).
+	VitestConfig string
+	VitestDir    string
 	// IntegrationBuild is the command (run in Path) that builds what the
 	// integration files spawn, run once before any of them. Empty means none.
 	IntegrationBuild []string
@@ -335,12 +356,16 @@ var Suites = []Suite{
 		"test-threads.el":      {"lisp/open-chats.agent-repl-chats"},
 		"test-spell.el":        {"lisp/requirements.json"},
 		"test-test-helpers.el": {"lisp/"},
-		"test-log-site.el":     {"lisp/"},
-	}, Inputs: []string{
-		// The Doom module files and the data the Emacs layer reads.
-		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
-		"logging-contract.md", "metaprompt.md",
-	}}},
+	}, Inputs: ertInputs}},
+	// THE ELISP RULE TESTS: every ert-deftest that reads the module's elisp
+	// sources as data and holds them to a structural rule ("no file calls X
+	// but Y", "every Z goes through one helper"). Their own suite, so a
+	// branch runs them before its merge is admitted (Rules) without the whole
+	// ERT suite; lisp/test-rules-scan.el fails a source-reading test anywhere
+	// else. They read every elisp source and suite in lisp/, and the Doom
+	// module files at the root, as data.
+	{Name: "ert-rules", Kind: ERT, Path: "lisp", ERTFiles: "test-rules-*.el", Rules: true,
+		Reuse: &Reuse{Inputs: append([]string{"lisp/"}, ertInputs...)}},
 	{Name: "testrun", Kind: GoModule, Path: "testrun", Reuse: &Reuse{
 		// The canonical timing history, which the runner's own test parses.
 		// Its tests find the module's root by listing it, and its scans walk
@@ -453,6 +478,22 @@ var Suites = []Suite{
 			// 2026-10-16).
 			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/", "webapp/.typecheck-cache/"},
 			Units:     webappUnitInputs}},
+	// THE WEBAPP'S RULE TESTS: every test that reads the webapp's own source
+	// (src/, its stylesheets, the page shell, its test code) to hold it to a
+	// structural rule ("no source calls X but Y", "the one maker"). Their own
+	// suite, so a branch runs them before its merge is admitted (Rules)
+	// without the whole webapp suite; webapp/rules/source-reads.test.ts fails
+	// a source-reading test anywhere else. They run under their own config
+	// over rules/ alone, and read the package's sources, tests, rules and page
+	// shell as data.
+	{Name: "webapp-rules", Kind: Vitest, Path: "webapp", VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/", Rules: true,
+		Reuse: &Reuse{Inputs: []string{
+			"webapp/src/", "webapp/test/", "webapp/rules/", "webapp/index.html", "webapp/app-layers.ts",
+			// The vocabulary and the glyph pictures the rules and the tests they
+			// scan read as data, and the scripts its npm hooks run.
+			"proto/vocab/", "images/",
+			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
+		}, Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/"}}},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
 	// `npm run test:integration` always has.
@@ -570,50 +611,12 @@ const (
 
 // webappUnitInputs is what each webapp test file reads beyond its import
 // graph, found by running every file confined to its graph (2026-11-11) and
-// declaring each read it was refused.
+// declaring each read it was refused. The scans over the webapp's sources and
+// tests are rules, run by webapp-rules (rules/source-reads.test.ts keeps
+// them out of test/), so a webapp test reads only the page it boots from and
+// the build its vite config check makes.
 var webappUnitInputs = func() map[string][]string {
 	out := map[string][]string{}
-	// The source scans, each over the webapp's own sources.
-	for _, f := range []string{
-		"test/bubble/consolidation.test.ts", "test/bubble/copy-room.test.ts", "test/code-block.test.ts",
-		"test/columns.test.ts", "test/connect-hook.test.ts", "test/connection-id.test.ts", "test/control.test.ts",
-		"test/copy-control.test.ts", "test/count-noun.test.ts", "test/document-runtime.test.ts",
-		"test/dom.test.ts", "test/drawn-status.test.ts", "test/elapsed-clock.test.ts", "test/error-cause.test.ts",
-		"test/feed/asks/ask-words.test.ts", "test/feed/bubble-selection.test.ts",
-		"test/feed/cards/exit-line.test.ts", "test/feed/cards/tool-head.test.ts", "test/feed/left-view.test.ts",
-		"test/feed/renderers.test.ts", "test/feed/rows/blocks.test.ts", "test/feed/rows/handback-badge.test.ts",
-		"test/feed/subtree-box.test.ts", "test/feed/title-fold.test.ts", "test/footer/activity.test.ts",
-		"test/footer/clock-span.test.ts", "test/frame.test.ts", "test/heat.test.ts",
-		"test/held/held-prompt.test.ts", "test/host/answers.test.ts", "test/import-cycles.test.ts", "test/link.test.ts",
-		"test/listeners.test.ts", "test/markdown.test.ts", "test/merge-glyph.test.ts",
-		"test/merge-queue-move.test.ts", "test/page-size.test.ts", "test/page-teardown.test.ts",
-		"test/per-document.test.ts", "test/percent-gradient.test.ts", "test/placement.test.ts",
-		"test/pointer-rest.test.ts", "test/pressure-color-call-sites.test.ts", "test/reduced-motion.test.ts",
-		"test/regexp.test.ts", "test/rpc/control-call.test.ts", "test/rpc/gesture.test.ts",
-		"test/rpc/merge-queue-refusal.test.ts", "test/rpc/oneof.test.ts", "test/rpc/page-streams.test.ts",
-		"test/rpc/refusal.test.ts", "test/rpc/refuse.test.ts", "test/rpc/requester.test.ts",
-		"test/rpc/transport.test.ts", "test/selection.test.ts", "test/sidebar/arrange.test.ts",
-		"test/sidebar/children.test.ts", "test/sidebar/family.test.ts", "test/sidebar/name-popup.test.ts", "test/sidebar/row-menu.test.ts",
-		"test/sidebar/row.test.ts", "test/sidebar/section-fold.test.ts", "test/sidebar/verbs.test.ts",
-		"test/timers.test.ts", "test/topbar/chip-toggle.test.ts", "test/topbar/pick.test.ts",
-		"test/type-out.test.ts", "test/wall-latency.test.ts", "test/webkit-stylesheets.test.ts",
-	} {
-		out[f] = []string{"webapp/src/"}
-	}
-	// The scans over the webapp's own tests and their helpers.
-	for _, f := range []string{
-		"test/agent-only-arms.test.ts", "test/bubble/still.test.ts", "test/computed-style.test.ts", "test/deferred-animation.test.ts",
-		"test/dom-rect.test.ts", "test/drag-pointer.test.ts", "test/failure-sink.test.ts",
-		"test/feed/harness.test.ts", "test/files-under.test.ts", "test/frame-queue.test.ts",
-		"test/host/popup-channel.test.ts", "test/integration/harness.self.test.ts",
-		"test/jsdom-capabilities.test.ts", "test/log-capture.test.ts", "test/page-transition.test.ts",
-		"test/prose.test.ts", "test/roster-apps.test.ts", "test/roster-families.test.ts",
-		"test/rpc/app-context.test.ts", "test/selectable.test.ts", "test/settled.test.ts",
-		"test/source-text.test.ts", "test/stylesheet.test.ts", "test/tail-triggers.test.ts",
-		"test/visibility-doc.test.ts",
-	} {
-		out[f] = []string{"webapp/test/"}
-	}
 	// The page the app boots from.
 	for _, f := range []string{
 		"test/integration/bubble-selection.integration.test.ts", "test/integration/client-log.integration.test.ts",
@@ -629,15 +632,13 @@ var webappUnitInputs = func() map[string][]string {
 	} {
 		out[f] = []string{"webapp/index.html"}
 	}
-	// The vite config's own check builds from the page, as do the control
-	// test's and the integration harness's self check.
-	for _, f := range []string{"test/vite-config.test.ts", "test/control.test.ts", "test/integration/harness.self.test.ts"} {
+	// The vite config's own check builds from the page, as does the
+	// integration harness's self check.
+	for _, f := range []string{"test/vite-config.test.ts", "test/integration/harness.self.test.ts"} {
 		out[f] = append(out[f], "webapp/index.html")
 	}
 	// The vite config's check builds the app from the page's entry.
 	out["test/vite-config.test.ts"] = append(out["test/vite-config.test.ts"], "webapp/src/", "proto/gen/ts/", "proto/ts/", "agent-shim/logging/ts/")
-	out["test/failure/sink.test.ts"] = []string{"webapp/src/"}
-	out["test/webkit-stylesheets.test.ts"] = append(out["test/webkit-stylesheets.test.ts"], "webapp/test/")
 	return out
 }()
 
@@ -692,55 +693,10 @@ var shimUnitInputs = func() map[string][]string {
 // (2026-11-10, the integration pass 2026-11-11) and declaring each read it was
 // refused.
 var daemonUnitInputs = map[string][]string{
-	// The structural source scans: each walks the daemon's tree, or the part
-	// of it named, so any change there reruns it.
-	".":                                   {"daemon/"},
-	"internal/account":                    {"daemon/"},
-	"internal/bounce":                     {"daemon/"},
-	"internal/childproc":                  {"daemon/"},
-	"internal/clock":                      {"daemon/internal/"},
-	"internal/commandcatalog/catalogtest": {"daemon/internal/"},
-	"internal/creategate":                 {"daemon/"},
-	"internal/ctxend":                     {"daemon/"},
-	"internal/dirpath":                    {"daemon/"},
-	"internal/gitlayout":                  {"daemon/"},
-	"internal/effortlevel":                {"daemon/internal/"},
-	"internal/envc":                       {"daemon/"},
-	"internal/freshinput":                 {"daemon/internal/"},
-	"internal/h2cclient":                  {"daemon/"},
-	"internal/health":                     {"daemon/"},
-	"internal/ids":                        {"daemon/internal/"},
-	"internal/inflight":                   {"daemon/"},
-	"internal/latestmodel":                {"daemon/internal/resolve/"},
-	"internal/outputtext":                 {"daemon/"},
-	"internal/procgroup":                  {"daemon/"},
-	"internal/promptorigin":               {"daemon/"},
-	"internal/promptqueue":                {"daemon/"},
-	"internal/protoarm":                   {"daemon/"},
-	"internal/ratelimittest":              {"daemon/"},
-	"internal/ratewindow":                 {"daemon/"},
-	"internal/recordlock":                 {"daemon/"},
-	"internal/runecap":                    {"daemon/internal/"},
-	"internal/shellword":                  {"daemon/"},
-	"internal/sourcescan":                 {"daemon/"},
-	"internal/sweepguard":                 {"daemon/internal/"},
-	"internal/textline":                   {"daemon/internal/"},
-	"internal/transportcut":               {"daemon/"},
-	"internal/clock/clocktest":            {"daemon/"},
-	// The scans pinning named call sites in other packages.
-	"internal/atomicfile": {"daemon/internal/classifierupdate/update.go", "daemon/internal/daemonaddr/claim.go",
-		"daemon/internal/rollout/carry.go", "daemon/internal/rollout/manifest.go", "daemon/internal/rollout/spawn.go"},
-	"internal/briefprompt": {"daemon/internal/gather/gather.go", "daemon/internal/mainsync/mainsync.go", "daemon/internal/mergenotice/mergenotice.go",
-		"daemon/internal/prwatch/poller.go", "daemon/internal/workspacenotice/workspacenotice.go",
-		"daemon/internal/workspacesubs/workspacesubs.go"},
-	"internal/standdown": {"daemon/internal/desktopnotify/notifier.go", "daemon/internal/desktopnotify/summary.go",
-		"daemon/internal/mergeworkspace/mergeworkspace.go"},
-	"internal/streamslot": {"daemon/internal/desktopnotify/focus.go", "daemon/internal/procmetrics/emacs.go"},
-	// Its scan reads every boot and takeover source for a hand-rolled raise
-	// of the bring-up marker.
-	"internal/bringup":       {"daemon/internal/boot/", "daemon/internal/rollout/"},
-	"internal/usersetup":     {"daemon/internal/externalbrowser/slack.go", "daemon/internal/pullrefs/pullrefs.go"},
-	"internal/workspacesubs": {"daemon/internal/mergenotice/mergenotice.go"},
+	// No daemon package reads the daemon's own sources: every rule test that
+	// does lives in reposcans (daemon/reposcans/daemonrules), whose
+	// TestNoDaemonCodeOutsideReposcansReadsGoSource fails one anywhere else.
+
 	// The briefs, read as data.
 	"internal/classifierupdate": {"prompts/"},
 	"internal/gather":           {"prompts/"},
@@ -755,10 +711,8 @@ var daemonUnitInputs = map[string][]string{
 	"internal/revision":         {"prompts/"},
 	"internal/slackwatch":       {"prompts/"},
 	"internal/wssummary":        {"prompts/"},
-	"internal/resolve/feed":     {"prompts/", "daemon/internal/promptqueue/deliver.go"},
-	"internal/headless":         {"daemon/"},
-	"internal/workspace":        {"daemon/", "prompts/"},
-	"internal/wsm":              {"daemon/"},
+	"internal/resolve/feed":     {"prompts/"},
+	"internal/workspace":        {"prompts/"},
 	// The vocabulary, read as data.
 	"internal/buildid":         {"proto/vocab/"},
 	"internal/dlog":            {"proto/vocab/"},
@@ -770,28 +724,22 @@ var daemonUnitInputs = map[string][]string{
 	// The in-process scenario goldens: the shim's recorded scenarios, read
 	// back against the vocabulary their frames name.
 	"internal/scenariogolden": {"testdata/scenario-goldens/", "proto/vocab/"},
-	"internal/sessionwatcher": {"proto/vocab/", "daemon/"},
-	"internal/vocab":          {"daemon/", "proto/vocab/"},
+	"internal/sessionwatcher": {"proto/vocab/"},
+	"internal/vocab":          {"proto/vocab/"},
 	// The agent CLI's tests check every command a skill or a daemon brief
 	// names, and that each API skill links the front door.
 	// Its successor-environment test reads the real module root's requirements
 	// manifest, the path paths.Checkout names.
 	"cmd/agent-repld": {"skills/", "prompts/", "bin/agent-repld", "requirements.json"},
-	// gitclient pins the markers the merge queue's hook spells, and its
-	// StoppedBy scan walks the daemon's tree.
-	"internal/gitclient": {"daemon/", "/.githooks/reference-transaction"},
+	// gitclient pins the markers the merge queue's hook spells.
+	"internal/gitclient": {"/.githooks/reference-transaction"},
 	// lifecycleconfig pins the repository's own lifecycle config to the
 	// pipeline its queue runs, and to the scripts it names.
-	"internal/lifecycleconfig": {"daemon/", "/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/"},
+	"internal/lifecycleconfig": {"/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/"},
 	// The harness's deploy configuration reads the briefs and the landing
-	// script, and its scans read the integration suite's own sources.
-	// Its holder scan reads the command's tests too, and the pinned checkout
-	// copies the module's requirements manifest.
-	"integration/harness": {"prompts/", "bin/deploy-landing.sh", "daemon/integration/", "daemon/cmd/agent-repld/", "requirements.json"},
-	// The client-address scan reads the packages that tell a client one.
-	"internal/daemonaddr": {"daemon/internal/server/", "daemon/internal/rollout/"},
-	// The includes scan reads the holder ensure, which parses them.
-	"internal/reqmanifest": {"daemon/internal/holderensure/"},
+	// script, and the pinned checkout copies the module's requirements
+	// manifest.
+	"integration/harness": {"prompts/", "bin/deploy-landing.sh", "requirements.json"},
 	// prose holds the daemon's parse to the old webapp parser's golden
 	// answers, and to the webapp's parsed-prose fixture.
 	"internal/prose": {"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/"},
@@ -906,6 +854,14 @@ func Check(suites []Suite) error {
 				errs = append(errs, fmt.Errorf("roster: %s declares Batch max %d min %d: both must be at least 1, and min no more than max", s.Name, b.Max, b.Min))
 			}
 		}
+		if s.ERTFiles != "" {
+			if s.Kind != ERT {
+				errs = append(errs, fmt.Errorf("roster: %s declares ERTFiles, but only an ERT suite's files are chosen by a glob", s.Name))
+			} else if _, err := filepath.Match(s.ERTFiles, ""); err != nil {
+				errs = append(errs, fmt.Errorf("roster: %s declares ERTFiles %q, which is no glob: %w", s.Name, s.ERTFiles, err))
+			}
+		}
+		errs = append(errs, checkVitestConfig(s)...)
 		if s.Reuse == nil {
 			continue
 		}
@@ -924,6 +880,46 @@ func Check(suites []Suite) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// checkVitestConfig refuses a suite's own vitest config declared on any kind
+// but Vitest, one without the directory its files lie in (or that directory
+// without it), a directory not "/"-ended or outside Path, and one beside an
+// integration config, which runs only beside the package's ordinary config.
+func checkVitestConfig(s Suite) []error {
+	if s.VitestConfig == "" && s.VitestDir == "" {
+		return nil
+	}
+	switch {
+	case s.Kind != Vitest:
+		return []error{fmt.Errorf("roster: %s declares VitestConfig or VitestDir, but only a vitest suite runs a vitest config", s.Name)}
+	case s.VitestConfig == "" || s.VitestDir == "":
+		return []error{fmt.Errorf("roster: %s declares only one of VitestConfig %q and VitestDir %q: a suite's own config names the directory its files lie in", s.Name, s.VitestConfig, s.VitestDir)}
+	case !strings.HasSuffix(s.VitestDir, "/") || strings.HasPrefix(s.VitestDir, "/") || strings.HasPrefix(s.VitestDir, "../"):
+		return []error{fmt.Errorf("roster: %s declares VitestDir %q, which is no \"/\"-ended directory inside its Path", s.Name, s.VitestDir)}
+	case s.IntegrationConfig != "":
+		return []error{fmt.Errorf("roster: %s declares both its own VitestConfig and an IntegrationConfig: an integration config runs beside the package's ordinary one", s.Name)}
+	}
+	return nil
+}
+
+// DefaultVitestConfig is the config `vitest run` reads when given none: a
+// vitest package's ordinary config.
+const DefaultVitestConfig = "vitest.config.ts"
+
+// UnitConfig is the vitest config a Vitest suite's unit batches run under,
+// relative to Path: its own (VitestConfig), or the package's ordinary one.
+func (s Suite) UnitConfig() string {
+	if s.VitestConfig != "" {
+		return s.VitestConfig
+	}
+	return DefaultVitestConfig
+}
+
+// OwnsVitestFile reports whether rel (a file relative to Path) lies in the
+// suite's own directory (VitestDir), so a selection of it is the suite's.
+func (s Suite) OwnsVitestFile(rel string) bool {
+	return s.VitestDir != "" && strings.HasPrefix(filepath.ToSlash(rel), s.VitestDir)
 }
 
 // checkBuilds refuses a build directory that is not a directory ("/"-ended),
@@ -989,6 +985,14 @@ func Harnesses() []string {
 		}
 	}
 	return out
+}
+
+// ertInputs are what every ERT chunk reads beyond its suite's directory: the
+// Doom module files and the data the Emacs layer reads as the shared helpers
+// load it.
+var ertInputs = []string{
+	"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
+	"logging-contract.md", "metaprompt.md",
 }
 
 // RuleSuites is the names of the rule suites (Suite.Rules), in roster

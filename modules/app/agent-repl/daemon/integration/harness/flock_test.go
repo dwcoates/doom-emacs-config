@@ -3,7 +3,6 @@ package harness
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -60,21 +59,5 @@ func TestTakeExclusiveCallsOnBusyOnlyWhenTheLockIsHeld(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestEveryBlockingHarnessLockGoesThroughTakeExclusive pins the call sites:
-// a blocking LOCK_EX written by hand outside takeExclusive is a drifted copy.
-func TestEveryBlockingHarnessLockGoesThroughTakeExclusive(t *testing.T) {
-	for _, file := range []string{"runroot.go", "flock.go"} {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		for i, line := range strings.Split(string(body), "\n") {
-			if strings.Contains(line, "syscall.LOCK_EX)") && !strings.Contains(line, "return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)") {
-				t.Fatalf("%s:%d takes a blocking flock by hand: %s", file, i+1, strings.TrimSpace(line))
-			}
-		}
 	}
 }

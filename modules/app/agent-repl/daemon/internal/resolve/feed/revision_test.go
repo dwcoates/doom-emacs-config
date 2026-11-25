@@ -1,14 +1,12 @@
 package feed
 
 import (
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
 
 // revisionOf is the response_revision page line rewriting UNIT to MARKDOWN.
@@ -335,22 +333,5 @@ func TestFoldOfRowMissesARowNoFoldDrew(t *testing.T) {
 				t.Fatal("foldOfRow found a fold for a row no fold drew")
 			}
 		})
-	}
-}
-
-// TestEveryRowToFoldLookupGoesThroughFoldOfRow fails a resolver file that walks
-// the response folds comparing their rows by hand instead of asking foldOfRow.
-func TestEveryRowToFoldLookupGoesThroughFoldOfRow(t *testing.T) {
-	// Act.
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if n := strings.Count(string(file.Source), "fold.row.GetValue() == "); n > 0 && (file.Name != "revision.go" || n > 1) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert.
-	if len(offenders) != 0 {
-		t.Fatalf("hand-rolled row-to-fold lookups in %v; ask foldOfRow", offenders)
 	}
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -118,27 +116,6 @@ func TestWriteAdvancedInstantMovesOnlyForwardAndRefusesAnUnknownWorkspace(t *tes
 			}
 			if got.InteractedAt == nil || !got.InteractedAt.Equal(tt.want) {
 				t.Fatalf("instant = %v, want %v", got.InteractedAt, tt.want)
-			}
-		})
-	}
-}
-
-// TestTheWorkspaceInstantWritersShareWriteAdvancedInstant pins that the status
-// change and interaction instants are written through the one helper, so a
-// hand-rolled copy of its statement or its existence check fails here.
-func TestTheWorkspaceInstantWritersShareWriteAdvancedInstant(t *testing.T) {
-	for _, file := range []string{"statuschanged.go", "interaction.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Arrange
-			raw, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("read %s: %v", file, err)
-			}
-			src := string(raw)
-
-			// Act / Assert
-			if !strings.Contains(src, "s.writeAdvancedInstant(") || strings.Contains(src, "advanceInstant(ctx, tx,") {
-				t.Fatalf("%s writes an instant without writeAdvancedInstant", file)
 			}
 		})
 	}

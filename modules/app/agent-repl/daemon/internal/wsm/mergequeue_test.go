@@ -2,12 +2,10 @@ package wsm
 
 import (
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -1573,25 +1571,6 @@ func TestMergeQueueColumnsNameEveryColumnTheScanReads(t *testing.T) {
 	}
 }
 
-// TestNoQueueReadSpellsOutItsColumns holds every merge_queue read to
-// mergeQueueColumns: a read that lists its columns by hand can drift from the
-// scan's order.
-func TestNoQueueReadSpellsOutItsColumns(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("mergequeue.go")
-	if err != nil {
-		t.Fatalf("read mergequeue.go: %v", err)
-	}
-
-	// Act
-	spelled := strings.Count(string(src), "pick_started_at, pick_turn, slot, slot_since")
-
-	// Assert
-	if spelled != 1 {
-		t.Fatalf("the queue's column list is spelled %d times in mergequeue.go, want once (mergeQueueColumns)", spelled)
-	}
-}
-
 func TestMergeMoveString(t *testing.T) {
 	tests := []struct {
 		move MergeMove
@@ -1792,28 +1771,6 @@ func TestEntryPlaceRefusesAWorkspaceNotInTheQueue(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("entryPlace = %v, want ErrNotFound", err)
-	}
-}
-
-func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
-	// Arrange
-	code, err := os.ReadFile("mergequeue.go")
-	if err != nil {
-		t.Fatalf("read mergequeue.go: %v", err)
-	}
-
-	// Act
-	reads := strings.Count(string(code), "SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?")
-	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
-
-	// Assert: the helper's own query, and one call per reordering (move,
-	// move to a place, move to a named place (PlaceMerge), prioritize, a
-	// merge stepping aside, a remediated
-	// merge returning, the place a returned merge answers (returnPlaceOf),
-	// and an admitted merge moving ahead of the merges it passed over) and
-	// per state write guarded on its prior state (setMergeQueueState).
-	if reads != 1 || calls != 9 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 9", reads, calls)
 	}
 }
 
@@ -2822,18 +2779,6 @@ func TestAssignQueuePlacesReordersMergesAmongTheirOwnPlaces(t *testing.T) {
 	}
 }
 
-// THE QUEUE REORDERS THROUGH ONE HELPER: a hand-rolled seq swap elsewhere
-// would skip the negative parking the unique (repo_key, seq) index needs.
-func TestEveryQueueReorderGoesThroughAssignQueuePlaces(t *testing.T) {
-	src, err := os.ReadFile("mergequeue.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(src), "SET seq = -seq"); n != 1 {
-		t.Fatalf("mergequeue.go parks seqs in %d places, want only assignQueuePlaces", n)
-	}
-}
-
 func TestAnAdmissionPastWaitingMergesPutsTheAdmittedMergeAheadOfThem(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -2985,21 +2930,6 @@ func TestNormalizedRepoKeyRecordsAKeyThatCannotBeNormalizedOnce(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestRepoKeyRefusalIsRecordedOnlyByTheHelper fails on a hand-rolled site: the
-// refusal message exists once, inside normalizedRepoKey.
-func TestRepoKeyRefusalIsRecordedOnlyByTheHelper(t *testing.T) {
-	// Arrange
-	const message = "refused a merge queue key that cannot be normalized"
-
-	// Act
-	sites := sourcescan.Sites(t, message)
-
-	// Assert
-	if want := []string{"mergequeue.go"}; !slices.Equal(sites, want) {
-		t.Errorf("files recording %q = %v, want %v (only normalizedRepoKey records it)", message, sites, want)
 	}
 }
 

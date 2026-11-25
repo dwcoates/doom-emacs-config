@@ -1,7 +1,6 @@
 package holds_test
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/holds"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1064,27 +1062,6 @@ func TestTrayDrawsNoCardForADaemonNotice(t *testing.T) {
 	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.holds.convert",
 		Message: "a held daemon notice was skipped: the tray draws no card for it"}); !ok {
 		t.Fatalf("no record of the skipped notice: %+v", surfaces.Records())
-	}
-}
-
-// THE TRAY ASKS holdfold.Seen whether a hold has a card, the reading the
-// queue's fold and classifier share: no file of the tray reads a hold's
-// origin as a daemon notice by hand.
-func TestTrayAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`\bDaemonNotice(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
-
-	// Act
-	var found []string
-	for _, file := range sourcescan.Production(t) {
-		if handRolled.Match(file.Source) {
-			found = append(found, file.Name)
-		}
-	}
-
-	// Assert
-	if len(found) > 0 {
-		t.Fatalf("these files read a hold as a daemon notice by hand instead of holdfold.Seen: %v", found)
 	}
 }
 

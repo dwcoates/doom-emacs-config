@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installAnimationFrames, type AnimationFrames } from "./animation-frames.js";
-import { readFileSync } from "node:fs";
 import { createTicker } from "../src/clock.js";
 import type { RevealPace } from "../src/reveal-pace.js";
 import { typeOut, type TypeOutSurface } from "../src/type-out.js";
@@ -199,19 +198,5 @@ describe("the type-out loop", () => {
     // Assert
     const record = await forwardedRecord(capture, `test.type-out.${suffix}`);
     expect([record.level.case, record.context?.row]).toEqual(["debug", "row-1"]);
-  });
-
-  it("is the loop every typed-out surface runs, none hand-rolling its own", () => {
-    // Arrange: the pacing step is the loop's alone.
-    const sources = ["../src/feed/cards/response.ts", "../src/feed/title-reveal.ts"].map((path) =>
-      readFileSync(new URL(path, import.meta.url), "utf8"),
-    );
-    // Act
-    const shapes = sources.map((source) => [source.includes("typeOut("), source.includes("advanceReveal(")]);
-    // Assert
-    expect(shapes).toEqual([
-      [true, false],
-      [true, false],
-    ]);
   });
 });

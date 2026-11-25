@@ -2,27 +2,14 @@ package server
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
-
-func TestEveryBackgroundCreateIsStartedByStartBackgroundCreate(t *testing.T) {
-	// Act: the package's own production sources.
-	sites := sourcescan.Sites(t, "s.runBackgroundCreate(")
-
-	// Assert: the one goroutine that runs a create detached lives in
-	// startBackgroundCreate, so no op-carrying create can run it apart.
-	if !slices.Equal(sites, []string{"workspaces.go"}) {
-		t.Fatalf("runBackgroundCreate called from %v, want only startBackgroundCreate in workspaces.go", sites)
-	}
-}
 
 func TestStartBackgroundCreateReportsOnItsOpAndSurvivesTheCallersContext(t *testing.T) {
 	// Arrange: a create held open until the caller's context is gone.

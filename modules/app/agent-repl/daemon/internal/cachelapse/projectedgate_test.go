@@ -12,7 +12,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -348,15 +347,5 @@ func TestAGateRaisedParksItsSessionForTheWorkspaceInView(t *testing.T) {
 	// Assert
 	if len(h.coldDowns) != 1 || !h.coldDowns[0].atGate {
 		t.Fatalf("cold parks = %+v, want one park taken at the gate", h.coldDowns)
-	}
-}
-
-func TestProjectedGateWritesHaveOneHome(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, ".SetProjectedColdGate(ctx")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "projectedgate.go" {
-		t.Fatalf("a projected gate is written at %v, want only Keeper.projectGate in projectedgate.go", sites)
 	}
 }

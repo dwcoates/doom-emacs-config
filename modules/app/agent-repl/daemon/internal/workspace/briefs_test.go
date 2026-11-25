@@ -9,7 +9,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/prompts"
-	"agent-repld/internal/sourcescan"
 )
 
 // composeBriefName is the brief the composeBrief tests arrange.
@@ -237,24 +236,5 @@ func TestASpliceFaultThatCannotBeRecordedIsLogged(t *testing.T) {
 				t.Fatalf("records = %+v, want an ERROR %q naming the brief and the cause", f.log.logger.Records(), tc.message)
 			}
 		})
-	}
-}
-
-// TestEveryPromptsFaultIsRaisedThroughComposeBrief pins that the brief sites
-// share composeBrief's shape: a hand-rolled load-splice-raise in any other file
-// would drift from it (another log message, a fault left open), so raising the
-// prompts fault anywhere but the helper fails here.
-func TestEveryPromptsFaultIsRaisedThroughComposeBrief(t *testing.T) {
-	// Arrange / Act.
-	var raisers []string
-	for _, file := range sourcescan.Production(t) {
-		if file.Name != "briefs.go" && strings.Contains(string(file.Source), "v.raisePromptsFault(") {
-			raisers = append(raisers, file.Name)
-		}
-	}
-
-	// Assert.
-	if len(raisers) != 0 {
-		t.Fatalf("files raising the prompts fault outside composeBrief = %v, want none", raisers)
 	}
 }

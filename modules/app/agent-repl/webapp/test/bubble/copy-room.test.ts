@@ -3,9 +3,6 @@
  * copy-room — a bubble's copy control, and the ghost that opens its first line
  * of text so the bubble widens by the control's room.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUBBLE_COPY_CLASS,
@@ -22,7 +19,6 @@ import { WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-la
 import { boxRect } from "../dom-rect.js";
 import { COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, boundCopyText } from "../../src/copy-control.js";
 import { plainProse, servedProse } from "../prose.js";
-import { filesUnder } from "../files-under.js";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -247,36 +243,5 @@ describe("a tree that opens a bubble with a copy control", () => {
     document.body.append(bubble);
     // Assert
     expect(treeLineWidths(bubble)[0]).toBeLessThanOrEqual(stagedCols(staged.layout) - 50);
-  });
-});
-
-describe("every bubble copy control's draw", () => {
-  /** Every source file under src/, by its path from src/. */
-  function sources(): { file: string; code: string }[] {
-    const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src");
-    return filesUnder(src).map((file) => ({ file: path.relative(src, file), code: readFileSync(file, "utf8") }));
-  }
-
-  it("leaves its room through reserveCopyRoom, wherever a copy control goes in a bubble's corner", () => {
-    // Arrange: every file that draws a bubble's copy control into a bubble.
-    const drawing = sources().filter(
-      ({ file, code }) =>
-        file !== "bubble/copy-room.ts" &&
-        file !== "feed/rows/blocks.ts" &&
-        /\b(?:bubbleCopyControl|drawPromptCopyControl)\(/.test(code),
-    );
-    // Act
-    const without = drawing.filter(({ code }) => !/\breserveCopyRoom\(/.test(code)).map(({ file }) => file);
-    // Assert
-    expect([drawing.length > 0, without]).toEqual([true, []]);
-  });
-
-  it("is never a hand-rolled copy control in a bubble's corner", () => {
-    // Act: every other file that builds a bound copy control.
-    const rolled = sources()
-      .filter(({ file, code }) => file !== "copy-control.ts" && file !== "bubble/copy-room.ts" && /\bboundCopyControl\(/.test(code))
-      .map(({ file }) => file);
-    // Assert
-    expect(rolled).toEqual([]);
   });
 });

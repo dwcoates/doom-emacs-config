@@ -20,7 +20,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "a webapp change selects the webapp suite, the build harness and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx"},
-			want:  []string{"build-frontend-harness", "webapp", "e2e-kit", "e2e", "repo-scans"},
+			want:  []string{"build-frontend-harness", "webapp", "webapp-rules", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "a brief change selects the daemon suite that composes and pins it, and the end-to-end suites",
@@ -35,7 +35,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "lock", "sockethold", "zettel", "testservice", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e-kit", "e2e", "repo-scans"},
+			want:  []string{"daemon", "sidecar", "store", "lock", "sockethold", "zettel", "testservice", "shim", "webapp", "webapp-rules", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
@@ -45,12 +45,12 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "module-root elisp selects ert",
 			paths: []string{"modules/app/agent-repl/config.el"},
-			want:  []string{"ert"},
+			want:  []string{"ert", "ert-rules"},
 		},
 		{
 			name:  "lisp/ selects ert, the byte-compile gate and the repo scans, which read its wire decoders",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert", "byte-compile", "repo-scans"},
+			want:  []string{"ert", "ert-rules", "byte-compile", "repo-scans"},
 		},
 		{
 			name:  "the byte-compile gate selects itself, the script harnesses and the scans",
@@ -65,17 +65,17 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "the vite server every vite config imports selects the webapp's and the shim's suites besides bin/'s",
 			paths: []string{"modules/app/agent-repl/bin/vite-server.mjs"},
-			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans", "webapp", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e"),
+			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans", "webapp", "webapp-rules", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e"),
 		},
 		{
 			name:  "the vite server's declarations select what the server does",
 			paths: []string{"modules/app/agent-repl/bin/vite-server.d.mts"},
-			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans", "webapp", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e"),
+			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans", "webapp", "webapp-rules", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e"),
 		},
 		{
 			name:  "several regions union their selections",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e-kit", "e2e", "repo-scans"},
+			want:  []string{"build-frontend-harness", "daemon", "webapp", "webapp-rules", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "the e2e harness selects the cross-system suite, and the scans of its sources",
@@ -324,7 +324,7 @@ func TestSelectSuitesMapsTheProseFixtureToItsWriterAndReader(t *testing.T) {
 	got := SelectSuites([]string{"modules/app/agent-repl/webapp/test/fixtures/parsed-prose.json"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,webapp" {
+	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,webapp,webapp-rules" {
 		t.Fatalf("the prose fixture selected %v (full=%v), want daemon, webapp and repo-scans", got.Suites, got.Full)
 	}
 }
@@ -416,7 +416,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,byte-compile,e2e-kit,e2e" {
+	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,ert-rules,repo-scans,webapp,webapp-rules,byte-compile,e2e-kit,e2e" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }

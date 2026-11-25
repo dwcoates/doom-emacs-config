@@ -2,14 +2,9 @@
  * The shared screenshot decoder (pixels.ts): every webkit suite that reads
  * painted pixels reads them through it, in device px from the clip's corner.
  */
-import path from "node:path";
-import { readdir, readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { screenshotPixels } from "./pixels";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** A white page with one 10x10 pure red square at (20, 30). */
 const PAGE = `<!doctype html><html><body style="margin:0;background:#fff">
@@ -80,19 +75,5 @@ describe("screenshotPixels", () => {
 
     // Act / Assert
     expect(() => px.rgba(10, 0)).toThrow("pixel (10, 0) is outside the 10x10 shot");
-  });
-
-  it("is the only screenshot any webkit suite takes", async () => {
-    // Arrange — every webkit source but the helper itself.
-    const files = (await readdir(here)).filter((f) => f.endsWith(".ts") && f !== "pixels.ts");
-
-    // Act
-    const shooting: string[] = [];
-    for (const f of files) {
-      if (/\.screenshot\(/.test(await readFile(path.join(here, f), "utf8"))) shooting.push(f);
-    }
-
-    // Assert
-    expect(shooting).toEqual([]);
   });
 });

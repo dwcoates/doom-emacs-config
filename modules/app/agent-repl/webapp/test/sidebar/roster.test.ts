@@ -94,8 +94,6 @@ import {
 
 // Imported at collection, not inside a test, so the transform never counts
 // against a test's timeout.
-import css from "../../src/styles.css?raw";
-import rosterSource from "../../src/sidebar/roster.ts?raw";
 
 const VIEW_OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_UNKNOWN_REPOSITORY = create(UpdateSidebarViewResponseSchema, {
@@ -115,7 +113,6 @@ async function click(control: Element): Promise<void> {
 function pane(drawn: HTMLElement): HTMLElement {
   return drawn.querySelector(".sb-pane") as HTMLElement;
 }
-
 
 /** Each band viewport the faded foot is or is not painted on (styles.css), and whether it is. */
 const BAND_FOOT_FADES = [
@@ -274,7 +271,6 @@ describe("the sections", () => {
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
     expect(pane(drawn).querySelector(".open-section .repo")?.classList.contains("repo-section")).toBe(true);
   });
-
 });
 
 /** A daemon that records every UpdateSidebarView and answers ANSWER. */
@@ -476,7 +472,6 @@ describe("folding a section is the daemon's view, shared by every page", () => {
     await click(drawn.querySelector(".repo-section [data-section-fold]") as Element);
     expect(pane(drawn).textContent).toContain("the daemon no longer has that repository");
   });
-
 });
 
 describe("drawHeadedSection", () => {
@@ -511,7 +506,6 @@ describe("drawHeadedSection", () => {
     expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual(["Head", "(1/1)"]);
   });
 
-
   it("hands the header and the box to the decoration, after the count", () => {
     let handed: [HTMLElement, HTMLElement] | undefined;
     const section = draw(wire(), sidebarContext(), "p", {
@@ -540,7 +534,6 @@ describe("drawHeadedSection", () => {
     bare.header = undefined;
     expect(() => draw(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
   });
-
 
   it("draws every row it is handed, a receded one included", () => {
     const section = draw(wire({ rows: [row({ id: "ws-receded", closed: true })] }), sidebarContext(), "p", SHAPE);
@@ -606,7 +599,6 @@ describe("drawHeadedSection", () => {
       section.querySelector(":scope > .rows") !== null,
     ]).toEqual([true, counted, true]);
   });
-
 });
 
 describe("recently merged", () => {
@@ -748,7 +740,6 @@ describe("the create controls", () => {
     await click(section.querySelector(".sb-add") as Element);
     expect(section.classList.contains("folded")).toBe(false);
   });
-
 });
 
 describe("a malformed roster", () => {
@@ -984,16 +975,11 @@ describe("a section's folded count", () => {
     expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "font-size"))).toBe("0.85em");
   });
 
-  it("draws no section count inside a badge", () => {
-    expect(css).not.toMatch(/\.sb-count[^{]*\{[^}]*(border|padding)/);
-  });
-
   it("refuses a header whose count is unset", () => {
     const section = repoSection({ id: "repo-1" });
     section.header!.count = undefined;
     expect(() => drawWorkspaceRoster(roster({ repos: [section] }), sidebarContext())).toThrow(MalformedView);
   });
-
 });
 
 describe("the Recently Merged section's header", () => {
@@ -1059,11 +1045,6 @@ describe("the Recently Merged section's header", () => {
       const drawn = drawWorkspaceRoster(roster({ merged: twoGroups(collapsed) }), sidebarContext());
       expect(inRail(drawn, () => cascadedValue(todayCount(drawn), property))).toBe(want);
     }
-  });
-
-  it("draws its today count through the one helper the groups draw theirs with", () => {
-    // A section header formatting its own summary could drift from the groups'.
-    expect(rosterSource.match(/appendChild\(drawMergedTodayCount\(/g)?.length).toBe(2);
   });
 
   it("refuses a header whose count is unset as a malformed view", () => {
@@ -1673,19 +1654,6 @@ describe("recently merged rows", () => {
     expect([name?.classList.contains("band-name"), name?.classList.contains("viewed")]).toEqual([true, false]);
   });
 
-  it("paints a Recently Merged group's repository title purple and leaves its flanking rules alone", () => {
-    expect(css).toContain("#ws-sidebar .merged-group-head > .sb-label { color: var(--blocked); }");
-    expect(css).toMatch(/\.merged-group-head::after \{[^}]*background: var\(--border\);/);
-  });
-
-  it("styles a merged name with the repository headers' colour variable", () => {
-    expect(css).toContain("#ws-sidebar .row .name.band-name { --name-rest: var(--repo-head-expanded); color: var(--repo-head-expanded); }");
-  });
-
-  it("draws no gutter bar on a row merged today", () => {
-    expect(css).not.toContain("merged-today");
-  });
-
   it.each(BAND_FOOT_FADES)("$name", ({ cls, region, attrs, want }) => {
     // Arrange
     const section = document.createElement("div");
@@ -1712,26 +1680,6 @@ describe("recently merged rows", () => {
     const padding = inRail(section, () => cascadedValue(viewport, "scroll-padding-bottom"));
     // Assert
     expect(padding === "var(--band-foot-fade)").toBe(want);
-  });
-
-  it("declares the one rail row vertical padding", () => {
-    expect(css).toContain("#ws-sidebar { --row-pad-y: 0.14rem; }");
-  });
-
-  it("pads every rail row with the shared vertical padding", () => {
-    expect(css).toContain("  padding: var(--row-pad-y) var(--row-pad-right) var(--row-pad-y) calc(0.9rem + var(--row-indent));");
-  });
-
-  it("declares the one rail row right padding", () => {
-    expect(css).toContain("#ws-sidebar { --row-pad-right: 0.7rem; }");
-  });
-
-  it("builds a merged row's height out of the shared vertical padding", () => {
-    expect(css).toContain("--merged-row-h: calc(var(--row-pad-y) * 2 + var(--merged-row-line-h));");
-  });
-
-  it("restates no row vertical padding of its own", () => {
-    expect(css).not.toContain("--merged-row-pad-y");
   });
 
   it("keeps the merged arm on the row, the hook contract's", () => {
@@ -2750,7 +2698,6 @@ describe("the recently merged rows' stylesheet", () => {
     const glyph = drawn.querySelector<HTMLElement>(".sb-mq-glyph")!;
     expect(inRail(drawn, () => cascadedValue(glyph, "width"))).toBe("var(--mq-glyph-w)");
   });
-
 });
 
 describe("the open rows' recency gutters", () => {
@@ -2903,7 +2850,6 @@ describe("the tab number's stylesheet", () => {
   });
 });
 
-
 describe("drawGroupedSection", () => {
   /** A section wire with a header and an expanded fold, and the shape it is drawn as. */
   const wire = () => mergeQueueBand([]);
@@ -2938,11 +2884,6 @@ describe("drawGroupedSection", () => {
     const section = drawGroupedSection(wire(), sidebarContext(), "p", decorated, [groupEl("a")]);
     expect(section.querySelector(":scope > .repo-head > #extra")).not.toBeNull();
   });
-
-  it("is the one shape both group sections are drawn through", () => {
-    // A section drawing its groups by hand could fold or leave itself out differently.
-    expect([rosterSource.match(/return drawGroupedSection\(/g)?.length, rosterSource.match(/leftOut: \{ when: \(\) => groups\.length === 0/g)?.length]).toEqual([2, 1]);
-  });
 });
 
 describe("drawRepositoryGroup", () => {
@@ -2968,11 +2909,6 @@ describe("drawRepositoryGroup", () => {
     document.body.replaceChildren(group);
     head.click();
     expect(group.classList.contains("folded")).toBe(true);
-  });
-
-  it("is the one box both sections' groups are drawn in", () => {
-    // A group box made by hand could miss its section or repository, which its fold is keyed by.
-    expect([rosterSource.match(/drawRepositoryGroup\("(merge-queue|recently-merged)"/g)?.length, rosterSource.match(/className = MERGED_GROUP_CLASS/g)?.length]).toEqual([2, 1]);
   });
 });
 

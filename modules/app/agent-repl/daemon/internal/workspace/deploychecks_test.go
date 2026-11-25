@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -494,28 +493,6 @@ func TestRefreshDeployCheckFailsLoudlyWhenTheAdvanceCannotRun(t *testing.T) {
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks,
 		Message: "could not advance the standing deploy fixer to its parent's tip: fast-forward"}); !ok {
 		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
-	}
-}
-
-func TestEveryAdvanceToAParentsTipGoesThroughOneHelper(t *testing.T) {
-	// Arrange
-	sources := map[string]string{}
-	for _, file := range []string{"open.go", "deploychecks.go"} {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sources[file] = string(body)
-	}
-
-	// Assert: both callers share advanceToParent, and only it fast-forwards.
-	for file, src := range sources {
-		if !strings.Contains(src, "v.advanceToParent(") {
-			t.Fatalf("%s does not advance through advanceToParent", file)
-		}
-	}
-	if strings.Count(sources["open.go"]+sources["deploychecks.go"], "Git.FastForward(") != 1 {
-		t.Fatal("a second fast-forward to a parent's tip was written beside advanceToParent")
 	}
 }
 

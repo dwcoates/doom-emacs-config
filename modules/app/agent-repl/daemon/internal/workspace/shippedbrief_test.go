@@ -45,36 +45,6 @@ func TestLoadShippedBriefReadsTheShippedCorpus(t *testing.T) {
 	}
 }
 
-// TestEveryShippedBriefLoadGoesThroughLoadShippedBrief keeps the package's
-// tests from hand-rolling the shipped corpus's path again.
-func TestEveryShippedBriefLoadGoesThroughLoadShippedBrief(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	handRolled := `filepath.Join("..", "..", "..", "prompts")`
-
-	for _, file := range files {
-		t.Run(file, func(t *testing.T) {
-			// Act.
-			text, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("ReadFile: %v", err)
-			}
-
-			// Assert.
-			count := strings.Count(string(text), handRolled)
-			if file == "shippedbrief_test.go" {
-				count -= 2 // the helper's own definition and this check
-			}
-			if count != 0 {
-				t.Fatalf("%s spells the shipped corpus's path %d times, want loadShippedBrief or shippedPromptsDir", file, count)
-			}
-		})
-	}
-}
-
 // handedFailuresSection is the metaprompt section a brief handing over a
 // failure points at for how the fix is dispatched.
 const handedFailuresSection = "Handed failures"
@@ -143,36 +113,6 @@ func TestAssertCarries(t *testing.T) {
 			// Assert.
 			if !slices.Equal(rec.failures, tt.want) {
 				t.Fatalf("failures = %q, want %q", rec.failures, tt.want)
-			}
-		})
-	}
-}
-
-// TestEveryCarryCheckGoesThroughAssertCarries keeps the package's tests from
-// hand-rolling assertCarries's loop again.
-func TestEveryCarryCheckGoesThroughAssertCarries(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	handRolled := "want it to carry %q"
-
-	for _, file := range files {
-		t.Run(file, func(t *testing.T) {
-			// Act.
-			text, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("ReadFile: %v", err)
-			}
-
-			// Assert.
-			count := strings.Count(string(text), handRolled)
-			if file == "shippedbrief_test.go" {
-				count -= 2 // the helper's own Fatalf and this check
-			}
-			if count != 0 {
-				t.Fatalf("%s hand-rolls a carry check %d times, want assertCarries", file, count)
 			}
 		})
 	}

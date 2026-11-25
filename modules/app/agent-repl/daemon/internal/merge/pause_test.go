@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -551,26 +550,6 @@ func TestRefuseNoopPauseNamesTheArmAndReasonOfTheAskedForState(t *testing.T) {
 				t.Fatalf("a WARN record was written, want none")
 			}
 		})
-	}
-}
-
-func TestNoopPauseRefusalsAllGoThroughRefuseNoopPause(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("queue.go")
-	if err != nil {
-		t.Fatalf("read queue.go: %v", err)
-	}
-
-	// Act.
-	text := string(src)
-
-	// Assert: two call sites share the helper, and only the helper builds the
-	// already_paused arm by hand.
-	if n := strings.Count(text, "o.refuseNoopPause(op, paused,"); n != 2 {
-		t.Fatalf("refuseNoopPause call sites = %d, want 2", n)
-	}
-	if n := strings.Count(text, "ArmAlreadyPaused, "); n != 1 {
-		t.Fatalf("hand-built already_paused arms in queue.go = %d, want only the helper's", n)
 	}
 }
 

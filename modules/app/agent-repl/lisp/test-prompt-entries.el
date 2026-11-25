@@ -554,43 +554,6 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
   "A blank entry opens on the label, a space, a dash and a space."
   (should (equal (agent-repl-prompt-entries-opening "3.1.2") "3.1.2 - ")))
 
-(ert-deftest agent-repl-test-prompt-entries-every-opened-entry-is-opened-by-the-one-helper ()
-  "`M-j'/`M-k' and a branch click open entries through `agent-repl-prompt-entries-opening'."
-  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open-on")
-                  ("input.el" "agent-repl-input-compose-entry")))
-    ;; Arrange
-    (let ((source (with-temp-buffer
-                    (insert-file-contents (expand-file-name (car case) agent-repl-test--module-dir))
-                    (goto-char (point-min))
-                    (re-search-forward (concat "^(defun " (regexp-quote (cadr case)) " "))
-                    (beginning-of-line)
-                    (buffer-substring (point) (progn (forward-sexp) (point))))))
-      ;; Act / Assert: the shared helper, never a hand-rolled " - ".
-      (should (equal (list (cadr case)
-                           (and (string-match-p "(agent-repl-prompt-entries-opening " source) t)
-                           (string-match-p "\" - \"" source))
-                     (list (cadr case) t nil))))))
-
-(defun agent-repl-test-prompt-entries--defun-source (name)
-  "The source of NAME's `defun' in prompt-entries.el."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "prompt-entries.el" agent-repl-test--module-dir))
-    (goto-char (point-min))
-    (re-search-forward (concat "^(defun " (regexp-quote name) " "))
-    (beginning-of-line)
-    (buffer-substring (point) (progn (forward-sexp) (point)))))
-
-(ert-deftest agent-repl-test-prompt-entries-every-line-beside-an-entry-opens-through-open-on ()
-  "`M-j'/`M-k' open their line through `agent-repl-prompt-entries--open-on', never by hand."
-  (dolist (name '("agent-repl-prompt-entries--open-sibling"))
-    ;; Arrange
-    (let ((source (agent-repl-test-prompt-entries--defun-source name)))
-      ;; Act / Assert
-      (should (equal (list name
-                           (and (string-match-p "(agent-repl-prompt-entries--open-on\\_>" source) t)
-                           (string-match-p "(evil-open-\\(below\\|above\\) " source))
-                     (list name t nil))))))
-
 (ert-deftest agent-repl-test-prompt-entries-a-refused-neighbor-leaves-the-entry ()
   "A refusal leaves the entry as it was and is recorded at info."
   (agent-repl-test-prompt-entries--opening '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil)))
@@ -866,17 +829,6 @@ is recorded on `flashed'."
                     :type 'user-error)
       (should (null asked-target))
       (should (cl-some (lambda (m) (string-match-p "kind-off-entry ws=ws-1 way=:way point=15" m)) logs)))))
-
-(ert-deftest agent-repl-test-prompt-entries-every-entry-command-acts-through-on-entry ()
-  "Stepping and opening a sibling both act through `agent-repl-prompt-entries--on-entry', never a hand-rolled refusal."
-  (dolist (name '("agent-repl-prompt-entries--step" "agent-repl-prompt-entries--open-sibling"))
-    ;; Arrange
-    (let ((source (agent-repl-test-prompt-entries--defun-source name)))
-      ;; Act / Assert
-      (should (equal (list name
-                           (and (string-match-p "(agent-repl-prompt-entries--on-entry\\_>" source) t)
-                           (string-match-p "user-error\\|agent-repl--input-flash" source))
-                     (list name t nil))))))
 
 (ert-deftest agent-repl-test-prompt-entries-on-entry-binding-is-a-filtered-menu-item ()
   "The entry-only binding of a command is a menu item the on-entry filter guards."

@@ -2,29 +2,10 @@ package merge
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
-
-// THE ROUND'S HOLD HAS ONE WRITER (holdRound): a second caller of the
-// store's hold could mark a round held that no resume record waits on.
-func TestOnlyHoldRoundWritesARoundsHold(t *testing.T) {
-	// Act
-	var callers []string
-	for _, file := range sourcescan.Production(t) {
-		if strings.Contains(string(file.Source), ".HoldMergeRound(") && !strings.HasSuffix(file.Name, "held.go") {
-			callers = append(callers, file.Name)
-		}
-	}
-
-	// Assert
-	if len(callers) != 0 {
-		t.Fatalf("files calling HoldMergeRound besides held.go: %v", callers)
-	}
-}
 
 // THE HOLD'S SET AND CLEAR ARE INFO RECORDS, so the shared log says when a
 // merge was suspended at its round and when it ran on (2026-11-17: no record

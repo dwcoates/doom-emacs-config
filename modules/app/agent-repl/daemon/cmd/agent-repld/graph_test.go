@@ -26,7 +26,6 @@ import (
 
 	"agent-repld/internal/boot"
 	"agent-repld/internal/sessionlock"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"testing"
 	"time"
@@ -671,16 +670,6 @@ func TestResolvePathsTakesTheLockDirectoryFromSessionlock(t *testing.T) {
 	}
 }
 
-func TestTheGraphRegistersMergeTestLogsForRetention(t *testing.T) {
-	// Act.
-	registered := sourcescan.Count(t, "p.Surfaces.RetainDirectory(merge.LogsDir(p.Layout.Dir()), merge.IsLog)")
-
-	// Assert.
-	if registered != 1 {
-		t.Fatalf("the merge test logs directory is registered for retention %d times, want once", registered)
-	}
-}
-
 // recordingSink records the faults it is told of, in order.
 type recordingSink struct{ events []string }
 
@@ -915,30 +904,6 @@ func TestSlackChannelSubdomain(t *testing.T) {
 				t.Fatalf("record context = %#v, want %#v", records[0].Context, tc.wantCtx)
 			}
 		})
-	}
-}
-
-// THE SPAWN PREFLIGHT RUNS ONCE, AFTER THE DEPLOYER IS BUILT: the deployer's
-// daemon-boot recovery edge (CloseEarlierFailures) closes every standing
-// successor_spawn_failed fault, so a preflight before it would have its own
-// fault closed by the same boot.
-func TestTheGraphPreflightsTheSpawnOnceAfterTheDeployerIsBuilt(t *testing.T) {
-	// Arrange
-	var graph string
-	for _, f := range sourcescan.Production(t) {
-		if f.Name == "graph.go" {
-			graph = string(f.Source)
-		}
-	}
-
-	// Act
-	preflights := strings.Count(graph, "rolloutController.PreflightSpawn(ctx)")
-	preflight := strings.Index(graph, "rolloutController.PreflightSpawn(ctx)")
-	deployer := strings.Index(graph, "buildDeployer(ctx, deployerParams{")
-
-	// Assert
-	if preflights != 1 || deployer < 0 || preflight < deployer {
-		t.Fatalf("PreflightSpawn sites = %d at %d, buildDeployer at %d; want one preflight after the deployer is built", preflights, preflight, deployer)
 	}
 }
 

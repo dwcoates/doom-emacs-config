@@ -14,7 +14,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1173,22 +1172,6 @@ func TestAnAskOpenedInAnOrdinaryWorkspaceRevealsNothing(t *testing.T) {
 	// Assert
 	if revealed := h.detached.revealed(); len(revealed) != 0 {
 		t.Fatalf("reveals = %v, want none", revealed)
-	}
-}
-
-func TestEveryMergeTabIsPublishedThroughPublishTab(t *testing.T) {
-	// Arrange / Act: the package's own production sources.
-	files := sourcescan.Production(t)
-
-	// Assert: tabRow is composed only inside publishTab, so no tab reaches a
-	// feed other than its bubble's.
-	for _, file := range files {
-		if file.Name == "tabs.go" {
-			continue
-		}
-		if strings.Contains(string(file.Source), "tabRow(") {
-			t.Errorf("%s composes a tab row itself, want every tab published through publishTab", file.Name)
-		}
 	}
 }
 

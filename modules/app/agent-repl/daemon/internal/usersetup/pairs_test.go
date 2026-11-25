@@ -1,7 +1,6 @@
 package usersetup_test
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -45,30 +44,6 @@ func TestPairs(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("Pairs(%q) = %v, want %v", tc.raw, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestPairsIsTheOnePairParser pins that every per-user pair variable is read
-// through Pairs: a reader that splits its own pairs would drift from the
-// shared error and trimming rules.
-func TestPairsIsTheOnePairParser(t *testing.T) {
-	for _, path := range []string{"../pullrefs/pullrefs.go", "../externalbrowser/slack.go"} {
-		t.Run(path, func(t *testing.T) {
-			// Arrange.
-			src, err := os.ReadFile(path) //nolint:gosec // repository source
-			if err != nil {
-				t.Fatal(err)
-			}
-			body := string(src)
-
-			// Assert.
-			if !strings.Contains(body, "usersetup.Pairs(") {
-				t.Fatalf("%s does not read its pairs through usersetup.Pairs", path)
-			}
-			if strings.Contains(body, `strings.Cut(`) && strings.Contains(body, `"="`) {
-				t.Fatalf("%s splits `<key>=<value>` pairs by hand", path)
 			}
 		})
 	}

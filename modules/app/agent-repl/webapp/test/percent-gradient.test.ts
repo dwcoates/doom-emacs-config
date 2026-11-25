@@ -1,10 +1,5 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { percentGradientColor, type PercentStop } from "../src/percent-gradient.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 // The hue is the first field of the `hsl(H S% L%)` string; saturation and
 // lightness are fixed.
@@ -54,15 +49,4 @@ describe("percentGradientColor", () => {
     // Act / Assert
     expect(() => percentGradientColor(50, disordered)).toThrow("stop 1 sits below");
   });
-
-  it.each(["src/panels/context-colors.ts", "src/pressure-color.ts"])(
-    "%s colors its percent through the shared helper, not its own interpolation",
-    (file) => {
-      // Arrange
-      const source = readFileSync(path.join(here, "..", file), "utf8");
-      // Assert
-      expect(source).toContain("percentGradientColor(");
-      expect(source).not.toMatch(/function lerp\b/);
-    },
-  );
 });

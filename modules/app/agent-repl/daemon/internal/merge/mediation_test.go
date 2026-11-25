@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -20,7 +18,6 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1252,21 +1249,6 @@ func TestSubmissionsToTakesOnlyTheNamedWorkspacesPromptsOfTheNamedBrief(t *testi
 	}
 }
 
-// TestEverySubmissionFilterGoesThroughSubmissionsTo keeps the deploy-check
-// tests' filters of the harness's prompts on the one helper: a hand-rolled
-// loop over the submissions by workspace fails here.
-func TestEverySubmissionFilterGoesThroughSubmissionsTo(t *testing.T) {
-	for _, file := range []string{"mediation_test.go", "escalation_test.go"} {
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.Count(string(src), "range h.queue.submissions {\n\t\tif sub.WS =="); n != 0 && !(file == "mediation_test.go" && n == 1) {
-			t.Fatalf("%s filters the submissions by workspace by hand %d times; use submissionsTo", file, n)
-		}
-	}
-}
-
 func TestADeployThatChangedNothingIsReleasedUnchecked(t *testing.T) {
 	later := deployStarted.Add(time.Minute)
 	tests := []struct {
@@ -1376,15 +1358,6 @@ func TestReleaseCheckEndsTheChainOfOnlyACheckItReleased(t *testing.T) {
 	}
 }
 
-// TestEveryCheckReleaseGoesThroughReleaseCheck keeps one path from a
-// released check to its chain's end: a site releasing a check by hand, which
-// could leave its chain running, fails here.
-func TestEveryCheckReleaseGoesThroughReleaseCheck(t *testing.T) {
-	if sites := sourcescan.Sites(t, "DB.ReleaseMediation("); !slices.Equal(sites, []string{"mediation.go"}) {
-		t.Fatalf("checks are released in %v, want only releaseCheck in mediation.go", sites)
-	}
-}
-
 func TestAnAwaitCutByTheIntakesOwnDecisionIsNoFailure(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1444,15 +1417,6 @@ func TestOwesIsTheCheckOfTheDeployThatBeganThen(t *testing.T) {
 				t.Fatalf("owes = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-// TestEveryStillOwedTestGoesThroughOwes keeps one reading of "this check is
-// still the one owed": a hand-rolled comparison of a check's instant fails
-// here.
-func TestEveryStillOwedTestGoesThroughOwes(t *testing.T) {
-	if sites := sourcescan.Sites(t, ".OwedAt.Equal("); !slices.Equal(sites, []string{"mediation.go"}) {
-		t.Fatalf("an owed check's instant is compared in %v, want only owes in mediation.go", sites)
 	}
 }
 
@@ -2073,24 +2037,6 @@ func TestQueueKeyedFindsAListedQueueByItsKey(t *testing.T) {
 				t.Fatalf("queueKeyed = (%v, %v), want (%v, %v)", got.key, found, tc.want.key, tc.wantFound)
 			}
 		})
-	}
-}
-
-func TestEveryListedQueueLookupGoesThroughQueueKeyed(t *testing.T) {
-	// Arrange: every merge source file but the helper's own.
-	byHand := regexp.MustCompile(`sameQueue\(\w+\.key,`)
-	total := 0
-
-	// Act, Assert: no other code compares a listed queue's key by hand.
-	for _, file := range sourcescan.Production(t) {
-		n := len(byHand.FindAllIndex(file.Source, -1))
-		if n > 0 && file.Name != "mediation.go" {
-			t.Fatalf("%s compares a listed queue's key by hand; use queueKeyed", file.Name)
-		}
-		total += n
-	}
-	if total != 1 {
-		t.Fatalf("a listed queue's key is compared %d times, want once, inside queueKeyed", total)
 	}
 }
 

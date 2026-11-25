@@ -62,7 +62,10 @@ export default defineConfig({
     // also holds the layer's HELPERS (drive.ts, perf.ts, real-daemon.ts),
     // which need no daemon and whose own tests belong in the fast run like any
     // other unit test. Excluding the whole directory left them untestable.
-    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**", "test/webkit/**", "test/webapp-layer/**/*.layer.test.ts"],
+    //
+    // The rule tests (rules/) have their own config too (vitest.rules.config.ts,
+    // testrun's `webapp-rules` suite), run before a merge is admitted.
+    exclude: ["**/node_modules/**", "**/dist/**", "rules/**", "test/integration/**", "test/webkit/**", "test/webapp-layer/**/*.layer.test.ts"],
     // TIGHT ON PURPOSE, RE-MEASURED after the 300ms bound tripped three times
     // under load on otherwise-passing tests (question.test.ts, shell.test.ts,
     // feed.test.ts). Four `npx vitest run --reporter=json` passes (2 quiet, 2

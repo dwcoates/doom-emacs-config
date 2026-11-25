@@ -3,17 +3,9 @@
  * stylesheet, which every webkit suite that draws into `#feed` opens rather
  * than spelling its own.
  */
-import path from "node:path";
-import { readdir, readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import type { Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openFeedPage } from "./feed-page";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-
-/** The shell's empty feed, as a suite spelling its own shell would write it. */
-const EMPTY_FEED = '<main id="feed" data-feed="root"></main>';
 
 /** What the opened page reported. */
 interface Opened {
@@ -89,17 +81,5 @@ describe("the shared feed page in WebKit", () => {
 
     // Assert
     expect(devicePixelRatio).toBe(2);
-  });
-
-  it("is the only shell: no webkit suite spells its own empty feed", async () => {
-    // Arrange
-    const suites = (await readdir(here)).filter((f) => f.endsWith(".webkit.test.ts"));
-
-    // Act
-    const sources = await Promise.all(suites.map(async (f) => [f, await readFile(path.join(here, f), "utf8")] as const));
-    const handRolled = sources.filter(([f, src]) => f !== "feed-page.webkit.test.ts" && src.includes(EMPTY_FEED)).map(([f]) => f);
-
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });

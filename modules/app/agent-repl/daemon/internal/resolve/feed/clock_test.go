@@ -1,8 +1,6 @@
 package feed
 
 import (
-	"os"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -125,19 +123,5 @@ func TestSettledClock(t *testing.T) {
 				t.Fatalf("settledClock spans %d..%d, want %d..%d", start, end, tc.wantStart, tc.wantEnd)
 			}
 		})
-	}
-}
-
-func TestToolCallsAndAsksShareOneStartPrecedence(t *testing.T) {
-	// Arrange: the source of every settled card's clock start.
-	src, err := os.ReadFile("toolcall.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act, Assert: the tool call's settle takes its start through clockStart,
-	// the same rule settledClock applies to asks and skills.
-	if !strings.Contains(string(src), "u.startedAtMs = clockStart(u.startedAtMs, settled)") {
-		t.Fatal("settledOutcome does not take its start through clockStart")
 	}
 }

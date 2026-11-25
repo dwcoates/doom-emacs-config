@@ -1,9 +1,6 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { deferredAnimation } from "./deferred-animation.js";
-import { filesUnder } from "./files-under.js";
 
 describe("deferredAnimation", () => {
   it("leaves finished pending until the test settles it", async () => {
@@ -37,19 +34,5 @@ describe("deferredAnimation", () => {
     await fade.cancel();
     // Assert
     expect(String(failed.mock.calls[0]?.[0])).toBe("AbortError: cancelled");
-  });
-});
-
-describe("deferredAnimation's call sites", () => {
-  it("is the one deferred animation: no suite hand-rolls a pending finished", () => {
-    // Arrange
-    const root = join(__dirname);
-    const helper = join(root, "deferred-animation.ts");
-    // Act
-    const handRolled = filesUnder(root).filter(
-      (path) => path !== helper && /\{ finished \} as unknown as Animation/.test(readFileSync(path, "utf8")),
-    );
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });

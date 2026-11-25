@@ -9,7 +9,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agentrepl/logging"
 	"agentrepl/logging/profiling"
-	"agentrepl/logging/profiling/profilingtest"
 )
 
 func TestRecordProfilingEvent(t *testing.T) {
@@ -90,21 +89,5 @@ func TestStartRuntimeProfilingStopsCleanlyWithNoSession(t *testing.T) {
 	// Assert
 	if records := log.Records(); len(records) != 0 {
 		t.Fatalf("records = %+v, want none when no session was ever open", records)
-	}
-}
-
-func TestProfilingTakesTheSharedShape(t *testing.T) {
-	// Arrange
-	source, err := os.ReadFile("profiling.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	problems := profilingtest.SharedShapeProblems(string(source), "daemon")
-
-	// Assert
-	for _, p := range problems {
-		t.Error("profiling.go " + p)
 	}
 }

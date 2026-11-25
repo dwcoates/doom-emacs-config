@@ -1,9 +1,7 @@
 package prwatch
 
 import (
-	"os"
 	"reflect"
-	"strings"
 	"testing"
 
 	"agent-repld/internal/wsm"
@@ -43,24 +41,5 @@ func TestFailingOfReadsEachSubscriptionsStretch(t *testing.T) {
 	// Assert
 	if len(got) != 2 || got[0] != f || got[1] != nil {
 		t.Fatalf("failingOf = %v, want the one stretch then nil", got)
-	}
-}
-
-func TestEveryPollGroupsAndJudgesThroughTheSharedHelpers(t *testing.T) {
-	for _, file := range []string{"poller.go", "queuewatch.go", "runwatch.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Arrange
-			src, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Assert
-			for _, handRolled := range []string{"; !seen {", "make([]*wsm.PullRequestFailure"} {
-				if strings.Contains(string(src), handRolled) {
-					t.Fatalf("%s hand-rolls %q; use grouped and failingOf", file, handRolled)
-				}
-			}
-		})
 	}
 }

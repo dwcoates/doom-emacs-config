@@ -3,10 +3,7 @@ package runtimemetrics
 import (
 	"errors"
 	"math"
-	"slices"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
@@ -123,15 +120,5 @@ func TestValidSeconds(t *testing.T) {
 				t.Fatalf("validSeconds(%v) = %v, want %v", tt.seconds, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestEveryReportedDurationIsCheckedByValidSeconds(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "math.IsNaN(")
-
-	// Assert
-	if want := []string{"latency.go"}; !slices.Equal(sites, want) {
-		t.Fatalf("math.IsNaN( sites = %v, want %v: check a duration with validSeconds", sites, want)
 	}
 }

@@ -5,7 +5,6 @@ import { mergeTabPanel, swapHeading } from "../../../src/feed/merge/tab-panels.j
 import { createTicker } from "../../../src/clock.js";
 import { harness, mergeRow, rowContext } from "../harness.js";
 import { FakeSubfeed, childRow, tabRow } from "./fixtures.js";
-import TAB_PANELS from "../../../src/feed/merge/tab-panels.ts?raw";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -401,9 +400,5 @@ describe("swapHeading", () => {
   it("keeps the old heading when no next one is drawn", () => {
     const head = document.createElement("p");
     expect(swapHeading(head, null)).toBe(head);
-  });
-
-  it("is the one way a panel's heading is swapped", () => {
-    expect([TAB_PANELS.split("swapHeading(").length - 1, TAB_PANELS.split(".replaceWith(next)").length - 1]).toEqual([3, 1]);
   });
 });

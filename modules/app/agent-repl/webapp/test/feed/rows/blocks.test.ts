@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-import stylesheet from "../../../src/styles.css?raw";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -151,29 +147,6 @@ describe("drawFeedQuoteBlock", () => {
       "⟢ Replying to an earlier response of yours",
       6,
     ]);
-  });
-});
-
-describe("the attached image's own rule in the stylesheet", () => {
-  it("caps an attached image at the width of the bubble it sits in", () => {
-    // Arrange: the rule as the stylesheet declares it. An unconstrained <img>
-    // of a screenshot is a couple of thousand pixels wide and would push the
-    // bubble, and with it the feed's column, off the panel.
-    const rule = stylesheet.match(/\.prompt-block-image\s*\{[^}]*\}/)?.[0] ?? "";
-
-    // Act / Assert.
-    expect(rule).toContain("max-width: 100%");
-  });
-
-  it.each([
-    ["draws every image at the shared thumbnail height, large or small", `height: ${imageThumbnail.height_px}px`],
-    ["keeps the aspect ratio when the width cap bites", "object-fit: contain"],
-  ])("%s", (_name, declaration) => {
-    // Arrange.
-    const rule = stylesheet.match(/\.prompt-block-image\s*\{[^}]*\}/)?.[0] ?? "";
-
-    // Act / Assert.
-    expect(rule).toContain(declaration);
   });
 });
 
@@ -423,19 +396,5 @@ describe("drawPromptCopyControl", () => {
     expect(() => drawPromptCopyControl([{ block: { case: undefined } }], "FeedUserPrompt.body.blocks")).toThrow(
       "FeedUserPrompt.body.blocks[0].block",
     );
-  });
-});
-
-describe("the prompt kinds' copy controls", () => {
-  it("both hand their body's blocks to drawPromptCopyControl unwrapped by nothing", () => {
-    // Arrange
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const sources = ["user-prompt.ts", "agent-prompt.ts"].map((file) =>
-      readFileSync(path.join(here, "../../../src/feed/rows", file), "utf8"),
-    );
-    // Act
-    const calls = sources.map((code) => /drawPromptCopyControl\(body\.blocks,/.test(code));
-    // Assert
-    expect(calls).toEqual([true, true]);
   });
 });

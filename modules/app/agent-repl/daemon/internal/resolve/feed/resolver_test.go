@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1413,51 +1411,5 @@ func TestFindRowMissesAnAbsentRow(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatalf("findRow found a row the feed never held")
-	}
-}
-
-// TestFeedTestsLookUpRowsThroughTheSharedHelper pins that no test in this
-// package hand-rolls the row-by-id loop findRow and rowByID replaced.
-func TestFeedTestsLookUpRowsThroughTheSharedHelper(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	var offenders []string
-
-	// Act.
-	for _, file := range files {
-		if file == "resolver_test.go" {
-			continue
-		}
-		text, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if strings.Contains(string(text), "if row.GetId().GetValue() == ") {
-			offenders = append(offenders, file)
-		}
-	}
-
-	// Assert.
-	if len(offenders) != 0 {
-		t.Fatalf("files hand-rolling a row lookup: %v (use findRow or rowByID)", offenders)
-	}
-}
-
-func TestARemovedDirectoryIsRoutedThroughWorkspaceUnlessGoneAlone(t *testing.T) {
-	// Arrange
-	// THE SINK IS RESOLVED AS THE WORKSPACE IS PRIMED (prime.go).
-	b, err := os.ReadFile("prime.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := string(b)
-
-	// Act, Assert: the shared helper is taken, and no hand-rolled branch on
-	// the removed directory stands beside it.
-	if !strings.Contains(src, "dlog.WorkspaceUnlessGone(") || strings.Contains(src, "dlog.ErrWorkspaceDirGone") {
-		t.Fatal("prime.go does not route a removed directory through dlog.WorkspaceUnlessGone alone")
 	}
 }

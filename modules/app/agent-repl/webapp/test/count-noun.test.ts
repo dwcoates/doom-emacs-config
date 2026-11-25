@@ -1,11 +1,5 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { countNoun, pluralNoun } from "../src/count-noun.js";
-import { filesUnder } from "./files-under.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("pluralNoun", () => {
   it.each([
@@ -25,16 +19,5 @@ describe("countNoun", () => {
     { name: "a several-word noun on its last word", n: 2, noun: "starting task", want: "2 starting tasks" },
   ])("says $name", ({ n, noun, want }) => {
     expect(countNoun(n, noun)).toBe(want);
-  });
-});
-
-describe("every count is worded through count-noun", () => {
-  it("hand-rolls the singular-or-s ternary in no src file", () => {
-    const src = path.join(here, "..", "src");
-    const handRolled = /=== 1n? \? (?:"" : "s"|" ?(\w+)" : " ?\1s"|"[^"]*\b1 \w+" : `[^`]*\$\{[^}]*\} \w+s`)/;
-    const offenders = filesUnder(src)
-      .filter((file) => handRolled.test(readFileSync(file, "utf8")))
-      .map((file) => path.relative(src, file));
-    expect(offenders).toEqual([]);
   });
 });

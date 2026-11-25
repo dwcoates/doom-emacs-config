@@ -888,30 +888,6 @@ missing here or there is a broken seam.")
                              (equal (plist-get (plist-get (nth 2 entry) :workspace) :id) (car entry))))
                       gated))))
 
-(ert-deftest agent-repl-test-rpc-only-the-gates-send-reaches-the-unary-transport ()
-  "No elisp source but rpc.el\\='s transport half calls the async unary transport.
-A call site that reached `agent-repl-connect-unary' itself would skip the
-call gate, and its call about a workspace mid-adopt would reach a daemon
-that has not adopted it."
-  ;; Arrange
-  (let ((callers nil))
-    ;; Act
-    (dolist (file (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'"))
-      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
-                  (member (file-name-nondirectory file) '("connect.el")))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (goto-char (point-min))
-          (while (re-search-forward "(agent-repl-connect-unary[ \n]" nil t)
-            (push (cons (file-name-nondirectory file)
-                        (save-excursion
-                          (beginning-of-defun)
-                          (buffer-substring-no-properties (point) (line-end-position))))
-                  callers)))))
-    ;; Assert
-    (should (equal callers
-                   '(("rpc.el" . "(defun agent-repl-rpc--send-unary (conn method json decoder log-scope"))))))
-
 (ert-deftest agent-repl-test-rpc-a-call-is-sent-on-the-connection-the-gate-names ()
   "The gate may send a held call on another daemon; the transport gets that one."
   ;; Arrange

@@ -199,21 +199,6 @@ to find rather than assuming any particular buffer name."
   ;; Act / Assert
   (should-not (agent-repl-itest--context-strings '(((message . "m"))))))
 
-(ert-deftest agent-repl-itest-host-every-suite-reads-values-through-the-shared-reader ()
-  "No integration suite reads the retired `arguments' list of a record's context."
-  ;; Arrange
-  (let ((dir agent-repl-itest--lisp-dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-integration-.*\\.el\\'"))
-      (with-temp-buffer
-        (insert-file-contents file)
-        ;; Spelled in two halves, so this test's own source never matches.
-        (when (re-search-forward (concat "(alist-get '" "arguments") nil t)
-          (push (file-name-nondirectory file) hand-rolled))))
-    ;; Assert
-    (should-not hand-rolled)))
-
 (ert-deftest agent-repl-itest-host-subscribes-once-per-open-workspace ()
   "One WatchHostWorkspace subscription exists per OPEN workspace.
 elisp.md: there is no global host-workspace stream; the per-workspace

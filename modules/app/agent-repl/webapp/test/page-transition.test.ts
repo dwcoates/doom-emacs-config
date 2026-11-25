@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 // The one way a test dispatches a page transition. See test/page-transition.ts.
 import { describe, expect, it } from "vitest";
-import { codeUnder } from "./files-under.js";
 import { dispatchPageTransition } from "./page-transition.js";
 
 describe("dispatchPageTransition", () => {
@@ -23,16 +22,5 @@ describe("dispatchPageTransition", () => {
     win.removeEventListener(type, listener);
     // Assert
     expect(seen).toEqual([[type, persisted]]);
-  });
-});
-
-describe("the call sites", () => {
-  it("dispatch a page transition only through dispatchPageTransition", () => {
-    // Arrange / Act
-    const rolled = [...codeUnder(process.cwd() + "/test")]
-      .filter(([file, code]) => file !== "page-transition.ts" && /new\s+(?:[\w$]+\.)*PageTransitionEvent\(/.test(code))
-      .map(([file]) => file);
-    // Assert
-    expect(rolled).toEqual([]);
   });
 });

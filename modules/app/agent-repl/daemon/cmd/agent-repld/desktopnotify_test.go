@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -193,25 +192,6 @@ func TestResolveNotifyProgramRecordsAMissingProgram(t *testing.T) {
 	r := findRecord(t, log.Records(), "no desktop banner program; it will not run")
 	if r.Level != "error" || r.Context["role"] != "banner" || r.Context["cause"] != "not installed" || r.Context["override_env"] != "AGENT_REPL_TEST_UNSET" {
 		t.Fatalf("record = %+v, want the role, cause and override env at error", r)
-	}
-}
-
-// TestNotifyProgramsResolveThroughOneHelper fails a resolver that hand-rolls
-// its boot record instead of asking resolveNotifyProgram.
-func TestNotifyProgramsResolveThroughOneHelper(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("desktopnotify.go")
-	if err != nil {
-		t.Fatalf("read desktopnotify.go: %v", err)
-	}
-
-	// Act
-	asks := strings.Count(string(src), "return resolveNotifyProgram(")
-	records := strings.Count(string(src), "log.Error(opDesktopNotify")
-
-	// Assert
-	if asks != 2 || records != 1 {
-		t.Fatalf("resolveNotifyProgram( x%d (want 2), log.Error(opDesktopNotify x%d (want 1)", asks, records)
 	}
 }
 

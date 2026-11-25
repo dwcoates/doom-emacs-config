@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestOpenMergeLedgerRecordsTheLease(t *testing.T) {
@@ -763,34 +760,5 @@ func TestSettleLiveRounds(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestEveryWriteThatSettlesARoundGoesThroughSettleLiveRounds pins that the
-// package's one UPDATE writing a round's end is settleLiveRounds', beside the
-// layout-155 step, which shipped before rounds had holds: a hand-rolled
-// settling UPDATE could leave a round settled and held.
-func TestEveryWriteThatSettlesARoundGoesThroughSettleLiveRounds(t *testing.T) {
-	// Arrange
-	update := regexp.MustCompile(`(?s)UPDATE merge_tab_intervals(?: AS \w+)? SET (.*?)WHERE`)
-
-	// Act
-	var settling []string
-	for _, f := range sourcescan.Production(t) {
-		for _, m := range update.FindAllSubmatch(f.Source, -1) {
-			if strings.Contains(string(m[1]), "ended_at") {
-				settling = append(settling, f.Name+": "+strings.Join(strings.Fields(string(m[1])), " "))
-			}
-		}
-	}
-
-	// Assert
-	slices.Sort(settling)
-	want := []string{
-		"mergeledger.go: ended_at = `+ended.text+`, outcome = ?, held_since = NULL",
-		"mergeledger.go: outcome = 'restarted', ended_at = COALESCE((SELECT MIN(later.started_at) FROM merge_tab_intervals AS later",
-	}
-	if !slices.Equal(settling, want) {
-		t.Fatalf("the UPDATEs that settle a round are\n%s\nwant only settleLiveRounds' and the layout-155 step's:\n%s", strings.Join(settling, "\n"), strings.Join(want, "\n"))
 	}
 }

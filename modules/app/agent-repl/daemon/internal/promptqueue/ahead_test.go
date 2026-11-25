@@ -3,8 +3,6 @@ package promptqueue
 import (
 	"context"
 	"errors"
-	"regexp"
-	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -14,7 +12,6 @@ import (
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -280,26 +277,6 @@ func TestAnAgentsPromptJoinsTheRunningTurnPastTheUsersQueuedPrompt(t *testing.T)
 	}
 }
 
-// THE CLASSIFIER'S FOLD ASKS holdfold.SameAuthor: no file of the queue
-// compares two prompts' senders by hand.
-func TestTheQueueAsksHoldfoldWhetherTwoPromptsShareAnAuthor(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`SentBy\s*==\s*\*|\*[a-z.]*SentBy\s*==`)
-
-	// Act
-	var found []string
-	for _, file := range sourcescan.Production(t) {
-		if handRolled.Match(file.Source) {
-			found = append(found, file.Name)
-		}
-	}
-
-	// Assert
-	if len(found) > 0 {
-		t.Fatalf("these files compare senders by hand instead of holdfold.SameAuthor: %v", found)
-	}
-}
-
 // placementSubmission is the daemon's brief asking the workspace to file
 // itself into a subsection: a prompt of an origin drawn nowhere.
 func placementSubmission(turn ids.TurnID) Submission {
@@ -376,47 +353,5 @@ func TestAPromptIsNeverJudgedAgainstOrFoldedIntoADaemonNotice(t *testing.T) {
 				t.Fatalf("into = (%+v, %v), want the seen prompt carrying both", into, err)
 			}
 		})
-	}
-}
-
-// THE QUEUE ASKS holdfold.Seen whether a hold stands in the line the user
-// sees: no file of the queue reads a hold's origin as a daemon notice by hand.
-func TestTheQueueAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`\bDaemonNotice(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
-
-	// Act
-	var found []string
-	for _, file := range sourcescan.Production(t) {
-		if handRolled.Match(file.Source) {
-			found = append(found, file.Name)
-		}
-	}
-
-	// Assert
-	if len(found) > 0 {
-		t.Fatalf("these files read a hold as a daemon notice by hand instead of holdfold.Seen: %v", found)
-	}
-}
-
-// TestTheQueueReadsTheLineThroughHoldfold pins itemAhead to holdfold.InLine,
-// the reading the fold and the tray's "fold above" share: an ahead.go that
-// tests a cold gate's kept prompt or a daemon notice by hand fails here
-// rather than drifting from the tray.
-func TestTheQueueReadsTheLineThroughHoldfold(t *testing.T) {
-	// Arrange
-	var source string
-	for _, file := range sourcescan.Production(t) {
-		if file.Name == "ahead.go" {
-			source = string(file.Source)
-		}
-	}
-
-	// Act
-	handRolled := regexp.MustCompile(`HoldColdGateAnswered|holdfold\.Seen\(`).FindAllString(source, -1)
-
-	// Assert
-	if !strings.Contains(source, "holdfold.InLine(") || len(handRolled) != 0 {
-		t.Fatalf("ahead.go calls holdfold.InLine: %v, hand-rolls %v; want the one reading", strings.Contains(source, "holdfold.InLine("), handRolled)
 	}
 }

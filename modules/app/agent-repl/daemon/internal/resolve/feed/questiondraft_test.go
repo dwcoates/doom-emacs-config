@@ -2,9 +2,7 @@ package feed
 
 import (
 	"errors"
-	"os"
 	"slices"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -791,21 +789,5 @@ func TestInServedOrderAnswersTheHeldLabelsInTheServedOrder(t *testing.T) {
 				t.Fatalf("inServedOrder = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestTheChosenLabelsAreOrderedThroughInServedOrder(t *testing.T) {
-	// Arrange: a hand-rolled ordering that drifted from the helper fails here.
-	source, err := os.ReadFile("questiondraft.go")
-	if err != nil {
-		t.Fatalf("read questiondraft.go: %v", err)
-	}
-
-	// Act.
-	calls := strings.Count(string(source), "inServedOrder(")
-
-	// Assert: the definition plus toggleLabel's and pickByNumber's calls.
-	if calls != 3 {
-		t.Fatalf("inServedOrder( appears %d times, want its definition and two call sites", calls)
 	}
 }

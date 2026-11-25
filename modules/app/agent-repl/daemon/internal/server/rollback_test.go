@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1420,34 +1419,6 @@ func TestRolledBackUnansweredCarriesTheWordsWithoutTheQuote(t *testing.T) {
 	}
 }
 
-// EVERY STOP THAT TOOK A PROMPT BACK ANSWERS THROUGH rolledBackUnanswered, so
-// a hand-built rolled_back_unanswered arm in the server's source fails here.
-func TestEveryRolledBackUnansweredAnswerIsBuiltByTheHelper(t *testing.T) {
-	// Arrange.
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the server's source: %v", err)
-	}
-	var builds int
-
-	// Act.
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(e.Name())
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
-		}
-		builds += strings.Count(string(raw), "&agentreplv1.InterruptSuccess_RolledBackUnanswered{")
-	}
-
-	// Assert.
-	if builds != 1 {
-		t.Fatalf("the rolled_back_unanswered arm is built %d times, want once, in rolledBackUnanswered", builds)
-	}
-}
-
 // injected is a prompt the way the host and the daemon deliver it: the
 // person's words with an injected span ahead of them and another after them.
 func injected(words string) *conversationv1.UserSaid {
@@ -1563,37 +1534,6 @@ func TestEveryComposerHandbackLeavesInjectedSpansOut(t *testing.T) {
 				t.Fatalf("composer prompt = %v, want the words alone", got)
 			}
 		})
-	}
-}
-
-// EVERY PROMPT HANDED BACK TO THE COMPOSER IS BUILT BY composerWords, so a
-// hand-built handback in the server's source fails here.
-func TestEveryComposerHandbackIsBuiltByTheHelper(t *testing.T) {
-	// Arrange.
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the server's source: %v", err)
-	}
-	var handbacks, helped int
-
-	// Act.
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(e.Name())
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
-		}
-		src := string(raw)
-		handbacks += strings.Count(src, "&agentreplv1.RollBackSuccess{") + strings.Count(src, "&agentreplv1.InterruptRolledBackUnanswered{")
-		helped += strings.Count(src, "&agentreplv1.RollBackSuccess{Prompt: composerWords(") +
-			strings.Count(src, "&agentreplv1.InterruptRolledBackUnanswered{Prompt: composerWords(")
-	}
-
-	// Assert.
-	if handbacks != 2 || helped != handbacks {
-		t.Fatalf("composer handbacks = %d, built by composerWords = %d; want 2, both by composerWords", handbacks, helped)
 	}
 }
 

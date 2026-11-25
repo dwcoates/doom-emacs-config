@@ -14,9 +14,3 @@ func TestNoBuildCacheEnvTurnsTheBuildCacheAndTheGoEnvironmentFileOff(t *testing.
 		t.Fatalf("NoBuildCacheEnv() = %v, want %v", got, want)
 	}
 }
-
-func TestStartDaemonAppliesNoBuildCacheEnvAfterTheInheritedEnvironment(t *testing.T) {
-	// The one call site must state it after os.Environ() and before ExtraEnv,
-	// so it beats the host's cache and a test can still name one.
-	assertAppendedBetweenInheritedAndExtra(t, "NoBuildCacheEnv")
-}

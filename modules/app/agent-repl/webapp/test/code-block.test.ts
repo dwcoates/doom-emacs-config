@@ -1,16 +1,10 @@
 // @vitest-environment jsdom
-/** The one code block, its copy control, and the proof no other module draws its shape itself. */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+/** The one code block and its copy control; the proof no other module draws its shape is rules/code-block.rules.test.ts. */
 import { afterEach, describe, expect, it } from "vitest";
 import { CODE_COPY_CLASS, codeBlockHtml, codeOfBlockControl } from "../src/code-block.js";
 import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, installCopyControls } from "../src/copy-control.js";
 import { renderMarkdown } from "../src/markdown.js";
 import { CODE_RUN_CLASS } from "../src/run-control.js";
-import { codeUnder } from "./files-under.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(here, "../src");
 
 let teardown: (() => void) | undefined;
 
@@ -151,18 +145,6 @@ describe("codeBlockHtml", () => {
     const html = renderMarkdown("```bash\nls -la\n```");
     // Assert
     expect(html).toBe(codeBlockHtml("ls -la", "bash"));
-  });
-
-  it("is the only place src writes the code block's shape", () => {
-    // Arrange
-    const files = [...codeUnder(SRC)];
-    // Act
-    const handRolled = files
-      .filter(([file]) => file !== "code-block.ts")
-      .filter(([, code]) => /class="md-code"/.test(code))
-      .map(([file]) => file);
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });
 

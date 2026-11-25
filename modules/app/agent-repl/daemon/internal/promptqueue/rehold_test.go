@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
 	"slices"
 	"testing"
 	"time"
@@ -259,40 +258,5 @@ func TestHeldAgainDropsTheOldEntrysRetirementAndSchedule(t *testing.T) {
 	// Assert
 	if again.ScheduleID != "" || again.Tombstone != nil || again.Classification != nil || again.Hold != nil {
 		t.Fatalf("held again = %+v, want no schedule, retirement, verdict or hold carried over", again)
-	}
-}
-
-// THE ONE SHAPE. A held prompt's turn is re-minted (`x.Turn = wsm.NewTurnID()`)
-// only inside heldAgain, so no hand-rolled re-hold can keep a retirement or a
-// schedule the old entry carried.
-func TestEveryReHoldGoesThroughHeldAgain(t *testing.T) {
-	// Arrange
-	fset, funcs := productionFuncs(t)
-	var sites []string
-	// Act
-	for _, fn := range funcs {
-		if fn.Name.Name == "heldAgain" {
-			continue
-		}
-		ast.Inspect(fn, func(n ast.Node) bool {
-			assign, ok := n.(*ast.AssignStmt)
-			if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
-				return true
-			}
-			lhs, ok := assign.Lhs[0].(*ast.SelectorExpr)
-			if !ok || lhs.Sel.Name != "Turn" {
-				return true
-			}
-			if call, ok := assign.Rhs[0].(*ast.CallExpr); ok {
-				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewTurnID" {
-					sites = append(sites, fset.Position(assign.Pos()).String()+" in "+fn.Name.Name)
-				}
-			}
-			return true
-		})
-	}
-	// Assert
-	if len(sites) != 0 {
-		t.Fatalf("a held prompt's turn re-minted outside heldAgain: %v", sites)
 	}
 }

@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"strings"
 	"testing"
 
@@ -30,7 +26,6 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/rollout"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -841,59 +836,6 @@ func TestRegistryWorkspaceAnswersTheRecord(t *testing.T) {
 	}
 }
 
-// TestEveryResolutionReadGoesThroughTheRegistryGate fails a resolution that
-// reads the registry on its own, outside the gate Close takes: each reads the
-// workspace's head through its shared helper (registryHead, or
-// resolutionHead, which takes the boundary's handed read or reads through
-// registryHead), never the state client directly.
-func TestEveryResolutionReadGoesThroughTheRegistryGate(t *testing.T) {
-	// readsInside marks the helpers the read itself is written in: their read
-	// of the state client is the closure they hand readRegistryValue.
-	cases := []struct {
-		file, function, helper string
-		readsInside            bool
-	}{
-		{"refuse.go", "resolveRegistered", "s.resolutionHead(", false},
-		{"requestlog.go", "beginRequest", "s.registryHead(", false},
-		{"refuse.go", "resolutionHead", "s.registryHead(", false},
-		{"refuse.go", "registryHead", "readRegistryValue(", true},
-		{"refuse.go", "registryWorkspace", "readRegistryValue(", true},
-		{"refuse.go", "readRegistryValue", "s.readRegistry(", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.function, func(t *testing.T) {
-			// Arrange.
-			fset := token.NewFileSet()
-			parsed, err := parser.ParseFile(fset, tc.file, nil, 0)
-			if err != nil {
-				t.Fatalf("parse %s: %v", tc.file, err)
-			}
-			var body string
-			for _, decl := range parsed.Decls {
-				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == tc.function {
-					raw, readErr := os.ReadFile(tc.file)
-					if readErr != nil {
-						t.Fatalf("read %s: %v", tc.file, readErr)
-					}
-					body = string(raw[fset.Position(fn.Body.Pos()).Offset:fset.Position(fn.Body.End()).Offset])
-				}
-			}
-			if body == "" {
-				t.Fatalf("%s declares no %s", tc.file, tc.function)
-			}
-
-			// Act.
-			direct := !tc.readsInside && (strings.Contains(body, "s.deps.DB.Workspace(") || strings.Contains(body, "s.deps.DB.WorkspaceHead("))
-			shared := strings.Contains(body, tc.helper)
-
-			// Assert.
-			if direct || !shared {
-				t.Fatalf("%s: direct registry read %v, shared helper %v; its registry read must go through %s", tc.function, direct, shared, tc.helper)
-			}
-		})
-	}
-}
-
 func TestRefuseOntoSetsTheTypedRefusalTheRPCWouldAnswer(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -925,40 +867,6 @@ func TestRefuseOntoSetsTheTypedRefusalTheRPCWouldAnswer(t *testing.T) {
 				t.Fatalf("response = %v, want nothing set", resp.GetResult())
 			}
 		})
-	}
-}
-
-// TestDetachedFailuresMapTheirRefusalOnlyThroughRefuseOnto pins that every
-// detached mutation maps its typed refusal through the one helper, so no site
-// hand-rolls `asRefusal` then `refuse(...) == nil` and drifts from the others.
-func TestDetachedFailuresMapTheirRefusalOnlyThroughRefuseOnto(t *testing.T) {
-	// Arrange.
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the package: %v", err)
-	}
-
-	// Act.
-	var offenders []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		for _, line := range strings.Split(string(src), "\n") {
-			if strings.Contains(line, "s.refuse(") && strings.Contains(line, "== nil") && !strings.Contains(line, "return s.refuse(") {
-				offenders = append(offenders, name+": "+strings.TrimSpace(line))
-			}
-		}
-	}
-
-	// Assert.
-	if len(offenders) > 0 {
-		t.Fatalf("hand-rolled typed-refusal mapping, use refuseOnto: %v", offenders)
 	}
 }
 
@@ -1155,72 +1063,6 @@ func TestAnUnlandedHandoverRefusalNamesItsSuccessorInItsMetadata(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestNoResolutionFailureIsRenderedThroughFail fails a handler that renders a
-// workspace resolution's error through fail. resolveRef already recorded that
-// error where it was decided, and a cancelled caller is no failure, so fail's
-// ERROR re-recorded it and named the caller leaving a daemon failure (an
-// OpenFeed cancelled during the 0.439.1 handover). failResolution, endStream
-// and answerResolution are the renderings that know both.
-func TestNoResolutionFailureIsRenderedThroughFail(t *testing.T) {
-	// Arrange.
-	files := sourcescan.Production(t)
-	fset := token.NewFileSet()
-	var sites, offenders []string
-
-	// Act.
-	for _, file := range files {
-		parsed, parseErr := parser.ParseFile(fset, file.Name, file.Source, 0)
-		if parseErr != nil {
-			t.Fatalf("parse %s: %v", file.Name, parseErr)
-		}
-		ast.Inspect(parsed, func(n ast.Node) bool {
-			block, ok := n.(*ast.BlockStmt)
-			if !ok {
-				return true
-			}
-			for i, stmt := range block.List {
-				if !resolvesAWorkspace(stmt) || i+1 == len(block.List) {
-					continue
-				}
-				site := fset.Position(stmt.Pos()).String()
-				sites = append(sites, site)
-				ast.Inspect(block.List[i+1], func(m ast.Node) bool {
-					if call, ok := m.(*ast.CallExpr); ok {
-						if fn, ok := call.Fun.(*ast.Ident); ok && fn.Name == "fail" {
-							offenders = append(offenders, site)
-						}
-					}
-					return true
-				})
-			}
-			return true
-		})
-	}
-
-	// Assert.
-	if len(sites) == 0 {
-		t.Fatal("found no workspace resolution call site; the scan no longer matches the code")
-	}
-	if len(offenders) != 0 {
-		t.Fatalf("these resolutions render their error through fail, want failResolution: %v", offenders)
-	}
-}
-
-// resolvesAWorkspace reports whether stmt assigns the answer of s.resolveRef or
-// s.resolveRegistered.
-func resolvesAWorkspace(stmt ast.Stmt) bool {
-	assign, ok := stmt.(*ast.AssignStmt)
-	if !ok || len(assign.Rhs) != 1 {
-		return false
-	}
-	call, ok := assign.Rhs[0].(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	return ok && (sel.Sel.Name == "resolveRef" || sel.Sel.Name == "resolveRegistered")
 }
 
 // handoverArmsLacking answers every agentrepl.v1 error arm named ARM whose

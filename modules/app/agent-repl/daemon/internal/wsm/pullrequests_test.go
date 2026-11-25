@@ -4,9 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -614,28 +612,6 @@ func TestInsertPullRequestSubscriptionIfAbsentInTx(t *testing.T) {
 			}
 			if got := subsOf(t, s, ws); !reflect.DeepEqual(got, []PullRequestSubscription{tt.want(ws)}) {
 				t.Fatalf("subscriptions = %+v, want %+v", got, tt.want(ws))
-			}
-		})
-	}
-}
-
-// TestPullRequestSubscriptionsAreInsertedIfAbsentThroughOneHelper pins that a
-// subscription taken without replacing a held one is written through
-// insertPullRequestSubscriptionIfAbsentInTx, so a hand-rolled copy of its
-// statement fails here.
-func TestPullRequestSubscriptionsAreInsertedIfAbsentThroughOneHelper(t *testing.T) {
-	for _, file := range []string{"workspacelinks.go", "followedpullrequests.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Arrange
-			raw, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("read %s: %v", file, err)
-			}
-			src := string(raw)
-
-			// Act / Assert
-			if !strings.Contains(src, "insertPullRequestSubscriptionIfAbsentInTx(") || strings.Contains(src, "INSERT INTO pull_request_subscriptions") {
-				t.Fatalf("%s inserts a pull-request subscription without insertPullRequestSubscriptionIfAbsentInTx", file)
 			}
 		})
 	}

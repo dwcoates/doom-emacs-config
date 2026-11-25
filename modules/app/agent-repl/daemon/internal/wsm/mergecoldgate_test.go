@@ -7,8 +7,6 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // entryOfQueue answers WS's entry in REPO's queue, failing the test when it
@@ -432,15 +430,5 @@ func TestDropMergeLeaseRefusesALeaseThatIsNotTheWorkspacesMergeLease(t *testing.
 	}
 	if _, progress, _ := s.MergeProgressOf(ctx, ws.ID); !progress {
 		t.Fatal("the refused drop deleted the progress record")
-	}
-}
-
-func TestOnlyDropMergeLeaseDeletesAMergeLease(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?")
-
-	// Assert
-	if !slices.Equal(sites, []string{"mergequeue.go"}) {
-		t.Fatalf("a merge lease is deleted at %v, want only dropMergeLease in mergequeue.go", sites)
 	}
 }

@@ -59,12 +59,6 @@ one of `debug', `info', `warn' and `error'."
     (should (agent-repl-test-notifications--recorded-p records 'info "none"))
     (should-not (agent-repl-test-notifications--recorded-p records 'error "none"))))
 
-(ert-deftest agent-repl-test-notifications-no-test-hand-rolls-a-log-capture ()
-  "Every log capture in this file goes through the recorder."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "test-notifications.el" agent-repl-test--module-dir))
-    (should (= (how-many (concat "symbol-function '" "agent-repl--emit-\\(info\\|warn\\|error\\|log\\)\\_>")) 4))))
-
 ;;;; ---- Tests: reporting the focus ----
 
 (defmacro agent-repl-test-notifications--with-reporter (focused conn &rest body)

@@ -41,10 +41,7 @@ import {
 } from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
-import stylesheet from "../../src/styles.css?raw";
-import expandedSource from "../../src/footer/expanded.ts?raw";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
 const NOW = FOOTER_TEST_NOW;
@@ -409,12 +406,6 @@ describe("firstLiveChipPanel: the first chip panel with entries", () => {
     const h = harness();
     expect(firstLiveChipPanel(expanded({ shells: [SHELL_ROW] }), stopsHoldingAnswer(h))).toBe("agents");
   });
-
-  it("is the one place the chip panels are searched for entries", () => {
-    // A resolver hand-rolling its own search would drift from the others.
-    const searches = withoutBlockComments(expandedSource).match(/CHIP_PANELS\.(find|some|filter)\(/g) ?? [];
-    expect(searches).toHaveLength(1);
-  });
 });
 
 /** Every promise the click chain queued. */
@@ -744,7 +735,6 @@ describe("the tokens panel's per-agent spend", () => {
 });
 
 // ---- the agents panel ------------------------------------------------------
-
 
 describe("the agents panel", () => {
   it("carries the fan-wide stop in its header", () => {
@@ -1092,15 +1082,6 @@ describe("a detached-work row is one hit target", () => {
     const row = panel.querySelector(".footer-row");
     expect(clickers.filter((el) => row?.contains(el))).toEqual([row]);
   });
-
-  it("washes the whole row on hover, as the agent roster's pressable rows do", () => {
-    // Arrange
-    const rule = /\.footer-row-jump:hover\s*\{([^}]*)\}/.exec(withoutBlockComments(stylesheet));
-    // Act
-    const declarations = rule?.[1] ?? "";
-    // Assert
-    expect(declarations).toMatch(/background:\s*var\(--bg\)/);
-  });
 });
 
 // ---- the tasks panel -------------------------------------------------------
@@ -1167,11 +1148,9 @@ describe("the tasks panel", () => {
       drawPanel("tasks", { tasks: [{ status: {}, subject: { text: "x" } }] }),
     ).toThrow(MalformedView);
   });
-
 });
 
 // ---- the shells panel ------------------------------------------------------
-
 
 describe("the shells panel", () => {
   it("draws the command verbatim", () => {
@@ -1202,11 +1181,9 @@ describe("the shells panel", () => {
     await settle();
     expect(panel.querySelector("[data-unreachable]")).not.toBeNull();
   });
-
 });
 
 // ---- the monitors panel ----------------------------------------------------
-
 
 describe("the monitors panel", () => {
   it("draws what is being watched verbatim", () => {
@@ -1240,11 +1217,9 @@ describe("the monitors panel", () => {
     const { panel } = drawPanel("monitors", { monitors: [{ ...MONITOR_ROW, jump: unresolvedFor("notDrawn") }] });
     expect(panel.querySelector("[data-jump-unresolved]")?.getAttribute("data-jump-unresolved")).toBe("notDrawn");
   });
-
 });
 
 // ---- the merges panel ------------------------------------------------------
-
 
 describe("the merges panel", () => {
   it("draws the bubble head's branch line verbatim", () => {
@@ -1325,7 +1300,6 @@ describe("the merges panel", () => {
     });
   });
 
-
   it("refuses a row with no label", () => {
     const view = expanded({ merges: [MERGE_ROW] });
     const row = view.merges?.rows[0] as unknown as { label: unknown };
@@ -1342,7 +1316,6 @@ describe("the merges panel", () => {
 });
 
 // ---- the crons panel -------------------------------------------------------
-
 
 describe("the crons panel", () => {
   it("draws the vendor's schedule verbatim", () => {
@@ -1379,7 +1352,6 @@ describe("the crons panel", () => {
     const { panel } = drawPanel("crons", { crons: [CRON_ROW] });
     expect(panel.querySelector("[data-jump]")).toBeNull();
   });
-
 
   it("draws a pending wakeup alone as a row, not the empty line", () => {
     const { panel } = drawPanel("crons", { wakeup: {} });
@@ -1436,11 +1408,6 @@ describe("rowText", () => {
       "footer-row-label",
       "every 5 min",
     ]);
-  });
-
-  it("is the one way a row's text span is built", () => {
-    const source = withoutBlockComments(expandedSource);
-    expect(source).not.toMatch(/\.className = "footer-row-(label|description|command)";\n\s*\w+\.textContent/);
   });
 });
 
@@ -1920,7 +1887,6 @@ describe("the section keeps the reader's scroll", () => {
     expect(monitors).not.toBe(shells);
   });
 });
-
 
 // ---- the rows' figures cell ------------------------------------------------
 

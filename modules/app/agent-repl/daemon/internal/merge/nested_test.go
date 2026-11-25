@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -705,29 +703,6 @@ func TestFixesExhaustedFailsTheMergeRecordsItAndSettlesTheTestsTab(t *testing.T)
 	}
 }
 
-// The head's gate gives up through fixesExhausted; a hand-rolled copy of its
-// summary anywhere else would drift from it.
-func TestEveryExhaustedGateGivesUpThroughFixesExhausted(t *testing.T) {
-	// Arrange
-	sources := []string{"process.go", "chain.go"}
-
-	// Act
-	calls, copies := 0, 0
-	for _, name := range sources {
-		body, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("reading %s: %v", name, err)
-		}
-		calls += strings.Count(string(body), "r.fixesExhausted(")
-		copies += strings.Count(string(body), "fixing attempts; the whole run is archived")
-	}
-
-	// Assert: one caller, and the summary spelled once, in the helper.
-	if calls != 1 || copies != 1 {
-		t.Fatalf("fixesExhausted calls = %d, summary spellings = %d; want 1 and 1", calls, copies)
-	}
-}
-
 func TestEndRunSettlesTheRunTheTestsTabAndTheRoundAsOne(t *testing.T) {
 	// Arrange.
 	tests := []struct {
@@ -761,26 +736,6 @@ func TestEndRunSettlesTheRunTheTestsTabAndTheRoundAsOne(t *testing.T) {
 				t.Fatalf("the round closed as %+v, want tests %s", last, tt.closed)
 			}
 		})
-	}
-}
-
-// handSettled is a run's settled draw followed by its tests tab settling.
-var handSettled = regexp.MustCompile(`publishRun\([^\n]*\.settled\([^\n]*\n\s*(g\.)?r\.settleTesting\(`)
-
-func TestEveryRunEndingSettlesThroughEndRun(t *testing.T) {
-	// Arrange.
-	for _, file := range []string{"gate.go", "chain.go", "process.go"} {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
-		}
-
-		// Act / Assert: a run settled together with its tests tab never
-		// stands outside endRun. (A failed run alone, which leaves the tab
-		// live for the fixing attempt after it, is not that shape.)
-		if handSettled.Match(body) {
-			t.Fatalf("%s settles a run and its tests tab by hand instead of through endRun", file)
-		}
 	}
 }
 

@@ -1,12 +1,10 @@
 package merge
 
 import (
-	"agent-repld/internal/sourcescan"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -720,27 +718,6 @@ func TestEnqueueRefusesAMergePlacedFrontAndBehind(t *testing.T) {
 	}
 	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.enqueue", text: "contradicts itself about its placement"}) {
 		t.Fatalf("no record of the contradiction: %+v", h.logs.Records())
-	}
-}
-
-// TestMergeRequestRefusalsAreRecordedThroughLogRefusal keeps every typed
-// refusal of a merge request on the one INFO helper: a refusal recorded at
-// WARN by hand is the drift this replaced.
-func TestMergeRequestRefusalsAreRecordedThroughLogRefusal(t *testing.T) {
-	// Arrange
-	byHand := regexp.MustCompile(`log\.(Warn|Info)\(op, "refused`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if (file.Name == "request.go" || file.Name == "interrupttab.go") && byHand.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v record a refusal by hand; use logRefusal", offenders)
 	}
 }
 

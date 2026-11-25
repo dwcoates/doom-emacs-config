@@ -1,21 +1,12 @@
 // @vitest-environment jsdom
-/** The one control, and the proof nothing in src builds a `<button>` itself. */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+/** The one control; the proof nothing in src builds a `<button>` itself is rules/control.rules.test.ts. */
 import { afterEach, describe, expect, it } from "vitest";
 import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl, setControlsDisabled, whileControlsDisabled } from "../src/control.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
-import { codeOf, withoutBlockComments } from "./source-text.js";
-import { codeUnder, filesUnder } from "./files-under.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(here, "../src");
 
 afterEach(() => {
   document.body.innerHTML = "";
 });
-
 
 /** A mounted control, counting the clicks that reach its own handler. */
 function mounted(): { control: ReturnType<typeof createControl>; clicks: () => number } {
@@ -271,48 +262,6 @@ describe("the one control", () => {
     // Act / Assert
     expect(document.querySelectorAll(CONTROL_SELECTOR)).toHaveLength(1);
   });
-
-  it("is the only way src builds a clickable control: no module creates a <button>", () => {
-    // Arrange
-    const files = filesUnder(SRC, [".ts", ".html"]).concat([path.join(here, "../index.html")]);
-    // Act
-    const handRolled = files
-      .filter((file) => {
-        const code = file.endsWith(".ts") ? codeOf(readFileSync(file, "utf8")) : readFileSync(file, "utf8");
-        return /createElement\(\s*["'`]button["'`]\s*\)|<button[\s>]/i.test(code);
-      })
-      .map((file) => path.relative(path.join(here, ".."), file));
-    // Assert
-    expect(handRolled).toEqual([]);
-  });
-
-  it("is the only way src gives an element the button role", () => {
-    // Arrange
-    const files = [...codeUnder(SRC)].filter(([file]) => !`${path.sep}${file}`.endsWith(`${path.sep}control.ts`));
-    // Act
-    const handRolled = files
-      .filter(([, code]) => /setAttribute\(\s*["'`]role["'`]\s*,\s*["'`]button["'`]\s*\)/.test(code))
-      .map(([file]) => file);
-    // Assert
-    expect(handRolled).toEqual([]);
-  });
-
-  it("styles no native button: the stylesheet names ar-button, never button", () => {
-    // Arrange
-    const css = withoutBlockComments(readFileSync(path.join(SRC, "styles.css"), "utf8"));
-    // Act
-    const selectors = [...css.matchAll(/([^{}]+)\{/g)].map((m) => m[1]);
-    const native = selectors.filter((sel) => /(?<![-\w.#:])button(?![-\w])/.test(sel));
-    // Assert
-    expect(native).toEqual([]);
-  });
-
-  it("styles no :disabled control: a control's disabled state is aria-disabled", () => {
-    // Arrange
-    const css = withoutBlockComments(readFileSync(path.join(SRC, "styles.css"), "utf8"));
-    // Act / Assert
-    expect(css.includes(":disabled")).toBe(false);
-  });
 });
 
 describe("labelledControl", () => {
@@ -351,16 +300,6 @@ describe("labelledControl", () => {
     // Assert
     expect(clicks).toBe(0);
   });
-
-  it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts", "held/classifier-update.ts"])(
-    "is how %s builds every row control",
-    (file) => {
-      // Arrange
-      const code = codeOf(readFileSync(path.join(SRC, file), "utf8"));
-      // Act / Assert: a hand-rolled control would call createControl itself.
-      expect(code).not.toMatch(/\bcreateControl\(/);
-    },
-  );
 });
 
 describe("setControlsDisabled", () => {
@@ -391,7 +330,6 @@ describe("setControlsDisabled", () => {
   it("does nothing for a root already gone", () => {
     expect(() => setControlsDisabled(null, true)).not.toThrow();
   });
-
 });
 
 describe("whileControlsDisabled", () => {
@@ -454,22 +392,5 @@ describe("whileControlsDisabled", () => {
     });
     // Assert
     expect(ran).toBe(true);
-  });
-
-  it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts"])("is how %s disables its answers", (file) => {
-    const code = codeOf(readFileSync(path.join(SRC, file), "utf8"));
-    expect([/\bwhileControlsDisabled\(/.test(code), /querySelectorAll<Control>\(CONTROL_SELECTOR\)/.test(code)]).toEqual([
-      true,
-      false,
-    ]);
-  });
-
-  it("is the only way src disables a row of controls", () => {
-    // Arrange
-    const files = [...codeUnder(SRC)].filter(([file]) => !`${path.sep}${file}`.endsWith(`${path.sep}control.ts`));
-    // Act
-    const handRolled = files.filter(([, code]) => /\bsetControlsDisabled\(/.test(code)).map(([file]) => file);
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });

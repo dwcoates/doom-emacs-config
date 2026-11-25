@@ -15,7 +15,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/refusalarm"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -298,21 +297,6 @@ func TestWriteLogWritesTheWholeBody(t *testing.T) {
 	got, readErr := os.ReadFile(path)
 	if err != nil || readErr != nil || string(got) != "nothing ran.\n" {
 		t.Fatalf("writeLog = %v, file = (%q, %v), want the body", err, got, readErr)
-	}
-}
-
-func TestEveryLogIsCreatedThroughCreateLog(t *testing.T) {
-	// Act: the production sites that open one of the queue's logs.
-	viaHelper := sourcescan.Count(t, "createLog(")
-	byHand := sourcescan.Count(t, "os.Create(")
-	written := sourcescan.Count(t, "os.WriteFile(")
-
-	// Assert: the gate run, writeLog, the script hook and the helper's own
-	// definition, and no hand-rolled create, which would write a log the
-	// retention pass could prune mid-run. The one os.WriteFile is the failing
-	// tests file in the worktree (writeFailingTests), which is no log.
-	if viaHelper != 4 || byHand != 0 || written != 1 {
-		t.Fatalf("createLog( appears %d times, os.Create( %d and os.WriteFile( %d; want 4, 0 and 1", viaHelper, byHand, written)
 	}
 }
 

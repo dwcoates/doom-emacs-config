@@ -10,7 +10,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/footer"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -420,14 +419,5 @@ func TestAFinishsPhaseAndRunEndFollowWhatItServes(t *testing.T) {
 				t.Fatalf("finishPhase, finishRunEnd = %q, %q; want %q, %q", phase, end, tt.wantPhase, tt.wantEnd)
 			}
 		})
-	}
-}
-
-// TestEveryFinishPhaseGoesThroughFinishPhase keeps the turn meter and the run
-// counter labeling a finish alike: a site spelling a finish's phase by hand
-// fails here.
-func TestEveryFinishPhaseGoesThroughFinishPhase(t *testing.T) {
-	if sites := sourcescan.Sites(t, "f.ServesEscalation, MediatorPhaseFixing"); !slices.Equal(sites, []string{"mediatormetrics.go"}) {
-		t.Fatalf("a finish's phase is spelled in %v, want only finishPhase in mediatormetrics.go", sites)
 	}
 }

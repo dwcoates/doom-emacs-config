@@ -3,9 +3,6 @@
  * body — the one bubble body: the custom element that knows when it joins the
  * document, the cap measurement a metaprompt tree wraps to, and its refusals.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { columnMeasure } from "../../src/metaprompt-tree.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -1431,14 +1428,5 @@ describe("requireMarkdownSlot", () => {
       "not-a-slot",
       "a test touched an element that is not a markdown slot",
     ]);
-  });
-
-  it("is the one guard every slot-only setting goes through", () => {
-    // Arrange
-    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/bubble/body.ts"), "utf8");
-    // Act
-    const handRolled = source.match(/if \(!isMarkdownSlot\(/g) ?? [];
-    // Assert: only requireMarkdownSlot itself tests a slot this way.
-    expect(handRolled).toHaveLength(1);
   });
 });

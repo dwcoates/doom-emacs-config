@@ -20,7 +20,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1419,27 +1418,6 @@ func TestServiceStalenessJudgesTheReportAgainstTheFreshBuild(t *testing.T) {
 	}
 }
 
-// TestDeployNamesTheLockHolderOnlyThroughTheSharedConstant guards the
-// extraction: deploy.go spells the lock holder's binary name only as
-// sessionlock.HolderBinary, so the name it installs and the name the traffic
-// measurement recognizes cannot drift apart.
-func TestDeployNamesTheLockHolderOnlyThroughTheSharedConstant(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("deploy.go")
-	if err != nil {
-		t.Fatalf("read deploy.go: %v", err)
-	}
-
-	// Act.
-	literal := strings.Count(string(src), `"shim-lock"`)
-	shared := strings.Count(string(src), "sessionlock.HolderBinary")
-
-	// Assert.
-	if literal != 0 || shared == 0 {
-		t.Fatalf("deploy.go spells the lock holder %d time(s) as a literal and %d through sessionlock.HolderBinary; want only the constant", literal, shared)
-	}
-}
-
 func TestDrainLandingsAnswersAtOnceWithNoLandingDeploy(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -2165,16 +2143,6 @@ func TestPathStands(t *testing.T) {
 				t.Fatalf("pathStands(%s) = %v, %v; want %v, error %v", tt.path, got, err, tt.want, tt.wantErr)
 			}
 		})
-	}
-}
-
-func TestEveryLiveAbsenceIsReadThroughPathStands(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "os.Lstat(")
-
-	// Assert: pathStands' own read is the only one.
-	if !slices.Equal(sites, []string{"deploy.go"}) {
-		t.Fatalf("os.Lstat sites = %v, want only pathStands' in deploy.go", sites)
 	}
 }
 

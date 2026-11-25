@@ -12,7 +12,6 @@ import (
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -300,28 +299,6 @@ func TestRunSweepsOnEveryBeat(t *testing.T) {
 	}
 	if len(h.backlogs) != 1 {
 		t.Fatalf("backlogs = %v, want one sweep's move", h.backlogs)
-	}
-}
-
-func TestTheScheduleIsClockRepeat(t *testing.T) {
-	// Act
-	repeats := sourcescan.Count(t, "clock.Repeat(")
-	waits := sourcescan.Count(t, "Clock.After(") + sourcescan.Count(t, "clock.After(")
-
-	// Assert
-	if repeats != 1 || waits != 0 {
-		t.Fatalf("clock.Repeat( appears %d times and a hand-rolled .After( wait %d times; want one Repeat and no own wait", repeats, waits)
-	}
-}
-
-func TestAGateIsDatedByGateLapsedAt(t *testing.T) {
-	// Act
-	shared := sourcescan.Count(t, "cachelapse.GateLapsedAt(")
-	own := sourcescan.Count(t, "GetLastRequestAtMs()")
-
-	// Assert
-	if shared != 1 || own != 0 {
-		t.Fatalf("cachelapse.GateLapsedAt( appears %d times and an own reading of the last request %d times; want the shared reading alone", shared, own)
 	}
 }
 

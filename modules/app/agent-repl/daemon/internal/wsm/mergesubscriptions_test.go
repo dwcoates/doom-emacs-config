@@ -5,12 +5,10 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
 
 // subscription is WS's subscription to REPO, taken at instant.
@@ -408,25 +406,6 @@ func TestEndingASubscriptionWhoseScopeCannotBeNormalizedIsRefused(t *testing.T) 
 		Message: "refused to end a merge queue subscription whose scope cannot be normalized"})
 	if !ok || record.Context["subscriber"] != string(ws.ID) || record.Context["repo"] != "relative/.git" {
 		t.Fatalf("no error record naming the refused subscription: %+v", log.Records())
-	}
-}
-
-// TestEverySingleSubscriptionEndGoesThroughEndSubscription pins that the one
-// statement deleting a single subscription is endSubscription's: an end that
-// hand-rolls it would skip the scope's normalization or its refusal record.
-func TestEverySingleSubscriptionEndGoesThroughEndSubscription(t *testing.T) {
-	// Arrange
-	statement := "DELETE FROM merge_queue_subscriptions WHERE subscriber = ? AND repo_key = ?"
-	found := 0
-
-	for _, file := range sourcescan.Production(t) {
-		// Act
-		found += strings.Count(string(file.Source), statement)
-	}
-
-	// Assert
-	if found != 1 {
-		t.Fatalf("%q appears %d times in production source, want once (endSubscription)", statement, found)
 	}
 }
 

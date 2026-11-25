@@ -3,8 +3,6 @@ package topbar
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 
@@ -473,23 +471,6 @@ func TestSelectionsErrorIsOneErrorOnTheWorkspacesLog(t *testing.T) {
 	records := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opSelections, Message: "a failed keep"})
 	if len(records) != 1 || records[0].Context["cause"] != "disk full" {
 		t.Fatalf("records = %+v, want one ERROR carrying its cause", h.log.Records())
-	}
-}
-
-func TestEverySelectionsErrorGoesThroughTheHelper(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("selections.go")
-	if err != nil {
-		t.Fatalf("read selections.go: %v", err)
-	}
-
-	// Act
-	direct := strings.Count(string(src), "log.Error(opSelections") +
-		strings.Count(string(src), "log.Log(dlog.LevelError, opSelections")
-
-	// Assert: the only direct record is the helper's own.
-	if direct != 1 || strings.Count(string(src), "r.selectionsError(ws, ") < 3 {
-		t.Fatalf("selections.go has %d direct opSelections records, want only selectionsError's", direct)
 	}
 }
 

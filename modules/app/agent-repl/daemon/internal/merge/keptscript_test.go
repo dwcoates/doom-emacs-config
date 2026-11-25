@@ -106,37 +106,6 @@ func TestRunKeptScriptReportsALogThatCannotBeWritten(t *testing.T) {
 	}
 }
 
-func TestEveryScriptOutsideADeployRunRunsThroughRunKeptScript(t *testing.T) {
-	// Arrange: a deploy's own hooks run in deploy.go, drawn as they write;
-	// every other script run (a release, a drain, a finish hook) is
-	// RunKeptScript's.
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := map[string]int{}
-
-	// Act
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.Count(string(raw), "RunLinesWith("); n > 0 {
-			calls[name] = n
-		}
-	}
-
-	// Assert
-	if len(calls) != 3 || calls["deploy.go"] != 1 || calls["keptscript.go"] != 1 || calls["api.go"] != 1 {
-		t.Fatalf("RunLinesWith is called in %v, want once in deploy.go (a deploy's own hooks), once in keptscript.go (RunKeptScript) and its declaration in api.go", calls)
-	}
-}
-
 func TestLifecycleLogPathIsAQueueLog(t *testing.T) {
 	for _, stage := range []lifecycleconfig.Stage{lifecycleconfig.StageCreation, lifecycleconfig.StageFinish} {
 		t.Run(stage.Key(), func(t *testing.T) {

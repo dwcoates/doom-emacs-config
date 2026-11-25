@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { stampedAge } from "../../../src/feed/asks/stamped-age.js";
 import { TICKING_ATTRIBUTE, stopClocks, stopTicking } from "../../../src/feed/ticking.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
@@ -70,32 +68,4 @@ describe("stampedAge", () => {
     // Act, Assert
     expect(() => stampedAge(tooBig, "x.at_ms", askHarness().rc, "when")).toThrow(MalformedView);
   });
-});
-
-describe("stampedAge: the cold gate's own", () => {
-  it.each(["permission.ts", "question.ts"])(
-    "%s draws no age of its own: its time is the tool card head's clock",
-    (file) => {
-      // Arrange
-      const source = readFileSync(join(__dirname, "../../../src/feed/asks", file), "utf8");
-      // Act
-      const handRolled = /`\$\{formatTickedAge\([^)]*\)\} ago`/.test(source);
-      const stamped = /stampedAge\(/.test(source);
-      // Assert
-      expect([handRolled, stamped]).toEqual([false, false]);
-    },
-  );
-
-  it.each(["cold-gate.ts"])(
-    "%s draws its settled instant through the shared helper, not a hand-rolled age",
-    (file) => {
-      // Arrange
-      const source = readFileSync(join(__dirname, "../../../src/feed/asks", file), "utf8");
-      // Act
-      const handRolled = /`\$\{formatTickedAge\([^)]*\)\} ago`/.test(source);
-      const shared = /stampedAge\(/.test(source);
-      // Assert
-      expect([handRolled, shared]).toEqual([false, true]);
-    },
-  );
 });

@@ -3,11 +3,8 @@ package promptqueue
 import (
 	"context"
 	"errors"
-	"go/ast"
 	"reflect"
-	"regexp"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,7 +14,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lockwatch"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -277,32 +273,6 @@ func TestStandingSessionHold(t *testing.T) {
 	}
 }
 
-// TestNoSiteHandRollsTheStandingSessionHoldTest pins the call sites to the
-// one predicate: a hand-rolled copy of its test fails here rather than
-// drifting from it silently.
-func TestNoSiteHandRollsTheStandingSessionHoldTest(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`Tombstone\s*[!=]=\s*nil\s*(&&|\|\|)\s*\w+\.Hold\s*[!=]=\s*nil\s*(&&|\|\|)\s*\*\w+\.Hold\s*[!=]=\s*wsm\.HoldReconnect`)
-	const definition = "return h.Tombstone == nil && h.Hold != nil && waitsOnSession(*h.Hold)"
-	definitions := 0
-	for _, file := range sourcescan.Production(t) {
-		// Act
-		for i, line := range strings.Split(string(file.Source), "\n") {
-			// Assert
-			if strings.TrimSpace(line) == definition {
-				definitions++
-				continue
-			}
-			if handRolled.MatchString(line) {
-				t.Errorf("%s:%d hand-rolls the standing session hold test; call standingSessionHold: %s", file.Name, i+1, strings.TrimSpace(line))
-			}
-		}
-	}
-	if definitions != 1 {
-		t.Fatalf("found %d definitions of standingSessionHold's test, want exactly 1", definitions)
-	}
-}
-
 func TestInQueueOrderSortsOldestFirstKeepingTies(t *testing.T) {
 	// Arrange
 	later, earlier := instant.Add(time.Second), instant
@@ -332,34 +302,6 @@ func TestInQueueOrderLeavesAnEmptyQueueEmpty(t *testing.T) {
 	// Assert
 	if len(got) != 0 {
 		t.Fatalf("order = %v, want none", got)
-	}
-}
-
-// THE ONE SHAPE. Held prompts are put in queue order only by inQueueOrder, so
-// no hand-rolled sort can order them by another key.
-func TestEveryQueueOrderingGoesThroughInQueueOrder(t *testing.T) {
-	// Arrange
-	fset, funcs := productionFuncs(t)
-	var sites []string
-	// Act
-	for _, fn := range funcs {
-		if fn.Name.Name == "inQueueOrder" {
-			continue
-		}
-		ast.Inspect(fn, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "SliceStable" || sel.Sel.Name == "Slice") {
-				sites = append(sites, fset.Position(call.Pos()).String()+" in "+fn.Name.Name)
-			}
-			return true
-		})
-	}
-	// Assert
-	if len(sites) != 0 {
-		t.Fatalf("held prompts sorted outside inQueueOrder: %v", sites)
 	}
 }
 

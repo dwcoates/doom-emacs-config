@@ -5527,12 +5527,6 @@ encoder reads: the common codec owns the real encoding.")
       (should (string-match-p "ReportedX" (format "%S" err)))
       (should (string-match-p "the_field" (format "%S" err))))))
 
-(ert-deftest agent-repl-test-wire-verbs-every-editor-duration-shares-one-check ()
-  "No encoder in wire-verbs.el checks a duration by hand beside the shared helper."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "wire-verbs.el" agent-repl-test--module-dir))
-    (should (= (how-many "1\\.0e\\+INF" (point-min) (point-max)) 1))))
-
 (ert-deftest agent-repl-test-wire-verbs-editor-latency-kinds-pinned ()
   "The editor latency vocabulary is every generated enum name except UNSPECIFIED."
   (should (equal
@@ -5879,23 +5873,6 @@ dir and the temporary root it carries."
   (should-error (agent-repl-wire-verbs--decode-accepting-result
                  "M" '((other . 1)) #'ignore #'ignore #'ignore)))
 
-(defun agent-repl-test-wire-verbs--occurrences (needle haystack)
-  "Count the non-overlapping occurrences of NEEDLE in HAYSTACK."
-  (let ((count 0) (start 0))
-    (while (setq start (string-search needle haystack start))
-      (setq count (1+ count) start (+ start (length needle))))
-    count))
-
-(ert-deftest agent-repl-test-wire-verbs-no-codec-hand-rolls-the-op-id-or-accepted-result ()
-  "Every op id and every accepted result goes through the shared helpers.
-A hand-rolled site is exactly the one that drifts: it spells `opId' or the
-three arms its own way."
-  (let* ((file (file-name-with-extension
-                (symbol-file 'agent-repl-wire-verbs--append-op-id 'defun) "el"))
-         (source (with-temp-buffer (insert-file-contents file) (buffer-string))))
-    (should (= (agent-repl-test-wire-verbs--occurrences "(cons 'opId" source) 1))
-    (should (= (agent-repl-test-wire-verbs--occurrences "'(success error accepted)" source) 1))))
-
 ;;;; ---- The lone-`detail' decoder ----------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-decode-detail-carries-the-sentence ()
@@ -5911,14 +5888,6 @@ three arms its own way."
     (should-error (agent-repl-wire-verbs--decode-detail
                    "Anything" (agent-repl-test-wire-verbs--parse "{\"detail\":\"x\",\"cause\":\"y\"}"))
                   :type 'agent-repl-wire-error)))
-
-(ert-deftest agent-repl-test-wire-verbs-no-codec-hand-rolls-a-lone-detail ()
-  "Every message carrying only `detail' decodes through the one helper.
-A hand-rolled site is a second spelling of the same shape, which drifts."
-  (let* ((file (file-name-with-extension
-                (symbol-file 'agent-repl-wire-verbs--decode-detail 'defun) "el"))
-         (source (with-temp-buffer (insert-file-contents file) (buffer-string))))
-    (should (= (agent-repl-test-wire-verbs--occurrences "'(detail))" source) 1))))
 
 ;;;; ---- KillWorkspace / NukeWorkspace: the immediate ack --------------
 
@@ -7014,20 +6983,6 @@ instead diverges from it unseen."
   (agent-repl-test-wire-verbs--with-common
     (should-error (funcall (agent-repl-wire-verbs--empty-arm "SomeEmptyArm") '((stray . "x")))
                   :type 'agent-repl-wire-error)))
-
-(ert-deftest agent-repl-test-wire-verbs-empty-arms-share-one-decoder ()
-  "Every empty arm in the verbs codec is decoded through
-`agent-repl-wire-verbs--empty-arm', so no site hand-rolls a lambda around
-`agent-repl-wire-verbs--decode-empty' that could drift from it."
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (concat (file-name-sans-extension
-                            (symbol-file 'agent-repl-wire-verbs--empty-arm 'defun))
-                           ".el"))
-                  (buffer-string))))
-    (should-not (string-match-p
-                 "(lambda (\\([a-z]+\\))[ \t\n]+(agent-repl-wire-verbs--decode-empty[ \t\n]+\"[A-Za-z]+\"[ \t\n]+\\1))"
-                 source))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-error-thread-awaiting-first-answer-arm ()
   "SubmitPromptError's `thread_awaiting_first_answer' arm decodes as its keyword."

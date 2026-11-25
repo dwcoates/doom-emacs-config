@@ -1,5 +1,4 @@
 import { create } from "@bufbuild/protobuf";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { RosterOpenRowsSchema, RosterRepoSectionSchema, RosterRowSchema, type RosterRow } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { backlogRow, numberTabs, openRow, rowEntries, sectionTabRegions, withFamily } from "./roster-families.js";
@@ -128,21 +127,5 @@ describe("sectionTabRegions", () => {
 
     // Act / Assert
     expect(sectionTabRegions(section).folded).toBe(true);
-  });
-});
-
-describe("the test rosters that build families", () => {
-  it.each(["sidebar/harness.ts", "integration/fixtures.ts"])("%s takes them from roster-families", (file) => {
-    // A hand-rolled family or numbering would let the two kinds of test roster disagree.
-    const source = readFileSync(new URL(file, import.meta.url), "utf8");
-    expect(source).toMatch(/from "\.\.\/roster-families\.js"/);
-    expect(source).not.toMatch(/new WeakMap<RosterRow/);
-    expect(source).not.toMatch(/RosterOpenRowTabSchema/);
-  });
-
-  it.each(["sidebar/harness.ts", "integration/fixtures.ts"])("%s numbers a section's tabs through sectionTabRegions", (file) => {
-    // A hand-rolled walk of a section's entries could number them out of drawn order.
-    const source = readFileSync(new URL(file, import.meta.url), "utf8");
-    expect(source).toMatch(/\.map\(sectionTabRegions\)/);
   });
 });

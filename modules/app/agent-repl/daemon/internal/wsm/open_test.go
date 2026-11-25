@@ -12,7 +12,6 @@ import (
 
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestOpenRefusesUnusablePaths(t *testing.T) {
@@ -908,18 +907,6 @@ func TestEndTxAfterACommitRecordsNothing(t *testing.T) {
 	}
 }
 
-// Every rollback in this package goes through endTx, so no site can quietly
-// drop a failed one again.
-func TestEveryRollbackGoesThroughEndTx(t *testing.T) {
-	// Act
-	rollbacks := sourcescan.Count(t, ".Rollback()")
-
-	// Assert
-	if rollbacks != 1 {
-		t.Fatalf("production source calls Rollback %d times; only endTx may", rollbacks)
-	}
-}
-
 func TestCommittedNamesACommitRefusedAfterItsContextEnded(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -971,18 +958,5 @@ func TestAWriteWhoseContextEndsBeforeItsCommitIsRecordedAsTheEnding(t *testing.T
 		if r.Operation == "daemon.wsm.test" && r.Level == dlog.LevelError {
 			t.Fatalf("a cancelled commit was recorded at ERROR: %+v", r)
 		}
-	}
-}
-
-// Every commit in this package goes through committed, so no site reads a
-// cancelled caller's commit as a broken store again.
-func TestEveryCommitGoesThroughCommitted(t *testing.T) {
-	// Act
-	commits := sourcescan.Count(t, ".Commit()")
-	wrapped := sourcescan.Count(t, "committed(ctx, tx.Commit())")
-
-	// Assert
-	if commits != wrapped {
-		t.Fatalf("production source calls Commit %d times, %d of them through committed", commits, wrapped)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -604,25 +603,6 @@ func TestRegisteredRefAnswersTheRecordARefNames(t *testing.T) {
 				t.Fatalf("registeredRef = %+v, %v; want ok %v", got, ok, tt.wantOK)
 			}
 		})
-	}
-}
-
-// EVERY REF CRITERION RESOLVES THROUGH registeredRef: a handler that resolves
-// created_by, caller or login.of_workspace by hand fails here.
-func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("findworkspaces.go")
-	if err != nil {
-		t.Fatalf("read the handler: %v", err)
-	}
-
-	// Act
-	calls := strings.Count(string(src), "registeredRef(byID, ref)")
-	byHand := strings.Count(string(src), "byID[wsm.WorkspaceID(ref.GetId())]")
-
-	// Assert
-	if calls != 3 || byHand != 1 {
-		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want all three refs through the helper and its own one lookup", calls, byHand)
 	}
 }
 

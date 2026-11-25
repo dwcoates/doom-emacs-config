@@ -139,9 +139,10 @@ func oneCase(sel *testrunv1.TestSelection) error {
 	return nil
 }
 
-// vitestKey is one vitest package to list: its directory and its suite's
-// integration config ("" for none).
-type vitestKey struct{ dir, config string }
+// vitestKey is one vitest suite's package to list: its directory, its
+// suite's own config ("" for the package's ordinary one) and its integration
+// config ("" for none).
+type vitestKey struct{ dir, unit, integration string }
 
 // pruning is one rerun's existence check: the names each vitest package and
 // the ERT suite must list, gathered so each is listed once.
@@ -219,11 +220,11 @@ func (p *pruning) locateVitest(f *testrunv1.TestSelectionVitestFile) (string, fu
 	if detail := p.gone(what, f.GetFile()); detail != "" {
 		return detail, nil, nil
 	}
-	s, rel, err := owningDir(p.l, f.GetFile(), "vitest file", roster.Vitest)
+	s, rel, err := owningVitest(p.l, f.GetFile())
 	if err != nil {
 		return err.Error(), nil, nil
 	}
-	key := vitestKey{dir: roster.Resolve(p.l.Repo, p.l.Module, s.Path), config: s.IntegrationConfig}
+	key := vitestKey{dir: roster.Resolve(p.l.Repo, p.l.Module, s.Path), unit: s.VitestConfig, integration: s.IntegrationConfig}
 	if !slices.Contains(p.vitest[key], rel) {
 		p.vitest[key] = append(p.vitest[key], rel)
 	}
@@ -255,12 +256,12 @@ func (p *pruning) locateERT(f *testrunv1.TestSelectionErtFile) (string, func() s
 	if detail := p.gone(what, path); detail != "" {
 		return detail, nil, nil
 	}
-	s, rel, err := owningDir(p.l, path, "ERT file", roster.ERT)
+	s, rel, err := owningERT(p.l, path)
 	if err != nil {
 		return err.Error(), nil, nil
 	}
 	lispDir := roster.Resolve(p.l.Repo, p.l.Module, s.Path)
-	files, err := suites.ERTRoster(lispDir)
+	_, files, err := suites.ERTFiles(lispDir, s)
 	if err != nil {
 		return "", nil, fmt.Errorf("list the ERT roster for %s: %w", what, err)
 	}
@@ -313,11 +314,12 @@ func (p *pruning) locateHarness(h *testrunv1.TestSelectionHarness) (string, func
 func (p *pruning) listNames() error {
 	p.vitestNames = map[vitestKey]map[string][]string{}
 	for key, files := range p.vitest {
-		// A package's files are its default config's and, where the suite
-		// has one, its integration config's: a file is collected by one.
-		configs := []string{""}
-		if key.config != "" {
-			configs = append(configs, key.config)
+		// A suite's files are its unit config's (its own, or the package's
+		// default) and, where the suite has one, its integration config's: a
+		// file is collected by one.
+		configs := []string{key.unit}
+		if key.integration != "" {
+			configs = append(configs, key.integration)
 		}
 		names := map[string][]string{}
 		for _, config := range configs {

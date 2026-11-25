@@ -11,7 +11,6 @@ import (
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -466,41 +465,6 @@ func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 
 	// Act
 	DetachedOutcomeKind(9).mergeEnd()
-}
-
-// TestEveryResolutionIsAnnouncedThroughEnded pins the one funnel: a merge's
-// resolved banner is raised only through raiseResolved, by tellThenRaise,
-// which ended (and the fork that never made a merge workspace) call, so every
-// end is handed back before its banner rises. A handback skips ended only for
-// a merge never put in line, so no terminal can hand back without announcing
-// its end, and every end's banner is worded by the one bannerLine.
-func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
-	// Arrange / Act: the package's own production sources.
-	resolved, raised, ordered, handBacks, settles := 0, 0, 0, 0, 0
-	for _, file := range sourcescan.Production(t) {
-		resolved += strings.Count(string(file.Source), "Banners.Resolved(")
-		raised += strings.Count(string(file.Source), "o.raiseResolved(")
-		ordered += strings.Count(string(file.Source), "o.tellThenRaise(")
-		handBacks += strings.Count(string(file.Source), "o.handBack(ctx")
-		settles += strings.Count(string(file.Source), "o.settle(ctx")
-	}
-
-	// Assert
-	if resolved != 1 {
-		t.Errorf("Banners.Resolved is called at %d sites, want 1: raiseResolved", resolved)
-	}
-	if raised != 1 {
-		t.Errorf("raiseResolved is called at %d sites, want 1: tellThenRaise", raised)
-	}
-	if ordered != 2 {
-		t.Errorf("tellThenRaise is called at %d sites, want 2: ended and the failed fork", ordered)
-	}
-	if handBacks != 1 {
-		t.Errorf("handBack is called at %d sites, want 1: settle", handBacks)
-	}
-	if settles != 2 {
-		t.Errorf("settle is called at %d sites, want 2: ended and a merge never put in line", settles)
-	}
 }
 
 // bannerRaised reports whether the harness raised a banner of KIND.

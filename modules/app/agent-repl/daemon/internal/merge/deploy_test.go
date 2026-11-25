@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -248,24 +247,6 @@ func TestAHeldRepositorySkipsTheDeployHookAndCountsTheSkip(t *testing.T) {
 	h.db.mu.Unlock()
 	if skipped != 1 {
 		t.Fatalf("skipped = %d, want the one skip recorded", skipped)
-	}
-}
-
-func TestAHeadExtendsItsChainOnlyOnceItKnowsItsDeploy(t *testing.T) {
-	// Arrange: the admission's own chain extension is the one that follows
-	// the head's session; a sourcescan finds it after takeSession.
-	src, err := os.ReadFile("run.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(src)
-	admit := body[strings.Index(body, "func (r *run) admit("):]
-	admit = admit[:strings.Index(admit, "\n}\n")]
-
-	// Assert
-	take, extend := strings.Index(admit, "r.takeSession(ctx)"), strings.Index(admit, "o.extendChain(")
-	if take < 0 || extend < 0 || extend < take {
-		t.Fatalf("admit extends its chain at %d and takes its session at %d; want the extension after the session", extend, take)
 	}
 }
 

@@ -18,14 +18,10 @@ import (
 	"agentrepl/testrun/roster"
 )
 
-// vitestFiles lists a package's unit test files under its default config, as
-// paths relative to the package, after making its npm deps satisfy the
-// lockfile through the one sanctioned path (bin/ensure-deps.sh).
-func vitestFiles(module, dir string) ([]string, error) {
-	return vitestFilesUnder(module, dir, "")
-}
-
-// vitestFilesUnder is vitestFiles under CONFIG ("" is the default config).
+// vitestFilesUnder lists a package's test files under CONFIG ("" is its
+// default config), as paths relative to the package, after making its npm
+// deps satisfy the lockfile through the one sanctioned path
+// (bin/ensure-deps.sh).
 func vitestFilesUnder(module, dir, config string) ([]string, error) {
 	if err := runEnsure(fmt.Sprintf("ensure the npm deps of %s", dir), filepath.Join(module, "bin", "ensure-deps.sh"), dir); err != nil {
 		return nil, err
@@ -77,12 +73,15 @@ const KnipSlots = 2
 // adds chunk blobs and their merged report only when explicitly requested.
 func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
-	files, err := vitestFiles(l.Module, dir)
+	files, err := vitestFilesUnder(l.Module, dir, s.VitestConfig)
 	if err != nil {
 		return Units{}, err
 	}
 	if len(files) == 0 {
 		return Units{}, fmt.Errorf("suites: %s lists no test files under %s", s.Name, dir)
+	}
+	if err := checkVitestOwnership(s, files); err != nil {
+		return Units{}, err
 	}
 	batches, err := vitestBatches(s, dir, files, "")
 	if err != nil {
@@ -117,6 +116,35 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	}
 	u.Splits = append(u.Splits, splits...)
 	return u, nil
+}
+
+// checkVitestOwnership refuses FILES (suite s's, relative to its package)
+// that stray from the directory a suite owns: a suite with its own config
+// (roster.Suite.VitestDir) runs only files inside its directory, and any other
+// suite none inside the directory of a suite of its package that has one, so
+// a file is one suite's alone and a selection of it reaches that suite.
+func checkVitestOwnership(s roster.Suite, files []string) error {
+	var stray []string
+	for _, f := range files {
+		if s.VitestConfig != "" {
+			if !s.OwnsVitestFile(f) {
+				stray = append(stray, f)
+			}
+			continue
+		}
+		for _, other := range roster.Suites {
+			if other.Kind == roster.Vitest && other.Path == s.Path && other.Name != s.Name && other.OwnsVitestFile(f) {
+				stray = append(stray, f+" ("+other.Name+"'s)")
+			}
+		}
+	}
+	switch {
+	case len(stray) == 0:
+		return nil
+	case s.VitestConfig != "":
+		return fmt.Errorf("suites: %s's %s runs files outside its directory %s: %s", s.Name, s.VitestConfig, s.VitestDir, strings.Join(stray, ", "))
+	}
+	return fmt.Errorf("suites: %s's %s runs files another suite owns: %s", s.Name, s.UnitConfig(), strings.Join(stray, ", "))
 }
 
 // vitestIntegrationBuild is the unit that builds what the suite's integration
@@ -185,7 +213,10 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 	work := filepath.Join(l.Work, "vitest", s.Name)
 	blobs := filepath.Join(work, "blobs")
 	dirs := []string{filepath.Join(work, "items")}
-	if l.Coverage {
+	// A suite with its own config reads sources rather than running them, so
+	// a coverage run instruments none of its files.
+	coverage := l.Coverage && s.VitestConfig == ""
+	if coverage {
 		dirs = append(dirs, blobs)
 	}
 	for _, d := range dirs {
@@ -193,17 +224,6 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 			return Units{}, fmt.Errorf("suites: create %s: %w", d, err)
 		}
 	}
-	// The typecheck is incremental, seeded from the host's newest passing
-	// typecheck of the package (internal/typecheck).
-	typecheck := spec(s.Name+":typecheck", s.Name, dir, []string{l.Self, "typecheck", "-name", s.Name, "--", "npm", "run", "typecheck"})
-	// tsc cannot be pinned to one core: its compiler thread and node's GC and
-	// worker threads measured 1.5-1.75 cores on average across four full
-	// runs (webapp and shim alike), so the unit holds the two slots it uses.
-	typecheck.Slots = TypecheckSlots
-	// knip is the package's unused-export gate: an export, file or dependency
-	// nothing uses fails the suite instead of accumulating (its knip.json).
-	knip := spec(s.Name+":knip", s.Name, dir, []string{"npm", "run", "knip"})
-	knip.Slots = KnipSlots
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
 	if len(batches) == 0 {
 		return Units{}, fmt.Errorf("suites: %s has no batch of test files to run", s.Name)
@@ -213,12 +233,12 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 		names := FlatNames(items, byItem)
 		tag := unitTag(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
-		argv := []string{
-			"npx", "vitest", "run",
-			"--maxWorkers=1",
-			"--reporter=default", "--reporter=" + reporter,
+		argv := []string{"npx", "vitest", "run"}
+		if s.VitestConfig != "" {
+			argv = append(argv, "--config", s.VitestConfig)
 		}
-		if l.Coverage {
+		argv = append(argv, "--maxWorkers=1", "--reporter=default", "--reporter="+reporter)
+		if coverage {
 			argv = append(argv,
 				"--coverage",
 				"--coverage.reportsDirectory="+filepath.Join(work, "chunk-coverage", tag),
@@ -237,7 +257,7 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 		}
 		testsOut := filepath.Join(work, "items", tag+".tests.json")
 		env := []string{VitestItemsEnv + "=" + itemsOut, testtimes.VitestTestsEnv + "=" + testsOut}
-		if l.Coverage {
+		if coverage {
 			// A chunk is confined to its own files' inputs, so it reports
 			// only what it loaded; the merge adds the rest (the package's
 			// vitest.config.ts coverage note).
@@ -251,8 +271,8 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
 	splits := batchSplits(s.Name, s.Name, batches, chunk, named)
-	atomic := []run.Spec{typecheck, knip}
-	if l.Coverage {
+	atomic := vitestChecks(l, s, dir)
+	if coverage {
 		merge := spec(s.Name+":coverage", s.Name, dir, []string{
 			"npx", "vitest", "run", "--merge-reports=" + blobs, "--coverage",
 			"--coverage.reportsDirectory=" + filepath.Dir(cover.VitestCoverage(l.Work, s.Name)),
@@ -263,6 +283,27 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 		atomic = append(atomic, merge)
 	}
 	return Units{Atomic: atomic, Splits: splits}, nil
+}
+
+// vitestChecks are a vitest package's suite-wide checks: its typecheck and
+// its knip. A suite with its own config (roster.Suite.VitestConfig) runs
+// neither, since they check the whole package and are its ordinary suite's.
+func vitestChecks(l Layout, s roster.Suite, dir string) []run.Spec {
+	if s.VitestConfig != "" {
+		return nil
+	}
+	// The typecheck is incremental, seeded from the host's newest passing
+	// typecheck of the package (internal/typecheck).
+	typecheck := spec(s.Name+":typecheck", s.Name, dir, []string{l.Self, "typecheck", "-name", s.Name, "--", "npm", "run", "typecheck"})
+	// tsc cannot be pinned to one core: its compiler thread and node's GC and
+	// worker threads measured 1.5-1.75 cores on average across four full
+	// runs (webapp and shim alike), so the unit holds the two slots it uses.
+	typecheck.Slots = TypecheckSlots
+	// knip is the package's unused-export gate: an export, file or dependency
+	// nothing uses fails the suite instead of accumulating (its knip.json).
+	knip := spec(s.Name+":knip", s.Name, dir, []string{"npm", "run", "knip"})
+	knip.Slots = KnipSlots
+	return []run.Spec{typecheck, knip}
 }
 
 // IntegrationAreaPrefix opens the area of every integration-config batch.
@@ -313,13 +354,13 @@ func VitestBatchOfGroup(s roster.Suite, group string) (batch, config string, err
 		return b, s.IntegrationConfig, nil
 	}
 	if b, ok := strings.CutPrefix(group, s.Name+"/"); ok && b != "" {
-		return b, VitestConfig, nil
+		return b, s.UnitConfig(), nil
 	}
 	return "", "", fmt.Errorf("suites: %q is no batch group of %s", group, s.Name)
 }
 
 // VitestConfig is the config `vitest run` reads when given none.
-const VitestConfig = "vitest.config.ts"
+const VitestConfig = roster.DefaultVitestConfig
 
 // VitestNamePattern is the `-t` value that runs exactly the tests whose full
 // names start with one of names. Vitest matches `-t` against a test's

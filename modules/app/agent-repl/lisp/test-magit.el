@@ -689,16 +689,6 @@ recorded `agent-repl--info' lines."
       (should (seq-some (lambda (line) (string-search "branch=not-in-log" line)) infos))
       (should (equal said "agent-repl: abc123 is not among the commits master's log shows")))))
 
-(defconst agent-repl-test-magit--source
-  (expand-file-name "magit.el" (file-name-directory (or load-file-name buffer-file-name)))
-  "The magit.el source these tests load.")
-
-(ert-deftest agent-repl-test-magit-every-display-binding-goes-through-the-helper ()
-  "No magit.el definition but the helper let-binds the display function itself."
-  (with-temp-buffer
-    (insert-file-contents agent-repl-test-magit--source)
-    (should (= (how-many "(let\\*? ((magit-display-buffer-function" (point-min) (point-max)) 1))))
-
 ;;;; ---- Tests: commit decorations keep their tags ----
 
 (ert-deftest agent-repl-test-magit-ref-labels-keep-tags ()

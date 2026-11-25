@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -602,64 +601,6 @@ func TestAwaitLogRecordWithinReturnsTheRecordThePredicateAccepts(t *testing.T) {
 	}
 }
 
-// TestEveryTurnEndedWaitNamesOpTurnEnded pins that the integration suite waits
-// on a turn's durable close through OpTurnEnded alone: a test that spelled the
-// operation by hand would keep passing on a stale spelling after a rename.
-func TestEveryTurnEndedWaitNamesOpTurnEnded(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob(filepath.Join("..", "*_test.go"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("glob the integration tests = %v, %v, want files", files, err)
-	}
-
-	// Act
-	var spelled []string
-	for _, f := range files {
-		body, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		if strings.Contains(string(body), fmt.Sprintf("%q", OpTurnEnded)) {
-			spelled = append(spelled, f)
-		}
-	}
-
-	// Assert
-	if len(spelled) != 0 {
-		t.Fatalf("integration tests spell %q by hand instead of harness.OpTurnEnded: %v", OpTurnEnded, spelled)
-	}
-}
-
-// TestNoTurnCountWaitCountsTheTurnEndedOperation pins that a wait for N turns
-// counts their durable closes (AwaitTurnsClosed): one turn's close writes
-// several OpTurnEnded records, so a count of the operation is met before the
-// N-th turn has left the watcher.
-func TestNoTurnCountWaitCountsTheTurnEndedOperation(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob(filepath.Join("..", "*_test.go"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("glob the integration tests = %v, %v, want files", files, err)
-	}
-	counting := regexp.MustCompile(`AwaitWorkspaceLogOperationCount\([^)]*harness\.OpTurnEnded`)
-
-	// Act
-	var found []string
-	for _, f := range files {
-		body, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		if counting.Match(body) {
-			found = append(found, f)
-		}
-	}
-
-	// Assert
-	if len(found) != 0 {
-		t.Fatalf("integration tests count harness.OpTurnEnded records instead of AwaitTurnsClosed: %v", found)
-	}
-}
-
 // TestExpectWorkspaceRestartWarningsDeclaresTheWholeRestartSet covers the
 // helper's one guarantee: every operation of WorkspaceRestartWarnings is
 // licensed, and nothing else is.
@@ -678,67 +619,6 @@ func TestExpectWorkspaceRestartWarningsDeclaresTheWholeRestartSet(t *testing.T) 
 		if !d.expected[op] {
 			t.Fatalf("expected = %v, want %q declared", d.expected, op)
 		}
-	}
-}
-
-// TestNoIntegrationTestSpellsOutTheWorkspaceRestartWarnings covers the call
-// sites: a test that declares the whole restart set by hand would drift from
-// WorkspaceRestartWarnings unseen, so it must call
-// ExpectWorkspaceRestartWarnings instead.
-func TestNoIntegrationTestSpellsOutTheWorkspaceRestartWarnings(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob(filepath.Join("..", "*_test.go"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("glob the integration tests = (%v, %v), want files", files, err)
-	}
-	call := warningDeclaration
-
-	for _, file := range files {
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-
-		// Act
-		for _, match := range call.FindAllStringSubmatch(string(raw), -1) {
-			// Assert
-			spelled := 0
-			declared := match[1] + match[2]
-			for _, op := range WorkspaceRestartWarnings {
-				if strings.Contains(declared, `"`+op+`"`) {
-					spelled++
-				}
-			}
-			if spelled == len(WorkspaceRestartWarnings) {
-				t.Fatalf("%s declares the whole workspace-restart set by hand; call ExpectWorkspaceRestartWarnings:\n%s", file, match[0])
-			}
-		}
-	}
-}
-
-// warningDeclaration matches one warning declaration in a test's source: a
-// call, or an Opts.ExpectWarnings literal that declares a boot's warnings
-// before the process starts. Its first or second group is what it declares.
-var warningDeclaration = regexp.MustCompile(`(?s)ExpectWarnings(?:For)?(?:\((.*?)\)\n|: \[\]string\{(.*?)\})`)
-
-func TestWarningDeclarationReadsEveryDeclarationForm(t *testing.T) {
-	cases := []struct {
-		name, src, want string
-	}{
-		{name: "a call", src: "d.ExpectWarnings(\"a.b\", \"c.d\")\n", want: `"a.b", "c.d"`},
-		{name: "a per-workspace call", src: "d.ExpectWarningsFor(ws, \"a.b\")\n", want: `ws, "a.b"`},
-		{name: "an Opts literal", src: "harness.Opts{ExpectWarnings: []string{\"a.b\"}, StateDir: dir}", want: `"a.b"`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			m := warningDeclaration.FindStringSubmatch(tc.src)
-
-			// Assert
-			if m == nil || m[1]+m[2] != tc.want {
-				t.Fatalf("warningDeclaration on %q = %q, want %q", tc.src, m, tc.want)
-			}
-		})
 	}
 }
 

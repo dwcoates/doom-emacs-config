@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"slices"
 	"sort"
@@ -21,7 +20,6 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/refusalarm"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1515,34 +1513,6 @@ func TestReorderRedrawsTheQueueOnlyWhenTheOrderChanged(t *testing.T) {
 				t.Fatalf("ws-2's drawn place = %d, want %d", got, tt.wantPlace)
 			}
 		})
-	}
-}
-
-func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
-	// Arrange.
-	var calls []string
-	for _, file := range []string{"queue.go", "terminal.go"} {
-		code, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		// Act.
-		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.MoveMergeTo(", "o.deps.DB.PlaceMerge(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
-			for range strings.Count(string(code), call) {
-				calls = append(calls, file+":"+call)
-			}
-		}
-	}
-
-	// Assert: each store reorder is called once, inside the reordering its
-	// verb hands to reorder.
-	want := []string{
-		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.deps.DB.MoveMergeTo(", "queue.go:o.deps.DB.PlaceMerge(",
-		"queue.go:o.reorder(ctx, ws, reordering{", "queue.go:o.reorder(ctx, ws, reordering{", "queue.go:o.reorder(ctx, ws, reordering{",
-		"terminal.go:o.deps.DB.PrioritizeMerge(", "terminal.go:o.reorder(ctx, ws, reordering{",
-	}
-	if !slices.Equal(calls, want) {
-		t.Fatalf("reorder sites = %v, want %v", calls, want)
 	}
 }
 
@@ -3253,19 +3223,6 @@ func TestReadScopedRepositoryRecordsOnlyAFailureThatIsNoRefusal(t *testing.T) {
 				t.Fatalf("err %v, ERROR recorded %v (%+v); want recorded %v naming the scope", err, recorded, rec, tt.wantError)
 			}
 		})
-	}
-}
-
-func TestEveryScopedReadSharesReadScopedRepository(t *testing.T) {
-	// Arrange
-	const message = "could not resolve the scoped repository's queue key"
-
-	// Act
-	count := sourcescan.Count(t, message)
-
-	// Assert
-	if count != 1 {
-		t.Fatalf("%q is written %d times; want it only in readScopedRepository, so no scoped read records its failure by hand", message, count)
 	}
 }
 

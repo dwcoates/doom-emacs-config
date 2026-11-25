@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -786,13 +783,6 @@ describe("classicDiffLines", () => {
 
   it("refuses a wire line with no kind", () => {
     expect(() => classicDiffLines([create(FeedDiffLineSchema, { text: "x" })], "test.lines")).toThrow(MalformedView);
-  });
-
-  it("is the one site that reads a wire line's kind", () => {
-    const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../src/feed/cards/tool-call.ts");
-    const calls = readFileSync(src, "utf8").match(/diffLineKind\(/g) ?? [];
-    // The definition and the one call inside classicDiffLines.
-    expect(calls.length).toBe(2);
   });
 });
 

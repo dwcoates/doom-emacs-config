@@ -22,10 +22,6 @@
 
 ;;;; ---- Fixture builders ----
 
-(defconst agent-repl-test-roster--dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The directory this suite and `roster.el' live in.")
-
 (defun agent-repl-test-roster--row (id name status &rest overrides)
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children' (the
@@ -536,16 +532,6 @@ each ref id that has a live tab here to its name."
   (cl-letf (((symbol-function 'agent-repl--ws-get)
              (lambda (&rest _) (error "nil names no workspace to read"))))
     (should-not (agent-repl-roster-ws-repository nil))))
-
-(ert-deftest agent-repl-test-roster-ws-repository-is-the-commands-only-lookup ()
-  "commands.el reads a workspace's repository only through the shared lookup.
-A hand-rolled ref-to-section walk there would drift from the helper."
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "commands.el" agent-repl-test-roster--dir))
-                  (buffer-string))))
-    (should (string-match-p "(agent-repl-roster-ws-repository " source))
-    (should-not (string-match-p "(agent-repl-roster-repository-of " source))))
 
 (ert-deftest agent-repl-test-roster-walk-visits-children-depth-first ()
   "A row precedes its children, which is the contract's render order."
@@ -3171,28 +3157,6 @@ is the finish edge (owner ruling, 2026-10-06)."
       ;; Assert
       (should-not called))))
 
-(ert-deftest agent-repl-test-roster-for-ws-readers-share-the-one-shape ()
-  "Every `agent-repl-roster-*-for-ws' reader goes through `agent-repl-roster--for-ws'."
-  ;; Arrange
-  (let ((forms nil))
-    (with-temp-buffer
-      (insert-file-contents (expand-file-name "roster.el" agent-repl-test-roster--dir))
-      (condition-case nil
-          (while t (push (read (current-buffer)) forms))
-        (end-of-file nil)))
-    ;; Act
-    (let ((readers (seq-filter (lambda (form)
-                                 (and (eq (car-safe form) 'defun)
-                                      (string-match-p "\\`agent-repl-roster-.*-for-ws\\'"
-                                                      (symbol-name (nth 1 form)))
-                                      (not (memq (nth 1 form) '(agent-repl-roster-row-for-ws
-                                                                agent-repl-roster--for-ws)))))
-                               forms)))
-      ;; Assert
-      (should (>= (length readers) 4))
-      (dolist (form readers)
-        (should (eq (car-safe (car (last form))) 'agent-repl-roster--for-ws))))))
-
 ;;; test-roster.el ends here
 
 
@@ -4373,24 +4337,6 @@ a second switch, and lands in the destination's input window."
       (agent-repl-roster-move-frame "alpha")
       ;; Assert
       (should (equal (list switched-following landed) '(t "alpha"))))))
-
-(ert-deftest agent-repl-test-roster-every-move-to-a-selected-workspace-goes-through-move-frame ()
-  "The roster's follow and Emacs's own switch request move the frame
-through `agent-repl-roster-move-frame', and neither switches on its own."
-  (dolist (spec '(("roster.el" . "agent-repl-roster--follow")
-                  ("host.el" . "agent-repl-host--move-on-request")))
-    (with-temp-buffer
-      ;; Arrange
-      (insert-file-contents (expand-file-name (car spec) agent-repl-test--module-dir))
-      (emacs-lisp-mode)
-      (goto-char (point-min))
-      (re-search-forward (concat "^(defun " (regexp-quote (cdr spec)) " "))
-      (beginning-of-defun)
-      ;; Act
-      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
-        ;; Assert
-        (should (string-match-p "(agent-repl-roster-move-frame " body))
-        (should-not (string-match-p "(agent-repl--ws-switch " body))))))
 
 ;;;; ---- An answered selection is never moved back by a roster from before it ----
 

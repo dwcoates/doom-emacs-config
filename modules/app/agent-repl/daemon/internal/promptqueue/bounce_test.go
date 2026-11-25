@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2541,24 +2539,5 @@ func TestBouncingAnswersWhetherABounceDrainsTheWorkspace(t *testing.T) {
 	// Assert
 	if before || !during {
 		t.Fatalf("Bouncing = (before %v, during %v), want (false, true)", before, during)
-	}
-}
-
-// EVERY BOUNCE DECISION ASKS THE ONE LEASE HOLD: no site in bounce.go asks the
-// merge's hold alone, so none can take a bounce a stand-down's lease holds.
-func TestEveryBounceDecisionAsksTheOneLeaseHold(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("bounce.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	direct := strings.Count(string(src), "q.heldBehindMergeLocked(")
-	shared := strings.Count(string(src), "q.heldBehindLeaseLocked(")
-
-	// Assert
-	if direct != 1 || shared != 3 {
-		t.Fatalf("heldBehindMergeLocked calls = %d, heldBehindLeaseLocked calls = %d, want only the shared hold to ask the merge's (1) and three decisions to ask the shared hold", direct, shared)
 	}
 }

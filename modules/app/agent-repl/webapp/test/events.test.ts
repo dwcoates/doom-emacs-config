@@ -2,12 +2,8 @@
 /**
  * The webapp tests' event waits: a recorded call and a DOM state.
  */
-import { readFileSync } from "node:fs";
-import { dirname, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { awaitDom, recorded } from "./events.js";
-import { filesUnder } from "./files-under.js";
 
 describe("recorded", () => {
   it("resolves reached at once for a count already recorded", async () => {
@@ -114,21 +110,5 @@ describe("awaitDom", () => {
 
     // Assert
     await expect(waiting).rejects.toThrow("the span did not happen within 1ms; the DOM holds <div></div>");
-  });
-});
-
-describe("the webapp's tests", () => {
-  it("never poll a condition with vi.waitFor: they await its event (events.ts)", () => {
-    // Arrange
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const self = fileURLToPath(import.meta.url);
-
-    // Act
-    const polling = filesUnder(dir, [".ts", ".tsx"]).filter(
-      (file) => file !== self && readFileSync(file, "utf8").includes("vi.waitFor("),
-    );
-
-    // Assert
-    expect(polling.map((file) => relative(dir, file))).toEqual([]);
   });
 });

@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
 import {
   SVG_NS,
   ancestorMatching,
@@ -20,7 +18,6 @@ import {
   windowOf,
 } from "../src/dom.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
-import { codeUnder, filesUnder } from "./files-under.js";
 import { dispatchPageTransition } from "./page-transition.js";
 
 describe("scrollbarWidthPx", () => {
@@ -34,17 +31,6 @@ describe("scrollbarWidthPx", () => {
 
   it("takes the side borders off, which are not the bar", () => {
     expect(scrollbarWidthPx({ offsetWidth: 202, clientWidth: 185 }, 2)).toBe(15);
-  });
-
-  it("is the one formula: every scrollbar measurement calls it, and none rolls its own", () => {
-    // Arrange — every source under src/, comments stripped.
-    const src = join(process.cwd(), "src");
-    const code = codeUnder(src);
-    // Act
-    const callers = [...code].filter(([, text]) => /\bscrollbarWidthPx\(/.test(text)).map(([p]) => p).sort();
-    const rolled = [...code].filter(([, text]) => /offsetWidth\s*-[^;]*clientWidth/.test(text)).map(([p]) => p);
-    // Assert
-    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts"], ["dom.ts"]]);
   });
 });
 
@@ -67,17 +53,6 @@ describe("computedPx", () => {
     ["a malformed number", "1.2.3px"],
   ])("answers null for %s", (_label, value) => {
     expect(computedPx(value)).toBeNull();
-  });
-
-  it("is the one parse of a computed px length in the webapp", () => {
-    // Arrange
-    const src = join(process.cwd(), "src");
-    const code = new Map(filesUnder(src).map((path) => [relative(src, path), readFileSync(path, "utf8")]));
-    // Act
-    const callers = [...code].filter(([, text]) => /\bcomputedPx\(/.test(text)).map(([p]) => p).sort();
-    const rolled = [...code].filter(([, text]) => /px\$\//.test(text)).map(([p]) => p);
-    // Assert
-    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts", "feed/collapsed-width.ts", "feed/ellipsis-trim.ts", "sidebar/band-fit.ts", "sidebar/selection-scroll.ts"], ["dom.ts"]]);
   });
 });
 
@@ -264,18 +239,6 @@ describe("repaintMark", () => {
     expect(observer.takeRecords()).toHaveLength(0);
     observer.disconnect();
   });
-
-  it("is how every in-place glyph repaint is written", () => {
-    // Arrange — the modules that repaint a breathing state glyph in place.
-    const sites = ["feed/merge/tab-strip.ts", "feed/merge/tests-tab.ts"].map((file) =>
-      readFileSync(join(__dirname, "../src", file), "utf8"),
-    );
-    // Act
-    const handRolled = sites.filter((source) => /\.className !== /.test(source));
-    const shared = sites.filter((source) => source.includes("repaintMark("));
-    // Assert
-    expect([handRolled.length, shared.length]).toEqual([0, sites.length]);
-  });
 });
 
 describe("placeOptional", () => {
@@ -331,16 +294,6 @@ describe("placeOptional", () => {
     // Assert
     expect(el.querySelector(".value")).toBe(drawn);
   });
-
-  it("is how the merge tests tab places its optional elements", () => {
-    // Arrange — the module whose suite rows draw counts and a reused source.
-    const source = readFileSync(join(__dirname, "../src/feed/merge/tests-tab.ts"), "utf8");
-    // Act
-    const handRolled = /drawn\?\.remove\(\)/.test(source);
-    const shared = source.match(/placeOptional\(/g)?.length ?? 0;
-    // Assert
-    expect([handRolled, shared]).toEqual([false, 2]);
-  });
 });
 
 describe("SVG_NS", () => {
@@ -350,21 +303,9 @@ describe("SVG_NS", () => {
     // Assert
     expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
   });
-
-  it("is the one spelling: no source but dom.ts writes the namespace out", () => {
-    // Arrange — every source under src/, comments stripped.
-    const src = join(process.cwd(), "src");
-    // Act
-    const spelled = [...codeUnder(src)].filter(([, code]) => code.includes("www.w3.org/2000/svg")).map(([path]) => path);
-    // Assert
-    expect(spelled).toEqual(["dom.ts"]);
-  });
 });
 
 describe("decorativeElement", () => {
-  /** A hand-rolled decorative element: a classed span or div set aria-hidden by hand. */
-  const HAND_ROLLED = /const (\w+) = document\.createElement\("(?:span|div)"\);\s*\1\.className = [^;]+;(?:\s*\1\.setAttribute\([^;]+\);)*?\s*\1\.setAttribute\("aria-hidden", "true"\)/;
-
   it.each(["span", "div"] as const)("makes a %s of its tag", (tag) => {
     expect(decorativeElement(tag, "x").tagName).toBe(tag.toUpperCase());
   });
@@ -375,22 +316,6 @@ describe("decorativeElement", () => {
 
   it("hides itself from a screen reader", () => {
     expect(decorativeElement("div", "x").getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("is the one maker: no source hand-rolls a classed element it hides", () => {
-    // Arrange — every source under src/, comments stripped.
-    const src = join(process.cwd(), "src");
-    // Act
-    const code = [...codeUnder(src)];
-    const rolled = code.filter(([, text]) => HAND_ROLLED.test(text)).map(([path]) => path);
-    const callers = code.filter(([, text]) => /\bdecorativeElement\(/.test(text)).map(([path]) => path);
-    // Assert: none rolls its own, and the sidebar's rules are among its callers.
-    expect([rolled, ["sidebar/merge-queue-view.ts", "sidebar/roster.ts"].every((path) => callers.includes(path))]).toEqual([[], true]);
-  });
-
-  it("recognizes a hand-rolled copy", () => {
-    const copy = 'const g = document.createElement("span");\n  g.className = "x";\n  g.setAttribute("data-glyph", n);\n  g.setAttribute("aria-hidden", "true");';
-    expect(HAND_ROLLED.test(copy)).toBe(true);
   });
 });
 
@@ -407,16 +332,6 @@ describe("windowOf", () => {
     const el = document.implementation.createHTMLDocument("windowless").createElement("div");
     // Act / Assert
     expect(() => windowOf(el)).toThrow(/lives in a window/);
-  });
-
-  it("is the one window lookup every sidebar module asks", () => {
-    // Arrange: every sidebar source file.
-    const src = join(__dirname, "../src");
-    const files = filesUnder(join(src, "sidebar"));
-    // Act: a hand-rolled lookup defines its own windowOf.
-    const rolled = files.filter((f) => /function windowOf\(/.test(readFileSync(f, "utf8"))).map((f) => relative(src, f));
-    // Assert: none, so every caller shares dom.ts's.
-    expect(rolled).toEqual([]);
   });
 });
 
@@ -446,18 +361,6 @@ describe("pageResizeObserver", () => {
     // Act / Assert
     expect(pageResizeObserver(el)).toBeNull();
   });
-
-  it("is the one availability check every measurer asks", () => {
-    // Arrange: every source file under src.
-    const src = join(__dirname, "../src");
-    const files = filesUnder(src);
-    // Act: a hand-rolled check reads `typeof <x>.ResizeObserver`.
-    const rolled = files
-      .filter((f) => /typeof [\w.?]+\.ResizeObserver/.test(readFileSync(f, "utf8")))
-      .map((f) => relative(src, f));
-    // Assert: only the helper's own module.
-    expect(rolled).toEqual(["dom.ts"]);
-  });
 });
 
 describe("pageIntersectionObserver", () => {
@@ -476,20 +379,7 @@ describe("pageIntersectionObserver", () => {
     // Act / Assert
     expect(pageIntersectionObserver()).toBeNull();
   });
-
-  it("is the one availability check every viewport watch asks", () => {
-    // Arrange: every source file under src.
-    const src = join(__dirname, "../src");
-    const files = filesUnder(src);
-    // Act: a hand-rolled check reads `IntersectionObserver` off the global.
-    const rolled = files
-      .filter((f) => /IntersectionObserver\?:/.test(readFileSync(f, "utf8")))
-      .map((f) => relative(src, f));
-    // Assert: only the helper's own module.
-    expect(rolled).toEqual(["dom.ts"]);
-  });
 });
-
 
 describe("nodeLabel", () => {
   it.each([
@@ -507,20 +397,6 @@ describe("nodeLabel", () => {
 
     // Assert
     expect(label).toBe(want);
-  });
-
-  it("is the one place a node is spelled tag.class", () => {
-    // Arrange: the spelling's own template, as a hand-rolled copy would write it.
-    const spelling = /tagName\.toLowerCase\(\)\}\.\$\{/;
-
-    // Act
-    const src = join(process.cwd(), "src");
-    const copies = [...codeUnder(src)]
-      .filter(([file, code]) => file !== "dom.ts" && spelling.test(code))
-      .map(([file]) => file);
-
-    // Assert
-    expect(copies).toEqual([]);
   });
 });
 
@@ -685,24 +561,10 @@ describe("childrenMatching", () => {
     const record = await forwardedRecord(capture, "dom.query-scope-refused");
     expect(record.context).toEqual(expect.objectContaining({ helper: "childrenMatching", selector: ":scope > .row" }));
   });
-
-});
-
-describe("querySelectorAll", () => {
-  it("is the one way the webapp queries: no source calls querySelectorAll, whose answer WebKit caches", () => {
-    // Arrange — every source under src/, comments stripped.
-    const src = join(process.cwd(), "src");
-    const code = [...codeUnder(src)];
-    // Act
-    const direct = code.filter(([, text]) => /\bquerySelectorAll\b/.test(text)).map(([path]) => path);
-    // Assert
-    expect(direct).toEqual([]);
-  });
 });
 
 /** Let queued mutation records reach their observers. */
 const records = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-
 
 describe("pageMutationObserver", () => {
   afterEach(() => {
@@ -862,17 +724,5 @@ describe("pageMutationObserver", () => {
     // Assert
     const record = await forwardedRecord(capture, "dom.page-observer-windowless");
     expect([record.level.case, record.context]).toEqual(["error", expect.objectContaining({ document: windowless.URL })]);
-  });
-});
-
-describe("MutationObserver", () => {
-  it("is built only by pageMutationObserver: no source constructs one a page would carry into teardown", () => {
-    // Arrange — every source under src/, comments stripped.
-    const src = join(process.cwd(), "src");
-    const code = [...codeUnder(src)];
-    // Act
-    const builders = code.filter(([, text]) => /\bnew\s+(?:[\w$]+\.)*MutationObserver\b/.test(text)).map(([path]) => path);
-    // Assert
-    expect(builders).toEqual(["dom.ts"]);
   });
 });

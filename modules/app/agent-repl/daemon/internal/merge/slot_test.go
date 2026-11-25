@@ -1,13 +1,8 @@
 package merge
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"slices"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // The owner's ruling (2026-09-28): a parked merge does NOT block its
@@ -170,45 +165,4 @@ func TestARunLeavingTheHeadWithNoEndFailsHard(t *testing.T) {
 	// Act
 	h.o.mu.Lock()
 	h.o.vacateHeadLocked(r)
-}
-
-func TestEveryHeadChangeGoesThroughTheHeadHelpers(t *testing.T) {
-	// Arrange
-	fset := token.NewFileSet()
-	owners := map[string]bool{"takeHeadLocked": true, "vacateHeadLocked": true}
-	for _, source := range sourcescan.Production(t) {
-		parsed, err := parser.ParseFile(fset, source.Name, source.Source, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", source.Name, err)
-		}
-
-		// Act
-		var enclosing string
-		ast.Inspect(parsed, func(n ast.Node) bool {
-			if decl, ok := n.(*ast.FuncDecl); ok {
-				enclosing = decl.Name.Name
-			}
-			// Assert
-			switch node := n.(type) {
-			case *ast.AssignStmt:
-				for _, lhs := range node.Lhs {
-					if index, ok := lhs.(*ast.IndexExpr); ok && namesRunning(index.X) && !owners[enclosing] {
-						t.Errorf("%s: %s sets the queue's head itself, not through takeHeadLocked", fset.Position(node.Pos()), enclosing)
-					}
-				}
-			case *ast.CallExpr:
-				if fn, ok := node.Fun.(*ast.Ident); ok && fn.Name == "delete" && len(node.Args) > 0 && namesRunning(node.Args[0]) && !owners[enclosing] {
-					t.Errorf("%s: %s clears the queue's head itself, not through vacateHeadLocked", fset.Position(node.Pos()), enclosing)
-				}
-			}
-			return true
-		})
-	}
-}
-
-// namesRunning reports whether EXPR is an orchestrator's head map,
-// `<x>.running`.
-func namesRunning(expr ast.Expr) bool {
-	sel, ok := expr.(*ast.SelectorExpr)
-	return ok && sel.Sel.Name == "running"
 }

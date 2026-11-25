@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { filesUnder } from "./files-under.js";
 import { describe, expect, it } from "vitest";
 import { overrideComputedStyle } from "./computed-style.js";
 
@@ -47,16 +43,5 @@ describe("overrideComputedStyle", () => {
   it("hands the next test the engine's style", () => {
     // Assert
     expect(window.getComputedStyle(document.body).scrollPaddingTop).not.toBe("9px");
-  });
-});
-
-describe("every test that overrides some elements' computed style", () => {
-  it("does it through overrideComputedStyle, never a spy of its own over the real method", () => {
-    const here = fileURLToPath(import.meta.url);
-    const handRolled = filesUnder(join(process.cwd(), "test"), [".test.ts", ".test.tsx"]).filter(
-      (path) => path !== here && readFileSync(path, "utf8").includes("window.getComputedStyle.bind(window)"),
-    );
-
-    expect(handRolled).toEqual([]);
   });
 });

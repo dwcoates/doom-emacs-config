@@ -1058,7 +1058,7 @@ ANSWER is called with no argument for each report and answers `reported'
 \(success at once), `refused' (failure at once) or `pending' (held: ON-PENDING
 is called with the list (WS ON-REPORTED ON-NOT-REPORTED)).  ON-REPORT is
 called with WS before the answer.  Answers t, sent, as the real report does.
-THE ONE such stand-in for a three-way answer (test-test-helpers.el holds the
+THE ONE such stand-in for a three-way answer (test-rules-suites.el holds the
 suites to it)."
   (lambda (ws on-reported on-not-reported)
     (funcall on-report ws)
@@ -1078,14 +1078,14 @@ The prefix is `agent-repl--build-log-text's: the record's time, then
 (defun agent-repl-test--user-said (text)
   "Return the decoded `UserSaid' plist of the one text block TEXT, as the composer builds it.
 THE ONE such fixture every suite builds a typed prompt with
-\(test-test-helpers.el holds every suite to it)."
+\(test-rules-suites.el holds every suite to it)."
   (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
 
 (defun agent-repl-test--said (messages)
   "Return MESSAGES without the log records the batch logger echoed among them.
 In batch every log record is also a `message', so a suite that records
 `message' to read what the user was told reads the log's echoes too.  Order
-is kept.  THE ONE such filter every suite uses (test-test-helpers.el holds
+is kept.  THE ONE such filter every suite uses (test-rules-suites.el holds
 every suite to it)."
   (cl-remove-if (lambda (m) (string-match-p agent-repl-test--log-echo-regexp m))
                 messages))
@@ -1093,7 +1093,7 @@ every suite to it)."
 (defun agent-repl-test--remapped-backgrounds (face)
   "Return every :background the current buffer remaps FACE to, newest first.
 Read from `face-remapping-alist', so a remap stacked on another shows as
-two.  THE ONE such reader every suite uses (test-test-helpers.el holds
+two.  THE ONE such reader every suite uses (test-rules-suites.el holds
 every suite to it)."
   (delq nil (mapcar (lambda (spec) (and (listp spec) (plist-get spec :background)))
                     (cdr (assq face face-remapping-alist)))))
@@ -1104,7 +1104,7 @@ every suite to it)."
 (defmacro agent-repl-test--with-clock (start &rest body)
   "Run BODY with `agent-repl--now' answering `agent-repl-test--clock', from START.
 BODY steps time by setting `agent-repl-test--clock'.  THE ONE settable
-clock every suite uses (test-test-helpers.el holds every suite to it)."
+clock every suite uses (test-rules-suites.el holds every suite to it)."
   (declare (indent 1))
   `(let ((agent-repl-test--clock ,start))
      (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test--clock)))
@@ -1153,7 +1153,7 @@ renders the record's message and pushes it onto PLACE, so PLACE holds the
 records newest first.  Stub a rung by its emitter:
 \((symbol-function \='agent-repl--emit-error)
 \(agent-repl-test--record-into errors)).  THE ONE such recorder every suite
-uses (test-test-helpers.el holds every suite to it)."
+uses (test-rules-suites.el holds every suite to it)."
   `(lambda (_scope site &rest values)
      (push (agent-repl-log-site-render site values) ,place)))
 
@@ -1164,7 +1164,7 @@ reads which rung a record went to: stub each rung with its own LEVEL, as
 in ((symbol-function \='agent-repl--emit-warn)
 \(agent-repl-test--record-leveled-into records \='warn)).  PLACE holds the
 records newest first.  THE ONE such recorder every suite uses
-\(test-test-helpers.el holds every suite to it)."
+\(test-rules-suites.el holds every suite to it)."
   `(lambda (_scope site &rest values)
      (push (cons ,level (agent-repl-log-site-render site values)) ,place)))
 
@@ -1173,7 +1173,7 @@ records newest first.  THE ONE such recorder every suite uses
 Like `agent-repl-test--record-into', it pushes each record's text onto
 PLACE, newest first; then it signals an `error' carrying that text, as
 the real rung aborts its caller.  THE ONE such stand-in every suite uses
-\(test-test-helpers.el holds every suite to it)."
+\(test-rules-suites.el holds every suite to it)."
   `(lambda (_scope site &rest values)
      (let ((text (agent-repl-log-site-render site values)))
        (push text ,place)
@@ -1203,7 +1203,7 @@ in, so every other suite records at this boundary."
 The directory's name starts with PREFIX, VAR holds it as a directory name
 \(with its trailing slash), and it is deleted with everything in it however
 BODY exits.  THE ONE temporary-directory fixture every suite uses
-\(test-test-helpers.el holds every suite to it)."
+\(test-rules-suites.el holds every suite to it)."
   (declare (indent 2) (debug (symbolp form body)))
   `(let ((,var (file-name-as-directory (make-temp-file ,prefix t))))
      (unwind-protect (progn ,@body)
@@ -1211,7 +1211,7 @@ BODY exits.  THE ONE temporary-directory fixture every suite uses
 
 (defun agent-repl-test--module-sources ()
   "Every module source in `lisp/', suites (`test-*.el') aside.
-THE ONE list every source scan reads (test-test-helpers.el holds the scans
+THE ONE list every source scan reads (test-rules-suites.el holds the scans
 to it).  Suites are out of scope by design: a suite declares and uses its
 own batch-only scaffolding, which no rule about module code governs."
   (cl-remove-if (lambda (file) (string-prefix-p "test-" (file-name-nondirectory file)))
@@ -1478,6 +1478,38 @@ kind's suite reads its marks the same way."
           (sort (cl-remove-if-not (lambda (ov) (overlay-get ov tag))
                                   (overlays-in (point-min) (point-max)))
                 (lambda (a b) (< (overlay-start a) (overlay-start b))))))
+
+;;;; ---- Shared by a suite and the rule tests (test-rules-*.el) ----
+;;
+;; A helper both a suite and a rule file read lives here, the one file every
+;; ERT chunk loads, rather than in either: the `ert-rules' suite loads no
+;; module suite.
+
+(defun agent-repl-test--production-lisp-files ()
+  "Return the hand-written production Elisp files subject to source lints.
+The logging and module-wide rules (test-rules-logging.el,
+test-rules-modules.el) both scan them."
+  (seq-filter
+   (lambda (path)
+     (not (string-prefix-p "test-" (file-name-nondirectory path))))
+   (directory-files agent-repl-test--module-dir t "\\.el\\'")))
+
+(defun agent-repl-test-input-help--binding-commands (binding)
+  "Return the commands BINDING's row lists: one, or its list.
+test-input-help.el and its rules in test-rules-views.el both read it."
+  (let ((command (car binding)))
+    (if (listp command) (copy-sequence command) (list command))))
+
+(defun agent-repl-test-input-help--topic-commands (&optional loadable-only)
+  "Return every command the help topics name.
+LOADABLE-ONLY keeps only the topics whose `:requires' batch Emacs has."
+  (delete-dups
+   (mapcan (lambda (topic)
+             (when (or (not loadable-only)
+                       (cl-every (lambda (feature) (locate-library (symbol-name feature)))
+                                 (plist-get topic :requires)))
+               (mapcan #'agent-repl-test-input-help--binding-commands (plist-get topic :bindings))))
+           (copy-sequence agent-repl-input-help-topics))))
 
 (provide 'test-helpers)
 

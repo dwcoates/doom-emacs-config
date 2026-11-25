@@ -57,9 +57,9 @@ routed and its identity checked, never serialized. The wire codec logs one
 `verbosity=verbose`, so the same threshold governs their persistence.
 
 Direct `message` calls are only for text the user must read. The source audit
-in `test-core.el` explicitly lists each permitted file, owning function,
+in `test-rules-logging.el` explicitly lists each permitted file, owning function,
 message template, and user-facing reason. Diagnostics use the logging rungs;
-adding an unlisted `message` call fails the ERT suite. The same source audit
+adding an unlisted `message` call fails the `ert-rules` suite. The same source audit
 rejects record-builder/file-writer bypasses and unclassified literal-nil
 workspace log sites.
 
@@ -285,6 +285,26 @@ and keep one edge case per test case (an `ert-deftest`, or one named case of
 a table). Tests never launch external processes or
 mutate state outside `temporary-file-directory`; use the repository fakes and
 single-purpose boundary stubs.
+
+### Rule tests
+
+A rule test reads the module's elisp sources from disk as data and holds them
+to a structural rule ("no file calls X but Y", "every Z goes through one
+helper"). Rule tests are no one module's tests, so the one-file-per-source
+rule does not place them: they live by rule area in `test-rules-*.el`, the
+`ert-rules` suite (`testrun/roster/roster.go`), which every branch runs before
+its merge is admitted to the queue: `test-rules-logging.el`,
+`test-rules-modules.el`, `test-rules-wire.el`, `test-rules-views.el`,
+`test-rules-suites.el` (rules over the suites themselves),
+`test-rules-declarations.el`, `test-rules-no-throw-on-input.el` and
+`test-rules-scan.el`. `test-agent-repl.el` loads none of them. A helper a
+module's suite and a rule file both read lives in `test-helpers.el`.
+
+`test-rules-scan.el` fails any `ert-deftest` outside `test-rules-*.el` that
+reads elisp source (a file reader called on a `.el` path or listing), naming
+each; a test that reads elisp and is no rule (a binding observable only in its
+source, a module tree the test writes) is named with its reason in
+`agent-repl-test-rules-scan--allowed`.
 
 ### What is real and what is a mock in the ERT suites
 

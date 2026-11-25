@@ -1,9 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { boxAt, boxRect, settableScrollTop } from "./dom-rect.js";
-import { codeUnder } from "./files-under.js";
 
 describe("boxRect", () => {
   it("derives every edge from the box it is stated by", () => {
@@ -33,15 +30,6 @@ describe("boxRect", () => {
     // Assert
     expect([rect.left, rect.width, rect.right, rect.bottom, rect.x, rect.y]).toEqual([0, 0, 0, 20, 0, 5]);
   });
-
-  it("is the one scripted DOMRect: no suite hand-rolls its own", () => {
-    // Arrange
-    const suites = codeUnder(dirname(fileURLToPath(import.meta.url)));
-    // Act
-    const handRolled = [...suites].filter(([path, code]) => path !== "dom-rect.ts" && /toJSON:\s*\(\)\s*=>/.test(code)).map(([path]) => path);
-    // Assert
-    expect(handRolled).toEqual([]);
-  });
 });
 
 describe("boxAt", () => {
@@ -68,16 +56,6 @@ describe("boxAt", () => {
     // Assert
     expect(el.getBoundingClientRect().bottom).toBe(20);
   });
-
-  it("is how the sidebar's drag suite fixes one element's box: no copy of its own", () => {
-    // Arrange
-    const suites = codeUnder(dirname(fileURLToPath(import.meta.url)));
-    // Act
-    const code = suites.get("sidebar/subsections.test.ts") ?? "";
-    const handRolled = code.match(/defineProperty\(el, "getBoundingClientRect", \{ configurable: true, value: \(\) => boxRect\(\{ top/g) ?? [];
-    // Assert
-    expect([code.includes("boxAt("), handRolled.length]).toEqual([true, 0]);
-  });
 });
 
 describe("settableScrollTop", () => {
@@ -98,16 +76,5 @@ describe("settableScrollTop", () => {
     el.scrollTop = 9_999;
     // Assert
     expect(el.scrollTop).toBe(9_999);
-  });
-
-  it("is the one settable scrollTop of the feed suites: none hand-rolls its own", () => {
-    // Arrange
-    const suites = codeUnder(dirname(fileURLToPath(import.meta.url)));
-    // Act
-    const handRolled = [...suites]
-      .filter(([path, code]) => path.startsWith("feed/") && /defineProperty\([^,]+,\s*"scrollTop"/.test(code))
-      .map(([path]) => path);
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });

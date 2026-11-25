@@ -5,13 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
 
 // TestANestedStoreCallRunsOnItsOperationsConnection pins the reuse: the pool
@@ -350,29 +348,5 @@ func TestEveryOperationIsAccounted(t *testing.T) {
 	ops := []string{s.conns.holds[before].op, s.conns.holds[before+1].op}
 	if !reflect.DeepEqual(ops, []string{"daemon.wsm.sample_read", "daemon.wsm.sample_write"}) {
 		t.Fatalf("holds = %v, want the read then the write", ops)
-	}
-}
-
-// TestOnlyTheConnectionsOwnersReachThePool pins q as the one way a statement
-// finds its connection. An operation holds the pool's only connection, so a
-// statement inside it that went to the pool (s.db()) would wait forever for
-// the connection its own operation holds. The pool is reached only where no
-// operation can be running: the open, the migration, the close, and q itself.
-func TestOnlyTheConnectionsOwnersReachThePool(t *testing.T) {
-	// Arrange
-	owners := map[string]bool{"conn.go": true, "open.go": true, "memory.go": true, "migrate.go": true}
-	pool := regexp.MustCompile(`s\.db\(\)`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if !owners[file.Name] && pool.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v reach the pool with s.db(); run statements on s.q(ctx)", offenders)
 	}
 }

@@ -1408,7 +1408,8 @@ like an improvement still needs that conversation. Code:
     system's own suites run every other system as a mock ("A system's
     integration tests run that system alone"), so only the end-to-end suites
     test the systems together:
-    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert`;
+    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert` and
+      `ert-rules`;
     - `daemon/`: `daemon`, `e2e-kit` (the e2e world is built on the daemon's
       integration harness) and `e2e`;
     - the shim, the sidecar and the store: `shim`, `sidecar` and `store`,
@@ -1417,7 +1418,7 @@ like an improvement still needs that conversation. Code:
       matrix reads the mocked vendor's scenarios;
     - `agent-shim/shim-lock/`: `lock`, plus `shim`, whose integration tests
       spawn the real lock helper, and `e2e`;
-    - `webapp/`: `webapp`, `build-frontend-harness`, `e2e-kit` (whose scenario
+    - `webapp/`: `webapp`, `webapp-rules`, `build-frontend-harness`, `e2e-kit` (whose scenario
       matrix reads the webapp layer's areas) and `e2e`;
     - the module's `bin/`: every `bin/` harness;
   - a change to something several systems share fans out to its consumers and
@@ -1431,9 +1432,10 @@ like an improvement still needs that conversation. Code:
       its own, `e2e-kit` and `e2e`;
   - two tests keep the map honest: every local module a Go suite's `go.mod`
     replaces, and every tree a Vitest suite imports outside itself, must select
-    that suite. They and the mock-rule source scan are the `repo-scans` suite
-    (`daemon/reposcans`, its own module so no system's reuse key covers the
-    other systems' trees), which a change to any system selects;
+    that suite. They, the mock-rule source scan and every rule test of the
+    daemon (`daemonrules`) are the `repo-scans` suite (`daemon/reposcans`, its
+    own module so no system's reuse key covers the other systems' trees),
+    which a change to any system selects;
   - the runner itself (`testrun/`, `bin/test-all.sh` and the two report
     scripts it delegates to) runs every suite;
   - the briefs (`prompts/`) run `daemon` and `e2e`: the daemon

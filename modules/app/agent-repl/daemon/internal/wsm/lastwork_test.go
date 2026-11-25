@@ -3,12 +3,8 @@ package wsm
 import (
 	"context"
 	"errors"
-	"regexp"
-	"slices"
 	"testing"
 	"time"
-
-	"agent-repld/internal/sourcescan"
 )
 
 func TestRecordWork(t *testing.T) {
@@ -143,19 +139,5 @@ func TestWorkedSince(t *testing.T) {
 				t.Fatalf("WorkedSince(%v) = %v, %v; want %v, %v", tt.since, at, got, worked, tt.want)
 			}
 		})
-	}
-}
-
-// TestLastWorkAtHasOneWriter pins the structure invariant A rests on: the
-// only statement in this package that writes last_work_at is RecordWork's
-// (through advanceInstant), beside the layout's own DDL. A second writer is
-// a path that is not work reaching the idle clock.
-func TestLastWorkAtHasOneWriter(t *testing.T) {
-	// Act
-	got := sourcescan.SitesMatching(t, regexp.MustCompile(`last_work_at\s*=|"last_work_at"`))
-
-	// Assert
-	if want := []string{"lastwork.go", "lastwork.go"}; !slices.Equal(got, want) {
-		t.Fatalf("last_work_at is written in %v, want only lastwork.go's DDL backfill and RecordWork", got)
 	}
 }

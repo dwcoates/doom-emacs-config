@@ -10,8 +10,6 @@ import {
 import type { FoldFade } from "../../src/sidebar/context.js";
 import { SURFACED_ROW_CLASS } from "../../src/sidebar/row.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import stylesheet from "../../src/styles.css?raw";
-import { keyframesOf, rulesOf } from "../stylesheet.js";
 
 /** A row freshly drawn for ID, in ROOT. */
 const drawn = (root: HTMLElement, id: string): HTMLElement => {
@@ -142,24 +140,5 @@ describe("the fold fade", () => {
     // Assert
     const record = await forwardedRecord(capture, "sidebar.fold-fade");
     expect(record.context).toMatchObject({ workspace: "ws-1", ms: FOLD_FADE_MS });
-  });
-});
-
-describe("the fold fade's styling", () => {
-  it("fades a fading row's own line, a covered row's only", () => {
-    expect(stylesheet).toMatch(/#ws-sidebar \.ws\.covered\.fold-fading > :not\(\.kids\)/);
-  });
-
-  it("fades a block divider heading only covered, fading rows with them", () => {
-    expect(stylesheet).toMatch(
-      /#ws-sidebar \.sb-repo-block:not\(:has\(\.ws:not\(\.covered\)\)\):not\(:has\(\.surfaced:not\(\.fold-fading\)\)\) > \.sb-repo-divider \{\s*animation: ws-fold-fade var\(--fold-fade-duration/,
-    );
-  });
-
-  it("fades from full ink to none", () => {
-    expect(rulesOf(keyframesOf("ws-fold-fade")).map((rule) => [rule.selectors, rule.declarations.trim()])).toEqual([
-      [["from"], "opacity: 1;"],
-      [["to"], "opacity: 0;"],
-    ]);
   });
 });

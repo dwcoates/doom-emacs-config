@@ -393,31 +393,6 @@ every vocabulary assertion built on it pass vacuously."
   ;; Assert
   (should-not quit-flag))
 
-(ert-deftest agent-repl-test-helpers-quit-deferral-sites-use-the-shared-macros ()
-  "No suite hand-rolls the quit-deferral recipe beside the shared macros.
-A hand-rolled site is the failure this asserts against: it is easy to
-write one that forgets to disarm `quit-flag' inside the `inhibit-quit'
-scope, and such a site passes while leaving a live quit for whichever
-test runs next."
-  ;; Arrange -- test-helpers.el is where the recipe is ALLOWED to appear.
-  (let ((dir agent-repl-test--module-dir)
-        (offenders nil))
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file)
-                      '("test-helpers.el" "test-test-helpers.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (goto-char (point-min))
-          ;; Act -- the recipe's own signature: binding `inhibit-quit' by hand
-          ;; in a suite that also touches `quit-flag'.
-          (when (and (save-excursion
-                       (re-search-forward "(let ((inhibit-quit t))" nil t))
-                     (save-excursion
-                       (re-search-forward "\\_<quit-flag\\_>" nil t)))
-            (push (file-name-nondirectory file) offenders)))))
-    ;; Assert
-    (should-not offenders)))
-
 ;;;; ---- the popup-recording test helper --------------------------------
 
 (ert-deftest agent-repl-test-helpers-recording-popups-records-each-buffer ()
@@ -456,23 +431,6 @@ test runs next."
     (agent-repl-test--recording-popups (agent-repl-popup-show (current-buffer))))
   (agent-repl-test--recording-popups
     (should (null agent-repl-test--popups-shown))))
-
-(ert-deftest agent-repl-test-helpers-popup-stubs-use-the-shared-macro ()
-  "No suite but test-popup.el stubs `agent-repl-popup-show' by hand.
-test-popup.el tests the popup module itself and records one level lower."
-  ;; Arrange
-  (let ((dir agent-repl-test--module-dir)
-        (offenders nil))
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file)
-                      '("test-helpers.el" "test-test-helpers.el" "test-popup.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          ;; Act
-          (when (search-forward "(symbol-function 'agent-repl-popup-show)" nil t)
-            (push (file-name-nondirectory file) offenders)))))
-    ;; Assert
-    (should-not offenders)))
 
 ;;;; ---- The batch temp root ----
 
@@ -592,26 +550,6 @@ A zombie awaiting its reaper counts as gone: it holds no fds."
   ;; Act / Assert
   (should-not (agent-repl-test--reap-process nil)))
 
-(ert-deftest agent-repl-test-helpers-subprocess-reaps-share-one-helper ()
-  "Every subprocess reap in the shared harness goes through the group kill.
-A site that hand-rolls `delete-process' on a subprocess orphans its children."
-  ;; Arrange
-  (with-temp-buffer
-    (insert-file-contents
-     (expand-file-name "test-integration-helpers.el" agent-repl-test-helpers--dir))
-    ;; Act
-    (let ((hand-rolled
-           (cl-loop for name in '("agent-repl-daemon--build-process"
-                                  "agent-repl--frontend-daemon-process")
-                    when (progn (goto-char (point-min))
-                                (search-forward (format "(delete-process %s)" name) nil t))
-                    collect name))
-          (helper (progn (goto-char (point-min))
-                         (how-many (regexp-quote "(agent-repl-test--reap-process")))))
-      ;; Assert
-      (should-not hand-rolled)
-      (should (= helper 3)))))
-
 (ert-deftest agent-repl-test-helpers-with-temp-dir-binds-a-fresh-directory-name ()
   "The variable names an existing, empty directory, as a directory name."
   (agent-repl-test--with-temp-dir dir "agent-repl-temp-dir-test-"
@@ -643,22 +581,6 @@ A site that hand-rolls `delete-process' on a subprocess orphans its children."
        (error "Boom")))
     ;; Assert
     (should-not (file-exists-p seen))))
-
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-a-temp-dir-fixture ()
-  "Every temporary-directory fixture goes through `agent-repl-test--with-temp-dir'.
-A hand-rolled one is a macro deleting its own bound directory, the
-signature this looks for."
-  ;; Arrange
-  (let ((offenders nil))
-    (dolist (file (directory-files agent-repl-test--module-dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          ;; Act
-          (when (re-search-forward "(delete-directory ,[^ ]+ t)" nil t)
-            (push (file-name-nondirectory file) offenders)))))
-    ;; Assert
-    (should-not offenders)))
 
 ;;;; ---- Source scans ----
 
@@ -695,22 +617,6 @@ signature this looks for."
       ;; Act / Assert
       (should (equal (agent-repl-test--file-forms file) nil)))))
 
-(ert-deftest agent-repl-test-helpers-no-source-scan-hand-rolls-its-reader ()
-  "Every suite that reads module sources as data goes through the shared helpers.
-A hand-rolled scan lists `lisp/' itself or loops `read' over a buffer, the
-signatures this looks for."
-  ;; Arrange
-  (let ((offenders nil))
-    (dolist (file (directory-files agent-repl-test--module-dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          ;; Act
-          (when (re-search-forward "(while t\\s-*(let ((form (read (current-buffer)))" nil t)
-            (push (file-name-nondirectory file) offenders)))))
-    ;; Assert
-    (should-not offenders)))
-
 ;;;; ---- agent-repl-test--said ------------------------------------------
 
 (ert-deftest agent-repl-test-helpers-said-drops-an-echoed-record ()
@@ -743,42 +649,12 @@ signatures this looks for."
     (should (equal (agent-repl-test--said (list "second" record "first"))
                    '("second" "first")))))
 
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-said-filter ()
-  "Every suite that strips the log's echoes from recorded messages uses the one filter."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward "(string-match-p \"[^\"]*\\[agent-repl[^\"]*\" m)" nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should-not hand-rolled)))
-
 ;;;; ---- agent-repl-test--user-said ------------------------------------
 
 (ert-deftest agent-repl-test-helpers-user-said-is-one-text-block ()
   "The fixture is the decoded UserSaid of its text as one text block."
   (should (equal (agent-repl-test--user-said "fix the feed")
                  '(:content (:blocks ((:arm :text :value (:text "fix the feed"))))))))
-
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-user-said-fixture ()
-  "Every suite that builds a one-text-block UserSaid uses the one fixture."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (search-forward "(list :content (list :blocks (list (list :arm :text :value (list :text text)))))" nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should-not hand-rolled)))
 
 ;;;; ---- agent-repl-test--composer-marked ----
 
@@ -793,15 +669,6 @@ signatures this looks for."
     ;; Act / Assert
     (should (equal (agent-repl-test--composer-marked 'tag-a) '("aa" "cc")))))
 
-(ert-deftest agent-repl-test-test-helpers-composer-marked-is-every-kinds-reader ()
-  "Every composer mark kind's suite reads its marks through the one reader."
-  (dolist (file '("test-command-completion.el" "test-workspace-completion.el"))
-    (with-temp-buffer
-      (insert-file-contents (expand-file-name file agent-repl-test-helpers--dir))
-      (should (search-forward "(agent-repl-test--composer-marked '" nil t))
-      (goto-char (point-min))
-      (should-not (search-forward "(overlays-in" nil t)))))
-
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here
@@ -815,20 +682,6 @@ signatures this looks for."
     ;; Assert
     (should (equal (file-name-nondirectory path) "render-colors.json"))
     (should (file-readable-p path))))
-
-(ert-deftest agent-repl-test-helpers-no-suite-spells-the-render-colors-path-itself ()
-  "Every suite reads render-colors.json through the one helper path."
-  ;; Arrange
-  (let ((spelled nil))
-    ;; Act
-    (dolist (file (directory-files agent-repl-test--module-dir t "\\`test-.*\\.el\\'"))
-      (with-temp-buffer
-        (insert-file-contents file)
-        (when (re-search-forward "(expand-file-name \"[./]*proto/vocab/render-colors\\.json\"" nil t)
-          (unless (equal (file-name-nondirectory file) "test-helpers.el")
-            (push (file-name-nondirectory file) spelled)))))
-    ;; Assert
-    (should-not spelled)))
 
 (ert-deftest agent-repl-test-helpers-record-into-records-formatted-newest-first ()
   "A rung stubbed with the recorder keeps each record's text, newest first."
@@ -852,23 +705,6 @@ signatures this looks for."
         (should (equal (cadr err) "broken n=1"))))
     (should (equal records '("broken n=1")))))
 
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-fatal-stand-in ()
-  "Every suite stubs `agent-repl--fatal' with `agent-repl-test--fatal-into'.
-test-spell.el records each rung with its level, a different shape, and
-stubs every rung alike."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward "(symbol-function 'agent-repl--emit-fatal)[ \t\n]*(lambda (_" nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should-not hand-rolled)))
-
 (ert-deftest agent-repl-test-helpers-remapped-backgrounds-reads-newest-first ()
   "The reader returns each :background FACE is remapped to, newest first, stacked ones included."
   (with-temp-buffer
@@ -881,38 +717,6 @@ stubs every rung alike."
                          (agent-repl-test--remapped-backgrounds 'fringe)
                          (agent-repl-test--remapped-backgrounds 'header-line))
                    '(("#222222" "#111111") nil nil)))))
-
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-remapped-backgrounds ()
-  "Every suite reads a buffer's remapped backgrounds through `agent-repl-test--remapped-backgrounds'."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward "(plist-get spec :background)" nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should-not hand-rolled)))
-
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-recorder ()
-  "Every suite records a logging rung through `agent-repl-test--record-into'."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (equal (file-name-nondirectory file) "test-helpers.el")
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward
-                 "(lambda (_[a-z]* fmt &rest args)[ \t\n]*(push (apply #'format fmt args) [^() \t\n]+))"
-                 nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should-not hand-rolled)))
 
 (ert-deftest agent-repl-test-helpers-with-clock-answers-its-start ()
   "Inside the settable clock `agent-repl--now' answers the START it was given."
@@ -939,23 +743,6 @@ stubs every rung alike."
     (should (eq (symbol-function 'agent-repl--now) before))
     (should (= agent-repl-test--clock 0.0))))
 
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-settable-clock ()
-  "Every suite steps `agent-repl--now' through `agent-repl-test--with-clock'."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (equal (file-name-nondirectory file) "test-helpers.el")
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward
-                 "(symbol-function 'agent-repl--now)[ \t\n]*(lambda ()[ \t\n]*[a-z-]+)"
-                 nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should-not hand-rolled)))
-
 (ert-deftest agent-repl-test-helpers-record-leveled-into-records-level-and-text-newest-first ()
   "A rung stubbed with the leveled recorder keeps each record as (LEVEL . TEXT), newest first."
   ;; Arrange
@@ -967,23 +754,6 @@ stubs every rung alike."
       (agent-repl--error nil "second s={s}" :s "x"))
     ;; Assert
     (should (equal records '((error . "second s=x") (info . "first n=1"))))))
-
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-leveled-recorder ()
-  "Every suite records a rung with its level through `agent-repl-test--record-leveled-into'."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (equal (file-name-nondirectory file) "test-helpers.el")
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward
-                 "(lambda (_[a-z]* fmt &rest args)[ \t\n]*(push (cons '[a-z]+ (apply #'format fmt args))"
-                 nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should-not hand-rolled)))
 
 ;;;; ---- The page-unloading reporter ----
 
@@ -1020,21 +790,3 @@ A list: the reporter's return, the reports seen, the outcome, the held."
   ;; Act / Assert
   (should-error (agent-repl-test-helpers--report-through 'maybe)))
 
-(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-page-unloading-reporter ()
-  "Every suite that answers a report three ways uses the one reporter."
-  ;; Arrange
-  (let ((dir agent-repl-test-helpers--dir)
-        (hand-rolled nil))
-    ;; Act
-    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
-      (unless (equal (file-name-nondirectory file) "test-helpers.el")
-        (with-temp-buffer
-          (insert-file-contents file)
-          (while (re-search-forward
-                  "(symbol-function 'agent-repl-host-report-page-unloading)[ \t\n]*(lambda (ws on-reported on-not-reported)"
-                  nil t)
-            (let ((end (save-excursion (up-list -1) (forward-sexp) (point))))
-              (when (re-search-forward "'refused\\|'pending" end t)
-                (push (file-name-nondirectory file) hand-rolled)))))))
-    ;; Assert
-    (should-not hand-rolled)))

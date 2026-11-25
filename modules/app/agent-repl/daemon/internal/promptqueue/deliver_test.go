@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"os"
 	"strings"
 	"testing"
 
@@ -1269,28 +1267,6 @@ func TestRetractAcceptedTakesDownTheTurnsMirroredRow(t *testing.T) {
 	}
 }
 
-// THE ONE RETRACTION. Every production path in this package that takes an
-// accepted prompt's mirrored row back goes through retractAccepted, so no
-// site hand-rolls a retraction that could take down a different row.
-func TestEveryMirroredRowRetractionGoesThroughRetractAccepted(t *testing.T) {
-	// Arrange
-	fset, funcs := productionFuncs(t)
-	var sites []string
-	// Act
-	for _, fn := range funcs {
-		ast.Inspect(fn, func(n ast.Node) bool {
-			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "OnPromptRetired" && fn.Name.Name != "retractAccepted" {
-				sites = append(sites, fset.Position(sel.Pos()).String()+" in "+fn.Name.Name)
-			}
-			return true
-		})
-	}
-	// Assert
-	if len(sites) != 0 {
-		t.Fatalf("mirrored rows retracted outside retractAccepted: %v", sites)
-	}
-}
-
 // --- a prompt the vendor already recorded -----------------------------------
 
 // recordedBehindRunning stands RUNNING with t1 and t2 held behind it, t1's
@@ -1365,23 +1341,5 @@ func TestCloseRecordedClosesTheTurnAsWithdrawnAndRecordsTheLostDeliveryAtError(t
 	if !closed || how != wsm.CloseWithdrawn || !logged || record.Context["turn"] != "t1" ||
 		record.Context["invariant_violation"] != "a delivered prompt's hold is retired with its delivery" {
 		t.Fatalf("close = (%v, %v), record = (%+v, %v); want withdrawn and the lost delivery at ERROR", how, closed, record, logged)
-	}
-}
-
-// Every refusal of a recorded prompt goes through closeRecorded: a site that
-// hand-rolled its own close and record would drift from the rest.
-func TestEveryRecordedRefusalGoesThroughCloseRecorded(t *testing.T) {
-	// Arrange
-	files := []string{"deliver.go", "join.go"}
-
-	// Act, Assert
-	for _, name := range files {
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", name, err)
-		}
-		if strings.Contains(string(source), "ErrPromptRecorded") && !strings.Contains(string(source), "q.closeRecorded(") {
-			t.Fatalf("%s handles ErrPromptRecorded without closeRecorded", name)
-		}
 	}
 }

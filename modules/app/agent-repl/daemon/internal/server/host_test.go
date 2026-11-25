@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -1559,25 +1557,6 @@ func TestLogHostStreamReadLeavesTheCallersFieldsAlone(t *testing.T) {
 	// Assert.
 	if !reflect.DeepEqual(fields, dlog.Context{"workspace": "ws-1"}) {
 		t.Fatalf("fields = %v, want them unchanged", fields)
-	}
-}
-
-// TestHostReadsAreRecordedThroughOneHelper pins that every host read failure
-// in host.go goes through logHostStreamRead: a hand-rolled cancelled-context
-// branch beside it is the drift the helper exists to prevent.
-func TestHostReadsAreRecordedThroughOneHelper(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("host.go")
-	if err != nil {
-		t.Fatalf("read host.go: %v", err)
-	}
-
-	// Act.
-	branches := strings.Count(string(src), "ctxend.Is(")
-
-	// Assert.
-	if branches != 1 {
-		t.Fatalf("host.go tests ctxend.Is %d times, want once, inside logHostStreamRead", branches)
 	}
 }
 

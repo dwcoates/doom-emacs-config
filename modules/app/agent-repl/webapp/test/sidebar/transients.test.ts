@@ -8,8 +8,6 @@ import { spyLog } from "../log-spy.js";
 import { createListeners } from "../../src/listeners.js";
 import { FOCUS_LEFT_BLUR, FOCUS_LEFT_EMACS, FOCUS_LEFT_HIDDEN } from "../../src/focus-left.js";
 import { DISMISS_PAGE_PRESS } from "../../src/host/sidebar-popups.js";
-import stylesheet from "../../src/styles.css?raw";
-import { rulesOf } from "../stylesheet.js";
 
 describe("the rail's transients", () => {
   let host: HTMLElement;
@@ -347,21 +345,5 @@ describe("the rail's transients", () => {
     host.dispatchEvent(new MouseEvent("mouseleave"));
     // ASSERT
     expect([closes, suspended()]).toEqual([[], false]);
-  });
-});
-
-describe("the rail's hover highlights in the stylesheet", () => {
-  const railHoverSelectors = rulesOf(stylesheet)
-    .flatMap((rule) => rule.selectors)
-    .filter((selector) => selector.startsWith("#ws-sidebar") && selector.includes(":hover"));
-
-  it("has hover highlights in the rail to gate", () => {
-    expect(railHoverSelectors.length).toBeGreaterThan(0);
-  });
-
-  it("draws every one only while the rail is not suspended", () => {
-    expect(
-      railHoverSelectors.filter((selector) => !selector.startsWith(`#ws-sidebar:not(.${HOVER_SUSPENDED_CLASS}) `)),
-    ).toEqual([]);
   });
 });

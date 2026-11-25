@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -9,7 +7,6 @@ import {
   type SelectWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { codeUnder } from "../files-under.js";
 import { RecordingSink, WORKSPACE } from "../feed/harness.js";
 import { scriptedAppContext } from "./app-context.js";
 
@@ -68,11 +65,5 @@ describe("scriptedAppContext", () => {
 
   it("ticks at the period it was told", () => {
     expect([ticksWithin(60_000, 59_999), ticksWithin(60_000, 60_000)]).toEqual([0, 1]);
-  });
-
-  it("is how every merge test scripts its daemon, so none builds the client by hand", () => {
-    const here = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "feed", "merge");
-    const handRolled = [...codeUnder(here)].filter(([, code]) => code.includes("createRouterTransport")).map(([file]) => file);
-    expect(handRolled).toEqual([]);
   });
 });

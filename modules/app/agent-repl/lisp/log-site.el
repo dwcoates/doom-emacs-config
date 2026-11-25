@@ -83,7 +83,7 @@ For a form expanded outside any file load or compile -- a test's
 
 (defvar agent-repl-log-site--expanded (make-hash-table :test #'equal)
   "KEY -> (FUNCTION TEMPLATE FILE) for every site expanded in this Emacs.
-The scan in `test-log-site.el' holds every call it finds in source to the
+The scan in `test-rules-logging.el' holds every call it finds in source to the
 key its expansion derived here.")
 
 ;;;; ---- Keys ----

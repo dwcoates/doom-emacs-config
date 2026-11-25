@@ -99,20 +99,6 @@ func TestTheHandbackBriefLeadsWithItsLabel(t *testing.T) {
 	}
 }
 
-func TestThePromptQueueMirrorDrawsThroughPromptRow(t *testing.T) {
-	// Arrange
-	raw, err := os.ReadFile("../../promptqueue/deliver.go")
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	source := string(raw)
-
-	// Act / Assert: the mirror composes no prompt row of its own.
-	if !strings.Contains(source, "feed.PromptRow(") || strings.Contains(source, "FeedRow_UserPrompt{") {
-		t.Fatal("the prompt queue's mirror does not draw its row through feed.PromptRow")
-	}
-}
-
 func TestMarkMergeWorkspaceRemovedRestatesTheHead(t *testing.T) {
 	// Arrange
 	store := newFakeDurableRows()

@@ -172,49 +172,6 @@
 
 ;;;; ---- ONE path: Emacs holds no prompt in memory ----
 
-(defconst agent-repl-test-pq--retired-in-memory-names
-  '(;; The retired outage queue and its release edges.
-    "agent-repl-prompt-queue-offer"
-    "agent-repl-prompt-queue-drain"
-    "agent-repl--prompt-queue-draining"
-    "agent-repl--prompt-queue-on-link-up"
-    "agent-repl--prompt-queue-on-link-promote"
-    "agent-repl--prompt-queue-on-reattached"
-    ":outage"
-    ;; The retired in-memory deferral queue, its finish-edge release and its
-    ;; liveness gate.
-    "agent-repl--prompt-queue-enqueue"
-    "agent-repl--prompt-queue-on-finish"
-    "agent-repl-prompt-queue-pending"
-    "agent-repl-prompt-queue-deliverable-p"
-    "agent-repl--prompt-queue-blocked-gates"
-    ":deferred-prompts")
-  "Names of the retired in-memory prompt holding and its release edges.")
-
-(ert-deftest agent-repl-pq-no-production-source-names-a-retired-in-memory-queue ()
-  "No production source holds a prompt in Emacs memory.
-Owner ruling, 2026-09-28: held prompts survive outages and restarts, so a
-prompt the daemon did not take goes to the durable held-prompt ingress
-\(held-ingress.el), and a deferral is held by the daemon itself.  A source
-naming a retired queue or one of its release edges has reopened a second
-path."
-  ;; Arrange
-  (let* ((dir (file-name-directory (symbol-file 'agent-repl-queue-deferred-prompt)))
-         (sources (cl-remove-if (lambda (f) (string-prefix-p "test-" (file-name-nondirectory f)))
-                                (directory-files dir t "\\.el\\'")))
-         (offenders nil))
-    ;; Act
-    (dolist (file sources)
-      (with-temp-buffer
-        (insert-file-contents file)
-        (dolist (name agent-repl-test-pq--retired-in-memory-names)
-          (goto-char (point-min))
-          (when (search-forward name nil t)
-            (push (format "%s: %s" (file-name-nondirectory file) name) offenders)))))
-    ;; Assert
-    (should (> (length sources) 10))
-    (should-not offenders)))
-
 (ert-deftest agent-repl-pq-nothing-rides-the-finish-edge-to-release-a-prompt ()
   "The roster's finish edge releases no prompt: the daemon delivers deferrals."
   (should-not (seq-some (lambda (fn) (and (symbolp fn)

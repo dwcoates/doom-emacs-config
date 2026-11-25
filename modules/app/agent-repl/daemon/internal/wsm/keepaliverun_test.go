@@ -3,11 +3,8 @@ package wsm
 import (
 	"context"
 	"errors"
-	"slices"
 	"testing"
 	"time"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // readRun reads workspace WS's keep-alive run back.
@@ -118,18 +115,6 @@ func TestAKeepaliveOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("a keep-alive was recorded for a workspace that does not exist")
-	}
-}
-
-// TestTheKeepaliveRunHasOneWrite pins countKeepalive as the run's one write:
-// a hand-rolled count elsewhere would drift from its turn-clock rule.
-func TestTheKeepaliveRunHasOneWrite(t *testing.T) {
-	// Act
-	writers := sourcescan.Sites(t, "keepalive_run_beats =")
-
-	// Assert
-	if !slices.Equal(writers, []string{"keepaliverun.go"}) {
-		t.Fatalf("the run is written in %v, want keepaliverun.go alone", writers)
 	}
 }
 

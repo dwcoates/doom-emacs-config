@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
 	"reflect"
 	"testing"
 
@@ -17,7 +16,6 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimlife"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -230,21 +228,6 @@ func TestNoSessionErrorMatchesErrNoSessionAndStatesItsCause(t *testing.T) {
 	// Assert
 	if !matches || text != ErrNoSession.Error()+": "+causeNoWatcher {
 		t.Fatalf("errors.Is = %v, Error = %q; want a match stating the cause", matches, text)
-	}
-}
-
-// TestEveryNoSessionRefusalStatesItsCause pins every refusal site to
-// noSession: a bare ErrNoSession would reach the client with no account, which
-// the server refuses as an invariant break.
-func TestEveryNoSessionRefusalStatesItsCause(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "ErrNoSession")
-
-	// Assert
-	for _, site := range sites {
-		if site != "api.go" {
-			t.Fatalf("ErrNoSession named outside api.go in %v; refuse with noSession(cause)", sites)
-		}
 	}
 }
 
@@ -1818,19 +1801,6 @@ func TestHoldAndRevive(t *testing.T) {
 	}
 }
 
-// TestEveryShimlessEntryWaitsThroughHoldAndRevive pins that a prompt and a
-// session act with no shim share holdAndRevive, so neither hand-rolls its own
-// hold-then-revive.
-func TestEveryShimlessEntryWaitsThroughHoldAndRevive(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "q.holdAndRevive(")
-
-	// Assert
-	if want := []string{"acts.go", "submit.go"}; !reflect.DeepEqual(sites, want) {
-		t.Fatalf("holdAndRevive call sites = %v, want %v", sites, want)
-	}
-}
-
 func TestRefuseAtColdGate(t *testing.T) {
 	const message = "the session is parked at its cold gate, so the act is refused by the gate's own name"
 	tests := []struct {
@@ -1878,18 +1848,6 @@ func TestRefuseAtColdGate(t *testing.T) {
 				t.Fatalf("records = %+v, want %q at %s", h.log.Records(), message, tc.wantLevel)
 			}
 		})
-	}
-}
-
-// TestEveryColdGateRefusalGoesThroughRefuseAtColdGate pins that no entry
-// hand-rolls its own cold-gate refusal.
-func TestEveryColdGateRefusalGoesThroughRefuseAtColdGate(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "&ColdGateRefusal{")
-
-	// Assert
-	if want := []string{"submit.go"}; !reflect.DeepEqual(sites, want) {
-		t.Fatalf("ColdGateRefusal construction sites = %v, want %v", sites, want)
 	}
 }
 
@@ -2132,33 +2090,5 @@ func TestAStandDownBeforeTheRevivalBeganDoesNotExcuseIt(t *testing.T) {
 	// Assert
 	if !logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
 		t.Fatalf("records = %+v, want the lying revival at ERROR", h.log.Records())
-	}
-}
-
-// EVERY MERGE REFUSAL IS refuseMerging's: the held path and the arrival path
-// refuse a submission under a refusing lease with the one answer.
-func TestEveryMergeRefusalIsRefuseMergings(t *testing.T) {
-	// Arrange
-	fset, funcs := productionFuncs(t)
-
-	// Act
-	var found []string
-	for _, fn := range funcs {
-		if fn.Name.Name == "refuseMerging" {
-			continue
-		}
-		ast.Inspect(fn, func(n ast.Node) bool {
-			if kv, ok := n.(*ast.KeyValueExpr); ok {
-				if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "RefusedArm" {
-					found = append(found, fset.Position(kv.Pos()).String()+" in "+fn.Name.Name)
-				}
-			}
-			return true
-		})
-	}
-
-	// Assert
-	if len(found) > 0 {
-		t.Fatalf("these functions compose a merge refusal instead of calling refuseMerging: %v", found)
 	}
 }

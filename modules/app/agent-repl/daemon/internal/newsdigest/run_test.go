@@ -14,7 +14,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/recordlock"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -677,17 +676,5 @@ func TestContextEndedRecordsTheRunsEndAndAnswersItsCause(t *testing.T) {
 	logged := records(log, "info", opRun)
 	if !errors.Is(err, context.Canceled) || len(logged) != 1 || logged[0].Context["cause"] != context.Canceled.Error() {
 		t.Fatalf("contextEnded = %v with records %v, want the cause answered and logged once", err, log.Records())
-	}
-}
-
-// TestEveryContextEndOfARunIsRecordedByContextEnded holds run to one record
-// of a run its context ended.
-func TestEveryContextEndOfARunIsRecordedByContextEnded(t *testing.T) {
-	// Act
-	counts := []int{sourcescan.Count(t, "ended with its context"), sourcescan.Count(t, "contextEnded(log, ")}
-
-	// Assert
-	if counts[0] != 1 || counts[1] != 3 {
-		t.Fatalf("records = %d and calls = %d, want one record in contextEnded and three exits through it", counts[0], counts[1])
 	}
 }

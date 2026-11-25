@@ -3,14 +3,12 @@ package workspace
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestUpdateAgentArmNamesEveryLandedKind(t *testing.T) {
@@ -448,28 +446,5 @@ func TestRefusedNoSession(t *testing.T) {
 				t.Fatalf("refusedNoSession(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestNoCallerHandRollsTheNoSessionCheck holds every caller in this package
-// to refusedNoSession: a hand-rolled arm comparison is where the checks drift.
-func TestNoCallerHandRollsTheNoSessionCheck(t *testing.T) {
-	// Arrange.
-	pattern := regexp.MustCompile(`\.Arm\s*[!=]=\s*ArmShimNoSession`)
-
-	// Act.
-	var offenders []string
-	for _, f := range sourcescan.Production(t) {
-		if f.Name == "shimarms.go" {
-			continue
-		}
-		if pattern.Match(f.Source) {
-			offenders = append(offenders, f.Name)
-		}
-	}
-
-	// Assert.
-	if len(offenders) != 0 {
-		t.Fatalf("hand-rolled no_session checks in %v, want refusedNoSession", offenders)
 	}
 }

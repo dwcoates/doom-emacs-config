@@ -2,7 +2,6 @@ package footer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1626,26 +1625,6 @@ func TestTakeUpdateFoldsABeat(t *testing.T) {
 	}
 }
 
-// EVERY READING OF A SPAWN'S PROMPT INTO A ROW GOES THROUGH takeCommission AND
-// takeUpdate: a hand-rolled site elsewhere in chips.go would let the spawning
-// call's stream and the run's own describe one run differently.
-func TestChipsReadsAPromptOnlyThroughTheSharedHelpers(t *testing.T) {
-	// Arrange
-	source, err := os.ReadFile("chips.go")
-	if err != nil {
-		t.Fatalf("read chips.go: %v", err)
-	}
-
-	// Act
-	beats := strings.Count(string(source), "GetPrompt().GetDescription()")
-	commissions := strings.Count(string(source), "row.description = commission.GetDescription()")
-
-	// Assert
-	if beats != 1 || commissions != 1 {
-		t.Fatalf("chips.go reads a beat's description at %d sites and a commission's at %d, want 1 each (takeUpdate, takeCommission)", beats, commissions)
-	}
-}
-
 // ---- a subagent resumed by a send ------------------------------------------------
 
 // resumedSubagent announces AGENT's run resumed by the send SEND: the handle
@@ -1912,32 +1891,6 @@ func TestMinimalAgentRowIsUndescribedAndAddressedByHandleAndAgent(t *testing.T) 
 		row.label != "subagent" || row.description != "" || row.tokens != 0 ||
 		!row.startedAt.Equal(instant) || row.provenance != provenanceLiveWorkSet {
 		t.Fatalf("row = %+v, want an undescribed row addressed by send-1 and agent-1", *row)
-	}
-}
-
-// EVERY ROW OPENED AHEAD OF ITS DESCRIPTION IS minimalAgentRow's: the generic
-// label is spelled in one row literal, so a hand-rolled minimal row elsewhere
-// fails here rather than drifting.
-func TestMinimalRowsAreBuiltOnlyByTheSharedHelper(t *testing.T) {
-	for _, file := range []string{"chips.go", "livework.go", "netresume.go"} {
-		// Arrange
-		source, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-
-		// Act
-		literals := strings.Count(string(source), "label:        subagentLabel(nil)") +
-			strings.Count(string(source), "label: subagentLabel(nil)")
-
-		// Assert
-		want := 0
-		if file == "chips.go" {
-			want = 1
-		}
-		if literals != want {
-			t.Fatalf("%s builds a generic-label row literal at %d sites, want %d", file, literals, want)
-		}
 	}
 }
 

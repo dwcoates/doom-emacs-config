@@ -2875,18 +2875,6 @@ flash never claims a start is under way."
                        (agent-repl--input-refusal-detail '(:arm :no-session :value nil)))
                  '("why" ""))))
 
-(ert-deftest agent-repl-input-no-arm-hand-rolls-the-refusal-detail ()
-  "Every refusal arm reads its `detail' through the one helper."
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "input.el" (file-name-directory
-                                                 (symbol-file (quote agent-repl--input-refusal-detail) (quote defun)))))
-                  (buffer-string))))
-    (should-not (string-match-p (regexp-quote "(plist-get (plist-get reason :value) :detail)")
-                                (replace-regexp-in-string
-                                 (regexp-quote "(or (plist-get (plist-get reason :value) :detail) \"\")")
-                                 "" source)))))
-
 (ert-deftest agent-repl-input-no-session-records-at-warn ()
   "A session the daemon could not bring back is a WARN, under its own token."
   (agent-repl-test-input--with
@@ -5409,16 +5397,6 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (should-not agent-repl-test-input--select-requests)
     (should (agent-repl-test-input--call-logged-p :warn "elisp.input.probe-no-conn"))
     (should (equal (agent-repl-test-input--notice) "probe: no daemon connection"))))
-
-(ert-deftest agent-repl-test-input-every-composer-verb-goes-through-the-one-call ()
-  "No send site in input.el hand-rolls the verb call's handover routing."
-  (let ((source (with-temp-buffer
-                  (insert-file-contents (expand-file-name "input.el" agent-repl-test--module-dir))
-                  (buffer-string)))
-        (count 0) (start 0))
-    (while (string-match "(agent-repl-host-route-handover" source start)
-      (setq count (1+ count) start (match-end 0)))
-    (should (= count 1))))
 
 ;;;; ---- Numbered answers ---------------------------------------------------
 

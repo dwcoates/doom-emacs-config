@@ -11,7 +11,6 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/logsite"
 )
@@ -592,83 +591,6 @@ func TestAwaitOwnEnd(t *testing.T) {
 			}
 			if !loggedLike(h, logLike{level: tc.level, op: "daemon.merge.pause", text: tc.message, context: want}) {
 				t.Fatalf("no %s record %q: %v", tc.level, tc.message, h.logs.Records())
-			}
-		})
-	}
-}
-
-// TestASuspensionAwaitsEveryOwnEndThroughAwaitOwnEnd holds suspendFor's runs
-// that end by themselves -- in their terminal, or abandoned -- to the one
-// bounded wait, so neither drifts into a hand-rolled copy.
-func TestASuspensionAwaitsEveryOwnEndThroughAwaitOwnEnd(t *testing.T) {
-	// Arrange.
-	body := orchestratorMethodBody(t, "suspendFor")
-
-	// Act.
-	calls := strings.Count(body, "o.awaitOwnEnd(")
-	handRolled := strings.Count(body, "case <-mark.done") + strings.Count(body, "o.forgetMoved(ws)\n\t\tlog.Info(op, \"the merge was abandoned")
-
-	// Assert.
-	if calls != 2 || handRolled != 0 {
-		t.Fatalf("suspendFor waits through awaitOwnEnd %d times with %d hand-rolled waits, want 2 and none", calls, handRolled)
-	}
-}
-
-// orchestratorMethodBody answers the production source of the orchestrator's
-// method NAME, from its declaration to the next one.
-func orchestratorMethodBody(t *testing.T, name string) string {
-	t.Helper()
-	decl := "\nfunc (o *orchestrator) " + name + "("
-	for _, f := range sourcescan.Production(t) {
-		src := string(f.Source)
-		start := strings.Index(src, decl)
-		if start < 0 {
-			continue
-		}
-		end := strings.Index(src[start+1:], "\nfunc ")
-		if end < 0 {
-			return src[start:]
-		}
-		return src[start : start+1+end]
-	}
-	t.Fatalf("%s was not found", name)
-	return ""
-}
-
-func TestOrchestratorMethodBodyAnswersOneMethodWhole(t *testing.T) {
-	// Arrange + Act.
-	body := orchestratorMethodBody(t, "forgetMoved")
-
-	// Assert.
-	if !strings.HasPrefix(body, "\nfunc (o *orchestrator) forgetMoved(") || strings.Count(body, "\nfunc ") != 1 || !strings.Contains(body, "delete(o.displaces, ws)") {
-		t.Fatalf("body = %q, want forgetMoved alone and whole", body)
-	}
-}
-
-// TestEverySuspensionCutsAndLetsGoThroughTheSharedHelpers holds every site
-// that cuts a suspended run and waits for it to let go to cutSuspended and
-// awaitLetGo, so no site drifts into a hand-rolled copy.
-func TestEverySuspensionCutsAndLetsGoThroughTheSharedHelpers(t *testing.T) {
-	cases := []struct {
-		method       string
-		cuts, letsGo int
-	}{
-		{method: "suspendFor", cuts: 1, letsGo: 1},
-		{method: "stepAside", cuts: 1},
-		{method: "takeBackSteppedAside", letsGo: 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.method, func(t *testing.T) {
-			// Arrange.
-			body := orchestratorMethodBody(t, tc.method)
-
-			// Act.
-			cuts, letsGo := strings.Count(body, "o.cutSuspended("), strings.Count(body, "o.awaitLetGo(")
-			handRolled := strings.Count(body, "r.cancel(") + strings.Count(body, "case <-r.finished:\n\tcase <-time.After(")
-
-			// Assert.
-			if cuts != tc.cuts || letsGo != tc.letsGo || handRolled != 0 {
-				t.Fatalf("%s cuts %d, lets go %d, hand-rolls %d, want %d, %d and none", tc.method, cuts, letsGo, handRolled, tc.cuts, tc.letsGo)
 			}
 		})
 	}

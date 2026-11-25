@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"strings"
 	"testing"
 
 	"agentrepl/logging/logsite"
@@ -9,7 +8,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestRestateRowPublishesTheEditedSnapshotAndLeavesTheStoredRowAlone(t *testing.T) {
@@ -40,28 +38,6 @@ func TestRestateRowPublishesTheEditedSnapshotAndLeavesTheStoredRowAlone(t *testi
 	}
 	if !republished.GetActivity().GetResponse().GetFinalAnswer() {
 		t.Fatal("the feed's row lacks the edit, want the edited snapshot published")
-	}
-}
-
-func TestEveryStoredRowRestatementGoesThroughRestateRow(t *testing.T) {
-	// Arrange: the only production files allowed to snapshot a row by hand are
-	// the publication path itself and the restatement helper.
-	allowed := map[string]bool{"resolver.go": true, "restate.go": true}
-	var offenders []string
-
-	// Act.
-	for _, file := range sourcescan.Production(t) {
-		if allowed[file.Name] {
-			continue
-		}
-		if strings.Contains(string(file.Source), "proto.Clone(") {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert.
-	if len(offenders) > 0 {
-		t.Fatalf("hand-rolled row restatements (use restateRow): %s", strings.Join(offenders, ", "))
 	}
 }
 

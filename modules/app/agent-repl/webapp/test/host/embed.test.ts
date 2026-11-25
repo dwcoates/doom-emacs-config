@@ -4,7 +4,6 @@ import { createQuiet, type QuietSource } from "../../src/quiet.js";
 import { createEditorIngressView, type EditorIngressView } from "../../src/held/editor-ingress.js";
 import { createEditorNotices, type EditorNotices } from "../../src/footer/editor-notice.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
-import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
@@ -647,16 +646,5 @@ describe("the host's log level", () => {
     await Promise.resolve();
     const refused = capture.sent.find((record) => record.operation === "webapp.log.level-window" && record.level.case === "error");
     expect([levelWindow.level(), refused !== undefined]).toEqual(["info", true]);
-  });
-});
-
-
-describe("the page's log level", () => {
-  it("is applied through LevelWindow.apply, never opened or closed by hand", () => {
-    // Act
-    const shape = levelApplyShapeOf("host/embed.ts");
-
-    // Assert
-    expect(shape).toEqual({ applies: true, handRolls: false });
   });
 });

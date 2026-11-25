@@ -3,14 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -24,7 +20,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/stateroot"
 )
 
@@ -230,53 +225,6 @@ func TestOpenDaemonStreamAnswersTheOpenError(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, refused) {
 		t.Fatalf("openDaemonStream error = %v, want the open's own", err)
-	}
-}
-
-// serverStreamMethods names the daemon client's server-streaming methods.
-func serverStreamMethods() map[string]bool {
-	client := reflect.TypeOf((*agentreplv1connect.AgentReplClient)(nil)).Elem()
-	methods := map[string]bool{}
-	for i := 0; i < client.NumMethod(); i++ {
-		m := client.Method(i)
-		if m.Type.NumOut() > 0 && strings.Contains(m.Type.Out(0).String(), "ServerStreamForClient") {
-			methods[m.Name] = true
-		}
-	}
-	return methods
-}
-
-func TestEveryVerbOpensItsServerStreamsThroughOpenDaemonStream(t *testing.T) {
-	// Arrange.
-	streaming := serverStreamMethods()
-	if len(streaming) == 0 {
-		t.Fatal("the daemon client has no server-streaming method; the scan below would pass vacuously")
-	}
-	fset := token.NewFileSet()
-	var direct []string
-
-	// Act.
-	for _, source := range sourcescan.Production(t) {
-		file, err := parser.ParseFile(fset, source.Name, source.Source, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", source.Name, err)
-		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && streaming[sel.Sel.Name] {
-				direct = append(direct, fset.Position(call.Pos()).String()+" "+sel.Sel.Name)
-			}
-			return true
-		})
-	}
-
-	// Assert.
-	if len(direct) > 0 {
-		t.Fatalf("server streams opened by a direct call, so their Close can drain a standing stream; open them with openDaemonStream:\n%s",
-			strings.Join(direct, "\n"))
 	}
 }
 

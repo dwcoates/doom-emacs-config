@@ -10,7 +10,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/netstate"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -783,16 +782,6 @@ func TestFreeNameAgainstSkipsWhatElseHoldsAName(t *testing.T) {
 				t.Fatalf("name = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestEveryNameIsDisambiguatedByFreeNameAgainst(t *testing.T) {
-	// Arrange / Act: the suffix loop is written once.
-	loops := sourcescan.Count(t, `"-" + strconv.Itoa(suffix)`)
-
-	// Assert
-	if loops != 1 {
-		t.Fatalf("name suffixes are composed at %d sites, want 1: freeNameAgainst", loops)
 	}
 }
 

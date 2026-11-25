@@ -178,7 +178,7 @@ func resolveOne(sel *testrunv1.TestSelection, l suites.Layout) (roster.Suite, ta
 		if err != nil {
 			return roster.Suite{}, target{}, err
 		}
-		s, rel, err := owningDir(l, f.GetFile(), "vitest file", roster.Vitest)
+		s, rel, err := owningVitest(l, f.GetFile())
 		return s, target{kind: kindVitest, where: rel, all: all, names: names, what: "vitest file " + f.GetFile()}, err
 	case *testrunv1.TestSelection_ErtFile:
 		f := t.ErtFile
@@ -190,7 +190,7 @@ func resolveOne(sel *testrunv1.TestSelection, l suites.Layout) (roster.Suite, ta
 		if err != nil {
 			return roster.Suite{}, target{}, err
 		}
-		s, rel, err := owningDir(l, path, "ERT file", roster.ERT)
+		s, rel, err := owningERT(l, path)
 		return s, target{kind: kindERT, where: rel, all: all, names: names, what: "ERT file " + f.GetFile()}, err
 	case *testrunv1.TestSelection_Suite:
 		suite, known := roster.Lookup(t.Suite.GetName())
@@ -309,10 +309,12 @@ func ertPath(l suites.Layout, file string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("ERT file %s: the %s suite's directory is outside the repository: %w", file, s.Name, err)
 		}
-		dirs = append(dirs, filepath.ToSlash(rel))
+		if dir := filepath.ToSlash(rel); !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
 	}
 	if len(dirs) != 1 {
-		return "", fmt.Errorf("ERT file %s: a bare file name needs exactly one ERT suite to name a file of, and the roster has %d (%s); name the file by its path", file, len(dirs), strings.Join(dirs, ", "))
+		return "", fmt.Errorf("ERT file %s: a bare file name needs every ERT suite in one directory to name a file of, and the roster has %d (%s); name the file by its path", file, len(dirs), strings.Join(dirs, ", "))
 	}
 	return dirs[0] + "/" + file, nil
 }
@@ -344,6 +346,70 @@ func owningDir(l suites.Layout, path, what string, kinds ...roster.Kind) (roster
 		return roster.Suite{}, "", fmt.Errorf("%s %s: no suite in the roster runs it", what, path)
 	}
 	return best, bestRel, nil
+}
+
+// owningERT finds the ERT suite that runs path (a repository-relative path)
+// and answers path relative to its directory. Of the ERT suites sharing the
+// deepest directory holding path, the one whose own glob
+// (roster.Suite.ERTFiles) matches the file's name runs it; a file no glob
+// matches is the aggregator's suite's.
+func owningERT(l suites.Layout, path string) (roster.Suite, string, error) {
+	s, rel, err := owningDir(l, path, "ERT file", roster.ERT)
+	if err != nil {
+		return roster.Suite{}, "", err
+	}
+	dir := roster.Resolve(l.Repo, l.Module, s.Path)
+	var aggregated *roster.Suite
+	for _, c := range roster.Suites {
+		if c.Kind != roster.ERT || roster.Resolve(l.Repo, l.Module, c.Path) != dir {
+			continue
+		}
+		if c.ERTFiles == "" {
+			if aggregated == nil {
+				aggregated = &c
+			}
+			continue
+		}
+		ok, err := filepath.Match(c.ERTFiles, rel)
+		if err != nil {
+			return roster.Suite{}, "", fmt.Errorf("ERT file %s: the %s suite's files %q: %w", path, c.Name, c.ERTFiles, err)
+		}
+		if ok {
+			return c, rel, nil
+		}
+	}
+	if aggregated == nil {
+		return roster.Suite{}, "", fmt.Errorf("ERT file %s: no ERT suite of its directory runs it", path)
+	}
+	return *aggregated, rel, nil
+}
+
+// owningVitest finds the vitest suite that runs path (a repository-relative
+// path) and answers path relative to its package. Of the vitest suites
+// sharing the deepest package holding path, the one whose own directory
+// (roster.Suite.VitestDir) holds the file runs it; any other file is the
+// package's ordinary suite's, the one with no config of its own.
+func owningVitest(l suites.Layout, path string) (roster.Suite, string, error) {
+	s, rel, err := owningDir(l, path, "vitest file", roster.Vitest)
+	if err != nil {
+		return roster.Suite{}, "", err
+	}
+	var ordinary *roster.Suite
+	for _, c := range roster.Suites {
+		if c.Kind != roster.Vitest || c.Path != s.Path {
+			continue
+		}
+		if c.OwnsVitestFile(rel) {
+			return c, rel, nil
+		}
+		if c.VitestConfig == "" && ordinary == nil {
+			ordinary = &c
+		}
+	}
+	if ordinary == nil {
+		return roster.Suite{}, "", fmt.Errorf("vitest file %s: no vitest suite of its package runs it", path)
+	}
+	return *ordinary, rel, nil
 }
 
 // owningScript finds the harness suite whose script is path. A script

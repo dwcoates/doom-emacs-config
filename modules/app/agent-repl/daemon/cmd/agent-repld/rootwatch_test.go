@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,7 +15,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/recordlock/locktest"
-	"agent-repld/internal/sourcescan"
 )
 
 // fakeChanges is the watch's change source in the test's hands: each send
@@ -244,37 +241,6 @@ func TestFollowRootPathsAcceptsTheRootWatchsOwnPaths(t *testing.T) {
 	// Assert
 	if src == nil {
 		t.Fatal("followRootPaths answered no source for the root watch's own paths")
-	}
-}
-
-// TestOnlyFollowRootPathsBuildsTheRootWatchsSource pins that the refusal
-// cannot be stepped around: this package follows paths only through
-// followRootPaths, whose one kernelevent.FollowPaths call is the only follow
-// in its production sources.
-func TestOnlyFollowRootPathsBuildsTheRootWatchsSource(t *testing.T) {
-	// Arrange
-	var sites []string
-
-	// Act
-	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, f *ast.File) {
-		for _, decl := range f.Decls {
-			fn, _ := decl.(*ast.FuncDecl)
-			ast.Inspect(decl, func(n ast.Node) bool {
-				if sourcescan.IsSelector(n, "kernelevent", "Follow") || sourcescan.IsSelector(n, "kernelevent", "FollowPaths") {
-					owner := ""
-					if fn != nil {
-						owner = fn.Name.Name
-					}
-					sites = append(sites, owner+"@"+filepath.Base(fset.Position(n.Pos()).Filename))
-				}
-				return true
-			})
-		}
-	})
-
-	// Assert
-	if want := []string{"followRootPaths@rootwatch.go"}; !slices.Equal(sites, want) {
-		t.Fatalf("kernelevent follows at %v, want only %v", sites, want)
 	}
 }
 

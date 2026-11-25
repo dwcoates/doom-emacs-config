@@ -3,9 +3,6 @@
  * THE SIDEBAR'S APPS: the rail title's switcher and the Chat app's thread
  * list, drawn from the roster and acted on through the daemon.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -477,15 +474,6 @@ describe("the current thread's outline", () => {
   it("labelOutline refuses an unset label", () => {
     // Act / Assert
     expect(() => labelOutline(document.createElement("span"), undefined, "rows[0].label")).toThrow(/rows\[0\]\.label/);
-  });
-
-  it("draws every outline label through labelOutline", () => {
-    // Arrange
-    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/sidebar/threads.ts"), "utf8");
-
-    // Assert: no label is drawn from its text by hand beside labelOutline.
-    expect(source.match(/labelOutline\(/g)?.length).toBe(3);
-    expect(source).not.toMatch(/\.label, `\$\{at\}\.label`\)\.text/);
   });
 
   it("draws nothing under a row the roster gives no outline", async () => {

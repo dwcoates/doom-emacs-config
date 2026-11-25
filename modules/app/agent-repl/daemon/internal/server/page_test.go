@@ -5,9 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"testing"
 	"time"
@@ -1614,38 +1611,6 @@ func subscribePage(t *testing.T, ctx context.Context, h *harness, req *agentrepl
 	}
 	if resp.Msg.GetSuccess().GetSubscribed() == nil {
 		t.Fatalf("subscribe %s answered %v, want subscribed", req.GetSubscription(), resp.Msg)
-	}
-}
-
-// TestPageTestsSubscribeThroughTheHelper keeps every subscription a test
-// expects to be accepted on subscribePage, so the accepted path is spelled
-// once: a hand-rolled SubscribePage that fails the test on its error is a
-// second copy of the helper.
-func TestPageTestsSubscribeThroughTheHelper(t *testing.T) {
-	// Arrange
-	helperDef := regexp.MustCompile(`(?s)\nfunc subscribePage\(.*?\n\}\n`)
-	handRolled := regexp.MustCompile(`if _, err := h\.Client\.SubscribePage\(ctx, connect\.NewRequest\([^;]*?\)\); err != nil \{\n\s*t\.Fatalf`)
-	names, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-
-	// Act
-	var offenders []string
-	for _, name := range names {
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		// The helper's own body is the one spelling the rule allows.
-		if handRolled.Match(helperDef.ReplaceAll(source, nil)) {
-			offenders = append(offenders, name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v subscribe a page by hand; use subscribePage", offenders)
 	}
 }
 

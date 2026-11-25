@@ -3,9 +3,6 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { RosterVersionSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { sameOptional } from "../../src/rpc/optional-equal.js";
-import { codeOf } from "../source-text.js";
-import sidebarSource from "../../src/sidebar/sidebar.ts?raw";
-import feedSource from "../../src/feed/feed-view.ts?raw";
 
 const version = (text: string) => create(RosterVersionSchema, { text });
 
@@ -22,15 +19,5 @@ describe("sameOptional", () => {
 
     // Assert
     expect(same).toBe(want);
-  });
-
-  it("is how the rail's head and the feed's hover stamp compare their optional messages", () => {
-    // Arrange
-    const sidebar = codeOf(sidebarSource);
-    const feed = codeOf(feedSource);
-
-    // Act / Assert
-    expect([sidebar.includes("sameOptional(RosterVersionSchema"), feed.includes("sameOptional(FeedHoverStampSchema")]).toEqual([true, true]);
-    expect([sidebar, feed].map((code) => /=== undefined \|\| \w+(\.\w+)? === undefined\) return/.test(code))).toEqual([false, false]);
   });
 });

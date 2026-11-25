@@ -4,15 +4,10 @@
  * Its browser is Playwright's WebKit build pinned by `playwright-core`
  * (package.json); `npx playwright-core install webkit` fetches it once.
  */
-import path from "node:path";
-import { readFile, readdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootPage, pageAssets } from "./boot-page";
 import { rejectionOf } from "./rejection";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 let browser: Browser;
 
@@ -142,26 +137,5 @@ describe("pageAssets", () => {
   it("bundles the page module beside it and reads the real stylesheet", () => {
     // Arrange + Act: the hook's bundle. Assert
     expect([assets.script.includes("installPageLogger"), assets.css.includes("#feed-scroll")]).toEqual([true, true]);
-  });
-});
-
-describe("the one boot", () => {
-  let suites: string[];
-  const own: string[] = [];
-
-  beforeAll(async () => {
-    // This suite names the boot's own failure, so it is not one of them.
-    suites = (await readdir(here)).filter(
-      (name) => name.endsWith(".webkit.test.ts") && name !== "boot-page.webkit.test.ts",
-    );
-    for (const name of suites) {
-      const src = await readFile(path.join(here, name), "utf8");
-      if (src.includes("the page failed to boot")) own.push(name);
-    }
-  });
-
-  it("is the only place a WebKit suite boots its page by hand", () => {
-    // Arrange + Act: the hook's read of every suite. Assert
-    expect([suites.length > 5, own]).toEqual([true, []]);
   });
 });

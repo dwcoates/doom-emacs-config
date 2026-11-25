@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +17,6 @@ import (
 	"agent-repld/internal/sessionwhy"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimlife"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1945,37 +1943,20 @@ func allReasons(c *controller) []standDownReason {
 	}
 }
 
-// EVERY STAND-DOWN PATH GOES THROUGH THE ONE GATE: the shim is stood down,
-// and the mode read, only in park, and every reason park is handed names
-// its trigger and a remote-control policy, which only the idle sweep's and a
-// cold gate's let park a session in remote control.
-func TestEveryStandDownPathGoesThroughTheRemoteControlGate(t *testing.T) {
+// EVERY STAND-DOWN REASON NAMES ITS TRIGGER AND ITS REMOTE-CONTROL POLICY,
+// which only the idle sweep's and a cold gate's let park a session in remote
+// control. That every stand-down goes through park, the one gate, is a rule
+// over the package's sources, held in reposcans
+// (daemonrules.TestEveryStandDownPathGoesThroughTheRemoteControlGate), which
+// also pins the eight standDownReason literals allReasons builds from.
+func TestEveryStandDownReasonNamesItsTriggerAndPolicy(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	reasons := allReasons(h.c)
 
 	// Act
-	kills := sourcescan.Sites(t, "Stand.KillSession(")
-	hibernates := sourcescan.Sites(t, "Stand.Hibernate(")
-	modeReads := sourcescan.Sites(t, "DB.RemoteControl(")
-	literals := sourcescan.Sites(t, "standDownReason{")
-	parks := sourcescan.Sites(t, "c.park(")
+	reasons := allReasons(h.c)
 
 	// Assert
-	// controller.go's is the daemon's own immediate shutdown, which forces
-	// every session down for its exit and is no trigger of the park.
-	if !slices.Equal(kills, []string{"controller.go", "sweep.go"}) || !slices.Equal(hibernates, []string{"sweep.go"}) {
-		t.Fatalf("KillSession sites = %v, Hibernate sites = %v; want the shutdown's and park's alone", kills, hibernates)
-	}
-	if !slices.Equal(modeReads, []string{"sweep.go"}) {
-		t.Fatalf("remote-control reads = %v, want park's alone", modeReads)
-	}
-	if !slices.Equal(parks, []string{"cycle.go", "sweep.go", "withheld.go"}) {
-		t.Fatalf("park sites = %v, want the cycle's, the sweep's and the withheld path's", parks)
-	}
-	if len(literals) != 8 {
-		t.Fatalf("standDownReason literals = %v, want the eight allReasons builds from", literals)
-	}
 	for _, reason := range reasons {
 		if reason.trigger == "" {
 			t.Errorf("the %s reason names no trigger", reason.op)

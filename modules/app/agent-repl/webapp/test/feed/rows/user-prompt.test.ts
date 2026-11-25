@@ -5,10 +5,6 @@ import { create } from "@bufbuild/protobuf";
 import { FeedUserPromptBodySchema, FeedUserPromptSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedUserPrompt, userPromptLook } from "../../../src/feed/rows/user-prompt.js";
-import { codeOf } from "../../source-text.js";
-import userPromptSource from "../../../src/feed/rows/user-prompt.ts?raw";
-import heldPromptSource from "../../../src/held/held-prompt.ts?raw";
-import ingressPromptSource from "../../../src/held/ingress-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
@@ -507,23 +503,6 @@ describe("userPromptLook: the one source of the user prompt's look", () => {
   it("folds with no line cap", () => {
     // Arrange / Act / Assert
     expect(userPromptLook(body, "Body").capLines).toBe(USER_PROMPT_CAP_LINES);
-  });
-
-  it.each([
-    ["the feed's user prompt", userPromptSource],
-    ["a held prompt", heldPromptSource],
-    ["an ingress prompt", ingressPromptSource],
-  ])("is how %s draws a person's words, never a hand-rolled copy control or cap", (_name, source) => {
-    // A held prompt an agent sent folds at the agent-to-agent cap, so that
-    // one named constant is the only cap besides the user prompt's it may set.
-    // Arrange / Act
-    const code = codeOf(source);
-    // Assert
-    expect([
-      /\buserPromptLook\(/.test(code),
-      /\bdrawPromptCopyControl\(/.test(code.replace(/export function userPromptLook[\s\S]*?\n}\n/, "")),
-      [...code.matchAll(/capLines:\s*(\w+)/g)].map((m) => m[1]).filter((cap) => cap !== "USER_PROMPT_CAP_LINES" && cap !== "AGENT_PROMPT_CAP_LINES" && cap !== "typeof"),
-    ]).toEqual([true, false, []]);
   });
 });
 

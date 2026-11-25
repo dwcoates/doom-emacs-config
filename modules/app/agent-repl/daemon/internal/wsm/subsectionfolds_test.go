@@ -3,10 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // subsectionNow reads subsection ID back through the arrangement.
@@ -75,23 +72,5 @@ func TestSetSubsectionFoldedRefusesAnUnknownSubsection(t *testing.T) {
 	var unknown *UnknownSubsectionError
 	if !errors.As(err, &unknown) || unknown.ID != "absent" || !errors.Is(err, ErrNotFound) {
 		t.Fatalf("SetSubsectionFolded = %v, want an UnknownSubsectionError naming absent", err)
-	}
-}
-
-// TestNoStoreWriteExpandsASubsection pins that the daemon never expands a
-// subsection on its own: a placement and a move leave every fold as it is,
-// so only SetSubsectionFolded writes a subsection's fold.
-func TestNoStoreWriteExpandsASubsection(t *testing.T) {
-	// Arrange
-	const expansion = "UPDATE subsections SET folded = 0"
-
-	for _, file := range sourcescan.Production(t) {
-		// Act
-		n := strings.Count(string(file.Source), expansion)
-
-		// Assert
-		if n != 0 {
-			t.Errorf("%s states the subsection expansion %d times, want 0", file.Name, n)
-		}
 	}
 }

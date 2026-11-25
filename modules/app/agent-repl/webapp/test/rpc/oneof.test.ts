@@ -1,7 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { InterruptErrorSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
@@ -12,7 +9,6 @@ import { ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
 import { INTERRUPT_ERROR_ARMS } from "../../src/interrupt-error.js";
 import { ROSTER_STATUS_ARMS } from "../integration/fixtures.js";
 import { captureLogRecords } from "../log-capture.js";
-import { filesUnder } from "../files-under.js";
 
 describe("oneofArms", () => {
   it("answers the oneof's arms in the generated spelling, in declaration order", () => {
@@ -72,19 +68,5 @@ describe("the arm lists that read off a schema", () => {
 
   it("gives the integration fixtures the sidebar's own list", () => {
     expect(ROSTER_STATUS_ARMS).toBe(ROSTER_STATUS_CASES);
-  });
-});
-
-describe("the source reads a oneof's arms in one place", () => {
-  it("finds no oneof lookup outside the reader", () => {
-    // Arrange: every source file under src.
-    const src = join(dirname(fileURLToPath(import.meta.url)), "../../src");
-    const files = filesUnder(src);
-
-    // Act
-    const lookups = files.filter((f) => readFileSync(f, "utf8").includes(".oneofs.find(")).map((f) => relative(src, f));
-
-    // Assert: only the reader's own module.
-    expect(lookups).toEqual(["rpc/oneof.ts"]);
   });
 });

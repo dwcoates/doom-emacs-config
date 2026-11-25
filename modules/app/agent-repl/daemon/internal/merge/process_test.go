@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,7 +23,6 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1803,24 +1799,6 @@ func TestShasOfAnswersTheCommitsShasInOrder(t *testing.T) {
 	}
 }
 
-// TestEveryRebaseIsStartedFromShasOf is the drift guard on the shared shape.
-func TestEveryRebaseIsStartedFromShasOf(t *testing.T) {
-	// Arrange.
-	body, err := os.ReadFile("process.go")
-	if err != nil {
-		t.Fatalf("reading process.go: %v", err)
-	}
-
-	// Act.
-	starts := strings.Count(string(body), "r.git.StartRebase(")
-	shared := strings.Count(string(body), "r.git.StartRebase(ctx, dir, tip, shasOf(")
-
-	// Assert.
-	if starts == 0 || starts != shared {
-		t.Fatalf("%d rebase starts, %d through shasOf, want every one through it", starts, shared)
-	}
-}
-
 func TestDrawFixingStandsTheAttemptLive(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -3009,42 +2987,6 @@ func TestRecordRebaseRecordsTheRebaseAndClearsEveryEarlierStepsFacts(t *testing.
 	if got.Turn != "" || got.ConflictFiles != nil || got.FixAttempt != 0 || got.FailingSuites != nil ||
 		got.Head != "" || got.MergeCommit != "" || got.FailingArchive != "" || got.FailingTail != "" {
 		t.Fatalf("record = %+v, want every earlier step's facts cleared", got)
-	}
-}
-
-// TestEveryRebaseRecordIsWrittenByRecordRebase covers the one record every
-// rebase writes: the commits a rebase replays reach a record only through
-// recordRebase, so no rebase start writes a record of its own shape.
-func TestEveryRebaseRecordIsWrittenByRecordRebase(t *testing.T) {
-	// Arrange
-	fset := token.NewFileSet()
-	for _, source := range sourcescan.Production(t) {
-		parsed, err := parser.ParseFile(fset, source.Name, source.Source, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", source.Name, err)
-		}
-
-		// Act
-		var enclosing string
-		ast.Inspect(parsed, func(n ast.Node) bool {
-			if decl, ok := n.(*ast.FuncDecl); ok {
-				enclosing = decl.Name.Name
-			}
-			assign, ok := n.(*ast.AssignStmt)
-			if !ok {
-				return true
-			}
-			for _, lhs := range assign.Lhs {
-				sel, ok := lhs.(*ast.SelectorExpr)
-				// Assert
-				if ok && (sel.Sel.Name == "BranchHead" || sel.Sel.Name == "Commits") && enclosing != "recordRebase" {
-					if id, isIdent := sel.X.(*ast.Ident); isIdent && id.Name == "d" {
-						t.Errorf("%s: %s writes a rebase's record by hand, not through recordRebase", fset.Position(assign.Pos()), enclosing)
-					}
-				}
-			}
-			return true
-		})
 	}
 }
 

@@ -14,8 +14,6 @@ import {
 } from "../../src/feed/walk-control.js";
 import { fireIntersection, intersectionObservers } from "../intersection-observer.js";
 import { captureLogRecords } from "../log-capture.js";
-import feedViewSource from "../../src/feed/feed-view.ts?raw";
-import { codeOf } from "../source-text.js";
 
 /** A control in the document, counting the clicks its listeners heard. */
 function mounted() {
@@ -251,20 +249,6 @@ describe("createWalkTrigger", () => {
   });
 });
 
-describe("the feed's walk control goes through walk-control.ts", () => {
-  it("builds its control with drawWalkControl", () => {
-    expect(codeOf(feedViewSource)).toMatch(/drawWalkControl\(\)/);
-  });
-
-  it("never sets the control's disabled state by hand", () => {
-    expect(codeOf(feedViewSource)).not.toMatch(/loadMore\.disabled\s*=/);
-  });
-
-  it("never hand-rolls the control's class", () => {
-    expect(codeOf(feedViewSource)).not.toMatch(/"feed-load-more"/);
-  });
-});
-
 describe("createWalkFaces", () => {
   /** Two mounted controls, each counting its clicks. */
   function two() {
@@ -380,15 +364,5 @@ describe("createWalkFaces", () => {
     // Assert
     expect(faces.controls()).toEqual([]);
     expect(() => fireIntersection(top, true)).toThrow(/no IntersectionObserver/);
-  });
-});
-
-describe("every face of the feed's walk goes through createWalkFaces", () => {
-  it("never watches a face with a trigger of its own", () => {
-    expect(codeOf(feedViewSource)).not.toMatch(/createWalkTrigger\(/);
-  });
-
-  it("never sets a face's loading state by hand", () => {
-    expect(codeOf(feedViewSource)).not.toMatch(/setWalkLoading\(/);
   });
 });

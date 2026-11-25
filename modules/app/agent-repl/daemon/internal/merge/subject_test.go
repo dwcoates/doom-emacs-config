@@ -3,12 +3,10 @@ package merge
 import (
 	"context"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/gitclient"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -180,29 +178,5 @@ func TestSourceLabelRefusesAnUndeclaredSource(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "undeclared source") {
 		t.Fatalf("sourceLabel = %v, want the undeclared source refused", err)
-	}
-}
-
-// TestResolveSubjectReadsWhatAMergeClosesFromLandingCloses pins the one
-// statement of what a merge closes: every arm of resolveSubject reads it from
-// wsm.MergeSource.LandingCloses, which the family rules read too, and none
-// spells a closing workspace by hand.
-func TestResolveSubjectReadsWhatAMergeClosesFromLandingCloses(t *testing.T) {
-	// Arrange.
-	var byHand []string
-	spelled := regexp.MustCompile(`closes(Also)?(:| =) *(r\.ws|r\.source\.Workspace|origin\.CloseOnLanding)`)
-
-	// Act.
-	calls := sourcescan.Count(t, "r.source.LandingCloses(")
-	for _, f := range sourcescan.Production(t) {
-		byHand = append(byHand, spelled.FindAllString(string(f.Source), -1)...)
-	}
-
-	// Assert.
-	if calls != 2 {
-		t.Fatalf("LandingCloses calls = %d, want one per closing arm (own branch, workspace)", calls)
-	}
-	if len(byHand) != 0 {
-		t.Fatalf("closing workspaces spelled by hand: %v", byHand)
 	}
 }

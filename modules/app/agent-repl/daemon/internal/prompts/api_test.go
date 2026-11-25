@@ -476,24 +476,6 @@ func TestUnsaid(t *testing.T) {
 	}
 }
 
-func TestEveryBriefWordingPinAssertsThroughUnsaid(t *testing.T) {
-	// Arrange: a pin that hand-rolls its own phrase check drifts from the
-	// rest, so none may.
-	src, err := os.ReadFile("api_test.go")
-	if err != nil {
-		t.Fatalf("reading api_test.go: %v", err)
-	}
-	handRolled := "!strings.Contains(got" + ".Body"
-
-	// Act.
-	n := strings.Count(string(src), handRolled)
-
-	// Assert.
-	if n != 0 {
-		t.Fatalf("api_test.go hand-rolls %d phrase checks on a brief's body; assert through unsaid", n)
-	}
-}
-
 func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(t *testing.T) {
 	// Arrange.
 	want := []string{

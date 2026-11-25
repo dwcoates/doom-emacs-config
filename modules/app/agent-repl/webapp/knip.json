@@ -1,9 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["test/**/*.test.ts", "test/**/*.test.tsx", "test/webkit/*-page.ts", "test/webkit/fixtures/bundle-entry.ts", "protobuf-runtime-aliases.ts"],
-  "project": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "*.ts"],
+  "entry": ["test/**/*.test.ts", "rules/**/*.test.ts", "test/**/*.test.tsx", "test/webkit/*-page.ts", "test/webkit/fixtures/bundle-entry.ts", "protobuf-runtime-aliases.ts"],
+  "project": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "rules/**/*.ts", "*.ts"],
   "vitest": {
-    "config": ["vitest.config.ts", "vitest.integration.config.ts", "vitest.webkit.config.ts", "vitest.webapp-layer.config.ts"]
+    "config": ["vitest.config.ts", "vitest.integration.config.ts", "vitest.webkit.config.ts", "vitest.webapp-layer.config.ts", "vitest.rules.config.ts"]
   },
   "ignoreExportsUsedInFile": true,
   "ignoreDependencies": ["@stryker-mutator/core", "@stryker-mutator/vitest-runner"]

@@ -1,9 +1,6 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { pathedFamilies } from "../../src/sidebar/family.js";
-import { codeOf, functionBody } from "../source-text.js";
 import { openRow, row } from "./harness.js";
 
 describe("pathedFamilies", () => {
@@ -13,20 +10,5 @@ describe("pathedFamilies", () => {
       ["a", "R.rows[0]"],
       ["b", "R.rows[1]"],
     ]);
-  });
-
-  it.each([
-    ["roster.ts", "drawRosterRows"],
-    ["entries.ts", "pathedOpenRows"],
-    ["row.ts", "appendRowKids"],
-  ])("is how %s walks a list's rows", (file, fn) => {
-    // Arrange
-    const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
-
-    // Act
-    const body = functionBody(source, fn);
-
-    // Assert
-    expect(body.includes("pathedFamilies(")).toBe(true);
   });
 });

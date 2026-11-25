@@ -313,6 +313,26 @@ func TestCheck(t *testing.T) {
 			"s declares Batch max 4 min 0"},
 		{"a batching whose min is above its max", Suite{Name: "s", Kind: ERT, Reuse: &Reuse{}, Batch: &Batching{Max: 4, Min: 5}},
 			"min no more than max"},
+		{"an ERT suite's own files", Suite{Name: "s", Kind: ERT, Reuse: &Reuse{}, ERTFiles: "test-rules-*.el"}, ""},
+		{"own files on a suite that is not ERT", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, ERTFiles: "test-rules-*.el"},
+			"s declares ERTFiles, but only an ERT suite's files are chosen by a glob"},
+		{"own files that are no glob", Suite{Name: "s", Kind: ERT, Reuse: &Reuse{}, ERTFiles: "test-[rules"},
+			`s declares ERTFiles "test-[rules", which is no glob`},
+		{"a vitest suite's own config", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/"}, ""},
+		{"an own config on a suite that is not vitest", Suite{Name: "s", Kind: ERT, Reuse: &Reuse{}, VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/"},
+			"s declares VitestConfig or VitestDir, but only a vitest suite runs a vitest config"},
+		{"an own config without its directory", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, VitestConfig: "vitest.rules.config.ts"},
+			`s declares only one of VitestConfig "vitest.rules.config.ts" and VitestDir ""`},
+		{"an own directory without its config", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, VitestDir: "rules/"},
+			`s declares only one of VitestConfig "" and VitestDir "rules/"`},
+		{"an own directory not ended by a slash", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, VitestConfig: "c.ts", VitestDir: "rules"},
+			`s declares VitestDir "rules", which is no "/"-ended directory inside its Path`},
+		{"an own directory outside the package", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, VitestConfig: "c.ts", VitestDir: "../rules/"},
+			`s declares VitestDir "../rules/", which is no "/"-ended directory inside its Path`},
+		{"an own directory from the root", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, VitestConfig: "c.ts", VitestDir: "/rules/"},
+			`s declares VitestDir "/rules/", which is no "/"-ended directory inside its Path`},
+		{"an own config beside an integration config", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, VitestConfig: "c.ts", VitestDir: "rules/", IntegrationConfig: "i.ts"},
+			"s declares both its own VitestConfig and an IntegrationConfig"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -330,6 +350,70 @@ func TestCheck(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestSuiteUnitConfig(t *testing.T) {
+	tests := []struct {
+		name  string
+		suite Suite
+		want  string
+	}{
+		{"a suite with its own config", Suite{Kind: Vitest, VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/"}, "vitest.rules.config.ts"},
+		{"a suite with none", Suite{Kind: Vitest}, DefaultVitestConfig},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.suite.UnitConfig()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("UnitConfig() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSuiteOwnsVitestFile(t *testing.T) {
+	rules := Suite{Kind: Vitest, VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/"}
+	tests := []struct {
+		name  string
+		suite Suite
+		rel   string
+		want  bool
+	}{
+		{"a file in its directory", rules, "rules/styles.rules.test.ts", true},
+		{"a file deep in its directory", rules, "rules/feed/cards/paint.rules.test.ts", true},
+		{"a file outside its directory", rules, "test/styles.test.ts", false},
+		{"a file whose directory only starts with its name", rules, "rules-old/a.test.ts", false},
+		{"any file, for a suite with no directory of its own", Suite{Kind: Vitest}, "rules/a.test.ts", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.suite.OwnsVitestFile(tt.rel)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("OwnsVitestFile(%q) = %v, want %v", tt.rel, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheWebappRulesAreARuleSuiteUnderTheirOwnConfig(t *testing.T) {
+	// Act
+	s, ok := Lookup("webapp-rules")
+
+	// Assert
+	if !ok {
+		t.Fatal("the roster has no webapp-rules suite")
+	}
+	got := []any{s.Kind, s.Path, s.VitestConfig, s.VitestDir, s.Rules, s.NeverReused}
+	want := []any{Vitest, "webapp", "vitest.rules.config.ts", "rules/", true, ""}
+	if !slices.Equal(got, want) {
+		t.Fatalf("webapp-rules = %v, want %v", got, want)
 	}
 }
 

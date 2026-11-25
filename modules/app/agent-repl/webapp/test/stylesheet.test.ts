@@ -1,197 +1,11 @@
 // @vitest-environment jsdom
 /**
- * THE SHARED STYLESHEET-RULE READERS (`test/stylesheet.ts`).
- *
- * Every test that reads a rule off `src/styles.css` by text goes through
- * `rulesOf`, `isOwnRule`, `selectorOf` or `keyframesOf`, so a comment that names a selector can never be
- * credited to the rule after it. `source-text.test.ts` pins that sharing.
+ * THE REAL STYLESHEET IN A TEST'S DOCUMENT (`test/stylesheet.ts`): the mounts
+ * that install it and take it down, and the cascade probes over it. The
+ * readers of its text are `rules/stylesheet-text.ts`.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { cascadedValue, cascadedValueIn, inDocument, inRail, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, selectorOf } from "./stylesheet.js";
-import STYLES_TEST from "./styles.test.ts?raw";
-import STYLESHEET from "./stylesheet.ts?raw";
-import { filesUnder } from "./files-under.js";
-
-describe("rulesOf", () => {
-  it.each([
-    {
-      name: "reads each rule's selectors and declarations in source order",
-      css: ".a { color: red; } .b { color: blue; }",
-      want: [
-        { selectors: [".a"], declarations: " color: red; " },
-        { selectors: [".b"], declarations: " color: blue; " },
-      ],
-    },
-    {
-      name: "splits a selector list into its trimmed selectors",
-      css: ".a ,\n .b > .c { display: none; }",
-      want: [{ selectors: [".a", ".b > .c"], declarations: " display: none; " }],
-    },
-    {
-      name: "never credits a rule with a selector its preceding comment names",
-      css: "/* see .bubble-subfeed { } */ .strip { display: flex; }",
-      want: [{ selectors: [".strip"], declarations: " display: flex; " }],
-    },
-    {
-      name: "reads no rules from a sheet of comments alone",
-      css: "/* .a { color: red; } */",
-      want: [],
-    },
-  ])("$name", ({ css, want }) => {
-    // Arrange / Act
-    const rules = rulesOf(css);
-    // Assert
-    expect(rules).toEqual(want);
-  });
-});
-
-describe("isOwnRule", () => {
-  it.each([
-    { name: "is a rule whose selector list is the selector alone", css: ".a { color: red; }", want: true },
-    { name: "is not a rule that shares its declarations with another selector", css: ".a, .b { color: red; }", want: false },
-    { name: "is not a rule for a selector that only begins with it", css: ".a:hover { color: red; }", want: false },
-    { name: "is not another selector's own rule", css: ".b { color: red; }", want: false },
-  ])("$name", ({ css, want }) => {
-    // Arrange
-    const [rule] = rulesOf(css);
-
-    // Act
-    const own = isOwnRule(rule, ".a");
-
-    // Assert
-    expect(own).toBe(want);
-  });
-
-  it("is the only place a test asks whether a rule is a selector's own", () => {
-    // Arrange: the hand-rolled shape isOwnRule replaced.
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const shape = /selectors\.length === 1/;
-    const owners = new Set([path.join(here, "stylesheet.ts"), fileURLToPath(import.meta.url)]);
-
-    // Act
-    const handRolled = filesUnder(here).filter((file) => !owners.has(file) && shape.test(readFileSync(file, "utf8")));
-
-    // Assert
-    expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);
-  });
-});
-
-describe("selectorOf", () => {
-  it("answers the selector the pattern's first group captures from the real stylesheet", () => {
-    // Arrange / Act
-    const selector = selectorOf(/([^{}]*\.merge-strip)\s*\{/, "merge strip");
-    // Assert
-    expect(selector).toBe(".merge-strip");
-  });
-
-  it("fails loudly naming what it looked for when nothing matches", () => {
-    // Arrange / Act / Assert
-    expect(() => selectorOf(/(\.no-such-class-anywhere)\s*\{/, "phantom rule")).toThrow(
-      "the stylesheet has no phantom rule",
-    );
-  });
-});
-
-describe("mediaBlocksOf", () => {
-  it.each([
-    {
-      name: "reads a block's body between its own braces, nested rules whole",
-      css: "@media (q) { .a { x: 1; } .b { y: 2; } } .c { z: 3; }",
-      want: [" .a { x: 1; } .b { y: 2; } "],
-    },
-    {
-      name: "reads every block of the query in source order",
-      css: "@media (q) { .a { x: 1; } } .m { } @media (q) { .b { y: 2; } }",
-      want: [" .a { x: 1; } ", " .b { y: 2; } "],
-    },
-    { name: "skips a block of another query", css: "@media (other) { .a { x: 1; } }", want: [] },
-  ])("$name", ({ css, want }) => {
-    // Arrange / Act
-    const bodies = mediaBlocksOf("q", css).map((block) => block.body);
-
-    // Assert
-    expect(bodies).toEqual(want);
-  });
-
-  it("spans a block from its @media to just past its closing brace", () => {
-    // Arrange
-    const css = ".x { } @media (q) { .a { x: 1; } } .y { }";
-
-    // Act
-    const [block] = mediaBlocksOf("q", css);
-
-    // Assert
-    expect(css.slice(block?.start, block?.end)).toBe("@media (q) { .a { x: 1; } }");
-  });
-
-  it("fails loudly on a block that never closes", () => {
-    // Arrange / Act / Assert
-    expect(() => mediaBlocksOf("q", "@media (q) { .a { x: 1; }")).toThrow(/@media \(q\) block never closes/);
-  });
-
-  it("reads the real stylesheet by default", () => {
-    // Arrange / Act
-    const blocks = mediaBlocksOf("prefers-color-scheme: dark");
-
-    // Assert
-    expect(blocks[0]?.body).toContain(":root");
-  });
-});
-
-describe("keyframesOf", () => {
-  it.each([
-    { what: "a block of several stops", css: "@keyframes a {\n  0% { opacity: 0; }\n  100% { opacity: 1; }\n}\n", want: "\n  0% { opacity: 0; }\n  100% { opacity: 1; }" },
-    { what: "a block of a single stop", css: "@keyframes a {\n  50% { opacity: 0; }\n}\n", want: "\n  50% { opacity: 0; }" },
-    { what: "the named block among others", css: "@keyframes b {\n  to { color: red; }\n}\n@keyframes a {\n  to { color: blue; }\n}\n", want: "\n  to { color: blue; }" },
-  ])("answers the body of $what", ({ css, want }) => {
-    // Arrange / Act
-    const body = keyframesOf("a", css);
-    // Assert
-    expect(body).toBe(want);
-  });
-
-  it("does not answer a block whose name merely starts with the asked name", () => {
-    // Arrange
-    const css = "@keyframes ab {\n  to { color: red; }\n}\n";
-    // Act / Assert
-    expect(() => keyframesOf("a", css)).toThrow("the stylesheet has no @keyframes a");
-  });
-
-  it("reads the real stylesheet by default", () => {
-    // Arrange / Act
-    const body = keyframesOf("ws-selection-number-rise");
-    // Assert
-    expect(body).toMatch(/from\s*\{/);
-  });
-
-  it("fails loudly naming the block when the stylesheet has none", () => {
-    // Arrange / Act / Assert
-    expect(() => keyframesOf("no-such-keyframes")).toThrow("the stylesheet has no @keyframes no-such-keyframes");
-  });
-
-  it("fails loudly when the block never closes", () => {
-    // Arrange
-    const css = "@keyframes a {\n  to { color: red; }";
-    // Act / Assert
-    expect(() => keyframesOf("a", css)).toThrow("the stylesheet's @keyframes a never closes");
-  });
-
-  it("is the only place a test cuts a keyframes block out of the stylesheet", () => {
-    // Arrange: the hand-rolled shape keyframesOf replaced, a regex opening on a keyframes block.
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const shape = /\/@keyframes [\w-]+ \\\{/;
-    const owners = new Set([path.join(here, "stylesheet.ts"), fileURLToPath(import.meta.url)]);
-
-    // Act
-    const handRolled = filesUnder(here).filter((file) => !owners.has(file) && shape.test(readFileSync(file, "utf8")));
-
-    // Assert
-    expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);
-  });
-});
+import { cascadedValue, cascadedValueIn, inDocument, inRail } from "./stylesheet.js";
 
 describe("inDocument", () => {
   it("mounts the drawn element in the document with the real stylesheet", () => {
@@ -233,17 +47,6 @@ describe("inDocument", () => {
     expect(act).toThrow("boom");
     expect([el.isConnected, document.head.querySelectorAll("style").length]).toEqual([false, sheets]);
   });
-
-  it("is the one mount-and-teardown the stylesheet suites share", () => {
-    // Arrange: the hand-rolled shape inDocument replaced, an element removed and then the sheet torn down.
-    const shape = /\.remove\(\);\s*teardown\(\);/g;
-
-    // Act
-    const sites = [STYLES_TEST.match(shape)?.length ?? 0, STYLESHEET.match(shape)?.length ?? 0];
-
-    // Assert
-    expect(sites).toEqual([0, 1]);
-  });
 });
 
 describe("cascadedValueIn", () => {
@@ -264,17 +67,6 @@ describe("cascadedValueIn", () => {
 
     // Assert
     expect([document.body.querySelector(".q-verdict"), document.head.querySelectorAll("style").length]).toEqual([null, sheets]);
-  });
-
-  it("is the one child-in-parent cascade probe the stylesheet suite shares", () => {
-    // Arrange: the hand-rolled shape cascadedValueIn replaced.
-    const shape = /document\.body\.replaceChildren\(parent\)/g;
-
-    // Act
-    const sites = STYLES_TEST.match(shape)?.length ?? 0;
-
-    // Assert
-    expect(sites).toBe(0);
   });
 });
 
@@ -320,18 +112,5 @@ describe("inRail", () => {
     // Assert
     expect(act).toThrow("boom");
     expect([document.getElementById("ws-sidebar"), document.head.querySelectorAll("style").length]).toEqual([null, sheets]);
-  });
-
-  it("is the only place a test builds the jsdom sidebar rail", () => {
-    // Arrange: the hand-rolled shape inRail replaced.
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const shape = 'rail.id = "ws-sidebar"';
-    const owners = new Set([path.join(here, "stylesheet.ts"), fileURLToPath(import.meta.url)]);
-
-    // Act
-    const handRolled = filesUnder(here).filter((file) => !owners.has(file) && readFileSync(file, "utf8").includes(shape));
-
-    // Assert
-    expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);
   });
 });

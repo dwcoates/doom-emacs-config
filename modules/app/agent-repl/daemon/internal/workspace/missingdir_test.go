@@ -3,17 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/token"
 	"io/fs"
-	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -268,33 +263,5 @@ func TestPublishRegistrySettlesAMissingDirectory(t *testing.T) {
 				t.Fatalf("the settlement was not recorded at INFO under %s: %+v", opRegister, f.log.logger.Records())
 			}
 		})
-	}
-}
-
-// TestAMissingDirectoryIsClosedOnlyBySettleMissingDirectory keeps every
-// missing-directory close in the daemon on the one settlement: a caller
-// closing such a row itself skips the ruled recreation, which is how a running
-// daemon closed workspaces whose branches survived (2026-10-24).
-func TestAMissingDirectoryIsClosedOnlyBySettleMissingDirectory(t *testing.T) {
-	// Arrange.
-	const closeRecord = "a workspace whose directory is gone could not be closed"
-	root := sourcescan.DaemonRoot(t)
-
-	// Act.
-	var spelledIn []string
-	sourcescan.EachDaemonSource(t, root, nil, func(fset *token.FileSet, file *ast.File) {
-		ast.Inspect(file, func(n ast.Node) bool {
-			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING && strings.Contains(lit.Value, closeRecord) {
-				rel, _ := filepath.Rel(root, fset.Position(lit.Pos()).Filename)
-				spelledIn = append(spelledIn, rel)
-			}
-			return true
-		})
-	})
-
-	// Assert.
-	want := []string{filepath.Join("internal", "workspace", "missingdir.go")}
-	if !slices.Equal(spelledIn, want) {
-		t.Fatalf("the missing-directory close is spelled in %v, want only %v", spelledIn, want)
 	}
 }

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -1159,26 +1158,6 @@ func TestNewLoggedHarnessRecordsTheWorkspaceLog(t *testing.T) {
 	t.Fatalf("records = %v, want the move under %q", log.records(), opSelectFeedRow)
 }
 
-// TestSelectFeedRowTestsBuildTheirLoggedHarnessThroughTheHelper pins that the
-// recording-logger wiring lives only in newLoggedHarness, so no test in this
-// file hand-rolls a variant that drifts from it.
-func TestSelectFeedRowTestsBuildTheirLoggedHarnessThroughTheHelper(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("select_feed_row_test.go")
-	if err != nil {
-		t.Fatalf("read the test source: %v", err)
-	}
-
-	// Act.
-	// The needle is split so this line is not itself counted.
-	got := strings.Count(string(src), "deps.Log = &fakeSurfaces"+"{workspace: log, global: log}")
-
-	// Assert.
-	if got != 1 {
-		t.Fatalf("hand-rolled logged harnesses = %d, want only newLoggedHarness's own", got)
-	}
-}
-
 // receiveHostEventPastSelection reads the host stream until a push that is
 // neither the host state nor the selection: the next EVENT.
 func receiveHostEventPastSelection(
@@ -1911,25 +1890,5 @@ func TestSelectClickedFailsWithoutRunningThen(t *testing.T) {
 	}
 	if _, _, held := s.currentSelection(testWorkspaceID); held {
 		t.Fatal("a failed selectClicked selected a row")
-	}
-}
-
-// TestEveryClickSelectsThroughSelectClicked pins that each click handler that
-// selects (bubble, answer, entry, and a branch of an older response) selects
-// through selectClicked, so none hand-rolls the lock and the store.
-func TestEveryClickSelectsThroughSelectClicked(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("select_feed_row.go")
-	if err != nil {
-		t.Fatalf("read select_feed_row.go: %v", err)
-	}
-
-	// Act.
-	calls := strings.Count(string(src), "s.selectClicked(")
-	builds := strings.Count(string(src), "selectionOf(kind, row,")
-
-	// Assert: four handlers call it, and only it builds a clicked selection.
-	if calls != 4 || builds != 1 {
-		t.Fatalf("select_feed_row.go calls selectClicked %d times and builds a clicked selection %d times, want 4 and 1", calls, builds)
 	}
 }

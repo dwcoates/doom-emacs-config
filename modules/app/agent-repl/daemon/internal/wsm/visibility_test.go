@@ -1,11 +1,6 @@
 package wsm
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 )
@@ -113,38 +108,6 @@ func TestInMergedBand(t *testing.T) {
 				t.Fatalf("InMergedBand = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestNoSourceSpellsASettledMergeByHand(t *testing.T) {
-	// Arrange
-	settled := regexp.MustCompile(`\.Closed\s*&&\s*\w+\.MergedAt\s*!=\s*nil`)
-	var offenders []string
-
-	// Act
-	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || path == filepath.Join("..", "wsm", "visibility.go") {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if settled.Match(src) {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("walking internal/: %v", err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("these sources spell a settled merge by hand instead of through Workspace.MergeSettled: %v", offenders)
 	}
 }
 

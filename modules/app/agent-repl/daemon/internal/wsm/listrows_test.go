@@ -3,11 +3,8 @@ package wsm
 import (
 	"context"
 	"errors"
-	"regexp"
 	"strings"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 )
 
 func TestListRowsDecodesEveryRowInOrder(t *testing.T) {
@@ -76,27 +73,6 @@ func TestListRowsFailsAQueryThatCannotRun(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("listRows ran a query against a table that does not exist")
-	}
-}
-
-// TestRowDecodersListThroughListRows keeps every many-row read that decodes
-// with a scan helper on the one loop: a hand-rolled `for rows.Next()` that
-// calls a scanX(rows) decoder is a second copy of listRows to drift.
-func TestRowDecodersListThroughListRows(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`for rows\.Next\(\) \{\s*\w+, err := scan[A-Z]\w*\(rows\)`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if handRolled.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v decode rows in a hand-rolled loop; use listRows", offenders)
 	}
 }
 

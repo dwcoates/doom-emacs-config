@@ -14,7 +14,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -409,19 +408,6 @@ func TestFoldTabs(t *testing.T) {
 // errUnknownTarget is a fold's refusal of a target nothing carries.
 var errUnknownTarget = errors.New("no such target")
 
-func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
-	// Act.
-	specs := sourcescan.Count(t, "foldTabsSpec{")
-	calls := sourcescan.Count(t, "v.foldTabs(ctx, log, ")
-	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownFolded(ws.ID)")
-
-	// Assert.
-	if specs != 3 || calls != 3 || byHand != 1 {
-		t.Fatalf("fold specs = %d, foldTabs calls = %d, stand-down loops = %d; want the repository's, the subsection's and the children's spec, each fold through foldTabs",
-			specs, calls, byHand)
-	}
-}
-
 func TestFoldSubsectionRecordsTheFoldAndStandsDownOnlyItsOwnWorkspaces(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -461,22 +447,6 @@ func TestFoldSubsectionRefusesAnUnknownSubsection(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a refused fold", len(f.sidebar.registries))
-	}
-}
-
-// TestFoldTabsMembershipIsTheSharedOne pins every fold that hides tabs to
-// wsm.FoldMembers: a hand-rolled membership closure would let the sessions a
-// collapse stands down drift from the ones the roster and the refusal count.
-func TestFoldTabsMembershipIsTheSharedOne(t *testing.T) {
-	// Act
-	shared := sourcescan.Count(t, "return wsm.RepositoryMembers(") +
-		sourcescan.Count(t, "return wsm.SubsectionMembers(") + sourcescan.Count(t, "return wsm.DescendantMembers(")
-	byHand := sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Repo ==") +
-		sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Subsection")
-
-	// Assert
-	if shared != 3 || byHand != 0 {
-		t.Fatalf("shared memberships = %d, hand-rolled = %d; want 3 and 0", shared, byHand)
 	}
 }
 

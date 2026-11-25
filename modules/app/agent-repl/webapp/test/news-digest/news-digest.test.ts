@@ -31,7 +31,6 @@ import { RecordingSink, appContext } from "../topbar/fixtures.js";
 
 // Imported at collection, not inside a test, so the transform never counts
 // against a test's timeout.
-import source from "../../src/news-digest/news-digest.ts?raw";
 
 type OverlayInit = MessageInitShape<typeof NewsDigestOverlaySchema>;
 
@@ -898,15 +897,5 @@ describe("the digest's shared builders", () => {
       ["One", "Two"],
       ["https://press.test/2"],
     ]);
-  });
-
-  it("is the only place news-digest.ts builds a heading, a prose block or a link row", () => {
-    // ARRANGE
-    // ACT
-    const counts = ['createElement("h2")', '"news-digest-summary md"', '"news-digest-links"', "renderMarkdown("].map(
-      (shape) => source.split(shape).length - 1,
-    );
-    // ASSERT
-    expect(counts).toEqual([1, 1, 1, 1]);
   });
 });

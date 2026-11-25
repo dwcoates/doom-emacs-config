@@ -4,9 +4,6 @@
 import { FOCUS_LEFT_COMPOSER, FOCUS_LEFT_EMACS, pageFocusLeft } from "../../src/focus-left.js";
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
-import { levelApplyShapeOf } from "./level-apply-shape.js";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -692,17 +689,6 @@ describe("the page a switch leaves", () => {
     expect(frame("a").hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(false);
     expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false });
   });
-
-  it("is hidden through one step shared by both kinds of show", () => {
-    // Arrange
-    const source = readFileSync(path.join(import.meta.dirname, "../../src/host/host.ts"), "utf8");
-
-    // Act
-    const hand = source.match(/applyShown\(previous, false\)/g) ?? [];
-
-    // Assert
-    expect(hand).toHaveLength(1);
-  });
 });
 
 describe("remove", () => {
@@ -1176,17 +1162,6 @@ describe("notes", () => {
     ]);
   });
 
-  it("takes every page out of the document through one removal", () => {
-    // A removal that skips removeFrame forgets the window, and the page's
-    // last message would read as a stranger's warning. dispose alone removes
-    // directly: it has already stopped listening.
-    const source = readFileSync(path.join(import.meta.dirname, "../../src/host/host.ts"), "utf8");
-    const direct = source.match(/\.iframe\.remove\(\)/g) ?? [];
-    expect(direct.length).toBe(2);
-    expect(source).toMatch(/const removeFrame = \(frame: Frame\): void => \{[^}]*frame\.iframe\.remove\(\);/s);
-    expect(source).toMatch(/dispose\(\) \{[^}]*for \(const frame of frames\.values\(\)\) frame\.iframe\.remove\(\);/s);
-  });
-
   it("hands each note to one answer only", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
@@ -1620,16 +1595,6 @@ describe("setLogLevel", () => {
       ]).toEqual(["refused", "info", 1]);
     },
   );
-});
-
-describe("the webhost's log level", () => {
-  it("is applied through LevelWindow.apply, never opened or closed by hand", () => {
-    // Act
-    const shape = levelApplyShapeOf("host/host.ts");
-
-    // Assert
-    expect(shape).toEqual({ applies: true, handRolls: false });
-  });
 });
 
 describe("a hidden page keeps the size it was hidden at", () => {

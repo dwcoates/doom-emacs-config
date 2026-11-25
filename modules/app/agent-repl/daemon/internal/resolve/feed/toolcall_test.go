@@ -3,14 +3,12 @@ package feed
 import (
 	"fmt"
 	"math"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	kinds "agent-repld/internal/detachedkindtest"
-	"agent-repld/internal/sourcescan"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -392,24 +390,6 @@ func TestTheDiffLineConstructorsSetTheirArmAndText(t *testing.T) {
 				t.Fatalf("line = %+v, want the %s arm with text t", tt.line, tt.name)
 			}
 		})
-	}
-}
-
-func TestEveryDiffLineIsBuiltThroughTheSharedConstructors(t *testing.T) {
-	// Arrange: each arm's literal may appear once, in its constructor.
-	arms := []string{"FeedDiffLine_Header{", "FeedDiffLine_Added{", "FeedDiffLine_Removed{", "FeedDiffLine_Context{"}
-
-	// Act, Assert.
-	for _, arm := range arms {
-		if n := sourcescan.Count(t, arm); n != 1 {
-			var where []string
-			for _, file := range sourcescan.Production(t) {
-				if strings.Contains(string(file.Source), arm) {
-					where = append(where, file.Name)
-				}
-			}
-			t.Fatalf("%s is built %d times (%s), want once, in its constructor", arm, n, strings.Join(where, ", "))
-		}
 	}
 }
 

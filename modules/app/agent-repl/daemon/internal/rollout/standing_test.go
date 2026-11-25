@@ -2,12 +2,10 @@ package rollout
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 )
 
 // TestStandingIsOwnedBeforeAnyHandover covers the ordinary case: a daemon that
@@ -265,30 +263,6 @@ func TestIntakeChangedAnswersAFreshChannelAfterEachChange(t *testing.T) {
 	}
 	if !h.c.ServesIntake() {
 		t.Fatalf("ServesIntake = false after the successor owned everything")
-	}
-}
-
-// TestControllerLockIsReleasedOnlyThroughUnlock pins that no production file
-// releases the controller's lock around unlock, which is the one place a
-// change of ServesIntake's answer is signaled.
-func TestControllerLockIsReleasedOnlyThroughUnlock(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
-	for _, f := range files {
-		t.Run(f.Name, func(t *testing.T) {
-			// Act
-			got := strings.Count(string(f.Source), "c.mu.Unlock()")
-
-			// Assert: unlock itself holds the one direct release.
-			want := 0
-			if f.Name == "standing.go" {
-				want = 1
-			}
-			if got != want {
-				t.Fatalf("%s releases c.mu directly %d times, want %d; release it through c.unlock()", f.Name, got, want)
-			}
-		})
 	}
 }
 

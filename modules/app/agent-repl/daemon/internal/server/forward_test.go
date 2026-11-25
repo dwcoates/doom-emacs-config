@@ -21,7 +21,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 )
 
@@ -490,19 +489,6 @@ func TestPipeStreamStatesItsTargetsAcceptanceOnce(t *testing.T) {
 					err, accepted, len(sink.got), tc.wantErr, tc.wantAccepted, tc.messages)
 			}
 		})
-	}
-}
-
-// TestOnlyPipeStreamCarriesAStreamFromAnotherDaemon keeps every stream carried
-// from another daemon on pipeStream, so a forwarded stream and a relayed page
-// subscription cannot come to state their target's acceptance differently.
-func TestOnlyPipeStreamCarriesAStreamFromAnotherDaemon(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, ".CallServerStream(")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "forward.go" {
-		t.Fatalf("a server stream is opened at another daemon from %v, want only pipeStream in forward.go", sites)
 	}
 }
 

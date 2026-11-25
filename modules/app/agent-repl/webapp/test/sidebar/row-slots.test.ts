@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { rowSlots } from "../../src/sidebar/row-slots.js";
 import { captureLogRecords } from "../log-capture.js";
@@ -60,16 +58,5 @@ describe("rowSlots", () => {
     capture.logger.flush();
     await Promise.resolve();
     expect(capture.sent.find((r) => r.operation === "sidebar.test.orphan-slot")?.level.case).toBe("error");
-  });
-
-  it("is the read every slot painter finds its slots by", () => {
-    // Arrange
-    const source = (file: string): string => readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8");
-
-    // Act / Assert
-    for (const file of ["tab-numbers.ts", "recency-gutters.ts"]) {
-      expect(source(file)).toContain("rowSlots(");
-      expect(source(file)).not.toContain('closest("[data-roster-row]")');
-    }
   });
 });

@@ -25,9 +25,3 @@ func TestHostNeutralUserEnvEnvClearsWhatEmacsStates(t *testing.T) {
 		})
 	}
 }
-
-func TestStartDaemonAppliesHostNeutralUserEnvEnvAfterTheInheritedEnvironment(t *testing.T) {
-	// The one call site must state the cleared env file after os.Environ() and
-	// before ExtraEnv, so it beats the host's value and a test can still set one.
-	assertAppendedBetweenInheritedAndExtra(t, "HostNeutralUserEnvEnv")
-}

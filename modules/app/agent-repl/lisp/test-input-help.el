@@ -55,22 +55,6 @@ for that map.  A `:composer' KEY-VECTOR may start with an Evil
           :leader (map-of (plist-get bindings :leader))
           :leader-key "SPC")))
 
-(defun agent-repl-test-input-help--binding-commands (binding)
-  "Return the commands BINDING's row lists: one, or its list."
-  (let ((command (car binding)))
-    (if (listp command) (copy-sequence command) (list command))))
-
-(defun agent-repl-test-input-help--topic-commands (&optional loadable-only)
-  "Return every command the help topics name.
-LOADABLE-ONLY keeps only the topics whose `:requires' batch Emacs has."
-  (delete-dups
-   (mapcan (lambda (topic)
-             (when (or (not loadable-only)
-                       (cl-every (lambda (feature) (locate-library (symbol-name feature)))
-                                 (plist-get topic :requires)))
-               (mapcan #'agent-repl-test-input-help--binding-commands (plist-get topic :bindings))))
-           (copy-sequence agent-repl-input-help-topics))))
-
 (defun agent-repl-test-input-help--quoted-commands (form)
   "Return every symbol FORM quotes with `#''."
   (let (found)
@@ -82,58 +66,6 @@ LOADABLE-ONLY keeps only the topics whose `:requires' batch Emacs has."
                          (walk (cdr x))))))
       (walk form))
     found))
-
-(defconst agent-repl-test-input-help--binders
-  '(define-key map! evil-define-key evil-define-key* keymap-set global-set-key local-set-key)
-  "The forms that bind a key; a `#''-quoted command inside one is a binding.")
-
-(defun agent-repl-test-input-help--source-commands (file)
-  "Return the `#''-quoted commands inside FILE's binding forms.
-`map!' is a no-op stub under `emacs -Q', so its bindings are read off the
-source; so is every other binding form, wherever it nests."
-  (with-temp-buffer
-    (insert-file-contents file)
-    (let (found)
-      (cl-labels ((walk (x inside)
-                    (cond ((and inside (eq (car-safe x) 'function) (symbolp (cadr x)))
-                           (push (cadr x) found))
-                          ((consp x)
-                           (let ((in (or inside (memq (car x) agent-repl-test-input-help--binders))))
-                             (walk (car x) in)
-                             (when (listp (cdr x))
-                               (dolist (y (cdr x)) (walk y in))))))))
-        (condition-case nil
-            (while t (walk (read (current-buffer)) nil))
-          (end-of-file nil)))
-      found)))
-
-(defun agent-repl-test-input-help--module-sources ()
-  "Return every non-test elisp source of the module, config.el included."
-  (cons (expand-file-name "config.el" agent-repl-test--module-root)
-        (seq-remove (lambda (file) (string-prefix-p "test-" (file-name-nondirectory file)))
-                    (directory-files agent-repl-test--module-dir t "\\.el\\'"))))
-
-(defun agent-repl-test-input-help--bound-commands ()
-  "Return every command the module binds.
-Its live keymaps (every `agent-repl'-named keymap variable, which a
-`define-key' fills even under `emacs -Q'), and every binding form of its
-sources (`agent-repl-test-input-help--source-commands').  Only commands
-count: Evil marks a map with non-command bindings, such as an intercept
-map's `[intercept-state] all'."
-  (let (found)
-    (cl-labels ((walk (map)
-                  (map-keymap (lambda (_event def)
-                                (cond ((keymapp def) (walk def))
-                                      ((and (symbolp def) (commandp def)) (push def found))))
-                              map)))
-      (mapatoms (lambda (symbol)
-                  (when (and (boundp symbol)
-                             (string-prefix-p "agent-repl" (symbol-name symbol))
-                             (keymapp (symbol-value symbol)))
-                    (walk (symbol-value symbol))))))
-    (dolist (file (agent-repl-test-input-help--module-sources))
-      (setq found (append (agent-repl-test-input-help--source-commands file) found)))
-    (delete-dups found)))
 
 ;;;; ---- The button colors ----
 
@@ -609,36 +541,11 @@ Compared in description order: a keymap's own order says nothing."
       (dolist (variable (plist-get (cddr binding) :variables))
         (should (boundp variable))))))
 
-(ert-deftest agent-repl-test-input-help-every-face-is-an-agent-repl-defface ()
-  "input-help.el defines its faces with `agent-repl-defface', so a load re-specs them."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "input-help.el" agent-repl-test--module-dir))
-    (should-not (search-forward "(defface " nil t))))
-
 (ert-deftest agent-repl-test-input-help-every-topic-command-is-a-command ()
   "Every command a topic names is an interactive command.
 Topics needing a package batch Emacs lacks (magit) are left out."
   (dolist (command (agent-repl-test-input-help--topic-commands t))
     (should (commandp command))))
-
-(ert-deftest agent-repl-test-input-help-every-topic-command-is-bound ()
-  "Every command a topic names is bound somewhere in the module."
-  (let ((bound (agent-repl-test-input-help--bound-commands)))
-    (dolist (command (agent-repl-test-input-help--topic-commands))
-      (should (memq command bound)))))
-
-(ert-deftest agent-repl-test-input-help-every-binding-is-in-a-topic ()
-  "Every command the module binds is in a topic, or listed as unlisted."
-  (let ((listed (append (agent-repl-test-input-help--topic-commands)
-                        (mapcar #'car agent-repl-input-help-unlisted-commands))))
-    (dolist (command (agent-repl-test-input-help--bound-commands))
-      (should (memq command listed)))))
-
-(ert-deftest agent-repl-test-input-help-every-unlisted-command-is-bound ()
-  "Every command kept out of the topics is still bound, so the list holds no stale entry."
-  (let ((bound (agent-repl-test-input-help--bound-commands)))
-    (dolist (entry agent-repl-input-help-unlisted-commands)
-      (should (memq (car entry) bound)))))
 
 (ert-deftest agent-repl-test-input-help-no-command-is-both-listed-and-unlisted ()
   "A command is in a topic or unlisted, never both."

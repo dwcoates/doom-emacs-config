@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -872,24 +871,6 @@ func TestAppendTranscriptLineSurfacesAnUnwritableDirectory(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("appendTranscriptLine wrote under a file posing as the projects directory")
-	}
-}
-
-// TestFakeTranscriptWritesShareOneHelper fails when a fake RPC writes a
-// transcript line by hand instead of through appendTranscriptLine.
-func TestFakeTranscriptWritesShareOneHelper(t *testing.T) {
-	// Arrange
-	source, err := os.ReadFile("server.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	writes := strings.Count(string(source), "os.WriteFile(path") + strings.Count(string(source), "os.OpenFile(path")
-
-	// Assert
-	if writes != 1 {
-		t.Errorf("server.go opens or writes a transcript path %d times, want once, in appendTranscriptLine", writes)
 	}
 }
 

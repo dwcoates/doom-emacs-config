@@ -745,23 +745,3 @@ func TestHoldServingThatFailsReleasesTheBootClaim(t *testing.T) {
 	}
 	next.release()
 }
-
-// TestEveryServingHolderGoesThroughHoldServing pins that no path takes the
-// serving lock by hand: one that did could keep a boot claim with no serving
-// lock beside it, which every booting daemon reads as departing.
-func TestEveryServingHolderGoesThroughHoldServing(t *testing.T) {
-	// Arrange.
-	files := []string{"claim.go", "api.go"}
-	for _, name := range files {
-		// Act.
-		raw, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-
-		// Assert.
-		if strings.Contains(string(raw), ".takeServing()") {
-			t.Fatalf("%s takes the serving lock by hand; use holdServing", name)
-		}
-	}
-}

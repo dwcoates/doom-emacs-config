@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 /** The one copy control: its markup, its click, its copied moment, and its record. */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   boundCopyControl,
@@ -15,11 +13,7 @@ import {
 } from "../src/copy-control.js";
 import { CLICK_THROUGH_SELECTOR } from "../src/expand.js";
 import { bubbleClick, SELECTABLE_ATTRIBUTE } from "../src/feed/bubble-selection.js";
-import { codeUnder } from "./files-under.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(here, "../src");
 
 let teardown: (() => void) | undefined;
 
@@ -78,18 +72,6 @@ describe("copyControlHtml", () => {
   it("holds no text", () => {
     // Act / Assert
     expect(drawn().textContent).toBe("");
-  });
-
-  it("is the only place src draws a copy control", () => {
-    // Arrange
-    const files = [...codeUnder(SRC)];
-    // Act
-    const handRolled = files
-      .filter(([file]) => file !== "copy-control.ts")
-      .filter(([, code]) => /data-copies|copy-control-icon/.test(code))
-      .map(([file]) => file);
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });
 
