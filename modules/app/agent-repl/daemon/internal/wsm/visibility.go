@@ -136,10 +136,13 @@ func (ws Workspace) LetsCacheLapse() bool {
 // failed, or was taken off) nothing is carried, and it runs only while the
 // user looks at it: its requester's bubble opens it, which selects it.
 //
-// THE WORKSPACE THE USER IS LOOKING AT RUNS (owner ruling, 2026-10-17), even
-// hidden or collapsed: selecting one revives it, and a rule that withheld it
-// stood that session down the moment it came up, so its cold gate stood again
-// after every answer. Moving off it withholds it again.
+// THE WORKSPACE THE USER IS LOOKING AT KEEPS A RUNNING SESSION UP (owner
+// rulings, 2026-10-17 and 2026-11-24), even backlogged or collapsed: a rule
+// that withheld it stood a session down the moment it came up, so its cold
+// gate stood again after every answer. Selecting a workspace whose session is
+// PARKED never brings it up: only a prompt, a settings pick, a keep-alive
+// restore, a cold gate's answer or a restart does. Moving off it withholds it
+// again.
 //
 // A WORKSPACE A FOLD SPARES RUNS UNDER THE FOLD (FoldSpare): a fold never
 // stands a one-shot down, so a boot never withholds one a fold hides either.

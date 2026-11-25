@@ -909,3 +909,24 @@ func TestASessionBroughtUpForWorkIsNeverParkedBeforeItsTurnCloses(t *testing.T) 
 		})
 	}
 }
+
+func TestAClosedWorkspacesSessionIsParkedAtOnceAndOwesOneLastBeat(t *testing.T) {
+	// Arrange: closed now, its cache warm from a turn ten minutes ago, and no
+	// resource allocation holding it, as the roster says of a closed workspace.
+	rec := warm()
+	rec.Closed = true
+	rec.Closure = &wsm.Closure{At: now}
+	h := newHarness(t, rec)
+	h.hold = func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{} }
+
+	// Act
+	h.reconcile("the workspace was closed or reopened")
+
+	// Assert: parked now, and its one last beat still owed.
+	if len(h.idleDowns) != 1 {
+		t.Fatalf("idle parks = %+v, want the closed workspace's session parked at once", h.idleDowns)
+	}
+	if _, armed := h.keeper.beats[theWorkspace]; !armed {
+		t.Fatal("no beat armed: a closed workspace owes its conversation one last keep-alive")
+	}
+}
