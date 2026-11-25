@@ -1709,3 +1709,95 @@ func TestPublishNamingRecordsAnUnreadableAccountRootAtError(t *testing.T) {
 		t.Fatalf("record = %+v, want the workspace and the cause", got)
 	}
 }
+
+func TestBringUpViews(t *testing.T) {
+	cases := []struct {
+		name       string
+		arrange    func(*fixture)
+		wantErr    string
+		wantBound  bool
+		wantNaming bool
+	}{
+		{name: "binds the directory and then publishes the naming", wantBound: true, wantNaming: true},
+		{
+			name:    "a failed bind publishes no naming",
+			arrange: func(f *fixture) { f.footer.setDirErr = errors.New("bind exploded") },
+			wantErr: "bind exploded",
+		},
+		{
+			name:      "a failed naming is surfaced after the bind",
+			arrange:   func(f *fixture) { f.db.sessionErr = errors.New("session exploded") },
+			wantErr:   "session exploded",
+			wantBound: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			v := f.verbs.(*verbs)
+			record := f.workspace("w1", worktreeDir(t))
+			if tc.arrange != nil {
+				tc.arrange(f)
+			}
+			namingsBefore := len(f.topbarNamings)
+
+			// Act.
+			err := v.bringUpViews(context.Background(), v.deps.Log.Global(), record)
+
+			// Assert.
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("bringUpViews = %v, want nil", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("bringUpViews = %v, want an error carrying %q", err, tc.wantErr)
+			}
+			if _, bound := f.footer.dirs["w1"]; bound != tc.wantBound {
+				t.Fatalf("footer bound = %v, want %v", bound, tc.wantBound)
+			}
+			if named := len(f.topbarNamings) > namingsBefore; named != tc.wantNaming {
+				t.Fatalf("naming published = %v, want %v", named, tc.wantNaming)
+			}
+		})
+	}
+}
+
+// TestEveryBindThenNameGoesThroughBringUpViews asserts no source in this
+// package binds a workspace's resolvers and publishes its naming back to back
+// by hand, so a site that drifts from bringUpViews fails here.
+func TestEveryBindThenNameGoesThroughBringUpViews(t *testing.T) {
+	// Arrange.
+	const window = 6
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("list the package's sources: %v", err)
+	}
+	var pairs []string
+
+	// Act.
+	for _, path := range sources {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		lines := strings.Split(string(src), "\n")
+		for i, line := range lines {
+			if !strings.Contains(line, "v.bindResolvers(") {
+				continue
+			}
+			for j := i + 1; j < len(lines) && j <= i+window; j++ {
+				if strings.Contains(lines[j], "v.publishNaming(") {
+					pairs = append(pairs, fmt.Sprintf("%s:%d", path, i+1))
+				}
+			}
+		}
+	}
+
+	// Assert.
+	if len(pairs) != 1 || !strings.HasPrefix(pairs[0], "register.go:") {
+		t.Fatalf("bind-then-name pairs = %v, want exactly the one in bringUpViews", pairs)
+	}
+}

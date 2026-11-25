@@ -363,12 +363,8 @@ func TestSettleMissingDirectorySurfacesAFailedNamingOfADirectoryRestoredMeanwhil
 	if restored || err == nil || !strings.Contains(err.Error(), "session exploded") {
 		t.Fatalf("SettleMissingDirectory = (%v, %v), want (false, the naming's error)", restored, err)
 	}
-	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: testMissingDirOp, Message: "could not publish the naming of the workspace restored meanwhile"})
-	if !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRegister, Message: "could not read the workspace's account root for its topbar"}); !ok {
 		t.Fatalf("no ERROR record of the failed naming: %+v", f.log.logger.Records())
-	}
-	if record.Context[dlog.KeyWorkspaceID] != "w1" || !strings.Contains(record.Context["cause"].(string), "session exploded") {
-		t.Fatalf("record = %+v, want the workspace and the cause", record)
 	}
 	if closures := f.db.closures["w1"]; len(closures) != 0 {
 		t.Fatalf("closures = %+v, want none", closures)

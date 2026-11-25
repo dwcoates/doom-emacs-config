@@ -319,12 +319,8 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		}
 		log = v.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(record.ID)})
 		log.Info(opOpen, "the thread's directory was gone; it was made again", dlog.Context{"dir": record.Dir})
-		if err := v.bindResolvers(ctx, log, record); err != nil {
-			return nil, fmt.Errorf("open %q: bind the thread's views: %w", record.ID, err)
-		}
-		if err := v.publishNaming(ctx, log, record); err != nil {
-			log.Error(opOpen, "could not publish the thread's naming", dlog.Context{"dir": record.Dir, "cause": err.Error()})
-			return nil, fmt.Errorf("open %q: publish the thread's naming: %w", record.ID, err)
+		if err := v.bringUpViews(ctx, log, record); err != nil {
+			return nil, fmt.Errorf("open %q: bring up the thread's views: %w", record.ID, err)
 		}
 		return log, nil
 	}
@@ -422,14 +418,8 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 	// exists (BindViews, PublishRegistry), so a restored one has neither, and
 	// its session's first footer and topbar records would meet a resolver
 	// that does not know where the workspace is.
-	if err := v.bindResolvers(ctx, log, record); err != nil {
-		return nil, fmt.Errorf("open %q: bind the restored workspace's views: %w", record.ID, err)
-	}
-	if err := v.publishNaming(ctx, log, record); err != nil {
-		log.Error(opOpen, "could not publish the restored workspace's naming", dlog.Context{
-			"dir": record.Dir, "branch": record.Branch, "cause": err.Error(),
-		})
-		return nil, fmt.Errorf("open %q: publish the restored workspace's naming: %w", record.ID, err)
+	if err := v.bringUpViews(ctx, log, record); err != nil {
+		return nil, fmt.Errorf("open %q: bring up the restored workspace's views: %w", record.ID, err)
 	}
 	return log, nil
 }

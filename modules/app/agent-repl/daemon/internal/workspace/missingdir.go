@@ -74,13 +74,8 @@ func (v *verbs) SettleMissingDirectory(ctx context.Context, op string, ws wsm.Wo
 	// workspace, whoever brought the directory back.
 	if _, err := os.Stat(ws.Dir); err == nil {
 		wsLog := v.deps.Log.WorkspaceOrCentral(ws.Dir).With(dlog.Context{"workspace": string(ws.ID)})
-		if err := v.bindResolvers(ctx, wsLog, ws); err != nil {
-			return false, fmt.Errorf("bind the views of %q, restored meanwhile: %w", ws.ID, err)
-		}
-		if err := v.publishNaming(ctx, wsLog, ws); err != nil {
-			fields["cause"] = err.Error()
-			log.Error(op, "could not publish the naming of the workspace restored meanwhile", fields)
-			return false, fmt.Errorf("publish the naming of %q, restored meanwhile: %w", ws.ID, err)
+		if err := v.bringUpViews(ctx, wsLog, ws); err != nil {
+			return false, fmt.Errorf("bring up the views of %q, restored meanwhile: %w", ws.ID, err)
 		}
 		log.Info(op, "the workspace directory was gone and was restored meanwhile; its views are bound", fields)
 		return true, nil

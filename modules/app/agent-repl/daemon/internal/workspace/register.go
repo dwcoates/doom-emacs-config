@@ -591,6 +591,21 @@ func (v *verbs) bindResolvers(ctx context.Context, log dlog.Logger, record wsm.W
 	return nil
 }
 
+// bringUpViews binds RECORD's directory on every resolver (bindResolvers) and
+// then publishes its topbar naming (publishNaming): the two every workspace
+// needs before anything is drawn for it, in the order the naming needs, since
+// it writes to the sinks the binding resolves. Both record their own failures,
+// so the caller only propagates one.
+func (v *verbs) bringUpViews(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+	if err := v.bindResolvers(ctx, log, record); err != nil {
+		return err
+	}
+	if err := v.publishNaming(ctx, log, record); err != nil {
+		return fmt.Errorf("publish the naming of %q: %w", record.ID, err)
+	}
+	return nil
+}
+
 // publishNaming installs the topbar's naming and account lines: both are
 // DAEMON facts (the registry's name and branch, the repo-under-root account
 // rule) and no vendor frame carries either, so nothing else can state them.
@@ -823,10 +838,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 			})
 			continue
 		}
-		if err := v.bindResolvers(ctx, global, *ws); err != nil {
-			return fmt.Errorf("publish the opening roster: %w", err)
-		}
-		if err := v.publishNaming(ctx, global, *ws); err != nil {
+		if err := v.bringUpViews(ctx, global, *ws); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 	}
