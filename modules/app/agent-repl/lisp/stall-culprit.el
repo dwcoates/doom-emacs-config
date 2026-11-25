@@ -43,11 +43,39 @@
 ;; under a millisecond of every second.  The sampler itself is a timer, so its own
 ;; time is charged to `agent-repl-stall-sample' like any other unit's, and a
 ;; sampler grown costly would name itself.
+;;
+;; EACH UNIT IS ALSO CHARGED WHAT IT ALLOCATED.  Garbage collection held the
+;; loop for most of the stalls attributed so far, and a collection comes
+;; after a fixed amount of allocation, whoever allocated it.  So every charge
+;; also reads Emacs's allocation counters (`cons-cells-consed' and its
+;; siblings, exact and read without allocating) and adds the bytes allocated
+;; since the last charge to the current unit; allocation while no unit runs
+;; (redisplay, a process that is not a daemon connection, the command loop
+;; itself) is charged to `untimed'.  Once a minute the top allocators, the
+;; untimed remainder, and the collections the minute paid for are recorded
+;; at INFO (`elisp.alloc.minute'), so the allocation that drives the
+;; collections is named from the shared log alone.  Reading the counters
+;; costs about 0.5 microseconds a charge (measured 2026-11-25 in batch).
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (declare-function agent-repl--now "core" ())
+(declare-function agent-repl--register-timer "core" (key timer))
 (declare-function timer--function "timer" (timer))
+
+(defconst agent-repl-stall-culprit--central
+  '(:agent-repl-central "the editor's allocation spans every workspace")
+  "The log scope of every allocation record.")
+
+(defconst agent-repl-stall-culprit-report-interval 60
+  "Seconds between two records of the minute's allocation.")
+
+(defconst agent-repl-stall-culprit-report-top 8
+  "How many of the minute's allocators its record names.")
 
 (defvar agent-repl-stall-culprit--current nil
   "The key of the unit the loop is running now, `:idle', or nil for none.
@@ -67,16 +95,76 @@ method's name.")
 (defvar agent-repl-stall-culprit--suspended nil
   "The units a minibuffer wait suspended, innermost first.")
 
+(defvar agent-repl-stall-culprit--allocated-at 0
+  "`agent-repl-stall-culprit--allocated' at the last charge.")
+
+(defvar agent-repl-stall-culprit--allocations nil
+  "Each unit's allocation since the last minute's record, an alist (KEY . BYTES).
+Allocation while no unit runs is under the key `(untimed)'.")
+
+(defvar agent-repl-stall-culprit--report-from nil
+  "`(GCS-DONE . GC-ELAPSED)' when the current minute's record began.")
+
+(defun agent-repl-stall-culprit--allocated ()
+  "Answer the bytes Emacs has allocated since it started, by its counters.
+Each counter is weighed by the size of what it counts on a 64-bit build:
+a cons or a float 16 bytes, a vector cell 8, a symbol 48, a string header
+32, an interval 56, a string character 1."
+  (+ (* 16 cons-cells-consed) (* 16 floats-consed) (* 8 vector-cells-consed)
+     (* 48 symbols-consed) (* 32 strings-consed) (* 56 intervals-consed)
+     string-chars-consed))
+
 (defun agent-repl-stall-culprit--charge (now)
-  "Charge the current unit its time up to NOW, and restart its clock at NOW."
-  (let ((key agent-repl-stall-culprit--current))
+  "Charge the current unit its time up to NOW and its allocation since the last charge.
+Restarts its clock at NOW."
+  (let ((key agent-repl-stall-culprit--current)
+        (allocated (agent-repl-stall-culprit--allocated)))
     (when (consp key)
       (let ((ran (- now agent-repl-stall-culprit--since))
             (cell (assoc key agent-repl-stall-culprit--window)))
         (if cell
             (setcdr cell (+ (cdr cell) ran))
-          (push (cons key ran) agent-repl-stall-culprit--window)))))
-  (setq agent-repl-stall-culprit--since now))
+          (push (cons key ran) agent-repl-stall-culprit--window))))
+    (let* ((owner (if (consp key) key '(untimed)))
+           (bytes (- allocated agent-repl-stall-culprit--allocated-at))
+           (cell (assoc owner agent-repl-stall-culprit--allocations)))
+      (if cell
+          (setcdr cell (+ (cdr cell) bytes))
+        (push (cons owner bytes) agent-repl-stall-culprit--allocations)))
+    (setq agent-repl-stall-culprit--since now
+          agent-repl-stall-culprit--allocated-at allocated)))
+
+(defun agent-repl-stall-culprit--key-name (key)
+  "Answer unit KEY as it reads in a record: SOURCE:NAME, or `untimed'."
+  (if (cdr key)
+      (format "%s:%s" (car key) (cdr key))
+    (symbol-name (car key))))
+
+(defun agent-repl-stall-culprit-report-allocations ()
+  "Record at INFO the allocation since the last record, by unit, and start afresh.
+Names the `agent-repl-stall-culprit-report-top' largest allocators in
+megabytes, the untimed remainder, the total, and the collections and their
+seconds since the last record."
+  (agent-repl-stall-culprit--charge (agent-repl--now))
+  (let* ((from (or agent-repl-stall-culprit--report-from (cons gcs-done gc-elapsed)))
+         (allocations (sort (copy-sequence agent-repl-stall-culprit--allocations)
+                            (lambda (a b) (> (cdr a) (cdr b)))))
+         (total (apply #'+ 0 (mapcar #'cdr allocations)))
+         (mb (lambda (bytes) (format "%.1f" (/ bytes 1048576.0)))))
+    (agent-repl--info agent-repl-stall-culprit--central
+                      "elisp.alloc.minute allocated-mb={allocated} untimed-mb={untimed} gcs={gcs} gc-seconds={gc} threshold={threshold} top={top}"
+                      :allocated (funcall mb total)
+                      :untimed (funcall mb (or (cdr (assoc '(untimed) allocations)) 0))
+                      :gcs (- gcs-done (car from))
+                      :gc (format "%.3f" (- gc-elapsed (cdr from)))
+                      :threshold gc-cons-threshold
+                      :top (mapconcat (lambda (cell)
+                                        (format "%s=%s" (agent-repl-stall-culprit--key-name (car cell))
+                                                (funcall mb (cdr cell))))
+                                      (seq-take allocations agent-repl-stall-culprit-report-top)
+                                      ","))
+    (setq agent-repl-stall-culprit--allocations nil
+          agent-repl-stall-culprit--report-from (cons gcs-done gc-elapsed))))
 
 (defun agent-repl-stall-culprit-run (key fn &rest args)
   "Run FN on ARGS as the unit KEY, timing it; answer what FN answers.
@@ -153,6 +241,12 @@ garbage collection ran."
     (agent-repl-stall-culprit-reset now)
     (list :culprit (agent-repl-stall-culprit--culprit (car best))
           :ran (cdr best) :timed timed :gc gc)))
+
+(setq agent-repl-stall-culprit--allocated-at (agent-repl-stall-culprit--allocated))
+(agent-repl--register-timer
+ :allocation-report
+ (run-at-time agent-repl-stall-culprit-report-interval agent-repl-stall-culprit-report-interval
+              #'agent-repl-stall-culprit-report-allocations))
 
 (advice-add 'timer-event-handler :around #'agent-repl-stall-culprit--around-timer)
 (advice-add 'command-execute :around #'agent-repl-stall-culprit--around-command)

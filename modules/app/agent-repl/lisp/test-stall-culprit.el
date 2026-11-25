@@ -10,6 +10,9 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+(defvar agent-repl-test-stall-culprit--bytes 0
+  "What the stubbed allocation counter answers.")
+
 (defmacro agent-repl-test-stall-culprit--with (&rest body)
   "Run BODY with a settable clock and a fresh culprit window at 100.0."
   (declare (indent 0))
@@ -17,9 +20,19 @@
          (agent-repl-stall-culprit--since 100.0)
          (agent-repl-stall-culprit--window nil)
          (agent-repl-stall-culprit--gc-at gc-elapsed)
-         (agent-repl-stall-culprit--suspended nil))
+         (agent-repl-stall-culprit--suspended nil)
+         (agent-repl-test-stall-culprit--bytes 0)
+         (agent-repl-stall-culprit--allocated-at 0)
+         (agent-repl-stall-culprit--allocations nil)
+         (agent-repl-stall-culprit--report-from nil))
      (agent-repl-test--with-clock 100.0
-       ,@body)))
+       (cl-letf (((symbol-function 'agent-repl-stall-culprit--allocated)
+                  (lambda () agent-repl-test-stall-culprit--bytes)))
+         ,@body))))
+
+(defun agent-repl-test-stall-culprit--allocate (bytes)
+  "Step the stubbed allocation counter by BYTES."
+  (setq agent-repl-test-stall-culprit--bytes (+ agent-repl-test-stall-culprit--bytes bytes)))
 
 (defun agent-repl-test-stall-culprit--advance (seconds)
   "Step the test clock by SECONDS."
@@ -245,6 +258,68 @@
     ;; Assert
     (should (equal agent-repl-stall-culprit--window
                    '(((process-filter . "WatchHostWorkspace") . 0.25))))))
+
+(ert-deftest agent-repl-test-stall-culprit-a-unit-is-charged-what-it-allocated ()
+  "The bytes allocated while a unit runs are charged to it, a nested unit's to the nested one."
+  (agent-repl-test-stall-culprit--with
+    ;; Act
+    (agent-repl-stall-culprit-run
+     '(process-filter . "WatchWorkspaceRoster")
+     (lambda ()
+       (agent-repl-test-stall-culprit--allocate 1000)
+       (agent-repl-stall-culprit-run '(timer . agent-repl-a)
+                                     (lambda () (agent-repl-test-stall-culprit--allocate 300)))
+       (agent-repl-test-stall-culprit--allocate 24)))
+    ;; Assert
+    (should (equal (cdr (assoc '(process-filter . "WatchWorkspaceRoster") agent-repl-stall-culprit--allocations)) 1024))
+    (should (equal (cdr (assoc '(timer . agent-repl-a) agent-repl-stall-culprit--allocations)) 300))))
+
+(ert-deftest agent-repl-test-stall-culprit-allocation-outside-any-unit-is-untimed ()
+  "Bytes allocated while no unit runs are charged to `untimed'."
+  (agent-repl-test-stall-culprit--with
+    ;; Arrange
+    (agent-repl-test-stall-culprit--allocate 4096)
+    ;; Act
+    (agent-repl-test-stall-culprit--unit '(timer . agent-repl-a) 0.25)
+    ;; Assert
+    (should (equal (cdr (assoc '(untimed) agent-repl-stall-culprit--allocations)) 4096))))
+
+(ert-deftest agent-repl-test-stall-culprit-the-minute-record-names-the-top-allocators ()
+  "The minute's record names the allocators largest first, the untimed remainder and the collections."
+  (agent-repl-test-stall-culprit--with
+    (let (records)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (agent-repl-test--record-into records)))
+        ;; Arrange
+        (agent-repl-test-stall-culprit--allocate (* 1 1048576))
+        (agent-repl-stall-culprit-run '(process-filter . "WatchWorkspaceRoster")
+                                      (lambda () (agent-repl-test-stall-culprit--allocate (* 3 1048576))))
+        (agent-repl-stall-culprit-run '(timer . agent-repl-a)
+                                      (lambda () (agent-repl-test-stall-culprit--allocate (* 2 1048576))))
+        (setq agent-repl-stall-culprit--report-from (cons (- gcs-done 7) (- gc-elapsed 0.5)))
+        ;; Act
+        (agent-repl-stall-culprit-report-allocations)
+        ;; Assert
+        (should (string-match-p
+                 "elisp.alloc.minute allocated-mb=6.0 untimed-mb=1.0 gcs=7 gc-seconds=0.500 threshold=[0-9]+ top=process-filter:WatchWorkspaceRoster=3.0,timer:agent-repl-a=2.0,untimed=1.0"
+                 (car records)))))))
+
+(ert-deftest agent-repl-test-stall-culprit-the-minute-record-starts-the-next-minute-afresh ()
+  "After its record, a minute's allocations are forgotten and the collection baseline moves."
+  (agent-repl-test-stall-culprit--with
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
+      ;; Arrange
+      (agent-repl-test-stall-culprit--unit '(timer . agent-repl-a) 0.25)
+      (agent-repl-test-stall-culprit--allocate 100)
+      ;; Act
+      (agent-repl-stall-culprit-report-allocations)
+      ;; Assert
+      (should-not agent-repl-stall-culprit--allocations)
+      (should (equal agent-repl-stall-culprit--report-from (cons gcs-done gc-elapsed))))))
+
+(ert-deftest agent-repl-test-stall-culprit-the-allocation-record-is-a-registered-timer ()
+  "The minute's record is armed through the timer registry, so a reload replaces it."
+  (should (timerp (cdr (assq :allocation-report agent-repl--keyed-timers)))))
 
 (ert-deftest agent-repl-test-stall-culprit-the-loop-entry-points-are-advised ()
   "Timers, commands and minibuffer waits all pass through the timing."
