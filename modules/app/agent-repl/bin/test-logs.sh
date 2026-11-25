@@ -149,18 +149,26 @@ run_logs() {
     run_logs_unwindowed "$@"
 }
 
+# logs_env sets LOGS_ENV to the environment every logs.sh run of the
+# harness gets, read at the call so a case's overrides apply.
+logs_env() {
+    LOGS_ENV=(
+        PATH="$bin:$PATH"
+        HOME="$home"
+        TMPDIR="$runtime_tmp"
+        GOCACHE="$TMP/go-cache"
+        AGENT_REPL_LOGS_BUILD_DIR="$TMP/build"
+        AGENT_REPL_LOGS_TEST_ROWS="${AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE:-$rows}"
+        AGENT_REPL_STATE_DIR="$state"
+        XDG_CACHE_HOME="${XDG_CACHE_HOME_OVERRIDE:-$cache}"
+        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}"
+        TZ=UTC
+    )
+}
+
 run_logs_unwindowed() {
-    PATH="$bin:$PATH" \
-        HOME="$home" \
-        TMPDIR="$runtime_tmp" \
-        GOCACHE="$TMP/go-cache" \
-        AGENT_REPL_LOGS_BUILD_DIR="$TMP/build" \
-        AGENT_REPL_LOGS_TEST_ROWS="${AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE:-$rows}" \
-        AGENT_REPL_STATE_DIR="$state" \
-        XDG_CACHE_HOME="${XDG_CACHE_HOME_OVERRIDE:-$cache}" \
-        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
-        TZ=UTC \
-        "$LOGS" "$@"
+    logs_env
+    env "${LOGS_ENV[@]}" "$LOGS" "$@"
 }
 
 test_workspace_directory_and_default_format() {
@@ -1135,17 +1143,8 @@ EOF
     # Opening both ends here lets startup itself remain under read's deadline;
     # a read-only open would block before the follower opened its writer.
     exec {follow_fd}<>"$pipe"
-    PATH="$bin:$PATH" \
-        HOME="$home" \
-        TMPDIR="$runtime_tmp" \
-        GOCACHE="$TMP/go-cache" \
-        AGENT_REPL_LOGS_BUILD_DIR="$TMP/build" \
-        AGENT_REPL_LOGS_TEST_ROWS="$rows" \
-        AGENT_REPL_STATE_DIR="$state" \
-        XDG_CACHE_HOME="$cache" \
-        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
-        TZ=UTC \
-        "$LOGS" --workspace "$workspace" --runtime daemon --since "$fixture_since" --follow --json \
+    logs_env
+    env "${LOGS_ENV[@]}" "$LOGS" --workspace "$workspace" --runtime daemon --since "$fixture_since" --follow --json \
         >"$pipe" 2>"$TMP/follow.err" &
     pid=$!
     if read_follow_pattern 'daemon.follow.initial' "$follow_fd" "$TMP/follow.out"; then
@@ -1543,6 +1542,27 @@ test_an_ordered_read_leaves_no_spill_file() {
     fi
 }
 
+test_the_readers_go_unit_tests_pass() {
+    local out
+    if out="$(cd "$THIS_DIR" && GOCACHE="$TMP/go-cache" TMPDIR="$runtime_tmp" go test logs-reader.go logs-reader_test.go 2>&1)"; then
+        pass "the reader's Go unit tests pass"
+    else
+        fail "the reader's Go unit tests pass" "$out"
+    fi
+}
+
+# logs_env is the one environment every logs.sh run gets: a case running
+# logs.sh with an environment of its own would drift from it unseen.
+test_every_logs_run_takes_the_harness_environment() {
+    local hand_rolled
+    hand_rolled="$(grep -n '"\$LOGS"' "${BASH_SOURCE[0]}" | grep -v 'env "\${LOGS_ENV\[@\]}" "\$LOGS"' | grep -v '^[0-9]*:LOGS=' || true)"
+    if [ -z "$hand_rolled" ]; then
+        pass "every logs.sh run takes the harness's one environment"
+    else
+        fail "every logs.sh run takes the harness's one environment" "$hand_rolled"
+    fi
+}
+
 test_an_ordered_read_fails_when_it_cannot_make_its_spill_file() {
     local rc=0 err
     err="$(TMPDIR="$TMP/no-such-tmp" run_reader_on "$(ordered_limit_fixture)" --mode json 2>&1 >/dev/null)" || rc=$?
@@ -1635,5 +1655,7 @@ test_a_sample_keeps_each_groups_earliest_records
 test_the_reader_refuses_a_non_positive_ordered_limit
 test_an_ordered_read_leaves_no_spill_file
 test_an_ordered_read_fails_when_it_cannot_make_its_spill_file
+test_the_readers_go_unit_tests_pass
+test_every_logs_run_takes_the_harness_environment
 
 harness_finish

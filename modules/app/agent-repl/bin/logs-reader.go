@@ -1087,13 +1087,18 @@ func (f filters) accepts(rec record) bool {
 	return true
 }
 
-// recordBefore orders two records by instant, then by the order they were
-// read in.
-func recordBefore(a, b record) bool {
-	if a.instant.Equal(b.instant) {
-		return a.seq < b.seq
+// orderedBefore is the one order every printed record is in: by instant,
+// in Unix nanoseconds, then by the order the read came to it (its seq).
+func orderedBefore(instantA, seqA, instantB, seqB int64) bool {
+	if instantA != instantB {
+		return instantA < instantB
 	}
-	return a.instant.Before(b.instant)
+	return seqA < seqB
+}
+
+// recordBefore orders two records by orderedBefore.
+func recordBefore(a, b record) bool {
+	return orderedBefore(a.instant.UnixNano(), a.seq, b.instant.UnixNano(), b.seq)
 }
 
 func sortRecords(records []record) {
@@ -1159,10 +1164,7 @@ func (s *spillOrder) replay(visit func(record) error) error {
 	}
 	sort.Slice(s.entries, func(i, j int) bool {
 		a, b := s.entries[i], s.entries[j]
-		if a.instant != b.instant {
-			return a.instant < b.instant
-		}
-		return a.seq < b.seq
+		return orderedBefore(a.instant, a.seq, b.instant, b.seq)
 	})
 	var buffer []byte
 	for _, entry := range s.entries {
@@ -1295,11 +1297,22 @@ type harvestRenderer struct {
 	counts map[harvestKey]int
 }
 
+// harvestAttribution answers the workspace a harvest row is counted under:
+// a record or finding naming no workspace is central's, and one naming only
+// its ID or only its directory is incomplete (false).
+func harvestAttribution(workspaceID, workspaceDir string) (string, string, bool) {
+	switch {
+	case workspaceID == "" && workspaceDir == "":
+		return "central", "-", true
+	case workspaceID == "" || workspaceDir == "":
+		return workspaceID, workspaceDir, false
+	}
+	return workspaceID, workspaceDir, true
+}
+
 func (r *harvestRenderer) add(rec record) error {
-	workspaceID, workspaceDir := rec.WorkspaceID, rec.WorkspaceDir
-	if workspaceID == "" && workspaceDir == "" {
-		workspaceID, workspaceDir = "central", "-"
-	} else if workspaceID == "" || workspaceDir == "" {
+	workspaceID, workspaceDir, complete := harvestAttribution(rec.WorkspaceID, rec.WorkspaceDir)
+	if !complete {
 		return fmt.Errorf("harvest record %s at %s has incomplete workspace attribution: workspace_id=%q workspace_dir=%q",
 			rec.Operation, rec.Timestamp, workspaceID, workspaceDir)
 	}
@@ -1309,10 +1322,8 @@ func (r *harvestRenderer) add(rec record) error {
 
 func (r *harvestRenderer) finish(findings []sinkFinding) error {
 	for _, finding := range findings {
-		workspaceID, workspaceDir := finding.sink.workspaceID, finding.sink.workspaceDir
-		if workspaceID == "" && workspaceDir == "" {
-			workspaceID, workspaceDir = "central", "-"
-		} else if workspaceID == "" || workspaceDir == "" {
+		workspaceID, workspaceDir, complete := harvestAttribution(finding.sink.workspaceID, finding.sink.workspaceDir)
+		if !complete {
 			return fmt.Errorf("harvest finding has incomplete workspace attribution: workspace_id=%q workspace_dir=%q message=%q",
 				workspaceID, workspaceDir, finding.message)
 		}
