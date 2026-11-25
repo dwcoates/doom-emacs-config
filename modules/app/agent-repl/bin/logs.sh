@@ -295,8 +295,19 @@ read_workspace_rows() {
         fail "could not read daemon workspace state: $database"
 }
 
+# THE DAEMON'S WORKSPACE TABLE IS READ ONCE: every workspace scope resolves
+# its selector from it and the reader names every workspace by it. A
+# central-only read of a state root the daemon never wrote has no workspace
+# to name.
+workspace_rows=""
+have_workspace_rows=0
+if [ "$scope" != central ] || [ -f "$state_root/wsm.db" ]; then
+    workspace_rows="$(read_workspace_rows)"
+    have_workspace_rows=1
+fi
+
 resolve_workspace() {
-    local selector="$1" rows id dir name id_match="" id_match_dir=""
+    local selector="$1" id dir name id_match="" id_match_dir=""
     local name_match="" name_match_id="" name_count=0
     resolved_workspace_id=""
     resolved_workspace_dir=""
@@ -304,7 +315,6 @@ resolve_workspace() {
         resolved_workspace_dir="$(cd "$selector" && pwd -P)"
         return 0
     fi
-    rows="$(read_workspace_rows)"
     while IFS=$'\t' read -r id dir name; do
         [ -n "$id" ] || continue
         if [ "$id" = "$selector" ]; then
@@ -316,7 +326,7 @@ resolve_workspace() {
             name_match_id="$id"
             name_count=$((name_count + 1))
         fi
-    done <<<"$rows"
+    done <<<"$workspace_rows"
     if [ -n "$id_match" ]; then
         resolved_workspace_id="$id_match"
         resolved_workspace_dir="$id_match_dir"
@@ -336,14 +346,6 @@ if [ "$scope" = workspace ]; then
     resolve_workspace "$workspace_selector"
     workspace_dirs+=("$resolved_workspace_dir")
     workspace_ids+=("$resolved_workspace_id")
-elif [ "$scope" = all ]; then
-    rows="$(read_workspace_rows)"
-    while IFS=$'\t' read -r id dir name; do
-        [ -n "$id" ] || continue
-        [ -n "$dir" ] || fail "daemon workspace $id has an empty directory"
-        workspace_dirs+=("$dir")
-        workspace_ids+=("$id")
-    done <<<"$rows"
 fi
 
 bases=()
@@ -380,7 +382,10 @@ if [ "$scope" = central ] || [ "$scope" = all ]; then
         runtime_requested tests && add_base "$cache_root/log/tests.err.log" tests "" "" file stderr
     fi
 fi
-if [ "$scope" = workspace ] || [ "$scope" = all ]; then
+# EVERY DAEMON WORKSPACE'S LOGS ARE ENUMERATED BY THE READER (--all-workspaces
+# below): building their five bases each here, 8135 for 1625 workspaces, was
+# most of a 1s deploy-window read (2026-11-25). One workspace's are built here.
+if [ "$scope" = workspace ]; then
     for workspace_index in "${!workspace_dirs[@]}"; do
         workspace_dir="${workspace_dirs[$workspace_index]}"
         workspace_id="${workspace_ids[$workspace_index]}"
@@ -435,15 +440,13 @@ if [ "$harvest" -eq 1 ]; then
     helper_args+=(--harvest-from "$harvest_from" --harvest-to "$harvest_to")
 fi
 # EVERY WORKSPACE IS SHOWN BY ITS NAME: the reader is handed the daemon's
-# ID-to-name table and stamps a synthetic workspace_name on each record.
-# Workspace scopes have already required the table; a central-only read of a
-# state root the daemon never wrote has no workspace to name.
-if [ "$scope" != central ] || [ -f "$state_root/wsm.db" ]; then
-    while IFS=$'\t' read -r id dir name; do
-        [ -n "$id" ] || continue
-        [ -n "$name" ] || fail "daemon workspace $id has an empty name"
-        helper_args+=(--workspace-name "$id=$name")
-    done <<<"$(read_workspace_rows)"
+# workspace table, stamps a synthetic workspace_name on each record, and for
+# --all selects every workspace's logs from it. The table goes on descriptor 3,
+# which the reader inherits through the exec below.
+if [ "$have_workspace_rows" -eq 1 ]; then
+    exec 3< <(printf '%s\n' "$workspace_rows")
+    helper_args+=(--workspace-rows /dev/fd/3)
+    [ "$scope" != all ] || helper_args+=(--all-workspaces)
 fi
 for base_index in "${!bases[@]}"; do
     helper_args+=(
