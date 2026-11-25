@@ -100,12 +100,13 @@ Every drop of a page comes through `agent-repl-webhost-remove', so a
 caller that relied on the page drawing hears here that it never will.")
 
 (defvar agent-repl--webhost-pages (make-hash-table :test #'equal)
-  "Workspace id -> its held page, (:url URL :why WHY [:deferred t]).
+  "Workspace id -> its held page, (:url URL :why WHY), deferred or not.
 What the host should hold.  URL is where the page is held; WHY is the
 reason it was loaded for \(`agent-repl-page-report-load-reasons').  A
 DEFERRED page is held but was not handed to the host since its last reload:
-it is handed over when it is shown (`agent-repl--webhost-replay').  THE REASON LIVES WITH THE PAGE, so
-no page is held without one: a restatement reads it here
+it is handed over when it is shown (`agent-repl--webhost-replay').
+THE REASON LIVES WITH THE PAGE, so no page is held without one: a
+restatement reads it here
 \(`agent-repl-page-report-restate'), whatever connection asks.")
 
 (defun agent-repl--webhost-page-url (id)
@@ -1079,7 +1080,7 @@ over when it is shown (`agent-repl--webhost-hand-over-deferred')."
   (list :url url :why why))
 
 (defun agent-repl--webhost-deferred-p (id)
-  "Non-nil when page ID is held here but not yet handed to the host since its reload."
+  "Non-nil when page ID is held here and not handed to the host since a reload."
   (plist-get (gethash id agent-repl--webhost-pages) :deferred))
 
 (defun agent-repl--webhost-defer-page (id)
