@@ -2193,8 +2193,9 @@ prevented fixes the manifests or the runner, not the machine.
 
 Emacs has ONE path that shows a file or directory the system points at, named
 **the editor popup**: `agent-repl-popup-open PATH [LINE]` in `lisp/popup.el`. It
-is a Doom popup on the right at 40% of the frame's width, focused on open and
-closed (buffer killed) by `q` in command mode; a file opens at LINE (1-indexed,
+takes the place of the current workspace's view (the webapp's window), leaving
+the composer and the sidebar exactly as they were; it is focused on open and
+closed (buffer killed, the view put back) by `q` in command mode; a file opens at LINE (1-indexed,
 the top when absent) and a directory opens in dired. A path that does not exist
 is refused, never created. It shares its display with `agent-repl-popup-show`
 (a buffer rather than a path), so every agent-repl popup has one geometry.

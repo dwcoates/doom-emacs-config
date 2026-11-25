@@ -293,8 +293,8 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It sits above both the codec it encodes through and the transport it
 ;; sends over.
 (agent-repl--load-module "rpc")
-;; WHY: popup.el is the ONE shared popup subroutine (a Doom popup on the
-;; right at 40% width that `q' closes); notes.el, commands.el, daemon.el,
+;; WHY: popup.el is the ONE shared popup subroutine (it takes the view's
+;; window, and `q' closes it and puts the view back); notes.el, commands.el, daemon.el,
 ;; verbs.el and the host stream's `open_in_editor' arm all call it, so it
 ;; loads above all of them.  It depends on core.el's logging ladder and
 ;; nothing else.
@@ -636,14 +636,6 @@ load, never the daemon."
          (length errors)))
 
 (agent-repl--register-lifecycle-hooks noninteractive)
-
-;; The ONE Doom popup rule every agent-repl popup is displayed by (popup.el):
-;; right side, 40% of the frame's width, `q' closes it and kills its buffer.
-;; Installed here, after every module has loaded, so it is a single rule
-;; whatever order the modules that show popups were loaded in.  popup.el
-;; failing its load is already a load error, reported below.
-(when (fboundp 'agent-repl-popup-install-rule)
-  (agent-repl-popup-install-rule))
 
 ;; NO SNAPSHOT RESTORE.  The durable Emacs workspace-roster snapshot is
 ;; gone: THE DAEMON is the source of which workspaces exist, and on connect

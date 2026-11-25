@@ -373,8 +373,8 @@ announced on its own could drift from it: panels.el holds the one call."
     (buffer-string)))
 
 (ert-deftest agent-repl-test-popup-no-module-displays-a-popup-itself ()
-  "No module but popup.el calls `display-buffer' for a popup.
-magit.el's same-window display is the one other call, and it is not a popup."
+  "No module calls `display-buffer' for a popup: popup.el picks its window itself.
+magit.el's same-window display is the one call, and it is not a popup."
   ;; Arrange
   (let ((sources (cl-remove-if (lambda (name) (string-prefix-p "test-" name))
                                (directory-files agent-repl-test-popup--lisp-dir nil "\\.el\\'"))))
@@ -385,7 +385,7 @@ magit.el's same-window display is the one other call, and it is not a popup."
                                       (agent-repl-test-popup--source name)))
                     sources)))
       ;; Assert
-      (should (equal (sort callers #'string<) '("magit.el" "popup.el"))))))
+      (should (equal callers '("magit.el"))))))
 
 (ert-deftest agent-repl-test-popup-information-views-use-the-shared-popup ()
   "The build log and the health report are shown through `agent-repl-popup-show'."

@@ -588,6 +588,23 @@ repair is dispatched."
                 ((symbol-function 'agent-repl-window--apply-height) (lambda (&rest _) target)))
         (should (agent-repl-window--ensure-input-height "cur" win))))))
 
+;; A POPUP STANDS IN FOR THE VIEW (popup.el): the lone composer it leaves is
+;; the popup's layout, not a view gone missing.
+
+(ert-deftest agent-repl-window-test-ensure-layout-noop-when-a-popup-stands-in-for-the-view ()
+  "A popup in the view's window beside the composer → no repair is dispatched."
+  (let ((popup (generate-new-buffer " *elt-popup*")))
+    (unwind-protect
+        (should-not (agent-repl-window-test--run-ensure-layout
+                     :show-view t :show-input t
+                     :setup (lambda ()
+                              (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                                         (lambda () nil)))
+                                (agent-repl-popup-show popup)))))
+      (when (buffer-live-p popup)
+        (with-current-buffer popup (setq agent-repl-popup--stand-in nil))
+        (kill-buffer popup)))))
+
 ;; THE SIDEBAR STANDS WITH THE PANELS (sidebar-view.el).
 
 (ert-deftest agent-repl-window-test-ensure-layout-shows-a-missing-sidebar-beside-the-panels ()

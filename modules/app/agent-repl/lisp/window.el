@@ -45,6 +45,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--frontend-dispatch-show "frontends")
+(declare-function agent-repl-popup-standing-in-for "popup" (buffer &optional frame))
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-log-scope "workspace" (ws))
@@ -867,6 +868,8 @@ present\".  Everything else is an expected state and a no-op:
   that mount.
 - `agent-repl-window--ensure-layout-in-progress' set: a repair is
   already dispatching (see that variable).
+- A popup stands in for the view (`agent-repl-popup-standing-in-for'):
+  the popup took the view's window, and its close puts the view back.
 - Input window present but the VIEW buffer dead: the surviving input
   window of a died/rebound webview.  Remounting the view would mean
   creating a webview (and possibly a daemon session) from a
@@ -917,6 +920,15 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
                  "window--ensure-layout: noop reason=gate-layout-complete view-window={view_window}"
                  :view_window (prin1-to-string view-win))
                 nil)))
+         ;; A POPUP STANDS IN FOR THE VIEW (popup.el): the lone composer is
+         ;; the popup's layout, and closing the popup puts the view back.
+         ((and (not view-win)
+               (agent-repl-popup-standing-in-for (agent-repl-window--panel-buffer :view ws)))
+          (agent-repl--log-verbose
+           ws
+           "window--ensure-layout: noop reason=popup-stands-in-for-view input-window={input_window}"
+           :input_window (prin1-to-string input-win))
+          nil)
          ((not (agent-repl-window--panels-restorable-p ws))
           (agent-repl--log ws
                            "window--ensure-layout: ws={ws} input window present but view buffer dead — leaving for the next explicit show"
