@@ -422,6 +422,52 @@ func TestADiagnosticsPushWithNoBoundReporterIsRecordedNotDropped(t *testing.T) {
 	sink.OnSessionDiagnostics("ws-1", unhealthyDiagnostics())
 }
 
+// TestEveryDiagnosticsPushRecordNamesItsWorkspace pins that every record a
+// diagnostics push writes carries the workspace as its own (workspace_id), so
+// a reader scoped to the workspace finds it among a shared daemon's records.
+func TestEveryDiagnosticsPushRecordNamesItsWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		bound    bool
+		wantText string
+	}{
+		{name: "the verdict is folded", bound: true, wantText: "the shim's health verdict was folded into the session faults"},
+		{name: "no reporter is bound", bound: false, wantText: "a diagnostics push arrived before the health reporter existed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			forwarder := &healthForwarder{}
+			if tc.bound {
+				forwarder.bind(&fakeReporter{})
+			}
+			builds := &rolloutForwarder{}
+			builds.bind(&fakeBuildJudge{})
+			sink := &lifecycleSink{health: forwarder, builds: builds, log: log}
+
+			// Act
+			sink.OnSessionDiagnostics("ws-1", unhealthyDiagnostics())
+
+			// Assert
+			records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.cmd.lifecycle"})
+			if len(records) == 0 {
+				t.Fatalf("the push wrote no daemon.cmd.lifecycle record")
+			}
+			found := false
+			for _, r := range records {
+				if r.Context[dlog.KeyWorkspaceID] != "ws-1" {
+					t.Errorf("record %q names workspace_id %v, want ws-1", r.Message, r.Context[dlog.KeyWorkspaceID])
+				}
+				found = found || r.Message == tc.wantText
+			}
+			if !found {
+				t.Fatalf("records = %v, want one reading %q", records, tc.wantText)
+			}
+		})
+	}
+}
+
 // TestOnLinkFaultLevelsAForgottenWorkspaceAtDebug is the outermost layer of the
 // shim-death cascade. This sink outlives the registry row, so a shim dying
 // after its workspace was forgotten reaches it about a workspace nothing can
