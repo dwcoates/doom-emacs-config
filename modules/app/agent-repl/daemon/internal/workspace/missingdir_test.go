@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -263,5 +265,142 @@ func TestPublishRegistrySettlesAMissingDirectory(t *testing.T) {
 				t.Fatalf("the settlement was not recorded at INFO under %s: %+v", opRegister, f.log.logger.Records())
 			}
 		})
+	}
+}
+
+func TestSettleMissingDirectoryHoldsTheWorkspacesDirectoryGateAcrossTheRestore(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	gate := f.verbs.(*verbs).dirGates.For("w1")
+	heldDuringRestore := false
+	f.git.duringRestore = func() { heldDuringRestore = !gate.TryLock() }
+
+	// Act.
+	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
+
+	// Assert.
+	if err != nil || !restored {
+		t.Fatalf("SettleMissingDirectory = (%v, %v), want (true, nil)", restored, err)
+	}
+	if !heldDuringRestore {
+		t.Fatal("the directory gate was free while the settle restored the worktree")
+	}
+	if !gate.TryLock() {
+		t.Fatal("the directory gate stayed held after the settle answered")
+	}
+}
+
+func TestSettleMissingDirectoryBindsADirectoryRestoredMeanwhile(t *testing.T) {
+	// Arrange: an open holding the gate first brought the directory back.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	if err := os.MkdirAll(ws.Dir, 0o755); err != nil {
+		t.Fatalf("make the restored directory: %v", err)
+	}
+
+	// Act.
+	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
+
+	// Assert.
+	if err != nil || !restored {
+		t.Fatalf("SettleMissingDirectory = (%v, %v), want (true, nil)", restored, err)
+	}
+	if len(f.git.restored) != 0 {
+		t.Fatalf("restored = %+v, want no restore into a directory that is there", f.git.restored)
+	}
+	if got := f.footer.dirs["w1"]; got != ws.Dir {
+		t.Fatalf("footer bound dir = %q, want %q", got, ws.Dir)
+	}
+	if closures := f.db.closures["w1"]; len(closures) != 0 {
+		t.Fatalf("closures = %+v, want none", closures)
+	}
+	want := "the workspace directory was gone and was restored meanwhile; its views are bound"
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: testMissingDirOp, Message: want}); !ok {
+		t.Fatalf("no INFO record %q: %+v", want, f.log.logger.Records())
+	}
+}
+
+func TestSettleMissingDirectorySurfacesAFailedBindOfADirectoryRestoredMeanwhile(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	if err := os.MkdirAll(ws.Dir, 0o755); err != nil {
+		t.Fatalf("make the restored directory: %v", err)
+	}
+	f.footer.setDirErr = errors.New("bind exploded")
+
+	// Act.
+	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
+
+	// Assert.
+	if restored || err == nil || !strings.Contains(err.Error(), "bind exploded") {
+		t.Fatalf("SettleMissingDirectory = (%v, %v), want (false, the bind's error)", restored, err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRegister, Message: "a resolver could not be bound to the workspace's directory"}); !ok {
+		t.Fatalf("no ERROR record of the failed bind: %+v", f.log.logger.Records())
+	}
+	if closures := f.db.closures["w1"]; len(closures) != 0 {
+		t.Fatalf("closures = %+v, want none", closures)
+	}
+}
+
+func TestSettleMissingDirectorySurfacesAFailedNamingOfADirectoryRestoredMeanwhile(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	if err := os.MkdirAll(ws.Dir, 0o755); err != nil {
+		t.Fatalf("make the restored directory: %v", err)
+	}
+	f.db.sessionErr = errors.New("session exploded")
+
+	// Act.
+	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
+
+	// Assert.
+	if restored || err == nil || !strings.Contains(err.Error(), "session exploded") {
+		t.Fatalf("SettleMissingDirectory = (%v, %v), want (false, the naming's error)", restored, err)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: testMissingDirOp, Message: "could not publish the naming of the workspace restored meanwhile"})
+	if !ok {
+		t.Fatalf("no ERROR record of the failed naming: %+v", f.log.logger.Records())
+	}
+	if record.Context[dlog.KeyWorkspaceID] != "w1" || !strings.Contains(record.Context["cause"].(string), "session exploded") {
+		t.Fatalf("record = %+v, want the workspace and the cause", record)
+	}
+	if closures := f.db.closures["w1"]; len(closures) != 0 {
+		t.Fatalf("closures = %+v, want none", closures)
+	}
+}
+
+func TestSettleMissingDirectorySurfacesAStatThatCannotTell(t *testing.T) {
+	// Arrange: the directory's parent cannot be searched, so the stat under
+	// the gate answers neither "there" nor "gone".
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	parent := filepath.Dir(ws.Dir)
+	if err := os.Chmod(parent, 0); err != nil {
+		t.Fatalf("lock the parent: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	// Act.
+	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
+
+	// Assert.
+	if restored || err == nil {
+		t.Fatalf("SettleMissingDirectory = (%v, %v), want (false, the stat's error)", restored, err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: testMissingDirOp, Message: "could not tell again whether the workspace directory is gone; it is left as it is"}); !ok {
+		t.Fatalf("no ERROR record of the stat: %+v", f.log.logger.Records())
+	}
+	if len(f.git.restored) != 0 {
+		t.Fatalf("restored = %+v, want no restore", f.git.restored)
+	}
+	if closures := f.db.closures["w1"]; len(closures) != 0 {
+		t.Fatalf("closures = %+v, want none", closures)
 	}
 }

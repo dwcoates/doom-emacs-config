@@ -32,6 +32,16 @@ func reportOpenStage(progress OpenProgress, stage OpenStage) {
 }
 
 func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgress) error {
+	// ONE OPEN OF A WORKSPACE AT A TIME, AND NONE BESIDE ITS SETTLE
+	// (dirGates). Two opens raced on 2026-11-25 (webapp-reload-one-page,
+	// opened twice from one mention): the first was cutting the workspace's
+	// worktree again, the second's stat found the directory `git worktree
+	// add` had just made, skipped the restore and its binding, and answered
+	// "opened" -- so Emacs drew the tab and the topbar met its first frame
+	// with no directory bound. Under the gate, the record is read only once
+	// every earlier open has finished, so a second open finds the workspace
+	// opened, bound and named, and changes nothing.
+	defer v.dirGates.Lock(ws)()
 	record, log, err := v.owned(ctx, "OpenWorkspace", ws)
 	if err != nil {
 		return err

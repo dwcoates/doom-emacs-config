@@ -1566,3 +1566,70 @@ func TestOpenFailsLoudlyWhenAMergedWorkspacesBranchCannotBeCutAgain(t *testing.T
 		})
 	}
 }
+
+func TestOpenHoldsTheWorkspacesDirectoryGateAcrossTheRestore(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	gate := f.verbs.(*verbs).dirGates.For("w1")
+	heldDuringRestore := false
+	f.git.duringRestore = func() { heldDuringRestore = !gate.TryLock() }
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if !heldDuringRestore {
+		t.Fatal("the directory gate was free while the open restored the worktree")
+	}
+	if !gate.TryLock() {
+		t.Fatal("the directory gate stayed held after the open answered")
+	}
+}
+
+// TestASecondOpenAnswersOnlyOnceTheFirstHasBoundTheRestoredViews pins the
+// 2026-11-25 race (webapp-reload-one-page): a second open made while the
+// first was cutting the worktree again found the new directory, skipped the
+// restore and its binding, and answered before any view was bound.
+func TestASecondOpenAnswersOnlyOnceTheFirstHasBoundTheRestoredViews(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	restoring, release := make(chan struct{}), make(chan struct{})
+	f.git.duringRestore = func() {
+		close(restoring)
+		<-release
+	}
+	first := make(chan error, 1)
+	go func() { first <- f.verbs.Open(context.Background(), "w1", nil) }()
+	<-restoring
+	type answer struct {
+		err   error
+		bound string
+	}
+	second := make(chan answer, 1)
+
+	// Act.
+	go func() {
+		err := f.verbs.Open(context.Background(), "w1", nil)
+		second <- answer{err: err, bound: f.footer.dirs["w1"]}
+	}()
+	close(release)
+	firstErr, secondAnswer := <-first, <-second
+
+	// Assert.
+	if firstErr != nil || secondAnswer.err != nil {
+		t.Fatalf("Open = %v then %v, want both to succeed", firstErr, secondAnswer.err)
+	}
+	if secondAnswer.bound != ws.Dir {
+		t.Fatalf("footer bound dir when the second open answered = %q, want the restored %q", secondAnswer.bound, ws.Dir)
+	}
+	if len(f.git.restored) != 1 {
+		t.Fatalf("restored = %+v, want exactly one restore", f.git.restored)
+	}
+}
