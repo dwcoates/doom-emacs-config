@@ -225,7 +225,8 @@ final class OptionsTests: XCTestCase {
 final class NotificationCenterTests: XCTestCase {
     func testThePostResultOfEachAnswer() {
         XCTAssertEqual(postResult(for: nil), .posted)
-        XCTAssertEqual(postResult(for: NSError(domain: UNErrorDomain, code: UNError.Code.notificationsNotAllowed.rawValue)), .notAllowed)
+        XCTAssertEqual(postResult(for: NSError(domain: UNErrorDomain, code: UNError.Code.notificationsNotAllowed.rawValue)),
+                       .notAllowed("the notification center refused: notifications are not allowed"))
         if case .failed(let text) = postResult(for: NSError(domain: "X", code: 3, userInfo: [NSLocalizedDescriptionKey: "bad"])) {
             XCTAssertEqual(text, "X 3: bad")
         } else {
@@ -248,12 +249,78 @@ final class NotificationCenterTests: XCTestCase {
         XCTAssertEqual(try Agentrepl_V1_DesktopBannerClickToken(serializedBytes: token), banner.click)
     }
 
-    func testEachAuthorizationIsReported() {
-        XCTAssertTrue(authorizationReport(.authorized).allowed)
-        XCTAssertTrue(authorizationReport(.provisional).allowed)
-        XCTAssertFalse(authorizationReport(.denied).allowed)
-        XCTAssertTrue(authorizationReport(.denied).line.contains("System Settings"))
-        XCTAssertFalse(authorizationReport(.notDetermined).allowed)
+    /// Settings that draw a banner: allowed, alerts on, banner style.
+    let drawn = DisplaySettings(authorization: .authorized, alert: .enabled, style: .banner)
+
+    func testOnlySettingsThatDrawABannerLetItOnScreen() {
+        let cases: [(String, DisplaySettings, String?)] = [
+            ("banner style", drawn, nil),
+            ("alert style", DisplaySettings(authorization: .authorized, alert: .enabled, style: .alert), nil),
+            ("denied", DisplaySettings(authorization: .denied, alert: .enabled, style: .banner), "notifications are denied"),
+            ("never asked", DisplaySettings(authorization: .notDetermined, alert: .enabled, style: .banner),
+             "notifications were never allowed (run Zettel --request-notifications)"),
+            ("provisional", DisplaySettings(authorization: .provisional, alert: .enabled, style: .banner),
+             "notifications are delivered quietly (provisional), never drawn"),
+            ("alerts off", DisplaySettings(authorization: .authorized, alert: .disabled, style: .banner), "alerts are off"),
+            ("alerts unsupported", DisplaySettings(authorization: .authorized, alert: .notSupported, style: .banner),
+             "alerts are not supported"),
+            ("style None", DisplaySettings(authorization: .authorized, alert: .enabled, style: .none), "the alert style is None"),
+        ]
+        for (name, settings, want) in cases {
+            XCTAssertEqual(offScreenSetting(settings), want, name)
+        }
+    }
+
+    func testABannerKeptOffScreenIsNeverHandedToMacOS() async {
+        // Arrange
+        var added = 0
+
+        // Act
+        let result = await gatedPost(DisplaySettings(authorization: .denied, alert: .enabled, style: .banner)) { added += 1 }
+
+        // Assert
+        XCTAssertEqual(result, .notAllowed("notifications are denied"))
+        XCTAssertEqual(added, 0)
+    }
+
+    func testABannerOnScreenIsPostedOnceMacOSTakesIt() async {
+        // Arrange
+        var added = 0
+
+        // Act
+        let result = await gatedPost(drawn) { added += 1 }
+
+        // Assert
+        XCTAssertEqual(result, .posted)
+        XCTAssertEqual(added, 1)
+    }
+
+    func testABannerMacOSRefusesAnswersItsError() async {
+        // Act
+        let result = await gatedPost(drawn) { throw NSError(domain: "X", code: 3, userInfo: [NSLocalizedDescriptionKey: "bad"]) }
+
+        // Assert
+        XCTAssertEqual(result, .failed("X 3: bad"))
+    }
+
+    func testTheCheckReportsTheSameAnswerAPostGets() {
+        let cases: [(String, DisplaySettings)] = [
+            ("drawn", drawn),
+            ("denied", DisplaySettings(authorization: .denied, alert: .enabled, style: .banner)),
+            ("style None", DisplaySettings(authorization: .authorized, alert: .enabled, style: .none)),
+        ]
+        for (name, settings) in cases {
+            // Act
+            let report = displayReport(settings)
+
+            // Assert
+            XCTAssertEqual(report.allowed, offScreenSetting(settings) == nil, name)
+            if let setting = offScreenSetting(settings) {
+                XCTAssertEqual(report.line, "Zettel's banners stay off screen: \(setting) (System Settings → Notifications → Zettel)", name)
+            } else {
+                XCTAssertEqual(report.line, "Zettel may notify", name)
+            }
+        }
     }
 
     func testANotificationWithNoTokenHasNone() {

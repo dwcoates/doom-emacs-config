@@ -92,9 +92,9 @@ func TestLauncherPostSurfacesEveryRefusal(t *testing.T) {
 		answer *launcherv1.PostBannerResponse
 		want   string
 	}{
-		{"macOS does not allow Zettel to notify", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
-			Outcome: &agentreplv1.DesktopBannerPostOutcome_NotAllowed{NotAllowed: &agentreplv1.DesktopBannerPostOutcomeNotAllowed{}},
-		}), ErrNotAllowed.Error()},
+		{"Zettel's settings keep the banner off screen", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
+			Outcome: &agentreplv1.DesktopBannerPostOutcome_NotAllowed{NotAllowed: &agentreplv1.DesktopBannerPostOutcomeNotAllowed{Setting: "the alert style is None"}},
+		}), ErrNotAllowed.Error() + ": the alert style is None"},
 		{"macOS refused it for another reason", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
 			Outcome: &agentreplv1.DesktopBannerPostOutcome_Failed{Failed: &agentreplv1.DesktopBannerPostOutcomeFailed{PlatformError: "center busy"}},
 		}), "center busy"},

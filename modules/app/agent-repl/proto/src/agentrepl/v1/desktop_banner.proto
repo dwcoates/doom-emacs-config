@@ -72,12 +72,14 @@ message DesktopBannerClickToken {
 message DesktopBannerPostOutcome {
   // THE ARM IS THE OUTCOME. REQUIRED.
   oneof outcome {
-    // The notification center accepted the banner. Whether macOS then shows
-    // it at once, or files it in Notification Center because a Focus is on,
-    // is the user's setting and not reported.
+    // The notification center accepted the banner, and Zettel's settings
+    // draw it on screen: notifications are allowed, alerts are on, and their
+    // style is banners or alerts. The daemon rings the banner's chime on this
+    // answer alone, so a sound always means a banner on screen. A Focus that
+    // files the banner silently is not reported.
     DesktopBannerPostOutcomePosted posted = 1;
-    // The user has not allowed Zettel to post notifications, so the banner
-    // was refused. Remedied only in System Settings → Notifications → Zettel.
+    // Zettel's notification settings keep the banner off the screen, so it was
+    // not posted. Remedied only in System Settings → Notifications → Zettel.
     DesktopBannerPostOutcomeNotAllowed not_allowed = 2;
     // The notification center refused the banner for another reason.
     DesktopBannerPostOutcomeFailed failed = 3;
@@ -87,8 +89,12 @@ message DesktopBannerPostOutcome {
 // The notification center accepted the banner.
 message DesktopBannerPostOutcomePosted {}
 
-// The user has not allowed Zettel to post notifications.
-message DesktopBannerPostOutcomeNotAllowed {}
+// Zettel's notification settings keep the banner off the screen.
+message DesktopBannerPostOutcomeNotAllowed {
+  // The setting that keeps it off, as a line for the record (e.g.
+  // "notifications are denied", "the alert style is None"). REQUIRED.
+  string setting = 1;
+}
 
 // The notification center refused the banner for a reason other than
 // permission.

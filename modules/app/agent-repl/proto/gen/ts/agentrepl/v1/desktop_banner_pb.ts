@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/desktop_banner.proto.
  */
 export const file_agentrepl_v1_desktop_banner: GenFile = /*@__PURE__*/
-  fileDesc("CiFhZ2VudHJlcGwvdjEvZGVza3RvcF9iYW5uZXIucHJvdG8SDGFnZW50cmVwbC52MSLWAQoNRGVza3RvcEJhbm5lchIvCgV0aXRsZRgBIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyVGl0bGUSLQoEYm9keRgCIAEoCzIfLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyQm9keRIvCgVncm91cBgDIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyR3JvdXASNAoFY2xpY2sYBCABKAsyJS5hZ2VudHJlcGwudjEuRGVza3RvcEJhbm5lckNsaWNrVG9rZW4iIgoSRGVza3RvcEJhbm5lclRpdGxlEgwKBHRleHQYASABKAkiIQoRRGVza3RvcEJhbm5lckJvZHkSDAoEdGV4dBgBIAEoCSIgChJEZXNrdG9wQmFubmVyR3JvdXASCgoCaWQYASABKAkiSAoXRGVza3RvcEJhbm5lckNsaWNrVG9rZW4SLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiLuAQoYRGVza3RvcEJhbm5lclBvc3RPdXRjb21lEj4KBnBvc3RlZBgBIAEoCzIsLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVQb3N0ZWRIABJHCgtub3RfYWxsb3dlZBgCIAEoCzIwLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVOb3RBbGxvd2VkSAASPgoGZmFpbGVkGAMgASgLMiwuYWdlbnRyZXBsLnYxLkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZUZhaWxlZEgAQgkKB291dGNvbWUiIAoeRGVza3RvcEJhbm5lclBvc3RPdXRjb21lUG9zdGVkIiQKIkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZU5vdEFsbG93ZWQiOAoeRGVza3RvcEJhbm5lclBvc3RPdXRjb21lRmFpbGVkEhYKDnBsYXRmb3JtX2Vycm9yGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CiFhZ2VudHJlcGwvdjEvZGVza3RvcF9iYW5uZXIucHJvdG8SDGFnZW50cmVwbC52MSLWAQoNRGVza3RvcEJhbm5lchIvCgV0aXRsZRgBIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyVGl0bGUSLQoEYm9keRgCIAEoCzIfLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyQm9keRIvCgVncm91cBgDIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyR3JvdXASNAoFY2xpY2sYBCABKAsyJS5hZ2VudHJlcGwudjEuRGVza3RvcEJhbm5lckNsaWNrVG9rZW4iIgoSRGVza3RvcEJhbm5lclRpdGxlEgwKBHRleHQYASABKAkiIQoRRGVza3RvcEJhbm5lckJvZHkSDAoEdGV4dBgBIAEoCSIgChJEZXNrdG9wQmFubmVyR3JvdXASCgoCaWQYASABKAkiSAoXRGVza3RvcEJhbm5lckNsaWNrVG9rZW4SLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiLuAQoYRGVza3RvcEJhbm5lclBvc3RPdXRjb21lEj4KBnBvc3RlZBgBIAEoCzIsLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVQb3N0ZWRIABJHCgtub3RfYWxsb3dlZBgCIAEoCzIwLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVOb3RBbGxvd2VkSAASPgoGZmFpbGVkGAMgASgLMiwuYWdlbnRyZXBsLnYxLkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZUZhaWxlZEgAQgkKB291dGNvbWUiIAoeRGVza3RvcEJhbm5lclBvc3RPdXRjb21lUG9zdGVkIjUKIkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZU5vdEFsbG93ZWQSDwoHc2V0dGluZxgBIAEoCSI4Ch5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVGYWlsZWQSFgoOcGxhdGZvcm1fZXJyb3IYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * One banner for the launcher to post, as the user sees it, plus what the
@@ -179,9 +179,11 @@ export type DesktopBannerPostOutcome = Message<"agentrepl.v1.DesktopBannerPostOu
    */
   outcome: {
     /**
-     * The notification center accepted the banner. Whether macOS then shows
-     * it at once, or files it in Notification Center because a Focus is on,
-     * is the user's setting and not reported.
+     * The notification center accepted the banner, and Zettel's settings
+     * draw it on screen: notifications are allowed, alerts are on, and their
+     * style is banners or alerts. The daemon rings the banner's chime on this
+     * answer alone, so a sound always means a banner on screen. A Focus that
+     * files the banner silently is not reported.
      *
      * @generated from field: agentrepl.v1.DesktopBannerPostOutcomePosted posted = 1;
      */
@@ -189,8 +191,8 @@ export type DesktopBannerPostOutcome = Message<"agentrepl.v1.DesktopBannerPostOu
     case: "posted";
   } | {
     /**
-     * The user has not allowed Zettel to post notifications, so the banner
-     * was refused. Remedied only in System Settings → Notifications → Zettel.
+     * Zettel's notification settings keep the banner off the screen, so it was
+     * not posted. Remedied only in System Settings → Notifications → Zettel.
      *
      * @generated from field: agentrepl.v1.DesktopBannerPostOutcomeNotAllowed not_allowed = 2;
      */
@@ -230,11 +232,18 @@ export const DesktopBannerPostOutcomePostedSchema: GenMessage<DesktopBannerPostO
   messageDesc(file_agentrepl_v1_desktop_banner, 6);
 
 /**
- * The user has not allowed Zettel to post notifications.
+ * Zettel's notification settings keep the banner off the screen.
  *
  * @generated from message agentrepl.v1.DesktopBannerPostOutcomeNotAllowed
  */
 export type DesktopBannerPostOutcomeNotAllowed = Message<"agentrepl.v1.DesktopBannerPostOutcomeNotAllowed"> & {
+  /**
+   * The setting that keeps it off, as a line for the record (e.g.
+   * "notifications are denied", "the alert style is None"). REQUIRED.
+   *
+   * @generated from field: string setting = 1;
+   */
+  setting: string;
 };
 
 /**

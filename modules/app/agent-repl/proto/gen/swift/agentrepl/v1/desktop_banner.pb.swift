@@ -176,9 +176,11 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
   /// THE ARM IS THE OUTCOME. REQUIRED.
   public var outcome: Agentrepl_V1_DesktopBannerPostOutcome.OneOf_Outcome? = nil
 
-  /// The notification center accepted the banner. Whether macOS then shows
-  /// it at once, or files it in Notification Center because a Focus is on,
-  /// is the user's setting and not reported.
+  /// The notification center accepted the banner, and Zettel's settings
+  /// draw it on screen: notifications are allowed, alerts are on, and their
+  /// style is banners or alerts. The daemon rings the banner's chime on this
+  /// answer alone, so a sound always means a banner on screen. A Focus that
+  /// files the banner silently is not reported.
   public var posted: Agentrepl_V1_DesktopBannerPostOutcomePosted {
     get {
       if case .posted(let v)? = outcome {return v}
@@ -187,8 +189,8 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
     set {outcome = .posted(newValue)}
   }
 
-  /// The user has not allowed Zettel to post notifications, so the banner
-  /// was refused. Remedied only in System Settings → Notifications → Zettel.
+  /// Zettel's notification settings keep the banner off the screen, so it was
+  /// not posted. Remedied only in System Settings → Notifications → Zettel.
   public var notAllowed: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed {
     get {
       if case .notAllowed(let v)? = outcome {return v}
@@ -210,12 +212,14 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
 
   /// THE ARM IS THE OUTCOME. REQUIRED.
   public nonisolated enum OneOf_Outcome: Equatable, Sendable {
-    /// The notification center accepted the banner. Whether macOS then shows
-    /// it at once, or files it in Notification Center because a Focus is on,
-    /// is the user's setting and not reported.
+    /// The notification center accepted the banner, and Zettel's settings
+    /// draw it on screen: notifications are allowed, alerts are on, and their
+    /// style is banners or alerts. The daemon rings the banner's chime on this
+    /// answer alone, so a sound always means a banner on screen. A Focus that
+    /// files the banner silently is not reported.
     case posted(Agentrepl_V1_DesktopBannerPostOutcomePosted)
-    /// The user has not allowed Zettel to post notifications, so the banner
-    /// was refused. Remedied only in System Settings → Notifications → Zettel.
+    /// Zettel's notification settings keep the banner off the screen, so it was
+    /// not posted. Remedied only in System Settings → Notifications → Zettel.
     case notAllowed(Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed)
     /// The notification center refused the banner for another reason.
     case failed(Agentrepl_V1_DesktopBannerPostOutcomeFailed)
@@ -236,11 +240,15 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcomePosted: Sendable 
   public init() {}
 }
 
-/// The user has not allowed Zettel to post notifications.
+/// Zettel's notification settings keep the banner off the screen.
 public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
+
+  /// The setting that keeps it off, as a line for the record (e.g.
+  /// "notifications are denied", "the alert style is None"). REQUIRED.
+  public var setting: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -544,18 +552,29 @@ nonisolated extension Agentrepl_V1_DesktopBannerPostOutcomePosted: SwiftProtobuf
 
 nonisolated extension Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostOutcomeNotAllowed"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}setting\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.setting) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.setting.isEmpty {
+      try visitor.visitSingularStringField(value: self.setting, fieldNumber: 1)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed, rhs: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed) -> Bool {
+    if lhs.setting != rhs.setting {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -106,6 +106,15 @@ Consequences and reasoning:
 - **Permission is an outcome arm, not a connection fact.** `not_allowed` is
   reported per post, since the user can change it at any moment; the daemon
   logs it with the remedy.
+- **`posted` means drawn on screen, and `not_allowed` names the setting**
+  (2026-11-25). macOS's `add` answers no error even when Zettel is denied, so
+  the owner heard chimes for banners that never appeared. The launcher now
+  reads Zettel's settings before each post (`offScreenSetting`: allowed,
+  alerts on, banner or alert style) and posts only when they draw the banner;
+  otherwise it answers `not_allowed` with
+  `DesktopBannerPostOutcomeNotAllowed.setting`, and the installer's
+  `--check-notifications` asks the same function. A Focus that files the
+  banner silently is still not reported.
 - **`DesktopBannerPostOutcome` moved into `desktop_banner.proto`**, beside the
   banner, so `launcher.v1` imports one file for both.
 
