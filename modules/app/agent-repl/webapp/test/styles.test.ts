@@ -3071,16 +3071,12 @@ describe("the one bubble rule set", () => {
     );
     // Assert — the base rule paints the role's token; the roles choose it, and
     // so do the owner-named fills: the held variant's (2026-09-23), the
-    // page-colored thinking and interim fill (2026-10-08), the selected
-    // bubble's grey (2026-10-11), the agent-to-agent bubbles' prompt fill
-    // (2026-10-28), the selected prompt's darker blue (2026-10-19) and the
-    // selected final response's dimmed grey (2026-10-20).
+    // page-colored thinking and interim fill (2026-10-08) and the
+    // agent-to-agent bubbles' prompt fill (2026-10-28). A selected bubble
+    // keeps its own fill (2026-11-24).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
-        ".bubble.entry-selected",
-        ".bubble.final-response.entry-selected",
-        '.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected',
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
         '.bubble[data-variant="agent"]',
@@ -3123,6 +3119,10 @@ describe("the one bubble rule set", () => {
               rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
             ) &&
             !(prop === "font-style" && isOwnRule(rule, THINKING_SELECTOR)) &&
+            // THE SELECTED BUBBLE'S RING (owner request, 2026-11-24) is an
+            // inset outline, which never reflows; "the selected-entry mark"
+            // pins it.
+            !((prop === "outline" || prop === "outline-offset") && isOwnRule(rule, ".bubble.entry-selected")) &&
             // THE HELD GLIMMER (owner request, 2026-10-28) anchors its ring
             // on the held bubble; "the held glimmer" pins it.
             !(prop === "position" && isOwnRule(rule, '.bubble[data-variant="held"]')) &&

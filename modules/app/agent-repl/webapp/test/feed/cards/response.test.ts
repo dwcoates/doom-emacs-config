@@ -2475,22 +2475,21 @@ describe("the data-driven final-answer green", () => {
     expect(el.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
   });
 
-  it("keeps the green border on a selected final answer and dims its fill", () => {
-    // Arrange — a green final answer that is also the selected reply target, so
+  it("keeps the final answer's border and fill on a selected final answer, ringing it purple", () => {
+    // Arrange — a final answer that is also the selected reply target, so
     // both classes ride the same bubble.
     const el = drawFeedResponse(
       response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: plainProse("the answer") } } } }),
       rowContext(),
     );
     el.classList.add("entry-selected");
-    // Act, Assert — the drawn bubble matches BOTH the green rule and the
-    // selection's, and the selection's sets the fill alone, so the green border
-    // stays while selected. (var()-resolved colours are not observable under
-    // jsdom; selector + the declaration is the deterministic proof, mirrored
-    // from styles.test.ts.)
-    expect(el.matches('.bubble.final-response:not([data-variant="thinking"])')).toBe(true);
-    expect(el.matches(".bubble.final-response.entry-selected")).toBe(true);
-    expect(stylesheet).toMatch(/\.bubble\.final-response\.entry-selected\s*\{\s*--bubble-bg:\s*var\(--selected-final-response-bg\)\s*!important;\s*\}/);
+    // Act, Assert — the drawn bubble matches the selection's rule, which sets
+    // the inset ring alone, so its border and fill stay. (var()-resolved
+    // colours are not observable under jsdom; selector + the declaration is
+    // the deterministic proof, mirrored from styles.test.ts.)
+    expect(el.matches(".bubble.final-response")).toBe(true);
+    expect(el.matches(".bubble.entry-selected")).toBe(true);
+    expect(stylesheet).toMatch(/\.bubble\.entry-selected\s*\{\s*outline:\s*0\.5px solid var\(--blocked\);\s*outline-offset:\s*-0\.5px;\s*\}/);
   });
 });
 
