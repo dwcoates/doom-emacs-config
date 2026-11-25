@@ -551,6 +551,10 @@ type ProductionSites struct {
 	Refired []RefiredSite
 	// Owned is how many of the span's sites an open child owns, left out.
 	Owned int
+	// Unshipped is how many of the span's sites a child's fix landed for
+	// only after the span ended, left out: the build that served the span
+	// did not carry the fix, so the site firing in it says nothing of it.
+	Unshipped int
 	// Ignored is how many of the span's sites matched an ignored kind, left
 	// out.
 	Ignored int
@@ -625,17 +629,19 @@ func (o *orchestrator) productionSites(ctx context.Context, q checkedQueue, c ws
 	if err != nil {
 		return ProductionSites{}, fmt.Errorf("merge: read the kinds of record the checks leave out: %w", err)
 	}
-	out := DiffProductionSites(span, before, owned, fixed, kinds)
+	out := DiffProductionSites(span, c.Until, before, owned, fixed, kinds)
 	out.Baseline = baseline
 	return out, nil
 }
 
-// DiffProductionSites is the one comparison of a span's sites (SPAN) with
-// the span before it (BEFORE, nil for none): the sites new to the span, and
-// those a child's fix landed for that fired again after it. A site an open
-// child owns (OWNED) or of an ignored kind (KINDS) is left out of both,
-// and counted.
-func DiffProductionSites(span logsites.Answer, before *logsites.Answer, owned map[string]wsm.WorkspaceID, fixed []wsm.FixedSite, kinds []wsm.IgnoredRecordKind) ProductionSites {
+// DiffProductionSites is the one comparison of a span's sites (SPAN, the
+// span that ended UNTIL) with the span before it (BEFORE, nil for none): the
+// sites new to the span, and those a child's fix landed for that fired again
+// after it. A site an open child owns (OWNED), of an ignored kind (KINDS), or
+// whose fix landed only after the span ended (FIXED) is left out of both, and
+// counted. UNTIL is the span's own end, not the tally's hours (SPAN.To), so a
+// fix that landed within the span's last hour is judged by when it landed.
+func DiffProductionSites(span logsites.Answer, until time.Time, before *logsites.Answer, owned map[string]wsm.WorkspaceID, fixed []wsm.FixedSite, kinds []wsm.IgnoredRecordKind) ProductionSites {
 	seen := map[string]bool{}
 	if before != nil {
 		for _, site := range before.Sites {
@@ -656,7 +662,12 @@ func DiffProductionSites(span logsites.Answer, before *logsites.Answer, owned ma
 			out.Ignored++
 			continue
 		}
-		if fix, ok := fixes[site.Key]; ok && site.LastSeen.After(fix.LandedAt) {
+		fix, isFixed := fixes[site.Key]
+		if isFixed && fix.LandedAt.After(until) {
+			out.Unshipped++
+			continue
+		}
+		if isFixed && site.LastSeen.After(fix.LandedAt) {
 			out.Refired = append(out.Refired, RefiredSite{Site: site, FixedAt: fix.LandedAt, FixedBy: fix.Workspace})
 			continue
 		}
@@ -695,7 +706,7 @@ func RenderProductionSites(sites ProductionSites, c wsm.ProductionCheck) string 
 	default:
 		b.WriteString(fmt.Sprintf("Read whole from the tally: %s to %s.\n", sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
 	}
-	b.WriteString(fmt.Sprintf("Left out: %d sites open children own, %d sites of ignored kinds.\n", sites.Owned, sites.Ignored))
+	b.WriteString(fmt.Sprintf("Left out: %d sites open children own, %d sites whose fix landed, not yet in production, %d sites of ignored kinds.\n", sites.Owned, sites.Unshipped, sites.Ignored))
 	ordered := append([]logsites.Site(nil), sites.New...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		if (ordered[i].Level == "error") != (ordered[j].Level == "error") {

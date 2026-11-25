@@ -265,6 +265,8 @@ func TestAProductionTurnTheUserInterruptedIsLeftToTheUser(t *testing.T) {
 
 func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 	fixedAt := deployStarted.Add(-time.Hour)
+	// spanEnd is when the span ended: the landing after it began.
+	spanEnd := deployStarted.Add(time.Minute)
 	cases := []struct {
 		name string
 		span []logsites.Site
@@ -277,6 +279,9 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 		wantRefired []string
 		wantOwned   int
 		wantIgnored int
+		// wantUnshipped is how many sites a fix landed for only after the
+		// span ended.
+		wantUnshipped int
 	}{
 		{
 			name:    "a site the span before never fired is new",
@@ -309,6 +314,32 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 			wantRefired: []string{"aaaaaaaaaaaa"},
 		},
 		{
+			name:          "a site whose fix landed after the span ended is left out, not new",
+			span:          []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			fixed:         []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd.Add(time.Second)}},
+			wantUnshipped: 1,
+		},
+		{
+			name:          "a site whose fix landed after the span ended is left out, not refired, when the span before had it",
+			span:          []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			before:        []logsites.Site{site("aaaaaaaaaaaa", "warn", priorDeploy)},
+			fixed:         []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd.Add(time.Second)}},
+			wantUnshipped: 1,
+		},
+		{
+			name:    "a site whose fix landed as the span ended was in production for it",
+			span:    []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			fixed:   []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd}},
+			wantNew: []string{"aaaaaaaaaaaa"},
+		},
+		{
+			name:      "a site an open child owns is counted owned even when another child's fix is unshipped",
+			span:      []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			owned:     map[string]wsm.WorkspaceID{"aaaaaaaaaaaa": "child-2"},
+			fixed:     []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd.Add(time.Second)}},
+			wantOwned: 1,
+		},
+		{
 			name:   "a fixed site last seen before its fix landed is not refired",
 			span:   []logsites.Site{site("aaaaaaaaaaaa", "warn", fixedAt.Add(-time.Minute))},
 			before: []logsites.Site{site("aaaaaaaaaaaa", "warn", priorDeploy)},
@@ -324,7 +355,7 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 			}
 
 			// Act
-			got := DiffProductionSites(logsites.Answer{Sites: tc.span}, before, tc.owned, tc.fixed, tc.kinds)
+			got := DiffProductionSites(logsites.Answer{Sites: tc.span}, spanEnd, before, tc.owned, tc.fixed, tc.kinds)
 
 			// Assert
 			var gotNew, gotRefired []string
@@ -334,8 +365,8 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 			for _, r := range got.Refired {
 				gotRefired = append(gotRefired, r.Site.Key)
 			}
-			if !slices.Equal(gotNew, tc.wantNew) || !slices.Equal(gotRefired, tc.wantRefired) || got.Owned != tc.wantOwned || got.Ignored != tc.wantIgnored {
-				t.Fatalf("diff = new %v, refired %v, owned %d, ignored %d; want %v, %v, %d, %d", gotNew, gotRefired, got.Owned, got.Ignored, tc.wantNew, tc.wantRefired, tc.wantOwned, tc.wantIgnored)
+			if !slices.Equal(gotNew, tc.wantNew) || !slices.Equal(gotRefired, tc.wantRefired) || got.Owned != tc.wantOwned || got.Ignored != tc.wantIgnored || got.Unshipped != tc.wantUnshipped {
+				t.Fatalf("diff = new %v, refired %v, owned %d, ignored %d, unshipped %d; want %v, %v, %d, %d, %d", gotNew, gotRefired, got.Owned, got.Ignored, got.Unshipped, tc.wantNew, tc.wantRefired, tc.wantOwned, tc.wantIgnored, tc.wantUnshipped)
 			}
 		})
 	}
@@ -347,11 +378,26 @@ func TestDiffProductionSitesCarriesTheHoursTheTallyCovered(t *testing.T) {
 	span := logsites.Answer{From: from, To: to, Partial: true}
 
 	// Act
-	got := DiffProductionSites(span, nil, nil, nil, nil)
+	got := DiffProductionSites(span, deployStarted, nil, nil, nil, nil)
 
 	// Assert
 	if !got.From.Equal(from) || !got.To.Equal(to) || !got.Partial {
 		t.Fatalf("coverage = %v to %v, partial %v; want %v to %v, partial", got.From, got.To, got.Partial, from, to)
+	}
+}
+
+func TestRenderProductionSitesCountsWhatItLeftOut(t *testing.T) {
+	// Arrange
+	c := wsm.ProductionCheck{Since: priorDeploy, Until: deployStarted}
+	sites := ProductionSites{Baseline: "no earlier span", Owned: 2, Unshipped: 3, Ignored: 4}
+
+	// Act
+	got := RenderProductionSites(sites, c)
+
+	// Assert
+	want := "Left out: 2 sites open children own, 3 sites whose fix landed, not yet in production, 4 sites of ignored kinds.\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("site file = %q, want %q", got, want)
 	}
 }
 
