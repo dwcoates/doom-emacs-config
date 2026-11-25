@@ -207,6 +207,14 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 		if errors.Is(err, shimclient.ErrShimDied) {
 			return nil, fmt.Errorf("%w: %w", promptqueue.ErrShimDied, err)
 		}
+		// NOR IS ONE THIS DAEMON STOOD DOWN UNDER THE CALL
+		// (promptqueue.ErrShimStoodDown): a kill or a close whose teardown
+		// reached the shim while the turn was being sent (seen in the merge
+		// gate 2026-11-25: "the shim refused the turn ... the shim was stood
+		// down by this daemon", a KillWorkspace racing a revival's delivery).
+		if errors.Is(err, shimclient.ErrStandDownOrdered) {
+			return nil, fmt.Errorf("%w: %w", promptqueue.ErrShimStoodDown, err)
+		}
 		return nil, err
 	}
 	if failure := response.GetFailure(); failure != nil {
