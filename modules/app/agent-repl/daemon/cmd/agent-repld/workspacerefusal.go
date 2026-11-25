@@ -184,6 +184,16 @@ func describeNameRefusal(ws string, e *agentreplv1.SetWorkspaceNameError) (strin
 		case *agentreplv1.SetWorkspaceNameTaken_Pending:
 			return fmt.Sprintf("the name %s is reserved by a pending async merge or claimed by a create in flight", t.GetName()), nil
 		}
+	case *agentreplv1.SetWorkspaceNameError_Merging:
+		return fmt.Sprintf("a merge holds or names %s, and its branch and directory cannot move until the merge has landed or left the queue", ws), nil
+	case *agentreplv1.SetWorkspaceNameError_BranchPublished:
+		return fmt.Sprintf("%s's branch tracks %s, and moving it would part it from that remote branch", ws, r.BranchPublished.GetUpstream()), nil
+	case *agentreplv1.SetWorkspaceNameError_BranchExists:
+		return fmt.Sprintf("a branch named %s already exists that no workspace holds", r.BranchExists.GetBranch()), nil
+	case *agentreplv1.SetWorkspaceNameError_DirectoryExists:
+		return fmt.Sprintf("the directory %s already exists", r.DirectoryExists.GetDir()), nil
+	case *agentreplv1.SetWorkspaceNameError_Moving:
+		return fmt.Sprintf("%s's branch and directory are moving for its previous rename right now; rename it again once that ends", ws), nil
 	}
 	return "", undescribed("renaming "+ws, e)
 }

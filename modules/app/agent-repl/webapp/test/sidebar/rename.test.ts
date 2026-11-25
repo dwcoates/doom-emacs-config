@@ -108,6 +108,11 @@ describe("setWorkspaceNameRefusal", () => {
     ["a prefix", { case: "invalidName", value: { name: "A B/x", component: "A B", rule: { case: "prefix", value: {} } } }, 'the prefix "A B" is not letters and digits'],
     ["a workspace's name", { case: "nameTaken", value: { name: "x", holder: { case: "workspace", value: { id: "w" } } } }, "another workspace is already named x, or works on that branch"],
     ["a pending name", { case: "nameTaken", value: { name: "x", holder: { case: "pending", value: {} } } }, "x is being given to a workspace that is being created"],
+    ["a merge", { case: "merging", value: {} }, "a merge is landing this workspace; rename it once the merge has landed or left the queue"],
+    ["a published branch", { case: "branchPublished", value: { upstream: "origin/x" } }, "its branch tracks origin/x, so moving it would part it from that remote branch"],
+    ["an existing branch", { case: "branchExists", value: { branch: "x" } }, "a branch named x already exists"],
+    ["an existing directory", { case: "directoryExists", value: { dir: "/w/x" } }, "the directory /w/x already exists"],
+    ["a move under way", { case: "moving", value: {} }, "it is moving for its previous rename right now; rename it again in a moment"],
   ] as const)("words %s", (_name, cause, want) => {
     const error = create(SetWorkspaceNameErrorSchema, { cause: cause as never });
     expect(setWorkspaceNameRefusal(error.cause as CauseOf<typeof error>)).toBe(want);

@@ -1295,7 +1295,12 @@ and every other row is still opened and ordered."
         (let ((settled
                (progn
                  (agent-repl-roster--purge-foreign-tombstone name id)
-               (cond
+               ;; A ROW WHOSE DIRECTORY CHANGED UNDER ITS ID is a workspace a
+              ;; rename moved: its tab, and every buffer working in it,
+              ;; follow it before anything else reads its directory.
+              (when (and existing (plist-get (plist-get want :ref) :dir))
+                (agent-repl--ws-move-dir existing (plist-get (plist-get want :ref) :dir)))
+              (cond
                 ((null existing)
                  (agent-repl-roster--open-tab want decided))
                 ((equal existing name)
