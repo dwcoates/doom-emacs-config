@@ -849,6 +849,24 @@ type DB interface {
 	TakeOnDeployProblems(ctx context.Context, repo RepoKey, keys []ProblemKey, findings string, at time.Time) error
 	// FixDeployProblems marks every open problem of a repository fixed.
 	FixDeployProblems(ctx context.Context, repo RepoKey, at time.Time) (int, error)
+	// RecordGateFailures keeps a merge gate's failed tests as candidates of
+	// the repository's race findings (racefindings.go).
+	RecordGateFailures(ctx context.Context, repo RepoKey, failures []GateTestFailure) error
+	// PromoteRaces promotes every candidate a pass under its digest shows
+	// was a race, answering the findings it made or updated.
+	PromoteRaces(ctx context.Context, repo RepoKey, passes []TestPass) ([]Promotion, error)
+	// UnpromotedGateFailures answers the failures of a merge no pass has
+	// promoted to a race finding.
+	UnpromotedGateFailures(ctx context.Context, repo RepoKey, merge string, failed []TestPass) ([]RaceFindingRef, error)
+	// RaceFindings answers every race finding a repository holds.
+	RaceFindings(ctx context.Context, repo RepoKey) ([]RaceFinding, error)
+	// CheckRaceFindings answers an *UnknownRaceFindingError naming the first
+	// finding named that the repository does not hold.
+	CheckRaceFindings(ctx context.Context, repo RepoKey, refs []RaceFindingRef) error
+	// TakeOnRaceFindings records that a dispatch took on the findings named.
+	TakeOnRaceFindings(ctx context.Context, repo RepoKey, refs []RaceFindingRef, at time.Time) error
+	// FixRaceFindings marks every race finding taken on fixed.
+	FixRaceFindings(ctx context.Context, repo RepoKey, at time.Time) (int, error)
 	// IgnoredRecordKinds answers every kind of log record the deploy checks
 	// leave out (ignoredrecords.go).
 	IgnoredRecordKinds(ctx context.Context) ([]IgnoredRecordKind, error)

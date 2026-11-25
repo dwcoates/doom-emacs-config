@@ -404,6 +404,9 @@ var migrations = []migration{
 	{To: 212, Name: "owed_moves", Kind: MigrationAdditive, DDL: owedMovesDDL},
 	// IT IS ADDITIVE: a new nullable column the previous build never names.
 	{To: 213, Name: "slack_reaction_searched_through", Kind: MigrationAdditive, DDL: slackReactionSearchedThroughDDL},
+	// IT IS ADDITIVE: three new tables the previous build never names, and
+	// the races seen before their detection (racefindings.go).
+	{To: 214, Name: "queue_race_findings", Kind: MigrationAdditive, DDL: raceFindingsDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work
