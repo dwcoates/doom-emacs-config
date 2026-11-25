@@ -6,8 +6,8 @@ public enum Mode: Equatable {
     /// stopped; opened by hand, open Emacs and hand over to the resident one.
     case run
     /// Report whether macOS lets Zettel notify, and exit: 0 when it may,
-    /// 1 when it may not (bin/requirements.sh's notification_permission
-    /// check).
+    /// 1 when it may not (bin/requirements.sh's app_permission
+    /// check of `notifications`).
     case checkNotifications
     /// Ask macOS for permission to notify (its prompt, the first time) and
     /// exit as checkNotifications does.

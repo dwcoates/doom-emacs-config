@@ -58,7 +58,8 @@
     },
     {
       "id": "launcher-notification-permission",
-      "kind": "notification_permission",
+      "kind": "app_permission",
+      "permission": "notifications",
       "why": "macOS shows Zettel's banners only once it is allowed to notify",
       "profile": "run",
       "platforms": [

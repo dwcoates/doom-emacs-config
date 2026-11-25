@@ -955,10 +955,10 @@ test_skills_dirs_are_the_config_roots_skills_dirs() {
 }
 
 # ---------------------------------------------------------------------------
-# notification_permission.
+# app_permission.
 # ---------------------------------------------------------------------------
 
-PERMISSION='{"id": "notify", "kind": "notification_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel"}'
+PERMISSION='{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel", "permission": "notifications"}'
 
 test_an_authorized_notifier_is_ok() {
   new_case; manifest "[$PERMISSION]"
@@ -978,12 +978,24 @@ test_install_asks_for_an_unauthorized_notifiers_permission() {
 
 test_a_notifier_at_a_home_path_is_found() {
   new_case
-  manifest '[{"id": "notify", "kind": "notification_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "~/Applications/Zettel.app/Contents/MacOS/Zettel"}]'
+  manifest '[{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "~/Applications/Zettel.app/Contents/MacOS/Zettel", "permission": "notifications"}]'
   mkdir -p "$CASE/home/Applications/Zettel.app/Contents/MacOS"
   printf '#!/bin/sh\necho "Zettel may notify"\n' >"$CASE/home/Applications/Zettel.app/Contents/MacOS/Zettel"
   chmod +x "$CASE/home/Applications/Zettel.app/Contents/MacOS/Zettel"
   run check
   if [ "$RC" -eq 0 ] && has "ok          notify: Zettel may notify"; then pass "a ~/ command is the user's home"; else fail "home-path notifier" "rc=$RC" "$OUT"; fi
+}
+
+test_an_app_permission_with_no_permission_is_refused() {
+  new_case; manifest '[{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'notify: app_permission needs "permission"'; then pass "an app_permission with no permission is refused"; else fail "permission missing" "rc=$RC" "$OUT"; fi
+}
+
+test_an_app_permission_naming_an_unknown_permission_is_refused() {
+  new_case; manifest '[{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel", "permission": "camera"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has "notify: an app_permission permission is notifications, not camera"; then pass "an app_permission naming an unknown permission is refused"; else fail "unknown permission" "rc=$RC" "$OUT"; fi
 }
 
 # ---------------------------------------------------------------------------
