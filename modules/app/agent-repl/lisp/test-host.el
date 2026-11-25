@@ -730,6 +730,30 @@ looked at."
     ;; Assert
     (should-not (agent-repl-test-host--logged-p :info "elisp.host.ref-taken"))))
 
+;; Two writers of the ref once diverged: a rename's move reached the
+;; workspace plist and not the host entry, and an adopt echoed the stale
+;; ref (2026-11-25).  A future third writer fails here.
+(ert-deftest agent-repl-test-host-take-ref-is-the-only-writer-of-the-ref ()
+  "No source writes either home of the ref but `agent-repl-host-take-ref'."
+  ;; Arrange
+  (let ((pattern "(agent-repl--ws-put [^ ]+ :ref \\|(agent-repl-host--put [^ ]+ :ref ")
+        (offenders nil))
+    ;; Act
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'"))
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (while (re-search-forward pattern nil t)
+            (unless (and (string= (file-name-nondirectory file) "host.el")
+                         (save-excursion
+                           (beginning-of-defun)
+                           (looking-at "(defun agent-repl-host-take-ref ")))
+              (push (format "%s:%d" (file-name-nondirectory file) (line-number-at-pos))
+                    offenders))))))
+    ;; Assert
+    (should-not offenders)))
+
 (ert-deftest agent-repl-test-host-interaction-echoes-the-ref-and-the-kind ()
   "ReportUserInteraction carries the daemon-minted ref and the kind it was handed."
   (agent-repl-test-host--with-harness

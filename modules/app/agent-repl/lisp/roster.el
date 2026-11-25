@@ -97,6 +97,7 @@
 (declare-function agent-repl--panels-arm-arrivals "panels" ())
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host-rename "host" (old new))
+(declare-function agent-repl-host-take-ref "host" (ws ref))
 (declare-function agent-repl--frontend-rename-webview "frontend" (ws))
 (declare-function agent-repl-host--apply-naming "host" (ws))
 (declare-function agent-repl-link-primary "daemon-link" ())
@@ -1056,7 +1057,7 @@ this file's verb — so the tab's whole birth is a perspective plus the
     (agent-repl--ws-revive name)
     (agent-repl--ws-put name :released nil)
     (agent-repl--ws-create name dir)
-    (agent-repl--ws-put name :ref ref)
+    (agent-repl-host-take-ref name ref)
     (agent-repl--ws-put name :dir dir)
     ;; `:project-dir' is the identity key the REST of the system reads -- the
     ;; durable log sink, history, the composer's attachment root, panels,
@@ -1118,14 +1119,14 @@ second tab."
       ;; is still written through, because the row's ref is the authority
       ;; on the identity whatever the name ended up being.
       (progn
-        (agent-repl--ws-put old :ref ref)
+        (agent-repl-host-take-ref old ref)
         old)
     ;; Host state is keyed on the workspace name too (fanout §7), so it is
     ;; re-keyed in the SAME breath: a rename that moved only the workspace
     ;; table leaves `agent-repl-host-ref' answering nil for the new name.
     (agent-repl-host-rename old new)
     (agent-repl--ws-rename-persp old new)
-    (agent-repl--ws-put new :ref ref)
+    (agent-repl-host-take-ref new ref)
     (agent-repl--ws-put new :dir (plist-get ref :dir))
     ;; The webview's NAME is a panel key too: left on OLD, the window sweep
     ;; deletes it as another workspace's orphan and the layout shows it
@@ -1305,7 +1306,7 @@ and every other row is still opened and ordered."
                 ((null existing)
                  (agent-repl-roster--open-tab want decided))
                 ((equal existing name)
-                 (agent-repl--ws-put name :ref (plist-get want :ref))
+                 (agent-repl-host-take-ref name (plist-get want :ref))
                  (agent-repl--log-decision (list 'roster-tab-kept id) name
                                            name "elisp.roster.tab-kept: ws={ws} id={id}" :ws name :id id)
                  name)
