@@ -86,6 +86,8 @@ describe("isPathLinkText", () => {
     { name: "prose", text: "the config file", want: false },
     { name: "a path with more words", text: "~/a.el foo", want: false },
     { name: "a web URL", text: "https://x.test/a", want: false },
+    { name: "a skill link's slashed name", text: "/ceac-resource-usage", want: false },
+    { name: "a directory", text: "lisp/", want: true },
   ])("answers $want for $name", ({ text, want }) => {
     expect(isPathLinkText(text)).toBe(want);
   });

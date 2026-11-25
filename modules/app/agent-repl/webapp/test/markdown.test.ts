@@ -599,6 +599,40 @@ describe("the daemon's drawn links render whole", () => {
   );
 });
 
+describe("a skill link the daemon drew", () => {
+  // The daemon's skillrefs.Linkify draws a code span naming a skill as this.
+  const SKILL_LINK = "[/ceac-resource-usage](~/w/.claude/skills/ceac-resource-usage/SKILL.md)";
+
+  it.each([
+    { renderer: "renderMarkdown", render: (src: string) => renderMarkdown(src) },
+    { renderer: "inline", render: (src: string) => inline(src) },
+  ])("$renderer draws it as a plain link reading its slashed name", ({ render }) => {
+    // Arrange
+    const el = document.createElement("div");
+
+    // Act
+    el.innerHTML = render(`ran ${SKILL_LINK} now`);
+
+    // Assert
+    const anchors = [...el.querySelectorAll("a")];
+    expect(anchors.map((a) => [a.getAttribute("href"), a.textContent, a.getAttribute("title")])).toEqual([
+      ["~/w/.claude/skills/ceac-resource-usage/SKILL.md", "/ceac-resource-usage", null],
+    ]);
+    expect(el.querySelector("code")).toBeNull();
+  });
+
+  it("draws an escaped name as written", () => {
+    // Arrange
+    const el = document.createElement("div");
+
+    // Act
+    el.innerHTML = renderMarkdown("[/odd\\_name](~/s/odd_name/SKILL.md)");
+
+    // Assert
+    expect(el.querySelector("a")?.textContent).toBe("/odd_name");
+  });
+});
+
 describe("a file link draws its file name, not its path", () => {
   const drawn = (html: string): string[] =>
     [...html.matchAll(/<a [^>]*>(.*?)<\/a>/g)].map((m) => m[1].replace(/<[^>]*>/g, ""));

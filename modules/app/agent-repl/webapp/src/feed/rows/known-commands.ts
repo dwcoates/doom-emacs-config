@@ -55,7 +55,9 @@ export function slashWords(text: string): SlashWord[] {
 /**
  * Mark every slash word under ROOT whose name is in NAMES: each is wrapped in
  * a `span.known-command`. A text node is the run boundary, so a word an
- * element splits (`/merge-**queue**`) is two runs and neither is marked.
+ * element splits (`/merge-**queue**`) is two runs and neither is marked. A
+ * word inside a link is never marked: the link draws as every link does (a
+ * skill's name the daemon linked to its file, `/ceac-resource-usage`).
  */
 export function markKnownCommands(root: HTMLElement, names: ReadonlySet<string>): void {
   if (names.size === 0) return;
@@ -63,7 +65,7 @@ export function markKnownCommands(root: HTMLElement, names: ReadonlySet<string>)
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const texts: Text[] = [];
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    texts.push(node as Text);
+    if (node.parentElement?.closest("a") == null) texts.push(node as Text);
   }
   for (const node of texts) {
     const text = node.data;

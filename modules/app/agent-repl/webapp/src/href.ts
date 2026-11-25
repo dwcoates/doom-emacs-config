@@ -71,12 +71,15 @@ export function hasFileExtension(label: string): boolean {
 
 /**
  * WHETHER A LINK'S VISIBLE TEXT IS A PATH (owner request, 2026-10-15): one
- * token with no whitespace, holding a `/`, that is itself a file-link href. A
- * file link whose text is such a path draws `fileLinkLabel` of it, while text
- * the author chose (`[the config](~/x.el)`) is drawn as written.
+ * token with no whitespace, holding a `/` after its first character, that is
+ * itself a file-link href. A file link whose text is such a path draws
+ * `fileLinkLabel` of it, while text the author chose (`[the config](~/x.el)`)
+ * is drawn as written. A text whose only `/` leads it (`/ceac-resource-usage`,
+ * the daemon's skill link) has no directory to drop, so it is drawn as
+ * written too.
  */
 export function isPathLinkText(text: string): boolean {
-  return !/\s/.test(text) && text.includes("/") && isFileLinkHref(text);
+  return !/\s/.test(text) && text.slice(1).includes("/") && isFileLinkHref(text);
 }
 
 /**

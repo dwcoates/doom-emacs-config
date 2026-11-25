@@ -1013,6 +1013,19 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
     off();
   });
 
+  it("routes a skill link the daemon drew as a feed_link to the skill's file", async () => {
+    const { ctx, editor } = harness();
+    const { root, off } = proseInRow(
+      ctx,
+      "row-7",
+      renderMarkdown("ran [/ceac-resource-usage](~/w/.claude/skills/ceac-resource-usage/SKILL.md)"),
+    );
+    click(root.querySelector("a")!);
+    await settle();
+    expect(editor.map(feedLinkOf)).toEqual([{ href: "~/w/.claude/skills/ceac-resource-usage/SKILL.md", row: "row-7" }]);
+    off();
+  });
+
   it("routes a bare file name as a feed_link, href verbatim", async () => {
     const { ctx, editor } = harness();
     const { root, off } = proseInRow(ctx, "row-7", `<a href="AGENTS.md">AGENTS.md</a>`);
