@@ -124,7 +124,7 @@ func TestTheIntakesBriefNamesTheLastGatesLog(t *testing.T) {
 			q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
 
 			// Act
-			_, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+			_, _, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
 
 			// Assert
 			values := h.briefValues[len(h.briefValues)-1]

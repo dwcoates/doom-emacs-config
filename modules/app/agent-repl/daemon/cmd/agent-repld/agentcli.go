@@ -3083,23 +3083,34 @@ func queueMediation(c *cliCall, args []string) int {
 }
 
 // readProblems reads a decision's problems from IN: a JSON list of
-// {"statement", "evidence"} objects, at least one.
+// {"statement", "evidence", "race_findings"} objects, at least one, where
+// "race_findings" is an optional list of {"suite", "test"}.
 func readProblems(in io.Reader) ([]*agentreplv1.DeployProblem, error) {
 	var problems []struct {
 		Statement string   `json:"statement"`
 		Evidence  []string `json:"evidence"`
+		// RaceFindings names the queue race findings the problem is, each
+		// as the deploy check's brief names it.
+		RaceFindings []struct {
+			Suite string `json:"suite"`
+			Test  string `json:"test"`
+		} `json:"race_findings"`
 	}
 	decoder := json.NewDecoder(in)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&problems); err != nil {
-		return nil, fmt.Errorf("read the problems from standard input as a JSON list of {\"statement\", \"evidence\"}: %w", err)
+		return nil, fmt.Errorf("read the problems from standard input as a JSON list of {\"statement\", \"evidence\", \"race_findings\"}: %w", err)
 	}
 	if len(problems) == 0 {
 		return nil, errors.New("the problems name at least one problem")
 	}
 	out := make([]*agentreplv1.DeployProblem, 0, len(problems))
 	for _, p := range problems {
-		out = append(out, &agentreplv1.DeployProblem{Statement: p.Statement, Evidence: p.Evidence})
+		problem := &agentreplv1.DeployProblem{Statement: p.Statement, Evidence: p.Evidence}
+		for _, r := range p.RaceFindings {
+			problem.RaceFindings = append(problem.RaceFindings, &agentreplv1.QueueRaceFindingRef{Suite: r.Suite, Test: r.Test})
+		}
+		out = append(out, problem)
 	}
 	return out, nil
 }

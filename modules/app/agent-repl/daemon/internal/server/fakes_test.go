@@ -1430,6 +1430,8 @@ type fakeMerge struct {
 	releasedEscalations  []merge.RepositoryScope
 	escalationReleaseErr error
 	merge.Orchestrator
+	// observedRuns is every ObserveTestRun asked.
+	observedRuns []fakeObservedRun
 	// landings answers Landings, which landingsErr fails; landingsAsked is
 	// every window asked for.
 	landings      merge.LandingsWindow
@@ -1743,6 +1745,18 @@ func (f *fakeMerge) FoldProduction(_ context.Context, ws, folded, surviving ids.
 func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, d merge.Decision) error {
 	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: d})
 	return f.decideErr
+}
+
+// fakeObservedRun is one workspace test run handed to the queue's race
+// detection.
+type fakeObservedRun struct {
+	dir   string
+	ws    ids.WorkspaceID
+	units []*testrunv1.TestRunUnitEnded
+}
+
+func (f *fakeMerge) ObserveTestRun(_ context.Context, dir string, ws ids.WorkspaceID, units []*testrunv1.TestRunUnitEnded) {
+	f.observedRuns = append(f.observedRuns, fakeObservedRun{dir: dir, ws: ws, units: units})
 }
 
 func (f *fakeMerge) IgnoreRecords(_ context.Context, ws ids.WorkspaceID, kind wsm.IgnoredRecordKind) error {

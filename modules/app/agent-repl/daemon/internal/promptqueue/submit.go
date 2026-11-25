@@ -550,7 +550,13 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 			// DROPS THESE ENTRIES." They wait under the reconnect hold for
 			// whatever brings a session up next -- a retry, a restart, a
 			// revival -- and that edge delivers them (ReleaseReconnectHolds).
-			q.keepReconnectHolds(ctx, ws, log, err.Error())
+			// A BRING-UP THIS DAEMON'S OWN STAND-DOWN CUT is no failed
+			// revival: a kill or a close took the workspace's shim, and its
+			// serving with it, while the bring-up ran (2026-11-25: a workspace
+			// killed mid-merge cut the revival of its held prompts, read as
+			// WARN). The fleet counts the removal under the lock that removes
+			// the session, so the count read here never misses it.
+			q.keepReconnectHolds(ctx, ws, log, err.Error(), q.deps.StandDowns(ws) != stoodDown)
 			return
 		}
 		if !revived {
@@ -604,7 +610,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 				return
 			}
 			log.Error(opSubmit, "the revival reported success but the workspace still has no session", nil)
-			q.keepReconnectHolds(ctx, ws, log, "the revival reported success but no session came up")
+			q.keepReconnectHolds(ctx, ws, log, "the revival reported success but no session came up", false)
 			return
 		}
 		q.releaseReconnectHolds(ctx, ws, log)
@@ -612,7 +618,9 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 }
 
 // keepReconnectHolds records, loudly, that a FAILED bring-up leaves every
-// reconnect hold on the workspace standing.
+// reconnect hold on the workspace standing; a bring-up this daemon's own
+// stand-down cut (STOODDOWN) is recorded at INFO, the stand-down's own record
+// naming why the session is down.
 //
 // A failed bring-up NEVER drops these entries (feed_held.proto,
 // HeldPromptReconnectHold): the prompt waits for the session to reconnect, and
@@ -623,7 +631,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 // roster took at acceptance is not running, so the row falls back to what the
 // route reports -- the bring-up's own fault arm -- rather than standing at
 // `submitting` for a prompt that waits.
-func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, cause string) {
+func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, cause string, stoodDown bool) {
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
 		log.Error(opSubmit, "could not read the holds a failed revival leaves standing",
@@ -642,8 +650,12 @@ func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log 
 		log.Debug(opSubmit, "the failed revival leaves no reconnect hold standing", dlog.Context{"cause": cause})
 		return
 	}
-	log.Warn(opSubmit, "the revival failed; its prompts stay held under the reconnect hold until a session comes up",
-		dlog.Context{"cause": cause, "held": len(waiting), "turns": waiting})
+	fields := dlog.Context{"cause": cause, "held": len(waiting), "turns": waiting}
+	if stoodDown {
+		log.Info(opSubmit, "this daemon stood the session down while its revival ran; its prompts stay held under the reconnect hold until a session comes up", fields)
+		return
+	}
+	log.Warn(opSubmit, "the revival failed; its prompts stay held under the reconnect hold until a session comes up", fields)
 }
 
 // WithdrawRevivalTurn implements Queue.

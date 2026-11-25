@@ -9,6 +9,7 @@
 #   bin/test-all.sh --coverage
 #   bin/test-all.sh --suites webapp,build-frontend-harness
 #   bin/test-all.sh --selection REQUEST.pb [--events-fd N]
+#   AGENT_REPL_TEST_EVENTS_FILE=PATH bin/test-all.sh [--suites a,b]
 #   bin/test-all.sh --redundancy REQUEST.pb
 #
 # The daemon is the one caller (agentrepl.v1.RunTests, RunRedundancy, and the
@@ -159,9 +160,24 @@ fi
 # not record never writes it.
 RECORD_OUT="$RUN_TMP/pending-record.json"
 
+# AGENT_REPL_TEST_EVENTS_FILE WRITES THE RUN'S EVENTS TO A FILE (the merge
+# gate): the gate's run is relayed by the test service as lines alone, so the
+# typed testrun.v1.TestRunEvent stream, with every unit's per-test results and
+# inputs digest, is read from this file once the run ends. It is the runner's
+# --events-fd, opened on a descriptor here. It rides the environment, never
+# the argument list, so a gate running a script from before it runs as it
+# always did; and it is unset before the runner starts, so a test that runs
+# this script itself never writes the gate's file.
+RUN_ARGS=("$@")
+if [ -n "${AGENT_REPL_TEST_EVENTS_FILE:-}" ]; then
+    exec 9>"$AGENT_REPL_TEST_EVENTS_FILE"
+    RUN_ARGS+=(--events-fd 9)
+fi
+unset AGENT_REPL_TEST_EVENTS_FILE
+
 set +e
 "$REPO_ROOT/.claude/safe-test-run.sh" -- \
-    "$TESTRUN" run --module "$MODULE_ROOT" "$@" --record-out "$RECORD_OUT"
+    "$TESTRUN" run --module "$MODULE_ROOT" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} --record-out "$RECORD_OUT"
 RUN_RC=$?
 set -e
 

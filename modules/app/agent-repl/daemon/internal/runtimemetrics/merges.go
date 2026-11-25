@@ -61,6 +61,11 @@ const (
 	// hot reload to the approval or the finish that ended the run, by how
 	// it ended.
 	MediatorRunsName = "agentrepl_deploy_mediator_runs_total"
+	// RaceFindingsName counts the merge queue's race findings, by event: a
+	// test that failed in a merge gate and passed on the same inputs found
+	// (new), found again (recurred), or found again after its fix deployed
+	// (reopened).
+	RaceFindingsName = "agentrepl_merge_queue_race_findings_total"
 	// ProductionChecksName counts the production checks decided, by how
 	// each ended: nothing_to_do, dispatched or unanswered.
 	ProductionChecksName = "agentrepl_production_checks_total"
@@ -94,6 +99,7 @@ type merges struct {
 	mediatorTurnTokens, mediatorCompactions                                   *prometheus.HistogramVec
 	mediatorRuns                                                              *prometheus.CounterVec
 	productionChecks, productionChildren                                      *prometheus.CounterVec
+	raceFindings                                                              *prometheus.CounterVec
 }
 
 func newMerges() merges {
@@ -152,6 +158,9 @@ func newMerges() merges {
 		productionChecks: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: ProductionChecksName, Help: "Production checks decided, by how each ended.",
 		}, []string{"outcome"}),
+		raceFindings: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: RaceFindingsName, Help: "The merge queue's race findings: a test that failed in a merge gate and passed on the same inputs, by event: new, recurred, reopened.",
+		}, []string{"event"}),
 		productionChildren: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: ProductionChildrenName, Help: "The production mediator's children, by event: dispatched, folded, landed, closed.",
 		}, []string{"event"}),
@@ -277,6 +286,15 @@ func (s *Surface) CountMediatorRun(outcome string) {
 		return
 	}
 	s.merges.mediatorRuns.WithLabelValues(outcome).Inc()
+}
+
+// CountRaceFinding implements merge.Meter: one race finding found, by
+// EVENT. The off surface records nothing.
+func (s *Surface) CountRaceFinding(event string) {
+	if s == nil {
+		return
+	}
+	s.merges.raceFindings.WithLabelValues(event).Inc()
 }
 
 // ObserveProductionCheck implements merge.Meter: one production check

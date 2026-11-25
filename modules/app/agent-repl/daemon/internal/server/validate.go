@@ -1600,6 +1600,11 @@ func validateProblems(field string, problems []*agentreplv1.DeployProblem) *conn
 				return invalid(field+".evidence", "an evidence record is never blank")
 			}
 		}
+		for _, r := range p.GetRaceFindings() {
+			if strings.TrimSpace(r.GetSuite()) == "" || strings.TrimSpace(r.GetTest()) == "" {
+				return invalid(field+".race_findings", "a race finding names its suite and its test")
+			}
+		}
 	}
 	return nil
 }

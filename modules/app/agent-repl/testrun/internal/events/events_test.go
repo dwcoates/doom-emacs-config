@@ -76,6 +76,12 @@ func TestUnitEndedOf(t *testing.T) {
 		{name: "a failed and a skipped test", res: result("u", run.Failed, testtimes.Test{Name: "A", Outcome: testtimes.Fail}, testtimes.Test{Name: "B", Outcome: testtimes.Skip}), check: func(u *testrunv1.TestRunUnitEnded) bool {
 			return u.GetTests()[0].GetFailed() != nil && u.GetTests()[1].GetSkipped() != nil
 		}},
+		{name: "a confined unit carries its inputs digest", res: digested(result("u", run.Passed), "abc"), check: func(u *testrunv1.TestRunUnitEnded) bool {
+			return u.InputsDigest != nil && u.GetInputsDigest() == "abc"
+		}},
+		{name: "an unconfined unit carries no digest", res: result("u", run.Passed), check: func(u *testrunv1.TestRunUnitEnded) bool {
+			return u.InputsDigest == nil
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -245,4 +251,10 @@ func TestEventsWrittenFromTwoGoroutinesReadBackWhole(t *testing.T) {
 	if got := len(readAll(t, &buf)); got != 2*each {
 		t.Fatalf("read back %d events, want %d", got, 2*each)
 	}
+}
+
+// digested is RES run under a spec confined to the inputs DIGEST.
+func digested(res run.Result, digest string) run.Result {
+	res.Spec.InputsDigest = digest
+	return res
 }

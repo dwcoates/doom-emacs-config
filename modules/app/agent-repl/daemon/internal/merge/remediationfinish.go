@@ -402,10 +402,16 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 	if len(argv) == 0 {
 		return fmt.Errorf("merge: no test command is configured for the remediation's gate")
 	}
-	argv = gateArgv(append([]string(nil), argv...), o.deps.TestMetricsRoot)
 	// THE ATTEMPT IS DRAWN IN THE MEDIATOR'S FEED AS IT RUNS (fixgate.go).
 	card := o.newFixGateRun(f, fields)
 	archive := card.log.path
+	argv = gateArgv(append([]string(nil), argv...), o.deps.TestMetricsRoot, card.log.events)
+	// THE RESULTS FILE'S DIRECTORY EXISTS BEFORE THE RUNNER OPENS IT: the
+	// remediation's archive is written only after its run.
+	if err := os.MkdirAll(filepath.Dir(card.log.events), 0o755); err != nil {
+		card.failed("the gate could not run: " + err.Error())
+		return fmt.Errorf("merge: make the remediation gate's log directory: %w", err)
+	}
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate started", withField(fields, "archive", archive))
 	result, err := o.runRemediationGate(ctx, record.Dir, argv, archive, card.line)
 	if err != nil {
@@ -416,6 +422,8 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 		card.failed("the gate did not run: " + why)
 		return fmt.Errorf("merge: the remediation's gate did not run: %s; the whole run is archived at %s", why, archive)
 	}
+	// THE REMEDIATION'S GATE IS READ FOR RACES as a merge's is.
+	o.observeGateRaces(ctx, f.Repo, record.Name, card.log.events, archive, o.deps.Now())
 	if !result.Passed {
 		found := readFailingTests(result.Tail, record.Dir)
 		if err := o.recordFailingCases(ctx, f.Workspace, found, dlog.Merge(fields, dlog.Context{"archive": archive})); err != nil {
@@ -842,6 +850,11 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 		// ITS PROBLEMS ARE FIXED, NOT CLOSED: a later window that logs one
 		// again finds it RECURRED, with the mediator's findings beside it.
 		if _, err := o.deps.DB.FixDeployProblems(ctx, repo, at); err != nil {
+			errs = append(errs, err)
+		}
+		// ITS RACE FINDINGS ARE FIXED THE SAME WAY: a later gate failure
+		// promoted on the same inputs opens one again (wsm PromoteRaces).
+		if _, err := o.deps.DB.FixRaceFindings(ctx, repo, at); err != nil {
 			errs = append(errs, err)
 		}
 		// AN ESCALATION'S FINISH IS DONE AT ITS DEPLOY: no chain's end

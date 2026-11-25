@@ -511,7 +511,15 @@ type TestRunUnitEnded struct {
 	// The tests the unit ran, each with its own outcome, where the unit's output
 	// states them (Go, vitest and ERT do; a harness states its groups). Empty for
 	// a unit that ran no test (a build) or never started.
-	Tests         []*TestRunTestResult `protobuf:"bytes,8,rep,name=tests,proto3" json:"tests,omitempty"`
+	Tests []*TestRunTestResult `protobuf:"bytes,8,rep,name=tests,proto3" json:"tests,omitempty"`
+	// The digest of the unit's declared inputs, the reuse key the run confined
+	// the unit to: every file and environment value its tests may read. Two
+	// results of one test under one digest ran the same code, so a test that
+	// failed under a digest and passed under it again failed for no change of
+	// its inputs: the daemon records it as a queue race finding. UNSET for a
+	// unit the run did not confine to its inputs (an unconfined suite, a
+	// suite's shared infrastructure), whose results prove nothing of the kind.
+	InputsDigest  *string `protobuf:"bytes,9,opt,name=inputs_digest,json=inputsDigest,proto3,oneof" json:"inputs_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -606,6 +614,13 @@ func (x *TestRunUnitEnded) GetTests() []*TestRunTestResult {
 		return x.Tests
 	}
 	return nil
+}
+
+func (x *TestRunUnitEnded) GetInputsDigest() string {
+	if x != nil && x.InputsDigest != nil {
+		return *x.InputsDigest
+	}
+	return ""
 }
 
 type isTestRunUnitEnded_Verdict interface {
@@ -1601,7 +1616,7 @@ const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\x05suite\x18\x02 \x01(\tR\x05suite\" \n" +
 	"\n" +
 	"TestRunLog\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"\xde\x02\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"\x9a\x03\n" +
 	"\x10TestRunUnitEnded\x12\x17\n" +
 	"\aunit_id\x18\x01 \x01(\tR\x06unitId\x12\x14\n" +
 	"\x05suite\x18\x02 \x01(\tR\x05suite\x12\x17\n" +
@@ -1609,8 +1624,10 @@ const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\x06passed\x18\x04 \x01(\v2\x1d.testrun.v1.TestRunUnitPassedH\x00R\x06passed\x127\n" +
 	"\x06failed\x18\x05 \x01(\v2\x1d.testrun.v1.TestRunUnitFailedH\x00R\x06failed\x12@\n" +
 	"\tcancelled\x18\a \x01(\v2 .testrun.v1.TestRunUnitCancelledH\x00R\tcancelled\x123\n" +
-	"\x05tests\x18\b \x03(\v2\x1d.testrun.v1.TestRunTestResultR\x05testsB\t\n" +
-	"\averdictJ\x04\b\x06\x10\aR\bdeclined\"\x13\n" +
+	"\x05tests\x18\b \x03(\v2\x1d.testrun.v1.TestRunTestResultR\x05tests\x12(\n" +
+	"\rinputs_digest\x18\t \x01(\tH\x01R\finputsDigest\x88\x01\x01B\t\n" +
+	"\averdictB\x10\n" +
+	"\x0e_inputs_digestJ\x04\b\x06\x10\aR\bdeclined\"\x13\n" +
 	"\x11TestRunUnitPassed\"Q\n" +
 	"\x11TestRunUnitFailed\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x1f\n" +

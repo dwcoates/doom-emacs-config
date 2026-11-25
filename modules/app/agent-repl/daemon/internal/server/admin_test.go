@@ -1217,6 +1217,12 @@ func TestUpdateMergeQueueHandsTheIntakesDecisionOn(t *testing.T) {
 			want: merge.Decision{Kind: merge.MediationEscalate, Summary: "clean", Problems: problems}},
 		{name: "a dispatch", decision: aDispatch(&agentreplv1.UpdateMergeQueueMediationDispatch{}),
 			want: merge.Decision{Kind: merge.MediationDispatch, Summary: "clean", Problems: problems}},
+		{name: "a dispatch naming the race findings a problem is", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
+				Problems: []*agentreplv1.DeployProblem{{Statement: "TestRacy races", Evidence: []string{"lost"},
+					RaceFindings: []*agentreplv1.QueueRaceFindingRef{{Suite: "daemon", Test: "TestRacy"}}}}}}},
+			want: merge.Decision{Kind: merge.MediationDispatch, Summary: "clean", Problems: []merge.DeployProblem{{Statement: "TestRacy races", Evidence: []string{"lost"},
+				RaceFindings: []wsm.RaceFindingRef{{Suite: "daemon", Test: "TestRacy"}}}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1292,6 +1298,11 @@ func TestUpdateMergeQueueAnswersAMediationRefusal(t *testing.T) {
 			got: func(e *agentreplv1.UpdateMergeQueueError) bool {
 				groups := e.GetProblemsUnowned().GetGroups()
 				return len(groups) == 1 && groups[0] == "op: msg (new)"
+			}},
+		{name: "an unknown race finding", refusal: &merge.RefusalError{Arm: merge.ArmUnknownRaceFinding, Reason: "none",
+			Fields: map[string]any{"finding": &agentreplv1.QueueRaceFindingRef{Suite: "e2e", Test: "TestLanding"}}},
+			got: func(e *agentreplv1.UpdateMergeQueueError) bool {
+				return e.GetUnknownRaceFinding().GetFinding().GetTest() == "TestLanding"
 			}},
 		{name: "groups past their fixes", refusal: &merge.RefusalError{Arm: merge.ArmProblemsRecurring, Reason: "one",
 			Fields: map[string]any{"groups": []string{"op: msg (3 fixes)"}}},
@@ -1442,6 +1453,9 @@ func TestUpdateMergeQueueRefusesAMalformedMediation(t *testing.T) {
 		{name: "an approval's ignored group with no evidence", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{
 				Ignored: []*agentreplv1.DeployProblem{{Statement: "s"}}}}}},
+		{name: "a race finding with no test", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
+				Problems: []*agentreplv1.DeployProblem{{Statement: "s", Evidence: []string{"r"}, RaceFindings: []*agentreplv1.QueueRaceFindingRef{{Suite: "daemon"}}}}}}}},
 		{name: "a blank evidence record", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
 				Problems: []*agentreplv1.DeployProblem{{Statement: "s", Evidence: []string{" "}}}}}}},

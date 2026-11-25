@@ -738,14 +738,14 @@ func TestEveryGateNamesTheNicenessItsTreeRunsAt(t *testing.T) {
 		metricsRoot string
 		want        []string
 	}{
-		{name: "a daemon recording no metrics", want: []string{"env", "AGENT_REPL_TEST_NICENESS=10", "bash", "s"}},
+		{name: "a daemon recording no metrics", want: []string{"env", "AGENT_REPL_TEST_NICENESS=10", "AGENT_REPL_TEST_EVENTS_FILE=/l/e", "bash", "s"}},
 		{name: "a daemon recording metrics", metricsRoot: "/m", want: []string{
-			"env", "AGENT_REPL_TEST_NICENESS=10", "AGENT_REPL_TEST_METRICS_ROOT=/m", "AGENT_REPL_TEST_METRICS_TRIGGER=merge_queue", "bash", "s"}},
+			"env", "AGENT_REPL_TEST_NICENESS=10", "AGENT_REPL_TEST_EVENTS_FILE=/l/e", "AGENT_REPL_TEST_METRICS_ROOT=/m", "AGENT_REPL_TEST_METRICS_TRIGGER=merge_queue", "bash", "s"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act.
-			got := gateArgv([]string{"bash", "s"}, tt.metricsRoot)
+			got := gateArgv([]string{"bash", "s"}, tt.metricsRoot, "/l/e")
 
 			// Assert.
 			if !slices.Equal(got, tt.want) {

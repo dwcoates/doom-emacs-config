@@ -217,6 +217,24 @@ func TestRunTestsRelaysEveryEventTheRunWrites(t *testing.T) {
 	}
 }
 
+func TestRunTestsHandsEachRunsUnitVerdictsToTheQueuesRaceDetection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ref := testsWorkspace(t, h, testsDeploy)
+	digest := "d1"
+	unit := &testrunv1.TestRunUnitEnded{UnitId: "daemon:x#00", Suite: "daemon", InputsDigest: &digest, Verdict: &testrunv1.TestRunUnitEnded_Passed{Passed: &testrunv1.TestRunUnitPassed{}}}
+	h.Tests.events = []*testrunv1.TestRunEvent{{Event: &testrunv1.TestRunEvent_UnitEnded{UnitEnded: unit}}, endedPassed()}
+
+	// Act
+	runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()})
+
+	// Assert
+	runs := h.Merge.observedRuns
+	if len(runs) != 1 || runs[0].dir != ref.GetDir() || string(runs[0].ws) != ref.GetId() || len(runs[0].units) != 1 || !proto.Equal(runs[0].units[0], unit) {
+		t.Fatalf("observed runs = %+v, want the run's one unit verdict from its worktree and workspace", runs)
+	}
+}
+
 func TestRunTestsRefuses(t *testing.T) {
 	cases := []struct {
 		name  string

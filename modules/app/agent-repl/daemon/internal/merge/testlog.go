@@ -39,10 +39,13 @@ import (
 // root.
 const mergeLogsDir = "merge-logs"
 
-// testLog is one tests round's log: its token and its path.
+// testLog is one tests round's log: its token and its path, and the path the
+// round's runner writes its typed events to (bin/test-all.sh --events-file),
+// which the queue reads its race findings from (racefindings.go).
 type testLog struct {
-	token string
-	path  string
+	token  string
+	path   string
+	events string
 }
 
 // testLog names one tests round's log.
@@ -54,10 +57,8 @@ func (o *orchestrator) testLog(lease ids.LeaseID, round int) testLog {
 // mediator's workspace): THE ONE SHAPE of a tests log's token and path, so
 // every gate's log is resolved and pruned alike (TestLogPath, IsLog).
 func (o *orchestrator) testsLogOf(key string, round int) testLog {
-	return testLog{
-		token: fmt.Sprintf("%s/%d", key, round),
-		path:  filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", key, round)),
-	}
+	path := filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", key, round))
+	return testLog{token: fmt.Sprintf("%s/%d", key, round), path: path, events: eventsOf(path)}
 }
 
 // LogsDir is the directory every log the queue writes lives in, under the
@@ -67,12 +68,12 @@ func (o *orchestrator) testsLogOf(key string, round int) testLog {
 func LogsDir(stateDir string) string { return filepath.Join(stateDir, mergeLogsDir) }
 
 // logName matches the basename of every log the queue writes: a tests round's
-// (testLog), a script hook round's (hookLogName), a released deploy hook's
+// and its events (testLog), a script hook round's (hookLogName), a released deploy hook's
 // (releaseLogName), a queue_drained script's (runDrainedScript), a
 // creation or finish script hook's (LifecycleLogPath), a deploy check's
 // digest (DigestPath), and a production check's site file
 // (ProductionSitePath).
-var logName = regexp.MustCompile(`^(?:[0-9a-f]+-(?:tests|pre_deploy|deploy|post_deploy)-[0-9]+|release-[0-9]+|deploy_check-[0-9]+|production_check-[0-9]+|(?:queue_drained|creation|finish)-[0-9]+-[0-9]+)\.log$`)
+var logName = regexp.MustCompile(`^(?:[0-9a-f]+-(?:tests|pre_deploy|deploy|post_deploy)-[0-9]+|[0-9a-f]+-tests-[0-9]+-events|release-[0-9]+|deploy_check-[0-9]+|production_check-[0-9]+|(?:queue_drained|creation|finish)-[0-9]+-[0-9]+)\.log$`)
 
 // IsLog answers whether base names a log the queue writes.
 func IsLog(base string) bool { return logName.MatchString(base) }

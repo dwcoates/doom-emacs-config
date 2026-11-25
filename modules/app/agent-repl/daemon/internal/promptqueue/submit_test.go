@@ -2071,6 +2071,49 @@ func TestARevivedSessionStoodDownWhileTheRevivalRanKeepsItsHolds(t *testing.T) {
 	}
 }
 
+// TestARevivalCutByThisDaemonsStandDownKeepsItsHoldsQuietly is the
+// 2026-11-25 race: a workspace killed mid-merge stood its session down while
+// the revival of its held prompts ran, and the bring-up failed for it.
+func TestARevivalCutByThisDaemonsStandDownKeepsItsHoldsQuietly(t *testing.T) {
+	tests := []struct {
+		name      string
+		standDown bool
+		level     string
+		message   string
+	}{
+		{name: "a bring-up the stand-down cut is recorded at INFO", standDown: true, level: "info",
+			message: "this daemon stood the session down while its revival ran; its prompts stay held under the reconnect hold until a session comes up"},
+		{name: "a bring-up that failed on its own is a WARN", level: "warn",
+			message: "the revival failed; its prompts stay held under the reconnect hold until a session comes up"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.noSession = true
+			h.reviveErr = errors.New("the shim this start held was taken from it")
+			if tt.standDown {
+				h.reviveHook = func() { h.standDowns.Add(1) }
+			}
+
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+				t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+			}
+			h.waitRevivals()
+
+			// Assert
+			if !logged(h.log.Records(), tt.level, opSubmit, tt.message) {
+				t.Fatalf("records = %+v, want %q at %s", h.log.Records(), tt.message, tt.level)
+			}
+			standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+			if err != nil || len(standing) != 1 {
+				t.Fatalf("standing holds = (%+v, %v), want the prompt still held", standing, err)
+			}
+		})
+	}
+}
+
 // TestAStandDownBeforeTheRevivalBeganDoesNotExcuseIt pins that the count is
 // read when the revival starts: a stand-down already counted then explains
 // nothing about this revival.

@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_merge_queue.proto.
  */
 export const file_agentrepl_v1_endpoint_update_merge_queue: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEi9wYKF1VwZGF0ZU1lcmdlUXVldWVSZXF1ZXN0EjQKBXBhdXNlGAEgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQYXVzZUgAEjYKBnJlc3VtZRgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUmVzdW1lSAASNAoFZXZpY3QYAyABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0SAASNwoHbW92ZV91cBgHIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTW92ZVVwSAASOwoJbW92ZV9kb3duGAggASgLMiYuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlRG93bkgAEjcKB21vdmVfdG8YDiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVUb0gAEjwKCW1lZGlhdGlvbhgPIAEoCzInLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTWVkaWF0aW9uSAASTQoScmVsZWFzZV9lc2NhbGF0aW9uGBAgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVSZWxlYXNlRXNjYWxhdGlvbkgAEjcKB2dpdmVfdXAYESABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUdpdmVVcEgAEkcKD2lnbm9yZWRfcmVjb3JkcxgSIAEoCzIsLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlSWdub3JlZFJlY29yZHNIABIyCgRtb3ZlGBMgASgLMiIuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlSAASMwoJcmVxdWVzdGVyGA0gASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlckIICgZhY3Rpb25KBAgEEAVKBAgFEAZKBAgGEAdKBAgJEApKBAgKEAtKBAgLEAxKBAgMEA1SBWZyb250Ug1ob2xkX3JvbGxvdXRzUhByZWxlYXNlX3JvbGxvdXRzUglzdWJzY3JpYmVSC3Vuc3Vic2NyaWJlUg5kaXNhYmxlX3JhY2luZ1INZW5hYmxlX3JhY2luZyKwAQoeVXBkYXRlTWVyZ2VRdWV1ZUlnbm9yZWRSZWNvcmRzEj4KA2FkZBgBIAEoCzIvLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlSWdub3JlZFJlY29yZHNBZGRIABJECgZyZW1vdmUYAiABKAsyMi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUlnbm9yZWRSZWNvcmRzUmVtb3ZlSABCCAoGY2hhbmdlIl8KIVVwZGF0ZU1lcmdlUXVldWVJZ25vcmVkUmVjb3Jkc0FkZBItCgRraW5kGAEgASgLMh8uYWdlbnRyZXBsLnYxLklnbm9yZWRSZWNvcmRLaW5kEgsKA3doeRgCIAEoCSJVCiRVcGRhdGVNZXJnZVF1ZXVlSWdub3JlZFJlY29yZHNSZW1vdmUSLQoEa2luZBgBIAEoCzIfLmFnZW50cmVwbC52MS5JZ25vcmVkUmVjb3JkS2luZCJaChFJZ25vcmVkUmVjb3JkS2luZBIRCglvcGVyYXRpb24YASABKAkSHQoQbWVzc2FnZV9jb250YWlucxgCIAEoCUgAiAEBQhMKEV9tZXNzYWdlX2NvbnRhaW5zInsKFVVwZGF0ZU1lcmdlUXVldWVQYXVzZRI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARIMCgRoYXJkGAIgASgIEg8KB3RvX2xhbmQYAyABKAhCDQoLX3JlcG9zaXRvcnkiVAohVXBkYXRlTWVyZ2VRdWV1ZVJlbGVhc2VFc2NhbGF0aW9uEi8KCnJlcG9zaXRvcnkYASABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZiJXChZVcGRhdGVNZXJnZVF1ZXVlR2l2ZVVwEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDgoGcmVhc29uGAIgASgJIl0KFlVwZGF0ZU1lcmdlUXVldWVSZXN1bWUSNAoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSACIAQFCDQoLX3JlcG9zaXRvcnkiRgoVVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHwodVXBkYXRlTWVyZ2VRdWV1ZURpc2FibGVSYWNpbmciHgocVXBkYXRlTWVyZ2VRdWV1ZUVuYWJsZVJhY2luZyJHChZVcGRhdGVNZXJnZVF1ZXVlTW92ZVVwEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiSQoYVXBkYXRlTWVyZ2VRdWV1ZU1vdmVEb3duEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYirgEKFlVwZGF0ZU1lcmdlUXVldWVNb3ZlVG8SLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIuCghhaGVhZF9vZhgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIsCgZiZWhpbmQYAyABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSABCBwoFcGxhY2UitgIKFFVwZGF0ZU1lcmdlUXVldWVNb3ZlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOAoFZnJvbnQYAiABKAsyJy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVGcm9udEgAEjYKBGJhY2sYAyABKAsyJi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCYWNrSAASOgoGYmVoaW5kGAQgASgLMiguYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmVoaW5kSAASOAoFaW5kZXgYBSABKAsyJy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVJbmRleEgAQgcKBXBsYWNlIhsKGVVwZGF0ZU1lcmdlUXVldWVNb3ZlRnJvbnQiGgoYVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCYWNrIisKGlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmVoaW5kEg0KBW1lcmdlGAEgASgJIioKGVVwZGF0ZU1lcmdlUXVldWVNb3ZlSW5kZXgSDQoFaW5kZXgYASABKA0ihQIKGVVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb24SQQoHYXBwcm92ZRgBIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTWVkaWF0aW9uQXBwcm92ZUgAEkMKCGVzY2FsYXRlGAIgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25Fc2NhbGF0ZUgAEkMKCGRpc3BhdGNoGAQgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25EaXNwYXRjaEgAEg8KB3N1bW1hcnkYAyABKAlCCgoIZGVjaXNpb24iUAogVXBkYXRlTWVyZ2VRdWV1ZU1lZGlhdGlvbkFwcHJvdmUSLAoHaWdub3JlZBgBIAMoCzIbLmFnZW50cmVwbC52MS5EZXBsb3lQcm9ibGVtIlIKIVVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25Fc2NhbGF0ZRItCghwcm9ibGVtcxgBIAMoCzIbLmFnZW50cmVwbC52MS5EZXBsb3lQcm9ibGVtIm4KIVVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25EaXNwYXRjaBItCghwcm9ibGVtcxgBIAMoCzIbLmFnZW50cmVwbC52MS5EZXBsb3lQcm9ibGVtSgQIAhADSgQIAxAEUgdyZXN0b3JlUgVmcmVzaCI0Cg1EZXBsb3lQcm9ibGVtEhEKCXN0YXRlbWVudBgBIAEoCRIQCghldmlkZW5jZRgCIAMoCSKUAQoYVXBkYXRlTWVyZ2VRdWV1ZVJlc3BvbnNlEjgKB3N1Y2Nlc3MYASABKAsyJS5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVN1Y2Nlc3NIABI0CgVlcnJvchgCIAEoCzIjLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlRXJyb3JIAEIICgZyZXN1bHQiGQoXVXBkYXRlTWVyZ2VRdWV1ZVN1Y2Nlc3MiwQwKFVVwZGF0ZU1lcmdlUXVldWVFcnJvchJLChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlVW5rbm93bldvcmtzcGFjZUgAElQKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVRyYW5zZmVycmluZ0F3YXlIABJGCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU5vdFlldEFkb3B0ZWRIABJFCg5hbHJlYWR5X3BhdXNlZBgFIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlQWxyZWFkeVBhdXNlZEgAEj0KCm5vdF9wYXVzZWQYBiABKAsyJy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU5vdFBhdXNlZEgAEk8KFG5vX3N1Y2hfcXVldWVkX21lcmdlGAcgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVOb1N1Y2hRdWV1ZWRNZXJnZUgAEk0KEnVua25vd25fcmVwb3NpdG9yeRgIIAEoCzIvLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlVW5rbm93blJlcG9zaXRvcnlIABJBCgxub3RfbWVkaWF0b3IYDyABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU5vdE1lZGlhdG9ySAASSgoRbm9fbWVkaWF0aW9uX293ZWQYECABKAsyLS5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU5vTWVkaWF0aW9uT3dlZEgAEloKGXJlbWVkaWF0aW9uX2JvdW5kX3JlYWNoZWQYEiABKAsyNS5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVJlbWVkaWF0aW9uQm91bmRSZWFjaGVkSAASSQoQcHJvYmxlbXNfdW5vd25lZBgTIAEoCzItLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUHJvYmxlbXNVbm93bmVkSAASTQoScHJvYmxlbXNfcmVjdXJyaW5nGBQgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQcm9ibGVtc1JlY3VycmluZ0gAEkwKEm5vX2VzY2FsYXRpb25faGVsZBgVIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm9Fc2NhbGF0aW9uSGVsZEgAEkQKDm5vX3JlcGFpcl90dXJuGBYgASgLMiouYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVOb1JlcGFpclR1cm5IABJYChxwbGFjZW1lbnRfYmVoaW5kX25vdF9pbl9saW5lGBcgASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmROb3RJbkxpbmVIABJLChJpbmRleF9vdXRfb2ZfcmFuZ2UYGCABKAsyLS5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUluZGV4T3V0T2ZSYW5nZUgAEkEKDG1vdmVfYmxvY2tlZBgZIAEoCzIpLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTW92ZUJsb2NrZWRIAEIHCgVjYXVzZUoECAkQCkoECAoQC0oECAsQDEoECAwQDUoECA0QDkoECA4QD0oECBEQElIVcm9sbG91dHNfYWxyZWFkeV9oZWxkUhFyb2xsb3V0c19ub3RfaGVsZFIObm90X3N1YnNjcmliZWRSEXN1YnNjcmliZXJfY2xvc2VkUhdyYWNpbmdfYWxyZWFkeV9kaXNhYmxlZFITcmFjaW5nX25vdF9kaXNhYmxlZFIZbm9fcmVtZWRpYXRpb25fdG9fcmVzdG9yZSIiCiBVcGRhdGVNZXJnZVF1ZXVlVW5rbm93bldvcmtzcGFjZSI8CiRVcGRhdGVNZXJnZVF1ZXVlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFVwZGF0ZU1lcmdlUXVldWVUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQQodVXBkYXRlTWVyZ2VRdWV1ZU5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzIh8KHVVwZGF0ZU1lcmdlUXVldWVBbHJlYWR5UGF1c2VkIhsKGVVwZGF0ZU1lcmdlUXVldWVOb3RQYXVzZWQiIwohVXBkYXRlTWVyZ2VRdWV1ZU5vU3VjaFF1ZXVlZE1lcmdlIkEKH1VwZGF0ZU1lcmdlUXVldWVJbmRleE91dE9mUmFuZ2USDQoFaW5kZXgYASABKA0SDwoHd2FpdGluZxgCIAEoDSIjCiFVcGRhdGVNZXJnZVF1ZXVlVW5rbm93blJlcG9zaXRvcnkiHQobVXBkYXRlTWVyZ2VRdWV1ZU5vdE1lZGlhdG9yIiEKH1VwZGF0ZU1lcmdlUXVldWVOb01lZGlhdGlvbk93ZWQiIgogVXBkYXRlTWVyZ2VRdWV1ZU5vRXNjYWxhdGlvbkhlbGQiHgocVXBkYXRlTWVyZ2VRdWV1ZU5vUmVwYWlyVHVybiL/AQobVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCbG9ja2VkEkoKC25vdF93YWl0aW5nGAEgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZE5vdFdhaXRpbmdIABJCCgdhdF9lZGdlGAIgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZEF0RWRnZUgAEkcKCGFkbWl0dGVkGAMgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZEJ5QWRtaXR0ZWRIAEIHCgVjYXVzZSInCiVVcGRhdGVNZXJnZVF1ZXVlTW92ZUJsb2NrZWROb3RXYWl0aW5nIiMKIVVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZEF0RWRnZSJjCiVVcGRhdGVNZXJnZVF1ZXVlTW92ZUJsb2NrZWRCeUFkbWl0dGVkEjoKB2Jsb2NrZXIYASABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCbG9ja2VyIloKG1VwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlchItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkiMQofVXBkYXRlTWVyZ2VRdWV1ZVByb2JsZW1zVW5vd25lZBIOCgZncm91cHMYASADKAkiMwohVXBkYXRlTWVyZ2VRdWV1ZVByb2JsZW1zUmVjdXJyaW5nEg4KBmdyb3VwcxgBIAMoCSJRCidVcGRhdGVNZXJnZVF1ZXVlUmVtZWRpYXRpb25Cb3VuZFJlYWNoZWQSJgoecmVtZWRpYXRpb25zX2JlZm9yZV9lc2NhbGF0aW9uGAEgASgNQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEi9wYKF1VwZGF0ZU1lcmdlUXVldWVSZXF1ZXN0EjQKBXBhdXNlGAEgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQYXVzZUgAEjYKBnJlc3VtZRgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUmVzdW1lSAASNAoFZXZpY3QYAyABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0SAASNwoHbW92ZV91cBgHIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTW92ZVVwSAASOwoJbW92ZV9kb3duGAggASgLMiYuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlRG93bkgAEjcKB21vdmVfdG8YDiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVUb0gAEjwKCW1lZGlhdGlvbhgPIAEoCzInLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTWVkaWF0aW9uSAASTQoScmVsZWFzZV9lc2NhbGF0aW9uGBAgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVSZWxlYXNlRXNjYWxhdGlvbkgAEjcKB2dpdmVfdXAYESABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUdpdmVVcEgAEkcKD2lnbm9yZWRfcmVjb3JkcxgSIAEoCzIsLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlSWdub3JlZFJlY29yZHNIABIyCgRtb3ZlGBMgASgLMiIuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlSAASMwoJcmVxdWVzdGVyGA0gASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlckIICgZhY3Rpb25KBAgEEAVKBAgFEAZKBAgGEAdKBAgJEApKBAgKEAtKBAgLEAxKBAgMEA1SBWZyb250Ug1ob2xkX3JvbGxvdXRzUhByZWxlYXNlX3JvbGxvdXRzUglzdWJzY3JpYmVSC3Vuc3Vic2NyaWJlUg5kaXNhYmxlX3JhY2luZ1INZW5hYmxlX3JhY2luZyKwAQoeVXBkYXRlTWVyZ2VRdWV1ZUlnbm9yZWRSZWNvcmRzEj4KA2FkZBgBIAEoCzIvLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlSWdub3JlZFJlY29yZHNBZGRIABJECgZyZW1vdmUYAiABKAsyMi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUlnbm9yZWRSZWNvcmRzUmVtb3ZlSABCCAoGY2hhbmdlIl8KIVVwZGF0ZU1lcmdlUXVldWVJZ25vcmVkUmVjb3Jkc0FkZBItCgRraW5kGAEgASgLMh8uYWdlbnRyZXBsLnYxLklnbm9yZWRSZWNvcmRLaW5kEgsKA3doeRgCIAEoCSJVCiRVcGRhdGVNZXJnZVF1ZXVlSWdub3JlZFJlY29yZHNSZW1vdmUSLQoEa2luZBgBIAEoCzIfLmFnZW50cmVwbC52MS5JZ25vcmVkUmVjb3JkS2luZCJaChFJZ25vcmVkUmVjb3JkS2luZBIRCglvcGVyYXRpb24YASABKAkSHQoQbWVzc2FnZV9jb250YWlucxgCIAEoCUgAiAEBQhMKEV9tZXNzYWdlX2NvbnRhaW5zInsKFVVwZGF0ZU1lcmdlUXVldWVQYXVzZRI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARIMCgRoYXJkGAIgASgIEg8KB3RvX2xhbmQYAyABKAhCDQoLX3JlcG9zaXRvcnkiVAohVXBkYXRlTWVyZ2VRdWV1ZVJlbGVhc2VFc2NhbGF0aW9uEi8KCnJlcG9zaXRvcnkYASABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZiJXChZVcGRhdGVNZXJnZVF1ZXVlR2l2ZVVwEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDgoGcmVhc29uGAIgASgJIl0KFlVwZGF0ZU1lcmdlUXVldWVSZXN1bWUSNAoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSACIAQFCDQoLX3JlcG9zaXRvcnkiRgoVVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHwodVXBkYXRlTWVyZ2VRdWV1ZURpc2FibGVSYWNpbmciHgocVXBkYXRlTWVyZ2VRdWV1ZUVuYWJsZVJhY2luZyJHChZVcGRhdGVNZXJnZVF1ZXVlTW92ZVVwEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiSQoYVXBkYXRlTWVyZ2VRdWV1ZU1vdmVEb3duEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYirgEKFlVwZGF0ZU1lcmdlUXVldWVNb3ZlVG8SLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIuCghhaGVhZF9vZhgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIsCgZiZWhpbmQYAyABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSABCBwoFcGxhY2UitgIKFFVwZGF0ZU1lcmdlUXVldWVNb3ZlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOAoFZnJvbnQYAiABKAsyJy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVGcm9udEgAEjYKBGJhY2sYAyABKAsyJi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCYWNrSAASOgoGYmVoaW5kGAQgASgLMiguYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmVoaW5kSAASOAoFaW5kZXgYBSABKAsyJy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVJbmRleEgAQgcKBXBsYWNlIhsKGVVwZGF0ZU1lcmdlUXVldWVNb3ZlRnJvbnQiGgoYVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCYWNrIisKGlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmVoaW5kEg0KBW1lcmdlGAEgASgJIioKGVVwZGF0ZU1lcmdlUXVldWVNb3ZlSW5kZXgSDQoFaW5kZXgYASABKA0ihQIKGVVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb24SQQoHYXBwcm92ZRgBIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTWVkaWF0aW9uQXBwcm92ZUgAEkMKCGVzY2FsYXRlGAIgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25Fc2NhbGF0ZUgAEkMKCGRpc3BhdGNoGAQgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25EaXNwYXRjaEgAEg8KB3N1bW1hcnkYAyABKAlCCgoIZGVjaXNpb24iUAogVXBkYXRlTWVyZ2VRdWV1ZU1lZGlhdGlvbkFwcHJvdmUSLAoHaWdub3JlZBgBIAMoCzIbLmFnZW50cmVwbC52MS5EZXBsb3lQcm9ibGVtIlIKIVVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25Fc2NhbGF0ZRItCghwcm9ibGVtcxgBIAMoCzIbLmFnZW50cmVwbC52MS5EZXBsb3lQcm9ibGVtIm4KIVVwZGF0ZU1lcmdlUXVldWVNZWRpYXRpb25EaXNwYXRjaBItCghwcm9ibGVtcxgBIAMoCzIbLmFnZW50cmVwbC52MS5EZXBsb3lQcm9ibGVtSgQIAhADSgQIAxAEUgdyZXN0b3JlUgVmcmVzaCJuCg1EZXBsb3lQcm9ibGVtEhEKCXN0YXRlbWVudBgBIAEoCRIQCghldmlkZW5jZRgCIAMoCRI4Cg1yYWNlX2ZpbmRpbmdzGAMgAygLMiEuYWdlbnRyZXBsLnYxLlF1ZXVlUmFjZUZpbmRpbmdSZWYiMgoTUXVldWVSYWNlRmluZGluZ1JlZhINCgVzdWl0ZRgBIAEoCRIMCgR0ZXN0GAIgASgJIpQBChhVcGRhdGVNZXJnZVF1ZXVlUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVFcnJvckgAQggKBnJlc3VsdCIZChdVcGRhdGVNZXJnZVF1ZXVlU3VjY2VzcyKTDQoVVXBkYXRlTWVyZ2VRdWV1ZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm90WWV0QWRvcHRlZEgAEkUKDmFscmVhZHlfcGF1c2VkGAUgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVBbHJlYWR5UGF1c2VkSAASPQoKbm90X3BhdXNlZBgGIAEoCzInLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm90UGF1c2VkSAASTwoUbm9fc3VjaF9xdWV1ZWRfbWVyZ2UYByABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU5vU3VjaFF1ZXVlZE1lcmdlSAASTQoSdW5rbm93bl9yZXBvc2l0b3J5GAggASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVVbmtub3duUmVwb3NpdG9yeUgAEkEKDG5vdF9tZWRpYXRvchgPIAEoCzIpLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm90TWVkaWF0b3JIABJKChFub19tZWRpYXRpb25fb3dlZBgQIAEoCzItLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm9NZWRpYXRpb25Pd2VkSAASWgoZcmVtZWRpYXRpb25fYm91bmRfcmVhY2hlZBgSIAEoCzI1LmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUmVtZWRpYXRpb25Cb3VuZFJlYWNoZWRIABJJChBwcm9ibGVtc191bm93bmVkGBMgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQcm9ibGVtc1Vub3duZWRIABJNChJwcm9ibGVtc19yZWN1cnJpbmcYFCABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVByb2JsZW1zUmVjdXJyaW5nSAASTAoSbm9fZXNjYWxhdGlvbl9oZWxkGBUgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVOb0VzY2FsYXRpb25IZWxkSAASRAoObm9fcmVwYWlyX3R1cm4YFiABKAsyKi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU5vUmVwYWlyVHVybkgAElgKHHBsYWNlbWVudF9iZWhpbmRfbm90X2luX2xpbmUYFyABKAsyMC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEJlaGluZE5vdEluTGluZUgAEksKEmluZGV4X291dF9vZl9yYW5nZRgYIAEoCzItLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlSW5kZXhPdXRPZlJhbmdlSAASQQoMbW92ZV9ibG9ja2VkGBkgASgLMikuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZEgAElAKFHVua25vd25fcmFjZV9maW5kaW5nGBogASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVVbmtub3duUmFjZUZpbmRpbmdIAEIHCgVjYXVzZUoECAkQCkoECAoQC0oECAsQDEoECAwQDUoECA0QDkoECA4QD0oECBEQElIVcm9sbG91dHNfYWxyZWFkeV9oZWxkUhFyb2xsb3V0c19ub3RfaGVsZFIObm90X3N1YnNjcmliZWRSEXN1YnNjcmliZXJfY2xvc2VkUhdyYWNpbmdfYWxyZWFkeV9kaXNhYmxlZFITcmFjaW5nX25vdF9kaXNhYmxlZFIZbm9fcmVtZWRpYXRpb25fdG9fcmVzdG9yZSIiCiBVcGRhdGVNZXJnZVF1ZXVlVW5rbm93bldvcmtzcGFjZSI8CiRVcGRhdGVNZXJnZVF1ZXVlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFVwZGF0ZU1lcmdlUXVldWVUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQQodVXBkYXRlTWVyZ2VRdWV1ZU5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzIh8KHVVwZGF0ZU1lcmdlUXVldWVBbHJlYWR5UGF1c2VkIhsKGVVwZGF0ZU1lcmdlUXVldWVOb3RQYXVzZWQiIwohVXBkYXRlTWVyZ2VRdWV1ZU5vU3VjaFF1ZXVlZE1lcmdlIkEKH1VwZGF0ZU1lcmdlUXVldWVJbmRleE91dE9mUmFuZ2USDQoFaW5kZXgYASABKA0SDwoHd2FpdGluZxgCIAEoDSIjCiFVcGRhdGVNZXJnZVF1ZXVlVW5rbm93blJlcG9zaXRvcnkiHQobVXBkYXRlTWVyZ2VRdWV1ZU5vdE1lZGlhdG9yIiEKH1VwZGF0ZU1lcmdlUXVldWVOb01lZGlhdGlvbk93ZWQiIgogVXBkYXRlTWVyZ2VRdWV1ZU5vRXNjYWxhdGlvbkhlbGQiHgocVXBkYXRlTWVyZ2VRdWV1ZU5vUmVwYWlyVHVybiJYCiJVcGRhdGVNZXJnZVF1ZXVlVW5rbm93blJhY2VGaW5kaW5nEjIKB2ZpbmRpbmcYASABKAsyIS5hZ2VudHJlcGwudjEuUXVldWVSYWNlRmluZGluZ1JlZiL/AQobVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCbG9ja2VkEkoKC25vdF93YWl0aW5nGAEgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZE5vdFdhaXRpbmdIABJCCgdhdF9lZGdlGAIgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZEF0RWRnZUgAEkcKCGFkbWl0dGVkGAMgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZEJ5QWRtaXR0ZWRIAEIHCgVjYXVzZSInCiVVcGRhdGVNZXJnZVF1ZXVlTW92ZUJsb2NrZWROb3RXYWl0aW5nIiMKIVVwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlZEF0RWRnZSJjCiVVcGRhdGVNZXJnZVF1ZXVlTW92ZUJsb2NrZWRCeUFkbWl0dGVkEjoKB2Jsb2NrZXIYASABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVCbG9ja2VyIloKG1VwZGF0ZU1lcmdlUXVldWVNb3ZlQmxvY2tlchItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkiMQofVXBkYXRlTWVyZ2VRdWV1ZVByb2JsZW1zVW5vd25lZBIOCgZncm91cHMYASADKAkiMwohVXBkYXRlTWVyZ2VRdWV1ZVByb2JsZW1zUmVjdXJyaW5nEg4KBmdyb3VwcxgBIAMoCSJRCidVcGRhdGVNZXJnZVF1ZXVlUmVtZWRpYXRpb25Cb3VuZFJlYWNoZWQSJgoecmVtZWRpYXRpb25zX2JlZm9yZV9lc2NhbGF0aW9uGAEgASgNQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueRequest
@@ -884,6 +884,22 @@ export type DeployProblem = Message<"agentrepl.v1.DeployProblem"> & {
    * @generated from field: repeated string evidence = 2;
    */
   evidence: string[];
+
+  /**
+   * The queue race findings this problem is, each named as the deploy
+   * check's brief names it. A race finding is a test the daemon saw fail in
+   * a merge gate and then pass on the same inputs, so its failure is a race
+   * and not the branch's doing; the daemon hands every open one to the
+   * deploy mediator's next check. A dispatch naming one takes it on: the
+   * brief of every later check lists it as at work instead of open, until
+   * the fix's deploy marks it fixed. EMPTY for a problem the deploy's logs
+   * show, which is every problem but a race. A dispatch naming a finding
+   * the repository does not hold is refused with
+   * UpdateMergeQueueError.unknown_race_finding.
+   *
+   * @generated from field: repeated agentrepl.v1.QueueRaceFindingRef race_findings = 3;
+   */
+  raceFindings: QueueRaceFindingRef[];
 };
 
 /**
@@ -892,6 +908,38 @@ export type DeployProblem = Message<"agentrepl.v1.DeployProblem"> & {
  */
 export const DeployProblemSchema: GenMessage<DeployProblem> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 24);
+
+/**
+ * The identity of one queue race finding: the test, in the suite that ran
+ * it. A repository holds at most one finding per test, so the pair names it.
+ *
+ * @generated from message agentrepl.v1.QueueRaceFindingRef
+ */
+export type QueueRaceFindingRef = Message<"agentrepl.v1.QueueRaceFindingRef"> & {
+  /**
+   * REQUIRED. The roster suite whose unit ran the test, as the test runner
+   * names it ("daemon", "webapp", "e2e").
+   *
+   * @generated from field: string suite = 1;
+   */
+  suite: string;
+
+  /**
+   * REQUIRED. The test as its framework names it, a Go test by its
+   * top-level name only (TestLanding, never TestLanding/a_case): a failure
+   * of any of its subtests is a failure of the test.
+   *
+   * @generated from field: string test = 2;
+   */
+  test: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.QueueRaceFindingRef.
+ * Use `create(QueueRaceFindingRefSchema)` to create a new message.
+ */
+export const QueueRaceFindingRefSchema: GenMessage<QueueRaceFindingRef> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 25);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueResponse
@@ -920,7 +968,7 @@ export type UpdateMergeQueueResponse = Message<"agentrepl.v1.UpdateMergeQueueRes
  * Use `create(UpdateMergeQueueResponseSchema)` to create a new message.
  */
 export const UpdateMergeQueueResponseSchema: GenMessage<UpdateMergeQueueResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 25);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 26);
 
 /**
  * Done; the bubbles and roster reflect it.
@@ -935,7 +983,7 @@ export type UpdateMergeQueueSuccess = Message<"agentrepl.v1.UpdateMergeQueueSucc
  * Use `create(UpdateMergeQueueSuccessSchema)` to create a new message.
  */
 export const UpdateMergeQueueSuccessSchema: GenMessage<UpdateMergeQueueSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 26);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 27);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -1111,6 +1159,16 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
      */
     value: UpdateMergeQueueMoveBlocked;
     case: "moveBlocked";
+  } | {
+    /**
+     * A mediation decision naming a queue race finding its repository does
+     * not hold, by DeployProblem.race_findings. Nothing was decided.
+     * (Added 2026-11-25.)
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueUnknownRaceFinding unknown_race_finding = 26;
+     */
+    value: UpdateMergeQueueUnknownRaceFinding;
+    case: "unknownRaceFinding";
   } | { case: undefined; value?: undefined };
 };
 
@@ -1119,7 +1177,7 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
  * Use `create(UpdateMergeQueueErrorSchema)` to create a new message.
  */
 export const UpdateMergeQueueErrorSchema: GenMessage<UpdateMergeQueueError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 27);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 28);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueUnknownWorkspace
@@ -1132,7 +1190,7 @@ export type UpdateMergeQueueUnknownWorkspace = Message<"agentrepl.v1.UpdateMerge
  * Use `create(UpdateMergeQueueUnknownWorkspaceSchema)` to create a new message.
  */
 export const UpdateMergeQueueUnknownWorkspaceSchema: GenMessage<UpdateMergeQueueUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 28);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 29);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
@@ -1151,7 +1209,7 @@ export type UpdateMergeQueueWorkspaceRefMismatch = Message<"agentrepl.v1.UpdateM
  * Use `create(UpdateMergeQueueWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const UpdateMergeQueueWorkspaceRefMismatchSchema: GenMessage<UpdateMergeQueueWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 29);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 30);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueTransferringAway
@@ -1170,7 +1228,7 @@ export type UpdateMergeQueueTransferringAway = Message<"agentrepl.v1.UpdateMerge
  * Use `create(UpdateMergeQueueTransferringAwaySchema)` to create a new message.
  */
 export const UpdateMergeQueueTransferringAwaySchema: GenMessage<UpdateMergeQueueTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 30);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 31);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueNotYetAdopted
@@ -1194,7 +1252,7 @@ export type UpdateMergeQueueNotYetAdopted = Message<"agentrepl.v1.UpdateMergeQue
  * Use `create(UpdateMergeQueueNotYetAdoptedSchema)` to create a new message.
  */
 export const UpdateMergeQueueNotYetAdoptedSchema: GenMessage<UpdateMergeQueueNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 31);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 32);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueAlreadyPaused
@@ -1207,7 +1265,7 @@ export type UpdateMergeQueueAlreadyPaused = Message<"agentrepl.v1.UpdateMergeQue
  * Use `create(UpdateMergeQueueAlreadyPausedSchema)` to create a new message.
  */
 export const UpdateMergeQueueAlreadyPausedSchema: GenMessage<UpdateMergeQueueAlreadyPaused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 32);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 33);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueNotPaused
@@ -1220,7 +1278,7 @@ export type UpdateMergeQueueNotPaused = Message<"agentrepl.v1.UpdateMergeQueueNo
  * Use `create(UpdateMergeQueueNotPausedSchema)` to create a new message.
  */
 export const UpdateMergeQueueNotPausedSchema: GenMessage<UpdateMergeQueueNotPaused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 33);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 34);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
@@ -1233,7 +1291,7 @@ export type UpdateMergeQueueNoSuchQueuedMerge = Message<"agentrepl.v1.UpdateMerg
  * Use `create(UpdateMergeQueueNoSuchQueuedMergeSchema)` to create a new message.
  */
 export const UpdateMergeQueueNoSuchQueuedMergeSchema: GenMessage<UpdateMergeQueueNoSuchQueuedMerge> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 34);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 35);
 
 /**
  * The index refusal: the place asked for, and how many merges wait, so the
@@ -1262,7 +1320,7 @@ export type UpdateMergeQueueIndexOutOfRange = Message<"agentrepl.v1.UpdateMergeQ
  * Use `create(UpdateMergeQueueIndexOutOfRangeSchema)` to create a new message.
  */
 export const UpdateMergeQueueIndexOutOfRangeSchema: GenMessage<UpdateMergeQueueIndexOutOfRange> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 35);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 36);
 
 /**
  * The unknown-repository refusal. Empty on purpose (see the arm).
@@ -1277,7 +1335,7 @@ export type UpdateMergeQueueUnknownRepository = Message<"agentrepl.v1.UpdateMerg
  * Use `create(UpdateMergeQueueUnknownRepositorySchema)` to create a new message.
  */
 export const UpdateMergeQueueUnknownRepositorySchema: GenMessage<UpdateMergeQueueUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 36);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 37);
 
 /**
  * The not-the-intake refusal. No fields: the caller knows who it is.
@@ -1292,7 +1350,7 @@ export type UpdateMergeQueueNotMediator = Message<"agentrepl.v1.UpdateMergeQueue
  * Use `create(UpdateMergeQueueNotMediatorSchema)` to create a new message.
  */
 export const UpdateMergeQueueNotMediatorSchema: GenMessage<UpdateMergeQueueNotMediator> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 37);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 38);
 
 /**
  * The no-check-owed refusal. No fields.
@@ -1307,7 +1365,7 @@ export type UpdateMergeQueueNoMediationOwed = Message<"agentrepl.v1.UpdateMergeQ
  * Use `create(UpdateMergeQueueNoMediationOwedSchema)` to create a new message.
  */
 export const UpdateMergeQueueNoMediationOwedSchema: GenMessage<UpdateMergeQueueNoMediationOwed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 38);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 39);
 
 /**
  * The no-escalation-held refusal. No fields: nothing holds the queue for the user.
@@ -1322,7 +1380,7 @@ export type UpdateMergeQueueNoEscalationHeld = Message<"agentrepl.v1.UpdateMerge
  * Use `create(UpdateMergeQueueNoEscalationHeldSchema)` to create a new message.
  */
 export const UpdateMergeQueueNoEscalationHeldSchema: GenMessage<UpdateMergeQueueNoEscalationHeld> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 39);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 40);
 
 /**
  * The no-repair-turn refusal. No fields: the caller knows its own turn.
@@ -1337,7 +1395,29 @@ export type UpdateMergeQueueNoRepairTurn = Message<"agentrepl.v1.UpdateMergeQueu
  * Use `create(UpdateMergeQueueNoRepairTurnSchema)` to create a new message.
  */
 export const UpdateMergeQueueNoRepairTurnSchema: GenMessage<UpdateMergeQueueNoRepairTurn> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 40);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 41);
+
+/**
+ * The unknown-race-finding refusal: the first finding the decision named that
+ * the repository does not hold.
+ *
+ * @generated from message agentrepl.v1.UpdateMergeQueueUnknownRaceFinding
+ */
+export type UpdateMergeQueueUnknownRaceFinding = Message<"agentrepl.v1.UpdateMergeQueueUnknownRaceFinding"> & {
+  /**
+   * The finding as the decision named it.
+   *
+   * @generated from field: agentrepl.v1.QueueRaceFindingRef finding = 1;
+   */
+  finding?: QueueRaceFindingRef | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueUnknownRaceFinding.
+ * Use `create(UpdateMergeQueueUnknownRaceFindingSchema)` to create a new message.
+ */
+export const UpdateMergeQueueUnknownRaceFindingSchema: GenMessage<UpdateMergeQueueUnknownRaceFinding> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 42);
 
 /**
  * The refusal of a `move_up` or `move_down` that leaves the merge where it
@@ -1392,7 +1472,7 @@ export type UpdateMergeQueueMoveBlocked = Message<"agentrepl.v1.UpdateMergeQueue
  * Use `create(UpdateMergeQueueMoveBlockedSchema)` to create a new message.
  */
 export const UpdateMergeQueueMoveBlockedSchema: GenMessage<UpdateMergeQueueMoveBlocked> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 41);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 43);
 
 /**
  * The not-waiting cause. No fields: the merge's own standing is what the
@@ -1408,7 +1488,7 @@ export type UpdateMergeQueueMoveBlockedNotWaiting = Message<"agentrepl.v1.Update
  * Use `create(UpdateMergeQueueMoveBlockedNotWaitingSchema)` to create a new message.
  */
 export const UpdateMergeQueueMoveBlockedNotWaitingSchema: GenMessage<UpdateMergeQueueMoveBlockedNotWaiting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 42);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 44);
 
 /**
  * The at-the-edge cause. No fields: the direction asked for names the edge.
@@ -1423,7 +1503,7 @@ export type UpdateMergeQueueMoveBlockedAtEdge = Message<"agentrepl.v1.UpdateMerg
  * Use `create(UpdateMergeQueueMoveBlockedAtEdgeSchema)` to create a new message.
  */
 export const UpdateMergeQueueMoveBlockedAtEdgeSchema: GenMessage<UpdateMergeQueueMoveBlockedAtEdge> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 43);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 45);
 
 /**
  * The admitted-neighbour cause: the entry the move would have passed.
@@ -1445,7 +1525,7 @@ export type UpdateMergeQueueMoveBlockedByAdmitted = Message<"agentrepl.v1.Update
  * Use `create(UpdateMergeQueueMoveBlockedByAdmittedSchema)` to create a new message.
  */
 export const UpdateMergeQueueMoveBlockedByAdmittedSchema: GenMessage<UpdateMergeQueueMoveBlockedByAdmitted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 44);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 46);
 
 /**
  * The entry a one-place move cannot pass.
@@ -1476,7 +1556,7 @@ export type UpdateMergeQueueMoveBlocker = Message<"agentrepl.v1.UpdateMergeQueue
  * Use `create(UpdateMergeQueueMoveBlockerSchema)` to create a new message.
  */
 export const UpdateMergeQueueMoveBlockerSchema: GenMessage<UpdateMergeQueueMoveBlocker> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 45);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 47);
 
 /**
  * The unowned-problems refusal. DEPRECATED (2026-11-19): never answered; see
@@ -1499,7 +1579,7 @@ export type UpdateMergeQueueProblemsUnowned = Message<"agentrepl.v1.UpdateMergeQ
  * Use `create(UpdateMergeQueueProblemsUnownedSchema)` to create a new message.
  */
 export const UpdateMergeQueueProblemsUnownedSchema: GenMessage<UpdateMergeQueueProblemsUnowned> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 46);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 48);
 
 /**
  * The recurring-problems refusal. DEPRECATED (2026-11-20): never answered;
@@ -1522,7 +1602,7 @@ export type UpdateMergeQueueProblemsRecurring = Message<"agentrepl.v1.UpdateMerg
  * Use `create(UpdateMergeQueueProblemsRecurringSchema)` to create a new message.
  */
 export const UpdateMergeQueueProblemsRecurringSchema: GenMessage<UpdateMergeQueueProblemsRecurring> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 47);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 49);
 
 /**
  * The bound refusal. DEPRECATED (2026-11-20): never answered; see
@@ -1545,5 +1625,5 @@ export type UpdateMergeQueueRemediationBoundReached = Message<"agentrepl.v1.Upda
  * Use `create(UpdateMergeQueueRemediationBoundReachedSchema)` to create a new message.
  */
 export const UpdateMergeQueueRemediationBoundReachedSchema: GenMessage<UpdateMergeQueueRemediationBoundReached> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 48);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 50);
 

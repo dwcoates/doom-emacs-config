@@ -1117,8 +1117,21 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		// the failures gives its merge up (GiveUp); a turn that ends with no
 		// commit fails the merge here.
 		if r.failedHead != "" && head == r.failedHead {
-			out := r.fixesCommittedNothing(ctx, head)
-			return "", &out, nil
+			// UNLESS EVERY TEST THE GATE FAILED IS A RACE THE DAEMON FOUND
+			// (owner ruling, 2026-11-25): the repair's reruns passed each on
+			// the inputs it failed on, so the deploy mediator owns their fix,
+			// and the suites run again on the same head.
+			races, err := r.racesOnly(ctx)
+			if err != nil {
+				return "", nil, err
+			}
+			if !races {
+				out := r.fixesCommittedNothing(ctx, head)
+				return "", &out, nil
+			}
+			r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the fixing attempt committed nothing, but every test the gate failed passed on its inputs and is a race finding the deploy mediator owns; the suites run again", dlog.Context{
+				"workspace": string(r.ws), "head": head, "archive": r.failedArchive})
+			r.failedHead, r.failedArchive = "", ""
 		}
 		if attempt == fromAttempt && !resumeTests {
 			reused, err := r.reuseTested(ctx, tip, head)
@@ -1159,7 +1172,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			// A PASSING GATE ENDS THE RUN OF FAILURES: a later failure (a
 			// start-over on a moved target) starts its count afresh.
 			r.fixesUsed = 0
-			r.failedHead = ""
+			r.failedHead, r.failedArchive = "", ""
 			// THE PASS IS KEPT FOR A START-OVER (owner ruling, 2026-10-12): a
 			// merge whose target moves before it commits rebases again, and
 			// when that rebase gives the very tree that passed, the tests are
@@ -1174,7 +1187,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			out := r.fixesExhausted(ctx, verdict.result.ArchivePath, nil)
 			return "", &out, nil
 		}
-		r.failedHead = head
+		r.failedHead, r.failedArchive = head, verdict.result.ArchivePath
 		// THE WHOLE SUITE RAN AND FAILED: a head with a merge in line behind it
 		// steps aside to fix out of line, for the fixing-tests slot, so that
 		// merge takes the head (remediate.go); otherwise it fixes in place.
@@ -1498,7 +1511,7 @@ func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch stri
 	if err != nil {
 		return nil, err
 	}
-	r.failedHead = res.FixFromHead
+	r.failedHead, r.failedArchive = res.FixFromHead, res.FailingArchive
 	return r.fixSettled(ctx, round, n, res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch, close, true)
 }
 

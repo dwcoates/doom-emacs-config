@@ -58,6 +58,13 @@ type Spec struct {
 	// its tests start, which every unit of a profiling run is told the
 	// directory of.
 	Profiler Profiler
+	// InputsDigest is the reuse key the unit is confined to (reuse.Confine):
+	// the digest of every input its tests may read. Empty for a unit run
+	// unconfined, whose inputs nothing pins. Its verdict event carries it
+	// (testrun.v1.TestRunUnitEnded.inputs_digest), so a test that fails and
+	// then passes under one digest is known to have failed for no change of
+	// what it ran.
+	InputsDigest string
 }
 
 // Profiler is how a unit's own process writes a CPU profile.

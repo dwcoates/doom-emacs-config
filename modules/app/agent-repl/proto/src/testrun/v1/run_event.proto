@@ -113,6 +113,14 @@ message TestRunUnitEnded {
   // states them (Go, vitest and ERT do; a harness states its groups). Empty for
   // a unit that ran no test (a build) or never started.
   repeated TestRunTestResult tests = 8;
+  // The digest of the unit's declared inputs, the reuse key the run confined
+  // the unit to: every file and environment value its tests may read. Two
+  // results of one test under one digest ran the same code, so a test that
+  // failed under a digest and passed under it again failed for no change of
+  // its inputs: the daemon records it as a queue race finding. UNSET for a
+  // unit the run did not confine to its inputs (an unconfined suite, a
+  // suite's shared infrastructure), whose results prove nothing of the kind.
+  optional string inputs_digest = 9;
 }
 
 // The unit passed.

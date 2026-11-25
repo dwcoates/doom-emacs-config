@@ -1973,13 +1973,10 @@ func newHarness(t *testing.T) *harness {
 			if cause, ok := shimlife.StartOf(ctx); ok {
 				h.reviveCauses = append(h.reviveCauses, cause)
 			}
-			if h.reviveErr != nil {
-				return h.reviveErr
-			}
 			if h.reviveHook != nil {
 				h.reviveHook()
 			}
-			return nil
+			return h.reviveErr
 		},
 		SettingsStarted: func(_ ids.WorkspaceID, at time.Time) { h.settingsStarts = append(h.settingsStarts, at) },
 		Watcher:         func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession && !h.noWatcher },

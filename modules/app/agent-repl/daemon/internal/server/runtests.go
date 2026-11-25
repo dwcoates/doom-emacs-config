@@ -178,11 +178,19 @@ func (s *server) RunTests(
 	defer context.AfterFunc(s.life, stopRun)()
 	runs := max(msg.GetRuns(), 1)
 	for run := uint32(1); run <= runs; run++ {
+		var units []*testrunv1.TestRunUnitEnded
 		outcome, err := s.relayTestRun(runCtx, log, stream, dir, argv, run, func(ev *testrunv1.TestRunEvent) {
 			for _, c := range ev.GetDropped().GetCases() {
 				dropped = append(dropped, c.GetSelection())
 			}
+			if u := ev.GetUnitEnded(); u != nil {
+				units = append(units, u)
+			}
 		})
+		// EVERY RUN'S PASSES ARE READ FOR RACES: a test a merge gate failed
+		// that passes here on the same inputs failed for no change of its
+		// code (merge racefindings.go).
+		s.deps.Merge.ObserveTestRun(ctx, dir, w.id, units)
 		if outcome == runCutByExit {
 			return s.answerRunCutByExit(log, stream, dir, run)
 		}

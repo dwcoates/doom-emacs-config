@@ -24,6 +24,7 @@ package merge
 
 import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+	testrunv1 "agentrepl/proto/testrun/v1"
 	"context"
 	"fmt"
 	"strings"
@@ -107,6 +108,10 @@ func (a QueueOfferAnswer) String() string {
 
 // Orchestrator is the merge queue's whole surface.
 type Orchestrator interface {
+	// ObserveTestRun reads a workspace's own test run in a worktree for
+	// races: every test it passed on the inputs a merge gate failed it on
+	// is a race finding of the worktree's repository (racefindings.go).
+	ObserveTestRun(ctx context.Context, dir string, workspace ids.WorkspaceID, units []*testrunv1.TestRunUnitEnded)
 	// RecordDirectLanding records a landing land-direct.sh made on a
 	// repository's main branch, classified by the daemon's own state, and
 	// answers the path recorded (landings.go).
@@ -1000,6 +1005,10 @@ type Meter interface {
 	// taking the head to leaving it, by how it left (the HeadExit values, or
 	// an AbandonCause's spelling for a merge abandoned at the head).
 	ObserveMergeHead(exit string, took time.Duration)
+	// CountRaceFinding records one race finding the queue found, by its
+	// RaceFinding event (RaceFindingNew, RaceFindingRecurred,
+	// RaceFindingReopened).
+	CountRaceFinding(event string)
 	// ObserveMediatorTurnTokens records the tokens of one KIND
 	// (MediatorTokenKinds) a deploy mediator's turn spent, by the phase of
 	// its run the turn ended in (the MediatorPhase constants).

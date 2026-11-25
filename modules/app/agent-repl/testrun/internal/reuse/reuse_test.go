@@ -540,6 +540,50 @@ func TestConfineWrapsEachSpecInItsUnitsProfile(t *testing.T) {
 	}
 }
 
+func TestConfineStampsOnlyAConfinedKeyedUnitsSpecsWithItsDigest(t *testing.T) {
+	// Arrange
+	su, u := infraUnits()
+	v := SuiteVerdict{SuiteUnits: su, Confined: true, EnvelopeProfile: "/p/s.sb", Units: []UnitVerdict{
+		{Unit: su.Units[0], Keyed: true, Profile: "/p/a.sb", Key: Key{Digest: "aaaa"}},
+		{Unit: su.Units[1], Key: Key{Digest: "bbbb"}},
+	}}
+
+	// Act
+	got := Confine("/bin/testrun", v, u)
+
+	// Assert
+	cases := []struct {
+		name string
+		spec run.Spec
+		want string
+	}{
+		{name: "a keyed unit's chunk carries its key", spec: got.Splits[0].Chunk("s/a#00", nil), want: "aaaa"},
+		{name: "an unconfined unit's chunk carries none", spec: got.Splits[1].Chunk("s/b#00", nil), want: ""},
+		{name: "infra under the envelope carries none", spec: got.Atomic[0], want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.spec.InputsDigest != tc.want {
+				t.Fatalf("InputsDigest = %q, want %q", tc.spec.InputsDigest, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnUnconfinedSuitesSpecsCarryNoDigest(t *testing.T) {
+	// Arrange
+	su, u := infraUnits()
+	v := SuiteVerdict{SuiteUnits: su, Units: []UnitVerdict{{Unit: su.Units[0], Keyed: true, Key: Key{Digest: "aaaa"}}}}
+
+	// Act
+	got := Confine("/bin/testrun", v, u)
+
+	// Assert
+	if d := got.Splits[0].Chunk("s/a#00", nil).InputsDigest; d != "" {
+		t.Fatalf("InputsDigest = %q, want none: an unconfined run pins no inputs", d)
+	}
+}
+
 func TestAnUnconfinedSuiteIsLeftAsItIs(t *testing.T) {
 	// Arrange
 	su, u := infraUnits()

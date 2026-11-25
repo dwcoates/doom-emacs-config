@@ -70,7 +70,7 @@ func TestTheIntakesWindowStartsWhereTheLastCheckRead(t *testing.T) {
 			}
 
 			// Act
-			_, window, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+			_, window, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
 
 			// Assert
 			if err != nil || len(sinces) != 2 || !sinces[0].Equal(tt.wantSince) || !window.Start.Equal(tt.wantSince) || !window.Through.Equal(h.now) {

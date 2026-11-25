@@ -139,6 +139,9 @@ func describeUpdateQueueRefusal(ws string, e *agentreplv1.UpdateMergeQueueError)
 	case *agentreplv1.UpdateMergeQueueError_ProblemsRecurring:
 		return fmt.Sprintf("the check's window holds problems that came back after more than five of their fixes deployed, so only an escalation is accepted: %s",
 			strings.Join(r.ProblemsRecurring.GetGroups(), "; ")), nil
+	case *agentreplv1.UpdateMergeQueueError_UnknownRaceFinding:
+		f := r.UnknownRaceFinding.GetFinding()
+		return fmt.Sprintf("the repository holds no race finding %s/%s, so nothing was decided; name a finding as the deploy check's brief lists it", f.GetSuite(), f.GetTest()), nil
 	case *agentreplv1.UpdateMergeQueueError_NoEscalationHeld:
 		return "no escalation holds the repository's queue, so there is no hold to release", nil
 	case *agentreplv1.UpdateMergeQueueError_NoRepairTurn:
