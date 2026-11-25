@@ -698,6 +698,39 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       ;; Assert
       (should (equal answer '((success . ((workspace . ((id . "w1")))))))))))
 
+(defun agent-repl-test-connect--timed-keys (open)
+  "Answer the stall-culprit keys timed while OPEN dials an exchange that is answered and ended.
+OPEN is called with a connection and opens one exchange on it."
+  (let ((agent-repl-stall-culprit--current nil)
+        (agent-repl-stall-culprit--window nil))
+    (funcall open (agent-repl-test-connect--conn))
+    (let ((record (agent-repl-test-connect--last-spawn)))
+      (agent-repl-test-connect--feed record (agent-repl-test-connect--http 200 "{}"))
+      (agent-repl-test-connect--exit record))
+    (sort (mapcar #'car agent-repl-stall-culprit--window)
+          (lambda (a b) (string< (symbol-name (car a)) (symbol-name (car b)))))))
+
+(ert-deftest agent-repl-test-connect-unary-handlers-are-timed-under-their-method ()
+  "A unary exchange's filter and sentinel are stall-culprit units named by its rpc."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (let ((keys (agent-repl-test-connect--timed-keys
+                 (lambda (conn) (agent-repl-connect-unary conn "RegisterWorkspace" "{}"
+                                                          :on-response #'ignore :on-failure #'ignore)))))
+      ;; Assert
+      (should (equal keys '((process-filter . "RegisterWorkspace")
+                            (process-sentinel . "RegisterWorkspace")))))))
+
+(ert-deftest agent-repl-test-connect-stream-handlers-are-timed-under-their-method ()
+  "A stream's filter and sentinel are stall-culprit units named by its rpc."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (let ((keys (agent-repl-test-connect--timed-keys
+                 (lambda (conn) (agent-repl-connect-stream conn "WatchHostWorkspace" "{}" #'ignore #'ignore)))))
+      ;; Assert
+      (should (equal keys '((process-filter . "WatchHostWorkspace")
+                            (process-sentinel . "WatchHostWorkspace")))))))
+
 (ert-deftest agent-repl-test-connect-unary-reports-a-connect-error-body ()
   "A non-200 answer's Connect error `code' and `message' reach ON-FAILURE."
   ;; Arrange

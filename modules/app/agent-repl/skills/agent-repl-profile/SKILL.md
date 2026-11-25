@@ -199,7 +199,7 @@ which every runtime stops by itself.
 - **Interaction**: typing while a deploy rolls out; nothing typed reaches the screen until the editor comes back.
 - **Budget**: keystroke, 50-100ms.
 - **Measured**: 2026-10-25, 5-10s owner-observed. A `sample` of Emacs across a deploy: ~10.5s inside the roster stream's process filter, ~9.8s of it garbage collection on a 145MB heap (gcmh's idle threshold 800KB, `gc-cons-percentage` 0.1). A handover sent 93-131 full-roster pushes over 3.5-17s. One push's decode: 27.6ms and 554K conses interpreted, 2.8ms and 36K byte-compiled; its apply: 8ms and 192K conses, then 3ms and 42K.
-- **Code paths**: `lisp/wire-roster.el` (decode), `lisp/roster.el` (apply), `lisp/bytecode.el` (compiles what each load defined), `lisp/stall.el` (`editor_stall`, `editor_input_wait`).
+- **Code paths**: `lisp/wire-roster.el` (decode), `lisp/roster.el` (apply), `lisp/bytecode.el` (compiles what each load defined), `lisp/stall.el` (`editor_stall`, `editor_input_wait`), `lisp/stall-culprit.el` (each stall's culprit: the `elisp.stall.culprit` record and `agentrepl_editor_stall_culprit_seconds`).
 - **Contributors**: measured: every function ran interpreted after each load (fixed: `bytecode.el` compiles them in place); four walks of every row per push (fixed: one walk); the stall sampler could not see input waiting behind filters (fixed: the `editor_input_wait` latency).
 - **Status / next step**: fixed on branch `hotreload-perf`; read `editor_input_wait` (`/agent-repl-metrics`) across the next deploys.
 - **Flagged by**: the owner, 2026-10-25 ("emacs hangs for some 5-10 seconds on every deploy").

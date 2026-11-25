@@ -155,8 +155,10 @@ type latencies struct {
 	// heaps is each workspace's shim's heap at its last frame that carried
 	// one, within its current counting run.
 	heaps map[ids.WorkspaceID]*shimv1.ShimHeap
+	// culprits is the editor's stalls by the work that held its loop.
+	culprits map[StallCulprit]*histogram
 
-	latencyDesc, sentDesc, receivedDesc, heapDesc *prometheus.Desc
+	latencyDesc, sentDesc, receivedDesc, heapDesc, culpritDesc *prometheus.Desc
 }
 
 func newLatencies(log dlog.Logger) *latencies {
@@ -166,6 +168,8 @@ func newLatencies(log dlog.Logger) *latencies {
 		traffic:      map[ids.WorkspaceID]*traffic{},
 		runs:         map[ids.WorkspaceID]*shimRun{},
 		heaps:        map[ids.WorkspaceID]*shimv1.ShimHeap{},
+		culprits:     map[StallCulprit]*histogram{},
+		culpritDesc:  prometheus.NewDesc(EditorStallCulpritName, "The editor's command-loop stalls by the work that held the loop longest across each: source (timer, process_filter, process_sentinel, command, garbage_collection, unattributed, unknown) and function (agent-repl's own function, other, anonymous, an AgentRepl rpc method, or empty).", []string{"source", "function"}, nil),
 		heapDesc:     prometheus.NewDesc(ShimHeapName, "A workspace's shim's JavaScript heap at its last measurements frame, by kind (used, total, external).", []string{"workspace", "kind"}, nil),
 		latencyDesc:  prometheus.NewDesc(LatencyName, "How long a user-facing interaction took, by latency (proto/vocab/latencies.json) and workspace.", []string{"latency", "workspace"}, nil),
 		sentDesc:     prometheus.NewDesc(VendorBytesSentName, "Bytes a workspace's shim sent to the vendor API since the daemon started.", []string{"workspace"}, nil),
@@ -176,13 +180,19 @@ func newLatencies(log dlog.Logger) *latencies {
 // ErrInvalidLatency is a latency a client should never have sent.
 var ErrInvalidLatency = errors.New("invalid latency")
 
+// validSeconds reports whether s is a duration a client may report: finite
+// and not negative. THE ONE check of every reported duration.
+func validSeconds(s float64) bool {
+	return !math.IsNaN(s) && !math.IsInf(s, 0) && s >= 0
+}
+
 // validateReported checks one client latency, answering its kind.
 func validateReported(l *agentreplv1.ReportedLatency) (LatencyKind, error) {
 	kind, ok := ReportedKinds[l.GetKind()]
 	if !ok {
 		return LatencyKind{}, fmt.Errorf("%w: kind %v is not a reported latency", ErrInvalidLatency, l.GetKind())
 	}
-	if s := l.GetSeconds(); math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+	if s := l.GetSeconds(); !validSeconds(s) {
 		return LatencyKind{}, fmt.Errorf("%w: %s took %v seconds", ErrInvalidLatency, kind.Name, s)
 	}
 	return kind, nil
@@ -194,7 +204,7 @@ func validateEditor(l *agentreplv1.ReportedEditorLatency) (LatencyKind, error) {
 	if !ok {
 		return LatencyKind{}, fmt.Errorf("%w: kind %v is not an editor latency", ErrInvalidLatency, l.GetKind())
 	}
-	if s := l.GetSeconds(); math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+	if s := l.GetSeconds(); !validSeconds(s) {
 		return LatencyKind{}, fmt.Errorf("%w: %s took %v seconds", ErrInvalidLatency, kind.Name, s)
 	}
 	return kind, nil
@@ -209,6 +219,18 @@ func (l *latencies) observe(ws ids.WorkspaceID, kind LatencyKind, seconds float6
 	if h == nil {
 		h = newHistogram(kind.Buckets)
 		l.series[key] = h
+	}
+	h.observe(seconds)
+}
+
+// observeCulprit adds one editor stall under its culprit.
+func (l *latencies) observeCulprit(c StallCulprit, buckets []float64, seconds float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	h := l.culprits[c]
+	if h == nil {
+		h = newHistogram(buckets)
+		l.culprits[c] = h
 	}
 	h.observe(seconds)
 }
@@ -391,6 +413,7 @@ func (l *latencies) Describe(ch chan<- *prometheus.Desc) {
 	ch <- l.sentDesc
 	ch <- l.receivedDesc
 	ch <- l.heapDesc
+	ch <- l.culpritDesc
 }
 
 // Collect implements prometheus.Collector.
@@ -419,6 +442,9 @@ func (l *latencies) Collect(ch chan<- prometheus.Metric) {
 		t := l.traffic[ws]
 		ch <- prometheus.MustNewConstMetric(l.sentDesc, prometheus.CounterValue, t.sent, string(ws))
 		ch <- prometheus.MustNewConstMetric(l.receivedDesc, prometheus.CounterValue, t.received, string(ws))
+	}
+	for c, h := range l.culprits {
+		ch <- h.metric(l.culpritDesc, c.Source, c.Function)
 	}
 	for ws, h := range l.heaps {
 		ch <- prometheus.MustNewConstMetric(l.heapDesc, prometheus.GaugeValue, float64(h.GetUsedBytes()), string(ws), "used")

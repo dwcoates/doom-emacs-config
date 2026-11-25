@@ -5434,7 +5434,8 @@ encoder reads: the common codec owns the real encoding.")
                                        ((milestone . "EDITOR_STARTUP_MILESTONE_ALL_TABS")
                                         (running)
                                         (secondsSinceProcessStart . 6.5))])
-                     (editorLatencies . []))))))
+                     (editorLatencies . [])
+                     (editorStalls . []))))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-request-carries-editor-latencies ()
   "The editor's own latencies ride `editorLatencies', each fully spelled."
@@ -5449,7 +5450,8 @@ encoder reads: the common codec owns the real encoding.")
                      (editorLatencies . [((kind . "EDITOR_LATENCY_KIND_STALL") (seconds . 0.25))
                                          ((kind . "EDITOR_LATENCY_KIND_ELISP_RELOAD") (seconds . 1.0))
                                          ((kind . "EDITOR_LATENCY_KIND_INPUT_WAIT") (seconds . 0.4))
-                                         ((kind . "EDITOR_LATENCY_KIND_VIEWED_REATTACH") (seconds . 12.5))]))))))
+                                         ((kind . "EDITOR_LATENCY_KIND_VIEWED_REATTACH") (seconds . 12.5))])
+                     (editorStalls . []))))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-editor-latency ()
   "An unknown kind or a bad time never reaches the wire."
@@ -5462,6 +5464,67 @@ encoder reads: the common codec owns the real encoding.")
       (should-error (agent-repl-wire-encode-report-latencies-request
                      (list :editor-latencies (list latency)))
                     :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-request-carries-editor-stalls ()
+  "A stall rides `editorStalls' with its culprit, apart from the editor latencies."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-report-latencies-request
+                    (list :editor-latencies
+                          (list (list :kind :elisp-reload :seconds 1)
+                                (list :kind :attributed-stall :seconds 0.2
+                                      :culprit (list :source 'timer :function 'agent-repl-roster--reconcile)))))
+                   '((editorStartup . [])
+                     (editorLatencies . [((kind . "EDITOR_LATENCY_KIND_ELISP_RELOAD") (seconds . 1.0))])
+                     (editorStalls . [((seconds . 0.2)
+                                       (culprit . ((timer . ((function . ((named . ((symbol . "agent-repl-roster--reconcile"))))))))))]))))))
+
+(ert-deftest agent-repl-test-wire-verbs-editor-stall-culprit-arms ()
+  "Every culprit source encodes to its own arm of EditorStallCulprit."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case (list (list (list :source 'command :function :anonymous)
+                              '((command . ((function . ((anonymous))))))
+                              "a closure command")
+                        (list (list :source 'process-filter :method "WatchHostWorkspace")
+                              '((processFilter . ((rpcMethod . "WatchHostWorkspace"))))
+                              "a filter")
+                        (list (list :source 'process-sentinel :method "ReportLatencies")
+                              '((processSentinel . ((rpcMethod . "ReportLatencies"))))
+                              "a sentinel")
+                        (list (list :source 'garbage-collection) '((garbageCollection)) "garbage collection")
+                        (list (list :source 'unattributed) '((unattributed)) "unattributed")))
+      (should (equal (list (nth 2 case) (agent-repl-wire-encode-editor-stall-culprit (nth 0 case)))
+                     (list (nth 2 case) (nth 1 case)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-editor-stall ()
+  "A stall without a culprit, with a bad time, or with an unknown source never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (stall (list (list :kind :attributed-stall :seconds 0.2)
+                         (list :kind :attributed-stall :seconds -1 :culprit (list :source 'unattributed))
+                         (list :kind :attributed-stall :seconds 0.2 :culprit (list :source 'redisplay))
+                         (list :kind :attributed-stall :seconds 0.2 :culprit (list :source 'timer :function "named-by-a-string"))
+                         (list :kind :attributed-stall :seconds 0.2 :culprit (list :source 'process-filter))))
+      (should-error (agent-repl-wire-encode-report-latencies-request
+                     (list :editor-latencies (list stall)))
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-editor-seconds-answers-a-float ()
+  "A finite, non-negative duration is answered as a float."
+  (should (equal (agent-repl-wire-verbs--editor-seconds "M" "seconds" 2) 2.0))
+  (should (equal (agent-repl-wire-verbs--editor-seconds "M" "seconds" 0) 0.0)))
+
+(ert-deftest agent-repl-test-wire-verbs-editor-seconds-refuses-a-bad-duration-naming-its-field ()
+  "A negative, non-finite or missing duration fails, naming the message and field."
+  (dolist (seconds (list -1 0.0e+NaN 1.0e+INF nil))
+    (let ((err (should-error (agent-repl-wire-verbs--editor-seconds "ReportedX" "the_field" seconds)
+                             :type 'agent-repl-wire-error)))
+      (should (string-match-p "ReportedX" (format "%S" err)))
+      (should (string-match-p "the_field" (format "%S" err))))))
+
+(ert-deftest agent-repl-test-wire-verbs-every-editor-duration-shares-one-check ()
+  "No encoder in wire-verbs.el checks a duration by hand beside the shared helper."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "wire-verbs.el" agent-repl-test--module-dir))
+    (should (= (how-many "1\\.0e\\+INF" (point-min) (point-max)) 1))))
 
 (ert-deftest agent-repl-test-wire-verbs-editor-latency-kinds-pinned ()
   "The editor latency vocabulary is every generated enum name except UNSPECIFIED."
@@ -5479,7 +5542,7 @@ encoder reads: the common codec owns the real encoding.")
     (should (equal (json-serialize
                     (agent-repl-wire-encode-report-latencies-request
                      (list :editor-startup (list (list :milestone :init :daemon :spawned :seconds 1)))))
-                   "{\"editorStartup\":[{\"milestone\":\"EDITOR_STARTUP_MILESTONE_INIT\",\"spawned\":{},\"secondsSinceProcessStart\":1.0}],\"editorLatencies\":[]}"))))
+                   "{\"editorStartup\":[{\"milestone\":\"EDITOR_STARTUP_MILESTONE_INIT\",\"spawned\":{},\"secondsSinceProcessStart\":1.0}],\"editorLatencies\":[],\"editorStalls\":[]}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-milestone ()
   "An unknown milestone or daemon arm, or a bad time, never reaches the wire."

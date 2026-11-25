@@ -7,7 +7,8 @@
 ;; it, each queued here by its owner:
 ;;
 ;;   startup milestones  startup.el, once the editor's startup has ended
-;;   editor latencies    stall.el's command-loop stalls, elisp-build.el's
+;;   editor latencies    stall.el's command-loop stalls with their
+;;                       culprits (stall-culprit.el), elisp-build.el's
 ;;                       pushed elisp reloads
 ;;
 ;; A MEASUREMENT IS KEPT UNTIL A REPORT OF IT IS ACKNOWLEDGED.  It stays in
@@ -55,9 +56,11 @@ Each is a plist (:milestone KEYWORD :daemon KEYWORD :seconds NUMBER) for
 `agent-repl-wire-encode-reported-editor-startup'.")
 
 (defvar agent-repl-latency-report--editor nil
-  "Queued editor latencies, oldest first.
+  "Queued editor latencies and stalls, oldest first.
 Each is a plist (:kind KEYWORD :seconds NUMBER) for
-`agent-repl-wire-encode-reported-editor-latency'.")
+`agent-repl-wire-encode-reported-editor-latency', or a stall (:kind
+:attributed-stall :seconds NUMBER :culprit PLIST) for
+`agent-repl-wire-encode-reported-editor-stall'.")
 
 (defvar agent-repl-latency-report--in-flight nil
   "Non-nil while a report is unanswered.")
@@ -76,9 +79,19 @@ Each is a plist (:kind KEYWORD :seconds NUMBER) for
 
 (defun agent-repl-latency-report-editor (kind seconds)
   "Queue one editor latency of KIND that took SECONDS, and schedule its send."
+  (agent-repl-latency-report--queue-editor (list :kind kind :seconds seconds)))
+
+(defun agent-repl-latency-report-stall (seconds culprit)
+  "Queue one command-loop stall of SECONDS held by CULPRIT, and schedule its send.
+CULPRIT is the plist `agent-repl-stall-culprit-take' answers under
+`:culprit'.  It is sent as a ReportedEditorStall."
+  (agent-repl-latency-report--queue-editor
+   (list :kind :attributed-stall :seconds seconds :culprit culprit)))
+
+(defun agent-repl-latency-report--queue-editor (entry)
+  "Queue the editor measurement ENTRY, bounded, and schedule its send."
   (setq agent-repl-latency-report--editor
-        (append agent-repl-latency-report--editor
-                (list (list :kind kind :seconds seconds))))
+        (append agent-repl-latency-report--editor (list entry)))
   (agent-repl-latency-report--trim)
   (unless agent-repl-latency-report--timer
     (setq agent-repl-latency-report--timer

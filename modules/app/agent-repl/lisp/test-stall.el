@@ -12,7 +12,8 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-(defvar agent-repl-test-stall--reported nil "Every stall reported, newest first, as (KIND SECONDS).")
+(defvar agent-repl-test-stall--reported nil
+  "Every measurement reported, newest first, as (KIND SECONDS), a stall as (:stall SECONDS CULPRIT).")
 (defvar agent-repl-test-stall--records nil "Every info record, newest first.")
 (defvar agent-repl-test-stall--pending nil "What the stubbed input check answers.")
 
@@ -21,6 +22,10 @@
   (declare (indent 0))
   `(let ((agent-repl-stall--last nil)
          (agent-repl-stall--input nil)
+         (agent-repl-stall-culprit--current nil)
+         (agent-repl-stall-culprit--since 0.0)
+         (agent-repl-stall-culprit--window nil)
+         (agent-repl-stall-culprit--gc-at gc-elapsed)
          (agent-repl-test-stall--pending nil)
          (agent-repl-test-stall--reported nil)
          (agent-repl-test-stall--records nil))
@@ -29,6 +34,8 @@
                   (lambda () agent-repl-test-stall--pending))
                  ((symbol-function 'agent-repl-latency-report-editor)
                   (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
+                 ((symbol-function 'agent-repl-latency-report-stall)
+                  (lambda (seconds culprit) (push (list :stall seconds culprit) agent-repl-test-stall--reported)))
                  ((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-into agent-repl-test-stall--records)))
          ,@body))))
@@ -99,6 +106,47 @@
     ;; Assert
     (should (equal (mapcar (lambda (r) (/ (round (* 1000 (cadr r))) 1000.0)) agent-repl-test-stall--reported)
                    '(0.2 0.5)))))
+
+(defun agent-repl-test-stall--held-by (key seconds)
+  "Run a unit KEY that holds the loop for SECONDS of the test clock."
+  (agent-repl-stall-culprit-run
+   key (lambda () (setq agent-repl-test--clock (+ agent-repl-test--clock seconds)))))
+
+(ert-deftest agent-repl-test-stall-a-stall-is-reported-with-the-work-that-held-the-loop ()
+  "The unit that ran through the stall is reported as its culprit."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    (agent-repl-test-stall--held-by '(timer . agent-repl-roster--reconcile) 0.5)
+    ;; Act
+    (agent-repl-test-stall--run-after agent-repl-stall-interval)
+    ;; Assert
+    (should (equal (nth 2 (car agent-repl-test-stall--reported))
+                   '(:source timer :function agent-repl-roster--reconcile)))))
+
+(ert-deftest agent-repl-test-stall-a-stall-records-its-culprit-at-info ()
+  "Each stall writes one INFO record naming its culprit and what it ran."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    (agent-repl-test-stall--held-by '(process-filter . "WatchHostWorkspace") 0.5)
+    ;; Act
+    (agent-repl-test-stall--run-after agent-repl-stall-interval)
+    ;; Assert
+    (should (string-match-p
+             "elisp.stall.culprit seconds=0.500 source=process-filter function=WatchHostWorkspace ran=0.500 timed=0.500 gc="
+             (car agent-repl-test-stall--records)))))
+
+(ert-deftest agent-repl-test-stall-a-healthy-run-opens-a-new-culprit-window ()
+  "Work before an on-time run is never charged to a later stall."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    (agent-repl-test-stall--held-by '(timer . agent-repl-early) 0.01)
+    ;; Act
+    (agent-repl-test-stall--run-after agent-repl-stall-interval)
+    ;; Assert
+    (should-not agent-repl-stall-culprit--window)))
 
 (ert-deftest agent-repl-test-stall-a-gap-past-any-stall-is-recorded-not-reported ()
   "A gap longer than any stall (a host sleep) is recorded at INFO and not reported."

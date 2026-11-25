@@ -267,6 +267,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 
 (agent-repl--load-module "log-site")
 (agent-repl--load-module "core")
+;; WHY: stall-culprit.el times every timer, command and daemon connection
+;; handler the command loop runs, so stall.el can name what held the loop.
+;; It needs only core.el's clock, and loads before connect.el, whose
+;; connection handlers it wraps.
+(agent-repl--load-module "stall-culprit")
 ;; WHY: the wire-*.el codec is the protojson layer every agentrepl.v1 caller
 ;; sits on, so it loads directly after core.el — its only dependency is
 ;; core.el's logging ladder — and before anything that speaks to the daemon.

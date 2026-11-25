@@ -82,6 +82,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--capture-log-scope "core" (scope))
+(declare-function agent-repl-stall-culprit-wrap "stall-culprit" (source method fn))
 (declare-function agent-repl--global-state-file "core" (relative))
 
 ;;;; ---- Errors and customization ----
@@ -784,7 +785,9 @@ the call is idempotent.  Returns the socket process."
             (agent-repl-connect--open-socket
              (format "agent-repl-connect-%s" method)
              (car host-port) (cdr host-port) request
-             (lambda (proc chunk)
+             (agent-repl-stall-culprit-wrap
+              'process-filter method
+              (lambda (proc chunk)
                (setq body (concat body (agent-repl-connect--reader-feed reader chunk)))
                ;; A WHOLE BODY IS THE ANSWER.  The framing said how long the
                ;; body is, so the exchange need not wait on the peer's close
@@ -792,8 +795,10 @@ the call is idempotent.  Returns the socket process."
                ;; promptly, and the sentinel below names it.
                (when (or (agent-repl-connect--reader-breach reader)
                          (agent-repl-connect--reader-complete-p reader))
-                 (agent-repl-connect--close-socket proc)))
-             (lambda (proc event)
+                 (agent-repl-connect--close-socket proc))))
+             (agent-repl-stall-culprit-wrap
+              'process-sentinel method
+              (lambda (proc event)
                (unless (process-live-p proc)
                  (agent-repl-connect--detach-sentinel proc)
                  (let ((status (agent-repl-connect--reader-status reader))
@@ -839,7 +844,7 @@ the call is idempotent.  Returns the socket process."
                                   :status status)))))
                     (t
                      (settle :failure
-                             (agent-repl-connect--connect-error-detail status body)))))))
+                             (agent-repl-connect--connect-error-detail status body))))))))
              log-scope))
       ;; A REFUSED CONNECT CAN ANSWER BEFORE THE DIAL RETURNS -- the kernel
       ;; refuses on the spot and the sentinel runs from inside the write.  An
@@ -1099,7 +1104,9 @@ nothing.  Returns the stream object."
           (agent-repl-connect--open-socket
            (format "agent-repl-connect-stream-%s" method)
            (car host-port) (cdr host-port) request
-           (lambda (proc chunk)
+           (agent-repl-stall-culprit-wrap
+            'process-filter method
+            (lambda (proc chunk)
              (let ((bytes (agent-repl-connect--reader-feed reader chunk))
                    (status (agent-repl-connect--reader-status reader)))
                (cond
@@ -1141,8 +1148,10 @@ nothing.  Returns the stream object."
                  ;; when no end frame came with it; the sentinel below calls
                  ;; that what it is.
                  (when (agent-repl-connect--reader-complete-p reader)
-                   (agent-repl-connect--close-socket proc))))))
-           (lambda (proc event)
+                   (agent-repl-connect--close-socket proc)))))))
+           (agent-repl-stall-culprit-wrap
+            'process-sentinel method
+            (lambda (proc event)
              (unless (process-live-p proc)
                (agent-repl-connect--detach-sentinel proc)
                (let ((status (agent-repl-connect--reader-status reader))
@@ -1169,7 +1178,7 @@ nothing.  Returns the stream object."
                     (list :error
                           (agent-repl-connect--failure
                            :no-end-frame
-                           (format "%s: producer closed without an end frame" method)))))))))
+                           (format "%s: producer closed without an end frame" method))))))))))
            log-scope))
     stream)))
 

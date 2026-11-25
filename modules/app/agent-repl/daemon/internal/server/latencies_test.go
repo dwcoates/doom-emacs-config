@@ -5,6 +5,8 @@ import (
 	"math"
 	"testing"
 
+	"agent-repld/internal/runtimemetrics"
+
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -371,5 +373,52 @@ func TestReportLatenciesRefusesAMalformedEditorLatency(t *testing.T) {
 				t.Fatalf("a malformed batch recorded %+v and %+v", h.Latencies.all(), h.Latencies.editorLatencies())
 			}
 		})
+	}
+}
+
+// timerStall is a stall a named timer function held the loop for.
+func timerStall(symbol string, seconds float64) *agentreplv1.ReportedEditorStall {
+	return &agentreplv1.ReportedEditorStall{Seconds: seconds, Culprit: &agentreplv1.EditorStallCulprit{
+		Work: &agentreplv1.EditorStallCulprit_Timer{Timer: &agentreplv1.EditorStallTimer{Function: &agentreplv1.EditorStallFunction{
+			Function: &agentreplv1.EditorStallFunction_Named{Named: &agentreplv1.EditorStallFunctionNamed{Symbol: symbol}},
+		}}},
+	}}
+}
+
+func TestReportLatenciesRecordsTheEditorsStallsByCulprit(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		EditorStalls: []*agentreplv1.ReportedEditorStall{timerStall("agent-repl-roster--reconcile", 0.2)},
+	})
+
+	// Assert
+	if err != nil || resp.GetSuccess().GetRecorded() == nil {
+		t.Fatalf("ReportLatencies = %v, %v; want recorded", resp, err)
+	}
+	want := observedEditorStall{kind: "editor_stall", culprit: runtimemetrics.StallCulprit{Source: "timer", Function: "agent-repl-roster--reconcile"}, seconds: 0.2}
+	if got := h.Latencies.editorStalls(); len(got) != 1 || got[0] != want {
+		t.Fatalf("editor stalls = %+v, want [%+v]", got, want)
+	}
+}
+
+func TestReportLatenciesRecordsNoStallOfABatchWithAMalformedStall(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	noCulprit := &agentreplv1.ReportedEditorStall{Seconds: 0.2}
+
+	// Act
+	_, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		EditorStalls: []*agentreplv1.ReportedEditorStall{timerStall("agent-repl-x", 0.1), noCulprit},
+	})
+
+	// Assert
+	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", code)
+	}
+	if got := h.Latencies.editorStalls(); len(got) != 0 {
+		t.Fatalf("a malformed batch recorded %+v", got)
 	}
 }

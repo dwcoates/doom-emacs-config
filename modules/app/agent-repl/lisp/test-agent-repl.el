@@ -90,6 +90,7 @@
   (load (expand-file-name "test-stale-sink.el" dir) nil t)
   (load (expand-file-name "test-heap-census.el" dir) nil t)
   (load (expand-file-name "test-stall.el" dir) nil t)
+  (load (expand-file-name "test-stall-culprit.el" dir) nil t)
   (load (expand-file-name "test-open-tabs.el" dir) nil t)
   (load (expand-file-name "test-rpc.el" dir) nil t)
   (load (expand-file-name "test-services.el" dir) nil t)

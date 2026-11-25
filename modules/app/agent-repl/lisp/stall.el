@@ -12,7 +12,9 @@
 ;; how long the loop could not run it: the stall.  A stall at least
 ;; `agent-repl-stall-floor' long (the vocabulary's detection_floor_ms of
 ;; `editor_stall', proto/vocab/latencies.json) is reported through
-;; latency-report.el; anything shorter is a healthy loop and sends nothing.
+;; latency-report.el with the work that held the loop longest meanwhile
+;; (stall-culprit.el), and recorded at INFO by that work's name; anything
+;; shorter is a healthy loop and sends nothing.
 ;; A stall that begins between two runs is measured from the earlier run's
 ;; due instant onward, so a measured stall is at most one interval short of
 ;; the real one, never longer.
@@ -60,6 +62,9 @@
 (declare-function agent-repl--now "core" ())
 (declare-function agent-repl--register-timer "core" (key timer))
 (declare-function agent-repl-latency-report-editor "latency-report" (kind seconds))
+(declare-function agent-repl-latency-report-stall "latency-report" (seconds culprit))
+(declare-function agent-repl-stall-culprit-reset "stall-culprit" (now))
+(declare-function agent-repl-stall-culprit-take "stall-culprit" (now stall))
 
 (defconst agent-repl-stall--central
   '(:agent-repl-central "the editor's command loop spans every workspace")
@@ -100,23 +105,42 @@ one seen by two runs or more is reported from its first run to NOW."
         (agent-repl-latency-report-editor :input-wait (- now (car wait))))))))
 
 (defun agent-repl-stall-sample ()
-  "One run of the sampler: report a stall since the last run, then any input wait."
+  "One run of the sampler: report a stall since the last run, then any input wait.
+Every run closes the culprit window (stall-culprit.el) it measured over."
   (let* ((now (agent-repl--now))
          (last agent-repl-stall--last)
          (stall (and last (- now last agent-repl-stall-interval))))
     (setq agent-repl-stall--last now)
     (cond
-     ((or (null stall) (< stall agent-repl-stall-floor)))
+     ((or (null stall) (< stall agent-repl-stall-floor))
+      (agent-repl-stall-culprit-reset now))
      ((> stall agent-repl-stall-unclassified)
       ;; The host slept: whatever input was pending before it says nothing
       ;; about the loop.
       (setq agent-repl-stall--input nil)
+      (agent-repl-stall-culprit-reset now)
       (agent-repl--info agent-repl-stall--central
                         "elisp.stall.unclassified gap={gap} reason=longer-than-any-stall"
                         :gap (format "%.3f" (+ stall agent-repl-stall-interval))))
      (t
-      (agent-repl-latency-report-editor :stall stall)))
+      (agent-repl-stall--report now stall)))
     (agent-repl-stall--sample-input now)))
+
+(defun agent-repl-stall--report (now stall)
+  "Report a STALL seconds long ending at NOW, with the work that held the loop.
+The record names the culprit by its own function or rpc method, whatever
+its namespace; the daemon's metric folds a foreign function into `other'."
+  (let* ((taken (agent-repl-stall-culprit-take now stall))
+         (culprit (plist-get taken :culprit)))
+    (agent-repl--info agent-repl-stall--central
+                      "elisp.stall.culprit seconds={seconds} source={source} function={function} ran={ran} timed={timed} gc={gc}"
+                      :seconds (format "%.3f" stall)
+                      :source (symbol-name (plist-get culprit :source))
+                      :function (format "%s" (or (plist-get culprit :function) (plist-get culprit :method) ""))
+                      :ran (format "%.3f" (plist-get taken :ran))
+                      :timed (format "%.3f" (plist-get taken :timed))
+                      :gc (format "%.3f" (plist-get taken :gc)))
+    (agent-repl-latency-report-stall stall culprit)))
 
 (defun agent-repl--arm-stall-sampler ()
   "Arm the stall sampler under `:stall-sampler', replacing any held timer.
@@ -124,6 +148,7 @@ The first run after arming measures nothing: the gap before it is the
 arming's, not the loop's."
   (setq agent-repl-stall--last nil
         agent-repl-stall--input nil)
+  (agent-repl-stall-culprit-reset (agent-repl--now))
   (agent-repl--register-timer
    :stall-sampler
    (run-at-time agent-repl-stall-interval agent-repl-stall-interval
