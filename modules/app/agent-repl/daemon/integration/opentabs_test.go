@@ -300,10 +300,13 @@ func show(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 func cutWhileHidden(t *testing.T) *fixture {
 	t.Helper()
 	f := newOpened(t, harness.Opts{DurableState: true})
+	// BACKLOGGED FIRST: a backlog interrupts a running turn (owner ruling,
+	// 2026-11-24), so the turn the shutdown cuts is one a prompt started on
+	// the already backlogged workspace.
+	hide(t, f.d, f.ws)
 	f.shim.ExpectStartSession()
 	f.submit("do the long thing", "k-cut", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
-	hide(t, f.d, f.ws)
 	shutdownNow(t, f.d)
 	// The fake shim writes no vendor transcript, so the successor's resume
 	// finds none and says so; a real session's transcript is on disk.

@@ -82,13 +82,16 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 		statusIs(func(row *frontendv1.RosterRow) bool { return row.GetIdleAsync() != nil && row.GetViewed() == nil }))
 	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.async_outranks_turn_end")
 
-	// Act / Assert: the user scrolling the idle_async row's feed draws it
-	// PARTIAL and stamps its interaction recency.
+	// Act / Assert: the user scrolling the idle_async row's feed moments after
+	// the turn ended stamps its interaction recency, and leaves it FULL: an
+	// interaction inside the view exemption of a turn's end marks nothing
+	// viewed (sidebar.ViewExemption).
 	reportScrolled(t, f.d, f.ws)
-	awaitRoster(t, f.d, roster, "idle_async, viewed, after the user scrolled",
+	awaitRoster(t, f.d, roster, "idle_async, still unread, its recency stamped, after the user scrolled",
 		statusIs(func(row *frontendv1.RosterRow) bool {
-			return row.GetIdleAsync() != nil && row.GetViewed() != nil && row.GetLastInteracted() != nil
+			return row.GetIdleAsync() != nil && row.GetViewed() == nil && row.GetLastInteracted() != nil
 		}))
+	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.interaction_view_exempt")
 }
 
 // tabBarIDs lists the roster's tabs -- its open rows in the Open section's
