@@ -53,17 +53,7 @@ func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[id
 		return nil, fmt.Errorf("bringup: read the arrangement to read its folds: %w", err)
 	}
 	reg := sidebar.Registry{Workspaces: arrangement.Workspaces, Repositories: arrangement.Repositories, Subsections: arrangement.Subsections, RepositoryBlocks: arrangement.RepositoryBlocks}
-	out := map[ids.WorkspaceID]sidebar.Fold{}
-	for _, tab := range sidebar.Tabs(reg, log) {
-		if tab.Withheld != wsm.WithheldCollapsed {
-			continue
-		}
-		if tab.Fold == nil {
-			panic(fmt.Sprintf("bringup: the tab bar withheld workspace %s as collapsed and named no fold", tab.Workspace.ID))
-		}
-		out[tab.Workspace.ID] = *tab.Fold
-	}
-	return out, nil
+	return sidebar.CollapsedFolds(sidebar.Tabs(reg, log)), nil
 }
 
 // queuedMerges answers which workspaces have an entry standing in a merge

@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -135,4 +137,50 @@ func TestAFoldNamingNoCollapseRefusesItsFields(t *testing.T) {
 		}
 	}()
 	fold.Fields()
+}
+
+func TestCollapsedFoldsNamesEveryCollapsedTabAndNoOther(t *testing.T) {
+	// Arrange
+	repositoryFold := sidebar.Fold{By: sidebar.FoldedByRepository, Repository: "gamma"}
+	tabs := []sidebar.Tab{
+		{Workspace: wsm.Workspace{ID: "drawn"}, Withheld: wsm.Drawn},
+		{Workspace: wsm.Workspace{ID: "drawn-under-a-fold"}, Withheld: wsm.Drawn, Fold: &repositoryFold},
+		{Workspace: wsm.Workspace{ID: "collapsed"}, Withheld: wsm.WithheldCollapsed, Fold: &repositoryFold},
+	}
+
+	// Act
+	got := sidebar.CollapsedFolds(tabs)
+
+	// Assert
+	want := map[ids.WorkspaceID]sidebar.Fold{"collapsed": repositoryFold}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CollapsedFolds = %+v, want %+v", got, want)
+	}
+}
+
+func TestCollapsedFoldsRefusesACollapsedTabNamingNoFold(t *testing.T) {
+	// Arrange
+	tabs := []sidebar.Tab{{Workspace: wsm.Workspace{ID: "collapsed"}, Withheld: wsm.WithheldCollapsed}}
+	defer func() {
+		// Assert
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "collapsed") {
+			t.Fatalf("recover = %v, want a panic naming the collapsed workspace", r)
+		}
+	}()
+
+	// Act
+	sidebar.CollapsedFolds(tabs)
+}
+
+// THE ROSTER AND A BOOT READ THE TAB BAR'S FOLDS ONE WAY: every reader of
+// Tabs for its folds goes through CollapsedFolds, so no site reads the
+// collapsed tabs by a rule of its own.
+func TestEveryReadOfTheTabBarsFoldsGoesThroughCollapsedFolds(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "tab.Withheld != wsm.WithheldCollapsed")
+
+	// Assert
+	if len(sites) != 1 || !strings.HasSuffix(sites[0], "taborder.go") {
+		t.Fatalf("sites = %+v, want CollapsedFolds alone to read a tab's collapse", sites)
+	}
 }
