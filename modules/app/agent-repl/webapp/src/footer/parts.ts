@@ -34,7 +34,8 @@ export function statusWords(armCase: string): string {
  * name would lie, say nothing without its status, or misspell a stage:
  *
  * - `FooterStatusClosing`'s `blocked` is also a whole STATUS elsewhere, so it
- *   draws its message's name, "close blocked".
+ *   draws its message's name, "close blocked", and its `waiting` (a standing
+ *   close request) is a whole status too, so it reads "waiting to close".
  * - A deploy's first and last stages draw "pre-deploy" and "post-deploy", as
  *   a deploy config names them, and a merge waiting on a workspace "waiting
  *   for" what it waits on.
@@ -59,6 +60,7 @@ export function statusCellWord(armCase: string, subCase?: string): string {
 /** The declared exceptions of statusCellWord, keyed by statusStepKey. */
 const ELEVATED_STEP_WORDS: ReadonlyMap<string, string> = new Map([
   [statusStepKey("closing", "blocked"), "close blocked"],
+  [statusStepKey("closing", "waiting"), "waiting to close"],
   [statusStepKey("merging", "awaitingFree"), "waiting for"],
   [statusStepKey("merging", "preDeploy"), "pre-deploy"],
   [statusStepKey("merging", "postDeploy"), "post-deploy"],

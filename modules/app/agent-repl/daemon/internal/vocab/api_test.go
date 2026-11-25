@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -734,20 +735,22 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 }
 
 // A VENDOR FAULT OPENS THE COMPOSER BY ITS COLOR (owner ruling, 2026-10-02),
-// so the one exception there was (`blocked · api_retrying`) is gone. The one
-// declared today is `agent_repl_fault · turn_died` (owner ruling, 2026-10-06):
-// the fault stands until the next turn starts, so a closed composer would make
-// it permanent.
-func TestTheTurnDiedFaultIsTheOneComposerOpenSubstatus(t *testing.T) {
+// so the one exception there was (`blocked · api_retrying`) is gone. Two are
+// declared today: `agent_repl_fault · turn_died` (owner ruling, 2026-10-06),
+// whose fault stands until the next turn starts, so a closed composer would
+// make it permanent; and `closing · waiting`, a standing close request, which
+// a prompt the user sends withdraws.
+func TestTheDeclaredComposerOpenSubstatuses(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
+	want := map[string][]string{"agent_repl_fault": {"turn_died"}, "closing": {"waiting"}}
 
 	// Act.
 	got := c.ComposerOpenSubstatuses
 
 	// Assert.
-	if len(got) != 1 || len(got["agent_repl_fault"]) != 1 || got["agent_repl_fault"][0] != "turn_died" {
-		t.Fatalf("composer_open_substatuses = %v, want exactly agent_repl_fault: [turn_died]", got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("composer_open_substatuses = %v, want exactly %v", got, want)
 	}
 }
 

@@ -457,6 +457,7 @@ describe("composerClosedFor", () => {
     ["a vendor that refused to start", "vendorFault", "vendorRejection", false],
     ["a call the vendor retries", "vendorFault", "apiRetrying", false],
     ["a close under way", "closing", "blocked", true],
+    ["a standing close waiting, which a prompt withdraws", "closing", "waiting", false],
     ["a turn that died with agent-repl's machinery", "agentReplFault", "turnDied", false],
     ["a red status", "working", undefined, false],
     ["a merge in flight, purple, holding its prompts", "merging", "testing", false],
@@ -473,9 +474,9 @@ describe("composerClosedFor", () => {
     expect(got).toBe(closed);
   });
 
-  it("declares the turn-died fault as its one composer-open exception (owner ruling 2026-10-06)", () => {
+  it("declares the turn-died fault (owner ruling 2026-10-06) and the standing close as its composer-open exceptions", () => {
     // Assert
-    expect(renderColors.composer_open_substatuses).toEqual({ agent_repl_fault: ["turn_died"] });
+    expect(renderColors.composer_open_substatuses).toEqual({ agent_repl_fault: ["turn_died"], closing: ["waiting"] });
   });
 });
 

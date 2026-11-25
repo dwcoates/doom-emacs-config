@@ -426,12 +426,18 @@
     "closes it. 'agent_repl_fault · turn_died' is the one declared today",
     "(owner ruling, 2026-10-06): the last turn died with agent-repl's own",
     "machinery, the fault stands until the next turn starts, and a closed",
-    "composer would leave nothing to start it with. An exception is only",
-    "ever declared here; a renderer never opens a closed color on its own."
+    "composer would leave nothing to start it with. 'closing · waiting' is",
+    "the other: a standing close request waits for its blockers to clear,",
+    "and a prompt the user sends withdraws it, so the workspace stays usable",
+    "and the composer open. An exception is only ever declared here; a",
+    "renderer never opens a closed color on its own."
   ],
   "composer_open_substatuses": {
     "agent_repl_fault": [
       "turn_died"
+    ],
+    "closing": [
+      "waiting"
     ]
   },
   "_topbar_connectivity_comment": [
