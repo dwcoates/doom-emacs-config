@@ -1315,11 +1315,11 @@ them. Each close goes through `health.CloseOnEdge` on the edge the kind's
 lifetime declares (`internal/health/lifetime.go`) and is recorded under
 `daemon.health.close_on_edge`; opens go under `daemon.deploy.fault`.
 
-A daemon-scoped `deploy_failed` fault stands on the TOPBAR's warning strip as
-well as on every footer (owner ruling, 2026-09-28): `health.FaultTopbarLine`
-names it (`deploy failed: <footer line>`), and the graph's fault sink
-(`faultSurfaces`) raises it through `topbar.RaiseDaemonWarning` on every
-strip, present and future, and retracts it when the fault closes.
+A daemon-scoped `deploy_failed` fault is LOUD as well as standing on every
+footer (owner ruling, 2026-09-28): `health.FaultLoudLine` names it
+(`deploy failed: <footer line>`), and the graph's fault sink (`faultSurfaces`)
+tells it to every Emacs as a standing loud fault, and retracts it when the
+fault closes.
 
 One deploy runs at a time (`already_deploying`); a landing that arrives while
 one runs is covered by ONE follow-up deploy. Every decision is a record under

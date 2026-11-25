@@ -6,7 +6,7 @@
   [-limit N|-all]` lists the
   workspaces the daemon's registry holds, OPEN OR CLOSED (including ones
   closed long ago that the roster no longer shows), each with its name,
-  branch, repository, its summary (the one-sentence task summary the
+  branch, repository, its short and long summaries (the short one-sentence summary the
   webapp's topbar draws as the workspace's title), when it was created and
   last active, whether it is open, closed or landed, its `createdBy` and,
   for a child, its `parent`, most recently active first. Each record also

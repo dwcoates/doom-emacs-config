@@ -177,8 +177,8 @@ source scan fails on any of their names.
 The daemon tells every Emacs its standing loud faults on the one
 daemon-level stream Emacs holds, `WatchDaemon`, as `faults_standing`
 (`agentrepl.v1.DaemonFaultsStanding`): the whole set, replayed to a
-resubscribing stream. "Loud" is exactly what the topbar's warning strip
-carries: a failed deploy, and a failed deploy's rollback.
+resubscribing stream. "Loud" is one rule (`health.FaultLoudLine`): a failed
+deploy, and a failed deploy's rollback.
 
 - `agent-repl-link--faults-standing` (`daemon-link.el`) surfaces each
   fault id ONCE: an ERROR record `elisp.link.daemon-fault` carrying the id,
