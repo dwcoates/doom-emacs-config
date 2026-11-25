@@ -368,8 +368,11 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "Agent finished in workspace: %s"
      "is the configured user-facing completion notification")
     ("spell.el" agent-repl--spell-guarded-word
+     "Spellcheck: %s did not answer for %S (%s); the word was left unchecked"
+     "tells the user the spell checker was too slow to check a word")
+    ("spell.el" agent-repl--spell-guarded-word
      "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
-     "tells the user the spell checker stopped answering and was reset")
+     "tells the user the spell checker had stopped and was reset")
     ("status.el" agent-repl-tabbar-apply-row-count
      "agent-repl: tab-bar set to %s on this frame"
      "confirms the interactive tab-bar layout command")

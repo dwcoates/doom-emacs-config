@@ -822,26 +822,34 @@ stub returns."
     (delete-process proc)
     (agent-repl-test-spell--with-accept calls t
       ;; Act
-      (should-error (agent-repl-test-spell--bounded proc) :type 'agent-repl-spell-no-reply)
+      (should-error (agent-repl-test-spell--bounded proc) :type 'agent-repl-spell-not-running)
       ;; Assert: the dead process is never waited on
       (should-not calls))))
 
+;; THE GUARD ON `flyspell-word'
+
 (defmacro agent-repl-test-spell--with-word-guard (result-form &rest body)
   "Run BODY at the word \"wrold\" with `flyspell-word' stubbed by RESULT-FORM.
-`flyspell-get-word' answers \"wrold\" (the real one needs a loaded
-dictionary), `ispell-kill-ispell' is stubbed to record into `killed', and the
-logging ladder records as the other cases' do."
+`ispell-process' is a live fake bound as `proc', `flyspell-get-word' answers
+\"wrold\" (the real one needs a loaded dictionary), `ispell-kill-ispell' is
+stubbed to record into `killed', and the logging ladder records as the other
+cases' do."
   (declare (indent 1))
   `(agent-repl-test-spell--with-logging
-     (let ((killed 0))
-       (cl-letf (((symbol-function 'agent-repl-test-spell--flyspell-word)
-                  (lambda (&rest _) ,result-form))
-                 ((symbol-function 'flyspell-get-word)
-                  (lambda (&rest _) (list "wrold" 1 6)))
-                 ((symbol-function 'ispell-kill-ispell)
-                  (lambda (&rest _) (setq killed (1+ killed)))))
-         (with-temp-buffer
-           ,@body)))))
+     (let* ((killed 0)
+            (proc (agent-repl-test-spell--fake-process))
+            (ispell-process proc)
+            (ispell-filter-continue nil))
+       (unwind-protect
+           (cl-letf (((symbol-function 'agent-repl-test-spell--flyspell-word)
+                      (lambda (&rest _) ,result-form))
+                     ((symbol-function 'flyspell-get-word)
+                      (lambda (&rest _) (list "wrold" 1 6)))
+                     ((symbol-function 'ispell-kill-ispell)
+                      (lambda (&rest _) (setq killed (1+ killed)))))
+             (with-temp-buffer
+               ,@body))
+         (delete-process proc)))))
 
 (ert-deftest agent-repl-test-spell-a-word-flyspell-checks-returns-its-answer ()
   (agent-repl-test-spell--with-word-guard 'checked
@@ -849,14 +857,23 @@ logging ladder records as the other cases' do."
     (let ((answer (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)))
       ;; Assert
       (should (eq answer 'checked))
-      (should (= killed 0)))))
+      (should (= killed 0))
+      (should (= (agent-repl--spell-owed-replies proc) 0)))))
 
-(ert-deftest agent-repl-test-spell-an-unanswered-word-resets-the-spell-process ()
+(ert-deftest agent-repl-test-spell-an-unanswered-word-keeps-the-spell-process ()
+  (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-no-reply '("no reply within 100 ms"))
+    ;; Act
+    (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)
+    ;; Assert: a slow reply is not a dead process
+    (should (= killed 0))
+    (should (process-live-p proc))))
+
+(ert-deftest agent-repl-test-spell-an-unanswered-word-is-owed-by-the-spell-process ()
   (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-no-reply '("no reply within 100 ms"))
     ;; Act
     (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)
     ;; Assert
-    (should (= killed 1))))
+    (should (= (agent-repl--spell-owed-replies proc) 1))))
 
 (ert-deftest agent-repl-test-spell-an-unanswered-word-is-recorded-at-error-naming-the-word ()
   (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-no-reply '("no reply within 100 ms"))
@@ -865,13 +882,141 @@ logging ladder records as the other cases' do."
     ;; Assert
     (let ((record (car (agent-repl-test-spell--records 'error))))
       (should (string-prefix-p "elisp.spell.no-reply" (nth 1 record)))
+      (should (string-match-p "outcome=kept" (nth 1 record)))
       (should (member "wrold" record))
+      (should (member (process-id proc) record))
       (should (member "no reply within 100 ms" record)))))
 
 (ert-deftest agent-repl-test-spell-an-unanswered-word-leaves-it-unchecked ()
   (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-no-reply '("no reply within 100 ms"))
     ;; Act / Assert
     (should-not (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word))))
+
+(ert-deftest agent-repl-test-spell-a-stopped-spell-process-is-reset ()
+  (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-not-running '("the spell process is not running"))
+    ;; Act
+    (let ((answer (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)))
+      ;; Assert
+      (should-not answer)
+      (should (= killed 1))
+      (should (= (agent-repl--spell-owed-replies proc) 0)))))
+
+(ert-deftest agent-repl-test-spell-a-stopped-spell-process-is-recorded-at-error-as-reset ()
+  (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-not-running '("the spell process is not running"))
+    ;; Act
+    (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)
+    ;; Assert
+    (let ((record (car (agent-repl-test-spell--records 'error))))
+      (should (string-match-p "outcome=reset" (nth 1 record)))
+      (should (member "the spell process is not running" record)))))
+
+;; THE OWED REPLY'S DRAIN
+
+(defmacro agent-repl-test-spell--with-drain (received &rest body)
+  "Run BODY over a fake spell process `proc' whose filter records into RECEIVED.
+Logging records as the other cases' do."
+  (declare (indent 1))
+  `(agent-repl-test-spell--with-logging
+     (let* ((,received nil)
+            (proc (agent-repl-test-spell--fake-process)))
+       (set-process-filter proc (lambda (_p output) (push output ,received)))
+       (unwind-protect
+           (progn ,@body)
+         (delete-process proc)))))
+
+(defun agent-repl-test-spell--deliver (proc &rest chunks)
+  "Hand each of CHUNKS to PROC's filter, as Emacs would when hunspell writes it."
+  (dolist (chunk chunks)
+    (funcall (process-filter proc) proc chunk)))
+
+(ert-deftest agent-repl-test-spell-a-drain-swallows-the-owed-reply-and-passes-the-next ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange
+    (agent-repl--spell-owe-reply proc "ws" t)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "& shouldnt 1 0: shouldn't\n\n*\n\n")
+    ;; Assert
+    (should (equal received '("*\n\n")))))
+
+(ert-deftest agent-repl-test-spell-a-drain-holds-a-reply-split-across-chunks ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange
+    (agent-repl--spell-owe-reply proc "ws" t)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "& shouldnt 1 0: sho" "uldn't\n" "\n*\n\n")
+    ;; Assert
+    (should (equal received '("*\n\n")))))
+
+(ert-deftest agent-repl-test-spell-a-drain-ends-on-the-blank-line-after-a-line-already-read ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange: the abandoned exchange read the reply's whole first line
+    (agent-repl--spell-owe-reply proc "ws" t)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "\n*\n\n")
+    ;; Assert
+    (should (equal received '("*\n\n")))))
+
+(ert-deftest agent-repl-test-spell-a-drain-finishes-a-line-the-exchange-read-half-of ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange: the abandoned exchange read part of the reply's first line
+    (agent-repl--spell-owe-reply proc "ws" nil)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "\n\n*\n\n")
+    ;; Assert
+    (should (equal received '("*\n\n")))))
+
+(ert-deftest agent-repl-test-spell-a-drain-swallows-every-owed-reply ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange
+    (agent-repl--spell-owe-reply proc "ws" t)
+    (agent-repl--spell-owe-reply proc "ws" t)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "& a 1 0: b\n\n" "*\n\n" "# c 0\n\n")
+    ;; Assert
+    (should (equal received '("# c 0\n\n")))))
+
+(ert-deftest agent-repl-test-spell-a-drain-passes-nothing-while-a-reply-is-owed ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange
+    (agent-repl--spell-owe-reply proc "ws" t)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "& shouldnt 1 0: shouldn't\n")
+    ;; Assert
+    (should-not received)
+    (should (= (agent-repl--spell-owed-replies proc) 1))))
+
+(ert-deftest agent-repl-test-spell-a-drained-process-passes-output-untouched ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange
+    (agent-repl--spell-owe-reply proc "ws" t)
+    (agent-repl-test-spell--deliver proc "*\n\n")
+    ;; Act
+    (agent-repl-test-spell--deliver proc "*\n" "\n")
+    ;; Assert
+    (should (equal (reverse received) '("*\n" "\n")))
+    (should (= (agent-repl--spell-owed-replies proc) 0))))
+
+(ert-deftest agent-repl-test-spell-a-drained-reply-is-recorded-naming-the-process ()
+  (agent-repl-test-spell--with-drain _received
+    ;; Arrange
+    (agent-repl--spell-owe-reply proc "ws" t)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "*\n\n")
+    ;; Assert
+    (let ((record (car (agent-repl-test-spell--records 'log))))
+      (should (string-prefix-p "elisp.spell.drained" (nth 1 record)))
+      (should (member (process-id proc) record)))))
+
+(ert-deftest agent-repl-test-spell-a-second-owed-reply-wraps-the-filter-once ()
+  (agent-repl-test-spell--with-drain received
+    ;; Arrange: owed, drained, then owed again
+    (agent-repl--spell-owe-reply proc "ws" t)
+    (agent-repl-test-spell--deliver proc "*\n\n")
+    (agent-repl--spell-owe-reply proc "ws" t)
+    ;; Act
+    (agent-repl-test-spell--deliver proc "*\n\n" "# c 0\n\n")
+    ;; Assert: one wrapper, so the new reply reaches the filter once
+    (should (equal received '("# c 0\n\n")))))
 
 (ert-deftest agent-repl-test-spell-the-guard-binds-the-word-for-the-exchange ()
   (agent-repl-test-spell--with-word-guard agent-repl--spell-exchange-word
