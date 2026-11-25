@@ -165,6 +165,14 @@ type Orchestrator interface {
 	// deploy skipped it and the hook is a script. A release of a repository
 	// that is not held is refused (not_held).
 	ReleaseDeploys(ctx context.Context, scope RepositoryScope) (DeployRelease, error)
+	// PauseProduction pauses the production checks of the repository SCOPE
+	// names: its undecided spans are dropped, a span brief still held for its
+	// production mediator is retired, and the mediator's running turn is
+	// interrupted (agentrepl.v1.UpdateProductionPause.pause).
+	PauseProduction(ctx context.Context, scope RepositoryScope) (ProductionPaused, error)
+	// ResumeProduction resumes them; the first landing after it starts them
+	// again (agentrepl.v1.UpdateProductionPause.resume).
+	ResumeProduction(ctx context.Context, scope RepositoryScope) error
 	// RollOutLanding is a deploy hook's ask for the rollout of what its deploy
 	// landed: registered on the running deploy LEDGER names, fired at its
 	// teardown, and answered true; with no ledger, started at once and

@@ -302,7 +302,7 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 	fields = withField(fields, "mediator", string(ws))
 	var closed wsm.TurnClose
 	if !c.Prompted() {
-		turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+		turn, marked, failed, err := o.submitProductionTurn(ctx, q, ws, brief, func(turn ids.TurnID) (bool, error) {
 			return o.deps.DB.MarkProductionCheckPrompted(ctx, q.key, c.Until, o.deps.Now(), turn)
 		})
 		switch {
@@ -335,9 +335,14 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 			}
 		}
 		o.deps.Log.Global().Info(opProduction, "the production mediator was told of the span before; its turn is reattached", withField(withField(fields, "turn", string(c.Turn)), "resumed", c.Resumed))
-		closed, err = o.reattachTurn(ctx, ws, fields, c.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION)
+		var ended bool
+		closed, ended, err = o.reattachProductionTurn(ctx, q, ws, c, told, fields)
 		if err != nil {
 			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's reattached turn could not be awaited; the span stays due"), err)
+			return
+		}
+		if !ended {
+			o.deps.Log.Global().Info(opProduction, "the span was decided, or dropped by a pause, before its turn was reattached; this round ends", fields)
 			return
 		}
 	}
@@ -356,7 +361,15 @@ func (o *orchestrator) productionTurnEnded(ctx context.Context, q checkedQueue, 
 		return
 	}
 	if now == nil || !now.Until.Equal(told.Until) {
-		o.deps.Log.Global().Info(opProduction, "the production mediator's turn ended with its span decided", fields)
+		pause, err := o.deps.DB.ProductionPauseOf(ctx, q.key)
+		switch {
+		case err != nil:
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not read whether the production checks are paused at the mediator's turn end"), err)
+		case pause.Paused:
+			o.deps.Log.Global().Info(opProduction, "the production mediator's turn ended under a pause; its span was dropped, never reviewed", fields)
+		default:
+			o.deps.Log.Global().Info(opProduction, "the production mediator's turn ended with its span decided", fields)
+		}
 		return
 	}
 	if closed == wsm.CloseKilled {
@@ -393,7 +406,7 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the undecided production mediator's resuming brief could not be composed; the span stays due"), err)
 		return
 	}
-	turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+	turn, marked, failed, err := o.submitProductionTurn(ctx, q, ws, brief, func(turn ids.TurnID) (bool, error) {
 		return o.deps.DB.MarkProductionCheckResumed(ctx, q.key, c.Until, turn)
 	})
 	fields = withField(fields, "turn", string(turn))
@@ -416,6 +429,44 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 		return
 	}
 	o.productionTurnEnded(ctx, q, ws, c, closed, fields)
+}
+
+// submitProductionTurn is submitMarkedTurn for a production brief, under Q's
+// production lock, so a pause either drops the span before MARK reads it or
+// finds the brief already submitted and retires it (productionpause.go).
+func (o *orchestrator) submitProductionTurn(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, brief string, mark func(ids.TurnID) (bool, error)) (turn ids.TurnID, marked bool, failed turnFailure, err error) {
+	o.underProductionLock(q.key, func() {
+		turn, marked, failed, err = o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, mark)
+	})
+	return turn, marked, failed, err
+}
+
+// reattachProductionTurn brings span C's told turn on again, under Q's
+// production lock and only while C is still the span owed, then awaits its
+// end. It answers false, bringing nothing on, for a span a pause dropped.
+func (o *orchestrator) reattachProductionTurn(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, c wsm.ProductionCheck, told string, fields dlog.Context) (wsm.TurnClose, bool, error) {
+	var (
+		place  turnPlace
+		closed wsm.TurnClose
+		owed   bool
+		err    error
+	)
+	o.underProductionLock(q.key, func() {
+		var now *wsm.ProductionCheck
+		if now, err = o.deps.DB.ProductionCheckOf(ctx, q.key); err != nil || now == nil || !now.Until.Equal(c.Until) {
+			return
+		}
+		owed = true
+		place, closed, err = o.bringTurnOn(ctx, ws, fields, c.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION)
+	})
+	if err != nil || !owed {
+		return wsm.CloseFailed, false, err
+	}
+	if place == turnEnded {
+		return closed, true, nil
+	}
+	closed, err = o.deps.AwaitTurnEnd(ctx, ws, c.Turn)
+	return closed, true, err
 }
 
 // ProductionSitePath is where the site file of the span ending UNTIL is
@@ -742,6 +793,9 @@ func (o *orchestrator) toldProductionCheck(ctx context.Context, ws ids.Workspace
 		o.deps.Log.Global().Warn(opProduction, "refused a production decision in a repository that checks its production no more", withField(fields, "repo", string(repo)))
 		return checkedQueue{}, wsm.ProductionCheck{}, refuse(ArmNoProductionCheckOwed, ws, "the repository checks its production no more")
 	}
+	if err := o.refuseWhilePaused(ctx, q.key, ws, "decide", fields); err != nil {
+		return checkedQueue{}, wsm.ProductionCheck{}, err
+	}
 	c, err := o.deps.DB.ProductionCheckOf(ctx, q.key)
 	if err != nil {
 		o.deps.Log.Global().Error(opProduction, "could not read the production check to decide", withField(fields, "error", err.Error()))
@@ -904,6 +958,9 @@ func (o *orchestrator) FoldProduction(ctx context.Context, ws, folded, surviving
 	if !isMediator {
 		o.deps.Log.Global().Warn(opProduction, "refused a fold from a workspace that is no repository's production mediator", fields)
 		return refuse(ArmNotProductionMediator, ws, "this workspace is no repository's production mediator")
+	}
+	if err := o.refuseWhilePaused(ctx, repo, ws, "fold", fields); err != nil {
+		return err
 	}
 	for _, side := range []ids.WorkspaceID{folded, surviving} {
 		child, found, err := o.deps.DB.ProductionChildOf(ctx, side)

@@ -201,6 +201,10 @@ type orchestrator struct {
 	// an eviction beside it) never both act on one entry: the second reads
 	// the entry the first already took off (leftFirst).
 	dropLocks keyedmutex.Set[ids.WorkspaceID]
+	// productionLocks serialize each repository's span briefs with its
+	// production pause (productionpause.go), so no brief is told after a
+	// pause.
+	productionLocks keyedmutex.Set[wsm.RepoKey]
 	// requestingTurns is the turn in flight when each workspace's merge was
 	// asked for, until TakeRequestingTurn is asked about it.
 	requestingTurns map[ids.WorkspaceID]ids.TurnID
