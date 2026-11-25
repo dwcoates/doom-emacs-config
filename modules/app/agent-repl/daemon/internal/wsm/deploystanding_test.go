@@ -239,6 +239,44 @@ func TestRecordMediationEnding(t *testing.T) {
 	}
 }
 
+func TestOwedMediationStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		owe       bool
+		ending    DeployEnding
+		wantStart time.Time
+		wantFound bool
+	}{
+		{name: "an owed check with no ending answers its deploy's start", owe: true, wantStart: instant, wantFound: true},
+		{name: "an owed check whose deploy ended answers not found", owe: true, ending: DeployFinished},
+		{name: "a repository that owes no check answers not found"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx := context.Background()
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			if tt.owe {
+				s, repo = owingQueue(t)
+			}
+			if tt.ending != "" {
+				if _, err := s.RecordMediationEnding(ctx, repo, instant, tt.ending); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			start, found, err := s.OwedMediationStart(ctx, repo)
+
+			// Assert
+			if err != nil || found != tt.wantFound || !start.Equal(tt.wantStart) {
+				t.Fatalf("OwedMediationStart = (%v, %v, %v); want (%v, %v, nil)", start, found, err, tt.wantStart, tt.wantFound)
+			}
+		})
+	}
+}
+
 func TestANewerDeployForgetsTheOlderOnesEnding(t *testing.T) {
 	// Arrange
 	s, repo := owingQueue(t)

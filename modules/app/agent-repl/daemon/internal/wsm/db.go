@@ -923,6 +923,9 @@ type DB interface {
 	EndProductionChild(ctx context.Context, ws WorkspaceID, how ProductionChildEnding, at time.Time) (bool, error)
 	// RecordMediationEnding records how the checked deploy ended on its check.
 	RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error)
+	// OwedMediationStart answers the start of the deploy whose check is owed
+	// and has no ending recorded yet (deploystanding.go).
+	OwedMediationStart(ctx context.Context, repo RepoKey) (time.Time, bool, error)
 	// OweCompaction records that a workspace's next start compacts its conversation.
 	OweCompaction(ctx context.Context, ws WorkspaceID) (bool, error)
 	// BeginRemediationFinish records a remediation workspace's finish at its
