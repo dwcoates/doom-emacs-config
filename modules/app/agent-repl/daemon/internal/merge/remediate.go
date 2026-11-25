@@ -503,16 +503,9 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 // rebase rather than aborting it as a cut run's leftover
 // (settleStandingRebase).
 func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
-	lease, held, err := o.deps.DB.Lease(ctx, ws)
+	merged, err := o.returnedLease(ctx, repo, ws)
 	if err != nil {
-		return fmt.Errorf("merge: read the lease of the remediated merge of %s: %w", ws, err)
-	}
-	// THE MERGE LEASE IS THE STORE'S TO JUDGE: one that stepped aside from
-	// the head holds it, one that stepped aside from its waiting place holds
-	// none, and the store refuses the return when the two disagree.
-	var merged wsm.LeaseID
-	if held && lease.Holder == wsm.HolderMerge {
-		merged = lease.ID
+		return err
 	}
 	o.mu.Lock()
 	rem := o.remediating[ws]
@@ -543,6 +536,34 @@ func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID,
 	}
 	o.kick(repo)
 	return nil
+}
+
+// returnedLease is the merge lease WS's return to REPO's line gives up, as
+// the repair its entry stepped aside for says. A merge that stepped aside
+// from the head gives up the merge lease it holds; one that stepped aside
+// from its waiting place for the resolving-conflicts slot holds none of its
+// own, and gives up none even when its workspace is held by a merge lease
+// meanwhile, because that lease is another run's (2026-11-25: a resolving
+// slot holder whose workspace another run held returned with that run's
+// lease, the store refused the write, and the merge stayed out of line
+// holding its slot until the next boot). The store still judges the lease
+// passed against the entry's aside, refusing a return the two disagree on.
+func (o *orchestrator) returnedLease(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) (wsm.LeaseID, error) {
+	entry, err := o.entryOf(ctx, repo, ws)
+	if err != nil {
+		return "", fmt.Errorf("merge: read the entry of the remediated merge of %s: %w", ws, err)
+	}
+	if entry.Aside == wsm.MergeAsideWaitingConflicts {
+		return "", nil
+	}
+	lease, held, err := o.deps.DB.Lease(ctx, ws)
+	if err != nil {
+		return "", fmt.Errorf("merge: read the lease of the remediated merge of %s: %w", ws, err)
+	}
+	if held && lease.Holder == wsm.HolderMerge {
+		return lease.ID, nil
+	}
+	return "", nil
 }
 
 // drawBackInLine settles the repairing tab of WS's bubble -- "fixing tests" or

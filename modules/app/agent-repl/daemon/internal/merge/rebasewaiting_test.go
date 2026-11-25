@@ -292,6 +292,44 @@ func TestABusyResolvingSlotHolderReturnsToTheLineAndSaysSo(t *testing.T) {
 	}
 }
 
+func TestAResolvingSlotHolderWithAnotherRunReturnsToTheLineWithoutThatRunsLease(t *testing.T) {
+	// Arrange: C holds the resolving-conflicts slot while another run of it
+	// in this daemon holds a merge lease on its workspace (2026-11-25).
+	w := newWaitingWorld(t, "ws-c")
+	w.git.conflict("w1", "a1", "x.go")
+	w.land(t)
+	w.awaitPass(t)
+	other, err := w.h.db.AcquireLease(context.Background(), "ws-c", wsm.HolderMerge, wsm.PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	runCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	if !w.h.o.registerBackground(w.h.o.newBackgroundRun(runCtx, cancel, w.h.repoKey(), "ws-c", 0)) {
+		t.Fatal("the other run of C could not register")
+	}
+
+	// Act
+	w.h.o.resolveWaiting(context.Background(), w.h.repoKey(), "ws-c")
+
+	// Assert
+	if got := w.entryOf(t, "ws-c"); got.State != wsm.MergeQueued || got.Aside != wsm.MergeAsideNone {
+		t.Fatalf("C = %+v, want it back in line waiting", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "has another run in this daemon; it returns to the line") {
+		t.Fatal("the return was not recorded")
+	}
+	if w.recorded("error", "daemon.merge.rebase_waiting", "could not return the merge to the line") {
+		t.Fatal("the return was refused")
+	}
+	w.h.db.mu.Lock()
+	held, ok := w.h.db.leases["ws-c"]
+	w.h.db.mu.Unlock()
+	if !ok || held.ID != other.ID {
+		t.Fatalf("C's workspace holds %+v (held %v), want the other run's lease %s untouched", held, ok, other.ID)
+	}
+}
+
 func TestAConflictedWaitingMergeWhoseStepAsideFailsKeepsItsPlaceAndSaysSo(t *testing.T) {
 	// Arrange: C's commit conflicts; the store refuses its step aside.
 	w := newWaitingWorld(t, "ws-c")

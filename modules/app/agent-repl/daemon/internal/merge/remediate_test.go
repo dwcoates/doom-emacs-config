@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -981,6 +982,63 @@ func TestAsideReasonOf(t *testing.T) {
 			// Assert
 			if (err != nil) != tc.wantErr || got != tc.want {
 				t.Fatalf("asideReasonOf(%q) = (%v, %v), want (%v, error %v)", tc.step, got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestReturnedLease(t *testing.T) {
+	const own = wsm.LeaseID("lease-own")
+	cases := []struct {
+		name    string
+		queued  bool
+		aside   wsm.MergeAside
+		lease   *wsm.Lease
+		readErr error
+		want    wsm.LeaseID
+		wantErr string
+	}{
+		{name: "a test step aside gives up its merge lease", queued: true, aside: wsm.MergeAsideTests,
+			lease: &wsm.Lease{ID: own, Holder: wsm.HolderMerge}, want: own},
+		{name: "a conflict step aside gives up its merge lease", queued: true, aside: wsm.MergeAsideConflicts,
+			lease: &wsm.Lease{ID: own, Holder: wsm.HolderMerge}, want: own},
+		{name: "a head step aside gives up no other holder's lease", queued: true, aside: wsm.MergeAsideTests,
+			lease: &wsm.Lease{ID: own, Holder: wsm.HolderRestart}},
+		{name: "a head step aside holding no lease gives up none", queued: true, aside: wsm.MergeAsideTests},
+		{name: "a waiting conflict gives up another run's merge lease", queued: true, aside: wsm.MergeAsideWaitingConflicts,
+			lease: &wsm.Lease{ID: own, Holder: wsm.HolderMerge}},
+		{name: "a waiting conflict reads no lease", queued: true, aside: wsm.MergeAsideWaitingConflicts,
+			readErr: errors.New("never read")},
+		{name: "an unreadable lease is an error", queued: true, aside: wsm.MergeAsideTests,
+			readErr: errors.New("the store is unwell"), wantErr: "read the lease of the remediated merge"},
+		{name: "a missing entry is an error", wantErr: "read the entry of the remediated merge"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tc.queued {
+				h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Workspace: theWorkspace, State: wsm.MergeRemediating, Aside: tc.aside}}
+			}
+			if tc.lease != nil {
+				lease := *tc.lease
+				lease.Workspace = theWorkspace
+				h.db.leases[theWorkspace] = lease
+			}
+			h.db.leaseReadErr = tc.readErr
+
+			// Act
+			got, err := h.o.returnedLease(context.Background(), h.repoKey(), theWorkspace)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("returnedLease err = %v, want one saying %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("returnedLease = (%q, %v), want (%q, nil)", got, err, tc.want)
 			}
 		})
 	}
