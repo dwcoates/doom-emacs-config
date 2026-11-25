@@ -77,7 +77,7 @@ func sayCloseStands(ws string, waits *agentreplv1.WorkspaceCloseWaits) string {
 		on = append(on, b.GetSummary())
 	}
 	if f := waits.GetOpenChildren(); f != nil {
-		on = append(on, fmt.Sprintf("%d open children and %d open workspaces landing into it", len(f.GetChildren()), len(f.GetLandingInto())))
+		on = append(on, fmt.Sprintf("%d open children and %d open workspaces landing into it", len(f.Children), len(f.LandingInto)))
 	}
 	return fmt.Sprintf("%s's close now stands, waiting on %s; agent-repl closes %s once nothing blocks it, unless it is withdrawn first with `agent-repld workspace close %s -cancel` (any prompt the user sends it withdraws it too)",
 		ws, strings.Join(on, "; and "), ws, ws)

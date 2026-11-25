@@ -1590,9 +1590,10 @@ the ordinary open path is what brings it up next."
 
 (defun agent-repl-wire-decode-close-workspace-success (json)
   "Decode CloseWorkspaceSuccess from JSON into (:outcome (:arm :closed)).
-`closes_when_turn_ends\' is not decoded: it answers only a workspace
-closing itself mid-turn, and every close the editor sends is the user\='s,
-so one answering the editor is a breach."
+`closes_when_turn_ends\' and `stands\' are not decoded: the first answers
+only a workspace closing itself mid-turn, the second only a close that asked
+to stand, and every close the editor sends is the user\='s and never asks
+to stand, so either answering the editor is a breach."
   (let ((message "CloseWorkspaceSuccess"))
     (agent-repl-wire-verbs--check-keys message json '(closed))
     (list :outcome

@@ -524,10 +524,30 @@ func TestABuildReportedBeforeTheRolloutExistsIsRecordedNotDropped(t *testing.T) 
 	t.Fatalf("records = %+v, want the unbound report at ERROR naming the build", log.Records())
 }
 
+// fakeFellFree records each workspace the freeness edge told the standing
+// closes of.
+type fakeFellFree struct{ freed []ids.WorkspaceID }
+
+func (f *fakeFellFree) FellFree(ws ids.WorkspaceID) { f.freed = append(f.freed, ws) }
+
+func TestTheFreenessEdgeReachesTheStandingCloses(t *testing.T) {
+	// Arrange
+	closes := &fakeFellFree{}
+	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: &fakeCaches{}, standingCloses: closes, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.OnFree("ws-1", true)
+
+	// Assert
+	if !slices.Equal(closes.freed, []ids.WorkspaceID{"ws-1"}) {
+		t.Fatalf("standing closes told %v, want [ws-1]", closes.freed)
+	}
+}
+
 func TestTheFreenessEdgeReachesTheQueue(t *testing.T) {
 	// Arrange
 	queue := &fakeFreeQueue{}
-	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: queue, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.OnFree("ws-1", true)
@@ -541,7 +561,7 @@ func TestTheFreenessEdgeReachesTheQueue(t *testing.T) {
 func TestTheDepartureEdgeReachesTheQueueNamingItsWatcher(t *testing.T) {
 	// Arrange
 	queue := &fakeFreeQueue{}
-	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: queue, log: dlog.NewTestLogger()}
 	watcher := &departingWatcher{}
 	departure := sessionwatcher.Departure{Ordered: false, Cause: sessionwatcher.DepartureLinkDead}
 
@@ -561,7 +581,7 @@ func TestTheDepartureEdgeReachesTheQueueNamingItsWatcher(t *testing.T) {
 func TestTheTurnsAnAdoptionFoundEndedUnobservedReachTheQueue(t *testing.T) {
 	// Arrange
 	queue := &fakeFreeQueue{}
-	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: queue, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.OnTurnsEndedUnobserved("ws-1", []ids.TurnID{"turn-1", "turn-2"})
@@ -575,7 +595,7 @@ func TestTheTurnsAnAdoptionFoundEndedUnobservedReachTheQueue(t *testing.T) {
 func TestAVendorStartedTurnTheWatcherAdoptedReachesTheQueue(t *testing.T) {
 	// Arrange
 	queue := &fakeFreeQueue{}
-	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: queue, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.OnTurnAdopted("ws-1", sessionwatcher.AdoptedTurn{Turn: "turn-v", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED})
@@ -860,7 +880,7 @@ func (q *fakeFreeQueue) ReleaseReconnectHolds(ws ids.WorkspaceID) {
 func TestSessionUpReleasesTheQueuesReconnectHolds(t *testing.T) {
 	// Arrange
 	queue := &fakeFreeQueue{}
-	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: queue, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.SessionUp("ws-1")
@@ -903,7 +923,7 @@ func TestALinkEdgeReleasesTheQueuesReconnectHoldsOnlyWhenItComesBack(t *testing.
 			// Arrange
 			queue := &releaseQueue{released: make(chan ids.WorkspaceID, 4)}
 			var ran []string
-			sink := &lifecycleSink{queue: queue, relay: &relayForwarder{}, log: dlog.NewTestLogger(),
+			sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: queue, relay: &relayForwarder{}, log: dlog.NewTestLogger(),
 				async: func(f func()) { ran = append(ran, "off the caller"); f() }}
 
 			// Act
@@ -961,7 +981,7 @@ func (c *fakeCaches) SessionFree(ws ids.WorkspaceID, workEnded bool) {
 func TestOnFreeTellsTheCacheKeeper(t *testing.T) {
 	// Arrange
 	caches := &fakeCaches{}
-	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: caches, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: caches, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.OnFree("ws-1", true)
@@ -977,7 +997,7 @@ func TestOnFreeTellsTheCacheKeeperWhetherWorkEnded(t *testing.T) {
 		t.Run(fmt.Sprint(workEnded), func(t *testing.T) {
 			// Arrange
 			caches := &fakeCaches{}
-			sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: caches, log: dlog.NewTestLogger()}
+			sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: caches, log: dlog.NewTestLogger()}
 
 			// Act
 			sink.OnFree("ws-1", workEnded)
@@ -993,7 +1013,7 @@ func TestOnFreeTellsTheCacheKeeperWhetherWorkEnded(t *testing.T) {
 func TestSessionUpTellsTheCacheKeeper(t *testing.T) {
 	// Arrange
 	caches := &fakeCaches{}
-	sink := &lifecycleSink{queue: &fakeFreeQueue{}, caches: caches, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: &fakeFreeQueue{}, caches: caches, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.SessionUp("ws-1")
@@ -1007,7 +1027,7 @@ func TestSessionUpTellsTheCacheKeeper(t *testing.T) {
 func TestSessionUpBeforeTheCacheKeeperIsWiredIsRecordedAtError(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	sink := &lifecycleSink{queue: &fakeFreeQueue{}, log: log}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: &fakeFreeQueue{}, log: log}
 
 	// Act
 	sink.SessionUp("ws-1")
@@ -1086,7 +1106,7 @@ func (f *fakeRetrier) RetryWithheld(ws ids.WorkspaceID) { f.retried = append(f.r
 func TestTheFreenessEdgeRetriesADeferredStandDown(t *testing.T) {
 	// Arrange
 	retrier := &fakeRetrier{}
-	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: retrier, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: &fakeFreeQueue{}, standDowns: retrier, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.OnFree("ws-1", true)
@@ -1100,7 +1120,7 @@ func TestTheFreenessEdgeRetriesADeferredStandDown(t *testing.T) {
 func TestASessionComingUpRetriesADeferredStandDown(t *testing.T) {
 	// Arrange
 	retrier := &fakeRetrier{}
-	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: retrier, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: &fakeFreeQueue{}, standDowns: retrier, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.SessionUp("ws-1")
@@ -1114,7 +1134,7 @@ func TestASessionComingUpRetriesADeferredStandDown(t *testing.T) {
 func TestAnEdgeBeforeTheStandDownsAreWiredIsAnError(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	sink := &lifecycleSink{queue: &fakeFreeQueue{}, log: log}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: &fakeFreeQueue{}, log: log}
 
 	// Act
 	sink.OnFree("ws-1", true)
@@ -1146,7 +1166,7 @@ func (o *turnEndOrder) turnEnded(ws ids.WorkspaceID) {
 func TestATurnsEndReachesTheQueueAndThenTheDeployChecks(t *testing.T) {
 	// Arrange
 	order := &turnEndOrder{}
-	sink := &lifecycleSink{queue: order, mediation: order, log: dlog.NewTestLogger()}
+	sink := &lifecycleSink{standingCloses: &fakeFellFree{}, queue: order, mediation: order, log: dlog.NewTestLogger()}
 
 	// Act
 	sink.OnTurnEnded("ws-1", "turn-1", wsm.CloseCompleted)
