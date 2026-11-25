@@ -45,7 +45,9 @@
   (append agent-repl-page-report-load-reasons '(held-before-reasons))
   "Every reason a held page may carry: a load reason, or `held-before-reasons',
 a page a running Emacs held before it kept a reason with each page
-\(`agent-repl--webhost-migrate-page-entries').  It is never a load's.")
+\(`agent-repl--webhost-migrate-page-entries') or held under a reason this
+build no longer names (`agent-repl-webhost-page-reason').  It is never a
+load's.")
 
 (defconst agent-repl-page-report-unload-reasons
   '(deallocated detached released)

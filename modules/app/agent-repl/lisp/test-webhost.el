@@ -719,6 +719,51 @@ streams with no reason (elisp.page-report.held-without-reason)."
     ;; Assert
     (should-not (agent-repl-webhost-page-reason "alpha"))))
 
+;;;; ---- A stored reason the running build no longer names ----
+
+(ert-deftest agent-repl-test-wh-a-stored-reason-the-build-names-is-kept ()
+  "A held page's stored reason that the running build names is answered as stored."
+  (agent-repl-test-wh--with-host
+    (let ((logged nil))
+      ;; Arrange
+      (puthash "id-alpha" (list :url "http://ws-alpha.localhost:1/" :why 'slot) agent-repl--webhost-pages)
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
+        ;; Act
+        (should (eq (agent-repl-webhost-page-reason "alpha") 'slot)))
+      ;; Assert
+      (should (eq (plist-get (gethash "id-alpha" agent-repl--webhost-pages) :why) 'slot))
+      (should-not (seq-some (lambda (text) (string-search "page-reason-retired" text)) logged)))))
+
+(ert-deftest agent-repl-test-wh-a-stored-reason-the-build-no-longer-names-is-retired ()
+  "A held page whose stored reason the running build no longer names is held-before-reasons.
+2026-11-25 12:33: a page held as `awake' before the rename to `allocated'
+was restated under `awake' and breached the page-state contract."
+  (agent-repl-test-wh--with-host
+    ;; Arrange
+    (puthash "id-alpha" (list :url "http://ws-alpha.localhost:1/" :why 'retired-reason) agent-repl--webhost-pages)
+    ;; Act
+    (let ((why (agent-repl-webhost-page-reason "alpha")))
+      ;; Assert
+      (should (eq why 'held-before-reasons))
+      (should (equal (gethash "id-alpha" agent-repl--webhost-pages)
+                     '(:url "http://ws-alpha.localhost:1/" :why held-before-reasons))))))
+
+(ert-deftest agent-repl-test-wh-retiring-a-stored-reason-records-it-at-info ()
+  "Retiring a stored reason records one INFO naming the workspace and the retired reason."
+  (agent-repl-test-wh--with-host
+    (let ((logged nil))
+      ;; Arrange
+      (puthash "id-alpha" (list :url "http://ws-alpha.localhost:1/" :why 'retired-reason) agent-repl--webhost-pages)
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
+        ;; Act
+        (agent-repl-webhost-page-reason "alpha")
+        (agent-repl-webhost-page-reason "alpha"))
+      ;; Assert
+      (should (equal (seq-count (lambda (text)
+                                  (string-search "page-reason-retired ws=alpha id=id-alpha why=retired-reason" text))
+                                logged)
+                     1)))))
+
 (ert-deftest agent-repl-test-wh-reloading-a-page-not-held-is-an-error ()
   "A reload of a page the host does not hold is a defect: ERROR, signalled, nothing held."
   (agent-repl-test-wh--with-host
@@ -803,6 +848,18 @@ A running Emacs hot-loads the code over its own pages; no ERROR is recorded."
       ;; Assert
       (should (seq-some (lambda (text) (string-search "page-entry-converted id=id-alpha why=held-before-reasons" text))
                         logged)))))
+
+(ert-deftest agent-repl-test-wh-an-entry-converted-with-no-reason-reads-held-before-reasons ()
+  "An old entry with no reason, converted on load, still reads `held-before-reasons', not retired."
+  (agent-repl-test-wh--with-old-entries '(("id-alpha" . "http://ws-alpha.localhost:1/")) nil nil
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (ws) (list :id (concat "id-" ws))))
+                ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
+        ;; Act
+        (agent-repl--webhost-migrate-page-entries)
+        ;; Assert
+        (should (eq (agent-repl-webhost-page-reason "alpha") 'held-before-reasons)))
+      (should-not (seq-some (lambda (text) (string-search "page-reason-retired" text)) logged)))))
 
 (ert-deftest agent-repl-test-wh-ensuring-a-page-asks-the-host ()
   "The host is told to hold the page."

@@ -1653,3 +1653,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-24 deploy-mediator (landed in queue bypass mode): sidebar: a broken deploy hold (a merge admitted while a landed merge still deploying holds the head) is recorded once when the queue is taken, not on every roster render
 - 2026-11-24 deploy-mediator (landed in queue bypass mode): deploy intake: every window read records its duration against its bound, so the 3s bound that fired during a handover's boot wedge is resized from measured handover-time reads
 - 2026-11-24 deploy-mediator (landed in queue bypass mode): desktopnotify: a banner read aloud is bounded by its rendered audio's length, not a whitespace word count, and a bound passing is recorded as such
+- 2026-11-25 deploy-mediator: webhost: a held page whose stored load reason the running build no longer names is restated as held-before-reasons after a reload, instead of breaching the page-state contract

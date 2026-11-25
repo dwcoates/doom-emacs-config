@@ -75,6 +75,10 @@
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 
+;; The reasons a held page may carry are page-report.el's, which loads after
+;; this file; they are read only when a page's reason is asked for.
+(defvar agent-repl-page-report-held-reasons)
+
 (defvar xwidget-webkit-buffer-name-format)
 
 (defconst agent-repl-webhost-buffer-name " *agent-webview-host*"
@@ -807,9 +811,26 @@ cause, so the teardown that asked stays visible."
     (and id (gethash id agent-repl--webhost-pages) t)))
 
 (defun agent-repl-webhost-page-reason (ws)
-  "The reason WS's held page was loaded for, or nil when no page is held."
-  (let ((id (agent-repl--webhost-id ws)))
-    (and id (plist-get (gethash id agent-repl--webhost-pages) :why))))
+  "The reason WS's held page was loaded for, or nil when no page is held.
+A STORED REASON THE RUNNING BUILD NO LONGER NAMES is a page held before the
+current reasons existed: a running Emacs hot-loads new code over the pages
+it holds, and a landing that renames a reason leaves each page with the old
+name (2026-11-25 12:33, a restatement of a page held as `awake' after the
+rename to `allocated' breached the page-state contract).  Such a page is
+rewritten to `held-before-reasons', once, and recorded at INFO.  The reasons
+the build names are page-report.el's (`agent-repl-page-report-held-reasons');
+they are read here, when the reason is asked for, so the order the two files
+load in during a reload does not matter."
+  (let* ((id (agent-repl--webhost-id ws))
+         (page (and id (gethash id agent-repl--webhost-pages)))
+         (why (plist-get page :why)))
+    (when (and why (not (memq why agent-repl-page-report-held-reasons)))
+      (puthash id (plist-put (copy-sequence page) :why 'held-before-reasons)
+               agent-repl--webhost-pages)
+      (agent-repl--info ws "elisp.webhost.page-reason-retired ws={ws} id={id} why={why}"
+                        :ws ws :id id :why why)
+      (setq why 'held-before-reasons))
+    why))
 
 (defun agent-repl-webhost-reload-page (ws)
   "Load WS's page again, at its URL now: re-point it when the URL moved

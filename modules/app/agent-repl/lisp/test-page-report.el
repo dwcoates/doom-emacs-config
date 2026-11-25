@@ -145,4 +145,27 @@
     (should (seq-some (lambda (text) (string-search "held-without-reason ws=alpha" text))
                       agent-repl-test-pr--errors))))
 
+;;;; ---- A stored reason the running build no longer names ----
+
+(ert-deftest agent-repl-test-pr-a-page-held-under-a-retired-reason-is-restated-held-before-reasons ()
+  "A page whose stored reason the running build no longer names restates `held-before-reasons'.
+2026-11-25 12:33: a page held as `awake' before the rename to `allocated' was
+restated under `awake', and the encoder signalled a contract breach inside the
+host stream's open handler.  The web host's own table answers here, unstubbed."
+  (agent-repl-test--with-clean-state
+    (let ((sent nil)
+          (errors nil))
+      ;; Arrange
+      (puthash "id-alpha" (list :url "http://ws-alpha.localhost:1/" :why 'retired-reason) agent-repl--webhost-pages)
+      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (ws) (list :id (concat "id-" ws))))
+                ((symbol-function 'agent-repl-host--send-subject-verb)
+                 (lambda (ws _op _rpc _on-success _on-not-sent &optional extra)
+                   (push (list ws (plist-get extra :report)) sent)))
+                ((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
+        ;; Act
+        (agent-repl-page-report-restate "alpha"))
+      ;; Assert
+      (should (equal sent '(("alpha" (:arm :held :value :held-before-reasons)))))
+      (should-not errors))))
+
 ;;; test-page-report.el ends here
