@@ -361,6 +361,15 @@ func (c *controller) ExpectedParticipants(ws ids.WorkspaceID) int {
 	return e.expected.Count()
 }
 
+// RendezvousArmed reports whether this daemon armed an adopt rendezvous for
+// WS as the joining daemon (Controller.RendezvousArmed).
+func (c *controller) RendezvousArmed(ws ids.WorkspaceID) bool {
+	c.mu.Lock()
+	defer c.unlock()
+	e, ok := c.rendezvous[ws]
+	return ok && !e.servedHere
+}
+
 // logTransition records one workspace-scoped rollout state change. The
 // before/after pair makes the in-memory ledger reconstructible from a trace.
 func (c *controller) logTransition(operation string, ws ids.WorkspaceID, state string, before, after any, extra dlog.Context) {

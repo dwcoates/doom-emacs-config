@@ -1829,7 +1829,12 @@ type fakeRollout struct {
 	adopting func()
 	// awaitAdopted, when set, answers AwaitAdopted; unset, it answers owned.
 	awaitAdopted func(ws ids.WorkspaceID) (rollout.Standing, error)
+	// rendezvousArmed answers RendezvousArmed.
+	rendezvousArmed bool
 }
+
+// RendezvousArmed answers rendezvousArmed for every workspace.
+func (f *fakeRollout) RendezvousArmed(ids.WorkspaceID) bool { return f.rendezvousArmed }
 
 func (f *fakeRollout) AwaitAdopted(_ context.Context, ws ids.WorkspaceID) (rollout.Standing, error) {
 	if f.awaitAdopted == nil {

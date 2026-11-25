@@ -372,19 +372,30 @@ func TestAPageCallIsServedByTheDaemonItsAttachmentNames(t *testing.T) {
 func TestAnAdoptCallGoesWhereItsWorkspacesRendezvousIs(t *testing.T) {
 	cases := []struct {
 		name      string
+		rpc       string
 		standing  workspace.Standing
 		elsewhere string
-		want      string
+		// armed is whether this daemon armed the workspace's rendezvous as
+		// the joining daemon.
+		armed bool
+		want  string
 	}{
 		{name: "a workspace this daemon serves adopts on its successor", standing: workspace.StandingOwned, want: "successor"},
 		{name: "a workspace this daemon handed on adopts on its successor", standing: workspace.StandingTransferringAway, want: "successor"},
 		{name: "a workspace an older daemon still serves adopts there, never on this daemon's successor", standing: workspace.StandingNotYetAdopted, elsewhere: "elder", want: "elder"},
 		{name: "a workspace this daemon is adopting adopts here", standing: workspace.StandingNotYetAdopted},
+		{name: "a workspace whose rendezvous this daemon armed adopts here, though an older daemon still holds its serving row", standing: workspace.StandingNotYetAdopted, elsewhere: "elder", armed: true},
+		{name: "a call other than an adoption for a workspace whose rendezvous this daemon armed still goes to the older daemon holding its serving row", rpc: "SubmitPrompt", standing: workspace.StandingNotYetAdopted, elsewhere: "elder", armed: true, want: "elder"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: a handover to a successor is in flight.
+			rpc := tc.rpc
+			if rpc == "" {
+				rpc = "AdoptWebWorkspace"
+			}
 			h := newHarness(t, func(d *Deps) {
+				d.Rollout = &fakeRollout{rendezvousArmed: tc.armed}
 				d.Ownership = &fakeOwnership{standing: tc.standing}
 				d.SuccessorAddress = func() string { return "successor" }
 				d.ServingElsewhere = func(context.Context, ids.WorkspaceID) (string, bool, error) {
@@ -393,7 +404,7 @@ func TestAnAdoptCallGoesWhereItsWorkspacesRendezvousIs(t *testing.T) {
 			})
 
 			// Act
-			target, ok, err := h.Server.(*server).servingTarget(context.Background(), "AdoptWebWorkspace", "ws-1")
+			target, ok, err := h.Server.(*server).servingTarget(context.Background(), rpc, "ws-1")
 
 			// Assert
 			if err != nil || target != tc.want || ok != (tc.want != "") {
