@@ -80,9 +80,9 @@ type Workspace struct {
 	// RequestedBy is the workspace whose agent asked for this one's creation,
 	// nil when the user asked or the workspace was registered.
 	RequestedBy *WorkspaceID
-	// CloseWhenTurnEnds is when the workspace asked to close itself, set while
-	// it waits for that asking turn to end (selfclose.go); nil otherwise.
-	CloseWhenTurnEnds *time.Time
+	// CloseRequest is the workspace's standing close request
+	// (closerequest.go), nil while none stands.
+	CloseRequest *CloseRequest
 	// LastKeepaliveAt is when the daemon last sent the workspace's keep-alive
 	// (lastkeepalive.go); nil when it never has. CacheClock combines it with
 	// LastTurnEndedAt.

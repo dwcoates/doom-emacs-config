@@ -65,4 +65,4 @@ One serial runner (`workspace.StandingCloses`) judges requests; nothing polls.
 
 ## Storage
 
-- Layout 212 (additive): `close_requested_at`, `close_requested_by` on `workspaces`, filled from `close_when_turn_ends` (by `agent`), with triggers mirroring the old column both ways while a predecessor daemon shares the file. Layout 213 (contract) drops the triggers and `close_when_turn_ends`.
+- Layout 215 (additive): `close_requested_at`, `close_requested_by` on `workspaces`, filled from `close_when_turn_ends` (by `agent`), with triggers mirroring the old column both ways while a predecessor daemon shares the file. Layout 216 (contract) drops the triggers and `close_when_turn_ends`.
