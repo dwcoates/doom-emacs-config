@@ -123,7 +123,7 @@ export interface ActivityEnvelope {
  * stamped, so a consumer grades its bare settle a defect rather than old data.
  */
 export const ACTIVITY_CONTRACT =
-  conversationv1.AgentActivityContract.MONITOR_FAILURE_RESTATES_ITS_CALL;
+  conversationv1.AgentActivityContract.SUBAGENT_UPDATE_NAMES_ITS_AGENT;
 
 /** One unit of work at whatever state it has reached. */
 export function agentActivity(

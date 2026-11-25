@@ -1636,6 +1636,7 @@ export function convertDetached(
         toolUseId,
         raw,
         taskCommission(taskId, spawnCall, taskKinds),
+        taskKinds.agentOf(taskId) ?? subagentId(toolUseId),
       );
     }
 
@@ -1836,6 +1837,12 @@ export function taskUnitTarget(
  * prompt erased the commission the start had put there, and a replay of a run
  * still going drew no description. Empty only when the fold never saw the
  * spawning call open.
+ *
+ * THE CREATED AGENT IS RESTATED FOR THE SAME REASON: the beat replaces the
+ * start, so without it a replay of a run still going served a frame that named
+ * no agent and drew a bubble addressing no sub-feed (pre-queue-rule-tests,
+ * 2026-11-25). It is the task's agent, or the minting rule's reading of the
+ * spawning call, exactly as the terminal names it.
  */
 function subagentProgressEntries(
   context: FoldContext,
@@ -1844,6 +1851,7 @@ function subagentProgressEntries(
   toolUseId: string,
   raw: RawTask,
   commission: conversationv1.AgentSubagentPrompt,
+  createdAgent: conversationv1.AgentId,
 ): readonly PersistEntry[] {
   const activityId = toolCallActivityId(toolUseId);
   const totalTokens = raw.usage?.total_tokens;
@@ -1861,6 +1869,7 @@ function subagentProgressEntries(
             case: "update",
             value: create(conversationv1.AgentSubagentUpdateSchema, {
               prompt: commission,
+              createdAgentId: createdAgent,
               progress: create(conversationv1.AgentSubagentProgressSchema, {
                 totalTokens: nonNegativeBigInt(totalTokens),
                 toolUseCount: nonNegativeInt(toolUses),
