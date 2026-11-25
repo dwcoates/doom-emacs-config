@@ -189,3 +189,46 @@ func (o *orchestrator) refuseWhilePaused(ctx context.Context, repo wsm.RepoKey, 
 	o.deps.Log.Global().Info(opProduction, "refused a production mediator's action while its repository's production checks are paused", withField(withField(fields, "action", action), "paused_since", pause.Since.UTC().Format(time.RFC3339Nano)))
 	return refuse(ArmProductionPaused, ws, "the repository's production checks are paused: decide and fold nothing until they are resumed")
 }
+
+// ProductionStanding is one repository's production checks as the topbar's
+// production-checks chip draws them.
+type ProductionStanding struct {
+	// On reports that the repository's lifecycle config turns production
+	// checks on; nothing else is set when it is false.
+	On bool
+	// Paused reports that the checks are paused.
+	Paused bool
+	// Mediator is the repository's production mediator, empty while none is
+	// made yet.
+	Mediator ids.WorkspaceID
+}
+
+// ProductionStanding implements Orchestrator: a repository that checks no
+// production answers the zero standing, and no refusal.
+func (o *orchestrator) ProductionStanding(ctx context.Context, scope RepositoryScope) (ProductionStanding, error) {
+	const op = "daemon.merge.production_standing"
+	_, key, err := o.scopedRepository(ctx, op, "a production standing", scope)
+	if err != nil {
+		return ProductionStanding{}, err
+	}
+	fields := dlog.Context{"repo": string(key)}
+	queues, err := o.productionQueues(ctx, op)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not list the repositories that check their production", withField(fields, "error", err.Error()))
+		return ProductionStanding{}, err
+	}
+	if _, found := queueKeyed(queues, key); !found {
+		return ProductionStanding{}, nil
+	}
+	pause, err := o.deps.DB.ProductionPauseOf(ctx, key)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read whether the repository's production checks are paused", withField(fields, "error", err.Error()))
+		return ProductionStanding{}, err
+	}
+	mediator, _, err := o.deps.DB.StandingMediatorOf(ctx, wsm.MediatorProduction, key)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the repository's production mediator", withField(fields, "error", err.Error()))
+		return ProductionStanding{}, err
+	}
+	return ProductionStanding{On: true, Paused: pause.Paused, Mediator: mediator.Workspace}, nil
+}

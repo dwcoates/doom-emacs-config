@@ -336,3 +336,52 @@ func TestAProductionTurnEndingUnderAPauseSaysItsSpanWasDropped(t *testing.T) {
 		t.Fatalf("records = %v, want the turn's end recorded as under a pause", h.logs.Records())
 	}
 }
+
+func TestTheProductionStandingSaysWhatTheChipDraws(t *testing.T) {
+	cases := []struct {
+		name    string
+		harness func(t *testing.T) *harness
+		arrange func(t *testing.T, h *harness)
+		want    ProductionStanding
+	}{
+		{name: "a repository that checks no production is off", harness: checked, arrange: func(*testing.T, *harness) {}},
+		{name: "checks with no mediator yet run", harness: production, arrange: func(*testing.T, *harness) {}, want: ProductionStanding{On: true}},
+		{name: "paused checks name their mediator", harness: production, arrange: func(t *testing.T, h *harness) {
+			toldProduction(t, h)
+			pauseProduction(t, h)
+		}, want: ProductionStanding{On: true, Paused: true, Mediator: "ws-fixer"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := tc.harness(t)
+			tc.arrange(t, h)
+
+			// Act
+			got, err := h.o.ProductionStanding(context.Background(), theScope)
+
+			// Assert
+			if err != nil || got != tc.want {
+				t.Fatalf("ProductionStanding = (%+v, %v), want %+v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAProductionStandingThatCannotBeReadIsAnError(t *testing.T) {
+	// Arrange
+	h := production(t)
+	cause := errors.New("disk I/O error")
+	h.db.productionPauseErr = cause
+
+	// Act
+	_, err := h.o.ProductionStanding(context.Background(), theScope)
+
+	// Assert
+	if !errors.Is(err, cause) {
+		t.Fatalf("err = %v, want the cause", err)
+	}
+	if rec, ok := h.recordFor(dlog.LevelError, "daemon.merge.production_standing"); !ok || rec.Context["repo"] != string(mediationKey(h)) {
+		t.Fatalf("records = %v, want the failed read at ERROR naming the repository", h.logs.Records())
+	}
+}

@@ -2637,6 +2637,10 @@ func (q *fakeQueue) SubmitSessionAct(_ context.Context, ws ids.WorkspaceID, act 
 type fakeMerge struct {
 	merge.Orchestrator
 
+	// productionStanding and productionStandingErr answer ProductionStanding.
+	productionStanding    merge.ProductionStanding
+	productionStandingErr error
+
 	facts       map[ids.WorkspaceID]footer.MergeFacts
 	interrupted []ids.WorkspaceID
 	// queued reports the workspace's sync merge is queued, so OnInterrupt
@@ -2702,6 +2706,11 @@ func (f *fakeMerge) Unpause(context.Context, *merge.RepositoryScope) error {
 }
 
 // ResumeOwnPause records the resume and answers ownResumeErr.
+// ProductionStanding answers productionStanding and productionStandingErr.
+func (f *fakeMerge) ProductionStanding(context.Context, merge.RepositoryScope) (merge.ProductionStanding, error) {
+	return f.productionStanding, f.productionStandingErr
+}
+
 func (f *fakeMerge) ResumeOwnPause(_ context.Context, scope merge.RepositoryScope, ws ids.WorkspaceID) (bool, error) {
 	f.ownResumes = append(f.ownResumes, ownResume{scope: scope, ws: ws})
 	return f.ownResumeErr == nil && !f.ownResumeNone, f.ownResumeErr
@@ -4287,6 +4296,9 @@ type fixture struct {
 	topbarNames []string
 	// topbarNamings is every naming the topbar seam was handed, in order.
 	topbarNamings []topbar.Naming
+	// topbarProductionChecks is every production-checks chip the topbar seam
+	// was handed, by workspace, in order.
+	topbarProductionChecks []restatedProductionChecks
 	// topbarNamePrefixes is every name prefix the topbar seam was handed, in order.
 	topbarNamePrefixes []*frontendv1.WorkspaceNamePrefix
 	// effortReads is every config root whose settings were read; the read
@@ -4394,7 +4406,7 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings, namePrefixes: &f.topbarNamePrefixes}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings, namePrefixes: &f.topbarNamePrefixes, productionChecks: &f.topbarProductionChecks}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SlackThreads: f.slack,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -4586,8 +4598,16 @@ func (f *fixture) workspaceInRepo(t *testing.T, id ids.WorkspaceID, repoDir stri
 
 // stubTopbar satisfies the resolver seam the verbs hold but never
 // call, so a test that does call one nil-panics rather than passing quietly.
+// restatedProductionChecks is one production-checks chip the verbs stated.
+type restatedProductionChecks struct {
+	ws   ids.WorkspaceID
+	chip topbar.ProductionChecks
+}
+
 type stubTopbar struct {
 	topbar.Resolver
+	// productionChecks records every production-checks chip the verbs stated.
+	productionChecks *[]restatedProductionChecks
 	// contextTokens is each workspace's context chip figure; nil states none.
 	contextTokens map[ids.WorkspaceID]int64
 	// signIns records every workspace a sign-in was requested for; nil
@@ -4659,6 +4679,10 @@ func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 }
 
 func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
+func (s stubTopbar) SetProductionChecks(ws ids.WorkspaceID, chip topbar.ProductionChecks) {
+	*s.productionChecks = append(*s.productionChecks, restatedProductionChecks{ws: ws, chip: chip})
+}
+
 func (s stubTopbar) SetNaming(_ ids.WorkspaceID, naming topbar.Naming) {
 	if s.namings != nil {
 		*s.namings = append(*s.namings, naming)

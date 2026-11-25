@@ -639,12 +639,19 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 		log.Error(opRegister, "could not read the workspace's queue bypass standing for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
 		return err
 	}
+	// THE PRODUCTION-CHECKS CHIP RIDES THE NAMING TOO, for the same reason.
+	production, err := v.productionChecksOf(ctx, record.Repo)
+	if err != nil {
+		log.Error(opRegister, "could not read the workspace's repository's production-check standing for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
+		return err
+	}
 	v.deps.Topbar.SetNaming(record.ID, topbar.Naming{
-		Name:          record.Name,
-		NamePrefix:    nameprefix.Of(record),
-		ConfigDir:     configDir,
-		RemoteControl: remote.On,
-		QueueBypass:   bypass,
+		Name:             record.Name,
+		NamePrefix:       nameprefix.Of(record),
+		ConfigDir:        configDir,
+		RemoteControl:    remote.On,
+		QueueBypass:      bypass,
+		ProductionChecks: production,
 	})
 	// THE LINKS ARE DURABLE, so a restarted daemon's title opens the same
 	// links the workspace had.
