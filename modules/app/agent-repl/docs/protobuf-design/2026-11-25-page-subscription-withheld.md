@@ -42,3 +42,21 @@ inventory or convention stage is touched.
   new end arm would need its own reopen path.
 
 Sweep: nothing obviated.
+
+### `agentrepl.v1.ReportPageStateLoadReason` and `ReportPageStateUnloadReason`: an unnamed arm is recorded, never refused
+
+- WHAT: comments only. A reason message whose `oneof` is unassigned is now
+  read as a reason this daemon's revision does not name, and the daemon
+  records the load or unload with its reason `unnamed` (`pageheld.LoadUnnamed`,
+  `pageheld.UnloadUnnamed`, a new `reason` label on the page metrics). A
+  missing reason message is still `invalid_argument`.
+- WHY: the 2026-11-25 12:32 deploy retired the `dormant` unload arm, and the
+  Emacs the deploy had not reloaded yet reported a `dormant` unload to the
+  successor at 12:32:54.997. The successor read the oneof as unset, refused
+  the report as invalid, and Emacs recorded `elisp.host.page-state-failed` at
+  ERROR. Set-but-unassigned is the one signal every reader decodes across
+  schema skew, so it is the unknown, not a malformed request.
+- How the skew is detected and handled: the daemon cannot see which arm an
+  older editor meant (the wire drops the unknown field), so the report's fact
+  (the page loaded or unloaded) is recorded and its reason is labelled
+  `unnamed`, at INFO, and counted. Every other arm of the report is unchanged.

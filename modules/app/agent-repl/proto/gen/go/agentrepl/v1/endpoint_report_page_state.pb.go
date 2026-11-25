@@ -374,7 +374,10 @@ func (*ReportPageStateNotHeld) Descriptor() ([]byte, []int) {
 // set arm IS the reason; its arm name is the metrics' `reason` label.
 type ReportPageStateLoadReason struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The moment that loaded the page; Emacs always sets one.
+	// The moment that loaded the page; Emacs always sets one. A reason whose
+	// arm this daemon's revision does not name (an editor on another build,
+	// such as one a deploy has not reloaded yet) is recorded with its reason
+	// unnamed, never refused: the load itself is known.
 	//
 	// Types that are valid to be assigned to Reason:
 	//
@@ -757,7 +760,9 @@ func (*ReportPageStateLoadAllocated) Descriptor() ([]byte, []int) {
 // metrics' `reason` label.
 type ReportPageStateUnloadReason struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The moment that dropped the page; Emacs always sets one.
+	// The moment that dropped the page; Emacs always sets one. An arm this
+	// daemon's revision does not name is recorded with its reason unnamed,
+	// as for a load.
 	//
 	// Types that are valid to be assigned to Reason:
 	//

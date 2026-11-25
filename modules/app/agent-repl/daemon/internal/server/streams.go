@@ -1137,6 +1137,10 @@ func pageLoadReason(r *agentreplv1.ReportPageStateLoadReason) pageheld.LoadReaso
 		return pageheld.LoadUngated
 	case *agentreplv1.ReportPageStateLoadReason_HeldBeforeReasons:
 		return pageheld.LoadHeldBeforeReasons
+	case nil:
+		// AN ARM THIS DAEMON'S CONTRACT DOES NOT NAME: an editor on another
+		// build. Its load is recorded, its reason unnamed.
+		return pageheld.LoadUnnamed
 	default:
 		panic(fmt.Sprintf("ReportPageState: unhandled load reason arm %T", arm))
 	}
@@ -1151,6 +1155,12 @@ func pageUnloadReason(r *agentreplv1.ReportPageStateUnloadReason) pageheld.Unloa
 		return pageheld.UnloadDetached
 	case *agentreplv1.ReportPageStateUnloadReason_Released:
 		return pageheld.UnloadReleased
+	case nil:
+		// AN ARM THIS DAEMON'S CONTRACT DOES NOT NAME, as for a load: on the
+		// 2026-11-25 12:32 deploy an Emacs not yet reloaded reported the
+		// retired `dormant` unload to its successor, which refused it as
+		// invalid and the editor recorded an ERROR.
+		return pageheld.UnloadUnnamed
 	default:
 		panic(fmt.Sprintf("ReportPageState: unhandled unload reason arm %T", arm))
 	}

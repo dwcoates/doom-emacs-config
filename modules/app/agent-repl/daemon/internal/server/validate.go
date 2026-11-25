@@ -990,17 +990,21 @@ func validateReportPageStateRequest(req *agentreplv1.ReportPageStateRequest) *co
 	switch report := req.GetReport().(type) {
 	case nil:
 		return invalid("report", "a report arm is required")
+	// A REASON IS REQUIRED, BUT ITS ARM MAY BE ONE THIS DAEMON DOES NOT NAME:
+	// a reason set with its oneof unassigned is an editor on another build
+	// (agentrepl.v1.ReportPageStateUnloadReason), whose report is recorded
+	// with its reason unnamed (pageLoadReason, pageUnloadReason).
 	case *agentreplv1.ReportPageStateRequest_Loaded:
-		if report.Loaded.GetReason().GetReason() == nil {
-			return invalid("report.loaded.reason", "a load reason arm is required")
+		if report.Loaded.GetReason() == nil {
+			return invalid("report.loaded.reason", "a load reason is required")
 		}
 	case *agentreplv1.ReportPageStateRequest_Held:
-		if report.Held.GetReason().GetReason() == nil {
-			return invalid("report.held.reason", "a load reason arm is required")
+		if report.Held.GetReason() == nil {
+			return invalid("report.held.reason", "a load reason is required")
 		}
 	case *agentreplv1.ReportPageStateRequest_Unloaded:
-		if report.Unloaded.GetReason().GetReason() == nil {
-			return invalid("report.unloaded.reason", "an unload reason arm is required")
+		if report.Unloaded.GetReason() == nil {
+			return invalid("report.unloaded.reason", "an unload reason is required")
 		}
 	}
 	return nil
