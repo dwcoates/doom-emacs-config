@@ -69,6 +69,8 @@ func describeFinishRefusal(ws string, e *agentreplv1.FinishWorkspaceError) (stri
 		return sayBehindNotInLine(ws, r.PlacementBehindNotInLine), nil
 	case *agentreplv1.FinishWorkspaceError_MergeOffQueue:
 		return fmt.Sprintf("%s's merge left its queue without landing and its request stands; put it back with `agent-repld merge-queue requeue %s`, or end it with `agent-repld merge-queue discard %s` before finishing again", ws, ws, ws), nil
+	case *agentreplv1.FinishWorkspaceError_RuleChecksFailed:
+		return sayRuleChecksFailed(ws+"'s branch", r.RuleChecksFailed), nil
 	case *agentreplv1.FinishWorkspaceError_PlacementConflictsWithStored:
 		return fmt.Sprintf("%s's create fixed its finish at the %s of the merge queue, and this finish asked for %s; finish again with no -placement",
 			ws, placementSpelled(r.PlacementConflictsWithStored.GetStored()), placementSpelled(r.PlacementConflictsWithStored.GetRequested())), nil

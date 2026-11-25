@@ -2127,12 +2127,25 @@ and the other one the finish named.  Nothing was recorded."
     (list :stored (alist-get 'stored json)
           :requested (alist-get 'requested json))))
 
+(defun agent-repl-wire-decode-merge-rule-checks-failed (json)
+  "Decode MergeRuleChecksFailed from JSON.
+Answers (:worktree DIR :suites SUITES :failing-tests TEXT :log PATH): the
+branch failed its repository's rule suites, run in DIR before an agent's
+merge is admitted; TEXT names the failing cases with the commands that
+rerun them, and PATH is the run's archived output.  Nothing was recorded."
+  (let ((message "MergeRuleChecksFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(worktree suites failingTests log))
+    (list :worktree (agent-repl-wire-verbs--decode-string message 'worktree json)
+          :suites (agent-repl-wire-verbs--decode-repeated-string message 'suites json)
+          :failing-tests (agent-repl-wire-verbs--decode-string message 'failingTests json)
+          :log (agent-repl-wire-verbs--decode-string message 'log json))))
+
 (defun agent-repl-wire-decode-finish-workspace-error (json)
   "Decode FinishWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "FinishWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine mergeOffQueue placementConflictsWithStored))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine mergeOffQueue placementConflictsWithStored ruleChecksFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -2156,7 +2169,9 @@ arm this codec does not know is refused as an unknown field."
                  (list 'mergeOffQueue :merge-off-queue
                        #'agent-repl-wire-decode-finish-workspace-merge-off-queue)
                  (list 'placementConflictsWithStored :placement-conflicts-with-stored
-                       #'agent-repl-wire-decode-finish-workspace-placement-conflicts-with-stored))))))
+                       #'agent-repl-wire-decode-finish-workspace-placement-conflicts-with-stored)
+                 (list 'ruleChecksFailed :rule-checks-failed
+                       #'agent-repl-wire-decode-merge-rule-checks-failed))))))
 
 (defun agent-repl-wire-decode-finish-workspace-response-success (json)
   "Decode FinishWorkspaceResponse's `success' arm from JSON."

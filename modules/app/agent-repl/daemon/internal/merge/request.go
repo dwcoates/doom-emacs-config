@@ -116,6 +116,14 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		logRefusal(log, op, logsite.Msg("refused a deploy request for its version increment"), fields, err)
 		return Enqueued{}, err
 	}
+	// AN AGENT'S FINISH RUNS ITS RULE SUITES FIRST (rulecheck.go), once every
+	// cheaper refusal has been asked, and before anything is recorded. An
+	// async merge runs them below, once its maker is known to be registered.
+	if req.Detached == nil {
+		if err := o.checkRules(ctx, record, req, source, deploy, fields); err != nil {
+			return Enqueued{}, err
+		}
+	}
 	// releaseName lets go of an async request's name claim; a no-op for every
 	// other request. It runs once the request is recorded or refused.
 	var enqueued Enqueued
@@ -148,6 +156,12 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			} else {
 				log.Error(op, "could not read whether a merge off its queue holds the async merge's name", withField(fields, "error", err.Error()))
 			}
+			return Enqueued{}, err
+		}
+		// AN ASYNC MERGE RUNS ITS BRANCH'S RULE SUITES before its name is
+		// claimed: the run takes minutes, and a claim held through it would
+		// refuse every other ask for the name meanwhile.
+		if err := o.checkRules(ctx, record, req, source, deploy, fields); err != nil {
 			return Enqueued{}, err
 		}
 		branch, release, taken, err := o.deps.Names.ClaimMergeName(ctx, record.Dir, req.Detached.Name)

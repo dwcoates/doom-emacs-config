@@ -12,6 +12,10 @@ This workspace lands its work through its repository's merge queue.
 - A workspace may rerun its own recorded cases at any time (`agent-repld test run -rerun`).
   - The daemon records every case the workspace's runs named and every case a merge gate failed on its branch, so the rerun is the branch's regression set.
   - It runs only those cases, never a suite the record does not itself hold.
+- Asking for a merge (`workspace async-merge`, `workspace finished`) first runs the repository's rule suites on the branch, through the daemon (owner approval, 2026-11-25).
+  - They are the repository-wide checks that read its sources (gofmt, the source scans, the byte-compiler, shellcheck), which no targeted run names.
+  - A refusal names the failing cases with the command that reruns each group; fix them, commit, and ask again.
+  - The contract is `modules/app/agent-repl/AGENTS.md`, "The merge queue's test gate and remediation contract".
 - A workspace NEVER runs the full suite, for any reason (owner ruling, 2026-11-15).
   - The merge queue alone runs it, programmatically, as the gate of every landing.
   - Running it yourself duplicates the gate's work and adds load the host's other workspaces contend with.

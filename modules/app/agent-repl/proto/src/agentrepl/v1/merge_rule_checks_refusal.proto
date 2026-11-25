@@ -1,0 +1,41 @@
+// merge_rule_checks_refusal.proto — the refusals both ways an agent asks for
+// a merge share when the branch's repository-wide rule checks do not pass: a
+// workspace finishing (FinishWorkspace) and an async merge
+// (CreateWorkspaceAsyncMerge). Before an agent's merge is admitted to the
+// queue, the daemon runs the repository's rule suites (testrun's roster
+// suites marked Rules: the checks that read the module's sources, such as
+// gofmt, the source scans, the byte-compiler and shellcheck) on the branch's
+// worktree, in the maker's name, through the test service. No targeted run of
+// a workspace ever names them, so before this check they first ran in the
+// merge gate, where they failed merge after merge. A refused merge records
+// nothing: the maker fixes what failed and asks again.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The branch failed its rule suites, so its merge was not admitted.
+message MergeRuleChecksFailed {
+  // The worktree the rule suites ran in: the one with the branch checked
+  // out.
+  string worktree = 1;
+  // The rule suites that ran, by roster name.
+  repeated string suites = 2;
+  // The failing cases, grouped by suite, each group with the
+  // `agent-repld test run` command that reruns only them, as the merge
+  // queue's fixing brief renders a failing gate's cases. The cases are also
+  // recorded for the maker's `agent-repld test run -rerun`.
+  string failing_tests = 3;
+  // The path of the run's whole output, archived.
+  string log = 4;
+}
+
+// No worktree has the async merge's branch checked out, so its rule suites
+// had nowhere to run. The branch is checked out in a worktree (the maker's)
+// and the merge asked for again.
+message MergeRuleChecksNoWorktree {
+  // The branch the merge names.
+  string branch = 1;
+}

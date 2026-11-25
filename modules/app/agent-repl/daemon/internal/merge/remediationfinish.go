@@ -430,7 +430,7 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 			card.failed("the suite failed, and its failing cases could not be recorded: " + err.Error())
 			return err
 		}
-		failing := found.render(archive)
+		failing := found.render(gateFailingIntro, archive)
 		card.failed(fmt.Sprintf("the suite failed (exit %d); the fix goes back to work", result.ExitCode))
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate failed", withField(withField(fields, "archive", archive), "exit_code", result.ExitCode))
 		return o.resumeRemediation(ctx, f, BriefRemediationGateFailed, map[string]string{"archive_path": archive, "failing_tests": failing}, fields)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -230,6 +231,18 @@ func TestAnAsyncMergeIsRefused(t *testing.T) {
 		{name: "a requester whose own merge runs", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
 			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyMerging, Reason: "merging"}
 		}, got: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeRequesterMerging() != nil }},
+		{name: "a branch that failed its rule suites", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
+			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmRuleChecksFailed, Reason: "failed",
+				Fields: map[string]any{"worktree": "/w/a", "suites": []string{"repo-scans"}, "failing_tests": "- TestX", "log": "/s/rule_check-1-0.log"}}
+		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
+			r := e.GetAsyncMergeRuleChecksFailed()
+			return r.GetWorktree() == "/w/a" && slices.Equal(r.GetSuites(), []string{"repo-scans"}) && r.GetFailingTests() == "- TestX" && r.GetLog() == "/s/rule_check-1-0.log"
+		}},
+		{name: "a branch no worktree holds", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
+			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmRuleChecksNoWorktree, Reason: "none", Fields: map[string]any{"branch": "agent-fix"}}
+		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
+			return e.GetAsyncMergeRuleChecksNoWorktree().GetBranch() == "agent-fix"
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

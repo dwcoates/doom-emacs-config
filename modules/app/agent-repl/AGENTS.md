@@ -1391,6 +1391,34 @@ like an improvement still needs that conversation. Code:
 `daemon/internal/merge/suiteselect.go`, `gate.go`, `failingtests.go`,
 `process.go`, `chain.go`, `queue.go`.
 
+- **The rule suites run before an agent's merge is admitted** (owner
+  approval, 2026-11-25). The roster's rule suites (`Rules: true`,
+  `roster.RuleSuites`: `repo-scans`, `byte-compile`, `shellcheck`,
+  `ert-rules`, `webapp-rules`) are the checks that read the module's sources
+  and hold them to a structural rule, which no workspace's targeted run ever
+  names; before 2026-11-25 they first ran in the gate, where they failed 44 of
+  the 93 failed gates in the 3.5 days before. `workspace async-merge` and
+  `workspace finished`, asked by an agent, now run them on the branch's
+  worktree (the finishing workspace's own; for an async merge, the worktree
+  that has its branch checked out), in the maker's name and on the test
+  service, before anything is recorded (`daemon/internal/merge/rulecheck.go`).
+  A failure refuses the merge (`MergeRuleChecksFailed`: the failing cases,
+  each group with the command that reruns it, recorded for the maker's
+  `agent-repld test run -rerun`, and the run archived as
+  `<state>/merge-logs/rule_check-<ns>-0.log`); the maker fixes them, commits
+  and asks again. The user's own finish from the editor is not checked; the
+  gate still runs every selected suite on every merge.
+  - MEASURED (2026-11-25, this branch, nothing reused, governed, other
+    workspaces' runs going): 86 CPU-seconds of units and 6m48s of wall, most
+    of it waiting for CPU and a RAM disk seat. A rerun reuses every rule
+    suite but `repo-scans` (about 21 CPU-seconds). The check is bounded at
+    twice that wall (`ruleCheckBound`); a run that outlives it is stopped and
+    the merge is not admitted.
+  - EVERY RULE TEST LIVES IN ITS LANGUAGE'S RULE SUITE, never beside the code
+    it holds: the daemon's in `daemon/reposcans/daemonrules` (through
+    `reposcans/internal/sourcescan`), the elisp's in `lisp/test-rules-*.el`
+    (`ert-rules`), the webapp's in `webapp/rules/` (`webapp-rules`). Each
+    suite holds a scan that fails a source-reading test anywhere else.
 - **A selected suite whose every unit's exact inputs passed before is reused,
   not run** ("A run reuses an earlier pass of each unit's exact inputs"): its
   row reads reused and names the newest run that passed one of its units, and

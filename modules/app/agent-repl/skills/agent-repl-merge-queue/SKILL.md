@@ -236,6 +236,17 @@ Either kind:
   `still_queued` (dequeue first).
 - `workspace async-merge` under a name an off-queue merge holds is refused
   `async_merge_name_off_queue`, naming that merge: requeue it instead.
+- An agent's `workspace finished` and `workspace async-merge` first run the
+  repository's rule suites (`repo-scans`, `byte-compile`, `shellcheck`,
+  `ert-rules`, `webapp-rules`) on the branch's worktree through the daemon,
+  and the call waits for them. A failure is refused, recording nothing:
+  `rule_checks_failed` (`async_merge_rule_checks_failed` for an async merge)
+  names the failing cases with the command that reruns each group and the
+  archived run; fix them, commit, and ask again. An async merge whose branch
+  no worktree has checked out is refused
+  `async_merge_rule_checks_no_worktree`. The contract is
+  `modules/app/agent-repl/AGENTS.md`, "The merge queue's test gate and
+  remediation contract".
 - `merge-queue pause -repository here|DIR|all` and `merge-queue resume
   -repository here|DIR|all` suspend or resume a queue. `-repository` is
   required; `all` names every repository's queue.

@@ -33,6 +33,7 @@ var asyncMergeRenames = map[string]string{
 	merge.ArmSessionDeleted:      "async_merge_requester_session_deleted",
 	merge.ArmNoDeployConfig:      "async_merge_no_deploy_config",
 	merge.ArmDeployConfigInvalid: "async_merge_deploy_config_invalid",
+	merge.ArmRuleChecksFailed:    "async_merge_rule_checks_failed",
 }
 
 // createAsyncMerge records an async merge (agentrepl.v1.CreateWorkspaceAsyncMerge):

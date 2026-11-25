@@ -36,6 +36,19 @@ the full suite, runs only in the merge queue's gate: a workspace never runs
 the full suite (the metaprompt's "When to run which tests" rules how broad a
 run is).
 
+THE RULE SUITES RUN BEFORE A MERGE IS ADMITTED. A rule test, one that reads
+the module's sources to hold them to a structural rule, lives in its
+language's rule suite (roster `Rules: true`): the daemon's in
+`daemon/reposcans/daemonrules` (reading sources through
+`reposcans/internal/sourcescan`), the elisp's in `lisp/test-rules-*.el`
+(`ert-rules`), the webapp's in `webapp/rules/` (`webapp-rules`); a scan in
+each fails a source-reading test anywhere else. An agent's
+`workspace finished` or `workspace async-merge` runs every rule suite on the
+branch first and refuses the merge with the failing cases named
+(AGENTS.md, "The merge queue's test gate and remediation contract").
+Measured 2026-11-25 with nothing reused: 86 CPU-seconds of units, 6m48s of
+wall under a loaded host; keep the rule suites that cheap.
+
 Selections (each a repeatable flag; paths relative to the working directory
 or absolute, inside the workspace's worktree):
 

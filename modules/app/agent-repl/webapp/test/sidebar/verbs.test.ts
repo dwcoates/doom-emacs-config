@@ -1355,6 +1355,21 @@ describe("an arm no wording table knows", () => {
   });
 });
 
+describe("a finish whose branch failed its rule suites", () => {
+  it("names the suites and the archived run to fix from", () => {
+    // Act
+    const text = finishWorkspaceRefusal({
+      case: "ruleChecksFailed",
+      value: { worktree: "/w/a", suites: ["repo-scans", "shellcheck"], failingTests: "- TestX", log: "/s/rule_check-1-0.log" },
+    } as never);
+
+    // Assert
+    expect(text).toBe(
+      "this branch failed its rule suites (repo-scans, shellcheck); fix the failing cases in /s/rule_check-1-0.log and finish again",
+    );
+  });
+});
+
 describe("the cause behind a refusal", () => {
   it("is a malformed view when the error message itself is absent", () => {
     // Arrange / Act / Assert: the `?? {}` side — nothing to require a case of.

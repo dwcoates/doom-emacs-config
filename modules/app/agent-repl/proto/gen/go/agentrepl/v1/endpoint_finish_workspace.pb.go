@@ -439,6 +439,7 @@ type FinishWorkspaceError struct {
 	//	*FinishWorkspaceError_PlacementBehindNotInLine
 	//	*FinishWorkspaceError_MergeOffQueue
 	//	*FinishWorkspaceError_PlacementConflictsWithStored
+	//	*FinishWorkspaceError_RuleChecksFailed
 	Cause         isFinishWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -643,6 +644,15 @@ func (x *FinishWorkspaceError) GetPlacementConflictsWithStored() *FinishWorkspac
 	return nil
 }
 
+func (x *FinishWorkspaceError) GetRuleChecksFailed() *MergeRuleChecksFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*FinishWorkspaceError_RuleChecksFailed); ok {
+			return x.RuleChecksFailed
+		}
+	}
+	return nil
+}
+
 type isFinishWorkspaceError_Cause interface {
 	isFinishWorkspaceError_Cause()
 }
@@ -756,6 +766,13 @@ type FinishWorkspaceError_PlacementConflictsWithStored struct {
 	PlacementConflictsWithStored *FinishWorkspacePlacementConflictsWithStored `protobuf:"bytes,19,opt,name=placement_conflicts_with_stored,json=placementConflictsWithStored,proto3,oneof"`
 }
 
+type FinishWorkspaceError_RuleChecksFailed struct {
+	// The workspace's branch failed its repository's rule suites, run in its
+	// worktree before an agent's finish is admitted to the queue. Nothing
+	// was recorded.
+	RuleChecksFailed *MergeRuleChecksFailed `protobuf:"bytes,20,opt,name=rule_checks_failed,json=ruleChecksFailed,proto3,oneof"`
+}
+
 func (*FinishWorkspaceError_UnknownWorkspace) isFinishWorkspaceError_Cause() {}
 
 func (*FinishWorkspaceError_WorkspaceRefMismatch) isFinishWorkspaceError_Cause() {}
@@ -791,6 +808,8 @@ func (*FinishWorkspaceError_PlacementBehindNotInLine) isFinishWorkspaceError_Cau
 func (*FinishWorkspaceError_MergeOffQueue) isFinishWorkspaceError_Cause() {}
 
 func (*FinishWorkspaceError_PlacementConflictsWithStored) isFinishWorkspaceError_Cause() {}
+
+func (*FinishWorkspaceError_RuleChecksFailed) isFinishWorkspaceError_Cause() {}
 
 // A finish whose placement differs from its one-shot's stored placement.
 type FinishWorkspacePlacementConflictsWithStored struct {
@@ -1310,7 +1329,7 @@ var File_agentrepl_v1_endpoint_finish_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_finish_workspace.proto\x12\fagentrepl.v1\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1cworkspace/v1/workspace.proto\"\xff\x02\n" +
+	",agentrepl/v1/endpoint_finish_workspace.proto\x12\fagentrepl.v1\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a,agentrepl/v1/merge_rule_checks_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1cworkspace/v1/workspace.proto\"\xff\x02\n" +
 	"\x16FinishWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12>\n" +
 	"\trequester\x18\x02 \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequester\x12^\n" +
@@ -1329,7 +1348,7 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\x10landing_directly\x18\x02 \x01(\v23.agentrepl.v1.FinishWorkspaceSuccessLandingDirectlyH\x00R\x0flandingDirectlyB\t\n" +
 	"\alanding\"\x1e\n" +
 	"\x1cFinishWorkspaceSuccessQueued\"'\n" +
-	"%FinishWorkspaceSuccessLandingDirectly\"\xa4\x0e\n" +
+	"%FinishWorkspaceSuccessLandingDirectly\"\xf9\x0e\n" +
 	"\x14FinishWorkspaceError\x12\\\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.FinishWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v21.agentrepl.v1.FinishWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
@@ -1349,7 +1368,8 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\x15deploy_config_invalid\x18\x10 \x01(\v2$.agentrepl.v1.LifecycleConfigInvalidH\x00R\x13deployConfigInvalid\x12r\n" +
 	"\x1cplacement_behind_not_in_line\x18\x11 \x01(\v20.agentrepl.v1.MergeQueuePlacementBehindNotInLineH\x00R\x18placementBehindNotInLine\x12T\n" +
 	"\x0fmerge_off_queue\x18\x12 \x01(\v2*.agentrepl.v1.FinishWorkspaceMergeOffQueueH\x00R\rmergeOffQueue\x12\x82\x01\n" +
-	"\x1fplacement_conflicts_with_stored\x18\x13 \x01(\v29.agentrepl.v1.FinishWorkspacePlacementConflictsWithStoredH\x00R\x1cplacementConflictsWithStoredB\a\n" +
+	"\x1fplacement_conflicts_with_stored\x18\x13 \x01(\v29.agentrepl.v1.FinishWorkspacePlacementConflictsWithStoredH\x00R\x1cplacementConflictsWithStored\x12S\n" +
+	"\x12rule_checks_failed\x18\x14 \x01(\v2#.agentrepl.v1.MergeRuleChecksFailedH\x00R\x10ruleChecksFailedB\a\n" +
 	"\x05causeJ\x04\b\f\x10\rR\vowner_lands\"\xa9\x01\n" +
 	"+FinishWorkspacePlacementConflictsWithStored\x129\n" +
 	"\x06stored\x18\x01 \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\x06stored\x12?\n" +
@@ -1415,7 +1435,8 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_goTypes = []any{
 	(*LifecycleConfigMissing)(nil),                      // 25: agentrepl.v1.LifecycleConfigMissing
 	(*LifecycleConfigInvalid)(nil),                      // 26: agentrepl.v1.LifecycleConfigInvalid
 	(*MergeQueuePlacementBehindNotInLine)(nil),          // 27: agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	(*MergeQueueStatusOffQueueCause)(nil),               // 28: agentrepl.v1.MergeQueueStatusOffQueueCause
+	(*MergeRuleChecksFailed)(nil),                       // 28: agentrepl.v1.MergeRuleChecksFailed
+	(*MergeQueueStatusOffQueueCause)(nil),               // 29: agentrepl.v1.MergeQueueStatusOffQueueCause
 }
 var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
 	18, // 0: agentrepl.v1.FinishWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -1444,14 +1465,15 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
 	27, // 23: agentrepl.v1.FinishWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
 	16, // 24: agentrepl.v1.FinishWorkspaceError.merge_off_queue:type_name -> agentrepl.v1.FinishWorkspaceMergeOffQueue
 	6,  // 25: agentrepl.v1.FinishWorkspaceError.placement_conflicts_with_stored:type_name -> agentrepl.v1.FinishWorkspacePlacementConflictsWithStored
-	21, // 26: agentrepl.v1.FinishWorkspacePlacementConflictsWithStored.stored:type_name -> agentrepl.v1.MergeQueuePlacement
-	21, // 27: agentrepl.v1.FinishWorkspacePlacementConflictsWithStored.requested:type_name -> agentrepl.v1.MergeQueuePlacement
-	28, // 28: agentrepl.v1.FinishWorkspaceMergeOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	28, // 26: agentrepl.v1.FinishWorkspaceError.rule_checks_failed:type_name -> agentrepl.v1.MergeRuleChecksFailed
+	21, // 27: agentrepl.v1.FinishWorkspacePlacementConflictsWithStored.stored:type_name -> agentrepl.v1.MergeQueuePlacement
+	21, // 28: agentrepl.v1.FinishWorkspacePlacementConflictsWithStored.requested:type_name -> agentrepl.v1.MergeQueuePlacement
+	29, // 29: agentrepl.v1.FinishWorkspaceMergeOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
+	30, // [30:30] is the sub-list for method output_type
+	30, // [30:30] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_finish_workspace_proto_init() }
@@ -1460,6 +1482,7 @@ func file_agentrepl_v1_endpoint_finish_workspace_proto_init() {
 		return
 	}
 	file_agentrepl_v1_lifecycle_config_refusal_proto_init()
+	file_agentrepl_v1_merge_rule_checks_refusal_proto_init()
 	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_merge_queue_status_proto_init()
 	file_agentrepl_v1_merge_version_increment_proto_init()
@@ -1492,6 +1515,7 @@ func file_agentrepl_v1_endpoint_finish_workspace_proto_init() {
 		(*FinishWorkspaceError_PlacementBehindNotInLine)(nil),
 		(*FinishWorkspaceError_MergeOffQueue)(nil),
 		(*FinishWorkspaceError_PlacementConflictsWithStored)(nil),
+		(*FinishWorkspaceError_RuleChecksFailed)(nil),
 	}
 	file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
