@@ -263,6 +263,15 @@ which restores a known prior handler rather than keeping the current one."
   (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-answered raw \"elisp.sidebar-view\"")))
   (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl-webhost-parse-answer raw)"))))
 
+(ert-deftest agent-repl-test-wh-every-held-page-entry-is-built-through-the-one-helper ()
+  "Every held page's entry is made by `agent-repl--webhost-page-entry'."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(list :url"))))
+
+(ert-deftest agent-repl-test-wh-a-page-entry-holds-its-url-and-reason-and-no-deferral ()
+  "A page entry is held at its URL for its reason, handed to the host."
+  (should (equal (agent-repl--webhost-page-entry "http://ws-a.localhost:1/" 'shown)
+                 '(:url "http://ws-a.localhost:1/" :why shown))))
+
 (defun agent-repl-test-wh--on-commit (status uri)
   "What `agent-repl--webview-on-commit' did for STATUS and URI on a view at the host's URL."
   (let (did)
