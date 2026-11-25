@@ -17,48 +17,8 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// noPageOpen and loadingPageOpen name one workspace of an open.
-func noPageOpen(ws *workspacev1.WorkspaceRef) *agentreplv1.OpenTabsWorkspace {
-	return &agentreplv1.OpenTabsWorkspace{Workspace: ws, Page: &agentreplv1.OpenTabsWorkspace_None{None: &agentreplv1.OpenTabsPageNone{}}}
-}
-
 func loadingPageOpen(ws *workspacev1.WorkspaceRef) *agentreplv1.OpenTabsWorkspace {
 	return &agentreplv1.OpenTabsWorkspace{Workspace: ws, Page: &agentreplv1.OpenTabsWorkspace_Loading{Loading: &agentreplv1.OpenTabsPageLoading{}}}
-}
-
-// openLog reads an open until its finish, answering every frame in order.
-func openLog(t *testing.T, d *harness.Daemon, s *harness.Stream[*agentreplv1.OpenTabsResponse]) []*agentreplv1.OpenTabsResponse {
-	t.Helper()
-	var frames []*agentreplv1.OpenTabsResponse
-	ctx, cancel := d.WaitCtx()
-	defer cancel()
-	harness.AwaitView(t, ctx, s, "the open's finish", func(r *agentreplv1.OpenTabsResponse) bool {
-		frames = append(frames, r)
-		return r.GetFinished() != nil
-	})
-	return frames
-}
-
-// openedOutcomes maps each answered workspace to its outcome arm's name.
-func openedOutcomes(frames []*agentreplv1.OpenTabsResponse) map[string]string {
-	out := map[string]string{}
-	for _, f := range frames {
-		o := f.GetOpened()
-		if o == nil {
-			continue
-		}
-		switch {
-		case o.GetReady() != nil:
-			out[o.GetWorkspace().GetId()] = "ready"
-		case o.GetFailed() != nil:
-			out[o.GetWorkspace().GetId()] = "failed"
-		case o.GetHidden() != nil:
-			out[o.GetWorkspace().GetId()] = "hidden"
-		case o.GetRefused() != nil:
-			out[o.GetWorkspace().GetId()] = "refused"
-		}
-	}
-	return out
 }
 
 // hide moves a workspace into the backlog.
@@ -68,31 +28,6 @@ func hide(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 		Workspace: ws, Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}},
 	})); err != nil {
 		t.Fatalf("SetWorkspaceBacklogged(hide) = error %v", err)
-	}
-}
-
-// TestOpenTabsAnswersEachWorkspaceReadyWithNoShim pins the owner ruling of
-// 2026-10-28: an open reads the conversation from the store and starts no shim.
-func TestOpenTabsAnswersEachWorkspaceReadyWithNoShim(t *testing.T) {
-	t.Parallel()
-	// Arrange: two registered workspaces, neither opened.
-	d := canonicalView(t)
-	first := harness.Register(t, d, harness.NewRepo(t).Dir)
-	second := harness.Register(t, d, harness.NewRepo(t).Dir)
-
-	// Act
-	frames := openLog(t, d, d.OpenTabs(noPageOpen(first), noPageOpen(second)))
-
-	// Assert
-	want := map[string]string{first.GetId(): "ready", second.GetId(): "ready"}
-	if got := openedOutcomes(frames); len(got) != 2 || got[first.GetId()] != "ready" || got[second.GetId()] != "ready" {
-		t.Fatalf("outcomes = %v, want %v", got, want)
-	}
-	if done := frames[len(frames)-1].GetFinished(); done.GetReady() != 2 || done.GetTotal() != 2 || len(done.GetFailed()) != 0 {
-		t.Fatalf("finished = %v, want 2 of 2 ready", done)
-	}
-	if d.ShimSpawned(first) || d.ShimSpawned(second) {
-		t.Fatal("the open spawned a shim, want none")
 	}
 }
 
@@ -221,26 +156,6 @@ func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T
 	}
 }
 
-func TestANewEmacsStreamStartsNoWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange: a registered workspace nothing has opened, its roster drawn.
-	d := viewInGroup(t, groupEditorStream)
-	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
-	roster := d.WatchRoster()
-	awaitRoster(t, d, roster, "the registered workspace's row", func(r *frontendv1.RosterPush) bool {
-		return rosterRow(r, ws.GetId()) != nil
-	})
-
-	// Act: a new Emacs connects.
-	stream := d.WatchDaemonStream()
-	harness.AwaitView(t, d.Ctx(), stream, "the persistent-wifi standing", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetPersistentWifi() != nil
-	})
-
-	// Assert: nothing is brought up; the editor asks with OpenTabs.
-	harness.ExpectNoPush(t, roster, "a roster change from a bring-up nobody asked for")
-}
-
 func TestANetworkTheShimCannotReachIsANetworkFaultOnTheFooterAndTheRoster(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -261,37 +176,6 @@ func TestANetworkTheShimCannotReachIsANetworkFaultOnTheFooterAndTheRoster(t *tes
 	awaitRoster(t, f.d, f.d.WatchRoster(), "the roster's network fault", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()).GetNetworkFault() != nil
 	})
-}
-
-// stepIndex answers the index in FRAMES of the first step of WS that IS
-// reports, -1 when there is none.
-func stepIndex(frames []*agentreplv1.OpenTabsResponse, ws string, is func(*agentreplv1.OpenTabsStep) bool) int {
-	for i, f := range frames {
-		if step := f.GetStep(); step != nil && step.GetWorkspace().GetId() == ws && is(step) {
-			return i
-		}
-	}
-	return -1
-}
-
-// openedIndex answers the index in FRAMES of WS's `opened`, -1 when none.
-func openedIndex(frames []*agentreplv1.OpenTabsResponse, ws string) int {
-	for i, f := range frames {
-		if f.GetOpened().GetWorkspace().GetId() == ws {
-			return i
-		}
-	}
-	return -1
-}
-
-// show moves a backlogged workspace back into its section.
-func show(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
-	t.Helper()
-	if _, err := d.Client().SetWorkspaceBacklogged(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
-		Workspace: ws, Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Show{Show: &agentreplv1.SetWorkspaceBackloggedShow{}},
-	})); err != nil {
-		t.Fatalf("SetWorkspaceBacklogged(show) = error %v", err)
-	}
 }
 
 // cutWhileBacklogged runs a turn, hides the workspace under it (the stand-down

@@ -1444,6 +1444,27 @@ func TestEnsureCurrentKeepsEveryStandaloneLoadedAndCurrent(t *testing.T) {
 	}
 }
 
+func TestEnsureStandaloneCurrentSurfacesAnUnreadableInstalledBuild(t *testing.T) {
+	for _, sv := range Standalones {
+		t.Run(sv.Short, func(t *testing.T) {
+			// Arrange: the service runs, but nothing is installed to judge it against.
+			h := newRestarter(t)
+			h.running(t, sv.Label, sv.Service, 40, "new "+sv.Short, "new "+sv.Short)
+			if err := os.Remove(filepath.Join(h.r.CacheBin, sv.Service)); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			err := h.r.EnsureStandaloneCurrent(context.Background(), sv)
+
+			// Assert
+			if err == nil || !loggedTo(h.log, "error", "installed build could not be read") || len(h.acts()) != 0 {
+				t.Fatalf("EnsureStandaloneCurrent = %v, acts %v, records %+v; want the error at ERROR and nothing touched", err, h.acts(), h.log.Records())
+			}
+		})
+	}
+}
+
 func TestEnsureStandaloneLoadedNeverRestartsARunningOne(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -96,6 +96,19 @@ type BaselineInput struct {
 	Selection Selection
 	Commit    string
 	Now       time.Time
+	// ProfileOut is where the run's merged Go profile is written, block by
+	// block, so it outlives the run's scratch directory beside the baseline
+	// (ProfileFile); "" keeps it in CoverRoot, which the run deletes.
+	ProfileOut string
+}
+
+// ProfileFile is where a coverage run keeps its merged Go profile: beside its
+// baseline file, so a later run's profile can be compared with it block by
+// block (a test removal is judged by every block it alone covered, which the
+// per-function report cannot show once another test gains a block in the same
+// function).
+func ProfileFile(baselineOut string) string {
+	return strings.TrimSuffix(baselineOut, filepath.Ext(baselineOut)) + ".coverprofile"
 }
 
 // Baseline merges the run's counters into each system's coverage. A Go
@@ -125,6 +138,9 @@ func Baseline(goTool Runner, in BaselineInput) (*redundancy.BaselineFile, error)
 	}
 	if len(dirs) > 0 {
 		profile := filepath.Join(in.CoverRoot, "baseline.coverprofile")
+		if in.ProfileOut != "" {
+			profile = in.ProfileOut
+		}
 		if _, err := goTool(in.CoverRoot, "tool", "covdata", "textfmt", "-i="+strings.Join(dirs, ","), "-o="+profile); err != nil {
 			return nil, fmt.Errorf("cover: merge the run's counters: %w", err)
 		}
@@ -511,7 +527,7 @@ func RunBaseline(goTool Runner, a BaselineArgs, goSystems map[string]string, vit
 	if err != nil {
 		return nil, err
 	}
-	in := BaselineInput{CoverRoot: root, GoSystems: goSystems, Vitest: map[string]VitestReports{}, Selection: a.Selection, Commit: a.Commit, Now: now}
+	in := BaselineInput{CoverRoot: root, GoSystems: goSystems, Vitest: map[string]VitestReports{}, Selection: a.Selection, Commit: a.Commit, Now: now, ProfileOut: ProfileFile(a.Out)}
 	for _, name := range vitest {
 		r, ok, err := vitestReports(a.Work, in.CoverRoot, name, a.Selection)
 		if err != nil {

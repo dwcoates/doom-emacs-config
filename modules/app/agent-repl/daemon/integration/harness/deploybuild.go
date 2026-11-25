@@ -29,8 +29,13 @@ import (
 // from the daemon's own pid (which is alive), and the deploy never reaches
 // launchd. A world that runs the REAL services names their binaries
 // (Opts.ServiceBinaries, DeploySources.Store/Sidecar): the staged cache-bin
-// then carries copies of them, and the processes' own reports are the ones
-// the deploy reads. No world runs a real zettel, so zettel is a placeholder
+// then carries hard links to them, and the processes' own reports are the ones
+// the deploy reads. Every real binary the staging names (the daemon, the
+// services) is LINKED, never copied: a deploy reads the staged files and
+// copies them into place, never writes them, and copying a binary per staged
+// deploy filled a coverage run's RAM disk (2026-11-25, `cp ... agent-repl-tests:
+// No space left on device` at 3770 of 4096 MiB). A link across volumes fails
+// the build loudly, naming the two paths. No world runs a real zettel, so zettel is a placeholder
 // in every world, and its report is always the harness's to state.
 //
 // A test that needs a deploy to CHANGE something — a handover, a webview
@@ -85,7 +90,7 @@ type DeploySources struct {
 	// WebappDist is the dist the daemon serves (--webapp-dist).
 	WebappDist string
 	// Store and Sidecar, when set, are the shim-store and shim-claude-sidecar
-	// binaries the world really runs. The staged cache-bin carries copies of
+	// binaries the world really runs. The staged cache-bin carries links to
 	// them, so a deploy judges those processes — which report their own builds
 	// into the lock dir — up to date, and nothing is restarted. Unset, the
 	// staged cache-bin carries placeholder bytes whose reports the harness
@@ -144,7 +149,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
 		if real == "" {
 			return `printf 'harness %s\n' ` + shellword.Quote(name) + ` > "$out/cache-bin/` + name + `"`
 		}
-		return `cp ` + shellword.Quote(real) + ` "$out/cache-bin/` + name + `"`
+		return `ln ` + shellword.Quote(real) + ` "$out/cache-bin/` + name + `"`
 	}
 	// The staging arm runs AFTER the invocation is recorded and BEFORE the
 	// scripted exit, so a staged build still counts as one invocation.
@@ -165,7 +170,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
     printf '#!/bin/sh\n# a harness daemon build on the next layout, by additive steps\ncase "$1" in -migration-kind-from=*) echo additive ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/agent-repld"
     chmod +x "$out/daemon/bin/agent-repld"
   else
-    cp ` + shellword.Quote(daemonBinary) + ` "$out/daemon/bin/agent-repld"
+    ln ` + shellword.Quote(daemonBinary) + ` "$out/daemon/bin/agent-repld"
   fi
   if [ "$mode" = "` + string(DeployStaleWebapp) + `" ]; then
     printf '<html><script src="/assets/index-` + stagedWebappEntry + `.js"></script></html>' > "$out/webapp/dist/index.html"

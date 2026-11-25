@@ -522,6 +522,36 @@ func TestAnswerColdGateHandsTheVerbTheRequestsChoice(t *testing.T) {
 	}
 }
 
+// TestAnswerColdGateAnswersTheVerbsRefusalInBand pins that a verb refusing
+// the answer (no gate stands) is answered as its typed arm, and recorded.
+func TestAnswerColdGateAnswersTheVerbsRefusalInBand(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	h.Verbs.answerColdGateErr = &workspace.Refusal{Arm: workspace.ArmNoColdGate, Reason: "no cold gate stands"}
+
+	// Act.
+	resp, err := h.Client.AnswerColdGate(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+			Workspace: ref(),
+			Gate:      coldGateIDFor(testWorkspaceID),
+			Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+	if resp.Msg.GetError().GetNoColdGate() == nil {
+		t.Fatalf("result = %v, want no_cold_gate", resp.Msg.GetResult())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "AnswerColdGate", Message: "answered a typed refusal",
+		Match: func(r dlog.Record) bool { return r.Context["arm"] == workspace.ArmNoColdGate }}); !ok {
+		t.Fatalf("records = %+v, want the no_cold_gate refusal recorded", log.Records())
+	}
+}
+
 // TestInterruptAnswersNotDetachedWorkAsTheTypedArm pins that the arm
 // endpoint_interrupt.proto carries for "the FeedId names no detached item" is
 // answered as InterruptError.not_detached_work by BOTH layers that can raise it

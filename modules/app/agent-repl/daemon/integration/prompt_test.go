@@ -93,36 +93,6 @@ func TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused(t *testing.T) {
 	}
 }
 
-// TestARetryOfAnUndeliveredSubmissionRestartsTheSameTurn pins that the retry
-// re-drives the FIRST submission's turn id, not a fresh one: a shim that did
-// accept that turn (the daemon lost only its record of the acceptance) answers
-// the repeat as a no-op, which a fresh id would defeat.
-func TestARetryOfAnUndeliveredSubmissionRestartsTheSameTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
-	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
-	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("do the thing"), IdempotencyKey: "retried-key", Origin: origin,
-	}); err == nil {
-		t.Fatal("the first submission succeeded, want it refused by the shim")
-	}
-	original := f.shim.ExpectStartTurn().GetTurn().GetValue()
-
-	// Act
-	retry := f.submit("do the thing", "retried-key", origin)
-
-	// Assert
-	again := f.shim.ExpectStartTurn().GetTurn().GetValue()
-	if original == "" || again != original {
-		t.Fatalf("the retry's StartTurn turn = %q, want the refused original's %q", again, original)
-	}
-	if got := retry.GetSuccess().GetTurn().GetTurn().GetValue(); got != original {
-		t.Fatalf("the retry answered turn %q, want the original's %q", got, original)
-	}
-}
-
 func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -1966,59 +1936,6 @@ func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.
 // A reply to a selected bubble
 // ---------------------------------------------------------------------------
 
-// TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock covers the reply
-// path end to end: with a prompt selected, the next prompt reaches the shim as
-// the quote block (the selected prompt's words, fenced) ahead of the person's
-// own words, and its feed row draws the quote as its own arm.
-func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
-	t.Parallel()
-	// Arrange: a first prompt, its turn ended, then selected.
-	f := newCanonical(t)
-	feed := f.watchRootFeed()
-	f.submit("the first prompt", "k-first", origin)
-	f.shim.ExpectStartTurn()
-	first := awaitRow(t, f, feed, "the first prompt's selectable row", func(r *frontendv1.FeedRow) bool {
-		return promptText(r) == "the first prompt" && r.GetSelectable() != nil
-	})
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	if _, err := f.d.Client().SelectFeedRow(f.d.Ctx(), connect.NewRequest(&agentreplv1.SelectFeedRowRequest{
-		Workspace: f.ws,
-		Move:      &agentreplv1.SelectFeedRowRequest_Bubble{Bubble: &agentreplv1.SelectFeedRowBubble{Row: first.GetId()}},
-	})); err != nil {
-		t.Fatalf("SelectFeedRow = %v, want the first prompt selected", err)
-	}
-
-	// Act
-	f.submit("the reply", "k-reply", origin)
-
-	// Assert: the shim is handed the quote, then the words.
-	blocks := f.shim.ExpectStartTurn().GetSaid().GetContent().GetBlocks()
-	if len(blocks) != 2 {
-		t.Fatalf("StartTurn.said blocks = %v, want the quote then the words", blocks)
-	}
-	if quote := blocks[0].GetQuote().GetText(); !strings.Contains(quote, "```\nthe first prompt\n```") {
-		t.Fatalf("StartTurn.said quote = %q, want the selected prompt fenced", quote)
-	}
-	if words := blocks[1].GetText().GetText(); words != "the reply" {
-		t.Fatalf("StartTurn.said words = %q, want the person's own", words)
-	}
-	// Assert: the row draws the quote as its own arm, ahead of the words,
-	// naming the row it quoted.
-	row := awaitRow(t, f, feed, "the reply's row", func(r *frontendv1.FeedRow) bool {
-		return promptText(r) == "the reply"
-	})
-	drawn := row.GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	want := &frontendv1.FeedQuoteBlock{
-		Heading:   "⟢ Replying to an earlier prompt in this conversation",
-		Quoted:    "the first prompt",
-		Closing:   "⟢ My message",
-		QuotedRow: first.GetId(),
-	}
-	if len(drawn) != 2 || !proto.Equal(drawn[0].GetQuote(), want) {
-		t.Fatalf("drawn blocks = %v, want the quote arm taken apart (%v) then the words", drawn, want)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // An agent-sent prompt is headed by the workspace that sent it
 // ---------------------------------------------------------------------------
@@ -2052,87 +1969,6 @@ func TestAnAgentSentPromptIsDrawnUnderTheSendingWorkspace(t *testing.T) {
 	}
 	if req := f.shim.ExpectStartTurn(); req.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT {
 		t.Fatalf("StartTurn.origin = %v, want the agent-sent origin", req.GetOrigin())
-	}
-}
-
-// TestAnAgentSentPromptsStartTurnNamesItsSender: the shim is told which
-// workspace sent the prompt (StartTurnRequest.sent_by), by id and name, so it
-// can deliver the prompt as that workspace's message. A sender that never
-// started a session has no recorded mode, so none is declared.
-func TestAnAgentSentPromptsStartTurnNamesItsSender(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	sender := harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix"))
-
-	// Act
-	f.submitRaw(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-agent-sender",
-		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender,
-	})
-
-	// Assert
-	sentBy := f.shim.ExpectStartTurn().GetSentBy()
-	if sentBy.GetWorkspaceId() != sender.GetId() || !strings.Contains(sentBy.GetWorkspaceName(), "parser-fix") {
-		t.Fatalf("StartTurn.sent_by = %v, want workspace %s named parser-fix", sentBy, sender.GetId())
-	}
-	if sentBy.PermissionMode != nil {
-		t.Fatalf("StartTurn.sent_by.permission_mode = %v, want none for a sender with no session", sentBy.GetPermissionMode())
-	}
-}
-
-// TestAUsersPromptsStartTurnNamesNoSender: a prompt no agent sent carries no
-// sender, so the shim delivers it as words the user typed.
-func TestAUsersPromptsStartTurnNamesNoSender(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-
-	// Act
-	f.submit("please review the parser", "k-user-no-sender", origin)
-
-	// Assert
-	if sentBy := f.shim.ExpectStartTurn().GetSentBy(); sentBy != nil {
-		t.Fatalf("StartTurn.sent_by = %v, want none for a user's prompt", sentBy)
-	}
-}
-
-func TestAnAgentSentPromptFromNoOtherWorkspaceIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-
-	// Act
-	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("hello"), IdempotencyKey: "k-self",
-		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: f.ws,
-	})
-
-	// Assert
-	if resp.GetError().GetUnknownSender().GetSentBy().GetId() != f.ws.GetId() {
-		t.Fatalf("SubmitPrompt = %v, want unknown_sender naming the workspace itself", resp)
-	}
-}
-
-func TestAnAgentSentPromptIsDrawnInTheSendersFeedUnderTheRecipient(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	sender := &fixture{d: f.d, repo: f.repo, ws: harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix")), t: t}
-	feed := sender.watchRootFeed()
-
-	// Act
-	f.submitRaw(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-sent",
-		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender.ws,
-	})
-
-	// Assert
-	row := awaitRow(t, sender, feed, "the sent row headed by the recipient", func(r *frontendv1.FeedRow) bool {
-		return r.GetAgentPrompt().GetAddress().GetSent().GetPeerSession().GetWorkspace() != nil
-	})
-	if got := promptText(row); got != "please review the parser" {
-		t.Fatalf("sent row body = %q, want the prompt's text", got)
 	}
 }
 

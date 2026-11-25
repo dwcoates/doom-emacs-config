@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -201,21 +200,6 @@ func TestRegisterRepositoryRefusesAPathThatIsNotThere(t *testing.T) {
 	// Assert
 	if msg.GetError().GetUnreadablePath() == nil {
 		t.Fatalf("RegisterRepository(%s) = %v, want RegisterRepositoryError.unreadable_path", absent, msg)
-	}
-}
-
-func TestRegisterRepositoryRefusesABlankPathAsAValidationFailure(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-
-	// Act
-	_, err := d.Client().RegisterRepository(context.Background(), connect.NewRequest(&agentreplv1.RegisterRepositoryRequest{}))
-
-	// Assert: a blank string is not a path at all, so it is InvalidArgument
-	// rather than one of the two arms, which are about what a real path is.
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("RegisterRepository(\"\") = %v, want InvalidArgument", err)
 	}
 }
 

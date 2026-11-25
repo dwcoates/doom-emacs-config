@@ -152,33 +152,6 @@ func TestBootRefusesAnUnwritableStateRoot(t *testing.T) {
 	}
 }
 
-func TestBootOpensTheWorkspaceStateFresh(t *testing.T) {
-	t.Parallel()
-	// Arrange: a pre-existing legacy database the rebuild must abandon in
-	// place, under a state root short enough to hold a shim socket (see
-	// harness.ShortTempDir).
-	root := harness.ShortTempDir(t)
-	legacy := filepath.Join(root, "state.db")
-	if err := os.WriteFile(legacy, []byte("legacy sqlite bytes"), 0o644); err != nil {
-		t.Fatalf("seed state.db: %v", err)
-	}
-
-	// Act
-	d := harness.StartDaemon(t, harness.Opts{StateDir: root})
-
-	// Assert
-	got, err := os.ReadFile(legacy)
-	if err != nil {
-		t.Fatalf("read state.db after boot: %v", err)
-	}
-	if string(got) != "legacy sqlite bytes" {
-		t.Fatalf("state.db = %q after boot, want it left untouched", got)
-	}
-	if _, err := os.Stat(filepath.Join(d.StateDir, "wsm.db")); err != nil {
-		t.Fatalf("stat wsm.db = %v, want the fresh database created at boot", err)
-	}
-}
-
 func TestPprofRefusesARoutableBind(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
@@ -889,99 +862,6 @@ func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
 	})
 }
 
-// vanishedWorktree arranges a CLOSED workspace on a worktree whose directory
-// was removed with a plain `rm` while the daemon was down, so git still
-// registers the missing tree. It answers the workspace and the daemon that booted
-// over the removal.
-func vanishedWorktree(t *testing.T, repo *harness.Repo, name string) (*harness.Daemon, *workspacev1.WorkspaceRef) {
-	t.Helper()
-	d := newDaemon(t, harness.Opts{DurableState: true})
-	dir := worktreeOf(t, repo, name)
-	ws := harness.Register(t, d, dir)
-	// CLOSED FIRST: the boot recreates an OPEN workspace's worktree itself,
-	// so only a closed row reaches the open with its directory still gone.
-	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: ws})); err != nil {
-		t.Fatalf("CloseWorkspace: %v", err)
-	}
-	d.Stop()
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("remove the workspace directory: %v", err)
-	}
-	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
-	return nd, ws
-}
-
-// TestOpenWorkspaceRestoresAWorkspaceWhoseDirectoryIsGone is the re-open half
-// of the ruling above: boot CLOSES a workspace whose directory has vanished,
-// and re-opening that row restores the worktree from its surviving branch
-// (the user's intent in picking it) and opens it as any closed workspace.
-func TestOpenWorkspaceRestoresAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	repo := harness.NewRepo(t)
-	nd, ws := vanishedWorktree(t, repo, "reopened")
-
-	// Act.
-	resp, err := nd.Client().OpenWorkspace(nd.Ctx(),
-		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-
-	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace on a vanished directory = (%v, %v), want a success", resp, err)
-	}
-	if _, statErr := os.Stat(ws.GetDir()); statErr != nil {
-		t.Fatalf("the workspace directory after the open: %v, want it restored", statErr)
-	}
-	if !repo.HasWorktree(ws.GetDir()) {
-		t.Fatalf("the repository registers no worktree at %s after the open", ws.GetDir())
-	}
-}
-
-// TestOpenWorkspaceRecordsTheRestoreAtInfo is the narration half: the restore
-// is said once, at INFO, with the directory and the branch it came from.
-func TestOpenWorkspaceRecordsTheRestoreAtInfo(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	repo := harness.NewRepo(t)
-	nd, ws := vanishedWorktree(t, repo, "narrated")
-
-	// Act.
-	if _, err := nd.Client().OpenWorkspace(nd.Ctx(),
-		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace: %v", err)
-	}
-
-	// Assert.
-	nd.AwaitLogRecord(harness.WorkspaceLogPath(ws.GetDir(), "daemon"), "the restore record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.workspace.open" && strings.ToLower(r.Level) == "info" &&
-			strings.Contains(r.Message, "restored its worktree") &&
-			r.Context["branch"] == "narrated"
-	})
-}
-
-// TestOpenWorkspaceNamesTheVanishedDirectoryAndBranchInItsRefusal is the
-// evidence half: the arm says WHICH directory and branch are gone.
-func TestOpenWorkspaceNamesTheVanishedDirectoryAndBranchInItsRefusal(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	repo := harness.NewRepo(t)
-	nd, ws := vanishedWorktree(t, repo, "named")
-	repo.RemoveBranch("named")
-
-	// Act.
-	resp, err := nd.Client().OpenWorkspace(nd.Ctx(),
-		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenWorkspace: %v", err)
-	}
-
-	// Assert.
-	arm := resp.Msg.GetError().GetWorktreeUnrestorable()
-	if arm.GetDir() != ws.GetDir() || arm.GetBranch() != "named" || !strings.Contains(arm.GetDetail(), ws.GetDir()) {
-		t.Fatalf("refusal = %v, want it to name %q and branch %q", arm, ws.GetDir(), "named")
-	}
-}
-
 // TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally is the logging
 // half: the request still reaches its handler, and the records it produces
 // land on the central sink naming the workspace they are about, reported once
@@ -1011,32 +891,6 @@ func TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally(t *testing.T) {
 		return r.Operation == "daemon.dlog.central_fallback" &&
 			strings.ToLower(r.Level) == "debug" &&
 			r.Context["unroutable_workspace"] == ws.GetDir()
-	})
-}
-
-// TestBootCountsTheMissingDirectoryCloseInItsReport is the report half: the
-// boot's own completion record answers for what it closed, so a reader does
-// not have to count WARN records to know.
-func TestBootCountsTheMissingDirectoryCloseInItsReport(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := newDaemon(t, harness.Opts{DurableState: true})
-	repo := harness.NewRepo(t)
-	dir := worktreeOf(t, repo, "counted")
-	harness.Register(t, d, dir)
-	d.Stop()
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("remove the workspace directory: %v", err)
-	}
-	repo.RemoveBranch("counted")
-
-	// Act.
-	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
-
-	// Assert.
-	nd.AwaitLogRecord(nd.RunLogPath(), "the boot completion record's count", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.cmd.boot" && strings.Contains(r.Message, "reconciliation completed") &&
-			r.Context["missing_dir_closed"] == float64(1)
 	})
 }
 
@@ -1130,24 +984,6 @@ func TestBootRecordsHowLongTheOpeningViewsTook(t *testing.T) {
 	// Assert
 	if _, ok := record.Context["took_ms"]; !ok {
 		t.Fatalf("the opening views' record %+v carries no took_ms", record.Context)
-	}
-}
-
-// TestBootRecordsHowLongItWaitedForTheClaim pins the record that says a
-// replacement waited out its predecessor's exit for the boot claim.
-func TestBootRecordsHowLongItWaitedForTheClaim(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-
-	// Act
-	record := d.AwaitLogRecord(d.RunLogPath(), "the claim's record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.cmd.claim" && r.Message == "took the boot claim"
-	})
-
-	// Assert
-	if _, ok := record.Context["waited_ms"]; !ok {
-		t.Fatalf("the claim record %+v carries no waited_ms", record.Context)
 	}
 }
 

@@ -288,6 +288,9 @@ func TestRunBaselineWritesTheMergedFile(t *testing.T) {
 	if len(got.Systems) != 2 || got.Systems["webapp"].Percent != 100 || got.Commit != "c" {
 		t.Fatalf("baseline = %+v", got)
 	}
+	if raw, err := os.ReadFile(ProfileFile(out)); err != nil || string(raw) != mergedProfile {
+		t.Fatalf("the merged profile beside the baseline = %q, %v; want the run's merged profile", raw, err)
+	}
 	// Neither the integration tier nor the e2e layer wrote a report.
 	if w := got.Systems["webapp"]; !w.Provisional || !strings.Contains(w.Reason, "no integration coverage") || !strings.Contains(w.Reason, "no e2e webapp layer") {
 		t.Fatalf("webapp = %+v, want provisional for both missing tiers", w)
@@ -479,6 +482,12 @@ func TestSelection(t *testing.T) {
 				t.Errorf("goTiers = %q, want %q", got, tt.wantGo)
 			}
 		})
+	}
+}
+
+func TestProfileFileSitsBesideTheBaseline(t *testing.T) {
+	if got, want := ProfileFile("/runs/r1/coverage-baseline.json"), "/runs/r1/coverage-baseline.coverprofile"; got != want {
+		t.Fatalf("ProfileFile = %q, want %q", got, want)
 	}
 }
 

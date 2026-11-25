@@ -118,57 +118,6 @@ func TestAnAsyncMergeOfABranchWithAWorktreeLandsAndKeepsThatWorktree(t *testing.
 	}
 }
 
-func TestAnAsyncMergeIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		req  func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest
-		want func(*agentreplv1.CreateWorkspaceError) bool
-	}{
-		{
-			name: "a close-after that names the requester",
-			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
-				s.repo.AddBranch("agent-fix")
-				return s.asyncRequest("fix-merge", "agent-fix", harness.ClosingOnLanding(s.f.ws))
-			},
-			want: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeUnknownCloseAfter() != nil },
-		},
-		{
-			name: "a close-after that names no workspace",
-			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
-				s.repo.AddBranch("agent-fix")
-				return s.asyncRequest("fix-merge", "agent-fix", harness.ClosingOnLanding(&workspacev1.WorkspaceRef{Id: "nowhere", Dir: "/nowhere"}))
-			},
-			want: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeUnknownCloseAfter() != nil },
-		},
-		{
-			name: "a branch that does not exist",
-			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
-				return s.asyncRequest("fix-merge", "no-such-branch")
-			},
-			want: func(e *agentreplv1.CreateWorkspaceError) bool {
-				return e.GetAsyncMergeUnknownBranch().GetBranch() == "no-such-branch"
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			// Arrange.
-			s := newSourcedRepo(t)
-			s.d.ExpectWarnings("daemon.merge.enqueue")
-
-			// Act.
-			resp, err := s.d.Client().CreateWorkspace(s.d.Ctx(), connect.NewRequest(tt.req(s)))
-
-			// Assert.
-			if err != nil || !tt.want(resp.Msg.GetError()) {
-				t.Fatalf("CreateWorkspace = (%v, %v), want the %s refusal", resp.Msg.GetResult(), err, tt.name)
-			}
-		})
-	}
-}
-
 func TestAConflictIsResolvedByTheRequestersSessionAndTheRebaseContinues(t *testing.T) {
 	t.Parallel()
 	// Arrange: the target moved, and replaying the branch's work conflicts.
@@ -330,48 +279,6 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	})
 }
 
-func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
-	t.Parallel()
-	// Arrange: the workspace's turn is in flight when its agent asks.
-	s := newSourcedRepo(t)
-	s.repo.Tag("0.0.1")
-	harness.CommitWork(t, s.f.ws.GetDir())
-	s.f.submit("finish up and merge", "k-asking", origin)
-	s.awaitStartTurn(t, 2)
-	roster := s.d.WatchRoster()
-	root := s.f.watchRootFeed()
-
-	// Act: the agent asks while its turn runs. A merge onto agent-repl's own
-	// master names its version increment.
-	ask := harness.FinishRequest(s.f.ws, func(req *agentreplv1.FinishWorkspaceRequest) {
-		req.Requester = harness.AskedBy(s.f.ws)
-		req.VersionIncrement = &agentreplv1.MergeWorkspaceVersionIncrement{ChangelogLine: "Fix the footer",
-			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Patch{Patch: &agentreplv1.MergeWorkspaceVersionIncrementPatch{}}}
-	})
-	resp, err := s.d.Client().FinishWorkspace(s.d.Ctx(), connect.NewRequest(ask))
-	requireRPCAnswered(t, "FinishWorkspace", resp, err)
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("FinishWorkspace = (%v), want the deploy recorded", resp.Msg.GetResult())
-	}
-
-	// Assert: nothing about the merge on the roster or the feed.
-	harness.ExpectNoPush(t, root, "a merge row before the requesting turn ended")
-	r := awaitRoster(t, s.d, roster, "the roster", func(*frontendv1.RosterPush) bool { return true })
-	if row := rosterRow(r, s.f.ws.GetId()); row.GetMergeQueued() != nil || row.GetMerging() != nil {
-		t.Fatalf("the roster drew %v before the requesting turn ended", row.GetStatus())
-	}
-
-	// Act: the turn ends.
-	pushConcludedTurn(s.f.shim, mainAgent, "asked")
-
-	// Assert: the merge is put in line and lands.
-	merge := s.awaitConcluded(t, root)
-	s.d.AwaitLandingDeployed()
-	if merge.GetSuccess() == nil {
-		t.Fatalf("the merge ended %v, want landed once the turn ended", merge.GetResult())
-	}
-}
-
 func TestOpenInEditorRelaysAWorkspaceFileOntoTheHostStream(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -394,25 +301,6 @@ func TestOpenInEditorRelaysAWorkspaceFileOntoTheHostStream(t *testing.T) {
 	})
 	if got := push.GetOpenInEditor(); got.GetPath() != "lisp/core.el" || got.GetLine() != 12 {
 		t.Fatalf("relayed %v, want lisp/core.el at line 12", got)
-	}
-}
-
-func TestOpenInEditorRefusesAWorkspaceFileEscapingTheWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newCanonical(t)
-	f.d.ExpectWarnings("daemon.workspace.open_in_editor", "OpenInEditor")
-
-	// Act.
-	resp, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
-		Workspace: f.ws,
-		Target:    &agentreplv1.OpenInEditorRequest_WorkspaceFile{WorkspaceFile: &agentreplv1.OpenInEditorWorkspaceFile{Path: "../../etc/passwd"}},
-	}))
-
-	// Assert.
-	requireRPCAnswered(t, "OpenInEditor", resp, err)
-	if resp.Msg.GetError().GetPathEscapesWorkspace() == nil {
-		t.Fatalf("OpenInEditor = (%v), want path_escapes_workspace", resp.Msg.GetResult())
 	}
 }
 

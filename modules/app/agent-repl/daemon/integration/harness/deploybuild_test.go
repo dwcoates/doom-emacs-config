@@ -14,11 +14,11 @@ import (
 )
 
 // TestFakeDeployBuilderStagesTheServicesTheWorldRuns pins what the staged
-// cache-bin carries for each service: a copy of the real binary a world names
+// cache-bin carries for each service: a link to the real binary a world names
 // (so the real process's own report reads up to date), else the placeholder
 // whose report the harness states itself.
 //
-// Not parallel: the staging copies the harness's daemon binary, a package
+// Not parallel: the staging links the harness's daemon binary, a package
 // global only Main sets, which this test points at a stand-in.
 func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 	tests := []struct {
@@ -28,9 +28,9 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 		service   string
 		want      func(store, sidecar, tests string) string
 	}{
-		{name: "a real store is staged as a copy of its binary", real: true, service: "shim-store",
+		{name: "a real store is staged as a link to its binary", real: true, service: "shim-store",
 			want: func(store, _, _ string) string { return readOrFail(t, store) }},
-		{name: "a real sidecar is staged as a copy of its binary", real: true, service: "shim-claude-sidecar",
+		{name: "a real sidecar is staged as a link to its binary", real: true, service: "shim-claude-sidecar",
 			want: func(_, sidecar, _ string) string { return readOrFail(t, sidecar) }},
 		{name: "no real store stages the placeholder", service: "shim-store",
 			want: func(_, _, _ string) string { return fakeServiceBinary("shim-store") }},
@@ -38,7 +38,7 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 			want: func(_, _, _ string) string { return fakeServiceBinary("shim-claude-sidecar") }},
 		{name: "zettel stages the placeholder beside real services", real: true, service: "zettel",
 			want: func(_, _, _ string) string { return fakeServiceBinary("zettel") }},
-		{name: "a real test service is staged as a copy of its binary", realTests: true, service: "agent-repl-tests",
+		{name: "a real test service is staged as a link to its binary", realTests: true, service: "agent-repl-tests",
 			want: func(_, _, tests string) string { return readOrFail(t, tests) }},
 		{name: "no real test service stages the placeholder", service: "agent-repl-tests",
 			want: func(_, _, _ string) string { return fakeServiceBinary("agent-repl-tests") }},
@@ -83,6 +83,58 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 				t.Fatalf("staged %s = %q, want %q", tc.service, got, want)
 			}
 		})
+	}
+}
+
+// TestFakeDeployBuilderLinksEveryRealBinaryItStages pins that the staging
+// hard-links the real binaries it names rather than copying them: a copy per
+// staged deploy filled a coverage run's RAM disk (2026-11-25).
+//
+// Not parallel: it points the package's daemon binary at a stand-in.
+func TestFakeDeployBuilderLinksEveryRealBinaryItStages(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	previous := daemonBinary
+	daemonBinary = writeStandIn(t, dir, "agent-repld", "a daemon\n")
+	t.Cleanup(func() { daemonBinary = previous })
+	dist := filepath.Join(dir, "dist")
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dist, err)
+	}
+	src := DeploySources{
+		ShimMain:   writeStandIn(t, dir, "main.js", "// shim\n"),
+		WebappDist: dist,
+		Store:      writeStandIn(t, dir, "real-store", "the real store\n"),
+		Sidecar:    writeStandIn(t, dir, "real-sidecar", "the real sidecar\n"),
+		Tests:      writeStandIn(t, dir, "real-tests", "the real test service\n"),
+	}
+	b := NewFakeDeployBuilder(t, filepath.Join(dir, "bin"), src)
+	b.Stage(DeployCurrent)
+	out := filepath.Join(dir, "staging")
+
+	// Act
+	if raw, err := exec.Command(b.Path, "--out", out).CombinedOutput(); err != nil {
+		t.Fatalf("the fake build = %v:\n%s", err, raw)
+	}
+
+	// Assert
+	for staged, real := range map[string]string{
+		filepath.Join(out, "daemon", "bin", "agent-repld"):          daemonBinary,
+		filepath.Join(out, "cache-bin", buildreport.ServiceStore):   src.Store,
+		filepath.Join(out, "cache-bin", buildreport.ServiceSidecar): src.Sidecar,
+		filepath.Join(out, "cache-bin", buildreport.ServiceTests):   src.Tests,
+	} {
+		a, err := os.Stat(staged)
+		if err != nil {
+			t.Fatalf("stat %s: %v", staged, err)
+		}
+		r, err := os.Stat(real)
+		if err != nil {
+			t.Fatalf("stat %s: %v", real, err)
+		}
+		if !os.SameFile(a, r) {
+			t.Errorf("staged %s is not a link to %s", staged, real)
+		}
 	}
 }
 

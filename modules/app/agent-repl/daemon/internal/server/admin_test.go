@@ -153,6 +153,51 @@ func TestSetRepositoryScopesThePause(t *testing.T) {
 	}
 }
 
+// TestAResumeUnpausesTheQueueItNames pins the resume arm: its repository ref
+// scopes the unpause exactly as a pause's scopes the pause.
+func TestAResumeUnpausesTheQueueItNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		repository *workspacev1.RepositoryRef
+		wantScope  string
+	}{
+		{name: "an unset repository resumes every queue"},
+		{name: "a set repository resumes that queue alone", repository: &workspacev1.RepositoryRef{Id: "repo-1"}, wantScope: "repo-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(),
+				connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
+					Action: &agentreplv1.UpdateMergeQueueRequest_Resume{
+						Resume: &agentreplv1.UpdateMergeQueueResume{Repository: tt.repository},
+					},
+				}))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("UpdateMergeQueue = %v, %v; want success", resp, err)
+			}
+			if !h.Merge.unpaused {
+				t.Fatal("the resume never unpaused the queue")
+			}
+			var got string
+			if h.Merge.unpauseScope != nil {
+				got = string(h.Merge.unpauseScope.ID)
+			}
+			if got != tt.wantScope {
+				t.Fatalf("unpause scope = %q, want %q", got, tt.wantScope)
+			}
+			if h.Merge.pauseScope != nil || h.Merge.hardStopped {
+				t.Fatalf("pause scope %v, hard stopped %v; want the resume alone", h.Merge.pauseScope, h.Merge.hardStopped)
+			}
+		})
+	}
+}
+
 // hardPause sends a hard pause scoped to repo-1.
 func hardPause(t *testing.T, h *harness) {
 	t.Helper()
@@ -1159,6 +1204,14 @@ func TestUpdateMergeQueueRecordsWhoAsked(t *testing.T) {
 				return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}}}
 			},
 			want: dlog.Context{"action": "pause", "requested_by": merge.RequestedByUser.String()},
+		},
+		{
+			name:      "the user resuming every queue",
+			requester: userRequester(),
+			action: func() *agentreplv1.UpdateMergeQueueRequest {
+				return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{}}}
+			},
+			want: dlog.Context{"action": "resume", "requested_by": merge.RequestedByUser.String()},
 		},
 	}
 	for _, tt := range tests {

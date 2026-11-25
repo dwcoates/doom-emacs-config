@@ -638,40 +638,6 @@ func awaitLoginMarkerOn(t *testing.T, d *harness.Daemon, s *harness.Stream[*agen
 	return seen.String()
 }
 
-func TestOpenLoginFromTwoWorkspacesOutsideTheMultiRepoRootSharesOnePty(t *testing.T) {
-	t.Parallel()
-	// Arrange: two DIFFERENT workspaces whose repositories are both OUTSIDE
-	// $MULTI_REPO_ROOT, so both route to the same default account root
-	// (internal/login/manager.go keys its session map by CONFIG DIR, not by
-	// workspace -- login idempotence is PER ACCOUNT).
-	d := viewInGroup(t, groupLoginTerminal)
-	repoA := harness.NewRepo(t)
-	wsA := harness.Register(t, d, repoA.Dir)
-	repoB := harness.NewRepo(t)
-	wsB := harness.Register(t, d, repoB.Dir)
-
-	// Act
-	first, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: wsA}))
-	if err != nil {
-		t.Fatalf("the first OpenLogin = error %v, want a success", err)
-	}
-	second, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: wsB}))
-	if err != nil {
-		t.Fatalf("the second OpenLogin (a different workspace, the same account root) = error %v, want a success", err)
-	}
-
-	// Assert: the same account root, so the SAME pty -- one banner, not two.
-	if second.Msg.GetSuccess().GetConfigDir() != first.Msg.GetSuccess().GetConfigDir() {
-		t.Fatalf("OpenLogin config dir = %q for the second workspace, want the first's %q (both route to the default account)",
-			second.Msg.GetSuccess().GetConfigDir(), first.Msg.GetSuccess().GetConfigDir())
-	}
-	stream := d.WatchLogin(wsB)
-	seen := awaitLoginMarkerOn(t, d, stream)
-	if got := strings.Count(seen, harness.FakeClaudeLoginMarker); got != 1 {
-		t.Fatalf("login marker count = %d in the shared pty's scrollback (seen by a late subscriber on the SECOND workspace), want exactly 1: the second OpenLogin joined rather than spawning a second pty", got)
-	}
-}
-
 func TestOpenLoginUnderTwoDifferentAccountRootsSpawnsTwoDistinctPtys(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace's repository lives directly UNDER

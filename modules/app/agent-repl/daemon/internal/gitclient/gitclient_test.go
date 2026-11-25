@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -139,6 +140,10 @@ func TestDefaultBranchFails(t *testing.T) {
 			fails(1, "", "symbolic-ref"),
 			fails(2, "", "remote", "get-url", "origin"),
 			ok("worktree /repo\nHEAD abc\ndetached\n", "worktree", "list"),
+		}, wantOp: "daemon.gitclient.default_branch"},
+		{name: "a remote lookup git could not finish", fixtures: []gitFixture{
+			fails(1, "", "symbolic-ref"),
+			killedBy(syscall.SIGKILL, "remote", "get-url", "origin"),
 		}, wantOp: "daemon.gitclient.default_branch"},
 	}
 	for _, tt := range tests {
@@ -2001,6 +2006,24 @@ func TestCountCommitsSurfacesGitsFailure(t *testing.T) {
 	var failure *Error
 	if !errors.As(err, &failure) || failure.ExitCode != 128 {
 		t.Fatalf("CountCommits error = %v (%T), want git's own exit-128 failure", err, err)
+	}
+}
+
+func TestCountCommitsSurfacesAGitThatCouldNotFinish(t *testing.T) {
+	// Arrange: git is killed before it answers.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, killedBy(syscall.SIGKILL, "rev-list"))
+
+	// Act.
+	_, err := git.CountCommits(context.Background(), "/repo", "master", "feature")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Signal != syscall.SIGKILL.String() {
+		t.Fatalf("CountCommits error = %v (%T), want the killed git's failure", err, err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.count_commits"); !found {
+		t.Fatal("no ERROR record under daemon.gitclient.count_commits")
 	}
 }
 
