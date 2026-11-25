@@ -119,3 +119,8 @@ func TestPermalinkOpensInTheSlackApp(t *testing.T) {
 		t.Fatalf("SlackDeepLink(Permalink()) = (%q, %v, %q), want the channel's deep link", deep, ok, why)
 	}
 }
+
+// Every link the rewrite adds is written through mdinline.WriteLink.
+func TestLinksAreWrittenThroughWriteLink(t *testing.T) {
+	mdinlinetest.AssertNoHandWrittenLinks(t, "slackrefs.go")
+}

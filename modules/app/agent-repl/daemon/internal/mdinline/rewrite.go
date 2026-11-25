@@ -66,3 +66,9 @@ func StartsWord(line string, i int) bool {
 func IsWordByte(c byte) bool {
 	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
+
+// WriteLink writes the inline markdown link TEXT to URL, the one spelling a
+// rewrite draws a link it adds with.
+func WriteLink(out *strings.Builder, text, url string) {
+	out.WriteString("[" + text + "](" + url + ")")
+}

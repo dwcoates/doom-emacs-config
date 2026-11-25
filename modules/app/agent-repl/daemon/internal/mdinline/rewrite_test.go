@@ -89,3 +89,16 @@ func TestIsWordByte(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteLink(t *testing.T) {
+	// Arrange
+	var out strings.Builder
+
+	// Act
+	WriteLink(&out, "#12", "https://x/pull/12")
+
+	// Assert
+	if got, want := out.String(), "[#12](https://x/pull/12)"; got != want {
+		t.Errorf("WriteLink() wrote %q, want %q", got, want)
+	}
+}

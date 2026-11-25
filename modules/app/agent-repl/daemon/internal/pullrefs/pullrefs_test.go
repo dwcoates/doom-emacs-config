@@ -210,3 +210,8 @@ func TestPullURL(t *testing.T) {
 func TestLinkifyRewritesThroughTheSharedWalk(t *testing.T) {
 	mdinlinetest.AssertRewriteShape(t, "pullrefs.go", "Linkify")
 }
+
+// Every link the rewrite adds is written through mdinline.WriteLink.
+func TestLinksAreWrittenThroughWriteLink(t *testing.T) {
+	mdinlinetest.AssertNoHandWrittenLinks(t, "pullrefs.go")
+}

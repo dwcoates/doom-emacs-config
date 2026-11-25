@@ -57,7 +57,7 @@ func linkifyText(out *strings.Builder, s mdinline.Stretch, channels Channels) {
 		if line[i] == '#' && mdinline.StartsWord(line, i) {
 			if name, ok := channelName(line, i, s.AtEnd); ok {
 				if id, known := channels.IDs[name]; known {
-					out.WriteString("[#" + name + "](" + Permalink(channels.Subdomain, id) + ")")
+					mdinline.WriteLink(out, "#"+name, Permalink(channels.Subdomain, id))
 					i += 1 + len(name)
 					continue
 				}

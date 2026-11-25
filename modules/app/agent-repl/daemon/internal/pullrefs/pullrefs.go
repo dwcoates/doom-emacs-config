@@ -136,14 +136,14 @@ func linkifyText(out *strings.Builder, line string, from int, links Links, atEnd
 				i++
 				continue
 			}
-			writePullLink(out, "#"+number, ref.URL())
+			mdinline.WriteLink(out, "#"+number, ref.URL())
 			i = end
 		case isRepoByte(c) && mdinline.StartsWord(line, i):
 			name := repoName(line, i)
 			if hash := i + len(name); hash < len(line) && line[hash] == '#' && validRepoName(name) {
 				if number, end, ok := pullNumber(line, hash, atEnd); ok {
 					if ref, linked := links.inRepo(name, number); linked {
-						writePullLink(out, name+"#"+number, ref.URL())
+						mdinline.WriteLink(out, name+"#"+number, ref.URL())
 						named = append(named, ref)
 						i = end
 						continue
@@ -158,11 +158,6 @@ func linkifyText(out *strings.Builder, line string, from int, links Links, atEnd
 		}
 	}
 	return named
-}
-
-// writePullLink writes the markdown link TEXT to URL.
-func writePullLink(out *strings.Builder, text, url string) {
-	out.WriteString("[" + text + "](" + url + ")")
 }
 
 // pullNumber reads the pull request number after the `#` at HASH. END is where
