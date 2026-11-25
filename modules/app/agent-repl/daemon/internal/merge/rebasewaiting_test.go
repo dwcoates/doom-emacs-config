@@ -106,6 +106,36 @@ func TestALandingRebasesEveryWaitingMergeOntoTheNewTip(t *testing.T) {
 	w.finish(t)
 }
 
+func TestALandingRebasesTheWaitingMergesOnceItCommitsWhileItsDeployStillRuns(t *testing.T) {
+	// Arrange: the head's deploy hook is held, so the head stands committed
+	// and still deploying.
+	c := newChain(t)
+	c.h.mu.Lock()
+	c.h.config.Deploy = forUsers(anyTarget(scriptHookOf(checkScript)))
+	c.h.mu.Unlock()
+	passes := make(chan wsm.RepoKey, 16)
+	c.h.o.onWaitingPass = func(repo wsm.RepoKey) { passes <- repo }
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.queue(t, "ws-c", "w1")
+	deploying, release := c.h.hooks.hold(c.h.scriptAt(checkScript), c.dirs[theWorkspace])
+	done := admitAsync(c.h, context.Background())
+	receiveWithin(t, deploying, "the head's deploy hook starting")
+
+	// Act
+	receiveWithin(t, passes, "a pass over the waiting members ending while the head deploys")
+
+	// Assert
+	if got, want := c.git.tree("b-ws-c"), "a1+base+w1"; got != want {
+		t.Errorf("ws-c holds %s while the head deploys, want %s", got, want)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("the head ended on: %v", err)
+	}
+	c.drain(t)
+}
+
 func TestAWaitingMergesRebaseIsCountedFromWhenItWasQueued(t *testing.T) {
 	// Arrange
 	w := newWaitingWorld(t, "ws-c")

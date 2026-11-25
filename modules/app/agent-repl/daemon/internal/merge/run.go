@@ -1012,6 +1012,13 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 				return outcome{}, err
 			}
 		}
+		// A LANDING MOVED THE TARGET THE MOMENT IT COMMITTED: every merge
+		// still waiting in line rebases onto it now, never after the deploy
+		// (rebasewaiting.go). A run resumed past its commit asks again, since
+		// the exit cut whatever pass the dead run started.
+		if out.landed != "" && out.alreadyOn == "" {
+			r.o.rebaseWaiting(r.repo)
+		}
 	}
 	if !r.resumingPast(TabDeploy) {
 		if err := r.awaitTurnFor(ctx, lifecycleconfig.StageDeploy); err != nil {

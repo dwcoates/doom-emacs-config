@@ -18,6 +18,13 @@ import (
 // only kept close to the target, so that its turn at the head finds little
 // left to replay.
 //
+// THE PASS STARTS THE MOMENT THE LANDING COMMITS (owner request, 2026-11-25),
+// while the head goes on to its deploy (run.method): the target's tip is
+// final once the commit lands, so nothing the deploy does is waited for. The
+// landing still heads the line while it deploys, so the merge that heads it
+// next is rebased here too, and its admission waits for that rebase to settle
+// (queue.go).
+//
 // THE REBASE RUNS GIT ONLY. A replayed commit that conflicts is no prompt: the
 // rebase is aborted, the branch keeps its base, and the member steps aside out
 // of line for the RESOLVING-CONFLICTS SLOT (wsm.MergeAsideWaitingConflicts),
