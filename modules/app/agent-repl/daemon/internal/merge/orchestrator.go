@@ -255,6 +255,13 @@ type orchestrator struct {
 	serviceGates serviceGates
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
+	// drainRetries are the re-offers of each repository's queue that a failed
+	// queue_drained script armed (drained.go). Guarded by mu.
+	drainRetries map[wsm.RepoKey]*drainRetry
+	// afterFunc arms a timer that calls F once D has passed, answering its
+	// stop: time.AfterFunc, which a test replaces to fire a drain's re-offer
+	// at once.
+	afterFunc func(d time.Duration, f func()) (stop func() bool)
 	// lines serializes, per repository, every decision that reads its line
 	// and acts on the order it read -- the pump admitting its front
 	// (admitFront), a merge joining the chain behind the head (extendOnce) --
@@ -422,6 +429,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		offers:             map[ids.WorkspaceID]bool{},
 		repoOf:             map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:            map[wsm.RepoKey]bool{},
+		drainRetries:       map[wsm.RepoKey]*drainRetry{},
+		afterFunc:          func(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop },
 		lines:              map[wsm.RepoKey]*sync.Mutex{},
 		headLeases:         map[ids.WorkspaceID]wsm.Lease{},
 		leaseWaits:         map[ids.WorkspaceID]wsm.RepoKey{},

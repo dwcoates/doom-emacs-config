@@ -981,6 +981,9 @@ func (o *orchestrator) Drain(ctx context.Context) {
 
 	o.mu.Lock()
 	o.draining = true
+	// AN EXITING DAEMON RE-OFFERS NO FAILED DRAIN: its successor's boot
+	// offers every owed drain to its own pump (offerOwedDrains).
+	o.stopDrainRetriesLocked()
 	// THE ADMISSION STEPS IN FLIGHT ARE COUNTED UNDER THIS LOCK. `draining`
 	// is set under the same lock enterAdmission registers under, so none
 	// begins after it, and a zero count here means there is nothing to wait

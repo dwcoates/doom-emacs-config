@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -517,5 +518,187 @@ func TestTheBootAndTheTakeoverOfferEveryOwedDrain(t *testing.T) {
 				t.Fatalf("err = %v, kicked %v; want the owing queue offered once", err, kicked)
 			}
 		})
+	}
+}
+
+// failDrain fails the harness's release script and settles its drain once.
+func (h *harness) failDrain() {
+	h.t.Helper()
+	h.hooks.exits[h.drainScript(releaseScript)] = 1
+	h.o.settleDrained(context.Background(), h.repoKey())
+}
+
+// drainRetryTimers answers the timers the harness's failed drains armed.
+func (h *harness) drainRetryTimers() []*fakeTimer { return h.timers.all() }
+
+func TestDrainRetryWaitDoublesFromTheFirstUpToTheMost(t *testing.T) {
+	tests := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{failures: 1, want: 5 * time.Minute},
+		{failures: 2, want: 10 * time.Minute},
+		{failures: 3, want: 20 * time.Minute},
+		{failures: 4, want: 40 * time.Minute},
+		{failures: 5, want: time.Hour},
+		{failures: 6, want: time.Hour},
+		{failures: 1000, want: time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d failures", tt.failures), func(t *testing.T) {
+			// Act
+			got := drainRetryWait(tt.failures)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("drainRetryWait(%d) = %v, want %v", tt.failures, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAFailedDrainArmsItsQueuesReofferAfterTheFirstWait(t *testing.T) {
+	// Arrange
+	h := drainOwedHarness(t, releaseScript)
+
+	// Act
+	h.failDrain()
+
+	// Assert
+	timers := h.drainRetryTimers()
+	if len(timers) != 1 || timers[0].wait != DrainRetryFirst {
+		t.Fatalf("timers = %+v, want one armed for %v", timers, DrainRetryFirst)
+	}
+	record, ok := h.drainRecord(dlog.LevelInfo, "the failed drain's queue is offered to its pump again once its wait ends")
+	if !ok || record.Context["repo"] != string(h.repoKey()) || record.Context["failures"] != 1 || record.Context["retry_in"] != "5m0s" {
+		t.Fatalf("records = %+v, want the re-offer recorded with the queue, the failures and the wait", h.logs.Records())
+	}
+}
+
+func TestAFailedDrainsReofferKicksItsQueueWhenItsWaitEnds(t *testing.T) {
+	// Arrange
+	h := drainOwedHarness(t, releaseScript)
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+	h.failDrain()
+
+	// Act
+	h.drainRetryTimers()[0].f()
+
+	// Assert
+	if !slices.Equal(kicked, []wsm.RepoKey{h.repoKey()}) {
+		t.Fatalf("kicked %v, want the failed drain's queue offered to its pump", kicked)
+	}
+	if _, ok := h.drainRecord(dlog.LevelInfo, "the failed drain's wait ended; its queue is offered to its pump again"); !ok {
+		t.Fatalf("records = %+v, want the re-offer's firing recorded", h.logs.Records())
+	}
+}
+
+func TestEachFailedDrainInARowDoublesTheWaitAndReplacesTheArmedReoffer(t *testing.T) {
+	// Arrange
+	h := drainOwedHarness(t, releaseScript)
+	h.failDrain()
+
+	// Act
+	h.failDrain()
+
+	// Assert
+	timers := h.drainRetryTimers()
+	if len(timers) != 2 || timers[1].wait != 2*DrainRetryFirst {
+		t.Fatalf("timers = %+v, want a second armed for twice the first wait", timers)
+	}
+	if !h.timers.isStopped(timers[0]) || h.timers.isStopped(timers[1]) {
+		t.Fatal("want the first re-offer stopped and the second armed")
+	}
+}
+
+func TestAReplacedReofferThatFiresAnywayKicksNothing(t *testing.T) {
+	// Arrange: the first timer fires though a second failure replaced it.
+	h := drainOwedHarness(t, releaseScript)
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+	h.failDrain()
+	h.failDrain()
+
+	// Act
+	h.drainRetryTimers()[0].f()
+
+	// Assert
+	if kicked != nil {
+		t.Fatalf("kicked %v, want a replaced re-offer to kick nothing", kicked)
+	}
+}
+
+func TestADrainThatSucceedsDisarmsTheReofferAndTheNextFailureWaitsTheFirstWait(t *testing.T) {
+	// Arrange: two failures in a row, then a success.
+	h := drainOwedHarness(t, releaseScript)
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+	h.failDrain()
+	h.failDrain()
+	h.hooks.exits[h.drainScript(releaseScript)] = 0
+
+	// Act
+	h.o.settleDrained(context.Background(), h.repoKey())
+	armed := h.drainRetryTimers()[1]
+	armed.f()
+	h.db.mu.Lock()
+	h.db.drainOwed[h.repoKey()] = true
+	h.db.mu.Unlock()
+	h.failDrain()
+
+	// Assert
+	if !h.drainStillOwed() || !h.timers.isStopped(armed) || kicked != nil {
+		t.Fatalf("stopped %v, kicked %v; want the armed re-offer disarmed by the success", h.timers.isStopped(armed), kicked)
+	}
+	if timers := h.drainRetryTimers(); len(timers) != 3 || timers[2].wait != DrainRetryFirst {
+		t.Fatalf("timers = %+v, want the next failure to wait the first wait again", timers)
+	}
+}
+
+func TestTheDaemonsExitDisarmsEveryReofferAndArmsNoneAfter(t *testing.T) {
+	// Arrange
+	h := drainOwedHarness(t, releaseScript)
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+	h.failDrain()
+	armed := h.drainRetryTimers()[0]
+
+	// Act
+	h.o.Drain(context.Background())
+	armed.f()
+	h.o.retryDrain(h.repoKey(), dlog.Context{"repo": string(h.repoKey())})
+
+	// Assert
+	if !h.timers.isStopped(armed) || kicked != nil {
+		t.Fatalf("stopped %v, kicked %v; want the exit to disarm the re-offer", h.timers.isStopped(armed), kicked)
+	}
+	if timers := h.drainRetryTimers(); len(timers) != 1 {
+		t.Fatalf("timers = %+v, want an exiting daemon to arm no re-offer", timers)
+	}
+	if !h.drainStillOwed() {
+		t.Fatal("the drain was cleared, want it left owed to the successor")
+	}
+}
+
+func TestAFailedDrainsReofferRunsTheDrainAgainOnThePump(t *testing.T) {
+	// Arrange: an asynchronous orchestrator whose release push failed, and
+	// whose remote then answers.
+	h := drainOwedHarness(t, releaseScript)
+	h.o.async = true
+	h.failDrain()
+	h.hooks.exits[h.drainScript(releaseScript)] = 0
+
+	// Act
+	h.drainRetryTimers()[0].f()
+	select {
+	case <-liveGone(h.o):
+	case <-time.After(waitBound):
+		t.Fatal("the pump never went idle after the re-offered drain")
+	}
+
+	// Assert
+	if ran := h.scriptsRan(); len(ran) != 2 || h.drainStillOwed() {
+		t.Fatalf("scripts ran = %v, owed %v; want the release pushed again and the debt cleared", ran, h.drainStillOwed())
 	}
 }

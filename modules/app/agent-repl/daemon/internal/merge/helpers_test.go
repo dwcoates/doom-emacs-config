@@ -3896,7 +3896,9 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 type harness struct {
 	// meter keeps every metric the orchestrator recorded.
 	meter *fakeMeter
-	t     *testing.T
+	// timers are the timers the orchestrator armed, fired only by a test.
+	timers *fakeTimers
+	t      *testing.T
 
 	// asks are the workspace sessions' open asks, as the watcher reports them.
 	asks *Asks
@@ -4407,6 +4409,8 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("building the orchestrator: %v", err)
 	}
 	h.o = o
+	h.timers = &fakeTimers{}
+	o.afterFunc = h.timers.afterFunc
 	// NOTHING THE ORCHESTRATOR STARTED OUTLIVES ITS TEST; this waits, bounded,
 	// for every goroutine it counted to be gone.
 	t.Cleanup(func() {
@@ -5761,4 +5765,47 @@ func (h *harness) parksAsked() []parkAsk {
 	parks := h.parks
 	h.parks = nil
 	return parks
+}
+
+// fakeTimers stands in for time.AfterFunc: it records every timer armed, and
+// a test fires one by hand.
+type fakeTimers struct {
+	mu    sync.Mutex
+	armed []*fakeTimer
+}
+
+// fakeTimer is one armed timer: its wait, what it calls, and whether it was
+// stopped.
+type fakeTimer struct {
+	wait    time.Duration
+	f       func()
+	stopped bool
+}
+
+func (ft *fakeTimers) afterFunc(d time.Duration, f func()) func() bool {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	timer := &fakeTimer{wait: d, f: f}
+	ft.armed = append(ft.armed, timer)
+	return func() bool {
+		ft.mu.Lock()
+		defer ft.mu.Unlock()
+		was := !timer.stopped
+		timer.stopped = true
+		return was
+	}
+}
+
+// all answers every timer armed, in arming order.
+func (ft *fakeTimers) all() []*fakeTimer {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return slices.Clone(ft.armed)
+}
+
+// isStopped reports whether TIMER was stopped.
+func (ft *fakeTimers) isStopped(timer *fakeTimer) bool {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return timer.stopped
 }
