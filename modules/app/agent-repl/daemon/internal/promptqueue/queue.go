@@ -88,6 +88,17 @@ type wsState struct {
 	// so a second submission joins it rather than spawning a second one.
 	reviving bool
 
+	// gatePass reports that a pass of the workspace's cold gate the queue
+	// started for an agent's prompt runs (gatepass.go), so a second prompt
+	// arriving at the gate joins it rather than starting another. Guarded by
+	// q.mu; raised under drain, in the step that records the prompt waiting.
+	gatePass bool
+	// gatePassTurns are the agents' prompts that started or joined a pass of
+	// the gate, each of which passes the gate at most once: a pass that
+	// failed stands the gate again, and the prompt then waits for the user's
+	// answer rather than starting another. Guarded by q.mu.
+	gatePassTurns map[ids.TurnID]struct{}
+
 	// bringUps counts the revivals actually in flight for this workspace,
 	// from every caller -- the background one and the in-line one a hold's
 	// delivery takes. A release that lands while one is running is answered
@@ -208,6 +219,8 @@ type queue struct {
 	// reviving tracks the in-flight background revivals. It is a WaitGroup
 	// rather than a sleep so a test can join them.
 	reviving sync.WaitGroup
+	// gatePasses counts the passes of a cold gate in flight (gatepass.go).
+	gatePasses sync.WaitGroup
 
 	// bouncing tracks the bounces running on their own goroutines, so Drain
 	// joins them rather than closing the state client under one.
@@ -287,6 +300,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs the count of each workspace's ordered stand-downs")
 	case deps.BounceEnded == nil:
 		return nil, fmt.Errorf("the prompt queue needs to tell the stand-downs a bounce ended")
+	case deps.GatePass == nil:
+		return nil, fmt.Errorf("the prompt queue needs the cold gate's pass for the agents' prompts waiting at it")
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
@@ -457,10 +472,10 @@ func (q *queue) standingHold(ctx context.Context, ws ids.WorkspaceID, turn ids.T
 func (q *queue) waitForClassifications() { q.classifying.Wait() }
 
 // Drain implements Queue: a BOUNDED join of the classification verdicts, the
-// background revivals, and the bounces the registry is running. It reports
-// whether they all left, so the caller decides what an overrun means rather
-// than this package guessing — and it is bounded because an unbounded wait is
-// a daemon that does not exit.
+// background revivals, the passes of a cold gate, and the bounces the
+// registry is running. It reports whether they all left, so the caller
+// decides what an overrun means rather than this package guessing — and it is
+// bounded because an unbounded wait is a daemon that does not exit.
 func (q *queue) Drain(bound time.Duration) bool {
 	q.mu.Lock()
 	q.exiting = true
@@ -471,6 +486,7 @@ func (q *queue) Drain(bound time.Duration) bool {
 	go func() {
 		q.classifying.Wait()
 		q.reviving.Wait()
+		q.gatePasses.Wait()
 		q.releasing.Wait()
 		// A departure decision can START a bounce, so it is joined first.
 		q.departing.Wait()

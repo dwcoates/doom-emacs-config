@@ -621,6 +621,11 @@ type Deps struct {
 	// missing session; an answered one is a bring-up already under way. Nil
 	// means no workspace is ever read as gated.
 	ColdGate ColdGateFunc
+	// GatePass passes a workspace's standing cold gate for the prompts other
+	// workspaces' agents sent it (gatepass.go): the compaction `workspace
+	// pass-gate` makes, started by the step that records such a prompt
+	// waiting at the gate. REQUIRED.
+	GatePass GatePasser
 	// ColdGateHeld is told, on every republish of the hold tray, how many
 	// prompts are held at a cold gate (gatefate.go), so the standing gate
 	// offers its compact-and-resume answer exactly while there is something to
@@ -712,6 +717,21 @@ type CacheClocks interface {
 // (desktopnotify.TurnBanners.OnTurnEnded).
 type TurnBanners interface {
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.TurnClose)
+}
+
+// GatePasser passes a cold gate for the agents' prompts waiting at it
+// (workspace.Verbs, through the daemon's forwarder).
+type GatePasser interface {
+	// PassColdGateForPrompts answers WS's standing cold gate by the compaction
+	// `workspace pass-gate` makes (Haiku, the whole context, the prompts held
+	// at the gate kept for the user) and answers once its re-open settled:
+	// true when the session came up, false with no error when no gate stood
+	// to answer or the re-open was abandoned, the failure otherwise.
+	PassColdGateForPrompts(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// TellColdGatePassFailed tells SENDER that the pass of WS's cold gate its
+	// prompt started failed with CAUSE, and that the prompt waits at the gate
+	// for the user's answer.
+	TellColdGatePassFailed(ctx context.Context, sender, ws ids.WorkspaceID, cause error)
 }
 
 // ColdGateRefusal is ErrColdGate carrying the GATE'S OWN sentence, which is

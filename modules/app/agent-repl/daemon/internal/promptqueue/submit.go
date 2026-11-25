@@ -370,8 +370,9 @@ func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 //     resumes the session (2026-11-26 02:06:04Z: the production mediator's
 //     brief refused at a 369,551-token gate, the span left due).
 //
-// A prompt the user types is still refused, so the user knows it did not go,
-// and so is one an agent sent, whose refusal its command prints.
+// A prompt the user types is still refused, so the user knows it did not go
+// and answers the gate on its card. A prompt an agent sent is not refused
+// either: it waits at the gate and passes it (passesColdGate, gatepass.go).
 func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
@@ -876,10 +877,17 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 		moved := q.holdForSession(ctx, ws, kind, opSubmit, log)
 		message := logsite.Msg("the session does not serve yet; the prompts waiting on it stay held until it comes up")
 		if kind == wsm.HoldColdGate {
-			message = logsite.Msg("the session is parked at its cold gate; the prompts waiting on it are held until the gate is answered, which a prompt never does")
+			message = logsite.Msg("the session is parked at its cold gate; the prompts waiting on it are held until the gate is answered")
 		}
 		log.Log(dlog.LevelInfo, opSubmit, message, dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
 		q.reportResume(ws, ResumeNotNow, "the session does not serve: "+why)
+		// THE ARRIVALS WAITING ON THE SESSION WAIT AT THE GATE NOW, so the
+		// gate's answer settles them, and an agent's prompt among them passes
+		// the gate in that same step (gatepass.go). Left on the session wait,
+		// the gate's answer found nothing to settle (2026-11-25).
+		if kind == wsm.HoldColdGate {
+			q.driveArrivalsLocked(ctx, d, arrivalGateRaised, log)
+		}
 		return
 	}
 	// THE FACTS COME FIRST: until they are in, an adopted shim's running turn

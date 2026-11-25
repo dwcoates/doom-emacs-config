@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/topbar"
 )
@@ -1581,5 +1582,46 @@ func TestPassColdGateIsRefused(t *testing.T) {
 					f.cards.coldGatesCleared, len(f.fleet.resumes))
 			}
 		})
+	}
+}
+
+func TestTellColdGatePassFailedTellsTheSender(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("sender", t.TempDir())
+	gated := f.workspace("gated", t.TempDir())
+	f.briefs[BriefColdGatePassFailed] = prompts.Prompt{
+		Name: BriefColdGatePassFailed, Body: "{{workspace}} failed: {{why}}", Placeholders: []string{"workspace", "why"},
+	}
+
+	// Act
+	f.verbs.TellColdGatePassFailed(context.Background(), "sender", "gated", errors.New("the summarizer refused"))
+
+	// Assert
+	if told := toldRequester(f, "sender"); !slices.Equal(told, []string{gated.Name + " failed: the summarizer refused"}) {
+		t.Fatalf("notices = %q, want the sender told the gated workspace's pass failed", told)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opColdGate,
+		Message: "told the sender its prompt's pass of the cold gate failed"}); !ok {
+		t.Fatalf("records = %+v, want the notice recorded", f.log.logger.Records())
+	}
+}
+
+func TestTellColdGatePassFailedWithNoBriefTellsNobody(t *testing.T) {
+	// Arrange: the brief is not shipped.
+	f := newFixture(t)
+	f.workspace("sender", t.TempDir())
+	f.workspace("gated", t.TempDir())
+
+	// Act
+	f.verbs.TellColdGatePassFailed(context.Background(), "sender", "gated", errors.New("the summarizer refused"))
+
+	// Assert
+	if told := toldRequester(f, "sender"); len(told) != 0 {
+		t.Fatalf("notices = %q, want none", told)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opColdGate,
+		Message: "could not read a daemon brief"}); !ok {
+		t.Fatalf("records = %+v, want the unreadable brief at ERROR", f.log.logger.Records())
 	}
 }

@@ -69,15 +69,16 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 	}
 
 	// A COLD GATE refuses what nobody is present to resend only when the
-	// prompt first arrives, so its sender learns it did not go (an agent's
-	// command prints the refusal). A prompt already waiting has no sender
-	// listening, so it waits out the gate whatever its origin.
+	// prompt first arrives, so its sender learns it did not go. A prompt
+	// already waiting has no sender listening, so it waits out the gate
+	// whatever its origin, and an agent's prompt waits there and passes the
+	// gate (gatepass.go).
 	detail, gate := q.coldGate(sub.WS)
 	if gate == GateStanding {
-		if !sub.fromWait && !waitsOutColdGate(sub.Origin) {
+		if !sub.fromWait && !waitsOutColdGate(sub.Origin) && !passesColdGate(sub.Origin) {
 			return Disposition{}, q.refuseAtColdGate(ctx, sub.WS, opArrival, "the prompt", log)
 		}
-		return q.awaitArrival(ctx, sub, wsm.WaitColdGate, "the session is parked at its cold gate: "+detail, log)
+		return q.awaitColdGateLocked(ctx, d, sub, "the session is parked at its cold gate: "+detail, log)
 	}
 	if q.isDraining(sub.WS) {
 		return q.awaitArrival(ctx, sub, wsm.WaitBounce, "the workspace is draining for a bounce", log)
@@ -113,11 +114,10 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 		return disposition, nil
 	}
 	if kind, why, waiting := q.sessionWait(sub.WS); waiting {
-		reason := wsm.WaitSession
 		if kind == wsm.HoldColdGate {
-			reason = wsm.WaitColdGate
+			return q.awaitColdGateLocked(ctx, d, sub, why, log)
 		}
-		return q.awaitArrival(ctx, sub, reason, why, log)
+		return q.awaitArrival(ctx, sub, wsm.WaitSession, why, log)
 	}
 	if block, blocked := q.vendorBlocked(sub.WS); blocked {
 		return q.awaitArrival(ctx, sub, wsm.WaitVendor, "the vendor does not serve the session: "+block, log)
@@ -217,6 +217,7 @@ func (q *queue) awaitArrival(ctx context.Context, sub Submission, reason wsm.Arr
 // prompt that never waited has none.
 func (q *queue) endArrivalWait(ctx context.Context, sub Submission, why string, log dlog.Logger) {
 	fields := dlog.Context{"turn": string(sub.Turn), "how": why}
+	q.forgetGatePass(sub.WS, sub.Turn)
 	if !sub.fromWait {
 		log.Info(opArrival, "the prompt was delivered on arrival", fields)
 		return
@@ -256,6 +257,10 @@ const (
 	arrivalCallSettled
 	// arrivalBoot: the daemon booted; it drives every stored wait.
 	arrivalBoot
+	// arrivalGateRaised: the session a wait on the session waited for parked
+	// at its cold gate instead (a revival's, or a failed answer's gate stood
+	// again), so that wait now waits at the gate, which its answer settles.
+	arrivalGateRaised
 )
 
 func (e arrivalEdge) String() string {
@@ -274,6 +279,8 @@ func (e arrivalEdge) String() string {
 		return "call_settled"
 	case arrivalBoot:
 		return "boot"
+	case arrivalGateRaised:
+		return "gate_raised"
 	}
 	panic(fmt.Sprintf("promptqueue: undeclared arrival edge %d", int(e)))
 }
@@ -291,6 +298,8 @@ func (e arrivalEdge) ends(reason wsm.ArrivalWaitReason) bool {
 		return reason == wsm.WaitColdGate
 	case arrivalCallSettled:
 		return reason == wsm.WaitShimCall
+	case arrivalGateRaised:
+		return reason == wsm.WaitSession
 	}
 	panic(fmt.Sprintf("promptqueue: undeclared arrival edge %d", int(e)))
 }

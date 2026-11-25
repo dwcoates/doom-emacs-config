@@ -758,6 +758,13 @@ type Verbs interface {
 	// gate: answered compact by the default summarizer (Haiku, all the
 	// context), the one answer an agent may give (answers.go).
 	PassColdGate(ctx context.Context, ws ids.WorkspaceID) error
+	// PassColdGateForPrompts is PassColdGate made by the prompt queue for the
+	// agents' prompts waiting at WS's gate, answering once the re-open has
+	// settled: whether the session came up, or the failure (answers.go).
+	PassColdGateForPrompts(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// TellColdGatePassFailed tells SENDER's agent the pass of WS's cold gate
+	// its prompt started failed with CAUSE (answers.go).
+	TellColdGatePassFailed(ctx context.Context, sender, ws ids.WorkspaceID, cause error)
 	// SetModel switches the session's model through the QUEUE's session-act
 	// path, so it cannot overtake a queued prompt.
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error

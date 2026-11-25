@@ -355,23 +355,6 @@ func TestANoticeAtAColdGateWaitsOutTheGateWithNoRevival(t *testing.T) {
 	waitsUnder(t, h, "t1", wsm.WaitColdGate)
 }
 
-func TestAnAgentsPromptAtAColdGateIsRefused(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.coldGate = "the conversation is cold at 101600 context tokens"
-
-	// Act
-	_, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello"))
-
-	// Assert
-	var refusal *ColdGateRefusal
-	if !errors.As(err, &refusal) {
-		t.Fatalf("Submit = %v, want the cold gate's refusal", err)
-	}
-	noWaits(t, h)
-	noHolds(t, h)
-}
-
 func TestAWaitingAgentsPromptAGateMeetsWaitsOutTheGate(t *testing.T) {
 	// Arrange: the agent's prompt waits on a session that then parks at its
 	// gate; its sender is no longer listening, so it is not refused.
@@ -700,6 +683,7 @@ func TestWhichEventEndsWhichWait(t *testing.T) {
 		{edge: arrivalLeaseChanged, ends: []wsm.ArrivalWaitReason{wsm.WaitMerge, wsm.WaitBounce, wsm.WaitSession, wsm.WaitShutdown}},
 		{edge: arrivalGateAnswered, ends: []wsm.ArrivalWaitReason{wsm.WaitColdGate}},
 		{edge: arrivalCallSettled, ends: []wsm.ArrivalWaitReason{wsm.WaitShimCall}},
+		{edge: arrivalGateRaised, ends: []wsm.ArrivalWaitReason{wsm.WaitSession}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.edge.String(), func(t *testing.T) {
