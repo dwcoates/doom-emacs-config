@@ -1738,7 +1738,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DeployChecks:       deployChecks{f: verbsRef},
 		ProductionChildren: productionChildren{f: verbsRef},
 		LogSites:           logSites,
-		ReadLogs:           logsReader(scripts, filepath.Dir(paths.PromptsDir)),
+		ReadLogs:           logsReader(scripts, filepath.Dir(paths.PromptsDir), p.Surfaces.Global()),
 		Log:                p.Surfaces,
 	})
 	if err != nil {
