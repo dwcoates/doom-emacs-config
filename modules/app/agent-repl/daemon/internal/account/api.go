@@ -147,6 +147,10 @@ type Resolver interface {
 	// the caller can tell a same-account resume from an account switch. A miss
 	// is a *NotFoundError.
 	FindTranscript(ctx context.Context, workspaceDir, vendorSessionID string) (Transcript, error)
+	// MoveProject moves the vendor's project folder of one directory to the
+	// one of another under every root, for a worktree that moved. A root with
+	// no folder to move has nothing to do.
+	MoveProject(ctx context.Context, fromCWD, toCWD string) error
 	// NewestTranscript answers the most-recent transcript already on disk for a
 	// workspace, so a bring-up that has NO session record of its own can adopt
 	// and continue it rather than mint an empty new conversation. It probes ONLY
