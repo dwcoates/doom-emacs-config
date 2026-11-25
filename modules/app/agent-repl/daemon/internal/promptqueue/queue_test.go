@@ -122,14 +122,85 @@ func TestDispositionParkedReadsTheThreeWayAnswer(t *testing.T) {
 	}
 }
 
-func TestStandingHoldReportsAnUnknownTurn(t *testing.T) {
+func TestStandingHoldTellsWhyNoHoldStands(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) (ids.WorkspaceID, ids.TurnID)
+		want    error
+	}{
+		{
+			name: "a turn nothing was held under",
+			arrange: func(*testing.T, *harness) (ids.WorkspaceID, ids.TurnID) {
+				return theWorkspace, "never-held"
+			},
+			want: ErrNoSuchHold,
+		},
+		{
+			name: "a hold of another workspace",
+			arrange: func(t *testing.T, h *harness) (ids.WorkspaceID, ids.TurnID) {
+				queuedBehind(t, h, "t1")
+				return "another-workspace", "t1"
+			},
+			want: ErrNoSuchHold,
+		},
+		{
+			name: "a hold the session took",
+			arrange: func(t *testing.T, h *harness) (ids.WorkspaceID, ids.TurnID) {
+				queuedBehind(t, h, "t1")
+				turnEnds(h)
+				return theWorkspace, "t1"
+			},
+			want: ErrAlreadyDelivered,
+		},
+		{
+			name: "a hold dropped",
+			arrange: func(t *testing.T, h *harness) (ids.WorkspaceID, ids.TurnID) {
+				queuedBehind(t, h, "t1")
+				if err := h.q.Drop(context.Background(), theWorkspace, "t1"); err != nil {
+					t.Fatalf("Drop: %v", err)
+				}
+				return theWorkspace, "t1"
+			},
+			want: ErrNoSuchHold,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, turn := tt.arrange(t, h)
+			// Act
+			_, err := h.q.standingHold(context.Background(), ws, turn)
+			// Assert
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestStandingHoldAnswersAStandingHold(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
+	queuedBehind(t, h, "t1")
 	// Act
-	_, err := h.q.standingHold(context.Background(), theWorkspace, "never-held")
+	held, err := h.q.standingHold(context.Background(), theWorkspace, "t1")
 	// Assert
-	if err != ErrNoSuchHold {
-		t.Fatalf("err = %v, want ErrNoSuchHold", err)
+	if err != nil || held.Turn != "t1" || held.Tombstone != nil {
+		t.Fatalf("standingHold = (%+v, %v), want t1 standing", held, err)
+	}
+}
+
+func TestStandingHoldSurfacesAFailedRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	queuedBehind(t, h, "t1")
+	h.db.byTurnErr = errors.New("database is locked")
+	// Act
+	_, err := h.q.standingHold(context.Background(), theWorkspace, "t1")
+	// Assert
+	if !errors.Is(err, h.db.byTurnErr) {
+		t.Fatalf("err = %v, want the read failure", err)
 	}
 }
 

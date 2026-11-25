@@ -449,21 +449,35 @@ func waitsOnSession(kind wsm.HoldKind) bool {
 	return kind == wsm.HoldReconnect || kind == wsm.HoldColdGate
 }
 
-// standingHold finds one workspace's standing hold by turn.
+// standingHold finds one workspace's standing hold by turn. A hold that has
+// left the queue answers why (holdUnder): ErrAlreadyDelivered for one the
+// session took, ErrNoSuchHold for a turn WS never held under or a hold
+// otherwise retired, because the hold actions' error arms say no more.
 func (q *queue) standingHold(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.HeldPrompt, error) {
-	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
-	if err != nil {
-		return wsm.HeldPrompt{}, fmt.Errorf("read the holds for %q: %w", ws, err)
+	held, err := q.holdUnder(ctx, ws, turn)
+	if errors.Is(err, ErrNotHeld) {
+		return wsm.HeldPrompt{}, ErrNoSuchHold
 	}
-	for _, h := range standing {
-		if h.Turn == turn {
-			if h.Tombstone != nil {
-				return wsm.HeldPrompt{}, ErrAlreadyDelivered
-			}
-			return h, nil
-		}
+	return held, err
+}
+
+// holdUnder resolves the hold TURN names in WS, retired or standing, telling
+// apart a turn WS never held under (ErrNoSuchHold), a hold the session took
+// (ErrAlreadyDelivered) and one otherwise retired (ErrNotHeld). It reads the
+// one row by turn, so a retired hold is never mistaken for one never held.
+func (q *queue) holdUnder(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.HeldPrompt, error) {
+	held, found, err := q.deps.DB.HeldPromptByTurn(ctx, turn)
+	switch {
+	case err != nil:
+		return wsm.HeldPrompt{}, fmt.Errorf("read hold %q on %q: %w", turn, ws, err)
+	case !found || held.Workspace != ws:
+		return wsm.HeldPrompt{}, ErrNoSuchHold
+	case held.Tombstone != nil && held.Tombstone.Kind == tombstoneDelivered:
+		return wsm.HeldPrompt{}, ErrAlreadyDelivered
+	case held.Tombstone != nil:
+		return wsm.HeldPrompt{}, ErrNotHeld
 	}
-	return wsm.HeldPrompt{}, ErrNoSuchHold
+	return held, nil
 }
 
 // waitForClassifications joins every in-flight classification goroutine. It is
