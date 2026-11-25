@@ -83,6 +83,15 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 			})
 			return Report{}, fmt.Errorf("boot: finish the owed nukes: %w", err)
 		}
+		// A RENAME'S MOVE THAT STOOD ITS SHIM DOWN AND STOPPED PART WAY is
+		// finished before the registry is read, so no step below reads a
+		// directory the workspace is no longer at.
+		if err := s.deps.FinishMovingMoves(ctx); err != nil {
+			log.Error("daemon.boot.run", "the moving moves could not be finished", dlog.Context{
+				"error": err.Error(),
+			})
+			return Report{}, fmt.Errorf("boot: finish the moving moves: %w", err)
+		}
 	}
 	workspaces, err := s.deps.DB.ListWorkspaces(ctx)
 	if err != nil {

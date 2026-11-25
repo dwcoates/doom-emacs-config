@@ -180,6 +180,9 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool, endWork func(
 				fields["force"] = true
 				continue
 			}
+			if errors.Is(err, errMovedUnserved) {
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -228,14 +231,15 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	// kernel lock -- by ruling the shim takes both inside StartSession, not
 	// at startup -- so a second process for one workspace comes up beside
 	// the first, costing nothing until the swap.
-	began := c.deps.Clock.Now()
-	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
-	if err != nil {
-		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", dlog.WithCause(fields, err))
-		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
+	//
+	// A MOVE PRELAUNCHES AFTER ITS STAND-DOWN (movesFirst): a shim is spawned
+	// in the workspace's directory, which the move is about to change.
+	var fresh shimclient.Client
+	if !reason.movesFirst() {
+		if fresh, err = c.prelaunch(ctx, ws, reason, fields); err != nil {
+			return nil, Resumed{}, err
+		}
 	}
-	c.shimStep(ws, reason, restarttiming.ShimPrelaunch, began)
-	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
 
 	if *lease == nil && !*mergeHeld {
 		taken, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
@@ -285,8 +289,10 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 		// THE STAND-DOWN IS THE POINT OF NO RETURN, so a replacement that
 		// is already dead stops the bounce here, with the old shim still
 		// serving.
-		if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
-			return nil, Resumed{}, err
+		if fresh != nil {
+			if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
+				return nil, Resumed{}, err
+			}
 		}
 		// A PLANNED REPLACEMENT CHANGES NO STATUS (2026-11-23): from the
 		// stand-down until this relaunch ends, the old shim's dead link is
@@ -310,6 +316,24 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	// passed, so whatever build is on record was the stood-down shim's;
 	// the replacement's own report is the one judged, whenever it arrives.
 	c.forgetReported(ws)
+
+	if reason.movesFirst() {
+		// NOTHING SERVES THE WORKSPACE NOW, and its starts are held, so its
+		// branch and directory move under nothing (workspace.ApplyOwedMove).
+		if err := c.deps.Moves.ApplyOwedMove(ctx, ws); err != nil {
+			c.log.Error(opRelaunch, "the rename's move failed after the shim stood down; it stays owed, and the next boot finishes it", dlog.WithCause(fields, err))
+			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: move: %w", ws, err)
+		}
+		if !hasOld {
+			// A WORKSPACE NO SHIM SERVED IS NOT BROUGHT UP BY ITS MOVE: its
+			// next start brings it up in the directory it moved to.
+			c.log.Info(opRelaunch, "moved the workspace no shim served; its next start brings it up where it moved", fields)
+			return nil, Resumed{}, errMovedUnserved
+		}
+		if fresh, err = c.prelaunch(ctx, ws, reason, fields); err != nil {
+			return nil, Resumed{}, err
+		}
+	}
 
 	// A REPLACEMENT THAT DIED DURING THE STAND-DOWN IS REPLACED, never
 	// installed: the old shim is gone, so the workspace is otherwise left
@@ -363,6 +387,24 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	return fresh, resumed, nil
 }
 
+// errMovedUnserved ends a move whose workspace no shim served: it moved, and
+// nothing is relaunched, which is the bounce finished.
+var errMovedUnserved = errors.New("rollout: the moved workspace had no shim to relaunch")
+
+// prelaunch brings up the inert replacement shim of WS (ShimFleet.Prelaunch)
+// in the directory the workspace has now, timing the step.
+func (c *controller) prelaunch(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, fields dlog.Context) (shimclient.Client, error) {
+	began := c.deps.Clock.Now()
+	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
+	if err != nil {
+		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", dlog.WithCause(fields, err))
+		return nil, fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
+	}
+	c.shimStep(ws, reason, restarttiming.ShimPrelaunch, began)
+	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
+	return fresh, nil
+}
+
 // settleRelaunch finishes a bounce whose resume answered: the cold gate when
 // the resume answered cold, the new shim's pid, and the recovery edges.
 func (c *controller) settleRelaunch(ctx context.Context, ws ids.WorkspaceID, fresh shimclient.Client, resumed Resumed, fields dlog.Context) error {
@@ -413,6 +455,11 @@ func (c *controller) replacementAlive(fresh shimclient.Client, ws ids.WorkspaceI
 // will never install, so it does not leave an orphan process holding a socket.
 // It holds no session and no lock, so the kill costs nothing.
 func (c *controller) retirePrelaunch(ctx context.Context, fresh shimclient.Client, reason RelaunchReason, fields dlog.Context) {
+	if fresh == nil {
+		// A MOVE PRELAUNCHES NOTHING BEFORE ITS STAND-DOWN (movesFirst), so
+		// a move that stops before then has no prelaunch to retire.
+		return
+	}
 	if err := fresh.Kill(ctx, shimclient.KillAttribution{
 		Actor:  "rollout.relaunch",
 		Reason: fmt.Sprintf("a %s bounce failed or was deferred before the prelaunched shim was installed", reason),

@@ -676,6 +676,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "no run directory", breakDep: func(d *Deps) { d.RunDir = "" }},
 		{name: "no log surfaces", breakDep: func(d *Deps) { d.Log = nil }},
 		{name: "no restart recorder", breakDep: func(d *Deps) { d.Restarts = nil }},
+		{name: "no moving-move finisher", breakDep: func(d *Deps) { d.FinishMovingMoves = nil }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -3107,5 +3108,76 @@ func TestAWorkspaceAtItsRecordedColdGateIsNeverMarkedBringingUp(t *testing.T) {
 	defer h.bringingMu.Unlock()
 	if len(h.bringing) != 0 {
 		t.Fatalf("bring-up marker edges = %v, want none for a workspace whose start runs no shim", h.bringing)
+	}
+}
+
+// TestTheBootFinishesTheMovingMovesBeforeItReadsTheRegistry pins the moving
+// moves' place: a workspace whose move stopped part way is read by no later
+// step at the directory it left, so it is not closed as gone.
+func TestTheBootFinishesTheMovingMovesBeforeItReadsTheRegistry(t *testing.T) {
+	// Arrange: a workspace whose recorded directory a stopped move vacated.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateFree)
+	mustRemove(t, dir)
+	moved := t.TempDir()
+	h.finishMoves = func(ctx context.Context) {
+		to := moved
+		if err := h.db.Rename(ctx, ws.ID, "moved", &wsm.MoveTarget{Branch: "moved", Dir: to}); err != nil {
+			t.Fatalf("Rename: %v", err)
+		}
+		if _, _, err := h.db.CompleteMove(ctx, ws.ID); err != nil {
+			t.Fatalf("CompleteMove: %v", err)
+		}
+	}
+
+	// Act
+	report, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := h.moveFinishes.Load(); got != 1 {
+		t.Fatalf("FinishMovingMoves calls = %d, want 1", got)
+	}
+	if slices.Contains(report.MissingDirClosed, ws.ID) || slices.Contains(report.MissingDirRestored, ws.ID) {
+		t.Fatalf("report = %+v, want the moved workspace read at its new directory", report)
+	}
+}
+
+// TestAMovingMovesFailureFailsTheBoot pins the step's one failure: owed moves
+// that could not be listed fail the boot, recorded at ERROR.
+func TestAMovingMovesFailureFailsTheBoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.moveFinishErr = errors.New("the owed moves could not be listed")
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if !errors.Is(err, h.moveFinishErr) {
+		t.Fatalf("Run = %v, want the moving-moves failure", err)
+	}
+	if !h.hasRecord("error", "daemon.boot.run") {
+		t.Fatal("the failed moving-moves step was not recorded at ERROR")
+	}
+}
+
+// TestAJoiningDaemonFinishesNoMovingMove pins that a successor, which writes
+// nothing, leaves the moving moves to the incumbent's next boot.
+func TestAJoiningDaemonFinishesNoMovingMove(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
+
+	// Act
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert
+	if got := h.moveFinishes.Load(); got != 0 {
+		t.Fatalf("FinishMovingMoves calls = %d on a joining daemon, want 0", got)
 	}
 }

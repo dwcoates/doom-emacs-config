@@ -614,6 +614,8 @@ type fakeVerbs struct {
 	// answers, and a success answers the name it received.
 	names      []string
 	setNameErr error
+	// renamed is the move SetName answers, its name being the one asked.
+	renamed workspace.Renamed
 	// summaries records every summary SetSummary received; setSummaryErr is
 	// what it answers, and a success answers the summary it received.
 	summaries     []string
@@ -1050,12 +1052,14 @@ func (f *fakeVerbs) ClearLinks(_ context.Context, _ ids.WorkspaceID) ([]wsm.Work
 	return f.linkChange("clear")
 }
 
-func (f *fakeVerbs) SetName(_ context.Context, _ ids.WorkspaceID, name string) (string, error) {
+func (f *fakeVerbs) SetName(_ context.Context, _ ids.WorkspaceID, name string) (workspace.Renamed, error) {
 	f.names = append(f.names, name)
 	if f.setNameErr != nil {
-		return "", f.setNameErr
+		return workspace.Renamed{}, f.setNameErr
 	}
-	return name, nil
+	renamed := f.renamed
+	renamed.Name = name
+	return renamed, nil
 }
 
 func (f *fakeVerbs) SetSummary(_ context.Context, _ ids.WorkspaceID, summary string) (string, error) {

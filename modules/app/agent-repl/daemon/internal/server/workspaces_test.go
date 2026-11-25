@@ -3194,6 +3194,47 @@ func TestSetWorkspaceNameHandsTheNameToTheVerb(t *testing.T) {
 	}
 }
 
+// TestSetWorkspaceNameAnswersWhereTheMoveStands pins each of the verb's move
+// states reaching its arm of SetWorkspaceNameSuccess.move.
+func TestSetWorkspaceNameAnswersWhereTheMoveStands(t *testing.T) {
+	to := wsm.MoveTarget{Branch: "better-name", Dir: "/trees/better-name"}
+	tests := []struct {
+		name    string
+		renamed workspace.Renamed
+		check   func(*agentreplv1.SetWorkspaceNameMove) bool
+	}{
+		{name: "nothing moves", renamed: workspace.Renamed{Move: workspace.MoveNone},
+			check: func(m *agentreplv1.SetWorkspaceNameMove) bool { return m.GetNone() != nil }},
+		{name: "the move is owed", renamed: workspace.Renamed{Move: workspace.MoveOwed, To: to},
+			check: func(m *agentreplv1.SetWorkspaceNameMove) bool {
+				return m.GetOwed().GetBranch() == to.Branch && m.GetOwed().GetDir() == to.Dir
+			}},
+		{name: "the move ran", renamed: workspace.Renamed{Move: workspace.MoveMoved, To: to},
+			check: func(m *agentreplv1.SetWorkspaceNameMove) bool {
+				return m.GetMoved().GetBranch() == to.Branch && m.GetMoved().GetDir() == to.Dir
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.renamed = tt.renamed
+
+			// Act
+			resp, err := h.Client.SetWorkspaceName(context.Background(),
+				connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: ref(), Name: "better-name"}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspaceName: %v", err)
+			}
+			if !tt.check(resp.Msg.GetSuccess().GetMove()) {
+				t.Fatalf("move = %v, want the verb's %v", resp.Msg.GetSuccess().GetMove(), tt.renamed)
+			}
+		})
+	}
+}
+
 // TestSetWorkspaceNameRefusesAnUnknownWorkspace pins the unknown_workspace
 // arm, with no verb reached.
 func TestSetWorkspaceNameRefusesAnUnknownWorkspace(t *testing.T) {
@@ -3242,6 +3283,21 @@ func TestSetWorkspaceNameMapsTheVerbsRefusals(t *testing.T) {
 				got := e.GetNameTaken()
 				return got.GetName() == "better-name" && got.GetPending() != nil
 			}},
+		{name: "merging", refusal: &workspace.Refusal{Arm: workspace.ArmMerging, Reason: "merging"},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool { return e.GetMerging() != nil }},
+		{name: "branch_published, with its upstream", refusal: &workspace.Refusal{Arm: workspace.ArmBranchPublished, Reason: "tracks",
+			Fields: map[string]any{"upstream": "origin/feature"}},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool {
+				return e.GetBranchPublished().GetUpstream() == "origin/feature"
+			}},
+		{name: "branch_exists, with its branch", refusal: &workspace.Refusal{Arm: workspace.ArmBranchExists, Reason: "exists",
+			Fields: map[string]any{"branch": "better-name"}},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool { return e.GetBranchExists().GetBranch() == "better-name" }},
+		{name: "directory_exists, with its dir", refusal: &workspace.Refusal{Arm: workspace.ArmDirectoryExists, Reason: "exists",
+			Fields: map[string]any{"dir": "/trees/better-name"}},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool { return e.GetDirectoryExists().GetDir() == "/trees/better-name" }},
+		{name: "moving", refusal: &workspace.Refusal{Arm: workspace.ArmMoving, Reason: "moving"},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool { return e.GetMoving() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

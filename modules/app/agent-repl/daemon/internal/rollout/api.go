@@ -55,7 +55,15 @@ type RelaunchReason string
 // merge's run: true for the replacements nothing is waiting on (a stale build,
 // a stale skill set), which owe the session only a fresher process.
 func (r RelaunchReason) waitsBehindAMerge() bool {
-	return r == ReasonBuildStale || r == ReasonSkillsChanged
+	return r == ReasonBuildStale || r == ReasonSkillsChanged || r == ReasonRename
+}
+
+// movesFirst reports whether the bounce moves the workspace before its
+// replacement shim is spawned: a rename's move, which changes the directory
+// the shim is spawned in, so it stands the old shim down first and
+// prelaunches only once the workspace stands where it moved.
+func (r RelaunchReason) movesFirst() bool {
+	return r == ReasonRename
 }
 
 // The bounce reasons.
@@ -81,7 +89,21 @@ const (
 	// a bounce of what SERVES the workspace (the daemon), not of its shim, and
 	// it keeps the workspace drained on this daemon afterwards.
 	ReasonHandoverTransfer RelaunchReason = "handover_transfer"
+	// ReasonRename is a rename's move (agentrepl.v1.SetWorkspaceName): the
+	// workspace's branch and worktree directory move with its name, which
+	// needs its shim down. Unforced, it waits for the session's freeness,
+	// and behind a merge holding the workspace.
+	ReasonRename RelaunchReason = "rename"
 )
+
+// MoveApplier runs and reads the moves renames owe (workspace.Verbs).
+type MoveApplier interface {
+	// ApplyOwedMove runs the move a rename owes WS; none owed is nothing to
+	// do.
+	ApplyOwedMove(ctx context.Context, ws ids.WorkspaceID) error
+	// MoveOwed reports whether a rename owes WS a move not yet under way.
+	MoveOwed(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+}
 
 // Ask is what a deploy asks of a handover or a layout restart.
 type Ask struct {
@@ -139,6 +161,10 @@ type Controller interface {
 	// dispatched to the shim being replaced. done, when set, is told how the
 	// bounce ended.
 	BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, endWork func(context.Context), done func(error)) (bounce.Decision, error)
+	// TakeUpOwedMove asks for the move a rename owes a workspace, when one
+	// is owed and not under way: the boot's, and every adoption's, take-up
+	// of the moves renames recorded.
+	TakeUpOwedMove(ctx context.Context, ws ids.WorkspaceID)
 	// ShimReported takes one live shim's build report — every shim reports it
 	// on the opening diagnostics of every watch — and bounces the shim through
 	// the registry when the build is not the installed bundle's. It never
@@ -393,6 +419,10 @@ type Deps struct {
 	// the adopting daemon -- the successor, or this one taking a transfer back
 	// -- resumes it at its recorded step. Required.
 	Merges MergeMover
+	// Moves runs the move a rename owes a workspace once its rename bounce
+	// has stood the shim down (workspace.Verbs.ApplyOwedMove), and reads
+	// whether one is owed, so an adoption takes an owed move up. Required.
+	Moves MoveApplier
 	// QueuedCreates takes up the creates the outgoing daemon held for the
 	// network, at the takeover: until then they are still its own. Required.
 	QueuedCreates QueuedCreateRecovery
@@ -920,6 +950,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Merges == nil {
 		return nil, errors.New("rollout: the merge mover is required; a workspace whose merge runs must carry it across a handover")
+	}
+	if deps.Moves == nil {
+		return nil, errors.New("rollout: the move applier is required; a rename's move runs once its bounce has stood the shim down")
 	}
 	if deps.QueuedCreates == nil {
 		return nil, errors.New("rollout: the held creates' recovery is required; a successor takes up the creates its predecessor held for the network")

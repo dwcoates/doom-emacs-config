@@ -61,6 +61,16 @@ var errFake = errors.New("workspace test: arranged failure")
 // outside that set nil-panics, which is the loud failure the test wants.
 type fakeDB struct {
 	wsm.DB
+	// owedMoves are the moves renames owe, by workspace; renameMoveErr fails
+	// a rename that owes one, markMovingErr MarkMoving and completeMoveErr
+	// CompleteMove. lease is what Lease answers, and asyncRequests what
+	// AllAsyncMergeRequests does.
+	owedMoves       map[ids.WorkspaceID]wsm.OwedMove
+	renameMoveErr   error
+	markMovingErr   error
+	completeMoveErr error
+	lease           *wsm.Lease
+	asyncRequests   []wsm.AsyncMergeRequest
 	// compactable is each workspace with a conversation to compact
 	// (OweCompaction), and oweCompactionErr fails every one.
 	compactable      map[ids.WorkspaceID]bool
@@ -1167,6 +1177,93 @@ func (d *fakeDB) SetName(_ context.Context, id ids.WorkspaceID, name string) err
 	return nil
 }
 
+// Rename records the name as SetName does and owes the move to TO, as the
+// store's Rename does: a move already owed keeps where it moves from, and
+// one already moving is refused.
+func (d *fakeDB) Rename(ctx context.Context, id ids.WorkspaceID, name string, to *wsm.MoveTarget) error {
+	if to != nil && d.renameMoveErr != nil {
+		return d.renameMoveErr
+	}
+	if m, owed := d.owedMoves[id]; to != nil && owed && m.Moving {
+		return wsm.ErrMoveInFlight
+	}
+	if err := d.SetName(ctx, id, name); err != nil {
+		return err
+	}
+	if to == nil {
+		return nil
+	}
+	if d.owedMoves == nil {
+		d.owedMoves = map[ids.WorkspaceID]wsm.OwedMove{}
+	}
+	m, owed := d.owedMoves[id]
+	if !owed {
+		ws := d.workspaces[id]
+		m = wsm.OwedMove{Workspace: id, From: wsm.MoveTarget{Branch: ws.Branch, Dir: ws.Dir}}
+	}
+	m.To = *to
+	d.owedMoves[id] = m
+	return nil
+}
+
+// OwedMoveOf answers the fake's owed move.
+func (d *fakeDB) OwedMoveOf(_ context.Context, id ids.WorkspaceID) (wsm.OwedMove, bool, error) {
+	m, owed := d.owedMoves[id]
+	return m, owed, nil
+}
+
+// OwedMoves answers every owed move.
+func (d *fakeDB) OwedMoves(context.Context) ([]wsm.OwedMove, error) {
+	out := make([]wsm.OwedMove, 0, len(d.owedMoves))
+	for _, m := range d.owedMoves {
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// MarkMoving marks the fake's owed move moving.
+func (d *fakeDB) MarkMoving(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.markMovingErr != nil {
+		return false, d.markMovingErr
+	}
+	m, owed := d.owedMoves[id]
+	if !owed {
+		return false, nil
+	}
+	m.Moving = true
+	d.owedMoves[id] = m
+	return true, nil
+}
+
+// CompleteMove moves the fake's record to its owed move's target.
+func (d *fakeDB) CompleteMove(_ context.Context, id ids.WorkspaceID) (wsm.OwedMove, bool, error) {
+	if d.completeMoveErr != nil {
+		return wsm.OwedMove{}, false, d.completeMoveErr
+	}
+	m, owed := d.owedMoves[id]
+	if !owed {
+		return wsm.OwedMove{}, false, nil
+	}
+	ws := d.workspaces[id]
+	ws.Branch, ws.Dir = m.To.Branch, m.To.Dir
+	d.workspaces[id] = ws
+	delete(d.owedMoves, id)
+	return m, true, nil
+}
+
+// Lease answers the fake's lease.
+func (d *fakeDB) Lease(context.Context, ids.WorkspaceID) (wsm.Lease, bool, error) {
+	if d.lease == nil {
+		return wsm.Lease{}, false, nil
+	}
+	return *d.lease, true, nil
+}
+
+// AllAsyncMergeRequests answers the fake's async requests.
+func (d *fakeDB) AllAsyncMergeRequests(context.Context) ([]wsm.AsyncMergeRequest, error) {
+	return d.asyncRequests, nil
+}
+
 // MarkCloseWhenTurnEnds marks the fake's record.
 func (d *fakeDB) MarkCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID, at time.Time) error {
 	if d.markSelfCloseErr != nil {
@@ -1936,6 +2033,14 @@ type fakeGit struct {
 	ancestorErr error
 	// ancestorChecks records each IsAncestor call as "ancestor..descendant".
 	ancestorChecks []string
+	// upstreams answers Upstream per branch; a branch it does not name tracks
+	// nothing. moves and renamedBranches record MoveWorktree and
+	// RenameBranch, which moveErr and renameBranchErr fail.
+	upstreams       map[string]gitclient.Upstream
+	moves           [][2]string
+	moveErr         error
+	renamedBranches [][2]string
+	renameBranchErr error
 	// existingBranches are the branches this repository already holds, which
 	// is what the naming call's collision probe asks for.
 	existingBranches map[string]bool
@@ -2078,6 +2183,40 @@ func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error
 		return false, err
 	}
 	return g.existingBranches[branch], g.branchExistsErr
+}
+
+func (g *fakeGit) Upstream(_ context.Context, _, branch string) (gitclient.Upstream, bool, error) {
+	up, tracks := g.upstreams[branch]
+	return up, tracks, nil
+}
+
+// MoveWorktree moves the directory on disk, as git does, and records it.
+func (g *fakeGit) MoveWorktree(_ context.Context, _, from, to string) error {
+	if g.moveErr != nil {
+		return g.moveErr
+	}
+	g.moves = append(g.moves, [2]string{from, to})
+	if _, err := os.Lstat(from); err == nil {
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			return err
+		}
+		return os.Rename(from, to)
+	}
+	return nil
+}
+
+// RenameBranch renames the branch among the existing ones and records it.
+func (g *fakeGit) RenameBranch(_ context.Context, _, from, to string) error {
+	if g.renameBranchErr != nil {
+		return g.renameBranchErr
+	}
+	g.renamedBranches = append(g.renamedBranches, [2]string{from, to})
+	if g.existingBranches == nil {
+		g.existingBranches = map[string]bool{}
+	}
+	delete(g.existingBranches, from)
+	g.existingBranches[to] = true
+	return nil
 }
 
 func (g *fakeGit) CommonDir(context.Context, string) (string, error) {
@@ -2227,6 +2366,10 @@ func (g *fakeGit) Nuke(_ context.Context, repoDir, worktreeDir, branch string) e
 // fakeAccounts is an account.Resolver.
 type fakeAccounts struct {
 	account.Resolver
+
+	// projectMoves records MoveProject, which projectMoveErr fails.
+	projectMoves   [][2]string
+	projectMoveErr error
 
 	configDir string
 	// multiRepoDir is the work (multi-repo) account root the fake reports
@@ -5343,4 +5486,13 @@ type fakeSlackThreads struct {
 func (f *fakeSlackThreads) SubscribeAtCreation(_ context.Context, ws ids.WorkspaceID, name, url string, mode wsm.SlackThreadMode) error {
 	f.got = append(f.got, string(ws)+"|"+name+"|"+url+"|"+string(mode))
 	return f.err
+}
+
+// MoveProject records the move of the vendor's project folder.
+func (a *fakeAccounts) MoveProject(_ context.Context, from, to string) error {
+	if a.projectMoveErr != nil {
+		return a.projectMoveErr
+	}
+	a.projectMoves = append(a.projectMoves, [2]string{from, to})
+	return nil
 }

@@ -334,6 +334,11 @@ type harness struct {
 	nukeFinishes  atomic.Int64
 	finishNukes   func(ctx context.Context)
 	nukeFinishErr error
+	// moveFinishes counts the boot's FinishMovingMoves calls; finishMoves,
+	// when set, is what each does, and moveFinishErr is what they answer.
+	moveFinishes  atomic.Int64
+	finishMoves   func(ctx context.Context)
+	moveFinishErr error
 	// threadOpens counts the boot's OpenThreads calls;
 	// threadOpenErr fails them.
 	threadOpens   atomic.Int64
@@ -492,6 +497,13 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 				h.finishNukes(ctx)
 			}
 			return h.nukeFinishErr
+		},
+		FinishMovingMoves: func(ctx context.Context) error {
+			h.moveFinishes.Add(1)
+			if h.finishMoves != nil {
+				h.finishMoves(ctx)
+			}
+			return h.moveFinishErr
 		},
 		EnsureHomeRepository: func(context.Context) error {
 			h.homeEnsures.Add(1)
