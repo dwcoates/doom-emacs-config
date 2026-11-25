@@ -69,6 +69,12 @@ func (s *store) DropVendorTitle(ctx context.Context, id WorkspaceID) (bool, erro
 	return dropped, err
 }
 
+// vendorTitleRow is one workspace's stored vendor title, as listRows reads it.
+type vendorTitleRow struct {
+	id    WorkspaceID
+	title string
+}
+
 // ListVendorTitles loads every stored vendor title by workspace,
 // all-or-nothing: a workspace with none is absent, and an empty stored title
 // fails the whole read as a DecodeError naming its workspace.
@@ -76,13 +82,13 @@ func (s *store) ListVendorTitles(ctx context.Context) (map[WorkspaceID]string, e
 	var out map[WorkspaceID]string
 	err := s.read(ctx, "daemon.wsm.list_vendor_titles", dlog.Context{}, func(ctx context.Context) error {
 		rows, err := listRows(ctx, s.q(ctx), `SELECT workspace_id, title FROM workspace_vendor_titles`,
-			func(row interface{ Scan(...any) error }) (summaryRow, error) {
-				var r summaryRow
-				if err := row.Scan(&r.id, &r.summary); err != nil {
-					return summaryRow{}, err
+			func(row interface{ Scan(...any) error }) (vendorTitleRow, error) {
+				var r vendorTitleRow
+				if err := row.Scan(&r.id, &r.title); err != nil {
+					return vendorTitleRow{}, err
 				}
-				if r.summary == "" {
-					return summaryRow{}, &DecodeError{Table: "workspace_vendor_titles", Row: string(r.id), Err: errEmptyVendorTitle}
+				if r.title == "" {
+					return vendorTitleRow{}, &DecodeError{Table: "workspace_vendor_titles", Row: string(r.id), Err: errEmptyVendorTitle}
 				}
 				return r, nil
 			})
@@ -91,7 +97,7 @@ func (s *store) ListVendorTitles(ctx context.Context) (map[WorkspaceID]string, e
 		}
 		out = make(map[WorkspaceID]string, len(rows))
 		for _, r := range rows {
-			out[r.id] = r.summary
+			out[r.id] = r.title
 		}
 		return nil
 	})

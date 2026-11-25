@@ -252,9 +252,6 @@ func TestASinkFailureIsLoggedRaisedAndRetriedOnTheNextDraw(t *testing.T) {
 	if !h.hasRecordWithURLs("error", []string{"https://example.com/a"}) {
 		t.Fatalf("records = %+v, want the failed store's urls at error", h.records())
 	}
-	if keys := h.warnings.keys(); len(keys) != 1 || keys[0] != opResponseLinks {
-		t.Fatalf("warnings = %v, want the failure raised once", keys)
-	}
 	want := [][]string{{"https://example.com/a"}, {"https://example.com/a"}}
 	if !reflect.DeepEqual(sink.taken(), want) {
 		t.Fatalf("sink calls = %q, want the url offered again after the failure", sink.taken())

@@ -604,18 +604,18 @@ type DB interface {
 	// DropMergeProgress deletes one merge lease's progress record and
 	// reports whether one stood.
 	DropMergeProgress(ctx context.Context, lease LeaseID) (bool, error)
-	// PutWorkspaceSummary records a workspace's summary, the one sentence its
-	// agent set, replacing any it had (summaries.go).
-	PutWorkspaceSummary(ctx context.Context, id WorkspaceID, summary string) error
+	// PutWorkspaceSummary records a workspace's summary, the long and short
+	// summary its agent set, replacing any it had (summaries.go).
+	PutWorkspaceSummary(ctx context.Context, id WorkspaceID, summary WorkspaceSummary) error
 	// DropWorkspaceSummary deletes a workspace's summary, reporting whether
 	// one stood.
 	DropWorkspaceSummary(ctx context.Context, id WorkspaceID) (bool, error)
 	// WorkspaceSummaryOf loads a workspace's summary; the bool is false when
 	// none stands.
-	WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (string, bool, error)
+	WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (WorkspaceSummary, bool, error)
 	// ListWorkspaceSummaries loads every stored summary by workspace; a
 	// workspace with none is absent.
-	ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]string, error)
+	ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]WorkspaceSummary, error)
 	// PutVendorTitle records the vendor's title for a workspace's
 	// conversation, replacing any it had (vendortitles.go).
 	PutVendorTitle(ctx context.Context, id WorkspaceID, title string) error

@@ -2,7 +2,6 @@ package feed
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -145,7 +144,6 @@ func (r *resolver) settleResponseLinks(batch responseLinkBatch, err error) {
 	if err != nil {
 		r.logger(batch.ws).Error(opResponseLinks, "the web links a response named could not be stored as the workspace's links",
 			dlog.Context{"urls": batch.urls, "error": err.Error()})
-		r.raiseWarningFor(batch.ws, opResponseLinks, fmt.Sprintf("the links this workspace's response named could not be saved: %v", err))
 		seen := r.responseLinksSeen[batch.ws]
 		for _, u := range batch.urls {
 			delete(seen, u)

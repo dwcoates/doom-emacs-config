@@ -1070,30 +1070,11 @@ func (r *resolver) placeTurn(s *wsState, agent *conversationv1.AgentId, turn *id
 var errAgentFeedUnminted = errors.New("feed: no drawn spawn created this agent, so it has no sub-feed")
 
 // reportUnplaceableAgent records, loudly and once per frame, that an agent's
-// row could not be placed and was not drawn, and puts it on the topbar.
+// row could not be placed and was not drawn.
 func (r *resolver) reportUnplaceableAgent(s *wsState, agent string, cause error) {
 	r.logger(s.id).Error("daemon.feed.unplaceable_agent",
 		"a frame arrived for an agent that has no feed; nothing was drawn for it",
 		dlog.Context{"agent": agent, "main_agent": s.mainAgent, "cause": cause.Error()})
-	r.raiseWarning(s, "unplaceable_agent:"+agent,
-		fmt.Sprintf("rows of agent %q could not be placed in any feed and were not drawn", agent))
-}
-
-// raiseWarning puts a resolution failure on the topbar's warning chip, the
-// webapp's one error surface. The caller has already logged it with its full
-// context; nil Warnings leaves the log as the only record, which is what a
-// test that is not about the topbar wants.
-func (r *resolver) raiseWarning(s *wsState, key, line string) {
-	r.raiseWarningFor(s.id, key, line)
-}
-
-// raiseWarningFor is raiseWarning for a workspace named by its id, for state
-// that lives beside the workspaces' states rather than on one.
-func (r *resolver) raiseWarningFor(ws ids.WorkspaceID, key, line string) {
-	if r.deps.Warnings == nil {
-		return
-	}
-	r.deps.Warnings.RaiseWarning(ws, key, line)
 }
 
 // outputPlacement is where a row of TURN the SESSION ITSELF draws belongs — a

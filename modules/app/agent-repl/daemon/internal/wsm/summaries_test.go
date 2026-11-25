@@ -11,16 +11,22 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// mustPutSummary records SUMMARY for WS, failing the test on any error.
-func mustPutSummary(t *testing.T, s *store, ws WorkspaceID, summary string) {
+// summaryFor is a whole summary whose short summary is SHORT.
+func summaryFor(short string) WorkspaceSummary {
+	return WorkspaceSummary{Long: "The long form of " + short + ". It has two sentences.", Short: short}
+}
+
+// mustPutSummary records the whole summary whose short summary is SHORT for
+// WS, failing the test on any error.
+func mustPutSummary(t *testing.T, s *store, ws WorkspaceID, short string) {
 	t.Helper()
-	if err := s.PutWorkspaceSummary(context.Background(), ws, summary); err != nil {
-		t.Fatalf("PutWorkspaceSummary(%q): %v", summary, err)
+	if err := s.PutWorkspaceSummary(context.Background(), ws, summaryFor(short)); err != nil {
+		t.Fatalf("PutWorkspaceSummary(%q): %v", short, err)
 	}
 }
 
 // summaryOf reads WS's summary back, failing the test on an error.
-func summaryOf(t *testing.T, s *store, ws WorkspaceID) (string, bool) {
+func summaryOf(t *testing.T, s *store, ws WorkspaceID) (WorkspaceSummary, bool) {
 	t.Helper()
 	summary, found, err := s.WorkspaceSummaryOf(context.Background(), ws)
 	if err != nil {
@@ -38,8 +44,8 @@ func TestAWorkspaceSummaryRoundTrips(t *testing.T) {
 	mustPutSummary(t, s, ws.ID, "Fix the topbar")
 
 	// Assert
-	if got, found := summaryOf(t, s, ws.ID); !found || got != "Fix the topbar" {
-		t.Fatalf("summary = %q (found=%v), want %q", got, found, "Fix the topbar")
+	if got, found := summaryOf(t, s, ws.ID); !found || got != summaryFor("Fix the topbar") {
+		t.Fatalf("summary = %+v (found=%v), want %+v", got, found, summaryFor("Fix the topbar"))
 	}
 }
 
@@ -67,8 +73,8 @@ func TestPuttingASummaryReplacesTheOneStanding(t *testing.T) {
 	mustPutSummary(t, s, ws.ID, "Persist the topbar summary")
 
 	// Assert
-	if got, _ := summaryOf(t, s, ws.ID); got != "Persist the topbar summary" {
-		t.Fatalf("summary = %q, want the replacement", got)
+	if got, _ := summaryOf(t, s, ws.ID); got != summaryFor("Persist the topbar summary") {
+		t.Fatalf("summary = %+v, want the replacement", got)
 	}
 	if n := scalar[int](t, s, `SELECT count(*) FROM workspace_summaries`); n != 1 {
 		t.Fatalf("%d summary rows stand, want 1", n)
@@ -80,7 +86,7 @@ func TestASummaryOfAnUnknownWorkspaceIsNotFound(t *testing.T) {
 	s, log := testStore(t)
 
 	// Act
-	err := s.PutWorkspaceSummary(context.Background(), "ws-gone", "Fix the topbar")
+	err := s.PutWorkspaceSummary(context.Background(), "ws-gone", summaryFor("Fix the topbar"))
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -94,24 +100,62 @@ func TestASummaryOfAnUnknownWorkspaceIsNotFound(t *testing.T) {
 	}
 }
 
-func TestAnEmptySummaryIsRefused(t *testing.T) {
+func TestASummaryMissingAPartIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary WorkspaceSummary
+		want    error
+	}{
+		{name: "no short summary", summary: WorkspaceSummary{Long: "Fix it. Now."}, want: errEmptySummary},
+		{name: "no long summary", summary: WorkspaceSummary{Short: "Fix the topbar"}, want: errEmptyLongSummary},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			err := s.PutWorkspaceSummary(context.Background(), ws.ID, tt.summary)
+
+			// Assert
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("PutWorkspaceSummary = %v, want %v", err, tt.want)
+			}
+			if _, found := summaryOf(t, s, ws.ID); found {
+				t.Fatalf("a refused summary was stored")
+			}
+			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.put_workspace_summary"})
+			if !ok || rec.Context["workspace"] != string(ws.ID) {
+				t.Fatalf("no error record naming the workspace: %+v", log.Records())
+			}
+		})
+	}
+}
+
+func TestASummaryStoredBeforeLongSummariesReadsWithNoLongSummary(t *testing.T) {
 	// Arrange
-	s, log := testStore(t)
+	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
+	mustPutSummary(t, s, ws.ID, "Fix the topbar")
+	corrupt(t, s, `UPDATE workspace_summaries SET long_summary = NULL`)
 
 	// Act
-	err := s.PutWorkspaceSummary(context.Background(), ws.ID, "")
+	got, found := summaryOf(t, s, ws.ID)
 
 	// Assert
-	if !errors.Is(err, errEmptySummary) {
-		t.Fatalf("PutWorkspaceSummary = %v, want errEmptySummary", err)
+	if want := (WorkspaceSummary{Short: "Fix the topbar"}); !found || got != want {
+		t.Fatalf("summary = %+v (found=%v), want %+v", got, found, want)
 	}
-	if _, found := summaryOf(t, s, ws.ID); found {
-		t.Fatalf("a refused summary was stored")
+	if got.Complete() {
+		t.Fatalf("a summary with no long summary reads complete")
 	}
-	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.put_workspace_summary"})
-	if !ok || rec.Context["workspace"] != string(ws.ID) {
-		t.Fatalf("no error record naming the workspace: %+v", log.Records())
+}
+
+func TestAWholeSummaryIsComplete(t *testing.T) {
+	// Assert
+	if !summaryFor("Fix the topbar").Complete() {
+		t.Fatalf("a summary with both parts reads incomplete")
 	}
 }
 
@@ -163,8 +207,8 @@ func TestDroppingOneSummaryLeavesAnotherWorkspaces(t *testing.T) {
 	}
 
 	// Assert
-	if got, found := summaryOf(t, s, other.ID); !found || got != "Fix the footer" {
-		t.Fatalf("the other workspace's summary = %q (found=%v), want %q", got, found, "Fix the footer")
+	if got, found := summaryOf(t, s, other.ID); !found || got != summaryFor("Fix the footer") {
+		t.Fatalf("the other workspace's summary = %+v (found=%v), want %+v", got, found, summaryFor("Fix the footer"))
 	}
 }
 
@@ -218,12 +262,12 @@ func TestListingSummariesAnswersEveryStoredSummaryByWorkspace(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
-			want := map[WorkspaceID]string{}
+			want := map[WorkspaceID]WorkspaceSummary{}
 			for _, name := range []string{"first", "second", "third"} {
 				ws := testWorkspaceNamed(t, s, name)
 				if summary, ok := tt.stored[name]; ok {
 					mustPutSummary(t, s, ws.ID, summary)
-					want[ws.ID] = summary
+					want[ws.ID] = summaryFor(summary)
 				}
 			}
 
@@ -257,8 +301,8 @@ func TestListingSummariesKeepsAClosedWorkspacesSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkspaceSummaries: %v", err)
 	}
-	if got[ws.ID] != "Fix the topbar" {
-		t.Fatalf("a closed workspace's summary = %q, want %q", got[ws.ID], "Fix the topbar")
+	if got[ws.ID] != summaryFor("Fix the topbar") {
+		t.Fatalf("a closed workspace's summary = %+v, want %+v", got[ws.ID], summaryFor("Fix the topbar"))
 	}
 }
 
@@ -312,7 +356,7 @@ func TestDroppingTheDigestColumnsKeepsEveryTitle(t *testing.T) {
 	}
 
 	// Assert
-	rows, err := db.QueryContext(ctx, `SELECT `+summaryColumns+` FROM workspace_summaries ORDER BY workspace_id`)
+	rows, err := db.QueryContext(ctx, `SELECT workspace_id, title FROM workspace_summaries ORDER BY workspace_id`)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
@@ -328,5 +372,54 @@ func TestDroppingTheDigestColumnsKeepsEveryTitle(t *testing.T) {
 	want := map[string]string{"ws-a": "Fix the topbar", "ws-b": "Fix the footer"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("titles after the step = %v, want %v", got, want)
+	}
+}
+
+func TestTheLongSummaryStepKeepsEveryTitleWithNoLongSummary(t *testing.T) {
+	// Arrange — the table as layout 110 left it, holding one summary.
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	for _, q := range []string{
+		`CREATE TABLE workspaces (id TEXT PRIMARY KEY)`,
+		`INSERT INTO workspaces (id) VALUES ('ws-a')`,
+		workspaceSummariesDDL,
+		`INSERT INTO workspace_summaries VALUES ('ws-a', 'Fix the topbar')`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+
+	// Act
+	if _, err := db.ExecContext(ctx, workspaceSummariesLongDDL); err != nil {
+		t.Fatalf("the layout-217 step: %v", err)
+	}
+
+	// Assert
+	_, got, err := scanSummary(db.QueryRowContext(ctx, `SELECT `+summaryColumns+` FROM workspace_summaries`))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if want := (WorkspaceSummary{Short: "Fix the topbar"}); got != want {
+		t.Fatalf("summary after the step = %+v, want %+v", got, want)
+	}
+}
+
+func TestAnEmptyStoredLongSummaryIsRefusedByTheTable(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	mustPutSummary(t, s, ws.ID, "Fix the topbar")
+
+	// Act
+	_, err := s.db().ExecContext(context.Background(), `UPDATE workspace_summaries SET long_summary = ''`)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("the table stored an empty long summary; no long summary is NULL")
 	}
 }

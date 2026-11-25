@@ -221,7 +221,7 @@ func TestAFailedSignInRecordStillRetiresTheRowsAndIsRaised(t *testing.T) {
 	assertRecordedFault(t, h, opSignedIn, "disk full")
 }
 
-func TestAFailedSignInLoadIsLoggedAndRaised(t *testing.T) {
+func TestAFailedSignInLoadIsLogged(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{loadErr: errors.New("corrupt page")}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -288,7 +287,7 @@ func TestARedeliveredSettleMeasuresNothingMore(t *testing.T) {
 	}
 }
 
-func TestAFailedPersistIsRaisedOnTheTopbar(t *testing.T) {
+func TestAFailedPersistIsLoggedAtError(t *testing.T) {
 	// Arrange
 	h, pacing := newPacedHarness(t)
 	pacing.persistOK = errors.New("disk full")
@@ -300,8 +299,8 @@ func TestAFailedPersistIsRaisedOnTheTopbar(t *testing.T) {
 	h.settleProse("unit-1", "a"+chars(100))
 
 	// Assert
-	if !slices.Contains(h.warnings.keys(), "reveal_pacing_unsaved") {
-		t.Fatalf("raised warnings = %v, want reveal_pacing_unsaved", h.warnings.keys())
+	if !h.hasRecordWith("error", "daemon.feed.reveal_pacing_unsaved", "cause", "disk full") {
+		t.Fatalf("records = %+v, want the failed persist at error with its cause", h.records())
 	}
 	if h.onlyResponse().GetSuccess() == nil {
 		t.Fatal("the settled bubble was not drawn after a failed persist")

@@ -144,7 +144,7 @@ func TestAFailedReconnectionRecordStillRetiresTheCardsAndIsRaised(t *testing.T) 
 	assertRecordedFault(t, h, opReconnected, "disk full")
 }
 
-func TestAFailedReconnectionLoadIsLoggedAndRaised(t *testing.T) {
+func TestAFailedReconnectionLoadIsLogged(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{loadErr: errors.New("corrupt page")}
 

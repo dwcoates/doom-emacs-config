@@ -19,7 +19,7 @@ func loudLine(id ids.FaultID, detail string) FaultLine {
 	}
 	return FaultLine{
 		ID: id, Kind: KindDeployFailed, At: fixedNow, Record: record,
-		Topbar: FaultTopbarLine(record, true),
+		Loud: FaultLoudLine(record, true),
 	}
 }
 
@@ -52,7 +52,7 @@ func TestAnOpenedLoudFaultStandsWithItsLineAndItsTypedFault(t *testing.T) {
 	got := latest.GetFaults()[0]
 	if got.GetFaultId() != "f-1" || got.GetLine() != "deploy failed: build webapp: error TS2322" ||
 		got.GetOpenedAtMs() != fixedNow.UnixMilli() {
-		t.Fatalf("standing fault = %v, want its id, its topbar line and its instant", got)
+		t.Fatalf("standing fault = %v, want its id, its loud line and its instant", got)
 	}
 	if got.GetFault().GetDeployFailed().GetBuild().GetStep() != "webapp" {
 		t.Fatalf("typed fault = %v, want the deploy_failed build arm", got.GetFault())
@@ -131,7 +131,7 @@ func TestClosingAFaultThatIsNotStandingPublishesNothing(t *testing.T) {
 	}
 }
 
-func TestAFaultWithNoTopbarLineIsRefusedLoudly(t *testing.T) {
+func TestAFaultWithNoLoudLineIsRefusedLoudly(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	l := NewLoudFaults(log)

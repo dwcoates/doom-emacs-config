@@ -212,13 +212,13 @@ func FaultLineDetail(f wsm.Fault) string {
 	return f.Detail
 }
 
-// FaultTopbarLine answers the line the TOPBAR's warning strip — the webapp's
-// one error surface — draws for a fault, and "" for a fault it does not
-// carry. A failed deploy stands there as well as on every footer (owner
-// ruling, 2026-09-28): it is daemon-scoped, so it lands on every strip. The
-// line is the footer's own detail under the kind's name, so the two surfaces
-// cannot say different things about one failure.
-func FaultTopbarLine(f wsm.Fault, daemonScope bool) string {
+// FaultLoudLine answers the line every Emacs is told for a LOUD fault
+// (LoudFaults), and "" for a fault that is not loud. A failed deploy is loud
+// as well as standing on every footer (owner ruling, 2026-09-28): it is
+// daemon-scoped, so it lands on every strip. The line is the footer's own
+// detail under the kind's name, so the two surfaces cannot say different
+// things about one failure.
+func FaultLoudLine(f wsm.Fault, daemonScope bool) string {
 	if !daemonScope || f.Kind != KindDeployFailed {
 		return ""
 	}
@@ -238,16 +238,16 @@ type FaultLine struct {
 	Detail string
 	// At is when the fault was opened.
 	At time.Time
-	// Topbar is the line the topbar's warning strip draws for the fault,
-	// empty when the topbar does not carry it (FaultTopbarLine).
-	Topbar string
+	// Loud is the line every Emacs is told for the fault, empty when the fault
+	// is not loud (FaultLoudLine).
+	Loud string
 	// Record is the fault as it was recorded, for a surface that renders
-	// more of it than the line (the topbar's overlay, Emacs's typed fault).
+	// more of it than the line (Emacs's typed fault).
 	Record wsm.Fault
 }
 
 // FaultSink is told about every fault the daemon opens and closes. It is the
-// ONE hook the footer — and, for the faults it carries, the topbar — hangs off: the ruling asks that every fault reach the
+// ONE hook the footer — and, for the loud faults, every Emacs — hangs off: the ruling asks that every fault reach the
 // strip, and per-site plumbing beside each raise is exactly how three kinds
 // came to have a footer path and sixteen did not.
 //
@@ -308,7 +308,7 @@ func (o *observedDB) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, e
 		Cell:   cell,
 		Detail: FaultLineDetail(f),
 		At:     f.OpenedAt,
-		Topbar: FaultTopbarLine(f, f.Workspace == nil),
+		Loud:   FaultLoudLine(f, f.Workspace == nil),
 		Record: f,
 	})
 	return id, nil

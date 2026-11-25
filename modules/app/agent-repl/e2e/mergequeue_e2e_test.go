@@ -656,7 +656,7 @@ func mqCreateChildWithHooks(t *testing.T, w *stack.World, repoRef *workspacev1.R
 	// and every prompt it is sent until then closes with the note asking for
 	// one; the agent's summary is set here, so the prompts a test sends carry
 	// only their own words.
-	harness.SetSummary(t, w.Daemon, ws, harness.SeededSummary)
+	harness.SetSummary(t, w.Daemon, ws, harness.SeededLongSummary, harness.SeededShortSummary)
 	return ws
 }
 

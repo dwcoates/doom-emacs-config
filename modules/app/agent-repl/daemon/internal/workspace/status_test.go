@@ -80,12 +80,16 @@ func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 
 func TestStatusAnswersTheWorkspacesSummary(t *testing.T) {
 	tests := []struct {
-		name   string
-		stored map[ids.WorkspaceID]string
-		want   *string
+		name      string
+		stored    map[ids.WorkspaceID]wsm.WorkspaceSummary
+		wantShort *string
+		wantLong  *string
 	}{
-		{name: "one stands", stored: map[ids.WorkspaceID]string{"ws-1": "Fix the footer"}, want: proto.String("Fix the footer")},
-		{name: "none stands, so one is owed", stored: nil, want: nil},
+		{name: "a whole summary stands", stored: map[ids.WorkspaceID]wsm.WorkspaceSummary{"ws-1": {Long: "Fix it. Now.", Short: "Fix the footer"}},
+			wantShort: proto.String("Fix the footer"), wantLong: proto.String("Fix it. Now.")},
+		{name: "a short summary alone stands", stored: map[ids.WorkspaceID]wsm.WorkspaceSummary{"ws-1": {Short: "Fix the footer"}},
+			wantShort: proto.String("Fix the footer")},
+		{name: "none stands, so one is owed", stored: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,8 +106,9 @@ func TestStatusAnswersTheWorkspacesSummary(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Status: %v", err)
 			}
-			if (got.Summary == nil) != (tt.want == nil) || (tt.want != nil && got.GetSummary() != *tt.want) {
-				t.Errorf("summary = %v, want %v", got.Summary, tt.want)
+			if !proto.Equal(&agentreplv1.WorkspaceStatus{ShortSummary: got.ShortSummary, LongSummary: got.LongSummary},
+				&agentreplv1.WorkspaceStatus{ShortSummary: tt.wantShort, LongSummary: tt.wantLong}) {
+				t.Errorf("summary = %v / %v, want %v / %v", got.ShortSummary, got.LongSummary, tt.wantShort, tt.wantLong)
 			}
 		})
 	}

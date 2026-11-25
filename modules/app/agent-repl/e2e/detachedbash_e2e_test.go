@@ -388,8 +388,6 @@ func testBashDetachExplicitPoll(t *testing.T) {
 
 	initial, feedStream := dbOpenRootFeed(t, w, ws)
 	defer feedStream.Close()
-	topbarStream := w.WatchTopbar(ws)
-	defer topbarStream.Close()
 
 	turn := stack.SubmitPrompt(t, w, ws, "!bash-detach-poll")
 	stack.AwaitTurnEnded(t, w, ws, turn)
@@ -400,30 +398,10 @@ func testBashDetachExplicitPoll(t *testing.T) {
 	// the spool's last line was ever drawn.
 	dbAwaitSettledShell(t, w, ws, initial, feedStream, "tail -f build.log", dbExitedZero, "done")
 
-	// The settled shell above is ordered AFTER both polls were converted, so
-	// every topbar view the exempt drop could ever have provoked has already
-	// been published or is in flight; the barrier covers the in-flight
-	// tail. Every view seen — the initial one and any later push — must be
-	// free of a TaskOutput unmodeled warning.
-	dbExpectNoUnmodeledWarning(t, topbarStream, "TaskOutput")
-}
-
-// dbExpectNoUnmodeledWarning fails if any topbar view pushed once the daemon
-// is idle (harness.ExpectNoPushMatching) carries an unmodeled-tool warning
-// naming the given tool. Other warnings (the detached work's open fault) are
-// expected and ignored.
-func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1.TopbarView], tool string) {
-	t.Helper()
-	harness.ExpectNoPushMatching(t, stream,
-		"the exempt set is dropped entirely, never filed as unmodeled",
-		func(v *frontendv1.TopbarView) bool {
-			for _, tw := range v.GetWarnings().GetWarnings() {
-				if tw.GetUnmodeledTool().GetToolName().GetText() == tool {
-					return true
-				}
-			}
-			return false
-		})
+	// The exempt TaskOutput polls are dropped, never filed as unmodeled: an
+	// unmodeled activity is a WARN record
+	// (daemon.sessionwatcher.unmodeled_activity) this step does not declare,
+	// so the world's record sweep fails the step on one.
 }
 
 // ===========================================================================

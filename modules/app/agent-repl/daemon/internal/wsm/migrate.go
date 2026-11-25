@@ -412,6 +412,8 @@ var migrations = []migration{
 	// the mark (closerequest.go).
 	{To: 215, Name: "close_requests", Kind: MigrationAdditive, DDL: closeRequestDDL},
 	{To: 216, Name: "retired_self_close", Kind: MigrationContract, DDL: retiredSelfCloseDDL},
+	// IT IS ADDITIVE: a nullable column the previous build never names.
+	{To: 217, Name: "workspace_summaries_long", Kind: MigrationAdditive, DDL: workspaceSummariesLongDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

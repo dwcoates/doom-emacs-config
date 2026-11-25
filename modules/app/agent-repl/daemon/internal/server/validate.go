@@ -1860,14 +1860,18 @@ func validateSetWorkspaceNameRequest(req *agentreplv1.SetWorkspaceNameRequest) *
 }
 
 // validateSetWorkspaceSummaryRequest is SetWorkspaceSummaryRequest's base
-// function: a workspace ref and a summary that is not blank. Whether the
-// summary keeps the format is the rpc's verdict, never a malformed request.
+// function: a workspace ref, and a long and a short summary neither of which
+// is blank. Whether each part keeps its format is the rpc's verdict, never a
+// malformed request.
 func validateSetWorkspaceSummaryRequest(req *agentreplv1.SetWorkspaceSummaryRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
-	if strings.TrimSpace(req.GetSummary()) == "" {
-		return invalid("summary", "a summary names the summary")
+	if strings.TrimSpace(req.GetLongSummary()) == "" {
+		return invalid("long_summary", "a summary names its long summary")
+	}
+	if strings.TrimSpace(req.GetShortSummary()) == "" {
+		return invalid("short_summary", "a summary names its short summary")
 	}
 	return nil
 }

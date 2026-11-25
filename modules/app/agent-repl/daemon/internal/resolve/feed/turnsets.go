@@ -2,7 +2,6 @@ package feed
 
 import (
 	"context"
-	"fmt"
 
 	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -26,20 +25,17 @@ type turnSetRestore struct {
 	read primedTurnSet
 	// failed is the ERROR record's message for a load that failed.
 	failed logsite.Message
-	// warning is the topbar's line for a load that failed.
-	warning string
 	// loaded is the INFO record's message for a set that held turns.
 	loaded logsite.Message
 }
 
 // restoreTurnSet installs RESTORE's set, read by prime, into INTO. A load that fails is logged at
-// ERROR and raised on the topbar, and leaves INTO as it was: the set's rows
-// may be drawn again, which the warning says.
+// ERROR, and leaves INTO as it was: the set's rows may be drawn again, which
+// the record says.
 func (r *resolver) restoreTurnSet(s *wsState, restore turnSetRestore, into map[ids.TurnID]bool) {
 	turns, err := restore.read.turns, restore.read.err
 	if err != nil {
 		r.logger(s.id).Log(dlog.LevelError, restore.op, restore.failed, dlog.Context{"error": err.Error()})
-		r.raiseWarning(s, restore.op, restore.warning)
 		return
 	}
 	for _, turn := range turns {
@@ -73,8 +69,6 @@ type turnAnswer struct {
 	nothing logsite.Message
 	// failed is the ERROR record's message for a recording that failed.
 	failed logsite.Message
-	// warning prefixes the topbar's line for a recording that failed.
-	warning string
 	// answered is the INFO record's message for an answer recorded.
 	answered logsite.Message
 }
@@ -125,6 +119,5 @@ func (r *resolver) answerTurns(s *wsState, answer turnAnswer) *storeOutcome {
 		func(err error) {
 			fields["error"] = err.Error()
 			log.Log(dlog.LevelError, answer.op, answer.failed, fields)
-			r.raiseWarningFor(ws, answer.op, fmt.Sprintf("%s: %v", answer.warning, err))
 		}, answered)
 }

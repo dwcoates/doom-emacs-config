@@ -379,7 +379,7 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				// absent so the client draws their dashes.
 				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the session-less strip a registered workspace opens with")
 				view := push.(*frontendv1.TopbarView)
-				if view.GetWorkspaceName() == nil || view.GetContext() == nil || view.GetWarnings() == nil {
+				if view.GetWorkspaceName() == nil || view.GetContext() == nil {
 					t.Fatalf("%s on a registered-but-unopened workspace = %v, want the always-drawn cells", k.Name, view)
 				}
 				if view.GetModelSelector() != nil {

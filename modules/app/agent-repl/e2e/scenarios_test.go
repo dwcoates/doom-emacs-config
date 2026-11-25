@@ -42,7 +42,7 @@ func TestTurns(t *testing.T) {
 func TestFaults(t *testing.T) {
 	scenario(t,
 		testQueryEofEndsTheTurnAsQueryDied,
-		testConverterRecoveryClosesTheDegradedWindow,
+		testConverterDefectStandsUntilACleanTurn,
 		testResidueAttachmentsDrawNoRow,
 		testContextTipDrawsNoRow,
 		testTokensReminderDrawsNoRow,
@@ -99,7 +99,6 @@ func TestDaemonLifecycle(t *testing.T) {
 		testColdBringUpEarnsNoStoreRefusal,
 		testColdBootReadsReplayFromStore,
 		testASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt,
-		testRecoveryAfterStoreRestart,
 	)
 }
 

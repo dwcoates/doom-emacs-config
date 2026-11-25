@@ -843,10 +843,8 @@ type fleetFixture struct {
 	// topbarWindow is the context window the STRIP answers the gate's figure
 	// is measured against; the fixture starts it at the assumed 1,000,000.
 	topbarWindow int64
-	// picked is the effort level the topbar holds as picked, and
-	// topbarWarnings every warning line the fleet raised on the strip.
-	picked         conversationv1.AgentEffortLevel
-	topbarWarnings []string
+	// picked is the effort level the topbar holds as picked.
+	picked conversationv1.AgentEffortLevel
 	// topbarRemote is every remote-control mode the fleet stated to the strip.
 	topbarRemote []bool
 	// signIns is every workspace the fleet asked the topbar to open the login
@@ -1020,7 +1018,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return f.payErr
 		},
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
-		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{signIns: &f.signIns, coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow, remoteControl: &f.topbarRemote}, Log: f.log,
+		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{signIns: &f.signIns, coldGates: &f.topbarGates, picked: &f.picked, window: &f.topbarWindow, remoteControl: &f.topbarRemote}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Lifecycle: &quietLifecycle{},
 			Footer:    footerLinkSink{rec: f.links},

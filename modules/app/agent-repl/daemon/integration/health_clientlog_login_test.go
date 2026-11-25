@@ -218,7 +218,6 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 	// answers unhealthy, and each is recorded loudly by design. The routing to
 	// the topbar is the only DEBUG half of this.
 	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.health.session")
-	topbar := f.d.WatchTopbar(f.ws)
 
 	// Act: the shim reports itself unhealthy.
 	f.shim.PushUnhealthy(&conversationv1.SessionFault{
@@ -228,10 +227,11 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 			StoreUnreachable: &conversationv1.SessionFaultStoreUnreachable{},
 		},
 	})
-	// The topbar's warning strip is the daemon's own evidence that it absorbed
-	// the fault, so the health probe below is not racing the push.
-	awaitTopbar(t, f, topbar, "a topbar warning for the session fault", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) > 0
+	// The fault's own record is the daemon's evidence that it absorbed the
+	// push: the health reporter records it before any view is drawn, so the
+	// health probe below is not racing the push.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the session fault recorded", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.health.open_fault"
 	})
 
 	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))

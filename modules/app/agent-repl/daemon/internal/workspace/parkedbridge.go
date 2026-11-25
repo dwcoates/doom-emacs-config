@@ -105,8 +105,6 @@ func (f *Fleet) gateShim(ctx context.Context, ws ids.WorkspaceID, off func(conte
 		log.Error(opParkedBridge, "could not read the parked workspace's remote-control mode; its gate holds no bridge, and claude.ai cannot reach it", dlog.Context{
 			"cause": err.Error(),
 		})
-		f.deps.Topbar.RaiseWarning(ws, remoteControlWarning,
-			fmt.Sprintf("could not read whether this parked session should be reachable from claude.ai: %v", err))
 		off(ctx, ws)
 		return
 	}
@@ -308,11 +306,10 @@ func standingDown(ctx context.Context, err error) bool {
 	return ctx.Err() != nil && ctxend.Is(err)
 }
 
-// parkedBridgeFailed states a bridge that cannot be held: at ERROR and on the
-// warning strip, the reader's one error surface. The gate keeps no shim.
+// parkedBridgeFailed states a bridge that cannot be held at ERROR. The gate
+// keeps no shim.
 func (f *Fleet) parkedBridgeFailed(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, what, cause string) {
 	log.Error(opParkedBridge, "{what}; claude.ai cannot reach the parked workspace", dlog.Context{"what": what, "cause": cause})
-	f.deps.Topbar.RaiseWarning(ws, remoteControlWarning, fmt.Sprintf("this parked session cannot be reached from claude.ai: %s: %s", what, cause))
 	f.standDownAtGate(ctx, ws)
 }
 

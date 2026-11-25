@@ -278,7 +278,12 @@ func describeSummaryRefusal(ws string, e *agentreplv1.SetWorkspaceSummaryError) 
 	case *agentreplv1.SetWorkspaceSummaryError_NotYetAdopted:
 		return sayNotYetAdopted(ws, "set the summary again"), nil
 	case *agentreplv1.SetWorkspaceSummaryError_InvalidSummary:
-		return fmt.Sprintf("the summary %q is not one plain sentence of two to fifteen words (%s)", r.InvalidSummary.GetSummary(), r.InvalidSummary.GetReason()), nil
+		switch part := r.InvalidSummary.GetPart().(type) {
+		case *agentreplv1.SetWorkspaceSummaryInvalidSummary_LongSummary:
+			return fmt.Sprintf("the long summary %q is not two to four sentences in one paragraph of at most eighty words (%s)", part.LongSummary.GetLongSummary(), part.LongSummary.GetReason()), nil
+		case *agentreplv1.SetWorkspaceSummaryInvalidSummary_ShortSummary:
+			return fmt.Sprintf("the short summary %q is not one plain sentence of two to fifteen words (%s)", part.ShortSummary.GetShortSummary(), part.ShortSummary.GetReason()), nil
+		}
 	}
 	return "", undescribed("the summary of "+ws, e)
 }

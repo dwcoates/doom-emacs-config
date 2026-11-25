@@ -15,7 +15,7 @@ import (
 // testRestore is a turnSetRestore of the set READ, with recognizable
 // messages.
 func testRestore(read primedTurnSet) turnSetRestore {
-	return turnSetRestore{op: "daemon.feed.test_restore", read: read, failed: logsite.Msg("failed"), warning: "warned", loaded: logsite.Msg("loaded")}
+	return turnSetRestore{op: "daemon.feed.test_restore", read: read, failed: logsite.Msg("failed"), loaded: logsite.Msg("loaded")}
 }
 
 func TestRestoreTurnSet(t *testing.T) {
@@ -121,7 +121,7 @@ func testAnswer(s *wsState, store *fakeTurnSet) turnAnswer {
 	return turnAnswer{
 		op: "daemon.feed.test_answer", names: unreachableEnding, retires: unreachableEnding,
 		into: s.reconnected, record: store.RecordReconnectedTurns, fields: dlog.Context{"why": "test"},
-		nothing: logsite.Msg("nothing"), failed: logsite.Msg("failed"), warning: "warned", answered: logsite.Msg("answered"),
+		nothing: logsite.Msg("nothing"), failed: logsite.Msg("failed"), answered: logsite.Msg("answered"),
 	}
 }
 

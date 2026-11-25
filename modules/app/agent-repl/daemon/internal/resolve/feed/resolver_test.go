@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -167,8 +165,6 @@ type harness struct {
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
 	// by the test, never waited on.
 	clock *fakeStallClock
-	// warnings is the fake topbar every raised warning lands on.
-	warnings *fakeWarnings
 	// placed are the entry placements Deps.EntryPlaced was told, in order.
 	placed []placedEntry
 	// boards is the fake chess board state every board row is drawn from.
@@ -193,30 +189,6 @@ type settledAnswer struct {
 	ws          ids.WorkspaceID
 	markdown    string
 	settledAtMs int64
-}
-
-// fakeWarnings records every warning the resolver raised on the topbar.
-type fakeWarnings struct {
-	mu     sync.Mutex
-	raised []string
-}
-
-// RaiseWarning implements WarningRaiser, recording "<key>: <line>".
-func (f *fakeWarnings) RaiseWarning(_ ids.WorkspaceID, key, line string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.raised = append(f.raised, key+": "+line)
-}
-
-// keys answers the key of every warning raised, in order.
-func (f *fakeWarnings) keys() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]string, 0, len(f.raised))
-	for _, raised := range f.raised {
-		out = append(out, strings.SplitN(raised, ": ", 2)[0])
-	}
-	return out
 }
 
 // placedEntry is one Deps.EntryPlaced call.
@@ -261,7 +233,7 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 	painter := &fakePainter{}
 	h := &harness{
 		t: t, log: log, painter: painter, nowMs: 1_700_000_000_000,
-		faults: &fakeFaults{}, clock: &fakeStallClock{}, warnings: &fakeWarnings{},
+		faults: &fakeFaults{}, clock: &fakeStallClock{},
 		boards: newFakeChessBoards(), catalogs: commandcatalog.New(),
 		names: map[ids.WorkspaceID]string{}, peerSource: &fakePeerDeliveries{}, taskSource: &fakeVendorTasks{},
 		chat: &fakeChatSink{},
@@ -330,7 +302,6 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 		Now:            func() time.Time { return time.UnixMilli(h.nowMs) },
 		AfterFunc:      h.clock.AfterFunc,
 		Faults:         h.faults,
-		Warnings:       h.warnings,
 		RolledBack:     stores.rolledBack,
 		SignedIn:       stores.signedIn,
 		Reconnected:    stores.reconnected,
@@ -951,8 +922,8 @@ func TestUpsertAtTurnAddressLandsOnTheRootForATurnWithNoAddress(t *testing.T) {
 // TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly pins the owner's rule
 // (2026-09-23): there is NO fallback that sends an unplaceable row to the main
 // feed. It used to land on the root with a WARN, which is the path a
-// subagent's background shell took to the root. Now nothing is drawn, the
-// failure is an ERROR, and the topbar's warning chip says so.
+// subagent's background shell took to the root. Now nothing is drawn, and the
+// failure is an ERROR.
 func TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -968,9 +939,6 @@ func TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly(t *testing.T) {
 	}
 	if !h.hasRecord("error", "daemon.feed.unplaceable_agent") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.unplaceable_agent", h.records())
-	}
-	if got := h.warnings.keys(); !slices.Equal(got, []string{"unplaceable_agent:agent-ghost"}) {
-		t.Fatalf("raised = %v, want the unplaceable agent on the topbar", got)
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 // dead_shim_recovery_test.go: a shim that dies ON ITS OWN, outside any
 // stand-down, is brought back without the user doing anything -- live, by the
 // departure's own revival, and at the next boot, by the boot's bring-up -- on
-// the same vendor session, with no fault left on the footer or the topbar and
+// the same vendor session, with no fault left on the footer and
 // a prompt sent into the gap delivered.
 
 // deadShimRecords are the WARN-or-worse records a shim's own death writes on
@@ -111,7 +111,6 @@ func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 	concludeFirstTurn(t, f)
 	vendor := f.shim.Info().VendorSessionID
 	footer := f.d.WatchFooter(f.ws)
-	topbar := f.d.WatchTopbar(f.ws)
 	roster := f.d.WatchRoster()
 
 	// Act: the shim dies on its own, and nobody does anything.
@@ -139,9 +138,6 @@ func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 	awaitFooter(t, f, footer, "the footer drawing the death", footerDisconnected)
 	awaitRoster(t, f.d, roster, "the roster row drawing the death", rosterLost(f))
 	awaitFooter(t, f, footer, "the footer idle with no fault", footerSettled)
-	awaitTopbar(t, f, topbar, "the topbar with no warning", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) == 0
-	})
 	awaitRoster(t, f.d, roster, "the roster row serving again", rosterServing(f))
 	expectSessionHealthy(t, f.d, f)
 }
@@ -237,7 +233,6 @@ func TestAShimThatDiedBeforeABootIsBroughtBackAtBoot(t *testing.T) {
 	// Arrange, Act
 	f, d, vendor := bootAfterADeadShim(t)
 	footer := d.WatchFooter(f.ws)
-	topbar := d.WatchTopbar(f.ws)
 	roster := d.WatchRoster()
 
 	// Assert: the boot resumes the same conversation, unasked.
@@ -249,9 +244,6 @@ func TestAShimThatDiedBeforeABootIsBroughtBackAtBoot(t *testing.T) {
 		return r.PID == d.PID() && r.Operation == "daemon.workspace.bring_up" && r.Message == "the session is up"
 	})
 	awaitFooter(t, f, footer, "the footer idle with no fault", footerSettled)
-	awaitTopbar(t, f, topbar, "the topbar with no warning", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) == 0
-	})
 	awaitRoster(t, d, roster, "the roster row serving", rosterServing(f))
 	expectSessionHealthy(t, d, f)
 }

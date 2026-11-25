@@ -116,9 +116,8 @@ func resetPacing(fold *proseState) {
 // settlePacing files a measured block's arrival speed once it settles whole:
 // the characters that arrived after its first fragment, over the time since
 // it. A block too small to say anything is left out (minMeasuredChars,
-// minMeasuredDuration). The window is written to its durable record; the
-// pacer has logged a failed write at ERROR, and it is put on the topbar's
-// warning chip so it is not the log's alone.
+// minMeasuredDuration). The window is written to its durable record, and a
+// failed write is logged at ERROR.
 func (r *resolver) settlePacing(s *wsState, fold *proseState, src revealSource) {
 	started, firstChars := fold.firstFragmentAt, fold.firstFragmentChars
 	resetPacing(fold)
@@ -135,10 +134,8 @@ func (r *resolver) settlePacing(s *wsState, fold *proseState, src revealSource) 
 	}
 	r.deps.Pacing.Observe(src.key, float64(chars)/elapsed.Seconds())
 	if err := r.deps.Pacing.Persist(context.Background(), src.key); err != nil {
-		r.logger(s.id).Debug("daemon.feed.reveal_pacing_unsaved",
-			"the reveal pacing record could not be saved; raised on the topbar",
-			dlog.Context{"model": src.key.Model, "kind": string(src.kind)})
-		r.raiseWarning(s, "reveal_pacing_unsaved",
-			"the streaming reveal pacing record could not be saved: "+err.Error())
+		r.logger(s.id).Error("daemon.feed.reveal_pacing_unsaved",
+			"the reveal pacing record could not be saved",
+			dlog.Context{"model": src.key.Model, "kind": string(src.kind), "cause": err.Error()})
 	}
 }

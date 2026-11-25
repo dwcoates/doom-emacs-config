@@ -549,7 +549,7 @@ func (s *lifecycleSink) OnAsksSettled(ws ids.WorkspaceID) {
 //
 // The push is the WHOLE verdict, so the standing shim-reported faults are
 // closed first and the pushed ones opened afresh: a healthy verdict is a
-// retraction, exactly as the topbar's warning strip treats it.
+// retraction.
 func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *conversationv1.SessionDiagnostics) {
 	// EVERY FRAME STATES THE SHIM'S BUILD, and the rollout judges it against
 	// the installed bundle before anything else here can return early.

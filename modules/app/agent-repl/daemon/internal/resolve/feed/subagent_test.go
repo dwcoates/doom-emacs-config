@@ -373,9 +373,6 @@ func TestWorkDetachedFromAUnitWeNeverDrewIsReportedUnplaceableWhenTheTurnEnds(t 
 	if !h.hasRecord("error", "daemon.feed.detached_unplaceable") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.detached_unplaceable", h.records())
 	}
-	if got := h.warnings.keys(); !slices.Equal(got, []string{"detached_unplaceable:work-1"}) {
-		t.Fatalf("raised = %v, want the unplaceable work on the topbar", got)
-	}
 	for _, row := range h.everyRow() {
 		if row.GetShellHead() != nil {
 			t.Fatalf("rows = %+v, want no shell head for unplaceable work", h.everyRow())
@@ -2639,8 +2636,8 @@ func TestADetachedShellIsDrawnInItsOwnersFeedAtItsCallsRow(t *testing.T) {
 			if got := h.rowKinds(tc.wantFeed(carrier)); !slices.Equal(got, tc.wantKinds) {
 				t.Fatalf("rows of %s = %v, want %v: the head replaces its card in place", want, got, tc.wantKinds)
 			}
-			if len(h.warnings.keys()) != 0 {
-				t.Fatalf("raised = %v, want nothing raised for placeable work", h.warnings.keys())
+			if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+				t.Fatalf("records = %+v, want nothing unplaceable for placeable work", h.records())
 			}
 		})
 	}
@@ -2710,9 +2707,6 @@ func TestADetachmentWhoseOwnerContradictsItsCallsCarrierDrawsNothing(t *testing.
 	if !h.hasRecord("error", "daemon.feed.detached_unplaceable") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.detached_unplaceable", h.records())
 	}
-	if got := h.warnings.keys(); !slices.Equal(got, []string{"detached_unplaceable:toolu_bash"}) {
-		t.Fatalf("raised = %v, want the work on the topbar", got)
-	}
 }
 
 func TestTheUnplaceableRecordNamesTheWorkKindOwnerAnnouncerAndReason(t *testing.T) {
@@ -2761,8 +2755,8 @@ func TestASubagentsMonitorDrawsItsCardInTheSubagentsFeed(t *testing.T) {
 	if got := h.rowKinds(agentFeed(sub)); !slices.Equal(got, []string{"agent_prompt", "tool_card"}) {
 		t.Fatalf("subagent rows = %v, want the commission then the monitor's card", got)
 	}
-	if len(h.warnings.keys()) != 0 {
-		t.Fatalf("raised = %v, want nothing", h.warnings.keys())
+	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want nothing unplaceable", h.records())
 	}
 }
 
@@ -2808,9 +2802,6 @@ func TestACreatedSubagentWithNoKnownOwnerDrawsNothing(t *testing.T) {
 	}
 	if !h.hasRecord("error", "daemon.feed.detached_unplaceable") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.detached_unplaceable", h.records())
-	}
-	if got := h.warnings.keys(); !slices.Equal(got, []string{"detached_unplaceable:work-1"}) {
-		t.Fatalf("raised = %v, want the work on the topbar", got)
 	}
 }
 

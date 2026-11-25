@@ -681,41 +681,6 @@ func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T)
 	}
 }
 
-func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	// The sweep covers every test; the declared record is evidence of the session faults the test pushes.
-	f.d.ExpectWarnings("daemon.health.open_fault")
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act: one unhealthy pull naming two distinct faults, in this order.
-	f.shim.PushUnhealthy(
-		&conversationv1.SessionFault{
-			Component: "store",
-			Detail:    "writes are buffering",
-			Kind:      &conversationv1.SessionFault_StoreUnreachable{StoreUnreachable: &conversationv1.SessionFaultStoreUnreachable{}},
-		},
-		&conversationv1.SessionFault{
-			Component: "converter",
-			Detail:    "could not model a record",
-			Kind:      &conversationv1.SessionFault_ConverterDefect{ConverterDefect: &conversationv1.SessionFaultConverterDefect{}},
-		},
-	)
-
-	// Assert: two warnings are drawn, the LATER-named fault (converter) first.
-	got := awaitTopbar(t, f, topbar, "both session-fault warnings", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) == 2
-	})
-	warnings := got.GetWarnings().GetWarnings()
-	if warnings[0].GetSessionFault().GetComponent().GetText() != "converter" {
-		t.Fatalf("warnings[0].session_fault.component.text = %q, want the newest fault (\"converter\") first", warnings[0].GetSessionFault().GetComponent().GetText())
-	}
-	if warnings[1].GetSessionFault().GetComponent().GetText() != "store" {
-		t.Fatalf("warnings[1].session_fault.component.text = %q, want the older fault (\"store\") second", warnings[1].GetSessionFault().GetComponent().GetText())
-	}
-}
-
 // ---------------------------------------------------------------------------
 // helpers — prefixed ft* so they cannot collide with another suite's file.
 // ---------------------------------------------------------------------------

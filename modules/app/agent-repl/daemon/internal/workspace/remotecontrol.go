@@ -44,9 +44,6 @@ import (
 
 const (
 	opRemoteControl = "daemon.workspace.remote_control"
-	// remoteControlWarning keys the warning strip's line for a bridge the
-	// vendor would not put in the asked state.
-	remoteControlWarning = opRemoteControl
 )
 
 // RemoteControlBound bounds ONE SetSessionRemoteControl. It is a PRODUCT
@@ -55,7 +52,7 @@ const (
 // exists yet (the bridge is new), so it is sized at half of
 // DefaultStartSessionBound, the window for the vendor work a start covers; a
 // re-measure belongs here once the first runs are recorded. An overrun is the
-// refusal path: logged at ERROR and stated on the warning strip.
+// refusal path: logged at ERROR.
 const RemoteControlBound = 30 * time.Second
 
 // UpdateRemoteControlMode records the mode CHANGE leaves on workspace WS and
@@ -95,7 +92,7 @@ func (v *verbs) UpdateRemoteControlMode(ctx context.Context, ws ids.WorkspaceID,
 // the topbar, and puts it in force on the workspace's live shim. It answers the
 // mode recorded, with the shim's no_session refusal when no shim holds a
 // session to bridge (the next bring-up puts the mode in force), and the
-// vendor's refusal, which also rides the warning strip.
+// vendor's refusal, which is logged at ERROR.
 func (f *Fleet) SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error) {
 	gate := f.remoteControlGate(ws)
 	gate.Lock()
@@ -119,7 +116,7 @@ func (f *Fleet) SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.Wo
 // the same mode (reapplyRemoteControl).
 //
 // A FAILURE IS LOGGED HERE, the one ownership point, with the transition and
-// its cause, stated on the warning strip, and answered to the caller.
+// its cause, and answered to the caller.
 func (f *Fleet) RestateRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, transition string) error {
 	gate := f.remoteControlGate(ws)
 	gate.Lock()
@@ -128,7 +125,6 @@ func (f *Fleet) RestateRemoteControl(ctx context.Context, log dlog.Logger, ws id
 	standing, err := f.deps.DB.RemoteControl(ctx, ws)
 	if err != nil {
 		log.Error(opRemoteControl, "could not read the remote-control mode a queue bypass transition left", dlog.WithCause(fields, err))
-		f.deps.Topbar.RaiseWarning(ws, remoteControlWarning, fmt.Sprintf("could not read whether this session should be reachable from claude.ai after its queue bypass %s: %v", transition, err))
 		return fmt.Errorf("restate remote control on %q after queue bypass %s: %w", ws, transition, err)
 	}
 	fields["remote_control"], fields["lifted_by_queue_bypass"] = standing.On, standing.LiftedByQueueBypass
@@ -170,7 +166,6 @@ func (f *Fleet) putRemoteControlInForce(ctx context.Context, log dlog.Logger, ws
 			return &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession, Detail: err.Error()}
 		}
 		log.Error(opRemoteControl, "the shim did not put the remote-control mode in force", dlog.WithCause(fields, err))
-		f.deps.Topbar.RaiseWarning(ws, remoteControlWarning, fmt.Sprintf("could not turn remote control %s: %v", onOff(on), err))
 		return err
 	}
 	log.Info(opRemoteControl, "the shim put the remote-control mode in force", fields)
@@ -182,9 +177,8 @@ func (f *Fleet) putRemoteControlInForce(ctx context.Context, log dlog.Logger, ws
 // shim starts with no bridge.
 //
 // A REFUSAL IS LOUD, NEVER FATAL. The session runs either way; the chip still
-// says the mode is on, so the failure is logged at ERROR and stated on the
-// warning strip, the reader's one error surface, as a failed effort put-back
-// is.
+// says the mode is on, so the failure is logged at ERROR, as a failed effort
+// put-back is.
 //
 // THE PUT-BACK OUTLIVES ITS CALLER'S CANCEL, the mode's read included: it
 // runs once the session is up, while the bring-up's caller may already have
@@ -201,7 +195,6 @@ func (f *Fleet) reapplyRemoteControl(ctx context.Context, log dlog.Logger, ws id
 	standing, err := f.deps.DB.RemoteControl(ctx, ws)
 	if err != nil {
 		log.Error(opRemoteControl, "could not read the workspace's remote-control mode for its new shim", dlog.Context{"cause": err.Error()})
-		f.deps.Topbar.RaiseWarning(ws, remoteControlWarning, fmt.Sprintf("could not read whether this session should be reachable from claude.ai: %v", err))
 		return
 	}
 	if !standing.On {
@@ -228,8 +221,6 @@ func (f *Fleet) reapplyRemoteControl(ctx context.Context, log dlog.Logger, ws id
 		log.Error(opRemoteControl, "the new shim could not be put in remote control", dlog.Context{
 			"remote_control_recorded": standing.Recorded, "cause": err.Error(),
 		})
-		f.deps.Topbar.RaiseWarning(ws, remoteControlWarning,
-			fmt.Sprintf("the session started and could not be made reachable from claude.ai: %v", err))
 		return
 	}
 	log.Info(opRemoteControl, "put the new shim in remote control", dlog.Context{"remote_control_recorded": standing.Recorded})

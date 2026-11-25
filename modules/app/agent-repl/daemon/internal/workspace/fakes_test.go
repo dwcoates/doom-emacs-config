@@ -110,7 +110,7 @@ type fakeDB struct {
 
 	// storedSummaries are the summaries WorkspaceSummaryOf answers;
 	// summaryErr fails that read.
-	storedSummaries map[ids.WorkspaceID]string
+	storedSummaries map[ids.WorkspaceID]wsm.WorkspaceSummary
 	summaryErr      error
 
 	// deletedJobs is every creation job DeleteCreationJob removed, in order;
@@ -4258,9 +4258,8 @@ type fixture struct {
 	// to, as {root, model}, in order.
 	topbarLoginDefaults [][2]string
 	// topbarEffortSettings is every effort settings read the topbar seam was
-	// handed; topbarWarnings every warning line it was asked to raise.
+	// handed.
 	topbarEffortSettings []claudesettings.Effort
-	topbarWarnings       []string
 	// topbarLinks is every shown-links list the topbar seam was handed, in
 	// order; an empty one is a clear.
 	topbarLinks [][]topbar.Link
@@ -4374,7 +4373,7 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings, namePrefixes: &f.topbarNamePrefixes}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings, namePrefixes: &f.topbarNamePrefixes}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SlackThreads: f.slack,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -4574,9 +4573,8 @@ type stubTopbar struct {
 	// watches none.
 	signIns *[]ids.WorkspaceID
 	// effortSettings records every effort settings read the verbs installed,
-	// in order; warnings every warning-strip line they raised, by key.
+	// in order.
 	effortSettings *[]claudesettings.Effort
-	warnings       *[]string
 	// picked is the level the topbar holds as picked; nil holds none.
 	picked *conversationv1.AgentEffortLevel
 	// parked records every park state the verbs installed or lifted, in order.
@@ -4682,11 +4680,6 @@ func (s stubTopbar) PickedEffort(ids.WorkspaceID) (conversationv1.AgentEffortLev
 func (s stubTopbar) SetPickedEffort(_ ids.WorkspaceID, level conversationv1.AgentEffortLevel) {
 	if s.picked != nil {
 		*s.picked = level
-	}
-}
-func (s stubTopbar) RaiseWarning(_ ids.WorkspaceID, key, line string) {
-	if s.warnings != nil {
-		*s.warnings = append(*s.warnings, key+": "+line)
 	}
 }
 
@@ -4985,7 +4978,7 @@ type fakeSummaries struct {
 // setSummary is one summary fakeSummaries.Set recorded.
 type setSummary struct {
 	ws      ids.WorkspaceID
-	summary string
+	summary wsm.WorkspaceSummary
 }
 
 func (s *fakeSummaries) Restore(_ context.Context, ws ids.WorkspaceID) error {
@@ -4993,7 +4986,7 @@ func (s *fakeSummaries) Restore(_ context.Context, ws ids.WorkspaceID) error {
 	return s.err
 }
 
-func (s *fakeSummaries) Set(_ context.Context, ws ids.WorkspaceID, summary string) error {
+func (s *fakeSummaries) Set(_ context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) error {
 	if s.setErr != nil {
 		return s.setErr
 	}
@@ -5496,9 +5489,9 @@ func (a *fakeAnchors) FollowFromFirstRead(ws ids.WorkspaceID, pr wsm.PullRequest
 }
 
 // WorkspaceSummaryOf answers the stored summary, or summaryErr.
-func (d *fakeDB) WorkspaceSummaryOf(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+func (d *fakeDB) WorkspaceSummaryOf(_ context.Context, ws ids.WorkspaceID) (wsm.WorkspaceSummary, bool, error) {
 	if d.summaryErr != nil {
-		return "", false, d.summaryErr
+		return wsm.WorkspaceSummary{}, false, d.summaryErr
 	}
 	summary, ok := d.storedSummaries[ws]
 	return summary, ok, nil

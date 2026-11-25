@@ -2,7 +2,6 @@ package feed
 
 import (
 	"context"
-	"fmt"
 
 	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -103,7 +102,6 @@ func (r *resolver) NetworkFaultClosed(ws ids.WorkspaceID, id string) {
 		fields:   dlog.Context{"fault": id},
 		nothing:  logsite.Msg("the connection came back and no connection-failed card was drawn; nothing was retired"),
 		failed:   logsite.Msg("the connection came back and its connection-failed cards were removed but could not be recorded; a daemon restart will draw them again"),
-		warning:  "the answered connection failures could not be saved and will reappear after a daemon restart",
 		answered: logsite.Msg("the connection came back; the connection-failed cards drawn before it were retired and recorded"),
 	}
 	if r.deps.Reconnected != nil {
@@ -147,7 +145,6 @@ func (r *resolver) answerLateUnreachable(s *wsState, row *frontendv1.FeedRow) {
 	}, func(err error) {
 		fields["error"] = err.Error()
 		log.Error(opReconnected, "a late connection-failed card the network's return answered was not drawn but could not be recorded; a daemon restart will draw it again", fields)
-		r.raiseWarningFor(ws, opReconnected, fmt.Sprintf("an answered connection failure could not be saved and will reappear after a daemon restart: %v", err))
 	}, answered)
 }
 
@@ -158,10 +155,9 @@ func (r *resolver) restoreReconnected(s *wsState, primed *primedWorkspace) {
 		return
 	}
 	r.restoreTurnSet(s, turnSetRestore{
-		op:      opReconnectedRestore,
-		read:    primed.turnSets[turnSetReconnected],
-		failed:  logsite.Msg("the workspace's reconnection-answered turns could not be loaded; their connection-failed cards may be drawn again"),
-		warning: "answered connection failures could not be loaded and may be drawn again",
-		loaded:  logsite.Msg("the workspace's reconnection-answered turns were loaded; their connection-failed cards are not drawn"),
+		op:     opReconnectedRestore,
+		read:   primed.turnSets[turnSetReconnected],
+		failed: logsite.Msg("the workspace's reconnection-answered turns could not be loaded; their connection-failed cards may be drawn again"),
+		loaded: logsite.Msg("the workspace's reconnection-answered turns were loaded; their connection-failed cards are not drawn"),
 	}, s.reconnected)
 }

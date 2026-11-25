@@ -4,10 +4,10 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"agent-repld/internal/apiresponses"
 	"agent-repld/internal/claudesettings"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // usageFingerprint is one unit's reported usage, kept so a re-report can be
@@ -42,92 +42,6 @@ type modelTotals struct {
 	// order is the order the model was first seen in, which the breakdown's
 	// per-model sections are drawn in.
 	order int
-}
-
-// warningKind names which concern a warning carries.
-type warningKind int
-
-// The warning kinds, one per TopbarWarning detail arm.
-const (
-	// warnSessionless is the one warning with NO detail arm: the workspace's
-	// session-less state is a statement, not a control.
-	warnSessionless warningKind = iota
-	warnAccounting
-	warnUnmodeledTool
-	warnDetachedUnmodeled
-	warnSessionFault
-	warnDegradedWindow
-	// warnRaised is a condition the DAEMON raised about its own resolution —
-	// detached work it could not place, say. Like the session-less line it
-	// carries NO detail arm: the sentence is the whole warning, and the full
-	// context is in the record the raising site logged beside it.
-	warnRaised
-)
-
-// warning is one accumulated concern plus the order it takes in the dropdown.
-type warning struct {
-	// kind is which concern it is.
-	kind warningKind
-	// key identifies the concern so a re-observation updates it rather than
-	// reordering the list.
-	key string
-	// seq is the observation order; the dropdown draws the highest first.
-	seq int
-	// line is the dropdown row's sentence.
-	line string
-	// detail is the overlay the click reveals.
-	detail func() *frontendv1.TopbarWarning
-}
-
-// unmodeledCall is one distinct unmodeled tool the session has run.
-type unmodeledCall struct {
-	// toolName is the tool as the agent named it.
-	toolName string
-	// argumentLines are the daemon's abbreviated account of the call.
-	argumentLines []string
-	// seq is the observation order.
-	seq int
-}
-
-// raisedRecord is one warning the daemon raised about its own resolution.
-type raisedRecord struct {
-	// line is the dropdown row's sentence.
-	line string
-	// deployFailed is a failed deploy's overlay, nil for a row with none.
-	// Only a daemon-scoped warning carries one.
-	deployFailed *DeployFailedOverlay
-	// seq is the observation order.
-	seq int
-}
-
-// faultRecord is one standing shim fault.
-type faultRecord struct {
-	// component is which part of the shim faulted.
-	component string
-	// detail is the fault's own account.
-	detail string
-	// line is the dropdown row's sentence.
-	line string
-	// seq is the observation order.
-	seq int
-}
-
-// windowRecord is one degraded window the shim has reported.
-type windowRecord struct {
-	// component is which part of the shim degraded.
-	component string
-	// reason is the shim's stated reason.
-	reason string
-	// beganAtMs is when the window opened.
-	beganAtMs int64
-	// closed reports whether the window has closed.
-	closed bool
-	// endedAtMs is when it closed, meaningful only when closed.
-	endedAtMs int64
-	// dropped is how many observations were lost inside it.
-	dropped int64
-	// seq is the observation order.
-	seq int
 }
 
 // wsState is one workspace's whole topbar accumulation. In-memory only: a
@@ -168,15 +82,14 @@ type wsState struct {
 	// set no summary, and always in preference to the workspace name.
 	sessionTitle string
 
-	// summary is the one-sentence imperative summary of this workspace's task
-	// that its own agent set. It is the FIRST precedence in title(), ahead of
-	// the vendor's ai-title and the workspace name. Empty while none stands;
-	// its sole writer is SetSummary.
-	summary string
+	// summary is the summary of this workspace's task that its own agent set.
+	// Its short summary is the FIRST precedence in title(), ahead of the
+	// vendor's ai-title, and its long summary the title's hover description.
+	// The zero value while none stands; its sole writer is SetSummary.
+	summary wsm.WorkspaceSummary
 
-	// links are the links the summary's menu shows, most recently set first,
-	// which title() attaches to the title; empty while none is shown. Its
-	// sole writer is SetLinks.
+	// links are the links the workspace name's menu shows, most recently set
+	// first; empty while none is shown. Its sole writer is SetLinks.
 	links []Link
 
 	// permissionMode is the mode in force, as the session facts spell it.
@@ -272,14 +185,6 @@ type wsState struct {
 	// counted is every unit whose usage has been folded into the session
 	// totals, with what it reported.
 	counted map[string]usageFingerprint
-	// responses files this session's units under the API RESPONSE each
-	// arrived in, and is the accounting warning's denominator. Usage rides
-	// EXACTLY ONE unit per API response (the first content block's), so
-	// absence on a unit means "not the carrying unit", never "free": the
-	// reconciliation is per API response and never per unit. The ledger is
-	// SHARED with the footer's per-turn verdict so the rule cannot drift
-	// between the two.
-	responses *apiresponses.Ledger
 	// totals are the session's summed figures.
 	totals usageFingerprint
 	// perModel is each model's share of the spend, by model name.
@@ -291,31 +196,6 @@ type wsState struct {
 	// stable across health churn rather than reordering under the reader.
 	mcpServers []*conversationv1.SessionMcpServer
 
-	// contradictions are the reconciliation problems observed this session.
-	contradictions []string
-
-	// unmodeled are the distinct unmodeled tools the session has run.
-	unmodeled map[string]*unmodeledCall
-	// detachedUnmodeled are the live detached-unmodeled items.
-	detachedUnmodeled []DetachedUnmodeled
-	// detachedSeq is the observation order of the detached-unmodeled set.
-	detachedSeq int
-	// faults are the standing shim faults, by their identity.
-	faults map[string]*faultRecord
-	// windows are the degraded windows, by their identity.
-	windows map[string]*windowRecord
-	// accountingSeq is the accounting warning's observation order, zero until
-	// it has ever been raised.
-	accountingSeq int
-	// raised are the warnings the daemon raised about its own resolution, by
-	// the key the raising site named. Never retracted: each is a thing that
-	// already went wrong, and the record of it stays in front of the reader.
-	raised map[string]*raisedRecord
-	// daemonRaised are the DAEMON-scoped warnings standing on this strip, by
-	// key: the resolver's daemon set, each with this strip's own observation
-	// order. Retracted when the daemon retracts them.
-	daemonRaised map[string]*raisedRecord
-
 	// seq mints observation orders.
 	seq int
 }
@@ -323,15 +203,8 @@ type wsState struct {
 // newWSState builds an empty accumulation.
 func newWSState() *wsState {
 	return &wsState{
-		counted:   map[string]usageFingerprint{},
-		responses: apiresponses.New(),
-		perModel:  map[string]*modelTotals{},
-		unmodeled: map[string]*unmodeledCall{},
-		faults:    map[string]*faultRecord{},
-		windows:   map[string]*windowRecord{},
-		raised:    map[string]*raisedRecord{},
-
-		daemonRaised: map[string]*raisedRecord{},
+		counted:  map[string]usageFingerprint{},
+		perModel: map[string]*modelTotals{},
 	}
 }
 
@@ -349,7 +222,7 @@ func (s *wsState) nextSeq() int {
 // IT IS NOT A WHOLE-VIEW STATE. Under the FIXED SCHEMA ruling the strip has
 // one shape; this only decides what each session-scoped cell states, and the
 // two named states additionally contribute their reason to the context chip's
-// hover and one line to the warning strip.
+// hover.
 func (s *wsState) sessionless() bool {
 	return s.coldGate || !s.started
 }
@@ -369,8 +242,7 @@ func (s *wsState) controlsWithheld() bool {
 //
 // NO SESSION FACT IS EVER A GATE. Every session-scoped cell states "I do not
 // know yet" in its own slot: the two controls by ABSENCE, which the client
-// draws as a dash, and the context chip and warning strip by their own
-// content. So a workspace with no session — cold-gated, or simply not
+// draws as a dash, and the context chip by its own content. So a workspace with no session — cold-gated, or simply not
 // started — publishes the same strip as every other workspace, and the
 // facts fill in as they arrive. Gating on a session fact was how a strip that
 // would never get one stayed BLANK for as long as the state stood.

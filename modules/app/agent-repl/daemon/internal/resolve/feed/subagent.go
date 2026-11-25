@@ -4,7 +4,6 @@ import (
 	"agent-repld/internal/prose"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	"fmt"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
@@ -849,8 +848,7 @@ func (r *resolver) ownerPlacement(s *wsState, owner string) (placement, error) {
 }
 
 // reportUnplaceableWork records detached work that could not be placed in its
-// owner's feed — nothing was drawn for it — at ERROR with the whole context,
-// and puts it on the topbar's warning chip.
+// owner's feed — nothing was drawn for it — at ERROR with the whole context.
 func (r *resolver) reportUnplaceableWork(s *wsState, workID, kind, owner, announcer, reason string) {
 	r.logger(s.id).Error("daemon.feed.detached_unplaceable",
 		"detached work could not be placed in the feed it belongs to; nothing was drawn for it",
@@ -858,8 +856,6 @@ func (r *resolver) reportUnplaceableWork(s *wsState, workID, kind, owner, announ
 			"work": workID, "kind": kind, "owner": owner, "announcer": announcer,
 			"main_agent": s.mainAgent, "reason": reason,
 		})
-	r.raiseWarning(s, "detached_unplaceable:"+workID,
-		fmt.Sprintf("detached %s %s could not be placed in its feed: %s", kind, workID, reason))
 }
 
 // detachForegroundShell turns an already-drawn foreground shell into its

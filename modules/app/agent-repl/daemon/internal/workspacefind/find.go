@@ -40,8 +40,8 @@ type Query struct {
 	Until *time.Time
 	// Standing keeps only workspaces in this standing.
 	Standing Standing
-	// Text keeps only workspaces whose name, branch or summary contains it,
-	// compared case-insensitively.
+	// Text keeps only workspaces whose name, branch, short summary or long
+	// summary contains it, compared case-insensitively.
 	Text *string
 	// Limit answers at most this many, the most recently active first.
 	Limit *int
@@ -80,7 +80,7 @@ type Records struct {
 	// Repositories are every registered repository.
 	Repositories []wsm.Repository
 	// Summaries are each workspace's words (Summaries).
-	Summaries map[wsm.WorkspaceID]string
+	Summaries map[wsm.WorkspaceID]wsm.WorkspaceSummary
 	// Drawn is how the roster draws each workspace (Placements).
 	Drawn map[wsm.WorkspaceID]Drawn
 	// Sessions are the session records by workspace, which say the config dir
@@ -96,9 +96,9 @@ type Found struct {
 	Workspace wsm.Workspace
 	// Repository is the repository the workspace belongs to.
 	Repository wsm.Repository
-	// Summary is the workspace's stored summary, else its vendor title
-	// (Summaries), nil when neither stands.
-	Summary *string
+	// Summary is the workspace's stored summary, else its vendor title as a
+	// short summary alone (Summaries), nil when neither stands.
+	Summary *wsm.WorkspaceSummary
 	// LastActiveAt is LastActiveAt(Workspace), which the answer is ordered by.
 	LastActiveAt time.Time
 	// Roster is how the roster draws the workspace, nil when it draws no row
@@ -153,12 +153,12 @@ func IsAgentWorkspace(ws wsm.Workspace) bool {
 
 // Summaries answers each workspace's words for a find, by the topbar's own
 // precedence: the summary its agent set (SUMMARIES), else the vendor's title
-// for its conversation (TITLES), which the topbar draws while no summary
-// stands. A workspace with neither is absent.
-func Summaries(summaries, titles map[wsm.WorkspaceID]string) map[wsm.WorkspaceID]string {
-	out := make(map[wsm.WorkspaceID]string, len(summaries)+len(titles))
+// for its conversation (TITLES) as a short summary alone, which the topbar
+// draws while no summary stands. A workspace with neither is absent.
+func Summaries(summaries map[wsm.WorkspaceID]wsm.WorkspaceSummary, titles map[wsm.WorkspaceID]string) map[wsm.WorkspaceID]wsm.WorkspaceSummary {
+	out := make(map[wsm.WorkspaceID]wsm.WorkspaceSummary, len(summaries)+len(titles))
 	for ws, title := range titles {
-		out[ws] = title
+		out[ws] = wsm.WorkspaceSummary{Short: title}
 	}
 	for ws, summary := range summaries {
 		out[ws] = summary
@@ -331,13 +331,13 @@ func inStanding(ws wsm.Workspace, standing Standing) bool {
 	}
 }
 
-// containsText reports whether F's name, branch or summary contains TEXT,
-// case-insensitively.
+// containsText reports whether F's name, branch, short summary or long
+// summary contains TEXT, case-insensitively.
 func containsText(f Found, text string) bool {
 	needle := strings.ToLower(text)
 	haystacks := []string{f.Workspace.Name, f.Workspace.Branch}
 	if f.Summary != nil {
-		haystacks = append(haystacks, *f.Summary)
+		haystacks = append(haystacks, f.Summary.Short, f.Summary.Long)
 	}
 	for _, h := range haystacks {
 		if strings.Contains(strings.ToLower(h), needle) {

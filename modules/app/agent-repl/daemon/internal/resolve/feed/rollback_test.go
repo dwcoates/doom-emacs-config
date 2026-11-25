@@ -384,7 +384,7 @@ func TestAFailedRollbackRecordStillRemovesTheRowsAndIsRaised(t *testing.T) {
 	assertRecordedFault(t, h, opRollbackApply, "disk full")
 }
 
-func TestAFailedRollbackLoadIsLoggedAndRaised(t *testing.T) {
+func TestAFailedRollbackLoadIsLogged(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{loadErr: errors.New("corrupt page")}
 
@@ -531,15 +531,6 @@ func assertRecordedFault(t *testing.T, h *harness, op, cause string) {
 	}
 	if !found {
 		t.Fatalf("records = %+v, want an ERROR %s naming %q", h.records(), op, cause)
-	}
-	raised := false
-	for _, key := range h.warnings.keys() {
-		if len(key) >= len(op) && key[:len(op)] == op {
-			raised = true
-		}
-	}
-	if !raised {
-		t.Fatalf("warnings = %v, want one keyed %s", h.warnings.keys(), op)
 	}
 }
 
@@ -854,11 +845,14 @@ func TestASettleTheVendorRefusedDrawsTheRowsBackWhereTheyStood(t *testing.T) {
 	if got := rootOrder(h); !slices.Equal(got, before) {
 		t.Fatalf("root rows = %v, want %v: the refused rollback's rows back where they stood", got, before)
 	}
-	if len(h.warnings.raised) != 1 || !strings.Contains(h.warnings.raised[0], "Resume rejected") {
-		t.Fatalf("warnings = %v, want one naming the vendor's words", h.warnings.raised)
+	named := false
+	for _, record := range h.records() {
+		if text, ok := record.Context["vendor_message"].(string); ok && record.Level == "warn" && record.Operation == opRollbackApply && strings.Contains(text, "Resume rejected") {
+			named = true
+		}
 	}
-	if !h.hasRecord("warn", opRollbackApply) {
-		t.Fatalf("records = %+v, want the refusal recorded at WARN", h.records())
+	if !named {
+		t.Fatalf("records = %+v, want the refusal recorded at WARN naming the vendor's words", h.records())
 	}
 }
 
@@ -876,8 +870,8 @@ func TestASettleWhoseRestartFailedDrawsTheRowsBackAndRecordsAnError(t *testing.T
 	if got := rootOrder(h); !slices.Equal(got, before) {
 		t.Fatalf("root rows = %v, want %v", got, before)
 	}
-	if !h.hasRecord("error", opRollbackApply) || len(h.warnings.raised) != 1 {
-		t.Fatalf("records = %+v, warnings = %v, want an error and one warning", h.records(), h.warnings.raised)
+	if !h.hasRecord("error", opRollbackApply) {
+		t.Fatalf("records = %+v, want an error", h.records())
 	}
 }
 

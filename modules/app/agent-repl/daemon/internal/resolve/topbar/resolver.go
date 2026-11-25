@@ -36,9 +36,6 @@ type resolver struct {
 	// workspace (wsm.NextKeepalives), under mu.
 	keepalives wsm.NextKeepalives
 	topics     map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]
-	// daemonRaised are the standing daemon-scoped warnings, by key. A
-	// workspace whose accumulation is made later takes them at once.
-	daemonRaised map[string]DaemonWarning
 	// persistentWifi is the machine's persistent-wifi standing, which every
 	// strip draws alike; nil before the controller's first read.
 	persistentWifi *agentreplv1.PersistentWifiState
@@ -63,15 +60,12 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		return nil, fmt.Errorf(
 			"topbar resolver needs the render-colors topbar_connectivity table; it refuses to serve an unpainted state")
 	}
-	o := options{clock: SystemClock{}, warningCap: DefaultWarningCap}
+	o := options{clock: SystemClock{}}
 	for _, apply := range opts {
 		apply(&o)
 	}
 	if o.clock == nil {
 		return nil, fmt.Errorf("topbar resolver needs a clock")
-	}
-	if o.warningCap <= 0 {
-		return nil, fmt.Errorf("topbar warning cap must be positive, got %d", o.warningCap)
 	}
 	r := &resolver{
 		colors:     colors,
@@ -81,7 +75,6 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		keepalives: wsm.NextKeepalives{},
 		topics:     map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]{},
 
-		daemonRaised:   map[string]DaemonWarning{},
 		signInRequests: map[string]string{},
 	}
 	o.quiet.Follow(QuietViewName, r.followQuiet)
@@ -110,11 +103,6 @@ func (r *resolver) stateLocked(ws ids.WorkspaceID) *wsState {
 	s, ok := r.states[ws]
 	if !ok {
 		s = newWSState()
-		// A DAEMON-SCOPED WARNING STANDS ON EVERY STRIP, including one made
-		// after it was raised.
-		for key, warning := range r.daemonRaised {
-			s.daemonRaised[key] = &raisedRecord{line: warning.Line, deployFailed: warning.DeployFailed, seq: s.nextSeq()}
-		}
 		r.states[ws] = s
 	}
 	return s
@@ -279,9 +267,8 @@ func (r *resolver) followQuiet(quiet bool) {
 // ruling 2026-09-13). Every cell is stated on every publication and in the
 // same slot; there is no branch here that draws a different strip. A cell
 // whose SESSION fact is unknown says so IN ITS OWN SLOT: the two controls by
-// absence, which the client draws as a dash, and the context chip and warning
-// strip by their own content — the chip carrying the context the session held
-// with the reason in its hover, the strip carrying the state as one line.
+// absence, which the client draws as a dash, and the context chip by its own
+// content, carrying the context the session held with the reason in its hover.
 func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarView, error) {
 	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, r.parkLocked(ws, s), s.coldGate))
 	if err != nil {
@@ -299,12 +286,11 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 	}
 	return &frontendv1.TopbarView{
 		Title:                title(s),
-		WorkspaceName:        &frontendv1.TopbarWorkspaceName{Text: s.naming.Name, Prefix: s.naming.NamePrefix},
+		WorkspaceName:        &frontendv1.TopbarWorkspaceName{Text: s.naming.Name, Prefix: s.naming.NamePrefix, Links: nameLinks(s.links)},
 		SessionLine:          &frontendv1.TopbarSessionLine{Text: r.sessionLine(s)},
 		ModelSelector:        modelSelector,
 		EffortSelector:       effortSelector(s),
 		Connectivity:         connectivity,
-		Warnings:             r.warningStrip(s),
 		Context:              r.contextChip(s),
 		Account:              r.account(s),
 		PermissionModePicker: r.permissionModePicker(s),
@@ -325,32 +311,34 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 // its own element (TopbarWorkspaceName), drawn beneath the summary, and a
 // workspace with no summary yet draws no title line at all.
 //
-// THE LINKS RIDE THE TITLE, so a workspace with no summary has nothing
-// clickable: the links are attached only to a title that exists.
+// THE LONG SUMMARY IS THE TITLE'S DESCRIPTION, the popup a hover shows. It
+// rides only the agent's own short summary: the vendor's ai-title has none.
 func title(s *wsState) *frontendv1.TopbarTitle {
-	var out *frontendv1.TopbarTitle
 	switch {
-	case s.summary != "":
-		out = &frontendv1.TopbarTitle{Text: s.summary}
+	case s.summary.Short != "":
+		out := &frontendv1.TopbarTitle{Text: s.summary.Short}
+		if s.summary.Long != "" {
+			out.Description = &frontendv1.TopbarTitleDescription{Text: s.summary.Long}
+		}
+		return out
 	case s.sessionTitle != "":
-		out = &frontendv1.TopbarTitle{Text: s.sessionTitle}
+		return &frontendv1.TopbarTitle{Text: s.sessionTitle}
 	default:
 		return nil
 	}
-	out.Links = titleLinks(s.links)
-	return out
 }
 
-// titleLinks resolves what a click on the summary opens: nothing with no
-// shown link, the link itself with one, and the menu of all of them, in the
-// order given, with two or more.
-func titleLinks(links []Link) *frontendv1.TopbarTitleLinks {
+// nameLinks resolves what a click on the workspace's name opens: nothing with
+// no shown link, the link itself with one, and the menu of all of them, in the
+// order given, with two or more. The name is always drawn, so a workspace
+// with no summary still opens its links.
+func nameLinks(links []Link) *frontendv1.TopbarWorkspaceNameLinks {
 	switch len(links) {
 	case 0:
 		return nil
 	case 1:
-		return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Single{
-			Single: &frontendv1.TopbarTitleLink{Label: links[0].Label, Url: links[0].URL}}}
+		return &frontendv1.TopbarWorkspaceNameLinks{Opens: &frontendv1.TopbarWorkspaceNameLinks_Single{
+			Single: &frontendv1.TopbarWorkspaceNameLink{Label: links[0].Label, Url: links[0].URL}}}
 	}
 	// Owned links first, each group keeping the order given.
 	ordered := slices.Clone(links)
@@ -364,12 +352,12 @@ func titleLinks(links []Link) *frontendv1.TopbarTitleLinks {
 			return 1
 		}
 	})
-	items := make([]*frontendv1.TopbarTitleLinkMenuItem, len(ordered))
+	items := make([]*frontendv1.TopbarWorkspaceNameLinkMenuItem, len(ordered))
 	for i, link := range ordered {
-		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL, Owned: link.Owned, Icon: linkIcon(link.URL), Badge: linkBadge(link.State), Subscribed: link.Subscribed}
+		items[i] = &frontendv1.TopbarWorkspaceNameLinkMenuItem{Label: link.Label, Url: link.URL, Owned: link.Owned, Icon: linkIcon(link.URL), Badge: linkBadge(link.State), Subscribed: link.Subscribed}
 	}
-	return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Menu{
-		Menu: &frontendv1.TopbarTitleLinkMenu{Items: items}}}
+	return &frontendv1.TopbarWorkspaceNameLinks{Opens: &frontendv1.TopbarWorkspaceNameLinks_Menu{
+		Menu: &frontendv1.TopbarWorkspaceNameLinkMenu{Items: items}}}
 }
 
 // sessionLine composes the identity line: which vendor session, which account
@@ -679,18 +667,20 @@ func (r *resolver) SetNamePrefix(ws ids.WorkspaceID, prefix *frontendv1.Workspac
 		})
 }
 
-// SetSummary installs the summary the workspace's agent set. It is the first
-// precedence in the title, ahead of the vendor's ai-title. An empty text
-// retracts it (the title falls back to the vendor's ai-title, else no title
-// line), which is how a /clear drops the summary of the conversation it ended.
-func (r *resolver) SetSummary(ws ids.WorkspaceID, summary string) {
+// SetSummary installs the summary the workspace's agent set. Its short
+// summary is the first precedence in the title, ahead of the vendor's
+// ai-title, and its long summary the title's hover description. The zero
+// summary retracts it (the title falls back to the vendor's ai-title, else no
+// title line), which is how a /clear drops the summary of the conversation it
+// ended.
+func (r *resolver) SetSummary(ws ids.WorkspaceID, summary wsm.WorkspaceSummary) {
 	r.mutate(ws, "daemon.topbar.set_summary", "the topbar took the workspace summary",
-		dlog.Context{"present": summary != ""},
+		dlog.Context{"short_present": summary.Short != "", "long_present": summary.Long != ""},
 		func(s *wsState) { s.summary = summary })
 }
 
-// SetLinks installs the links the summary's menu shows, which the title
-// carries while a summary stands. Empty clears them.
+// SetLinks installs the links the workspace name's menu shows. Empty clears
+// them.
 func (r *resolver) SetLinks(ws ids.WorkspaceID, shown []Link) {
 	urls := make([]string, len(shown))
 	for i, link := range shown {
@@ -789,56 +779,7 @@ func (r *resolver) SignInAnswered(configDir string) {
 		func(*wsState) {})
 }
 
-// SetDetachedUnmodeled installs the live detached-unmodeled items.
-func (r *resolver) SetDetachedUnmodeled(ws ids.WorkspaceID, items []DetachedUnmodeled) {
-	r.mutate(ws, "daemon.topbar.set_detached_unmodeled",
-		"the topbar took the live detached-unmodeled set",
-		dlog.Context{"items": len(items)}, func(s *wsState) {
-			s.detachedUnmodeled = items
-			s.detachedSeq = s.nextSeq()
-		})
-}
-
-// RaiseWarning puts a condition the daemon raised about its own resolution on
-// the warning strip. A key already raised keeps its place in the list and
-// takes the new sentence.
-func (r *resolver) RaiseWarning(ws ids.WorkspaceID, key, line string) {
-	r.mutate(ws, "daemon.topbar.raise_warning",
-		"the topbar took a warning the daemon raised",
-		dlog.Context{"key": key, "line": line}, func(s *wsState) {
-			if held, ok := s.raised[key]; ok {
-				held.line = line
-				return
-			}
-			s.raised[key] = &raisedRecord{line: line, seq: s.nextSeq()}
-		})
-}
-
-// RaiseDaemonWarning puts a daemon-scoped condition on every strip. A key
-// already raised keeps its place in each list and takes the new sentence and
-// overlay.
-func (r *resolver) RaiseDaemonWarning(key string, warning DaemonWarning) {
-	r.eachStrip("daemon.topbar.raise_daemon_warning", logsite.Msg("the topbar took a warning the daemon raised on every strip"),
-		dlog.Context{"key": key, "line": warning.Line, "overlay": warning.DeployFailed != nil},
-		func() { r.daemonRaised[key] = warning },
-		func(s *wsState) {
-			if held, ok := s.daemonRaised[key]; ok {
-				held.line, held.deployFailed = warning.Line, warning.DeployFailed
-				return
-			}
-			s.daemonRaised[key] = &raisedRecord{line: warning.Line, deployFailed: warning.DeployFailed, seq: s.nextSeq()}
-		})
-}
-
-// RetractDaemonWarning takes a daemon-scoped condition off every strip.
-func (r *resolver) RetractDaemonWarning(key string) {
-	r.eachStrip("daemon.topbar.retract_daemon_warning", logsite.Msg("the topbar retracted a warning the daemon raised on every strip"),
-		dlog.Context{"key": key},
-		func() { delete(r.daemonRaised, key) },
-		func(s *wsState) { delete(s.daemonRaised, key) })
-}
-
-// eachStrip changes the daemon-scoped set, then applies the change to every
+// eachStrip changes the resolver-wide state, then applies the change to every
 // workspace's accumulation and republishes each one bound to its sink. An
 // unbound accumulation takes the change without a publication, which its
 // binding's first mutation makes.
@@ -970,9 +911,9 @@ func (r *resolver) SetParticipants(ws ids.WorkspaceID, host, web bool) {
 		})
 }
 
-// OnActivity is here for the unmodeled-tool warning AND for the session's own
-// token accounting, which the topbar accumulates itself: each resolver owns
-// what it collects, and nothing aggregates on its behalf.
+// OnActivity is here for the session's own token accounting, which the
+// topbar accumulates itself for the context chip's breakdown: each resolver
+// owns what it collects, and nothing aggregates on its behalf.
 func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
 	if act == nil {
 		return
@@ -984,19 +925,23 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	}
 	r.mutate(ws, "daemon.topbar.on_activity", "the topbar took an activity frame",
 		dlog.Context{"arm": arm, "activity_id": unit}, func(s *wsState) {
-			s.responses.Observe(unit, act.GetUsage() != nil)
-			r.observeUsage(s, unit, act.GetUsage())
-			r.observeResponse(s, unit, act)
-			r.observeUnmodeled(s, act)
+			for _, contradiction := range r.observeUsage(s, unit, act.GetUsage()) {
+				r.logOf(ws, s).Warn("daemon.topbar.usage_contradiction",
+					"a unit's token usage contradicts the session's accounting; the breakdown takes its latest report",
+					dlog.Context{"activity_id": unit, "contradiction": contradiction})
+			}
 		})
 }
 
 // observeUsage folds one unit's usage into the SESSION's totals, keyed by unit
-// so a re-report replaces rather than adds.
-func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.TokenUsage) {
+// so a re-report replaces rather than adds. It answers every contradiction
+// the report makes with what the session already holds, for its caller to
+// record.
+func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.TokenUsage) []string {
 	if u == nil {
-		return
+		return nil
 	}
+	var contradictions []string
 	next := usageFingerprint{
 		read:      u.GetInputHits().GetRead(),
 		written:   u.GetInputMisses().GetWritten(),
@@ -1005,16 +950,14 @@ func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.Token
 		thinking:  u.GetOutputThinkingTokens(),
 	}
 	if next.thinking > next.output {
-		s.contradictions = append(s.contradictions,
-			fmt.Sprintf("unit %s reports more thinking tokens than output tokens", unit))
+		contradictions = append(contradictions, "it reports more thinking tokens than output tokens")
 	}
 	previous, held := s.counted[unit]
 	if held && previous == next {
-		return
+		return contradictions
 	}
 	if held {
-		s.contradictions = append(s.contradictions,
-			fmt.Sprintf("unit %s reported two different usages", unit))
+		contradictions = append(contradictions, "it reported two different usages")
 		s.totals = subtractUsage(s.totals, previous)
 		if model, ok := s.perModel[s.model]; ok {
 			model.figures = subtractUsage(model.figures, previous)
@@ -1028,49 +971,7 @@ func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.Token
 		s.perModel[s.model] = model
 	}
 	model.figures = addUsage(model.figures, next)
-}
-
-// observeResponse counts the session's settled responses, each under the API
-// RESPONSE it arrived in, which is what the accounting reconciles.
-func (r *resolver) observeResponse(s *wsState, unit string, act *conversationv1.AgentActivity) {
-	item, ok := act.GetItem().(*conversationv1.AgentActivity_Response)
-	if !ok {
-		return
-	}
-	switch item.Response.GetResult().(type) {
-	case *conversationv1.AgentResponse_Success, *conversationv1.AgentResponse_Failure:
-		s.responses.Settle(unit)
-	}
-}
-
-// observeUnmodeled records one distinct unmodeled tool, with the daemon's
-// abbreviated account of its arguments.
-func (r *resolver) observeUnmodeled(s *wsState, act *conversationv1.AgentActivity) {
-	item, ok := act.GetItem().(*conversationv1.AgentActivity_Unmodeled)
-	if !ok {
-		return
-	}
-	start, running := item.Unmodeled.GetResult().(*conversationv1.AgentUnmodeled_Start)
-	if !running {
-		return
-	}
-	name := start.Start.GetToolName()
-	if name == "" {
-		return
-	}
-	// A TOOL THE SESSION NEVER OFFERED is no blind spot of the contract: the
-	// agent called one that does not exist, and the vendor refused it.
-	if start.Start.GetNotOffered() {
-		return
-	}
-	call, held := s.unmodeled[name]
-	if !held {
-		call = &unmodeledCall{toolName: name, seq: s.nextSeq()}
-		s.unmodeled[name] = call
-	}
-	if lines := abbreviateArguments(start.Start.GetArguments()); len(lines) > 0 {
-		call.argumentLines = lines
-	}
+	return contradictions
 }
 
 // OnContextCut is the cut that discards the transcript the chip's figure was
@@ -1160,7 +1061,9 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 			s.vendorSessionID = u.IdentityRotated.GetVendorSessionId()
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
-		return "diagnostics", func(s *wsState) { r.applyDiagnostics(s, u.Diagnostics) }
+		// THE TOPBAR DRAWS NO HEALTH: the shim records its own faults and
+		// degraded windows, and the footer states a session's health.
+		return "diagnostics", func(*wsState) {}
 	case *conversationv1.SessionUpdate_Title:
 		return "title", func(s *wsState) { s.sessionTitle = u.Title.GetText() }
 	case *conversationv1.SessionUpdate_ContextUsage:
@@ -1305,41 +1208,41 @@ func (r *resolver) PermissionModes(ws ids.WorkspaceID) ([]string, bool) {
 // for a link whose state is empty (no pull request, or one not yet read). A
 // state this switch does not know is a store state added without its badge,
 // and fails hard.
-func linkBadge(state wsm.PullRequestState) *frontendv1.TopbarTitleLinkBadge {
+func linkBadge(state wsm.PullRequestState) *frontendv1.TopbarWorkspaceNameLinkBadge {
 	switch state {
 	case "":
 		return nil
 	case wsm.PullRequestStateOpen:
-		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Open{Open: &frontendv1.TopbarTitleLinkBadgeOpen{}}}
+		return &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Open{Open: &frontendv1.TopbarWorkspaceNameLinkBadgeOpen{}}}
 	case wsm.PullRequestStateDraft:
-		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Draft{Draft: &frontendv1.TopbarTitleLinkBadgeDraft{}}}
+		return &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Draft{Draft: &frontendv1.TopbarWorkspaceNameLinkBadgeDraft{}}}
 	case wsm.PullRequestStateMerged:
-		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Merged{Merged: &frontendv1.TopbarTitleLinkBadgeMerged{}}}
+		return &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Merged{Merged: &frontendv1.TopbarWorkspaceNameLinkBadgeMerged{}}}
 	case wsm.PullRequestStateClosed:
-		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Closed{Closed: &frontendv1.TopbarTitleLinkBadgeClosed{}}}
+		return &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Closed{Closed: &frontendv1.TopbarWorkspaceNameLinkBadgeClosed{}}}
 	}
 	panic(fmt.Sprintf("topbar: pull request state %q has no badge", state))
 }
 
 // linkIcon names the service icon a menu row draws for a url, from the url's
 // host: GitHub, Slack, Notion and GNS hosts have one, every other host none.
-func linkIcon(rawURL string) frontendv1.TopbarTitleLinkIcon {
+func linkIcon(rawURL string) frontendv1.TopbarWorkspaceNameLinkIcon {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED
+		return frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_UNSPECIFIED
 	}
 	host := strings.ToLower(u.Hostname())
 	switch {
 	case hostIs(host, "github.com"):
-		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GITHUB
+		return frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_GITHUB
 	case hostIs(host, "slack.com"):
-		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_SLACK
+		return frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_SLACK
 	case hostIs(host, "notion.so"), hostIs(host, "notion.site"):
-		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION
+		return frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_NOTION
 	case gnsurl.IsHost(host):
-		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS
+		return frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_GNS
 	}
-	return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED
+	return frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_UNSPECIFIED
 }
 
 // hostIs reports whether host is domain or one of its subdomains.

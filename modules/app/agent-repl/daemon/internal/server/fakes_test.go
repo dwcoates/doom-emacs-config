@@ -194,7 +194,7 @@ type fakeDB struct {
 	subsections []wsm.Subsection
 	// summaries are the stored workspace summaries ListWorkspaceSummaries
 	// answers; summariesErr fails that read.
-	summaries    map[ids.WorkspaceID]string
+	summaries    map[ids.WorkspaceID]wsm.WorkspaceSummary
 	summariesErr error
 	// titles are the stored vendor titles ListVendorTitles answers;
 	// titlesErr fails that read.
@@ -623,7 +623,7 @@ type fakeVerbs struct {
 	renamed workspace.Renamed
 	// summaries records every summary SetSummary received; setSummaryErr is
 	// what it answers, and a success answers the summary it received.
-	summaries     []string
+	summaries     []wsm.WorkspaceSummary
 	setSummaryErr error
 	// opens and selects count every Open and Select the handlers made: the
 	// two verbs that bring a workspace up.
@@ -1067,10 +1067,10 @@ func (f *fakeVerbs) SetName(_ context.Context, _ ids.WorkspaceID, name string) (
 	return renamed, nil
 }
 
-func (f *fakeVerbs) SetSummary(_ context.Context, _ ids.WorkspaceID, summary string) (string, error) {
+func (f *fakeVerbs) SetSummary(_ context.Context, _ ids.WorkspaceID, summary wsm.WorkspaceSummary) (wsm.WorkspaceSummary, error) {
 	f.summaries = append(f.summaries, summary)
 	if f.setSummaryErr != nil {
-		return "", f.setSummaryErr
+		return wsm.WorkspaceSummary{}, f.setSummaryErr
 	}
 	return summary, nil
 }
@@ -3861,7 +3861,7 @@ func (d *fakeDB) ListVendorTitles(context.Context) (map[ids.WorkspaceID]string, 
 }
 
 // ListWorkspaceSummaries answers the seeded summaries, or summariesErr.
-func (d *fakeDB) ListWorkspaceSummaries(context.Context) (map[ids.WorkspaceID]string, error) {
+func (d *fakeDB) ListWorkspaceSummaries(context.Context) (map[ids.WorkspaceID]wsm.WorkspaceSummary, error) {
 	if d.summariesErr != nil {
 		return nil, d.summariesErr
 	}

@@ -116,7 +116,7 @@ func (v *verbs) CreateMediator(ctx context.Context, repoDir string, role wsm.Med
 //
 // A REAL FAILURE STAYS AN ERROR: a level the live session's selector never
 // offered is refused here, before any pick, and a vendor's refusal of the
-// switch is recorded at ERROR and stated on the warning strip by the fleet.
+// switch is recorded at ERROR by the fleet.
 func (v *verbs) SetMediatorAgent(ctx context.Context, ws wsm.WorkspaceID, cfg *repoconfigv1.MediatorAgent) error {
 	agent := MediatorAgentOf(cfg)
 	if err := v.setMediatorModel(ctx, ws, agent.Model); err != nil {

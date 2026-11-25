@@ -1,6 +1,6 @@
 // Package topbar is the topbar resolver: title and session line, the model
-// selector, the permission-mode picker, the connectivity glyph, the warnings
-// and the context chip.
+// selector, the permission-mode picker, the connectivity glyph and the
+// context chip.
 //
 // The model fact is LAST-WRITER-WINS in shim order. The connectivity glyph and
 // its tone come from the render-colors vocabulary. See ARCHITECTURE.md
@@ -13,14 +13,13 @@
 //	SetName                the workspace name alone, on a rename
 //	OnSessionStarted       the vendor session id and the effective model
 //	SetAccount             the account arm (a logged-out root is a DRAWN
-//	                       warning, so "not yet read" is not the same fact)
+//	                       label, so "not yet read" is not the same fact)
 //	OnSessionStarted       (also) the permission-mode picker, served from the
 //	                       vendor's fixed switchable set
 //	SessionContextUsage    the context chip's figure and its breakdown
 //
-// Connectivity and the warning strip need nothing: an unobserved link is
-// `no_session`, and an empty warning list is the daemon saying nothing is
-// wrong. Before the five arrive NOTHING is published — the contract's legal
+// Connectivity needs nothing: an unobserved link is `no_session`. Before the
+// five arrive NOTHING is published — the contract's legal
 // "not yet resolved" state — because a partial view would violate the
 // non-optional fields it would have to leave empty.
 package topbar
@@ -116,40 +115,6 @@ type QueueBypass struct {
 	Offers []*frontendv1.TopbarQueueBypassContext
 }
 
-// DetachedUnmodeled is one live item of UNMODELED work running detached. It
-// has no home in the footer's chips by design and no arm in DetachableWork, so
-// the daemon states it here rather than letting it vanish.
-type DetachedUnmodeled struct {
-	// ToolName is the tool as the agent named it.
-	ToolName string
-	// StartedAt is when it began; the overlay's clock ticks from it.
-	StartedAt time.Time
-}
-
-// DaemonWarning is one daemon-scoped condition as the warning strip draws it:
-// the row's line, and the overlay the row opens when it has one.
-type DaemonWarning struct {
-	// Line is the row's sentence. Never empty.
-	Line string
-	// DeployFailed is a failed deploy's overlay; nil is a row with no overlay.
-	DeployFailed *DeployFailedOverlay
-}
-
-// DeployFailedOverlay is what a failed deploy's row reveals, every line
-// composed by the health package out of the fault's own evidence.
-type DeployFailedOverlay struct {
-	// Step is the step that failed, in words.
-	Step string
-	// Component is what the step failed on: the build step, or the component.
-	Component string
-	// Rollback is what became of the install, in words.
-	Rollback string
-	// Detail is the failure's own account, whole.
-	Detail string
-	// Log is where the build's whole output is archived; empty for none.
-	Log string
-}
-
 // Resolver is the topbar's whole surface.
 type Resolver interface {
 	sessionwatcher.TopbarSink
@@ -211,16 +176,16 @@ type Resolver interface {
 	// workspace verbs, on every UpdateQueueBypassMode, for every workspace of
 	// the repository.
 	SetQueueBypass(ws ids.WorkspaceID, chip QueueBypass)
-	// SetSummary installs the one-sentence workspace summary its agent set
-	// (agentrepl.v1.SetWorkspaceSummary), shown in the title's FIRST
-	// precedence: above the vendor's ai-title and the workspace name. An empty
-	// text retracts it. Its sole producer is the summary keeper
+	// SetSummary installs the workspace summary its agent set
+	// (agentrepl.v1.SetWorkspaceSummary): the short summary in the title's
+	// FIRST precedence, above the vendor's ai-title, and the long summary as
+	// the title's hover description (TopbarTitle.description). The zero
+	// summary retracts it. Its sole producer is the summary keeper
 	// (wssummary.Keeper).
-	SetSummary(ws ids.WorkspaceID, summary string)
-	// SetLinks installs the links the summary's menu shows, most recently
-	// set first, which the title carries for a click to open
-	// (TopbarTitle.links). Empty clears them. They ride the title, so a
-	// workspace with no summary publishes no links. Its sole producer is the
+	SetSummary(ws ids.WorkspaceID, summary wsm.WorkspaceSummary)
+	// SetLinks installs the links the workspace name's menu shows, most
+	// recently set first, which the name carries for a click to open
+	// (TopbarWorkspaceName.links). Empty clears them. Its sole producer is the
 	// workspace verbs, at registration and on every ChangeWorkspaceLinks.
 	SetLinks(ws ids.WorkspaceID, shown []Link)
 	// SetModelCatalog installs the switchable model set the selector renders,
@@ -262,7 +227,7 @@ type Resolver interface {
 	BindContextFill(sink ContextFillSink)
 	// SetAccount installs the account cell: the root in force and EVERY root
 	// the daemon knows beside it. An EMPTY email is the logged-out arm, which
-	// is a drawn warning rather than a blank label.
+	// is a drawn label rather than a blank one.
 	SetAccount(ws ids.WorkspaceID, account Account)
 	// SetLoginDefaultModel moves the default model of the login CONFIG_DIR on
 	// every strip spending as it, so a "Make default" on one workspace is
@@ -275,27 +240,6 @@ type Resolver interface {
 	// SignInAnswered ends the request standing on CONFIG_DIR once its login
 	// flow ends, signed in or closed.
 	SignInAnswered(configDir string)
-	// SetDetachedUnmodeled installs the live detached-unmodeled items, one
-	// warning each. Nothing on the shim's streams announces them —
-	// DetachableWork has no unmodeled arm — so the daemon states the set.
-	SetDetachedUnmodeled(ws ids.WorkspaceID, items []DetachedUnmodeled)
-	// RaiseWarning puts a condition the DAEMON raised about its own resolution
-	// on the warning strip — the webapp's one error surface — as one line with
-	// no overlay. key identifies the condition, so raising it again updates
-	// the line rather than adding a second one. The raising site logs the full
-	// context itself; this only makes it visible.
-	RaiseWarning(ws ids.WorkspaceID, key, line string)
-	// RaiseDaemonWarning is RaiseWarning for a condition of the WHOLE DAEMON
-	// — a daemon-scoped fault — which stands on EVERY workspace's warning
-	// strip, present and future, as its line and, when the warning carries
-	// one, the overlay its row opens. key identifies the condition, so
-	// raising it again restates it. Unlike a workspace's raised warning it is
-	// RETRACTED when the condition ends (RetractDaemonWarning): the fault it
-	// draws is closed, not merely past.
-	RaiseDaemonWarning(key string, warning DaemonWarning)
-	// RetractDaemonWarning takes a daemon-scoped warning off every strip. A
-	// key that is not raised retracts nothing.
-	RetractDaemonWarning(key string)
 	// SetPersistentWifi states the machine's persistent-wifi standing, which
 	// every strip draws as its persistent-wifi chip. The persistent-wifi
 	// controller calls it on every change.
@@ -345,8 +289,7 @@ type Option func(*options)
 type ContextFillSink func(ws ids.WorkspaceID, tokens int64, fill float64)
 
 type options struct {
-	clock      Clock
-	warningCap int
+	clock Clock
 	// selections keeps the controls for when the shim is down; nil keeps
 	// nothing (WithSelectionStore).
 	selections SelectionStore
@@ -361,24 +304,18 @@ type options struct {
 // (viewquiet).
 func WithQuiet(g *viewquiet.Gate) Option { return func(o *options) { o.quiet = g } }
 
-// WithClock injects the clock every warning's ordering instant is taken from.
+// WithClock injects the clock the cold gate's rise is stamped by.
 func WithClock(c Clock) Option { return func(o *options) { o.clock = c } }
-
-// WithWarningCap sets how many warnings the dropdown carries.
-func WithWarningCap(n int) Option { return func(o *options) { o.warningCap = n } }
 
 // Defaults for the injectable knobs.
 const (
-	// DefaultWarningCap is how many warnings the dropdown carries, newest
-	// first. The strip is a summary, not a log.
-	DefaultWarningCap = 20
 	// DefaultLineWidth is how wide a composed overlay line may be before the
 	// daemon truncates it.
 	DefaultLineWidth = 120
 )
 
-// Clock is the resolver's whole dependency on time: warnings are ordered by
-// when they were observed, and a test must not depend on wall-clock.
+// Clock is the resolver's whole dependency on time: the cold gate's rise is
+// stamped by it, and a test must not depend on wall-clock.
 type Clock interface {
 	// Now is the current instant.
 	Now() time.Time

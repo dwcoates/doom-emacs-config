@@ -1525,9 +1525,6 @@ func TestALeftoverDetachmentIsReportedOnlyWhenItArrivedLive(t *testing.T) {
 			if got := h.hasRecord("error", "daemon.feed.detached_unplaceable"); got != tc.wantError {
 				t.Fatalf("ERROR recorded = %v, want %v; records = %+v", got, tc.wantError, h.records())
 			}
-			if got := len(h.warnings.keys()) > 0; got != tc.wantError {
-				t.Fatalf("raised = %v, want raised %v", h.warnings.keys(), tc.wantError)
-			}
 			level := "debug"
 			if tc.wantError {
 				level = "error"
@@ -1669,9 +1666,6 @@ func TestARestatedShellPastTheReplayedPageIsNoFaultAtAReplayedTurnEnd(t *testing
 	// Assert.
 	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
 		t.Fatalf("records = %+v, want no ERROR for a restated shell", h.records())
-	}
-	if got := h.warnings.keys(); len(got) != 0 {
-		t.Fatalf("raised = %v, want nothing on the topbar", got)
 	}
 }
 
