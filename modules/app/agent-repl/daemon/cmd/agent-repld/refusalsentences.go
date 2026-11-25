@@ -75,7 +75,7 @@ func sayParentNotOpen(e *agentreplv1.WorkspaceParentNotOpen, again string) (stri
 
 // sayInvalidName is the invalid_name sentence, one per rule the name broke:
 // its last component is no slug, a component before it is no prefix, or it
-// lies in the daemon's own `agent-repl` branch namespace. A create and a
+// ends in a standing workspace's name (a repository's mediator's). A create and a
 // rename refuse a name by the same message, so both say it here.
 func sayInvalidName(n *agentreplv1.CreateWorkspaceInvalidName) (string, error) {
 	switch n.GetRule().(type) {
@@ -84,7 +84,7 @@ func sayInvalidName(n *agentreplv1.CreateWorkspaceInvalidName) (string, error) {
 	case *agentreplv1.CreateWorkspaceInvalidName_Prefix:
 		return fmt.Sprintf("the name %q breaks the naming rule: its component %q before the last is not a prefix", n.GetName(), n.GetComponent()), nil
 	case *agentreplv1.CreateWorkspaceInvalidName_Reserved:
-		return fmt.Sprintf("the name %q lies in the daemon's own branch namespace %q, which no workspace's name may use", n.GetName(), n.GetComponent()), nil
+		return fmt.Sprintf("the name %q ends in %q, a name agent-repl keeps for its own standing workspace", n.GetName(), n.GetComponent()), nil
 	}
 	return "", undescribed("invalid_name", n)
 }

@@ -35,12 +35,6 @@ type mediatorRole struct {
 	// role is the workspace's standing (wsm.Workspace.Mediator), and the
 	// table its record lives in.
 	role wsm.MediatorRole
-	// name is the slug a made mediator takes; the workspace verbs make it
-	// under the daemon's own branch namespace (workspace.StandingBranch), so
-	// no branch a person or an agent cut can hold it. A repository holds it
-	// once; a closed mediator keeps it, and is reopened. A mediator recorded
-	// before the namespace keeps the name it was made under.
-	name string
 	// agent is the section of a repository's lifecycle config that says how
 	// the role's mediator runs, nil when the role's checks are off.
 	agent func(*repoconfigv1.LifecycleConfig) (*repoconfigv1.MediatorAgent, bool)
@@ -50,7 +44,6 @@ type mediatorRole struct {
 // queue until it decides.
 var deployRole = mediatorRole{
 	role: wsm.MediatorDeploy,
-	name: "deploy-mediator",
 	agent: func(cfg *repoconfigv1.LifecycleConfig) (*repoconfigv1.MediatorAgent, bool) {
 		return cfg.GetDeployChecks().GetAgent(), cfg.GetDeployChecks() != nil
 	},
@@ -60,7 +53,6 @@ var deployRole = mediatorRole{
 // landings and dispatches children, holding nothing.
 var productionRole = mediatorRole{
 	role: wsm.MediatorProduction,
-	name: "production-mediator",
 	agent: func(cfg *repoconfigv1.LifecycleConfig) (*repoconfigv1.MediatorAgent, bool) {
 		return cfg.GetProductionChecks().GetAgent(), cfg.GetProductionChecks() != nil
 	},
@@ -204,12 +196,12 @@ func (o *orchestrator) mediatorOf(ctx context.Context, r mediatorRole, q checked
 // session's landing reads and which makes its finish the daemon's to land,
 // whichever brief it works.
 func (o *orchestrator) makeMediator(ctx context.Context, r mediatorRole, q checkedQueue, fields dlog.Context) (ids.WorkspaceID, error) {
-	fields = withField(r.roleFields(fields), "name", r.name)
+	fields = withField(r.roleFields(fields), "name", r.role.Name())
 	agent, _ := r.agent(q.config)
-	made, err := o.deps.DeployChecks.CreateMediator(ctx, q.repository.Dir, r.name, agent)
+	made, err := o.deps.DeployChecks.CreateMediator(ctx, q.repository.Dir, r.role, agent)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "the mediator could not be made", withField(fields, "error", err.Error()))
-		return "", fmt.Errorf("merge: make the %s mediator %s: %w", r.role, r.name, err)
+		return "", fmt.Errorf("merge: make the %s mediator %s: %w", r.role, r.role.Name(), err)
 	}
 	fields = withField(fields, "workspace", string(made.ID))
 	if err := o.deps.DB.RecordStandingMediator(ctx, r.role, q.key, made.ID); err != nil {

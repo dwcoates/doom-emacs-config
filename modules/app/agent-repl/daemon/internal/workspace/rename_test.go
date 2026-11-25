@@ -167,6 +167,43 @@ func TestSetNameMayNameTheWorkspaceAfterItsOwnBranch(t *testing.T) {
 	}
 }
 
+func TestSetNameGivesAMediatorItsOwnRolesName(t *testing.T) {
+	cases := []struct {
+		name      string
+		role      wsm.MediatorRole
+		requested string
+		wantArm   string
+	}{
+		{name: "a mediator takes its own role's name, unprefixed", role: wsm.MediatorProduction, requested: "prod-mediator"},
+		{name: "a mediator may not take another role's name", role: wsm.MediatorProduction, requested: "deploy-mediator", wantArm: ArmInvalidName},
+		{name: "a workspace that is no mediator may not take a role's name", role: wsm.NotMediator, requested: "prod-mediator", wantArm: ArmInvalidName},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a prefix every other rename would take.
+			f := renameFixture(t)
+			t.Setenv(PrefixEnv, "ABC")
+			ws := f.db.workspaces["w1"]
+			ws.Mediator = tc.role
+			f.db.workspaces["w1"] = ws
+
+			// Act.
+			name, err := f.verbs.SetName(context.Background(), "w1", tc.requested)
+
+			// Assert.
+			if tc.wantArm == "" {
+				if err != nil || name != tc.requested || f.db.workspaces["w1"].Name != tc.requested {
+					t.Fatalf("SetName = %q, %v, recorded %q; want %q as it stands", name, err, f.db.workspaces["w1"].Name, tc.requested)
+				}
+				return
+			}
+			if refusal, ok := AsRefusal(err); !ok || refusal.Arm != tc.wantArm || f.db.workspaces["w1"].Name != "sample" {
+				t.Fatalf("SetName = %q, %v, recorded %q; want the %s refusal and the name kept", name, err, f.db.workspaces["w1"].Name, tc.wantArm)
+			}
+		})
+	}
+}
+
 func TestSetNameRefusesANameThatBreaksTheNamingRule(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -176,7 +213,7 @@ func TestSetNameRefusesANameThatBreaksTheNamingRule(t *testing.T) {
 	}{
 		{name: "a slug that is not lowercase hyphenated words", requested: "Better Name", component: "Better Name", rule: NameRuleSlug},
 		{name: "a prefix that is not letters and digits", requested: "A B/better", component: "A B", rule: NameRulePrefix},
-		{name: "a name in the daemon's reserved namespace", requested: "agent-repl/standing/deploy-intake", component: "agent-repl", rule: NameRuleReserved},
+		{name: "a standing workspace's name", requested: "prod-mediator", component: "prod-mediator", rule: NameRuleReserved},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

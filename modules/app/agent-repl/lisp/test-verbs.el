@@ -1845,15 +1845,15 @@ refusal still reaches the generic reporting."
     (should (agent-repl-test-verbs--messaged-p
              "agent-repl: workspace creation FAILED: the name \"a b/fix\" is not a workspace name: its prefix \"a b\" must be letters and digits joined by single . _ or -"))))
 
-(ert-deftest agent-repl-verbs-create-invalid-name-reserved-names-the-namespace ()
-  "A name in the daemon's own branch namespace says the namespace is agent-repl's."
+(ert-deftest agent-repl-verbs-create-invalid-name-reserved-names-the-standing-name ()
+  "A name ending in a standing workspace's name says the name is agent-repl's."
   (agent-repl-test-verbs--with
       (list (cons :create (list :response (list :arm :error
                                                 :value (agent-repl-test-verbs--invalid-name-refusal
-                                                        "agent-repl/fix" "agent-repl" :reserved)))))
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "agent-repl/fix")
+                                                        "fix/prod-mediator" "prod-mediator" :reserved)))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "fix/prod-mediator")
     (should (agent-repl-test-verbs--messaged-p
-             "agent-repl: workspace creation FAILED: the name \"agent-repl/fix\" is not a workspace name: its first part \"agent-repl\" is the branch namespace agent-repl keeps for its own workspaces"))))
+             "agent-repl: workspace creation FAILED: the name \"fix/prod-mediator\" is not a workspace name: \"prod-mediator\" is the name agent-repl keeps for its own standing workspace"))))
 
 (ert-deftest agent-repl-verbs-create-invalid-name-empty-part-says-so ()
   "An empty part between slashes is named as such, not quoted as \"\"."

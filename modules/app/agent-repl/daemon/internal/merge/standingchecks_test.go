@@ -31,7 +31,7 @@ func mediatorIn(t *testing.T, h *harness, ws ids.WorkspaceID, closed bool) {
 	t.Helper()
 	ctx := context.Background()
 	h.db.mu.Lock()
-	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: deployRole.name, Repo: theRepository, Closed: closed}
+	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: deployRole.role.Name(), Repo: theRepository, Closed: closed}
 	h.db.mu.Unlock()
 	if err := h.db.RecordDeployMediator(ctx, mediationKey(h), ws); err != nil {
 		t.Fatal(err)
@@ -91,8 +91,8 @@ func TestMediatorOfMakesOneForAQueueWithNone(t *testing.T) {
 			got, err := h.o.mediatorOf(context.Background(), deployRole, queueOf(t, h), dlog.Context{})
 
 			// Assert
-			if err != nil || got != (standing{ws: "ws-fixer"}) || !slices.Equal(h.checks.made, []string{deployRole.name}) {
-				t.Fatalf("mediatorOf = (%+v, %v), made %v; want %s made", got, err, h.checks.made, deployRole.name)
+			if err != nil || got != (standing{ws: "ws-fixer"}) || !slices.Equal(h.checks.made, []string{deployRole.role.Name()}) {
+				t.Fatalf("mediatorOf = (%+v, %v), made %v; want %s made", got, err, h.checks.made, deployRole.role.Name())
 			}
 			recorded, found, readErr := h.db.DeployMediatorOf(context.Background(), mediationKey(h))
 			if readErr != nil || !found || recorded.Workspace != got.ws {
@@ -192,7 +192,7 @@ func TestAProductionMediatorIsRecordedInItsOwnRole(t *testing.T) {
 	// Assert
 	recorded, found, err2 := h.db.checks.StandingMediatorOf(context.Background(), wsm.MediatorProduction, mediationKey(h))
 	_, deployFound, err3 := h.db.checks.StandingMediatorOf(context.Background(), wsm.MediatorDeploy, mediationKey(h))
-	if err != nil || err2 != nil || err3 != nil || !found || recorded.Workspace != got.ws || deployFound || !slices.Equal(h.checks.made, []string{"production-mediator"}) {
+	if err != nil || err2 != nil || err3 != nil || !found || recorded.Workspace != got.ws || deployFound || !slices.Equal(h.checks.made, []string{wsm.MediatorProduction.Name()}) {
 		t.Fatalf("mediatorOf = (%+v, %v), recorded (%+v, %v, %v), deploy %v (%v), made %v; want only a production mediator made", got, err, recorded, found, err2, deployFound, err3, h.checks.made)
 	}
 }

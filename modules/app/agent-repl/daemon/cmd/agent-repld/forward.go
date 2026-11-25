@@ -407,12 +407,12 @@ func (f *verbsForwarder) letQueueThroughAfterBypassTurn(ctx context.Context, ws 
 // built after the merge orchestrator.
 type deployChecks struct{ f *verbsForwarder }
 
-func (d deployChecks) CreateMediator(ctx context.Context, repoDir, name string, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
+func (d deployChecks) CreateMediator(ctx context.Context, repoDir string, role wsm.MediatorRole, agent *repoconfigv1.MediatorAgent) (wsm.Workspace, error) {
 	verbs, err := d.f.bound("the merge queue made a standing mediator")
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return verbs.CreateMediator(ctx, repoDir, name, agent)
+	return verbs.CreateMediator(ctx, repoDir, role, agent)
 }
 
 func (d deployChecks) SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error {

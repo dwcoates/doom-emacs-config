@@ -1836,6 +1836,24 @@ const (
 // fold that hid them would hide work the user relies on.
 func (w Workspace) AlwaysShown() bool { return w.IsMediator() || w.QueueBypassHeld }
 
+// MediatorRoles are every mediator role, in the order a repository's
+// section draws them.
+var MediatorRoles = []MediatorRole{MediatorDeploy, MediatorProduction}
+
+// Name is the workspace name, branch and worktree directory a mediator of
+// role R is made under (owner ruling, 2026-11-25: named plainly), which no
+// other workspace may take. A role that is no mediator has none, and asking
+// for it is a bug.
+func (r MediatorRole) Name() string {
+	switch r {
+	case MediatorDeploy:
+		return "deploy-mediator"
+	case MediatorProduction:
+		return "prod-mediator"
+	}
+	panic(fmt.Sprintf("wsm: the name of mediator role %q", string(r)))
+}
+
 // IsMediator reports whether the workspace is one of its repository's
 // standing mediators.
 func (w Workspace) IsMediator() bool { return w.Mediator != NotMediator }

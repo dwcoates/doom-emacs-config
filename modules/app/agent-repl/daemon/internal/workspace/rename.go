@@ -24,7 +24,8 @@ const rpcSetName = "SetWorkspaceName"
 // deploys name the branch.
 //
 // The requested name follows a supplied create name's rule and takes the
-// same prefix (ValidateSuppliedName, suppliedBranch). It is refused when
+// same prefix (ValidateSuppliedName, suppliedBranch), save a mediator's own
+// role's name (renamedTo). It is refused when
 // another workspace holds it as its name or branch, or a pending reservation
 // or claim holds it (holdersLocked). The check and the write happen under the
 // naming lock, so no create or async merge can hand the name out between them.
@@ -37,10 +38,10 @@ func (v *verbs) SetName(ctx context.Context, ws ids.WorkspaceID, requested strin
 		return "", err
 	}
 	supplied := strings.TrimSpace(requested)
-	if err := refuseSuppliedName(log, rpcSetName, supplied); err != nil {
+	name, err := renamedTo(log, record, supplied)
+	if err != nil {
 		return "", err
 	}
-	name := suppliedBranch(supplied)
 	fields := dlog.Context{"name": name, "previous": record.Name, "branch": record.Branch}
 	if name == record.Name {
 		log.Info(opSetName, "the workspace already has the name; nothing changed", fields)
@@ -52,6 +53,20 @@ func (v *verbs) SetName(ctx context.Context, ws ids.WorkspaceID, requested strin
 	log.Info(opSetName, "renamed the workspace", fields)
 	v.publishRename(ctx, log, ws, name)
 	return name, nil
+}
+
+// renamedTo is the name SUPPLIED renames RECORD to. A mediator renamed to
+// its own role's name takes it as it stands (wsm.MediatorRole.Name), which
+// the naming rule refuses every other workspace (IsStandingName); any other
+// name follows a supplied create name's rule and takes the same prefix.
+func renamedTo(log dlog.Logger, record wsm.Workspace, supplied string) (string, error) {
+	if record.IsMediator() && supplied == record.Mediator.Name() {
+		return supplied, nil
+	}
+	if err := refuseSuppliedName(log, rpcSetName, supplied); err != nil {
+		return "", err
+	}
+	return suppliedBranch(supplied), nil
 }
 
 // recordName checks NAME is free to WS and records it, under the naming lock.
