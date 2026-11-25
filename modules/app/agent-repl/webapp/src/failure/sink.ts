@@ -8,9 +8,9 @@
  * observe. A failure this end wants to report that has no arm up there is a
  * failure this end has no standing to classify.
  *
- * REPORT AND RETRACT, KEYED ON THE ARM. A reconnect loop that appended a row
- * per attempt would bury the warning chip under its own alarm, so a repeat
- * report of the SAME arm replaces its row. `daemon_unreachable` is WINDOW-SHAPED and is
+ * REPORT AND RETRACT, KEYED ON THE ARM. A reconnect loop that recorded a
+ * failure per attempt would bury the record under its own alarm, so a repeat
+ * report of the SAME arm stands as the one it repeats. `daemon_unreachable` is WINDOW-SHAPED and is
  * retracted when the link comes back — a settled "lost the connection;
  * reconnecting" beside a visibly live feed reads as a standing fault.
  * `workspace_gone` and `stale_bundle` are deliberately unretractable: there is
@@ -47,7 +47,7 @@ export function isClientFailureArm(arm: string): arm is ClientFailureArm {
 }
 
 export interface FailureSink {
-  /** File (or replace) the warning chip's row for KIND's arm. */
+  /** File KIND's failure, or stand on the one its arm already filed. */
   report(kind: FailureKind): void;
   /** Remove ARM's row, if one stands. */
   retract(arm: ClientFailureArm): void;
@@ -113,7 +113,7 @@ export function daemonUnreachable(closeCode: number, closeReason: string): Failu
 
 /**
  * A push could not be read and was skipped. Conversation may be missing as a
- * result, which is why it is a warning-chip row rather than a log line.
+ * result, which is why the footer draws it as a card as well as its record.
  */
 export function frameUndecodable(cause: string, frameHead: string): FailureKind {
   return create(FailureKindSchema, {

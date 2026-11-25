@@ -606,7 +606,7 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.order.indexOf("login")).toBeLessThan(page.order.indexOf("topbar"));
   });
 
-  test("mounts the topbar before adoption, so its warning chip can show a failed boot", async () => {
+  test("mounts the topbar before adoption", async () => {
     await bootMain();
 
     expect(page.order.indexOf("topbar-mount")).toBeLessThan(page.order.indexOf("adopt"));
@@ -779,15 +779,11 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
   });
 });
 
-/** The evidence lines the topbar's warning chip shows for the client-local ARM. */
-function chipEvidence(arm: string): string[] {
-  document.querySelector<HTMLElement>("#topbar .topbar-heading-warnings")?.click();
-  document
-    .querySelector<HTMLElement>(`#topbar [data-reveal] [data-local][data-arm="${arm}"]`)
-    ?.click();
-  return [...document.querySelectorAll("#topbar [data-reveal] .topbar-warning-detail-line")].map(
-    (line) => line.textContent ?? "",
-  );
+/** The causes of every failure of the client-local ARM the page's failure sink recorded. */
+function filedCauses(arm: string): unknown[] {
+  return page.clientLogs
+    .filter((call) => call.record.message.startsWith(`filing the ${arm} failure: `))
+    .map((call) => call.record.context?.cause);
 }
 
 /** Put the page in the webhost's iframe: a parent window that takes its posts. */
@@ -819,28 +815,15 @@ describe("a page in the webhost", { timeout: BOOT_TIMEOUT_MS }, () => {
 
     expect(page.feedWorkspaceSelected).toHaveBeenCalledTimes(1);
   });
-
-  test("lists the webhost's failures in its warning chip", async () => {
-    const webhost = embedInWebhost();
-    await bootMain();
-
-    fromWebhost(webhost, {
-      channel: "agent-repl-host",
-      kind: "webhostFailures",
-      failures: [{ arm: "daemonUnreachable", headline: "lost the daemon", evidence: [["close code", "1006"]] }],
-    });
-
-    expect(chipEvidence("daemonUnreachable")).toEqual(["close code: 1006"]);
-  });
 });
 
 describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
-  test("files boot_failed in the topbar's warning chip when adoption never completes", async () => {
+  test("records boot_failed with its cause when adoption never completes", async () => {
     page.adopt = () => Promise.reject(new Error("adoption refused"));
 
     await bootMain();
 
-    expect(chipEvidence("bootFailed")).toEqual(["cause: Error: adoption refused"]);
+    expect(filedCauses("bootFailed")).toEqual(["Error: adoption refused"]);
   });
 
   test("draws no failure overlay for a failed boot", async () => {
@@ -881,7 +864,7 @@ describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
     await bootMain();
 
     expect(page.bootedContext?.isQuiesced()).toBe(false);
-    expect(chipEvidence("bootFailed")).toEqual([]);
+    expect(filedCauses("bootFailed")).toEqual([]);
   });
 
   test("a deferred adoption mounts the page after the adoption", async () => {
@@ -900,12 +883,12 @@ describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.bootedContext?.isQuiesced()).toBe(false);
   });
 
-  test("words a non-Error rejection in the chip as the value itself", async () => {
+  test("words a non-Error rejection's cause as the value itself", async () => {
     page.adopt = () => Promise.reject("the daemon hung up");
 
     await bootMain();
 
-    expect(chipEvidence("bootFailed")).toEqual(["cause: the daemon hung up"]);
+    expect(filedCauses("bootFailed")).toEqual(["the daemon hung up"]);
   });
 
   test("re-raises the shell's missing mount point by name", async () => {
@@ -926,13 +909,6 @@ describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
     );
   });
 
-  test("draws no heading warnings for an address failure, having no topbar yet", async () => {
-    addressPage("?dir=/tmp/ws-1");
-
-    await bootMain();
-
-    expect(document.querySelector("#topbar .topbar-heading-warnings")).toBeNull();
-  });
 });
 
 describe("the ClientLog sink and the client's link verdict", { timeout: BOOT_TIMEOUT_MS }, () => {

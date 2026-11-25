@@ -199,7 +199,7 @@ describe("installBackgroundClear", () => {
     expect(a.reported).toEqual([]);
   });
 
-  it("names a refused clear on the warning chip as the clear", async () => {
+  it("names a refused clear in the failure sink as the clear", async () => {
     // Arrange
     const a = armed({
       selectFeedRow: () =>

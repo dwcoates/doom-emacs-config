@@ -9,7 +9,7 @@ import {
   TopbarSessionLineSchema,
   TopbarTitleSchema,
   TopbarWorkspaceNameSchema,
-  TopbarTitleLinkIcon,
+  TopbarWorkspaceNameLinkIcon,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   OpenExternalResponseSchema,
@@ -212,7 +212,7 @@ describe("drawHeadingLine", () => {
   // tooltip or the class would fail here.
   it.each([
     ["title", () => drawTopbarTitle(create(TopbarTitleSchema, { text: "t" }), topbarContext().tc), "topbar-title"],
-    ["workspace name", () => drawTopbarWorkspaceName(workspaceName("t")), "topbar-workspace-name"],
+    ["workspace name", () => drawTopbarWorkspaceName(workspaceName("t"), topbarContext().tc), "topbar-workspace-name"],
   ])("draws the %s as a heading line", (_, draw, className) => {
     expect(draw().outerHTML).toBe(drawHeadingLine(className, "t").outerHTML);
   });
@@ -222,7 +222,7 @@ describe("drawTopbarWorkspaceName's emoji-ack glyph", () => {
   it("draws the glyph in the name's prefix, the tooltip the name alone", () => {
     // Act
     const u = create(TopbarWorkspaceNameSchema, { text: "acked", prefix: { emojiAck: { text: "👍" } } });
-    const line = drawTopbarWorkspaceName(u);
+    const line = drawTopbarWorkspaceName(u, topbarContext().tc);
 
     // Assert
     expect([line.firstElementChild?.outerHTML, line.textContent, line.title]).toEqual([
@@ -233,7 +233,7 @@ describe("drawTopbarWorkspaceName's emoji-ack glyph", () => {
   });
 
   it("draws no glyph for a name that wears none", () => {
-    expect(drawTopbarWorkspaceName(workspaceName("plain")).querySelector(".name-emoji-ack")).toBeNull();
+    expect(drawTopbarWorkspaceName(workspaceName("plain"), topbarContext().tc).querySelector(".name-emoji-ack")).toBeNull();
   });
 });
 
@@ -262,13 +262,13 @@ describe("drawTopbarHeading", () => {
 
 describe("drawTopbarWorkspaceName", () => {
   it("draws the name verbatim", () => {
-    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect")).textContent).toBe(
+    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect"), topbarContext().tc).textContent).toBe(
       "fix-reconnect",
     );
   });
 
   it("keeps the whole name in the tooltip, since the strip ellipsis-clips it", () => {
-    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect")).title).toBe("fix-reconnect");
+    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect"), topbarContext().tc).title).toBe("fix-reconnect");
   });
 
   it("draws the name's prefix before the name, through the one shared drawer", () => {
@@ -276,7 +276,7 @@ describe("drawTopbarWorkspaceName", () => {
       text: "fix-reconnect",
       prefix: { priority: { level: { case: "p2", value: {} } } },
     });
-    const line = drawTopbarWorkspaceName(u);
+    const line = drawTopbarWorkspaceName(u, topbarContext().tc);
     expect(line.firstElementChild?.outerHTML).toBe(drawNamePrefix(u.prefix, "TopbarWorkspaceName.prefix")?.outerHTML);
     expect(line.querySelector("[data-priority='p2']")).not.toBeNull();
   });
@@ -286,11 +286,11 @@ describe("drawTopbarWorkspaceName", () => {
       text: "fix-reconnect",
       prefix: { priority: { level: { case: "p1", value: {} } } },
     });
-    expect(drawTopbarWorkspaceName(u).title).toBe("fix-reconnect");
+    expect(drawTopbarWorkspaceName(u, topbarContext().tc).title).toBe("fix-reconnect");
   });
 
   it("draws no prefix for a name that wears none", () => {
-    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect")).querySelector(".name-prefix")).toBeNull();
+    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect"), topbarContext().tc).querySelector(".name-prefix")).toBeNull();
   });
 });
 
@@ -344,79 +344,158 @@ const click = (el: Element): void => {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
 };
 
-describe("drawTopbarTitle with one shown link", () => {
-  const URL = "https://github.com/o/r/pull/7";
-  const linked = () =>
-    create(TopbarTitleSchema, {
-      text: "Fix the reconnect backoff",
-      links: { opens: { case: "single", value: { label: "The pull request", url: URL } } },
-    });
+/** The paint of a workspace name with no links, drawn in a heading as the strip does. */
+function plainNamePaint(): Record<string, string> {
+  const heading = drawTopbarHeading(create(TopbarTitleSchema, { text: "t" }), workspaceName("w"), topbarContext().tc);
+  document.body.replaceChildren(heading);
+  return paint(heading.querySelector(".topbar-workspace-name")!);
+}
 
-  it("draws the summary as the link's text, pointing at the url", () => {
-    const anchor = drawTopbarTitle(linked(), topbarContext().tc).querySelector("a[data-external-link]");
-    expect([anchor?.textContent, anchor?.getAttribute("href")]).toEqual([
-      "Fix the reconnect backoff",
-      URL,
-    ]);
-  });
+describe("drawTopbarTitle's long summary", () => {
+  const LONG = "The reconnect backoff retries too fast. Fix its schedule.";
+  const described = () => create(TopbarTitleSchema, { text: "Fix the reconnect backoff", description: { text: LONG } });
+  const hover = (el: Element, type: "pointerenter" | "pointerleave"): void => {
+    el.dispatchEvent(new Event(type));
+  };
 
-  it("names the label and the url in the tooltip, beneath the whole summary", () => {
-    expect(drawTopbarTitle(linked(), topbarContext().tc).title).toBe(
-      `Fix the reconnect backoff\nThe pull request\n${URL}`,
-    );
-  });
-
-  it("draws a title with no links as plain text", () => {
-    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "t" }), topbarContext().tc);
-    expect(title.querySelector("a")).toBeNull();
-  });
-
-  it("opens the url through OpenExternal when clicked", async () => {
-    // Arrange
-    const { ctx, opened, first } = recordingContext();
-    const title = drawTopbarTitle(linked(), topbarContext(ctx).tc);
-    document.body.replaceChildren(title);
-    // Act
-    click(title.querySelector("a")!);
-    // Assert: the router transport answers on a timer, so the request is
-    // awaited (recordingContext's first) rather than read synchronously.
-    await first;
-    expect(opened.map((req) => req.url)).toEqual([URL]);
-  });
-
-  it("does not also open the heading's session line", () => {
-    // Arrange
+  it("draws the long summary beneath the strip while the pointer rests on the summary", () => {
     const { host, tc } = topbarContext();
-    const heading = drawTopbarHeading(linked(), workspaceName("fix-reconnect"), tc);
-    host.append(heading);
-    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
-    // Act
-    click(heading.querySelector("a")!);
-    // Assert
+    const title = drawTopbarTitle(described(), tc);
+    host.append(title);
+    hover(title, "pointerenter");
+    expect(openPanel(host)?.querySelector(".topbar-title-description")?.textContent).toBe(LONG);
+  });
+
+  it("closes the long summary when the pointer leaves the summary", () => {
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(described(), tc);
+    host.append(title);
+    hover(title, "pointerenter");
+    hover(title, "pointerleave");
     expect(openPanel(host)).toBeNull();
   });
 
-  it("is underlined and keeps the summary's own color and face", () => {
-    // Arrange
+  it("leaves another open reveal standing when the pointer leaves the summary", () => {
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(described(), tc);
+    host.append(title);
+    bindHeadingSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    click(title);
+    hover(title, "pointerleave");
+    expect(openPanel(host)?.textContent).toBe("session abc");
+  });
+
+  it("marks the summary as the popup's anchor", () => {
+    expect(drawTopbarTitle(described(), topbarContext().tc).getAttribute("data-reveal-anchor")).toBe("description");
+  });
+
+  it("drops the line's own tooltip, which the popup stands in for", () => {
+    expect(drawTopbarTitle(described(), topbarContext().tc).hasAttribute("title")).toBe(false);
+  });
+
+  it("opens nothing on a hover of a summary with no long summary", () => {
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "t" }), tc);
+    host.append(title);
+    hover(title, "pointerenter");
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("re-opens the popup with a later push's long summary", () => {
+    const { host, tc } = topbarContext();
+    const first = drawTopbarTitle(described(), tc);
+    host.append(first);
+    hover(first, "pointerenter");
+    const later = drawTopbarTitle(create(TopbarTitleSchema, { text: "t", description: { text: "Later. Text." } }), tc);
+    first.replaceWith(later);
+    tc.reveals.refresh();
+    expect(openPanel(host)?.textContent).toBe("Later. Text.");
+  });
+});
+
+describe("the summary's look", () => {
+  it("is the summary's purple and never underlined, whatever the name carries", () => {
     const teardown = installStylesheet();
     try {
-      const heading = drawTopbarHeading(linked(), workspaceName("fix-reconnect"), topbarContext().tc);
+      const plain = plainPaint();
+      const heading = drawTopbarHeading(
+        create(TopbarTitleSchema, { text: "t", description: { text: "One. Two." } }),
+        create(TopbarWorkspaceNameSchema, { text: "w", links: { opens: { case: "single", value: { label: "L", url: "https://a.example/1" } } } }),
+        topbarContext().tc,
+      );
       document.body.replaceChildren(heading);
-      const anchor = heading.querySelector("a")!;
-      // Act / Assert
-      expect(paint(anchor)).toEqual({ ...plainPaint(), textDecoration: "underline" });
+      const drawn = paint(heading.querySelector(".topbar-title")!);
+      expect([drawn, drawn.textDecoration.includes("underline")]).toEqual([plain, false]);
     } finally {
       teardown();
     }
   });
 });
 
-describe("drawTopbarTitle with several shown links", () => {
+describe("drawTopbarWorkspaceName with one shown link", () => {
+  const URL = "https://github.com/o/r/pull/7";
+  const linked = () =>
+    create(TopbarWorkspaceNameSchema, {
+      text: "fix-reconnect",
+      links: { opens: { case: "single", value: { label: "The pull request", url: URL } } },
+    });
+
+  it("draws the name as the link's text, pointing at the url", () => {
+    const anchor = drawTopbarWorkspaceName(linked(), topbarContext().tc).querySelector("a[data-external-link]");
+    expect([anchor?.textContent, anchor?.getAttribute("href")]).toEqual(["fix-reconnect", URL]);
+  });
+
+  it("names the label and the url in the tooltip, beneath the whole name", () => {
+    expect(drawTopbarWorkspaceName(linked(), topbarContext().tc).title).toBe(`fix-reconnect\nThe pull request\n${URL}`);
+  });
+
+  it("draws a name with no links as plain text", () => {
+    expect(drawTopbarWorkspaceName(workspaceName("t"), topbarContext().tc).querySelector("a")).toBeNull();
+  });
+
+  it("keeps the name's prefix before its link", () => {
+    const u = linked();
+    u.prefix = create(TopbarWorkspaceNameSchema, { prefix: { priority: { level: { case: "p2", value: {} } } } }).prefix;
+    const line = drawTopbarWorkspaceName(u, topbarContext().tc);
+    expect([line.firstElementChild?.querySelector("[data-priority='p2']") !== null, line.lastElementChild?.tagName]).toEqual([true, "A"]);
+  });
+
+  it("opens the url through OpenExternal when clicked", async () => {
+    const { ctx, opened, first } = recordingContext();
+    const name = drawTopbarWorkspaceName(linked(), topbarContext(ctx).tc);
+    document.body.replaceChildren(name);
+    click(name.querySelector("a")!);
+    await first;
+    expect(opened.map((req) => req.url)).toEqual([URL]);
+  });
+
+  it("does not also open the heading's session line", () => {
+    const { host, tc } = topbarContext();
+    const heading = drawTopbarHeading(create(TopbarTitleSchema, { text: "t" }), linked(), tc);
+    host.append(heading);
+    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    click(heading.querySelector("a")!);
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("is underlined and keeps the name's own color and face", () => {
+    const teardown = installStylesheet();
+    try {
+      const heading = drawTopbarHeading(create(TopbarTitleSchema, { text: "t" }), linked(), topbarContext().tc);
+      document.body.replaceChildren(heading);
+      expect(paint(heading.querySelector("a")!)).toEqual({ ...plainNamePaint(), textDecoration: "underline" });
+    } finally {
+      teardown();
+    }
+  });
+});
+
+describe("drawTopbarWorkspaceName with several shown links", () => {
   const PR = "https://github.com/o/r/pull/7";
   const DOC = "https://example.com/design";
   const menued = () =>
-    create(TopbarTitleSchema, {
-      text: "Fix the reconnect backoff",
+    create(TopbarWorkspaceNameSchema, {
+      text: "fix-reconnect",
       links: {
         opens: {
           case: "menu",
@@ -428,24 +507,21 @@ describe("drawTopbarTitle with several shown links", () => {
   /** Draw the heading with its session-line reveal bound, as the strip does. */
   function drawn(ctx?: AppContext) {
     const { host, tc } = topbarContext(ctx);
-    const heading = drawTopbarHeading(menued(), workspaceName("fix-reconnect"), tc);
+    const heading = drawTopbarHeading(create(TopbarTitleSchema, { text: "Fix the reconnect backoff" }), menued(), tc);
     host.append(heading);
     bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
-    const title = heading.querySelector<HTMLElement>(".topbar-title")!;
-    return { host, tc, title };
+    const name = heading.querySelector<HTMLElement>(".topbar-workspace-name")!;
+    return { host, tc, name };
   }
 
-  it("draws the summary as plain text, not as a link", () => {
-    const { title } = drawn();
-    expect([title.textContent, title.querySelector("a")]).toEqual(["Fix the reconnect backoff", null]);
+  it("draws the name as plain text, not as a link", () => {
+    const { name } = drawn();
+    expect([name.textContent, name.querySelector("a")]).toEqual(["fix-reconnect", null]);
   });
 
   it("drops the menu of the labels, in the served order, on a click", () => {
-    // Arrange
-    const { host, title } = drawn();
-    // Act
-    click(title);
-    // Assert
+    const { host, name } = drawn();
+    click(name);
     const anchors = [...openPanel(host)!.querySelectorAll("a[data-external-link]")];
     expect(anchors.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["The pull request", PR],
@@ -454,62 +530,63 @@ describe("drawTopbarTitle with several shown links", () => {
   });
 
   it("draws each row's url beneath its label, as the row's second line", () => {
-    const { host, title } = drawn();
-    click(title);
-    const rows = [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+    const { host, name } = drawn();
+    click(name);
+    const rows = [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-name-link-option")];
     expect(
       rows.map((row) => [...row.children].map((el) => [el.className, [...el.children].map((c) => c.className), el.textContent])),
     ).toEqual([
-      [[LINK_HEAD_CLASS, ["external-link"], "The pull request"], ["topbar-title-link-url", [], PR]],
-      [[LINK_HEAD_CLASS, ["external-link"], "The design doc"], ["topbar-title-link-url", [], DOC]],
+      [[LINK_HEAD_CLASS, ["external-link"], "The pull request"], ["topbar-name-link-url", [], PR]],
+      [[LINK_HEAD_CLASS, ["external-link"], "The design doc"], ["topbar-name-link-url", [], DOC]],
     ]);
   });
 
   it("names each row's url in its tooltip", () => {
-    const { host, title } = drawn();
-    click(title);
-    const rows = [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+    const { host, name } = drawn();
+    click(name);
+    const rows = [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-name-link-option")];
     expect(rows.map((row) => row.title)).toEqual([PR, DOC]);
   });
 
   it("does not also open the heading's session line", () => {
-    const { host, title } = drawn();
-    click(title);
+    const { host, name } = drawn();
+    click(name);
     expect(openPanel(host)?.textContent).not.toContain("session abc");
   });
 
-  it("closes the menu on a second click of the summary", () => {
-    const { host, title } = drawn();
-    click(title);
-    click(title);
+  it("closes the menu on a second click of the name", () => {
+    const { host, name } = drawn();
+    click(name);
+    click(name);
     expect(openPanel(host)).toBeNull();
   });
 
-  it("marks the summary as the menu's anchor, so an outside click spares it", () => {
-    const { title } = drawn();
-    expect(title.getAttribute("data-reveal-anchor")).toBe("links");
+  it("marks the name as the menu's anchor, so an outside click spares it", () => {
+    const { name } = drawn();
+    expect(name.getAttribute("data-reveal-anchor")).toBe("links");
+  });
+
+  it("leaves the summary a plain line with no menu", () => {
+    const { host, name } = drawn();
+    const title = name.parentElement!.querySelector<HTMLElement>(".topbar-title")!;
+    expect([title.hasAttribute("data-reveal-anchor"), title.querySelector("a"), openPanel(host)]).toEqual([false, null, null]);
   });
 
   it("opens a picked link through OpenExternal and closes the menu", async () => {
-    // Arrange
     const { ctx, opened, first } = recordingContext();
-    const { host, title } = drawn(ctx);
-    click(title);
-    // Act
+    const { host, name } = drawn(ctx);
+    click(name);
     click(openPanel(host)!.querySelectorAll("a")[1]);
-    // Assert
     await first;
     expect(opened.map((req) => req.url)).toEqual([DOC]);
     expect(openPanel(host)).toBeNull();
   });
 
-  it("is underlined and keeps the summary's own color and face", () => {
-    // Arrange
+  it("is underlined and keeps the name's own color and face", () => {
     const teardown = installStylesheet();
     try {
-      const { title } = drawn();
-      // Act / Assert
-      expect(paint(title)).toEqual({ ...plainPaint(), textDecoration: "underline" });
+      const { name } = drawn();
+      expect(paint(name)).toEqual({ ...plainNamePaint(), textDecoration: "underline" });
     } finally {
       teardown();
     }
@@ -517,9 +594,9 @@ describe("drawTopbarTitle with several shown links", () => {
 
   it("opens a row's link when its url line is clicked", async () => {
     const { ctx, opened, first } = recordingContext();
-    const { host, title } = drawn(ctx);
-    click(title);
-    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-url")[1]);
+    const { host, name } = drawn(ctx);
+    click(name);
+    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-name-link-url")[1]);
     await first;
     expect(opened.map((req) => req.url)).toEqual([DOC]);
     expect(openPanel(host)).toBeNull();
@@ -527,9 +604,9 @@ describe("drawTopbarTitle with several shown links", () => {
 
   it("opens a row's link when the row's own background is clicked", async () => {
     const { ctx, opened, first } = recordingContext();
-    const { host, title } = drawn(ctx);
-    click(title);
-    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")[0]);
+    const { host, name } = drawn(ctx);
+    click(name);
+    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-name-link-option")[0]);
     await first;
     expect(opened.map((req) => req.url)).toEqual([PR]);
     expect(openPanel(host)).toBeNull();
@@ -537,74 +614,70 @@ describe("drawTopbarTitle with several shown links", () => {
 
   it("opens a label click's link exactly once", async () => {
     const { ctx, opened, first } = recordingContext();
-    const { host, title } = drawn(ctx);
-    click(title);
+    const { host, name } = drawn(ctx);
+    click(name);
     click(openPanel(host)!.querySelectorAll("a")[0]);
     await first;
     expect(opened.map((req) => req.url)).toEqual([PR]);
   });
 
   it("draws each row's label like a model selector's name: white, the same size, never underlined", () => {
-    // Arrange
     const teardown = installStylesheet();
     try {
-      const { host, title } = drawn();
-      click(title);
+      const { host, name } = drawn();
+      click(name);
       const label = openPanel(host)!.querySelector("a")!;
       const labelPaint = paint(label);
       const panel = document.createElement("div");
       panel.className = "topbar-reveal";
       const row = document.createElement("button");
       row.className = "topbar-model-option";
-      const name = document.createElement("span");
-      name.className = "topbar-model-name";
-      row.append(name);
+      const modelName = document.createElement("span");
+      modelName.className = "topbar-model-name";
+      row.append(modelName);
       panel.append(row);
       document.body.append(panel);
-      // Act / Assert
-      expect(labelPaint).toEqual({ ...paint(name), textDecoration: "none" });
+      expect(labelPaint).toEqual({ ...paint(modelName), textDecoration: "none" });
     } finally {
       teardown();
     }
   });
 
   it("refuses a links arm this build cannot draw", () => {
-    // Arrange
-    const future = create(TopbarTitleSchema, { text: "t", links: {} });
-    // Act / Assert
-    expect(() => drawTopbarTitle(future, topbarContext().tc)).toThrow(/TopbarTitleLinks.opens/);
+    const future = create(TopbarWorkspaceNameSchema, { text: "t", links: {} });
+    expect(() => drawTopbarWorkspaceName(future, topbarContext().tc)).toThrow(/TopbarWorkspaceNameLinks.opens/);
   });
 });
 
-/** One summary-menu row to draw, as the daemon serves it. */
+/** One name link-menu row to draw, as the daemon serves it. */
 type MenuItem = {
   label: string;
   url: string;
   owned?: boolean;
   subscribed?: boolean;
-  icon?: TopbarTitleLinkIcon;
+  icon?: TopbarWorkspaceNameLinkIcon;
   badge?: { state: { case: "open" | "draft" | "merged" | "closed"; value: object } };
 };
 
 /**
- * Draws a heading whose summary drops a menu of ITEMS, opens the menu, and
+ * Draws a heading whose name drops a menu of ITEMS, opens the menu, and
  * answers its rows in the order drawn. CTX is the app context the strip opens
  * links through.
  */
 function rowsOf(items: MenuItem[], ctx?: AppContext): HTMLElement[] {
   const { host, tc } = topbarContext(ctx);
   const heading = drawTopbarHeading(
-    create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
-    workspaceName("w"),
+    create(TopbarTitleSchema, { text: "t" }),
+    create(TopbarWorkspaceNameSchema, { text: "w", links: { opens: { case: "menu", value: { items } } } }),
     tc,
   );
   host.append(heading);
   bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
-  click(heading.querySelector<HTMLElement>(".topbar-title")!);
-  return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+  click(heading.querySelector<HTMLElement>(".topbar-workspace-name")!);
+  return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-name-link-option")];
 }
 
-describe("a summary menu row's owned tint and service icon", () => {
+describe("a name link-menu row's owned tint and service icon", () => {
 
   it("marks owned rows and leaves reference rows unmarked", () => {
     const rows = rowsOf([
@@ -615,23 +688,23 @@ describe("a summary menu row's owned tint and service icon", () => {
   });
 
   it.each([
-    [TopbarTitleLinkIcon.GITHUB, "GITHUB"],
-    [TopbarTitleLinkIcon.SLACK, "SLACK"],
-    [TopbarTitleLinkIcon.GNS, "GNS"],
-    [TopbarTitleLinkIcon.NOTION, "NOTION"],
+    [TopbarWorkspaceNameLinkIcon.GITHUB, "GITHUB"],
+    [TopbarWorkspaceNameLinkIcon.SLACK, "SLACK"],
+    [TopbarWorkspaceNameLinkIcon.GNS, "GNS"],
+    [TopbarWorkspaceNameLinkIcon.NOTION, "NOTION"],
   ])("draws the icon of service %s left of the label", (icon, name) => {
     const [row] = rowsOf([{ label: "L", url: "https://a.example/1", icon }]);
-    const anchor = row!.querySelector("a")!;
+    const anchor = row.querySelector("a")!;
     expect([anchor.firstElementChild!.getAttribute("data-link-icon"), anchor.textContent]).toEqual([name, "L"]);
   });
 
   it("draws no icon for a host with no service", () => {
     const [row] = rowsOf([{ label: "L", url: "https://a.example/1" }]);
-    expect(row!.querySelector("svg")).toBeNull();
+    expect(row.querySelector("svg")).toBeNull();
   });
 
   it("refuses an icon arm this build cannot draw", () => {
-    expect(() => drawLinkIcon(99 as TopbarTitleLinkIcon)).toThrow(/TopbarTitleLinkIcon/);
+    expect(() => drawLinkIcon(99 as TopbarWorkspaceNameLinkIcon)).toThrow(/TopbarWorkspaceNameLinkIcon/);
   });
 });
 
@@ -642,8 +715,8 @@ describe("a summary menu row's pull request badge and owned label", () => {
     // Act
     const [row] = rowsOf([{ label: "The fix", url: PR, badge: { state: { case: "merged", value: {} } } }]);
     // Assert
-    const last = row!.lastElementChild as HTMLElement;
-    expect([row!.classList.contains(BADGED_LINK_CLASS), last.className, last.dataset.badge, last.textContent]).toEqual([
+    const last = row.lastElementChild as HTMLElement;
+    expect([row.classList.contains(BADGED_LINK_CLASS), last.className, last.dataset.badge, last.textContent]).toEqual([
       true,
       LINK_BADGE_CLASS,
       "merged",
@@ -653,7 +726,7 @@ describe("a summary menu row's pull request badge and owned label", () => {
 
   it("draws no badge, and reserves no margin, for a row served none", () => {
     const [row] = rowsOf([{ label: "The doc", url: "https://example.com/doc" }]);
-    expect([row!.querySelector(`.${LINK_BADGE_CLASS}`), row!.classList.contains(BADGED_LINK_CLASS)]).toEqual([null, false]);
+    expect([row.querySelector(`.${LINK_BADGE_CLASS}`), row.classList.contains(BADGED_LINK_CLASS)]).toEqual([null, false]);
   });
 
   it("draws an owned row's label, and only its label, in the summary's purple", () => {
@@ -667,9 +740,9 @@ describe("a summary menu row's pull request badge and owned label", () => {
       // Assert
       const summary = cascadedValueIn("topbar-strip", "topbar-title", "color");
       expect([
-        cascadedValue(owned!.querySelector("a")!, "color"),
-        cascadedValue(reference!.querySelector("a")!, "color") === summary,
-        cascadedValue(owned!.querySelector(".topbar-title-link-url")!, "color") === summary,
+        cascadedValue(owned.querySelector("a")!, "color"),
+        cascadedValue(reference.querySelector("a")!, "color") === summary,
+        cascadedValue(owned.querySelector(".topbar-name-link-url")!, "color") === summary,
       ]).toEqual([summary, false, false]);
     } finally {
       teardown();
@@ -678,7 +751,7 @@ describe("a summary menu row's pull request badge and owned label", () => {
 });
 
 describe("a menu row's second line", () => {
-  const SECOND_LINES = ["topbar-account-option-dir", "topbar-model-description", "topbar-title-link-url"];
+  const SECOND_LINES = ["topbar-account-option-dir", "topbar-model-description", "topbar-name-link-url"];
 
   it.each(["color", "font-size"])("draws %s the same in every menu", (property) => {
     const teardown = installStylesheet();
@@ -704,7 +777,7 @@ describe("a summary menu row's owned and subscribed marks and its untinted icon"
     // Act
     const [row] = rowsOf([{ label: "L", url: "https://a.example/1", ...flags }]);
     // Assert
-    expect(marksOf(row!)).toEqual(want);
+    expect(marksOf(row)).toEqual(want);
   });
 
   it("opens the row's link when a mark is clicked", async () => {
@@ -712,7 +785,7 @@ describe("a summary menu row's owned and subscribed marks and its untinted icon"
     const { ctx, first } = recordingContext();
     const [row] = rowsOf([{ label: "A", url: "https://a.example/1", subscribed: true }], ctx);
     // Act
-    click(row!.querySelector<HTMLElement>(`.${LINK_MARK_CLASS}`)!);
+    click(row.querySelector<HTMLElement>(`.${LINK_MARK_CLASS}`)!);
     // Assert
     await first;
   });
@@ -722,12 +795,12 @@ describe("a summary menu row's owned and subscribed marks and its untinted icon"
     try {
       // Act
       const [owned, reference] = rowsOf([
-        { label: "Mine", url: "https://github.com/o/r/pull/1", owned: true, icon: TopbarTitleLinkIcon.GITHUB },
-        { label: "Theirs", url: "https://github.com/o/r/pull/2", icon: TopbarTitleLinkIcon.GITHUB },
+        { label: "Mine", url: "https://github.com/o/r/pull/1", owned: true, icon: TopbarWorkspaceNameLinkIcon.GITHUB },
+        { label: "Theirs", url: "https://github.com/o/r/pull/2", icon: TopbarWorkspaceNameLinkIcon.GITHUB },
       ]);
       // Assert
       const iconColor = (row: HTMLElement) => cascadedValue(row.querySelector("svg")!, "color");
-      expect([iconColor(owned!) === iconColor(reference!), iconColor(owned!) === cascadedValue(owned!.querySelector("a")!, "color")]).toEqual([
+      expect([iconColor(owned) === iconColor(reference), iconColor(owned) === cascadedValue(owned.querySelector("a")!, "color")]).toEqual([
         true,
         false,
       ]);

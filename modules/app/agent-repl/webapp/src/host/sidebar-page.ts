@@ -16,8 +16,7 @@
  * call's own script and run here, in order, the moment the page starts.
  *
  * The page talks to the daemon over its own connection (document.ts). Its
- * warnings and errors tint the rail's version (sidebar/notices.ts), since the
- * pages' warning chip is in another web view.
+ * warnings and errors tint the rail's version (sidebar/notices.ts).
  */
 import { parseWindowLevel, type AppliedLevel, type LevelWindow, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { bootFailed } from "../failure/sink.js";

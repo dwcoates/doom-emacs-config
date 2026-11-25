@@ -98,7 +98,7 @@ describe("foldMergeBubble", () => {
     expect([record.level.case, record.context?.row, record.context?.folded]).toEqual(["info", "m1", true]);
   });
 
-  it("files a refused open on the warning chip under the open request", async () => {
+  it("files a refused open in the failure sink under the open request", async () => {
     // Arrange
     const { h, reported } = scripted(refused());
     // Act
@@ -107,7 +107,7 @@ describe("foldMergeBubble", () => {
     expect(filedWhat(reported)).toBe(OPEN_MERGE_BUBBLE_REQUEST);
   });
 
-  it("files a refused close on the warning chip under the close request", async () => {
+  it("files a refused close in the failure sink under the close request", async () => {
     // Arrange
     const { h, reported } = scripted(refused());
     // Act
@@ -144,7 +144,7 @@ describe("foldMergeBubble", () => {
     );
   });
 
-  it("files a transport failure on the warning chip", async () => {
+  it("files a transport failure in the failure sink", async () => {
     // Arrange
     const { h, reported } = scripted(unreachable());
     // Act

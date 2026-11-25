@@ -38,7 +38,7 @@ import {
   FeedMergeFoldSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
-import { HARNESS_EPOCH_MS, bootColdOnce, chipFailureArms, sharedMount, startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, bootColdOnce, filedFailureArms, sharedMount, startHarness, type Harness } from "./harness";
 import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import { ROOT_FEED } from "./fake-daemon";
 import {
@@ -2212,7 +2212,7 @@ describe("a merge bubble's fold", () => {
     expect(expanded()).toBe("true");
   });
 
-  it("files a refused fold on the warning chip", async () => {
+  it("files a refused fold in the failure sink", async () => {
     // Arrange
     await drawLanded();
     harness.fake.answer(
@@ -2225,7 +2225,7 @@ describe("a merge bubble's fold", () => {
     await harness.click('[data-feed-row="merge-1"] [data-expand]');
     await harness.settle();
     // Assert
-    expect(chipFailureArms()).toContain("controlPlaneFailed");
+    expect(filedFailureArms()).toContain("controlPlaneFailed");
   });
 });
 

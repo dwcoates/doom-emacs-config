@@ -54,7 +54,6 @@ import {
   TopbarAccountOptionSchema,
   TopbarEffortSelectorSchema,
   TopbarViewSchema,
-  TopbarWarningSchema,
   type TopbarAccountOption,
   type TopbarEffortSelector,
   type TopbarView,
@@ -165,7 +164,6 @@ export type RowInit = MessageInitShape<typeof FeedRowSchema>;
 export type RowArm = NonNullable<RowInit["row"]>;
 export type ActivityUnit = NonNullable<MessageInitShape<typeof FeedTurnActivitySchema>["unit"]>;
 export type StatusArm = NonNullable<MessageInitShape<typeof FooterStatusSchema>["status"]>;
-export type WarningInit = MessageInitShape<typeof TopbarWarningSchema>;
 export type HeldItemInit = MessageInitShape<typeof FeedHeldItemSchema>;
 
 // ---------------------------------------------------------------------------
@@ -2265,85 +2263,6 @@ export const emptyFooterView = (): FooterView => footerView({ status: "idle", su
 // Topbar
 // ---------------------------------------------------------------------------
 
-export const TOPBAR_WARNING_ARMS = [
-  "accounting",
-  "unmodeledTool",
-  "detachedUnmodeled",
-  "sessionFault",
-  "degradedWindow",
-  "deployFailed",
-] as const;
-export type TopbarWarningArm = (typeof TOPBAR_WARNING_ARMS)[number];
-
-type WarningDetail = NonNullable<WarningInit["detail"]>;
-
-const warningDetail = (arm: TopbarWarningArm): WarningDetail => {
-  switch (arm) {
-    case "accounting":
-      return {
-        case: "accounting",
-        value: { lines: [{ text: "usage figures are estimates" }, { text: "cache reads uncounted" }] },
-      };
-    case "unmodeledTool":
-      return {
-        case: "unmodeledTool",
-        value: {
-          toolName: { text: "mcp__weather__forecast" },
-          argumentLines: [{ text: "city=Berlin" }, { text: "days=3" }],
-        },
-      };
-    case "detachedUnmodeled":
-      return {
-        case: "detachedUnmodeled",
-        value: { toolName: { text: "mcp__weather__watch" }, startedAtMs: 1_000n },
-      };
-    case "sessionFault":
-      return {
-        case: "sessionFault",
-        value: { component: { text: "shim" }, detail: { text: "store writes rejected" } },
-      };
-    case "degradedWindow":
-      return {
-        case: "degradedWindow",
-        value: {
-          component: { text: "store" },
-          reason: { text: "disk pressure" },
-          beganAtMs: 1_000n,
-          extent: { case: "open", value: {} },
-        },
-      };
-    case "deployFailed":
-      return {
-        case: "deployFailed",
-        value: {
-          step: { text: "install" },
-          component: { text: "store" },
-          rollback: { text: "it was rolled back to the previous build" },
-          detail: { text: "rename store: permission denied" },
-        },
-      };
-  }
-};
-
-export const topbarWarning = (arm: TopbarWarningArm): WarningInit => ({
-  line: { text: `warning: ${arm}` },
-  detail: warningDetail(arm),
-});
-
-/** The closed extent of the degraded-window detail, drawn without a tick. */
-export const degradedWindowClosedWarning = (): WarningInit => ({
-  line: { text: "warning: degradedWindow closed" },
-  detail: {
-    case: "degradedWindow",
-    value: {
-      component: { text: "store" },
-      reason: { text: "disk pressure" },
-      beganAtMs: 1_000n,
-      extent: { case: "closed", value: { endedAtMs: 5_000n, droppedCount: 12n } },
-    },
-  },
-});
-
 export const TOPBAR_ACCOUNT_ARMS = ["loggedIn", "loggedOut"] as const;
 
 /**
@@ -2416,7 +2335,6 @@ type TopbarInit = {
   breakdown?: boolean;
   /** Omit the per-row share, which is `optional` and drawn only when set. */
   shares?: boolean;
-  warnings?: WarningInit[];
   permissionMode?: string;
   /**
    * The effort selector. Omitted, the selector is ABSENT (the no-session
@@ -2493,7 +2411,6 @@ export function topbarView(init?: TopbarInit): TopbarView {
               began: { case: init.agentReplSession.began, value: {} },
             },
     },
-    warnings: { warnings: init?.warnings ?? [] },
     remoteControl: {
       mode: { case: "off", value: {} },
       tooltip: { text: "remote control off: this session is not reachable from claude.ai" },

@@ -79,7 +79,7 @@ describe("shellElements", () => {
 });
 
 describe("the shipped shell", () => {
-  it("carries no failure overlay: the topbar's warning chip is where errors show", () => {
+  it("carries no failure overlay", () => {
     // Arrange
     const doc = document.implementation.createHTMLDocument("shell");
     // Act

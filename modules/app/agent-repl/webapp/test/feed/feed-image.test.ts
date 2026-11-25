@@ -62,7 +62,7 @@ describe("openDrawnImage", () => {
     expect(reported).toEqual([]);
   });
 
-  it("files a refusal on the warning chip and logs it at error", async () => {
+  it("files a refusal in the failure sink and logs it at error", async () => {
     // Arrange
     const capture = captureLogRecords();
     const { h, reported } = scripted({
@@ -78,7 +78,7 @@ describe("openDrawnImage", () => {
     expect([reported.length, record.level.case, record.context?.arm]).toEqual([1, "error", "notDrawn"]);
   });
 
-  it("files a transport failure on the warning chip", async () => {
+  it("files a transport failure in the failure sink", async () => {
     // Arrange
     const { h, reported } = scripted({
       openFeedImage: () => {
@@ -102,7 +102,7 @@ describe("closeFeedImage", () => {
     expect([h.calls.closeFeedImage[0]?.workspace?.id, reported]).toEqual(["ws-1", []]);
   });
 
-  it("files a refusal on the warning chip", async () => {
+  it("files a refusal in the failure sink", async () => {
     // Arrange
     const { h, reported } = scripted({
       closeFeedImage: () =>
@@ -116,7 +116,7 @@ describe("closeFeedImage", () => {
     expect(reported).toHaveLength(1);
   });
 
-  it("files a transport failure on the warning chip", async () => {
+  it("files a transport failure in the failure sink", async () => {
     // Arrange
     const { h, reported } = scripted({
       closeFeedImage: () => {

@@ -1,6 +1,6 @@
 /**
- * The persistent-wifi chip: one wifi glyph between the remote-control chip and
- * the warning chip, stating two facts about the MACHINE the daemon runs on.
+ * The persistent-wifi chip: one wifi glyph after the remote-control chip,
+ * stating two facts about the MACHINE the daemon runs on.
  *
  * THE GLYPH IS ALWAYS BLACK AND THE MODE ARM PAINTS THE DISC (owner request,
  * 2026-10-02): on → a green disc; off or unassigned → a white one. The wifi arm

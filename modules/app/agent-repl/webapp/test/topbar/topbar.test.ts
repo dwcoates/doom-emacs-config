@@ -7,18 +7,8 @@ import { createControl } from "../../src/control.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { drawChipRun, drawTopbarView, mountTopbar, signInRequestToOpen } from "../../src/topbar/topbar.js";
 import { pageFocusLeft } from "../../src/focus-left.js";
-import { createLocalFailures, type LocalFailures } from "../../src/failure/local.js";
 import { pagePresence } from "../../src/presence.js";
 import type { AppContext } from "../../src/rpc/context.js";
-import { clearClientFailures } from "../../src/rpc/link.js";
-import {
-  bootFailed,
-  controlPlaneFailed,
-  daemonUnreachable,
-  frameUndecodable,
-  staleBundle,
-  workspaceGone,
-} from "../../src/failure/sink.js";
 import { GEOMETRY, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 
@@ -41,7 +31,6 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
       options: [{ mode: "plan", displayName: "plan" }],
     },
     context: { text: "142.3k", breakdown: { sections: [] } },
-    warnings: { warnings: [] },
     remoteControl: { mode: { case: "off", value: {} }, tooltip: { text: "remote control off" } },
     persistentWifi: {
       wifi: { case: "joined", value: {} },
@@ -54,9 +43,9 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
 
 /**
  * A SESSION-LESS workspace's view: the cells the daemon can always resolve,
- * and NOT ONE of the three session-scoped controls. The context chip and the
- * warning strip are still set — always — and they are where the state's own
- * facts ride (topbar.proto, FIXED SCHEMA AND ORGANIZATION).
+ * and NOT ONE of the three session-scoped controls. The context chip is still
+ * set — always — and it is where the state's own facts ride (topbar.proto,
+ * FIXED SCHEMA AND ORGANIZATION).
  */
 function sessionlessView(reason: string, context = "0"): TopbarView {
   return create(TopbarViewSchema, {
@@ -65,7 +54,6 @@ function sessionlessView(reason: string, context = "0"): TopbarView {
     account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
     connectivity: { tone: "none", glyph: "○", title: "no session" },
     context: { text: context, breakdown: { sections: [{ heading: { text: reason }, rows: [] }] } },
-    warnings: { warnings: [{ line: { text: reason } }] },
     remoteControl: { mode: { case: "off", value: {} }, tooltip: { text: "remote control off" } },
     persistentWifi: {
       wifi: { case: "joined", value: {} },
@@ -168,11 +156,10 @@ describe("drawTopbarView", () => {
     expect([...(left?.children ?? [])].map(firstClass)).toEqual(["topbar-status", "topbar-account-cell"]);
   });
 
-  it("orders the status run queue bypass, remote control, persistent wifi, with no warnings in it", () => {
+  it("orders the status run queue bypass, remote control, persistent wifi", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(
       view({
-        warnings: sessionlessView("parked").warnings,
         queueBypass: create(TopbarViewSchema, {
           queueBypass: { mode: { case: "off", value: {} }, tooltip: { text: "queue bypass off" } },
         }).queueBypass,
@@ -184,13 +171,8 @@ describe("drawTopbarView", () => {
 
   it("orders the right group model, effort, permission mode, context", () => {
     const { tc } = topbarContext();
-    const row = drawTopbarView(view({ warnings: sessionlessView("parked").warnings }), tc);
+    const row = drawTopbarView(view(), tc);
     expect(childClasses(row, ".topbar-right")).toEqual(["topbar-model", "topbar-effort", "topbar-mode", "topbar-context"]);
-  });
-
-  it("draws the status run without a warning chip while nothing is wrong", () => {
-    const { tc } = topbarContext();
-    expect(childClasses(drawTopbarView(view(), tc), ".topbar-status")).toEqual(["topbar-remote-control", "topbar-wifi"]);
   });
 
   // THE ONE SHAPE OF A CHIP RUN: every run the strip draws comes from
@@ -246,45 +228,13 @@ describe("drawTopbarView", () => {
     const { tc } = topbarContext();
     const classOf = (v: TopbarView): string[] =>
       [...drawTopbarView(v, tc).querySelectorAll(".topbar-chips > *")].map(firstClass);
-    const warned = view({
-      warnings: create(TopbarViewSchema, {
-        warnings: { warnings: [{ line: { text: "a" }, detail: { case: "accounting", value: { lines: [] } } }] },
-      }).warnings,
-    });
-    expect(classOf(sessionlessView("no session yet"))).toEqual(classOf(warned));
+    expect(classOf(sessionlessView("no session yet"))).toEqual(classOf(view()));
   });
 
   it("draws the context figure for a workspace with no session", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(sessionlessView("cold context, awaiting your answer", "101.1k"), tc);
     expect(row.querySelector(".topbar-context-figure")?.textContent).toBe("101.1k");
-  });
-
-  it("draws the state as a warning line rather than losing it", () => {
-    const { host, tc } = topbarContext();
-    host.append(drawTopbarView(sessionlessView("cold context, awaiting your answer"), tc));
-    host.querySelector(".topbar-heading-warnings")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(openPanel(host)?.textContent).toBe("cold context, awaiting your answer");
-  });
-
-  it("draws no warning chip when the daemon reports nothing wrong", () => {
-    const { tc } = topbarContext();
-    expect(drawTopbarView(view(), tc).querySelector(".topbar-heading-warnings")).toBeNull();
-  });
-
-  it("draws the warning chip when the list is non-empty", () => {
-    const { tc } = topbarContext();
-    const drawn = drawTopbarView(
-      view({
-        warnings: create(TopbarViewSchema, {
-          warnings: {
-            warnings: [{ line: { text: "a" }, detail: { case: "accounting", value: { lines: [] } } }],
-          },
-        }).warnings,
-      }),
-      tc,
-    );
-    expect(drawn.querySelector(".topbar-heading-warnings")).not.toBeNull();
   });
 
   // THE CELL'S CLICK IS THE LOGIN OPTIONS, in both arms (owner ruling,
@@ -349,13 +299,9 @@ describe("mountTopbar", () => {
     for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
   }
 
-  /** Mount the topbar over FAILURES and start it watching CTX. */
-  function mountWatching(
-    host: HTMLElement,
-    ctx: AppContext,
-    failures: LocalFailures = createLocalFailures(),
-  ) {
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
+  /** Mount the topbar and start it watching CTX. */
+  function mountWatching(host: HTMLElement, ctx: AppContext) {
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), geometry: GEOMETRY });
     handle.watch(ctx, { openLogin: () => undefined });
     return handle;
   }
@@ -382,7 +328,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([requesting("1")]), { openLogin });
     await settle();
@@ -396,7 +342,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([requesting("1"), requesting("1")]), { openLogin });
     await settle();
@@ -410,7 +356,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([requesting("1"), view(), requesting("2")]), { openLogin });
     await settle();
@@ -424,7 +370,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([view()]), { openLogin });
     await settle();
@@ -552,163 +498,13 @@ describe("mountTopbar", () => {
   });
 });
 
-/**
- * THE WARNING CHIP LISTS THE PAGE'S OWN FAILURES, WITH OR WITHOUT A PUSH (owner
- * ruling, 2026-09-23). The chip is the one place an error shows, and the
- * failures that most need showing are the ones that stop a push arriving.
- */
-describe("mountTopbar: the chip's client-local failures", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-    clearClientFailures();
-  });
-
-  async function settle(): Promise<void> {
-    for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
-  }
-
-  /** A mounted topbar that has NOT started watching: no push can ever arrive. */
-  function mountUnwatched(failures: LocalFailures) {
+describe("mountTopbar before its first push", () => {
+  it("draws nothing until a push arrives", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
-    return { host, handle };
-  }
-
-  /** The arms of the client-local rows in the chip's opened list. */
-  function listedArms(host: HTMLElement): string[] {
-    host
-      .querySelector(".topbar-heading-warnings")
-      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    const arms = Array.from(openPanel(host)?.querySelectorAll<HTMLElement>("[data-local]") ?? []).map(
-      (row) => row.dataset.arm ?? "",
-    );
-    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    return arms;
-  }
-
-  const MINTS = [
-    ["daemonUnreachable", () => daemonUnreachable(1006, "abnormal")],
-    ["workspaceGone", () => workspaceGone()],
-    ["bootFailed", () => bootFailed("Error: nope")],
-    ["controlPlaneFailed", () => controlPlaneFailed("OpenLogin", "unavailable")],
-    ["frameUndecodable", () => frameUndecodable("a oneof sets no arm", "FooterView")],
-    ["staleBundle", () => staleBundle("schema drift")],
-  ] as const;
-
-  for (const [arm, mint] of MINTS) {
-    it(`lists ${arm} in the chip when it is filed`, () => {
-      // ARRANGE
-      const failures = createLocalFailures();
-      const { host, handle } = mountUnwatched(failures);
-      // ACT
-      failures.report(mint());
-      // ASSERT
-      expect(listedArms(host)).toEqual([arm]);
-      handle.dispose();
-    });
-
-    it(`takes ${arm} off the chip when it is retracted`, () => {
-      // ARRANGE
-      const failures = createLocalFailures();
-      const { host, handle } = mountUnwatched(failures);
-      failures.report(mint());
-      // ACT
-      failures.retract(arm);
-      // ASSERT
-      expect(host.querySelector(".topbar-heading-warnings")).toBeNull();
-      handle.dispose();
-    });
-  }
-
-  it("draws a failure filed before the topbar was mounted", () => {
-    const failures = createLocalFailures();
-    failures.report(bootFailed("Error: adoption refused"));
-    const { host, handle } = mountUnwatched(failures);
-    expect(listedArms(host)).toEqual(["bootFailed"]);
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), geometry: GEOMETRY });
+    expect(host.querySelector("[data-topbar-strip]")?.children.length).toBe(0);
     handle.dispose();
-  });
-
-  it("draws no warnings at all while nothing stands", () => {
-    const { host, handle } = mountUnwatched(createLocalFailures());
-    expect(host.querySelector(".topbar-heading-warnings")).toBeNull();
-    handle.dispose();
-  });
-
-  it("draws the warnings on the heading's line before any push", () => {
-    const failures = createLocalFailures();
-    const { host, handle } = mountUnwatched(failures);
-    failures.report(staleBundle("drift"));
-    expect(host.querySelector(".topbar-row > .topbar-heading > .topbar-heading-warnings")).not.toBeNull();
-    handle.dispose();
-  });
-
-  it("draws the right group as an empty chip run before any push", () => {
-    const failures = createLocalFailures();
-    const { host, handle } = mountUnwatched(failures);
-    failures.report(staleBundle("drift"));
-    expect(host.querySelector(".topbar-row > .topbar-right.topbar-chips")?.children.length).toBe(0);
-    handle.dispose();
-  });
-
-  it("lists the unreachable daemon when the stream fails before its first push", async () => {
-    // ARRANGE: the daemon is unreachable from the start, so no view ever
-    // arrives; the stream's own failure is filed through the chip's set.
-    const failures = createLocalFailures();
-    const ctx = appContext(
-      {
-        watchTopbar: async function* () {
-          throw new Error("connection refused");
-        },
-      },
-      failures,
-    );
-    const host = document.createElement("div");
-    document.body.replaceChildren(host);
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
-    // ACT
-    handle.watch(ctx, { openLogin: () => undefined });
-    await settle();
-    // ASSERT
-    expect(listedArms(host)).toEqual(["daemonUnreachable"]);
-    handle.dispose();
-  });
-
-  it("adds the chip over the last view when the link drops after a push", async () => {
-    // ARRANGE
-    const failures = createLocalFailures();
-    const ctx = appContext(
-      {
-        watchTopbar: async function* () {
-          yield create(WatchTopbarResponseSchema, { topbar: view() });
-          throw new Error("connection reset");
-        },
-      },
-      failures,
-    );
-    const host = document.createElement("div");
-    document.body.replaceChildren(host);
-    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
-    // ACT
-    handle.watch(ctx, { openLogin: () => undefined });
-    await settle();
-    // ASSERT: the stale view stays drawn, and the chip lists the dropped link.
-    expect([host.querySelector(".topbar-title")?.textContent, listedArms(host)]).toEqual([
-      "ABC/fix",
-      ["daemonUnreachable"],
-    ]);
-    handle.dispose();
-  });
-
-  it("stops drawing failures once disposed", () => {
-    const failures = createLocalFailures();
-    const { host, handle } = mountUnwatched(failures);
-    handle.dispose();
-    failures.report(staleBundle("drift"));
-    expect(host.children.length).toBe(0);
   });
 });
 

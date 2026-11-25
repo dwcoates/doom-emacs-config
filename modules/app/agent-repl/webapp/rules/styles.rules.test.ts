@@ -2467,27 +2467,10 @@ describe("the held prompt's collapse", () => {
 });
 
 /**
- * THE WARNING CHIP IS RED, AND IS THE ONE PLACE AN ERROR SHOWS (owner ruling,
- * 2026-09-23). The chip took the alarm `--err`, and the client-local failure
- * overlay it replaced — cards drawn over the page — left no rule behind.
+ * NO FAILURE OVERLAY. The client-local failure overlay — cards drawn over the
+ * page — was retired and left no rule behind.
  */
-describe("the warning chip as the one error surface", () => {
-  it("paints the heading's errors in the alarm red: the LAST color the cascade reaches them with is --err", () => {
-    // Arrange — every rule naming the heading's errors that sets its color, in
-    // file order; with equal specificity the last one is what paints it.
-    const coloring = rulesOf(stylesheet).filter(
-      (rule) =>
-        rule.selectors.includes('.topbar-heading-warnings[data-severity="errors"]') &&
-        /(?:^|[\s;{])color\s*:/.test(rule.declarations),
-    );
-
-    // Act
-    const last = coloring.at(-1)?.declarations ?? "";
-
-    // Assert
-    expect(last).toMatch(/(?:^|[\s;{])color\s*:\s*var\(--err\)\s*(?:;|$)/);
-  });
-
+describe("the failure overlay's absence", () => {
   it("carries no rule for a failure overlay", () => {
     // Arrange / Act
     const overlay = rulesOf(stylesheet).filter((rule) =>

@@ -1,10 +1,10 @@
 /**
- * The service icon a summary-menu row draws on its label's left. The daemon
- * names the service from the url's host (frontend.v1.TopbarTitleLinkIcon), so
+ * The service icon a name link-menu row draws on its label's left. The daemon
+ * names the service from the url's host (frontend.v1.TopbarWorkspaceNameLinkIcon), so
  * this file never inspects a url: it only draws the mark the enum arm names.
  * Every mark is a monochrome glyph in the row's text color.
  */
-import { TopbarTitleLinkIcon } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import { TopbarWorkspaceNameLinkIcon } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { SVG_NS } from "../dom.js";
 import { unreachableArm } from "../rpc/strict.js";
 
@@ -29,21 +29,21 @@ const NOTION: Mark = [
 const GNS: Mark = ["M12 2a10 10 0 1 0 10 10h-9v2.5h6.2A7.5 7.5 0 1 1 12 4.5a7.4 7.4 0 0 1 5.2 2.1l1.8-1.8A9.9 9.9 0 0 0 12 2z"];
 
 /** The icon's class, and the data attribute naming which service it draws. */
-export const LINK_ICON_CLASS = "topbar-title-link-icon";
+export const LINK_ICON_CLASS = "topbar-name-link-icon";
 
 /**
  * The mark for a menu row, or null for the row whose host has no icon. An
  * arm this build does not know throws, so a newer daemon's icon is a loud
  * refusal rather than a silently missing mark.
  */
-export function drawLinkIcon(icon: TopbarTitleLinkIcon): SVGSVGElement | null {
+export function drawLinkIcon(icon: TopbarWorkspaceNameLinkIcon): SVGSVGElement | null {
   const marks = markFor(icon);
   if (marks === null) return null;
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("class", LINK_ICON_CLASS);
-  svg.setAttribute("data-link-icon", TopbarTitleLinkIcon[icon]);
+  svg.setAttribute("data-link-icon", TopbarWorkspaceNameLinkIcon[icon]);
   for (const d of marks) {
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", d);
@@ -53,19 +53,19 @@ export function drawLinkIcon(icon: TopbarTitleLinkIcon): SVGSVGElement | null {
   return svg;
 }
 
-function markFor(icon: TopbarTitleLinkIcon): Mark | null {
+function markFor(icon: TopbarWorkspaceNameLinkIcon): Mark | null {
   switch (icon) {
-    case TopbarTitleLinkIcon.UNSPECIFIED:
+    case TopbarWorkspaceNameLinkIcon.UNSPECIFIED:
       return null;
-    case TopbarTitleLinkIcon.GITHUB:
+    case TopbarWorkspaceNameLinkIcon.GITHUB:
       return GITHUB;
-    case TopbarTitleLinkIcon.SLACK:
+    case TopbarWorkspaceNameLinkIcon.SLACK:
       return SLACK;
-    case TopbarTitleLinkIcon.GNS:
+    case TopbarWorkspaceNameLinkIcon.GNS:
       return GNS;
-    case TopbarTitleLinkIcon.NOTION:
+    case TopbarWorkspaceNameLinkIcon.NOTION:
       return NOTION;
     default:
-      return unreachableArm("TopbarTitleLinkIcon", String(icon));
+      return unreachableArm("TopbarWorkspaceNameLinkIcon", String(icon));
   }
 }

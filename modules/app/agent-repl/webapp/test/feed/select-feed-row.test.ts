@@ -72,7 +72,7 @@ describe("selectFeedRow", () => {
     expect([record.context?.move, record.context?.outcome]).toEqual(["clear", "none"]);
   });
 
-  it("files a refusal on the warning chip under the caller's request", async () => {
+  it("files a refusal in the failure sink under the caller's request", async () => {
     // Arrange
     const { h, reported } = scripted(refused());
     // Act
@@ -93,7 +93,7 @@ describe("selectFeedRow", () => {
     expect([record.level.case, record.context?.arm]).toEqual(["error", "notYetAdopted"]);
   });
 
-  it("files a transport failure on the warning chip", async () => {
+  it("files a transport failure in the failure sink", async () => {
     // Arrange
     const { h, reported } = scripted(unreachable());
     // Act

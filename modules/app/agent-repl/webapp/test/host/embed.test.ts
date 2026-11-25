@@ -11,7 +11,6 @@ import { FOCUS_LEFT_EMACS, connectToHost, type HostLink } from "../../src/host/e
 import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
 import { createFocusLeft, FOCUS_LEFT_COMPOSER, type FocusLeftSource } from "../../src/focus-left.js";
-import { createWebhostFailureView, type WebhostFailureView } from "../../src/failure/webhost.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { createRestyleTurns, type RestyleTurnsSource } from "../../src/host/restyle-turn.js";
 import { createWebhostPresses, type WebhostPressSource } from "../../src/webhost-pressed.js";
@@ -24,7 +23,6 @@ let presence: PresenceSource;
 let quiet: QuietSource;
 let levelWindow: LevelWindow;
 let clock: number;
-let webhostFailures: WebhostFailureView;
 let editorIngress: EditorIngressView;
 let editorNotices: EditorNotices;
 let focusLeft: FocusLeftSource;
@@ -85,7 +83,6 @@ beforeEach(() => {
   pageDoc = document;
   quiet = createQuiet();
   presence = createPresence(pageDoc, true, quiet);
-  webhostFailures = createWebhostFailureView();
   editorIngress = createEditorIngressView();
   editorNotices = createEditorNotices();
   focusLeft = createFocusLeft(pageWin, presence);
@@ -99,7 +96,7 @@ beforeEach(() => {
   focusLeft.onLeft((why) => leftFor.push(why));
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 });
 
 afterEach(() => {
@@ -117,7 +114,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+    const none = connectToHost({ doc: document, win: window, presence: alone, quiet, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 
 
     // Assert
@@ -316,7 +313,7 @@ describe("a bubble expanded over the webapp", () => {
     if (!open) pageDoc.documentElement.setAttribute("data-bubble-overlay", "response");
     link?.dispose();
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
     await delivered();
     received = [];
 
@@ -462,7 +459,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 
     // Assert
     await delivered();
@@ -532,19 +529,6 @@ describe("reported facts", () => {
     // Assert
     await delivered();
     expect(received).toEqual([]);
-  });
-});
-
-describe("the webhost's failures", () => {
-  it("lists the webhost's failures for the warning chip", () => {
-    // Arrange
-    const failure = { arm: "daemonUnreachable", headline: "lost the connection", evidence: [["close", "1006"]] };
-
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "webhostFailures", failures: [failure] });
-
-    // Assert
-    expect(webhostFailures.standing()).toEqual([failure]);
   });
 });
 

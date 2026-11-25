@@ -1,45 +1,37 @@
 /**
- * The client-local failures: what the topbar's warning chip lists beside the
- * daemon's pushed warnings, when this page's own machinery stopped working.
+ * The client-local failures: what this page records when its own machinery
+ * stopped working.
  *
  * WHAT IT HOLDS AND WHAT IT DOES NOT. Exactly the six `FailureKind` arms a
  * FRONTEND may mint — the failures of its own machinery, which the daemon
  * definitionally cannot observe. The daemon's own eleven arms never come here:
  * a shim that died or a session that was superseded reaches the user through
- * the footer's disconnected and blocked families and the topbar's pushed
- * warnings. These are the residue those pushes cannot carry, because when one
- * fires the push may be exactly what is broken — so the chip draws them from
- * here, whether or not a topbar push ever arrived.
+ * the footer's disconnected and blocked families.
  *
- * NO DOM. This module keeps the standing set and says when it changed; the
- * topbar's warning chip is the one place it is drawn (`src/topbar/warnings.ts`).
- * The chip is the ONE place the webapp makes an error visible — no overlay, no
- * banner, no corner card.
+ * NO SURFACE LISTS THEM (owner ruling, 2026-11-25: the topbar draws no
+ * warnings). Filing one records it at ERROR with its arm's own evidence, and
+ * the three arms that describe this page's link to the daemon are relayed to
+ * the footer, which draws them as cards.
  *
- * ONE ENTRY PER ARM. A repeat report of the same arm REPLACES its entry rather
- * than stacking: a reconnect loop that appended a row per attempt would bury
- * the chip's list under its own alarm, and the second report of a condition is
- * the same condition.
+ * ONE STANDING FAILURE PER ARM. A repeat report of the same arm REPLACES the
+ * standing one rather than stacking: a reconnect loop would otherwise record
+ * an ERROR and relay a card per attempt, and the second report of a condition
+ * is the same condition, recorded at DEBUG.
  *
  * RETRACTION IS PER ARM AND IS THE FILER'S CALL. `daemon_unreachable` is
- * window-shaped and `watchStream` retracts it on the first successful push, so
- * a flapping link leaves no ghost. `workspace_gone` and `stale_bundle` are
- * deliberately unretractable — there is nothing to come back, and a
- * self-clearing version of either would hide a page that is silently wrong.
- * This module enforces nothing about which: a caller that never retracts gets
- * a standing entry, which is the correct outcome for those two.
+ * window-shaped and `watchStream` retracts it on the first successful push.
+ * `workspace_gone` and `stale_bundle` are deliberately unretractable — there
+ * is nothing to come back.
  *
  * SUPPRESSION IS FOR ANNOUNCED FAILURES ONLY. When the daemon says "I am
  * restarting and will be back in 8 s", the streams dying is the announcement
  * coming true, not news — so `suppress(arm, untilMs)` holds that arm back for
- * exactly the window the daemon named. The report is STILL LOGGED, so nothing
- * is erased; only the alarm is withheld, and only until the instant the daemon
- * itself gave. A report after expiry stands normally, which is the whole point:
- * an outage that overran its announcement is news again.
+ * exactly the window the daemon named: the report is logged at INFO and
+ * relays no card. A report after expiry stands normally, which is the whole
+ * point: an outage that overran its announcement is news again.
  */
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createLogger } from "../log.js";
-import { createListeners } from "../listeners.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase } from "../rpc/strict.js";
 import { isClientFailureArm, type ClientFailureArm, type FailureSink } from "./sink.js";
@@ -60,35 +52,20 @@ export interface Handle {
   dispose(): void;
 }
 
-/** One standing client-local failure, as the warning chip draws it. */
-export interface LocalFailure {
-  readonly arm: ClientFailureArm;
-  /** The sentence its row leads with, chosen by the arm. */
-  readonly headline: string;
-  /** The arm's own typed evidence as label/value pairs, empty values dropped. */
-  readonly evidence: ReadonlyArray<readonly [string, string]>;
-}
-
-/** What the warning chip reads: the standing set, and word of each change. */
-export interface LocalFailureView {
-  /** The failures standing now, in the order they were first filed. */
-  standing(): readonly LocalFailure[];
-  /** Call LISTENER after every change to the standing set; answers the unsubscribe. */
-  subscribe(listener: () => void): () => void;
-}
-
-/** The app's FailureSink: files, retracts and suppresses; the chip draws it. */
+/** The app's FailureSink: files, retracts and suppresses. */
 export type LocalFailures = FailureSink &
-  LocalFailureView &
   Handle & {
     /** Hold ARM back until UNTILMS. Always implemented here. */
     suppress(arm: ClientFailureArm, untilMs: number): void;
     /** Whether ARM is held back right now. Always implemented here. */
     suppressing(arm: ClientFailureArm): boolean;
+    /** The arms standing now, in the order they were first filed. */
+    standingArms(): readonly ClientFailureArm[];
   };
 
 /**
- * The sentence each arm's row leads with.
+ * The sentence each arm is stated with, in its record and on the footer's
+ * card.
  *
  * COMPOSED HERE, and this is the one place in the webapp that is allowed to
  * compose a sentence rather than draw one the daemon composed — because the
@@ -106,14 +83,14 @@ export const ARM_HEADLINE: Readonly<Record<ClientFailureArm, string>> = {
 };
 
 /**
- * The evidence rows a failure shows, per arm, as label/value pairs read
+ * The evidence a failure's record carries, per arm, as label/value pairs read
  * straight off the arm's own typed fields.
  *
  * VERBATIM, NEVER INTERPRETED. Each of these is the producer's own account —
  * a close code, a decode failure, the head of the frame — put where whoever
  * debugs this can read it, not explained. An empty value is omitted, because
  * the protos state outright that several of these are allowed to be empty and
- * an empty row reads as missing data.
+ * an empty field reads as missing data.
  */
 export function evidenceRows(kind: FailureKind): ReadonlyArray<readonly [string, string]> {
   const arm = requireCase(kind.kind, "FailureKind.kind");
@@ -155,68 +132,57 @@ export function evidenceRows(kind: FailureKind): ReadonlyArray<readonly [string,
 }
 
 /**
- * Create the app's client-local failure set.
- *
- * Empty while the page is healthy, so the chip it feeds costs nothing until
- * something is filed.
+ * The record context of KIND's evidence: each label, spaces as underscores,
+ * to its value.
  */
+export function evidenceContext(kind: FailureKind): Record<string, string> {
+  return Object.fromEntries(evidenceRows(kind).map(([label, value]) => [label.replaceAll(" ", "_"), value]));
+}
+
+/** Create the page's client-local failures. */
 export function createLocalFailures(): LocalFailures {
-  log.debug("creating the warning chip's client-local failure set", {
-    operation: "warning-chip.create",
-  });
-  const entries = new Map<ClientFailureArm, LocalFailure>();
+  log.debug("creating the client-local failures", { operation: "failure.create" });
+  /** The arms standing now. */
+  const standing = new Set<ClientFailureArm>();
   /** Per arm, the instant its suppression window ends. */
   const suppressedUntil = new Map<ClientFailureArm, number>();
-  const listeners = createListeners();
-
-  const changed = (): void => {
-    listeners.notify();
-  };
 
   return {
-    standing(): readonly LocalFailure[] {
-      return [...entries.values()];
-    },
-
-    subscribe(listener: () => void): () => void {
-      return listeners.add(listener);
-    },
-
     report(kind: FailureKind): void {
       const arm = requireCase(kind.kind, "FailureKind.kind").case;
       if (!isClientFailureArm(arm)) {
         // The daemon never mints one of these, and a frontend never mints the
         // daemon's. Refusing loudly is the whole point of splitting the
         // vocabulary by producer.
-        log.error("the warning chip was handed the non-client failure arm '{arm}'", {
-          operation: "warning-chip.foreign-arm",
+        log.error("a client-local failure was filed under the non-client arm '{arm}'", {
+          operation: "failure.foreign-arm",
           context: {},
         }, { arm });
         return;
       }
+      const evidence = evidenceContext(kind);
       const until = suppressedUntil.get(arm);
       if (until !== undefined && Date.now() < until) {
-        // LOGGED, NOT LISTED. The failure is real and the record of it must
-        // survive; what is withheld is the alarm, for the window the daemon
-        // itself named.
+        // RECORDED, NOT RELAYED. The failure is real and the record of it
+        // must survive; what is withheld is the footer's card, for the window
+        // the daemon itself named.
         log.info("the {arm} failure is suppressed for an announced outage", {
-          operation: "warning-chip.suppressed",
-          context: { until_ms: until },
+          operation: "failure.suppressed",
+          context: { until_ms: until, ...evidence },
         }, { arm });
         return;
       }
-      const replacing = entries.has(arm);
-      if (replacing) log.debug("replacing the {arm} failure in the warning chip", { operation: "warning-chip.replace" }, { arm });
-      else log.error("filing the {arm} failure in the warning chip", { operation: "warning-chip.report" }, { arm });
-      entries.set(arm, { arm, headline: ARM_HEADLINE[arm], evidence: evidenceRows(kind) });
-      changed();
-      // THE CHIP LISTS IT; THE FOOTER HEARS ABOUT IT TOO (the audit's N2 row
-      // 11: a footer left saying `working` under a dead link kept saying
-      // `working`). Only the two arms that describe THIS page's link to the
-      // daemon are relayed -- a boot failure, a departed workspace or a stale
-      // bundle is not a link this footer can speak for. AFTER the entry is
-      // filed and drawn, so the relay can never cost the chip its row: the
-      // footer redrawing is somebody else's code running inside this call.
+      if (standing.has(arm)) {
+        log.debug("the {arm} failure is reported again while it stands", { operation: "failure.replace", context: evidence }, { arm });
+        return;
+      }
+      standing.add(arm);
+      log.error("filing the {arm} failure: {headline}", { operation: "failure.report", context: evidence }, { arm, headline: ARM_HEADLINE[arm] });
+      // THE FOOTER HEARS ABOUT IT (the audit's N2 row 11: a footer left
+      // saying `working` under a dead link kept saying `working`). Only the
+      // arms that describe THIS page's link to the daemon are relayed -- a
+      // boot failure, a departed workspace or a stale bundle is not a link
+      // this footer can speak for.
       if (arm === "daemonUnreachable") {
         reportClientFailure("daemon_unreachable_card", ARM_HEADLINE.daemonUnreachable);
       }
@@ -228,6 +194,10 @@ export function createLocalFailures(): LocalFailures {
       }
     },
 
+    standingArms(): readonly ClientFailureArm[] {
+      return [...standing];
+    },
+
     suppressing(arm: ClientFailureArm): boolean {
       const until = suppressedUntil.get(arm);
       return until !== undefined && Date.now() < until;
@@ -235,14 +205,14 @@ export function createLocalFailures(): LocalFailures {
 
     suppress(arm: ClientFailureArm, untilMs: number): void {
       log.info("suppressing the {arm} failure until an announced instant", {
-        operation: "warning-chip.suppress",
+        operation: "failure.suppress",
         context: { until_ms: untilMs },
       }, { arm });
       suppressedUntil.set(arm, untilMs);
-      // An entry already standing for this arm belongs to the moments BEFORE
+      // A failure already standing for this arm belongs to the moments BEFORE
       // the announcement was read; the window it is now inside says it is
-      // expected, so it comes down with the rest.
-      if (entries.delete(arm)) changed();
+      // expected, so it stands down with the rest.
+      standing.delete(arm);
     },
 
     retract(arm: ClientFailureArm): void {
@@ -252,23 +222,17 @@ export function createLocalFailures(): LocalFailures {
       // daemonUnreachable card for the next stream the same handover moved
       // (2026-10-22). The window ends at the instant the daemon announced, and
       // an outage that overruns it is news again.
-      if (!entries.delete(arm)) return;
-      log.info("retracting the {arm} failure from the warning chip", {
-        operation: "warning-chip.retract",
+      if (!standing.delete(arm)) return;
+      log.info("retracting the {arm} failure", {
+        operation: "failure.retract",
         context: {},
       }, { arm });
-      changed();
     },
 
     dispose(): void {
-      log.debug("disposing the warning chip's client-local failure set", {
-        operation: "warning-chip.dispose",
-      });
-      const had = entries.size > 0;
-      entries.clear();
+      log.debug("disposing the client-local failures", { operation: "failure.dispose" });
+      standing.clear();
       suppressedUntil.clear();
-      if (had) changed();
-      listeners.clear();
     },
   };
 }

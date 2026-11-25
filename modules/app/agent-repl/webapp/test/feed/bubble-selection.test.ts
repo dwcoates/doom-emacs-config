@@ -404,7 +404,7 @@ describe("installBubbleSelect", () => {
     expect(a.h.calls.selectFeedRow).toEqual([]);
   });
 
-  it("files a refused selection on the warning chip under the click's request", async () => {
+  it("files a refused selection in the failure sink under the click's request", async () => {
     // Arrange
     const a = armed({
       selectFeedRow: () =>
@@ -444,7 +444,7 @@ describe("installBubbleSelect", () => {
     ]);
   });
 
-  it("files a click that failed at the transport on the warning chip", async () => {
+  it("files a click that failed at the transport in the failure sink", async () => {
     // Arrange
     const a = armed({
       selectFeedRow: () => {

@@ -8,7 +8,7 @@
  * edge.
  *
  * SO THE TOP IS NOT NEGOTIABLE and only the LEFT and the HEIGHT are. A reveal
- * anchored under the warning chip at the far right would run off the right edge
+ * anchored under the context chip at the far right would run off the right edge
  * at its own width, so it slides LEFT until it fits, keeping its top edge under
  * the strip; a reveal too tall for what is left of the window keeps its
  * position and takes a scrollable height instead of growing past the bottom.

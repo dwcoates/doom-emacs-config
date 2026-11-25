@@ -1791,7 +1791,7 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     j.feed.dispose();
   });
 
-  it("files a bubble the daemon would not open for the jump on the warning chip", async () => {
+  it("files a bubble the daemon would not open for the jump in the failure sink", async () => {
     // Arrange
     const j = await jumping(() =>
       create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),

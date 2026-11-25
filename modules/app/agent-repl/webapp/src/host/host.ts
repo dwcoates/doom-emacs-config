@@ -22,9 +22,8 @@
  * applies Emacs's calls and uses neither.)
  *
  * THE SIDEBAR IS NOT HERE. It is a web view of its own, in an Emacs window
- * beside the host's (host/sidebar-page.ts). This module tells every page which
- * of the webhost's failures stand, and ends the pages above the gate band of
- * the page on screen.
+ * beside the host's (host/sidebar-page.ts). This module ends the pages above
+ * the gate band of the page on screen.
  */
 import { focusLeftReason, focusMovedCause, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
 import { pageQuiet, type QuietSource } from "../quiet.js";
@@ -38,7 +37,6 @@ import {
 import { selectedText } from "../selection.js";
 import {
   type HeldIngressWireEntry,
-  type WebhostFailure,
   HOST_CHANNEL,
   onHostChannel,
   parseHeldIngressEntry,
@@ -238,8 +236,6 @@ export interface Host {
   editing(): boolean;
   /** Every workspace id the host holds a page for. */
   ids(): string;
-  /** Tell every page the webhost's own failures standing now. */
-  setFailures(failures: readonly WebhostFailure[]): void;
   /**
    * Record at LEVEL, the webhost and every page, until UNTILMS (epoch ms): a
    * log level window, replayed to a page that loads before it ends. Info, with
@@ -301,7 +297,6 @@ export function createHost(env: HostEnv): Host {
   const frames = new Map<string, Frame>();
   const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
-  let failures: readonly WebhostFailure[] = [];
   const now = env.now ?? Date.now;
   /** The log level window every page is told, while one stands. */
   let logLevel: { level: WindowLevel; untilMs: number } | null = null;
@@ -380,8 +375,6 @@ export function createHost(env: HostEnv): Host {
     ...(downtimeStartedAtMs === null ? {} : { downtimeStartedAtMs }),
   });
 
-  /** The webhost's failures, as every page is told. */
-  const failuresMessage = (): HostToPage => ({ channel: HOST_CHANNEL, kind: "webhostFailures", failures });
   /** Tell every page MESSAGE. */
   const broadcast = (message: HostToPage): void => {
     for (const frame of frames.values()) post(frame, message);
@@ -398,7 +391,6 @@ export function createHost(env: HostEnv): Host {
     const downtimeStartedAtMs = frame.pendingDowntimeStartedAtMs;
     frame.pendingDowntimeStartedAtMs = null;
     post(frame, presenceOf(frame, switchStartedAtMs, reloadStartedAtMs, downtimeStartedAtMs));
-    post(frame, failuresMessage());
     if (logLevel !== null && logLevel.untilMs > now()) {
       post(frame, { channel: HOST_CHANNEL, kind: "logLevel", level: logLevel.level, untilMs: logLevel.untilMs });
     }
@@ -1054,10 +1046,6 @@ export function createHost(env: HostEnv): Host {
     editing() {
       const frame = shownId === null ? undefined : frames.get(shownId);
       return frame?.editing ?? false;
-    },
-    setFailures(next) {
-      failures = next;
-      broadcast(failuresMessage());
     },
     setLogLevel(name, untilMs) {
       let level: WindowLevel;
