@@ -866,3 +866,30 @@ func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 		return row.GetDone() != nil
 	}))
 }
+
+// A FAILED START KEEPS ITS SHIM HELD, AND THE NEXT START REUSES IT: the
+// vendor rejects the first StartSession outright, and the next open starts
+// the session on the SAME shim -- never a second spawn, never an adoption of
+// the shim this daemon already holds.
+func TestTheStartAfterARejectedVendorStartReusesItsShim(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonicalRegistered(t)
+	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.restart")
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartRejectTimes: 1, VendorStartFailDetail: "invalid api key"})
+	if resp, err := f.startRaw(); err != nil || resp.GetError().GetRelaunchFailed() == nil {
+		t.Fatalf("the start = (%v, %v), want the vendor's rejection", resp, err)
+	}
+
+	// Act: a prompt is what starts it next.
+	resp := f.submit("after the rejection", "k-after-reject", origin)
+
+	// Assert
+	if resp.GetError() != nil {
+		t.Fatalf("SubmitPrompt = %v, want the prompt taken", resp)
+	}
+	f.d.Shim(f.ws).ExpectStartTurn()
+	if got := f.d.Shim(f.ws).Count(harness.RPCStartSession); got != 2 {
+		t.Fatalf("StartSession calls on the one shim = %d, want the rejected one and the one that started", got)
+	}
+}
