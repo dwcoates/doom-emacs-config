@@ -3,6 +3,7 @@ package proctable
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,10 @@ type Usage struct {
 	// variable, which tells one marked tree from another (a test run's unit
 	// tag, cores.UnitEnv).
 	Mark string
+	// Program is the base name of the process's argv[0], read with its mark:
+	// which executable it is (a test binary, a daemon, a fake), "" when its
+	// argv is empty.
+	Program string
 	// Own is the CPU seconds the process used itself.
 	Own float64
 	// Children is the CPU seconds of every child it reaped, theirs and their
@@ -50,9 +55,10 @@ type markedKernel struct {
 
 // mark is what a scan remembers of a process it read the environment of.
 type mark struct {
-	start  time.Time
-	marked bool
-	value  string
+	start   time.Time
+	marked  bool
+	value   string
+	program string
 }
 
 // Marked scans for the processes of one user whose environment names Name.
@@ -94,11 +100,11 @@ func (m *Marked) Scan() ([]Usage, error) {
 			continue
 		}
 		alive[pid] = true
-		value, marked, err := m.marked(pid, rec)
+		found, err := m.marked(pid, rec)
 		if err != nil {
 			return nil, err
 		}
-		if !marked {
+		if !found.marked {
 			continue
 		}
 		own, children, err := m.k.rusage(pid)
@@ -109,7 +115,7 @@ func (m *Marked) Scan() ([]Usage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read pid %d's CPU: %w", pid, err)
 		}
-		out = append(out, Usage{Pid: pid, Ppid: rec.Ppid, Start: rec.Start, Mark: value, Own: own, Children: children})
+		out = append(out, Usage{Pid: pid, Ppid: rec.Ppid, Start: rec.Start, Mark: found.value, Program: found.program, Own: own, Children: children})
 	}
 	for pid := range m.marks {
 		if !alive[pid] {
@@ -119,25 +125,28 @@ func (m *Marked) Scan() ([]Usage, error) {
 	return out, nil
 }
 
-// marked answers whether the process carries the mark, and its value,
-// reading its environment only the first time this process (pid and start)
-// is seen. A
+// marked answers whether the process carries the mark, its value and its
+// program, reading its argv and environment only the first time this process
+// (pid and start) is seen. A
 // process whose environment cannot be read right now (exiting, mid-exec, a
 // zombie) is unmarked for this scan and read again by the next, unless it
 // was already read.
-func (m *Marked) marked(pid int, rec procRecord) (string, bool, error) {
+func (m *Marked) marked(pid int, rec procRecord) (mark, error) {
 	if known, ok := m.marks[pid]; ok && known.start.Equal(rec.Start) {
-		return known.value, known.marked, nil
+		return known, nil
 	}
-	_, env, err := m.k.args(pid)
+	argv, env, err := m.k.args(pid)
 	switch {
 	case err == nil:
 	case errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.EPERM), errors.Is(err, syscall.ESRCH), errors.Is(err, syscall.EIO):
-		return "", false, nil
+		return mark{}, nil
 	default:
-		return "", false, fmt.Errorf("read pid %d's environment: %w", pid, err)
+		return mark{}, fmt.Errorf("read pid %d's environment: %w", pid, err)
 	}
 	found := mark{start: rec.Start}
+	if len(argv) > 0 {
+		found.program = filepath.Base(argv[0])
+	}
 	for _, kv := range env {
 		if value, ok := strings.CutPrefix(kv, m.Name+"="); ok {
 			found.marked, found.value = true, value
@@ -145,5 +154,5 @@ func (m *Marked) marked(pid int, rec procRecord) (string, bool, error) {
 		}
 	}
 	m.marks[pid] = found
-	return found.value, found.marked, nil
+	return found, nil
 }

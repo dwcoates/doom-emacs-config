@@ -523,6 +523,7 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 			Suite: r.Spec.Suite, ID: r.Spec.ID, Outcome: unitOutcomes[r.Outcome],
 			Wall: r.Wall(), CPU: r.Usage.CPU, MaxRSSBytes: r.Usage.MaxRSSBytes,
 			BlockReads: r.Usage.BlockReads, BlockWrites: r.Usage.BlockWrites,
+			Programs: r.Programs, Phases: r.Phases,
 		})
 	}
 	for _, s := range suiteResults {

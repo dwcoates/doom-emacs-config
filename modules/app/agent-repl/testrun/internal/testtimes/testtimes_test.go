@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +79,7 @@ func TestParseGoReadsEveryTestAndSubtest(t *testing.T) {
 		{Suite: "daemon", Name: "agent-repld/internal/x.TestA", Outcome: Fail, Seconds: 0.3},
 		{Suite: "daemon", Name: "agent-repld/internal/x.TestB", Outcome: Pass, Seconds: 1.5},
 	}
-	if err != nil || !slices.Equal(got, want) {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseGo = %+v, %v; want %+v", got, err, want)
 	}
 }
@@ -162,7 +162,7 @@ func TestParseERTReadsEveryResultLine(t *testing.T) {
 		{Suite: "elisp", Name: "agent-repl-test-b", Outcome: Fail, Seconds: 1.5},
 		{Suite: "elisp", Name: "agent-repl-test-c", Outcome: Skip, Seconds: 0.00001},
 	}
-	if err != nil || !slices.Equal(got, want) {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseERT = %+v, %v; want %+v", got, err, want)
 	}
 }
@@ -205,7 +205,7 @@ func TestParseVitestNamesEachTestByItsFileAndSuites(t *testing.T) {
 		{Suite: "webapp", Name: "test/a.test.ts > suite > case", Outcome: Pass, Seconds: 0.012},
 		{Suite: "webapp", Name: "test/a.test.ts > other", Outcome: Skip, Seconds: 0},
 	}
-	if err != nil || !slices.Equal(got, want) {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseVitest = %+v, %v; want %+v", got, err, want)
 	}
 }
@@ -264,7 +264,7 @@ func TestOfItemsGivesEachItemTheUnitsOutcomeInNameOrder(t *testing.T) {
 
 	// Assert
 	want := []Test{{Suite: "harness", Name: "a", Outcome: Fail, Seconds: 1}, {Suite: "harness", Name: "b", Outcome: Fail, Seconds: 2}}
-	if !slices.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("OfItems = %+v, want %+v", got, want)
 	}
 }
@@ -384,5 +384,38 @@ func TestWithLogRecords(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEncodeLandsEachTestsAndUnitsCPUByProgramAndPhase(t *testing.T) {
+	// Arrange
+	at := time.UnixMilli(1_700_000_000_123)
+
+	// Act
+	got := string(Encode(Report{
+		Tests: []Test{{Suite: "daemon", Name: "TestA", Outcome: Pass, Seconds: 1, CPU: 3, HasCPU: true, Processes: 2,
+			Programs: map[string]float64{ProgramTestBinary: 0.5, ProgramDaemon: 2.5}}},
+		Units: []Unit{{Suite: "daemon", ID: "daemon:x#00", Outcome: Pass, Wall: 2, CPU: 4,
+			Programs: map[string]float64{ProgramDaemon: 3, ProgramTestBinary: 1},
+			Phases:   map[string]float64{"harness_setup": 0.25, "daemon_boot_fresh": 1.5}}},
+	}, "merge_queue", at))
+
+	// Assert: every program and phase in its own sample, sorted by label.
+	test := `{suite="daemon",test="TestA",outcome="pass",trigger="merge_queue"`
+	unit := `{suite="daemon",unit="daemon:x#00",outcome="pass",trigger="merge_queue"`
+	for _, line := range []string{
+		`agentrepl_test_program_cpu_seconds` + test + `,program="daemon"} 2.5 1700000000123`,
+		`agentrepl_test_program_cpu_seconds` + test + `,program="test_binary"} 0.5 1700000000123`,
+		`agentrepl_test_unit_program_cpu_seconds` + unit + `,program="daemon"} 3 1700000000123`,
+		`agentrepl_test_unit_program_cpu_seconds` + unit + `,program="test_binary"} 1 1700000000123`,
+		`agentrepl_test_unit_phase_cpu_seconds` + unit + `,phase="daemon_boot_fresh"} 1.5 1700000000123`,
+		`agentrepl_test_unit_phase_cpu_seconds` + unit + `,phase="harness_setup"} 0.25 1700000000123`,
+	} {
+		if !strings.Contains(got, line+"\n") {
+			t.Fatalf("Encode =\n%s\nwant a line\n%s", got, line)
+		}
+	}
+	if i, j := strings.Index(got, `program="daemon"} 3`), strings.Index(got, `program="test_binary"} 1`); i > j {
+		t.Fatalf("Encode wrote the unit's programs out of order:\n%s", got)
 	}
 }

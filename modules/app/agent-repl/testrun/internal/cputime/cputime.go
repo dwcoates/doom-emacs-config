@@ -86,10 +86,23 @@ func (s *Sampler) read() {
 			if (g.CPU == 0 && g.Started == 0) || !strings.HasPrefix(tag, own) {
 				continue
 			}
-			s.slices[tag] = append(s.slices[tag], testtimes.CPUSlice{From: s.last, To: now, CPU: g.CPU, Started: g.Started})
+			s.slices[tag] = append(s.slices[tag], testtimes.CPUSlice{From: s.last, To: now, CPU: g.CPU, Started: g.Started, Programs: labels(g.Programs)})
 		}
 	}
 	s.last, s.primed = now, true
+}
+
+// labels folds CPU by executable (cores.MarkGrowth.Programs) into CPU by
+// program label (testtimes.Program); none for a read that split nothing.
+func labels(byExe map[string]float64) map[string]float64 {
+	if len(byExe) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(byExe))
+	for exe, cpu := range byExe {
+		out[testtimes.Program(exe)] += cpu
+	}
+	return out
 }
 
 // Take answers unit ID's intervals and forgets them.

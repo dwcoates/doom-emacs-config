@@ -22,11 +22,39 @@ const (
 	timebaseMissing = "the kernel's timebase frequency (sysctl hw.tbfrequency) is zero"
 )
 
-// NewMarked scans for this user's processes whose environment names name.
-// It reads the kernel's timebase once: proc_pid_rusage answers CPU in mach
-// absolute time units, hw.tbfrequency of them a second (24 MHz on Apple
-// silicon, 1 GHz on Intel).
+// NewMarked scans for this user's processes whose environment names name,
+// reading their CPU through darwinRusage.
 func NewMarked(name string) (*Marked, error) {
+	rusage, err := darwinRusage()
+	if err != nil {
+		return nil, err
+	}
+	return &Marked{
+		Name: name,
+		UID:  os.Geteuid(),
+		k:    markedKernel{listPids: listPids, record: record, args: procargs2Args(procArgs), rusage: rusage},
+	}, nil
+}
+
+// ProcessCPU answers the CPU seconds process PID has used, its own and its
+// reaped children's, through proc_pid_rusage.
+func ProcessCPU(pid int) (float64, error) {
+	rusage, err := darwinRusage()
+	if err != nil {
+		return 0, err
+	}
+	own, children, err := rusage(pid)
+	if err != nil {
+		return 0, fmt.Errorf("read pid %d's CPU: %w", pid, err)
+	}
+	return own + children, nil
+}
+
+// darwinRusage is proc_pid_rusage's own and reaped children's CPU seconds of
+// a process. It reads the kernel's timebase: proc_pid_rusage answers CPU in
+// mach absolute time units, hw.tbfrequency of them a second (24 MHz on Apple
+// silicon, 1 GHz on Intel).
+func darwinRusage() (func(pid int) (float64, float64, error), error) {
 	hz, err := unix.SysctlUint64(timebaseSysctl)
 	if err != nil {
 		return nil, fmt.Errorf("read the kernel's timebase frequency (sysctl %s): %w", timebaseSysctl, err)
@@ -35,7 +63,7 @@ func NewMarked(name string) (*Marked, error) {
 		return nil, fmt.Errorf("%s", timebaseMissing)
 	}
 	seconds := func(ticks uint64) float64 { return float64(ticks) / float64(hz) }
-	rusage := func(pid int) (float64, float64, error) {
+	return func(pid int) (float64, float64, error) {
 		buf := make([]byte, sizeofRusageV1)
 		if _, err := procInfo(callPidRusage, pid, rusageInfoV1, buf); err != nil {
 			return 0, 0, fmt.Errorf("proc_pid_rusage: %w", err)
@@ -44,10 +72,5 @@ func NewMarked(name string) (*Marked, error) {
 		own := seconds(at(offUserTime)) + seconds(at(offSystemTime))
 		children := seconds(at(offChildUser)) + seconds(at(offChildSystem))
 		return own, children, nil
-	}
-	return &Marked{
-		Name: name,
-		UID:  os.Geteuid(),
-		k:    markedKernel{listPids: listPids, record: record, args: procargs2Args(procArgs), rusage: rusage},
 	}, nil
 }

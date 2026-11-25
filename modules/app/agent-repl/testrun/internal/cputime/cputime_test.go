@@ -156,3 +156,25 @@ func TestSamplerKeepsTheProcessesEachIntervalStarted(t *testing.T) {
 		t.Fatalf("Take(a) = %+v; want %+v", got, want)
 	}
 }
+
+func TestSamplerFoldsEachIntervalsProgramsIntoTheirLabels(t *testing.T) {
+	// Arrange: a daemon, two test binaries and the fake git used the interval.
+	t0 := time.Unix(1_800_000_000, 0)
+	r := &reads{now: t0, growth: []map[string]cores.MarkGrowth{
+		{},
+		{"7/a": {CPU: 3, Programs: map[string]float64{"agent-repld": 1, "git": 0.5, "_.test": 1, "integration.test": 0.5}}},
+	}}
+	s := newSampler(r, &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+
+	// Act
+	for range r.growth {
+		s.read()
+	}
+
+	// Assert
+	got := s.Take("a")
+	want := map[string]float64{testtimes.ProgramDaemon: 1, testtimes.ProgramGit: 0.5, testtimes.ProgramTestBinary: 1.5}
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Programs, want) {
+		t.Fatalf("Take(a) = %+v; want one interval with programs %v", got, want)
+	}
+}

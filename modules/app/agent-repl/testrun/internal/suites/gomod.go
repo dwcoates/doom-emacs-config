@@ -199,6 +199,7 @@ func (b GoBuild) pkgOf(l Layout, s roster.Suite, rel string) goPkg {
 		Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
 		Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
 		Counts: filepath.Join(l.Work, "log-records", s.Name),
+		Phases: filepath.Join(l.Work, "phases", s.Name),
 	}
 }
 
