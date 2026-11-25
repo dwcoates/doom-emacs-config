@@ -146,6 +146,17 @@ func (c *Converter) diagnosticsAttachment(attachment map[string]any, at Attribut
 			LogVerbose("IDE diagnostics follow no write or edit this reader observed; stored as vendor_specific rather than attached by guess", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/diagnostics", attachment)}
 	}
+	if c.lastChangeInherited && !c.recordInherited {
+		// THE LAST CHANGE IS THE PARENT'S, and its row lives in the parent's
+		// book: a fork that has made no write or edit of its own still remembers
+		// the last one its copied context settled. A frame of the fork's own
+		// keyed on that unit would ask the store to move the parent's row into
+		// the fork's book, which it refuses on every such report. The findings
+		// are kept whole instead, exactly as when no change was observed.
+		c.log.With(at.ctxFor("diagnostics")).With(logging.Context{ActivityID: c.lastChangeUnit}).
+			LogVerbose("IDE diagnostics follow no write or edit of this fork's own (the last change was copied from the parent and is booked there); stored as vendor_specific rather than attached across books", nil)
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/diagnostics", attachment)}
+	}
 
 	report := &conversationv1.AgentDiagnosticsReport{}
 	for _, rawFile := range list(attachment["files"]) {

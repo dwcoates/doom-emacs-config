@@ -150,6 +150,15 @@ type Converter struct {
 	lastChangeUnit    string
 	lastChangeWasEdit bool
 
+	// lastChangeInherited marks a lastChangeUnit that a record the vendor's
+	// fork copied from the parent settled. That unit's row lives in the
+	// PARENT's book, so a diagnostics record of the fork's own can never land a
+	// frame on it: the store would skip the write as a row moving between
+	// books. recordInherited is the same answer for the record converting now,
+	// set once per record in Line.
+	lastChangeInherited bool
+	recordInherited     bool
+
 	// currentMessageID and nextBlockOrdinal number an API response's content
 	// blocks ACROSS THE SEVERAL TRANSCRIPT LINES that share one `message.id`.
 	//
@@ -295,6 +304,8 @@ func (c *Converter) Line(record map[string]any, at Attribution, following []map[
 	// states what the vendor recorded. A keep-alive's record is converted too,
 	// so the joins it opens or settles stay exactly as warm as any other's.
 	c.openedTurn = ""
+	inherited := inheritedByFork(record)
+	c.recordInherited = inherited
 	// A WAITING CUT LEARNS WHICH RECORDS DESCEND FROM ITS BOUNDARY before this
 	// one converts, so the summary that does is recognized by its own parent
 	// link however many records stand between them (contextcut.go).
@@ -310,7 +321,7 @@ func (c *Converter) Line(record map[string]any, at Attribution, following []map[
 	// THE PLACE IS STATED ONCE PER RECORD TOO, over the whole set the record
 	// produced, so each entry's ordinal is its index in that set (place.go).
 	stampPlace(entries, parseInstant(str(record["timestamp"])))
-	if inheritedByFork(record) {
+	if inherited {
 		// IT ANNOUNCES NO ROW, so it carries no upsert_key: nothing was stored.
 		c.log.With(at.ctxFor("fork-inherited-skip")).LogVerbose(
 			"a record the vendor's fork copied from the parent is never stored in the fork's book; converted to {entries_length} entrie(s), stored none", logging.Values{"entries_length": len(entries)})
