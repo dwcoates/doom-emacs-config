@@ -3,7 +3,6 @@ package runtimemetrics
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	"agent-repld/internal/ids"
@@ -52,7 +51,7 @@ func ValidateEditorStartup(m *agentreplv1.ReportedEditorStartup) (restarttiming.
 		return restarttiming.Observation{}, fmt.Errorf("%w: milestone %s names no way the editor came to a daemon", ErrInvalidLatency, milestone)
 	}
 	s := m.GetSecondsSinceProcessStart()
-	if math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+	if !validSeconds(s) {
 		return restarttiming.Observation{}, fmt.Errorf("%w: milestone %s came %v seconds after the process start", ErrInvalidLatency, milestone, s)
 	}
 	return restarttiming.OfEditorStart(milestone, daemon, time.Duration(s*float64(time.Second))), nil

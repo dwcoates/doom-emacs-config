@@ -3,6 +3,9 @@ package runtimemetrics
 import (
 	"errors"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -98,4 +101,55 @@ func TestAnEditorStallIsServedAsALatencyAndByCulprit(t *testing.T) {
 		`agentrepl_editor_stall_culprit_seconds_count{function="WatchHostWorkspace",source="process_filter"} 2`,
 		`agentrepl_editor_stall_culprit_seconds_sum{function="WatchHostWorkspace",source="process_filter"} 0.4`,
 	)
+}
+
+func TestValidSeconds(t *testing.T) {
+	tests := []struct {
+		name    string
+		seconds float64
+		want    bool
+	}{
+		{name: "zero", seconds: 0, want: true},
+		{name: "a positive duration", seconds: 0.2, want: true},
+		{name: "a negative duration", seconds: -0.001},
+		{name: "NaN", seconds: math.NaN()},
+		{name: "positive infinity", seconds: math.Inf(1)},
+		{name: "negative infinity", seconds: math.Inf(-1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := validSeconds(tt.seconds); got != tt.want {
+				t.Fatalf("validSeconds(%v) = %v, want %v", tt.seconds, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEveryReportedDurationIsCheckedByValidSeconds(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	var rolled []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(src), "math.IsNaN("); n > 0 && !(f == "latency.go" && n == 1) {
+			rolled = append(rolled, f)
+		}
+	}
+
+	// Assert
+	if len(rolled) > 0 {
+		t.Fatalf("%v check a duration by hand; use validSeconds", rolled)
+	}
 }

@@ -5507,6 +5507,25 @@ encoder reads: the common codec owns the real encoding.")
                      (list :editor-latencies (list stall)))
                     :type 'agent-repl-wire-error))))
 
+(ert-deftest agent-repl-test-wire-verbs-editor-seconds-answers-a-float ()
+  "A finite, non-negative duration is answered as a float."
+  (should (equal (agent-repl-wire-verbs--editor-seconds "M" "seconds" 2) 2.0))
+  (should (equal (agent-repl-wire-verbs--editor-seconds "M" "seconds" 0) 0.0)))
+
+(ert-deftest agent-repl-test-wire-verbs-editor-seconds-refuses-a-bad-duration-naming-its-field ()
+  "A negative, non-finite or missing duration fails, naming the message and field."
+  (dolist (seconds (list -1 0.0e+NaN 1.0e+INF nil))
+    (let ((err (should-error (agent-repl-wire-verbs--editor-seconds "ReportedX" "the_field" seconds)
+                             :type 'agent-repl-wire-error)))
+      (should (string-match-p "ReportedX" (format "%S" err)))
+      (should (string-match-p "the_field" (format "%S" err))))))
+
+(ert-deftest agent-repl-test-wire-verbs-every-editor-duration-shares-one-check ()
+  "No encoder in wire-verbs.el checks a duration by hand beside the shared helper."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "wire-verbs.el" agent-repl-test--module-dir))
+    (should (= (how-many "1\\.0e\\+INF" (point-min) (point-max)) 1))))
+
 (ert-deftest agent-repl-test-wire-verbs-editor-latency-kinds-pinned ()
   "The editor latency vocabulary is every generated enum name except UNSPECIFIED."
   (should (equal

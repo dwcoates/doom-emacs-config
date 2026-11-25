@@ -180,13 +180,19 @@ func newLatencies(log dlog.Logger) *latencies {
 // ErrInvalidLatency is a latency a client should never have sent.
 var ErrInvalidLatency = errors.New("invalid latency")
 
+// validSeconds reports whether s is a duration a client may report: finite
+// and not negative. THE ONE check of every reported duration.
+func validSeconds(s float64) bool {
+	return !math.IsNaN(s) && !math.IsInf(s, 0) && s >= 0
+}
+
 // validateReported checks one client latency, answering its kind.
 func validateReported(l *agentreplv1.ReportedLatency) (LatencyKind, error) {
 	kind, ok := ReportedKinds[l.GetKind()]
 	if !ok {
 		return LatencyKind{}, fmt.Errorf("%w: kind %v is not a reported latency", ErrInvalidLatency, l.GetKind())
 	}
-	if s := l.GetSeconds(); math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+	if s := l.GetSeconds(); !validSeconds(s) {
 		return LatencyKind{}, fmt.Errorf("%w: %s took %v seconds", ErrInvalidLatency, kind.Name, s)
 	}
 	return kind, nil
@@ -198,7 +204,7 @@ func validateEditor(l *agentreplv1.ReportedEditorLatency) (LatencyKind, error) {
 	if !ok {
 		return LatencyKind{}, fmt.Errorf("%w: kind %v is not an editor latency", ErrInvalidLatency, l.GetKind())
 	}
-	if s := l.GetSeconds(); math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+	if s := l.GetSeconds(); !validSeconds(s) {
 		return LatencyKind{}, fmt.Errorf("%w: %s took %v seconds", ErrInvalidLatency, kind.Name, s)
 	}
 	return kind, nil

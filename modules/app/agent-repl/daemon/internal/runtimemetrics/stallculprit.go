@@ -2,7 +2,6 @@ package runtimemetrics
 
 import (
 	"fmt"
-	"math"
 	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -58,7 +57,7 @@ var agentReplMethods = agentreplv1.File_agentrepl_v1_service_proto.Services().By
 // wraps ErrInvalidLatency.
 func ValidateEditorStall(s *agentreplv1.ReportedEditorStall) (LatencyKind, StallCulprit, error) {
 	kind := EditorKinds[agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL]
-	if sec := s.GetSeconds(); math.IsNaN(sec) || math.IsInf(sec, 0) || sec < 0 {
+	if sec := s.GetSeconds(); !validSeconds(sec) {
 		return LatencyKind{}, StallCulprit{}, fmt.Errorf("%w: %s took %v seconds", ErrInvalidLatency, kind.Name, sec)
 	}
 	c := s.GetCulprit()

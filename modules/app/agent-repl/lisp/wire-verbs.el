@@ -6453,6 +6453,13 @@ elisp spelling to reach for by accident.")
   '((:spawned . spawned) (:running . running))
   "How the editor came to a daemon, keyword to the `daemon' oneof's arm.")
 
+(defun agent-repl-wire-verbs--editor-seconds (message field seconds)
+  "Answer SECONDS as a float, failing MESSAGE's FIELD unless finite and non-negative.
+THE ONE check of every duration the editor reports."
+  (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
+    (agent-repl-wire-verbs--fail message field "not a finite, non-negative number"))
+  (float seconds))
+
 (defun agent-repl-wire-encode-reported-editor-startup (milestone)
   "Encode one ReportedEditorStartup from plist MILESTONE.
 MILESTONE is (:milestone KEYWORD :daemon KEYWORD :seconds NUMBER), each
@@ -6466,11 +6473,10 @@ the seconds a finite, non-negative number since the process start."
       (agent-repl-wire-verbs--fail message "milestone" "unknown milestone"))
     (unless arm
       (agent-repl-wire-verbs--fail message "daemon" "unknown daemon arm"))
-    (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
-      (agent-repl-wire-verbs--fail message "seconds_since_process_start" "not a finite, non-negative number"))
     (list (cons 'milestone name)
           (cons arm nil)
-          (cons 'secondsSinceProcessStart (float seconds)))))
+          (cons 'secondsSinceProcessStart
+                (agent-repl-wire-verbs--editor-seconds message "seconds_since_process_start" seconds)))))
 
 (defconst agent-repl-wire-editor-latency-kinds
   '((:stall . "EDITOR_LATENCY_KIND_STALL")
@@ -6480,20 +6486,13 @@ the seconds a finite, non-negative number since the process start."
   "The EditorLatencyKind vocabulary Emacs sends, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT, as for the startup milestones.")
 
-(defun agent-repl-wire-verbs--editor-seconds (message seconds)
-  "Answer SECONDS as a float, failing MESSAGE when it is not finite and non-negative.
-THE ONE check of an editor measurement's `seconds'."
-  (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
-    (agent-repl-wire-verbs--fail message "seconds" "not a finite, non-negative number"))
-  (float seconds))
-
 (defun agent-repl-wire-encode-reported-editor-latency (latency)
   "Encode one ReportedEditorLatency from plist LATENCY.
 LATENCY is (:kind KEYWORD :seconds NUMBER), each required: the kind from
 its closed vocabulary, the seconds a finite, non-negative number."
   (let* ((message "ReportedEditorLatency")
          (name (cdr (assq (plist-get latency :kind) agent-repl-wire-editor-latency-kinds)))
-         (seconds (agent-repl-wire-verbs--editor-seconds message (plist-get latency :seconds))))
+         (seconds (agent-repl-wire-verbs--editor-seconds message "seconds" (plist-get latency :seconds))))
     (unless name
       (agent-repl-wire-verbs--fail message "kind" "unknown kind"))
     (list (cons 'kind name)
@@ -6537,7 +6536,7 @@ finite, non-negative number, the culprit one for
   (let ((message "ReportedEditorStall"))
     (unless (plist-get stall :culprit)
       (agent-repl-wire-verbs--fail message "culprit" "missing"))
-    (list (cons 'seconds (agent-repl-wire-verbs--editor-seconds message (plist-get stall :seconds)))
+    (list (cons 'seconds (agent-repl-wire-verbs--editor-seconds message "seconds" (plist-get stall :seconds)))
           (cons 'culprit (agent-repl-wire-encode-editor-stall-culprit (plist-get stall :culprit))))))
 
 (defun agent-repl-wire-encode-report-latencies-request (request)
