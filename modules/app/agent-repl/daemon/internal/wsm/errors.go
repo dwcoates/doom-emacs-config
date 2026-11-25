@@ -369,6 +369,16 @@ func (m MergeSource) IsOneShot() bool {
 	return m.Kind == MergeSourceOwnBranch && !m.KeepOpen && m.Detach == ""
 }
 
+// ParksWhileQueued reports whether the source's wait in line parks the
+// requester's session: the requester's own branch with no pick. A merge
+// workspace's merge with a pick runs that pick on the session at the head of
+// the line, and every other source runs off the requester's session. The
+// park (merge parkQueued) and its hand-back (merge returnSession) both read
+// it.
+func (m MergeSource) ParksWhileQueued() bool {
+	return m.Kind == MergeSourceOwnBranch && m.Pick == ""
+}
+
 // validate refuses a source whose fields contradict its arm: each arm carries
 // exactly its own field, so a stored row cannot name a merge nobody asked for.
 func (m MergeSource) validate() error {

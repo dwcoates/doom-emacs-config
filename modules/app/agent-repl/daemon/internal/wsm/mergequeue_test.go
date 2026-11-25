@@ -3709,3 +3709,25 @@ func TestPlaceMergeRefusesAnUndeclaredPlaceAndMovesNothing(t *testing.T) {
 		t.Fatalf("queue = %v, want %v", got, want)
 	}
 }
+
+func TestParksWhileQueuedAcceptsOnlyAnOwnBranchWithNoPick(t *testing.T) {
+	tests := []struct {
+		name   string
+		source MergeSource
+		want   bool
+	}{
+		{name: "an own-branch merge", source: MergeSource{Kind: MergeSourceOwnBranch}, want: true},
+		{name: "an own-branch merge kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}, want: true},
+		{name: "a merge workspace's merge with a pick", source: MergeSource{Kind: MergeSourceOwnBranch, Pick: "fix it"}},
+		{name: "another workspace's merge", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "other"}},
+		{name: "a named branch's merge", source: MergeSource{Kind: MergeSourceBranch, Branch: "feature"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := tt.source.ParksWhileQueued(); got != tt.want {
+				t.Fatalf("ParksWhileQueued(%+v) = %v, want %v", tt.source, got, tt.want)
+			}
+		})
+	}
+}

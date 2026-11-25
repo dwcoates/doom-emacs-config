@@ -961,7 +961,7 @@ func behindNotInLine(ws wsm.WorkspaceID, asked string, names []string) *RefusalE
 // left as it stands, and so is a merge workspace's with a pick: the pick runs
 // on that session at the head of the line, before the merge is admitted.
 func (o *orchestrator) parkQueued(ctx context.Context, op string, repo wsm.RepoKey, source wsm.MergeSource, ws ids.WorkspaceID, ledger ids.LeaseID) {
-	if source.Kind != wsm.MergeSourceOwnBranch || source.Pick != "" {
+	if !source.ParksWhileQueued() {
 		return
 	}
 	o.log(ctx, ws).Info(op, "asked for the park of the workspace's session while its merge waits in line", dlog.Context{

@@ -1095,7 +1095,7 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 // next prompt revives it as any parked session's does.
 func (o *orchestrator) returnSession(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource, cause AbandonCause) {
 	const op = "daemon.merge.return_session"
-	if source.Kind != wsm.MergeSourceOwnBranch || source.Pick != "" || !cause.returnsSession() {
+	if !source.ParksWhileQueued() || !cause.returnsSession() {
 		return
 	}
 	log := o.log(ctx, ws)

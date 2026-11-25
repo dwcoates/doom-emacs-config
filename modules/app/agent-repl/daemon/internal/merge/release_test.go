@@ -447,3 +447,32 @@ func TestAFailedHandBackOfAParkedSessionIsRecordedAndTheDropStands(t *testing.T)
 		t.Fatalf("record context = %v, want the cause, the workspace and the error", rec.Context)
 	}
 }
+
+func TestTheParkAndItsHandBackAskTheSameSourcesAsParksWhileQueued(t *testing.T) {
+	sources := map[string]wsm.MergeSource{
+		"own branch":           {Kind: wsm.MergeSourceOwnBranch},
+		"own branch kept open": {Kind: wsm.MergeSourceOwnBranch, KeepOpen: true},
+		"own branch with pick": {Kind: wsm.MergeSourceOwnBranch, Pick: "fix it"},
+		"another workspace":    {Kind: wsm.MergeSourceWorkspace},
+		"named branch":         {Kind: wsm.MergeSourceBranch, Branch: "feature"},
+	}
+	for name, source := range sources {
+		t.Run(name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.o.parkQueued(context.Background(), "daemon.merge.request", h.repoKey(), source, theWorkspace, "ledger-1")
+			h.o.returnSession(context.Background(), theWorkspace, h.repoKey(), source, CauseUserDrop)
+
+			// Assert.
+			parked := len(h.parksAsked()) == 1
+			h.mu.Lock()
+			returned := len(h.startedSessions) == 1
+			h.mu.Unlock()
+			if want := source.ParksWhileQueued(); parked != want || returned != want {
+				t.Fatalf("parked = %v, handed back = %v; want both %v", parked, returned, want)
+			}
+		})
+	}
+}
