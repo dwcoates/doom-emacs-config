@@ -267,7 +267,8 @@ A workspace keeps every link that bears on its task, such as its pull request, t
 ### Creating workspaces from Slack emoji
 
 - An emoji you type as `:shortcode:` in one of your own Slack messages, or add as a reaction to any message, can create a workspace for that message.
-  - The daemon checks your messages and reactions about every 3 minutes.
+  - The daemon checks your messages and reactions about every 20 seconds.
+  - A check that fails is made up by the next one, which reads on from the last check that worked, up to 8 hours back.
   - Each message and emoji fires once, ever.
   - Reactions already on messages when the settings are first complete never fire; only ones you add afterwards do.
 - Firing creates a backlogged intake workspace that reads the thread, names the task, and forks itself into the workspace that does it, then closes.

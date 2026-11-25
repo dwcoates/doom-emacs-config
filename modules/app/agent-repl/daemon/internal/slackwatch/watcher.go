@@ -94,6 +94,7 @@ type Store interface {
 	SlackReactionSettings(ctx context.Context) (wsm.SlackReactionSettings, error)
 	MarkSlackReactionFired(ctx context.Context, t wsm.SlackReactionTrigger, at time.Time) (bool, error)
 	RecordSlackReactionBaseline(ctx context.Context, standing []wsm.SlackReactionTrigger, at time.Time) error
+	RecordSlackReactionSearch(ctx context.Context, at time.Time) error
 }
 
 // LinksPublisher republishes a workspace's links to every view of them

@@ -379,45 +379,20 @@ func TestPost(t *testing.T) {
 	}
 }
 
-func TestSearchName(t *testing.T) {
-	tests := []struct {
-		name    string
-		out     string
-		want    string
-		wantErr bool
-	}{
-		{name: "the account name", out: `{"name":"dodge","profile":{"display_name_normalized":"Dodge"}}`, want: "dodge"},
-		{name: "the display name when no account name", out: `{"profile":{"display_name_normalized":"Dodge"}}`, want: "Dodge"},
-		{name: "neither", out: `{}`, wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			bin, _ := fakeGNS(t, tt.out, "", 0, "")
-			c, _ := newClient(t, bin, 0)
-
-			got, err := c.SearchName(context.Background(), "U1")
-
-			if got != tt.want || (err != nil) != tt.wantErr {
-				t.Fatalf("SearchName = %q, %v", got, err)
-			}
-		})
-	}
-}
-
 func TestSearchReadsAPageAndCountsThePages(t *testing.T) {
 	// Arrange
 	bin, dir := fakeGNS(t, `{"messages":[{"channel":{"id":"C1"},"ts":"1.2","text":":agent-ack: do it","permalink":"https://x.slack.com/archives/C1/p12"}],"total":150}`, "", 0, "")
 	c, _ := newClient(t, bin, 0)
 
 	// Act
-	got, err := c.Search(context.Background(), "from:@dodge", 2)
+	got, err := c.Search(context.Background(), "from:<@U1>", 2)
 
 	// Assert
 	want := SearchPage{Pages: 2, Messages: []SearchMessage{{Channel: "C1", TS: "1.2", Text: ":agent-ack: do it", Permalink: "https://x.slack.com/archives/C1/p12"}}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("Search = %+v, %v", got, err)
 	}
-	if strings.Join(argsOf(t, dir), " ") != "slack search from:@dodge --count 100 --page 2 --json" {
+	if strings.Join(argsOf(t, dir), " ") != "slack search from:<@U1> --count 100 --page 2 --json" {
 		t.Fatalf("args = %v", argsOf(t, dir))
 	}
 }
