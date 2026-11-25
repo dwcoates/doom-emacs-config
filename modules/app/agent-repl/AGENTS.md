@@ -577,6 +577,10 @@ it. Never delete a test on a judgement of overlap alone. The daemon runs it
     `coverage-baseline.json` beside the run's log. It becomes
     `testrun/coverage-baseline.json` only by the owner's decision, and
     nothing rewrites it after a removal.
+  - Beside it the run keeps `coverage-baseline.coverprofile`, the merged Go
+    profile block by block, so two coverage runs (before and after removing
+    or moving tests) are compared block by block: a function's percentage
+    hides a block one removal lost when another test gained a block there.
 - It is the heaviest test load there is: it refuses to run at normal
   priority, runs one process at a time, and a multi-hour batch runs only on
   AC power.
