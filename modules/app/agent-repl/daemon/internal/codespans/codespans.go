@@ -127,8 +127,10 @@ func spanAt(line string, at, to int, spans []string) string {
 // text draws its code spans as plain text, and every backtick is taken out of
 // a link's destination, a bare URL, an autolink, and a reference definition's
 // destination. So [`foo`](https://x/`y`) draws as [foo](https://x/y) and a
-// bare https://x/`y` as https://x/y. Everything outside a link is left as
-// written.
+// bare https://x/`y` as https://x/y. A code span holding nothing but one
+// `http(s)://` URL (mdinline.SchemeURL) draws as that URL's autolink, so
+// `https://x/y` draws as <https://x/y>, a link the reader clicks rather than
+// code they copy. Everything else outside a link is left as written.
 func Unmark(markdown string) string {
 	if !strings.Contains(markdown, "`") {
 		return markdown
@@ -140,6 +142,10 @@ func Unmark(markdown string) string {
 		switch line.Kind {
 		case mdinline.Prose:
 			for _, s := range doc.Spans(line.Text) {
+				if url, ok := codeURL(s); ok {
+					out.WriteString("<" + url + ">")
+					continue
+				}
 				unmarkSpan(&out, doc, s)
 			}
 		case mdinline.Definition:
@@ -149,6 +155,16 @@ func Unmark(markdown string) string {
 		}
 	}
 	return out.String()
+}
+
+// codeURL answers the URL S holds when S is a code span holding nothing but
+// one `http(s)://` URL, its surrounding space trimmed.
+func codeURL(s mdinline.Span) (string, bool) {
+	if s.Kind != mdinline.Code {
+		return "", false
+	}
+	url := strings.TrimSpace(s.Inner)
+	return url, mdinline.SchemeURL(url)
 }
 
 // unmarkSpan writes S to OUT, without code markers when it is a link.

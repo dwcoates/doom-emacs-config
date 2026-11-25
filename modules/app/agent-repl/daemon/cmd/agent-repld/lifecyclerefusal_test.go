@@ -24,6 +24,7 @@ var lifecycleRefusals = func() []describedRefusal {
 	gate := &agentreplv1.PassColdGateError{}
 	notify := &agentreplv1.NotifyWorkspaceError{}
 	keep := &agentreplv1.KeepLiveWorkspaceError{}
+	openLink := &agentreplv1.OpenExternalError{}
 	return []describedRefusal{
 		{name: "open", empty: open, oneof: "cause",
 			cases: append(append(sharedWorkspaceCases(open, "open it again", theFourWorkspaceArms...),
@@ -138,6 +139,16 @@ var lifecycleRefusals = func() []describedRefusal {
 				refusalCase{name: "standing_down", err: armed(notify, "standing_down", nil), want: "the daemon is standing down and starts no banner"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeNotifyRefusal("ws", e.(*agentreplv1.NotifyWorkspaceError))
+			}},
+		{name: "open-link", empty: openLink, oneof: "cause",
+			cases: append(sharedWorkspaceCases(openLink, "open the link again", theFourWorkspaceArms...),
+				refusalCase{name: "invalid_url", err: armed(openLink, "invalid_url", nil), want: `"x" is not an absolute url`},
+				refusalCase{name: "no_browser_configured", err: armed(openLink, "no_browser_configured", nil),
+					want: "this daemon has no external browser configured to open the link with"},
+				refusalCase{name: "launch_failed", err: armedWith(openLink, "launch_failed", map[string]any{"detail": "exec"}),
+					want: `the external browser did not open "x" (exec)`}),
+			describe: func(e proto.Message) (string, error) {
+				return describeOpenExternalRefusal("ws", "x", e.(*agentreplv1.OpenExternalError))
 			}},
 		{name: "keep-live", empty: keep, oneof: "cause",
 			cases: append(sharedWorkspaceCases(keep, "keep it live again", theFourWorkspaceArms...),

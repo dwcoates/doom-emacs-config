@@ -547,6 +547,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("The block holds exactly ONE runnable command");
   });
 
+  it("opens a link the user must visit rather than handing it over to click", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home) ?? "";
+    // Assert
+    expect(text).toContain("A link the user must visit, or a command the user must run, is NEVER handed over as text to click or to copy.");
+    expect(text).toContain("A link the user must visit is opened for them in their browser: `agent-repld workspace open-link here <url>`.");
+  });
+
   it("dispatches a handed failure's fix with a command valid from any repository", () => {
     // Arrange
     const home = homeOnThisRepository();

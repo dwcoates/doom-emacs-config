@@ -261,6 +261,28 @@ func describeNotifyRefusal(ws string, e *agentreplv1.NotifyWorkspaceError) (stri
 	return "", undescribed("notifying for "+ws, e)
 }
 
+// describeOpenExternalRefusal says why LINK was not opened for WS
+// (endpoint_open_external.proto).
+func describeOpenExternalRefusal(ws, link string, e *agentreplv1.OpenExternalError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.OpenExternalError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.OpenExternalError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.OpenExternalError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "open the link again"), nil
+	case *agentreplv1.OpenExternalError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "open the link again"), nil
+	case *agentreplv1.OpenExternalError_InvalidUrl:
+		return fmt.Sprintf("%q is not an absolute url", link), nil
+	case *agentreplv1.OpenExternalError_NoBrowserConfigured:
+		return "this daemon has no external browser configured to open the link with", nil
+	case *agentreplv1.OpenExternalError_LaunchFailed:
+		return fmt.Sprintf("the external browser did not open %q (%s)", link, r.LaunchFailed.GetDetail()), nil
+	}
+	return "", undescribed("opening a link for "+ws, e)
+}
+
 // describeKeepLiveRefusal says why WS was not kept live
 // (endpoint_keep_live_workspace.proto).
 func describeKeepLiveRefusal(ws string, e *agentreplv1.KeepLiveWorkspaceError) (string, error) {

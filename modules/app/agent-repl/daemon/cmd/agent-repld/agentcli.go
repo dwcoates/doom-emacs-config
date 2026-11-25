@@ -230,6 +230,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"slack-tail":             {usage: "slack-tail WS -thread URL [-limit N]", run: workspaceSlackTail},
 		"slack-post":             {usage: "slack-post WS -thread URL -text \":emoji: TEXT\" [-force]", run: workspaceSlackPost},
 		"notify":                 {usage: "notify WS TEXT", run: workspaceNotify},
+		"open-link":              {usage: "open-link WS URL", run: workspaceOpenLink},
 		"pass-gate":              {usage: "pass-gate WS", run: workspacePassGate},
 		"keep-live":              {usage: "keep-live WS", run: workspaceKeepLive},
 		"subsections":            {usage: "subsections WS", run: workspaceSubsections},
@@ -2510,6 +2511,25 @@ func workspaceNotify(c *cliCall, args []string) int {
 	resp, err := c.client.NotifyWorkspace(c.ctx, connect.NewRequest(&agentreplv1.NotifyWorkspaceRequest{Workspace: ws, Message: rest[0]}))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.NotifyWorkspaceResponse) (string, error) {
 		return describeNotifyRefusal(named, msg.GetError())
+	})
+}
+
+// workspaceOpenLink opens URL in the external browser profile WS's session
+// signs in as (endpoint_open_external.proto), the launch a click on a link in
+// WS's feed makes: an agent opens a link its user must visit rather than
+// handing them one to click.
+func workspaceOpenLink(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	named, ws, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 1 || strings.TrimSpace(rest[0]) == "" {
+		return c.usageFailed("the command names the link to open, once")
+	}
+	resp, err := c.client.OpenExternal(c.ctx, connect.NewRequest(&agentreplv1.OpenExternalRequest{Workspace: ws, Url: rest[0]}))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.OpenExternalResponse) (string, error) {
+		return describeOpenExternalRefusal(named, rest[0], msg.GetError())
 	})
 }
 
