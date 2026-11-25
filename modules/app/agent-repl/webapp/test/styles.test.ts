@@ -1455,133 +1455,93 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(css.includes(".row-revealed")).toBe(false);
   });
 
-  it("keeps the ring off a selected final response, whose fill turns grey", () => {
+  it("keeps the flash ring off a selected final response, whose purple ring is its mark", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble final-response entry-selected";
 
-    // Act, Assert — the ring's selector does not match it.
+    // Act, Assert — the flash ring's selector does not match it.
     expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
   });
 
-  it("fills every selected bubble with the grey selection token, over every kind's own fill", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".bubble.entry-selected");
-
-    // Assert
-    expect(rule).toMatch(/--bubble-bg:\s*var\(--selected-bubble-bg\)\s*!important/);
-  });
-
-  it("keeps the ring off a selected prompt, whose fill is its mark", () => {
+  it("keeps the flash ring off a selected prompt, whose purple ring is its mark", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble user entry-selected";
     card.setAttribute("data-role", "prompt");
 
-    // Act, Assert — the ring's selector does not match it.
+    // Act, Assert — the flash ring's selector does not match it.
     expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
   });
 
-  it("sets the fill alone, so selecting never recolors a border or reflows a bubble", () => {
+  it("rings a selected bubble with a very thin outline of the canonical purple", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble.entry-selected") ?? "";
 
     // Assert
-    expect(rule.trim()).toBe("--bubble-bg: var(--selected-bubble-bg) !important;");
+    expect(rule).toMatch(/outline:\s*0\.5px solid var\(--blocked\);/);
   });
 
-  it.each(THEME_BLOCKS)("fills a selected bubble a neutral grey in the %s theme", (_theme, block) => {
+  it("pulls the selected bubble's ring inside its own box by the ring's width", () => {
     // Arrange / Act
-    const [r, g, b] = rgbOf(block(), "--selected-bubble-bg");
-
-    // Assert — no channel strays far from the others.
-    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(16);
-  });
-
-  it.each(THEME_BLOCKS)("fills a selected bubble a little lighter than a response in the %s theme", (_theme, block) => {
-    // Arrange
-    const css = block();
-
-    // Act
-    const [response, selected] = [luminance(themeRgbOf(css, "--assistant")), luminance(rgbOf(css, "--selected-bubble-bg"))];
+    const rule = declarationsOf(".bubble.entry-selected") ?? "";
 
     // Assert
-    expect(selected).toBeGreaterThan(response);
+    expect(rule).toMatch(/outline-offset:\s*-0\.5px;/);
+  });
+
+  it("sets the ring alone, so selecting never recolors a fill or border, reflows, or flashes", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.entry-selected") ?? "";
+
+    // Assert
+    expect(rule.trim().split(/;\s*/).filter(Boolean)).toEqual([
+      "outline: 0.5px solid var(--blocked)",
+      "outline-offset: -0.5px",
+    ]);
   });
 
   it.each([
-    ["a user prompt", "user", "var(--selected-prompt-bg)"],
-    ["an agent-addressed prompt", "agent", "var(--selected-prompt-bg)"],
-    ["a peer message", "peer", "var(--selected-prompt-bg)"],
-    ["a held prompt", "held", "var(--selected-bubble-bg)"],
-  ])("fills a selected %s with its selection token", (_kind, variant, want) => {
+    ["a user prompt", "bubble entry-selected", "prompt", "user"],
+    ["an agent-addressed prompt", "bubble entry-selected", "prompt", "agent"],
+    ["a held prompt", "bubble entry-selected", "prompt", "held"],
+    ["an interim response", "bubble interim-response entry-selected", "response", "response"],
+    ["a final response", "bubble final-response entry-selected", "response", "response"],
+  ])("keeps %s's own fill while it is selected", (_kind, className, role, variant) => {
     // Arrange
-    const bubble = selectedBubble("bubble entry-selected", "prompt", variant);
+    const selected = selectedBubble(className, role, variant);
+    const unselected = selectedBubble(className.replace(" entry-selected", ""), role, variant);
+
     // Act
-    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
+    const [selectedFill, ownFill] = [selected, unselected].map((el) => inDocument(el, (e) => cascadedValue(e, "--bubble-bg")));
+
     // Assert
-    expect(fill).toBe(want);
+    expect(selectedFill).toBe(ownFill);
   });
 
-  it("fills a selected interim response with the grey selection token, never the prompt's blue", () => {
+  it("rings a selected member of a coalesced run, whose border width is 0", () => {
     // Arrange
-    const bubble = selectedBubble("bubble interim-response entry-selected", "response", "response");
-    // Act
-    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
-    // Assert
-    expect(fill).toBe("var(--selected-bubble-bg)");
-  });
-
-  it("fills a selected final response with its dimmed selection token", () => {
-    // Arrange
+    const run = document.createElement("div");
+    run.className = "response-run";
+    const item = document.createElement("div");
+    item.className = "feed-item";
     const bubble = selectedBubble("bubble final-response entry-selected", "response", "response");
-    // Act
-    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
-    // Assert
-    expect(fill).toBe("var(--selected-final-response-bg)");
-  });
-
-  it("sets the selected final response's fill alone, so selecting it never reflows it", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".bubble.final-response.entry-selected") ?? "";
-
-    // Assert
-    expect(rule.trim()).toBe("--bubble-bg: var(--selected-final-response-bg) !important;");
-  });
-
-  it("dims the selected final response's fill to 37.5% of the way from its own fill to the selected grey", () => {
-    // Arrange / Act — declared once on :root, so each theme mixes its own two tokens.
-    const declaration = themeValueOf(declarationsOf(":root") ?? "", "--selected-final-response-bg");
-
-    // Assert — the half-strength grey, 25% dimmer again (0.75 of 50%).
-    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--assistant))");
-  });
-
-  it("never overrides the dimmed final response fill in the dark theme", () => {
-    // Arrange / Act
-    const declaration = themeValueOf(darkThemeBlock(), "--selected-final-response-bg");
-
-    // Assert
-    expect(declaration).toBeUndefined();
-  });
-
-  it("sets the selected prompt's fill alone, so selecting a prompt never reflows it", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected') ?? "";
-
-    // Assert
-    expect(rule.trim()).toBe("--bubble-bg: var(--selected-prompt-bg) !important;");
-  });
-
-  it.each(THEME_BLOCKS)("fills a selected prompt a different grey from a user prompt in the %s theme", (_theme, block) => {
-    // Arrange
-    const css = block();
+    item.append(bubble);
+    run.append(item);
 
     // Act
-    const [prompt, selected] = [themeRgbOf(css, "--user"), rgbOf(css, "--selected-prompt-bg")];
+    const outline = inDocument(run, () => cascadedValue(bubble, "outline"));
 
-    // Assert: a different grey, with no hue (prompts are grey, 2026-10-27).
-    expect([selected.join() !== prompt.join(), Math.max(...selected) - Math.min(...selected) <= 4]).toEqual([true, true]);
+    // Assert
+    expect(outline).toBe("0.5px solid var(--blocked)");
+  });
+
+  it("declares no selected-bubble fill token any more", () => {
+    // Arrange / Act
+    const css = withoutBlockComments(stylesheet);
+
+    // Assert
+    expect(/--selected-(bubble|prompt|final-response)-bg/.test(css)).toBe(false);
   });
 
   it("defines the --selected-entry token so the blue rule resolves", () => {
@@ -3111,16 +3071,12 @@ describe("the one bubble rule set", () => {
     );
     // Assert — the base rule paints the role's token; the roles choose it, and
     // so do the owner-named fills: the held variant's (2026-09-23), the
-    // page-colored thinking and interim fill (2026-10-08), the selected
-    // bubble's grey (2026-10-11), the agent-to-agent bubbles' prompt fill
-    // (2026-10-28), the selected prompt's darker blue (2026-10-19) and the
-    // selected final response's dimmed grey (2026-10-20).
+    // page-colored thinking and interim fill (2026-10-08) and the
+    // agent-to-agent bubbles' prompt fill (2026-10-28). A selected bubble
+    // keeps its own fill (2026-11-24).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
-        ".bubble.entry-selected",
-        ".bubble.final-response.entry-selected",
-        '.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected',
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
         '.bubble[data-variant="agent"]',
@@ -3163,6 +3119,10 @@ describe("the one bubble rule set", () => {
               rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
             ) &&
             !(prop === "font-style" && isOwnRule(rule, THINKING_SELECTOR)) &&
+            // THE SELECTED BUBBLE'S RING (owner request, 2026-11-24) is an
+            // inset outline, which never reflows; "the selected-entry mark"
+            // pins it.
+            !((prop === "outline" || prop === "outline-offset") && isOwnRule(rule, ".bubble.entry-selected")) &&
             // THE HELD GLIMMER (owner request, 2026-10-28) anchors its ring
             // on the held bubble; "the held glimmer" pins it.
             !(prop === "position" && isOwnRule(rule, '.bubble[data-variant="held"]')) &&
