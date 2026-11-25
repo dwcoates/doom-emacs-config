@@ -239,6 +239,9 @@ func TestAServingLinkWithNoWebStreamDrawsTheCompromisedTone(t *testing.T) {
 	if got.GetTone() != "blue" {
 		t.Fatalf("tone = %q, want the compromised tone: a client hop is down", got.GetTone())
 	}
+	if got.GetTitle() == "connected to the session" {
+		t.Fatalf("title = %q, want the not-connected tooltip while a client hop is down", got.GetTitle())
+	}
 }
 
 func TestTheLastPeerHopComingUpDrawsTheServingTone(t *testing.T) {
@@ -255,6 +258,9 @@ func TestTheLastPeerHopComingUpDrawsTheServingTone(t *testing.T) {
 	got := h.view(t).GetConnectivity()
 	if got.GetTone() != "green" {
 		t.Fatalf("tone = %q, want green once every hop is live", got.GetTone())
+	}
+	if got.GetTitle() != "connected to the session" {
+		t.Fatalf("title = %q, want the connected tooltip once every hop is live", got.GetTitle())
 	}
 }
 

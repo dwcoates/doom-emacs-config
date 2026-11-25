@@ -529,6 +529,54 @@ func TestASubFeedsNextPageWalksItsOwnAgentsBook(t *testing.T) {
 	}
 }
 
+func TestASubFeedsWalkServesOnlyItsOwnAgentsRows(t *testing.T) {
+	// Arrange: the sub-agent's book holds more than a store page; the root's
+	// book holds a row of its own.
+	h := newHarness(t)
+	store := h.withHistory(newFakeHistory(3))
+	created := &conversationv1.AgentId{Value: "agent-sub"}
+	h.spawnSubagent("spawn-1", created, "Explore", "explore")
+	var subBook []bookEntry
+	for i := range 5 {
+		subBook = append(subBook, bookEntry{entry: frameEntry(created, &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity(fmt.Sprintf("sub-%d", i), "sub row")},
+		})})
+	}
+	store.books["agent-sub"] = newestFirst(subBook)
+	store.books[""] = newestFirst([]bookEntry{{entry: promptEntry("root-0", "root only")}, answerEntry("root-0", "root-answer")})
+	sub := feedid.Feed{Agent: created}
+	onSub := func(t *testing.T, page *frontendv1.FeedPage) {
+		t.Helper()
+		for _, row := range pageRows(t, page) {
+			ref, err := testDecode(row.GetId())
+			if err != nil {
+				t.Fatalf("row %v: %v", row.GetId(), err)
+			}
+			if testFeedValue(ref.Feed) != testFeedValue(sub) {
+				t.Fatalf("row %v is on feed %+v, want only the sub-feed's own rows", row.GetId(), ref.Feed)
+			}
+		}
+	}
+
+	// Act.
+	first, _ := h.openPage(sub, "reader-1")
+	older, err := h.olderPageOf(sub, "reader-1")
+	if err != nil {
+		t.Fatalf("OlderPage: %v", err)
+	}
+
+	// Assert: the newest page says there is more, and neither page carries a
+	// row of the root's.
+	if got := edgeOf(t, first); got != "has_more" {
+		t.Fatalf("first page edge = %s, want has_more over more than a store page", got)
+	}
+	onSub(t, first)
+	onSub(t, older)
+	if len(pageRows(t, older)) == 0 {
+		t.Fatal("the older page served no rows, want the sub-agent's older rows")
+	}
+}
+
 // ---- the walk ----
 
 func TestNextFetchesThePageItDoesNotHold(t *testing.T) {
@@ -773,6 +821,43 @@ func TestADaemonRowInAnEmptyFeedSortsAtTheMomentItWasMade(t *testing.T) {
 	got := rowIDs(pageRows(t, page))
 	if want := h.promptRowIDs("turn-0", "turn-1") + ",row|cold-gate"; strings.Join(got, ",") != want {
 		t.Fatalf("page rows = %v, want %v", got, want)
+	}
+}
+
+func TestAWalkBelowADaemonRowReachesTheConversationsStart(t *testing.T) {
+	// Arrange: a book of several store pages, and a daemon row (a cold gate)
+	// made before history loads.
+	h := newHarness(t)
+	book := promptsBook(8)
+	h.mainBook(3, book)
+	h.resolver.UpsertSynthesized(testWorkspace, rootFeed(), &frontendv1.FeedRow{
+		Id:  &frontendv1.FeedId{Value: "row|cold-gate"},
+		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{}},
+	})
+
+	// Act: the newest page, then older pages until the walk says at_start.
+	first, _ := h.openPage(rootFeed(), "reader-1")
+	pages := []*frontendv1.FeedPage{first}
+	for edgeOf(t, pages[len(pages)-1]) == "has_more" && len(pages) <= len(book) {
+		pages = append(pages, h.nextPage("reader-1"))
+	}
+
+	// Assert: the walk was never cut short at the gate row, and it reached
+	// every answer and the opening prompt.
+	if len(pages) < 3 || edgeOf(t, pages[len(pages)-1]) != "at_start" {
+		t.Fatalf("walked %d pages ending %s, want several pages ending at_start", len(pages), edgeOf(t, pages[len(pages)-1]))
+	}
+	seen := map[string]bool{}
+	for _, page := range pages {
+		for _, id := range rowIDs(pageRows(t, page)) {
+			seen[id] = true
+		}
+	}
+	for i := range book {
+		id := h.promptRowID(fmt.Sprintf("turn-%d", i))
+		if !seen[id] {
+			t.Fatalf("row %s was never served on the walk; served %v", id, seen)
+		}
 	}
 }
 

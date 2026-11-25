@@ -275,6 +275,30 @@ func TestALandedAnswerStillGreensOnReplay(t *testing.T) {
 // TestATurnThatDidNotLandItsAnswerRaisesTheFault covers both NOT LANDED cases:
 // a terminal naming no answer over drawn prose, and a terminal naming an answer
 // no drawn row resolves.
+func TestAVendorStartedTurnsEndMarksAndNamesItsAnsweringResponse(t *testing.T) {
+	// Arrange: a turn the vendor started on its own, and its answer.
+	h := newHarness(t)
+	h.promptWith("turn-vendor", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+	h.send(responseSuccessActivity("unit-answer", "the hand-back is in"))
+
+	// Act: its terminal names that answer.
+	turn := ids.TurnID("turn-vendor")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-answer"), nil, nil)
+
+	// Assert: the response is the final answer, and the turn's own concluded
+	// terminal names it.
+	if !h.rowByID(rootFeed(), h.responseRowID("unit-answer")).GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatal("the vendor turn's answering response is not marked the final answer")
+	}
+	terminal := h.rowByID(rootFeed(), h.turnEndedRowID("turn-vendor"))
+	if got := terminal.GetTurn().GetValue(); got != "turn-vendor" {
+		t.Fatalf("terminal turn = %q, want turn-vendor", got)
+	}
+	if got := terminal.GetTurnEnded().GetConcluded().GetAnswer().GetValue(); got != h.responseRowID("unit-answer") {
+		t.Fatalf("concluded answer = %q, want the answering response %q", got, h.responseRowID("unit-answer"))
+	}
+}
+
 func TestATurnThatDidNotLandItsAnswerRaisesTheFault(t *testing.T) {
 	tests := []struct {
 		name     string

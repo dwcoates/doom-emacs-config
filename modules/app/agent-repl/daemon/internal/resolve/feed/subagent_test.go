@@ -2865,6 +2865,25 @@ func TestARestatedShellWhoseCallTheReplayReachesDrawsItsHead(t *testing.T) {
 	}
 }
 
+func TestARestatedShellWhoseCallArrivesLiveDrawsItsHeadOnTheRoot(t *testing.T) {
+	// Arrange: the session came up restating a live shell, before any of its
+	// book was drawn.
+	h := newHarness(t)
+	h.standingShell("restored-shell-1", "sleep 100")
+
+	// Act: the call that launched it arrives live on the main agent's stream.
+	h.send(bashCall("restored-shell-1", "sleep 100"))
+
+	// Assert: the head lands on the root feed, in the call's place, and
+	// nothing was unplaceable.
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"shell_head"}) {
+		t.Fatalf("root rows = %v, want the restored shell's head in the call's place", got)
+	}
+	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want no ERROR daemon.feed.detached_unplaceable", h.records())
+	}
+}
+
 func TestARestatedShellWhoseCallAlreadyDrewMovesItAtOnce(t *testing.T) {
 	// Arrange: the call's card is on the feed already.
 	h := newHarness(t)
@@ -3361,6 +3380,29 @@ func TestATailPastTheContractsCapIsRefused(t *testing.T) {
 	}
 	if !h.hasRecord("error", "daemon.feed.spool_over_cap") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.spool_over_cap", h.records())
+	}
+}
+
+func TestATailPastTheContractsCapPublishesNothing(t *testing.T) {
+	// Arrange: a detached shell's head on the root feed, and a reader
+	// following it.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "long-build"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	rows := h.follow(rootFeed(), "reader-1")
+
+	// Act: a tail past the contract's cap.
+	h.bash("work-1", tailOf(strings.Repeat("y", spoolCap+1)))
+	pushed := pushedRowsBefore(t, rows, h.sendSentinel())
+
+	// Assert: the refused frame neither upserts the head nor draws a body.
+	if len(pushed) != 0 {
+		t.Fatalf("pushed = %v, want nothing for a refused over-cap tail", rowIDs(pushed))
+	}
+	if h.hasShellBody("work-1") {
+		t.Fatal("an over-cap tail drew the shell's spool body")
 	}
 }
 

@@ -124,11 +124,12 @@ func TestRowNameWearsTheSharedPrefix(t *testing.T) {
 	tests := []struct {
 		name  string
 		level wsm.Priority
+		arm   func(*frontendv1.WorkspaceNamePrefix) bool
 	}{
-		{name: "p05", level: wsm.PriorityP05},
-		{name: "p1", level: wsm.PriorityP1},
-		{name: "p2", level: wsm.PriorityP2},
-		{name: "p3", level: wsm.PriorityP3},
+		{name: "p05", level: wsm.PriorityP05, arm: func(p *frontendv1.WorkspaceNamePrefix) bool { return p.GetPriority().GetP05() != nil }},
+		{name: "p1", level: wsm.PriorityP1, arm: func(p *frontendv1.WorkspaceNamePrefix) bool { return p.GetPriority().GetP1() != nil }},
+		{name: "p2", level: wsm.PriorityP2, arm: func(p *frontendv1.WorkspaceNamePrefix) bool { return p.GetPriority().GetP2() != nil }},
+		{name: "p3", level: wsm.PriorityP3, arm: func(p *frontendv1.WorkspaceNamePrefix) bool { return p.GetPriority().GetP3() != nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,6 +146,9 @@ func TestRowNameWearsTheSharedPrefix(t *testing.T) {
 			if want := nameprefix.Of(ws); want == nil || !proto.Equal(got, want) {
 				t.Fatalf("prefix = %v, want %v", got, want)
 			}
+			if !tc.arm(got) {
+				t.Fatalf("prefix = %v, want the %s priority icon", got, tc.name)
+			}
 		})
 	}
 }
@@ -159,6 +163,23 @@ func TestRowNameOfAnUnprioritizedWorkspaceWearsNoPrefix(t *testing.T) {
 	// Assert: unset is no prefix, never an empty one.
 	if got := onlyRow(t, r).GetName().GetPrefix(); got != nil {
 		t.Fatalf("an unprioritized workspace's name wore a prefix: %v", got)
+	}
+}
+
+func TestClearingAPriorityRemovesTheRowNamesPrefix(t *testing.T) {
+	// Arrange: a prioritized workspace's row.
+	r, _ := newResolver(t)
+	r.SetRegistry(registry(prioritized(workspace("w", "n"), wsm.PriorityP1)))
+	if onlyRow(t, r).GetName().GetPrefix().GetPriority().GetP1() == nil {
+		t.Fatalf("prefix = %v, want the p1 icon before the clear", onlyRow(t, r).GetName().GetPrefix())
+	}
+
+	// Act: the priority is cleared.
+	r.SetRegistry(registry(workspace("w", "n")))
+
+	// Assert
+	if got := onlyRow(t, r).GetName().GetPrefix(); got != nil {
+		t.Fatalf("prefix = %v, want none once the priority is cleared", got)
 	}
 }
 

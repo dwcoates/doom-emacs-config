@@ -777,6 +777,42 @@ func TestAnUnresolvableScheduleLeavesTheNextFireUnset(t *testing.T) {
 	}
 }
 
+func TestACreatedJobJoinsTheSetAndOutlivesItsTurn(t *testing.T) {
+	// Arrange: a turn in which the agent creates one recurring job.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "cron-1"},
+		Item: &conversationv1.AgentActivity_Cron{Cron: &conversationv1.AgentCron{
+			State: &conversationv1.AgentCron_Start{Start: &conversationv1.AgentCronStart{
+				Act: &conversationv1.AgentCronStart_Create{Create: &conversationv1.AgentCronCreate{
+					Cron: "*/5 * * * *", Prompt: "check the build", Recurring: true,
+				}},
+			}},
+		}},
+	})
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "cron-1"},
+		Item: &conversationv1.AgentActivity_Cron{Cron: &conversationv1.AgentCron{
+			State: &conversationv1.AgentCron_Success{Success: &conversationv1.AgentCronSuccess{
+				Act: &conversationv1.AgentCronSuccess_Created{Created: &conversationv1.AgentCronCreated{
+					JobId: "job-1", HumanSchedule: "every 5 minutes", Recurring: true,
+				}},
+			}},
+		}},
+	})
+
+	// Act: the turn concludes; the view is what a reader opening now is served.
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert: the one standing job is on the chip.
+	if got := h.view(t).GetStrip().GetLiveWork().GetCrons().GetCount(); got != 1 {
+		t.Fatalf("crons chip = %d, want the 1 created job standing after its turn", got)
+	}
+}
+
 func TestADeletedJobLeavesTheSet(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -824,16 +860,32 @@ func TestPanelRowsKeepTheirArrivalOrder(t *testing.T) {
 }
 
 func TestAnEmptyPanelStillShips(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
+	tests := []struct {
+		name string
+		act  func(h *harness)
+	}{
+		{name: "connected", act: func(*harness) {}},
+		{name: "a turn started", act: func(h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant}) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
 
-	// Act
-	connected(h)
+			// Act
+			connected(h)
+			tc.act(h)
 
-	// Assert
-	expanded := h.view(t).GetExpanded()
-	if expanded.GetShells() == nil || expanded.GetShells().GetRows() != nil {
-		t.Fatalf("shells panel = %+v, want present with an empty row list", expanded.GetShells())
+			// Assert: every panel is resolved on every push, rows or none.
+			expanded := h.view(t).GetExpanded()
+			if expanded.GetShells() == nil || expanded.GetShells().GetRows() != nil {
+				t.Fatalf("shells panel = %+v, want present with an empty row list", expanded.GetShells())
+			}
+			if expanded.GetTokens() == nil || expanded.GetAgents() == nil || expanded.GetTasks() == nil ||
+				expanded.GetMonitors() == nil || expanded.GetCrons() == nil {
+				t.Fatalf("expanded = %v, want every panel (tokens/agents/tasks/shells/monitors/crons) resolved", expanded)
+			}
+		})
 	}
 }
 

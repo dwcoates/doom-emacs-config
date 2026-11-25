@@ -577,6 +577,55 @@ func TestAOneShotIsDrawnWhereItIsArranged(t *testing.T) {
 	}
 }
 
+func TestAOneShotKeepsItsMarkWhereverItIsArranged(t *testing.T) {
+	oneShots := subsection("sub-one-shots", wsm.OneShotsSubsectionName, 1)
+	oneShots.OneShots = true
+	cases := []struct {
+		name       string
+		workspaces []wsm.Workspace
+		subs       []wsm.Subsection
+		want       []string
+	}{
+		{
+			name:       "filed in the one-shots subsection",
+			workspaces: []wsm.Workspace{placed(workspace("w-a", "a"), 1), marked(in(placed(workspace("w-s", "shot"), 2), oneShots))},
+			subs:       []wsm.Subsection{oneShots},
+			want:       []string{"a", "[" + wsm.OneShotsSubsectionName + ": shot]"},
+		},
+		{
+			name:       "dragged out to the end of the unsectioned rows",
+			workspaces: []wsm.Workspace{placed(workspace("w-a", "a"), 1), marked(placed(workspace("w-s", "shot"), 2))},
+			want:       []string{"a", "shot"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			reg := registry(tc.workspaces...)
+			reg.Subsections = tc.subs
+
+			// Act
+			r.SetRegistry(reg)
+
+			// Assert: drawn where it is arranged, still marked a one-shot.
+			roster := latest(t, r)
+			if got := entryShape(roster.GetRepository().GetSections()[0]); !equal(got, tc.want) {
+				t.Fatalf("entries = %v, want %v", got, tc.want)
+			}
+			var shot *frontendv1.RosterRow
+			for _, open := range rosterwalk.OpenRows(roster) {
+				if open.GetRow().GetWorkspace().GetWorkspace().GetId() == "w-s" {
+					shot = open.GetRow()
+				}
+			}
+			if shot.GetOneShot() == nil {
+				t.Fatalf("the one-shot's row = %v, want its one-shot mark", shot)
+			}
+		})
+	}
+}
+
 func TestTheMainWorkspacesOneShotChildIsDrawnNestedUnderIt(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)

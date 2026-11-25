@@ -191,6 +191,15 @@ func TestTheAnsweredCardCarriesTheChoicesInTheBatchsOrder(t *testing.T) {
 	if answers[1].GetHeader().GetText() != "Suites" || len(answers[1].GetChosen()) != 2 {
 		t.Fatalf("second answer = %+v, want the suites question's", answers[1])
 	}
+	if got := answers[0].GetChosen(); got[0] != "OAuth" {
+		t.Fatalf("first answer's chosen = %v, want the echoed label OAuth", got)
+	}
+	if got := answers[1].GetChosen(); got[0] != "daemon" || got[1] != "webapp" {
+		t.Fatalf("second answer's chosen = %v, want the echoed labels daemon, webapp", got)
+	}
+	if rows := h.rows(rootFeed()); len(rows) != 1 {
+		t.Fatalf("rows = %v, want the one card the open ask drew, settled in place", rowIDs(rows))
+	}
 }
 
 func TestTheFreeTextEscapeIsCarriedWhenTheUserTypedOne(t *testing.T) {

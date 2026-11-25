@@ -126,6 +126,23 @@ func TestTheHeaderCarriesTheVendorsParts(t *testing.T) {
 	}
 }
 
+func TestTheHeaderMovesWithTheNextPushedUsage(t *testing.T) {
+	// Arrange: a first usage answered.
+	h := newHarness(t)
+	panelOf(t, h, fullUsage())
+	grown := fullUsage()
+	grown.TotalTokens = 168_900
+	grown.Percentage = 84
+
+	// Act
+	header := panelOf(t, h, grown).GetHeader()
+
+	// Assert: the header is the newest usage's, not the first's.
+	if header.GetUsed() != "168.9k" || header.GetPercent() != 84 {
+		t.Fatalf("header = %+v, want used 168.9k at 84%%, the newest pushed usage", header)
+	}
+}
+
 func TestTheHeaderPercentIsTheVendorsOwnFigure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

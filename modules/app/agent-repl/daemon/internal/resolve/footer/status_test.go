@@ -258,6 +258,35 @@ func TestADecidedPermissionLeavesThePermissionGate(t *testing.T) {
 	}
 }
 
+func TestADeniedPermissionLeavesItsTurnWorkingUntilItsOwnTerminal(t *testing.T) {
+	// Arrange: a running turn gated on an ask, which the user denies.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnPermission(testWS, mainAgent, permissionStart("ask-1", "Claude wants to read foo"))
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, &conversationv1.AgentPermission{
+		Id: &conversationv1.AgentPermissionId{Value: "ask-1"},
+		Result: &conversationv1.AgentPermission_Success{Success: &conversationv1.AgentPermissionSuccess{
+			Decision: &conversationv1.AgentPermissionSuccess_Denied{Denied: &conversationv1.AgentPermissionDenied{
+				By: &conversationv1.AgentPermissionDenied_User{User: &conversationv1.AgentPermissionDeniedByUser{}},
+			}},
+		}},
+	})
+	afterDeny := h.view(t).GetStrip().GetStatus()
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert: a deny does not end the turn; its own terminal does.
+	if afterDeny.GetWorking() == nil {
+		t.Fatalf("status = %v after the deny, want working: the turn is still in flight", afterDeny)
+	}
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetDone() == nil {
+		t.Fatalf("status = %v after the turn's terminal, want idle·done", h.view(t).GetStrip().GetStatus())
+	}
+}
+
 func TestAQuestionGateComposesTheBatchLead(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -436,8 +465,8 @@ func TestTheWakeupFallbackStandsWhereTheFooterWouldReadIdle(t *testing.T) {
 	if waiting.GetWakeup() == nil {
 		t.Fatalf("substatus = %+v, want the wakeup fallback", waiting.GetSubstatus())
 	}
-	if waiting.GetActivity().GetSalient().GetWakeup().GetWakeAtMs() == 0 {
-		t.Fatalf("the wakeup countdown carries no deadline")
+	if got, want := waiting.GetActivity().GetSalient().GetWakeup().GetWakeAtMs(), instant.Add(300*1000*1000*1000).UnixMilli(); got != want {
+		t.Fatalf("the wakeup countdown's deadline = %d, want exactly the scheduled instant %d", got, want)
 	}
 }
 
@@ -2261,6 +2290,26 @@ func TestTheTurnsTerminalEndsApiRetrying(t *testing.T) {
 	// Assert
 	if got := h.status(t); got == "vendor_fault" {
 		t.Fatalf("status = blocked after the turn's terminal")
+	}
+}
+
+func TestACompletedTerminalAfterARetryIsDone(t *testing.T) {
+	// Arrange: a running turn whose call the vendor rate limited and retried.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{
+		Message: "rate limited",
+		Kind:    &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}},
+	})
+
+	// Act: the turn concludes normally; its terminal is authoritative.
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetDone() == nil {
+		t.Fatalf("status = %v, want idle·done once the turn's own terminal landed", h.view(t).GetStrip().GetStatus())
 	}
 }
 
