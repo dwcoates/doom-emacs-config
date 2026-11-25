@@ -73,6 +73,10 @@ final class BannerExchangeTests: XCTestCase {
             (.notAllowed("the alert style is None"), .with { $0.outcome.notAllowed.setting = "the alert style is None" }, .error,
              "Zettel's settings keep the banner off screen; nothing was posted (System Settings → Notifications → Zettel)"),
             (.failed("center busy"), .with { $0.outcome.failed.platformError = "center busy" }, .error, "macOS refused the banner"),
+            (.silenced(.focus("Work")), .with { $0.outcome.silenced.focus = "Work" }, .warn,
+             "a Focus silences Zettel; the banner went to Notification Center unseen (System Settings → Focus → its Allowed Apps)"),
+            (.silenced(.focusUnreadable("bad json")), .with { $0.outcome.silenced.focusUnreadable = "bad json" }, .error,
+             "the Focus state could not be read; the banner was posted but is not known to be on screen"),
         ]
         for (result, want, level, record) in cases {
             // Arrange
@@ -100,6 +104,19 @@ final class BannerExchangeTests: XCTestCase {
         // Assert
         let record = log.first(.error, "Zettel's settings keep the banner off screen; nothing was posted (System Settings → Notifications → Zettel)")
         XCTAssertEqual(record?.context["setting"], "notifications are denied")
+    }
+
+    func testABannerAFocusSilencesRecordsTheFocus() async throws {
+        // Arrange
+        fresh()
+        center.result = .silenced(.focus("Work"))
+
+        // Act
+        _ = try await exchange(delimited(bannerRequest()))
+
+        // Assert
+        let record = log.first(.warn, "a Focus silences Zettel; the banner went to Notification Center unseen (System Settings → Focus → its Allowed Apps)")
+        XCTAssertEqual(record?.context["focus"], "Work")
     }
 
     func testAnUnpostableRequestIsRefusedAndPostsNothing() async throws {

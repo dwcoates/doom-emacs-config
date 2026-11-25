@@ -171,6 +171,21 @@ func TestAFailedBannerIsNeverHeld(t *testing.T) {
 	}
 }
 
+func TestABannerAFocusSilencesIsNeverHeld(t *testing.T) {
+	// Arrange
+	f := heldFixture(t)
+	f.backend.err = &SilencedError{Focus: "Work"}
+	postSettled(f, "ws1")
+
+	// Act
+	got := f.notifier.Claim()
+
+	// Assert
+	if got.Held {
+		t.Fatalf("Claim = %+v, want none: the user never saw the banner", got)
+	}
+}
+
 func TestForgetLetsGoOfEveryHeldBanner(t *testing.T) {
 	// Arrange
 	f := heldFixture(t)

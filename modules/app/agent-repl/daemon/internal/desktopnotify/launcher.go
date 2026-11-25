@@ -41,6 +41,23 @@ const DefaultLauncherSocket = "~/.cache/agent-repl/sock/launcher.sock"
 // to be resized.
 const LauncherPostBound = 5 * time.Second
 
+// SilencedError is a banner macOS took but that is not known to be on
+// screen, so it was not made: no chime rings and nothing holds it.
+type SilencedError struct {
+	// Focus names the Focus on now that silences Zettel, or is empty.
+	Focus string
+	// Unreadable is why the Focus state could not be read, or is empty.
+	Unreadable string
+}
+
+// Error implements error.
+func (e *SilencedError) Error() string {
+	if e.Focus != "" {
+		return fmt.Sprintf("the %s Focus silences Zettel; the banner went to Notification Center unseen (System Settings → Focus → %s → Allowed Apps)", e.Focus, e.Focus)
+	}
+	return fmt.Sprintf("the launcher could not read the Focus state, so the banner is not known to be on screen: %s", e.Unreadable)
+}
+
 // ErrNotAllowed is a banner Zettel's notification settings keep off the
 // screen, so the launcher never posted it; the error wrapping it names the
 // setting.
@@ -108,6 +125,15 @@ func (l *Launcher) Post(ctx context.Context, target Target, banner Banner, made 
 		return Handed, nil
 	case *agentreplv1.DesktopBannerPostOutcome_NotAllowed:
 		return Unclicked, fmt.Errorf("%w: %s", ErrNotAllowed, arm.NotAllowed.GetSetting())
+	case *agentreplv1.DesktopBannerPostOutcome_Silenced:
+		switch cause := arm.Silenced.GetCause().(type) {
+		case *agentreplv1.DesktopBannerPostOutcomeSilenced_Focus:
+			return Unclicked, &SilencedError{Focus: cause.Focus}
+		case *agentreplv1.DesktopBannerPostOutcomeSilenced_FocusUnreadable:
+			return Unclicked, &SilencedError{Unreadable: cause.FocusUnreadable}
+		default:
+			return Unclicked, fmt.Errorf("the launcher answered a silenced banner with no cause this daemon knows (%T)", cause)
+		}
 	case *agentreplv1.DesktopBannerPostOutcome_Failed:
 		return Unclicked, fmt.Errorf("macOS refused the banner: %s", arm.Failed.GetPlatformError())
 	default:

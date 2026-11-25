@@ -2,6 +2,7 @@ package desktopnotify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -306,9 +307,14 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	if made {
 		n.settle(ws, seq, err == nil && outcome == Handed, log)
 	}
+	var silenced *SilencedError
 	switch {
 	case standdown.CutShort(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while a banner awaited its click", dlog.Context{"cause": err.Error()})
+	case errors.As(err, &silenced) && silenced.Focus != "":
+		log.Warn(opPost, "a Focus silences Zettel; the banner went to Notification Center unseen and rang no chime", dlog.Context{
+			"title": banner.Title, "focus": silenced.Focus, "cause": err.Error(),
+		})
 	case err != nil:
 		log.Error(opPost, "the desktop banner program failed", dlog.Context{
 			"program": n.deps.Backend.Program(), "title": banner.Title, "cause": err.Error(),

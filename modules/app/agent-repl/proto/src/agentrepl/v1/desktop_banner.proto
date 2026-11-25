@@ -75,14 +75,19 @@ message DesktopBannerPostOutcome {
     // The notification center accepted the banner, and Zettel's settings
     // draw it on screen: notifications are allowed, alerts are on, and their
     // style is banners or alerts. The daemon rings the banner's chime on this
-    // answer alone, so a sound always means a banner on screen. A Focus that
-    // files the banner silently is not reported.
+    // answer alone, so a sound always means a banner on screen. No Focus on
+    // now silences Zettel (`silenced` otherwise).
     DesktopBannerPostOutcomePosted posted = 1;
     // Zettel's notification settings keep the banner off the screen, so it was
     // not posted. Remedied only in System Settings → Notifications → Zettel.
     DesktopBannerPostOutcomeNotAllowed not_allowed = 2;
     // The notification center refused the banner for another reason.
     DesktopBannerPostOutcomeFailed failed = 3;
+    // The notification center took the banner, but it is not known to be on
+    // screen: a Focus silences Zettel, so macOS files it in Notification
+    // Center without drawing it, or the Focus state could not be read. The
+    // daemon rings no chime for it.
+    DesktopBannerPostOutcomeSilenced silenced = 4;
   }
 }
 
@@ -94,6 +99,19 @@ message DesktopBannerPostOutcomeNotAllowed {
   // The setting that keeps it off, as a line for the record (e.g.
   // "notifications are denied", "the alert style is None"). REQUIRED.
   string setting = 1;
+}
+
+// A banner the notification center took but did not draw on screen.
+message DesktopBannerPostOutcomeSilenced {
+  // THE ARM IS WHY. REQUIRED.
+  oneof cause {
+    // The name of the Focus on now that silences Zettel ("Work"), as System
+    // Settings shows it.
+    string focus = 1;
+    // Why the Focus state could not be read, for the record: whether a Focus
+    // silences the banner is unknown, so it is not taken to be drawn.
+    string focus_unreadable = 2;
+  }
 }
 
 // The notification center refused the banner for a reason other than

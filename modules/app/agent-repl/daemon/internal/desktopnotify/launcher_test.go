@@ -95,6 +95,17 @@ func TestLauncherPostSurfacesEveryRefusal(t *testing.T) {
 		{"Zettel's settings keep the banner off screen", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
 			Outcome: &agentreplv1.DesktopBannerPostOutcome_NotAllowed{NotAllowed: &agentreplv1.DesktopBannerPostOutcomeNotAllowed{Setting: "the alert style is None"}},
 		}), ErrNotAllowed.Error() + ": the alert style is None"},
+		{"a Focus silences Zettel", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
+			Outcome: &agentreplv1.DesktopBannerPostOutcome_Silenced{Silenced: &agentreplv1.DesktopBannerPostOutcomeSilenced{
+				Cause: &agentreplv1.DesktopBannerPostOutcomeSilenced_Focus{Focus: "Work"}}},
+		}), "the Work Focus silences Zettel"},
+		{"the Focus state could not be read", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
+			Outcome: &agentreplv1.DesktopBannerPostOutcome_Silenced{Silenced: &agentreplv1.DesktopBannerPostOutcomeSilenced{
+				Cause: &agentreplv1.DesktopBannerPostOutcomeSilenced_FocusUnreadable{FocusUnreadable: "Assertions.json is not JSON"}}},
+		}), "could not read the Focus state, so the banner is not known to be on screen: Assertions.json is not JSON"},
+		{"a silenced banner with no cause", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
+			Outcome: &agentreplv1.DesktopBannerPostOutcome_Silenced{Silenced: &agentreplv1.DesktopBannerPostOutcomeSilenced{}},
+		}), "no cause this daemon knows"},
 		{"macOS refused it for another reason", outcomeAnswer(&agentreplv1.DesktopBannerPostOutcome{
 			Outcome: &agentreplv1.DesktopBannerPostOutcome_Failed{Failed: &agentreplv1.DesktopBannerPostOutcomeFailed{PlatformError: "center busy"}},
 		}), "center busy"},

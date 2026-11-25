@@ -515,6 +515,8 @@ func TestNotifierRingsNothingForABannerNotMade(t *testing.T) {
 		{name: "the workspace cannot be named", workspaces: fakeWorkspaces{err: errors.New("no such workspace")}, wantLevel: "error", wantRecord: "could not name the workspace; no desktop banner"},
 		{name: "no banner program is installed", workspaces: named, noProgram: true, wantLevel: "error", wantRecord: "no desktop banner program; the banner was not posted"},
 		{name: "the banner program failed", workspaces: named, programErr: errors.New("exit status 64"), wantLevel: "error", wantRecord: "the desktop banner program failed"},
+		{name: "a Focus silences the banner", workspaces: named, programErr: &SilencedError{Focus: "Work"}, wantLevel: "warn", wantRecord: "a Focus silences Zettel; the banner went to Notification Center unseen and rang no chime"},
+		{name: "the Focus state could not be read", workspaces: named, programErr: &SilencedError{Unreadable: "Assertions.json is not JSON"}, wantLevel: "error", wantRecord: "the desktop banner program failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -552,6 +554,23 @@ func TestNotifierRingsNothingForABannerNotMade(t *testing.T) {
 				t.Fatalf("no %s record %q of the banner not made", tc.wantLevel, tc.wantRecord)
 			}
 		})
+	}
+}
+
+func TestNotifierWarnsNamingTheFocusThatSilencesABanner(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(false)
+	f.backend.err = &SilencedError{Focus: "Work"}
+
+	// Act
+	f.notifier.Post("ws1", KindTurnEnded, titledBy)
+	f.notifier.wg.Wait()
+
+	// Assert
+	r, ok := hasRecord(f.log, "warn", "a Focus silences Zettel; the banner went to Notification Center unseen and rang no chime")
+	if !ok || r.Context["focus"] != "Work" || r.Context["title"] != "title ws-name" {
+		t.Fatalf("record = %+v (found=%v), want a warning naming the Work Focus and the banner", r, ok)
 	}
 }
 

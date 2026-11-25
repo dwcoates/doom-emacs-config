@@ -315,6 +315,7 @@ type DesktopBannerPostOutcome struct {
 	//	*DesktopBannerPostOutcome_Posted
 	//	*DesktopBannerPostOutcome_NotAllowed
 	//	*DesktopBannerPostOutcome_Failed
+	//	*DesktopBannerPostOutcome_Silenced
 	Outcome       isDesktopBannerPostOutcome_Outcome `protobuf_oneof:"outcome"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -384,6 +385,15 @@ func (x *DesktopBannerPostOutcome) GetFailed() *DesktopBannerPostOutcomeFailed {
 	return nil
 }
 
+func (x *DesktopBannerPostOutcome) GetSilenced() *DesktopBannerPostOutcomeSilenced {
+	if x != nil {
+		if x, ok := x.Outcome.(*DesktopBannerPostOutcome_Silenced); ok {
+			return x.Silenced
+		}
+	}
+	return nil
+}
+
 type isDesktopBannerPostOutcome_Outcome interface {
 	isDesktopBannerPostOutcome_Outcome()
 }
@@ -408,11 +418,21 @@ type DesktopBannerPostOutcome_Failed struct {
 	Failed *DesktopBannerPostOutcomeFailed `protobuf:"bytes,3,opt,name=failed,proto3,oneof"`
 }
 
+type DesktopBannerPostOutcome_Silenced struct {
+	// The notification center took the banner, but it is not known to be on
+	// screen: a Focus silences Zettel, so macOS files it in Notification
+	// Center without drawing it, or the Focus state could not be read. The
+	// daemon rings no chime for it.
+	Silenced *DesktopBannerPostOutcomeSilenced `protobuf:"bytes,4,opt,name=silenced,proto3,oneof"`
+}
+
 func (*DesktopBannerPostOutcome_Posted) isDesktopBannerPostOutcome_Outcome() {}
 
 func (*DesktopBannerPostOutcome_NotAllowed) isDesktopBannerPostOutcome_Outcome() {}
 
 func (*DesktopBannerPostOutcome_Failed) isDesktopBannerPostOutcome_Outcome() {}
+
+func (*DesktopBannerPostOutcome_Silenced) isDesktopBannerPostOutcome_Outcome() {}
 
 // The notification center accepted the banner.
 type DesktopBannerPostOutcomePosted struct {
@@ -498,6 +518,95 @@ func (x *DesktopBannerPostOutcomeNotAllowed) GetSetting() string {
 	return ""
 }
 
+// A banner the notification center took but did not draw on screen.
+type DesktopBannerPostOutcomeSilenced struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE ARM IS WHY. REQUIRED.
+	//
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*DesktopBannerPostOutcomeSilenced_Focus
+	//	*DesktopBannerPostOutcomeSilenced_FocusUnreadable
+	Cause         isDesktopBannerPostOutcomeSilenced_Cause `protobuf_oneof:"cause"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesktopBannerPostOutcomeSilenced) Reset() {
+	*x = DesktopBannerPostOutcomeSilenced{}
+	mi := &file_agentrepl_v1_desktop_banner_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopBannerPostOutcomeSilenced) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopBannerPostOutcomeSilenced) ProtoMessage() {}
+
+func (x *DesktopBannerPostOutcomeSilenced) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_desktop_banner_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopBannerPostOutcomeSilenced.ProtoReflect.Descriptor instead.
+func (*DesktopBannerPostOutcomeSilenced) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_desktop_banner_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DesktopBannerPostOutcomeSilenced) GetCause() isDesktopBannerPostOutcomeSilenced_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *DesktopBannerPostOutcomeSilenced) GetFocus() string {
+	if x != nil {
+		if x, ok := x.Cause.(*DesktopBannerPostOutcomeSilenced_Focus); ok {
+			return x.Focus
+		}
+	}
+	return ""
+}
+
+func (x *DesktopBannerPostOutcomeSilenced) GetFocusUnreadable() string {
+	if x != nil {
+		if x, ok := x.Cause.(*DesktopBannerPostOutcomeSilenced_FocusUnreadable); ok {
+			return x.FocusUnreadable
+		}
+	}
+	return ""
+}
+
+type isDesktopBannerPostOutcomeSilenced_Cause interface {
+	isDesktopBannerPostOutcomeSilenced_Cause()
+}
+
+type DesktopBannerPostOutcomeSilenced_Focus struct {
+	// The name of the Focus on now that silences Zettel ("Work"), as System
+	// Settings shows it.
+	Focus string `protobuf:"bytes,1,opt,name=focus,proto3,oneof"`
+}
+
+type DesktopBannerPostOutcomeSilenced_FocusUnreadable struct {
+	// Why the Focus state could not be read, for the record: whether a Focus
+	// silences the banner is unknown, so it is not taken to be drawn.
+	FocusUnreadable string `protobuf:"bytes,2,opt,name=focus_unreadable,json=focusUnreadable,proto3,oneof"`
+}
+
+func (*DesktopBannerPostOutcomeSilenced_Focus) isDesktopBannerPostOutcomeSilenced_Cause() {}
+
+func (*DesktopBannerPostOutcomeSilenced_FocusUnreadable) isDesktopBannerPostOutcomeSilenced_Cause() {}
+
 // The notification center refused the banner for a reason other than
 // permission.
 type DesktopBannerPostOutcomeFailed struct {
@@ -510,7 +619,7 @@ type DesktopBannerPostOutcomeFailed struct {
 
 func (x *DesktopBannerPostOutcomeFailed) Reset() {
 	*x = DesktopBannerPostOutcomeFailed{}
-	mi := &file_agentrepl_v1_desktop_banner_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_desktop_banner_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -522,7 +631,7 @@ func (x *DesktopBannerPostOutcomeFailed) String() string {
 func (*DesktopBannerPostOutcomeFailed) ProtoMessage() {}
 
 func (x *DesktopBannerPostOutcomeFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_desktop_banner_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_desktop_banner_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -535,7 +644,7 @@ func (x *DesktopBannerPostOutcomeFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopBannerPostOutcomeFailed.ProtoReflect.Descriptor instead.
 func (*DesktopBannerPostOutcomeFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_desktop_banner_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_desktop_banner_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DesktopBannerPostOutcomeFailed) GetPlatformError() string {
@@ -562,16 +671,21 @@ const file_agentrepl_v1_desktop_banner_proto_rawDesc = "" +
 	"\x12DesktopBannerGroup\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"S\n" +
 	"\x17DesktopBannerClickToken\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x8a\x02\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xd8\x02\n" +
 	"\x18DesktopBannerPostOutcome\x12F\n" +
 	"\x06posted\x18\x01 \x01(\v2,.agentrepl.v1.DesktopBannerPostOutcomePostedH\x00R\x06posted\x12S\n" +
 	"\vnot_allowed\x18\x02 \x01(\v20.agentrepl.v1.DesktopBannerPostOutcomeNotAllowedH\x00R\n" +
 	"notAllowed\x12F\n" +
-	"\x06failed\x18\x03 \x01(\v2,.agentrepl.v1.DesktopBannerPostOutcomeFailedH\x00R\x06failedB\t\n" +
+	"\x06failed\x18\x03 \x01(\v2,.agentrepl.v1.DesktopBannerPostOutcomeFailedH\x00R\x06failed\x12L\n" +
+	"\bsilenced\x18\x04 \x01(\v2..agentrepl.v1.DesktopBannerPostOutcomeSilencedH\x00R\bsilencedB\t\n" +
 	"\aoutcome\" \n" +
 	"\x1eDesktopBannerPostOutcomePosted\">\n" +
 	"\"DesktopBannerPostOutcomeNotAllowed\x12\x18\n" +
-	"\asetting\x18\x01 \x01(\tR\asetting\"G\n" +
+	"\asetting\x18\x01 \x01(\tR\asetting\"p\n" +
+	" DesktopBannerPostOutcomeSilenced\x12\x16\n" +
+	"\x05focus\x18\x01 \x01(\tH\x00R\x05focus\x12+\n" +
+	"\x10focus_unreadable\x18\x02 \x01(\tH\x00R\x0ffocusUnreadableB\a\n" +
+	"\x05cause\"G\n" +
 	"\x1eDesktopBannerPostOutcomeFailed\x12%\n" +
 	"\x0eplatform_error\x18\x01 \x01(\tR\rplatformErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -587,7 +701,7 @@ func file_agentrepl_v1_desktop_banner_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_desktop_banner_proto_rawDescData
 }
 
-var file_agentrepl_v1_desktop_banner_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_desktop_banner_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_desktop_banner_proto_goTypes = []any{
 	(*DesktopBanner)(nil),                      // 0: agentrepl.v1.DesktopBanner
 	(*DesktopBannerTitle)(nil),                 // 1: agentrepl.v1.DesktopBannerTitle
@@ -597,23 +711,25 @@ var file_agentrepl_v1_desktop_banner_proto_goTypes = []any{
 	(*DesktopBannerPostOutcome)(nil),           // 5: agentrepl.v1.DesktopBannerPostOutcome
 	(*DesktopBannerPostOutcomePosted)(nil),     // 6: agentrepl.v1.DesktopBannerPostOutcomePosted
 	(*DesktopBannerPostOutcomeNotAllowed)(nil), // 7: agentrepl.v1.DesktopBannerPostOutcomeNotAllowed
-	(*DesktopBannerPostOutcomeFailed)(nil),     // 8: agentrepl.v1.DesktopBannerPostOutcomeFailed
-	(*v1.WorkspaceRef)(nil),                    // 9: workspace.v1.WorkspaceRef
+	(*DesktopBannerPostOutcomeSilenced)(nil),   // 8: agentrepl.v1.DesktopBannerPostOutcomeSilenced
+	(*DesktopBannerPostOutcomeFailed)(nil),     // 9: agentrepl.v1.DesktopBannerPostOutcomeFailed
+	(*v1.WorkspaceRef)(nil),                    // 10: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_desktop_banner_proto_depIdxs = []int32{
-	1, // 0: agentrepl.v1.DesktopBanner.title:type_name -> agentrepl.v1.DesktopBannerTitle
-	2, // 1: agentrepl.v1.DesktopBanner.body:type_name -> agentrepl.v1.DesktopBannerBody
-	3, // 2: agentrepl.v1.DesktopBanner.group:type_name -> agentrepl.v1.DesktopBannerGroup
-	4, // 3: agentrepl.v1.DesktopBanner.click:type_name -> agentrepl.v1.DesktopBannerClickToken
-	9, // 4: agentrepl.v1.DesktopBannerClickToken.workspace:type_name -> workspace.v1.WorkspaceRef
-	6, // 5: agentrepl.v1.DesktopBannerPostOutcome.posted:type_name -> agentrepl.v1.DesktopBannerPostOutcomePosted
-	7, // 6: agentrepl.v1.DesktopBannerPostOutcome.not_allowed:type_name -> agentrepl.v1.DesktopBannerPostOutcomeNotAllowed
-	8, // 7: agentrepl.v1.DesktopBannerPostOutcome.failed:type_name -> agentrepl.v1.DesktopBannerPostOutcomeFailed
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	1,  // 0: agentrepl.v1.DesktopBanner.title:type_name -> agentrepl.v1.DesktopBannerTitle
+	2,  // 1: agentrepl.v1.DesktopBanner.body:type_name -> agentrepl.v1.DesktopBannerBody
+	3,  // 2: agentrepl.v1.DesktopBanner.group:type_name -> agentrepl.v1.DesktopBannerGroup
+	4,  // 3: agentrepl.v1.DesktopBanner.click:type_name -> agentrepl.v1.DesktopBannerClickToken
+	10, // 4: agentrepl.v1.DesktopBannerClickToken.workspace:type_name -> workspace.v1.WorkspaceRef
+	6,  // 5: agentrepl.v1.DesktopBannerPostOutcome.posted:type_name -> agentrepl.v1.DesktopBannerPostOutcomePosted
+	7,  // 6: agentrepl.v1.DesktopBannerPostOutcome.not_allowed:type_name -> agentrepl.v1.DesktopBannerPostOutcomeNotAllowed
+	9,  // 7: agentrepl.v1.DesktopBannerPostOutcome.failed:type_name -> agentrepl.v1.DesktopBannerPostOutcomeFailed
+	8,  // 8: agentrepl.v1.DesktopBannerPostOutcome.silenced:type_name -> agentrepl.v1.DesktopBannerPostOutcomeSilenced
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_desktop_banner_proto_init() }
@@ -625,6 +741,11 @@ func file_agentrepl_v1_desktop_banner_proto_init() {
 		(*DesktopBannerPostOutcome_Posted)(nil),
 		(*DesktopBannerPostOutcome_NotAllowed)(nil),
 		(*DesktopBannerPostOutcome_Failed)(nil),
+		(*DesktopBannerPostOutcome_Silenced)(nil),
+	}
+	file_agentrepl_v1_desktop_banner_proto_msgTypes[8].OneofWrappers = []any{
+		(*DesktopBannerPostOutcomeSilenced_Focus)(nil),
+		(*DesktopBannerPostOutcomeSilenced_FocusUnreadable)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -632,7 +753,7 @@ func file_agentrepl_v1_desktop_banner_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_desktop_banner_proto_rawDesc), len(file_agentrepl_v1_desktop_banner_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
