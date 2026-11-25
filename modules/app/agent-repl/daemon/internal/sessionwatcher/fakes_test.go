@@ -1577,6 +1577,12 @@ func (h *harness) routeNow(apply func(w *watcher)) []event {
 	// The turn ends recorded under mu reach the lifecycle sink only once it is
 	// released, exactly as every stream goroutine does it.
 	h.w.flushTurnEnds()
+	// A STREAM GOROUTINE'S FLUSH MAY HAVE TAKEN THEM FIRST, between the unlock
+	// and the flush above, and still be telling the sinks. Every dispatcher
+	// joins `dispatching` before it takes the pending ends under mu, so once
+	// this flush found them taken, waiting on it waits for their delivery
+	// (the merge gate of 2026-11-25 drained before the lifecycle's two calls).
+	h.w.dispatching.Wait()
 	return h.drainNow()
 }
 
