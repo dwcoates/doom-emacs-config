@@ -39,7 +39,7 @@
 (declare-function agent-repl--recency-ring "commands" (current))
 (declare-function agent-repl--ring-walk "commands" (all drawn current step))
 (declare-function agent-repl-host-pending-selection "host")
-(declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl-roster-open-entry-named "roster" (name))
 (declare-function agent-repl-rpc-report-recency-reach "rpc" (conn request &rest keys))
 
 (defvar agent-repl-roster-update-functions)
@@ -94,17 +94,26 @@ recent request while one is unanswered, else the tab shown."
 
 (defun agent-repl--recency-reach-request (reaches)
   "Return the ReportRecencyReachRequest plist for REACHES.
-Every reached tab is drawn, and a drawn tab's workspace is registered, so
-a name with no ref is a broken invariant: it is recorded and signalled."
+EACH REF IS THE ROSTER'S, read from the very Open section the ring was
+built from (`agent-repl--recency-ring'), so every reached name has one: a
+name with no open entry is a broken invariant, recorded and signalled.
+
+The ref was once the host table's (`agent-repl-host-ref'), which is a
+different record that changes at a different time: killing a workspace
+forgets its host entry at once, while its roster row stays until the
+daemon's next push.  On 2026-11-25 a reach computed in that window, from
+the roster still listing agent-repl-slack-threads, found no host ref for
+it and signalled.  The daemon keys a reach by id alone, and a gutter for
+a row no longer open is drawn nowhere."
   (list :reaches
         (mapcar (pcase-lambda (`(,name ,arm ,presses))
-                  (let ((ref (agent-repl-host-ref name)))
-                    (unless ref
+                  (let ((entry (agent-repl-roster-open-entry-named name)))
+                    (unless entry
                       (agent-repl--error agent-repl--recency-reach-log-scope
                                          "elisp.recency-reach.unregistered ws={ws} arm={arm} presses={presses}"
                                          :ws name :arm arm :presses presses)
-                      (error "agent-repl: the recency walk reaches %s, which has no daemon ref" name))
-                    (list :workspace ref
+                      (error "agent-repl: the recency walk reaches %s, which the roster does not list open" name))
+                    (list :workspace (plist-get entry :ref)
                           :direction (list :arm arm :value (list :presses presses)))))
               reaches)))
 
