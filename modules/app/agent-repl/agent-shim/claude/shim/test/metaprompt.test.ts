@@ -568,16 +568,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("A link the user must visit is opened for them in their browser: `agent-repld workspace open-link here <url>`.");
   });
 
-  it("dispatches a handed failure's fix with a command valid from any repository", () => {
+  it("starts a handed failure's fix child fresh, in this repository or another", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readMetaprompt(home) ?? "";
-    // Assert — a fork never crosses repositories, so the other-repository
-    // command is fresh and names its repository.
-    expect(text).toContain("`agent-repld workspace create -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`");
+    // Assert — the fix's prompt carries everything it needs, so the child
+    // starts fresh in either repository and never forks the conversation.
+    expect(text).toContain("`agent-repld workspace create -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`");
     expect(text).toContain("`agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`");
-    expect(text).not.toContain("-repository <repository> -relationship child -parent here -lands-into main -context fork");
+    expect(text).not.toContain("-lands-into main -context fork -fork here -one-shot -prompt <the fix>");
   });
 
   it("forbids version controlling any personal or private data, in any repository", () => {
