@@ -54,6 +54,13 @@ func (o *mediationOrchestrator) NoteDeployEnding(_ context.Context, at time.Time
 	return nil
 }
 
+func (o *mediationOrchestrator) NoteTakenOverDeployEnding(_ context.Context, ending wsm.DeployEnding) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.calls = append(o.calls, "taken-over ending "+string(ending))
+	return nil
+}
+
 func (o *mediationOrchestrator) OweMediations(_ context.Context, at time.Time) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -209,6 +216,47 @@ func TestADeployThatStoppedShortRecordsItsEndingBeforeTheRounds(t *testing.T) {
 	defer o.mu.Unlock()
 	if want := []string{"ending stopped_short 2026-11-13T21:00:00Z", "mediate"}; !slices.Equal(o.calls, want) {
 		t.Fatalf("calls %v, want %v", o.calls, want)
+	}
+}
+
+func TestADeploysEndingIsRecordedByWhereItBegan(t *testing.T) {
+	at := time.Date(2026, 11, 13, 21, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		began  bool
+		ending deployprogress.Ending
+		want   []string
+	}{
+		{name: "a deploy that began here is named by its start", began: true, ending: deployprogress.EndedFinished, want: []string{"ending finished 2026-11-13T21:00:00Z", "mediate"}},
+		{name: "a finished deploy taken over is recorded as taken over", ending: deployprogress.EndedFinished, want: []string{"taken-over ending finished", "mediate"}},
+		{name: "a deploy taken over that stopped short is recorded as taken over", ending: deployprogress.EndedStoppedShort, want: []string{"taken-over ending stopped_short", "mediate"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			o := &mediationOrchestrator{mediated: make(chan struct{})}
+			log := dlog.NewTestLogger()
+			h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: log}
+			h.bind(o)
+			if tt.began {
+				h.began()
+			}
+
+			// Act
+			h.ended(tt.ending)
+
+			// Assert
+			<-o.mediated
+			o.mu.Lock()
+			calls := slices.Clone(o.calls)
+			o.mu.Unlock()
+			if !slices.Equal(calls, tt.want) {
+				t.Fatalf("calls %v, want %v", calls, tt.want)
+			}
+			if _, logged := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opMediationHook}); logged {
+				t.Fatalf("records %+v, want no ERROR", log.Records())
+			}
+		})
 	}
 }
 
