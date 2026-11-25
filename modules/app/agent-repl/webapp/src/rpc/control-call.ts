@@ -8,7 +8,9 @@
  * streams. Every such call reads its answer the same way, so they read it
  * here:
  *
- *   - a transport failure files the chip (`callUnary` already logged it);
+ *   - a transport failure files the chip (`callUnary` already logged it),
+ *     unless it is planned (`isPlannedRefusal`: the quiet window of a deploy
+ *     handover, a move, a withheld call), which files nothing;
  *   - a refusal is worded through the rpc's own sentences (`refusalOf`, which
  *     also raises the page-wide move notice), recorded at ERROR with the arm,
  *     and filed on the chip;
@@ -23,7 +25,7 @@ import type { AgentReplClient } from "./client.js";
 import type { AppContext } from "./context.js";
 import { callFailure, refusalOf, type Cause, type SentenceTable } from "./refuse.js";
 import { requireCase, unreachableArm } from "./strict.js";
-import { callUnary } from "./unary.js";
+import { callUnary, isPlannedRefusal } from "./unary.js";
 
 const log = createLogger("webapp.rpc.control-call");
 
@@ -67,6 +69,7 @@ export async function controlCall<Res extends Message, Success>(
   } catch (err) {
     // `callUnary` already logged the transport failure; the chip is told here.
     if (!(err instanceof ConnectError)) throw err;
+    if (isPlannedRefusal(err)) return undefined;
     ctx.failures.report(controlPlaneFailed(call.what, callFailure(err).text));
     return undefined;
   }

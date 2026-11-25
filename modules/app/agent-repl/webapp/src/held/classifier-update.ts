@@ -41,7 +41,7 @@ import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { callFailure, refusalOf, type SentenceTable } from "../rpc/refuse.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { callUnary, isPlannedRefusal } from "../rpc/unary.js";
 
 const log = createLogger("webapp.held.classifier-update");
 
@@ -283,6 +283,12 @@ async function submit(ctx: AppContext, turn: string, example: ClassifierExample,
     // this renderer could not read it, so it travels up loudly.
     if (isMalformedView(err) || !(err instanceof ConnectError)) throw err;
     const failure = callFailure(err);
+    // A planned refusal (the quiet window of a deploy handover, a move) is no
+    // fault: `callUnary` recorded it, so it is said at the form and nowhere else.
+    if (isPlannedRefusal(err)) {
+      say(parts.status, failure.arm, failure.text);
+      return;
+    }
     log.error("UpdateClassifierPrompt failed: {text}", {
       operation: "held.classifier-update.failed",
       context: { turn, arm: failure.arm, cause: err },
