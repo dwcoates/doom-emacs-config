@@ -826,3 +826,41 @@ func TestMoveOwedIsTrueOnlyForAMoveNotUnderWay(t *testing.T) {
 		})
 	}
 }
+
+func TestWorktreeOccupied(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture, repo string)
+		want    bool
+	}{
+		{name: "a free directory", want: false},
+		{name: "a directory on disk", want: true, arrange: func(t *testing.T, f *fixture, repo string) {
+			dir, _ := WorktreeDir(repo, "better-name")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "a directory a rename's move is owed to", want: true, arrange: func(t *testing.T, f *fixture, repo string) {
+			dir, _ := WorktreeDir(repo, "better-name")
+			f.db.owedMoves = map[ids.WorkspaceID]wsm.OwedMove{"w1": {Workspace: "w1", To: wsm.MoveTarget{Branch: "better-name", Dir: dir}}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := renameFixture(t)
+			repo, _ := wsm.RepositoryWithID(f.db.repositories, f.db.workspaces["w1"].Repo)
+			if tt.arrange != nil {
+				tt.arrange(t, f, repo.Dir)
+			}
+
+			// Act: a prefixed name shares the bare name's directory.
+			occupied, _, err := f.verbs.(*verbs).worktreeOccupied(context.Background(), repo.Dir, "ABC/better-name")
+
+			// Assert
+			if err != nil || occupied != tt.want {
+				t.Fatalf("worktreeOccupied = (%v, %v), want %v", occupied, err, tt.want)
+			}
+		})
+	}
+}

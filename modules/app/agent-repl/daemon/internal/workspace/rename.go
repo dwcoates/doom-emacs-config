@@ -249,9 +249,9 @@ func (v *verbs) refuseMove(ctx context.Context, log dlog.Logger, record wsm.Work
 		}
 	}
 	if target.Dir != record.Dir {
-		present, err := pathPresent(target.Dir)
+		present, _, err := v.worktreeOccupied(ctx, repoDir, target.Branch)
 		if err != nil {
-			log.Error(opSetName, "could not read whether the new worktree directory exists; the workspace is not renamed", dlog.WithCause(fields, err))
+			log.Error(opSetName, "could not read whether the new worktree directory is free; the workspace is not renamed", dlog.WithCause(fields, err))
 			return fmt.Errorf("rename %q: %w", record.ID, err)
 		}
 		if present {

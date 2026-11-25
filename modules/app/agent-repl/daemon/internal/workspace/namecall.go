@@ -273,7 +273,7 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 		}
 		// So is a directory: another branch's worktree under the same bare
 		// name stands where this one would be materialized (worktreeOccupied).
-		occupied, _, err := worktreeOccupied(repoDir, candidate)
+		occupied, _, err := v.worktreeOccupied(ctx, repoDir, candidate)
 		if err != nil {
 			return false, err
 		}
