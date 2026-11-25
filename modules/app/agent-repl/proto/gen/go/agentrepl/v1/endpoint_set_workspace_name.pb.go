@@ -1,14 +1,24 @@
 // endpoint_set_workspace_name.proto — SetWorkspaceName: rename a workspace.
 // AGENT API section.
 //
-// A RENAME CHANGES THE NAME AND NOTHING ELSE. The name is what the sidebar,
-// the Emacs tab bar, the topbar and every agent CLI verb call the workspace.
-// The workspace's branch and its worktree directory keep the names they were
-// created with: moving the directory would pull the live session's working
-// directory and its vendor transcript out from under it, and the branch is a
-// fact about the repository that merges and deploys name. So after a rename
-// the name and the branch may differ, and every reader that needs the branch
-// reads WorkspaceStatus.branch, never the name.
+// A RENAME IS TOTAL: the workspace's branch and its worktree directory move
+// with its name, so the old name, branch and directory are held by nothing
+// afterwards and are free for any later workspace. The name is what the
+// sidebar, the Emacs tab bar, the topbar and every agent CLI verb call the
+// workspace; the branch becomes the name with the same prefix a create
+// applies, and the directory the one a create of that branch would get.
+//
+// THE NAME CHANGES AT ONCE; THE MOVE RUNS WHEN THE WORKSPACE IS FREE. The
+// live session works in the directory and the vendor files its transcript
+// under a folder named for it, so the move replaces the workspace's shim: it
+// waits until no turn and no detached work runs, holds the workspace's
+// prompts while it moves the branch, the directory and the transcript
+// folder, and resumes the same conversation in the new directory. The
+// success says whether the move is done or owed (SetWorkspaceNameSuccess.
+// move). An owed move survives a daemon restart and a handover.
+//
+// A REPOSITORY'S MAIN CHECKOUT KEEPS ITS BRANCH AND DIRECTORY: they are the
+// repository's, not the workspace's, so its rename changes the name alone.
 //
 // EVERYTHING KEYED BY THE WORKSPACE'S ID SURVIVES IT: its subscriptions, what
 // it awaits and who awaits it, its held prompts, its links, its
@@ -187,7 +197,8 @@ func (*SetWorkspaceNameResponse_Success) isSetWorkspaceNameResponse_Result() {}
 func (*SetWorkspaceNameResponse_Error) isSetWorkspaceNameResponse_Result() {}
 
 // Recorded, and the roster republished with the new name. Renaming a
-// workspace to the name it already has is no change and succeeds.
+// workspace to the name it already has moves its branch and directory when
+// they still differ from it, and is otherwise no change.
 type SetWorkspaceNameSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The name the workspace now has, with the prefix applied: what the
@@ -200,8 +211,13 @@ type SetWorkspaceNameSuccess struct {
 	// ArrangeSidebarSuccess.roster_revision. 0 when the daemon has resolved no
 	// roster yet.
 	RosterRevision uint64 `protobuf:"varint,2,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Where the move of the branch and the directory stands. The roster
+	// carries the workspace's directory (workspace.v1.WorkspaceRef.dir) under
+	// the same id, so every client learns the new directory from the roster
+	// once the move has run, whichever arm this is.
+	Move          *SetWorkspaceNameMove `protobuf:"bytes,3,opt,name=move,proto3" json:"move,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SetWorkspaceNameSuccess) Reset() {
@@ -248,6 +264,269 @@ func (x *SetWorkspaceNameSuccess) GetRosterRevision() uint64 {
 	return 0
 }
 
+func (x *SetWorkspaceNameSuccess) GetMove() *SetWorkspaceNameMove {
+	if x != nil {
+		return x.Move
+	}
+	return nil
+}
+
+// Where a rename's move of the branch and the worktree directory stands.
+// The arms are exclusive: a move either ran before the answer, waits for
+// the workspace to fall free, or has nothing to move.
+type SetWorkspaceNameMove struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to State:
+	//
+	//	*SetWorkspaceNameMove_Moved
+	//	*SetWorkspaceNameMove_Owed
+	//	*SetWorkspaceNameMove_None
+	State         isSetWorkspaceNameMove_State `protobuf_oneof:"state"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameMove) Reset() {
+	*x = SetWorkspaceNameMove{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameMove) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameMove) ProtoMessage() {}
+
+func (x *SetWorkspaceNameMove) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameMove.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameMove) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SetWorkspaceNameMove) GetState() isSetWorkspaceNameMove_State {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+func (x *SetWorkspaceNameMove) GetMoved() *SetWorkspaceNameMoved {
+	if x != nil {
+		if x, ok := x.State.(*SetWorkspaceNameMove_Moved); ok {
+			return x.Moved
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspaceNameMove) GetOwed() *SetWorkspaceNameMoveOwed {
+	if x != nil {
+		if x, ok := x.State.(*SetWorkspaceNameMove_Owed); ok {
+			return x.Owed
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspaceNameMove) GetNone() *SetWorkspaceNameMoveNone {
+	if x != nil {
+		if x, ok := x.State.(*SetWorkspaceNameMove_None); ok {
+			return x.None
+		}
+	}
+	return nil
+}
+
+type isSetWorkspaceNameMove_State interface {
+	isSetWorkspaceNameMove_State()
+}
+
+type SetWorkspaceNameMove_Moved struct {
+	// The branch and the directory moved before the answer: nothing served
+	// the workspace's session, so nothing had to wait.
+	Moved *SetWorkspaceNameMoved `protobuf:"bytes,1,opt,name=moved,proto3,oneof"`
+}
+
+type SetWorkspaceNameMove_Owed struct {
+	// The move is recorded and runs once no turn and no detached work runs
+	// in the workspace. Until it runs, the old branch and directory stay
+	// the workspace's.
+	Owed *SetWorkspaceNameMoveOwed `protobuf:"bytes,2,opt,name=owed,proto3,oneof"`
+}
+
+type SetWorkspaceNameMove_None struct {
+	// Nothing moves: the branch and the directory already carry the name,
+	// or they are the repository's own (its main checkout).
+	None *SetWorkspaceNameMoveNone `protobuf:"bytes,3,opt,name=none,proto3,oneof"`
+}
+
+func (*SetWorkspaceNameMove_Moved) isSetWorkspaceNameMove_State() {}
+
+func (*SetWorkspaceNameMove_Owed) isSetWorkspaceNameMove_State() {}
+
+func (*SetWorkspaceNameMove_None) isSetWorkspaceNameMove_State() {}
+
+// The branch and the directory the rename moved the workspace to.
+type SetWorkspaceNameMoved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace's branch now.
+	Branch string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
+	// The workspace's worktree directory now.
+	Dir           string `protobuf:"bytes,2,opt,name=dir,proto3" json:"dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameMoved) Reset() {
+	*x = SetWorkspaceNameMoved{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameMoved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameMoved) ProtoMessage() {}
+
+func (x *SetWorkspaceNameMoved) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameMoved.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameMoved) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SetWorkspaceNameMoved) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *SetWorkspaceNameMoved) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+// The move a rename recorded, to run when the workspace falls free.
+type SetWorkspaceNameMoveOwed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The branch the workspace will have.
+	Branch string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
+	// The worktree directory the workspace will have.
+	Dir           string `protobuf:"bytes,2,opt,name=dir,proto3" json:"dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameMoveOwed) Reset() {
+	*x = SetWorkspaceNameMoveOwed{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameMoveOwed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameMoveOwed) ProtoMessage() {}
+
+func (x *SetWorkspaceNameMoveOwed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameMoveOwed.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameMoveOwed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SetWorkspaceNameMoveOwed) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *SetWorkspaceNameMoveOwed) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+// Nothing moves. DELIBERATELY EMPTY: the workspace's branch and directory
+// already carry the name, or they belong to the repository.
+type SetWorkspaceNameMoveNone struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameMoveNone) Reset() {
+	*x = SetWorkspaceNameMoveNone{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameMoveNone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameMoveNone) ProtoMessage() {}
+
+func (x *SetWorkspaceNameMoveNone) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameMoveNone.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameMoveNone) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{6}
+}
+
 // The daemon's refusals; nothing was recorded and the workspace keeps its
 // name. Validation failures (an unset workspace, a blank name) are Connect
 // InvalidArgument, never an arm.
@@ -261,6 +540,10 @@ type SetWorkspaceNameError struct {
 	//	*SetWorkspaceNameError_NotYetAdopted
 	//	*SetWorkspaceNameError_InvalidName
 	//	*SetWorkspaceNameError_NameTaken
+	//	*SetWorkspaceNameError_Merging
+	//	*SetWorkspaceNameError_BranchPublished
+	//	*SetWorkspaceNameError_BranchExists
+	//	*SetWorkspaceNameError_DirectoryExists
 	Cause         isSetWorkspaceNameError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -268,7 +551,7 @@ type SetWorkspaceNameError struct {
 
 func (x *SetWorkspaceNameError) Reset() {
 	*x = SetWorkspaceNameError{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -280,7 +563,7 @@ func (x *SetWorkspaceNameError) String() string {
 func (*SetWorkspaceNameError) ProtoMessage() {}
 
 func (x *SetWorkspaceNameError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -293,7 +576,7 @@ func (x *SetWorkspaceNameError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameError.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SetWorkspaceNameError) GetCause() isSetWorkspaceNameError_Cause {
@@ -357,6 +640,42 @@ func (x *SetWorkspaceNameError) GetNameTaken() *SetWorkspaceNameTaken {
 	return nil
 }
 
+func (x *SetWorkspaceNameError) GetMerging() *SetWorkspaceNameMerging {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceNameError_Merging); ok {
+			return x.Merging
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspaceNameError) GetBranchPublished() *SetWorkspaceNameBranchPublished {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceNameError_BranchPublished); ok {
+			return x.BranchPublished
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspaceNameError) GetBranchExists() *SetWorkspaceNameBranchExists {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceNameError_BranchExists); ok {
+			return x.BranchExists
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspaceNameError) GetDirectoryExists() *SetWorkspaceNameDirectoryExists {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceNameError_DirectoryExists); ok {
+			return x.DirectoryExists
+		}
+	}
+	return nil
+}
+
 type isSetWorkspaceNameError_Cause interface {
 	isSetWorkspaceNameError_Cause()
 }
@@ -394,6 +713,30 @@ type SetWorkspaceNameError_NameTaken struct {
 	NameTaken *SetWorkspaceNameTaken `protobuf:"bytes,6,opt,name=name_taken,json=nameTaken,proto3,oneof"`
 }
 
+type SetWorkspaceNameError_Merging struct {
+	// A merge holds the workspace or stands in a queue for its branch, and
+	// the merge names that branch and directory until it ends. Rename it
+	// once the merge has landed or left the queue.
+	Merging *SetWorkspaceNameMerging `protobuf:"bytes,7,opt,name=merging,proto3,oneof"`
+}
+
+type SetWorkspaceNameError_BranchPublished struct {
+	// The workspace's branch tracks a branch on a remote, which a pull
+	// request or a push names by its name; moving the local branch would
+	// part it from that one.
+	BranchPublished *SetWorkspaceNameBranchPublished `protobuf:"bytes,8,opt,name=branch_published,json=branchPublished,proto3,oneof"`
+}
+
+type SetWorkspaceNameError_BranchExists struct {
+	// A git branch by the new name exists that no workspace holds.
+	BranchExists *SetWorkspaceNameBranchExists `protobuf:"bytes,9,opt,name=branch_exists,json=branchExists,proto3,oneof"`
+}
+
+type SetWorkspaceNameError_DirectoryExists struct {
+	// The worktree directory the new name resolves to already exists.
+	DirectoryExists *SetWorkspaceNameDirectoryExists `protobuf:"bytes,10,opt,name=directory_exists,json=directoryExists,proto3,oneof"`
+}
+
 func (*SetWorkspaceNameError_UnknownWorkspace) isSetWorkspaceNameError_Cause() {}
 
 func (*SetWorkspaceNameError_WorkspaceRefMismatch) isSetWorkspaceNameError_Cause() {}
@@ -406,6 +749,190 @@ func (*SetWorkspaceNameError_InvalidName) isSetWorkspaceNameError_Cause() {}
 
 func (*SetWorkspaceNameError_NameTaken) isSetWorkspaceNameError_Cause() {}
 
+func (*SetWorkspaceNameError_Merging) isSetWorkspaceNameError_Cause() {}
+
+func (*SetWorkspaceNameError_BranchPublished) isSetWorkspaceNameError_Cause() {}
+
+func (*SetWorkspaceNameError_BranchExists) isSetWorkspaceNameError_Cause() {}
+
+func (*SetWorkspaceNameError_DirectoryExists) isSetWorkspaceNameError_Cause() {}
+
+// A merge holds the workspace or stands in a merge queue for its branch.
+// DELIBERATELY EMPTY: the merge queue's status names the merge.
+type SetWorkspaceNameMerging struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameMerging) Reset() {
+	*x = SetWorkspaceNameMerging{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameMerging) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameMerging) ProtoMessage() {}
+
+func (x *SetWorkspaceNameMerging) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameMerging.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameMerging) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{8}
+}
+
+// The workspace's branch tracks a remote branch.
+type SetWorkspaceNameBranchPublished struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The upstream the branch tracks, as git spells it (`origin/<branch>`).
+	Upstream      string `protobuf:"bytes,1,opt,name=upstream,proto3" json:"upstream,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameBranchPublished) Reset() {
+	*x = SetWorkspaceNameBranchPublished{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameBranchPublished) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameBranchPublished) ProtoMessage() {}
+
+func (x *SetWorkspaceNameBranchPublished) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameBranchPublished.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameBranchPublished) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SetWorkspaceNameBranchPublished) GetUpstream() string {
+	if x != nil {
+		return x.Upstream
+	}
+	return ""
+}
+
+// A git branch by the new name exists that no workspace holds.
+type SetWorkspaceNameBranchExists struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The branch the new name resolves to.
+	Branch        string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameBranchExists) Reset() {
+	*x = SetWorkspaceNameBranchExists{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameBranchExists) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameBranchExists) ProtoMessage() {}
+
+func (x *SetWorkspaceNameBranchExists) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameBranchExists.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameBranchExists) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SetWorkspaceNameBranchExists) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+// The worktree directory the new name resolves to already exists.
+type SetWorkspaceNameDirectoryExists struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The directory the workspace would move to.
+	Dir           string `protobuf:"bytes,1,opt,name=dir,proto3" json:"dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceNameDirectoryExists) Reset() {
+	*x = SetWorkspaceNameDirectoryExists{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceNameDirectoryExists) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceNameDirectoryExists) ProtoMessage() {}
+
+func (x *SetWorkspaceNameDirectoryExists) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceNameDirectoryExists.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceNameDirectoryExists) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SetWorkspaceNameDirectoryExists) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
 type SetWorkspaceNameUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -415,7 +942,7 @@ type SetWorkspaceNameUnknownWorkspace struct {
 
 func (x *SetWorkspaceNameUnknownWorkspace) Reset() {
 	*x = SetWorkspaceNameUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -427,7 +954,7 @@ func (x *SetWorkspaceNameUnknownWorkspace) String() string {
 func (*SetWorkspaceNameUnknownWorkspace) ProtoMessage() {}
 
 func (x *SetWorkspaceNameUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -440,7 +967,7 @@ func (x *SetWorkspaceNameUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{12}
 }
 
 // The echoed dir disagrees with the registry's dir for this id.
@@ -454,7 +981,7 @@ type SetWorkspaceNameWorkspaceRefMismatch struct {
 
 func (x *SetWorkspaceNameWorkspaceRefMismatch) Reset() {
 	*x = SetWorkspaceNameWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -466,7 +993,7 @@ func (x *SetWorkspaceNameWorkspaceRefMismatch) String() string {
 func (*SetWorkspaceNameWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *SetWorkspaceNameWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -479,7 +1006,7 @@ func (x *SetWorkspaceNameWorkspaceRefMismatch) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SetWorkspaceNameWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SetWorkspaceNameWorkspaceRefMismatch) GetRegistryDir() string {
@@ -500,7 +1027,7 @@ type SetWorkspaceNameTransferringAway struct {
 
 func (x *SetWorkspaceNameTransferringAway) Reset() {
 	*x = SetWorkspaceNameTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -512,7 +1039,7 @@ func (x *SetWorkspaceNameTransferringAway) String() string {
 func (*SetWorkspaceNameTransferringAway) ProtoMessage() {}
 
 func (x *SetWorkspaceNameTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -525,7 +1052,7 @@ func (x *SetWorkspaceNameTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameTransferringAway.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SetWorkspaceNameTransferringAway) GetAddress() string {
@@ -551,7 +1078,7 @@ type SetWorkspaceNameNotYetAdopted struct {
 
 func (x *SetWorkspaceNameNotYetAdopted) Reset() {
 	*x = SetWorkspaceNameNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -563,7 +1090,7 @@ func (x *SetWorkspaceNameNotYetAdopted) String() string {
 func (*SetWorkspaceNameNotYetAdopted) ProtoMessage() {}
 
 func (x *SetWorkspaceNameNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -576,7 +1103,7 @@ func (x *SetWorkspaceNameNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SetWorkspaceNameNotYetAdopted) GetAddress() string {
@@ -609,7 +1136,7 @@ type SetWorkspaceNameTaken struct {
 
 func (x *SetWorkspaceNameTaken) Reset() {
 	*x = SetWorkspaceNameTaken{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -621,7 +1148,7 @@ func (x *SetWorkspaceNameTaken) String() string {
 func (*SetWorkspaceNameTaken) ProtoMessage() {}
 
 func (x *SetWorkspaceNameTaken) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -634,7 +1161,7 @@ func (x *SetWorkspaceNameTaken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameTaken.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameTaken) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SetWorkspaceNameTaken) GetName() string {
@@ -699,7 +1226,7 @@ type SetWorkspaceNameTakenPending struct {
 
 func (x *SetWorkspaceNameTakenPending) Reset() {
 	*x = SetWorkspaceNameTakenPending{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -711,7 +1238,7 @@ func (x *SetWorkspaceNameTakenPending) String() string {
 func (*SetWorkspaceNameTakenPending) ProtoMessage() {}
 
 func (x *SetWorkspaceNameTakenPending) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -724,7 +1251,7 @@ func (x *SetWorkspaceNameTakenPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameTakenPending.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameTakenPending) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{17}
 }
 
 var File_agentrepl_v1_endpoint_set_workspace_name_proto protoreflect.FileDescriptor
@@ -738,10 +1265,23 @@ const file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc = "" +
 	"\x18SetWorkspaceNameResponse\x12A\n" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.SetWorkspaceNameSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.SetWorkspaceNameErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"V\n" +
+	"\x06result\"\x8e\x01\n" +
 	"\x17SetWorkspaceNameSuccess\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
-	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevision\"\xb6\x04\n" +
+	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevision\x126\n" +
+	"\x04move\x18\x03 \x01(\v2\".agentrepl.v1.SetWorkspaceNameMoveR\x04move\"\xd8\x01\n" +
+	"\x14SetWorkspaceNameMove\x12;\n" +
+	"\x05moved\x18\x01 \x01(\v2#.agentrepl.v1.SetWorkspaceNameMovedH\x00R\x05moved\x12<\n" +
+	"\x04owed\x18\x02 \x01(\v2&.agentrepl.v1.SetWorkspaceNameMoveOwedH\x00R\x04owed\x12<\n" +
+	"\x04none\x18\x03 \x01(\v2&.agentrepl.v1.SetWorkspaceNameMoveNoneH\x00R\x04noneB\a\n" +
+	"\x05state\"A\n" +
+	"\x15SetWorkspaceNameMoved\x12\x16\n" +
+	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x10\n" +
+	"\x03dir\x18\x02 \x01(\tR\x03dir\"D\n" +
+	"\x18SetWorkspaceNameMoveOwed\x12\x16\n" +
+	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x10\n" +
+	"\x03dir\x18\x02 \x01(\tR\x03dir\"\x1a\n" +
+	"\x18SetWorkspaceNameMoveNone\"\x84\a\n" +
 	"\x15SetWorkspaceNameError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.SetWorkspaceNameUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
@@ -749,8 +1289,20 @@ const file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc = "" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.SetWorkspaceNameNotYetAdoptedH\x00R\rnotYetAdopted\x12M\n" +
 	"\finvalid_name\x18\x05 \x01(\v2(.agentrepl.v1.CreateWorkspaceInvalidNameH\x00R\vinvalidName\x12D\n" +
 	"\n" +
-	"name_taken\x18\x06 \x01(\v2#.agentrepl.v1.SetWorkspaceNameTakenH\x00R\tnameTakenB\a\n" +
-	"\x05cause\"\"\n" +
+	"name_taken\x18\x06 \x01(\v2#.agentrepl.v1.SetWorkspaceNameTakenH\x00R\tnameTaken\x12A\n" +
+	"\amerging\x18\a \x01(\v2%.agentrepl.v1.SetWorkspaceNameMergingH\x00R\amerging\x12Z\n" +
+	"\x10branch_published\x18\b \x01(\v2-.agentrepl.v1.SetWorkspaceNameBranchPublishedH\x00R\x0fbranchPublished\x12Q\n" +
+	"\rbranch_exists\x18\t \x01(\v2*.agentrepl.v1.SetWorkspaceNameBranchExistsH\x00R\fbranchExists\x12Z\n" +
+	"\x10directory_exists\x18\n" +
+	" \x01(\v2-.agentrepl.v1.SetWorkspaceNameDirectoryExistsH\x00R\x0fdirectoryExistsB\a\n" +
+	"\x05cause\"\x19\n" +
+	"\x17SetWorkspaceNameMerging\"=\n" +
+	"\x1fSetWorkspaceNameBranchPublished\x12\x1a\n" +
+	"\bupstream\x18\x01 \x01(\tR\bupstream\"6\n" +
+	"\x1cSetWorkspaceNameBranchExists\x12\x16\n" +
+	"\x06branch\x18\x01 \x01(\tR\x06branch\"3\n" +
+	"\x1fSetWorkspaceNameDirectoryExists\x12\x10\n" +
+	"\x03dir\x18\x01 \x01(\tR\x03dir\"\"\n" +
 	" SetWorkspaceNameUnknownWorkspace\"I\n" +
 	"$SetWorkspaceNameWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
@@ -779,38 +1331,54 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agentrepl_v1_endpoint_set_workspace_name_proto_goTypes = []any{
 	(*SetWorkspaceNameRequest)(nil),              // 0: agentrepl.v1.SetWorkspaceNameRequest
 	(*SetWorkspaceNameResponse)(nil),             // 1: agentrepl.v1.SetWorkspaceNameResponse
 	(*SetWorkspaceNameSuccess)(nil),              // 2: agentrepl.v1.SetWorkspaceNameSuccess
-	(*SetWorkspaceNameError)(nil),                // 3: agentrepl.v1.SetWorkspaceNameError
-	(*SetWorkspaceNameUnknownWorkspace)(nil),     // 4: agentrepl.v1.SetWorkspaceNameUnknownWorkspace
-	(*SetWorkspaceNameWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatch
-	(*SetWorkspaceNameTransferringAway)(nil),     // 6: agentrepl.v1.SetWorkspaceNameTransferringAway
-	(*SetWorkspaceNameNotYetAdopted)(nil),        // 7: agentrepl.v1.SetWorkspaceNameNotYetAdopted
-	(*SetWorkspaceNameTaken)(nil),                // 8: agentrepl.v1.SetWorkspaceNameTaken
-	(*SetWorkspaceNameTakenPending)(nil),         // 9: agentrepl.v1.SetWorkspaceNameTakenPending
-	(*v1.WorkspaceRef)(nil),                      // 10: workspace.v1.WorkspaceRef
-	(*CreateWorkspaceInvalidName)(nil),           // 11: agentrepl.v1.CreateWorkspaceInvalidName
+	(*SetWorkspaceNameMove)(nil),                 // 3: agentrepl.v1.SetWorkspaceNameMove
+	(*SetWorkspaceNameMoved)(nil),                // 4: agentrepl.v1.SetWorkspaceNameMoved
+	(*SetWorkspaceNameMoveOwed)(nil),             // 5: agentrepl.v1.SetWorkspaceNameMoveOwed
+	(*SetWorkspaceNameMoveNone)(nil),             // 6: agentrepl.v1.SetWorkspaceNameMoveNone
+	(*SetWorkspaceNameError)(nil),                // 7: agentrepl.v1.SetWorkspaceNameError
+	(*SetWorkspaceNameMerging)(nil),              // 8: agentrepl.v1.SetWorkspaceNameMerging
+	(*SetWorkspaceNameBranchPublished)(nil),      // 9: agentrepl.v1.SetWorkspaceNameBranchPublished
+	(*SetWorkspaceNameBranchExists)(nil),         // 10: agentrepl.v1.SetWorkspaceNameBranchExists
+	(*SetWorkspaceNameDirectoryExists)(nil),      // 11: agentrepl.v1.SetWorkspaceNameDirectoryExists
+	(*SetWorkspaceNameUnknownWorkspace)(nil),     // 12: agentrepl.v1.SetWorkspaceNameUnknownWorkspace
+	(*SetWorkspaceNameWorkspaceRefMismatch)(nil), // 13: agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatch
+	(*SetWorkspaceNameTransferringAway)(nil),     // 14: agentrepl.v1.SetWorkspaceNameTransferringAway
+	(*SetWorkspaceNameNotYetAdopted)(nil),        // 15: agentrepl.v1.SetWorkspaceNameNotYetAdopted
+	(*SetWorkspaceNameTaken)(nil),                // 16: agentrepl.v1.SetWorkspaceNameTaken
+	(*SetWorkspaceNameTakenPending)(nil),         // 17: agentrepl.v1.SetWorkspaceNameTakenPending
+	(*v1.WorkspaceRef)(nil),                      // 18: workspace.v1.WorkspaceRef
+	(*CreateWorkspaceInvalidName)(nil),           // 19: agentrepl.v1.CreateWorkspaceInvalidName
 }
 var file_agentrepl_v1_endpoint_set_workspace_name_proto_depIdxs = []int32{
-	10, // 0: agentrepl.v1.SetWorkspaceNameRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	18, // 0: agentrepl.v1.SetWorkspaceNameRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.SetWorkspaceNameResponse.success:type_name -> agentrepl.v1.SetWorkspaceNameSuccess
-	3,  // 2: agentrepl.v1.SetWorkspaceNameResponse.error:type_name -> agentrepl.v1.SetWorkspaceNameError
-	4,  // 3: agentrepl.v1.SetWorkspaceNameError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceNameUnknownWorkspace
-	5,  // 4: agentrepl.v1.SetWorkspaceNameError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatch
-	6,  // 5: agentrepl.v1.SetWorkspaceNameError.transferring_away:type_name -> agentrepl.v1.SetWorkspaceNameTransferringAway
-	7,  // 6: agentrepl.v1.SetWorkspaceNameError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspaceNameNotYetAdopted
-	11, // 7: agentrepl.v1.SetWorkspaceNameError.invalid_name:type_name -> agentrepl.v1.CreateWorkspaceInvalidName
-	8,  // 8: agentrepl.v1.SetWorkspaceNameError.name_taken:type_name -> agentrepl.v1.SetWorkspaceNameTaken
-	10, // 9: agentrepl.v1.SetWorkspaceNameTaken.workspace:type_name -> workspace.v1.WorkspaceRef
-	9,  // 10: agentrepl.v1.SetWorkspaceNameTaken.pending:type_name -> agentrepl.v1.SetWorkspaceNameTakenPending
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	7,  // 2: agentrepl.v1.SetWorkspaceNameResponse.error:type_name -> agentrepl.v1.SetWorkspaceNameError
+	3,  // 3: agentrepl.v1.SetWorkspaceNameSuccess.move:type_name -> agentrepl.v1.SetWorkspaceNameMove
+	4,  // 4: agentrepl.v1.SetWorkspaceNameMove.moved:type_name -> agentrepl.v1.SetWorkspaceNameMoved
+	5,  // 5: agentrepl.v1.SetWorkspaceNameMove.owed:type_name -> agentrepl.v1.SetWorkspaceNameMoveOwed
+	6,  // 6: agentrepl.v1.SetWorkspaceNameMove.none:type_name -> agentrepl.v1.SetWorkspaceNameMoveNone
+	12, // 7: agentrepl.v1.SetWorkspaceNameError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceNameUnknownWorkspace
+	13, // 8: agentrepl.v1.SetWorkspaceNameError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatch
+	14, // 9: agentrepl.v1.SetWorkspaceNameError.transferring_away:type_name -> agentrepl.v1.SetWorkspaceNameTransferringAway
+	15, // 10: agentrepl.v1.SetWorkspaceNameError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspaceNameNotYetAdopted
+	19, // 11: agentrepl.v1.SetWorkspaceNameError.invalid_name:type_name -> agentrepl.v1.CreateWorkspaceInvalidName
+	16, // 12: agentrepl.v1.SetWorkspaceNameError.name_taken:type_name -> agentrepl.v1.SetWorkspaceNameTaken
+	8,  // 13: agentrepl.v1.SetWorkspaceNameError.merging:type_name -> agentrepl.v1.SetWorkspaceNameMerging
+	9,  // 14: agentrepl.v1.SetWorkspaceNameError.branch_published:type_name -> agentrepl.v1.SetWorkspaceNameBranchPublished
+	10, // 15: agentrepl.v1.SetWorkspaceNameError.branch_exists:type_name -> agentrepl.v1.SetWorkspaceNameBranchExists
+	11, // 16: agentrepl.v1.SetWorkspaceNameError.directory_exists:type_name -> agentrepl.v1.SetWorkspaceNameDirectoryExists
+	18, // 17: agentrepl.v1.SetWorkspaceNameTaken.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // 18: agentrepl.v1.SetWorkspaceNameTaken.pending:type_name -> agentrepl.v1.SetWorkspaceNameTakenPending
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_name_proto_init() }
@@ -824,15 +1392,24 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_init() {
 		(*SetWorkspaceNameResponse_Error)(nil),
 	}
 	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[3].OneofWrappers = []any{
+		(*SetWorkspaceNameMove_Moved)(nil),
+		(*SetWorkspaceNameMove_Owed)(nil),
+		(*SetWorkspaceNameMove_None)(nil),
+	}
+	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7].OneofWrappers = []any{
 		(*SetWorkspaceNameError_UnknownWorkspace)(nil),
 		(*SetWorkspaceNameError_WorkspaceRefMismatch)(nil),
 		(*SetWorkspaceNameError_TransferringAway)(nil),
 		(*SetWorkspaceNameError_NotYetAdopted)(nil),
 		(*SetWorkspaceNameError_InvalidName)(nil),
 		(*SetWorkspaceNameError_NameTaken)(nil),
+		(*SetWorkspaceNameError_Merging)(nil),
+		(*SetWorkspaceNameError_BranchPublished)(nil),
+		(*SetWorkspaceNameError_BranchExists)(nil),
+		(*SetWorkspaceNameError_DirectoryExists)(nil),
 	}
-	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[15].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[16].OneofWrappers = []any{
 		(*SetWorkspaceNameTaken_Workspace)(nil),
 		(*SetWorkspaceNameTaken_Pending)(nil),
 	}
@@ -842,7 +1419,7 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
