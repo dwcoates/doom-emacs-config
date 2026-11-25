@@ -1850,10 +1850,10 @@ refusal still reaches the generic reporting."
   (agent-repl-test-verbs--with
       (list (cons :create (list :response (list :arm :error
                                                 :value (agent-repl-test-verbs--invalid-name-refusal
-                                                        "fix/production-mediator" "production-mediator" :reserved)))))
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "fix/production-mediator")
+                                                        "fix/prod-mediator" "prod-mediator" :reserved)))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "fix/prod-mediator")
     (should (agent-repl-test-verbs--messaged-p
-             "agent-repl: workspace creation FAILED: the name \"fix/production-mediator\" is not a workspace name: \"production-mediator\" is the name agent-repl keeps for its own standing workspace"))))
+             "agent-repl: workspace creation FAILED: the name \"fix/prod-mediator\" is not a workspace name: \"prod-mediator\" is the name agent-repl keeps for its own standing workspace"))))
 
 (ert-deftest agent-repl-verbs-create-invalid-name-empty-part-says-so ()
   "An empty part between slashes is named as such, not quoted as \"\"."

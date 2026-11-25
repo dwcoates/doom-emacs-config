@@ -130,8 +130,8 @@ func TestTheSharedNestedRefusalSentences(t *testing.T) {
 			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "A/b", Component: "A", Rule: &agentreplv1.CreateWorkspaceInvalidName_Prefix{Prefix: &agentreplv1.CreateWorkspaceInvalidNamePrefix{}}})
 		}, want: `the name "A/b" breaks the naming rule: its component "A" before the last is not a prefix`},
 		{name: "a standing workspace's name", say: func() (string, error) {
-			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "fix/production-mediator", Component: "production-mediator", Rule: &agentreplv1.CreateWorkspaceInvalidName_Reserved{Reserved: &agentreplv1.CreateWorkspaceInvalidNameReserved{}}})
-		}, want: `the name "fix/production-mediator" ends in "production-mediator", a name agent-repl keeps for its own standing workspace`},
+			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "fix/prod-mediator", Component: "prod-mediator", Rule: &agentreplv1.CreateWorkspaceInvalidName_Reserved{Reserved: &agentreplv1.CreateWorkspaceInvalidNameReserved{}}})
+		}, want: `the name "fix/prod-mediator" ends in "prod-mediator", a name agent-repl keeps for its own standing workspace`},
 		{name: "version unexpected, unversioned", say: func() (string, error) {
 			return sayVersionUnexpected(&agentreplv1.MergeWorkspaceVersionIncrementUnexpected{Reason: &agentreplv1.MergeWorkspaceVersionIncrementUnexpected_UnversionedRepository{UnversionedRepository: &agentreplv1.MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository{}}})
 		}, want: "its repository's deploy config versions nothing"},

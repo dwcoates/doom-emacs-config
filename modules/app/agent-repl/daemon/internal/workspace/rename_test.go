@@ -174,9 +174,9 @@ func TestSetNameGivesAMediatorItsOwnRolesName(t *testing.T) {
 		requested string
 		wantArm   string
 	}{
-		{name: "a mediator takes its own role's name, unprefixed", role: wsm.MediatorProduction, requested: "production-mediator"},
+		{name: "a mediator takes its own role's name, unprefixed", role: wsm.MediatorProduction, requested: "prod-mediator"},
 		{name: "a mediator may not take another role's name", role: wsm.MediatorProduction, requested: "deploy-mediator", wantArm: ArmInvalidName},
-		{name: "a workspace that is no mediator may not take a role's name", role: wsm.NotMediator, requested: "production-mediator", wantArm: ArmInvalidName},
+		{name: "a workspace that is no mediator may not take a role's name", role: wsm.NotMediator, requested: "prod-mediator", wantArm: ArmInvalidName},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,7 +213,7 @@ func TestSetNameRefusesANameThatBreaksTheNamingRule(t *testing.T) {
 	}{
 		{name: "a slug that is not lowercase hyphenated words", requested: "Better Name", component: "Better Name", rule: NameRuleSlug},
 		{name: "a prefix that is not letters and digits", requested: "A B/better", component: "A B", rule: NameRulePrefix},
-		{name: "a standing workspace's name", requested: "production-mediator", component: "production-mediator", rule: NameRuleReserved},
+		{name: "a standing workspace's name", requested: "prod-mediator", component: "prod-mediator", rule: NameRuleReserved},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -192,7 +192,7 @@ func TestAProductionMediatorIsRecordedInItsOwnRole(t *testing.T) {
 	// Assert
 	recorded, found, err2 := h.db.checks.StandingMediatorOf(context.Background(), wsm.MediatorProduction, mediationKey(h))
 	_, deployFound, err3 := h.db.checks.StandingMediatorOf(context.Background(), wsm.MediatorDeploy, mediationKey(h))
-	if err != nil || err2 != nil || err3 != nil || !found || recorded.Workspace != got.ws || deployFound || !slices.Equal(h.checks.made, []string{"production-mediator"}) {
+	if err != nil || err2 != nil || err3 != nil || !found || recorded.Workspace != got.ws || deployFound || !slices.Equal(h.checks.made, []string{wsm.MediatorProduction.Name()}) {
 		t.Fatalf("mediatorOf = (%+v, %v), recorded (%+v, %v, %v), deploy %v (%v), made %v; want only a production mediator made", got, err, recorded, found, err2, deployFound, err3, h.checks.made)
 	}
 }

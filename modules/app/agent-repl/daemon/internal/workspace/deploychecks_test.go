@@ -683,7 +683,7 @@ func TestAMediatorIsMadeUnderItsRolesPlainName(t *testing.T) {
 		want string
 	}{
 		{name: "the deploy mediator", role: wsm.MediatorDeploy, want: "deploy-mediator"},
-		{name: "the production mediator", role: wsm.MediatorProduction, want: "production-mediator"},
+		{name: "the production mediator", role: wsm.MediatorProduction, want: "prod-mediator"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -735,7 +735,7 @@ func TestACreateNamedForAStandingWorkspaceIsRefused(t *testing.T) {
 		name     string
 		supplied string
 	}{
-		{name: "a standing workspace's name", supplied: "production-mediator"},
+		{name: "a standing workspace's name", supplied: "prod-mediator"},
 		{name: "a standing workspace's name under a prefix", supplied: "fix/deploy-mediator"},
 	}
 	for _, tt := range tests {

@@ -175,7 +175,7 @@ func TestADueSpanIsToldToTheProductionMediatorWithItsSiteFile(t *testing.T) {
 	if err != nil || !strings.Contains(string(file), "aaaaaaaaaaaa") || !strings.Contains(submittedText(told[0]), path) {
 		t.Fatalf("site file %s = (%q, %v), brief %q; want the new site listed and named", path, file, err, submittedText(told[0]))
 	}
-	if !slices.Equal(h.checks.made, []string{"production-mediator"}) {
+	if !slices.Equal(h.checks.made, []string{wsm.MediatorProduction.Name()}) {
 		t.Fatalf("made %v, want the production mediator", h.checks.made)
 	}
 	if c, err := h.db.ProductionCheckOf(context.Background(), mediationKey(h)); err != nil || c != nil {

@@ -2495,7 +2495,7 @@ export const CreateWorkspaceInvalidNamePrefixSchema: GenMessage<CreateWorkspaceI
 /**
  * The name's last component is a standing workspace's name, one the daemon
  * keeps for a workspace it makes and owns itself (a repository's mediators,
- * `deploy-mediator` and `production-mediator`). No create, rename or async
+ * `deploy-mediator` and `prod-mediator`). No create, rename or async
  * merge name outside the daemon may end in one, so the branch and the
  * worktree directory the daemon makes for itself can never collide with one
  * a person or an agent made.

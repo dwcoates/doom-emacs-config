@@ -1,6 +1,7 @@
 package wsm
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -131,4 +132,46 @@ func TestNextKeepalives(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMediatorRoleName(t *testing.T) {
+	cases := []struct {
+		name string
+		role MediatorRole
+		want string
+	}{
+		{name: "the deploy mediator", role: MediatorDeploy, want: "deploy-mediator"},
+		{name: "the production mediator", role: MediatorProduction, want: "prod-mediator"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.role.Name()
+
+			// Assert
+			if got != tc.want || strings.Contains(got, "/") {
+				t.Fatalf("%s.Name() = %q, want %q", tc.role, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEveryMediatorRoleHasAName(t *testing.T) {
+	for _, role := range MediatorRoles {
+		if role.Name() == "" {
+			t.Errorf("%s has no name", role)
+		}
+	}
+}
+
+func TestTheNameOfNoMediatorRoleIsABug(t *testing.T) {
+	// Arrange
+	defer func() {
+		if recover() == nil {
+			t.Fatal("NotMediator.Name() answered, want a panic")
+		}
+	}()
+
+	// Act
+	_ = NotMediator.Name()
 }

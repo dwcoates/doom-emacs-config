@@ -1845,10 +1845,13 @@ var MediatorRoles = []MediatorRole{MediatorDeploy, MediatorProduction}
 // other workspace may take. A role that is no mediator has none, and asking
 // for it is a bug.
 func (r MediatorRole) Name() string {
-	if r == NotMediator {
-		panic("wsm: the name of no mediator role")
+	switch r {
+	case MediatorDeploy:
+		return "deploy-mediator"
+	case MediatorProduction:
+		return "prod-mediator"
 	}
-	return string(r) + "-mediator"
+	panic(fmt.Sprintf("wsm: the name of mediator role %q", string(r)))
 }
 
 // IsMediator reports whether the workspace is one of its repository's

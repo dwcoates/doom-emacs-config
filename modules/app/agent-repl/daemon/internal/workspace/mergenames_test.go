@@ -672,10 +672,10 @@ func TestClaimMergeNameAnswersTakenForAStandingName(t *testing.T) {
 	repo := claimRepo(t, f)
 
 	// Act
-	branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), repo, "production-mediator")
+	branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), repo, "prod-mediator")
 
 	// Assert
-	if err != nil || !taken || branch != "production-mediator" || release != nil {
+	if err != nil || !taken || branch != "prod-mediator" || release != nil {
 		t.Fatalf("ClaimMergeName = %q, %v, %v; want taken with no claim", branch, taken, err)
 	}
 	if claimed := f.verbs.(*verbs).names.claimed; len(claimed) != 0 {

@@ -362,7 +362,7 @@ func TestValidateSuppliedNameNamesTheFirstBreach(t *testing.T) {
 		{name: "a doubled slash", supplied: "ABC//fix", component: "", rule: NameRulePrefix},
 		{name: "a prefix with a doubled dot", supplied: "a..b/fix", component: "a..b", rule: NameRulePrefix},
 		{name: "a bad prefix before a bad slug", supplied: "a b/C D", component: "a b", rule: NameRulePrefix},
-		{name: "a standing workspace's name", supplied: "production-mediator", component: "production-mediator", rule: NameRuleReserved},
+		{name: "a standing workspace's name", supplied: "prod-mediator", component: "prod-mediator", rule: NameRuleReserved},
 		{name: "a standing workspace's name under a prefix", supplied: "ABC/deploy-mediator", component: "deploy-mediator", rule: NameRuleReserved},
 	}
 	for _, tc := range cases {
@@ -556,10 +556,10 @@ func TestIsStandingName(t *testing.T) {
 		want bool
 	}{
 		{name: "the deploy mediator's name", in: "deploy-mediator", want: true},
-		{name: "the production mediator's name", in: "production-mediator", want: true},
-		{name: "a standing name under a prefix", in: "ABC/production-mediator", want: true},
+		{name: "the production mediator's name", in: "prod-mediator", want: true},
+		{name: "a standing name under a prefix", in: "ABC/prod-mediator", want: true},
 		{name: "a name that only starts with a standing name", in: "production-mediator-planning", want: false},
-		{name: "a standing name as a prefix", in: "production-mediator/fix", want: false},
+		{name: "a standing name as a prefix", in: "prod-mediator/fix", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
