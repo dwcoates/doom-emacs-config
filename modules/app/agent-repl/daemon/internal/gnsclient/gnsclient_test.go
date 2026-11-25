@@ -403,7 +403,7 @@ func TestListReactedKeepsTheUsersOwnReactionsOnMessages(t *testing.T) {
 	  {"channel":"C1","message":{"ts":"1.2","text":"t","permalink":"https://x.slack.com/archives/C1/p12","reactions":[{"name":"agent-ack","users":["U2","U1"]},{"name":"eyes","users":["U2"]}]}},
 	  {"channel":"C1","message":{"ts":"1.3","reactions":[{"name":"eyes","users":["U2"]}]}},
 	  {"type":"file","file":{"id":"F1"}}]}`
-	bin, _ := fakeGNS(t, out, "", 0, "")
+	bin, dir := fakeGNS(t, out, "", 0, "")
 	c, _ := newClient(t, bin, 0)
 
 	// Act
@@ -413,6 +413,9 @@ func TestListReactedKeepsTheUsersOwnReactionsOnMessages(t *testing.T) {
 	want := []ReactedMessage{{Channel: "C1", TS: "1.2", Text: "t", Permalink: "https://x.slack.com/archives/C1/p12", Emojis: []string{"agent-ack"}}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListReacted = %+v, %v", got, err)
+	}
+	if args := strings.Join(argsOf(t, dir), " "); args != "slack reactions list --user U1 --limit 20 --full --json" {
+		t.Fatalf("args %q; want a page of 20", args)
 	}
 }
 

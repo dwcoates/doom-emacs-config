@@ -585,11 +585,17 @@ func (c *client) Search(ctx context.Context, query string, page int) (SearchPage
 	return res, nil
 }
 
+// reactedPageSize is how many of the user's latest reacted items a read
+// asks for (owner ruling, 2026-11-25). Slack sends each message whole, about
+// 3.5 KB, so 100 cost about 350 KB a poll; 20 cost about 70 KB, and miss a
+// reaction only when more than 20 are added between two polls that read.
+const reactedPageSize = 20
+
 func (c *client) ListReacted(ctx context.Context, userID string) ([]ReactedMessage, error) {
 	call := "gns slack reactions list --user " + userID
 	// --full makes Slack name every reacting user on each reaction, so a
 	// popular emoji's truncated list cannot hide the watch user.
-	out, err := c.run(ctx, nil, "slack", "reactions", "list", "--user", userID, "--limit", "100", "--full", "--json")
+	out, err := c.run(ctx, nil, "slack", "reactions", "list", "--user", userID, "--limit", strconv.Itoa(reactedPageSize), "--full", "--json")
 	if err != nil {
 		return nil, err
 	}
