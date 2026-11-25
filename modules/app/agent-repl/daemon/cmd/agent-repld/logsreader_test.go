@@ -51,7 +51,7 @@ func TestTheLogsReaderFailsLoudly(t *testing.T) {
 		want   string
 	}{
 		{name: "a reader that cannot run", runner: &fakeLines{err: errors.New("no such file")}, want: "no such file"},
-		{name: "a reader that outlives its bound", runner: &fakeLines{run: scriptrunner.Run{TimedOut: true}}, want: "outlived its bound of 3s (measured at 990ms)"},
+		{name: "a reader that outlives its bound", runner: &fakeLines{run: scriptrunner.Run{TimedOut: true}}, want: "outlived its bound of 2.25s (measured at 500ms)"},
 		{name: "a reader that exits non-zero", runner: &fakeLines{run: scriptrunner.Run{ExitCode: 2, Output: "logs: no sink"}}, want: "exited 2"},
 		{name: "a record that does not decode", runner: &fakeLines{run: scriptrunner.Run{Output: "{\"level\":"}}, want: "no record"},
 	}
@@ -86,10 +86,10 @@ func TestTheLogsReaderRecordsEveryReadsOutcome(t *testing.T) {
 		},
 		{
 			name:      "a read that outlives its bound records the bound and measurement",
-			run:       scriptrunner.Run{Wall: 3 * time.Second, TimedOut: true},
+			run:       scriptrunner.Run{Wall: 2251 * time.Millisecond, TimedOut: true},
 			wantErr:   true,
 			wantLevel: "ERROR",
-			want:      dlog.Context{"duration_ms": int64(3000), "outcome": "timed_out"},
+			want:      dlog.Context{"duration_ms": int64(2251), "outcome": "timed_out"},
 		},
 	}
 	for _, tt := range tests {
@@ -112,7 +112,7 @@ func TestTheLogsReaderRecordsEveryReadsOutcome(t *testing.T) {
 				t.Fatalf("level = %q, want %q", rec.Level, tt.wantLevel)
 			}
 			want := dlog.Context{
-				"bound_ms": int64(3000), "measured_ms": int64(990),
+				"bound_ms": int64(2250), "measured_ms": int64(500),
 				"since": "2026-11-25T01:30:00Z", "until": "2026-11-25T01:50:00Z",
 			}
 			for k, v := range tt.want {
