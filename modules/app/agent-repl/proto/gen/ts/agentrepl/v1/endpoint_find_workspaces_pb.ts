@@ -31,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_find_workspaces.proto.
  */
 export const file_agentrepl_v1_endpoint_find_workspaces: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluZF93b3Jrc3BhY2VzLnByb3RvEgxhZ2VudHJlcGwudjEi+QQKFUZpbmRXb3Jrc3BhY2VzUmVxdWVzdBI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARI3CgZ3aW5kb3cYAiABKAsyIi5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNXaW5kb3dIAYgBARI7CghzdGFuZGluZxgDIAEoCzIkLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nSAKIAQESEQoEdGV4dBgEIAEoCUgDiAEBEhIKBWxpbWl0GAUgASgNSASIAQESMwoKY3JlYXRlZF9ieRgGIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIBYgBARI8Cglvbl9yb3N0ZXIYByABKAsyJC5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNPblJvc3RlckgGiAEBEi8KBmNhbGxlchgIIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIB4gBARI1CgVsb2dpbhgJIAEoCzIhLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc0xvZ2luSAiIAQESOwoGdHVybmVkGAogASgLMiYuYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVHVybldpbmRvd0gJiAEBQg0KC19yZXBvc2l0b3J5QgkKB193aW5kb3dCCwoJX3N0YW5kaW5nQgcKBV90ZXh0QggKBl9saW1pdEINCgtfY3JlYXRlZF9ieUIMCgpfb25fcm9zdGVyQgkKB19jYWxsZXJCCAoGX2xvZ2luQgkKB190dXJuZWQiagoTRmluZFdvcmtzcGFjZXNMb2dpbhIyCgxvZl93b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAASFgoMYWNjb3VudF9yb290GAIgASgJSABCBwoFbG9naW4iGAoWRmluZFdvcmtzcGFjZXNPblJvc3RlciJiChhGaW5kV29ya3NwYWNlc1R1cm5XaW5kb3cSFQoIc2luY2VfbXMYASABKANIAIgBARIVCgh1bnRpbF9tcxgCIAEoA0gBiAEBQgsKCV9zaW5jZV9tc0ILCglfdW50aWxfbXMiXgoURmluZFdvcmtzcGFjZXNXaW5kb3cSFQoIc2luY2VfbXMYASABKANIAIgBARIVCgh1bnRpbF9tcxgCIAEoA0gBiAEBQgsKCV9zaW5jZV9tc0ILCglfdW50aWxfbXMi2gEKFkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmcSOAoEb3BlbhgBIAEoCzIoLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbkgAEjwKBmNsb3NlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkSAASPAoGbGFuZGVkGAMgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWRIAEIKCghzdGFuZGluZyIcChpGaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbiIeChxGaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkIh4KHEZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWQijgEKFkZpbmRXb3Jrc3BhY2VzUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc0Vycm9ySABCCAoGcmVzdWx0IqEBChVGaW5kV29ya3NwYWNlc1N1Y2Nlc3MSPwoIY29tcGxldGUYASABKAsyKy5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGVIABI9CgdwYXJ0aWFsGAIgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3VjY2Vzc1BhcnRpYWxIAEIICgZleHRlbnQiUQodRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGUSMAoKd29ya3NwYWNlcxgBIAMoCzIcLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZSJhChxGaW5kV29ya3NwYWNlc1N1Y2Nlc3NQYXJ0aWFsEjAKCndvcmtzcGFjZXMYASADKAsyHC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2USDwoHb21pdHRlZBgCIAEoDSLCBQoORm91bmRXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRIvCgpyZXBvc2l0b3J5GAQgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSGQoMbG9uZ19zdW1tYXJ5GBAgASgJSACIAQESGgoNc2hvcnRfc3VtbWFyeRgFIAEoCUgBiAEBEhUKDWNyZWF0ZWRfYXRfbXMYBiABKAMSGQoRbGFzdF9hY3RpdmVfYXRfbXMYByABKAMSNgoIc3RhbmRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VTdGFuZGluZxIzCgpjcmVhdGVkX2J5GAkgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgCiAEBEi8KBnBhcmVudBgKIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIA4gBARI3CgZyb3N0ZXIYCyABKAsyIi5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VSb3N0ZXJIBIgBARIPCgdjYWxsaW5nGAwgASgIEjUKBW1lcmdlGA0gASgLMiEuYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlTWVyZ2VIBYgBARIXCgpjb25maWdfZGlyGA4gASgJSAaIAQESHAoPbGFzdF90dXJuX2F0X21zGA8gASgDSAeIAQFCDwoNX2xvbmdfc3VtbWFyeUIQCg5fc2hvcnRfc3VtbWFyeUINCgtfY3JlYXRlZF9ieUIJCgdfcGFyZW50QgkKB19yb3N0ZXJCCAoGX21lcmdlQg0KC19jb25maWdfZGlyQhIKEF9sYXN0X3R1cm5fYXRfbXMiVwoTRm91bmRXb3Jrc3BhY2VNZXJnZRIyCglyZXF1ZXN0ZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSACIAQFCDAoKX3JlcXVlc3RlciKMAQoURm91bmRXb3Jrc3BhY2VSb3N0ZXISOgoHc2VjdGlvbhgBIAEoCzIpLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb24SOAoGc3RhdHVzGAIgASgLMiguYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlUm9zdGVyU3RhdHVzIu8BChtGb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb24SPQoEb3BlbhgBIAEoCzItLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25PcGVuSAASQwoHYmFja2xvZxgCIAEoCzIwLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25CYWNrbG9nSAASQQoGbWVyZ2VkGAMgASgLMi8uYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlUm9zdGVyU2VjdGlvbk1lcmdlZEgAQgkKB3NlY3Rpb24iIQofRm91bmRXb3Jrc3BhY2VSb3N0ZXJTZWN0aW9uT3BlbiIkCiJGb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25CYWNrbG9nIiMKIUZvdW5kV29ya3NwYWNlUm9zdGVyU2VjdGlvbk1lcmdlZCIpChpGb3VuZFdvcmtzcGFjZVJvc3RlclN0YXR1cxILCgNhcm0YASABKAki2gEKFkZvdW5kV29ya3NwYWNlU3RhbmRpbmcSOAoEb3BlbhgBIAEoCzIoLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVN0YW5kaW5nT3BlbkgAEjwKBmNsb3NlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVN0YW5kaW5nQ2xvc2VkSAASPAoGbGFuZGVkGAMgASgLMiouYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlU3RhbmRpbmdMYW5kZWRIAEIKCghzdGFuZGluZyIcChpGb3VuZFdvcmtzcGFjZVN0YW5kaW5nT3BlbiJKChxGb3VuZFdvcmtzcGFjZVN0YW5kaW5nQ2xvc2VkEhkKDGNsb3NlZF9hdF9tcxgBIAEoA0gAiAEBQg8KDV9jbG9zZWRfYXRfbXMiNAocRm91bmRXb3Jrc3BhY2VTdGFuZGluZ0xhbmRlZBIUCgxsYW5kZWRfYXRfbXMYASABKAMimQMKE0ZpbmRXb3Jrc3BhY2VzRXJyb3ISSwoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMi0uYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVW5rbm93blJlcG9zaXRvcnlIABJFCg91bmtub3duX2NyZWF0b3IYAiABKAsyKi5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNVbmtub3duQ3JlYXRvckgAEkMKDnVua25vd25fY2FsbGVyGAMgASgLMikuYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVW5rbm93bkNhbGxlckgAElQKF3Vua25vd25fbG9naW5fd29ya3NwYWNlGAQgASgLMjEuYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVW5rbm93bkxvZ2luV29ya3NwYWNlSAASSgoSdW5rbm93bl9sb2dpbl9yb290GAUgASgLMiwuYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVW5rbm93bkxvZ2luUm9vdEgAQgcKBWNhdXNlIiEKH0ZpbmRXb3Jrc3BhY2VzVW5rbm93blJlcG9zaXRvcnkiHgocRmluZFdvcmtzcGFjZXNVbmtub3duQ3JlYXRvciIdChtGaW5kV29ya3NwYWNlc1Vua25vd25DYWxsZXIiJQojRmluZFdvcmtzcGFjZXNVbmtub3duTG9naW5Xb3Jrc3BhY2UiLwoeRmluZFdvcmtzcGFjZXNVbmtub3duTG9naW5Sb290Eg0KBWtub3duGAEgAygJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluZF93b3Jrc3BhY2VzLnByb3RvEgxhZ2VudHJlcGwudjEi5QUKFUZpbmRXb3Jrc3BhY2VzUmVxdWVzdBI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARI3CgZ3aW5kb3cYAiABKAsyIi5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNXaW5kb3dIAYgBARI7CghzdGFuZGluZxgDIAEoCzIkLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nSAKIAQESEQoEdGV4dBgEIAEoCUgDiAEBEhIKBWxpbWl0GAUgASgNSASIAQESMwoKY3JlYXRlZF9ieRgGIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIBYgBARI8Cglvbl9yb3N0ZXIYByABKAsyJC5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNPblJvc3RlckgGiAEBEi8KBmNhbGxlchgIIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIB4gBARI1CgVsb2dpbhgJIAEoCzIhLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc0xvZ2luSAiIAQESOwoGdHVybmVkGAogASgLMiYuYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVHVybldpbmRvd0gJiAEBEi8KBnBhcmVudBgLIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZICogBARIbCg5lbmRlZF9zaW5jZV9tcxgMIAEoA0gLiAEBQg0KC19yZXBvc2l0b3J5QgkKB193aW5kb3dCCwoJX3N0YW5kaW5nQgcKBV90ZXh0QggKBl9saW1pdEINCgtfY3JlYXRlZF9ieUIMCgpfb25fcm9zdGVyQgkKB19jYWxsZXJCCAoGX2xvZ2luQgkKB190dXJuZWRCCQoHX3BhcmVudEIRCg9fZW5kZWRfc2luY2VfbXMiagoTRmluZFdvcmtzcGFjZXNMb2dpbhIyCgxvZl93b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAASFgoMYWNjb3VudF9yb290GAIgASgJSABCBwoFbG9naW4iGAoWRmluZFdvcmtzcGFjZXNPblJvc3RlciJiChhGaW5kV29ya3NwYWNlc1R1cm5XaW5kb3cSFQoIc2luY2VfbXMYASABKANIAIgBARIVCgh1bnRpbF9tcxgCIAEoA0gBiAEBQgsKCV9zaW5jZV9tc0ILCglfdW50aWxfbXMiXgoURmluZFdvcmtzcGFjZXNXaW5kb3cSFQoIc2luY2VfbXMYASABKANIAIgBARIVCgh1bnRpbF9tcxgCIAEoA0gBiAEBQgsKCV9zaW5jZV9tc0ILCglfdW50aWxfbXMi2gEKFkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmcSOAoEb3BlbhgBIAEoCzIoLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbkgAEjwKBmNsb3NlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkSAASPAoGbGFuZGVkGAMgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWRIAEIKCghzdGFuZGluZyIcChpGaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbiIeChxGaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkIh4KHEZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWQijgEKFkZpbmRXb3Jrc3BhY2VzUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc0Vycm9ySABCCAoGcmVzdWx0IqEBChVGaW5kV29ya3NwYWNlc1N1Y2Nlc3MSPwoIY29tcGxldGUYASABKAsyKy5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGVIABI9CgdwYXJ0aWFsGAIgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3VjY2Vzc1BhcnRpYWxIAEIICgZleHRlbnQiUQodRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGUSMAoKd29ya3NwYWNlcxgBIAMoCzIcLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZSJhChxGaW5kV29ya3NwYWNlc1N1Y2Nlc3NQYXJ0aWFsEjAKCndvcmtzcGFjZXMYASADKAsyHC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2USDwoHb21pdHRlZBgCIAEoDSLCBQoORm91bmRXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRIvCgpyZXBvc2l0b3J5GAQgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSGQoMbG9uZ19zdW1tYXJ5GBAgASgJSACIAQESGgoNc2hvcnRfc3VtbWFyeRgFIAEoCUgBiAEBEhUKDWNyZWF0ZWRfYXRfbXMYBiABKAMSGQoRbGFzdF9hY3RpdmVfYXRfbXMYByABKAMSNgoIc3RhbmRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VTdGFuZGluZxIzCgpjcmVhdGVkX2J5GAkgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgCiAEBEi8KBnBhcmVudBgKIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIA4gBARI3CgZyb3N0ZXIYCyABKAsyIi5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VSb3N0ZXJIBIgBARIPCgdjYWxsaW5nGAwgASgIEjUKBW1lcmdlGA0gASgLMiEuYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlTWVyZ2VIBYgBARIXCgpjb25maWdfZGlyGA4gASgJSAaIAQESHAoPbGFzdF90dXJuX2F0X21zGA8gASgDSAeIAQFCDwoNX2xvbmdfc3VtbWFyeUIQCg5fc2hvcnRfc3VtbWFyeUINCgtfY3JlYXRlZF9ieUIJCgdfcGFyZW50QgkKB19yb3N0ZXJCCAoGX21lcmdlQg0KC19jb25maWdfZGlyQhIKEF9sYXN0X3R1cm5fYXRfbXMiVwoTRm91bmRXb3Jrc3BhY2VNZXJnZRIyCglyZXF1ZXN0ZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSACIAQFCDAoKX3JlcXVlc3RlciKMAQoURm91bmRXb3Jrc3BhY2VSb3N0ZXISOgoHc2VjdGlvbhgBIAEoCzIpLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb24SOAoGc3RhdHVzGAIgASgLMiguYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlUm9zdGVyU3RhdHVzIu8BChtGb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb24SPQoEb3BlbhgBIAEoCzItLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25PcGVuSAASQwoHYmFja2xvZxgCIAEoCzIwLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25CYWNrbG9nSAASQQoGbWVyZ2VkGAMgASgLMi8uYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlUm9zdGVyU2VjdGlvbk1lcmdlZEgAQgkKB3NlY3Rpb24iIQofRm91bmRXb3Jrc3BhY2VSb3N0ZXJTZWN0aW9uT3BlbiIkCiJGb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25CYWNrbG9nIiMKIUZvdW5kV29ya3NwYWNlUm9zdGVyU2VjdGlvbk1lcmdlZCIpChpGb3VuZFdvcmtzcGFjZVJvc3RlclN0YXR1cxILCgNhcm0YASABKAki2gEKFkZvdW5kV29ya3NwYWNlU3RhbmRpbmcSOAoEb3BlbhgBIAEoCzIoLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVN0YW5kaW5nT3BlbkgAEjwKBmNsb3NlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVN0YW5kaW5nQ2xvc2VkSAASPAoGbGFuZGVkGAMgASgLMiouYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlU3RhbmRpbmdMYW5kZWRIAEIKCghzdGFuZGluZyIcChpGb3VuZFdvcmtzcGFjZVN0YW5kaW5nT3BlbiJ+ChxGb3VuZFdvcmtzcGFjZVN0YW5kaW5nQ2xvc2VkEhkKDGNsb3NlZF9hdF9tcxgBIAEoA0gAiAEBEjIKA2hvdxgCIAEoCzIlLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZUNsb3NlZEhvd0IPCg1fY2xvc2VkX2F0X21zIqQCChdGb3VuZFdvcmtzcGFjZUNsb3NlZEhvdxI9CgZjbG9zZWQYASABKAsyKy5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VDbG9zZWRIb3dDbG9zZWRIABI9CgZraWxsZWQYAiABKAsyKy5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VDbG9zZWRIb3dLaWxsZWRIABI9CgZmb2xkZWQYAyABKAsyKy5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VDbG9zZWRIb3dGb2xkZWRIABJFCgp1bnJlY29yZGVkGAQgASgLMi8uYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlQ2xvc2VkSG93VW5yZWNvcmRlZEgAQgUKA2hvdyIfCh1Gb3VuZFdvcmtzcGFjZUNsb3NlZEhvd0Nsb3NlZCIfCh1Gb3VuZFdvcmtzcGFjZUNsb3NlZEhvd0tpbGxlZCJXCh1Gb3VuZFdvcmtzcGFjZUNsb3NlZEhvd0ZvbGRlZBItCgRpbnRvGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAiAEBQgcKBV9pbnRvIiMKIUZvdW5kV29ya3NwYWNlQ2xvc2VkSG93VW5yZWNvcmRlZCI0ChxGb3VuZFdvcmtzcGFjZVN0YW5kaW5nTGFuZGVkEhQKDGxhbmRlZF9hdF9tcxgBIAEoAyLeAwoTRmluZFdvcmtzcGFjZXNFcnJvchJLChJ1bmtub3duX3JlcG9zaXRvcnkYASABKAsyLS5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNVbmtub3duUmVwb3NpdG9yeUgAEkUKD3Vua25vd25fY3JlYXRvchgCIAEoCzIqLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1Vua25vd25DcmVhdG9ySAASQwoOdW5rbm93bl9jYWxsZXIYAyABKAsyKS5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNVbmtub3duQ2FsbGVySAASVAoXdW5rbm93bl9sb2dpbl93b3Jrc3BhY2UYBCABKAsyMS5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNVbmtub3duTG9naW5Xb3Jrc3BhY2VIABJKChJ1bmtub3duX2xvZ2luX3Jvb3QYBSABKAsyLC5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNVbmtub3duTG9naW5Sb290SAASQwoOdW5rbm93bl9wYXJlbnQYBiABKAsyKS5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNVbmtub3duUGFyZW50SABCBwoFY2F1c2UiIQofRmluZFdvcmtzcGFjZXNVbmtub3duUmVwb3NpdG9yeSIeChxGaW5kV29ya3NwYWNlc1Vua25vd25DcmVhdG9yIh0KG0ZpbmRXb3Jrc3BhY2VzVW5rbm93bkNhbGxlciIlCiNGaW5kV29ya3NwYWNlc1Vua25vd25Mb2dpbldvcmtzcGFjZSIdChtGaW5kV29ya3NwYWNlc1Vua25vd25QYXJlbnQiLwoeRmluZFdvcmtzcGFjZXNVbmtub3duTG9naW5Sb290Eg0KBWtub3duGAEgAygJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * What to find. EVERY SET CRITERION MUST HOLD, and an unset one narrows
@@ -132,6 +132,28 @@ export type FindWorkspacesRequest = Message<"agentrepl.v1.FindWorkspacesRequest"
    * @generated from field: optional agentrepl.v1.FindWorkspacesTurnWindow turned = 10;
    */
   turned?: FindWorkspacesTurnWindow | undefined;
+
+  /**
+   * Only the children of this workspace (FoundWorkspace.parent): what a
+   * workspace reads to account for its children, open or ended. UNSET = any
+   * parent, or none. A ref naming no registered workspace is the
+   * unknown_parent answer.
+   *
+   * @generated from field: optional workspace.v1.WorkspaceRef parent = 11;
+   */
+  parent?: WorkspaceRef | undefined;
+
+  /**
+   * Only workspaces that had not ended by this instant, unix milliseconds:
+   * those open now, and those that landed or closed at or after it. A
+   * workspace ends when its merge lands (FoundWorkspaceStandingLanded) or it
+   * closes (FoundWorkspaceStandingClosed.closed_at_ms). A closed workspace
+   * whose close instant was never recorded ended before any instant asked
+   * for, and is left out. UNSET = however long ago it ended.
+   *
+   * @generated from field: optional int64 ended_since_ms = 12;
+   */
+  endedSinceMs?: bigint | undefined;
 };
 
 /**
@@ -873,6 +895,13 @@ export type FoundWorkspaceStandingClosed = Message<"agentrepl.v1.FoundWorkspaceS
    * @generated from field: optional int64 closed_at_ms = 1;
    */
   closedAtMs?: bigint | undefined;
+
+  /**
+   * How it ended.
+   *
+   * @generated from field: agentrepl.v1.FoundWorkspaceClosedHow how = 2;
+   */
+  how?: FoundWorkspaceClosedHow | undefined;
 };
 
 /**
@@ -881,6 +910,127 @@ export type FoundWorkspaceStandingClosed = Message<"agentrepl.v1.FoundWorkspaceS
  */
 export const FoundWorkspaceStandingClosedSchema: GenMessage<FoundWorkspaceStandingClosed> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 23);
+
+/**
+ * How a closed workspace that never landed ended. THE ARM IS HOW, and
+ * exactly one holds. A nuked workspace is never found: its record is gone.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceClosedHow
+ */
+export type FoundWorkspaceClosedHow = Message<"agentrepl.v1.FoundWorkspaceClosedHow"> & {
+  /**
+   * @generated from oneof agentrepl.v1.FoundWorkspaceClosedHow.how
+   */
+  how: {
+    /**
+     * Closed: by the user, an agent, or the daemon.
+     *
+     * @generated from field: agentrepl.v1.FoundWorkspaceClosedHowClosed closed = 1;
+     */
+    value: FoundWorkspaceClosedHowClosed;
+    case: "closed";
+  } | {
+    /**
+     * Killed: its session force-stopped, its worktree, branch and records
+     * kept (KillWorkspace).
+     *
+     * @generated from field: agentrepl.v1.FoundWorkspaceClosedHowKilled killed = 2;
+     */
+    value: FoundWorkspaceClosedHowKilled;
+    case: "killed";
+  } | {
+    /**
+     * Folded into another child of its production mediator, which took over
+     * its work (UpdateProductionMediation's fold).
+     *
+     * @generated from field: agentrepl.v1.FoundWorkspaceClosedHowFolded folded = 3;
+     */
+    value: FoundWorkspaceClosedHowFolded;
+    case: "folded";
+  } | {
+    /**
+     * Closed before the daemon recorded how a workspace ended.
+     *
+     * @generated from field: agentrepl.v1.FoundWorkspaceClosedHowUnrecorded unrecorded = 4;
+     */
+    value: FoundWorkspaceClosedHowUnrecorded;
+    case: "unrecorded";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceClosedHow.
+ * Use `create(FoundWorkspaceClosedHowSchema)` to create a new message.
+ */
+export const FoundWorkspaceClosedHowSchema: GenMessage<FoundWorkspaceClosedHow> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 24);
+
+/**
+ * Closed. No fields.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceClosedHowClosed
+ */
+export type FoundWorkspaceClosedHowClosed = Message<"agentrepl.v1.FoundWorkspaceClosedHowClosed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceClosedHowClosed.
+ * Use `create(FoundWorkspaceClosedHowClosedSchema)` to create a new message.
+ */
+export const FoundWorkspaceClosedHowClosedSchema: GenMessage<FoundWorkspaceClosedHowClosed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 25);
+
+/**
+ * Killed. No fields.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceClosedHowKilled
+ */
+export type FoundWorkspaceClosedHowKilled = Message<"agentrepl.v1.FoundWorkspaceClosedHowKilled"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceClosedHowKilled.
+ * Use `create(FoundWorkspaceClosedHowKilledSchema)` to create a new message.
+ */
+export const FoundWorkspaceClosedHowKilledSchema: GenMessage<FoundWorkspaceClosedHowKilled> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 26);
+
+/**
+ * Folded into another child.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceClosedHowFolded
+ */
+export type FoundWorkspaceClosedHowFolded = Message<"agentrepl.v1.FoundWorkspaceClosedHowFolded"> & {
+  /**
+   * The child it was folded into. UNSET when the registry no longer holds
+   * that workspace: the fold records it by id alone.
+   *
+   * @generated from field: optional workspace.v1.WorkspaceRef into = 1;
+   */
+  into?: WorkspaceRef | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceClosedHowFolded.
+ * Use `create(FoundWorkspaceClosedHowFoldedSchema)` to create a new message.
+ */
+export const FoundWorkspaceClosedHowFoldedSchema: GenMessage<FoundWorkspaceClosedHowFolded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 27);
+
+/**
+ * How it ended was not recorded. No fields.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceClosedHowUnrecorded
+ */
+export type FoundWorkspaceClosedHowUnrecorded = Message<"agentrepl.v1.FoundWorkspaceClosedHowUnrecorded"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceClosedHowUnrecorded.
+ * Use `create(FoundWorkspaceClosedHowUnrecordedSchema)` to create a new message.
+ */
+export const FoundWorkspaceClosedHowUnrecordedSchema: GenMessage<FoundWorkspaceClosedHowUnrecorded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 28);
 
 /**
  * Its branch landed, and the workspace is closed.
@@ -901,11 +1051,12 @@ export type FoundWorkspaceStandingLanded = Message<"agentrepl.v1.FoundWorkspaceS
  * Use `create(FoundWorkspaceStandingLandedSchema)` to create a new message.
  */
 export const FoundWorkspaceStandingLandedSchema: GenMessage<FoundWorkspaceStandingLanded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 24);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 29);
 
 /**
  * Validation failures (a blank text or account root, a zero limit, a
- * reversed window or turn window) are Connect InvalidArgument, never an arm.
+ * reversed window or turn window, a malformed parent ref) are Connect
+ * InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.FindWorkspacesError
  */
@@ -954,6 +1105,14 @@ export type FindWorkspacesError = Message<"agentrepl.v1.FindWorkspacesError"> & 
      */
     value: FindWorkspacesUnknownLoginRoot;
     case: "unknownLoginRoot";
+  } | {
+    /**
+     * `parent` names a workspace the daemon's registry does not hold.
+     *
+     * @generated from field: agentrepl.v1.FindWorkspacesUnknownParent unknown_parent = 6;
+     */
+    value: FindWorkspacesUnknownParent;
+    case: "unknownParent";
   } | { case: undefined; value?: undefined };
 };
 
@@ -962,7 +1121,7 @@ export type FindWorkspacesError = Message<"agentrepl.v1.FindWorkspacesError"> & 
  * Use `create(FindWorkspacesErrorSchema)` to create a new message.
  */
 export const FindWorkspacesErrorSchema: GenMessage<FindWorkspacesError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 25);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 30);
 
 /**
  * Empty: the echoed ref is the only identity involved.
@@ -977,7 +1136,7 @@ export type FindWorkspacesUnknownRepository = Message<"agentrepl.v1.FindWorkspac
  * Use `create(FindWorkspacesUnknownRepositorySchema)` to create a new message.
  */
 export const FindWorkspacesUnknownRepositorySchema: GenMessage<FindWorkspacesUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 26);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 31);
 
 /**
  * Empty: the echoed ref is the only identity involved.
@@ -992,7 +1151,7 @@ export type FindWorkspacesUnknownCreator = Message<"agentrepl.v1.FindWorkspacesU
  * Use `create(FindWorkspacesUnknownCreatorSchema)` to create a new message.
  */
 export const FindWorkspacesUnknownCreatorSchema: GenMessage<FindWorkspacesUnknownCreator> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 27);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 32);
 
 /**
  * Empty: the echoed ref is the only identity involved.
@@ -1007,7 +1166,7 @@ export type FindWorkspacesUnknownCaller = Message<"agentrepl.v1.FindWorkspacesUn
  * Use `create(FindWorkspacesUnknownCallerSchema)` to create a new message.
  */
 export const FindWorkspacesUnknownCallerSchema: GenMessage<FindWorkspacesUnknownCaller> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 28);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 33);
 
 /**
  * Empty: the echoed ref is the only identity involved.
@@ -1022,7 +1181,22 @@ export type FindWorkspacesUnknownLoginWorkspace = Message<"agentrepl.v1.FindWork
  * Use `create(FindWorkspacesUnknownLoginWorkspaceSchema)` to create a new message.
  */
 export const FindWorkspacesUnknownLoginWorkspaceSchema: GenMessage<FindWorkspacesUnknownLoginWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 29);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 34);
+
+/**
+ * Empty: the echoed ref is the only identity involved.
+ *
+ * @generated from message agentrepl.v1.FindWorkspacesUnknownParent
+ */
+export type FindWorkspacesUnknownParent = Message<"agentrepl.v1.FindWorkspacesUnknownParent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FindWorkspacesUnknownParent.
+ * Use `create(FindWorkspacesUnknownParentSchema)` to create a new message.
+ */
+export const FindWorkspacesUnknownParentSchema: GenMessage<FindWorkspacesUnknownParent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 35);
 
 /**
  * The account roots the daemon does know, so the caller can say which one it
@@ -1042,5 +1216,5 @@ export type FindWorkspacesUnknownLoginRoot = Message<"agentrepl.v1.FindWorkspace
  * Use `create(FindWorkspacesUnknownLoginRootSchema)` to create a new message.
  */
 export const FindWorkspacesUnknownLoginRootSchema: GenMessage<FindWorkspacesUnknownLoginRoot> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 30);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 36);
 
