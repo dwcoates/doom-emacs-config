@@ -11,6 +11,7 @@ import (
 	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
@@ -999,13 +1000,15 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// was up at the last stop. The split is read only for a workspace adopted
 	// with no shim to dial, the one it decides, so its record is never written
 	// for an adoption that dials. The marker is
-	// raised here, before the views are published, so the roster never draws
-	// the adopted row idle and usable while nothing serves it; the start
-	// itself runs once the adoption is complete and the workspace is this
-	// daemon's.
+	// raised here, before the views are published, for a start that runs a
+	// shim (bringup.RaiseMarkers), so the roster never draws the adopted row
+	// idle and usable while nothing serves it; the start itself runs once the
+	// adoption is complete and the workspace is this daemon's.
 	runs := false
+	var up []wsm.Workspace
+	var facts map[wsm.WorkspaceID]bringup.WasUp
 	if !dial && !record.Closed {
-		up, _, _ := c.takeoverSplit(ctx, []wsm.Workspace{record}, fields)
+		up, _, facts, _ = c.takeoverSplit(ctx, []wsm.Workspace{record}, fields)
 		runs = len(up) == 1
 	}
 	sessionless := !dial && !record.Closed && runs
@@ -1013,15 +1016,14 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// the incumbent held and detached, whose lock reads free. It is stood
 	// down once the workspace is this daemon's (standDownInert).
 	withheldInert := !dial && !record.Closed && !runs
-	if sessionless {
-		c.deps.BringingUp(ws, true)
-	}
+	bringup.RaiseMarkers(c.deps.BringingUp, up, facts)
 	if err := c.deps.PublishViews(ctx, ws); err != nil {
 		c.log.Error(opAdopt, "could not publish the workspace's fresh views", dlog.WithCause(fields, err))
 		if sessionless {
-			// The start this marker announced will not run: the adoption
+			// The start this adoption named will not run: the adoption
 			// failed, and the straggler pass or the incumbent decides what
-			// serves the workspace next.
+			// serves the workspace next. Lowering a marker never raised
+			// states nothing false.
 			c.deps.BringingUp(ws, false)
 		}
 		return fmt.Errorf("rollout: adopt %q: publish views: %w", ws, err)

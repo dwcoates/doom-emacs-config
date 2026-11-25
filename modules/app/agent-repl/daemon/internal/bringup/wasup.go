@@ -50,6 +50,33 @@ type WasUp struct {
 // daemon stopped: its session is live, or it stands at a recorded cold gate.
 func (w WasUp) Up() bool { return w.ColdGate || w.Live }
 
+// StartsShim reports that a start of the workspace runs a shim: its session
+// is live and no recorded cold gate stands. A start of a workspace at its
+// recorded gate raises the gate from the record and runs nothing
+// (workspace.Fleet.Start), so nothing is starting behind it.
+func (w WasUp) StartsShim() bool { return w.Live && !w.ColdGate }
+
+// RaiseMarkers raises the bring-up marker (sidebar.Resolver.SetBringingUp)
+// through RAISE for each of UP whose start runs a shim by FACTS
+// (WasUp.StartsShim), and for no other.
+//
+// THE MARKER SAYS A SHIM IS COMING UP, and every surface reads it so: the
+// roster draws the row `init`, a starting workspace counts as working, so it
+// stays visible through a fold and its page is loaded. Raised for a workspace
+// whose start only raised its recorded cold gate, it loaded the page of every
+// gated workspace a successor took over and showed the folded ones, until the
+// gate's raise lowered it: 19 pages loaded after the 2026-11-25 12:32 deploy,
+// and pages booted for workspaces the daemon then stopped serving. Every
+// caller that raises the marker ahead of a bring-up raises it here. Run lowers
+// each marker whether or not it was raised, which states nothing false.
+func RaiseMarkers(raise func(ws wsm.WorkspaceID, underWay bool), up []wsm.Workspace, facts map[wsm.WorkspaceID]WasUp) {
+	for _, ws := range up {
+		if facts[ws.ID].StartsShim() {
+			raise(ws.ID, true)
+		}
+	}
+}
+
 // Context states the facts for a record.
 func (w WasUp) Context() dlog.Context {
 	ctx := dlog.Context{
@@ -114,13 +141,16 @@ func WasUpFacts(ctx context.Context, sessions SessionLister, pending []wsm.Works
 // prompt. A session read that fails splits nothing:
 // waking a parked shim or leaving a live one down are both wrong, so the
 // caller states the failure.
-func OnlyWasUp(ctx context.Context, sessions SessionLister, pending []wsm.Workspace) (up, left []wsm.Workspace, err error) {
+//
+// It answers the facts it split by too, for the bring-up markers
+// (RaiseMarkers).
+func OnlyWasUp(ctx context.Context, sessions SessionLister, pending []wsm.Workspace) (up, left []wsm.Workspace, facts map[wsm.WorkspaceID]WasUp, err error) {
 	if len(pending) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	facts, err := WasUpFacts(ctx, sessions, pending)
+	facts, err = WasUpFacts(ctx, sessions, pending)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for _, ws := range pending {
 		if facts[ws.ID].Up() {
@@ -129,5 +159,5 @@ func OnlyWasUp(ctx context.Context, sessions SessionLister, pending []wsm.Worksp
 		}
 		left = append(left, ws)
 	}
-	return up, left, nil
+	return up, left, facts, nil
 }

@@ -3,8 +3,12 @@ package bringup
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +38,7 @@ func TestOnlyWasUp(t *testing.T) {
 	pending := []wsm.Workspace{{ID: "ws-up"}, {ID: "ws-parked"}, {ID: "ws-hibernated"}, {ID: "ws-killed"}, {ID: "ws-created"}, {ID: "ws-never-started"}}
 
 	// Act
-	gotUp, gotLeft, err := OnlyWasUp(context.Background(), fakeSessionList{sessions: []wsm.Session{up, parked, hibernated, killed, created}}, pending)
+	gotUp, gotLeft, _, err := OnlyWasUp(context.Background(), fakeSessionList{sessions: []wsm.Session{up, parked, hibernated, killed, created}}, pending)
 
 	// Assert
 	if err != nil {
@@ -50,7 +54,7 @@ func TestOnlyWasUp(t *testing.T) {
 
 func TestOnlyWasUpSplitsNothingWhenTheSessionsCannotBeRead(t *testing.T) {
 	// Act
-	up, left, err := OnlyWasUp(context.Background(), fakeSessionList{err: errors.New("locked")}, []wsm.Workspace{{ID: "ws-1"}})
+	up, left, _, err := OnlyWasUp(context.Background(), fakeSessionList{err: errors.New("locked")}, []wsm.Workspace{{ID: "ws-1"}})
 
 	// Assert
 	if err == nil || up != nil || left != nil {
@@ -68,7 +72,7 @@ func TestOnlyWasUpCountsAWorkspaceAtItsRecordedColdGateAsUp(t *testing.T) {
 	}
 
 	// Act
-	gotUp, gotLeft, err := OnlyWasUp(context.Background(), lister, pending)
+	gotUp, gotLeft, _, err := OnlyWasUp(context.Background(), lister, pending)
 
 	// Assert
 	if err != nil {
@@ -84,7 +88,7 @@ func TestOnlyWasUpCountsAWorkspaceAtItsRecordedColdGateAsUp(t *testing.T) {
 
 func TestOnlyWasUpSplitsNothingWhenTheColdGatesCannotBeRead(t *testing.T) {
 	// Act
-	up, left, err := OnlyWasUp(context.Background(), fakeSessionList{gateErr: errors.New("locked")}, []wsm.Workspace{{ID: "ws-1"}})
+	up, left, _, err := OnlyWasUp(context.Background(), fakeSessionList{gateErr: errors.New("locked")}, []wsm.Workspace{{ID: "ws-1"}})
 
 	// Assert
 	if err == nil || up != nil || left != nil {
@@ -184,5 +188,123 @@ func TestWasUpContextStatesEveryFact(t *testing.T) {
 				t.Fatalf("context = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWasUpStartsShim(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts WasUp
+		want  bool
+	}{
+		{"a live session runs its shim", WasUp{Live: true}, true},
+		{"a recorded cold gate runs nothing", WasUp{ColdGate: true}, false},
+		{"a live session at a recorded gate runs nothing", WasUp{Live: true, ColdGate: true}, false},
+		{"a parked session runs nothing", WasUp{Recorded: true, Conversation: true}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.facts.StartsShim()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("StartsShim(%+v) = %v, want %v", tc.facts, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRaiseMarkers(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts map[wsm.WorkspaceID]WasUp
+		want  []string
+	}{
+		{"a live session is marked", map[wsm.WorkspaceID]WasUp{"ws-1": {Live: true}}, []string{"ws-1"}},
+		{"a recorded cold gate is not marked", map[wsm.WorkspaceID]WasUp{"ws-1": {ColdGate: true}}, nil},
+		{"only the starts that run a shim are marked", map[wsm.WorkspaceID]WasUp{"ws-1": {ColdGate: true}, "ws-2": {Live: true}}, []string{"ws-2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var up []wsm.Workspace
+			for _, id := range []wsm.WorkspaceID{"ws-1", "ws-2"} {
+				if _, ok := tc.facts[id]; ok {
+					up = append(up, wsm.Workspace{ID: id})
+				}
+			}
+			var raised []string
+			raise := func(ws wsm.WorkspaceID, underWay bool) {
+				if !underWay {
+					t.Fatalf("RaiseMarkers lowered %s; it only raises", ws)
+				}
+				raised = append(raised, string(ws))
+			}
+
+			// Act
+			RaiseMarkers(raise, up, tc.facts)
+
+			// Assert
+			if !slices.Equal(raised, tc.want) {
+				t.Fatalf("raised = %v, want %v", raised, tc.want)
+			}
+		})
+	}
+}
+
+func TestOnlyWasUpAnswersTheFactsItSplitBy(t *testing.T) {
+	// Arrange
+	lister := fakeSessionList{
+		sessions: []wsm.Session{{Workspace: "ws-up", VendorSessionID: "vendor-up"}},
+		gated:    []wsm.WorkspaceID{"ws-gated"},
+	}
+	pending := []wsm.Workspace{{ID: "ws-up"}, {ID: "ws-gated"}}
+
+	// Act
+	_, _, facts, err := OnlyWasUp(context.Background(), lister, pending)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OnlyWasUp: %v", err)
+	}
+	if !facts["ws-up"].StartsShim() || facts["ws-gated"].StartsShim() || !facts["ws-gated"].ColdGate {
+		t.Fatalf("facts = %+v, want ws-up live and ws-gated at its gate", facts)
+	}
+}
+
+// TestEveryBringUpMarkerRaiseGoesThroughRaiseMarkers pins that no boot or
+// takeover raises the bring-up marker by hand: each raise goes through
+// RaiseMarkers, so a start that runs no shim is never marked.
+func TestEveryBringUpMarkerRaiseGoesThroughRaiseMarkers(t *testing.T) {
+	// Arrange
+	handRaise := regexp.MustCompile(`BringingUp\([^)]*,\s*true\)`)
+	var offenders []string
+	for _, dir := range []string{"../boot", "../rollout"} {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+		if err != nil {
+			t.Fatalf("Glob(%s): %v", dir, err)
+		}
+		if len(files) == 0 {
+			t.Fatalf("no Go files under %s: the scan read nothing", dir)
+		}
+		for _, file := range files {
+			if strings.HasSuffix(file, "_test.go") {
+				continue
+			}
+			src, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("ReadFile(%s): %v", file, err)
+			}
+			// Act
+			if handRaise.Match(src) {
+				offenders = append(offenders, file)
+			}
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("files raising the bring-up marker by hand = %v, want every raise through bringup.RaiseMarkers", offenders)
 	}
 }

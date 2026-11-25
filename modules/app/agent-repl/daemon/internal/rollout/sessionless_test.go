@@ -44,12 +44,12 @@ func TestBringUpSessionlessStartsEachPendingWorkspace(t *testing.T) {
 	}
 }
 
-func TestBringUpSessionlessRaisesTheMarkerBeforeItReturns(t *testing.T) {
+func TestBringUpSessionlessRaisesNoMarkerForAWorkspaceAtItsGate(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
-	// cold gate (owner ruling, 2026-11-23).
+	// cold gate (owner ruling, 2026-11-23), and its start runs no shim.
 	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 	h.mu.Lock()
 	h.startErr[ws] = errFake
@@ -62,26 +62,24 @@ func TestBringUpSessionlessRaisesTheMarkerBeforeItReturns(t *testing.T) {
 	h.mu.Unlock()
 
 	// Assert
-	if len(first) == 0 || first[0] != (markerEdge{ws: ws, up: true}) {
-		t.Fatalf("marker edges on return = %v, want the raise made before the start ran", first)
+	if slices.Contains(first, markerEdge{ws: ws, up: true}) {
+		t.Fatalf("marker edges on return = %v, want no raise for a start that only raises its gate", first)
 	}
 }
 
-func TestBringUpSessionlessLowersTheMarkerOnceTheStartEnds(t *testing.T) {
+func TestBringUpSessionlessOnlyLowersTheMarkerOfAGatedStart(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	// THE ONE SESSION-LESS WORKSPACE A HANDOVER STARTS stands at a recorded
-	// cold gate (owner ruling, 2026-11-23).
 	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 
 	// Act
 	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)
 
 	// Assert
-	want := []markerEdge{{ws: ws, up: true}, {ws: ws, up: false}}
+	want := []markerEdge{{ws: ws, up: false}}
 	if got := h.Marker(); !slices.Equal(got, want) {
-		t.Fatalf("marker edges = %v, want %v", got, want)
+		t.Fatalf("marker edges = %v, want only the start's lowering", got)
 	}
 }
 

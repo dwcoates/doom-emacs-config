@@ -758,7 +758,10 @@ var daemonUnitInputs = map[string][]string{
 		"daemon/internal/workspacesubs/workspacesubs.go"},
 	"internal/standdown": {"daemon/internal/desktopnotify/notifier.go", "daemon/internal/desktopnotify/summary.go",
 		"daemon/internal/mergeworkspace/mergeworkspace.go"},
-	"internal/streamslot":    {"daemon/internal/desktopnotify/focus.go", "daemon/internal/procmetrics/emacs.go"},
+	"internal/streamslot": {"daemon/internal/desktopnotify/focus.go", "daemon/internal/procmetrics/emacs.go"},
+	// Its scan reads every boot and takeover source for a hand-rolled raise
+	// of the bring-up marker.
+	"internal/bringup":       {"daemon/internal/boot/", "daemon/internal/rollout/"},
 	"internal/usersetup":     {"daemon/internal/externalbrowser/slack.go", "daemon/internal/pullrefs/pullrefs.go"},
 	"internal/workspacesubs": {"daemon/internal/mergenotice/mergenotice.go"},
 	// The briefs, read as data.
