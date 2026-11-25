@@ -1071,8 +1071,9 @@ families; it is split four ways for four writers:
 
 - `hooks_e2e_test.go` — #77-80
 - `questions_e2e_test.go` — #88-92 (deleted 2026-11-12: proven in
-  `daemon/integration/` by `TestRosterAndFooterAgreeOnAnOpenQuestion` and
-  `TestQuestionAnsweredRepushesWithEchoedLabels`)
+  `daemon/integration/` by `TestQuestionAnsweredRepushesWithEchoedLabels`, and
+  at the unit tier by the footer's `TestAQuestionGateComposesTheBatchLead` and
+  the sidebar's `TestAnOpenQuestionDrawsTheRowQuestion`)
 - `mcpmonitors_e2e_test.go` — #81-84 (deleted 2026-11-12: the MCP tool call
   is proven by the shim's `test/integration/scenario-frames.test.ts`)
 - `remainder_e2e_test.go` — #72-76, #85-87, #93-99
