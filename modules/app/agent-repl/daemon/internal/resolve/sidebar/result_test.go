@@ -77,7 +77,7 @@ func TestATurnEndIsReportedOnceAndAnInteractionReportsNoResult(t *testing.T) {
 
 	// Act.
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Assert: the result is how the turn ended; viewing it is another fact.
 	want := []wsm.TurnResult{{End: wsm.TurnResultDone}}
@@ -170,7 +170,7 @@ func TestTheViewedFactIsReportedWhenSetAndWhenATurnClearsIt(t *testing.T) {
 	r, reports := viewedResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone}, "")
 
 	// Act: the user interacts, then a new turn starts.
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Assert.
@@ -183,10 +183,10 @@ func TestTheViewedFactIsReportedWhenSetAndWhenATurnClearsIt(t *testing.T) {
 func TestARepeatedInteractionReportsTheViewedFactOnce(t *testing.T) {
 	// Arrange.
 	r, reports := viewedResolver(t, &wsm.TurnResult{End: wsm.TurnResultDone}, "")
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Act.
-	r.SetInteracted(theWS, afterExemption.Add(time.Second))
+	r.SetInteracted(theWS, afterTurnEnd.Add(time.Second))
 
 	// Assert: the durable record already holds the arm.
 	want := []viewedReport{{ws: theWS, arm: "done"}}
@@ -270,15 +270,15 @@ func TestATurnBeforeTheRestoredArmDropsTheRestoredViewedFact(t *testing.T) {
 	}
 }
 
-func TestTheViewExemptionKeepsAJustEndedResultUnread(t *testing.T) {
+func TestAnInteractionAnyTimeAfterATurnsEndViewsTheRow(t *testing.T) {
 	tests := []struct {
-		name       string
-		after      time.Duration
-		wantViewed bool
+		name  string
+		after time.Duration
 	}{
-		{name: "an interaction a minute after the end views nothing", after: time.Minute, wantViewed: false},
-		{name: "an interaction just inside the exemption views nothing", after: sidebar.ViewExemption - time.Millisecond, wantViewed: false},
-		{name: "an interaction at the exemption's end views the row", after: sidebar.ViewExemption, wantViewed: true},
+		{name: "at the turn's end", after: 0},
+		{name: "a millisecond after the turn's end", after: time.Millisecond},
+		{name: "a minute after the turn's end", after: time.Minute},
+		{name: "an hour after the turn's end", after: time.Hour},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -289,30 +289,21 @@ func TestTheViewExemptionKeepsAJustEndedResultUnread(t *testing.T) {
 			r.SetInteracted(theWS, epoch.Add(tt.after))
 
 			// Assert
-			if got := onlyRow(t, r).GetViewed() != nil; got != tt.wantViewed {
-				t.Fatalf("viewed = %v, want %v", got, tt.wantViewed)
+			row := onlyRow(t, r)
+			if row.GetViewed() == nil {
+				t.Fatal("viewed = unset, want the row viewed")
+			}
+			if got := row.GetLastInteracted(); got == nil || got.GetAtMs() != epoch.Add(tt.after).UnixMilli() {
+				t.Fatalf("last interacted = %v, want the interaction's instant", got)
+			}
+			if !hasRecord(r.surfaces.Records(), "info", "daemon.sidebar.row_viewed") {
+				t.Fatal("no daemon.sidebar.row_viewed record")
 			}
 		})
 	}
 }
 
-func TestAnExemptInteractionIsRecordedAndStillMovesRecency(t *testing.T) {
-	// Arrange
-	r := finished(t, arrange(t))
-
-	// Act
-	r.SetInteracted(theWS, epoch.Add(time.Minute))
-
-	// Assert
-	if !hasRecord(r.surfaces.Records(), "info", "daemon.sidebar.interaction_view_exempt") {
-		t.Fatal("no daemon.sidebar.interaction_view_exempt record")
-	}
-	if got := onlyRow(t, r).GetLastInteracted(); got == nil || got.GetAtMs() != epoch.Add(time.Minute).UnixMilli() {
-		t.Fatalf("last interacted = %v, want the exempt interaction's instant", got)
-	}
-}
-
-func TestARunningTurnIsNeverViewExempt(t *testing.T) {
+func TestAnInteractionDuringARunningTurnViewsTheRow(t *testing.T) {
 	// Arrange: a turn ended at epoch and the next one runs.
 	r := finished(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})

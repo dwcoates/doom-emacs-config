@@ -137,8 +137,8 @@ type wsState struct {
 	leftFirstViewed  bool
 	visitBeganViewed bool
 	// turnEndedAt is when this roster saw the workspace's last turn end
-	// (SetTurnEnded), nil until it has; the view exemption measures from the
-	// later of it and the durable record's LastTurnEndedAt.
+	// (SetTurnEnded), nil until it has; the allocation's clocks measure from
+	// the later of it and the durable record's LastTurnEndedAt (lastTurnEnd).
 	turnEndedAt *time.Time
 	// viewedSettled reports that the viewed fact has been decided: by a live
 	// interaction or turn, or by seeding it ONCE from the durable record
@@ -406,17 +406,13 @@ func (s *wsState) viewed() bool {
 }
 
 // interacted records that the user interacted with the workspace at AT, on
-// the arm the row draws now, and views the row unless EXEMPT (ViewExemption).
-// It answers whether the viewed fact changed. An interaction before any arm
+// the arm the row draws now, and views the row. It answers whether the viewed fact changed. An interaction before any arm
 // has been published views nothing: there is no row the user could have
 // interacted with. The instant is recorded either way, so the interaction
 // still counts toward the user's recency.
-func (s *wsState) interacted(at time.Time, exempt bool) bool {
+func (s *wsState) interacted(at time.Time) bool {
 	if s.interactedAt == nil || at.After(*s.interactedAt) {
 		s.interactedAt = &at
-	}
-	if exempt {
-		return false
 	}
 	s.viewedSettled = true
 	if !s.lastArmSeen || s.viewedArm != "" {
@@ -428,32 +424,10 @@ func (s *wsState) interacted(at time.Time, exempt bool) bool {
 
 // lastTurnEnd answers when the workspace's last turn ended: the later of the
 // end this roster saw (s.turnEndedAt) and the durable record's (RECORDED),
-// nil when neither knows one. The view exemption and the allocation's clocks
-// all read it, so a daemon that did not see the end measures from the record.
+// nil when neither knows one. The allocation's clocks all read it, so a
+// daemon that did not see the end measures from the record.
 func (s *wsState) lastTurnEnd(recorded *time.Time) *time.Time {
 	return laterOf(s.turnEndedAt, recorded)
-}
-
-// ViewExemption is how long after a turn ends the user's interaction with the
-// workspace marks nothing viewed (owner ruling, 2026-11-24): a result read in
-// the minutes after it lands stays unread, so a fold keeps drawing it and its
-// page stays loaded, until the user interacts with it again after the window.
-// It is a product rule, not a bound on any operation.
-const ViewExemption = 10 * time.Minute
-
-// viewExempt reports whether an interaction at AT falls inside the view
-// exemption of the workspace's last turn end: the later of the one this
-// roster saw (s.turnEndedAt) and the durable record's (RECORDED). A running
-// turn is never exempt: there is no result to keep unread.
-func (s *wsState) viewExempt(at time.Time, recorded *time.Time) (time.Time, bool) {
-	if s.turn != nil {
-		return time.Time{}, false
-	}
-	ended := s.lastTurnEnd(recorded)
-	if ended == nil || at.Before(*ended) {
-		return time.Time{}, false
-	}
-	return *ended, at.Sub(*ended) < ViewExemption
 }
 
 // resultEndedNow reports whether a turn end stands, which holds the row on

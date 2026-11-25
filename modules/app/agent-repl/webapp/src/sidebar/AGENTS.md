@@ -123,8 +123,6 @@ both halves below read visibility first. Visible does not mean loaded.
 - Only a turn's start lowers it. A turn's end, a deploy, a daemon restart, a
   park, a revival, a link blip or a fold never does. It is durable: written to
   wsm's `viewed_status` on every change and seeded from it at boot.
-- An interaction within ten minutes of a turn's end marks nothing viewed; it
-  still counts toward recency (`sidebar.ViewExemption`).
 
 ## The recency walk
 

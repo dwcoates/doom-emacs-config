@@ -119,7 +119,6 @@ func TestAVisitThatFirstViewedTheWorkspaceKeepsItsPageForTheFirstViewGrace(t *te
 	rig := newPageRig(t)
 	turnFinished(rig.sidebarResolver, "a")
 	rig.SetSelected("a")
-	rig.advance(t, sidebar.ViewExemption)
 	rig.SetInteracted("a", rig.now)
 
 	// Act

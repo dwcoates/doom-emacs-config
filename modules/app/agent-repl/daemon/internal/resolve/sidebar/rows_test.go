@@ -1015,7 +1015,7 @@ func TestRowStatesItsLiveDetachedWork(t *testing.T) {
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
 			r.SetTurnEnded(theWS, wsm.CloseCompleted)
-			r.SetInteracted(theWS, afterExemption)
+			r.SetInteracted(theWS, afterTurnEnd)
 		}, wantStatus: "idle_async", wantLive: true},
 		{name: "a done with no detached work does not", arrange: func(t *testing.T, r sidebarResolver) {
 			finished(t, r)
@@ -1065,7 +1065,7 @@ func TestATurnsEndLeavesTheViewedMarkerAsItStood(t *testing.T) {
 			// Arrange: the user interacted while the turn ran.
 			r := live(t, arrange(t))
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: tc.act})
-			r.SetInteracted(theWS, afterExemption)
+			r.SetInteracted(theWS, afterTurnEnd)
 
 			// Act.
 			r.SetTurnEnded(theWS, tc.how)
@@ -1106,7 +1106,7 @@ func TestTheBackgroundEndingLeavesTheViewedMarkerStanding(t *testing.T) {
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 	if got := onlyRow(t, r).GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want the idle_async row viewed — the arrangement did not interact")
 	}
@@ -1139,7 +1139,7 @@ func TestViewedReportDrawsADoneRowPartial(t *testing.T) {
 	r := finished(t, arrange(t))
 
 	// Act.
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Assert: presence is the mode.
 	if got := onlyRow(t, r).GetViewed(); got == nil {
@@ -1152,7 +1152,7 @@ func TestAnInteractionThatViewsTheRowIsRecordedAtInfo(t *testing.T) {
 	r := live(t, arrange(t))
 
 	// Act.
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Assert.
 	for _, rec := range r.surfaces.Records() {
@@ -1166,10 +1166,10 @@ func TestAnInteractionThatViewsTheRowIsRecordedAtInfo(t *testing.T) {
 func TestViewedReportIsIdempotent(t *testing.T) {
 	// Arrange.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Act: marking an already-viewed workspace changes nothing.
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Assert.
 	if got := onlyRow(t, r).GetViewed(); got == nil {
@@ -1180,7 +1180,7 @@ func TestViewedReportIsIdempotent(t *testing.T) {
 func TestAStatusChangeClearsTheViewedMarker(t *testing.T) {
 	// Arrange: a viewed, done row.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Act: new activity, from an origin the editor never told the roster about.
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1198,7 +1198,7 @@ func TestAStatusChangeClearsTheViewedMarker(t *testing.T) {
 func TestAViewedMarkerClearedByAStatusChangeStaysClearedBackOnDone(t *testing.T) {
 	// Arrange: a viewed, done row that took another turn.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Act: that turn finishes too.
@@ -1217,7 +1217,7 @@ func TestAViewedMarkerClearedByAStatusChangeStaysClearedBackOnDone(t *testing.T)
 func TestAPushThatRestatesTheSameStatusKeepsTheViewedMarker(t *testing.T) {
 	// Arrange.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Act: a re-push that leaves the arm exactly where it was.
 	r.SetSummary(theWS, "a summary line")
@@ -1235,7 +1235,7 @@ func TestAnotherWorkspacesStatusChangeLeavesThisMarkerStanding(t *testing.T) {
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Act: the OTHER workspace takes a turn.
 	r.SetTurn(ids.WorkspaceID("w2"), &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1306,7 +1306,7 @@ func TestRevivingMarkerLeavesTheStatusArmAlone(t *testing.T) {
 func TestRevivingMarkerLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 
 	// Act.
 	r.SetReviving(theWS, true)
@@ -1337,7 +1337,7 @@ func TestRevivingMarkerIsPerRow(t *testing.T) {
 func TestALinkBlipLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange: a done row the user has interacted with.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 	r.OnLink(theWS, shimclient.LinkRedialing)
 
 	// Act: the route comes back.
@@ -1358,7 +1358,7 @@ func TestAnInteractionDuringATurnStandsThroughThatTurnsEnd(t *testing.T) {
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.AckTurn(theWS)
-	r.SetInteracted(theWS, afterExemption)
+	r.SetInteracted(theWS, afterTurnEnd)
 	if got := onlyRow(t, r).GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want the running row viewed — the arrangement did not interact")
 	}
@@ -1459,7 +1459,7 @@ func TestAnInteractionDrawsEveryStatusPartial(t *testing.T) {
 			}
 
 			// Act.
-			r.SetInteracted(theWS, afterExemption)
+			r.SetInteracted(theWS, afterTurnEnd)
 
 			// Assert: every arm takes the user's interaction.
 			row := onlyRow(t, r)
@@ -2337,11 +2337,11 @@ func TestARepeatedInteractionPublishesOnlyWhenItReordersTheRecency(t *testing.T)
 			other := workspace("w2", "two")
 			other.InteractedAt = tc.otherAt
 			r := live(t, arrange(t, workspace(string(theWS), "one"), other))
-			r.SetInteracted(theWS, afterExemption)
+			r.SetInteracted(theWS, afterTurnEnd)
 			before := r.Revision()
 
 			// Act
-			r.SetInteracted(theWS, afterExemption.Add(time.Second))
+			r.SetInteracted(theWS, afterTurnEnd.Add(time.Second))
 
 			// Assert
 			if got := r.Revision() != before; got != tc.wantPublish {
