@@ -4219,6 +4219,17 @@ Each element is (WS LINE)."
   (should-not (agent-repl-roster-row-summary '(:detail (:summary nil))))
   (should-not (agent-repl-roster-row-summary nil)))
 
+(ert-deftest agent-repl-test-roster-row-repository-name-reads-the-row-field ()
+  "A row's repository name is its own `RosterRow.repository' name."
+  (should (equal (agent-repl-roster-row-repository-name
+                  '(:repository (:name "explanation-engine")))
+                 "explanation-engine")))
+
+(ert-deftest agent-repl-test-roster-row-repository-name-nil-when-unstated ()
+  "A row stating no repository, or no row at all, has no repository name."
+  (should-not (agent-repl-roster-row-repository-name '(:repository nil)))
+  (should-not (agent-repl-roster-row-repository-name nil)))
+
 (ert-deftest agent-repl-test-roster-row-commit-count-reads-the-detail ()
   "The detail panel's count is the row's commit count, zero included."
   (should (equal (agent-repl-roster-row-commit-count '(:detail (:commits (:count 0)))) 0))

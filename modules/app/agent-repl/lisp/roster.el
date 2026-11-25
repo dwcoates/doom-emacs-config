@@ -395,6 +395,14 @@ The workspace's generated summary (`RosterRowDetailSummary'), the same
 text the topbar draws over the workspace's name."
   (plist-get (plist-get (plist-get row :detail) :summary) :text))
 
+(defun agent-repl-roster-row-repository-name (row)
+  "Return the name of ROW's repository, or nil when the daemon states none.
+`frontend.v1.RosterRow.repository', on every list's rows: a hidden, merged
+or closed row sits in no repository section, and an open child may be of
+another repository than the section it is drawn in, so the row's own field
+is the one answer.  Nil when ROW is nil or its repository is unregistered."
+  (plist-get (plist-get row :repository) :name))
+
 (defun agent-repl-roster-row-attention-p (row)
   "Return non-nil when ROW carries the attention marker."
   (and (plist-get row :attention) t))

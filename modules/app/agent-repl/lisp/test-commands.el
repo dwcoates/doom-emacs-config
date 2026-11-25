@@ -3071,6 +3071,92 @@ MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
         (should (equal (mapcar #'substring-no-properties matches)
                        '("ws Fix the footer")))))))
 
+(defun agent-repl-test-commands--repository-row (name id repository &optional summary)
+  "Return a roster row for NAME, ID of REPOSITORY, stating SUMMARY when given."
+  (let ((row (if summary
+                 (agent-repl-test-commands--summarized-row name id summary)
+               (agent-repl-test-commands--row name id 1))))
+    (plist-put row :repository (list :name repository))))
+
+(ert-deftest agent-repl-test-commands-switch-candidate-carries-the-repository-before-the-summary ()
+  "A workspace's candidate is its name, then its repository and summary, invisible."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--repository-row
+                           "ws" "id-ws" "explanation-engine" "Fix it"))))
+    ;; Act
+    (let ((candidate (agent-repl--switch-candidate "ws" entry)))
+      ;; Assert
+      (should (equal (substring-no-properties candidate) "ws explanation-engine Fix it"))
+      (should-not (get-text-property 1 'invisible candidate))
+      (should (eq (get-text-property 2 'invisible candidate) t))
+      (should (eq (get-text-property (1- (length candidate)) 'invisible candidate) t)))))
+
+(ert-deftest agent-repl-test-commands-switch-candidate-carries-the-repository-without-a-summary ()
+  "A workspace with a repository and no summary carries the repository alone."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--repository-row "ws" "id-ws" "doom"))))
+    ;; Act
+    (let ((candidate (agent-repl--switch-candidate "ws" entry)))
+      ;; Assert
+      (should (equal (substring-no-properties candidate) "ws doom"))
+      (should (equal (agent-repl--switch-visible-name candidate) "ws")))))
+
+(ert-deftest agent-repl-test-commands-switch-display-alist-makes-the-repository-searchable ()
+  "Typing a repository keeps its workspaces and any other naming it, nothing else."
+  ;; Arrange
+  (let* ((alist (agent-repl--switch-display-alist
+                 (list (list :name "in-repo" :dir "/tmp/in-repo" :state :open
+                             :row (agent-repl-test-commands--repository-row
+                                   "in-repo" "id-in" "explanation-engine"))
+                       (list :name "explanation-engine-port" :dir "/tmp/port" :state :open
+                             :row (agent-repl-test-commands--repository-row
+                                   "explanation-engine-port" "id-port" "doom"))
+                       (list :name "elsewhere" :dir "/tmp/elsewhere" :state :open
+                             :row (agent-repl-test-commands--repository-row
+                                   "elsewhere" "id-else" "doom")))))
+         (table (agent-repl--switch-table alist 0)))
+    ;; Act
+    (let ((completion-styles '(substring)))
+      (let ((matches (completion-all-completions "explanation-engine" table nil 18)))
+        ;; Assert
+        (when (consp matches) (setcdr (last matches) nil))
+        (should (equal (sort (mapcar #'substring-no-properties matches) #'string<)
+                       '("explanation-engine-port doom" "in-repo explanation-engine")))))))
+
+(ert-deftest agent-repl-test-commands-switch-repository-column-is-the-repository-name ()
+  "The repository column is the row's repository name."
+  (should (equal (agent-repl--switch-repository
+                  (list :row (agent-repl-test-commands--repository-row "ws" "id-ws" "doom")))
+                 "doom")))
+
+(ert-deftest agent-repl-test-commands-switch-repository-column-without-a-repository-is-empty ()
+  "A row stating no repository, or a workspace with no row, draws an empty column."
+  (should (equal (agent-repl--switch-repository
+                  (list :row (agent-repl-test-commands--row "ws" "id-ws" 1)))
+                 ""))
+  (should (equal (agent-repl--switch-repository (list :row nil)) "")))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-draws-the-repository-first-padded ()
+  "The repository is the first column, padded to the widest repository offered."
+  ;; Arrange
+  (let* ((alist (agent-repl--switch-display-alist
+                 (list (list :name "a" :dir "/tmp/a" :section :repository :state :open
+                             :row (agent-repl-test-commands--repository-row
+                                   "a" "id-a" "doom"))
+                       (list :name "b" :dir "/tmp/b" :section :repository :state :open
+                             :row (agent-repl-test-commands--repository-row
+                                   "b" "id-b" "explanation-engine")))))
+         (affix (agent-repl--switch-affixation alist 0)))
+    ;; Act
+    (let ((short (nth 2 (car (funcall affix (list (car (nth 0 alist)))))))
+          (long (nth 2 (car (funcall affix (list (car (nth 1 alist))))))))
+      ;; Assert
+      (should (string-prefix-p (concat "doom" (make-string 15 ?\s))
+                               (substring-no-properties short 1)))
+      (should (string-prefix-p "explanation-engine "
+                               (substring-no-properties long 1)))
+      (should (= (length short) (length long))))))
+
 (ert-deftest agent-repl-test-commands-switch-summary-column-is-the-canonical-purple ()
   "The summary column draws the summary in the purple the topbar draws it in."
   ;; Arrange
