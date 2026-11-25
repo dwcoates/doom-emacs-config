@@ -304,11 +304,16 @@ func (c *controller) askDownFor(ws ids.WorkspaceID, beat time.Time, reason stand
 func (c *controller) retryCycle(ws ids.WorkspaceID) {
 	c.mu.Lock()
 	st := c.cycles[ws]
+	var merge *queuedMerge
+	if st != nil {
+		merge = st.merge
+	}
 	c.mu.Unlock()
 	if st == nil {
 		return
 	}
-	c.log.Debug(opCycle, "an edge arrived for a pending keep-alive cycle stand-down; asking again", dlog.Context{"workspace": string(ws)})
+	c.log.Log(settledLevel(merge), opCycle, logsite.Msg("an edge arrived for a pending stand-down; asking again"),
+		merge.fields(dlog.Context{"workspace": string(ws)}))
 	c.kickCycle(ws, st)
 }
 
@@ -449,7 +454,11 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		return withheldSettled, CycleOutcome{Failed: true, Why: "could not read the workspace's session; its stand-down is dropped"}
 	}
 	if !found || session.Terminal != nil {
-		log.Debug(op, "the workspace has no live session; nothing to stand down", fields)
+		read := dlog.Context{"found": found}
+		if found {
+			read["terminal"] = session.Terminal != nil
+		}
+		log.Log(settledLevel(merge), op, logsite.Msg("the workspace has no live session; nothing to stand down"), dlog.Merge(fields, read))
 		return withheldSettled, CycleOutcome{Down: true, Why: "the workspace has no live session; nothing to stand down"}
 	}
 	// A SYNC MERGE'S PARK HOLDS ONLY WHILE ITS ENTRY WAITS: the turn that
@@ -485,7 +494,8 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	switch gate := c.gate(ws); gate {
 	case gateOpen:
 	case gateNotServing:
-		log.Debug(op, "the workspace has no shim to address; nothing to stand down", fields)
+		log.Log(settledLevel(merge), op, logsite.Msg("the workspace has no shim to address; nothing to stand down"),
+			dlog.Merge(fields, dlog.Context{"gate": gate.String()}))
 		return withheldSettled, CycleOutcome{Down: true, Why: "the workspace has no shim to address; nothing to stand down"}
 	case gateBusy, gateStarting, gateReviving:
 		log.Info(op, "the session is busy; its stand-down waits for it to fall free",
@@ -516,6 +526,21 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		// afresh.
 		return withheldSettled, CycleOutcome{Failed: true, Why: "the park failed; its record above says why"}
 	}
+}
+
+// settledLevel answers the level a stand-down records a settling at when it
+// stood nothing down, and an edge asking a pending one again. A SYNC MERGE'S
+// PARK IS A DECISION OTHERS WAIT ON -- the merge queue, e2e and the sidebar --
+// so its settling is a fact at INFO, never silent: a merge's park asked again
+// on a bounce's end settled with no record at INFO, and which path it took
+// could not be read (2026-11-23, the displaced-turn landing). Every other ask
+// stays at DEBUG, because the keep-alive cycle reaches these paths for every
+// parked workspace at every beat.
+func settledLevel(merge *queuedMerge) string {
+	if merge != nil {
+		return dlog.LevelInfo
+	}
+	return dlog.LevelDebug
 }
 
 // mergeWaiting answers whether WS's entry in M's queue still waits in line as

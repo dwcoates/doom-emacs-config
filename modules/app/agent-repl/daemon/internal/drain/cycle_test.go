@@ -1090,6 +1090,150 @@ func TestAMergeQueuedParkThatFailsIsDroppedAndRecorded(t *testing.T) {
 	}
 }
 
+// nothingToStandDown names how a stand-down found nothing to stand down: the
+// workspace the arrange left, the record it says so in, and the state that
+// record names.
+var nothingToStandDown = []struct {
+	name    string
+	arrange func(t *testing.T, h *harness) ids.WorkspaceID
+	message string
+	state   dlog.Context
+}{
+	{name: "the gate answers not serving", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+		ws := h.workspace(t, instant)
+		h.stand.standDown(ws)
+		return ws
+	}, message: "the workspace has no shim to address; nothing to stand down", state: dlog.Context{"gate": gateNotServing.String()}},
+	{name: "the session row is absent", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+		ws := h.bare(t)
+		if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOff); err != nil {
+			t.Fatalf("SetRemoteControlMode: %v", err)
+		}
+		return ws
+	}, message: "the workspace has no live session; nothing to stand down", state: dlog.Context{"found": false}},
+	{name: "the session row has a terminal", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+		ws := h.workspace(t, instant)
+		if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: cycleReason.detail, At: instant}); err != nil {
+			t.Fatalf("SetSessionTerminal: %v", err)
+		}
+		return ws
+	}, message: "the workspace has no live session; nothing to stand down", state: dlog.Context{"found": true, "terminal": true}},
+}
+
+func TestAMergeQueuedParkThatFindsNothingToStandDownSaysSoAtInfo(t *testing.T) {
+	for _, tt := range nothingToStandDown {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.arrange(t, h)
+			m := queuedAt(t, h, ws, instant)
+			var got []CycleOutcome
+
+			// Act
+			h.c.askDownFor(ws, h.clock.Now(), mergeQueuedReason, &m, func(o CycleOutcome) { got = append(got, o) })
+
+			// Assert
+			if want := (CycleOutcome{Down: true, Why: tt.message}); len(got) != 1 || got[0] != want {
+				t.Fatalf("reports = %+v, want one %+v", got, want)
+			}
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opMergeQueued, Message: tt.message})
+			if !ok {
+				t.Fatalf("records = %+v, want %q at info", records(h.log, opMergeQueued), tt.message)
+			}
+			if rec.Context["workspace"] != string(ws) || rec.Context["repo"] != string(m.repo) || rec.Context["merge_entry"] != string(m.ledger) {
+				t.Fatalf("record context = %v, want the workspace and the queue entry", rec.Context)
+			}
+			for key, want := range tt.state {
+				if rec.Context[key] != want {
+					t.Fatalf("record context %s = %v, want %v (context %v)", key, rec.Context[key], want, rec.Context)
+				}
+			}
+			if _, named := rec.Context["terminal"]; named != (tt.state["terminal"] != nil) {
+				t.Fatalf("record context = %v, want terminal named only when the row was found", rec.Context)
+			}
+		})
+	}
+}
+
+func TestAnUnscopedStandDownThatFindsNothingToStandDownStaysAtDebug(t *testing.T) {
+	for _, tt := range nothingToStandDown {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.arrange(t, h)
+			var got []CycleOutcome
+
+			// Act
+			h.c.CycleDownThen(ws, beatAfter, func(o CycleOutcome) { got = append(got, o) })
+
+			// Assert
+			if want := (CycleOutcome{Down: true, Why: tt.message}); len(got) != 1 || got[0] != want {
+				t.Fatalf("reports = %+v, want one %+v", got, want)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opCycle, Message: tt.message}); ok {
+				t.Fatalf("records = %+v, want %q kept off info", records(h.log, opCycle), tt.message)
+			}
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "debug", Operation: opCycle, Message: tt.message})
+			if !ok {
+				t.Fatalf("records = %+v, want %q at debug", records(h.log, opCycle), tt.message)
+			}
+			for key, want := range tt.state {
+				if rec.Context[key] != want {
+					t.Fatalf("record context %s = %v, want %v (context %v)", key, rec.Context[key], want, rec.Context)
+				}
+			}
+		})
+	}
+}
+
+func TestAnEdgeForAPendingMergeQueuedParkIsRecordedAtInfo(t *testing.T) {
+	const message = "an edge arrived for a pending stand-down; asking again"
+	tests := []struct {
+		name string
+		// ask leaves a stand-down pending under the busy session.
+		ask       func(h *harness, ws ids.WorkspaceID, m queuedMerge)
+		wantLevel string
+		wantMerge bool
+	}{
+		{name: "a merge-queued park", ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) { h.mergeQueuedDown(ws, m) },
+			wantLevel: "info", wantMerge: true},
+		{name: "a keep-alive cycle stand-down", ask: func(h *harness, ws ids.WorkspaceID, _ queuedMerge) { h.c.CycleDown(ws, beatAfter) },
+			wantLevel: "debug"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			m := queuedAt(t, h, ws, instant)
+			h.freeness.SetFree(ws, false)
+			tt.ask(h, ws, m)
+			if !h.cyclePending(ws) {
+				t.Fatal("the stand-down under the busy session was not kept pending")
+			}
+
+			// Act
+			h.c.RetryWithheld(ws)
+
+			// Assert
+			edges := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Operation: opCycle, Message: message})
+			if len(edges) != 1 || edges[0].Level != tt.wantLevel {
+				t.Fatalf("records = %+v, want one %q at %s", records(h.log, opCycle), message, tt.wantLevel)
+			}
+			rec := edges[0]
+			if rec.Context["workspace"] != string(ws) {
+				t.Fatalf("record context = %v, want the workspace", rec.Context)
+			}
+			if tt.wantMerge && (rec.Context["repo"] != string(m.repo) || rec.Context["merge_entry"] != string(m.ledger)) {
+				t.Fatalf("record context = %v, want the queue entry", rec.Context)
+			}
+			if _, named := rec.Context["merge_entry"]; !tt.wantMerge && named {
+				t.Fatalf("record context = %v, want no queue entry for an unscoped stand-down", rec.Context)
+			}
+		})
+	}
+}
+
 func TestAMergeQueuedParkLeavesTheOrdinaryParkARestoreReads(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
