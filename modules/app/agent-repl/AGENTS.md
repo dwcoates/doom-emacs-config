@@ -3560,10 +3560,11 @@ pids, the views told, the roster republished):
   moves: measured on the cache clock, a pinged session would never have been
   idle at all (`daemon/internal/wsm/lastwork.go`).
 
-ONLY A PROMPT, A SETTINGS PICK, A KEEP-ALIVE RESTORE, A COLD GATE'S ANSWER OR
-A RESTART BRINGS A SHIM UP (owner rulings, 2026-10-28): a look, a select, an
-open, a history read, a boot and a deploy leave a parked session parked,
-because every conversation is read from the store.
+ONLY A PROMPT, A SETTINGS PICK, A KEEP-ALIVE RESTORE, A COLD GATE'S ANSWER, A
+RESTART OR A MERGE BRINGS A SHIM UP (owner rulings, 2026-10-28 and
+2026-11-24; a merge's step, or a merge leaving its line without landing): a
+look, a select, an open, a history read, a boot and a deploy leave a parked
+session parked, because every conversation is read from the store.
 `docs/developer/shim-lifecycle.md` is the reference for when a shim runs.
 A WORKSPACE AT ITS COLD GATE RUNS NO SHIM until the user answers the gate: the
 gate is recorded and raised from the record, and only the answer spawns a shim

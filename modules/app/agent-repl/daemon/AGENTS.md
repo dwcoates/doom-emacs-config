@@ -570,8 +570,8 @@ open's) starts only workspaces `bringup.OnlyVisible` keeps: those the persisted
 visibility (`wsm.Workspace.Visibility`) calls visible, widened by a queued
 merge, the deploy mediator and a fold's spared one-shots (`wsm.Workspace.Runs`).
 What visible means is `frontend.v1.RosterRowVisibility`'s alone: an open
-workspace no fold covers, or one that is working or unviewed, the parent of a
-visible one, and the selected one. A fold that makes a workspace not visible
+workspace that gets a number in the sidebar's Open section, its one
+definition in `webapp/src/sidebar/AGENTS.md` ("Visibility"). A fold that makes a workspace not visible
 stands the session down through the idle sweep's own gate and park (`drain/withheld.go`);
 a turn in flight defers it to the free edge that turn's end raises, and a
 workspace expanded again meanwhile is not stood down. A fold never stands down

@@ -67,44 +67,56 @@ Workspace resource allocation is whether a workspace has its page loaded and
 its shim unparked. The owner's rulings of 2026-11-24, as this change builds
 them. Each clock is a product rule, not a bound on an operation.
 
-### Shown (the sidebar's visibility)
+### Visible
 
-- A row is shown when it is a keeper (selected, working, unread, starting,
-  priority P0.5 or P1, a deploy mediator, or in queue bypass mode), when its
-  nearest container is unfolded and itself shown, or when a row beneath it is
-  shown. Mediators and queue-bypass workspaces are shown whatever folds them.
+- A VISIBLE workspace is one that gets a number in the sidebar's Open
+  section: an open workspace that no fold has rendered invisible as inactive.
+  Backlogged, closed, killed, nuked and merged workspaces are never visible.
+- A row a fold covers stays visible while it is selected, working, unread,
+  starting, of priority P0.5 or P1, a standing mediator or a queue-bypass
+  holder; the rows above a visible row stay visible too.
 - A subsection with members always draws its header.
-- A switch to a workspace that is not shown (the recency walk reaches it)
-  selects it, so it is shown while selected, and returns to not shown when the
-  user moves on.
+- `SPC p p` and the recency walk may select a workspace that is not visible,
+  or not even open. It holds its allocations while selected, and loses them
+  when the user moves on unless it is visible.
 
 ### Page
 
-- Not shown: never loaded.
+- Not visible: never loaded.
 - Selected: loaded.
 - A one-shot, or a workspace in a synchronous merge, that is not selected:
-  unloaded at once on becoming one, and at once when the user switches away
-  from it.
+  loaded for one minute after the user switches away from it, or after it
+  becomes one, then unloaded (owner ruling, 2026-11-24, which replaces "at
+  once"). An async merge is an ordinary workspace.
 - Working (starting and top priority count as working): loaded.
 - Unread: loaded until one hour after its turn ended.
 - Viewed: unloaded 10 seconds after the user switches away, except when the
   visit being left is the one that first marked it viewed; then 15 minutes.
-  (Assumption: the 15 minutes run from the switch away, so a long first visit
-  still keeps the page for 15 minutes after it.)
+  The 15 minutes run from the switch away, so a long first visit still keeps
+  the page for 15 minutes after it.
 
 ### Shim
 
-- Not shown: parked, except the named exceptions below.
-- Selected and working: running.
-- Deploy mediators and queue-bypass workspaces: always running.
-- A synchronous merge: parked while it waits in the queue; unparked for
-  keep-alive beats and while it rebases, runs its gate, repairs tests or
-  resolves conflicts; parked again when it waits again.
-- Unread: running until 15 minutes after its turn ended, then parked.
-- Viewed and idle: parked when its page unloads.
-- Backlogged, closed, killed or nuked: its running turn is interrupted, its
-  page unloads at once, and its shim parks after one more full keep-alive
-  tick.
+- Never parked while initializing (brought up for work whose turn has not
+  closed, with no instant between the bring-up and the turn), working, a
+  keep-alive beat awaits its answer, selected, remote control is on, or it is
+  a mediator, a queue-bypass holder or a one-shot.
+- Selecting a parked workspace never brings its session up.
+- Otherwise it parks 15 minutes after the later of its last turn's end and
+  the user's last interaction with it (owner ruling, 2026-11-24, which
+  replaces the unread and left rules), or 15 minutes after a start the user
+  asked for that runs no turn.
+- It parks the moment it stops being visible, and after a keep-alive answer
+  when it was restored only for that beat.
+- A synchronous merge: parked while it waits in line; brought back up when it
+  leaves the line without landing (evicted, dequeued, or behind a merge that
+  did not land) and when it reaches any active stage. A merge awaiting its
+  workspace's freedom holds the session.
+- Backlogged, closed, killed or nuked: its running turn is interrupted, it
+  parks, one last keep-alive beat goes out, and none after it. A close ends
+  the session as a kill does.
+- A session at its cold gate is parked; a settings visit parks on the switch
+  away when no turn ran.
 
 ### Viewed
 

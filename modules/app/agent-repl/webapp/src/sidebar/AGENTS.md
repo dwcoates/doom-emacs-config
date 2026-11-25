@@ -58,28 +58,61 @@ both halves below read visibility first. Visible does not mean loaded.
   holds:
   - not visible: unloaded;
   - the selection: loaded;
-  - a one-shot or a synchronous merge: unloaded (loaded only while selected);
+  - a one-shot or a synchronous merge (an async merge is an ordinary
+    workspace): loaded for one minute after the user switched away from it,
+    or after it became one while not selected (`PageAwayGrace`), then
+    unloaded;
   - working, starting or top priority: loaded;
-  - an unread result: loaded for an hour after its turn ended;
-  - a workspace the user left: loaded for ten seconds, or fifteen minutes
-    when the visit being left first marked it viewed;
+  - an unread result: loaded for an hour after its turn ended
+    (`PageUnreadHold`);
+  - a workspace the user left: loaded for ten seconds (`PageLeaveGrace`), or
+    fifteen minutes when the visit being left first marked it viewed
+    (`PageFirstViewGrace`);
   - otherwise unloaded.
   The roster arms one timer for the earliest of these clocks, so the verdict
   flips on time. Emacs follows it (`lisp/page-unload.el`); the cold gate's
   hold-back is the only page rule Emacs keeps.
-- The shim hold (`wsm.ShimHold`, `shimHoldOf` in the same file) says until
-  when an idle shim stays up; the cache keeper parks by it
+- The shim is NEVER parked while:
+  - it is initializing: a session brought up for work (a prompt, a create, a
+    fork, a thread, a merge step, a compaction) is held from its own durable
+    row until a turn closes after the bring-up (`wsm.Session.Initializing`,
+    `WorkBroughtUpAt`), so the hold passes from the bring-up to the turn with
+    no instant between them;
+  - it works: a turn, detached work, a question or permission ask, a clear or
+    a compaction (the drain's gate, `drain` `sweep.go` `gate`, also refuses
+    while a prompt is reviving or a start is under way);
+  - a keep-alive beat awaits its answer;
+  - it is selected (the selection holds a running shim up; selecting a parked
+    one never brings it up, `wsm.Workspace.Runs`);
+  - remote control is on, or it is a standing mediator, a queue-bypass holder
+    or a one-shot.
+- Otherwise the shim hold (`wsm.ShimHold`, `shimHoldOf` in `page.go`, joined
+  with the session's own `wsm.Session.BringUpHold`) says until when an idle
+  shim stays up; the cache keeper parks by it
   (`daemon/internal/cachelapse/standdown.go`, `parkWaits`):
   - not visible: no hold;
-  - the selection, work, a mediator, a queue-bypass holder, a one-shot: held
-    while that stands;
-  - a synchronous merge: none (its merge parks it while it waits in line,
-    `drain.Controller.MergeQueuedDown`, and its steps bring it up);
-  - an unread result: fifteen minutes after its turn ended;
-  - a workspace the user left: as long as its page.
+  - a synchronous merge waiting in line: no hold (its enqueue parks it,
+    `drain.Controller.MergeQueuedDown`); one awaiting its workspace's
+    freedom or at an active step is held while that stands;
+  - a start the user asked for that runs no turn (a restart, a relaunch, a
+    rebind, a swap, a cold gate's answer, a merge leaving its line without
+    landing): `wsm.ShimIdleHold` after that bring-up, unless a turn closes
+    first (`UserBroughtUpAt`);
+  - any other: `wsm.ShimIdleHold` (fifteen minutes) after the later of its
+    last turn's end and the user's last interaction with it.
+- A synchronous merge that leaves its line without landing (evicted,
+  dequeued, or behind a merge that did not land) brings back up the session
+  its wait parked (`merge.orchestrator.returnSession`, start cause
+  `merge_left_line`); its active steps bring it up as they need it
+  (`ensureSession`).
 - A backlog or a close interrupts the running turn first
-  (`workspace.verbs.interruptBeforeLeaving`). The workspace's cache gets one
-  last keep-alive beat (`cachelapse` schedule's `spent`), then lapses.
+  (`workspace.verbs.interruptBeforeLeaving`). The workspace is no longer
+  visible, so nothing holds its session: it parks, gets one last keep-alive
+  beat (`cachelapse` schedule's `spent`), and is never brought up for a later
+  one. A close ends the session as a kill does.
+- A settings visit (a model, permission-mode or effort pick that started the
+  shim) parks on the switch away when no turn ran
+  (`drain.Controller.VisitDown`), and a session at its cold gate is parked.
 
 ## Viewed
 
