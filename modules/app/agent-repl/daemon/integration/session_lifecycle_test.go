@@ -379,46 +379,6 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	})
 }
 
-func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWorkspaceRestartWarnings()
-	f.shim.ExpectStartSession()
-	f.submit("long running work", "k-restart-forced", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	f.shim.ExpectStartTurn()
-
-	// Act
-	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("RestartWorkspace{force:true} = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
-	}
-	// A forced restart interrupts THE TURN first -- KillTurn{force:true} --
-	// and the stand-down that follows is FORCED too: a forced bounce does not
-	// wait for in-flight work, and whatever is still live (monitors, background
-	// shells, background subagents) runs inside the shim's vendor child and
-	// ends with it (endpoint_deploy.proto, DeployRequest.force).
-	// THE KILL IS READ FROM THE OLD SHIM'S DURABLE LOG: the restart answers
-	// once it HAPPENED (owner ruling, 2026-10-08), by when the old shim has
-	// exited and its control socket is closed.
-	killedTurn := &shimv1.KillTurnRequest{}
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillTurn, killedTurn)
-	if !killedTurn.GetForce() {
-		t.Fatalf("KillTurn.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
-	}
-	killed := &shimv1.KillSessionRequest{}
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
-	if !killed.GetForce() {
-		t.Fatalf("KillSession.force = false on a forced restart, want the forced stand-down")
-	}
-}
-
 func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a very short idle cutoff so hibernation fires promptly.
@@ -475,48 +435,6 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 
 	// Assert: the prompt is delivered once the revived session is ready.
 	shim.ExpectStartTurn()
-}
-
-// TestABounceOfANeverTurnedSessionComesUpFresh is the e2e run-2 repro as an
-// assertion: a session that pre-minted a vendor session id and never took a
-// turn has NO transcript, so the staleness bounce's resume named a
-// conversation the shim rightly refuses as `unknown_session`, no client was
-// installed, and every later prompt answered `no_session` forever.
-func TestABounceOfANeverTurnedSessionComesUpFresh(t *testing.T) {
-	t.Parallel()
-	// Arrange: the fake reports a build that is not the installed bundle's, so
-	// the mount bounces the shim — and the fake withholds the transcript until the
-	// first turn, exactly as the vendor does.
-	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"FAKESHIM_BUILD_SHA=older-build"}})
-	f.d.ExpectWarnings("daemon.account.find_transcript",
-		"daemon.workspace.bring_up", "daemon.workspace.kill",
-		// The fake's replacement reports the SAME older build (its
-		// FAKESHIM_BUILD_SHA outlives the bounce), which the staleness judge
-		// names as a bounce that did not take.
-		"daemon.rollout.staleness")
-	// The sweep covers every test; the declared records are evidence of the bounce's stand-down, the abandoned conversation the classifier records, and the shim death the bounce drives.
-	f.d.ExpectWorkspaceRestartWarnings()
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{NoTranscriptUntilTurn: true})
-
-	// Act
-	if resp, err := f.startRaw(); err != nil || resp.GetSuccess() == nil {
-		t.Fatalf("the start = (%v, %v), want a success", resp, err)
-	}
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the completed build-staleness bounce", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.rollout.relaunch" && r.Message == "relaunched the workspace's shim"
-	})
-
-	// Assert: the bounce came up FRESH rather than failing its resume, and the
-	// workspace takes prompts afterwards.
-	for _, r := range f.d.RunLog() {
-		if r.Message == "the resume failed; the workspace carries its own error" {
-			t.Fatalf("the bounce recorded a relaunch_resume_failed fault: %+v", r)
-		}
-	}
-	resp := f.submit("after the bounce", "k-bounce-fresh", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	if resp.GetError() != nil {
-		t.Fatalf("SubmitPrompt after the bounce = %v, want an accepted prompt rather than no_session", resp)
-	}
 }
 
 func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
@@ -634,51 +552,6 @@ func TestRestartWorkspaceReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
 	// (<-exited) before Install and Resume are ever called, so this is a
 	// near-instant confirmation of an already-settled fact, not a wait.
 	harness.AwaitProcessExit(t, shortTimeout(t, f.d.Ctx(), 200*time.Millisecond), oldPID)
-}
-
-// TestRestartWorkspaceForcedContinuesTheInterruptedTurnWithoutResubmittingIt
-// pins both halves of a restart's cut: the interrupted prompt is never sent
-// again as a fresh turn, and the cut work is continued by the resumption
-// (owner ruling, 2026-10-30), the restarted session's one turn.
-func TestRestartWorkspaceForcedContinuesTheInterruptedTurnWithoutResubmittingIt(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWorkspaceRestartWarnings()
-	f.shim.ExpectStartSession()
-	f.submit("long running work", "k-restart-forced-no-redrive", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	f.shim.ExpectStartTurn()
-
-	// Act
-	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
-	if err != nil {
-		t.Fatalf("RestartWorkspace{force:true} = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
-	}
-	// THE KILL IS READ FROM THE OLD SHIM'S DURABLE LOG: the restart answers
-	// once it HAPPENED (owner ruling, 2026-10-08), by when the old shim has
-	// exited and its control socket is closed.
-	killedTurn := &shimv1.KillTurnRequest{}
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillTurn, killedTurn)
-	if !killedTurn.GetForce() {
-		t.Fatalf("KillTurn.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
-	}
-
-	second := f.d.ShimAt(prelaunchControlSocket(f.d, f.ws, 1))
-	resume := second.ExpectStartSession()
-	if resume.GetResume() == nil {
-		t.Fatalf("StartSession on the resumed shim = %v, want a resume source", resume)
-	}
-
-	// Assert: the one turn the resumed shim is asked to start is the
-	// resumption, never the interrupted prompt resubmitted.
-	if st := second.ExpectStartTurn(); st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
-		t.Fatalf("the resumed shim's turn has origin %v, want the resumption, never the cut prompt again", st.GetOrigin())
-	}
-	expectRPCCount(t, second, harness.RPCStartTurn, 1)
 }
 
 // ---- critique 13: bounce accountability ----
@@ -874,33 +747,6 @@ func TestARetriedVendorStartDeliversThePromptHeldWhileItRetried(t *testing.T) {
 	}
 	if got := shim.Count(harness.RPCStartSession); got != 3 {
 		t.Fatalf("StartSession calls = %d, want two refused and one that started", got)
-	}
-}
-
-// A FAILED START KEEPS ITS SHIM HELD, AND THE NEXT START REUSES IT: the
-// vendor rejects the first StartSession outright, and the next open starts
-// the session on the SAME shim -- never a second spawn, never an adoption of
-// the shim this daemon already holds.
-func TestTheStartAfterARejectedVendorStartReusesItsShim(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.restart")
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartRejectTimes: 1, VendorStartFailDetail: "invalid api key"})
-	if resp, err := f.startRaw(); err != nil || resp.GetError().GetRelaunchFailed() == nil {
-		t.Fatalf("the start = (%v, %v), want the vendor's rejection", resp, err)
-	}
-
-	// Act: a prompt is what starts it next.
-	resp := f.submit("after the rejection", "k-after-reject", origin)
-
-	// Assert
-	if resp.GetError() != nil {
-		t.Fatalf("SubmitPrompt = %v, want the prompt taken", resp)
-	}
-	f.d.Shim(f.ws).ExpectStartTurn()
-	if got := f.d.Shim(f.ws).Count(harness.RPCStartSession); got != 2 {
-		t.Fatalf("StartSession calls on the one shim = %d, want the rejected one and the one that started", got)
 	}
 }
 

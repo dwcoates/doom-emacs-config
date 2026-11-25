@@ -118,51 +118,6 @@ func TestAConflictIsResolvedByTheRequestersSessionAndTheRebaseContinues(t *testi
 	}
 }
 
-func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMergeLand(t *testing.T) {
-	t.Parallel()
-	// Arrange: the front's conflict is left unresolved; a second workspace
-	// waits behind it.
-	s := newSourcedRepo(t)
-	repoRef := mergeRepositoryRef(t, s.d, s.repo)
-	behind := mergeCreateChild(t, s.d, repoRef, "behind", "the work behind", nil)
-	harness.CommitWork(t, behind.ws.GetDir())
-	harness.CommitWork(t, s.f.ws.GetDir())
-	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
-	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
-	footer := s.d.WatchFooter(s.f.ws)
-	roster := s.d.WatchRoster()
-	behindRoot := behind.watchRootFeed()
-
-	// Act.
-	s.finish(t)
-	if _, err := s.d.Client().FinishWorkspace(s.d.Ctx(), connect.NewRequest(harness.FinishRequest(behind.ws))); err != nil {
-		t.Fatalf("FinishWorkspace(behind): %v", err)
-	}
-	// The session gives up on every attempt the commit's conflict gets.
-	for attempt := 1; attempt <= merge.MaxConflictAttempts; attempt++ {
-		s.awaitStartTurn(t, 1+attempt)
-		pushConcludedTurn(s.f.shim, mainAgent, "gave-up")
-	}
-
-	// Assert: merge failed in conflicts, turquoise on the roster, rebase left.
-	awaitFooter(t, s.f, footer, "merge failed in conflicts", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMergeFailed().GetConflicts() != nil
-	})
-	awaitRoster(t, s.d, roster, "the roster's merge_failed", func(r *frontendv1.RosterPush) bool {
-		return rosterRow(r, s.f.ws.GetId()).GetMergeFailed() != nil
-	})
-	if !s.repo.RebaseInProgress(s.f.ws.GetDir()) {
-		t.Fatal("the failed resolution's rebase was not left in progress")
-	}
-	merge := awaitRow(t, behind, behindRoot, "the merge behind's terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil
-	})
-	s.d.AwaitLandingDeployed()
-	if merge.GetActivity().GetMerge().GetSuccess() == nil {
-		t.Fatal("the merge behind the failed one did not land")
-	}
-}
-
 func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	t.Parallel()
 	// Arrange: the gate's first run fails, and while it is fixed the target

@@ -8,7 +8,6 @@ package integration
 import (
 	"agentrepl/protohelpers/rosterwalk"
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -595,20 +594,6 @@ func rosterNests(roster *frontendv1.RosterPush, parentID, childID string) bool {
 		}
 	}
 	return false
-}
-
-// connectCode reads a Connect error's code, or CodeUnknown for anything else.
-func connectCode(err error) connect.Code {
-	var cerr *connect.Error
-	if errors.As(err, &cerr) {
-		return cerr.Code()
-	}
-	return connect.CodeUnknown
-}
-
-// containsField reports whether a validation refusal names a field.
-func containsField(err error, field string) bool {
-	return err != nil && strings.Contains(err.Error(), field)
 }
 
 // healthRequest is the DaemonHealth probe used as a liveness check.

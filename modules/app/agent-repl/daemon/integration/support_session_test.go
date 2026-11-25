@@ -35,13 +35,6 @@ func prelaunchControlSocket(d *harness.Daemon, ws *workspacev1.WorkspaceRef, gen
 	return base + ".n" + strconv.Itoa(gen) + ".sock.ctl"
 }
 
-// expectNoRPC asserts a shim received no request for `rpc` from what the
-// test did (expectRPCCount).
-func expectNoRPC(t *testing.T, s *harness.ShimControl, rpc string) {
-	t.Helper()
-	expectRPCCount(t, s, rpc, 0)
-}
-
 // expectRPCCount asserts a shim's total receipt count for rpc is want once
 // the daemon is idle: every call the daemon was going to make of the shim as a
 // consequence of what the test did has been answered (Daemon.AwaitIdle), so

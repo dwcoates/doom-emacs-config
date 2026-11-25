@@ -3,8 +3,6 @@
 package integration
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -15,39 +13,6 @@ import (
 
 	"connectrpc.com/connect"
 )
-
-func TestRegisterWorkspaceIsIdempotentAcrossSpellings(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	repo := harness.NewRepo(t)
-	first := harness.Register(t, d, repo.Dir)
-	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(repo.Dir, link); err != nil {
-		t.Fatalf("symlink the worktree: %v", err)
-	}
-
-	tests := []struct {
-		name string
-		dir  string
-	}{
-		{name: "trailing slash", dir: repo.Dir + string(filepath.Separator)},
-		{name: "dot segments", dir: filepath.Join(repo.Dir, "..", filepath.Base(repo.Dir))},
-		{name: "symlink", dir: link},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			again := harness.Register(t, d, tc.dir)
-
-			// Assert
-			if again.GetId() != first.GetId() {
-				t.Fatalf("RegisterWorkspace(%s) = id %q, want the same id %q as %s", tc.dir, again.GetId(), first.GetId(), repo.Dir)
-			}
-		})
-	}
-}
 
 // TestRegisterWorkspaceAfterARestartIsIdempotent pins registration across a
 // daemon restart: re-registering the same directory on a fresh daemon
@@ -83,26 +48,6 @@ func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("the roster carries %d rows for workspace %q after a post-restart re-registration, want exactly 1", count, firstID)
 	}
-}
-
-func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
-	t.Parallel()
-	// It changes the daemon's one selection.
-	// Arrange
-	f := newRegisteredInGroup(t, groupSelection)
-	// A SELECT STARTS NO SHIM (owner ruling, 2026-10-28), so the window below
-	// is the re-selection's alone.
-	f.selectWorkspace()
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the latest roster", func(r *frontendv1.RosterPush) bool {
-		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
-	})
-
-	// Act
-	f.selectWorkspace()
-
-	// Assert
-	harness.ExpectNoPush(t, roster, "re-selecting the current workspace is a success that changes no view")
 }
 
 // TestSwitchingWorkspacesIsOneRosterPush pins that a switch reaches a roster

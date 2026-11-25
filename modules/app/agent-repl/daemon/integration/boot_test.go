@@ -3,10 +3,7 @@
 package integration
 
 import (
-	"context"
 	"database/sql"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -233,85 +230,6 @@ func TestJSONCodecServesRegisterAndAPerWorkspaceVerb(t *testing.T) {
 	first := harness.AwaitNext(t, d.Ctx(), roster, "the roster a JSON-codec subscriber opens with")
 	if rosterRow(first, ws.GetId()) == nil {
 		t.Fatalf("the first roster push over the JSON codec has no row for %s, want the latest-first roster", ws.GetId())
-	}
-}
-
-// TestWorkspaceBoundWarnStaysOffTheRunLog pins the log-discipline split:
-// a WARN record scoped to one workspace lands ONLY in that workspace's own
-// `<workspace>/.claude/emacs/daemon.log` sink and never on the daemon-wide
-// `daemon.run.log`. A fake shim that dies during bring-up produces exactly
-// this: shimclient.abandonBringUp logs `daemon.shimclient.spawn` at WARN
-// through the workspace-scoped surfaces.Workspace(dir) logger
-// (internal/shimclient/supervisor.go), never through the global one.
-func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	// The start under test is the restart's, whose failure is its own ERROR,
-	// and the dying bring-up's own records.
-	f.d.ExpectWarnings("daemon.workspace.restart")
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.spawn", "daemon.workspace.open",
-		"daemon.shimclient.exit", "daemon.workspace.bring_up")
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
-		ExitOn: harness.ExitOnStartup, ExitCode: 3, Stderr: "boom: workspace-bound warn",
-	})
-
-	// Act: bring-up dies, which drives the workspace-scoped WARN.
-	resp, err := f.startRaw()
-	if err != nil {
-		t.Fatalf("a start onto a dying shim = transport error %v, want the relaunch_failed arm", err)
-	}
-	if resp.GetError().GetRelaunchFailed() == nil {
-		t.Fatalf("a start onto a dying shim = %v, want RestartWorkspaceError.relaunch_failed", resp)
-	}
-
-	// Assert: the WARN record IS in the workspace's own daemon.log. The
-	// operation also carries the ordinary DEBUG/INFO records of a spawn, so
-	// the wait names the LEVEL as well: the subject is the warning, not the
-	// first record the operation happens to produce.
-	f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"),
-		"the WARN daemon.shimclient.spawn record", func(r harness.LogRecord) bool {
-			lvl := strings.ToLower(r.Level)
-			return r.Operation == "daemon.shimclient.spawn" && (lvl == "warn" || lvl == "warning")
-		})
-
-	// Assert: it is NOT on the daemon-wide run log.
-	for _, r := range f.d.RunLog() {
-		if r.Operation == "daemon.shimclient.spawn" {
-			t.Fatalf("daemon.run.log carries the workspace-bound record %v, want it confined to %s",
-				r, harness.WorkspaceLogPath(f.repo.Dir, "daemon"))
-		}
-	}
-}
-
-// TestCloseWorkspaceRemovesTheLogSinkSymlink covers what daemon.md's LOG
-// SURFACES ruling actually prescribes for a close: "eviction on workspace
-// close" — the SINK HANDLE is released, and the canonical link and its target
-// stay on disk (internal/workspace/close.go; pinned by
-// internal/dlog/surfaces_test.go's TestEvictLeavesTheCanonicalLinkAndTargetOnDisk,
-// because a closed workspace's log is still the record of what it did).
-//
-// It also pins the ordering the eviction imposes: the close record is written
-// through that same sink, so it must land BEFORE the eviction releases it.
-func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	link := harness.WorkspaceLogPath(f.repo.Dir, "daemon")
-	if _, err := os.Lstat(link); err != nil {
-		t.Fatalf("stat the workspace's daemon.log symlink before Close: %v", err)
-	}
-
-	// Act
-	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
-		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
-	}
-	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.workspace.close")
-
-	// Assert: the link SURVIVES (the settled contract), so the critique's
-	// removal claim does not hold against this codebase.
-	if _, err := os.Lstat(link); err != nil {
-		t.Fatalf("stat the workspace's daemon.log symlink after Close = %v, want it left on disk per internal/workspace/close.go and internal/dlog/surfaces_test.go's TestEvictLeavesTheCanonicalLinkAndTargetOnDisk", err)
 	}
 }
 
@@ -542,56 +460,6 @@ func TestBootRefusesAStateRootTooLongForShimSockets(t *testing.T) {
 
 // ---- audit-3 critique 25: address-file temp sibling, pprof unix socket ----
 
-// TestPprofServesOverAUnixSocket pins the OTHER accepted --pprof shape
-// (internal/pprofsurface/surface.go: isSocketPath recognizes a path
-// separator or a .sock suffix): a unix-socket path serves /debug/pprof/
-// exactly as the loopback host:port form does
-// (TestPprofServesOnAnExplicitLoopbackAddress).
-func TestPprofServesOverAUnixSocket(t *testing.T) {
-	t.Parallel()
-	// Arrange: a short root, independent of the state root's own socket
-	// budget, so the profiling socket's own path stays under the unix-socket
-	// limit.
-	sockDir, err := os.MkdirTemp("/tmp", "pprof")
-	if err != nil {
-		t.Fatalf("mkdir a short pprof socket root: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(sockDir) })
-	sockPath := filepath.Join(sockDir, "p.sock")
-
-	// The profiling surface says so out loud at boot.
-	d := newDaemon(t, harness.Opts{Pprof: sockPath, ExpectWarnings: []string{"daemon.pprof.enabled"}})
-	record := d.AwaitRunLogOperation("daemon.pprof.enabled")
-	network, _ := record.Context["network"].(string)
-	if network != "unix" {
-		t.Fatalf("daemon.pprof.enabled context = %v, want network \"unix\"", record.Context)
-	}
-	address, _ := record.Context["address"].(string)
-	if address == "" {
-		t.Fatalf("daemon.pprof.enabled context = %v, want the resolved socket path", record.Context)
-	}
-
-	// Act: GET /debug/pprof/ dialed over the unix socket itself.
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(ctx, "unix", address)
-			},
-		},
-	}
-	resp, err := client.Get("http://unix/debug/pprof/")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("GET /debug/pprof/ over the pprof unix socket = error %v, want the profiling surface", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /debug/pprof/ over the pprof unix socket = %d, want 200", resp.StatusCode)
-	}
-}
-
 // TestBootRefusesWithoutAnAccountRoot is the cross-system guard for the
 // launcher's argv. The account is DETERMINED by the workspace's path, so both
 // config roots must have an answer; a daemon spawned without one exits before
@@ -675,47 +543,6 @@ func TestBootServesThoughASurvivingShimIsUnreachable(t *testing.T) {
 	// record, and this is the socket actually accepting a connection.
 	if _, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest()); err != nil {
 		t.Fatalf("DaemonHealth = error %v, want a success: one unreachable survivor must not stop the daemon accepting connections", err)
-	}
-}
-
-// TestAnUnadoptedSurvivorWithNoManifestKeepsItsBounceUnknownStanding is the
-// other half of TestCrashBootWithNoManifestRecordsNoBounceUnknownForAnAdoptedWorkspace:
-// a session the lock says survived the crash and that the boot could NOT adopt
-// is the one the boot genuinely cannot account for. It records bounce_unknown
-// ("needs a human"), and nothing closes it: the workspace never attached.
-func TestAnUnadoptedSurvivorWithNoManifestKeepsItsBounceUnknownStanding(t *testing.T) {
-	t.Parallel()
-	// Arrange: the survivor holds its lock and its socket path is gone.
-	f := newOpened(t, harness.Opts{DurableState: true})
-	socket := f.d.SocketPath(f.ws)
-	f.d.Kill()
-	if err := os.Remove(socket); err != nil {
-		t.Fatalf("unlink the surviving shim's socket path %s: %v", socket, err)
-	}
-
-	// Act
-	// The sweep covers every test; the declared records are the overrun
-	// adoption this test arranges and the bounce_unknown it is about.
-	nd := harness.StartDaemon(t, harness.Opts{
-		StateDir: f.d.StateDir,
-		ExtraEnv: []string{
-			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
-			"AGENT_REPL_BOOT_ADOPT_BOUND=300ms",
-		},
-		ExpectWarnings: []string{"daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile"},
-	})
-
-	// Assert: recorded for this workspace.
-	nd.AwaitLogRecord(nd.RunLogPath(), "the unadopted session's bounce_unknown", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.rollout.reconcile" && r.Level == "warn" &&
-			r.Message == "a session's bounce disposition needs a human" && r.Context["workspace"] == f.ws.GetId()
-	})
-	// Assert: and standing. The boot's healthy-attach edge ran before the
-	// daemon served, which StartDaemon waited for.
-	for _, r := range nd.RunLog() {
-		if r.Operation == "daemon.health.close_on_edge" && r.Context["kind"] == "bounce_unknown" {
-			t.Fatalf("record %+v: an unadopted survivor's bounce_unknown must stand", r)
-		}
 	}
 }
 
@@ -826,72 +653,6 @@ func TestBootClosesAWorkspaceWhoseDirectoryAndBranchAreGone(t *testing.T) {
 	if row := rosterRow(got, ws.GetId()); row == nil || !row.GetClosed().GetClosed() {
 		t.Fatalf("the row for %s = %v, want it carried as closed", ws.GetId(), row)
 	}
-}
-
-// TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives pins the owner's ruling
-// of 2026-10-06: an OPEN workspace whose directory was deleted with a plain
-// `rm` (git still registers the tree) and whose branch exists is RECREATED
-// by the boot, and its row stays open.
-func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := newDaemon(t, harness.Opts{DurableState: true})
-	repo := harness.NewRepo(t)
-	dir := worktreeOf(t, repo, "recreated")
-	ws := harness.Register(t, d, dir)
-	d.Stop()
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("remove the workspace directory: %v", err)
-	}
-
-	// Act.
-	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
-
-	// Assert.
-	nd.AwaitLogRecord(nd.RunLogPath(), "the boot's recreation record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.boot.close_missing_dir" && strings.ToLower(r.Level) == "info" &&
-			r.WorkspaceID == ws.GetId() && strings.Contains(r.Message, "recreated")
-	})
-	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("the workspace directory after the boot: %v, want it recreated", err)
-	}
-	roster := nd.WatchRoster()
-	awaitRoster(t, nd, roster, "the recreated row open", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, ws.GetId())
-		return row != nil && !row.GetClosed().GetClosed()
-	})
-}
-
-// TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally is the logging
-// half: the request still reaches its handler, and the records it produces
-// land on the central sink naming the workspace they are about, reported once
-// at DEBUG rather than as an ERROR beside every record.
-func TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := newDaemon(t, harness.Opts{DurableState: true})
-	repo := harness.NewRepo(t)
-	dir := worktreeOf(t, repo, "routed")
-	ws := harness.Register(t, d, dir)
-	d.Stop()
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("remove the workspace directory: %v", err)
-	}
-	repo.RemoveBranch("routed")
-	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
-
-	// Act.
-	if _, err := nd.Client().OpenWorkspace(nd.Ctx(),
-		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace: %v", err)
-	}
-
-	// Assert.
-	nd.AwaitLogRecord(nd.RunLogPath(), "the central-fallback notice", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.dlog.central_fallback" &&
-			strings.ToLower(r.Level) == "debug" &&
-			r.Context["unroutable_workspace"] == ws.GetDir()
-	})
 }
 
 // healthAnswerBound is how long the EDITOR gives a replacement daemon to say

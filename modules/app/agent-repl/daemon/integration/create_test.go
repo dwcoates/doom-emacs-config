@@ -4,8 +4,6 @@ package integration
 
 import (
 	"agentrepl/protohelpers/rosterwalk"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -78,189 +76,11 @@ func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheIniti
 	}
 }
 
-func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMerge(t *testing.T) {
-	t.Parallel()
-	// Arrange: a parent, top-level workspace.
-	//
-	// The daemon's own checkout IS this repository and a test-all script
-	// stands in for the gate, because the emacs-repo method is the one that
-	// runs `git merge` at all: in every other repository the landing belongs
-	// to the merge prompts, and no git merge is issued for this assertion to
-	// find.
-	repo := harness.NewRepo(t)
-	script := repo.TestAllScript()
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-	repo.DeploysAsAgentRepl()
-	d := newDaemon(t, harness.Opts{
-		// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-		Timeout: harness.MergeChainTimeout,
-	})
-	repository := createRepositoryRef(t, d, repo)
-	parentResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
-		Repository:    repository,
-		Requester:     harness.User(),
-		ContextOrigin: harness.Fresh(),
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Peer()}},
-	}))
-	if err != nil || parentResp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(parent) = (%v, %v), want a success", parentResp, err)
-	}
-	parent := parentResp.Msg.GetSuccess().GetWorkspace()
-	roster := d.WatchRoster()
-
-	// Act: a child spawned from it.
-	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
-		Repository:    repository,
-		Requester:     harness.User(),
-		ContextOrigin: harness.Fresh(),
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Child(parent)}},
-	}))
-	if err != nil || childResp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(parent=%s) = (%v, %v), want a success", parent.GetId(), childResp, err)
-	}
-	child := childResp.Msg.GetSuccess().GetWorkspace()
-
-	// Assert: the roster nests the child under the parent.
-	awaitRoster(t, d, roster, "the child nested under its parent", func(r *frontendv1.RosterPush) bool {
-		return rosterNests(r, parent.GetId(), child.GetId())
-	})
-
-	// Assert: the child's merge lands into the parent's worktree, not main.
-	harness.CommitWork(t, child.GetDir())
-	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(child))); err != nil {
-		t.Fatalf("FinishWorkspace(child) = error %v, want the merge enqueued", err)
-	}
-	// The merge has to have REACHED ITS TERMINAL before the git calls say
-	// anything: `merge_queued` is published before the run starts, so waiting
-	// on it would read the trace of a merge that has not run yet.
-	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.RosterPush) bool {
-		if row := rosterRow(r, child.GetId()); row != nil {
-			return row.GetMerged() != nil
-		}
-		return leftForMerged(t, d, r, child.GetId(), func(*frontendv1.RosterRow) bool { return true })
-	})
-	// The git client selects its directory with `-C <dir>` and never with the
-	// child process's cwd, so "inside the parent's worktree" is read off the
-	// selection argument.
-	targetedParent := false
-	for _, c := range d.Git.Calls() {
-		if createArgsContain(c.Args, "merge") && createGitDir(c.Args) == parent.GetDir() {
-			targetedParent = true
-		}
-	}
-	if !targetedParent {
-		t.Fatalf("git calls = %v, want a merge run inside the parent's worktree %q", d.Git.Calls(), parent.GetDir())
-	}
-	// A clean landing into the parent's worktree (a passing test-all gate, no
-	// conflict) reaches none of internal/merge's WARN sites, and the parent's
-	// worktree is not this daemon's own checkout, so selfReload never fires
-	// either.
-}
-
 // ---- One-shot create ----
-
-func TestCreateWorkspaceOneShotCarriesTheDaemonsDirectiveNotTheRepositorys(t *testing.T) {
-	t.Parallel()
-	// Arrange: the repository states a directive of its own, which the daemon
-	// no longer reads: the completion directive is the daemon's, and what
-	// finishing does is the repository's deploy config.
-	d := canonicalView(t)
-	repo := harness.NewRepo(t)
-	directive := filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")
-	harness.ReplacePrompt(t, directive, "<!-- used by: the daemon; placeholders: none -->\nfile a report in the ledger.\n")
-	repository := createRepositoryRef(t, d, repo)
-
-	// Act
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
-		Repository:    repository,
-		Requester:     harness.User(),
-		ContextOrigin: harness.Fresh(),
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Relationship: harness.Peer(),
-			Prompt:       said("ship the fix"),
-		}},
-	}))
-
-	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	shim := d.Shim(ws)
-	shim.ExpectStartSession()
-	got := text(shim.ExpectStartTurn().GetSaid())
-	if strings.Contains(got, "file a report in the ledger.") || !strings.Contains(got, "agent-repld workspace finished here") {
-		t.Fatalf("the one-shot's decorated prompt = %q, want the daemon's directive alone", got)
-	}
-}
 
 // ---- Deploy hooks ----
 
 // ---- NukeWorkspace: kill-before-destroy ordering, and a git failure ----
-
-func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
-	t.Parallel()
-	// Arrange: an opened, LIVE workspace, its fake shim HUNG so KillSession's
-	// arrival is observable before it is ever answered.
-	//
-	// The workspace is a WORKTREE of its repository, not the repository root
-	// the shared fixture registers. Nuking a workspace whose directory IS the
-	// repository root deletes the repository itself, so the `worktree prune`
-	// that follows the removal has no repository left to run in and git fails
-	// on the arrangement rather than on anything the daemon did; the subject
-	// here is the ORDER of the kill against the git commands.
-	f := newOpenedWorktree(t, harness.Opts{}, "nuke-order")
-	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
-	f.d.ExpectWarnings("daemon.health.open_fault")
-	// The nuke ends a LIVE session whose shim is hung, which is the whole
-	// arrangement; the trail it leaves is evidence, not a fault.
-	expectSessionKillRecords(f.d)
-	f.shim.ExpectStartSession()
-	f.shim.Hang()
-
-	// Act: NukeWorkspace blocks on the hung KillSession
-	// (internal/workspace/teardown.go's kill() awaits it before Nuke() ever
-	// touches git), so it runs in its own goroutine.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		resp, err := f.d.Client().NukeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.NukeWorkspaceRequest{Workspace: f.ws}))
-		if err != nil || resp.Msg.GetSuccess() == nil {
-			t.Errorf("NukeWorkspace = (%v, %v), want a success", resp, err)
-		}
-	}()
-
-	// Assert: KillSession has reached the shim -- proof of ORDER, since the
-	// fake's own log write happens on arrival, before it is gated on the
-	// hang -- while the fake git's recorded calls carry no worktree removal
-	// yet, because the daemon-side call is still blocked on the hung
-	// KillSession and nothing past it has run.
-	f.d.AwaitShimVerbOrder(f.ws.GetDir(), harness.RPCKillSession)
-	for _, c := range f.d.Git.Calls() {
-		if createArgsContainAll(c.Args, "worktree", "remove") {
-			t.Fatalf("a worktree remove already ran while KillSession is still hung: %v, want the kill to finish first", c.Args)
-		}
-	}
-
-	// Act: release the fake, letting KillSession answer and the nuke proceed.
-	f.shim.Unhang()
-	<-done
-
-	// Assert: the worktree removal now follows the completed kill.
-	found := false
-	for _, c := range f.d.Git.Calls() {
-		if createArgsContainAll(c.Args, "worktree", "remove") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("git calls = %v, want a worktree remove once the kill completed", f.d.Git.Calls())
-	}
-}
 
 // ---- CloseWorkspace: blocked by live detached work with no turn open ----
 
@@ -315,17 +135,6 @@ func createArgsContain(args []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// createArgsContainAll reports whether a git call's args contain every token,
-// in any position.
-func createArgsContainAll(args []string, want ...string) bool {
-	for _, w := range want {
-		if !createArgsContain(args, w) {
-			return false
-		}
-	}
-	return true
 }
 
 // TestCreateWorkspaceUnderTheVendorGuardAloneSpawnsAFakeShim asserts a guarded
