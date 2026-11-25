@@ -431,6 +431,15 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Info(op, "a real turn ran since; the session is kept up",
 			dlog.Merge(fields, dlog.Context{"worked_at": worked}))
 		return withheldSettled, CycleOutcome{Why: "a real turn ran since; the session is kept up"}
+	} else if hold := session.BringUpHold(record.LastTurnEndedAt, c.deps.Clock.Now()); hold.HoldsAt(c.deps.Clock.Now()) {
+		// A SESSION ITS OWN BRING-UP HOLDS IS NEVER PARKED (owner ruling,
+		// 2026-11-24; wsm.Session.BringUpHold): a stand-down asked before a
+		// bring-up for work (a cold gate raised, then answered) is not taken
+		// over the session that came up, and the cache keeper asks again once
+		// the hold ends.
+		log.Info(op, "the session's own bring-up holds it up; the stand-down is not taken",
+			dlog.Merge(fields, dlog.Context{"indefinite": hold.Indefinite, "until": hold.Until}))
+		return withheldSettled, CycleOutcome{Why: "the session's own bring-up holds it up; the stand-down is not taken"}
 	}
 	switch gate := c.gate(ws); gate {
 	case gateOpen:

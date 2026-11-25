@@ -1824,8 +1824,13 @@ func (f *Fleet) sessionUp(
 // Fleet.Start reads them.
 func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdResume) error {
 	began := f.now()
+	// THE CAUSE RIDES THE BRING-UP ITSELF, not only its count: the session's
+	// record says it came up for the work the answer resumes
+	// (recordFacts, wsm.Session.WorkBroughtUpAt), so nothing parks it before
+	// that work's turn closes.
+	ctx = shimlife.WithStart(ctx, shimlife.StartColdGateAnswer)
 	err := f.resumeCold(ctx, ws, resume)
-	f.observeShimStart(shimlife.WithStart(ctx, shimlife.StartColdGateAnswer), ws, began, err)
+	f.observeShimStart(ctx, ws, began, err)
 	return err
 }
 

@@ -1043,3 +1043,39 @@ func TestABusyCycleStandDownHoldsDeferredBusyUntilItIsTaken(t *testing.T) {
 		t.Fatalf("hold after the park = %q, want none", got)
 	}
 }
+
+func TestAStandDownAskedBeforeABringUpForWorkIsNotTaken(t *testing.T) {
+	tests := []struct {
+		name      string
+		bringUp   func(s *wsm.Session)
+		wantKills int
+	}{
+		{name: "a session brought up for a turn not yet closed is kept up", bringUp: func(s *wsm.Session) { s.WorkBroughtUpAt = &beatAfter }},
+		{name: "a session the user restarted moments ago is kept up", bringUp: func(s *wsm.Session) { up := beatAfter; s.UserBroughtUpAt = &up }},
+		{name: "a session its bring-up no longer holds is parked", bringUp: func(*wsm.Session) {}, wantKills: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the gate's cold park was asked; the session then came up.
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			session, _, err := h.db.Session(context.Background(), ws)
+			if err != nil {
+				t.Fatalf("Session: %v", err)
+			}
+			tt.bringUp(&session)
+			if err := h.db.PutSession(context.Background(), session); err != nil {
+				t.Fatalf("PutSession: %v", err)
+			}
+			h.clock.Set(beatAfter.Add(time.Minute))
+
+			// Act
+			h.c.ColdDown(ws, beatAfter, true)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != tt.wantKills {
+				t.Fatalf("kills = %+v, want %d", killed, tt.wantKills)
+			}
+		})
+	}
+}

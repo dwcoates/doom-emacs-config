@@ -76,7 +76,7 @@ func TestTheStandDownDetailRidesTheContext(t *testing.T) {
 
 func TestEveryStartCauseSaysWhetherItIsForWork(t *testing.T) {
 	work := map[StartCause]bool{
-		StartPrompt: true, StartColdGateAnswer: true, StartCreate: true, StartFork: true,
+		StartPrompt: true, StartColdGateAnswer: false, StartCreate: true, StartFork: true,
 		StartThread: true, StartMerge: true, StartCompaction: true,
 		StartRelaunch: false, StartKeepalive: false, StartBoot: false, StartTakeover: false,
 		StartRestart: false, StartRebind: false, StartSettings: false, StartSwap: false, StartUnstated: false,
@@ -93,7 +93,7 @@ func TestEveryStartCauseSaysWhetherItIsForWork(t *testing.T) {
 
 func TestEveryStartCauseSaysWhetherTheUserStartedIt(t *testing.T) {
 	user := map[StartCause]bool{
-		StartRestart: true, StartRelaunch: true, StartRebind: true, StartSwap: true,
+		StartRestart: true, StartRelaunch: true, StartRebind: true, StartSwap: true, StartColdGateAnswer: true,
 		StartPrompt: false, StartKeepalive: false, StartBoot: false, StartTakeover: false, StartSettings: false, StartMerge: false,
 	}
 	for cause, want := range user {

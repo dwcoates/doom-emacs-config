@@ -398,9 +398,10 @@ var migrations = []migration{
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work
-// (a prompt, a cold gate's answer, a merge step, a create, a fork, ...) last
+// (a prompt, a merge step, a create, a fork, ...) last
 // brought a session up (Session.WorkBroughtUpAt), and when one the user asked
-// for that runs no turn of its own (a restart, a relaunch, a rebind, a swap)
+// for that runs no turn of its own (a restart, a relaunch, a rebind, a swap,
+// a cold gate's answer)
 // did (Session.UserBroughtUpAt), so the cache keeper never parks a session in
 // the initialization they begin (Session.BringUpHold), and a successor reads
 // the same instants.
