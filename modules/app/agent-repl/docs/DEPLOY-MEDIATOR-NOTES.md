@@ -60,3 +60,15 @@ Its brief names this file, and it is the mediator's to write.
   daemon during the roughly 3s before the elisp reload. That trio is the
   handover's contract skew, not a defect to fix. The same records after the
   elisp reload are a real fault.
+- `daemon.promptqueue.interject` "the interrupt was refused; the jump is
+  stripped and the prompt waits for the turn to end" with cause
+  `not_the_open_turn` (2026-11-25): the user's interject raced the end of the
+  turn it targeted, and a new turn had opened by the time the shim was asked
+  to kill it. One such record is the user's own race, drawn on the strip so
+  they know why the prompt did not jump. Many in one window would show the
+  interject reading a stale open turn, and would be dispatched.
+- `daemon.merge.production` WARN "the span's log sites were pruned before its
+  mediator read them" (2026-11-25): expected once per span that was owed
+  before the retention fix (dbde96d191) landed and whose rows were already
+  pruned; eight such spans stood due on 2026-11-25. A record of it for a span
+  owed after that landing is a retention defect and is dispatched.
