@@ -240,6 +240,15 @@ type Controller interface {
 	// adoption call for a workspace, which is what makes the rendezvous
 	// terminate.
 	ExpectedParticipants(ws ids.WorkspaceID) int
+	// RendezvousArmed reports whether this daemon holds an adopt rendezvous
+	// for WS that it armed as the JOINING daemon. AN ADOPT CALL FOR SUCH A
+	// WORKSPACE IS SERVED HERE, whatever the serving row says: the rendezvous
+	// is what the call exists to join, and it decides participants and awaits
+	// the incumbent's release itself. The outgoing daemon's own entry
+	// (servedHere) does not count: it is armed at announcement by the daemon
+	// handing the workspace over, and a call there is served by the
+	// incumbent's own standing rules.
+	RendezvousArmed(ws ids.WorkspaceID) bool
 	// Standing answers a workspace's SERVING STANDING on this daemon, which is
 	// what every per-workspace rpc refuses on before it delegates. The two
 	// non-owned standings are the two the rollout itself creates: a workspace

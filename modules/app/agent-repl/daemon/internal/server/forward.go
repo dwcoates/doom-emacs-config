@@ -126,10 +126,16 @@ func (s *server) instanceTarget(rpc, instance string) (string, bool, error) {
 //
 // AN ADOPT CALL GOES WHERE ITS WORKSPACE'S RENDEZVOUS IS. For a workspace
 // this daemon serves or has handed on, that is its successor while a handover
-// has one (adoptTarget). For a workspace this daemon has NOT adopted it is
-// decided by the serving row like any other call: an older daemon that still
-// holds the workspace takes it, never this daemon's own successor, which
-// serves nothing of a workspace two generations back.
+// has one (adoptTarget). For a workspace this daemon has NOT adopted but whose
+// rendezvous it has armed as the joining daemon (rollout RendezvousArmed), it
+// is this daemon, whatever the serving row says: the rendezvous decides who
+// may join and awaits the incumbent's release itself. On 2026-11-23 such a
+// call was forwarded by the serving row to the incumbent, already past its
+// transfer, and answered transferring_away in place of the rendezvous's own
+// participant check. For any other workspace this daemon has NOT adopted it
+// is decided by the serving row like any other call: an older daemon that
+// still holds the workspace takes it, never this daemon's own successor,
+// which serves nothing of a workspace two generations back.
 func (s *server) servingTarget(ctx context.Context, rpc string, ws ids.WorkspaceID) (string, bool, error) {
 	id := string(ws)
 	standing, err := s.deps.Ownership.Standing(ctx, ws)
@@ -148,6 +154,12 @@ func (s *server) servingTarget(ctx context.Context, rpc string, ws ids.Workspace
 			return target, true, nil
 		}
 	case workspace.StandingNotYetAdopted:
+		// AN ARMED RENDEZVOUS IS JOINED HERE, before the serving row is read:
+		// the incumbent releases that row only at freeness, after it has
+		// told the participants of the transfer.
+		if adoptRPCs[rpc] && s.deps.Rollout.RendezvousArmed(ws) {
+			return "", false, nil
+		}
 		// THE SERVING ROW NAMES WHO SERVES IT. An older daemon still holding
 		// it gets the call; a row released for the adoption under way here
 		// means this daemon is the one adopting it, so the call -- an adopt

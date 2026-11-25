@@ -72,3 +72,20 @@ Its brief names this file, and it is the mediator's to write.
   before the retention fix (dbde96d191) landed and whose rows were already
   pruned; eight such spans stood due on 2026-11-25. A record of it for a span
   owed after that landing is a retention defect and is dispatched.
+- Merge-gate races the queue hands over (2026-11-25): a race's seeded artifact
+  is the gate log of its FIRST failure and holds only the failing test's log
+  tail at info and above, so a cause that settled at debug cannot be read from
+  it. Before fixing, check whether the site already handles the quoted cause
+  (`git log --since` on the file): on 2026-11-25 six of nine open races had
+  been closed at their sites by landings after their last failure
+  (merge.progress exiting/cut, workspace.bring_up abandoned, merge.live_bubbles
+  recordFailed, rollout.relaunch closedUnder, promptqueue.submit ErrNotFound,
+  cachelapse.drive ErrNotFound, and rollout 1269af6bca for the late-facts
+  re-adoption). A race whose cause the tail cannot name gets the records that
+  would name it, at info, on the path the tail shows went silent.
+- `TestLanding/DisplacedTurnCapturedEndedThenResubmittedExactlyOnce` (e2e): the
+  merge-queued park is asked at the session-up edge of a `skills_changed`
+  bounce, deferred for the bounce, re-asked at `BounceEnded`, and that re-ask
+  settled with no record at info (2026-11-23 20:30:59). The settles that were
+  at debug are now at info for a merge-scoped park; the next failure's tail
+  names the gate or the session state it read.

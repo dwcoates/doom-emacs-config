@@ -3,12 +3,15 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimsocket"
 )
 
@@ -233,6 +236,91 @@ func TestTheBringUpRefusesToAdoptAShimItSpawnedItself(t *testing.T) {
 			}
 			if len(f.supervisor.adopts) != 0 {
 				t.Fatalf("adoptions = %d, want none: this daemon already holds that process", len(f.supervisor.adopts))
+			}
+		})
+	}
+}
+
+// A FAILED StartSession IS RECORDED BY ITS CAUSE: a stand-down this daemon
+// ordered and a bring-up whose caller went away are stated at INFO, and only a
+// start that failed on its own is an ERROR. The shim's own cancellation, with
+// the bring-up's context still live, is a failure of the start.
+func TestAFailedStartSessionIsRecordedByItsCause(t *testing.T) {
+	const (
+		standDownMessage = "the StartSession call ended in a stand-down this daemon ordered"
+		abandonedMessage = "the StartSession call was abandoned: the bring-up's caller went away before the shim answered"
+		failedMessage    = "the StartSession call failed"
+	)
+	tests := []struct {
+		name        string
+		startErr    error
+		cancelCall  bool
+		wantLevel   string
+		wantMessage string
+		wantIs      error
+	}{
+		{
+			name:        "a stand-down this daemon ordered",
+			startErr:    fmt.Errorf("%w: unavailable: unexpected EOF", shimclient.ErrStandDownOrdered),
+			wantLevel:   "info",
+			wantMessage: standDownMessage,
+			wantIs:      shimclient.ErrStandDownOrdered,
+		},
+		{
+			name:        "the bring-up's caller went away before the shim answered",
+			startErr:    fmt.Errorf("canceled: %w", context.Canceled),
+			cancelCall:  true,
+			wantLevel:   "info",
+			wantMessage: abandonedMessage,
+			wantIs:      context.Canceled,
+		},
+		{
+			name:        "the shim's own cancellation with the bring-up's context live",
+			startErr:    fmt.Errorf("canceled: %w", context.Canceled),
+			wantLevel:   "error",
+			wantMessage: failedMessage,
+			wantIs:      context.Canceled,
+		},
+		{
+			name:        "an unrelated error",
+			startErr:    errors.New("unavailable: the shim hung up"),
+			wantLevel:   "error",
+			wantMessage: failedMessage,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := arrangeFailedStart(t)
+			ws := f.workspace("w1")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f.client.startErr = tt.startErr
+			if tt.cancelCall {
+				f.client.onStart = cancel
+			}
+
+			// Act.
+			err := f.fleet.Start(ctx, ws.ID)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("Start = nil, want the start's own failure")
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Fatalf("Start = %v, want an error wrapping %v", err, tt.wantIs)
+			}
+			rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: opBringUp, Message: tt.wantMessage})
+			if !ok {
+				t.Fatalf("no %s record %q; records: %v", tt.wantLevel, tt.wantMessage, f.log.logger.Records())
+			}
+			if rec.Context["cause"] != tt.startErr.Error() {
+				t.Fatalf("cause = %v, want %q", rec.Context["cause"], tt.startErr.Error())
+			}
+			for _, other := range []string{standDownMessage, abandonedMessage, failedMessage} {
+				if other != tt.wantMessage && recordedAt(f, "info", opBringUp, other) || other != tt.wantMessage && recordedAt(f, "error", opBringUp, other) {
+					t.Fatalf("a record %q was written beside the expected %q", other, tt.wantMessage)
+				}
 			}
 		})
 	}

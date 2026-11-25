@@ -777,6 +777,41 @@ func TestExpectedParticipantsIsZeroForAWorkspaceWithNoTransfer(t *testing.T) {
 	}
 }
 
+func TestRendezvousArmedNamesTheJoiningDaemonsArmedEntries(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
+		want    bool
+	}{
+		{name: "a workspace with no rendezvous is not armed", arrange: func(*testing.T, *harness, ids.WorkspaceID) {}},
+		{name: "a rendezvous armed from the intent manifest is armed", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			holdAdoption(t, h)
+			arm(t, h, ws, Participants{Host: true})
+		}, want: true},
+		{name: "the outgoing daemon's own entry is not armed", arrange: func(_ *testing.T, h *harness, ws ids.WorkspaceID) {
+			h.c.mu.Lock()
+			h.c.rendezvous[ws] = &entry{servedHere: true, expected: Participants{Host: true, Web: true}, run: newAdoptionRun()}
+			h.c.mu.Unlock()
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tc.arrange(t, h, ws)
+
+			// Act
+			got := h.c.RendezvousArmed(ws)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("RendezvousArmed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestASecondManifestReadDoesNotReArmAnAdoptedRendezvous(t *testing.T) {
 	// Arrange — one host participant adopts the workspace, then the joining
 	// daemon reads the same stand-down manifest again, as its awaiting poll

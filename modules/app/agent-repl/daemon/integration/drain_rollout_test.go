@@ -1454,13 +1454,13 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	d.AwaitRunLogRecordFromAnyProcess("the successor's rendezvous armed from the intent manifest", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.rollout.join" && strings.HasPrefix(r.Message, "armed the adopt rendezvous from ")
 	})
-	// THE INCUMBENT HAS LET THE WORKSPACE GO, told on the host stream as every
-	// client is told. Until it releases the serving row the successor sends an
-	// adopt call for a workspace it has not adopted to the incumbent
-	// (server.servingTarget), which still serves it and answers
-	// no_transfer_announced: the armed rendezvous alone does not make the
-	// successor the one that answers (2026-11-22: the call arrived 1ms before
-	// the release and one gate failed here).
+	// THE SUCCESSOR SERVES THE CALL ITSELF once its rendezvous is armed,
+	// whatever the serving row says (server.servingTarget): the rendezvous
+	// decides participants and awaits the incumbent's release on its own.
+	// Forwarded by the serving row, the call reached the incumbent past its
+	// transfer and was answered transferring_away (2026-11-23). The host
+	// stream's transfer notice is still awaited as the edge that the handover
+	// has reached the participants, as every client is told of it.
 	harness.AwaitView(t, d.Ctx(), host, "the host stream's transfer notice", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetTransferred() != nil
 	})
