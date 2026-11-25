@@ -21,18 +21,24 @@ import (
 // polls Slack's API through `gns`, because reactions do not travel on a
 // channel's echo pipe, and only while its settings are complete.
 
-// The poll's cadence and windows, the gns-sockets plugin's defaults. They are
-// how far behind a trigger may be noticed, not bounds on an operation.
+// The poll's cadence and its search's window.
 const (
-	// PollEvery is the gap between polls.
-	PollEvery = 3 * time.Minute
-	// Lookback is how far back a poll's search reads the watch user's
-	// messages; it overlaps the previous poll, and the fired ledger drops a
-	// message read twice.
-	Lookback = 10 * time.Minute
-	// StartupLookback is the first poll's, so a restart sweeps up triggers
-	// typed while the daemon was down.
-	StartupLookback = 8 * time.Hour
+	// PollEvery is the gap between polls, how far behind a trigger may be
+	// noticed (owner ruling, 2026-11-25). A poll is two Slack calls, a search
+	// page and a reactions page, well inside both calls' rate limits (about
+	// 20 a minute each).
+	PollEvery = 20 * time.Second
+	// IndexAllowance is how far before the latest complete search's start a
+	// search reads again, for a message Slack's search indexed only after
+	// that search read. No indexing lag has been measured yet: it is the
+	// window every search read before, and the fired ledger drops a message
+	// read twice, so reading again costs no call. A trigger that surfaces
+	// only in a later search logs the lag it shows.
+	IndexAllowance = 10 * time.Minute
+	// MaxLookback is the furthest back any search reads: the first one, and
+	// one after a long gap (the daemon down, Slack failing), so a restart
+	// sweeps up the triggers typed while it was down, but no older ones.
+	MaxLookback = 8 * time.Hour
 	// searchPageCap bounds a poll's search to this many pages of 100, so a
 	// busy history cannot spin one poll forever.
 	searchPageCap = 20
@@ -94,15 +100,11 @@ func DispatchID(channel, ts, emoji string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// runReactions polls on the cadence until ctx ends: the first poll at once
-// with the startup lookback.
+// runReactions polls on the cadence until ctx ends, the first poll at once.
 func (w *Watcher) runReactions(ctx context.Context) {
-	lookback := StartupLookback
 	for {
 		if w.gate.Admits() {
-			if polled := w.PollReactions(ctx, lookback); polled {
-				lookback = Lookback
-			}
+			w.PollReactions(ctx)
 		}
 		select {
 		case <-ctx.Done():
@@ -112,9 +114,9 @@ func (w *Watcher) runReactions(ctx context.Context) {
 	}
 }
 
-// PollReactions runs one poll reading LOOKBACK of the watch user's messages,
-// and answers whether the settings were complete enough to poll.
-func (w *Watcher) PollReactions(ctx context.Context, lookback time.Duration) bool {
+// PollReactions runs one poll, and answers whether the settings were
+// complete enough to poll.
+func (w *Watcher) PollReactions(ctx context.Context) bool {
 	settings, err := w.deps.Store.SlackReactionSettings(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -127,7 +129,7 @@ func (w *Watcher) PollReactions(ctx context.Context, lookback time.Duration) boo
 		return false
 	}
 	fired := 0
-	searchErr := w.pollSearch(ctx, settings, lookback, &fired)
+	searchErr := w.pollSearch(ctx, settings, &fired)
 	reactionsErr := w.pollReacted(ctx, settings, &fired)
 	state := PollState{Polled: true, At: w.deps.Clock.Now(), Fired: fired}
 	if err := errors.Join(searchErr, reactionsErr); err != nil {
@@ -147,15 +149,16 @@ func (w *Watcher) setPolls(p PollState) {
 }
 
 // pollSearch fires every bound shortcode typed in the watch user's messages
-// read within LOOKBACK.
-func (w *Watcher) pollSearch(ctx context.Context, settings wsm.SlackReactionSettings, lookback time.Duration, fired *int) error {
-	name, err := w.deps.GNS.SearchName(ctx, settings.WatchUser)
-	if err != nil {
-		return fmt.Errorf("read the watch user's name: %w", err)
-	}
-	oldest := w.deps.Clock.Now().Add(-lookback)
+// since the latest complete search began, less IndexAllowance, and no
+// further back than MaxLookback; then records this search's start as where
+// the next one reads on from. A search that fails, or reaches its page cap
+// before its window's start, records nothing, so the next one reads the
+// same window again.
+func (w *Watcher) pollSearch(ctx context.Context, settings wsm.SlackReactionSettings, fired *int) error {
+	began := w.deps.Clock.Now()
+	oldest := SearchWindowStart(began, settings.SearchedThrough)
 	for page := 1; page <= searchPageCap; page++ {
-		res, err := w.deps.GNS.Search(ctx, "from:@"+name, page)
+		res, err := w.deps.GNS.Search(ctx, SearchQuery(settings.WatchUser), page)
 		if err != nil {
 			return fmt.Errorf("search the watch user's messages: %w", err)
 		}
@@ -168,15 +171,42 @@ func (w *Watcher) pollSearch(ctx context.Context, settings wsm.SlackReactionSett
 			}
 			for _, b := range settings.Bindings {
 				if strings.Contains(m.Text, ":"+b.Emoji+":") {
+					before := *fired
 					w.fire(ctx, settings, b, m.Channel, m.TS, m.Permalink, fired)
+					if *fired > before && settings.SearchedThrough != nil && at.Before(*settings.SearchedThrough) {
+						w.deps.Log.Info(opReactions, "a typed trigger surfaced only in a later search; Slack's search indexed it late", dlog.Context{
+							"channel": m.Channel, "ts": m.TS, "emoji": b.Emoji, "index_lag_ms": settings.SearchedThrough.Sub(at).Milliseconds()})
+					}
 				}
 			}
 		}
 		if len(res.Messages) == 0 || pastWindow || page >= res.Pages {
+			if err := w.deps.Store.RecordSlackReactionSearch(ctx, began); err != nil {
+				return fmt.Errorf("record where the next search reads on from: %w", err)
+			}
 			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("the search read its cap of %d pages without reaching its window's start (%s); the next search reads the same window", searchPageCap, oldest.UTC().Format(time.RFC3339))
+}
+
+// SearchQuery is the Slack search for USER's messages. It names the user by
+// id, so no lookup of their handle is needed and a renamed handle still
+// matches.
+func SearchQuery(user string) string { return "from:<@" + user + ">" }
+
+// SearchWindowStart is the oldest message a search beginning at BEGAN reads:
+// IndexAllowance before the latest complete search's start (SEARCHED, nil
+// before the first), and never more than MaxLookback before BEGAN.
+func SearchWindowStart(began time.Time, searched *time.Time) time.Time {
+	floor := began.Add(-MaxLookback)
+	if searched == nil {
+		return floor
+	}
+	if from := searched.Add(-IndexAllowance); from.After(floor) {
+		return from
+	}
+	return floor
 }
 
 // pollReacted fires every bound emoji the watch user reacted with, after the

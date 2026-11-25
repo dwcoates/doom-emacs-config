@@ -60,8 +60,10 @@ type fakeGNS struct {
 	thread    []gnsclient.ThreadMessage
 	posts     []string
 	postErr   error
-	name      string
 	pages     []gnsclient.SearchPage
+	// searchErr fails every search; queries are the searches asked for.
+	searchErr error
+	queries   []string
 	reacted   []gnsclient.ReactedMessage
 }
 
@@ -102,8 +104,11 @@ func (g *fakeGNS) Post(_ context.Context, _, _ string, blocks []byte) (string, e
 	g.posts = append(g.posts, string(blocks))
 	return fmt.Sprintf("9.%d", len(g.posts)), nil
 }
-func (g *fakeGNS) SearchName(context.Context, string) (string, error) { return g.name, nil }
-func (g *fakeGNS) Search(_ context.Context, _ string, page int) (gnsclient.SearchPage, error) {
+func (g *fakeGNS) Search(_ context.Context, query string, page int) (gnsclient.SearchPage, error) {
+	g.queries = append(g.queries, query)
+	if g.searchErr != nil {
+		return gnsclient.SearchPage{}, g.searchErr
+	}
 	if page > len(g.pages) {
 		return gnsclient.SearchPage{}, nil
 	}
@@ -221,7 +226,7 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{db: db, gns: &fakeGNS{username: "dodge", head: 40, name: "dodge"}, prompts: &fakePrompts{}, holds: &fakeHolds{}, intakes: &fakeIntakes{}, links: &fakeLinks{}, notices: &briefprompttest.Meter{},
+	r := &rig{db: db, gns: &fakeGNS{username: "dodge", head: 40}, prompts: &fakePrompts{}, holds: &fakeHolds{}, intakes: &fakeIntakes{}, links: &fakeLinks{}, notices: &briefprompttest.Meter{},
 		clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: Workspace{ID: record.ID, Name: "follower"}, repo: string(record.Repo), serves: true}
 	r.w, err = New(Deps{Store: db, GNS: r.gns, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
 		NewNonce: func() (string, error) { r.nonces++; return fmt.Sprintf("n%07d", r.nonces), nil },

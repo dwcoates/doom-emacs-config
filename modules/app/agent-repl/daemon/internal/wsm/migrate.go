@@ -402,6 +402,8 @@ var migrations = []migration{
 	{To: 211, Name: "retired_hidden_columns", Kind: MigrationContract, DDL: retiredHiddenColumnsDDL},
 	// IT IS ADDITIVE: one new table the previous build never names.
 	{To: 212, Name: "owed_moves", Kind: MigrationAdditive, DDL: owedMovesDDL},
+	// IT IS ADDITIVE: a new nullable column the previous build never names.
+	{To: 213, Name: "slack_reaction_searched_through", Kind: MigrationAdditive, DDL: slackReactionSearchedThroughDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

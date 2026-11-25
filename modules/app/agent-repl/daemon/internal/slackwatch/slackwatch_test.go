@@ -3,6 +3,7 @@ package slackwatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -824,7 +825,7 @@ func TestAnIncompletePollIsInactive(t *testing.T) {
 	r := newRig(t)
 
 	// Act
-	polled := r.w.PollReactions(context.Background(), Lookback)
+	polled := r.w.PollReactions(context.Background())
 
 	// Assert
 	if polled || len(r.w.polls.Missing) != 3 {
@@ -839,8 +840,8 @@ func TestTheFirstReactionsReadIsTheBaselineAndFiresNothing(t *testing.T) {
 	r.gns.reacted = []gnsclient.ReactedMessage{reacted("1.1", "agent-ack", "eyes")}
 
 	// Act
-	r.w.PollReactions(context.Background(), Lookback)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
+	r.w.PollReactions(context.Background())
 
 	// Assert
 	if len(r.intakes.got) != 0 {
@@ -853,12 +854,12 @@ func TestAReactionAddedAfterTheBaselineFiresOnce(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	r.settle(t, ackBinding)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 	r.gns.reacted = []gnsclient.ReactedMessage{reacted("1.2", "agent-ack")}
 
 	// Act
-	r.w.PollReactions(context.Background(), Lookback)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
+	r.w.PollReactions(context.Background())
 
 	// Assert
 	if len(r.intakes.got) != 1 {
@@ -874,7 +875,7 @@ func TestATypedShortcodeInTheWindowFires(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	r.settle(t, ackBinding)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 	recent, old := t0.Add(-time.Minute).Unix(), t0.Add(-time.Hour).Unix()
 	r.gns.pages = []gnsclient.SearchPage{{Pages: 1, Messages: []gnsclient.SearchMessage{
 		{Channel: "C1", TS: strconvTS(recent), Text: "please :agent-ack:", Permalink: "https://x.slack.com/archives/C1/p1"},
@@ -882,7 +883,7 @@ func TestATypedShortcodeInTheWindowFires(t *testing.T) {
 	}}}
 
 	// Act
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 
 	// Assert
 	if len(r.intakes.got) != 1 || !strings.Contains(r.intakeText(t, r.intakes.got[0]), "https://x.slack.com/archives/C1/p1") {
@@ -893,18 +894,175 @@ func TestATypedShortcodeInTheWindowFires(t *testing.T) {
 // strconvTS is a Slack timestamp SEC seconds into the epoch.
 func strconvTS(sec int64) string { return strconv.FormatInt(sec, 10) + ".000100" }
 
+func TestSearchWindowStart(t *testing.T) {
+	recent, old := t0.Add(-time.Hour), t0.Add(-48*time.Hour)
+	tests := []struct {
+		name     string
+		searched *time.Time
+		want     time.Time
+	}{
+		{name: "the first search reads back MaxLookback", searched: nil, want: t0.Add(-MaxLookback)},
+		{name: "a later search reads on from the last one, less the allowance", searched: &recent, want: recent.Add(-IndexAllowance)},
+		{name: "a search after a long gap reads back no further than MaxLookback", searched: &old, want: t0.Add(-MaxLookback)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := SearchWindowStart(t0, tt.searched)
+
+			// Assert
+			if !got.Equal(tt.want) {
+				t.Fatalf("SearchWindowStart = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchQueryNamesTheUserByID(t *testing.T) {
+	if got := SearchQuery("U1"); got != "from:<@U1>" {
+		t.Fatalf("SearchQuery = %q", got)
+	}
+}
+
+func TestAPollSearchesTheWatchUserByID(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert: the poll's query is SearchQuery's, never one spelled apart.
+	if !reflect.DeepEqual(r.gns.queries, []string{SearchQuery("U7HH4U1J4")}) {
+		t.Fatalf("searched %q", r.gns.queries)
+	}
+}
+
+// searchedThrough reads where the next search reads on from.
+func (r *rig) searchedThrough(t *testing.T) *time.Time {
+	t.Helper()
+	settings, err := r.db.SlackReactionSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return settings.SearchedThrough
+}
+
+func TestACompleteSearchRecordsItsStart(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert
+	if got := r.searchedThrough(t); got == nil || !got.Equal(t0) {
+		t.Fatalf("searched through %v, want %v", got, t0)
+	}
+}
+
+func TestAFailedSearchRecordsNothing(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	r.gns.searchErr = errBoom
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert
+	if got := r.searchedThrough(t); got != nil {
+		t.Fatalf("a failed search recorded %v", got)
+	}
+	rec := r.record(t, "info", opReactions, "a reaction poll failed in part; the next poll reads again")
+	if !strings.Contains(r.w.polls.Failure, "boom") || !strings.Contains(fmt.Sprint(rec.Context["cause"]), "boom") {
+		t.Fatalf("failure %q, record %+v", r.w.polls.Failure, rec.Context)
+	}
+}
+
+func TestASearchAtItsPageCapRecordsNothing(t *testing.T) {
+	// Arrange: every page of the cap lies inside the window, and more follow.
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	for range searchPageCap {
+		r.gns.pages = append(r.gns.pages, gnsclient.SearchPage{Pages: searchPageCap + 5, Messages: []gnsclient.SearchMessage{
+			{Channel: "C1", TS: strconvTS(t0.Add(-time.Minute).Unix()), Text: "chatter"}}})
+	}
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert
+	if got := r.searchedThrough(t); got != nil || !strings.Contains(r.w.polls.Failure, "cap of 20 pages") {
+		t.Fatalf("searched through %v, failure %q", got, r.w.polls.Failure)
+	}
+}
+
+// failingSearchRecord is a store whose record of a search's start fails.
+type failingSearchRecord struct{ Store }
+
+func (failingSearchRecord) RecordSlackReactionSearch(context.Context, time.Time) error {
+	return errBoom
+}
+
+func TestASearchWhoseStartCannotBeRecordedFails(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	r.w.deps.Store = failingSearchRecord{r.db}
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert
+	rec := r.record(t, "info", opReactions, "a reaction poll failed in part; the next poll reads again")
+	if !strings.Contains(r.w.polls.Failure, "record where the next search reads on from") || !strings.Contains(fmt.Sprint(rec.Context["cause"]), "boom") {
+		t.Fatalf("failure %q, record %+v", r.w.polls.Failure, rec.Context)
+	}
+}
+
+func TestTheNextSearchReadsOnFromTheLast(t *testing.T) {
+	// Arrange: the last complete search began an hour ago.
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	searched := t0.Add(-time.Hour)
+	if err := r.db.RecordSlackReactionSearch(context.Background(), searched); err != nil {
+		t.Fatal(err)
+	}
+	lateTS := strconvTS(searched.Add(-5 * time.Minute).Unix())
+	r.gns.pages = []gnsclient.SearchPage{{Pages: 1, Messages: []gnsclient.SearchMessage{
+		{Channel: "C1", TS: lateTS, Text: "late :agent-ack:", Permalink: "https://x.slack.com/archives/C1/p1"},
+		{Channel: "C1", TS: strconvTS(searched.Add(-IndexAllowance - time.Minute).Unix()), Text: "older :agent-ack:", Permalink: "https://x.slack.com/archives/C1/p2"},
+	}}}
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert: only the message inside the allowance fires, and its late
+	// indexing is recorded with the lag it shows.
+	if len(r.intakes.got) != 1 || !strings.Contains(r.intakeText(t, r.intakes.got[0]), "https://x.slack.com/archives/C1/p1") {
+		t.Fatalf("fired %+v; want only the message inside the allowance", r.intakes.got)
+	}
+	rec := r.record(t, "info", opReactions, "a typed trigger surfaced only in a later search; Slack's search indexed it late")
+	late, _ := slackTime(lateTS)
+	if rec.Context["index_lag_ms"] != searched.Sub(late).Milliseconds() || rec.Context["emoji"] != "agent-ack" {
+		t.Fatalf("record %+v", rec.Context)
+	}
+}
+
 func TestAnIntakeThatCannotBeCreatedIsRecordedAndNotFiredAgain(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	r.settle(t, ackBinding)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 	r.gns.reacted = []gnsclient.ReactedMessage{reacted("1.2", "agent-ack")}
 	r.intakes.fail = errBoom
 
 	// Act
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 	r.intakes.fail = nil
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 
 	// Assert
 	r.record(t, "error", opReactions, "could not create a fired binding's intake workspace; the trigger is recorded fired and creates nothing")
@@ -917,15 +1075,15 @@ func TestATriggerSlackNamesNoLinkForIsRecordedOnceAndNotFiredAgain(t *testing.T)
 	// Arrange
 	r := newRig(t)
 	r.settle(t, ackBinding)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 	linkless := reacted("1.2", "agent-ack")
 	linkless.Permalink = ""
 	r.gns.reacted = []gnsclient.ReactedMessage{linkless}
 	message := "Slack named no link for a triggering message; the trigger is recorded fired and creates nothing"
 
 	// Act
-	r.w.PollReactions(context.Background(), Lookback)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
+	r.w.PollReactions(context.Background())
 
 	// Assert
 	rec := r.record(t, "error", opReactions, message)

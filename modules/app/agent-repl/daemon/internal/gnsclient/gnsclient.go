@@ -143,8 +143,6 @@ type Client interface {
 	// Post posts BLOCKS (Slack Block Kit JSON) into the thread, answering the
 	// posted message's timestamp, empty when `gns` did not say it.
 	Post(ctx context.Context, channel, threadTS string, blocks []byte) (string, error)
-	// SearchName answers the account name `from:@<name>` searches match.
-	SearchName(ctx context.Context, userID string) (string, error)
 	// Search reads one page (from 1) of QUERY's matches.
 	Search(ctx context.Context, query string, page int) (SearchPage, error)
 	// ListReacted reads the messages USERID reacted to, most recent first.
@@ -552,30 +550,6 @@ func (c *client) Post(ctx context.Context, channel, threadTS string, blocks []by
 	return sent.TS, nil
 }
 
-func (c *client) SearchName(ctx context.Context, userID string) (string, error) {
-	call := "gns slack user get " + userID
-	out, err := c.run(ctx, nil, "slack", "user", "get", userID, "--json")
-	if err != nil {
-		return "", err
-	}
-	var user struct {
-		Name    string `json:"name"`
-		Profile struct {
-			DisplayNameNormalized string `json:"display_name_normalized"`
-		} `json:"profile"`
-	}
-	if err := c.decode(call, out, &user); err != nil {
-		return "", err
-	}
-	if user.Name != "" {
-		return user.Name, nil
-	}
-	if user.Profile.DisplayNameNormalized != "" {
-		return user.Profile.DisplayNameNormalized, nil
-	}
-	return "", c.failed(call, "Slack named no account name for the user")
-}
-
 // searchPageSize is how many matches a search page asks for, Slack's most.
 const searchPageSize = 100
 
@@ -611,11 +585,17 @@ func (c *client) Search(ctx context.Context, query string, page int) (SearchPage
 	return res, nil
 }
 
+// reactedPageSize is how many of the user's latest reacted items a read
+// asks for (owner ruling, 2026-11-25). Slack sends each message whole, about
+// 3.5 KB, so 100 cost about 350 KB a poll; 20 cost about 70 KB, and miss a
+// reaction only when more than 20 are added between two polls that read.
+const reactedPageSize = 20
+
 func (c *client) ListReacted(ctx context.Context, userID string) ([]ReactedMessage, error) {
 	call := "gns slack reactions list --user " + userID
 	// --full makes Slack name every reacting user on each reaction, so a
 	// popular emoji's truncated list cannot hide the watch user.
-	out, err := c.run(ctx, nil, "slack", "reactions", "list", "--user", userID, "--limit", "100", "--full", "--json")
+	out, err := c.run(ctx, nil, "slack", "reactions", "list", "--user", userID, "--limit", strconv.Itoa(reactedPageSize), "--full", "--json")
 	if err != nil {
 		return nil, err
 	}
