@@ -198,6 +198,13 @@ type graph struct {
 	// raise another banner then) and BEFORE the state client closes: a banner
 	// reads that client for the workspace's name.
 	CloseBanners func()
+	// SettleRoster returns once every roster change already queued, posted
+	// ones included, has been reported to its sinks (sidebar Resolver.Settle).
+	// `run` calls it AFTER the banners close, the last of what changes the
+	// roster, and BEFORE CloseRosterWrites: a posted change still being
+	// reported when the writers close is written after them, against the
+	// closed state client.
+	SettleRoster func()
 	// CloseRosterWrites writes every roster change still held (rosterWrites)
 	// and stops its writers. `run` calls it AFTER the watchers and the
 	// banners close, the last of what changes the roster, and BEFORE the
@@ -2376,6 +2383,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Background:        background,
 		CloseWatchers:     fleet.CloseWatchers,
 		CloseBanners:      notifier.Close,
+		SettleRoster:      sidebarResolver.Settle,
 		CloseRosterWrites: rosterDurable.Close,
 		DrainQueue:        queue.Drain,
 		DrainStarts:       fleet.DrainStarts,
