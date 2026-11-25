@@ -1,5 +1,7 @@
 // logs-reader.go parses, merges, filters, follows, and harvests agent-repl JSONL.
-// bin/logs.sh owns path and workspace discovery; this helper owns record semantics.
+// bin/logs.sh owns path discovery and resolves a --workspace selector; this
+// helper owns record semantics and, for an --all read, enumerates every daemon
+// workspace's logs from the workspace table logs.sh hands it (--workspace-rows).
 package main
 
 import (
@@ -49,7 +51,8 @@ type options struct {
 	baseWorkspaceDirs repeatedFlag
 	baseKinds         repeatedFlag
 	baseFormats       repeatedFlag
-	workspaceNames    repeatedFlag
+	workspaceRows     string
+	allWorkspaces     bool
 	workspaceLogsDir  string
 	harvestFrom       string
 	harvestTo         string
@@ -207,7 +210,8 @@ func run() error {
 	flag.Var(&opts.baseWorkspaceDirs, "base-workspace-dir", "workspace directory owning the corresponding base")
 	flag.Var(&opts.baseKinds, "base-kind", "base kind: file or symlink")
 	flag.Var(&opts.baseFormats, "base-format", "base content format: jsonl, stderr, or messages")
-	flag.Var(&opts.workspaceNames, "workspace-name", "ID=NAME for one daemon workspace, repeated for every workspace the daemon knows")
+	flag.StringVar(&opts.workspaceRows, "workspace-rows", "", "the daemon's workspace table, one ID<TAB>DIR<TAB>NAME row per line, naming every workspace the daemon knows")
+	flag.BoolVar(&opts.allWorkspaces, "all-workspaces", false, "select every --workspace-rows workspace's logs, after the central logs and before a messages snapshot")
 	flag.StringVar(&opts.workspaceLogsDir, "workspace-logs-dir", "", "the directory workspace log targets are written in, read by workspace ID when a workspace's link is gone")
 	flag.IntVar(&opts.sampleN, "sample-n", 0, "representative records per group (0 disables sampling)")
 	flag.StringVar(&opts.fields, "fields", "", "comma-separated field projection")
@@ -222,16 +226,29 @@ func run() error {
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument %q", flag.Arg(0))
 	}
-	names, err := parseWorkspaceNames(opts.workspaceNames)
+	rows, err := readWorkspaceRows(opts.workspaceRows)
 	if err != nil {
 		return err
 	}
-	if len(opts.bases) == 0 {
-		return errors.New("no log paths were selected")
+	names, err := workspaceNames(rows)
+	if err != nil {
+		return err
 	}
 	sinks, err := makeSinks(opts)
 	if err != nil {
 		return err
+	}
+	if opts.allWorkspaces {
+		if opts.workspaceRows == "" {
+			return errors.New("--all-workspaces requires --workspace-rows")
+		}
+		sinks, err = withWorkspaceSinks(sinks, rows, opts)
+		if err != nil {
+			return err
+		}
+	}
+	if len(sinks) == 0 {
+		return errors.New("no log paths were selected")
 	}
 	switch opts.mode {
 	case "human", "json", "harvest", "tally", "sample", "timeline", "fields":
@@ -1450,23 +1467,103 @@ func readFollow(state *followState, sequence int64, filter filters) ([]record, i
 	return records, next, nil
 }
 
-// parseWorkspaceNames reads the repeated --workspace-name ID=NAME pairs. A
-// pair with no "=", an empty ID or name, or an ID named twice is a usage
-// error: logs.sh builds the pairs from the daemon's own workspace table,
-// where IDs are unique and every workspace has a name.
-func parseWorkspaceNames(pairs []string) (map[string]string, error) {
-	names := make(map[string]string, len(pairs))
-	for _, pair := range pairs {
-		id, name, ok := strings.Cut(pair, "=")
-		if !ok || id == "" || name == "" {
-			return nil, fmt.Errorf("--workspace-name %q is not ID=NAME", pair)
+// workspaceRow is one row of the daemon's workspace table (wsm.db
+// workspaces: id, dir, name), as bin/logs.sh writes it for --workspace-rows.
+type workspaceRow struct {
+	id, dir, name string
+}
+
+// readWorkspaceRows reads the --workspace-rows table: one ID<TAB>DIR<TAB>NAME
+// row per line, the daemon's workspaces in ID order. No path is no table (a
+// central read of a state root the daemon never wrote). A table that cannot
+// be read, or a row with no ID, fails the read: every workspace named or read
+// comes from it.
+func readWorkspaceRows(path string) ([]workspaceRow, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read the workspace rows file: %w", err)
+	}
+	var rows []workspaceRow
+	for index, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
 		}
-		if _, seen := names[id]; seen {
-			return nil, fmt.Errorf("--workspace-name names workspace %q twice", id)
+		fields := strings.SplitN(line, "\t", 3)
+		for len(fields) < 3 {
+			fields = append(fields, "")
 		}
-		names[id] = name
+		if fields[0] == "" {
+			return nil, fmt.Errorf("the workspace rows file's line %d has no workspace ID", index+1)
+		}
+		rows = append(rows, workspaceRow{id: fields[0], dir: fields[1], name: fields[2]})
+	}
+	return rows, nil
+}
+
+// workspaceNames maps every daemon workspace's ID to its name. A workspace
+// with no name, or an ID the table holds twice, is refused: the daemon's
+// IDs are unique and every workspace has a name, and a record is never shown
+// by its ID alone when the daemon knows the workspace.
+func workspaceNames(rows []workspaceRow) (map[string]string, error) {
+	names := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if row.name == "" {
+			return nil, fmt.Errorf("daemon workspace %s has an empty name", row.id)
+		}
+		if _, seen := names[row.id]; seen {
+			return nil, fmt.Errorf("the daemon workspace table names workspace %q twice", row.id)
+		}
+		names[row.id] = row.name
 	}
 	return names, nil
+}
+
+// workspaceLogRuntimes are the runtimes with a log in every workspace, in the
+// order each workspace's logs are selected.
+var workspaceLogRuntimes = []string{"emacs", "daemon", "shim", "webapp", "sidecar"}
+
+// withWorkspaceSinks adds every daemon workspace's log sinks, workspace by
+// workspace in table order and runtime by runtime, after the central sinks
+// logs.sh selected and before its --messages snapshot, which is the order
+// logs.sh itself built them in when it enumerated them: it passed one
+// workspace's five bases as 30 arguments, 8135 bases for 1625 workspaces, and
+// that loop alone was most of a 1s deploy-window read (2026-11-25).
+func withWorkspaceSinks(selected []sink, rows []workspaceRow, opts options) ([]sink, error) {
+	requested := make(map[string]bool)
+	if opts.runtimes != "" {
+		for _, runtime := range strings.Split(opts.runtimes, ",") {
+			requested[runtime] = true
+		}
+	}
+	split := len(selected)
+	for split > 0 && selected[split-1].format == "messages" {
+		split--
+	}
+	sinks := make([]sink, 0, len(selected)+len(rows)*len(workspaceLogRuntimes))
+	sinks = append(sinks, selected[:split]...)
+	for _, row := range rows {
+		if row.dir == "" {
+			return nil, fmt.Errorf("daemon workspace %s has an empty directory", row.id)
+		}
+		for _, runtime := range workspaceLogRuntimes {
+			if len(requested) != 0 && !requested[runtime] {
+				continue
+			}
+			sinks = append(sinks, sink{
+				base:             row.dir + "/.claude/emacs/" + runtime + ".log",
+				runtime:          runtime,
+				workspaceID:      row.id,
+				workspaceDir:     row.dir,
+				canonicalSymlink: true,
+				logsDir:          opts.workspaceLogsDir,
+				format:           "jsonl",
+			})
+		}
+	}
+	return append(sinks, selected[split:]...), nil
 }
 
 // nameWorkspaces stamps each record's synthetic workspace_name from its

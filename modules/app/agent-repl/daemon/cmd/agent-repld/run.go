@@ -676,20 +676,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// feed resolver's next workspace lookup read a closed database. Arming
 	// them here makes the failed boot tear down in exactly the order the
 	// orderly exit does.
-	// THE ROSTER'S HELD WRITES ARE WRITTEN AFTER EVERYTHING THAT CHANGES THE
-	// ROSTER has closed, and before the state client: deferred here, before
-	// the banners and the watchers are, so it runs after both.
-	if built.CloseRosterWrites != nil {
-		defer teardown.step("close_roster_writes", built.CloseRosterWrites)
-	}
-	// THE BANNERS CLOSE AFTER THE WATCHERS and before the state client:
-	// deferred here, BEFORE CloseWatchers is, so it runs after it.
-	if built.CloseBanners != nil {
-		defer teardown.step("close_banners", built.CloseBanners)
-	}
-	if built.CloseWatchers != nil {
-		defer teardown.step("close_watchers", built.CloseWatchers)
-	}
+	// The order among the watchers, the banners and the roster's writes is
+	// closeRosterChangers's.
+	defer closeRosterChangers(teardown, built)
 
 	// THE MERGE DRAIN RUNS FIRST OF ALL THE TEARDOWNS. Deferred after the
 	// watchers and after `defer db.Close()`, so it runs BEFORE both: a merge
@@ -1674,6 +1663,41 @@ func (r *runningLoops) outstanding() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// closeRosterChangers closes what changes the roster, then the roster's
+// durable writes, as teardown steps in this order; a nil step is skipped.
+//
+// THE BANNERS CLOSE AFTER THE WATCHERS: no turn end can raise another banner
+// then.
+//
+// THE ROSTER SETTLES AFTER THE BANNERS, the last of what changes it, and
+// BEFORE ITS WRITERS CLOSE. A change the roster took POSTED (its footer status
+// edge, sidebar resolver.FooterStatusChanged) is reported off its caller's
+// goroutine, and closing the watch fleet severs every footer, which posts
+// exactly such an edge. Unsettled, that batch reached the status-change
+// writer after its Close, which then writes on the caller's goroutine, and
+// after the state client closed, against a closed database (2026-11-25).
+// Settled, every posted change has reached its writer before the writer
+// flushes, so the write is made while the state client is open.
+//
+// THE ROSTER'S HELD WRITES ARE WRITTEN LAST, and before the state client
+// closes, which `run` arms to run after this.
+func closeRosterChangers(teardown *teardownClock, built *graph) {
+	steps := []struct {
+		name string
+		fn   func()
+	}{
+		{"close_watchers", built.CloseWatchers},
+		{"close_banners", built.CloseBanners},
+		{"settle_roster", built.SettleRoster},
+		{"close_roster_writes", built.CloseRosterWrites},
+	}
+	for _, s := range steps {
+		if s.fn != nil {
+			teardown.step(s.name, s.fn)
+		}
+	}
 }
 
 // joinBackgroundLoops waits, bounded, for every background loop to leave, and

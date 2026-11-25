@@ -16,19 +16,25 @@ import (
 // sink's warnings file (proto/vocab/log-warnings-sink.json). Measured
 // 2026-11-17 over 1,404 log files (10 GB) for a 20-minute window: 0.86s cold,
 // 0.52s warm, before any warnings file existed, so the read was the reader's
-// discovery of every sink. 3s is three and a half times the worse, headroom
-// for the warnings files the window adds. (Before the warnings files the same
-// read filtered every record ever written: 7s measured on 2026-11-15, and it
-// outlived an 18s bound on 2026-11-17, holding the merge queue.) Measured
-// again 2026-11-24 over 11,830 log files (6.2 GB) for a 20-minute window:
-// 0.96-0.99s warm idle. The read runs during the handover, whose load is
-// heavier than an idle host's: every read records its duration (operation
-// daemon.merge.logs_read), and the bound is to be resized from those records.
-const logsReadBound = 3 * time.Second
+// discovery of every sink. (Before the warnings files the same read filtered
+// every record ever written: 7s measured on 2026-11-15, and it outlived an 18s
+// bound on 2026-11-17, holding the merge queue.) Measured again 2026-11-24
+// over 11,830 log files: 0.96-0.99s warm idle, most of it logs.sh building
+// five reader arguments per daemon workspace in bash; the then 3s bound timed
+// out at 3003ms on 2026-11-25 during a handover.
+//
+// Since the reader enumerates the workspaces' logs itself, measured
+// 2026-11-25 over 11,972 log files and 1,627 daemon workspaces, the window of
+// that timeout (51s) read in 0.40-0.50s over ten runs on a host at load
+// average 8. The read runs during the handover: the records of
+// daemon.merge.logs_read put handover reads (1291-1437ms) at about 1.5 times
+// the idle ones (980-1005ms), so the healthy worst case under handover load is
+// 0.75s, and the bound is three times that.
+const logsReadBound = 2250 * time.Millisecond
 
 // logsReadMeasured is the measurement logsReadBound was sized from, named in
-// the failure a read past the bound records.
-const logsReadMeasured = 990 * time.Millisecond
+// the failure a read past the bound records: the idle worst case.
+const logsReadMeasured = 500 * time.Millisecond
 
 // opLogsRead is the operation of the record every window read leaves.
 const opLogsRead = "daemon.merge.logs_read"

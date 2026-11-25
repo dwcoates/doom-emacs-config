@@ -2440,3 +2440,53 @@ func TestEveryHTTP1AnswerClosesItsConnection(t *testing.T) {
 		})
 	}
 }
+
+// TestCloseRosterChangersRunsItsStepsInOrder pins the 2026-11-25 exit that
+// wrote a roster status edge against the closed state client: the roster
+// settles after the banners close and before its durable writers do, and a
+// step the graph left nil is skipped as its neighbors are.
+func TestCloseRosterChangersRunsItsStepsInOrder(t *testing.T) {
+	tests := []struct {
+		name    string
+		nilStep string
+		want    string
+	}{
+		{name: "the roster settles after the banners and before its writes close", want: "close_watchers close_banners settle_roster close_roster_writes"},
+		{name: "a nil settle is skipped", nilStep: "settle_roster", want: "close_watchers close_banners close_roster_writes"},
+		{name: "a nil banner close is skipped", nilStep: "close_banners", want: "close_watchers settle_roster close_roster_writes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var ran []string
+			record := func(name string) func() {
+				if name == tt.nilStep {
+					return nil
+				}
+				return func() { ran = append(ran, name) }
+			}
+			built := &graph{
+				CloseWatchers:     record("close_watchers"),
+				CloseBanners:      record("close_banners"),
+				SettleRoster:      record("settle_roster"),
+				CloseRosterWrites: record("close_roster_writes"),
+			}
+			teardown := newTeardownClock(dlog.NewTestLogger())
+
+			// Act
+			closeRosterChangers(teardown, built)
+
+			// Assert
+			if got := strings.Join(ran, " "); got != tt.want {
+				t.Fatalf("ran %q, want %q", got, tt.want)
+			}
+			var stepped []string
+			for _, s := range teardown.steps {
+				stepped = append(stepped, s.name)
+			}
+			if got := strings.Join(stepped, " "); got != tt.want {
+				t.Fatalf("teardown steps %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

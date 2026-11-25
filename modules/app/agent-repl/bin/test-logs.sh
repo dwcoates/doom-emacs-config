@@ -304,6 +304,138 @@ test_all_beyond_the_argument_limit() {
     fi
 }
 
+# EVERY DAEMON WORKSPACE'S LOGS ARE ENUMERATED BY THE READER under --all
+# (--all-workspaces): two open workspaces with every runtime's link, and a
+# landed one whose directory is gone, read by its ID from the logs directory.
+# Each record is stamped 2026-09-12, outside every other fixture's window.
+enumeration_rows="$TMP/enumeration-workspaces.tsv"
+enumeration_window=(--since 2026-09-12T00:00:00Z --until 2026-09-12T01:00:00Z)
+
+enumeration_record() {
+    local minute="$1" runtime="$2" label="$3" dir="$4" id="$5"
+    printf '{"timestamp":"2026-09-12T00:%s:00.000000Z","runtime":"%s","pid":70,"level":"warn","verbosity":"normal","operation":"%s.%s","message":"enumerated","context":{},"workspace_dir":"%s","workspace_id":"%s"}\n' \
+        "$minute" "$runtime" "$label" "$runtime" "$dir" "$id"
+}
+
+arrange_enumeration_fixture() {
+    local label dir id minute=10 runtime
+    [ ! -f "$enumeration_rows" ] || return 0
+    : >"$enumeration_rows"
+    for label in enum-one enum-two; do
+        dir="$TMP/workspaces/$label"
+        id="ws-$label"
+        mkdir -p "$dir/.claude/emacs"
+        for runtime in emacs daemon shim webapp sidecar; do
+            : >"$targets/$label-$runtime.log"
+            enumeration_record "$minute" "$runtime" "$label" "$dir" "$id" >"$targets/$label-$runtime.warn.log"
+            ln -s "$targets/$label-$runtime.log" "$dir/.claude/emacs/$runtime.log"
+            ln -s "$targets/$label-$runtime.warn.log" "$dir/.claude/emacs/$runtime.warn.log"
+            minute=$((minute + 1))
+        done
+        printf '%s\t%s\t%s\n' "$id" "$dir" "$label" >>"$enumeration_rows"
+    done
+    dir="$TMP/workspaces/enum-landed"
+    for runtime in emacs daemon shim webapp sidecar; do
+        : >"$state/logs/agent-repl-ws-enum-landed-$runtime-4444444444.log"
+        enumeration_record "$minute" "$runtime" enum-landed "$dir" ws-enum-landed \
+            >"$state/logs/agent-repl-ws-enum-landed-$runtime-4444444444.warn.log"
+        minute=$((minute + 1))
+    done
+    printf 'ws-enum-landed\t%s\tenum-landed\n' "$dir" >>"$enumeration_rows"
+}
+
+test_all_reads_every_runtime_of_every_workspace_by_name() {
+    local out expected label runtime
+    arrange_enumeration_fixture
+    expected=""
+    for label in enum-one enum-two enum-landed; do
+        for runtime in emacs daemon shim webapp sidecar; do
+            expected+="workspace_name=$label operation=$label.$runtime"$'\n'
+        done
+    done
+    out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$enumeration_rows" \
+        run_logs --all "${enumeration_window[@]}" --fields workspace_name,operation 2>/dev/null)"
+    if [ "$out" = "${expected%$'\n'}" ]; then
+        pass "--all reads every runtime of every daemon workspace, open or landed, each by its name"
+    else
+        fail "--all reads every runtime of every daemon workspace, open or landed, each by its name"
+        printf 'stdout: %s\n' "$out" >&2
+    fi
+}
+
+test_all_selects_only_the_requested_runtimes_of_every_workspace() {
+    local out
+    arrange_enumeration_fixture
+    out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$enumeration_rows" \
+        run_logs --all --runtime shim,sidecar "${enumeration_window[@]}" --fields operation 2>/dev/null)"
+    if [ "$out" = $'operation=enum-one.shim\noperation=enum-one.sidecar\noperation=enum-two.shim\noperation=enum-two.sidecar\noperation=enum-landed.shim\noperation=enum-landed.sidecar' ]; then
+        pass "--all --runtime selects only those runtimes of every daemon workspace"
+    else
+        fail "--all --runtime selects only those runtimes of every daemon workspace"
+        printf 'stdout: %s\n' "$out" >&2
+    fi
+}
+
+test_all_finds_absent_workspace_sinks_in_workspace_then_runtime_order() {
+    local bare="$TMP/workspaces/enum-bare" bare_rows="$TMP/enum-bare-workspaces.tsv" err runtime
+    mkdir -p "$bare/.claude/emacs"
+    bare="$(cd "$bare" && pwd -P)"
+    # Every runtime's link names a target that is gone: one finding each.
+    for runtime in emacs daemon shim webapp sidecar; do
+        ln -s "$targets/enum-bare-$runtime.missing" "$bare/.claude/emacs/$runtime.log"
+    done
+    printf 'ws-enum-bare\t%s\tenum-bare\n' "$bare" >"$bare_rows"
+    err="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$bare_rows" \
+        run_logs --all --level debug --json 2>&1 >/dev/null |
+        sed -nE 's/^logs-reader: sink absent: .*enum-bare-([a-z]+)\.missing \[enum-bare\]$/\1/p' | paste -sd, -)" || true
+    if [ "$err" = emacs,daemon,shim,webapp,sidecar ]; then
+        pass "--all finds a workspace's absent sinks runtime by runtime, attributed by its name"
+    else
+        fail "--all finds a workspace's absent sinks runtime by runtime, attributed by its name"
+        printf 'findings: %s\n' "$err" >&2
+    fi
+}
+
+test_all_reads_central_logs_when_the_workspace_table_is_empty() {
+    local empty_rows="$TMP/empty-workspaces.tsv" out
+    : >"$empty_rows"
+    out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$empty_rows" run_logs --all --json 2>/dev/null)"
+    if grep_in "$out" -q '"operation":"daemon.boot"' &&
+        grep_in "$out" -q '"operation":"store.failure"' &&
+        ! grep_in "$out" -q '"workspace_id":"ws-'; then
+        pass "--all over an empty workspace table still reads the central logs"
+    else
+        fail "--all over an empty workspace table still reads the central logs"
+        printf 'stdout: %s\n' "$out" >&2
+    fi
+}
+
+test_all_refuses_an_unreadable_workspace_table() {
+    local rc=0 out err
+    out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$TMP/no-such-workspaces.tsv" \
+        run_logs --all --json 2>"$TMP/unreadable-table.err")" || rc=$?
+    err="$(cat "$TMP/unreadable-table.err")"
+    if [ "$rc" -eq 2 ] && [ -z "$out" ] &&
+        grep_in "$err" -q "could not read daemon workspace state: $state/wsm.db"; then
+        pass "--all fails loudly, reading nothing, when the daemon's workspace table cannot be read"
+    else
+        fail "--all fails loudly, reading nothing, when the daemon's workspace table cannot be read"
+        printf 'rc: %s\nstdout: %s\nstderr: %s\n' "$rc" "$out" "$err" >&2
+    fi
+}
+
+test_all_refuses_a_workspace_with_no_directory() {
+    local dirless="$TMP/dirless-workspaces.tsv" rc=0 err
+    printf 'ws-dirless\t\tdirless\n' >"$dirless"
+    err="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$dirless" run_logs --all --json 2>&1 >/dev/null)" || rc=$?
+    if [ "$rc" -ne 0 ] && grep_in "$err" -q 'daemon workspace ws-dirless has an empty directory'; then
+        pass "--all refuses a daemon workspace with no directory"
+    else
+        fail "--all refuses a daemon workspace with no directory"
+        printf 'stderr: %s\n' "$err" >&2
+    fi
+}
+
 test_since_rfc3339() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --since 2026-09-10T10:02:00Z --json)"
@@ -1072,16 +1204,53 @@ test_an_unnamed_daemon_workspace_is_refused() {
 }
 
 
-test_reader_refuses_a_malformed_or_repeated_workspace_name() {
-    local reader rc1=0 rc2=0 err1 err2
+# THE READER'S WORKSPACE TABLE (--workspace-rows) replaced its repeated
+# --workspace-name ID=NAME pairs: a row with no ID is the malformed pair's
+# successor, and an ID held twice is still refused.
+test_reader_refuses_a_workspace_row_with_no_id() {
+    local reader rc=0 err no_id="$TMP/no-id-workspaces.tsv"
     reader="$(ls "$TMP"/build/logs-reader-* | sed -n 1p)"
-    err1="$("$reader" --workspace-name "ws-a" 2>&1)" || rc1=$?
-    err2="$("$reader" --workspace-name "ws-a=alpha" --workspace-name "ws-a=again" 2>&1)" || rc2=$?
-    if [ "$rc1" -ne 0 ] && grep_in "$err1" -q 'is not ID=NAME' &&
-        [ "$rc2" -ne 0 ] && grep_in "$err2" -q 'names workspace "ws-a" twice'; then
-        pass "the reader refuses a malformed or repeated --workspace-name"
+    printf '\t%s\tnameless\n' "$workspace_a" >"$no_id"
+    err="$("$reader" --workspace-rows "$no_id" 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ] && grep_in "$err" -q "the workspace rows file's line 1 has no workspace ID"; then
+        pass "the reader refuses a workspace row with no ID"
     else
-        fail "the reader refuses a malformed or repeated --workspace-name"
+        fail "the reader refuses a workspace row with no ID"
+    fi
+}
+
+test_reader_refuses_a_workspace_table_naming_an_id_twice() {
+    local reader rc=0 err twice="$TMP/twice-workspaces.tsv"
+    reader="$(ls "$TMP"/build/logs-reader-* | sed -n 1p)"
+    printf 'ws-a\t%s\talpha\nws-a\t%s\tagain\n' "$workspace_a" "$workspace_a" >"$twice"
+    err="$("$reader" --workspace-rows "$twice" 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ] && grep_in "$err" -q 'the daemon workspace table names workspace "ws-a" twice'; then
+        pass "the reader refuses a workspace table holding an ID twice"
+    else
+        fail "the reader refuses a workspace table holding an ID twice"
+    fi
+}
+
+test_reader_refuses_an_unreadable_workspace_rows_file() {
+    local reader rc=0 err
+    reader="$(ls "$TMP"/build/logs-reader-* | sed -n 1p)"
+    err="$("$reader" --workspace-rows "$TMP/no-such-rows.tsv" --all-workspaces 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ] && grep_in "$err" -q 'read the workspace rows file' &&
+        grep_in "$err" -q 'no-such-rows.tsv'; then
+        pass "the reader fails loudly on a workspace rows file it cannot read"
+    else
+        fail "the reader fails loudly on a workspace rows file it cannot read"
+    fi
+}
+
+test_reader_refuses_all_workspaces_without_a_table() {
+    local reader rc=0 err
+    reader="$(ls "$TMP"/build/logs-reader-* | sed -n 1p)"
+    err="$("$reader" --all-workspaces 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ] && grep_in "$err" -q -- '--all-workspaces requires --workspace-rows'; then
+        pass "the reader refuses --all-workspaces without a workspace table"
+    else
+        fail "the reader refuses --all-workspaces without a workspace table"
     fi
 }
 
@@ -1202,6 +1371,12 @@ test_central_reads_a_record_longer_than_16mb
 test_stderr_sink_reads_a_line_longer_than_16mb
 test_all
 test_all_beyond_the_argument_limit
+test_all_reads_every_runtime_of_every_workspace_by_name
+test_all_selects_only_the_requested_runtimes_of_every_workspace
+test_all_finds_absent_workspace_sinks_in_workspace_then_runtime_order
+test_all_reads_central_logs_when_the_workspace_table_is_empty
+test_all_refuses_an_unreadable_workspace_table
+test_all_refuses_a_workspace_with_no_directory
 test_since_rfc3339
 test_since_duration
 test_until
@@ -1216,7 +1391,10 @@ test_json_appends_the_workspace_name_last
 test_fields_projects_the_workspace_name
 test_an_unknown_workspace_keeps_its_id
 test_an_unnamed_daemon_workspace_is_refused
-test_reader_refuses_a_malformed_or_repeated_workspace_name
+test_reader_refuses_a_workspace_row_with_no_id
+test_reader_refuses_a_workspace_table_naming_an_id_twice
+test_reader_refuses_an_unreadable_workspace_rows_file
+test_reader_refuses_all_workspaces_without_a_table
 test_reader_refuses_a_malformed_arguments_file
 test_harvest
 test_empty_harvest_window

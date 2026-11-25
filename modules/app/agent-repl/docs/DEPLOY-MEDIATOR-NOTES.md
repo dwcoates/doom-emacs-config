@@ -53,3 +53,10 @@ Its brief names this file, and it is the mediator's to write.
   predecessor's older build admitted before it had the hold; check which
   daemon pid logged `daemon.merge.start` for the admitted merge. On a build
   with the hold, the record is a real broken invariant and is dispatched.
+- `elisp.connect.unary-failure`, `elisp.rpc.transport-failure` and
+  `elisp.host.page-state-failed` on `ReportPageState` with `invalid_argument`
+  (2026-11-25): when a landing renames a page-state wire arm, the deploy's
+  handover window logs one such trio from the old elisp speaking to the new
+  daemon during the roughly 3s before the elisp reload. That trio is the
+  handover's contract skew, not a defect to fix. The same records after the
+  elisp reload are a real fault.
