@@ -87,3 +87,17 @@ Design mode: autonomous.
   - A request echoing the old dir after the move is refused
     `workspace_ref_mismatch`, as any stale ref is.
   - The main checkout keeps name-only renames (`none`).
+
+### 2. A rename during its workspace's own move is refused `moving`
+
+- What changed: `agentrepl.v1.SetWorkspaceNameError` gains `moving`.
+- Why: once a move has stood the shim down, its steps (the worktree, the
+  branch, the transcript folder) are under way toward one destination, and
+  the store completes the move to the destination its row names. Letting a
+  second rename change that destination mid-move would record a branch and
+  directory the disk does not have. Before the steps begin, a second rename
+  simply retargets the owed move.
+- Why the alternatives lost: holding the rename rpc until the move ends ties
+  the rpc to git and filesystem steps; answering it as an internal failure
+  hides an ordinary, momentary state.
+- Consequences: the window is the move's own steps, a matter of moments.

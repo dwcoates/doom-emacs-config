@@ -150,6 +150,10 @@ message SetWorkspaceNameError {
     SetWorkspaceNameBranchExists branch_exists = 9;
     // The worktree directory the new name resolves to already exists.
     SetWorkspaceNameDirectoryExists directory_exists = 10;
+    // The workspace's previous rename is moving its branch and directory
+    // right now; the move takes moments, and a rename asked again once it
+    // has ended is answered.
+    SetWorkspaceNameMoving moving = 11;
   }
 }
 
@@ -168,6 +172,11 @@ message SetWorkspaceNameBranchExists {
   // The branch the new name resolves to.
   string branch = 1;
 }
+
+// The workspace's previous rename is moving its branch and directory.
+// DELIBERATELY EMPTY: the move's steps are under way, so where it goes can no
+// longer change.
+message SetWorkspaceNameMoving {}
 
 // The worktree directory the new name resolves to already exists.
 message SetWorkspaceNameDirectoryExists {

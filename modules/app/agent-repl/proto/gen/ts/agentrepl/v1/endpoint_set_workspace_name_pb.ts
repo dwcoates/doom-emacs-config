@@ -45,7 +45,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_name.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_name: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9uYW1lLnByb3RvEgxhZ2VudHJlcGwudjEiVgoXU2V0V29ya3NwYWNlTmFtZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJIpQBChhTZXRXb3Jrc3BhY2VOYW1lUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVFcnJvckgAQggKBnJlc3VsdCJyChdTZXRXb3Jrc3BhY2VOYW1lU3VjY2VzcxIMCgRuYW1lGAEgASgJEhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBBIwCgRtb3ZlGAMgASgLMiIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZlIsUBChRTZXRXb3Jrc3BhY2VOYW1lTW92ZRI0CgVtb3ZlZBgBIAEoCzIjLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lTW92ZWRIABI2CgRvd2VkGAIgASgLMiYuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZlT3dlZEgAEjYKBG5vbmUYAyABKAsyJi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZU1vdmVOb25lSABCBwoFc3RhdGUiNAoVU2V0V29ya3NwYWNlTmFtZU1vdmVkEg4KBmJyYW5jaBgBIAEoCRILCgNkaXIYAiABKAkiNwoYU2V0V29ya3NwYWNlTmFtZU1vdmVPd2VkEg4KBmJyYW5jaBgBIAEoCRILCgNkaXIYAiABKAkiGgoYU2V0V29ya3NwYWNlTmFtZU1vdmVOb25lIuoFChVTZXRXb3Jrc3BhY2VOYW1lRXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEksKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi4uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVUcmFuc2ZlcnJpbmdBd2F5SAASRgoPbm90X3lldF9hZG9wdGVkGAQgASgLMisuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVOb3RZZXRBZG9wdGVkSAASQAoMaW52YWxpZF9uYW1lGAUgASgLMiguYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZUludmFsaWROYW1lSAASOQoKbmFtZV90YWtlbhgGIAEoCzIjLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lVGFrZW5IABI4CgdtZXJnaW5nGAcgASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNZXJnaW5nSAASSQoQYnJhbmNoX3B1Ymxpc2hlZBgIIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoUHVibGlzaGVkSAASQwoNYnJhbmNoX2V4aXN0cxgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoRXhpc3RzSAASSQoQZGlyZWN0b3J5X2V4aXN0cxgKIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lRGlyZWN0b3J5RXhpc3RzSABCBwoFY2F1c2UiGQoXU2V0V29ya3NwYWNlTmFtZU1lcmdpbmciMwofU2V0V29ya3NwYWNlTmFtZUJyYW5jaFB1Ymxpc2hlZBIQCgh1cHN0cmVhbRgBIAEoCSIuChxTZXRXb3Jrc3BhY2VOYW1lQnJhbmNoRXhpc3RzEg4KBmJyYW5jaBgBIAEoCSIuCh9TZXRXb3Jrc3BhY2VOYW1lRGlyZWN0b3J5RXhpc3RzEgsKA2RpchgBIAEoCSIiCiBTZXRXb3Jrc3BhY2VOYW1lVW5rbm93bldvcmtzcGFjZSI8CiRTZXRXb3Jrc3BhY2VOYW1lV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFNldFdvcmtzcGFjZU5hbWVUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQQodU2V0V29ya3NwYWNlTmFtZU5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzIp8BChVTZXRXb3Jrc3BhY2VOYW1lVGFrZW4SDAoEbmFtZRgBIAEoCRIvCgl3b3Jrc3BhY2UYAiABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAASPQoHcGVuZGluZxgDIAEoCzIqLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lVGFrZW5QZW5kaW5nSABCCAoGaG9sZGVyIh4KHFNldFdvcmtzcGFjZU5hbWVUYWtlblBlbmRpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9uYW1lLnByb3RvEgxhZ2VudHJlcGwudjEiVgoXU2V0V29ya3NwYWNlTmFtZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJIpQBChhTZXRXb3Jrc3BhY2VOYW1lUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVFcnJvckgAQggKBnJlc3VsdCJyChdTZXRXb3Jrc3BhY2VOYW1lU3VjY2VzcxIMCgRuYW1lGAEgASgJEhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBBIwCgRtb3ZlGAMgASgLMiIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZlIsUBChRTZXRXb3Jrc3BhY2VOYW1lTW92ZRI0CgVtb3ZlZBgBIAEoCzIjLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lTW92ZWRIABI2CgRvd2VkGAIgASgLMiYuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZlT3dlZEgAEjYKBG5vbmUYAyABKAsyJi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZU1vdmVOb25lSABCBwoFc3RhdGUiNAoVU2V0V29ya3NwYWNlTmFtZU1vdmVkEg4KBmJyYW5jaBgBIAEoCRILCgNkaXIYAiABKAkiNwoYU2V0V29ya3NwYWNlTmFtZU1vdmVPd2VkEg4KBmJyYW5jaBgBIAEoCRILCgNkaXIYAiABKAkiGgoYU2V0V29ya3NwYWNlTmFtZU1vdmVOb25lIqIGChVTZXRXb3Jrc3BhY2VOYW1lRXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEksKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi4uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVUcmFuc2ZlcnJpbmdBd2F5SAASRgoPbm90X3lldF9hZG9wdGVkGAQgASgLMisuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVOb3RZZXRBZG9wdGVkSAASQAoMaW52YWxpZF9uYW1lGAUgASgLMiguYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZUludmFsaWROYW1lSAASOQoKbmFtZV90YWtlbhgGIAEoCzIjLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lVGFrZW5IABI4CgdtZXJnaW5nGAcgASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNZXJnaW5nSAASSQoQYnJhbmNoX3B1Ymxpc2hlZBgIIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoUHVibGlzaGVkSAASQwoNYnJhbmNoX2V4aXN0cxgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoRXhpc3RzSAASSQoQZGlyZWN0b3J5X2V4aXN0cxgKIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lRGlyZWN0b3J5RXhpc3RzSAASNgoGbW92aW5nGAsgASgLMiQuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVNb3ZpbmdIAEIHCgVjYXVzZSIZChdTZXRXb3Jrc3BhY2VOYW1lTWVyZ2luZyIzCh9TZXRXb3Jrc3BhY2VOYW1lQnJhbmNoUHVibGlzaGVkEhAKCHVwc3RyZWFtGAEgASgJIi4KHFNldFdvcmtzcGFjZU5hbWVCcmFuY2hFeGlzdHMSDgoGYnJhbmNoGAEgASgJIhgKFlNldFdvcmtzcGFjZU5hbWVNb3ZpbmciLgofU2V0V29ya3NwYWNlTmFtZURpcmVjdG9yeUV4aXN0cxILCgNkaXIYASABKAkiIgogU2V0V29ya3NwYWNlTmFtZVVua25vd25Xb3Jrc3BhY2UiPAokU2V0V29ya3NwYWNlTmFtZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBTZXRXb3Jrc3BhY2VOYW1lVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkEKHVNldFdvcmtzcGFjZU5hbWVOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyKfAQoVU2V0V29ya3NwYWNlTmFtZVRha2VuEgwKBG5hbWUYASABKAkSLwoJd29ya3NwYWNlGAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAEj0KB3BlbmRpbmcYAyABKAsyKi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVRha2VuUGVuZGluZ0gAQggKBmhvbGRlciIeChxTZXRXb3Jrc3BhY2VOYW1lVGFrZW5QZW5kaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspaceNameRequest
@@ -375,6 +375,16 @@ export type SetWorkspaceNameError = Message<"agentrepl.v1.SetWorkspaceNameError"
      */
     value: SetWorkspaceNameDirectoryExists;
     case: "directoryExists";
+  } | {
+    /**
+     * The workspace's previous rename is moving its branch and directory
+     * right now; the move takes moments, and a rename asked again once it
+     * has ended is answered.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspaceNameMoving moving = 11;
+     */
+    value: SetWorkspaceNameMoving;
+    case: "moving";
   } | { case: undefined; value?: undefined };
 };
 
@@ -444,6 +454,23 @@ export const SetWorkspaceNameBranchExistsSchema: GenMessage<SetWorkspaceNameBran
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 10);
 
 /**
+ * The workspace's previous rename is moving its branch and directory.
+ * DELIBERATELY EMPTY: the move's steps are under way, so where it goes can no
+ * longer change.
+ *
+ * @generated from message agentrepl.v1.SetWorkspaceNameMoving
+ */
+export type SetWorkspaceNameMoving = Message<"agentrepl.v1.SetWorkspaceNameMoving"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspaceNameMoving.
+ * Use `create(SetWorkspaceNameMovingSchema)` to create a new message.
+ */
+export const SetWorkspaceNameMovingSchema: GenMessage<SetWorkspaceNameMoving> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 11);
+
+/**
  * The worktree directory the new name resolves to already exists.
  *
  * @generated from message agentrepl.v1.SetWorkspaceNameDirectoryExists
@@ -462,7 +489,7 @@ export type SetWorkspaceNameDirectoryExists = Message<"agentrepl.v1.SetWorkspace
  * Use `create(SetWorkspaceNameDirectoryExistsSchema)` to create a new message.
  */
 export const SetWorkspaceNameDirectoryExistsSchema: GenMessage<SetWorkspaceNameDirectoryExists> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 11);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 12);
 
 /**
  * The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
@@ -477,7 +504,7 @@ export type SetWorkspaceNameUnknownWorkspace = Message<"agentrepl.v1.SetWorkspac
  * Use `create(SetWorkspaceNameUnknownWorkspaceSchema)` to create a new message.
  */
 export const SetWorkspaceNameUnknownWorkspaceSchema: GenMessage<SetWorkspaceNameUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 12);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 13);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -498,7 +525,7 @@ export type SetWorkspaceNameWorkspaceRefMismatch = Message<"agentrepl.v1.SetWork
  * Use `create(SetWorkspaceNameWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const SetWorkspaceNameWorkspaceRefMismatchSchema: GenMessage<SetWorkspaceNameWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 13);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 14);
 
 /**
  * This daemon released the workspace to a successor.
@@ -519,7 +546,7 @@ export type SetWorkspaceNameTransferringAway = Message<"agentrepl.v1.SetWorkspac
  * Use `create(SetWorkspaceNameTransferringAwaySchema)` to create a new message.
  */
 export const SetWorkspaceNameTransferringAwaySchema: GenMessage<SetWorkspaceNameTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 14);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 15);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -545,7 +572,7 @@ export type SetWorkspaceNameNotYetAdopted = Message<"agentrepl.v1.SetWorkspaceNa
  * Use `create(SetWorkspaceNameNotYetAdoptedSchema)` to create a new message.
  */
 export const SetWorkspaceNameNotYetAdoptedSchema: GenMessage<SetWorkspaceNameNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 15);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 16);
 
 /**
  * The name is already held. Names and branches are one namespace: a
@@ -596,7 +623,7 @@ export type SetWorkspaceNameTaken = Message<"agentrepl.v1.SetWorkspaceNameTaken"
  * Use `create(SetWorkspaceNameTakenSchema)` to create a new message.
  */
 export const SetWorkspaceNameTakenSchema: GenMessage<SetWorkspaceNameTaken> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 16);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 17);
 
 /**
  * The name is reserved by a pending async merge or claimed by a create in
@@ -612,5 +639,5 @@ export type SetWorkspaceNameTakenPending = Message<"agentrepl.v1.SetWorkspaceNam
  * Use `create(SetWorkspaceNameTakenPendingSchema)` to create a new message.
  */
 export const SetWorkspaceNameTakenPendingSchema: GenMessage<SetWorkspaceNameTakenPending> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 17);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 18);
 
