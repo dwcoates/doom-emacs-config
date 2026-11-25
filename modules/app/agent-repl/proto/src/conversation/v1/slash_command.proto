@@ -173,6 +173,15 @@ message SessionCommandCatalogEntry {
   // leading slash. A composer may offer each alias, and completing one sends
   // the alias as typed — the runtime resolves it.
   repeated string aliases = 4;
+  // The absolute path of the `SKILL.md` the runtime resolved this command's
+  // name to, in the runtime's own words (its context reading lists each
+  // loaded skill with its file). It is whichever source the runtime chose for
+  // the name: the worktree's project skill, the account's own skill, or a
+  // plugin's. A reader that opens a skill's file opens this path and never
+  // looks one up by the name, since a lookup of its own could pick a source the
+  // runtime did not. UNSET for a command with no file (a built-in, an MCP
+  // prompt), and while the runtime has not yet stated its skills' files.
+  optional string skill_file = 5;
 }
 
 // ---- Context cuts: what /clear, /compact and auto-compaction leave behind ----

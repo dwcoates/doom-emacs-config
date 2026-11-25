@@ -374,7 +374,16 @@ type SessionCommandCatalogEntry struct {
 	// Other names the runtime answers as this SAME command, each without the
 	// leading slash. A composer may offer each alias, and completing one sends
 	// the alias as typed — the runtime resolves it.
-	Aliases       []string `protobuf:"bytes,4,rep,name=aliases,proto3" json:"aliases,omitempty"`
+	Aliases []string `protobuf:"bytes,4,rep,name=aliases,proto3" json:"aliases,omitempty"`
+	// The absolute path of the `SKILL.md` the runtime resolved this command's
+	// name to, in the runtime's own words (its context reading lists each
+	// loaded skill with its file). It is whichever source the runtime chose for
+	// the name: the worktree's project skill, the account's own skill, or a
+	// plugin's. A reader that opens a skill's file opens this path and never
+	// looks one up by the name, since a lookup of its own could pick a source the
+	// runtime did not. UNSET for a command with no file (a built-in, an MCP
+	// prompt), and while the runtime has not yet stated its skills' files.
+	SkillFile     *string `protobuf:"bytes,5,opt,name=skill_file,json=skillFile,proto3,oneof" json:"skill_file,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -435,6 +444,13 @@ func (x *SessionCommandCatalogEntry) GetAliases() []string {
 		return x.Aliases
 	}
 	return nil
+}
+
+func (x *SessionCommandCatalogEntry) GetSkillFile() string {
+	if x != nil && x.SkillFile != nil {
+		return *x.SkillFile
+	}
+	return ""
 }
 
 // The conversation was cut here, and the reader must see where.
@@ -986,14 +1002,17 @@ const file_conversation_v1_slash_command_proto_rawDesc = "" +
 	"takes_args\x18\x02 \x01(\bR\ttakesArgs\x12\x18\n" +
 	"\aaliases\x18\x03 \x03(\tR\aaliases\"`\n" +
 	"\x15SessionCommandCatalog\x12G\n" +
-	"\bcommands\x18\x01 \x03(\v2+.conversation.v1.SessionCommandCatalogEntryR\bcommands\"\xbd\x01\n" +
+	"\bcommands\x18\x01 \x03(\v2+.conversation.v1.SessionCommandCatalogEntryR\bcommands\"\xf0\x01\n" +
 	"\x1aSessionCommandCatalogEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\vdescription\x18\x02 \x01(\tH\x00R\vdescription\x88\x01\x01\x12(\n" +
 	"\rargument_hint\x18\x03 \x01(\tH\x01R\fargumentHint\x88\x01\x01\x12\x18\n" +
-	"\aaliases\x18\x04 \x03(\tR\aaliasesB\x0e\n" +
+	"\aaliases\x18\x04 \x03(\tR\aaliases\x12\"\n" +
+	"\n" +
+	"skill_file\x18\x05 \x01(\tH\x02R\tskillFile\x88\x01\x01B\x0e\n" +
 	"\f_descriptionB\x10\n" +
-	"\x0e_argument_hint\"\xec\x01\n" +
+	"\x0e_argument_hintB\r\n" +
+	"\v_skill_file\"\xec\x01\n" +
 	"\n" +
 	"ContextCut\x12;\n" +
 	"\acleared\x18\x01 \x01(\v2\x1f.conversation.v1.ContextClearedH\x00R\acleared\x12A\n" +
