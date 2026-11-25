@@ -904,6 +904,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ChessBoards: chessBoards,
 		// A USER PROMPT'S KNOWN COMMANDS are the standing catalog's.
 		Commands: slashCommands.Catalog,
+		// A SKILL LINK'S DESTINATION is spelled from the home directory, as
+		// every file link is.
+		Home: paths.Home,
 		// EVERY RECORDED ANSWER'S MENTIONS order the composer's completions.
 		AnswerSettled: mentions.Answered,
 	})

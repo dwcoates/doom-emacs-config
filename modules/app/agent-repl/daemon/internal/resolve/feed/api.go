@@ -599,6 +599,11 @@ type Deps struct {
 	// nil knows no catalog and stamps no commands, which is what a test that
 	// is not about slash commands wants. Production always wires it.
 	Commands func(ids.WorkspaceID) (*conversationv1.SessionCommandCatalog, bool)
+	// Home is the user's home directory, which a skill link's destination is
+	// spelled from (`~/...`, skillrefs.Href), as every file link the feed
+	// draws is. Empty spells every destination as its absolute path, which
+	// is what a test that is not about skill links wants.
+	Home string
 	// AnswerSettled is told every final response the feed records as its
 	// turn's answer: the workspace, its settled markdown and the instant it
 	// settled (epoch ms), live and on every replay alike (selection.go). It is
