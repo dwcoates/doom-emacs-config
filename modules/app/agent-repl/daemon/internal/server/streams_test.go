@@ -2093,6 +2093,7 @@ func TestReportPageStateRecordsEachArm(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
+			holdHostStream(t, h)
 
 			// Act.
 			for _, req := range tt.reports {
@@ -2115,6 +2116,7 @@ func TestReportPageStateRecordsEachArm(t *testing.T) {
 func TestARestatedPageHeldBeforeReasonsIsHeldUnderItsOwnReason(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	holdHostStream(t, h)
 	reason := &agentreplv1.ReportPageStateLoadReason{Reason: &agentreplv1.ReportPageStateLoadReason_HeldBeforeReasons{HeldBeforeReasons: &agentreplv1.ReportPageStateLoadHeldBeforeReasons{}}}
 	req := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: reason}}}
 
@@ -2188,6 +2190,7 @@ func TestReportPageStateRecordsAReasonItsContractDoesNotNameAsUnnamed(t *testing
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
+			holdHostStream(t, h)
 
 			// Act.
 			for _, req := range tt.reports {
@@ -2231,6 +2234,7 @@ func TestReportPageStateRecordsTheLoadAndItsReason(t *testing.T) {
 	h := newHarness(t, func(deps *Deps) {
 		deps.Log = &fakeSurfaces{global: log, workspace: log}
 	})
+	holdHostStream(t, h)
 
 	// Act.
 	reportPageState(t, h, &agentreplv1.ReportPageStateRequest{
@@ -2263,5 +2267,58 @@ func TestTheLastHostStreamClosingForgetsTheWorkspacesPage(t *testing.T) {
 	// Assert.
 	if pages := h.HeldPages.Reported(); len(pages) != 0 {
 		t.Fatalf("held pages = %v, want the page forgotten with its host stream", pages)
+	}
+}
+
+func TestAPageReportWithNoHostStreamStandingSetsNothing(t *testing.T) {
+	loaded := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Loaded{Loaded: &agentreplv1.ReportPageStateLoaded{Reason: shownReason()}}}
+	held := &agentreplv1.ReportPageStateRequest{Report: &agentreplv1.ReportPageStateRequest_Held{Held: &agentreplv1.ReportPageStateHeld{Reason: shownReason()}}}
+	tests := []struct {
+		name string
+		// closed opens the host stream and closes it before the report, as a
+		// release does when its load report is still in flight.
+		closed bool
+		report *agentreplv1.ReportPageStateRequest
+		arm    string
+	}{
+		{name: "a load before any host stream", report: loaded, arm: "loaded"},
+		{name: "a restatement before any host stream", report: held, arm: "held"},
+		{name: "a load landing after the last host stream closed", closed: true, report: loaded, arm: "loaded"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(deps *Deps) {
+				deps.Log = &fakeSurfaces{global: log, workspace: log}
+			})
+			if tt.closed {
+				ctx, cancel := context.WithCancel(context.Background())
+				openHostStream(t, h, ctx)
+				h.Footer.AwaitEdge(t) // the open edge
+				cancel()
+				h.Footer.AwaitEdge(t) // the close edge, stated after the forget
+			}
+
+			// Act.
+			resp := reportPageState(t, h, proto.Clone(tt.report).(*agentreplv1.ReportPageStateRequest))
+
+			// Assert.
+			if resp.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.GetResult())
+			}
+			if pages := h.HeldPages.Reported(); len(pages) != 0 {
+				t.Fatalf("held pages = %v, want none set with no host stream standing", pages)
+			}
+			if loads, _ := h.PageCounts.counted(); len(loads) != 0 {
+				t.Fatalf("loads = %v, want none counted with no host stream standing", loads)
+			}
+			for _, rec := range log.at("INFO") {
+				if rec.Operation == "daemon.server.page_state" && rec.Context["report"] == tt.arm {
+					return
+				}
+			}
+			t.Fatalf("no INFO page_state record naming the report set nothing among %v", log.at("INFO"))
+		})
 	}
 }
