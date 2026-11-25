@@ -1569,11 +1569,6 @@ func (w *addrWithdrawal) finish() {
 // starts; it is what serves the test barrier (server.Deps.TestBarrier).
 const testBarrierEnv = "AGENT_REPL_TEST_BARRIER"
 
-// testCoverageWindowsEnv is set to "1" by the integration harness for every
-// daemon it starts cover-built for the test runner's impact recording; it is
-// what serves the coverage window route (server.Deps.TestCoverageWindows).
-const testCoverageWindowsEnv = "AGENT_REPL_TEST_COVERAGE_WINDOWS"
-
 // loopJoinBound is how long the exit waits for the background loops to leave
 // after their serving context ended. Every loop is a ticker whose iteration is
 // itself bounded, so this is not a shutdown budget: it covers one in-flight
