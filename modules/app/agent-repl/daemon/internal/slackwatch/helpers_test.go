@@ -52,7 +52,7 @@ type fakeGNS struct {
 	later    []gnsclient.ThreadMessage
 	laterErr error
 	afters   []string
-	channels  []string
+	channels []string
 	// stream is what Stream reads, then streamErr its end.
 	stream    []gnsclient.PipeMessage
 	streamEnd int64
@@ -70,6 +70,7 @@ func (g *fakeGNS) SubscribeChannel(_ context.Context, channel string) error {
 	g.channels = append(g.channels, channel)
 	return nil
 }
+
 // ThreadRoot answers every message as its own thread's root.
 func (g *fakeGNS) ThreadRoot(_ context.Context, _, ts string) (string, error) {
 	return ts, g.rootErr

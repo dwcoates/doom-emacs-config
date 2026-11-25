@@ -149,7 +149,9 @@ func (w *Watcher) Subscribe(ctx context.Context, ws Workspace, url string, mode 
 		return wsm.SlackThreadSubscription{}, false, err
 	}
 	if found {
-		sub.Thread = held.Thread
+		// The store keeps a held subscription's source and cursor; they are
+		// named as held so the subscription it is handed is whole.
+		sub.Thread, sub.Source, sub.Cursor, sub.CursorTS = held.Thread, held.Source, held.Cursor, held.CursorTS
 	} else {
 		root, err := w.deps.GNS.ThreadRoot(ctx, thread.Channel, thread.TS)
 		if err != nil {
