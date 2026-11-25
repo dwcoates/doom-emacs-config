@@ -55,10 +55,6 @@ type Layout struct {
 	Self string
 	// Coverage adds expensive coverage instrumentation and report units.
 	Coverage bool
-	// Impact runs each suite's roster.Suite.ImpactPackages recorded: the
-	// files each of their top-level tests executed are recorded
-	// (agentrepl/testrun/internal/impact), at one test at a time per process.
-	Impact bool
 	// DebugInfo links every test binary and program with its DWARF debug
 	// information, which the run otherwise drops (gobuild.LinkFlags).
 	DebugInfo bool

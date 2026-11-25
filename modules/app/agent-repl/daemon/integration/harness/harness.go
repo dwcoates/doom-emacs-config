@@ -200,7 +200,7 @@ func mainIn(m *testing.M, module, root string) int {
 		// THE DAEMON RUNS THE MOCKED GIT BY CONSTRUCTION: it is linked in as
 		// the daemon's git binary, so no PATH a test or a child sets can
 		// reach the host's git.
-		{&daemonBinary, daemonProgramName(), "./cmd/agent-repld", "", true, func() []string { return []string{MockedGitLink(gitBinary), NoGitHubLink, NoSlackLink} }},
+		{&daemonBinary, "agent-repld", "./cmd/agent-repld", "", true, func() []string { return []string{MockedGitLink(gitBinary), NoGitHubLink, NoSlackLink} }},
 		// THE TEST SERVICE EVERY DAEMON'S MERGE GATES RUN ON (testservice.go):
 		// a real one, as our own system, never the owner's.
 		{&testsBinary, "agent-repl-tests", ".", filepath.Join(filepath.Dir(module), "testservice"), false, nil},
@@ -219,9 +219,6 @@ func mainIn(m *testing.M, module, root string) int {
 			buildArgs := []string{"build", "-buildvcs=false"}
 			if b.covered {
 				buildArgs = append(buildArgs, CoverageBuildArgs(CoverageRoot())...)
-				if ImpactEnabled() {
-					buildArgs = append(buildArgs, "-cover", "-covermode=atomic")
-				}
 			}
 			if b.links != nil {
 				buildArgs = append(buildArgs, "-ldflags="+strings.Join(b.links(), " "))
@@ -272,9 +269,6 @@ func runPinned(m *testing.M, module, parent string) int {
 		return 1
 	}
 	code := m.Run()
-	// The last test's coverage window closes while the shared daemons are
-	// still up to write their counters (impact.go).
-	ImpactFinish()
 	// The suite's shared fixtures end after its last test and before the run
 	// root they live under is removed (suite.go).
 	if failed := finishSuite(); code == 0 {

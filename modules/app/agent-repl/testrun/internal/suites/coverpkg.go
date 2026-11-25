@@ -70,42 +70,28 @@ func SystemModules(l Layout) (map[string]string, error) {
 	return out, nil
 }
 
-// CoveredModules answers the module path of the program module in dir and
-// the module paths of every coverage system it requires: the modules a
-// coverage build of the program instruments (coverPkg). Sorted after the
-// program's own.
-func CoveredModules(l Layout, dir string) (module string, required []string, err error) {
-	module, requires, err := goModFile(dir)
-	if err != nil {
-		return "", nil, err
-	}
-	systems, err := SystemModules(l)
-	if err != nil {
-		return "", nil, err
-	}
-	for _, req := range requires {
-		if _, ok := systems[req]; ok && req != module {
-			required = append(required, req)
-		}
-	}
-	sort.Strings(required)
-	return module, required, nil
-}
-
 // coverPkg is the -coverpkg a coverage build of a program in the module dir
 // instruments: the module's own packages and those of every coverage system
 // it requires, so the code a spawned system runs of another system's module
 // counts toward that system too.
 func coverPkg(l Layout, dir string) (string, error) {
-	_, required, err := CoveredModules(l, dir)
+	module, requires, err := goModFile(dir)
+	if err != nil {
+		return "", err
+	}
+	systems, err := SystemModules(l)
 	if err != nil {
 		return "", err
 	}
 	patterns := []string{"./..."}
-	for _, req := range required {
-		patterns = append(patterns, req+"/...")
+	var deps []string
+	for _, req := range requires {
+		if _, ok := systems[req]; ok && req != module {
+			deps = append(deps, req+"/...")
+		}
 	}
-	return strings.Join(patterns, ","), nil
+	sort.Strings(deps)
+	return strings.Join(append(patterns, deps...), ","), nil
 }
 
 // SpawnedRoot is where a coverage run's spawned systems write their counters,

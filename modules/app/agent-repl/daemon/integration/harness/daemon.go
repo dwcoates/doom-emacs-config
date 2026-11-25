@@ -803,7 +803,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	// sweep reads exactly the log content it reads without coverage and the
 	// suite's pass set is unchanged. The ordinary teardown below stands down
 	// while this one is armed, so the process is still killed exactly once.
-	if coverageTeardownArmed() {
+	if CoverageEnabled() {
 		t.Cleanup(func() {
 			d.gracefulStopForCoverage()
 			d.Kill()
@@ -1032,22 +1032,6 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		env = append(env, daemonCov...)
 		env = append(env, nodeCov...)
 	}
-	// A RUN THAT RECORDS WHICH FILES EACH TEST EXECUTES serves this daemon its
-	// coverage window route and gives it a counter directory: the test's own
-	// when the test starts the daemon, a scratch one when the suite does (its
-	// counters are cut through the route instead, impact.go).
-	if ImpactEnabled() {
-		env = append(env, coverageWindowsEnv+"=1")
-		if _, shared := t.(*SuiteTB); shared {
-			scratch, err := os.MkdirTemp(RunRoot(), "impact-shared-gocoverdir-")
-			if err != nil {
-				t.Fatalf("harness: %v", err)
-			}
-			env = append(env, "GOCOVERDIR="+scratch)
-		} else {
-			env = append(env, impactOwnDaemonEnv(t)...)
-		}
-	}
 	// A PROFILING RUN PROFILES THE DAEMON'S WHOLE LIFE AND ITS SHIMS' (profile.go).
 	profileEnv, profileDir := testenv.ExitProfile(t)
 	env = append(env, profileEnv...)
@@ -1122,7 +1106,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	t.Cleanup(func() {
 		// On a coverage run the teardown registered ahead of the warning
 		// sweep owns this and runs it after that sweep instead.
-		if coverageTeardownArmed() {
+		if CoverageEnabled() {
 			return
 		}
 		d.Kill()
@@ -1522,7 +1506,7 @@ func (d *Daemon) Stop() {
 // best-effort flush of the daemon's coverage counters ahead of the cleanup
 // kill, not a shutdown assertion. Daemon.Stop remains the assertion.
 func (d *Daemon) gracefulStopForCoverage() {
-	if !coverageTeardownArmed() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
+	if !CoverageEnabled() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
 		return
 	}
 	d.sigMu.Lock()
@@ -1540,7 +1524,7 @@ func (d *Daemon) gracefulStopForCoverage() {
 // run, and reporting nothing. ReapStrays still runs underneath, so a process
 // that ignores the signal is killed exactly as it always was.
 func (d *Daemon) standDownStraysForCoverage() {
-	if !coverageTeardownArmed() {
+	if !CoverageEnabled() {
 		return
 	}
 	pids := d.strayPIDs()

@@ -11,8 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"agentrepl/testrun/testenv"
 )
 
 // Kind is how a suite is turned into units.
@@ -135,14 +133,6 @@ type Suite struct {
 	// The run builds each program ONCE (Programs) and every chunk of a package
 	// named here waits for it and reads it from AGENT_REPL_TEST_PROGRAMS.
 	Programs map[string][]string
-	// ImpactPackages names the Go packages (by path relative to Path) of the
-	// suite's integration pass whose chunks run RECORDED when a run records
-	// (suites.Layout.Impact): one test at a time per process, against the
-	// cover-built build of each program that has one (Program.Impact), so the
-	// files each top-level test executed can be recorded
-	// (agentrepl/testrun/internal/impact). Shadow mode: recording never
-	// skips a test.
-	ImpactPackages []string
 	// Reuse declares what the suite's units read beyond what the runner
 	// derives (agentrepl/testrun/internal/reuse): a run skips every unit whose
 	// inputs are byte-identical to inputs an earlier run passed that unit on.
@@ -237,12 +227,6 @@ type Program struct {
 	// the system that spawns it, so its counters would land in that system's
 	// coverage directory and read as covered production code.
 	Fake bool
-	// Impact marks the program's build for coverage-based impact recording
-	// (internal/impact): built `-cover -covermode=atomic`, the one build
-	// whose counters a harness can cut into per-test windows. A run builds it
-	// only for a suite that lists it, in place of the ordinary build, when the
-	// run records (suites.Layout.Impact).
-	Impact bool
 }
 
 // ProgramLink binds the package variable Var, at link time, to the path of the
@@ -258,10 +242,6 @@ type ProgramLink struct {
 var Programs = []Program{
 	{Name: "agent-repld", Owner: "daemon", Module: "daemon", Package: "./cmd/agent-repld",
 		Links: []ProgramLink{{Var: "agent-repld/internal/gitclient.gitBinary", Program: "git"}}},
-	// The daemon's cover-built build for impact recording, which a recording
-	// run's daemon integration chunks run in place of agent-repld.
-	{Name: "agent-repld-impact", Owner: "daemon", Module: "daemon", Package: "./cmd/agent-repld", Impact: true,
-		Links: []ProgramLink{{Var: "agent-repld/internal/gitclient.gitBinary", Program: "git"}}},
 	{Name: "fakeshim", Owner: "daemon", Module: "daemon", Package: "./integration/fakeshim", Fake: true},
 	{Name: "git", Owner: "daemon", Module: "daemon", Package: "./integration/fakegit/git", Fake: true},
 	{Name: "shim-store", Owner: "store", Module: "agent-shim/shim-store", Package: "."},
@@ -276,14 +256,6 @@ var Programs = []Program{
 // the reference a test removal is held to (testrun/coverage-baseline.json).
 // The generated protobufs, the test tooling and the e2e harness are not.
 var CoverageSystems = []string{"daemon", "sidecar", "store", "lock", "logging", "protohelpers", "webapp", "shim"}
-
-// ImpactProgramOf answers the name of the program built for impact recording
-// in place of the program named name (Program.Impact), when there is one.
-func ImpactProgramOf(name string) (string, bool) {
-	impact := testenv.ImpactProgram(name)
-	p, ok := LookupProgram(impact)
-	return impact, ok && p.Impact
-}
 
 // LookupProgram answers the program named name.
 func LookupProgram(name string) (Program, bool) {
@@ -396,9 +368,8 @@ var Suites = []Suite{
 	// host slot too.
 	{Name: "daemon", Kind: GoModule, Path: "daemon",
 		IntegrationTags: "integration", IntegrationPackages: "./integration",
-		TestParallel:   map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
-		Programs:       map[string][]string{"integration": {"agent-repld", "fakeshim", "git", "agent-repl-tests"}},
-		ImpactPackages: []string{"integration"},
+		TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
+		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git", "agent-repl-tests"}},
 		// EACH PACKAGE IS REUSED ON ITS OWN, keyed on the build graph `go list
 		// -deps -test` names for it; what its tests read beyond that graph is
 		// declared per package, and every other read in the checkout is

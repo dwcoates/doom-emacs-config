@@ -1,32 +1,13 @@
 package suites
 
 import (
-	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
 	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/roster"
-	"agentrepl/testrun/testenv"
 )
-
-// layoutFor is l, with the real module root when the program p is an impact
-// build, whose -coverpkg reads the module's go.mod files (every other
-// program's build reads nothing, so a placeholder module serves).
-func layoutFor(t *testing.T, l Layout, p roster.Program) Layout {
-	t.Helper()
-	if !p.Impact {
-		return l
-	}
-	realModule, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	l.Module = realModule
-	return l
-}
 
 func TestProgramUnitsBuildEachNeededProgramOnce(t *testing.T) {
 	// Arrange: two suites ask for overlapping programs.
@@ -150,8 +131,8 @@ func TestProgramBuildPutsExtraFlagsBeforeTheOutput(t *testing.T) {
 func TestProgramUnitsBuildWhatProgramBuildSays(t *testing.T) {
 	// Every roster program's unit is exactly its ProgramBuild, so no build
 	// of a program drifts from the run's.
+	l := Layout{Module: "/m", Work: "/w"}
 	for _, p := range roster.Programs {
-		l := layoutFor(t, Layout{Module: "/m", Work: "/w"}, p)
 		specs, err := ProgramUnits(l, []string{p.Name}, func(roster.Program) string { return "x" })
 		if err != nil {
 			t.Fatal(err)
@@ -211,7 +192,7 @@ func TestEveryLinkInARunTakesItsFlagsFromLinkFlags(t *testing.T) {
 			}
 
 			// Act
-			argv, _, err := ProgramBuild(layoutFor(t, l, p), p)
+			argv, _, err := ProgramBuild(l, p)
 
 			// Assert
 			if err != nil {
@@ -255,11 +236,7 @@ func TestEveryProgramUnitIsAPinnedBuild(t *testing.T) {
 	}
 
 	// Act
-	realModule, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	specs, err := ProgramUnits(Layout{Module: realModule, Work: "/w"}, names, func(p roster.Program) string { return p.Owner })
+	specs, err := ProgramUnits(Layout{Module: "/m", Work: "/w"}, names, func(p roster.Program) string { return p.Owner })
 
 	// Assert
 	if err != nil || len(specs) != len(names) {
@@ -269,145 +246,5 @@ func TestEveryProgramUnitIsAPinnedBuild(t *testing.T) {
 		if want := pinnedBuild(sp); sp.Slots != want.Slots || !reflect.DeepEqual(sp.Env, want.Env) {
 			t.Errorf("%s holds %d slots pinned by %v, want pinnedBuild's %d pinned by %v", sp.ID, sp.Slots, sp.Env, want.Slots, want.Env)
 		}
-	}
-}
-
-func TestAnImpactProgramIsBuiltAtomicallyInstrumentedAndLinkedToTheMockedGit(t *testing.T) {
-	// Arrange
-	realModule, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, ok := roster.LookupProgram("agent-repld-impact")
-	if !ok || !p.Impact {
-		t.Fatalf("the roster holds no impact build of the daemon: %+v", p)
-	}
-
-	// Act
-	argv, dir, err := ProgramBuild(Layout{Module: realModule, Work: "/w"}, p)
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	joined := strings.Join(argv, " ")
-	for _, want := range []string{"-cover", "-covermode=atomic", "-coverpkg=./...", "-X agent-repld/internal/gitclient.gitBinary=/w/programs/git", "-o /w/programs/agent-repld-impact ./cmd/agent-repld"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("ProgramBuild = %s, want %q in it", joined, want)
-		}
-	}
-	if dir != filepath.Join(realModule, "daemon") {
-		t.Fatalf("ProgramBuild dir = %s, want the daemon module", dir)
-	}
-}
-
-func TestAnOrdinaryProgramIsNeverInstrumentedByAnImpactRun(t *testing.T) {
-	// Arrange
-	p, _ := roster.LookupProgram("agent-repld")
-
-	// Act
-	argv, _, err := ProgramBuild(Layout{Module: "/m", Work: "/w", Impact: true}, p)
-
-	// Assert
-	if err != nil || strings.Contains(strings.Join(argv, " "), "-cover") {
-		t.Fatalf("ProgramBuild = %v, %v; want the ordinary build, whatever the run records", argv, err)
-	}
-}
-
-func TestARecordedPackageRunsOneTestAtATimeAgainstTheImpactPrograms(t *testing.T) {
-	// Arrange
-	module := goPackageFixture(t, "func TestA(t *testing.T) {}\nfunc TestB(t *testing.T) {}\n")
-	l := Layout{Module: module, Work: t.TempDir(), Self: "/testrun", Impact: true}
-	s := roster.Suite{Name: "daemon", IntegrationTags: "integration", IntegrationPackages: "./p",
-		TestParallel:   map[string]roster.Parallel{"p": {Tests: 8, Slots: 2}},
-		ImpactPackages: []string{"p"},
-		Programs:       map[string][]string{"p": {"agent-repld", "fakeshim", "git"}}}
-
-	// Act
-	u, err := goIntegrationUnitsForPackages(l, s, module, []string{"p"})
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"agent-repld-impact", "fakeshim", "git"}; !reflect.DeepEqual(u.Programs, want) {
-		t.Fatalf("Programs = %v, want the impact build in place of the daemon: %v", u.Programs, want)
-	}
-	split := u.Splits[0]
-	if split.Slots != 1 {
-		t.Fatalf("Slots = %d, want a recorded chunk's one core", split.Slots)
-	}
-	chunk := split.Chunk("daemon:p[integration]#00", []string{"TestA", "TestB"})
-	if !slices.Contains(chunk.Argv, "-test.parallel=1") {
-		t.Fatalf("chunk argv = %v, want one test at a time", chunk.Argv)
-	}
-	windows := filepath.Join(l.Work, "impact", "daemon", "daemon_p_integration__00.jsonl")
-	if chunk.Impact == nil || chunk.Impact.Suite != "daemon" || chunk.Impact.Package != "p" || chunk.Impact.Tags != "integration" || !strings.HasPrefix(chunk.Impact.Windows, filepath.Join(l.Work, "impact", "daemon")) {
-		t.Fatalf("chunk.Impact = %+v (want windows under %s)", chunk.Impact, windows)
-	}
-	if !slices.Contains(chunk.Env, testenv.ImpactOut+"="+chunk.Impact.Windows) {
-		t.Fatalf("chunk env = %v, want the windows file named", chunk.Env)
-	}
-}
-
-func TestAPackageNotListedForImpactIsNeverRecorded(t *testing.T) {
-	cases := []struct {
-		name string
-		l    func(module string) Layout
-		s    roster.Suite
-	}{
-		{"a run that does not record", func(m string) Layout { return Layout{Module: m, Work: t.TempDir()} },
-			roster.Suite{Name: "daemon", IntegrationTags: "integration", ImpactPackages: []string{"p"}}},
-		{"a package the suite does not list", func(m string) Layout { return Layout{Module: m, Work: t.TempDir(), Impact: true} },
-			roster.Suite{Name: "daemon", IntegrationTags: "integration"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
-			l := tc.l(module)
-			s := tc.s
-			s.IntegrationPackages = "./p"
-			s.Programs = map[string][]string{"p": {"agent-repld"}}
-			s.TestParallel = map[string]roster.Parallel{"p": {Tests: 8, Slots: 2}}
-			// Act
-			u, err := goIntegrationUnitsForPackages(l, s, module, []string{"p"})
-			// Assert
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(u.Programs, []string{"agent-repld"}) {
-				t.Fatalf("Programs = %v, want the ordinary daemon", u.Programs)
-			}
-			if chunk := u.Splits[0].Chunk("x", []string{"TestA"}); chunk.Impact != nil || !slices.Contains(chunk.Argv, "-test.parallel=8") {
-				t.Fatalf("chunk = %+v, want an ordinary chunk", chunk)
-			}
-		})
-	}
-}
-
-func TestAGoSuitesUnitsCarryTheProgramsItsIntegrationPassRuns(t *testing.T) {
-	// Arrange: an ordinary package, and a tagged integration package whose
-	// tests run programs.
-	module, err := filepath.EvalSymlinks(goPackageFixture(t, "func TestA(t *testing.T) {}\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(module, "i", "i.go"), "package i\n", 0o644)
-	write(t, filepath.Join(module, "i", "i_test.go"), "//go:build integration\n\npackage i\n\nimport \"testing\"\n\nfunc TestI(t *testing.T) {}\n", 0o644)
-	l := Layout{Module: module, Work: t.TempDir(), Impact: true}
-	s := roster.Suite{Name: "daemon", Kind: roster.GoModule, Path: ".", IntegrationTags: "integration", IntegrationPackages: "./i",
-		ImpactPackages: []string{"i"},
-		Programs:       map[string][]string{"i": {"agent-repld", "git"}}}
-
-	// Act
-	u, err := goModuleUnits(l, s)
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"agent-repld-impact", "git"}; !reflect.DeepEqual(u.Programs, want) {
-		t.Fatalf("Programs = %v, want the integration pass's programs, the daemon as its impact build: %v", u.Programs, want)
 	}
 }
