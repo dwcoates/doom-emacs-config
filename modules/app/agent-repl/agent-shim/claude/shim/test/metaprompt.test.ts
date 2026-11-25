@@ -433,8 +433,19 @@ describe("this repository's committed metaprompt", () => {
     const text = readMetaprompt(home);
     // Assert
     expect(text).toContain("agent-repl closes a workspace once every pull request it owns has merged");
-    expect(text).toContain("so the workspace never closes itself for a merge");
+    expect(text).toContain("so the workspace never closes itself while it owns a pull request");
     expect(text).not.toContain("may close itself, after telling its parent");
+  });
+
+  it("requires a workspace whose work has all landed, with nothing outstanding, to close itself unasked", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("When a workspace finds all its work landed and nothing outstanding with me, it runs `agent-repld workspace close here` in that same turn, without asking.");
+    expect(text).toContain("A workspace that owns a pull request not yet merged waits for agent-repl's close, below.");
+    expect(text).not.toContain("so the workspace never closes itself for a merge");
   });
 
   it("requires a workspace to store its task's link and every resource its work creates, unasked", () => {
