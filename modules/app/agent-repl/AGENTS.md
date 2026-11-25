@@ -2553,7 +2553,28 @@ The harvest table groups by workspace ID and directory, level, runtime,
 operation, and message, with a count. Genuine central records are labelled
 `central` with directory `-`. An empty window still prints the header and exits
 zero. For exploratory reading use `--all`, `--level`, comma-separated
-`--runtime`, `--follow`, and `--json`; `bin/logs.sh --help` is authoritative.
+`--runtime`, `--match`, `--follow`, and `--json`; `bin/logs.sh --help` is
+authoritative.
+
+**EVERY READ IS A WINDOW, NARROWED BEFORE IT IS DECODED.** A windowless
+`--all` read decoded every record of 6.2 GB of logs and grew its reader to
+22 GB (2026-11-24), and the agent wanted eight lines of it.
+
+- `--workspace`, `--central` and `--all` read only with `--since` (a lookback
+  such as `2h`, or an RFC3339 instant); `logs.sh` refuses them without one.
+  - Start with the narrowest window the question allows, and widen it only
+    when it comes back empty.
+- Narrow by text with `--match REGEX`, never by piping the output to `grep`.
+  - `--match` tests each line as written, before it is decoded, so a line it
+    does not match costs the read nothing.
+    - It matches the raw JSONL, so a quote inside a value is `\"`.
+  - A `grep` after `logs.sh` filters only after the reader has read and
+    decoded every record in the window.
+- `--json`, the default format, `--fields` and `--timeline` print in time
+  order, so they hold each matching record's place until the read ends.
+  - Past a million records they fail before printing anything: narrow the
+    read, or count it with `--tally`.
+  - `--tally`, `--sample` and `--harvest` hold only their groups, at any size.
 
 ### Querying compactly — read this before dumping raw records
 
@@ -2588,15 +2609,15 @@ has nothing incremental to append to).
    line per record in time order, message truncated to `--width` (default
    120):
    ```sh
-   modules/app/agent-repl/bin/logs.sh --workspace <id|dir|name> --runtime shim --timeline
+   modules/app/agent-repl/bin/logs.sh --workspace <id|dir|name> --since 1h --runtime shim --timeline
    ```
 4. "Give me the full message and context for exactly one operation." —
-   narrow with `--runtime`/`--level` (and shell `grep` on the operation name
-   if needed), then `--fields` to print exactly the named top-level or
-   `context` fields, nothing else:
+   narrow with `--runtime`/`--level` and `--match` on the operation name,
+   then `--fields` to print exactly the named top-level or `context` fields,
+   nothing else:
    ```sh
-   modules/app/agent-repl/bin/logs.sh --workspace <id|dir|name> --runtime shim \
-     --fields operation,message,cause
+   modules/app/agent-repl/bin/logs.sh --workspace <id|dir|name> --since 1h --runtime shim \
+     --match '"operation":"shim\.turn\.' --fields operation,message,cause
    ```
 
 A service's `.err.log` (raw stderr — `shim-store.err.log`,

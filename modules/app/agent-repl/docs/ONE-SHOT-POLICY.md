@@ -68,7 +68,8 @@ not files here.
 Every one-shot create records the source it chose:
 
 ```sh
-modules/app/agent-repl/bin/logs.sh --all --runtime daemon \
+modules/app/agent-repl/bin/logs.sh --all --since 1h --runtime daemon \
+  --match 'daemon\.workspace\.oneshot_policy_source' \
   --fields operation,message,repository_root,source,policy_dir
 ```
 
