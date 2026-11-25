@@ -367,6 +367,18 @@ export function watchStream<Res extends Message>(
       };
     });
 
+  /**
+   * Wait out the backoff before a reopen, then double it up to its ceiling.
+   * Answers false when the stream was cancelled meanwhile: nothing reopens.
+   * Every reopen that waits goes through here.
+   */
+  const backOff = async (): Promise<boolean> => {
+    await waitBackoff(backoffMs);
+    if (cancelled) return false;
+    backoffMs = Math.min(backoffMs * 2, maxMs);
+    return true;
+  };
+
   const run = async (): Promise<void> => {
     while (!cancelled) {
       controller = new AbortController();
@@ -418,9 +430,7 @@ export function watchStream<Res extends Message>(
           context: { rpc: opts.name, address: successor, backoff_ms: backoffMs },
         }, { name: opts.name, successor });
         workspaceMoved(successor);
-        await waitBackoff(backoffMs);
-        if (cancelled) return;
-        backoffMs = Math.min(backoffMs * 2, maxMs);
+        if (!(await backOff())) return;
         continue;
       }
       // A STREAM WITHHELD FROM A WORKSPACE THAT IS NOT VISIBLE is planned
@@ -432,9 +442,7 @@ export function watchStream<Res extends Message>(
           operation: "rpc.stream-withheld",
           context: { rpc: opts.name, backoff_ms: backoffMs },
         }, { name: opts.name });
-        await waitBackoff(backoffMs);
-        if (cancelled) return;
-        backoffMs = Math.min(backoffMs * 2, maxMs);
+        if (!(await backOff())) return;
         continue;
       }
       // THE DAEMON MOVED UNDER THE RUN: however it ended, it was this end that
@@ -491,9 +499,7 @@ export function watchStream<Res extends Message>(
       } else {
         reportUnreachable(end);
       }
-      await waitBackoff(backoffMs);
-      if (cancelled) return;
-      backoffMs = Math.min(backoffMs * 2, maxMs);
+      if (!(await backOff())) return;
     }
   };
 

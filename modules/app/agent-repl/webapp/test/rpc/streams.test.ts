@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -1559,5 +1560,18 @@ describe("successorOf", () => {
 
   it("answers undefined for an error that is not a ConnectError", () => {
     expect(successorOf(new Error("x"))).toBeUndefined();
+  });
+});
+
+describe("watchStream's reopen waits", () => {
+  it("every backoff wait goes through the one helper", () => {
+    // Arrange
+    const source = readFileSync(new URL("../../src/rpc/streams.ts", import.meta.url), "utf8");
+
+    // Act
+    const waits = source.match(/await waitBackoff\(/g) ?? [];
+
+    // Assert
+    expect(waits.length).toBe(1);
   });
 });
