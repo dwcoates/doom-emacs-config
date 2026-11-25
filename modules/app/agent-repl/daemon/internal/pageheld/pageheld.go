@@ -45,7 +45,7 @@ type LoadReason string
 // The load reasons, as the metrics label them.
 const (
 	LoadShown     LoadReason = "shown"
-	LoadAwake     LoadReason = "awake"
+	LoadAllocated LoadReason = "allocated"
 	LoadSlot      LoadReason = "slot"
 	LoadRequested LoadReason = "load_requested"
 	LoadUngated   LoadReason = "ungated"
@@ -55,7 +55,7 @@ const (
 )
 
 // LoadReasons is every load reason, for a caller that serves each from 0.
-var LoadReasons = []LoadReason{LoadShown, LoadAwake, LoadSlot, LoadRequested, LoadUngated, LoadHeldBeforeReasons}
+var LoadReasons = []LoadReason{LoadShown, LoadAllocated, LoadSlot, LoadRequested, LoadUngated, LoadHeldBeforeReasons}
 
 // LoadUnreported labels a page the web host holds that Emacs reports no load
 // of. It is never a reason Emacs gives: only Snapshot answers it, for the
@@ -67,13 +67,13 @@ type UnloadReason string
 
 // The unload reasons, as the metrics label them.
 const (
-	UnloadDormant  UnloadReason = "dormant"
-	UnloadDetached UnloadReason = "detached"
-	UnloadReleased UnloadReason = "released"
+	UnloadDeallocated UnloadReason = "deallocated"
+	UnloadDetached    UnloadReason = "detached"
+	UnloadReleased    UnloadReason = "released"
 )
 
 // UnloadReasons is every unload reason, for a caller that serves each from 0.
-var UnloadReasons = []UnloadReason{UnloadDormant, UnloadDetached, UnloadReleased}
+var UnloadReasons = []UnloadReason{UnloadDeallocated, UnloadDetached, UnloadReleased}
 
 // Telemetry counts every page load and unload (runtimemetrics.Surface). Each
 // method is one counter update and never blocks.

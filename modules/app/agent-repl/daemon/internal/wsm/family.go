@@ -20,19 +20,19 @@ import (
 // under a closed parent:
 //
 //   - A WORKSPACE WITH OPEN CHILDREN STAYS OPEN (refuseOpenChildren): it is
-//     not hidden (SetHidden), closed by the user or an agent (MarkClosed), or
+//     not backlogged (SetBacklogged), closed by the user or an agent (MarkClosed), or
 //     queued for a merge whose landing closes it (requestMerge). An open
 //     workspace whose merge LANDS INTO it (Workspace.LandsInto) holds it open
 //     the same way, child or not: its branch is where that work goes.
 //   - A CHILD IS ONLY EVER OPEN UNDER AN OPEN PARENT (requireOpenParent): it
 //     is not registered (RegisterWorkspace), re-parented (SetParent),
-//     re-opened (Reopen) or shown (SetHidden) under a parent that is hidden,
+//     re-opened (Reopen) or shown (SetBacklogged) under a parent that is backlogged,
 //     closed, or CLOSING (a merge waiting in its queue closes it on landing).
 //
-// A HIDDEN CHILD COUNTS AS OPEN: hiding keeps its session, so a family is
+// A BACKLOGGED CHILD COUNTS AS OPEN: hiding keeps its session, so a family is
 // hidden child first. A HIDDEN MERGE WORKSPACE (Workspace.MergeHidden) is no
 // open child: it is an async merge's machinery, drawn nowhere until revealed,
-// and its requester stays free to be hidden or closed while it runs.
+// and its requester stays free to be backlogged or closed while it runs.
 //
 // The daemon's own closes (CloseByMerge, CloseByDaemon) are not refused: they
 // record what already happened (a branch landed, a directory vanished). A
@@ -60,7 +60,7 @@ func (r FamilyRef) String() string {
 type HasOpenChildrenError struct {
 	// Parent is the workspace the write would have taken out of Open.
 	Parent FamilyRef
-	// Children is every open descendant of Parent, hidden ones included, in
+	// Children is every open descendant of Parent, backlogged ones included, in
 	// place order. Empty only when LandingInto is not.
 	Children []FamilyRef
 	// LandingInto is every open workspace, not among Children, whose merge
@@ -83,9 +83,9 @@ type ParentState int
 
 // The states ParentNotOpenError names.
 const (
-	// ParentHidden is a parent in the hidden section, or a hidden merge
+	// ParentBacklogged is a parent in the backlog, or a hidden merge
 	// workspace.
-	ParentHidden ParentState = iota + 1
+	ParentBacklogged ParentState = iota + 1
 	// ParentClosed is a closed parent.
 	ParentClosed
 	// ParentClosing is an open parent a merge waiting in its repository's
@@ -96,8 +96,8 @@ const (
 // String names the state for records, as the contract's arm does.
 func (s ParentState) String() string {
 	switch s {
-	case ParentHidden:
-		return "hidden"
+	case ParentBacklogged:
+		return "backlogged"
 	case ParentClosed:
 		return "closed"
 	case ParentClosing:
@@ -249,16 +249,16 @@ func isClosing(ctx context.Context, q rowQuerier, id WorkspaceID) (bool, error) 
 	return closing, err
 }
 
-// requireOpenParent answers ParentNotOpenError when PARENT is hidden (or a
+// requireOpenParent answers ParentNotOpenError when PARENT is backlogged (or a
 // hidden merge workspace), closed, or closing, nil when it is open. An unknown
 // parent is ErrNotFound.
 func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) error {
 	var (
-		ref                    = FamilyRef{ID: parent}
-		closed, hidden, merged bool
+		ref                        = FamilyRef{ID: parent}
+		closed, backlogged, merged bool
 	)
-	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.hidden, `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, parent).
-		Scan(&ref.Dir, &ref.Name, &closed, &hidden, &merged)
+	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.backlogged, `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, parent).
+		Scan(&ref.Dir, &ref.Name, &closed, &backlogged, &merged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("wsm: parent %s: %w", parent, ErrNotFound)
 	}
@@ -268,8 +268,8 @@ func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) er
 	switch {
 	case closed:
 		return &ParentNotOpenError{Parent: ref, State: ParentClosed}
-	case hidden || merged:
-		return &ParentNotOpenError{Parent: ref, State: ParentHidden}
+	case backlogged || merged:
+		return &ParentNotOpenError{Parent: ref, State: ParentBacklogged}
 	}
 	closing, err := isClosing(ctx, q, parent)
 	if err != nil {

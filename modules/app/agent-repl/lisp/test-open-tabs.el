@@ -164,11 +164,11 @@ A ref id names the workspace of the same name."
 
 (defun agent-repl-test-open-tabs--row (id &optional off-bar)
   "A roster-walk row for workspace ID, drawn unless OFF-BAR says otherwise.
-OFF-BAR is `hidden' for a workspace the user hid, `folded' for one in a
-collapsed section: both are `:collapsed', only the first `:hidden'."
+OFF-BAR is `backlogged' for a workspace the user hid, `folded' for one in a
+collapsed section: both are `:collapsed', only the first `:backlogged'."
   (list :id id :name id :ref (list :id id :dir (concat "/w/" id))
-        :collapsed (and (memq off-bar '(hidden folded)) t)
-        :hidden (eq off-bar 'hidden)))
+        :collapsed (and (memq off-bar '(backlogged folded)) t)
+        :backlogged (eq off-bar 'backlogged)))
 
 (defun agent-repl-test-open-tabs--walk (&rest rows)
   "Reconcile the opens with ROWS, as one roster walk."
@@ -461,7 +461,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
                  (lambda (ws) (push ws made))))
         ;; Act
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
-                                         (agent-repl-test-open-tabs--row "b" 'hidden)))
+                                         (agent-repl-test-open-tabs--row "b" 'backlogged)))
       ;; Assert
       (should (equal made '("a"))))))
 
@@ -516,7 +516,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A hidden row is asked for, as `none', and no page is made for it."
   (agent-repl-test-open-tabs--with
     ;; Act
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Assert
     (should (equal (list (agent-repl-test-open-tabs--asked) agent-repl-test-open-tabs--paged
                          (agent-repl-test-open-tabs--page-arm "a"))
@@ -547,7 +547,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A row answered hidden is asked for again once it is shown."
   (agent-repl-test-open-tabs--with
     ;; Arrange
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :hidden))
     ;; Act
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -560,10 +560,10 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A row answered hidden is not asked for again while it stays hidden."
   (agent-repl-test-open-tabs--with
     ;; Arrange
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :hidden))
     ;; Act
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Assert
     (should (= (length agent-repl-test-open-tabs--requests) 1))))
 
@@ -603,18 +603,18 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
 ;;;; ---- Hiding ----
 
 (ert-deftest agent-repl-test-open-tabs-hiding-an-open-row-drops-its-page ()
-  "An open workspace that is hidden loses its page."
+  "An open workspace that is backlogged loses its page."
   (agent-repl-test-open-tabs--with
     ;; Arrange
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
     ;; Act
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Assert
     (should (equal agent-repl-test-open-tabs--dropped '("a")))))
 
 (ert-deftest agent-repl-test-open-tabs-a-collapsed-held-row-that-is-not-hidden-is-fatal ()
-  "A held row is collapsed only when hidden: a folded one off the bar is a broken contract."
+  "A held row is collapsed only when backlogged: a folded one off the bar is a broken contract."
   (agent-repl-test-open-tabs--with
     (let (fatals)
       (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
@@ -623,7 +623,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
         (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
         ;; Act / Assert
         (should-error (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded)))
-        (should (equal fatals '("elisp.open-tabs.withdraw-not-hidden ws=a id=a")))
+        (should (equal fatals '("elisp.open-tabs.withdraw-not-backlogged ws=a id=a")))
         (should-not agent-repl-test-open-tabs--dropped)))))
 
 (ert-deftest agent-repl-test-open-tabs-a-hide-tells-the-daemon-before-it-drops-the-page ()
@@ -633,7 +633,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
     ;; Act
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Assert
     (should (equal agent-repl-test-open-tabs--events '((report "a") (drop "a"))))))
 
@@ -645,7 +645,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
     (setq agent-repl-test-open-tabs--report 'refused)
     ;; Act
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Assert
     (should (equal (list agent-repl-test-open-tabs--dropped
                          (and (member "a" agent-repl-test-open-tabs--paged) t)
@@ -659,7 +659,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
     (setq agent-repl-test-open-tabs--report 'pending)
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     ;; Act
     (funcall (nth 1 (car agent-repl-test-open-tabs--pending)))
@@ -669,21 +669,21 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
                    '(nil t)))))
 
 (ert-deftest agent-repl-test-open-tabs-a-hidden-row-keeps-its-place ()
-  "An open workspace that is hidden keeps its place in the order, undrawn."
+  "An open workspace that is backlogged keeps its place in the order, undrawn."
   (agent-repl-test-open-tabs--with
     ;; Arrange
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
     ;; Act
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Assert
     (should-not (agent-repl-open-tabs-holds-p "a"))))
 
 (ert-deftest agent-repl-test-open-tabs-a-row-shown-again-is-held-for-its-open ()
-  "A hidden workspace shown again is held until its new open is answered."
+  "A backlogged workspace shown again is held until its new open is answered."
   (agent-repl-test-open-tabs--with
     ;; Arrange
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :hidden))
     ;; Act
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -695,7 +695,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   (agent-repl-test-open-tabs--with
     ;; Arrange
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Act
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
     ;; Assert
@@ -705,7 +705,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A workspace answered hidden keeps its place in the order, undrawn."
   (agent-repl-test-open-tabs--with
     ;; Arrange
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Act
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :hidden))
     ;; Assert
@@ -733,24 +733,24 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
       (cl-letf (((symbol-function 'agent-repl-roster-refresh-order)
                  (lambda () (cl-incf refreshed))))
         ;; Arrange
-        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
         ;; Act
         (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :hidden)))
       ;; Assert
       (should (= refreshed 1)))))
 
-(ert-deftest agent-repl-test-open-tabs-hidden-p-answers-for-a-hidden-row ()
-  "A workspace the walk met hidden is hidden."
+(ert-deftest agent-repl-test-open-tabs-backlogged-p-answers-for-a-backlogged-row ()
+  "A workspace the walk met backlogged is backlogged."
   (agent-repl-test-open-tabs--with
     ;; Act
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Assert
-    (should (agent-repl-open-tabs-hidden-p "a"))))
+    (should (agent-repl-open-tabs-backlogged-p "a"))))
 
-(ert-deftest agent-repl-test-open-tabs-hidden-p-is-nil-for-a-workspace-never-walked ()
-  "A workspace no walk met is not hidden."
+(ert-deftest agent-repl-test-open-tabs-backlogged-p-is-nil-for-a-workspace-never-walked ()
+  "A workspace no walk met is not backlogged."
   (agent-repl-test-open-tabs--with
-    (should-not (agent-repl-open-tabs-hidden-p "a"))))
+    (should-not (agent-repl-open-tabs-backlogged-p "a"))))
 
 ;;;; ---- A workspace's row ----
 
@@ -799,13 +799,13 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
 
 ;;;; ---- Folding ----
 
-(ert-deftest agent-repl-test-open-tabs-hidden-p-is-nil-for-a-folded-row ()
-  "A workspace in a collapsed section is not hidden but folded."
+(ert-deftest agent-repl-test-open-tabs-backlogged-p-is-nil-for-a-folded-row ()
+  "A workspace in a collapsed section is not backlogged but folded."
   (agent-repl-test-open-tabs--with
     ;; Act
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
     ;; Assert
-    (should-not (agent-repl-open-tabs-hidden-p "a"))))
+    (should-not (agent-repl-open-tabs-backlogged-p "a"))))
 
 ;;;; ---- Refusals ----
 
@@ -1097,7 +1097,7 @@ named daemon, so no walk is started."
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     (agent-repl-open-tabs--on-reattached "a")
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     ;; Act
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
@@ -1568,7 +1568,7 @@ leaves the tab open."
   "A hidden answer carries no row and indexes none."
   (agent-repl-test-open-tabs--with
     ;; Arrange
-    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'backlogged))
     ;; Act
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :hidden))
     ;; Assert

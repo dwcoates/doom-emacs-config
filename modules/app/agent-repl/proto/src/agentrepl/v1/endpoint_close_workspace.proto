@@ -3,7 +3,7 @@
 // buffers close, but the daemon↔shim session STAYS UP; the workspace is
 // merely unviewed. Its keep-alives get ONE LAST ROUND (owner request
 // 2026-10-17): the daemon sends the one beat already owed, then the cache is
-// left to lapse exactly as a hidden
+// left to lapse exactly as a backlogged
 // workspace's is, and the session is stood down when it does, so reopening
 // the workspace after that meets the cold gate. Reopening it before keeps the
 // cache warm again. The host
@@ -86,7 +86,7 @@ message CloseWorkspaceError {
     CloseWorkspaceTransferringAway transferring_away = 4;
     // A joining daemon has not finished adopting this workspace yet.
     CloseWorkspaceNotYetAdopted not_yet_adopted = 5;
-    // The workspace has open children (hidden ones included), and closing it
+    // The workspace has open children (backlogged ones included), and closing it
     // would leave them without their parent in the Open section.
     WorkspaceHasOpenChildren has_open_children = 6;
   }

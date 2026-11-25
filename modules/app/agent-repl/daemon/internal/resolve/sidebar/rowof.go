@@ -10,7 +10,7 @@ import (
 )
 
 // Row implements Resolver. The row is looked up in the last push's streams
-// (the Open section's walk, the hidden section, the closed rows), so it is
+// (the Open section's walk, the backlog, the closed rows), so it is
 // the row a client of the roster draws; a clone is answered, never the
 // published push's own message. A MERGED WORKSPACE IS IN NO STREAM, so its
 // row is resolved on demand as a page resolves it (readRow), from the merged
@@ -63,7 +63,7 @@ func (r *resolver) Revision() uint64 {
 }
 
 // findRow answers WS's row in PUSH's streams, nil when they carry none. Each
-// workspace is in at most one of the repository sections, the hidden section
+// workspace is in at most one of the repository sections, the backlog
 // and the closed rows.
 func findRow(push *frontendv1.RosterPush, ws string) *frontendv1.RosterRow {
 	for _, row := range rosterwalk.AllRows(push) {

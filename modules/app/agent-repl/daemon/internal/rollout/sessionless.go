@@ -135,7 +135,7 @@ func takeoverFacts(ws wsm.Workspace, facts bringup.WasUp, rule takeoverRule) dlo
 		"workspace":  string(ws.ID),
 		"rule":       string(rule),
 		"visibility": ws.Visibility.String(),
-		"hidden":     ws.Hidden,
+		"backlogged": ws.Backlogged,
 		"current":    ws.Current,
 		"mediator":   string(ws.Mediator),
 	})

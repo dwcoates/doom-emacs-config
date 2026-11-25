@@ -12,7 +12,7 @@ import (
 
 // This file is the durable half of the COLD-GATE BACKLOG (owner request,
 // 2026-10-26; coldbacklog.Sweeper): a shown workspace whose cold gate has
-// stood for over a weekday is moved into the hidden section, drawn as the
+// stood for over a weekday is moved into the backlog, drawn as the
 // Backlog, exactly as a hide moves it. The row records WHICH GATE it was
 // moved for, by the instant that gate's cache lapsed, so a workspace the user
 // shows again stays shown until a new conversation lapses into a new gate,
@@ -30,7 +30,7 @@ const coldGateBacklogDDL = `
 ALTER TABLE workspaces ADD COLUMN cold_gate_backlogged_at INTEGER;
 `
 
-// BacklogColdGate moves a shown workspace into the hidden section because the
+// BacklogColdGate moves a shown workspace into the backlog because the
 // cold gate whose cache lapsed at GATELAPSEDAT has stood too long, stamping the
 // hide at AT and recording the gate, and answers whether it moved it.
 //
@@ -41,7 +41,7 @@ ALTER TABLE workspaces ADD COLUMN cold_gate_backlogged_at INTEGER;
 // family rules as a hide is (HasOpenChildrenError, family.go), nothing
 // written. An unknown workspace is refused (ErrNotFound).
 func (s *store) BacklogColdGate(ctx context.Context, id WorkspaceID, gateLapsedAt, at time.Time) (bool, error) {
-	fields := dlog.Context{"workspace": string(id), "gate_lapsed_at": gateLapsedAt, "hidden_at": at}
+	fields := dlog.Context{"workspace": string(id), "gate_lapsed_at": gateLapsedAt, "backlogged_at": at}
 	moved := false
 	err := s.write(ctx, "daemon.wsm.backlog_cold_gate", fields, func(ctx context.Context, tx *sql.Tx) error {
 		ws, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))

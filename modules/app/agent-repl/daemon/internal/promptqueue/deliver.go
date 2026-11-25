@@ -103,7 +103,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 		// turn so no workspace is left showing a `submitting` phase for a turn
 		// that never ran.
 		q.retireOpenedTurn(sub, watcher)
-		if errors.Is(err, ErrShimHasNoSession) || errors.Is(err, ErrShimDied) || errors.Is(err, ErrSessionNotWatched) {
+		if errors.Is(err, ErrShimHasNoSession) || errors.Is(err, ErrShimDied) || errors.Is(err, ErrShimStoodDown) || errors.Is(err, ErrSessionNotWatched) {
 			return q.holdForReconnect(ctx, sub, err, log)
 		}
 		if errors.Is(err, ErrPromptRecorded) {
@@ -413,6 +413,8 @@ func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause erro
 	switch {
 	case errors.Is(cause, ErrShimDied):
 		why = logsite.Msg("the shim died under the delivery; the prompt is held until the revived session comes up")
+	case errors.Is(cause, ErrShimStoodDown):
+		why = logsite.Msg("this daemon stood the shim down under the delivery; the prompt is held until the session comes up again")
 	case errors.Is(cause, ErrSessionNotWatched):
 		why = logsite.Msg("no watch stood to see the turn; the prompt is held until the session comes up again")
 	}

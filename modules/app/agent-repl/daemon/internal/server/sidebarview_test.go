@@ -36,8 +36,8 @@ func mergeQueueSection() *agentreplv1.SidebarViewFoldSection_MergeQueue {
 	return &agentreplv1.SidebarViewFoldSection_MergeQueue{MergeQueue: &agentreplv1.SidebarViewMergeQueue{}}
 }
 
-func hiddenSection() *agentreplv1.SidebarViewFoldSection_Hidden {
-	return &agentreplv1.SidebarViewFoldSection_Hidden{Hidden: &agentreplv1.SidebarViewHidden{}}
+func backlogSection() *agentreplv1.SidebarViewFoldSection_Backlog {
+	return &agentreplv1.SidebarViewFoldSection_Backlog{Backlog: &agentreplv1.SidebarViewBacklog{}}
 }
 
 func openSection() *agentreplv1.SidebarViewFoldSection_Open {
@@ -70,8 +70,8 @@ func TestUpdateSidebarViewHandsASectionFoldToTheVerb(t *testing.T) {
 		{"collapse the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: collapseFold()}, sectionFold{merged: true, folded: true}},
 		{"expand the merge queue section", &agentreplv1.SidebarViewFoldSection{Section: mergeQueueSection(), Fold: expandFold()}, sectionFold{mergeQueue: true, folded: false}},
 		{"collapse the merge queue section", &agentreplv1.SidebarViewFoldSection{Section: mergeQueueSection(), Fold: collapseFold()}, sectionFold{mergeQueue: true, folded: true}},
-		{"collapse the hidden section", &agentreplv1.SidebarViewFoldSection{Section: hiddenSection(), Fold: collapseFold()}, sectionFold{hidden: true, folded: true}},
-		{"expand the hidden section", &agentreplv1.SidebarViewFoldSection{Section: hiddenSection(), Fold: expandFold()}, sectionFold{hidden: true, folded: false}},
+		{"collapse the backlog", &agentreplv1.SidebarViewFoldSection{Section: backlogSection(), Fold: collapseFold()}, sectionFold{backlogged: true, folded: true}},
+		{"expand the backlog", &agentreplv1.SidebarViewFoldSection{Section: backlogSection(), Fold: expandFold()}, sectionFold{backlogged: true, folded: false}},
 		{"collapse the open section", &agentreplv1.SidebarViewFoldSection{Section: openSection(), Fold: collapseFold()}, sectionFold{open: true, folded: true}},
 		{"expand the open section", &agentreplv1.SidebarViewFoldSection{Section: openSection(), Fold: expandFold()}, sectionFold{open: true, folded: false}},
 	}
@@ -420,8 +420,8 @@ func sizeMerged() *agentreplv1.SidebarViewSectionSize_RecentlyMerged {
 	return &agentreplv1.SidebarViewSectionSize_RecentlyMerged{RecentlyMerged: &agentreplv1.SidebarViewRecentlyMerged{}}
 }
 
-func sizeHidden() *agentreplv1.SidebarViewSectionSize_Hidden {
-	return &agentreplv1.SidebarViewSectionSize_Hidden{Hidden: &agentreplv1.SidebarViewHidden{}}
+func sizeBacklog() *agentreplv1.SidebarViewSectionSize_Backlog {
+	return &agentreplv1.SidebarViewSectionSize_Backlog{Backlog: &agentreplv1.SidebarViewBacklog{}}
 }
 
 func TestUpdateSidebarViewHandsTheSectionSizesToTheVerb(t *testing.T) {
@@ -439,17 +439,17 @@ func TestUpdateSidebarViewHandsTheSectionSizesToTheVerb(t *testing.T) {
 			name: "two bands sized in one request, in order",
 			req: sizeChange(
 				&agentreplv1.SidebarViewSectionSize{Section: sizeMerged(), Height: sizedLines(0)},
-				&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: sizedLines(9)},
+				&agentreplv1.SidebarViewSectionSize{Section: sizeBacklog(), Height: sizedLines(9)},
 			),
 			want: []wsm.SectionHeightChange{
 				{Section: wsm.BandMerged, Height: wsm.SizedHeight(0)},
-				{Section: wsm.BandHidden, Height: wsm.SizedHeight(9)},
+				{Section: wsm.BandBacklog, Height: wsm.SizedHeight(9)},
 			},
 		},
 		{
 			name: "a section fitted again",
-			req:  sizeChange(&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: fittedHeight()}),
-			want: []wsm.SectionHeightChange{{Section: wsm.BandHidden, Height: wsm.FittedHeight()}},
+			req:  sizeChange(&agentreplv1.SidebarViewSectionSize{Section: sizeBacklog(), Height: fittedHeight()}),
+			want: []wsm.SectionHeightChange{{Section: wsm.BandBacklog, Height: wsm.FittedHeight()}},
 		},
 	}
 	for _, tt := range tests {
@@ -486,8 +486,8 @@ func TestValidateUpdateSidebarViewRequestRefusesAnIncompleteSize(t *testing.T) {
 		{"a size with no section arm", sizeChange(&agentreplv1.SidebarViewSectionSize{Height: sizedLines(1)})},
 		{"a size with no height arm", sizeChange(&agentreplv1.SidebarViewSectionSize{Section: sizeQueue()})},
 		{"a section sized twice", sizeChange(
-			&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: sizedLines(1)},
-			&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: fittedHeight()},
+			&agentreplv1.SidebarViewSectionSize{Section: sizeBacklog(), Height: sizedLines(1)},
+			&agentreplv1.SidebarViewSectionSize{Section: sizeBacklog(), Height: fittedHeight()},
 		)},
 	}
 	for _, tt := range tests {

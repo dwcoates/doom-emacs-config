@@ -16,7 +16,7 @@ This change runs as a one-shot workspace with contract changes pre-approved by t
 
 ### A family never splits, and moves whole (owner rulings 2026-10-14 and 2026-10-20)
 
-- The unit is the family. A family is drawn in the one-shot subsection while any OPEN member is marked. A closed or hidden member's mark does not count, since finished one-shots keep their mark and are closed.
+- The unit is the family. A family is drawn in the one-shot subsection while any OPEN member is marked. A closed or backlogged member's mark does not count, since finished one-shots keep their mark and are closed.
 - Placing a family elsewhere (`ArrangePlaceWorkspace`, `ArrangePlaceWorkspaces`) clears the mark of every member that is not closed, in the same write. Otherwise the family would stay in the one-shot subsection after being dropped elsewhere. A closed member keeps its mark, since a finished one-shot is still one.
 
 ## Landed changes

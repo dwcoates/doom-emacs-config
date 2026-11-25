@@ -450,11 +450,11 @@ func (s *requestLoggingServer) SetWorkspaceParent(
 	return serveUnary(s, ctx, "SetWorkspaceParent", req, s.server.SetWorkspaceParent)
 }
 
-func (s *requestLoggingServer) SetWorkspaceHidden(
+func (s *requestLoggingServer) SetWorkspaceBacklogged(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.SetWorkspaceHiddenRequest],
-) (*connect.Response[agentreplv1.SetWorkspaceHiddenResponse], error) {
-	return serveUnary(s, ctx, "SetWorkspaceHidden", req, s.server.SetWorkspaceHidden)
+	req *connect.Request[agentreplv1.SetWorkspaceBackloggedRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceBackloggedResponse], error) {
+	return serveUnary(s, ctx, "SetWorkspaceBacklogged", req, s.server.SetWorkspaceBacklogged)
 }
 
 func (s *requestLoggingServer) MoveWorkspace(
@@ -663,11 +663,11 @@ func (s *requestLoggingServer) ClientLog(
 	return serveUnary(s, ctx, "ClientLog", req, s.server.ClientLog)
 }
 
-func (s *requestLoggingServer) SendHiddenKeepalives(
+func (s *requestLoggingServer) SendBackloggedKeepalives(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.SendHiddenKeepalivesRequest],
-) (*connect.Response[agentreplv1.SendHiddenKeepalivesResponse], error) {
-	return serveUnary(s, ctx, "SendHiddenKeepalives", req, s.server.SendHiddenKeepalives)
+	req *connect.Request[agentreplv1.SendBackloggedKeepalivesRequest],
+) (*connect.Response[agentreplv1.SendBackloggedKeepalivesResponse], error) {
+	return serveUnary(s, ctx, "SendBackloggedKeepalives", req, s.server.SendBackloggedKeepalives)
 }
 
 func (s *requestLoggingServer) UpdatePersistentWifiMode(

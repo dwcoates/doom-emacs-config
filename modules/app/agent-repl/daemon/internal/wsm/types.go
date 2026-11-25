@@ -148,10 +148,10 @@ type Workspace struct {
 	// where the workspace lands when it is created or its priority is set
 	// (see place.go).
 	Priority *Priority
-	// Hidden reports whether the user moved the workspace into the roster's
-	// hidden section (agentrepl.v1.SetWorkspaceHidden): off every grouping and
+	// Backlogged reports whether the user moved the workspace into the roster's
+	// backlog (agentrepl.v1.SetWorkspaceBacklogged): off every grouping and
 	// off the editor's tab bar, its session and tab untouched.
-	Hidden bool
+	Backlogged bool
 	// ChildrenFolded reports whether the workspace's children are folded: their
 	// rows hidden in the sidebar and their tabs folded off the tab bar
 	// (SetChildrenFolded).
@@ -164,10 +164,13 @@ type Workspace struct {
 	// create (CreationJob.FinishPlacement); the zero value when its finish
 	// names its own.
 	FinishPlacement FinishPlacement
+	// QueueBypassHeld reports that the workspace holds its repository's queue
+	// bypass mode (queue_bypass_holders), derived on read.
+	QueueBypassHeld bool
 	// Mediator is the standing mediator the workspace is, if any: its
 	// repository's deploy mediator (deploy_mediators) or production mediator
 	// (production_mediators). A mediator runs and is kept warm like any open
-	// workspace, hidden or not (owner ruling, 2026-11-17), so a check never
+	// workspace, backlogged or not (owner ruling, 2026-11-17), so a check never
 	// waits on a cold cache.
 	Mediator MediatorRole
 	// EmojiAck reports that the Slack emoji-ack reaction system created the
@@ -188,17 +191,17 @@ type Workspace struct {
 	Subsection *SubsectionID
 	// LastSelectedAt is when the user last selected the workspace.
 	LastSelectedAt *time.Time
-	// HiddenAt is when the user moved the workspace into the hidden section,
-	// set exactly while Hidden is (SetHidden).
-	HiddenAt *time.Time
+	// BackloggedAt is when the user moved the workspace into the backlog,
+	// set exactly while Backlogged is (SetBacklogged).
+	BackloggedAt *time.Time
 	// BackloggedGateAt is the lapse instant of the cold gate the daemon last
 	// moved the workspace into the backlog for (BacklogColdGate); nil when it
 	// never has. A workspace is backlogged at most once per gate, so one the
 	// user shows again stays shown.
 	BackloggedGateAt *time.Time
-	// CacheLapse is a HIDDEN workspace's projected cache lapse, as its shim
+	// CacheLapse is a BACKLOGGED workspace's projected cache lapse, as its shim
 	// last stated it (SetCacheLapse); nil when none is known. Never set on a
-	// workspace that is not hidden.
+	// workspace that is not backlogged.
 	CacheLapse *CacheLapse
 	// LastActivityAt is when the workspace LAST DID REAL WORK: the most recent
 	// turn start or turn close, stamped at the genuine activity edge inside the
@@ -336,7 +339,7 @@ type Repository struct {
 	// DefaultBranch is the repository's default branch.
 	DefaultBranch string
 	// Folded reports that the repository's roster section is collapsed: its
-	// rows hidden in the sidebar and its workspaces' tabs off the Emacs bar.
+	// rows backlogged in the sidebar and its workspaces' tabs off the Emacs bar.
 	Folded bool
 	// Place is the repository's position among the repositories, which the
 	// repository grouping and the tab bar both follow (arrange.go). Unique,
@@ -457,14 +460,14 @@ type RegisterFacts struct {
 	// created workspace never exists without its job and full merge geometry
 	// (RegisterWorkspace). There is no re-keying step for a failure to cut.
 	CreationJob WorkspaceID
-	// Hidden makes a MINTED workspace born hidden: the insert's own
-	// transaction writes the hidden columns, so no roster ever draws the row
+	// Backlogged makes a MINTED workspace born backlogged: the insert's own
+	// transaction writes the backlogged columns, so no roster ever draws the row
 	// visible for an instant. An announcement of an already-registered
 	// workspace ignores it.
-	Hidden bool
+	Backlogged bool
 	// Intake makes a MINTED workspace an ephemeral intake workspace
 	// (intake.go) born so: its intake_workspaces row is written in the
-	// insert's transaction. It implies Hidden.
+	// insert's transaction. It implies Backlogged.
 	Intake bool
 	// IntakeCard is the feed card an intake workspace was made for (a `?`
 	// question's), written beside its intake_workspaces row in the insert's
@@ -605,9 +608,21 @@ type Session struct {
 	StartedAt time.Time
 	// KeepaliveRestoredAt is when a keep-alive's restore last brought the
 	// session up (shimlife.StartKeepalive), nil when the bring-up that last
-	// recorded the session had another cause. A session up only for its
-	// keep-alive is dormant (Dormant): the editor holds no page for it.
+	// recorded the session had another cause. It is kept as evidence of why
+	// the session last came up.
 	KeepaliveRestoredAt *time.Time
+	// WorkBroughtUpAt is when a bring-up for work last brought the session up
+	// (shimlife.StartCause.ForWork), nil when the bring-up that last recorded
+	// the session was not for work (a keep-alive's restore, a boot's or a
+	// takeover's adoption, a settings pick). The session is INITIALIZING from
+	// it until a turn closes after it (Initializing).
+	WorkBroughtUpAt *time.Time
+	// UserBroughtUpAt is when a bring-up the user asked for that runs no turn
+	// of its own (shimlife.StartCause.UserStarted: a restart, a relaunch, a
+	// rebind, a swap) last brought the session up, nil otherwise. The session
+	// is held for ShimIdleHold from it unless a turn closes first
+	// (BringUpHold).
+	UserBroughtUpAt *time.Time
 	// ShimPID is the pid of the shim process serving this session, nil when no
 	// shim is up. It exists because the ROLLOUT's stand-down INTENT MANIFEST
 	// names a pid per session, and the incoming daemon reconciles that pid
@@ -641,20 +656,66 @@ type Session struct {
 // type that carries it.
 const TerminalParked = "parked"
 
-// Dormant reports whether the session runs no work of anyone's: it is parked,
-// or a keep-alive's restore brought it up and no turn has started since
-// (TURNSTARTED, the workspace's latest turn start, nil for none, and RUNNING,
-// a turn running now). The editor holds a dormant workspace's page only while
-// the user shows it (owner ruling, 2026-11-23: "the temporary unparking for
-// keepalives should not reload the pages"; frontend.v1.RosterRowDormant).
-func (s Session) Dormant(turnStarted *time.Time, running bool) bool {
-	if s.Parked() {
-		return true
-	}
-	if s.Terminal != nil || s.KeepaliveRestoredAt == nil || running {
+// ShimIdleHold is how long an idle shim stays up after the later of its
+// workspace's last turn end and the user's last interaction with it, and
+// after a bring-up the user asked for that runs no turn of its own (owner
+// ruling, 2026-11-24).
+const ShimIdleHold = 15 * time.Minute
+
+// Initializing reports whether the session was brought up for work that has
+// not finished yet (owner ruling, 2026-11-24): a bring-up for work recorded it
+// (WorkBroughtUpAt), it is not parked or dead, and no turn of the workspace
+// has closed since (LASTTURNENDED, the workspace's latest turn close, nil for
+// none). From the bring-up until that turn's close the session is never
+// parked: the turn's start makes it working, and its close starts the idle
+// hold, so no instant lies between initializing and working.
+func (s Session) Initializing(lastTurnEnded *time.Time) bool {
+	if s.Terminal != nil || s.WorkBroughtUpAt == nil {
 		return false
 	}
-	return turnStarted == nil || !turnStarted.After(*s.KeepaliveRestoredAt)
+	return lastTurnEnded == nil || !lastTurnEnded.After(*s.WorkBroughtUpAt)
+}
+
+// BringUpHold answers until when the session's own bring-up holds it up AT
+// NOW: for as long as it is initializing (Initializing), and for ShimIdleHold
+// after a bring-up the user asked for that runs no turn of its own
+// (UserBroughtUpAt) unless a turn has closed since. A parked or dead session,
+// or one brought up for neither, is held by nothing here.
+func (s Session) BringUpHold(lastTurnEnded *time.Time, now time.Time) ShimHold {
+	if s.Initializing(lastTurnEnded) {
+		return ShimHold{Indefinite: true}
+	}
+	if s.Terminal != nil || s.UserBroughtUpAt == nil {
+		return ShimHold{}
+	}
+	if lastTurnEnded != nil && lastTurnEnded.After(*s.UserBroughtUpAt) {
+		return ShimHold{}
+	}
+	return IdleHoldFrom(*s.UserBroughtUpAt, now)
+}
+
+// IdleHoldFrom answers the hold of an idle shim AT NOW that ShimIdleHold
+// after AT keeps up: until then, and none once it has passed. Every
+// fifteen-minute shim clock (a user-asked bring-up, a turn's end, an
+// interaction) is read through it.
+func IdleHoldFrom(at, now time.Time) ShimHold {
+	if until := at.Add(ShimIdleHold); now.Before(until) {
+		return ShimHold{Until: until}
+	}
+	return ShimHold{}
+}
+
+// Later answers whichever of H and O holds an idle shim up longer: one held
+// while its cause stands outlasts any instant.
+func (h ShimHold) Later(o ShimHold) ShimHold {
+	switch {
+	case h.Indefinite || o.Indefinite:
+		return ShimHold{Indefinite: true}
+	case o.Until.After(h.Until):
+		return o
+	default:
+		return h
+	}
 }
 
 // Parked reports whether this session was stood down ON PURPOSE while idle
@@ -1768,6 +1829,12 @@ const (
 	// reviews the span between landings and dispatches children.
 	MediatorProduction MediatorRole = "production"
 )
+
+// AlwaysShown reports whether the workspace is shown and run whatever folds
+// it (owner ruling, 2026-11-24): a standing mediator, or the holder of its
+// repository's queue bypass mode. Both work for the whole repository, so a
+// fold that hid them would hide work the user relies on.
+func (w Workspace) AlwaysShown() bool { return w.IsMediator() || w.QueueBypassHeld }
 
 // IsMediator reports whether the workspace is one of its repository's
 // standing mediators.

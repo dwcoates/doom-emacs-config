@@ -83,9 +83,9 @@ message ArrangedWorkspace {
   string name = 2;
   // The workspace's branch.
   string branch = 3;
-  // Whether the user hid the workspace: the sidebar draws it in its hidden
+  // Whether the user backlogged the workspace: the sidebar draws it in its backlog
   // section, not here, but it keeps this place for when it is shown again.
-  bool hidden = 4;
+  bool backlogged = 4;
   // Its children, depth-first in drawn order.
   repeated ArrangedWorkspace children = 5;
   // The workspace's recorded parent, present exactly when it has one. Such a

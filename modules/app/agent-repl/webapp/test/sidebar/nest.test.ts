@@ -62,7 +62,7 @@ describe("a refused nesting's words", () => {
 
   it.each(own)("words the %s arm", (arm) => {
     const value =
-      arm === "parentNotOpen" ? { parent: PARENT, state: { case: "hidden", value: {} } } : arm === "parentRefMismatch" ? { registryDir: "/r" } : {};
+      arm === "parentNotOpen" ? { parent: PARENT, state: { case: "backlogged", value: {} } } : arm === "parentRefMismatch" ? { registryDir: "/r" } : {};
     expect(setWorkspaceParentRefusal({ case: arm, value } as never)).not.toBe("");
   });
 
@@ -70,9 +70,9 @@ describe("a refused nesting's words", () => {
     expect(setWorkspaceParentRefusal({ case: "parentRefMismatch", value: { registryDir: "/reg/parent" } } as never)).toContain("/reg/parent");
   });
 
-  it("names the hidden parent", () => {
+  it("names the backlogged parent", () => {
     expect(
-      setWorkspaceParentRefusal({ case: "parentNotOpen", value: { parent: PARENT, state: { case: "hidden", value: {} } } } as never),
+      setWorkspaceParentRefusal({ case: "parentNotOpen", value: { parent: PARENT, state: { case: "backlogged", value: {} } } } as never),
     ).toContain("parent");
   });
 

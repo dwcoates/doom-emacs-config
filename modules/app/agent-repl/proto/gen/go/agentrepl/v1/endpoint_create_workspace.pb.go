@@ -131,14 +131,14 @@ type CreateWorkspaceRequest struct {
 	// or anything else: a creator that passes a Slack thread still says who it
 	// is.
 	Originator *WorkspaceOriginator `protobuf:"bytes,14,opt,name=originator,proto3" json:"originator,omitempty"`
-	// BORN HIDDEN. Present and true = the workspace's row is inserted hidden, in
+	// BORN BACKLOGGED. Present and true = the workspace's row is inserted backlogged, in
 	// the insert's own transaction, so no roster the daemon publishes ever
-	// draws it visible (a hidden workspace is the user's to reveal). UNSET =
+	// draws it visible (a backlogged workspace is the user's to reveal). UNSET =
 	// born visible. An intake workspace (a card's `?` question, a Slack emoji
 	// ack) is made this way: hiding it after it exists flashes it in the
 	// sidebar for as long as the second write takes. Refused as invalid beside
 	// `async_merge`, whose merge workspace is born hidden by the queue.
-	Hidden *bool `protobuf:"varint,15,opt,name=hidden,proto3,oneof" json:"hidden,omitempty"`
+	Backlogged *bool `protobuf:"varint,15,opt,name=backlogged,proto3,oneof" json:"backlogged,omitempty"`
 	// WHERE THE WORKSPACE IS FILED, decided by the creator and written in the
 	// insert's own transaction, so the workspace is born in its subsection and
 	// never files itself as a first task. UNSET = born unsectioned, and a
@@ -281,9 +281,9 @@ func (x *CreateWorkspaceRequest) GetOriginator() *WorkspaceOriginator {
 	return nil
 }
 
-func (x *CreateWorkspaceRequest) GetHidden() bool {
-	if x != nil && x.Hidden != nil {
-		return *x.Hidden
+func (x *CreateWorkspaceRequest) GetBacklogged() bool {
+	if x != nil && x.Backlogged != nil {
+		return *x.Backlogged
 	}
 	return false
 }
@@ -2967,7 +2967,7 @@ type CreateWorkspaceError_UnknownContextWorkspace struct {
 }
 
 type CreateWorkspaceError_ParentNotOpen struct {
-	// The named parent, or the workspace landed into, is hidden or closed,
+	// The named parent, or the workspace landed into, is backlogged or closed,
 	// and creating the workspace would make an open child of, or an open
 	// branch landing into, a workspace outside the Open section.
 	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,20,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`
@@ -5734,7 +5734,7 @@ var File_agentrepl_v1_endpoint_create_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/slack_thread.proto\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1aconversation/v1/user.proto\x1a$repoconfig/v1/lifecycle_config.proto\x1a\x1cworkspace/v1/workspace.proto\"\x87\b\n" +
+	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/slack_thread.proto\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1aconversation/v1/user.proto\x1a$repoconfig/v1/lifecycle_config.proto\x1a\x1cworkspace/v1/workspace.proto\"\x93\b\n" +
 	"\x16CreateWorkspaceRequest\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
@@ -5753,16 +5753,18 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\fslack_origin\x18\r \x01(\v2(.agentrepl.v1.CreateWorkspaceSlackOriginH\x05R\vslackOrigin\x88\x01\x01\x12A\n" +
 	"\n" +
 	"originator\x18\x0e \x01(\v2!.agentrepl.v1.WorkspaceOriginatorR\n" +
-	"originator\x12\x1b\n" +
-	"\x06hidden\x18\x0f \x01(\bH\x06R\x06hidden\x88\x01\x01\x12I\n" +
+	"originator\x12#\n" +
+	"\n" +
+	"backlogged\x18\x0f \x01(\bH\x06R\n" +
+	"backlogged\x88\x01\x01\x12I\n" +
 	"\tplacement\x18\x10 \x01(\v2&.agentrepl.v1.CreateWorkspacePlacementH\aR\tplacement\x88\x01\x01B\x06\n" +
 	"\x04formB\b\n" +
 	"\x06_modelB\v\n" +
 	"\t_priorityB\x10\n" +
 	"\x0e_allow_ungatedB\b\n" +
 	"\x06_op_idB\x0f\n" +
-	"\r_slack_originB\t\n" +
-	"\a_hiddenB\f\n" +
+	"\r_slack_originB\r\n" +
+	"\v_backloggedB\f\n" +
 	"\n" +
 	"_placementJ\x04\b\x04\x10\x05J\x04\b\t\x10\n" +
 	"R\x06parentR\vfork_source\"\x9b\x01\n" +

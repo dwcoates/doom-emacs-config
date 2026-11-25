@@ -16,8 +16,8 @@ type Section int
 const (
 	// OpenSection is the roster's open section, child rows included.
 	OpenSection Section = iota + 1
-	// HiddenSection is the roster's hidden section.
-	HiddenSection
+	// BacklogSection is the roster's backlog.
+	BacklogSection
 	// MergedSection is the roster's recently merged band, whose rows are
 	// paged on demand (agentrepl.v1.ListMergedWorkspaces).
 	MergedSection
@@ -29,8 +29,8 @@ func (s Section) String() string {
 	switch s {
 	case OpenSection:
 		return "open"
-	case HiddenSection:
-		return "hidden"
+	case BacklogSection:
+		return "backlog"
 	case MergedSection:
 		return "merged"
 	default:
@@ -46,7 +46,7 @@ type Drawn struct {
 }
 
 // Placements answers how the roster draws each workspace it draws in its
-// open, hidden and recently merged sections: the open and hidden rows off
+// open, backlogged and recently merged sections: the open and backlogged rows off
 // PUSH's workspaces stream, and the merged ones off MERGED, the rows the
 // sidebar's pages resolve for the registry's merged set
 // (sidebar.Resolver.MergedRows), since a merged workspace is in no stream. A
@@ -64,7 +64,7 @@ func Placements(push *frontendv1.RosterPush, merged []*frontendv1.RosterRow) (ma
 		rows    []*frontendv1.RosterRow
 	}{
 		{OpenSection, open},
-		{HiddenSection, rosterwalk.HiddenRows(push.GetWorkspaces())},
+		{BacklogSection, rosterwalk.BacklogRows(push.GetWorkspaces())},
 		{MergedSection, merged},
 	} {
 		for _, row := range section.rows {

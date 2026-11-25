@@ -33,7 +33,7 @@ BEFORE running its verb for the first time in a session.
 |---|---|
 | creating a workspace: how it relates to its creator, where it lands, the choice table | `create-relationship-landing` |
 | creating a workspace: fresh or forked context, work in another repository | `create-context-fork` |
-| creating a workspace: name, priority, hidden, one-shot, hooks, handing over edits | `create-flags` |
+| creating a workspace: name, priority, backlogged, one-shot, hooks, handing over edits | `create-flags` |
 | creating a workspace: filing it into a subsection at birth | `create-placement` |
 | this workspace's work belongs to another repository or touches several | `reorganize` |
 | sending a prompt to another workspace, or receiving one | `prompt` |
@@ -60,7 +60,7 @@ BEFORE running its verb for the first time in a session.
 | `no_layout_facts`, `no_creation_job` or `no_merge_layout` refusals | `no-merge-geometry` |
 | turning remote control on or off | `remote-control` |
 | taking or releasing queue bypass mode | `queue-bypass` |
-| hiding, showing or setting priority | `hidden-priority` |
+| moving into or out of the backlog, or setting priority | `backlog-priority` |
 | finishing, opening or closing a workspace | `finish-open-close` |
 | compacting a workspace or setting its model | `compact-model` |
 | reading or writing `.agent-repl/lifecycle.yaml`: the config and its five stages | `lifecycle-config` |

@@ -141,7 +141,7 @@ NON-OBVIOUS CONSEQUENCES.
   unregistered target, one of another repository, the main workspace, the
   workspace itself, and one whose landing chain reaches it (`landsInto` walk).
 - The family refusal counts open workspaces landing into a workspace
-  (`openLanders`), so a landing target cannot be closed, hidden or merged
+  (`openLanders`), so a landing target cannot be closed, backlogged or merged
   away under work aimed at it. A repository's main workspace is never held
   open this way.
 - A child's open parent follows it through `wsm.WorkspaceSubscribers`

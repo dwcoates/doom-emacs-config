@@ -12,7 +12,7 @@ import (
 const (
 	opFoldMergedSection     = "daemon.workspace.fold_merged_section"
 	opFoldMergeQueueSection = "daemon.workspace.fold_merge_queue_section"
-	opFoldHiddenSection     = "daemon.workspace.fold_hidden_section"
+	opFoldBacklog           = "daemon.workspace.fold_backlog"
 	opFoldOpenSection       = "daemon.workspace.fold_open_section"
 	opSizeSections          = "daemon.workspace.size_sections"
 )
@@ -31,11 +31,11 @@ func (v *verbs) FoldMergeQueueSection(ctx context.Context, folded bool) error {
 	return v.foldSingletonSection(ctx, opFoldMergeQueueSection, "merge queue section", v.deps.DB.SetMergeQueueSectionFolded, folded)
 }
 
-// FoldHiddenSection records whether the hidden-workspaces section is
+// FoldBacklog records whether the backlog is
 // collapsed, then republishes the roster to every page. There is nothing to
-// refuse: the roster carries exactly one hidden section.
-func (v *verbs) FoldHiddenSection(ctx context.Context, folded bool) error {
-	return v.foldSingletonSection(ctx, opFoldHiddenSection, "hidden section", v.deps.DB.SetHiddenSectionFolded, folded)
+// refuse: the roster carries exactly one backlog.
+func (v *verbs) FoldBacklog(ctx context.Context, folded bool) error {
+	return v.foldSingletonSection(ctx, opFoldBacklog, "backlog", v.deps.DB.SetBacklogFolded, folded)
 }
 
 // FoldOpenSection records whether the open-workspaces section is collapsed,

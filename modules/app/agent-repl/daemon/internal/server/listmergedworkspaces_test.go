@@ -217,7 +217,7 @@ func (s infoSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
 }
 
 // liveShapeRegistry is the owner's live registry shape (2026-11-16): about
-// 660 merged workspaces across 8 repositories and 500 open, hidden or closed
+// 660 merged workspaces across 8 repositories and 500 open, backlogged or closed
 // ones, every one at its own place, merged ones a minute apart, each with a
 // commit count.
 func liveShapeRegistry() sidebar.Registry {
@@ -251,8 +251,8 @@ func liveShapeRegistry() sidebar.Registry {
 		ws := base("other", i)
 		switch {
 		case i%5 == 0:
-			hidden := epoch
-			ws.Hidden, ws.HiddenAt = true, &hidden
+			backlogged := epoch
+			ws.Backlogged, ws.BackloggedAt = true, &backlogged
 		case i%5 == 1 || i%5 == 2:
 			ws.Closed = true
 		}

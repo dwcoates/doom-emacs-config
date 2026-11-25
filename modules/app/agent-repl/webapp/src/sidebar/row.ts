@@ -18,7 +18,7 @@
  * for a key, and the roster's new `current` arrives on the stream.
  *
  * WHAT TICKS AND WHAT DOES NOT. The when-column's arms that ship an INSTANT
- * (`merged`, `hidden`, and the starts of `sync_merging` and `turn_running`)
+ * (`merged`, `backlogged`, and the starts of `sync_merging` and `turn_running`)
  * are animated here off the shared ticker — never a `setInterval` of this
  * module's own. A sync merge and a running turn read exactly what the footer
  * strip's turn clock reads (`liveElapsedReading`, from the start instant the
@@ -53,8 +53,8 @@ import type {
   RosterRowMergePaused,
   RosterRowMergeTurn,
   RosterRowWhen,
-  RosterRowWhenHidden,
-  RosterRowWhenHiddenCache,
+  RosterRowWhenBacklogged,
+  RosterRowWhenBackloggedCache,
   RosterRowWhenMerged,
   RosterRowWhenNoTurnRunning,
   RosterRowWhenSyncMerging,
@@ -70,7 +70,7 @@ import {
   SelectInEditorResponseSchema,
   type SelectInEditorResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
-import { SetWorkspaceHiddenResponseSchema, type SetWorkspaceHiddenError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import { SetWorkspaceBackloggedResponseSchema, type SetWorkspaceBackloggedError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
@@ -108,8 +108,8 @@ import {
 } from "./detail-more.js";
 import {
   buildSelectInEditorRequest,
-  buildSetWorkspaceHiddenRequest,
-  setWorkspaceHiddenRefusal,
+  buildSetWorkspaceBackloggedRequest,
+  setWorkspaceBackloggedRefusal,
   type CauseOf,
   buildOpenWorkspaceRequest,
   buildRevertMergeRequest,
@@ -126,18 +126,51 @@ const log = createLogger("webapp.sidebar.row");
 /** Draw FAMILY, a row of one list and its family, at PATH (`drawRosterRow`). */
 export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
   const drawn = drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family, path, family.childrenFold);
-  if (family.surfaced === true) drawn.classList.add(SURFACED_ROW_CLASS);
+  const cover = foldCoverOf(family, place, path);
+  if (cover !== "uncovered") drawn.classList.add(COVERED_ROW_CLASS);
+  if (cover === "surfaced") drawn.classList.add(SURFACED_ROW_CLASS);
   const id = drawn.getAttribute("data-roster-row");
   if (id === null) throw new Error(`${path}.row: a drawn row names its workspace`);
-  sc.foldFade.apply(id, drawn, family.surfaced === true);
+  sc.foldFade.apply(id, drawn, cover === "surfaced");
   return drawn;
 }
 
+/** An open row's standing under the folds (frontend.v1.RosterOpenRowFoldCover's arm). */
+export type FoldCover = "uncovered" | "hidden" | "surfaced";
+
 /**
- * The class of a row drawn inside a fold that covers it
- * (frontend.v1.RosterOpenRow.surfaced): the stylesheet hides every other row
- * of the fold, and a row of its family that stands between the fold and it
- * keeps only its `.kids` box.
+ * FAMILY's standing under the folds, drawn in PLACE at PATH. THE DAEMON
+ * DECIDES IT (frontend.v1.RosterOpenRow.fold_cover): the sidebar never
+ * re-derives which fold covers a row from the folds it draws. Every open row
+ * carries it, so an open row without one is malformed; a row of another list
+ * has no fold over it.
+ */
+export function foldCoverOf(family: RowFamily, place: RowPlace, path: string): FoldCover {
+  if (place !== "grouping") return "uncovered";
+  const arm = requireCase(requireMessage(family.foldCover, `${path}.fold_cover`).cover, `${path}.fold_cover.cover`);
+  switch (arm.case) {
+    case "uncovered":
+    case "hidden":
+    case "surfaced":
+      return arm.case;
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(`${path}.fold_cover.cover`, other.case);
+    }
+  }
+}
+
+/**
+ * The class of a row a fold covers (frontend.v1.RosterOpenRowFoldCover's
+ * `hidden` and `surfaced` arms): the stylesheet hides it unless it, or a row
+ * beneath it, is surfaced.
+ */
+export const COVERED_ROW_CLASS = "covered";
+
+/**
+ * The class of a row drawn inside a fold that covers it (the `surfaced` arm):
+ * the stylesheet draws it, and a covered row of its family that stands
+ * between the fold and it keeps only its `.kids` box.
  */
 export const SURFACED_ROW_CLASS = "surfaced";
 
@@ -149,13 +182,13 @@ export const SURFACED_ROW_CLASS = "surfaced";
  *   - `merged`: the recently-merged band. Drawn plain; a click REOPENS the
  *     workspace and then selects it (`OpenWorkspace`, owner request
  *     2026-10-14): a merged workspace is taken back to revise what it landed.
- *   - `hidden`: the hidden-workspaces section. Drawn with NO STATE (owner
+ *   - `backlog`: the backlog. Drawn with NO STATE (owner
  *     request, 2026-10-13): no status color, no status mark, no read greying,
  *     no reviving shimmer and no attention marker; its name is in the
- *     Recently Merged band's grey, struck through only at a cold gate. A click SHOWS it again (`SetWorkspaceHidden`), which
+ *     Recently Merged band's grey, struck through only at a cold gate. A click SHOWS it again (`SetWorkspaceBacklogged`), which
  *     is the section's one gesture.
  */
-export type RowPlace = "grouping" | "merged" | "hidden";
+export type RowPlace = "grouping" | "merged" | "backlog";
 
 /**
  * One roster row, with KIN, its family in its list, nested under it.
@@ -175,7 +208,7 @@ export function drawRosterRow(
   childrenFold?: RosterOpenRowChildrenFold,
 ): HTMLElement {
   const merged = place === "merged";
-  const hidden = place === "hidden";
+  const backlog = place === "backlog";
   const workspace = drawRosterRowWorkspace(
     requireMessage(u.workspace, `${path}.workspace`),
     `${path}.workspace`,
@@ -219,10 +252,10 @@ export function drawRosterRow(
   };
   const mark = rosterRowMark(status.case, markers);
   const ws = document.createElement("div");
-  // A HIDDEN ROW WEARS NO STATUS COLOR (owner request, 2026-10-13): its name
+  // A BACKLOGGED ROW WEARS NO STATUS COLOR (owner request, 2026-10-13): its name
   // takes the rail's plain text; `data-arm` still carries the arm, and the
   // name still draws a cold gate's strike.
-  ws.className = `ws ${hidden ? toneClass("none") : mark.toneClass}`;
+  ws.className = `ws ${backlog ? toneClass("none") : mark.toneClass}`;
   ws.setAttribute("data-roster-row", workspace.id);
   ws.setAttribute("data-arm", status.case);
   sc.drawnStatus.note(workspace.id, { arm: status.case, source: "daemon" });
@@ -234,10 +267,10 @@ export function drawRosterRow(
   if (highlighted) ws.setAttribute("data-current", "true");
   if (closed) ws.setAttribute("data-closed", "true");
   if (highlighted) ws.classList.add("current");
-  // A CLOSED OR HIDDEN ROW RECEDES (owner request, 2026-10-13): a Hidden
+  // A CLOSED OR BACKLOGGED ROW RECEDES (owner request, 2026-10-13): a backlogged
   // row's name reads in the Recently Merged band's grey, which is the band
   // name colour at the receded opacity.
-  if (closed || hidden) ws.classList.add("receded");
+  if (closed || backlog) ws.classList.add("receded");
   // THE HIGHLIGHTED ROW'S NUMBER IS WHITE (selection-fade.ts): a row drawn
   // highlighted moves the highlight to it, and a redraw mid-fade joins the
   // fade where the clock says it has got to.
@@ -277,8 +310,8 @@ export function drawRosterRow(
   });
 
   // THE BANDS DRAW NO STATUS MARK (owner requests, 2026-10-02 and
-  // 2026-10-13): a recently-merged row and a hidden row show no dot or glyph.
-  // Both bands' names are in the repository names' grey; a hidden row's is
+  // 2026-10-13): a recently-merged row and a backlogged row show no dot or glyph.
+  // Both bands' names are in the repository names' grey; a backlogged row's is
   // struck through only at a cold gate.
   // AN OPEN ROW LEADS WITH ITS EMACS TAB NUMBER (owner request, 2026-10-17),
   // filled in by the roster drawer once the push is drawn (`tab-numbers.ts`),
@@ -309,23 +342,23 @@ export function drawRosterRow(
     status.case,
     u.viewed !== undefined && drawRosterRowViewed(u.viewed, `${path}.viewed`),
   );
-  if (mode === "partial" && !hidden) {
+  if (mode === "partial" && !backlog) {
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
   // THE UNREAD TURN END IS NOT INKED ON THE NAME (owner request, 2026-10-29):
   // names are greyscale, so the marker only validates and tags the row.
-  if (u.idleAsyncUnread !== undefined && !hidden) {
+  if (u.idleAsyncUnread !== undefined && !backlog) {
     const end = drawRosterRowIdleAsyncUnread(u.idleAsyncUnread, status.case, `${path}.idleAsyncUnread`);
     ws.setAttribute("data-unread-turn-end", end);
   }
   // A BAND ROW'S NAME TAKES THE REPOSITORY NAMES' COLOUR, Recently Merged and
-  // Hidden alike (owner requests, 2026-10-03 and 2026-10-13); a merged row's
+  // the Backlog alike (owner requests, 2026-10-03 and 2026-10-13); a merged row's
   // timestamp keeps the secondary grey.
-  if (merged || hidden) label.classList.add("band-name");
+  if (merged || backlog) label.classList.add("band-name");
   // THE REVIVING SHIMMER IS THE NAME'S TOO, and only while the wire carries
   // the marker: the daemon lowers it when the revival ends, whichever way.
-  if (!hidden && u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
+  if (!backlog && u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
     markReviving(ws, label);
   }
   // THE NAME BREATHES, NOT THE MARK (owner request, 2026-10-14): a row whose
@@ -336,7 +369,7 @@ export function drawRosterRow(
   // THE NAME WEARS ITS STATUS COLOR UNTIL THE ROW IS VIEWED (owner request,
   // 2026-11-23, `name-tint.ts`), whatever the status and however long ago its
   // turn ended. Only an open row, never a band's.
-  if (place === "grouping" && !hidden) {
+  if (place === "grouping" && !backlog) {
     const shown = requireCase(requireMessage(u.when, `${path}.when`).shown, `${path}.when.shown`);
     applyNameTint(label, nameTint(shown.case, mark.toneClass, mode === "partial"));
   }
@@ -351,7 +384,7 @@ export function drawRosterRow(
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at
   // all rather than an empty element holding its place.
-  if (!hidden && u.attention !== undefined) {
+  if (!backlog && u.attention !== undefined) {
     const marker = drawRosterRowAttention(u.attention, `${path}.attention`);
     ws.setAttribute("data-attention", "");
     line.appendChild(marker);
@@ -367,7 +400,7 @@ export function drawRosterRow(
   // open section only.
   if (
     place === "grouping" &&
-    !hidden &&
+    !backlog &&
     u.openOwnedPullRequest !== undefined &&
     drawRosterRowOpenOwnedPullRequest(u.openOwnedPullRequest, `${path}.openOwnedPullRequest`)
   ) {
@@ -377,7 +410,7 @@ export function drawRosterRow(
   // 2026-11-21): the topbar chip's own gradient, in the open section only. The
   // daemon states the marker only from 400,000 tokens, so absent means the
   // ordinary ink. Inline, so it wins over the green an open pull request gives.
-  if (place === "grouping" && !hidden && u.contextHeat !== undefined) {
+  if (place === "grouping" && !backlog && u.contextHeat !== undefined) {
     const heat = drawRosterRowContextHeat(u.contextHeat, `${path}.contextHeat`);
     duration.setAttribute("data-context-heat", "");
     duration.style.color = contextFigureColor(heat);
@@ -750,19 +783,19 @@ export function drawRosterRowWhen(
     case "merged":
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`), " ago");
       return when;
-    case "hidden":
+    case "backlogged":
       // THE COLUMN COUNTS DOWN TO THE CACHE'S LAPSE once the daemon knows it,
       // and up from the hide until then.
       if (shown.value.cache !== undefined) {
         tickCacheLapse(
           when,
           sc,
-          drawRosterRowWhenHiddenCache(shown.value.cache, `${path}.hidden.cache`),
-          `${path}.hidden.cache`,
+          drawRosterRowWhenBackloggedCache(shown.value.cache, `${path}.backlogged.cache`),
+          `${path}.backlogged.cache`,
         );
         return when;
       }
-      tickAge(when, sc, drawRosterRowWhenHidden(shown.value, `${path}.hidden`));
+      tickAge(when, sc, drawRosterRowWhenBacklogged(shown.value, `${path}.backlogged`));
       return when;
     default: {
       const other: { case: string } = shown;
@@ -799,13 +832,13 @@ export function drawRosterRowWhenMerged(u: RosterRowWhenMerged, path: string): n
   return msOf(u.atMs, `${path}.at_ms`);
 }
 
-/** When the workspace was hidden, as an epoch instant. */
-export function drawRosterRowWhenHidden(u: RosterRowWhenHidden, path: string): number {
+/** When the workspace was backlogged, as an epoch instant. */
+export function drawRosterRowWhenBacklogged(u: RosterRowWhenBacklogged, path: string): number {
   return msOf(u.atMs, `${path}.at_ms`);
 }
 
-/** When a hidden workspace's prompt cache lapses, as an epoch instant. */
-export function drawRosterRowWhenHiddenCache(u: RosterRowWhenHiddenCache, path: string): number {
+/** When a backlogged workspace's prompt cache lapses, as an epoch instant. */
+export function drawRosterRowWhenBackloggedCache(u: RosterRowWhenBackloggedCache, path: string): number {
   return msOf(u.lapsesAtMs, `${path}.lapses_at_ms`);
 }
 
@@ -844,7 +877,7 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
   }
   // THE CHILDREN BLOCK IS DRAWN IF AND ONLY IF THERE ARE CHILDREN (owner
   // request, 2026-10-20): every workspace whose recorded parent is this one,
-  // wherever the rail draws it, so a child that is closed, merged or hidden
+  // wherever the rail draws it, so a child that is closed, merged or backlogged
   // is still named here.
   if (u.children.length > 0) {
     requireFactHome("children", "panel");
@@ -977,7 +1010,7 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * 2026-10-06).
  *
  * THE POINTER'S TRIGGER IS THE ROW'S WHOLE LINE, in every section alike: the
- * open workspaces section, Hidden and Recently Merged (owner requests,
+ * open workspaces section, the Backlog and Recently Merged (owner requests,
  * 2026-10-31, which retired the duration field as the only trigger of
  * 2026-10-14). The panel opens once the pointer has rested anywhere on the
  * line for `HOVER_OPEN_DELAY_MS`, at once when it reaches the duration
@@ -1190,7 +1223,7 @@ export function noteSelectRoute(response: SelectInEditorResponse, workspace: Wor
  * return runs it on the click; a band with several offers them as a choice
  * list under the row (`drawBandChoices`), and the user's pick runs.
  *
- *   - `hidden`: SHOW the workspace again (owner request, 2026-10-13); the push
+ *   - `backlog`: SHOW the workspace again (owner request, 2026-10-13); the push
  *     that follows moves it back into its groupings and onto the tab bar.
  *   - `merged`: REOPEN it, or REOPEN IT AND REVERT ITS MERGE (owner requests,
  *     2026-10-14 and 2026-10-15). Either way the daemon restores its worktree
@@ -1216,19 +1249,19 @@ export interface BandReturn {
 }
 
 export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readonly BandReturn[]>> = {
-  hidden: [
+  backlog: [
     {
       label: "Show",
       operation: "sidebar.row.show",
-      message: log.message("showing a hidden workspace from the rail"),
+      message: log.message("showing a backlogged workspace from the rail"),
       resetsDeploysFolds: false,
       bringBack: (line, sc, workspace) =>
         runVerb(line, {
           sc,
-          rpc: "SetWorkspaceHidden",
-          call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
-          schema: SetWorkspaceHiddenResponseSchema,
-          refusalText: (cause) => setWorkspaceHiddenRefusal(cause as CauseOf<SetWorkspaceHiddenError>),
+          rpc: "SetWorkspaceBacklogged",
+          call: (client) => client.setWorkspaceBacklogged(buildSetWorkspaceBackloggedRequest(workspace, false)),
+          schema: SetWorkspaceBackloggedResponseSchema,
+          refusalText: (cause) => setWorkspaceBackloggedRefusal(cause as CauseOf<SetWorkspaceBackloggedError>),
         }),
     },
   ],
@@ -1359,7 +1392,7 @@ function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number, suffix = "
 }
 
 /**
- * Count HOST down to a hidden workspace's cache lapse now and on every tick: its
+ * Count HOST down to a backlogged workspace's cache lapse now and on every tick: its
  * text, its place on the heat gradient, and `data-cache-cold` once it has come.
  */
 function tickCacheLapse(host: HTMLElement, sc: SidebarContext, lapsesAtMs: number, path: string): void {

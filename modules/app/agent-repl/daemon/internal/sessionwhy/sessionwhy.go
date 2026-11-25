@@ -39,7 +39,7 @@ const (
 	// SettingsVisit is a session a settings pick started, no turn run since.
 	SettingsVisit Reason = "settings_visit"
 	// ParkGrace is an idle session whose park waits out its grace
-	// (cachelapse.StandDownGrace after its last work).
+	// (until its shim hold ends, wsm.ShimHold).
 	ParkGrace Reason = "park_grace"
 	// Keepalive is a session up for its keep-alive: restored for the beat, or
 	// awaiting the beat's answer.
@@ -51,7 +51,7 @@ const (
 	// WithheldShown is a session whose withheld stand-down (a fold, a lapse)
 	// found the workspace shown or reopened, and so kept it.
 	WithheldShown Reason = "stand_down_withheld_shown"
-	// CacheLapsePending is a hidden or closed workspace's session left for its
+	// CacheLapsePending is a backlogged or closed workspace's session left for its
 	// cache's lapse to stand down.
 	CacheLapsePending Reason = "cache_lapse_pending"
 	// IdleSweepPending is a session left for the idle sweep.

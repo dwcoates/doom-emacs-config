@@ -24,7 +24,7 @@ this record is written without per-increment selections.
   `transferring_away`, `not_yet_adopted`) plus `invalid_link { url, reason }`.
 - WHY: the brief asked that the setter ride an existing workspace-attribute
   setter if one existed. None does: `agent-repld workspace set` calls one rpc
-  per attribute (`SetWorkspaceHidden`, `SetWorkspacePriority`,
+  per attribute (`SetWorkspaceBacklogged`, `SetWorkspacePriority`,
   `SetWorkspaceParent`, `SetWorkspaceOneShot`, `SetWorkspaceCorrespondence`),
   so a dedicated rpc is the existing pattern. The brief required that clearing
   be expressed explicitly rather than as an empty string, hence the two-arm

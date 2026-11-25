@@ -167,7 +167,7 @@ type CreateSpec struct {
 	// the request was recorded, so it is taken as it stands.
 	MergeName string
 	// Intake makes this create an EPHEMERAL INTAKE WORKSPACE (intake.go): it
-	// is recorded as one and hidden before its session starts, it runs no
+	// is recorded as one and backlogged before its session starts, it runs no
 	// creation stage, and the daemon retires it when a turn of it ends. Only
 	// CreateIntake sets it, beside a name and an initial prompt, on a peer
 	// with a fresh context.
@@ -176,10 +176,10 @@ type CreateSpec struct {
 	// in the insert's own transaction (wsm.RegisterFacts.IntakeCard). Only
 	// AskAboutCard sets it, beside Intake.
 	IntakeCard *wsm.IntakeCard
-	// Hidden makes the workspace BORN HIDDEN: its row is inserted hidden, in
-	// the insert's own transaction (agentrepl.v1.CreateWorkspaceRequest.hidden).
+	// Backlogged makes the workspace BORN BACKLOGGED: its row is inserted backlogged, in
+	// the insert's own transaction (agentrepl.v1.CreateWorkspaceRequest.backlogged).
 	// Intake implies it.
-	Hidden bool
+	Backlogged bool
 	// Placement files the workspace into a subsection in the insert's own
 	// transaction (agentrepl.v1.CreateWorkspaceRequest.placement), nil for
 	// none. It needs a Requester, the creator of a new subsection, and is
@@ -515,7 +515,7 @@ type Verbs interface {
 	// RefreshDeployCheck brings a standing fixer's worktree to its parent's
 	// tip before a new brief.
 	RefreshDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
-	// ResumeDeployCheck shows a hidden deploy check workspace again.
+	// ResumeDeployCheck shows a backlogged deploy check workspace again.
 	ResumeDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// CloseSelf is the workspace's own agent closing it: the asking turn is
 	// never a blocker, and a workspace whose turn still runs is marked to
@@ -633,12 +633,12 @@ type Verbs interface {
 	// draws it in the topbar (agentrepl.v1.SetWorkspaceSummary), answering the
 	// summary the workspace now has.
 	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary string) (string, error)
-	// SetHidden moves the workspace into the roster's hidden section, or back
+	// SetBacklogged moves the workspace into the roster's backlog, or back
 	// out of it, and republishes the roster. A show also reveals a hidden
 	// merge workspace, so it ends with the workspace drawn or with an error.
-	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
+	SetBacklogged(ctx context.Context, ws ids.WorkspaceID, backlogged bool) error
 	// BacklogColdGate moves a shown workspace whose cold gate, lapsed at
-	// gateLapsedAt, has stood too long into the hidden section, once per gate
+	// gateLapsedAt, has stood too long into the backlog, once per gate
 	// (coldbacklog.Sweeper), and republishes the roster.
 	BacklogColdGate(ctx context.Context, ws ids.WorkspaceID, gateLapsedAt time.Time) error
 	// SetParent retargets the workspace's merge to parent's checkout (nil:
@@ -673,9 +673,9 @@ type Verbs interface {
 	// FoldMergeQueueSection records whether the Merge Queue section is
 	// collapsed and republishes the roster.
 	FoldMergeQueueSection(ctx context.Context, folded bool) error
-	// FoldHiddenSection records whether the hidden-workspaces section is
+	// FoldBacklog records whether the backlog is
 	// collapsed and republishes the roster.
-	FoldHiddenSection(ctx context.Context, folded bool) error
+	FoldBacklog(ctx context.Context, folded bool) error
 	// FoldOpenSection records whether the open-workspaces section is
 	// collapsed and republishes the roster.
 	FoldOpenSection(ctx context.Context, folded bool) error
@@ -829,7 +829,7 @@ type Verbs interface {
 	// composed follow-up question, for the caller to submit. Unset is the
 	// `web_fallback` arm: the refusal alone, silently.
 	OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string, report bool) (*UnresolvedLink, error)
-	// CreateIntake creates an ephemeral intake workspace: hidden, with a
+	// CreateIntake creates an ephemeral intake workspace: backlogged, with a
 	// fresh context, handed one brief, and retired by the daemon when a turn
 	// of it ends (intake.go).
 	CreateIntake(ctx context.Context, spec IntakeSpec) (wsm.Workspace, error)
@@ -1004,7 +1004,7 @@ type Deps struct {
 	// StandDowns stands down the session of a workspace whose repository
 	// section or subsection the user collapsed (drain.Controller.StandDownFolded).
 	StandDowns StandDowns
-	// CacheLapses holds a hidden workspace's keep-alives and stands its
+	// CacheLapses holds a backlogged workspace's keep-alives and stands its
 	// session down once its cache lapses (cachelapse.Keeper).
 	CacheLapses CacheLapses
 	// Summaries keeps every workspace's summary (wssummary.Keeper): it draws
@@ -1070,7 +1070,7 @@ type TurnEnds interface {
 	Next(ws ids.WorkspaceID) <-chan struct{}
 }
 
-// CacheLapses is the hidden workspaces' cache keeper (cachelapse.Keeper),
+// CacheLapses is the backlogged workspaces' cache keeper (cachelapse.Keeper),
 // told of every hide and show once it is recorded, and of every cold gate
 // answered before its re-open starts, so the session the answer brings up
 // owes no keep-alive until its next turn ends.
@@ -1447,7 +1447,7 @@ func New(deps Deps) (Verbs, error) {
 	case deps.StandDowns == nil:
 		return nil, missing("a withheld workspace's stand-down")
 	case deps.CacheLapses == nil:
-		return nil, missing("the hidden workspaces' cache keeper")
+		return nil, missing("the backlogged workspaces' cache keeper")
 	case deps.Summaries == nil:
 		return nil, missing("a summary restorer")
 	case deps.HookRunner == nil:

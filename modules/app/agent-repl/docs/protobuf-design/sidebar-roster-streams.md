@@ -82,7 +82,7 @@ container first, then the merged section, then the new endpoint.
 optional merge_queue, optional recently_merged, optional closed }`.
 `agentrepl.v1.WatchWorkspaceRosterResponse.push` gains `streams` (tag 3) and
 retires `roster` (tag 1). `frontend.v1.WorkspaceRoster` keeps the open
-repository view, hidden, open-section heading, selection, version, app
+repository view, backlog, open-section heading, selection, version, app
 switcher, threads and cold gates, and retires `recently_merged` (3),
 `merge_queue` (19), `closed` (14) and `revision` (11).
 
@@ -267,10 +267,10 @@ more { rows, omitted } } }` | `error { unknown_repository | not_ready }`.
 | Reader | Was | Now |
 |---|---|---|
 | `daemon/internal/workspacefind/roster.go` `Placements` | `rosterwalk.MergedRows` | merged placements from the registry's merged set, status from the row a page resolves |
-| `daemon/internal/workspacefind/locate.go` `Locate` | `rosterwalk.AllRows` (drawn = open, hidden, merged, closed) | open and hidden from the workspaces stream, closed from the closed stream, merged from the registry (closed with `MergedAt`, not a thread, not merge-hidden) |
+| `daemon/internal/workspacefind/locate.go` `Locate` | `rosterwalk.AllRows` (drawn = open, backlogged, merged, closed) | open and backlogged from the workspaces stream, closed from the closed stream, merged from the registry (closed with `MergedAt`, not a thread, not merge-hidden) |
 | `daemon/internal/resolve/sidebar/rowof.go` `findRow` / `Row` | `rosterwalk.AllRows` of the last roster | the last push's streams, and a merged workspace's row resolved on demand |
-| `daemon/internal/composermentions/roster.go` `RosterNames` | open + hidden of the roster | the same, off the workspaces stream (merged were never read) |
-| `daemon/internal/rostermirror/mirror.go` | every row of each roster | holds the latest snapshot of each stream it is sent and reads open, hidden and closed; merged workspaces are never served, so never mirrored |
+| `daemon/internal/composermentions/roster.go` `RosterNames` | open + backlogged of the roster | the same, off the workspaces stream (merged were never read) |
+| `daemon/internal/rostermirror/mirror.go` | every row of each roster | holds the latest snapshot of each stream it is sent and reads open, backlogged and closed; merged workspaces are never served, so never mirrored |
 | `daemon/internal/server/workspace_mentions.go`, `daemon/cmd/agent-repld/agentcli.go` | `rosterwalk.OpenRows(roster)` | the workspaces stream |
 | `proto/helpers/go/rosterwalk` `MergedRows`, `AllRows` | merged rows of the roster | `MergedRows` removed; `AllRows` walks a push's streams |
 | Emacs `lisp/roster.el` `agent-repl-roster-walk` | merged band rows walked | not walked; the closed stream walked |

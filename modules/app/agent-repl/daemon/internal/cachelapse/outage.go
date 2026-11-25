@@ -24,7 +24,7 @@ import (
 // timed an interval on from it.
 //
 // ONLY A WORKSPACE THAT OWES A BEAT IS PULLED. The armed beats are the one
-// authority on that: a workspace at its cold gate, hidden, closed past its
+// authority on that: a workspace at its cold gate, backlogged, closed past its
 // last round or past the idle cutoff has none armed (beatPlanFor), and the
 // beat's own plan is read afresh again when it goes out.
 

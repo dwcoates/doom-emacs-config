@@ -43,7 +43,7 @@ func intakeSpec(repo, name string) IntakeSpec {
 	}
 }
 
-func TestCreateIntakeCreatesAHiddenMarkedWorkspaceHandedItsBrief(t *testing.T) {
+func TestCreateIntakeCreatesABackloggedMarkedWorkspaceHandedItsBrief(t *testing.T) {
 	// Arrange
 	f, repo := intakeFixture(t)
 
@@ -57,8 +57,8 @@ func TestCreateIntakeCreatesAHiddenMarkedWorkspaceHandedItsBrief(t *testing.T) {
 	if len(f.git.created) != 1 || f.git.created[0].RepoDir != repo {
 		t.Fatalf("created worktrees = %+v, want one in %q", f.git.created, repo)
 	}
-	if !f.db.intakes[created.ID] || !f.db.workspaces[created.ID].Hidden {
-		t.Errorf("intake mark %v, hidden %v; want the workspace marked and hidden", f.db.intakes[created.ID], f.db.workspaces[created.ID].Hidden)
+	if !f.db.intakes[created.ID] || !f.db.workspaces[created.ID].Backlogged {
+		t.Errorf("intake mark %v, backlogged %v; want the workspace marked and backlogged", f.db.intakes[created.ID], f.db.workspaces[created.ID].Backlogged)
 	}
 	if got := f.db.putSessions[0].Model; got != "opus" {
 		t.Errorf("session model = %q, want the spec's", got)
@@ -104,7 +104,7 @@ func TestCreateIntakeCreatesNothingWhenItsBriefWillNotCompose(t *testing.T) {
 	}
 }
 
-func TestAnIntakeWorkspaceIsRegisteredBornMarkedAndHidden(t *testing.T) {
+func TestAnIntakeWorkspaceIsRegisteredBornMarkedAndBacklogged(t *testing.T) {
 	// Arrange
 	f, repo := intakeFixture(t)
 
@@ -116,8 +116,8 @@ func TestAnIntakeWorkspaceIsRegisteredBornMarkedAndHidden(t *testing.T) {
 		t.Fatalf("CreateIntake: %v", err)
 	}
 	facts := registeredFactsOf(f, created.ID)
-	if facts == nil || !facts.Intake || !facts.Hidden {
-		t.Fatalf("registered facts = %+v, want the insert itself to carry Intake and Hidden", facts)
+	if facts == nil || !facts.Intake || !facts.Backlogged {
+		t.Fatalf("registered facts = %+v, want the insert itself to carry Intake and Backlogged", facts)
 	}
 }
 
@@ -139,7 +139,7 @@ func TestNoRosterPublishedDuringAnIntakeCreateDrawsItVisible(t *testing.T) {
 				continue
 			}
 			seen++
-			if !ws.Hidden {
+			if !ws.Backlogged {
 				t.Fatalf("roster publication %d carried the intake workspace visible", i)
 			}
 		}

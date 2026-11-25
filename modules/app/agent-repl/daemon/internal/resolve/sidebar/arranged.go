@@ -36,7 +36,7 @@ type ArrangedWorkspace struct {
 // and subsection in the order arrange() gives the sidebar and the tab bar,
 // each run's families nested exactly as the sidebar nests them (nest), with
 // every workspace that is neither closed, merged nor a hidden merge
-// workspace. A hidden one keeps its place. A closed workspace is left out and
+// workspace. A backlogged one keeps its place. A closed workspace is left out and
 // its open children take its place, as the sidebar hoists them.
 func Arranged(reg Registry, log dlog.Logger) []ArrangedRepository {
 	var listed []wsm.Workspace

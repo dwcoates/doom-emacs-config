@@ -99,6 +99,9 @@ type Resolver interface {
 	// Visibility answers a workspace's visibility as the last render derived
 	// it (visibility.go): the value the roster just published.
 	Visibility(ws ids.WorkspaceID) wsm.Visibility
+	// ShimHold answers until when the workspace's resource allocation holds
+	// its idle shim up, as the last render derived it (page.go).
+	ShimHold(ws ids.WorkspaceID) wsm.ShimHold
 	// SetMerge installs one workspace's merge facts, which drive its merge
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)

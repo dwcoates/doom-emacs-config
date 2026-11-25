@@ -3,7 +3,7 @@
  * lives exactly as long as that section's drawing.
  *
  * WHY IT EXISTS (2026-10-15). The rail used to throw its whole drawing away
- * on every roster push and rebuild it: the open sections, the hidden band and
+ * on every roster push and rebuild it: the open sections, the backlog and
  * a hundred recently-merged rows, for a push that changed one row. A section
  * a push leaves unchanged is now kept as it was drawn (`roster.ts`), and what
  * it registered while drawing — its copies of the view (`view.ts`), its

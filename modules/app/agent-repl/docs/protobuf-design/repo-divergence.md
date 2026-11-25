@@ -26,7 +26,7 @@ round, so this reading was taken as a judgment call, not a ruling.
    daemon started), `counted { branch, upstream, ahead, behind }`,
    `no_upstream { branch }` and `failed { reason }`.
    - Why on the section rather than on `RosterSectionHeader`: the header message
-     is shared with the maturity stages, the hidden band and the merged band,
+     is shared with the maturity stages, the backlog and the merged band,
      none of which has a primary branch. A field there would mean nothing in
      three of its four uses.
    - Why a failed arm rather than keeping the last good count: a count whose

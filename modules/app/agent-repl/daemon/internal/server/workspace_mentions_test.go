@@ -34,19 +34,19 @@ func mentionRowIn(id, name, repository string, children ...*frontendv1.RosterOpe
 }
 
 // mentionRoster is a roster whose one repository section holds ROWS, in no
-// subsection, and whose hidden section holds HIDDEN.
-func mentionRoster(rows []*frontendv1.RosterOpenRow, hidden ...*frontendv1.RosterOpenRow) *frontendv1.WorkspaceRoster {
+// subsection, and whose backlog holds BACKLOGGED.
+func mentionRoster(rows []*frontendv1.RosterOpenRow, backlog ...*frontendv1.RosterOpenRow) *frontendv1.WorkspaceRoster {
 	section := &frontendv1.RosterRepoSection{}
 	for _, row := range rows {
 		section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: row}})
 	}
-	var hiddenRows []*frontendv1.RosterHiddenRow
-	for _, row := range hidden {
-		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: row.GetRow()})
+	var backlogRows []*frontendv1.RosterBacklogRow
+	for _, row := range backlog {
+		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: row.GetRow()})
 	}
 	return &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section}},
-		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
+		Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: backlogRows}},
 	}
 }
 
@@ -119,7 +119,7 @@ func targetNames(targets *frontendv1.WorkspaceMentionTargets) []string {
 }
 
 // TestMentionTargetsResolvesTheViewersSet pins which workspaces a viewer may
-// mention: the Open section's in its order then the hidden section's, less
+// mention: the Open section's in its order then the backlog's, less
 // the viewer's own, every unnamed row, and every shared name that the
 // viewer's repository does not settle.
 func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
@@ -166,13 +166,13 @@ func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
 			want:   []string{"beta=b"},
 		},
 		{
-			name:   "a hidden workspace is a target after the Open section's",
+			name:   "a backlogged workspace is a target after the Open section's",
 			roster: mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}, mentionRow("h", "hidden")),
 			viewer: "v",
 			want:   []string{"alpha=a", "hidden=h"},
 		},
 		{
-			name:   "a hidden viewer is no target",
+			name:   "a backlogged viewer is no target",
 			roster: mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}, mentionRow("v", "viewer")),
 			viewer: "v",
 			want:   []string{"alpha=a"},
@@ -218,7 +218,7 @@ func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
 			want:   nil,
 		},
 		{
-			name:   "a name shared between an open and a hidden workspace is settled the same way",
+			name:   "a name shared between an open and a backlogged workspace is settled the same way",
 			roster: mentionRoster([]*frontendv1.RosterOpenRow{mentionRowIn("v", "viewer", "doom"), mentionRowIn("a", "fix", "zettel")}, mentionRowIn("h", "fix", "doom")),
 			viewer: "v",
 			want:   []string{"fix=h"},
@@ -314,7 +314,7 @@ func TestMentionTargetsLinksRecentlyClosedWorkspaces(t *testing.T) {
 			want: []string{"same=c (closed)"},
 		},
 		{
-			name:   "a closed workspace sharing a hidden workspace's name is no target",
+			name:   "a closed workspace sharing a backlogged workspace's name is no target",
 			roster: withClosed(mentionRoster(nil, mentionRow("h", "same")), nil, []*frontendv1.RosterRow{closedRow("c", "same", time.Hour)}),
 			want:   []string{"same=h"},
 		},

@@ -25,7 +25,7 @@ const (
 )
 
 // idleBeforeParkBuckets span a cold park taken at once to a session up a
-// day: the grace (20 minutes, cachelapse.StandDownGrace) and the hour around
+// day: the shim hold (wsm.ShimHold) and the hour around
 // it are each a bucket edge, so "parked 20 minutes after its work" reads off
 // the 1200 and 1500 buckets.
 var idleBeforeParkBuckets = []float64{10, 60, 300, 600, 1200, 1500, 1800, 2700, 3600, 7200, 14400, 28800, 86400}

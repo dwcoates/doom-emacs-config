@@ -48,6 +48,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--input-buffer-name "core")
 (declare-function agent-repl-roster-interaction-standing-p "roster" (ws))
+(declare-function agent-repl-roster-open-entry-named "roster" (name))
 (declare-function agent-repl--input-selection-changed "input" (ws))
 (declare-function agent-repl-link-successor-pending-p "daemon-link")
 (declare-function agent-repl-link-successor-at "daemon-link")
@@ -712,8 +713,8 @@ one place the handover walk lives."
 (defvar agent-repl-host--select-in-flight nil
   "The `WorkspaceRef' whose SelectWorkspace awaits its answer, or nil.
 A REF, NEVER A NAME: a workspace this editor does not hold (a folded or
-hidden one, frontend.v1.RosterRowVisibility) is selected through the same one
-queue as a held one, and it has no name here until its tab opens.
+backlogged one, frontend.v1.RosterRowVisibility) is selected through the
+same one queue as a held one, and it has no name here until its tab opens.
 EMACS SENDS ONE SELECTION AT A TIME.  Every unary call rides its own
 socket, so two selects sent back to back -- `s-}' pressed twice -- reach
 the daemon in whatever order its accepts are scheduled, and the older one
@@ -1116,19 +1117,35 @@ choice, and ends any walk the frame stood in (`agent-repl--end-recency-walk').
 A request that cannot be sent is LOUD: a switch the user asked for that
 goes nowhere is reported in the echo area and at WARN, never dropped.
 Answers t when the request was sent or queued, nil otherwise."
+  (let ((unheld (and (null (agent-repl-host-ref ws))
+                     (fboundp 'agent-repl-roster-open-entry-named)
+                     (agent-repl-roster-open-entry-named ws))))
+    (if unheld
+        ;; A WORKSPACE THIS EDITOR HOLDS NO TAB FOR (a fold hides it, so it is
+        ;; not visible) is selected by its ref: the daemon draws it once it is
+        ;; the selection, and the roster's follow lands the frame on it.
+        (agent-repl-host-request-switch-ref (plist-get unheld :ref) trigger ws)
+      (agent-repl-host--request-switch-held ws trigger))))
+
+(defun agent-repl-host--note-walk (ws trigger shown)
+  "Record a switch to WS by TRIGGER against the recency walk, from SHOWN.
+Set BEFORE the frame moves: the move's own activation reads it.  A walk\='s
+first step records where it started, and every step where it lands; any
+other trigger is a choice and ends the walk (`agent-repl--end-recency-walk')."
+  (if (eq trigger 'recency-walk)
+      (progn
+        (unless agent-repl--recency-walk-landing
+          (setq agent-repl--recency-walk-origin shown))
+        (setq agent-repl--recency-walk-landing ws))
+    (agent-repl--end-recency-walk ws trigger)))
+
+(defun agent-repl-host--request-switch-held (ws trigger)
+  "`agent-repl-host-request-switch' for WS, a workspace this editor holds."
   (let* ((shown (agent-repl--ws-current-name))
          (walk (eq trigger 'recency-walk))
          (started (unless (eq trigger 'startup)
                     (agent-repl-host--count-editor-switch ws trigger))))
-    ;; Set BEFORE the frame moves: the move's own activation reads it.  A
-    ;; walk's first step records where it started; a choice ends the walk
-    ;; first (`agent-repl--end-recency-walk').
-    (if walk
-        (progn
-          (unless agent-repl--recency-walk-landing
-            (setq agent-repl--recency-walk-origin shown))
-          (setq agent-repl--recency-walk-landing ws))
-      (agent-repl--end-recency-walk ws trigger))
+    (agent-repl-host--note-walk ws trigger shown)
     (setq agent-repl-host-last-request (cons ws (float-time)))
     (agent-repl--info ws "elisp.host.switch-requested ws={ws} trigger={trigger} shown={shown} pending={pending}"
                       :ws ws :trigger trigger :shown shown :pending (or (agent-repl-host-pending-selection) "none"))
@@ -1153,7 +1170,7 @@ Answers t when the request was sent or queued, nil otherwise."
            walk started)
         (agent-repl-host--move-on-request ws shown))))))
 
-(defun agent-repl-host-request-switch-ref (ref trigger)
+(defun agent-repl-host-request-switch-ref (ref trigger &optional name)
   "Ask the daemon to make the workspace REF names current, whether held or not.
 TRIGGER is as `agent-repl-host-request-switch' takes it.  A workspace this
 editor holds is switched to by name, the frame moving at once.  One it
@@ -1161,14 +1178,20 @@ does not hold (frontend.v1.RosterRowVisibility) has no perspective to move to:
 the daemon is asked to select it (`agent-repl-host-select-ref'), the
 roster push that marks it held opens it, and the roster\='s follow lands
 the frame on it (`agent-repl-roster-apply-current', owner ruling
-2026-11-21).  Either way the switch is counted as the user\='s and ends any
-recency walk.  Answers t when the request was sent or queued."
+2026-11-21).  Either way the switch is counted as the user\='s.  A step of
+the recency walk keeps the walk and the selection history, as a step to a
+held workspace does, landing on NAME (its tab name once it is held); any
+other trigger ends the walk.  Answers t when the request was sent or
+queued."
   (let ((ws (agent-repl-host--held-name (plist-get ref :id))))
     (if ws
-        (agent-repl-host-request-switch ws trigger)
+        (agent-repl-host--request-switch-held ws trigger)
       (let ((scope (agent-repl-host--target-scope ref))
+            (walk (eq trigger 'recency-walk))
             (started (agent-repl-host--count-editor-switch nil trigger)))
-        (agent-repl--end-recency-walk scope trigger)
+        (if walk
+            (agent-repl-host--note-walk name trigger (agent-repl--ws-current-name))
+          (agent-repl--end-recency-walk scope trigger))
         (setq agent-repl-host-last-request nil)
         (agent-repl--info scope "elisp.host.switch-requested-unheld id={id} trigger={trigger} shown={shown}"
                           :id (plist-get ref :id) :trigger trigger :shown (agent-repl--ws-current-name))
@@ -1177,7 +1200,7 @@ recency walk.  Answers t when the request was sent or queued."
                (unless (eq outcome :success)
                  (agent-repl--info scope "elisp.host.switch-request-settled id={id} outcome={outcome}"
                                    :id (plist-get ref :id) :outcome (prin1-to-string outcome))))
-         nil started)))))
+         walk started)))))
 
 (defun agent-repl-host--move-on-request (ws shown)
   "Move the frame to WS for Emacs\='s own switch request, unless it cannot.

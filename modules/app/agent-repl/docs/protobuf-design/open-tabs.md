@@ -2,7 +2,7 @@
 
 ## Problem
 
-At startup every open workspace's session was brought up at once, hidden ones
+At startup every open workspace's session was brought up at once, backlogged ones
 included (48 concurrent vendor starts on 2026-10-12, 50s of retries), go-aheads
 were sent strictly in registry order (one slow workspace held every tab behind
 it), the startup was implicit in an editor connecting, and the readiness of a
@@ -11,13 +11,13 @@ workspace's web page was checked by Emacs alone, never by the daemon.
 ## Core design principles (owner, 2026-10-12)
 
 1. ONLY OPEN AND VISIBLE WORKSPACES RUN. The daemon restores and starts the
-   sessions of open, visible workspaces only. A hidden workspace (or one in a
+   sessions of open, visible workspaces only. A backlogged workspace (or one in a
    collapsed repository section) runs nothing; it is started when shown and
-   stood down when hidden. Amended 2026-10-13 (hidden-cache-lapse.md): a
-   hidden workspace's session is stood down when its prompt cache lapses,
+   stood down when backlogged. Amended 2026-10-13 (backlogged-cache-lapse.md): a
+   backlogged workspace's session is stood down when its prompt cache lapses,
    not at the hide, so it can be shown again warm until then. Amended
    2026-10-17: the workspace the user is looking at (the selection) runs even
-   hidden or collapsed (`wsm.Workspace.Runs`), and keeps its cache warm
+   backlogged or collapsed (`wsm.Workspace.Runs`), and keeps its cache warm
    (`wsm.Workspace.KeepaliveHeld`). Selecting one revives it, and the old
    rule then stood that session down the moment it came up, so its cold gate
    stood again after every answer. Moving off it withholds it again.
@@ -35,7 +35,7 @@ workspace's web page was checked by Emacs alone, never by the daemon.
      themselves, the editor asks with OpenTabs.
    - Reopens: the 2026-09-13 / 2026-10-02 ruling "an open workspace is never
      session-less" now reads "an open VISIBLE workspace".
-   - Does not claim: that a hidden workspace's registry entry, worktree or
+   - Does not claim: that a backlogged workspace's registry entry, worktree or
      conversation is dropped. They are kept.
 2. THE EDITOR SHOWS A TAB ONLY WHEN THE DAEMON SAYS THE WORKSPACE IS OPEN.
    Open means served by agent-repl's services AND its web page drawn. The
@@ -62,7 +62,7 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   - A service-level start failure still opens (arm `failed`): the tab shows
     the fault (owner delegated this ruling; recorded as the agent's decision).
   - Vendor and network state never gate `opened` (unchanged from the go-ahead).
-  - A hidden or collapsed workspace is answered `hidden` at once.
+  - A backlogged or collapsed workspace is answered `hidden` at once.
 
 ### OpenTabsWorkspace.page: loading or none
 - WHAT: each requested workspace says whether the editor loads a web page
@@ -89,9 +89,9 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   a daemon restart under open tabs never greys them (principle 4).
 
 ### Hide and collapse stand sessions down
-- AMENDED 2026-10-13 for the hide (hidden-cache-lapse.md): the hide holds the
+- AMENDED 2026-10-13 for the hide (backlogged-cache-lapse.md): the hide holds the
   session's keep-alives and the stand-down below happens when its cache lapses.
-- WHAT: SetWorkspaceHidden(hide) and a repository collapse stand the session
+- WHAT: SetWorkspaceBacklogged(hide) and a repository collapse stand the session
   down as the idle sweep does (hibernate, conversation kept), deferred while a
   turn runs and taken once it ends (owner delegated the timing; recorded as
   the agent's decision: never interrupt a turn).
@@ -101,7 +101,7 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   - A fold never stands down a workspace its own record spares
     (`wsm.Workspace.FoldSpare`): a one-shot, or one with a merge queue entry
     standing (requested, waiting or running, its deploy hooks included). A
-    hidden or closed workspace is withheld by that act, not a fold, and is
+    backlogged or closed workspace is withheld by that act, not a fold, and is
     spared nothing.
   - A workspace with a turn or detached work in flight is held back by the
     stand-down gate, as before, and nothing reaches its turn or its session.
@@ -146,7 +146,7 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   (`docs/developer/shim-lifecycle.md`).
 
 ## Decisions taken for the owner (delegated 2026-10-12, to confirm)
-- Collapsed repository sections count as not visible, like hidden ones.
+- Collapsed repository sections count as not visible, like backlogged ones.
 - A workspace whose session fails to start still opens, showing its fault.
 - Hiding with a turn in flight stands the session down once the turn ends.
 

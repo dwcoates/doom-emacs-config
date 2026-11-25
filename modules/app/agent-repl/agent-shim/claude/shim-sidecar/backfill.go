@@ -6,7 +6,7 @@ package main
 // whose shim has not started a session is never read. That is the right steady
 // state, and the wrong one after the store has lost its rows: on 2026-10-17 a
 // deploy rollback nuked events.db, the sidecar rebuilt the 26 conversations
-// whose shims held their locks, and every open or hidden workspace whose shim
+// whose shims held their locks, and every open or backlogged workspace whose shim
 // was idle stayed empty until its next prompt.
 //
 // A BACKFILL REQUEST is a file in `<state dir>/sidecar-backfill/` naming one

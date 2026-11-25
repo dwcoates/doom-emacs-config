@@ -110,6 +110,8 @@ func TestVisibilityReasons(t *testing.T) {
 			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Starting: true, TopPriority: true}}, id: "a", want: ReasonCoveredStarting},
 		{name: "a covered top-priority workspace has covered_top_priority",
 			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, TopPriority: true}}, id: "a", want: ReasonCoveredTopPriority},
+		{name: "a covered mediator or bypass holder has covered_always_shown",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, AlwaysShown: true}}, id: "a", want: ReasonCoveredAlwaysShown},
 		{name: "a covered parent visible only through its child has parent_of_visible",
 			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, Working: true}}, id: "p", want: ReasonParentOfVisible},
 		{name: "a covered parent with its own reason keeps it",
@@ -298,11 +300,20 @@ func TestACorruptStoredVisibilityIsADecodeError(t *testing.T) {
 
 // seedOver runs the migration's seed over S's workspaces as they stand, with
 // every visibility reset first, and answers each one's seeded visibility.
+// The seed runs at layout 192, whose file names the backlog `hidden` (layout
+// 205 retired that column for `backlogged`), so S is given that column again,
+// filled from `backlogged`, for the seed to read.
 func seedOver(t *testing.T, s *store, ids ...WorkspaceID) map[WorkspaceID]Visibility {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := s.db().Exec(`UPDATE workspaces SET visibility = 'not_visible'`); err != nil {
-		t.Fatalf("reset: %v", err)
+	for _, stmt := range []string{
+		`ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE workspaces SET hidden = backlogged`,
+		`UPDATE workspaces SET visibility = 'not_visible'`,
+	} {
+		if _, err := s.db().Exec(stmt); err != nil {
+			t.Fatalf("arrange the layout-192 shape %q: %v", stmt, err)
+		}
 	}
 	tx, err := s.db().BeginTx(ctx, nil)
 	if err != nil {
@@ -327,16 +338,16 @@ func seedOver(t *testing.T, s *store, ids ...WorkspaceID) map[WorkspaceID]Visibi
 }
 
 func TestTheVisibilitySeedDerivesFromTheRecord(t *testing.T) {
-	// Arrange: one drawn, one hidden, one selected hidden, one under a
+	// Arrange: one drawn, one backlogged, one selected backlogged, one under a
 	// folded parent, and that parent.
 	s, _ := testStore(t)
-	drawn, hidden, picked := testWorkspaceNamed(t, s, "drawn"), testWorkspaceNamed(t, s, "hidden"), testWorkspaceNamed(t, s, "picked")
+	drawn, backlogged, picked := testWorkspaceNamed(t, s, "drawn"), testWorkspaceNamed(t, s, "hidden"), testWorkspaceNamed(t, s, "picked")
 	parent, child := testWorkspaceNamed(t, s, "parent"), testWorkspaceNamed(t, s, "child")
 	for _, stmt := range []struct {
 		q    string
 		args []any
 	}{
-		{`UPDATE workspaces SET hidden = 1, hidden_at = 1 WHERE id IN (?, ?)`, []any{string(hidden.ID), string(picked.ID)}},
+		{`UPDATE workspaces SET backlogged = 1, backlogged_at = 1 WHERE id IN (?, ?)`, []any{string(backlogged.ID), string(picked.ID)}},
 		{`UPDATE workspaces SET is_current = 1 WHERE id = ?`, []any{string(picked.ID)}},
 		{`UPDATE workspaces SET parent_id = ? WHERE id = ?`, []any{string(parent.ID), string(child.ID)}},
 		{`UPDATE workspaces SET children_folded = 1 WHERE id = ?`, []any{string(parent.ID)}},
@@ -347,10 +358,10 @@ func TestTheVisibilitySeedDerivesFromTheRecord(t *testing.T) {
 	}
 
 	// Act
-	got := seedOver(t, s, drawn.ID, hidden.ID, picked.ID, parent.ID, child.ID)
+	got := seedOver(t, s, drawn.ID, backlogged.ID, picked.ID, parent.ID, child.ID)
 
 	// Assert
-	want := map[WorkspaceID]Visibility{drawn.ID: UnselectedVisible, hidden.ID: NotVisible, picked.ID: Selected,
+	want := map[WorkspaceID]Visibility{drawn.ID: UnselectedVisible, backlogged.ID: NotVisible, picked.ID: Selected,
 		parent.ID: UnselectedVisible, child.ID: NotVisible}
 	for id, v := range want {
 		if got[id] != v {

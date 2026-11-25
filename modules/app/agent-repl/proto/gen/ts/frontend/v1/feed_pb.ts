@@ -3202,7 +3202,7 @@ export type FeedResponseUpdate = Message<"frontend.v1.FeedResponseUpdate"> & {
    * How fast the client types out the text it has not yet shown. SET on every
    * live draw of every response bubble (prose, interim and thinking, the main
    * agent's and every subagent's); UNSET on a replayed draw (a reconnect, a
-   * reload, a hidden workspace's backlog), whose prose finished arriving long
+   * reload, a backlogged workspace's unread rows), whose prose finished arriving long
    * ago and is drawn whole at once.
    *
    * @generated from field: optional frontend.v1.FeedResponseRevealPace reveal_pace = 3;

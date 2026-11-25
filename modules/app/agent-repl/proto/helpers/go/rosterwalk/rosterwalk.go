@@ -1,6 +1,6 @@
 // Package rosterwalk is THE ONE WALK over the rows of a frontend.v1.RosterPush's
 // streams. A child workspace's row nests under its parent's in its list's own
-// row type (RosterOpenRow.children, RosterHiddenRow.children), so a reader
+// row type (RosterOpenRow.children, RosterBacklogRow.children), so a reader
 // that hand-rolls its own loop can miss every child while the others see
 // them -- the merge-queue verb once refused a child's own merge that way.
 // Every Go reader of the roster, in every module, walks through here.
@@ -36,13 +36,13 @@ func OpenFamily(row *frontendv1.RosterOpenRow) []*frontendv1.RosterOpenRow {
 	return out
 }
 
-// FlattenHidden lists every hidden row of the hidden section's rows
+// FlattenBacklog lists every backlogged row of the backlog's rows
 // depth-first, each row before its nested family.
-func FlattenHidden(rows []*frontendv1.RosterHiddenRow) []*frontendv1.RosterHiddenRow {
-	var out []*frontendv1.RosterHiddenRow
+func FlattenBacklog(rows []*frontendv1.RosterBacklogRow) []*frontendv1.RosterBacklogRow {
+	var out []*frontendv1.RosterBacklogRow
 	for _, row := range rows {
 		out = append(out, row)
-		out = append(out, FlattenHidden(row.GetChildren())...)
+		out = append(out, FlattenBacklog(row.GetChildren())...)
 	}
 	return out
 }
@@ -113,11 +113,11 @@ func OpenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterOpenRow {
 	return out
 }
 
-// HiddenRows lists every row of the hidden section, flattened.
-func HiddenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+// BacklogRows lists every row of the backlog, flattened.
+func BacklogRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
-	for _, hidden := range FlattenHidden(roster.GetHidden().GetHiddenRows().GetRows()) {
-		out = append(out, hidden.GetRow())
+	for _, backlog := range FlattenBacklog(roster.GetBacklog().GetBacklogRows().GetRows()) {
+		out = append(out, backlog.GetRow())
 	}
 	return out
 }
@@ -133,7 +133,7 @@ func ClosedRows(closed *frontendv1.RosterClosedRows) []*frontendv1.RosterRow {
 }
 
 // AllRows lists every row a push's streams carry -- the workspaces stream's
-// Open section walk and hidden section, then the closed stream. Each
+// Open section walk and backlog, then the closed stream. Each
 // workspace appears once. A MERGED WORKSPACE IS IN NO STREAM
 // (agentrepl.v1.ListMergedWorkspaces pages its row), so none is listed. The
 // push must hold every stream: a subscription's first push does, and so does
@@ -144,7 +144,7 @@ func AllRows(push *frontendv1.RosterPush) []*frontendv1.RosterRow {
 	for _, open := range OpenRows(push.GetWorkspaces()) {
 		out = append(out, open.GetRow())
 	}
-	out = append(out, HiddenRows(push.GetWorkspaces())...)
+	out = append(out, BacklogRows(push.GetWorkspaces())...)
 	return append(out, ClosedRows(push.GetClosed())...)
 }
 

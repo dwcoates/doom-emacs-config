@@ -887,27 +887,26 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	})
 }
 
-// TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence is landing 7: the
-// blocked arm states WHY, so a caller with no footer can say it — and
-// `summary` is the same composed sentence the footer's activity line draws.
-func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
+// TestCloseWorkspaceInterruptsATurnInFlightAndCloses pins the owner's
+// 2026-11-24 ruling: a close interrupts the running turn first rather than
+// being refused for it, so the workspace closes and its session ends.
+func TestCloseWorkspaceInterruptsATurnInFlightAndCloses(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newCanonical(t)
-	f.d.ExpectWarnings("daemon.workspace.close")
 	f.shim.ExpectStartSession()
-	f.submit("do the thing", "k-close-evidence", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.submit("do the thing", "k-close-interrupts", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
 
 	// Act
 	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws}))
 
 	// Assert
-	if err != nil {
-		t.Fatalf("CloseWorkspace with a turn in flight = transport error %v, want the blocked arm", err)
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CloseWorkspace with a turn in flight = (%v, %v), want success", resp, err)
 	}
-	blocked := resp.Msg.GetError().GetBlocked()
-	if blocked == nil || !blocked.GetTurnInFlight() || blocked.GetSummary() == "" {
-		t.Fatalf("CloseWorkspaceBlocked = %v, want turn_in_flight true with a composed summary", blocked)
+	if kill := f.shim.ExpectKillTurn(); kill == nil {
+		t.Fatal("no KillTurn: the running turn was not interrupted ahead of the close")
 	}
 }
 

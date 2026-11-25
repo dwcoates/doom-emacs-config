@@ -262,7 +262,7 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing
-(`SetWorkspaceHidden` already serves `workspace set hidden`, per the owner's
+(`SetWorkspaceBacklogged` already serves `workspace set -backlogged`, per the owner's
 request that the API and the workspace skill cover it).
 
 Consequences, accepted:
@@ -322,7 +322,7 @@ agent-repld call        <Method> [JSON]     # debugging escape hatch, outside th
 - `workspace prompt` sends a message into the workspace's conversation
   (`SubmitPrompt`).
 - `workspace set` (ruled, renamed from `update`) changes the workspace's
-  settings: priority, hidden, model, effort, permission mode.
+  settings: priority, backlogged, model, effort, permission mode.
 - `workspace merge` lands the workspace's own branch in its recorded target
   (today's one-shot); it carries what is known only once the work is done: queue
   placement (front or back) and the version increment with its changelog line.

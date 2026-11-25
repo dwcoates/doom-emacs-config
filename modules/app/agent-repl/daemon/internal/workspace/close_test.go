@@ -64,18 +64,50 @@ func TestCloseRecordsWhoAskedForIt(t *testing.T) {
 	}
 }
 
-func TestCloseRefusesATurnInFlight(t *testing.T) {
+func TestCloseInterruptsATurnInFlightThenCloses(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	turn := wsm.TurnID("t1")
-	f.running.Turn = &turn
+	runningTurn(f, 0)
+
+	// Act.
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+	// Assert: the turn is stopped ahead of the close, which is not refused.
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(f.shim.killedTurns) != 1 || !f.shim.killedTurns[0].Force {
+		t.Fatalf("killed turns = %+v, want one confirmed kill", f.shim.killedTurns)
+	}
+	if !f.db.closedFlags["w1"] {
+		t.Fatal("the workspace was not closed after its turn was interrupted")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opClose, Message: "interrupted the running turn ahead of the verb"}); !ok {
+		t.Fatal("no info record of the interrupt ahead of the close")
+	}
+}
+
+func TestACloseWhoseInterruptFailsClosesNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = errors.New("shim unreachable")
 
 	// Act.
 	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
-	asRefusal(t, err, "blocked")
+	if err == nil {
+		t.Fatal("Close succeeded although the turn could not be interrupted")
+	}
+	if f.db.closedFlags["w1"] {
+		t.Fatal("the workspace was closed although its turn could not be interrupted")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opClose}); !ok {
+		t.Fatal("no error record of the failed interrupt")
+	}
 }
 
 func TestCloseRefusesLiveDetachedWork(t *testing.T) {
@@ -188,8 +220,9 @@ func TestCloseManifestsTheRefusalInTheFooter(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	turn := wsm.TurnID("t1")
-	f.running.Turn = &turn
+	f.running.LiveWork = sessionwatcher.LiveWorkSet{
+		Agents: []*conversationv1.AgentId{{Value: "agent-1"}},
+	}
 
 	// Act.
 	_ = f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
@@ -274,8 +307,9 @@ func TestCloseRefusalIsNotLoggedAsAWarning(t *testing.T) {
 	// an ordinary answer the client reads rather than a fault.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	turn := wsm.TurnID("t1")
-	f.running.Turn = &turn
+	f.running.LiveWork = sessionwatcher.LiveWorkSet{
+		Agents: []*conversationv1.AgentId{{Value: "agent-1"}},
+	}
 
 	// Act.
 	_ = f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)

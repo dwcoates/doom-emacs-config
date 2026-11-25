@@ -11,7 +11,7 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
-(declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
+(declare-function agent-repl-open-tabs-backlogged-p "open-tabs" (ws))
 (declare-function agent-repl--frontend-precreate-webview "frontend" (ws))
 (declare-function agent-repl-input-hidden-p "window" (ws))
 (declare-function agent-repl--open-progress-placeholder "open-progress" (ws))
@@ -731,8 +731,8 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       ;; view, so only a live workspace is mounted.
       (when (and (eq reason 'no-live-view) (agent-repl--ws-live-p ws))
         (agent-repl--info log-ws "elisp.panels.mount-on-switch ws={ws} withheld={withheld}"
-                          :ws ws :withheld (and (fboundp 'agent-repl-open-tabs-hidden-p)
-                                  (agent-repl-open-tabs-hidden-p ws)
+                          :ws ws :withheld (and (fboundp 'agent-repl-open-tabs-backlogged-p)
+                                  (agent-repl-open-tabs-backlogged-p ws)
                                   t))
         (agent-repl--panels-mount-awaited-view ws)))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —

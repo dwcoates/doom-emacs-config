@@ -154,7 +154,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - family rules: a parent with an open child is refused CloseWorkspace,
   KillWorkspace and a hide (has_open_children, naming the child), and the
   family stays open and nested; a parent whose child is closed closes; a
-  child of a hidden parent is refused CreateWorkspace (parent_not_open)
+  child of a backlogged parent is refused CreateWorkspace (parent_not_open)
 - subsection folds: collapsing a subsection (UpdateSidebarView) draws it
   collapsed and folds its workspaces' tabs, the rest numbered 1..N
 - registry ordering: a new workspace lands second-to-last on the tab bar;

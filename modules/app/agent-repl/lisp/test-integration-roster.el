@@ -106,7 +106,7 @@ OVERRIDES replaces top-level entries (notably `current')."
              (divergence . ((pending . ()))) (expanded . ((collapsible . ()))))])
          (openCount . ((workspaces . 1)))))
      (open . ((label . ((text . "Open"))) (expanded . ())))
-     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
+     (backlog . ((header . ((label . ((text . "Backlog"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
      (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
@@ -163,7 +163,7 @@ order apart from declaration order."
              (divergence . ((pending . ()))) (expanded . ((collapsible . ()))))])
          (openCount . ((workspaces . 1)))))
     (open . ((label . ((text . "Open"))) (expanded . ())))
-    (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
+    (backlog . ((header . ((label . ((text . "Backlog"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
@@ -1995,10 +1995,10 @@ the wire decoder."
         (should (null (agent-repl--ws-by-ref-id "itest-dup-id")))
         (should (equal agent-repl-roster-view kept))))))
 
-(ert-deftest agent-repl-itest-roster-roster-missing-hidden-is-refused ()
-  "A `WorkspaceRoster' with no `hidden' field at all is a contract breach.
-sidebar.proto: the hidden section is always set, empty when nothing is
-hidden, so its absence is a malformed push, dropped at ERROR."
+(ert-deftest agent-repl-itest-roster-roster-missing-backlog-is-refused ()
+  "A `WorkspaceRoster' with no `backlog' field at all is a contract breach.
+sidebar.proto: the backlog is always set, empty when nothing is
+backlogged, so its absence is a malformed push, dropped at ERROR."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -2007,17 +2007,17 @@ hidden, so its absence is a malformed push, dropped at ERROR."
        daemon (agent-repl-itest-roster--roster-missing
                (list (agent-repl-itest-roster--row
                       "ws-no-hidden-marker" "ws-no-hidden-marker" 'ready))
-               'hidden))
+               'backlog))
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (should (agent-repl-itest-roster--push-invalid-carries-raw
                daemon "ws-no-hidden-marker")))))
 
-(ert-deftest agent-repl-itest-roster-a-hidden-row-keeps-its-tab-off-the-drawing ()
-  "A hidden row the daemon shows gets a tab the bar does not draw.
-The daemon shows a hidden row only while it is the selection
-\(wsm.Visibility).  The hidden section walks after the repository
+(ert-deftest agent-repl-itest-roster-a-backlogged-row-keeps-its-tab-off-the-drawing ()
+  "A backlogged row the daemon shows gets a tab the bar does not draw.
+The daemon shows a backlogged row only while it is the selection
+\(wsm.Visibility).  The backlog walks after the repository
 sections, as a collapsed repository's rows do: in the tab order, out of
 the drawn order."
   ;; Arrange.
@@ -2029,14 +2029,14 @@ the drawn order."
         (agent-repl-itest-roster--push
          daemon (agent-repl-itest-roster--roster
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
-                 `(hidden
-                   . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 1)))))
+                 `(backlog
+                   . ((header . ((label . ((text . "Backlog"))) (count . ((workspaces . 1)))))
                       (rows . ((rows . ,(vector hidden-row))))
                       (expanded . ())))))
         ;; Assert.
         (agent-repl-itest--wait-until
          (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo" "ws-hidden")))
-         nil "the repo section's row, then the hidden row")
+         nil "the repo section's row, then the backlogged row")
         (should (equal (agent-repl-roster-drawn-tab-order) '("ws-repo")))))))
 
 ;; audit-3 #42

@@ -13,9 +13,9 @@
 //
 // The same call serves every open: the editor's startup (every registered
 // open workspace at once), and any later one (a workspace created, reopened,
-// unhidden, or whose repository section was expanded).
+// taken out of the backlog, or whose repository section was expanded).
 //
-// ONLY VISIBLE WORKSPACES ARE OPENED. A workspace the user hid, or whose
+// ONLY VISIBLE WORKSPACES ARE OPENED. A workspace the user backlogged, or whose
 // repository section or subsection is collapsed, is answered `opened` at
 // once with its `hidden` arm; it is opened when it is shown again, which the
 // editor asks for with another OpenTabs.
@@ -1308,7 +1308,7 @@ type OpenTabsOpened_Failed struct {
 }
 
 type OpenTabsOpened_Hidden struct {
-	// Hidden, or in a collapsed repository section or subsection, and not the workspace
+	// Backlogged, or in a collapsed repository section or subsection, and not the workspace
 	// the user is looking at: nothing was read, and it stays off the tab
 	// bar until it is shown again.
 	Hidden *OpenTabsOpenedHidden `protobuf:"bytes,5,opt,name=hidden,proto3,oneof"`

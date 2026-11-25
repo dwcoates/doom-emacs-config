@@ -1237,16 +1237,16 @@ func TestWorkspaceRefInRosterReadsEveryStreamOfTheFirstPush(t *testing.T) {
 	row := func(id, dir string) *frontendv1.RosterRow {
 		return &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: dir}}}
 	}
-	push := func(open, hidden, closed *frontendv1.RosterRow) *frontendv1.RosterPush {
+	push := func(open, backlog, closed *frontendv1.RosterRow) *frontendv1.RosterPush {
 		out := firstPush(&frontendv1.WorkspaceRoster{
 			Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{}}},
-			Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{}},
+			Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{}},
 		})
 		if open != nil {
 			out.Workspaces.Repository.Sections[0].Entries = rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: open}})
 		}
-		if hidden != nil {
-			out.Workspaces.Hidden.HiddenRows.Rows = []*frontendv1.RosterHiddenRow{{Row: hidden}}
+		if backlog != nil {
+			out.Workspaces.Backlog.BacklogRows.Rows = []*frontendv1.RosterBacklogRow{{Row: backlog}}
 		}
 		if closed != nil {
 			out.Closed.Rows = []*frontendv1.RosterClosedRow{{Row: closed}}
@@ -1260,7 +1260,7 @@ func TestWorkspaceRefInRosterReadsEveryStreamOfTheFirstPush(t *testing.T) {
 		wantErr string
 	}{
 		{name: "an open row", push: push(row("ws-o", "/w/x"), nil, nil), wantID: "ws-o"},
-		{name: "a hidden row", push: push(nil, row("ws-h", "/w/x"), nil), wantID: "ws-h"},
+		{name: "a backlogged row", push: push(nil, row("ws-h", "/w/x"), nil), wantID: "ws-h"},
 		{name: "a closed row, on the closed stream", push: push(nil, nil, row("ws-c", "/w/x")), wantID: "ws-c"},
 		{name: "a dir no stream carries", push: push(row("ws-o", "/w/other"), nil, nil)},
 		{name: "a dir two workspaces claim", push: push(row("ws-o", "/w/x"), nil, row("ws-c", "/w/x")), wantErr: "appears under both"},

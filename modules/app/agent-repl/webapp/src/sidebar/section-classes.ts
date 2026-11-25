@@ -10,6 +10,6 @@
  * cycle, so its names are always defined when anything reads them.
  */
 export const OPEN_SECTION_CLASS = "open-section";
-export const HIDDEN_SECTION_CLASS = "hidden-section";
+export const BACKLOG_SECTION_CLASS = "backlog-section";
 export const MERGED_SECTION_CLASS = "merged-section";
 export const MERGE_QUEUE_SECTION_CLASS = "merge-queue-section";

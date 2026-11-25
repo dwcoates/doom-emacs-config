@@ -8,9 +8,9 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold, RosterOpenSection.fold.
+//     RosterBacklogSection.fold, RosterOpenSection.fold.
 //   - a band section's height: RosterMergeQueueSection.height,
-//     RosterMergedSection.height, RosterHiddenSection.height.
+//     RosterMergedSection.height, RosterBacklogSection.height.
 //
 // It is DURABLE: it survives a daemon restart.
 //
@@ -197,7 +197,7 @@ type SidebarViewSectionSize struct {
 	//
 	//	*SidebarViewSectionSize_MergeQueue
 	//	*SidebarViewSectionSize_RecentlyMerged
-	//	*SidebarViewSectionSize_Hidden
+	//	*SidebarViewSectionSize_Backlog
 	Section isSidebarViewSectionSize_Section `protobuf_oneof:"section"`
 	// WHAT HEIGHT. THE ARM IS THE HEIGHT; unset is malformed.
 	//
@@ -265,10 +265,10 @@ func (x *SidebarViewSectionSize) GetRecentlyMerged() *SidebarViewRecentlyMerged 
 	return nil
 }
 
-func (x *SidebarViewSectionSize) GetHidden() *SidebarViewHidden {
+func (x *SidebarViewSectionSize) GetBacklog() *SidebarViewBacklog {
 	if x != nil {
-		if x, ok := x.Section.(*SidebarViewSectionSize_Hidden); ok {
-			return x.Hidden
+		if x, ok := x.Section.(*SidebarViewSectionSize_Backlog); ok {
+			return x.Backlog
 		}
 	}
 	return nil
@@ -313,16 +313,16 @@ type SidebarViewSectionSize_RecentlyMerged struct {
 	RecentlyMerged *SidebarViewRecentlyMerged `protobuf:"bytes,2,opt,name=recently_merged,json=recentlyMerged,proto3,oneof"`
 }
 
-type SidebarViewSectionSize_Hidden struct {
-	// The Hidden Workspaces section (frontend.v1.RosterHiddenSection).
-	Hidden *SidebarViewHidden `protobuf:"bytes,3,opt,name=hidden,proto3,oneof"`
+type SidebarViewSectionSize_Backlog struct {
+	// The Backlog section (frontend.v1.RosterBacklogSection).
+	Backlog *SidebarViewBacklog `protobuf:"bytes,3,opt,name=backlog,proto3,oneof"`
 }
 
 func (*SidebarViewSectionSize_MergeQueue) isSidebarViewSectionSize_Section() {}
 
 func (*SidebarViewSectionSize_RecentlyMerged) isSidebarViewSectionSize_Section() {}
 
-func (*SidebarViewSectionSize_Hidden) isSidebarViewSectionSize_Section() {}
+func (*SidebarViewSectionSize_Backlog) isSidebarViewSectionSize_Section() {}
 
 type isSidebarViewSectionSize_Height interface {
 	isSidebarViewSectionSize_Height()
@@ -448,7 +448,7 @@ type SidebarViewFoldSection struct {
 	//	*SidebarViewFoldSection_Repository
 	//	*SidebarViewFoldSection_RecentlyMerged
 	//	*SidebarViewFoldSection_MergeQueue
-	//	*SidebarViewFoldSection_Hidden
+	//	*SidebarViewFoldSection_Backlog
 	//	*SidebarViewFoldSection_Open
 	//	*SidebarViewFoldSection_Subsection
 	//	*SidebarViewFoldSection_Workspace
@@ -528,10 +528,10 @@ func (x *SidebarViewFoldSection) GetMergeQueue() *SidebarViewMergeQueue {
 	return nil
 }
 
-func (x *SidebarViewFoldSection) GetHidden() *SidebarViewHidden {
+func (x *SidebarViewFoldSection) GetBacklog() *SidebarViewBacklog {
 	if x != nil {
-		if x, ok := x.Section.(*SidebarViewFoldSection_Hidden); ok {
-			return x.Hidden
+		if x, ok := x.Section.(*SidebarViewFoldSection_Backlog); ok {
+			return x.Backlog
 		}
 	}
 	return nil
@@ -620,11 +620,11 @@ type SidebarViewFoldSection_MergeQueue struct {
 	MergeQueue *SidebarViewMergeQueue `protobuf:"bytes,11,opt,name=merge_queue,json=mergeQueue,proto3,oneof"`
 }
 
-type SidebarViewFoldSection_Hidden struct {
-	// The hidden-workspaces section; the roster carries exactly one. Its
-	// fold hides rows in the sidebar only: a hidden workspace is off the
+type SidebarViewFoldSection_Backlog struct {
+	// The backlog; the roster carries exactly one. Its
+	// fold hides rows in the sidebar only: a backlogged workspace is off the
 	// Emacs tab bar whether the section is folded or not.
-	Hidden *SidebarViewHidden `protobuf:"bytes,7,opt,name=hidden,proto3,oneof"`
+	Backlog *SidebarViewBacklog `protobuf:"bytes,7,opt,name=backlog,proto3,oneof"`
 }
 
 type SidebarViewFoldSection_Open struct {
@@ -661,7 +661,7 @@ func (*SidebarViewFoldSection_RecentlyMerged) isSidebarViewFoldSection_Section()
 
 func (*SidebarViewFoldSection_MergeQueue) isSidebarViewFoldSection_Section() {}
 
-func (*SidebarViewFoldSection_Hidden) isSidebarViewFoldSection_Section() {}
+func (*SidebarViewFoldSection_Backlog) isSidebarViewFoldSection_Section() {}
 
 func (*SidebarViewFoldSection_Open) isSidebarViewFoldSection_Section() {}
 
@@ -759,27 +759,27 @@ func (*SidebarViewMergeQueue) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{7}
 }
 
-// The hidden-workspaces section. DELIBERATELY EMPTY: the arm is the section.
-type SidebarViewHidden struct {
+// The backlog. DELIBERATELY EMPTY: the arm is the section.
+type SidebarViewBacklog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SidebarViewHidden) Reset() {
-	*x = SidebarViewHidden{}
+func (x *SidebarViewBacklog) Reset() {
+	*x = SidebarViewBacklog{}
 	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SidebarViewHidden) String() string {
+func (x *SidebarViewBacklog) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SidebarViewHidden) ProtoMessage() {}
+func (*SidebarViewBacklog) ProtoMessage() {}
 
-func (x *SidebarViewHidden) ProtoReflect() protoreflect.Message {
+func (x *SidebarViewBacklog) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -791,8 +791,8 @@ func (x *SidebarViewHidden) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SidebarViewHidden.ProtoReflect.Descriptor instead.
-func (*SidebarViewHidden) Descriptor() ([]byte, []int) {
+// Deprecated: Use SidebarViewBacklog.ProtoReflect.Descriptor instead.
+func (*SidebarViewBacklog) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{8}
 }
 
@@ -1326,27 +1326,27 @@ const file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc = "" +
 	"\rsize_sections\x18\x04 \x01(\v2%.agentrepl.v1.SidebarViewSizeSectionsH\x00R\fsizeSectionsB\b\n" +
 	"\x06changeJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\rshow_groupingR\tshow_open\"U\n" +
 	"\x17SidebarViewSizeSections\x12:\n" +
-	"\x05sizes\x18\x01 \x03(\v2$.agentrepl.v1.SidebarViewSectionSizeR\x05sizes\"\x85\x03\n" +
+	"\x05sizes\x18\x01 \x03(\v2$.agentrepl.v1.SidebarViewSectionSizeR\x05sizes\"\x88\x03\n" +
 	"\x16SidebarViewSectionSize\x12F\n" +
 	"\vmerge_queue\x18\x01 \x01(\v2#.agentrepl.v1.SidebarViewMergeQueueH\x00R\n" +
 	"mergeQueue\x12R\n" +
-	"\x0frecently_merged\x18\x02 \x01(\v2'.agentrepl.v1.SidebarViewRecentlyMergedH\x00R\x0erecentlyMerged\x129\n" +
-	"\x06hidden\x18\x03 \x01(\v2\x1f.agentrepl.v1.SidebarViewHiddenH\x00R\x06hidden\x12@\n" +
+	"\x0frecently_merged\x18\x02 \x01(\v2'.agentrepl.v1.SidebarViewRecentlyMergedH\x00R\x0erecentlyMerged\x12<\n" +
+	"\abacklog\x18\x03 \x01(\v2 .agentrepl.v1.SidebarViewBacklogH\x00R\abacklog\x12@\n" +
 	"\x06fitted\x18\x04 \x01(\v2&.agentrepl.v1.SidebarViewSectionFittedH\x01R\x06fitted\x12=\n" +
 	"\x05lines\x18\x05 \x01(\v2%.agentrepl.v1.SidebarViewSectionLinesH\x01R\x05linesB\t\n" +
 	"\asectionB\b\n" +
 	"\x06height\"\x1a\n" +
 	"\x18SidebarViewSectionFitted\"/\n" +
 	"\x17SidebarViewSectionLines\x12\x14\n" +
-	"\x05lines\x18\x01 \x01(\rR\x05lines\"\x97\x05\n" +
+	"\x05lines\x18\x01 \x01(\rR\x05lines\"\x9a\x05\n" +
 	"\x16SidebarViewFoldSection\x12=\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
 	"repository\x12R\n" +
 	"\x0frecently_merged\x18\x03 \x01(\v2'.agentrepl.v1.SidebarViewRecentlyMergedH\x00R\x0erecentlyMerged\x12F\n" +
 	"\vmerge_queue\x18\v \x01(\v2#.agentrepl.v1.SidebarViewMergeQueueH\x00R\n" +
-	"mergeQueue\x129\n" +
-	"\x06hidden\x18\a \x01(\v2\x1f.agentrepl.v1.SidebarViewHiddenH\x00R\x06hidden\x123\n" +
+	"mergeQueue\x12<\n" +
+	"\abacklog\x18\a \x01(\v2 .agentrepl.v1.SidebarViewBacklogH\x00R\abacklog\x123\n" +
 	"\x04open\x18\t \x01(\v2\x1d.agentrepl.v1.SidebarViewOpenH\x00R\x04open\x12=\n" +
 	"\n" +
 	"subsection\x18\n" +
@@ -1358,8 +1358,8 @@ const file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc = "" +
 	"\asectionB\x06\n" +
 	"\x04foldJ\x04\b\x02\x10\x03J\x04\b\x06\x10\aJ\x04\b\b\x10\tR\x06viewedR\x04taskR\bmaturity\"\x1b\n" +
 	"\x19SidebarViewRecentlyMerged\"\x17\n" +
-	"\x15SidebarViewMergeQueue\"\x13\n" +
-	"\x11SidebarViewHidden\"\x11\n" +
+	"\x15SidebarViewMergeQueue\"\x14\n" +
+	"\x12SidebarViewBacklog\"\x11\n" +
 	"\x0fSidebarViewOpen\"\x13\n" +
 	"\x11SidebarViewExpand\"\x15\n" +
 	"\x13SidebarViewCollapse\"\xa7\x01\n" +
@@ -1401,7 +1401,7 @@ var file_agentrepl_v1_endpoint_update_sidebar_view_proto_goTypes = []any{
 	(*SidebarViewFoldSection)(nil),             // 5: agentrepl.v1.SidebarViewFoldSection
 	(*SidebarViewRecentlyMerged)(nil),          // 6: agentrepl.v1.SidebarViewRecentlyMerged
 	(*SidebarViewMergeQueue)(nil),              // 7: agentrepl.v1.SidebarViewMergeQueue
-	(*SidebarViewHidden)(nil),                  // 8: agentrepl.v1.SidebarViewHidden
+	(*SidebarViewBacklog)(nil),                 // 8: agentrepl.v1.SidebarViewBacklog
 	(*SidebarViewOpen)(nil),                    // 9: agentrepl.v1.SidebarViewOpen
 	(*SidebarViewExpand)(nil),                  // 10: agentrepl.v1.SidebarViewExpand
 	(*SidebarViewCollapse)(nil),                // 11: agentrepl.v1.SidebarViewCollapse
@@ -1422,13 +1422,13 @@ var file_agentrepl_v1_endpoint_update_sidebar_view_proto_depIdxs = []int32{
 	2,  // 2: agentrepl.v1.SidebarViewSizeSections.sizes:type_name -> agentrepl.v1.SidebarViewSectionSize
 	7,  // 3: agentrepl.v1.SidebarViewSectionSize.merge_queue:type_name -> agentrepl.v1.SidebarViewMergeQueue
 	6,  // 4: agentrepl.v1.SidebarViewSectionSize.recently_merged:type_name -> agentrepl.v1.SidebarViewRecentlyMerged
-	8,  // 5: agentrepl.v1.SidebarViewSectionSize.hidden:type_name -> agentrepl.v1.SidebarViewHidden
+	8,  // 5: agentrepl.v1.SidebarViewSectionSize.backlog:type_name -> agentrepl.v1.SidebarViewBacklog
 	3,  // 6: agentrepl.v1.SidebarViewSectionSize.fitted:type_name -> agentrepl.v1.SidebarViewSectionFitted
 	4,  // 7: agentrepl.v1.SidebarViewSectionSize.lines:type_name -> agentrepl.v1.SidebarViewSectionLines
 	19, // 8: agentrepl.v1.SidebarViewFoldSection.repository:type_name -> workspace.v1.RepositoryRef
 	6,  // 9: agentrepl.v1.SidebarViewFoldSection.recently_merged:type_name -> agentrepl.v1.SidebarViewRecentlyMerged
 	7,  // 10: agentrepl.v1.SidebarViewFoldSection.merge_queue:type_name -> agentrepl.v1.SidebarViewMergeQueue
-	8,  // 11: agentrepl.v1.SidebarViewFoldSection.hidden:type_name -> agentrepl.v1.SidebarViewHidden
+	8,  // 11: agentrepl.v1.SidebarViewFoldSection.backlog:type_name -> agentrepl.v1.SidebarViewBacklog
 	9,  // 12: agentrepl.v1.SidebarViewFoldSection.open:type_name -> agentrepl.v1.SidebarViewOpen
 	20, // 13: agentrepl.v1.SidebarViewFoldSection.subsection:type_name -> agentrepl.v1.SubsectionRef
 	21, // 14: agentrepl.v1.SidebarViewFoldSection.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -1460,7 +1460,7 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() {
 	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[2].OneofWrappers = []any{
 		(*SidebarViewSectionSize_MergeQueue)(nil),
 		(*SidebarViewSectionSize_RecentlyMerged)(nil),
-		(*SidebarViewSectionSize_Hidden)(nil),
+		(*SidebarViewSectionSize_Backlog)(nil),
 		(*SidebarViewSectionSize_Fitted)(nil),
 		(*SidebarViewSectionSize_Lines)(nil),
 	}
@@ -1468,7 +1468,7 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() {
 		(*SidebarViewFoldSection_Repository)(nil),
 		(*SidebarViewFoldSection_RecentlyMerged)(nil),
 		(*SidebarViewFoldSection_MergeQueue)(nil),
-		(*SidebarViewFoldSection_Hidden)(nil),
+		(*SidebarViewFoldSection_Backlog)(nil),
 		(*SidebarViewFoldSection_Open)(nil),
 		(*SidebarViewFoldSection_Subsection)(nil),
 		(*SidebarViewFoldSection_Workspace)(nil),

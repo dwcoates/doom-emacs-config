@@ -62,8 +62,8 @@
 (declare-function agent-repl-wire-encode-register-workspaces-request "wire-host" (request))
 (declare-function agent-repl-wire-encode-retry-vendor-error-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-retry-vendor-error-response "wire-verbs" (json))
-(declare-function agent-repl-wire-encode-send-hidden-keepalives-request "wire-verbs" (&optional request))
-(declare-function agent-repl-wire-decode-send-hidden-keepalives-response "wire-verbs" (json))
+(declare-function agent-repl-wire-encode-send-backlogged-keepalives-request "wire-verbs" (&optional request))
+(declare-function agent-repl-wire-decode-send-backlogged-keepalives-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-update-persistent-wifi-mode-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-persistent-wifi-mode-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-update-remote-control-mode-request "wire-verbs" (request))
@@ -135,8 +135,8 @@
 (declare-function agent-repl-wire-encode-restart-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-restart-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-set-workspace-priority-request "wire-verbs" (request))
-(declare-function agent-repl-wire-encode-set-workspace-hidden-request "wire-verbs" (request))
-(declare-function agent-repl-wire-decode-set-workspace-hidden-response "wire-verbs" (json))
+(declare-function agent-repl-wire-encode-set-workspace-backlogged-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-set-workspace-backlogged-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-update-sidebar-view-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-sidebar-view-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
@@ -583,22 +583,22 @@ RET in an empty composer sends it: nothing goes out as content, and the
 shim's own continue prompt is the retry.  The answer's arm is what the
 shim judged: retried, nothing scheduled, busy or ended.")
 
-(agent-repl-rpc--defverb agent-repl-rpc-send-hidden-keepalives
-  "SendHiddenKeepalives"
-  agent-repl-wire-encode-send-hidden-keepalives-request
-  agent-repl-wire-decode-send-hidden-keepalives-response
-  "Send one keep-alive to every hidden workspace's session.
+(agent-repl-rpc--defverb agent-repl-rpc-send-backlogged-keepalives
+  "SendBackloggedKeepalives"
+  agent-repl-wire-encode-send-backlogged-keepalives-request
+  agent-repl-wire-decode-send-backlogged-keepalives-response
+  "Send one keep-alive to every backlogged workspace's session.
 Daemon-scoped: nothing names a workspace.  Each cadence stays held; the
 keep-alive's answer moves each cache's lapse later, which reaches the
-hidden section's countdown on the roster stream.  The success reports
-each hidden workspace's outcome; only an unreadable registry is an error.")
+backlog's countdown on the roster stream.  The success reports
+each backlogged workspace's outcome; only an unreadable registry is an error.")
 
-(agent-repl-rpc--defverb agent-repl-rpc-set-workspace-hidden
-  "SetWorkspaceHidden"
-  agent-repl-wire-encode-set-workspace-hidden-request
-  agent-repl-wire-decode-set-workspace-hidden-response
-  "Move a workspace into the sidebar's hidden section, or back out of it.
-A hidden workspace keeps its session and its tab; the roster push that
+(agent-repl-rpc--defverb agent-repl-rpc-set-workspace-backlogged
+  "SetWorkspaceBacklogged"
+  agent-repl-wire-encode-set-workspace-backlogged-request
+  agent-repl-wire-decode-set-workspace-backlogged-response
+  "Move a workspace into the sidebar's backlog, or back out of it.
+A backlogged workspace keeps its session and its tab; the roster push that
 follows takes its tab off the bar's drawing, numbering and navigation.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-list-merged-workspaces

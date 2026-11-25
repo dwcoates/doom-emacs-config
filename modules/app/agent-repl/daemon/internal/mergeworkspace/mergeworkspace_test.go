@@ -298,7 +298,7 @@ func TestForkFindsTheWorkspaceARestartLeftForked(t *testing.T) {
 
 // TestForkStartsTheSessionOfTheWorkspaceARestartLeftForked: the restart may
 // have cut the create after registration and before its session came up, and
-// the boot brings no hidden workspace up, so the pick that follows the
+// the boot brings no backlogged workspace up, so the pick that follows the
 // hand-off would otherwise be submitted to no session.
 func TestForkStartsTheSessionOfTheWorkspaceARestartLeftForked(t *testing.T) {
 	// Arrange

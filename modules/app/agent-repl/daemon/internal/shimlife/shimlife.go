@@ -50,10 +50,47 @@ const (
 	// session of its own yet, its session started fresh on it (queue bypass
 	// mode's switch, workspace.verbs.swapConversation, not a rebind).
 	StartSwap StartCause = "swap"
+	// StartMergeLeftLine is a workspace's session brought back up once its own
+	// branch's merge, whose wait in line parked it, left the line without
+	// landing and without its workspace ending: evicted, dequeued, or behind
+	// a merge that did not land (merge.AbandonCause.returnsSession).
+	StartMergeLeftLine StartCause = "merge_left_line"
 	// StartUnstated is a start no caller stated a cause for: a wiring gap,
 	// which the fleet records at INFO so it is seen.
 	StartUnstated StartCause = "unstated"
 )
+
+// ForWork reports whether a start of this cause brings the session up for a
+// turn it is about to run (owner ruling, 2026-11-24): a prompt, a create's or
+// a fork's first prompt, a thread's question, a merge
+// step or an owed compaction. Such a session is initializing until that turn
+// closes (wsm.Session.Initializing) and is never parked meanwhile. A
+// keep-alive's restore, a boot's or a takeover's adoption, a settings pick and
+// the starts UserStarted names run no turn of their own.
+func (c StartCause) ForWork() bool {
+	switch c {
+	case StartPrompt, StartCreate, StartFork, StartThread, StartMerge, StartCompaction:
+		return true
+	default:
+		return false
+	}
+}
+
+// UserStarted reports whether a start of this cause is one the user asked for
+// that runs no turn of its own for certain: the restart verb, a relaunch of a
+// dead shim, a rebind, a swap, a cold gate's answer (a "pay" resumes with no
+// turn unless prompts were held at the gate), and the session a merge's wait
+// in line parked handed back once the merge leaves the line without landing.
+// Such a session is held for wsm.ShimIdleHold from its bring-up
+// (wsm.Session.UserBroughtUpAt), so it is never parked the moment it comes up.
+func (c StartCause) UserStarted() bool {
+	switch c {
+	case StartRestart, StartRelaunch, StartRebind, StartSwap, StartColdGateAnswer, StartMergeLeftLine:
+		return true
+	default:
+		return false
+	}
+}
 
 // StandDownReason is why a shim is stood down on purpose.
 type StandDownReason string
@@ -64,7 +101,7 @@ const (
 	StandDownKeepaliveCycle StandDownReason = "keepalive_cycle"
 	// StandDownHibernate is a session idle past the cutoff.
 	StandDownHibernate StandDownReason = "hibernate"
-	// StandDownCacheLapse is a hidden or closed workspace whose cache lapsed.
+	// StandDownCacheLapse is a backlogged or closed workspace whose cache lapsed.
 	StandDownCacheLapse StandDownReason = "cache_lapse"
 	// StandDownFold is a workspace a fold withholds (a collapsed repository
 	// section or subsection, or a parent's folded children), stood down once
@@ -87,7 +124,7 @@ const (
 	// the switch away from its workspace with no prompt run since.
 	StandDownSettingsVisit StandDownReason = "settings_visit"
 	// StandDownIdle is a session parked once it has been idle
-	// cachelapse.StandDownGrace, between its keep-alives.
+	// its shim hold (wsm.ShimHold), between its keep-alives.
 	StandDownIdle StandDownReason = "idle"
 	// StandDownCacheCold is an idle session parked the moment its cache was
 	// known cold, so no keep-alive would ever stand it down.

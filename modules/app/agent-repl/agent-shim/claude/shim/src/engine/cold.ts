@@ -501,7 +501,7 @@ export function sessionCold(
  * The projected lapse a HELD keep-alive cadence states (engine/keepalive.ts):
  * when the cache lapses, and the cold gate's verdict on a resume after it. The
  * verdict is the floor's, the same rule {@link judgeCold} applies to a lapse,
- * so a hidden workspace is struck through exactly when showing it will ask.
+ * so a backlogged workspace is struck through exactly when showing it will ask.
  * A gated verdict carries every fact the gate will state once the lapse comes
  * (the last request and the lifetime that lapsed), so the daemon raises the
  * gate at the lapse with no shim started.

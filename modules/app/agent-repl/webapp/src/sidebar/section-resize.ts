@@ -1,7 +1,7 @@
 /**
  * section-resize — THE RULES BETWEEN THE RAIL'S SECTIONS ARE DRAGGED (owner
  * request, 2026-11-11): pressing the grey rule above an open band section
- * (Merge Queue, Recently Merged, Hidden Workspaces) and dragging it moves the
+ * (Merge Queue, Recently Merged, Backlog) and dragging it moves the
  * room between that section and the open section above it. Dragging the rule
  * between the Open section and Merge Queue upward makes the Open section
  * shorter and the Merge Queue section taller.
@@ -36,8 +36,8 @@ import { DRAGGING_CLASS } from "../drag.js";
 import { createLogger } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { BAND_SIZED_ATTRIBUTE, bandSize, fittedSection, type FittedSection } from "./band-fit.js";
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
-import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, type SidebarContext } from "./context.js";
+import { BACKLOG_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
+import { BACKLOG_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, type SidebarContext } from "./context.js";
 import { changeViews, type ViewPiece } from "./view-change.js";
 import { heightViewKey } from "./view.js";
 import { decorativeElement } from "../dom.js";
@@ -91,7 +91,7 @@ export function drawSectionHeight(section: HTMLElement, foldKey: string, wire: n
 }
 
 /** The four sections top to bottom, as the pane draws them. */
-const SECTION_ORDER = [OPEN_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, HIDDEN_SECTION_CLASS] as const;
+const SECTION_ORDER = [OPEN_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, BACKLOG_SECTION_CLASS] as const;
 
 /** Whether SECTION is drawn open in its pane. */
 const isOpen = (section: Element): boolean => !(section as HTMLElement).hidden && !section.classList.contains(FOLDED_CLASS);
@@ -165,8 +165,8 @@ function sizeSection(foldKey: string): MessageInitShape<typeof SidebarViewSectio
       return { case: "mergeQueue", value: {} };
     case MERGED_FOLD_KEY:
       return { case: "recentlyMerged", value: {} };
-    case HIDDEN_FOLD_KEY:
-      return { case: "hidden", value: {} };
+    case BACKLOG_FOLD_KEY:
+      return { case: "backlog", value: {} };
     default:
       break;
   }

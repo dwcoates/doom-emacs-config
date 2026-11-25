@@ -222,8 +222,8 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 // AN ANSWERED GATE MARKS ITS CACHE COLD first (cachelapse.Keeper.ColdGateAnswered),
 // so the re-opened session owes no keep-alive until its next turn ends.
 //
-// AN ANSWERED GATE SHOWS ITS WORKSPACE (owner ruling, 2026-10-17). A hidden
-// workspace's answer moves it out of the hidden section before the re-open
+// AN ANSWERED GATE SHOWS ITS WORKSPACE (owner ruling, 2026-10-17). A backlogged
+// workspace's answer moves it out of the backlog before the re-open
 // starts, so the session the answer brings up is one the daemon runs and
 // keeps warm, never one the cache keeper stands down on arrival. A show that
 // cannot be recorded refuses the answer, and the gate stands again.
@@ -270,14 +270,14 @@ func (v *verbs) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		return fmt.Errorf("mark the cache of the workspace whose cold gate was answered, %q, cold: %w", ws, err)
 	}
 	// A STANDING DEPLOY CHECK STAYS WHERE IT IS: it runs and is kept warm
-	// hidden or not (wsm.Workspace.Runs), so the hidden intake is never shown.
-	if record.InHiddenSection() && !record.IsMediator() {
-		if err := v.recordHidden(ctx, log, ws, false); err != nil {
-			// recordHidden recorded the failure at ERROR as its owner.
+	// backlogged or not (wsm.Workspace.Runs), so the backlogged intake is never shown.
+	if record.InBacklog() && !record.IsMediator() {
+		if err := v.recordBacklogged(ctx, log, ws, false); err != nil {
+			// recordBacklogged recorded the failure at ERROR as its owner.
 			v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, logsite.Msg("the workspace could not be shown; the answer is refused"), err)
 			return fmt.Errorf("show the workspace whose cold gate was answered, %q: %w", ws, err)
 		}
-		log.Info(opColdGate, "the answered gate's workspace was hidden; it is shown again", dlog.Context{"choice": choice})
+		log.Info(opColdGate, "the answered gate's workspace was backlogged; it is shown again", dlog.Context{"choice": choice})
 	}
 	if err := v.deps.Queue.ColdGateAnswered(ctx, ws, coldGateFate(answer)); err != nil {
 		// The queue recorded the failure at ERROR as its owner; what is the

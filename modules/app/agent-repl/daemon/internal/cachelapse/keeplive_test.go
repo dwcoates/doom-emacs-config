@@ -172,7 +172,7 @@ func TestAKeepLiveIsRefused(t *testing.T) {
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool { return e.GetClosed() != nil }},
 		{name: "for an unknown workspace", arrange: func(h *harness) { delete(h.db.records, theWorkspace) },
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool { return e.GetUnknownWorkspace() != nil }},
-		{name: "for a hidden workspace, which owes no keep-alive", arrange: func(h *harness) { h.db.records[theWorkspace] = beatable(hidden(), 10*time.Minute) },
+		{name: "for a backlogged workspace, which owes no keep-alive", arrange: func(h *harness) { h.db.records[theWorkspace] = beatable(backlogged(), 10*time.Minute) },
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool { return e.GetOwesNoKeepalive().GetReason() != "" }},
 		{name: "when the registry cannot be read", arrange: func(h *harness) { h.db.readErr = errors.New("the store is gone") },
 			want: func(e *agentreplv1.KeepLiveWorkspaceError) bool {
@@ -243,7 +243,7 @@ func TestAnAlreadyUpWorkspaceIsBeatenAndLeftToTheOrdinaryRules(t *testing.T) {
 		wantDowns int
 	}{
 		{name: "within its grace it stays up with no stand-down asked", workedAgo: ptr(time.Minute),
-			wantRule: "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive"},
+			wantRule: "the workspace's resource allocation holds its shim up; the shim stays up until its hold ends"},
 		{name: "past its grace the stand-down's own rule keeps it up", outcome: &drain.CycleOutcome{Why: "remote control is on; the shim stays up for claude.ai"},
 			wantRule: "remote control is on; the shim stays up for claude.ai", wantDowns: 1},
 	}
@@ -251,7 +251,7 @@ func TestAnAlreadyUpWorkspaceIsBeatenAndLeftToTheOrdinaryRules(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := keepLiveHarness(t)
-			h.workedAgo(StandDownGrace + time.Minute)
+			h.workedAgo(testHoldAfterWork + time.Minute)
 			if tt.workedAgo != nil {
 				h.workedAgo(*tt.workedAgo)
 			}
@@ -444,7 +444,7 @@ func TestTheVerbAndTheScheduledBeatShareOneSubroutine(t *testing.T) {
 	if got, want := callers["sendBeat"], []string{"beginKeepLive", "beatsDue"}; !sameSet(got, want) {
 		t.Fatalf("sendBeat is called from %v, want only %v", got, want)
 	}
-	// SendHiddenKeepalives' beat (`SPC j R`) keeps its cadence held and owns
+	// SendBackloggedKeepalives' beat (`SPC j R`) keeps its cadence held and owns
 	// no stand-down, so it is the one other caller of the shim's keep-alive.
 	if got, want := callers["Beat"], []string{"sendBeat", "beat"}; !sameSet(got, want) {
 		t.Fatalf("the shim's keep-alive is asked from %v, want only %v", got, want)

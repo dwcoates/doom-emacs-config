@@ -209,7 +209,7 @@ func TestArmedPanicsOnAMisnamedArm(t *testing.T) {
 // armVariants answers one message of descriptor MD per way its oneofs can be
 // set, recursively: each arm of each oneof, and each such variant of every
 // singular message field that has oneofs of its own, so a nested choice (a
-// parent's hidden or closed state, GitHub's failure) is enumerated too. A
+// parent's backlogged or closed state, GitHub's failure) is enumerated too. A
 // message with no oneof anywhere in it is one empty variant.
 func armVariants(md protoreflect.MessageDescriptor, depth int) []protoreflect.Message {
 	out := []protoreflect.Message{newGenerated(md)}
@@ -300,7 +300,7 @@ func TestArmVariants(t *testing.T) {
 	}{
 		{name: "a message with no oneof is one empty variant", md: (&agentreplv1.SetWorkspaceOneShotClosed{}).ProtoReflect().Descriptor(), want: 1},
 		{name: "each arm of a oneof is a variant", md: (&agentreplv1.SetWorkspaceOneShotError{}).ProtoReflect().Descriptor(), want: 6},
-		{name: "a nested oneof is enumerated within its arm", md: (&agentreplv1.SetWorkspaceHiddenError{}).ProtoReflect().Descriptor(), want: 5 + 3},
+		{name: "a nested oneof is enumerated within its arm", md: (&agentreplv1.SetWorkspaceBackloggedError{}).ProtoReflect().Descriptor(), want: 5 + 3},
 		{name: "a singular field's oneof is enumerated", md: (&agentreplv1.CommentOnPullRequestNotPosted{}).ProtoReflect().Descriptor(), want: 5},
 	}
 	for _, tt := range tests {

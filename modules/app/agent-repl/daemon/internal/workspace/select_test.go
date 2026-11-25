@@ -679,6 +679,26 @@ func TestRecordInteractionStampsTheInstantThenTellsTheRoster(t *testing.T) {
 	}
 }
 
+func TestRecordInteractionIsRecordedAtInfoWithItsKind(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.RecordInteraction(context.Background(), "w1", InteractionComposerTyped); err != nil {
+		t.Fatalf("RecordInteraction: %v", err)
+	}
+
+	// Assert.
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opInteraction})
+	if !ok {
+		t.Fatalf("no info %s record", opInteraction)
+	}
+	if got := rec.Context["interaction"]; got != string(InteractionComposerTyped) {
+		t.Fatalf("interaction = %v, want %s", got, InteractionComposerTyped)
+	}
+}
+
 func TestRecordInteractionSelectsNothing(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -794,10 +814,10 @@ func TestSelectOnADaemonStandingDownLeavesTheSelectionStanding(t *testing.T) {
 	}
 }
 
-func TestSetHiddenRecordsTheFlagAndRepublishesTheRoster(t *testing.T) {
+func TestSetBackloggedRecordsTheFlagAndRepublishesTheRoster(t *testing.T) {
 	tests := []struct {
-		name   string
-		hidden bool
+		name       string
+		backlogged bool
 	}{{"hide", true}, {"show", false}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -805,18 +825,18 @@ func TestSetHiddenRecordsTheFlagAndRepublishesTheRoster(t *testing.T) {
 			f := newFixture(t)
 			f.workspace("w1", t.TempDir())
 			prior := f.db.workspaces["w1"]
-			prior.Hidden = !tt.hidden
+			prior.Backlogged = !tt.backlogged
 			f.db.workspaces["w1"] = prior
 
 			// Act
-			err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden)
+			err := f.verbs.SetBacklogged(context.Background(), "w1", tt.backlogged)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("SetHidden: %v", err)
+				t.Fatalf("SetBacklogged: %v", err)
 			}
-			if got := f.db.workspaces["w1"].Hidden; got != tt.hidden {
-				t.Fatalf("recorded hidden = %v, want %v", got, tt.hidden)
+			if got := f.db.workspaces["w1"].Backlogged; got != tt.backlogged {
+				t.Fatalf("recorded backlogged = %v, want %v", got, tt.backlogged)
 			}
 			if len(f.sidebar.registries) != 1 {
 				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
@@ -825,12 +845,12 @@ func TestSetHiddenRecordsTheFlagAndRepublishesTheRoster(t *testing.T) {
 	}
 }
 
-func TestSetHiddenRefusesAnUnknownWorkspace(t *testing.T) {
+func TestSetBackloggedRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 
 	// Act
-	err := f.verbs.SetHidden(context.Background(), "nope", true)
+	err := f.verbs.SetBacklogged(context.Background(), "nope", true)
 
 	// Assert
 	asRefusal(t, err, ArmUnknownWorkspace)
@@ -839,20 +859,20 @@ func TestSetHiddenRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 }
 
-func TestSetHiddenSurfacesAFailedWriteAtError(t *testing.T) {
+func TestSetBackloggedSurfacesAFailedWriteAtError(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	f.db.setHiddenErr = errors.New("disk I/O error")
+	f.db.setBackloggedErr = errors.New("disk I/O error")
 
 	// Act
-	err := f.verbs.SetHidden(context.Background(), "w1", true)
+	err := f.verbs.SetBacklogged(context.Background(), "w1", true)
 
 	// Assert
 	if err == nil {
-		t.Fatal("a failed hidden write was answered as success")
+		t.Fatal("a failed backlogged write was answered as success")
 	}
-	if !loggedAtError(f, opSetHidden) {
+	if !loggedAtError(f, opSetBacklogged) {
 		t.Fatal("the failed write was not recorded at error")
 	}
 	if len(f.sidebar.registries) != 0 {
@@ -863,13 +883,13 @@ func TestSetHiddenSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
-func TestRecordHiddenWritesRepublishesAndRaisesTheEdge(t *testing.T) {
+func TestRecordBackloggedWritesRepublishesAndRaisesTheEdge(t *testing.T) {
 	tests := []struct {
-		name   string
-		hidden bool
+		name       string
+		backlogged bool
 	}{
-		{name: "hiding", hidden: true},
-		{name: "showing", hidden: false},
+		{name: "hiding", backlogged: true},
+		{name: "showing", backlogged: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -877,18 +897,18 @@ func TestRecordHiddenWritesRepublishesAndRaisesTheEdge(t *testing.T) {
 			f := newFixture(t)
 			f.workspace("w1", t.TempDir())
 			prior := f.db.workspaces["w1"]
-			prior.Hidden = !tt.hidden
+			prior.Backlogged = !tt.backlogged
 			f.db.workspaces["w1"] = prior
 
 			// Act
-			err := f.verbs.(*verbs).recordHidden(context.Background(), f.log.Global(), "w1", tt.hidden)
+			err := f.verbs.(*verbs).recordBacklogged(context.Background(), f.log.Global(), "w1", tt.backlogged)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("recordHidden: %v", err)
+				t.Fatalf("recordBacklogged: %v", err)
 			}
-			if got := f.db.workspaces["w1"].Hidden; got != tt.hidden {
-				t.Fatalf("recorded hidden = %v, want %v", got, tt.hidden)
+			if got := f.db.workspaces["w1"].Backlogged; got != tt.backlogged {
+				t.Fatalf("recorded backlogged = %v, want %v", got, tt.backlogged)
 			}
 			if len(f.sidebar.registries) != 1 {
 				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
@@ -900,20 +920,20 @@ func TestRecordHiddenWritesRepublishesAndRaisesTheEdge(t *testing.T) {
 	}
 }
 
-func TestRecordHiddenSurfacesAFailedWriteAtError(t *testing.T) {
+func TestRecordBackloggedSurfacesAFailedWriteAtError(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	f.db.setHiddenErr = errors.New("disk I/O error")
+	f.db.setBackloggedErr = errors.New("disk I/O error")
 
 	// Act
-	err := f.verbs.(*verbs).recordHidden(context.Background(), f.log.Global(), "w1", false)
+	err := f.verbs.(*verbs).recordBacklogged(context.Background(), f.log.Global(), "w1", false)
 
 	// Assert
 	if err == nil {
-		t.Fatal("a failed hidden write was answered as success")
+		t.Fatal("a failed backlogged write was answered as success")
 	}
-	if !loggedAtError(f, opSetHidden) {
+	if !loggedAtError(f, opSetBacklogged) {
 		t.Fatal("the failed write was not recorded at error")
 	}
 	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
@@ -921,27 +941,27 @@ func TestRecordHiddenSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
-// TestTheHiddenFlagHasOneWrite fails when a verb writes the hidden flag by
-// hand instead of through recordHidden, which would skip the roster push or
+// TestTheBackloggedFlagHasOneWrite fails when a verb writes the backlogged flag by
+// hand instead of through recordBacklogged, which would skip the roster push or
 // the cache keeper's edge.
-func TestTheHiddenFlagHasOneWrite(t *testing.T) {
+func TestTheBackloggedFlagHasOneWrite(t *testing.T) {
 	// Act
-	sites := sourcescan.Sites(t, "v.deps.DB.SetHidden(")
+	sites := sourcescan.Sites(t, "v.deps.DB.SetBacklogged(")
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "select.go" {
-		t.Fatalf("the hidden flag is written at %v, want only recordHidden in select.go", sites)
+		t.Fatalf("the backlogged flag is written at %v, want only recordBacklogged in select.go", sites)
 	}
 }
 
 // hiddenMergeWorkspace registers WS as a merge workspace its async merge still
-// withholds, with the hidden flag as HIDDEN, and makes the fixture's merge
+// withholds, with the backlogged flag as BACKLOGGED, and makes the fixture's merge
 // queue reveal through the verbs' own durable reveal, as the orchestrator does.
 func hiddenMergeWorkspace(t *testing.T, f *fixture, ws ids.WorkspaceID, hidden bool) {
 	t.Helper()
 	record := f.workspace(ws, t.TempDir())
 	record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
-	record.Hidden = hidden
+	record.Backlogged = hidden
 	f.db.with(record)
 	f.merge.reveal = func(ctx context.Context, id ids.WorkspaceID) error {
 		_, err := f.verbs.RevealMergeWorkspace(ctx, id)
@@ -968,24 +988,24 @@ func drawnOpen(t *testing.T, f *fixture, ws ids.WorkspaceID) bool {
 func TestShowingAHiddenMergeWorkspaceRevealsItAndTheRosterDrawsIt(t *testing.T) {
 	tests := []struct {
 		name string
-		// hidden is the hidden flag beside the unrevealed standing.
-		hidden bool
+		// backlogged is the backlogged flag beside the unrevealed standing.
+		backlogged bool
 	}{
-		{name: "withheld by its merge only", hidden: false},
-		{name: "withheld by its merge and hidden by the flag", hidden: true},
+		{name: "withheld by its merge only", backlogged: false},
+		{name: "withheld by its merge and backlogged by the flag", backlogged: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
-			hiddenMergeWorkspace(t, f, "ws-merge", tt.hidden)
+			hiddenMergeWorkspace(t, f, "ws-merge", tt.backlogged)
 
 			// Act
-			err := f.verbs.SetHidden(context.Background(), "ws-merge", false)
+			err := f.verbs.SetBacklogged(context.Background(), "ws-merge", false)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("SetHidden: %v", err)
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 			if !slices.Equal(f.merge.reveals, []ids.WorkspaceID{"ws-merge"}) || f.merge.revealCauses[0] != "it was shown" {
 				t.Fatalf("reveals = %v causes = %v, want the one reveal a show asks for", f.merge.reveals, f.merge.revealCauses)
@@ -1002,7 +1022,7 @@ func TestShowingAnOrdinaryWorkspaceRevealsNothing(t *testing.T) {
 		name   string
 		record func(wsm.Workspace) wsm.Workspace
 	}{
-		{name: "an ordinary hidden workspace", record: func(ws wsm.Workspace) wsm.Workspace { return ws }},
+		{name: "an ordinary backlogged workspace", record: func(ws wsm.Workspace) wsm.Workspace { return ws }},
 		{name: "a revealed merge workspace the user hid", record: func(ws wsm.Workspace) wsm.Workspace {
 			ws.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
 			ws.MergeRevealed = true
@@ -1014,15 +1034,15 @@ func TestShowingAnOrdinaryWorkspaceRevealsNothing(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			record := tt.record(f.workspace("w1", t.TempDir()))
-			record.Hidden = true
+			record.Backlogged = true
 			f.db.with(record)
 
 			// Act
-			err := f.verbs.SetHidden(context.Background(), "w1", false)
+			err := f.verbs.SetBacklogged(context.Background(), "w1", false)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("SetHidden: %v", err)
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 			if len(f.merge.reveals) != 0 {
 				t.Fatalf("reveals = %v, want none", f.merge.reveals)
@@ -1043,15 +1063,15 @@ func TestHidingARevealedMergeWorkspaceIsAnOrdinaryHide(t *testing.T) {
 	f.db.with(record)
 
 	// Act
-	err := f.verbs.SetHidden(context.Background(), "ws-merge", true)
+	err := f.verbs.SetBacklogged(context.Background(), "ws-merge", true)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetHidden: %v", err)
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 	got := f.db.workspaces["ws-merge"]
-	if !got.InHiddenSection() || got.MergeHidden() || !got.MergeRevealed {
-		t.Fatalf("record = %+v, want it in the hidden section and still revealed", got)
+	if !got.InBacklog() || got.MergeHidden() || !got.MergeRevealed {
+		t.Fatalf("record = %+v, want it in the backlog and still revealed", got)
 	}
 }
 
@@ -1062,18 +1082,18 @@ func TestAShowWhoseRevealFailsIsAnErrorAndWritesNothing(t *testing.T) {
 	f.db.revealErr = errors.New("database is locked")
 
 	// Act
-	err := f.verbs.SetHidden(context.Background(), "ws-merge", false)
+	err := f.verbs.SetBacklogged(context.Background(), "ws-merge", false)
 
 	// Assert
 	if !errors.Is(err, f.db.revealErr) {
-		t.Fatalf("SetHidden = %v, want the reveal's failure", err)
+		t.Fatalf("SetBacklogged = %v, want the reveal's failure", err)
 	}
 	if !loggedAtError(f, opRevealMergeWorkspace) {
 		t.Fatal("the failed reveal was not recorded at error")
 	}
 	got := f.db.workspaces["ws-merge"]
-	if !got.Hidden || !got.MergeHidden() {
-		t.Fatalf("record = %+v, want the hidden flag and the merge's withholding both untouched", got)
+	if !got.Backlogged || !got.MergeHidden() {
+		t.Fatalf("record = %+v, want the backlogged flag and the merge's withholding both untouched", got)
 	}
 	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
 		t.Fatalf("roster republications = %d, visibility edges = %v; want none for a failed show", len(f.sidebar.registries), f.visibilityEdges)
@@ -1088,15 +1108,15 @@ func TestAShowIsRefusedByAnyErrorItsRevealAnswers(t *testing.T) {
 	f.merge.reveal = func(context.Context, ids.WorkspaceID) error { return refused }
 
 	// Act
-	err := f.verbs.SetHidden(context.Background(), "ws-merge", false)
+	err := f.verbs.SetBacklogged(context.Background(), "ws-merge", false)
 
 	// Assert
 	if !errors.Is(err, refused) {
-		t.Fatalf("SetHidden = %v, want the reveal's error", err)
+		t.Fatalf("SetBacklogged = %v, want the reveal's error", err)
 	}
-	if !f.db.workspaces["ws-merge"].Hidden || len(f.sidebar.registries) != 0 {
-		t.Fatalf("hidden = %v, roster republications = %d; want the flag untouched and no roster",
-			f.db.workspaces["ws-merge"].Hidden, len(f.sidebar.registries))
+	if !f.db.workspaces["ws-merge"].Backlogged || len(f.sidebar.registries) != 0 {
+		t.Fatalf("backlogged = %v, roster republications = %d; want the flag untouched and no roster",
+			f.db.workspaces["ws-merge"].Backlogged, len(f.sidebar.registries))
 	}
 }
 
@@ -1342,13 +1362,13 @@ func TestMoveSurfacesAStoreFailure(t *testing.T) {
 	}
 }
 
-func TestSetHiddenTellsTheCacheKeeper(t *testing.T) {
+func TestSetBackloggedTellsTheCacheKeeper(t *testing.T) {
 	tests := []struct {
-		name   string
-		hidden bool
+		name       string
+		backlogged bool
 	}{
-		{name: "a hide", hidden: true},
-		{name: "a show", hidden: false},
+		{name: "a hide", backlogged: true},
+		{name: "a show", backlogged: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1357,8 +1377,8 @@ func TestSetHiddenTellsTheCacheKeeper(t *testing.T) {
 			f.workspace("w1", t.TempDir())
 
 			// Act
-			if err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+			if err := f.verbs.SetBacklogged(context.Background(), "w1", tt.backlogged); err != nil {
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 
 			// Assert
@@ -1369,14 +1389,14 @@ func TestSetHiddenTellsTheCacheKeeper(t *testing.T) {
 	}
 }
 
-func TestSetHiddenTellsTheMergeQueueOfAHideOnly(t *testing.T) {
+func TestSetBackloggedTellsTheMergeQueueOfAHideOnly(t *testing.T) {
 	tests := []struct {
-		name   string
-		hidden bool
-		want   []ids.WorkspaceID
+		name       string
+		backlogged bool
+		want       []ids.WorkspaceID
 	}{
-		{name: "a hide is told", hidden: true, want: []ids.WorkspaceID{"w1"}},
-		{name: "a show is not", hidden: false, want: nil},
+		{name: "a hide is told", backlogged: true, want: []ids.WorkspaceID{"w1"}},
+		{name: "a show is not", backlogged: false, want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1385,13 +1405,13 @@ func TestSetHiddenTellsTheMergeQueueOfAHideOnly(t *testing.T) {
 			f.workspace("w1", t.TempDir())
 
 			// Act
-			if err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+			if err := f.verbs.SetBacklogged(context.Background(), "w1", tt.backlogged); err != nil {
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 
 			// Assert
-			if !slices.Equal(f.merge.hidden, tt.want) {
-				t.Fatalf("the merge queue was told of hides %v, want %v", f.merge.hidden, tt.want)
+			if !slices.Equal(f.merge.backlogged, tt.want) {
+				t.Fatalf("the merge queue was told of hides %v, want %v", f.merge.backlogged, tt.want)
 			}
 		})
 	}
@@ -1401,22 +1421,22 @@ func TestAFailedHideTellsTheMergeQueueNothing(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	f.db.setHiddenErr = errFake
+	f.db.setBackloggedErr = errFake
 
 	// Act
-	err := f.verbs.SetHidden(context.Background(), "w1", true)
+	err := f.verbs.SetBacklogged(context.Background(), "w1", true)
 
 	// Assert
 	if err == nil {
-		t.Fatal("SetHidden over a failed write succeeded")
+		t.Fatal("SetBacklogged over a failed write succeeded")
 	}
-	if len(f.merge.hidden) != 0 {
-		t.Fatalf("the merge queue was told of hides %v over a failed write, want none", f.merge.hidden)
+	if len(f.merge.backlogged) != 0 {
+		t.Fatalf("the merge queue was told of hides %v over a failed write, want none", f.merge.backlogged)
 	}
 }
 
 // TestHidingStandsNothingDownAtOnce pins the owner's request of 2026-10-13: a
-// hidden workspace's cache is left to lapse, and the cache keeper stands its
+// backlogged workspace's cache is left to lapse, and the cache keeper stands its
 // session down only when it does.
 func TestHidingStandsNothingDownAtOnce(t *testing.T) {
 	// Arrange
@@ -1424,8 +1444,8 @@ func TestHidingStandsNothingDownAtOnce(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act
-	if err := f.verbs.SetHidden(context.Background(), "w1", true); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert
@@ -1440,8 +1460,8 @@ func TestShowingAWorkspaceStartsNothingAndStandsNothingDown(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act
-	if err := f.verbs.SetHidden(context.Background(), "w1", false); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w1", false); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert
@@ -1470,8 +1490,8 @@ func TestHidingTheCurrentWorkspaceLandsOnItsLeftNeighbour(t *testing.T) {
 	f := hideFixture(t, "w3")
 
 	// Act
-	if err := f.verbs.SetHidden(context.Background(), "w3", true); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w3", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert
@@ -1480,7 +1500,7 @@ func TestHidingTheCurrentWorkspaceLandsOnItsLeftNeighbour(t *testing.T) {
 	}
 	landed := false
 	for _, r := range f.log.logger.Records() {
-		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w2" && r.Context["hidden"] == "w3" && r.Context["place"] != nil {
+		if r.Operation == opSetBacklogged && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w2" && r.Context["backlogged"] == "w3" && r.Context["place"] != nil {
 			landed = true
 		}
 	}
@@ -1494,8 +1514,8 @@ func TestHidingTheLeftmostCurrentWorkspaceLandsOnItsRightNeighbour(t *testing.T)
 	f := hideFixture(t, "w1")
 
 	// Act
-	if err := f.verbs.SetHidden(context.Background(), "w1", true); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert
@@ -1521,8 +1541,8 @@ func TestHidingTheCurrentWorkspaceLandsOnTheOneSelectedBeforeIt(t *testing.T) {
 	f.db.current = &[]ids.WorkspaceID{"w3"}[0]
 
 	// Act
-	if err := f.verbs.SetHidden(context.Background(), "w3", true); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w3", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert
@@ -1531,7 +1551,7 @@ func TestHidingTheCurrentWorkspaceLandsOnTheOneSelectedBeforeIt(t *testing.T) {
 	}
 	landed := false
 	for _, r := range f.log.logger.Records() {
-		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w4" && r.Context["hidden"] == "w3" && r.Context["by"] == string(sidebar.LandedByRepository) {
+		if r.Operation == opSetBacklogged && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w4" && r.Context["backlogged"] == "w3" && r.Context["by"] == string(sidebar.LandedByRepository) {
 			landed = true
 		}
 	}
@@ -1545,8 +1565,8 @@ func TestHidingAnotherWorkspaceLeavesTheSelectionWhereItIs(t *testing.T) {
 	f := hideFixture(t, "w1")
 
 	// Act
-	if err := f.verbs.SetHidden(context.Background(), "w2", true); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w2", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert
@@ -1556,17 +1576,17 @@ func TestHidingAnotherWorkspaceLeavesTheSelectionWhereItIs(t *testing.T) {
 }
 
 func TestHidingWithNoOtherDrawnTabLeavesTheSelectionAndSaysSo(t *testing.T) {
-	// Arrange: w2 and w3 are already hidden.
+	// Arrange: w2 and w3 are already backlogged.
 	f := hideFixture(t, "w1")
 	for _, id := range []ids.WorkspaceID{"w2", "w3"} {
 		ws := f.db.workspaces[id]
-		ws.Hidden = true
+		ws.Backlogged = true
 		f.db.workspaces[id] = ws
 	}
 
 	// Act
-	if err := f.verbs.SetHidden(context.Background(), "w1", true); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert
@@ -1575,7 +1595,7 @@ func TestHidingWithNoOtherDrawnTabLeavesTheSelectionAndSaysSo(t *testing.T) {
 	}
 	said := false
 	for _, r := range f.log.logger.Records() {
-		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Message == "the tab bar draws no other workspace beside the hidden one; the selection stays" {
+		if r.Operation == opSetBacklogged && r.Level == dlog.LevelInfo && r.Message == "the tab bar draws no other workspace beside the backlogged one; the selection stays" {
 			said = true
 		}
 	}
@@ -1617,18 +1637,18 @@ func TestAFailedCurrentReadFailsTheLandingLoudly(t *testing.T) {
 	f.db.currentErr = errors.New("disk I/O error")
 
 	// Act
-	err := f.verbs.SetHidden(context.Background(), "w1", true)
+	err := f.verbs.SetBacklogged(context.Background(), "w1", true)
 
 	// Assert
 	if err == nil {
 		t.Fatal("a landing whose current read failed was answered as success")
 	}
-	if !loggedAtError(f, opSetHidden) {
+	if !loggedAtError(f, opSetBacklogged) {
 		t.Fatalf("the failed read was not recorded at error: err=%v records=%+v", err, f.log.logger.Records())
 	}
 }
 func TestHidingLandsOnTheNeighbourTheUserSawBeforeTheHide(t *testing.T) {
-	// Arrange: w2 is current between w1 and w3; once hidden, its tab follows
+	// Arrange: w2 is current between w1 and w3; once backlogged, its tab follows
 	// the drawn ones, but the landing is read off the bar as it stood.
 	f := newFixture(t)
 	for i, id := range []ids.WorkspaceID{"w1", "w2", "w3"} {
@@ -1639,8 +1659,8 @@ func TestHidingLandsOnTheNeighbourTheUserSawBeforeTheHide(t *testing.T) {
 	f.db.current = &[]ids.WorkspaceID{"w2"}[0]
 
 	// Act.
-	if err := f.verbs.SetHidden(context.Background(), "w2", true); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := f.verbs.SetBacklogged(context.Background(), "w2", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 
 	// Assert.
@@ -1649,27 +1669,27 @@ func TestHidingLandsOnTheNeighbourTheUserSawBeforeTheHide(t *testing.T) {
 	}
 }
 
-func TestSetHiddenAnswersAFamilyRefusal(t *testing.T) {
+func TestSetBackloggedAnswersAFamilyRefusal(t *testing.T) {
 	tests := []struct {
-		name   string
-		hidden bool
-		err    error
+		name       string
+		backlogged bool
+		err        error
 	}{
-		{name: "a hide of a parent with open children", hidden: true, err: errOpenChildren},
-		{name: "a show under a parent that is not open", hidden: false, err: errParentNotOpen},
+		{name: "a hide of a parent with open children", backlogged: true, err: errOpenChildren},
+		{name: "a show under a parent that is not open", backlogged: false, err: errParentNotOpen},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			f.workspace("w1", t.TempDir())
-			f.db.setHiddenErr = tt.err
+			f.db.setBackloggedErr = tt.err
 
 			// Act
-			err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden)
+			err := f.verbs.SetBacklogged(context.Background(), "w1", tt.backlogged)
 
 			// Assert
-			requireFamilyAnswer(t, f, err, tt.err, opSetHidden)
+			requireFamilyAnswer(t, f, err, tt.err, opSetBacklogged)
 			if len(f.visibilityEdges) != 0 {
 				t.Fatalf("visibility edges = %v, want none for a refused write", f.visibilityEdges)
 			}
@@ -1912,8 +1932,8 @@ func TestBacklogColdGateMovesAShownWorkspaceIntoTheBacklog(t *testing.T) {
 		t.Fatalf("BacklogColdGate: %v", err)
 	}
 	got := f.db.workspaces["w1"]
-	if !got.Hidden || got.BackloggedGateAt == nil || !got.BackloggedGateAt.Equal(backlogGate) {
-		t.Fatalf("hidden = %v for gate %v, want hidden for %v", got.Hidden, got.BackloggedGateAt, backlogGate)
+	if !got.Backlogged || got.BackloggedGateAt == nil || !got.BackloggedGateAt.Equal(backlogGate) {
+		t.Fatalf("backlogged = %v for gate %v, want backlogged for %v", got.Backlogged, got.BackloggedGateAt, backlogGate)
 	}
 	if len(f.sidebar.registries) != 1 {
 		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
@@ -1941,7 +1961,7 @@ func TestBacklogColdGateLeavesAWorkspaceTheStoreDeclines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BacklogColdGate: %v", err)
 	}
-	if f.db.workspaces["w1"].Hidden {
+	if f.db.workspaces["w1"].Backlogged {
 		t.Fatal("the workspace the user is looking at was backlogged")
 	}
 	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
@@ -1991,14 +2011,68 @@ func TestBacklogColdGateSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
-// TestEveryHiddenSectionMoveEndsInHiddenRecorded fails when a move into or
-// out of the hidden section republishes or raises the keeper's edge by hand.
-func TestEveryHiddenSectionMoveEndsInHiddenRecorded(t *testing.T) {
+// TestEveryBacklogMoveEndsInBackloggedRecorded fails when a move into or
+// out of the backlog republishes or raises the keeper's edge by hand.
+func TestEveryBacklogMoveEndsInBackloggedRecorded(t *testing.T) {
 	// Act
-	sites := sourcescan.Sites(t, "v.hiddenRecorded(ctx, log, ws, ")
+	sites := sourcescan.Sites(t, "v.backloggedRecorded(ctx, log, ws, ")
 
 	// Assert
 	if !slices.Equal(sites, []string{"select.go", "select.go"}) {
-		t.Fatalf("hiddenRecorded is called at %v, want recordHidden and BacklogColdGate in select.go", sites)
+		t.Fatalf("backloggedRecorded is called at %v, want recordBacklogged and BacklogColdGate in select.go", sites)
+	}
+}
+
+func TestABacklogInterruptsARunningTurnFirst(t *testing.T) {
+	tests := []struct {
+		name           string
+		killErr        error
+		wantBacklogged bool
+		wantErr        bool
+	}{
+		{name: "the turn is interrupted, then the workspace is backlogged", wantBacklogged: true},
+		{name: "a failed interrupt backlogs nothing", killErr: errors.New("shim unreachable"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			runningTurn(f, 0)
+			f.shim.killTurnErr = tt.killErr
+
+			// Act
+			err := f.verbs.SetBacklogged(context.Background(), "w1", true)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("SetBacklogged error = %v, want error %v", err, tt.wantErr)
+			}
+			if len(f.shim.killedTurns) != 1 && tt.killErr == nil {
+				t.Fatalf("killed turns = %+v, want one", f.shim.killedTurns)
+			}
+			if got := f.db.workspaces["w1"].Backlogged; got != tt.wantBacklogged {
+				t.Fatalf("backlogged = %v, want %v", got, tt.wantBacklogged)
+			}
+			if tt.wantErr && !loggedAtError(f, opSetBacklogged) {
+				t.Fatal("the failed interrupt was not recorded at error")
+			}
+		})
+	}
+}
+
+func TestABacklogOfAnIdleWorkspaceInterruptsNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	if err := f.verbs.SetBacklogged(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
+	}
+
+	// Assert
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none for an idle workspace", f.shim.killedTurns)
 	}
 }

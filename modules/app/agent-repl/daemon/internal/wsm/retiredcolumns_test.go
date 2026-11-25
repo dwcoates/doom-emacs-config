@@ -82,7 +82,7 @@ VALUES (1, 1, 'repository', 1, 0, 1, 1)`)
 	view, err := handle.(*store).SidebarView(context.Background())
 
 	// Assert
-	want := SidebarView{MergedFolded: true, HiddenFolded: true, MergeQueueFolded: true}
+	want := SidebarView{MergedFolded: true, BacklogFolded: true, MergeQueueFolded: true}
 	if err != nil || view != want {
 		t.Fatalf("SidebarView after the migration = %+v, %v; want %+v", view, err, want)
 	}
@@ -138,14 +138,14 @@ func TestAFreshViewWriteMintsTheRowWithoutTheDroppedGrouping(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	err := s.SetHiddenSectionFolded(context.Background(), true)
+	err := s.SetBacklogFolded(context.Background(), true)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetHiddenSectionFolded: %v", err)
+		t.Fatalf("SetBacklogFolded: %v", err)
 	}
 	view, err := s.SidebarView(context.Background())
-	if want := (SidebarView{HiddenFolded: true}); err != nil || view != want {
+	if want := (SidebarView{BacklogFolded: true}); err != nil || view != want {
 		t.Fatalf("SidebarView = %+v, %v; want %+v", view, err, want)
 	}
 }

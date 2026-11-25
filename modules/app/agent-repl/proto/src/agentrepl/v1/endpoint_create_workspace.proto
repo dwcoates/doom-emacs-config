@@ -136,14 +136,14 @@ message CreateWorkspaceRequest {
   // is.
   WorkspaceOriginator originator = 14;
 
-  // BORN HIDDEN. Present and true = the workspace's row is inserted hidden, in
+  // BORN BACKLOGGED. Present and true = the workspace's row is inserted backlogged, in
   // the insert's own transaction, so no roster the daemon publishes ever
-  // draws it visible (a hidden workspace is the user's to reveal). UNSET =
+  // draws it visible (a backlogged workspace is the user's to reveal). UNSET =
   // born visible. An intake workspace (a card's `?` question, a Slack emoji
   // ack) is made this way: hiding it after it exists flashes it in the
   // sidebar for as long as the second write takes. Refused as invalid beside
   // `async_merge`, whose merge workspace is born hidden by the queue.
-  optional bool hidden = 15;
+  optional bool backlogged = 15;
 
   // WHERE THE WORKSPACE IS FILED, decided by the creator and written in the
   // insert's own transaction, so the workspace is born in its subsection and
@@ -696,7 +696,7 @@ message CreateWorkspaceError {
     CreateWorkspaceInvalidName invalid_name = 42;
     // The one-shot's context workspace is not in the daemon's registry.
     CreateWorkspaceUnknownContextWorkspace unknown_context_workspace = 19;
-    // The named parent, or the workspace landed into, is hidden or closed,
+    // The named parent, or the workspace landed into, is backlogged or closed,
     // and creating the workspace would make an open child of, or an open
     // branch landing into, a workspace outside the Open section.
     WorkspaceParentNotOpen parent_not_open = 20;

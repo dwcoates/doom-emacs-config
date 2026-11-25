@@ -135,7 +135,7 @@ export type SidebarMemoryWorkspacesVisible = Message<"frontend.v1.SidebarMemoryW
   visible: number;
 
   /**
-   * How many workspaces are open (not hidden, not closed).
+   * How many workspaces are open (not backlogged, not closed).
    *
    * @generated from field: uint32 open = 2;
    */

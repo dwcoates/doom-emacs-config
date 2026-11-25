@@ -4,11 +4,11 @@
 // another's branch needs that branch to stay, so a parent, or a workspace
 // another lands into, may not leave the Open section while such a workspace is
 // still open: a workspace with open children
-// cannot be hidden, closed, killed, nuked, or merged by a merge that closes
+// cannot be backlogged, closed, killed, nuked, or merged by a merge that closes
 // it, and a workspace cannot be made, moved or brought back as the open child
-// of a parent that is hidden, closed, or closing (a merge waiting in its
-// repository's queue closes it once it lands). A HIDDEN CHILD COUNTS AS OPEN:
-// hiding keeps its session, so a family is hidden child first. A HIDDEN MERGE
+// of a parent that is backlogged, closed, or closing (a merge waiting in its
+// repository's queue closes it once it lands). A BACKLOGGED CHILD COUNTS AS OPEN:
+// hiding keeps its session, so a family is backlogged child first. A HIDDEN MERGE
 // WORKSPACE (an async merge's, drawn nowhere until it is revealed) is no open
 // child: it is the merge's machinery, not a member of the family.
 
@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/family.proto.
  */
 export const file_agentrepl_v1_family: GenFile = /*@__PURE__*/
-  fileDesc("ChlhZ2VudHJlcGwvdjEvZmFtaWx5LnByb3RvEgxhZ2VudHJlcGwudjEipgEKGFdvcmtzcGFjZUhhc09wZW5DaGlsZHJlbhIqCgZwYXJlbnQYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiwKCGNoaWxkcmVuGAIgAygLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIwCgxsYW5kaW5nX2ludG8YAyADKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIokCChZXb3Jrc3BhY2VQYXJlbnROb3RPcGVuEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSPAoGaGlkZGVuGAIgASgLMiouYWdlbnRyZXBsLnYxLldvcmtzcGFjZVBhcmVudE5vdE9wZW5IaWRkZW5IABI8CgZjbG9zZWQYAyABKAsyKi5hZ2VudHJlcGwudjEuV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NlZEgAEj4KB2Nsb3NpbmcYBCABKAsyKy5hZ2VudHJlcGwudjEuV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NpbmdIAEIHCgVzdGF0ZSIeChxXb3Jrc3BhY2VQYXJlbnROb3RPcGVuSGlkZGVuIh4KHFdvcmtzcGFjZVBhcmVudE5vdE9wZW5DbG9zZWQiHwodV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("ChlhZ2VudHJlcGwvdjEvZmFtaWx5LnByb3RvEgxhZ2VudHJlcGwudjEipgEKGFdvcmtzcGFjZUhhc09wZW5DaGlsZHJlbhIqCgZwYXJlbnQYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiwKCGNoaWxkcmVuGAIgAygLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIwCgxsYW5kaW5nX2ludG8YAyADKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpECChZXb3Jrc3BhY2VQYXJlbnROb3RPcGVuEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSRAoKYmFja2xvZ2dlZBgCIAEoCzIuLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuQmFja2xvZ2dlZEgAEjwKBmNsb3NlZBgDIAEoCzIqLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuQ2xvc2VkSAASPgoHY2xvc2luZxgEIAEoCzIrLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuQ2xvc2luZ0gAQgcKBXN0YXRlIiIKIFdvcmtzcGFjZVBhcmVudE5vdE9wZW5CYWNrbG9nZ2VkIh4KHFdvcmtzcGFjZVBhcmVudE5vdE9wZW5DbG9zZWQiHwodV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * The workspace still has open children, so the request would leave them
@@ -47,7 +47,7 @@ export type WorkspaceHasOpenChildren = Message<"agentrepl.v1.WorkspaceHasOpenChi
   parent?: WorkspaceRef | undefined;
 
   /**
-   * Every open child of `parent`, hidden ones included, in the roster's order.
+   * Every open child of `parent`, backlogged ones included, in the roster's order.
    * Empty only when `landing_into` is not.
    *
    * @generated from field: repeated workspace.v1.WorkspaceRef children = 2;
@@ -56,7 +56,7 @@ export type WorkspaceHasOpenChildren = Message<"agentrepl.v1.WorkspaceHasOpenChi
 
   /**
    * Every open workspace that is NOT a child of `parent` but whose branch
-   * lands into `parent`'s branch (WorkspaceLandingTarget.workspace), hidden
+   * lands into `parent`'s branch (WorkspaceLandingTarget.workspace), backlogged
    * ones included, in the roster's order. Empty only when `children` is not.
    *
    * @generated from field: repeated workspace.v1.WorkspaceRef landing_into = 3;
@@ -93,12 +93,12 @@ export type WorkspaceParentNotOpen = Message<"agentrepl.v1.WorkspaceParentNotOpe
    */
   state: {
     /**
-     * The parent is hidden.
+     * The parent is backlogged.
      *
-     * @generated from field: agentrepl.v1.WorkspaceParentNotOpenHidden hidden = 2;
+     * @generated from field: agentrepl.v1.WorkspaceParentNotOpenBacklogged backlogged = 2;
      */
-    value: WorkspaceParentNotOpenHidden;
-    case: "hidden";
+    value: WorkspaceParentNotOpenBacklogged;
+    case: "backlogged";
   } | {
     /**
      * The parent is closed.
@@ -129,18 +129,18 @@ export const WorkspaceParentNotOpenSchema: GenMessage<WorkspaceParentNotOpen> = 
   messageDesc(file_agentrepl_v1_family, 1);
 
 /**
- * The parent is hidden. DELIBERATELY EMPTY: the arm is the fact.
+ * The parent is backlogged. DELIBERATELY EMPTY: the arm is the fact.
  *
- * @generated from message agentrepl.v1.WorkspaceParentNotOpenHidden
+ * @generated from message agentrepl.v1.WorkspaceParentNotOpenBacklogged
  */
-export type WorkspaceParentNotOpenHidden = Message<"agentrepl.v1.WorkspaceParentNotOpenHidden"> & {
+export type WorkspaceParentNotOpenBacklogged = Message<"agentrepl.v1.WorkspaceParentNotOpenBacklogged"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.WorkspaceParentNotOpenHidden.
- * Use `create(WorkspaceParentNotOpenHiddenSchema)` to create a new message.
+ * Describes the message agentrepl.v1.WorkspaceParentNotOpenBacklogged.
+ * Use `create(WorkspaceParentNotOpenBackloggedSchema)` to create a new message.
  */
-export const WorkspaceParentNotOpenHiddenSchema: GenMessage<WorkspaceParentNotOpenHidden> = /*@__PURE__*/
+export const WorkspaceParentNotOpenBackloggedSchema: GenMessage<WorkspaceParentNotOpenBacklogged> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_family, 2);
 
 /**

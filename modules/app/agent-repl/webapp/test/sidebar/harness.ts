@@ -22,7 +22,7 @@ import {
   RosterRowSchema,
   RosterRowDetailSchema,
   RosterRowWhenSchema,
-  RosterHiddenSectionSchema,
+  RosterBacklogSectionSchema,
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedRowSchema,
@@ -45,7 +45,7 @@ import {
   RosterRepoSectionSchema,
   RosterSubsectionSchema,
   WorkspaceRosterSchema,
-  type RosterHiddenSection,
+  type RosterBacklogSection,
   type RosterMergeQueueHead,
   type RosterMergeQueueHeadClock,
   type RosterMergeQueueSubject,
@@ -62,9 +62,9 @@ import {
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { hiddenRow, numberTabs, openRow, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
+import { backlogRow, numberTabs, openRow, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
 
-export { hiddenRow, openRow };
+export { backlogRow, openRow };
 import type { Ticker } from "../../src/clock.js";
 import { createDrawnStatusLog } from "../../src/drawn-status.js";
 import type { FailureSink } from "../../src/failure/sink.js";
@@ -612,19 +612,19 @@ export function mergedGroup(init: {
 }
 
 /**
- * The hidden-workspaces section. Its daemon-held fold is EXPANDED unless
+ * The backlog. Its daemon-held fold is EXPANDED unless
  * said, as the daemon draws a section nobody has folded; its count is the
  * rows it carries unless said.
  */
-export function hiddenSection(
+export function backlogSection(
   rows: RosterRow[] = [],
   count: number = rows.length,
   collapsed: boolean = false,
   sized: number | null = null,
-): RosterHiddenSection {
-  return create(RosterHiddenSectionSchema, {
-    header: { label: { text: "Hidden" }, count: { workspaces: count } },
-    hiddenRows: { rows: rows.map(hiddenRow) },
+): RosterBacklogSection {
+  return create(RosterBacklogSectionSchema, {
+    header: { label: { text: "Backlog" }, count: { workspaces: count } },
+    backlogRows: { rows: rows.map(backlogRow) },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
     height: bandHeight(sized),
   });
@@ -650,7 +650,7 @@ export function roster(init: {
   repos?: RosterRepoSection[];
   merged?: RosterMergedSection;
   mergeQueue?: RosterMergeQueueSection;
-  hidden?: RosterHiddenSection;
+  backlog?: RosterBacklogSection;
   open?: RosterOpenSection;
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
   openCount?: number;
@@ -679,7 +679,7 @@ export function roster(init: {
   const workspaces: WorkspaceRoster = create(WorkspaceRosterSchema, {
     repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted, unfolded: init.openUnfolded ?? init.openCount ?? unfolded } },
     open: init.open ?? openSection(),
-    hidden: init.hidden ?? hiddenSection(),
+    backlog: init.backlog ?? backlogSection(),
     ...rosterApps(init.chat),
     ...(init.current === undefined
       ? {}

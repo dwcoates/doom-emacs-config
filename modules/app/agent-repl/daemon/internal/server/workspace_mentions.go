@@ -77,7 +77,7 @@ const RecentlyClosedMentionWindow = 5 * 24 * time.Hour
 // the two cannot differ.
 //
 // Every workspace the workspaces stream carries is a LIVE candidate: the Open
-// section's in its drawn order, then the hidden section's. Every workspace
+// section's in its drawn order, then the backlog's. Every workspace
 // closed within RecentlyClosedMentionWindow follows as a CLOSED candidate:
 // the merged, then the closed stream's, in that order; a closed row without a
 // close record is none, since nothing vouches for when it closed. A name only
@@ -94,7 +94,7 @@ func mentionTargets(push *frontendRoster, merged []*frontendv1.RosterRow, viewer
 	for _, open := range rosterwalk.OpenRows(roster) {
 		live = append(live, open.GetRow())
 	}
-	live = append(live, rosterwalk.HiddenRows(roster)...)
+	live = append(live, rosterwalk.BacklogRows(roster)...)
 	since := now.Add(-RecentlyClosedMentionWindow).UnixMilli()
 	for _, row := range append(append([]*frontendv1.RosterRow(nil), merged...), rosterwalk.ClosedRows(push.GetClosed())...) {
 		if row.Closure != nil && row.GetClosure().GetAtMs() >= since {

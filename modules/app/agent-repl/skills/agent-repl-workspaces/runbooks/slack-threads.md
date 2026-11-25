@@ -64,7 +64,7 @@
     - A bound emoji the watch user types as `:shortcode:` in their own
       message or adds as a reaction fires once per (message, emoji);
       reactions standing when the settings first became complete never fire.
-    - Firing creates a hidden intake workspace that reads the thread, names
+    - Firing creates a backlogged intake workspace that reads the thread, names
       the task and forks itself into the bound workspace (`-slack-thread`
       with `-originator emoji-ack` for announced, or `-slack-subscribe MODE`
       for subscribed; `-one-shot` and `-priority` as bound), then closes.

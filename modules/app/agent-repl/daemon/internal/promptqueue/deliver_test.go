@@ -867,6 +867,47 @@ func TestADeliveryTheShimDiedUnderHoldsThePromptForTheReconnect(t *testing.T) {
 	}
 }
 
+// errShimStoodDownUnder is the sender's answer for a StartTurn this daemon
+// stood the shim down under, as the workspace sender maps it.
+var errShimStoodDownUnder = fmt.Errorf("start turn: %w: unavailable: use of closed network connection", ErrShimStoodDown)
+
+// A DELIVERY THIS DAEMON STOOD THE SHIM DOWN UNDER IS HELD for the session's
+// next coming up, never refused, and recorded at info with its cause.
+func TestADeliveryTheDaemonStoodTheShimDownUnderHoldsThePrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errShimStoodDownUnder
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	t.Run("the prompt is held under the reconnect hold", func(t *testing.T) {
+		if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
+			t.Fatalf("Submit = (%+v, %v), want the prompt held under the reconnect hold", got, err)
+		}
+	})
+	t.Run("the mirrored row is taken down", func(t *testing.T) {
+		if rows := h.feed.retiredPrompts(); len(rows) != 1 || rows[0] != "t1" {
+			t.Fatalf("retired prompt rows = %v, want t1's mirrored row taken down", rows)
+		}
+	})
+	t.Run("the hold is recorded at info with its cause, and nothing at error", func(t *testing.T) {
+		record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+			Level: "info", Operation: opDeliver,
+			Message: "this daemon stood the shim down under the delivery; the prompt is held until the session comes up again",
+		})
+		if !ok || record.Context["cause"] != errShimStoodDownUnder.Error() {
+			t.Fatalf("records = %+v, want the stood-down hold recorded at info with its cause", h.log.Records())
+		}
+		for _, r := range h.log.Records() {
+			if r.Level == "error" {
+				t.Fatalf("a stand-down this daemon ordered was recorded at error: %+v", r)
+			}
+		}
+	})
+}
+
 // errNotWatched is the sender's answer for a StartTurn it would not send
 // because no watch stood to see the turn, as the workspace sender maps it.
 var errNotWatched = fmt.Errorf("%w: no watcher stands for turn \"t1\"", ErrSessionNotWatched)

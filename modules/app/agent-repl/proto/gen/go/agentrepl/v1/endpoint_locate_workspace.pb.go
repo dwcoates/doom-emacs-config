@@ -9,7 +9,7 @@
 // tests), and any open workspace the sidebar does not draw. A caller resolved
 // off the roster was refused "inside no workspace the daemon serves" from its
 // own worktree (2026-10-25 to 2026-11-14). A workspace is located when it is
-// open, hidden ones included, or when the roster draws it (a recently merged
+// open, backlogged ones included, or when the roster draws it (a recently merged
 // or closed row the sidebar still shows). Threads share their workspace's
 // directory and are never located.
 

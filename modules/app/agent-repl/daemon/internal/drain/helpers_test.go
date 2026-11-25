@@ -731,7 +731,7 @@ func (h *harness) liveVisibility(ws ids.WorkspaceID) wsm.Visibility {
 	_, covered := folded[ws]
 	return wsm.Visibilities([]wsm.VisibilityInput{{
 		ID:       ws,
-		Open:     !record.Closed && !record.Hidden && !record.IsThread() && !record.MergeHidden(),
+		Open:     !record.Closed && !record.Backlogged && !record.IsThread() && !record.MergeHidden(),
 		Covered:  covered,
 		Selected: record.Current,
 	}})[ws]

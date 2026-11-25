@@ -95,7 +95,7 @@ func DaemonNoticeNamed(origin string) bool {
 // subsection-placement brief. A merge's own briefs
 // (its repairs, its actions, its hooks, its revert) drive the merge's work
 // and are not notices, nor is a deploy mediator's brief, which drives its own
-// hidden workspace's work.
+// backlogged workspace's work.
 func DeliveredOnArrival(origin conversationv1.PromptOrigin) bool {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,

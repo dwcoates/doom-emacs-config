@@ -99,8 +99,8 @@ func TestACycleStandDownSkips(t *testing.T) {
 			}
 			return ws
 		}},
-		{name: "a hidden workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
-			return h.hidden(t)
+		{name: "a backlogged workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return h.backlogged(t)
 		}},
 		{name: "a closed workspace with no merge queued, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
@@ -658,14 +658,14 @@ func TestAColdParkOrAVisitStandsDownAClosedOrWithheldWorkspace(t *testing.T) {
 		ask     func(c *controller, ws ids.WorkspaceID)
 		life    shimlife.StandDownReason
 	}{
-		{name: "a cold park of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+		{name: "a cold park of a backlogged workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
 			ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter, false) }, life: shimlife.StandDownCacheCold},
 		{name: "a cold park of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
 			h.closedAt(t, ws)
 			return ws
 		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter, false) }, life: shimlife.StandDownCacheCold},
-		{name: "a visit of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+		{name: "a visit of a backlogged workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
 			ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }, life: shimlife.StandDownSettingsVisit},
 		{name: "a visit of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
@@ -921,6 +921,91 @@ func TestAMergeQueuedParkIsNotTaken(t *testing.T) {
 	}
 }
 
+// TestAPendingMergeQueuedParkAndAnUnscopedAsk covers a sync merge's park
+// pending under a busy session while another asker (the shim hold's idle
+// park) asks too: neither ask is lost to the other, and the merge's park,
+// which outranks it, is the one taken while its entry waits.
+func TestAPendingMergeQueuedParkAndAnUnscopedAsk(t *testing.T) {
+	tests := []struct {
+		name string
+		// ask puts both asks in, under the busy session, in their order.
+		ask func(h *harness, ws ids.WorkspaceID, m queuedMerge)
+		// leave takes the merge out of line before the session falls free.
+		leave    bool
+		wantLife shimlife.StandDownReason
+		wantOp   string
+		wantDone string
+	}{
+		{
+			name: "an idle ask after the merge's park leaves the merge's park in force",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.mergeQueuedDown(ws, m)
+				h.c.IdleDown(ws, beatAfter)
+			},
+			wantLife: shimlife.StandDownMergeQueued, wantOp: opMergeQueued, wantDone: mergeQueuedReason.done.Template(),
+		},
+		{
+			name: "a merge's park after an idle ask takes its place",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.c.IdleDown(ws, beatAfter)
+				h.mergeQueuedDown(ws, m)
+			},
+			wantLife: shimlife.StandDownMergeQueued, wantOp: opMergeQueued, wantDone: mergeQueuedReason.done.Template(),
+		},
+		{
+			name: "the idle ask is taken once the merge left its line",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.mergeQueuedDown(ws, m)
+				h.c.IdleDown(ws, beatAfter)
+			},
+			leave:    true,
+			wantLife: shimlife.StandDownIdle, wantOp: opIdlePark, wantDone: idleParkReason.done.Template(),
+		},
+		{
+			name: "an idle ask outranked before the merge's park is taken once the merge left its line",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.c.IdleDown(ws, beatAfter)
+				h.mergeQueuedDown(ws, m)
+			},
+			leave:    true,
+			wantLife: shimlife.StandDownIdle, wantOp: opIdlePark, wantDone: idleParkReason.done.Template(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			m := queuedAt(t, h, ws, instant)
+			h.freeness.SetFree(ws, false)
+			tt.ask(h, ws, m)
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none under the turn", killed)
+			}
+			if tt.leave {
+				if err := h.db.RemoveMergeQueueEntry(context.Background(), m.repo, ws, "user_dequeue"); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+			}
+			h.freeness.SetFree(ws, true)
+
+			// Act
+			h.c.RetryWithheld(ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 1 || killed[0].Life != tt.wantLife {
+				t.Fatalf("kills = %+v, want one %v park", killed, tt.wantLife)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: tt.wantOp, Message: tt.wantDone}); !ok {
+				t.Fatalf("records = %+v, want %q under %s", records(h.log, tt.wantOp), tt.wantDone, tt.wantOp)
+			}
+			if h.cyclePending(ws) {
+				t.Fatal("a park taken stayed pending")
+			}
+		})
+	}
+}
+
 // mergeParkErrDB fails the one read a sync merge's park makes that READ
 // names.
 type mergeParkErrDB struct {
@@ -1041,5 +1126,41 @@ func TestABusyCycleStandDownHoldsDeferredBusyUntilItIsTaken(t *testing.T) {
 	}
 	if got := why.Facts(ws).Hold; got != "" {
 		t.Fatalf("hold after the park = %q, want none", got)
+	}
+}
+
+func TestAStandDownAskedBeforeABringUpForWorkIsNotTaken(t *testing.T) {
+	tests := []struct {
+		name      string
+		bringUp   func(s *wsm.Session)
+		wantKills int
+	}{
+		{name: "a session brought up for a turn not yet closed is kept up", bringUp: func(s *wsm.Session) { s.WorkBroughtUpAt = &beatAfter }},
+		{name: "a session the user restarted moments ago is kept up", bringUp: func(s *wsm.Session) { up := beatAfter; s.UserBroughtUpAt = &up }},
+		{name: "a session its bring-up no longer holds is parked", bringUp: func(*wsm.Session) {}, wantKills: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the gate's cold park was asked; the session then came up.
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			session, _, err := h.db.Session(context.Background(), ws)
+			if err != nil {
+				t.Fatalf("Session: %v", err)
+			}
+			tt.bringUp(&session)
+			if err := h.db.PutSession(context.Background(), session); err != nil {
+				t.Fatalf("PutSession: %v", err)
+			}
+			h.clock.Set(beatAfter.Add(time.Minute))
+
+			// Act
+			h.c.ColdDown(ws, beatAfter, true)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != tt.wantKills {
+				t.Fatalf("kills = %+v, want %d", killed, tt.wantKills)
+			}
+		})
 	}
 }

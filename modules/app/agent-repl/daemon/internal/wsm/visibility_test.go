@@ -19,11 +19,11 @@ func TestWithheld(t *testing.T) {
 		want       Withholding
 	}{
 		{name: "an ordinary workspace is drawn", ws: Workspace{}, want: Drawn},
-		{name: "a hidden workspace is withheld hidden", ws: Workspace{Hidden: true}, want: WithheldHidden},
+		{name: "a backlogged workspace is withheld backlogged", ws: Workspace{Backlogged: true}, want: WithheldBacklogged},
 		{name: "a workspace in a collapsed section is withheld collapsed", ws: Workspace{}, repoFolded: true, want: WithheldCollapsed},
-		{name: "a hidden workspace in a collapsed section is withheld hidden", ws: Workspace{Hidden: true}, repoFolded: true, want: WithheldHidden},
-		{name: "a reopened merged workspace the user hid is withheld hidden", ws: Workspace{Hidden: true, MergedAt: &merged}, want: WithheldHidden},
-		{name: "a settled merge ignores its hidden flag", ws: Workspace{Hidden: true, Closed: true, MergedAt: &merged}, want: Drawn},
+		{name: "a backlogged workspace in a collapsed section is withheld backlogged", ws: Workspace{Backlogged: true}, repoFolded: true, want: WithheldBacklogged},
+		{name: "a reopened merged workspace the user hid is withheld backlogged", ws: Workspace{Backlogged: true, MergedAt: &merged}, want: WithheldBacklogged},
+		{name: "a settled merge ignores its backlogged flag", ws: Workspace{Backlogged: true, Closed: true, MergedAt: &merged}, want: Drawn},
 		{name: "a merged workspace follows its repository's fold", ws: Workspace{MergedAt: &merged}, repoFolded: true, want: WithheldCollapsed},
 		{name: "the selection in a collapsed section is withheld collapsed by the sections alone", ws: Workspace{Current: true}, repoFolded: true, want: WithheldCollapsed},
 	}
@@ -40,7 +40,7 @@ func TestWithheld(t *testing.T) {
 	}
 }
 
-func TestInHiddenSection(t *testing.T) {
+func TestInBacklog(t *testing.T) {
 	merged := time.Unix(100, 0)
 	cases := []struct {
 		name string
@@ -48,18 +48,18 @@ func TestInHiddenSection(t *testing.T) {
 		want bool
 	}{
 		{name: "an ordinary workspace is not", ws: Workspace{}, want: false},
-		{name: "a hidden workspace is", ws: Workspace{Hidden: true}, want: true},
-		{name: "a reopened merged hidden workspace is", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
-		{name: "a settled merge that was hidden is not", ws: Workspace{Hidden: true, Closed: true, MergedAt: &merged}, want: false},
+		{name: "a backlogged workspace is", ws: Workspace{Backlogged: true}, want: true},
+		{name: "a reopened merged backlogged workspace is", ws: Workspace{Backlogged: true, MergedAt: &merged}, want: true},
+		{name: "a settled merge that was backlogged is not", ws: Workspace{Backlogged: true, Closed: true, MergedAt: &merged}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := tc.ws.InHiddenSection()
+			got := tc.ws.InBacklog()
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("InHiddenSection = %v, want %v", got, tc.want)
+				t.Fatalf("InBacklog = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -156,10 +156,10 @@ func TestLetsCacheLapse(t *testing.T) {
 		want bool
 	}{
 		{name: "an open visible workspace does not", ws: Workspace{}, want: false},
-		{name: "a hidden workspace does", ws: Workspace{Hidden: true}, want: true},
+		{name: "a backlogged workspace does", ws: Workspace{Backlogged: true}, want: true},
 		{name: "a closed workspace does", ws: Workspace{Closed: true}, want: true},
-		{name: "a closed hidden workspace does", ws: Workspace{Hidden: true, Closed: true}, want: true},
-		{name: "a reopened merged hidden workspace does", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
+		{name: "a closed backlogged workspace does", ws: Workspace{Backlogged: true, Closed: true}, want: true},
+		{name: "a reopened merged backlogged workspace does", ws: Workspace{Backlogged: true, MergedAt: &merged}, want: true},
 		{name: "a merged closed workspace does", ws: Workspace{Closed: true, MergedAt: &merged}, want: true},
 	}
 	for _, tc := range cases {
@@ -175,20 +175,20 @@ func TestLetsCacheLapse(t *testing.T) {
 	}
 }
 
-// TestTheHiddenSectionIsOneStatement pins that Withheld's hidden arm IS
-// InHiddenSection: every workspace it calls hidden, and no other, is in the
-// hidden section, so the tab bar, the start path and the cache keeper cannot
-// disagree about which workspaces are hidden.
-func TestTheHiddenSectionIsOneStatement(t *testing.T) {
+// TestTheBacklogIsOneStatement pins that Withheld's backlogged arm IS
+// InBacklog: every workspace it calls backlogged, and no other, is in the
+// backlog, so the tab bar, the start path and the cache keeper cannot
+// disagree about which workspaces are backlogged.
+func TestTheBacklogIsOneStatement(t *testing.T) {
 	merged := time.Unix(100, 0)
-	for _, ws := range []Workspace{{}, {Hidden: true}, {MergedAt: &merged}, {Hidden: true, MergedAt: &merged}} {
+	for _, ws := range []Workspace{{}, {Backlogged: true}, {MergedAt: &merged}, {Backlogged: true, MergedAt: &merged}} {
 		for _, folded := range []bool{false, true} {
 			// Act
-			withheldHidden := ws.Withheld(folded) == WithheldHidden
+			withheldHidden := ws.Withheld(folded) == WithheldBacklogged
 
 			// Assert
-			if withheldHidden != ws.InHiddenSection() {
-				t.Fatalf("Withheld(%v) of %+v = %v, InHiddenSection = %v", folded, ws, ws.Withheld(folded), ws.InHiddenSection())
+			if withheldHidden != ws.InBacklog() {
+				t.Fatalf("Withheld(%v) of %+v = %v, InBacklog = %v", folded, ws, ws.Withheld(folded), ws.InBacklog())
 			}
 		}
 	}
@@ -202,7 +202,7 @@ func TestEveryVisibleWorkspaceRuns(t *testing.T) {
 	merged := time.Unix(100, 0)
 	for mask := 0; mask < 1<<7; mask++ {
 		bit := func(i int) bool { return mask&(1<<i) != 0 }
-		ws := Workspace{Hidden: bit(0), Closed: bit(1), Current: bit(2), OneShot: bit(3)}
+		ws := Workspace{Backlogged: bit(0), Closed: bit(1), Current: bit(2), OneShot: bit(3)}
 		if bit(4) {
 			ws.Mediator = MediatorDeploy
 		}
@@ -235,20 +235,20 @@ func TestRuns(t *testing.T) {
 	}{
 		{name: "a visible workspace runs", ws: Workspace{Visibility: UnselectedVisible}, want: true},
 		{name: "the selection runs", ws: Workspace{Visibility: Selected}, want: true},
-		{name: "a hidden selection runs", ws: Workspace{Hidden: true, Visibility: Selected}, want: true},
+		{name: "a backlogged selection runs", ws: Workspace{Backlogged: true, Visibility: Selected}, want: true},
 		{name: "a workspace that is not visible does not run", ws: Workspace{}, want: false},
 		{name: "a collapsed workspace that is not visible does not run", ws: Workspace{}, repoFolded: true, want: false},
 		{name: "a hidden merge workspace runs in a collapsed section", ws: Workspace{MergeOf: &of}, repoFolded: true, mergeQueued: true, want: true},
 		{name: "a hidden merge workspace whose merge left every queue does not run", ws: Workspace{MergeOf: &of}, want: false},
 		{name: "a selected hidden merge workspace whose merge left every queue runs", ws: Workspace{MergeOf: &of, Visibility: Selected}, want: true},
-		{name: "a hidden workspace with a merge queued runs", ws: Workspace{Hidden: true}, mergeQueued: true, want: true},
+		{name: "a backlogged workspace with a merge queued runs", ws: Workspace{Backlogged: true}, mergeQueued: true, want: true},
 		{name: "a closed workspace with a merge queued runs", ws: Workspace{Closed: true}, mergeQueued: true, want: true},
 		{name: "a collapsed one-shot runs, as the fold spares it", ws: Workspace{OneShot: true}, repoFolded: true, want: true},
 		{name: "a collapsed workspace with a merge pending runs, as the fold spares it", ws: Workspace{MergePending: true}, repoFolded: true, want: true},
-		{name: "a hidden one-shot does not run, as only a fold spares", ws: Workspace{OneShot: true, Hidden: true}, want: false},
+		{name: "a backlogged one-shot does not run, as only a fold spares", ws: Workspace{OneShot: true, Backlogged: true}, want: false},
 		{name: "an unfolded one-shot that is not visible does not run", ws: Workspace{OneShot: true}, want: false},
-		{name: "a hidden standing deploy check runs", ws: Workspace{Hidden: true, Mediator: MediatorDeploy}, want: true},
-		{name: "a hidden production mediator runs", ws: Workspace{Hidden: true, Mediator: MediatorProduction}, want: true},
+		{name: "a backlogged standing deploy check runs", ws: Workspace{Backlogged: true, Mediator: MediatorDeploy}, want: true},
+		{name: "a backlogged production mediator runs", ws: Workspace{Backlogged: true, Mediator: MediatorProduction}, want: true},
 		{name: "a thread that is not visible does not run", ws: Workspace{Kind: WorkspaceKindThread}, want: false},
 	}
 	for _, tc := range cases {
@@ -272,11 +272,11 @@ func TestKeepaliveHeld(t *testing.T) {
 		want bool
 	}{
 		{name: "an ordinary workspace keeps its cache warm", ws: Workspace{}, want: false},
-		{name: "a hidden workspace lets its cache lapse", ws: Workspace{Hidden: true}, want: true},
-		{name: "a hidden workspace the user is looking at keeps its cache warm", ws: Workspace{Hidden: true, Current: true}, want: false},
-		{name: "a reopened merged hidden workspace lets its cache lapse", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
-		{name: "a hidden standing deploy check keeps its cache warm", ws: Workspace{Hidden: true, Mediator: MediatorDeploy}, want: false},
-		{name: "a hidden production mediator keeps its cache warm", ws: Workspace{Hidden: true, Mediator: MediatorProduction}, want: false},
+		{name: "a backlogged workspace lets its cache lapse", ws: Workspace{Backlogged: true}, want: true},
+		{name: "a backlogged workspace the user is looking at keeps its cache warm", ws: Workspace{Backlogged: true, Current: true}, want: false},
+		{name: "a reopened merged backlogged workspace lets its cache lapse", ws: Workspace{Backlogged: true, MergedAt: &merged}, want: true},
+		{name: "a backlogged standing deploy check keeps its cache warm", ws: Workspace{Backlogged: true, Mediator: MediatorDeploy}, want: false},
+		{name: "a backlogged production mediator keeps its cache warm", ws: Workspace{Backlogged: true, Mediator: MediatorProduction}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,7 +296,7 @@ func TestKeepaliveHeld(t *testing.T) {
 // read the same verdict.
 func TestAHeldCacheNeverRuns(t *testing.T) {
 	merged := time.Unix(100, 0)
-	for _, ws := range []Workspace{{}, {Hidden: true}, {Hidden: true, Current: true}, {Current: true}, {Hidden: true, MergedAt: &merged}} {
+	for _, ws := range []Workspace{{}, {Backlogged: true}, {Backlogged: true, Current: true}, {Current: true}, {Backlogged: true, MergedAt: &merged}} {
 		for _, folded := range []bool{false, true} {
 			// Act / Assert
 			if ws.KeepaliveHeld() && ws.Runs(folded, false) {
@@ -312,7 +312,7 @@ func TestLetsCacheLapseOfASelectedWorkspace(t *testing.T) {
 		ws   Workspace
 		want bool
 	}{
-		{name: "a selected hidden workspace keeps its cache warm", ws: Workspace{Hidden: true, Current: true}, want: false},
+		{name: "a selected backlogged workspace keeps its cache warm", ws: Workspace{Backlogged: true, Current: true}, want: false},
 		{name: "a selected closed workspace lets its cache lapse", ws: Workspace{Closed: true, Current: true}, want: true},
 	}
 	for _, tc := range cases {
@@ -328,8 +328,8 @@ func TestLetsCacheLapseOfASelectedWorkspace(t *testing.T) {
 	}
 }
 
-func TestKeptWarmIgnoresCollapsingAndHonorsAHide(t *testing.T) {
-	hiddenAt := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+func TestKeptWarmIgnoresCollapsingAndKeepsABacklogForItsLastBeat(t *testing.T) {
+	backloggedAt := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name   string
 		ws     Workspace
@@ -337,9 +337,10 @@ func TestKeptWarmIgnoresCollapsingAndHonorsAHide(t *testing.T) {
 		want   bool
 	}{
 		{name: "a drawn workspace is kept warm", ws: Workspace{ID: "w"}, want: true},
-		{name: "a hidden workspace lets its cache lapse", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt}},
-		{name: "a hidden workspace the user is looking at is kept warm", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt, Current: true}, want: true},
-		{name: "a hidden workspace with a merge queued is kept warm", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt}, queued: true, want: true},
+		{name: "a backlogged workspace is kept warm for its last beat, which the keeper spends", ws: Workspace{ID: "w", Backlogged: true, BackloggedAt: &backloggedAt}, want: true},
+		{name: "a hidden merge workspace is not kept warm", ws: Workspace{ID: "w", MergeOf: &MergeOrigin{}}},
+		{name: "a backlogged workspace the user is looking at is kept warm", ws: Workspace{ID: "w", Backlogged: true, BackloggedAt: &backloggedAt, Current: true}, want: true},
+		{name: "a backlogged workspace with a merge queued is kept warm", ws: Workspace{ID: "w", Backlogged: true, BackloggedAt: &backloggedAt}, queued: true, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -394,5 +395,60 @@ func TestTopPriority(t *testing.T) {
 				t.Fatalf("TopPriority = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestShimHoldLater(t *testing.T) {
+	at := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		h, o ShimHold
+		want ShimHold
+	}{
+		{name: "an indefinite hold wins", h: ShimHold{Until: at}, o: ShimHold{Indefinite: true}, want: ShimHold{Indefinite: true}},
+		{name: "the later instant wins", h: ShimHold{Until: at}, o: ShimHold{Until: at.Add(time.Minute)}, want: ShimHold{Until: at.Add(time.Minute)}},
+		{name: "an earlier instant loses", h: ShimHold{Until: at.Add(time.Minute)}, o: ShimHold{Until: at}, want: ShimHold{Until: at.Add(time.Minute)}},
+		{name: "two empty holds stay empty", want: ShimHold{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := tt.h.Later(tt.o); got != tt.want {
+				t.Fatalf("Later = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIdleHoldFrom(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	tests := []struct {
+		name string
+		at   time.Time
+		want ShimHold
+	}{
+		{name: "inside the hold it runs until the hold's end", at: now.Add(-time.Minute), want: ShimHold{Until: now.Add(ShimIdleHold - time.Minute)}},
+		{name: "at the hold's end it holds none", at: now.Add(-ShimIdleHold), want: ShimHold{}},
+		{name: "past the hold it holds none", at: now.Add(-2 * ShimIdleHold), want: ShimHold{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := IdleHoldFrom(tt.at, now); got != tt.want {
+				t.Fatalf("IdleHoldFrom = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAUserBringUpHoldIsTheIdleHoldFromItsBringUp(t *testing.T) {
+	// Arrange
+	now := time.UnixMilli(1_700_000_000_000)
+	up := now.Add(-time.Minute)
+	s := Session{UserBroughtUpAt: &up}
+
+	// Act / Assert
+	if got, want := s.BringUpHold(nil, now), IdleHoldFrom(up, now); got != want {
+		t.Fatalf("BringUpHold = %+v, want IdleHoldFrom's %+v", got, want)
 	}
 }

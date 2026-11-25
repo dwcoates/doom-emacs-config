@@ -86,7 +86,7 @@
                   (ref dispatched-at &optional lander))
 (declare-function agent-repl-host-editor-switch-count "host" ())
 (declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
-(declare-function agent-repl-verb-set-hidden "verbs" (ws hidden))
+(declare-function agent-repl-verb-set-backlogged "verbs" (ws backlogged))
 (declare-function agent-repl--completing-read-under-ivy "core" (alist entry prompt table))
 (declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
 (declare-function agent-repl-verb-swap "agent-repl-verbs" (ws target))
@@ -782,7 +782,7 @@ offered -- but picking it costs a daemon round trip and a session
 revival, which picking an open one does not.  The user is owed that
 difference before they press RET, and text is the whole of how it is
 said: no face, no styling, nothing the column could disagree with when
-the row's real state changes underneath it.  A hidden or merged row says
+the row's real state changes underneath it.  A backlogged or merged row says
 so in its place instead (`agent-repl--switch-state-label'), and the word
 \"merged\" takes the merge purple every other surface paints a merge in.")
 
@@ -804,8 +804,8 @@ A workspace a merge closed is offered for
   "How long `SPC p p' offers a workspace after a merge closed it, in ms.
 One day (owner request, 2026-11-17).")
 
-(defconst agent-repl--switch-hidden-glyph "◌"
-  "The mark a HIDDEN workspace draws in the switcher in place of its dot.
+(defconst agent-repl--switch-backlogged-glyph "◌"
+  "The mark a BACKLOGGED workspace draws in the switcher in place of its dot.
 A dotted ring: the workspace is there but kept out of sight.  It is inked
 with the row's status color, so the switcher still says what the sidebar
 says about the workspace's status.")
@@ -820,6 +820,10 @@ known workspace, so it reads every page until the last."
 
 (defun agent-repl--switch-candidates (&optional all)
   "Return every KNOWN workspace the `SPC p p' switcher can land on.
+THE SWITCHER IS NOT LIMITED TO VISIBLE WORKSPACES: it is the way to
+select one that is not visible (one a fold hides, a backlogged one) or
+not even open (a closed or merged one).  Selecting it gives it its
+allocations while it is selected (webapp/src/sidebar/AGENTS.md).
 With ALL non-nil, every merged workspace is among them; otherwise only
 the merged pages `SPC p p' can offer from (`agent-repl--switch-merged-pages').
 
@@ -848,7 +852,7 @@ Each entry is a plist:
           `:not-here' (the daemon knows it, this Emacs has no tab)
   :row    the roster row, nil for a live local workspace with none yet
   :section  the roster section the row sits in (`:repository',
-          `:hidden', `:closed' (`agent-repl-roster-walk') or `:merged'
+          `:backlog', `:closed' (`agent-repl-roster-walk') or `:merged'
           (a merged page), nil without a row
 
 A LIVE LOCAL WORKSPACE THE ROSTER DOES NOT CARRY IS STILL OFFERED: the
@@ -1021,7 +1025,7 @@ the daemon's record states no instant, and is never recent."
   "Return the ENTRIES `SPC p p' offers, read at NOW-MS.
 
 THE WORKSPACES THAT ARE CURRENT, AND THE RECENT ONES (owner request,
-2026-10-14): every open workspace, every hidden one, every one closed
+2026-10-14): every open workspace, every backlogged one, every one closed
 recently (`agent-repl--switch-closed-recently-p': three days after any
 close, one after a merge, owner request 2026-11-17), and beyond those the
 `agent-repl--switch-recent-limit' most recently MERGED, and as many of the
@@ -1035,11 +1039,11 @@ a tab is standing for it here -- and is never dropped.
 
 The order they are offered in is `agent-repl--switch-by-recency''s, applied
 by the caller."
-  (let (open hidden recent merged closed)
+  (let (open backlogged recent merged closed)
     (dolist (entry entries)
       (let ((row (plist-get entry :row)))
         (pcase (plist-get entry :section)
-          (:hidden (push entry hidden))
+          (:backlog (push entry backlogged))
           (:merged (if (agent-repl--switch-closed-recently-p row now-ms)
                        (push entry recent)
                      (push entry merged)))
@@ -1051,7 +1055,7 @@ by the caller."
               ((agent-repl-roster-row-closed-by-user-at row)
                (push entry closed)))))))
     (append (nreverse open)
-            (nreverse hidden)
+            (nreverse backlogged)
             (nreverse recent)
             (agent-repl--switch-most-recent
              (nreverse merged)
@@ -1087,8 +1091,8 @@ other candidate keeps its order."
 
 (defun agent-repl--switch-mark (entry)
   "Return the mark ENTRY's line opens with: its status as the sidebar shows it.
-A closed or merged workspace is the sidebar's grey dot; a hidden one
-draws `agent-repl--switch-hidden-glyph' in its status color; every other
+A closed or merged workspace is the sidebar's grey dot; a backlogged one
+draws `agent-repl--switch-backlogged-glyph' in its status color; every other
 row draws the sidebar's own mark for its status arm
 \(`agent-repl-status-roster-mark').  A live local workspace no roster push
 carries yet has no status to show, and draws the default glyph, grey."
@@ -1100,20 +1104,20 @@ carries yet has no status to show, and draws the default glyph, grey."
           (agent-repl-roster-row-closed-p row))
       (propertize (agent-repl-status--glyph-char agent-repl-status-dot-glyph)
                   'face 'shadow))
-     ((eq (plist-get entry :section) :hidden)
+     ((eq (plist-get entry :section) :backlog)
       (agent-repl-status-roster-mark (agent-repl-roster-row-status row)
-                                     agent-repl--switch-hidden-glyph))
+                                     agent-repl--switch-backlogged-glyph))
      (t
       (agent-repl-status-roster-mark (agent-repl-roster-row-status row))))))
 
 (defun agent-repl--switch-state-label (entry)
   "Return the state column's word for ENTRY.
-Where the workspace sits outranks how it would open: a hidden or merged
+Where the workspace sits outranks how it would open: a backlogged or merged
 workspace says so, and every other says `agent-repl--switch-state-labels'.
 \"merged\" is drawn in `agent-repl--color-merging-purple', the one color
 every surface paints a merge in."
   (pcase (plist-get entry :section)
-    (:hidden "hidden")
+    (:backlog "backlogged")
     (:merged (propertize "merged" 'face
                          (list :foreground agent-repl--color-merging-purple)))
     (_ (alist-get (plist-get entry :state) agent-repl--switch-state-labels ""))))
@@ -1258,8 +1262,8 @@ either way most recently selected first (`agent-repl--switch-by-recency').
 Each line shows the workspace's status mark and its columns
 \(`agent-repl--switch-affixation').
 
-A HIDDEN WORKSPACE IS UNHIDDEN: choosing it shows it again
-\(`agent-repl-verb-set-hidden'), which lands on it once the daemon accepts.
+A BACKLOGGED WORKSPACE LEAVES THE BACKLOG: choosing it shows it again
+\(`agent-repl-verb-set-backlogged'), which lands on it once the daemon accepts.
 
 AN OPEN WORKSPACE IS A SWITCH REQUEST and nothing more: the daemon is
 asked to select it (`agent-repl-host-request-switch') and the frame
@@ -1303,17 +1307,17 @@ daemon-minted and there is no spelling of it Emacs could construct."
            (ws (plist-get entry :ws))
            (ref (plist-get entry :ref)))
       (cond
-       ((and ws (eq (plist-get entry :section) :hidden))
+       ((and ws (eq (plist-get entry :section) :backlog))
         (agent-repl--info ws "elisp.commands.switch-unhides ws={ws}" :ws ws)
-        (agent-repl-verb-set-hidden ws nil))
+        (agent-repl-verb-set-backlogged ws nil))
        (ws
         (agent-repl--info ws "elisp.commands.switch-chosen ws={ws} all={all}" :ws ws :all (and all t))
         (agent-repl-host-request-switch ws 'picker))
-       ;; A HIDDEN OR FOLDED WORKSPACE THIS EDITOR DOES NOT HOLD is open, so
-       ;; it is not reopened: a hidden one is shown (as a held one is), a
+       ;; A BACKLOGGED OR FOLDED WORKSPACE THIS EDITOR DOES NOT HOLD is open, so
+       ;; it is not reopened: a backlogged one is shown (as a held one is), a
        ;; folded one is selected and drawn inside its fold while it stays
        ;; the selection (owner ruling, 2026-11-21).
-       ((and ref (eq (plist-get entry :section) :hidden))
+       ((and ref (eq (plist-get entry :section) :backlog))
         (agent-repl--info (agent-repl--ws-current-log-name)
                           "elisp.commands.switch-unhides-unheld name={name} id={id}"
                           :name (plist-get entry :name) :id (plist-get ref :id))
@@ -1339,7 +1343,7 @@ daemon-minted and there is no spelling of it Emacs could construct."
 (defun agent-repl-switch-to-project (&optional project)
   "Switch to a current or recent workspace, or to PROJECT.
 
-With no argument, completes over the open and hidden workspaces, the
+With no argument, completes over the open and backlogged workspaces, the
 most recently merged and the ones the user most recently closed -- the
 daemon's roster is the source of what exists -- most recently selected
 first, and stands on the chosen one, opening it first when it is closed
@@ -1835,22 +1839,28 @@ start from."
   (agent-repl--step-workspace 1 #'agent-repl--working-ring "working-cycle" 'cycle))
 
 (defun agent-repl--recency-ring (current)
-  "Return the drawn tabs, and CURRENT, most recently selected first.
-The ONE selection-recency order (`agent-repl-roster-selection-recency-order')
-over the drawn tabs (`agent-repl--drawn-tab-names'), so `s-[' and `s-]'
-reach exactly the tabs `s-{' and `s-}' do, and pass over a folded one.
-CURRENT joins the ring when it is not among them, so it still has a place
-to step from."
-  (let ((drawn (agent-repl--drawn-tab-names)))
+  "Return every open workspace, and CURRENT, most recently interacted first.
+The ONE recency order (`agent-repl-roster-selection-recency-order') over
+every workspace of the Open section (`agent-repl-roster-open-entries'),
+the ones a fold hides and this editor holds no tab for included: `s-[' and
+`s-]' reach a workspace that is not visible (owner ruling, 2026-11-24),
+which a step selects and so draws, and which returns to not visible once
+the walk moves on.  CURRENT joins the ring when it is not among them, so it
+still has a place to step from."
+  (let ((open (mapcar (lambda (entry) (plist-get entry :name))
+                      (and (fboundp 'agent-repl-roster-open-entries)
+                           (agent-repl-roster-open-entries)))))
     (agent-repl-roster-selection-recency-order
-     (if (or (null current) (member current drawn))
-         drawn
-       (append drawn (list current))))))
+     (if (or (null current) (member current open))
+         open
+       (append open (list current))))))
 
 (defun agent-repl--recency-walk (n)
-  "Switch N places along the selection history, positive being older.
-`s-[' and `s-]' are `s-{' and `s-}' over the recency order rather than the
-bar's (`agent-repl--recency-ring'), wrapping at both ends.
+  "Switch N places along the interaction history, positive being older.
+`s-[' and `s-]' walk the recency order (`agent-repl--recency-ring'),
+wrapping at both ends, and land on ANY workspace of it, not only a drawn
+tab: a step to a workspace this editor holds no tab for selects it through
+the daemon (`agent-repl-host-request-switch').
 
 A STEP IS NOT AN INTERACTION.  The switch is requested with the
 `recency-walk' trigger, so it stamps no interaction instant, and the walk\='s
@@ -1859,7 +1869,14 @@ The order therefore holds still under the walk, and the current
 workspace's place in it IS the walk's position: `s-[' pressed again lands
 one older, and `s-]' comes back toward the most recent, with no cursor to
 keep."
-  (agent-repl--step-workspace n #'agent-repl--recency-ring "recency-walk" 'recency-walk))
+  (agent-repl--step-workspace-to
+   n (lambda (current _drawn)
+       ;; A ring holding only CURRENT has nowhere to walk: a step that would
+       ;; land where it starts is no step.
+       (let* ((ring (agent-repl--recency-ring current))
+              (target (agent-repl--cycle-target ring ring current n)))
+         (unless (equal target current) target)))
+   "recency-walk" 'recency-walk))
 
 (defun agent-repl-switch-older ()
   "Switch to the workspace viewed before the current one, without recording a view.
@@ -1901,7 +1918,7 @@ NOT SELECTABLE, as its sidebar row is not: the press is a reported no-op.
 
 Called interactively with no prefix argument, completes over the
 DRAWN TABS (`agent-repl--drawn-tab-names') and switches to the chosen one,
-the same set the walking chords reach.  A folded or hidden workspace has no
+the same set the walking chords reach.  A folded or backlogged workspace has no
 tab here (frontend.v1.RosterRowVisibility); `SPC p p' reaches it.
 
 An empty bar and a slot the bar does not draw are REPORTED no-ops rather

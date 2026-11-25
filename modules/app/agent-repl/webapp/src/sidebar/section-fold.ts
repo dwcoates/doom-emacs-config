@@ -12,8 +12,8 @@ import { FOLDED_CLASS } from "./folded-class.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { SidebarContext } from "./context.js";
-import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY } from "./context.js";
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./section-classes.js";
+import { BACKLOG_FOLD_KEY, MERGED_FOLD_KEY } from "./context.js";
+import { BACKLOG_SECTION_CLASS, MERGED_SECTION_CLASS } from "./section-classes.js";
 import { queryAll } from "../dom.js";
 import type { FocusLeft } from "../focus-left.js";
 import { createLogger } from "../log.js";
@@ -73,7 +73,7 @@ function flashCurrentRow(section: HTMLElement): void {
  * gesture asks nothing and flashes the selected row, as the daemon refuses
  * such a collapse too. Selecting a workspace in a collapsed section opens
  * nothing: the roster draws that workspace alone inside the fold while it is
- * the selection (`frontend.v1.RosterOpenRow.surfaced`).
+ * the selection (`frontend.v1.RosterOpenRow.fold_cover`).
  */
 export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTarget): FoldGesture {
   return (section, control) => {
@@ -219,13 +219,13 @@ export interface FocusFoldedSection {
 /**
  * THE SECTIONS THAT FOLD THEMSELVES WHEN THE FOCUS LEAVES THE PAGE (owner
  * request, 2026-11-01): Recently Merged, as its groups did while they sat in
- * the Deploys section, and Hidden. Each is a glance at settled or put-away
+ * the Deploys section, and the Backlog. Each is a glance at settled or put-away
  * workspaces, opened by a click on its header and folded again once the
  * user is done with the rail.
  */
 export const FOCUS_FOLDED_SECTIONS: readonly FocusFoldedSection[] = [
   { className: MERGED_SECTION_CLASS, foldKey: MERGED_FOLD_KEY, target: { case: "recentlyMerged", value: {} } },
-  { className: HIDDEN_SECTION_CLASS, foldKey: HIDDEN_FOLD_KEY, target: { case: "hidden", value: {} } },
+  { className: BACKLOG_SECTION_CLASS, foldKey: BACKLOG_FOLD_KEY, target: { case: "backlog", value: {} } },
 ];
 
 /**

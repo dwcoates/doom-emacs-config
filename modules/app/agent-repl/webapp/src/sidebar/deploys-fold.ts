@@ -10,7 +10,7 @@
  *     (the group's `DEPLOYS_LINE_ATTRIBUTE`);
  *   - the focus leaves the rail's page (`focus-left.ts`): a click into a
  *     feed, into another Emacs window, or Emacs moving its own focus;
- *   - a workspace outside the groups is clicked: an open row or a hidden
+ *   - a workspace outside the groups is clicked: an open row or a backlogged
  *     row;
  *   - a workspace is reopened from a group (`row.ts`'s band returns).
  *

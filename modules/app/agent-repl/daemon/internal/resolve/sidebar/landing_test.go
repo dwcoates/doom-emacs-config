@@ -222,7 +222,7 @@ func TestLandingTargetPassesOverWithheldTabs(t *testing.T) {
 		name     string
 		withheld wsm.Withholding
 	}{
-		{name: "a hidden ancestor is no landing", withheld: wsm.WithheldHidden},
+		{name: "a backlogged ancestor is no landing", withheld: wsm.WithheldBacklogged},
 		{name: "a collapsed ancestor is no landing", withheld: wsm.WithheldCollapsed},
 	}
 	for _, tt := range tests {
@@ -258,7 +258,7 @@ func TestLandingTargetFindsNoneWithNoOtherDrawnTab(t *testing.T) {
 		{name: "only the leaving workspace is drawn", tabs: func(reg Registry) []Tab { return landingTabs(reg)[1:2] }},
 		{name: "every other tab is withheld", tabs: func(reg Registry) []Tab {
 			tabs := landingTabs(reg)
-			tabs[0].Withheld = wsm.WithheldHidden
+			tabs[0].Withheld = wsm.WithheldBacklogged
 			tabs[2].Withheld = wsm.WithheldCollapsed
 			return tabs
 		}},

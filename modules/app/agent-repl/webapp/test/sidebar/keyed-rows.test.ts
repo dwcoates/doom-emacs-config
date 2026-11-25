@@ -3,19 +3,19 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
-  RosterHiddenRowsSchema,
+  RosterBacklogRowsSchema,
   RosterOpenRowsSchema,
   RosterOpenRowTabSchema,
-  type RosterHiddenRow,
+  type RosterBacklogRow,
   type RosterRow,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   disposeKeyedRows,
-  drawKeyedHiddenRows,
+  drawKeyedBacklogRows,
   drawKeyedRows,
-  HIDDEN_ROW,
+  BACKLOG_ROW,
   OPEN_ROW,
-  pathedHiddenRows,
+  pathedBacklogRows,
   patchKeyedRows,
   placeKeyedRows,
   reconcileKeyedRegions,
@@ -30,7 +30,7 @@ const ticking = (id: string, current = false): RosterRow =>
   row({ id, current, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } });
 const elementOf = (box: HTMLElement, id: string): Element | null => box.querySelector(`[data-roster-row='${id}']`);
 const idsOf = (box: HTMLElement): Array<string | null> => [...box.children].map((el) => el.getAttribute("data-roster-row"));
-const hiddenRows = (...r: RosterRow[]) => create(RosterHiddenRowsSchema, { rows: r.map((one) => ({ row: one })) });
+const backlogRows = (...r: RosterRow[]) => create(RosterBacklogRowsSchema, { rows: r.map((one) => ({ row: one })) });
 
 describe("keyed rows", () => {
   it("redraws only the rows whose wire changed, where they stand", () => {
@@ -252,7 +252,7 @@ describe("keyed regions", () => {
   });
 });
 
-describe("keyed hidden rows", () => {
+describe("keyed backlogged rows", () => {
   const hiddenOf = (box: HTMLElement, id: string): Element | null => elementOf(box, id);
 
   it.each([
@@ -262,16 +262,16 @@ describe("keyed hidden rows", () => {
       want: { drawn: 1, removed: 0, moved: 0 },
       keptA: true,
     },
-    { name: "moves the hidden rows reordered, drawing none", next: [row({ id: "b" }), row({ id: "a" })], want: { drawn: 0, removed: 0, moved: 2 }, keptA: true },
+    { name: "moves the backlogged rows reordered, drawing none", next: [row({ id: "b" }), row({ id: "a" })], want: { drawn: 0, removed: 0, moved: 2 }, keptA: true },
   ])("$name", ({ next, want, keptA }) => {
     // Arrange
     const rail = sidebarContext();
-    const kept: KeyedRows<RosterHiddenRow> = { entries: [] };
-    const box = drawKeyedHiddenRows(hiddenRows(row({ id: "a" }), row({ id: "b" })), rail, "h", "hidden", kept);
+    const kept: KeyedRows<RosterBacklogRow> = { entries: [] };
+    const box = drawKeyedBacklogRows(backlogRows(row({ id: "a" }), row({ id: "b" })), rail, "h", "backlog", kept);
     const a = hiddenOf(box, "a");
 
     // Act
-    const patched = reconcileKeyedRegions([{ kept, rows: pathedHiddenRows(hiddenRows(...next), "h") }], rail, "hidden", HIDDEN_ROW);
+    const patched = reconcileKeyedRegions([{ kept, rows: pathedBacklogRows(backlogRows(...next), "h") }], rail, "backlog", BACKLOG_ROW);
     placeKeyedRows(box, kept);
 
     // Assert

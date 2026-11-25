@@ -134,7 +134,7 @@ import "agentrepl/v1/endpoint_load_page_in_editor.proto";
 import "agentrepl/v1/endpoint_ask_about_response.proto";
 import "agentrepl/v1/endpoint_select_response_text.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
-import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
+import "agentrepl/v1/endpoint_send_backlogged_keepalives.proto";
 import "agentrepl/v1/endpoint_send_login_input.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "agentrepl/v1/endpoint_set_default_model.proto";
@@ -142,7 +142,7 @@ import "agentrepl/v1/endpoint_set_effort.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
-import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
+import "agentrepl/v1/endpoint_set_workspace_backlogged.proto";
 import "agentrepl/v1/endpoint_set_workspace_name.proto";
 import "agentrepl/v1/endpoint_set_workspace_summary.proto";
 import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
@@ -423,12 +423,12 @@ service AgentRepl {
   // second-to-last within that priority. See
   // endpoint_set_workspace_priority.proto.
   rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
-  // Move a workspace into the hidden section or back out; a hidden workspace
-  // is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
-  rpc SetWorkspaceHidden(SetWorkspaceHiddenRequest) returns (SetWorkspaceHiddenResponse);
-  // Send one keep-alive to every hidden workspace's session, so each cache's
-  // lapse moves later. See endpoint_send_hidden_keepalives.proto.
-  rpc SendHiddenKeepalives(SendHiddenKeepalivesRequest) returns (SendHiddenKeepalivesResponse);
+  // Move a workspace into the backlog or back out; a backlogged workspace
+  // is off the Emacs tab bar. See endpoint_set_workspace_backlogged.proto.
+  rpc SetWorkspaceBacklogged(SetWorkspaceBackloggedRequest) returns (SetWorkspaceBackloggedResponse);
+  // Send one keep-alive to every backlogged workspace's session, so each cache's
+  // lapse moves later. See endpoint_send_backlogged_keepalives.proto.
+  rpc SendBackloggedKeepalives(SendBackloggedKeepalivesRequest) returns (SendBackloggedKeepalivesResponse);
   // Retarget a workspace's merge: make it a child of another workspace of the
   // same repository, or top-level. Its session is told in the same operation.
   // See endpoint_set_workspace_parent.proto.

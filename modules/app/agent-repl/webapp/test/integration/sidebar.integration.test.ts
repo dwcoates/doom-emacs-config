@@ -86,7 +86,7 @@ describe("arm coverage", () => {
   it("covers every when-column arm", () => {
     assertCoversOneof(RosterRowWhenSchema, "shown", [
       "merged",
-      "hidden",
+      "backlogged",
       "syncMerging",
       "turnRunning",
       "noTurnRunning",
@@ -648,7 +648,7 @@ describe("roster ordering", () => {
     // Assert
     // The open workspaces section heads the pane and the Recently Merged
     // section follows it, by construction (an empty Merge Queue and an empty
-    // Hidden section are left out).
+    // Backlog are left out).
     expect(harness.texts('.sb-pane .repo-head .sb-label')).toEqual([
       "Open",
       "zulu",

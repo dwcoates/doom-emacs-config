@@ -11,7 +11,7 @@ import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
 import { setWorkspaceNameRefusal } from "../../src/sidebar/rename.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import type { CauseOf } from "../../src/sidebar/verbs.js";
-import { appContext, hiddenSection, mergedSection, repoSection, roster, row, sidebarContext } from "./harness.js";
+import { appContext, backlogSection, mergedSection, repoSection, roster, row, sidebarContext } from "./harness.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -91,7 +91,7 @@ describe("renaming a workspace from its row", () => {
 
   it.each([
     ["the Recently Merged band", () => roster({ repos: [repoSection({ id: "repo-1" })], merged: mergedSection([row({ id: "ws-1" })]) })],
-    ["the Hidden section", () => roster({ repos: [repoSection({ id: "repo-1" })], hidden: hiddenSection([row({ id: "ws-1" })]) })],
+    ["the Backlog", () => roster({ repos: [repoSection({ id: "repo-1" })], backlog: backlogSection([row({ id: "ws-1" })]) })],
   ])("offers no rename in %s, whose click is the band's own gesture", (_where, made) => {
     const { sc } = renamed(taken);
     const pane = mount(made(), sc);

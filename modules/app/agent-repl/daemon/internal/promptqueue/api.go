@@ -95,6 +95,13 @@ var (
 	// hold, never refused: the death starts the session's revival, whose
 	// coming up delivers it.
 	ErrShimDied = errors.New("promptqueue: the shim died under the delivery")
+	// ErrShimStoodDown is a delivery that failed because THIS DAEMON stood
+	// the shim down under it (a kill, a close or a forget whose teardown
+	// reached the shim while StartTurn was in flight). The sender's error
+	// answers errors.Is against it. Like a death it is HELD under the
+	// reconnect hold, never refused: the prompt waits for the session's next
+	// coming up, and the teardown decides whether there is one.
+	ErrShimStoodDown = errors.New("promptqueue: this daemon stood the shim down under the delivery")
 	// ErrSessionNotWatched is a delivery the sender would not send because no
 	// watch stands to see the turn: the session's watcher is gone, or closed
 	// while the turn waited for its main watch. A turn sent then writes frames

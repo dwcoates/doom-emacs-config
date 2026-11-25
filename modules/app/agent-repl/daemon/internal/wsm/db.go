@@ -108,13 +108,13 @@ type DB interface {
 	// TakeOwedPlacementNote takes the placement note the workspace's next
 	// prompt owes, answering whether one was owed.
 	TakeOwedPlacementNote(ctx context.Context, id WorkspaceID) (bool, error)
-	// RequireOpenParent answers ParentNotOpenError when the parent is hidden,
+	// RequireOpenParent answers ParentNotOpenError when the parent is backlogged,
 	// closed or closing, nil when it is open (family.go).
 	RequireOpenParent(ctx context.Context, parent WorkspaceID) error
 	// RequireNoOpenChildren answers HasOpenChildrenError for the first of ids
 	// with an open descendant, nil when none has (family.go).
 	RequireNoOpenChildren(ctx context.Context, ids ...WorkspaceID) error
-	// OpenChildren answers the open DIRECT children of PARENT, hidden ones
+	// OpenChildren answers the open DIRECT children of PARENT, backlogged ones
 	// included and hidden merge workspaces excluded, in place order (family.go).
 	OpenChildren(ctx context.Context, parent WorkspaceID) ([]FamilyRef, error)
 	// Reopen records that a workspace's editor state stands again, clearing
@@ -150,21 +150,21 @@ type DB interface {
 	// SetPriority sets or clears a workspace's priority; setting one moves the
 	// workspace to second-to-last within that priority.
 	SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error
-	// SetHidden records whether a workspace sits in the roster's hidden
-	// section; an unknown workspace is ErrNotFound.
-	SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error
+	// SetBacklogged records whether a workspace sits in the roster's backlog;
+	// an unknown workspace is ErrNotFound.
+	SetBacklogged(ctx context.Context, id WorkspaceID, backlogged bool, at time.Time) error
 	// HideFamily hides a workspace with every open workspace its hide would
-	// be refused for, each marked as hidden with it, and answers those
+	// be refused for, each marked as backlogged with it, and answers those
 	// members (familyhide.go).
 	HideFamily(ctx context.Context, root WorkspaceID, at time.Time) ([]WorkspaceID, error)
 	// ShowFamily shows a workspace and the members HideFamily hid with it,
 	// and answers the members shown (familyhide.go).
 	ShowFamily(ctx context.Context, root WorkspaceID) ([]WorkspaceID, error)
 	// BacklogColdGate moves a shown workspace whose cold gate stood too long
-	// into the hidden section, once per gate, and answers whether it moved it.
+	// into the backlog, once per gate, and answers whether it moved it.
 	BacklogColdGate(ctx context.Context, id WorkspaceID, gateLapsedAt, at time.Time) (bool, error)
-	// SetCacheLapse records a hidden workspace's projected cache lapse, and
-	// answers whether it was recorded: a workspace not hidden takes none.
+	// SetCacheLapse records a backlogged workspace's projected cache lapse, and
+	// answers whether it was recorded: a workspace not backlogged takes none.
 	SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLapse) (bool, error)
 	// RevealMergeWorkspace records that a merge workspace has been revealed,
 	// answering whether this call revealed it; a workspace that is no merge
@@ -550,9 +550,9 @@ type DB interface {
 	// SetMergeQueueSectionFolded records whether the Merge Queue section is
 	// collapsed.
 	SetMergeQueueSectionFolded(ctx context.Context, folded bool) error
-	// SetHiddenSectionFolded records whether the hidden-workspaces section is
+	// SetBacklogFolded records whether the backlog is
 	// collapsed.
-	SetHiddenSectionFolded(ctx context.Context, folded bool) error
+	SetBacklogFolded(ctx context.Context, folded bool) error
 	// SetOpenSectionFolded records whether the open-workspaces section is
 	// collapsed.
 	SetOpenSectionFolded(ctx context.Context, folded bool) error

@@ -186,7 +186,7 @@ export type NukeWorkspaceError = Message<"agentrepl.v1.NukeWorkspaceError"> & {
     case: "gitFailed";
   } | {
     /**
-     * The workspace has open children (hidden ones included), and nuking it
+     * The workspace has open children (backlogged ones included), and nuking it
      * would leave them without their parent in the Open section.
      *
      * @generated from field: agentrepl.v1.WorkspaceHasOpenChildren has_open_children = 6;

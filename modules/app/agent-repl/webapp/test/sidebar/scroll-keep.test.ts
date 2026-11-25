@@ -51,23 +51,23 @@ describe("createRailScrollKeep", () => {
     expect(fresh.region.scrollTop).toBe(140);
   });
 
-  it("keeps each section under its own name, Deploys and Hidden Workspaces alike", () => {
+  it("keeps each section under its own name, Deploys and Backlog alike", () => {
     // Arrange
     const merged = section("merged-section", "rows");
-    const hidden = section("hidden-section", "rows");
+    const hidden = section("backlog-section", "rows");
     const body = railBody([merged.section, hidden.section]);
     merged.region.scrollTop = 60;
     hidden.region.scrollTop = 20;
     const keep = createRailScrollKeep();
     keep.capture(body, "workspaces");
     const freshMerged = section("merged-section", "rows");
-    const freshHidden = section("hidden-section", "rows");
+    const freshBacklog = section("backlog-section", "rows");
     merged.section.replaceWith(freshMerged.section);
-    hidden.section.replaceWith(freshHidden.section);
+    hidden.section.replaceWith(freshBacklog.section);
     // Act
     keep.restore(body, "workspaces");
     // Assert
-    expect([freshMerged.region.scrollTop, freshHidden.region.scrollTop]).toEqual([60, 20]);
+    expect([freshMerged.region.scrollTop, freshBacklog.region.scrollTop]).toEqual([60, 20]);
   });
 
   it("puts back a kept section the draw moved", () => {
@@ -181,7 +181,7 @@ describe("createRailScrollKeep", () => {
     const body = railBody([]);
     const keep = createRailScrollKeep();
     keep.capture(body, "workspaces");
-    const fresh = section("hidden-section", "rows");
+    const fresh = section("backlog-section", "rows");
     fresh.region.scrollTop = 40;
     body.appendChild(fresh.section);
     // Act

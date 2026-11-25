@@ -10,10 +10,10 @@ import (
 )
 
 // intakeWorkspacesDDL is the layout-115 addition: intake_workspaces, one row
-// per EPHEMERAL INTAKE WORKSPACE, a hidden workspace the daemon creates to
+// per EPHEMERAL INTAKE WORKSPACE, a backlogged workspace the daemon creates to
 // work out what a request is and hand it on (a card's `?` question, a Slack
 // emoji ack), which the daemon closes when a turn of it ends. The row is
-// written in the transaction that inserts the workspace hidden
+// written in the transaction that inserts the workspace backlogged
 // (RegisterFacts.Intake), so an intake workspace is never one without the
 // other, and never drawn visible.
 //

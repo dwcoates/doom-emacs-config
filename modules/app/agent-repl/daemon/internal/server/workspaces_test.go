@@ -895,26 +895,26 @@ func TestOpenWorkspaceRelaysNoUnmappedStage(t *testing.T) {
 	}
 }
 
-// ---- SetWorkspaceHidden ----------------------------------------------------
+// ---- SetWorkspaceBacklogged ----------------------------------------------------
 
-func hideArm() *agentreplv1.SetWorkspaceHiddenRequest_Hide {
-	return &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}}
+func hideArm() *agentreplv1.SetWorkspaceBackloggedRequest_Hide {
+	return &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}}
 }
 
-func showArm() *agentreplv1.SetWorkspaceHiddenRequest_Show {
-	return &agentreplv1.SetWorkspaceHiddenRequest_Show{Show: &agentreplv1.SetWorkspaceHiddenShow{}}
+func showArm() *agentreplv1.SetWorkspaceBackloggedRequest_Show {
+	return &agentreplv1.SetWorkspaceBackloggedRequest_Show{Show: &agentreplv1.SetWorkspaceBackloggedShow{}}
 }
 
-// TestSetWorkspaceHiddenHandsThePlaceToTheVerb pins each visibility arm
+// TestSetWorkspaceBackloggedHandsThePlaceToTheVerb pins each visibility arm
 // reaching the verb with the id the registry resolved.
-func TestSetWorkspaceHiddenHandsThePlaceToTheVerb(t *testing.T) {
+func TestSetWorkspaceBackloggedHandsThePlaceToTheVerb(t *testing.T) {
 	tests := []struct {
 		name string
-		req  *agentreplv1.SetWorkspaceHiddenRequest
+		req  *agentreplv1.SetWorkspaceBackloggedRequest
 		want bool
 	}{
-		{"hide", &agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}, true},
-		{"show", &agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: showArm()}, false},
+		{"hide", &agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref(), Visibility: hideArm()}, true},
+		{"show", &agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref(), Visibility: showArm()}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -922,62 +922,62 @@ func TestSetWorkspaceHiddenHandsThePlaceToTheVerb(t *testing.T) {
 			h := newHarness(t)
 
 			// Act
-			resp, err := h.Client.SetWorkspaceHidden(context.Background(),
+			resp, err := h.Client.SetWorkspaceBacklogged(context.Background(),
 				connect.NewRequest(tt.req))
 
 			// Assert
 			if err != nil {
-				t.Fatalf("SetWorkspaceHidden: %v", err)
+				t.Fatalf("SetWorkspaceBacklogged: %v", err)
 			}
 			if resp.Msg.GetSuccess() == nil {
 				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
 			}
-			want := hiddenSet{ws: testWorkspaceID, hidden: tt.want}
-			if len(h.Verbs.hiddenSets) != 1 || h.Verbs.hiddenSets[0] != want {
-				t.Fatalf("hidden sets = %+v, want %+v", h.Verbs.hiddenSets, want)
+			want := backloggedSet{ws: testWorkspaceID, backlogged: tt.want}
+			if len(h.Verbs.backloggedSets) != 1 || h.Verbs.backloggedSets[0] != want {
+				t.Fatalf("backlogged sets = %+v, want %+v", h.Verbs.backloggedSets, want)
 			}
 		})
 	}
 }
 
-// TestSetWorkspaceHiddenRefusesAnUnknownWorkspace pins that an id the
+// TestSetWorkspaceBackloggedRefusesAnUnknownWorkspace pins that an id the
 // registry does not hold answers the unknown_workspace arm and reaches no verb.
-func TestSetWorkspaceHiddenRefusesAnUnknownWorkspace(t *testing.T) {
+func TestSetWorkspaceBackloggedRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
 	// Act
-	resp, err := h.Client.SetWorkspaceHidden(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{
+	resp, err := h.Client.SetWorkspaceBacklogged(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
 			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, Visibility: hideArm(),
 		}))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetWorkspaceHidden: %v", err)
+		t.Fatalf("SetWorkspaceBacklogged: %v", err)
 	}
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
-	if len(h.Verbs.hiddenSets) != 0 {
-		t.Fatalf("hidden sets = %+v, want none for an unknown workspace", h.Verbs.hiddenSets)
+	if len(h.Verbs.backloggedSets) != 0 {
+		t.Fatalf("backlogged sets = %+v, want none for an unknown workspace", h.Verbs.backloggedSets)
 	}
 }
 
-// TestSetWorkspaceHiddenMapsTheVerbsRefusal pins a refusal the verb raises
+// TestSetWorkspaceBackloggedMapsTheVerbsRefusal pins a refusal the verb raises
 // answering its own arm.
-func TestSetWorkspaceHiddenMapsTheVerbsRefusal(t *testing.T) {
+func TestSetWorkspaceBackloggedMapsTheVerbsRefusal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.Verbs.setHiddenErr = &workspace.Refusal{Arm: workspace.ArmNotYetAdopted, Reason: "still adopting"}
+	h.Verbs.setBackloggedErr = &workspace.Refusal{Arm: workspace.ArmNotYetAdopted, Reason: "still adopting"}
 
 	// Act
-	resp, err := h.Client.SetWorkspaceHidden(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
+	resp, err := h.Client.SetWorkspaceBacklogged(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref(), Visibility: hideArm()}))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetWorkspaceHidden: %v", err)
+		t.Fatalf("SetWorkspaceBacklogged: %v", err)
 	}
 	if resp.Msg.GetError().GetNotYetAdopted() == nil {
 		t.Fatalf("result = %v, want not_yet_adopted", resp.Msg.GetResult())
@@ -1129,7 +1129,7 @@ func TestChangeWorkspaceLinksMapsTheVerbsRefusals(t *testing.T) {
 // refusal, wrapped by whichever verb carried it up, answers on the rpc's own
 // shared arm.
 func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
-	parentNotOpen := &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"}, State: wsm.ParentHidden}
+	parentNotOpen := &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"}, State: wsm.ParentBacklogged}
 	tests := []struct {
 		name  string
 		setUp func(h *harness)
@@ -1144,19 +1144,19 @@ func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
 			},
 		},
 		{
-			name:  "SetWorkspaceHidden has_open_children",
-			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("hide: %w", familyChildren) },
+			name:  "SetWorkspaceBacklogged has_open_children",
+			setUp: func(h *harness) { h.Verbs.setBackloggedErr = fmt.Errorf("hide: %w", familyChildren) },
 			call: func(h *harness) (bool, error) {
-				resp, err := h.Client.SetWorkspaceHidden(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
+				resp, err := h.Client.SetWorkspaceBacklogged(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref(), Visibility: hideArm()}))
 				return err == nil && resp.Msg.GetError().GetHasOpenChildren() != nil, err
 			},
 		},
 		{
-			name:  "SetWorkspaceHidden parent_not_open",
-			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("show: %w", parentNotOpen) },
+			name:  "SetWorkspaceBacklogged parent_not_open",
+			setUp: func(h *harness) { h.Verbs.setBackloggedErr = fmt.Errorf("show: %w", parentNotOpen) },
 			call: func(h *harness) (bool, error) {
-				resp, err := h.Client.SetWorkspaceHidden(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
-				return err == nil && resp.Msg.GetError().GetParentNotOpen().GetHidden() != nil, err
+				resp, err := h.Client.SetWorkspaceBacklogged(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref(), Visibility: hideArm()}))
+				return err == nil && resp.Msg.GetError().GetParentNotOpen().GetBacklogged() != nil, err
 			},
 		},
 		{
@@ -1185,22 +1185,22 @@ func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
 	}
 }
 
-// TestSetWorkspaceHiddenRefusesAMissingVisibility pins an unset arm as a
+// TestSetWorkspaceBackloggedRefusesAMissingVisibility pins an unset arm as a
 // malformed request that reaches no verb.
-func TestSetWorkspaceHiddenRefusesAMissingVisibility(t *testing.T) {
+func TestSetWorkspaceBackloggedRefusesAMissingVisibility(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
 	// Act
-	_, err := h.Client.SetWorkspaceHidden(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref()}))
+	_, err := h.Client.SetWorkspaceBacklogged(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref()}))
 
 	// Assert
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v (%v), want InvalidArgument", connect.CodeOf(err), err)
 	}
-	if len(h.Verbs.hiddenSets) != 0 {
-		t.Fatalf("hidden sets = %+v, want none for a malformed request", h.Verbs.hiddenSets)
+	if len(h.Verbs.backloggedSets) != 0 {
+		t.Fatalf("backlogged sets = %+v, want none for a malformed request", h.Verbs.backloggedSets)
 	}
 }
 
@@ -3705,16 +3705,16 @@ func TestCreateWorkspaceAnswersTheLifecycleRefusals(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceMapsHiddenAndPlacementToTheSpec(t *testing.T) {
+func TestCreateWorkspaceMapsBackloggedAndPlacementToTheSpec(t *testing.T) {
 	tests := []struct {
-		name          string
-		hidden        *bool
-		placement     *agentreplv1.CreateWorkspacePlacement
-		wantHidden    bool
-		wantPlacement *workspace.CreatePlacement
+		name           string
+		backlogged     *bool
+		placement      *agentreplv1.CreateWorkspacePlacement
+		wantBacklogged bool
+		wantPlacement  *workspace.CreatePlacement
 	}{
-		{name: "neither", wantHidden: false},
-		{name: "born hidden", hidden: boolPtr(true), wantHidden: true},
+		{name: "neither", wantBacklogged: false},
+		{name: "born backlogged", backlogged: boolPtr(true), wantBacklogged: true},
 		{name: "an existing subsection", placement: &agentreplv1.CreateWorkspacePlacement{
 			Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: "auth"}},
 			wantPlacement: &workspace.CreatePlacement{Subsection: "auth"}},
@@ -3728,7 +3728,7 @@ func TestCreateWorkspaceMapsHiddenAndPlacementToTheSpec(t *testing.T) {
 			h := newHarness(t)
 			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
 			req := oneShotCreate(registeredRepoRef(h), nil)
-			req.Hidden, req.Placement = tt.hidden, tt.placement
+			req.Backlogged, req.Placement = tt.backlogged, tt.placement
 
 			// Act
 			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
@@ -3738,8 +3738,8 @@ func TestCreateWorkspaceMapsHiddenAndPlacementToTheSpec(t *testing.T) {
 				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
 			}
 			spec := h.Verbs.createSpecs[0]
-			if spec.Hidden != tt.wantHidden || !reflect.DeepEqual(spec.Placement, tt.wantPlacement) {
-				t.Fatalf("spec hidden %v placement %+v, want %v and %+v", spec.Hidden, spec.Placement, tt.wantHidden, tt.wantPlacement)
+			if spec.Backlogged != tt.wantBacklogged || !reflect.DeepEqual(spec.Placement, tt.wantPlacement) {
+				t.Fatalf("spec backlogged %v placement %+v, want %v and %+v", spec.Backlogged, spec.Placement, tt.wantBacklogged, tt.wantPlacement)
 			}
 		})
 	}

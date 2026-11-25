@@ -7,7 +7,7 @@
  * the header's divider sits, over the top of the sections. The scroller keeps
  * its height, so the band fit (`band-fit.ts`) is never re-measured for it.
  *
- * THE QUERY NARROWS EVERY SECTION: the repository sections, Hidden
+ * THE QUERY NARROWS EVERY SECTION: the repository sections, the Backlog
  * Workspaces and Recently Merged alike. A row stays
  * when its name matches or any row nested under it does, so a matching child
  * keeps its family's line above it; a section or merged group left with no

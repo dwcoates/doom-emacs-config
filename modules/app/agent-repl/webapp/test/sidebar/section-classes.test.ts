@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  HIDDEN_SECTION_CLASS,
+  BACKLOG_SECTION_CLASS,
   MERGED_SECTION_CLASS,
   MERGE_QUEUE_SECTION_CLASS,
   OPEN_SECTION_CLASS,
@@ -11,9 +11,9 @@ import { FOCUS_FOLDED_SECTIONS } from "../../src/sidebar/section-fold.js";
 
 describe("the sections' classes", () => {
   it("are the four the stylesheet draws the sections with", () => {
-    expect([OPEN_SECTION_CLASS, HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS]).toEqual([
+    expect([OPEN_SECTION_CLASS, BACKLOG_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS]).toEqual([
       "open-section",
-      "hidden-section",
+      "backlog-section",
       "merged-section",
       "merge-queue-section",
     ]);
@@ -26,6 +26,6 @@ describe("the sections' classes", () => {
   });
 
   it("are defined where a module reads them at its top level", () => {
-    expect(FOCUS_FOLDED_SECTIONS.map((shape) => shape.className)).toEqual([MERGED_SECTION_CLASS, HIDDEN_SECTION_CLASS]);
+    expect(FOCUS_FOLDED_SECTIONS.map((shape) => shape.className)).toEqual([MERGED_SECTION_CLASS, BACKLOG_SECTION_CLASS]);
   });
 });

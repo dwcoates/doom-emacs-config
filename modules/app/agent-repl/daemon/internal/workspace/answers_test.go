@@ -1367,14 +1367,14 @@ func TestARefusedColdGateStandsAgainInOneHome(t *testing.T) {
 	}
 }
 
-// hideWorkspace moves a fixture workspace into the hidden section.
+// hideWorkspace moves a fixture workspace into the backlog.
 func hideWorkspace(f *fixture, ws ids.WorkspaceID) {
 	record := f.db.workspaces[ws]
-	record.Hidden = true
+	record.Backlogged = true
 	f.db.workspaces[ws] = record
 }
 
-func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
+func TestAnswerColdGateShowsABackloggedWorkspaceBeforeTheReopen(t *testing.T) {
 	tests := []struct {
 		name   string
 		answer func() *agentreplv1.AnswerColdGateRequest
@@ -1391,8 +1391,8 @@ func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
 			f.workspace("w1", t.TempDir())
 			hideWorkspace(f, "w1")
 			standingGate(f)
-			hiddenAtSettle := true
-			f.queue.onGateFate = func() { hiddenAtSettle = f.db.workspaces["w1"].Hidden }
+			backloggedAtSettle := true
+			f.queue.onGateFate = func() { backloggedAtSettle = f.db.workspaces["w1"].Backlogged }
 
 			// Act.
 			err := f.verbs.AnswerColdGate(context.Background(), "w1", tt.answer())
@@ -1401,8 +1401,8 @@ func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
 			if err != nil {
 				t.Fatalf("AnswerColdGate: %v", err)
 			}
-			if hiddenAtSettle {
-				t.Fatal("the workspace was still hidden when the held prompts were settled, before the re-open")
+			if backloggedAtSettle {
+				t.Fatal("the workspace was still backlogged when the held prompts were settled, before the re-open")
 			}
 			if len(f.fleet.resumes) != 1 {
 				t.Fatalf("resumes = %d, want the chosen re-open", len(f.fleet.resumes))
@@ -1411,7 +1411,7 @@ func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
 				t.Fatalf("visibility edges = %v, want the shown workspace", f.visibilityEdges)
 			}
 			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
-				Level: "info", Operation: opColdGate, Message: "the answered gate's workspace was hidden; it is shown again"}); !ok {
+				Level: "info", Operation: opColdGate, Message: "the answered gate's workspace was backlogged; it is shown again"}); !ok {
 				t.Fatalf("records = %+v, want the show recorded", f.log.logger.Records())
 			}
 		})
@@ -1441,7 +1441,7 @@ func TestAnswerColdGateWhoseShowFailsIsRefusedAndStandsTheGateAgain(t *testing.T
 	f.workspace("w1", t.TempDir())
 	hideWorkspace(f, "w1")
 	standingGate(f)
-	f.db.setHiddenErr = errors.New("disk I/O error")
+	f.db.setBackloggedErr = errors.New("disk I/O error")
 
 	// Act.
 	err := f.verbs.AnswerColdGate(context.Background(), "w1", payAnswer())
@@ -1456,12 +1456,12 @@ func TestAnswerColdGateWhoseShowFailsIsRefusedAndStandsTheGateAgain(t *testing.T
 	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
 		t.Fatalf("reraised = %v, want vendor-1's gate stood again", f.cards.reraised)
 	}
-	if !loggedAtError(f, opSetHidden) {
+	if !loggedAtError(f, opSetBacklogged) {
 		t.Fatal("the failed show was not recorded at error")
 	}
 	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
 		Level: "info", Operation: opColdGate, Message: "the workspace could not be shown; the answer is refused"})
-	if !ok || r.Context["cause"] != `set hidden on "w1": disk I/O error` || r.Context["gate_stands_again"] != true {
+	if !ok || r.Context["cause"] != `set backlogged on "w1": disk I/O error` || r.Context["gate_stands_again"] != true {
 		t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
 	}
 }

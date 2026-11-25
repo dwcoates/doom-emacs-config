@@ -29,9 +29,9 @@ message WorkspaceStatus {
   // Where the workspace's branch lands, fixed at its creation and changed only
   // by a retarget (SetWorkspaceParent).
   WorkspaceStatusMergeTarget merge_target = 4;
-  // TRUE while the workspace is in the hidden section (off the Emacs tab bar);
-  // SetWorkspaceHidden moves it in and out.
-  bool hidden = 5;
+  // TRUE while the workspace is in the backlog (off the Emacs tab bar);
+  // SetWorkspaceBacklogged moves it in and out.
+  bool backlogged = 5;
   // Whether the workspace is open, and what it is doing if so.
   WorkspaceStatusStanding standing = 6;
   // TRUE while the workspace is a one-shot: created as one, or marked one
@@ -63,7 +63,7 @@ message WorkspaceStatus {
   // user asked, or the workspace was registered rather than created. Recorded
   // for every relationship, so the origin of a peer stays traceable.
   optional workspace.v1.WorkspaceRef created_by = 14;
-  // Every OPEN child of this workspace, hidden ones included, in the roster's
+  // Every OPEN child of this workspace, backlogged ones included, in the roster's
   // order: the workspaces this one coordinates and must account for before it
   // can be finished or closed. Empty for a workspace with no open child.
   repeated workspace.v1.WorkspaceRef children = 15;

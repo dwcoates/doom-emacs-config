@@ -478,24 +478,24 @@ model as the webapp."
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
       (agent-repl-hide-workspace agent-repl-itest-verbs--ws)
-      (agent-repl-itest--await-call daemon "SetWorkspaceHidden")
+      (agent-repl-itest--await-call daemon "SetWorkspaceBacklogged")
       ;; Assert.
-      (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspaceHidden")))
+      (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspaceBacklogged")))
         (should (assq 'hide body))
         (should-not (assq 'show body))
         (should (equal (alist-get 'id (alist-get 'workspace body)) (plist-get ref :id)))))))
 
 (ert-deftest agent-repl-itest-verbs-show-sends-the-show-arm-then-selects ()
-  "Showing a hidden workspace sends the `show' arm, then selects that workspace."
+  "Showing a backlogged workspace sends the `show' arm, then selects that workspace."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
-      (agent-repl-verb-set-hidden agent-repl-itest-verbs--ws nil)
-      (agent-repl-itest--await-call daemon "SetWorkspaceHidden")
+      (agent-repl-verb-set-backlogged agent-repl-itest-verbs--ws nil)
+      (agent-repl-itest--await-call daemon "SetWorkspaceBacklogged")
       (agent-repl-itest--await-call daemon "SelectWorkspace")
       ;; Assert.
-      (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspaceHidden")))
+      (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspaceBacklogged")))
         (should (assq 'show body))
         (should-not (assq 'hide body)))
       (should (equal (alist-get 'id (alist-get 'workspace
@@ -1710,7 +1710,7 @@ rest of this suite already asserts against."
              (divergence . ((pending . ()))) (expanded . ((collapsible . ()))))])
          (openCount . ((workspaces . 1)))))
     (open . ((label . ((text . "Open"))) (expanded . ())))
-    (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
+    (backlog . ((header . ((label . ((text . "Backlog"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "merge queue")))))

@@ -4,7 +4,7 @@
 // THE DAEMON DRIVES EVERY KEEP-ALIVE (owner ruling, 2026-10-26). A shim runs
 // no keep-alive cadence of its own: the daemon times each beat from the cache
 // clock its workspace's turns keep, and asks for it here -- and the user can
-// ask for one for a hidden workspace on demand (owner request, 2026-10-14).
+// ask for one for a backlogged workspace on demand (owner request, 2026-10-14).
 // The shim submits its ordinary keep-alive turn at once.
 //
 // THE NEW LAPSE FOLLOWS ON THE SESSION STREAM, never in this answer. The

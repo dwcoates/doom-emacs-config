@@ -1069,7 +1069,7 @@ func TestEachStreamCarriesItsOwnSnapshot(t *testing.T) {
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"o"}, Line: inLine("o")})
 
 	// Act.
-	r.SetRegistry(queueView(workspace("o", "open"), hiddenWorkspace("h", "hidden"), closed, mergedAt("m", time.Hour)))
+	r.SetRegistry(queueView(workspace("o", "open"), backloggedWorkspace("h", "hidden"), closed, mergedAt("m", time.Hour)))
 
 	// Assert.
 	push := latestPush(t, r)
@@ -1078,7 +1078,7 @@ func TestEachStreamCarriesItsOwnSnapshot(t *testing.T) {
 		got  []string
 		want []string
 	}{
-		{name: "workspaces holds the open and hidden rows", got: rowNames(rosterwalk.AllRows(&frontendv1.RosterPush{Workspaces: push.GetWorkspaces()})), want: []string{"open", "hidden"}},
+		{name: "workspaces holds the open and backlogged rows", got: rowNames(rosterwalk.AllRows(&frontendv1.RosterPush{Workspaces: push.GetWorkspaces()})), want: []string{"open", "hidden"}},
 		{name: "closed holds the closed row", got: rowNames(rosterwalk.ClosedRows(push.GetClosed())), want: []string{"closed"}},
 		{name: "the merge queue holds the queued workspace", got: queueSubjectIDs(queueGroup(push, repo)), want: []string{"o"}},
 		{name: "recently merged holds the merge's summary", got: []string{fmt.Sprint(push.GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces())}, want: []string{"1"}},

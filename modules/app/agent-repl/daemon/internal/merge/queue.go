@@ -22,6 +22,7 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -490,10 +491,10 @@ const (
 	// its bubble, and puts the merge back at its place in line, skipped until
 	// the gate is passed (coldgate.go, requeues).
 	CauseColdGate AbandonCause = "cold_gate"
-	// CauseHiddenAtColdGate is the user hiding a workspace whose merge stood
+	// CauseBackloggedAtColdGate is the user hiding a workspace whose merge stood
 	// at its cold gate: hiding passes the gate without an answer, and takes
 	// the merge off its queue.
-	CauseHiddenAtColdGate AbandonCause = "hidden_at_cold_gate"
+	CauseBackloggedAtColdGate AbandonCause = "hidden_at_cold_gate"
 	// CauseColdGateAnswerFailed is the queue's one answer to a waiting
 	// merge's cold gate, a compaction, failing (answerQueuedColdGate): the
 	// failure is final, so the merge leaves its queue as a failed merge
@@ -539,7 +540,7 @@ var abandonSummaries = map[AbandonCause]string{
 	CauseAheadDidNotLand:      "the merge this one was placed behind left the queue without landing",
 	CauseAgentGaveUp:          "the merge's own agent gave it up",
 	CauseColdGate:             "the workspace's session parked at its cold gate; the merge waits at its place in line until the gate is passed",
-	CauseHiddenAtColdGate:     "the workspace was hidden at its cold gate while this merge was waiting in the queue",
+	CauseBackloggedAtColdGate: "the workspace was backlogged at its cold gate while this merge was waiting in the queue",
 	CauseColdGateAnswerFailed: "the queue could not answer the workspace's cold gate by a compaction; the merge left the queue, and the gate stands for the user to answer before the merge is requeued",
 }
 
@@ -549,12 +550,12 @@ var abandonSummaries = map[AbandonCause]string{
 // ran (2026-09-28: "a merge left the queue without running" was logged for one
 // that had run three repair rounds).
 var runningSummaries = map[AbandonCause]string{
-	CauseUserDrop:         "the operator evicted this merge while it was running",
-	CauseUserDequeue:      "the user took this merge out of the queue while it was running",
-	CauseWorkspaceClosed:  "the workspace was closed while this merge was running",
-	CauseAgentGaveUp:      "the merge's own agent gave it up from its repair turn",
-	CauseColdGate:         "the workspace's session parked at its cold gate while this merge was running; it waits at its place in line until the gate is passed, and runs again from its start",
-	CauseHiddenAtColdGate: "the workspace was hidden at its cold gate while this merge was running",
+	CauseUserDrop:             "the operator evicted this merge while it was running",
+	CauseUserDequeue:          "the user took this merge out of the queue while it was running",
+	CauseWorkspaceClosed:      "the workspace was closed while this merge was running",
+	CauseAgentGaveUp:          "the merge's own agent gave it up from its repair turn",
+	CauseColdGate:             "the workspace's session parked at its cold gate while this merge was running; it waits at its place in line until the gate is passed, and runs again from its start",
+	CauseBackloggedAtColdGate: "the workspace was backlogged at its cold gate while this merge was running",
 }
 
 // releases reports whether C is a RELEASE the user or the operator asked for
@@ -562,7 +563,16 @@ var runningSummaries = map[AbandonCause]string{
 // ending (its workspace closing, the daemon shutting down). A released merge's
 // bubble is closed (closeReleasedBubble).
 func (c AbandonCause) releases() bool {
-	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseHiddenAtColdGate
+	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseBackloggedAtColdGate
+}
+
+// returnsSession reports whether a waiting merge leaving its line for C
+// leaves its workspace standing with nothing else to answer for its session:
+// an evict, a dequeue, or the merge ahead not landing. The session its wait
+// parked (parkQueued) is brought back up for it (returnSession). A close, a
+// shutdown, a backlog at a cold gate or a failed gate answer leave it parked.
+func (c AbandonCause) returnsSession() bool {
+	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseAheadDidNotLand
 }
 
 // requeues reports whether C puts the merge back at its place in line rather
@@ -1067,11 +1077,44 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	}
 	o.publishAbandonedWith(ctx, ws, ledger, entry, cause, o.queuedSentence(ws, cause, entry))
 	o.clearOffer(ws)
+	o.returnSession(ctx, ws, repo, entry.Source, cause)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}
 	o.kick(repo)
 	return nil
+}
+
+// returnSession brings WS's session back up once its own branch's merge,
+// whose wait in line parked it (parkQueued), left REPO's line for CAUSE
+// without landing while its workspace stands (AbandonCause.returnsSession).
+// The bring-up is the user's session handed back, held for wsm.ShimIdleHold
+// (shimlife.StartMergeLeftLine), so the park lasted only while the merge
+// waited. It runs on its own goroutine in a running daemon, so the drop never
+// waits on a revival; a failed bring-up is recorded here, and the workspace's
+// next prompt revives it as any parked session's does.
+func (o *orchestrator) returnSession(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource, cause AbandonCause) {
+	const op = "daemon.merge.return_session"
+	if !source.ParksWhileQueued() || !cause.returnsSession() {
+		return
+	}
+	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)}
+	log.Info(op, "the merge left its line without landing; the session its wait parked is brought back up", fields)
+	start := func(ctx context.Context) {
+		if err := o.deps.StartSession(shimlife.WithStart(ctx, shimlife.StartMergeLeftLine), ws); err != nil {
+			log.Error(op, "could not bring back up the session a merge's wait in line parked", withField(fields, "error", err.Error()))
+		}
+	}
+	if !o.async {
+		start(ctx)
+		return
+	}
+	o.live.Add(1)
+	inflight.Standing(func() {
+		defer o.live.Done()
+		start(context.WithoutCancel(ctx))
+	})
 }
 
 // takeOffQueue reads WS's entry in REPO and removes it for CAUSE, under WS's

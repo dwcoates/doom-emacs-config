@@ -1,5 +1,5 @@
-// Package cachelapse keeps a HIDDEN workspace's prompt cache until it lapses
-// (owner request, 2026-10-13; docs/protobuf-design/hidden-cache-lapse.md).
+// Package cachelapse keeps a BACKLOGGED workspace's prompt cache until it lapses
+// (owner request, 2026-10-13; docs/protobuf-design/backlogged-cache-lapse.md).
 //
 // A CLOSED WORKSPACE IS KEPT THE SAME WAY, after ONE LAST ROUND (owner
 // request, 2026-10-17). Closing leaves the session up, so its shim is asked
@@ -32,7 +32,7 @@
 // THE BEAT IS RECONCILED, NEVER TOLD ONCE. On a hide, a show, a close, a
 // reopen, a selection moving onto or off the workspace, every session coming
 // up and every session falling free, the loop reads the workspace's row afresh
-// and arms its next beat to match (beatDue): none while hidden and not
+// and arms its next beat to match (beatDue): none while backlogged and not
 // selected (wsm.Workspace.KeepaliveHeld), one last one while closed, every
 // cycle otherwise. A hide that races a bring-up is caught either way, because
 // the hide writes the row before it queues the edge and the bring-up installs
@@ -52,7 +52,7 @@
 // Once a beat has gone out a session nobody is using is stood down
 // (drain.Controller.CycleDown) and restored a minute before its next beat, at
 // most MaxRestores at once, so an idle workspace's ~350MB is free between
-// beats. A hidden workspace beats no more and its cache lapses as above; a
+// beats. A backlogged workspace beats no more and its cache lapses as above; a
 // closed one gets the one beat it was owed, then lapses.
 //
 // A FINISHED WORKSPACE WAITING ON ITS SYNC MERGE IS NOT STOOD DOWN HERE (owner
@@ -192,10 +192,14 @@ type Deps struct {
 	// none stands (workspace.Fleet.StandingColdGate). A session parked at the
 	// gate holds no cadence to project a lapse from, and its conversation is
 	// already cold, so the gate's facts are its lapse (gateLapse).
-	ColdGate   func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
+	ColdGate func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
+	// Hold answers until when WS's resource allocation holds its idle shim
+	// up (sidebar.Resolver.ShimHold): every idle park waits on it, and the
+	// roster tells the keeper of each change (ShimHoldChanged).
+	Hold       func(ws ids.WorkspaceID) wsm.ShimHold
 	StandDowns StandDowns
 	// PublishRegistry republishes the roster's durable half, which is where
-	// a recorded projection and a lapse reach the hidden section.
+	// a recorded projection and a lapse reach the backlog.
 	PublishRegistry func(context.Context) error
 	// IdleCutoff is the idle sweep's cutoff (drain): no beat is sent for a
 	// workspace whose engagement is older than it by the time the beat comes
@@ -223,7 +227,7 @@ type Deps struct {
 	// that started it at SINCE having ended (drain.Controller.VisitDown).
 	VisitDown func(ws ids.WorkspaceID, since time.Time)
 	// IdleDown asks for WS's session to be parked, idle since SINCE for
-	// StandDownGrace between its keep-alives (drain.Controller.IdleDown).
+	// until its shim hold ends, between its keep-alives (drain.Controller.IdleDown).
 	IdleDown func(ws ids.WorkspaceID, since time.Time)
 	// Restore brings a session the keep-alive cycle parked back up, calling
 	// DONE once with how its start ended. It returns at once.
@@ -321,7 +325,7 @@ type edge struct {
 	why string
 }
 
-// Keeper is the hidden workspaces' cache keeper.
+// Keeper is the backlogged workspaces' cache keeper.
 type Keeper struct {
 	deps Deps
 
@@ -380,7 +384,7 @@ type Keeper struct {
 	// owned by Run alone.
 	owners map[ids.WorkspaceID]standing
 	// idleDue is when each session the cold park or the keep-alive cycle
-	// owns has been idle StandDownGrace, armed until then (standdown.go);
+	// owns ends its shim hold, armed until then (standdown.go);
 	// owned by Run alone.
 	idleDue map[ids.WorkspaceID]time.Time
 	// early is each workspace's beat a long outage's end pulled forward, with
@@ -404,6 +408,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the shim fleet")
 	case deps.ColdGate == nil:
 		return nil, errors.New("cachelapse: the keeper needs the standing cold gates")
+	case deps.Hold == nil:
+		return nil, errors.New("cachelapse: the keeper needs the shim holds")
 	case deps.StandDowns == nil:
 		return nil, errors.New("cachelapse: the keeper needs the withheld stand-downs")
 	case deps.PublishRegistry == nil:
@@ -525,7 +531,7 @@ func (k *Keeper) TurnClosed(ws ids.WorkspaceID) {
 // VisibilityChanged is a hide or a show of WS, or the selection moving onto
 // or off it, already recorded: its cadence is reconciled. It never blocks.
 func (k *Keeper) VisibilityChanged(ws ids.WorkspaceID) {
-	k.enqueue(edge{ws: ws, why: "the workspace was hidden, shown, selected or deselected"})
+	k.enqueue(edge{ws: ws, why: "the workspace was backlogged, shown, selected or deselected"})
 }
 
 // ClosureChanged is a close or a reopen of WS, already recorded: its cadence
@@ -535,7 +541,7 @@ func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
 }
 
 // ColdGateRaised is WS's session parking at its cold gate: its cache is
-// marked cold (markCold), and a hidden or closed workspace takes the gate's
+// marked cold (markCold), and a backlogged or closed workspace takes the gate's
 // lapse. JUDGED is a gate a shim judged just now, the one raise the telemetry
 // counts; a raise from the record, a re-raise after a failed answer and a
 // carried gate are the same gate.
@@ -561,14 +567,14 @@ func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID, judged bool) {
 
 // MergeLeftQueue is WS's entry leaving its merge queue: a hidden merge
 // workspace whose merge left every queue is stood down, and any other's
-// cadence reconciled, so a hidden or closed one lets its cache lapse again.
+// cadence reconciled, so a backlogged or closed one lets its cache lapse again.
 // It never blocks.
 func (k *Keeper) MergeLeftQueue(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "its merge left its queue"})
 }
 
 // MergeEnteredQueue is WS's merge moving into a queue: its cadence is
-// reconciled, so a hidden or closed workspace beats again while the entry
+// reconciled, so a backlogged or closed workspace beats again while the entry
 // stands. It never blocks.
 func (k *Keeper) MergeEnteredQueue(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "its merge entered a queue"})
@@ -651,7 +657,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 	}
 }
 
-// restore arms the lapse every hidden workspace's row records.
+// restore arms the lapse every backlogged workspace's row records.
 func (k *Keeper) restore(ctx context.Context) error {
 	log := k.deps.Log.Global()
 	workspaces, err := k.deps.DB.ListWorkspaces(ctx)
@@ -668,7 +674,7 @@ func (k *Keeper) restore(ctx context.Context) error {
 			k.deadlines[ws.ID] = ws.CacheLapse.LapsesAt
 		}
 	}
-	log.Info(opLapse, "re-armed the hidden workspaces' recorded cache lapses", dlog.Context{"armed": len(k.deadlines)})
+	log.Info(opLapse, "re-armed the backlogged workspaces' recorded cache lapses", dlog.Context{"armed": len(k.deadlines)})
 	projected, err := k.deps.DB.ProjectedColdGates(ctx)
 	if err != nil {
 		if leaving(ctx, log, opGate, "listing the projected cold gates to re-arm them", err) {
@@ -754,7 +760,7 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	}
 }
 
-// record stores a stated projection on a hidden or closed workspace's row and
+// record stores a stated projection on a backlogged or closed workspace's row and
 // arms it. A workspace shown or reopened meanwhile takes none: the store
 // refuses it in the statement that reads the visibility and the close.
 func (k *Keeper) record(ctx context.Context, ws ids.WorkspaceID, stated *conversationv1.SessionCacheLapse) {
@@ -769,7 +775,7 @@ func (k *Keeper) record(ctx context.Context, ws ids.WorkspaceID, stated *convers
 	k.store(ctx, log, ws, lapse, "the shim's projected cache lapse")
 }
 
-// store records LAPSE on a hidden or closed workspace's row and arms it,
+// store records LAPSE on a backlogged or closed workspace's row and arms it,
 // answering whether it was recorded. A workspace shown or reopened meanwhile
 // takes none: the store refuses it in the statement that reads the visibility
 // and the close. It is THE ONE write of a lapse in this package
@@ -795,9 +801,9 @@ func (k *Keeper) store(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID,
 	}
 	if !recorded {
 		// DEBUG, NOT INFO: every shim states its projection on every anchor
-		// change now that the daemon drives the beats, and only a hidden or
+		// change now that the daemon drives the beats, and only a backlogged or
 		// closed workspace's is kept.
-		log.Debug(opProjection, "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped", fields)
+		log.Debug(opProjection, "a cache lapse arrived for a workspace that is neither backlogged nor closed; it is dropped", fields)
 		delete(k.deadlines, ws)
 		return false
 	}
@@ -888,7 +894,7 @@ func (k *Keeper) mergeEnded(ctx context.Context, log dlog.Logger, record wsm.Wor
 }
 
 // lapseDue takes every lapse that has come: the session is stood down, and
-// the roster republished so the hidden section shows the cold cache.
+// the roster republished so the backlog shows the cold cache.
 func (k *Keeper) lapseDue(ctx context.Context) {
 	now := k.deps.Clock.Now()
 	lapsed := false
@@ -947,7 +953,7 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		return false
 	}
 	k.deps.Telemetry.CountLapse(ws, LapseStoodDown)
-	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed}))
+	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"backlogged": record.InBacklog(), "closed": record.Closed}))
 	k.deps.StandDowns.StandDownWithheld(ws, drain.WithheldCacheLapse)
 	return true
 }
@@ -1036,7 +1042,7 @@ func gateLapse(cold *conversationv1.SessionCold) wsm.CacheLapse {
 // cold: when its cache's lifetime passed after the last request, or at the
 // last request itself when the gate is a model switch (a cache is per model,
 // so the requested model's never held it). It is THE ONE READING of a gate's
-// age: the hidden section's lapse (gateLapse) and the cold-gate backlog
+// age: the backlog's lapse (gateLapse) and the cold-gate backlog
 // (coldbacklog.Sweeper) both date the gate by it.
 func GateLapsedAt(cold *conversationv1.SessionCold) time.Time {
 	at := cold.GetLastRequestAtMs()

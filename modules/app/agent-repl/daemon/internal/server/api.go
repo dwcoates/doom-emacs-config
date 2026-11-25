@@ -239,9 +239,9 @@ type Deps struct {
 	// `persistent_wifi` state every Emacs WatchDaemon stream subscribes to (a
 	// webview's never does: its topbar view carries the same standing).
 	PersistentWifi PersistentWifi
-	// HiddenKeepalives backs SendHiddenKeepalives: one keep-alive to every
-	// hidden workspace's session (internal/cachelapse).
-	HiddenKeepalives HiddenKeepalives
+	// BackloggedKeepalives backs SendBackloggedKeepalives: one keep-alive to every
+	// backlogged workspace's session (internal/cachelapse).
+	BackloggedKeepalives BackloggedKeepalives
 	// KeepLives backs KeepLiveWorkspace: the cache keeper's one keep-alive
 	// subroutine, run on one workspace now (internal/cachelapse).
 	KeepLives KeepLives
@@ -717,8 +717,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the desktop banners")
 	case deps.PersistentWifi == nil:
 		return nil, missing("the persistent-wifi controller")
-	case deps.HiddenKeepalives == nil:
-		return nil, missing("the hidden workspaces' cache keeper")
+	case deps.BackloggedKeepalives == nil:
+		return nil, missing("the backlogged workspaces' cache keeper")
 	case deps.KeepLives == nil:
 		return nil, missing("the cache keeper's keep-live")
 	case deps.NewsDigest == nil:

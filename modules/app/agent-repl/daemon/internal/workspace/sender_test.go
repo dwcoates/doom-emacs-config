@@ -239,6 +239,20 @@ func TestSenderStartTurnMarksAShimThatDiedUnderTheCallForTheQueue(t *testing.T) 
 	}
 }
 
+func TestSenderStartTurnMarksAShimThisDaemonStoodDownUnderTheCallForTheQueue(t *testing.T) {
+	// Arrange
+	stoodDown := fmt.Errorf("%w: unavailable: use of closed network connection", shimclient.ErrStandDownOrdered)
+	s := newTestSender(&fakeSenderClient{startTurnErr: stoodDown})
+
+	// Act
+	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+
+	// Assert
+	if !errors.Is(err, promptqueue.ErrShimStoodDown) || !errors.Is(err, shimclient.ErrStandDownOrdered) {
+		t.Fatalf("StartTurn = %v, want the queue's stood-down error with the shim client's in its chain", err)
+	}
+}
+
 // TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal covers a
 // turn_already_open, which is always the daemon's own bug: it is carried up as
 // its typed arm rather than retried.

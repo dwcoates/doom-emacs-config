@@ -20,7 +20,7 @@ import {
   RosterColdGateSchema,
   type RosterOpenRow,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import { SetWorkspaceBackloggedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { MergedPages } from "../../src/sidebar/context.js";
 import { MERGED_MORE_CLASS, MERGED_PAGE_CLASS, MERGED_PAGE_SIZE } from "../../src/sidebar/merged-pages.js";
@@ -70,7 +70,7 @@ import {
   drawnEntries,
   fakeTicker,
   allMergesLoaded,
-  hiddenSection,
+  backlogSection,
   mergedBand,
   mergedGroup,
   mergedSection,
@@ -103,8 +103,8 @@ const VIEW_UNKNOWN_REPOSITORY = create(UpdateSidebarViewResponseSchema, {
 });
 /** One settled merge, so the merged band draws. */
 const MERGED_ROW = row({ id: "ws-9", closed: true, status: { case: "merged", value: {} } });
-/** One hidden workspace, so the hidden section draws. */
-const HIDDEN_ROW = row({ id: "ws-8" });
+/** One hidden workspace, so the backlog draws. */
+const BACKLOG_ROW = row({ id: "ws-8" });
 
 async function click(control: Element): Promise<void> {
   (control as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -119,8 +119,8 @@ function pane(drawn: HTMLElement): HTMLElement {
 
 /** Each band viewport the faded foot is or is not painted on (styles.css), and whether it is. */
 const BAND_FOOT_FADES = [
-  { name: "fades a capped Hidden Workspaces viewport while rows lie below it", cls: "hidden-section", region: "rows", attrs: ["data-band-more"], want: true },
-  { name: "leaves a Hidden Workspaces viewport with nothing below unfaded", cls: "hidden-section", region: "rows", attrs: [], want: false },
+  { name: "fades a capped Backlog viewport while rows lie below it", cls: "backlog-section", region: "rows", attrs: ["data-band-more"], want: true },
+  { name: "leaves a Backlog viewport with nothing below unfaded", cls: "backlog-section", region: "rows", attrs: [], want: false },
   { name: "fades a capped Recently Merged viewport while rows lie below it", cls: "merged-section", region: "rows", attrs: ["data-band-more"], want: true },
   { name: "leaves a Recently Merged viewport with nothing below unfaded", cls: "merged-section", region: "rows", attrs: [], want: false },
   { name: "fades a stretched Recently Merged viewport while rows lie below it", cls: "merged-section", region: "rows", attrs: ["data-band-stretched", "data-band-more"], want: true },
@@ -316,9 +316,9 @@ const FOLDING_SECTIONS = [
     id: "",
   },
   {
-    kind: "hidden",
-    roster: (collapsed: boolean) => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, collapsed) }),
-    selector: ".hidden-section",
+    kind: "backlog",
+    roster: (collapsed: boolean) => roster({ backlog: backlogSection([BACKLOG_ROW], 1, collapsed) }),
+    selector: ".backlog-section",
     id: "",
   },
   {
@@ -551,13 +551,13 @@ describe("drawHeadedSection", () => {
     const shown: string[] = [];
     const sc = sidebarContext(
       appContext({
-        setWorkspaceHidden: (request) => {
+        setWorkspaceBacklogged: (request) => {
           shown.push(request.workspace?.id ?? "");
-          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+          return create(SetWorkspaceBackloggedResponseSchema, { result: { case: "success", value: {} } });
         },
       }),
     );
-    const section = draw(wire({ rows: [row({ id: "ws-1" })] }), sc, "p", { ...SHAPE, place: "hidden" });
+    const section = draw(wire({ rows: [row({ id: "ws-1" })] }), sc, "p", { ...SHAPE, place: "backlog" });
     await click(section.querySelector("[data-select]") as Element);
     expect(shown).toEqual(["ws-1"]);
   });
@@ -595,7 +595,7 @@ describe("drawHeadedSection", () => {
   // hand-rolled section that drew its own header would carry neither here.
   it.each([
     ["repository", ".repo-section", roster({ repos: [repoSection({ id: "repo-1" })] }), true],
-    ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) }), true],
+    ["backlog", ".backlog-section", roster({ backlog: backlogSection([BACKLOG_ROW]) }), true],
     ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) }), true],
   ] as const)("draws the %s section in the one headed shape", (_kind, selector, made, counted) => {
     const drawn = drawWorkspaceRoster(made, sidebarContext());
@@ -673,53 +673,53 @@ describe("recently merged", () => {
   });
 });
 
-describe("hidden workspaces", () => {
-  it("draws the hidden row in the rail's one hidden section", () => {
-    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW]) }), sidebarContext());
-    expect(drawn.querySelectorAll(".hidden-section [data-roster-row='ws-8']").length).toBe(1);
+describe("backlogged workspaces", () => {
+  it("draws the hidden row in the rail's one backlog", () => {
+    const drawn = drawWorkspaceRoster(roster({ backlog: backlogSection([BACKLOG_ROW]) }), sidebarContext());
+    expect(drawn.querySelectorAll(".backlog-section [data-roster-row='ws-8']").length).toBe(1);
   });
 
   it("draws the section below the Recently Merged section", () => {
     const drawn = drawWorkspaceRoster(
-      roster({ hidden: hiddenSection([HIDDEN_ROW]), merged: mergedSection([MERGED_ROW]) }),
+      roster({ backlog: backlogSection([BACKLOG_ROW]), merged: mergedSection([MERGED_ROW]) }),
       sidebarContext(),
     );
-    const kinds = [OPEN_SECTION_CLASS, "merged-section", "hidden-section"];
+    const kinds = [OPEN_SECTION_CLASS, "merged-section", "backlog-section"];
     const sections = [...pane(drawn).children].map((section) => kinds.find((kind) => section.classList.contains(kind)));
-    expect(sections).toEqual([OPEN_SECTION_CLASS, "merged-section", "hidden-section"]);
+    expect(sections).toEqual([OPEN_SECTION_CLASS, "merged-section", "backlog-section"]);
   });
 
   it("draws the daemon's heading and count", () => {
-    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW], 1) }), sidebarContext());
-    const section = pane(drawn).querySelector(".hidden-section") as HTMLElement;
+    const drawn = drawWorkspaceRoster(roster({ backlog: backlogSection([BACKLOG_ROW], 1) }), sidebarContext());
+    const section = pane(drawn).querySelector(".backlog-section") as HTMLElement;
     expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual([
-      "Hidden",
+      "Backlog",
       "(1)",
     ]);
   });
 
   it("keeps the section out of the rail when nothing is hidden", () => {
     const drawn = drawWorkspaceRoster(roster(), sidebarContext());
-    expect(pane(drawn).querySelector(".hidden-section")).toBeNull();
+    expect(pane(drawn).querySelector(".backlog-section")).toBeNull();
   });
 
   it("keeps the section out of the rail when it counts no workspace", () => {
     const drawn = drawWorkspaceRoster(
-      roster({ hidden: hiddenSection([], 0) }),
+      roster({ backlog: backlogSection([], 0) }),
       sidebarContext(),
     );
-    expect(pane(drawn).querySelector(".hidden-section")).toBeNull();
+    expect(pane(drawn).querySelector(".backlog-section")).toBeNull();
   });
 
-  it("refuses a roster with no hidden section as a malformed view", () => {
+  it("refuses a roster with no backlog as a malformed view", () => {
     const bare = { ...roster(), workspaces: create(WorkspaceRosterSchema, { repository: { sections: [] } }) };
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 
-  it("refuses an empty hidden section with no fold as a malformed view", () => {
-    const section = hiddenSection();
+  it("refuses an empty backlog with no fold as a malformed view", () => {
+    const section = backlogSection();
     section.fold = { case: undefined };
-    expect(() => drawWorkspaceRoster(roster({ hidden: section }), sidebarContext())).toThrow(MalformedView);
+    expect(() => drawWorkspaceRoster(roster({ backlog: section }), sidebarContext())).toThrow(MalformedView);
   });
 });
 
@@ -827,7 +827,7 @@ describe("a recently-merged section with no fold", () => {
 
 describe("the bands' header color", () => {
   it.each([
-    ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) })],
+    ["backlog", ".backlog-section", roster({ backlog: backlogSection([BACKLOG_ROW]) })],
     ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) })],
   ] as const)("draws the %s band's header in the merged band's purple", (_kind, selector, made) => {
     // Arrange
@@ -841,10 +841,10 @@ describe("the bands' header color", () => {
     expect(color).toBe("var(--blocked)");
   });
 
-  it("leaves a hidden row's name out of the header's purple", () => {
+  it("leaves a backlogged row's name out of the header's purple", () => {
     // Arrange
-    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW]) }), sidebarContext());
-    const name = pane(drawn).querySelector(".hidden-section [data-roster-row='ws-8'] .name") as HTMLElement;
+    const drawn = drawWorkspaceRoster(roster({ backlog: backlogSection([BACKLOG_ROW]) }), sidebarContext());
+    const name = pane(drawn).querySelector(".backlog-section [data-roster-row='ws-8'] .name") as HTMLElement;
 
     // Act
     const color = inRail(drawn, () => cascadedValue(name, "color"));
@@ -902,14 +902,14 @@ describe("a section's folded count", () => {
     expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "display"))).toBe("inline");
   });
 
-  it("shows the count while the hidden workspaces section is unfolded", () => {
-    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW], 1, false) }), sidebarContext());
-    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".hidden-section"), "display"))).toBe("inline");
+  it("shows the count while the backlog is unfolded", () => {
+    const drawn = drawWorkspaceRoster(roster({ backlog: backlogSection([BACKLOG_ROW], 1, false) }), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".backlog-section"), "display"))).toBe("inline");
   });
 
-  it("shows the count while the hidden workspaces section is folded", () => {
-    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW], 1, true) }), sidebarContext());
-    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".hidden-section"), "display"))).toBe("inline");
+  it("shows the count while the backlog is folded", () => {
+    const drawn = drawWorkspaceRoster(roster({ backlog: backlogSection([BACKLOG_ROW], 1, true) }), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".backlog-section"), "display"))).toBe("inline");
   });
 
   it.each([
@@ -917,25 +917,25 @@ describe("a section's folded count", () => {
     { name: "color", property: "color" },
     { name: "border", property: "border-top-style" },
     { name: "padding", property: "padding-left" },
-  ])("draws the hidden workspaces section's count in the Merge Queue section's count's $name", ({ property }) => {
+  ])("draws the backlog's count in the Merge Queue section's count's $name", ({ property }) => {
     const drawn = drawWorkspaceRoster(
       roster({
-        hidden: hiddenSection([HIDDEN_ROW], 1, false),
+        backlog: backlogSection([BACKLOG_ROW], 1, false),
         merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })], false),
       }),
       sidebarContext(),
     );
     const [hidden, merged] = inRail(drawn, () => [
-      cascadedValue(countOf(drawn, ".hidden-section"), property),
+      cascadedValue(countOf(drawn, ".backlog-section"), property),
       cascadedValue(countOf(drawn, ".merged-section .merged-group-head"), property),
     ]);
     expect(hidden).toBe(merged);
   });
 
-  it("draws the hidden workspaces section's count as every row it holds", () => {
+  it("draws the backlog's count as every row it holds", () => {
     const rows = [row({ id: "ws-h1" }), row({ id: "ws-h2" }), row({ id: "ws-h3" })];
-    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection(rows, 3, false) }), sidebarContext());
-    expect([countOf(drawn, ".hidden-section").textContent, pane(drawn).querySelectorAll(".hidden-section .row").length]).toEqual(["(3)", 3]);
+    const drawn = drawWorkspaceRoster(roster({ backlog: backlogSection(rows, 3, false) }), sidebarContext());
+    expect([countOf(drawn, ".backlog-section").textContent, pane(drawn).querySelectorAll(".backlog-section .row").length]).toEqual(["(3)", 3]);
   });
 
   it("draws the Recently Merged section's count of every merge beside its label", () => {
@@ -971,7 +971,7 @@ describe("a section's folded count", () => {
   });
 
   it.each([
-    { name: "Hidden Workspaces'", selector: ".hidden-section .sb-count", r: () => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, false) }) },
+    { name: "Backlog'", selector: ".backlog-section .sb-count", r: () => roster({ backlog: backlogSection([BACKLOG_ROW], 1, false) }) },
     { name: "a folded Merge Queue section's", selector: ".merged-section .sb-count", r: () => roster({ merged: mergedSection([MERGED_ROW], true) }) },
     { name: "an unfolded Merge Queue section's", selector: ".merged-section .sb-count", r: () => roster({ merged: mergedSection([MERGED_ROW], false) }) },
   ])("draws $name count in grey", ({ selector, r }) => {
@@ -1827,7 +1827,7 @@ describe("drawFoldHeader", () => {
     const drawn = drawWorkspaceRoster(
       roster({
         repos: [repoSection({ id: "repo-1" })],
-        hidden: hiddenSection([HIDDEN_ROW]),
+        backlog: backlogSection([BACKLOG_ROW]),
         merged: mergedSection([row({ id: "ws-m", closed: true })], false),
       }),
       sidebarContext(),
@@ -1976,7 +1976,7 @@ describe("the Merge Queue section's queues", () => {
     const groupHead = pane(drawn).querySelector<HTMLElement>(`.${cls} > .rows .merged-group-head`)!;
     expect(
       inRail(drawn, () => [cascadedValue(head, "padding-bottom"), cascadedValue(groupHead, "padding-top"), cascadedValue(groupHead, "margin-top").startsWith("-")]),
-    ).toEqual(["var(--hidden-rule-lead)", "0px", false]);
+    ).toEqual(["var(--backlog-rule-lead)", "0px", false]);
   });
 
   it("sets the inside rules' gap 40% under the gap of the rules between the sections", () => {
@@ -2035,11 +2035,11 @@ describe("the Merge Queue section's queues", () => {
   it.each([
     { cls: "merge-queue-section", lead: "--merged-rule-lead", above: "calc(var(--rule-gap) - 3.3px)", below: "calc(var(--rule-gap) - 3.6px)" },
     { cls: "merged-section", lead: "--merged-rule-lead", above: "calc(var(--rule-gap) - 3.3px)", below: "calc(var(--rule-gap) - 3.6px)" },
-    { cls: "hidden-section", lead: "--merged-rule-lead", above: "calc(var(--rule-gap) - 3.3px)", below: "calc(var(--rule-gap) - 2.6px)" },
+    { cls: "backlog-section", lead: "--merged-rule-lead", above: "calc(var(--rule-gap) - 3.3px)", below: "calc(var(--rule-gap) - 2.6px)" },
   ])("stands the rule over the $cls off the text on both sides by the rule gap", ({ cls, lead, above, below }) => {
     const drawn = drawWorkspaceRoster(
       roster({
-        hidden: hiddenSection([HIDDEN_ROW]),
+        backlog: backlogSection([BACKLOG_ROW]),
         mergeQueue: mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]),
         merged: mergedSection([merged("m1")], false),
       }),
@@ -2549,30 +2549,30 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     expect(after).toBe(before);
   });
 
-  it("keeps the hidden band the push leaves unchanged", () => {
+  it("keeps the backlog the push leaves unchanged", () => {
     // Arrange
-    const band = hiddenSection([row({ id: "ws-h" })]);
+    const band = backlogSection([row({ id: "ws-h" })]);
     const drawer = createRosterDrawer(sidebarContext());
-    const before = drawer.draw(roster({ hidden: band })).querySelector("[data-roster-row='ws-h']");
+    const before = drawer.draw(roster({ backlog: band })).querySelector("[data-roster-row='ws-h']");
 
     // Act
-    const after = drawer.draw(roster({ hidden: band, repos: [ticking("a")] })).querySelector("[data-roster-row='ws-h']");
+    const after = drawer.draw(roster({ backlog: band, repos: [ticking("a")] })).querySelector("[data-roster-row='ws-h']");
 
     // Assert
     expect(after).toBe(before);
   });
 
-  /** Every stream drawn once: a repository, a hidden row, a queue and a merged group. */
+  /** Every stream drawn once: a repository, a backlogged row, a queue and a merged group. */
   const everyStream = () =>
     roster({
       repos: [ticking("a")],
-      hidden: hiddenSection([row({ id: "ws-h" })]),
+      backlog: backlogSection([row({ id: "ws-h" })]),
       mergeQueue: mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]),
       merged: mergedBand([mergedGroup({ id: "a", rows: [MERGED_ROW] })], false),
     });
   /** Each stream's section in DRAWN, by its class. */
   const sectionsOf = (drawn: HTMLElement) =>
-    [".open-section", ".hidden-section", ".merge-queue-section", ".merged-section"].map((cls) => drawn.querySelector(cls));
+    [".open-section", ".backlog-section", ".merge-queue-section", ".merged-section"].map((cls) => drawn.querySelector(cls));
 
   it("keeps every section of a stream the push did not replace, and redraws the one it did", () => {
     // Arrange
@@ -2978,20 +2978,20 @@ describe("drawRepositoryGroup", () => {
 
 describe("a band section's height", () => {
   /** A rail drawing one row in every band, each band sized as SIZED says. */
-  const sizedRail = (sized: { queue?: number; merged?: number; hidden?: number } = {}) =>
+  const sizedRail = (sized: { queue?: number; merged?: number; backlog?: number } = {}) =>
     drawWorkspaceRoster(
       roster({
         repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })],
         mergeQueue: mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("q-0") } })], false, sized.queue ?? null),
         merged: mergedSection([MERGED_ROW], false, sized.merged ?? null),
-        hidden: hiddenSection([HIDDEN_ROW], 1, false, sized.hidden ?? null),
+        backlog: backlogSection([BACKLOG_ROW], 1, false, sized.backlog ?? null),
       }),
       sidebarContext(),
     );
   const BANDS = [
     { name: "Merge Queue", cls: ".merge-queue-section", sized: { queue: 4 } },
     { name: "Recently Merged", cls: ".merged-section", sized: { merged: 4 } },
-    { name: "Hidden Workspaces", cls: ".hidden-section", sized: { hidden: 4 } },
+    { name: "Backlog", cls: ".backlog-section", sized: { backlog: 4 } },
   ];
 
   it.each(BANDS)("states the lines a sized $name section shows", ({ cls, sized }) => {
@@ -3007,18 +3007,18 @@ describe("a band section's height", () => {
   it("draws the grip over every band's rule, the one shape every band shares", () => {
     const drawn = pane(sizedRail());
     const grips = [...drawn.querySelectorAll(`:scope > .repo > .${RESIZE_HANDLE_CLASS}`)].map((grip) => (grip.parentElement as HTMLElement).getAttribute("data-section"));
-    expect(grips).toEqual(["merge-queue", "merged", "hidden"]);
+    expect(grips).toEqual(["merge-queue", "merged", "backlog"]);
   });
 
   it("refuses a band section whose wire carries no height arm", () => {
-    const section = hiddenSection([HIDDEN_ROW], 1, false);
+    const section = backlogSection([BACKLOG_ROW], 1, false);
     section.height = { case: undefined };
-    expect(() => drawWorkspaceRoster(roster({ hidden: section }), sidebarContext())).toThrow(MalformedView);
+    expect(() => drawWorkspaceRoster(roster({ backlog: section }), sidebarContext())).toThrow(MalformedView);
   });
 
   it("offers the resize cursor on a band's rule under an open section", () => {
     const drawn = sizedRail();
-    expect(inRail(drawn, () => cascadedValue(pane(drawn).querySelector(`.hidden-section > .${RESIZE_HANDLE_CLASS}`) as Element, "cursor"))).toBe("row-resize");
+    expect(inRail(drawn, () => cascadedValue(pane(drawn).querySelector(`.backlog-section > .${RESIZE_HANDLE_CLASS}`) as Element, "cursor"))).toBe("row-resize");
   });
 
   it("offers no resize cursor on a band's rule under no open section", () => {
@@ -3032,7 +3032,7 @@ describe("a band section's height", () => {
   it("takes no room with the grip, its margins cancelling its height", () => {
     const drawn = sizedRail();
     const lengths = inRail(drawn, () => {
-      const grip = pane(drawn).querySelector(`.hidden-section > .${RESIZE_HANDLE_CLASS}`) as Element;
+      const grip = pane(drawn).querySelector(`.backlog-section > .${RESIZE_HANDLE_CLASS}`) as Element;
       return ["height", "margin-top", "margin-bottom"].map((property) => Number.parseFloat(cascadedValue(grip, property)));
     });
     expect(lengths.reduce((sum, px) => sum + px, 0)).toBe(0);
@@ -3121,13 +3121,13 @@ describe("the roster drawer: what each draw changed", () => {
     ]).toEqual([true, "(3/3)", { sections: 0, drawn: 1, removed: 0, moved: 1 }]);
   });
 
-  it("draws only the hidden row a push changed, keeping the hidden section", () => {
+  it("draws only the hidden row a push changed, keeping the backlog", () => {
     // Arrange
     const drawer = createRosterDrawer(sidebarContext());
     const hiddenAt = (status: string) =>
-      roster({ repos: [], hidden: hiddenSection([row({ id: "h1" }), row({ id: "h2", status: { case: status, value: {} } as Parameters<typeof row>[0]["status"] })]) });
+      roster({ repos: [], backlog: backlogSection([row({ id: "h1" }), row({ id: "h2", status: { case: status, value: {} } as Parameters<typeof row>[0]["status"] })]) });
     const first = drawer.draw(hiddenAt("ready"));
-    const section = first.querySelector(".hidden-section");
+    const section = first.querySelector(".backlog-section");
     const h1 = first.querySelector("[data-roster-row='h1']");
 
     // Act
@@ -3135,19 +3135,19 @@ describe("the roster drawer: what each draw changed", () => {
 
     // Assert
     expect([
-      draw.element.querySelector(".hidden-section") === section,
+      draw.element.querySelector(".backlog-section") === section,
       draw.element.querySelector("[data-roster-row='h1']") === h1,
       counts(draw),
     ]).toEqual([true, true, { sections: 0, drawn: 1, removed: 0, moved: 0 }]);
   });
 
-  it("draws the hidden section anew when its last row leaves, so it is left out", () => {
+  it("draws the backlog anew when its last row leaves, so it is left out", () => {
     // Arrange
     const drawer = createRosterDrawer(sidebarContext());
-    drawer.draw(roster({ repos: [], hidden: hiddenSection([row({ id: "h1" })]) }));
+    drawer.draw(roster({ repos: [], backlog: backlogSection([row({ id: "h1" })]) }));
 
     // Act
-    const draw = drawer.drawCounted(roster({ repos: [], hidden: hiddenSection([]) }));
+    const draw = drawer.drawCounted(roster({ repos: [], backlog: backlogSection([]) }));
 
     // Assert
     expect([draw.sectionsDrawn, draw.element.querySelector("[data-roster-row='h1']")]).toEqual([1, null]);

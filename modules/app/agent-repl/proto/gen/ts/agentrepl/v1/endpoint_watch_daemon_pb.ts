@@ -382,7 +382,7 @@ export type WatchDaemonResponse = Message<"agentrepl.v1.WatchDaemonResponse"> & 
      * switch to the workspace exactly as a key switches to it. The editor
      * makes the switch, never the daemon, which is what makes a click as fast
      * as a key. It rides this stream because the clicked row can be a
-     * workspace the editor does not hold (a folded or hidden one), which has
+     * workspace the editor does not hold (a folded or backlogged one), which has
      * no host stream. Sent ONLY on an Emacs stream. An event, not state: never
      * replayed to a late subscriber.
      *

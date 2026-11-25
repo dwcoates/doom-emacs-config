@@ -1,11 +1,11 @@
 /**
  * roster — the rail: the open workspaces by repository, the Merge Queue
- * section, the Recently Merged section, and the hidden workspaces, one copy
+ * section, the Recently Merged section, and the backlog, one copy
  * of each (owner ruling, 2026-10-15). Nothing is re-grouped, re-sorted or
  * counted here.
  *
  * THE ROSTER IS FOUR SNAPSHOT STREAMS (`roster-streams.ts`): the workspaces
- * (the open sections and the hidden band), the merge queue, the Recently
+ * (the open sections and the backlog), the merge queue, the Recently
  * Merged summary and the closed rows, which no section draws. A stream a push
  * did not replace is the very snapshot already drawn, so its sections are
  * kept without even being compared; a replaced one is compared section by
@@ -30,17 +30,17 @@
 import { drawRosterSectionHeight, drawSectionHeight, type RosterSectionHeight } from "./section-resize.js";
 import { FOLDED_CLASS } from "./folded-class.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, MERGED_AT_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
+import { BACKLOG_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
 import {
-  RosterHiddenSectionSchema,
+  RosterBacklogSectionSchema,
   RosterMergedSectionSchema,
   RosterMergeQueueSectionSchema,
   RosterOpenSectionSchema,
   RosterRepoSectionSchema,
   type RosterCurrentWorkspace,
-  type RosterHiddenRow,
-  type RosterHiddenRows,
-  type RosterHiddenSection,
+  type RosterBacklogRow,
+  type RosterBacklogRows,
+  type RosterBacklogSection,
   type RosterLabel,
   type RosterMergedRepoGroup,
   type RosterMergedRepoGroupHeader,
@@ -66,11 +66,11 @@ import { childrenMatching, decorativeElement, placeChildren, queryAll } from "..
 import {
   disposeKeyedRows,
   drawKeyedEntries,
-  drawKeyedHiddenRows,
+  drawKeyedBacklogRows,
   drawKeyedRows,
-  HIDDEN_ROW,
+  BACKLOG_ROW,
   OPEN_ROW,
-  pathedHiddenRows,
+  pathedBacklogRows,
   placeKeyedRows,
   reconcileKeyedRegions,
   remarkKeyedRows,
@@ -82,7 +82,7 @@ import { createLogger } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
 import {
-  HIDDEN_FOLD_KEY,
+  BACKLOG_FOLD_KEY,
   MERGED_FOLD_KEY,
   MERGE_QUEUE_FOLD_KEY,
   OPEN_FOLD_KEY,
@@ -233,7 +233,7 @@ interface DrawnSection<W, D extends Drawn = Drawn> {
  * A PUSH REDRAWS ONLY WHAT IT CHANGED (2026-10-15). Every push used to throw
  * the whole rail away and rebuild it: 45ms and more of script for a push that
  * changed one row, and pushes come in bursts. A section — a repository's, the
- * hidden band, the Merge Queue and Recently Merged sections, the open
+ * backlog, the Merge Queue and Recently Merged sections, the open
  * section's heading — whose
  * wire is equal to the one it was drawn from is kept, DOM, view copies, clocks
  * and all (`scope.ts`); a changed one is drawn anew and the old one's scope
@@ -247,8 +247,8 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   roster.className = "sb-roster";
   // ONE COPY OF EVERY SECTION (owner ruling, 2026-10-15): the open workspaces
   // by repository, then the Merge Queue section, then the Recently Merged
-  // section, then the hidden workspaces (owner requests, 2026-10-27: the
-  // queues and merges above Hidden; 2026-11-01: split in two).
+  // section, then the backlog (owner requests, 2026-10-27: the
+  // queues and merges above the Backlog; 2026-11-01: split in two).
   // The pane is the box band-fit.ts fits the four sections' viewports in.
   const pane = document.createElement("div");
   pane.className = "sb-pane";
@@ -260,7 +260,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   const removeDrag = installArrangeDrag(dragScope.context, roster, drawnRefs(() => repos.values()));
   /** The open section, and the box its repository sections are placed in. */
   let open: DrawnSection<{ open: RosterOpenSection; count: string }, Drawn & { body: HTMLElement }> | null = null;
-  let hidden: DrawnSection<RosterHiddenSection, DrawnHiddenSection> | null = null;
+  let backlog: DrawnSection<RosterBacklogSection, DrawnBacklogSection> | null = null;
   let merged: DrawnSection<{ summary: RosterMergedSection; pages: number }> | null = null;
   let mergeQueue: DrawnSection<{ queue: RosterMergeQueueSection; coldGated: ColdGated }> | null = null;
   /** The streams last drawn, null before the first draw. */
@@ -299,14 +299,14 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
 
   /**
    * Draw the WORKSPACES stream's sections (the repositories, the open
-   * heading, the hidden band) from U, into DISCARDED what they replace;
+   * heading, the backlog) from U, into DISCARDED what they replace;
    * answers what the rows kept in their sections changed, and how many
    * slots and counts were repainted.
    */
   const drawWorkspaces = (u: RosterStreams["workspaces"], discarded: Array<DrawnSection<unknown>>): WorkspacesDrawn => {
     const path = "WorkspaceRoster";
     const repository = requireMessage(u.repository, `${path}.repository`);
-    const hiddenWire = requireMessage(u.hidden, `${path}.hidden`);
+    const backlogWire = requireMessage(u.backlog, `${path}.backlog`);
     const openWire = requireMessage(u.open, `${path}.open`);
     const openCount = openCountText(
       drawRosterOpenCount(
@@ -410,44 +410,44 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
     // Every switch moves every reach, so every push repaints every gutter too.
     repainted += paintRecencyGutters(open.drawn.body, recencyGutters(repository, `${path}.repository`));
 
-    // THE HIDDEN SECTION'S ROWS ARE KEYED as a repository's are: a push that
+    // THE BACKLOG'S ROWS ARE KEYED as a repository's are: a push that
     // changed only its rows keeps the section and draws the rows it changed.
-    const hiddenPath = `${path}.hidden`;
-    if (hidden !== null && untouched(hidden) && !equals(RosterHiddenSectionSchema, hidden.wire, hiddenWire) && sameButHiddenRows(hidden.wire, hiddenWire)) {
+    const backlogPath = `${path}.backlog`;
+    if (backlog !== null && untouched(backlog) && !equals(RosterBacklogSectionSchema, backlog.wire, backlogWire) && sameButBacklogRows(backlog.wire, backlogWire)) {
       tally(
         reconcileKeyedRegions(
-          [{ kept: hidden.drawn.rows, rows: pathedHiddenRows(requireMessage(hiddenWire.hiddenRows, `${hiddenPath}.hidden_rows`), `${hiddenPath}.hidden_rows`) }],
+          [{ kept: backlog.drawn.rows, rows: pathedBacklogRows(requireMessage(backlogWire.backlogRows, `${backlogPath}.backlog_rows`), `${backlogPath}.backlog_rows`) }],
           rail,
-          "hidden",
-          HIDDEN_ROW,
+          "backlog",
+          BACKLOG_ROW,
         ),
       );
-      placeKeyedRows(sectionBody(hidden.drawn.element, hiddenPath), hidden.drawn.rows);
-      remarkKeyedRows(hidden.drawn.rows, rail.attention);
-      if (paintSectionCount(hidden.drawn.element, requireMessage(hiddenWire.header, `${hiddenPath}.header`), `${hiddenPath}.header`)) repainted += 1;
-      hidden.wire = hiddenWire;
+      placeKeyedRows(sectionBody(backlog.drawn.element, backlogPath), backlog.drawn.rows);
+      remarkKeyedRows(backlog.drawn.rows, rail.attention);
+      if (paintSectionCount(backlog.drawn.element, requireMessage(backlogWire.header, `${backlogPath}.header`), `${backlogPath}.header`)) repainted += 1;
+      backlog.wire = backlogWire;
     } else {
-      const wasHidden = hidden;
-      hidden = keepOrDraw(
-        hidden,
-        hiddenWire,
-        (a, b) => equals(RosterHiddenSectionSchema, a, b),
+      const wasBacklog = backlog;
+      backlog = keepOrDraw(
+        backlog,
+        backlogWire,
+        (a, b) => equals(RosterBacklogSectionSchema, a, b),
         (scoped) => {
-          const rows: KeyedRows<RosterHiddenRow> = { entries: [] };
+          const rows: KeyedRows<RosterBacklogRow> = { entries: [] };
           scoped.onDispose(() => disposeKeyedRows(rows));
-          const element = drawRosterHiddenSection(hiddenWire, scoped, hiddenPath, (r, p) => drawKeyedHiddenRows(r, rail, p, "hidden", rows));
+          const element = drawRosterBacklogSection(backlogWire, scoped, backlogPath, (r, p) => drawKeyedBacklogRows(r, rail, p, "backlog", rows));
           return { element, rows };
         },
         discarded,
       );
-      if (hidden === wasHidden) remarkKeyedRows(hidden.drawn.rows, rail.attention);
+      if (backlog === wasBacklog) remarkKeyedRows(backlog.drawn.rows, rail.attention);
     }
     return { rows: kept_, repainted };
   };
 
   /** Whether a section of the workspaces stream was rearranged by a drag, so its unchanged snapshot is drawn anew anyway. */
   const workspacesRearranged = (): boolean =>
-    [...repos.values(), open, hidden].some((section) => section !== null && !untouched(section));
+    [...repos.values(), open, backlog].some((section) => section !== null && !untouched(section));
 
   const drawCounted = (u: RosterStreams): RosterDraw => {
       const changed = changedStreams(drawnStreams, u);
@@ -456,17 +456,17 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       let workspacesDrawn: WorkspacesDrawn = { rows: { drawn: 0, removed: 0, moved: 0 }, repainted: 0 };
       // A STREAM THE PUSH DID NOT REPLACE IS THE SNAPSHOT ALREADY DRAWN: its
       // sections are kept as they stand, uncompared.
-      if (open === null || hidden === null || changed.includes("workspaces") || workspacesRearranged()) {
+      if (open === null || backlog === null || changed.includes("workspaces") || workspacesRearranged()) {
         workspacesDrawn = drawWorkspaces(u.workspaces, discarded);
       } else {
         for (const section of repos.values()) {
           keep(section).drawn.regions.forEach((rows) => remarkKeyedRows(rows, rail.attention));
         }
         keep(open);
-        remarkKeyedRows(keep(hidden).drawn.rows, rail.attention);
+        remarkKeyedRows(keep(backlog).drawn.rows, rail.attention);
       }
       const openDrawn = requireDrawn(open, "the open section");
-      const hiddenDrawn = requireDrawn(hidden, "the hidden section");
+      const backlogDrawn = requireDrawn(backlog, "the backlog");
       // THE RECENTLY MERGED SECTION is the summary and the pages loaded beside
       // it (`merged-pages.ts`), drawn anew when either moved.
       const mergedWire = u.recentlyMerged;
@@ -511,7 +511,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       // it, which the stylesheet's rules between sections read.
       const placedSections = placeChildren(
         pane,
-        [openDrawn.drawn.element, mergeQueue.drawn.element, merged.drawn.element, hiddenDrawn.drawn.element].filter(
+        [openDrawn.drawn.element, mergeQueue.drawn.element, merged.drawn.element, backlogDrawn.drawn.element].filter(
           (element) => !element.hidden,
         ),
       );
@@ -546,7 +546,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
           repo_sections: repos.size,
           merged_groups: mergedWire.groups.length,
           merge_queue_groups: mergeQueueWire.groups.length,
-          hidden_rows: hiddenDrawn.wire.hiddenRows?.rows.length ?? 0,
+          backlog_rows: backlogDrawn.wire.backlogRows?.rows.length ?? 0,
           redrawn_sections: draw.sectionsDrawn,
           redrawn_rows: draw.rowsDrawn,
           removed_rows: draw.rowsRemoved,
@@ -565,10 +565,10 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       removeDrag();
       dragScope.dispose(roster);
       const drawn: Array<DrawnSection<unknown>> = [...repos.values()];
-      for (const section of [open, hidden, merged, mergeQueue]) if (section !== null) drawn.push(section);
+      for (const section of [open, backlog, merged, mergeQueue]) if (section !== null) drawn.push(section);
       for (const section of drawn) section.scope.dispose(section.drawn.element);
       repos = new Map();
-      open = hidden = merged = mergeQueue = null;
+      open = backlog = merged = mergeQueue = null;
       drawnStreams = null;
       pane.replaceChildren();
     },
@@ -588,9 +588,9 @@ interface DrawnRepoSection extends Drawn {
   body: HTMLElement;
 }
 
-/** A drawn hidden section: its element, and its keyed rows. */
-interface DrawnHiddenSection extends Drawn {
-  rows: KeyedRows<RosterHiddenRow>;
+/** A drawn backlog: its element, and its keyed rows. */
+interface DrawnBacklogSection extends Drawn {
+  rows: KeyedRows<RosterBacklogRow>;
 }
 
 /** The rows box a drawn section ELEMENT at PATH stands its body in (`drawHeadedBox`). */
@@ -654,19 +654,19 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
   return equals(RosterRepoSectionSchema, left, right);
 }
 
-/** Whether two hidden sections differ in their rows at most: the same header, fold and height. */
-function sameButHiddenRows(a: RosterHiddenSection, b: RosterHiddenSection): boolean {
-  // AN EMPTY HIDDEN SECTION IS LEFT OUT of the rail (`drawRosterHiddenSection`),
+/** Whether two backlogs differ in their rows at most: the same header, fold and height. */
+function sameButBacklogRows(a: RosterBacklogSection, b: RosterBacklogSection): boolean {
+  // AN EMPTY BACKLOG IS LEFT OUT of the rail (`drawRosterBacklogSection`),
   // so a count that reaches or leaves zero draws the section anew.
-  const empty = (u: RosterHiddenSection): boolean => (u.header?.count?.workspaces ?? 0) === 0;
+  const empty = (u: RosterBacklogSection): boolean => (u.header?.count?.workspaces ?? 0) === 0;
   if (empty(a) || empty(b)) return false;
-  const left = clone(RosterHiddenSectionSchema, a);
-  const right = clone(RosterHiddenSectionSchema, b);
+  const left = clone(RosterBacklogSectionSchema, a);
+  const right = clone(RosterBacklogSectionSchema, b);
   for (const section of [left, right]) {
-    section.hiddenRows = undefined;
+    section.backlogRows = undefined;
     if (section.header !== undefined) section.header.count = undefined;
   }
-  return equals(RosterHiddenSectionSchema, left, right);
+  return equals(RosterBacklogSectionSchema, left, right);
 }
 
 /**
@@ -755,7 +755,7 @@ export const OPEN_COUNT_CLASS = "sb-open-count";
 
 /**
  * The open-workspaces section: the "Open" heading over the repository
- * sections, drawn like the Hidden, Merge Queue and Recently Merged headings,
+ * sections, drawn like the Backlog, Merge Queue and Recently Merged headings,
  * with "(U/N)" beside the label whether the section is folded or not (owner
  * requests, 2026-10-13 and 2026-11-19). N is the daemon's sum of the
  * sections' counts, so it is what a person counting the section's entries
@@ -955,7 +955,7 @@ export interface HeadedSectionShape<H extends SectionHeader = SectionHeader> ext
  * fold, and ROWS (at ROWS_PATH) below it, each with its family.
  *
  * THE ONE SHAPE every folding section but the merged band
- * draws — repository, hidden workspaces — through
+ * draws — repository, backlog — through
  * `drawHeadedBox`, which the merged band shares, so none can disagree with
  * another on how a header folds.
  */
@@ -1021,7 +1021,7 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
 /**
  * The Recently Merged section (owner request, 2026-11-01; it was the merges
  * of the Deploys section), drawn directly under the Merge Queue section and
- * above Hidden: ONE GROUP PER REPOSITORY with a merge, from the band's
+ * above the Backlog: ONE GROUP PER REPOSITORY with a merge, from the band's
  * SUMMARY (U) and the pages of rows this page has loaded beside it (PAGES,
  * `merged-pages.ts`): the stream carries no merged row.
  *
@@ -1414,7 +1414,7 @@ export function mergedTodayCommitsText(today: MergedRowFacts[]): string {
 }
 
 /**
- * The hidden-workspaces section: the workspaces the user hid, hoisted out of
+ * The backlog: the workspaces the user backlogged, hoisted out of
  * every grouping. They keep their sessions and their editor tabs; the Emacs
  * tab bar does not draw them.
  *
@@ -1427,33 +1427,33 @@ export function mergedTodayCommitsText(today: MergedRowFacts[]): string {
  * sizes its viewport against the Open section's and the Recently Merged
  * section's.
  *
- * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceHidden`), rather
+ * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceBacklogged`), rather
  * than selecting it: the push that follows moves it back into its groupings
  * and onto the tab bar.
  */
-export function drawRosterHiddenSection(
-  u: RosterHiddenSection,
+export function drawRosterBacklogSection(
+  u: RosterBacklogSection,
   sc: SidebarContext,
   path: string,
-  drawRows: (rows: RosterHiddenRows, path: string) => HTMLElement = (rows, p) => drawRosterRows(rows, sc, p, "hidden"),
+  drawRows: (rows: RosterBacklogRows, path: string) => HTMLElement = (rows, p) => drawRosterRows(rows, sc, p, "backlog"),
 ): HTMLElement {
-  const rows = requireMessage(u.hiddenRows, `${path}.hidden_rows`);
+  const rows = requireMessage(u.backlogRows, `${path}.backlog_rows`);
   return drawHeadedBox(
     u,
     sc,
     path,
     {
-      foldKey: HIDDEN_FOLD_KEY,
-      className: HIDDEN_SECTION_CLASS,
-      target: { case: "hidden", value: {} },
+      foldKey: BACKLOG_FOLD_KEY,
+      className: BACKLOG_SECTION_CLASS,
+      target: { case: "backlog", value: {} },
       resizable: true,
       leftOut: {
         when: (header, headerPath) =>
           drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
-        attribute: "data-hidden-empty",
+        attribute: "data-backlog-empty",
       },
     },
-    () => drawRows(rows, `${path}.hidden_rows`),
+    () => drawRows(rows, `${path}.backlog_rows`),
   );
 }
 
@@ -1543,7 +1543,7 @@ export function drawRosterLabel(u: RosterLabel, path: string): string {
 
 /**
  * The rows region of a section at PATH, in the resolver's render order, each
- * row with its family. The daemon lists each state on its own (open, hidden,
+ * row with its family. The daemon lists each state on its own (open, backlogged,
  * merged), so every row it sends is drawn: a closed workspace is in none of
  * these lists, and an open workspace whose parent is not open already stands
  * in its parent's place. `place` is which kind of section the rows sit in

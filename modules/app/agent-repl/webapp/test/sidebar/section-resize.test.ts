@@ -14,7 +14,7 @@ import {
   type UpdateSidebarViewResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { BAND_SIZED_ATTRIBUTE, type FittedSection } from "../../src/sidebar/band-fit.js";
-import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, OPEN_FOLD_KEY } from "../../src/sidebar/context.js";
+import { BACKLOG_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, OPEN_FOLD_KEY } from "../../src/sidebar/context.js";
 import { recorded } from "../events.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
@@ -51,8 +51,8 @@ const REFUSED = create(UpdateSidebarViewResponseSchema, {
 
 /** The four sections a pane draws: class, fold key, whether folded, the lines the wire sized it to. */
 interface Drawn {
-  folded?: Partial<Record<"open" | "queue" | "merged" | "hidden", boolean>>;
-  sized?: Partial<Record<"queue" | "merged" | "hidden", number>>;
+  folded?: Partial<Record<"open" | "queue" | "merged" | "backlog", boolean>>;
+  sized?: Partial<Record<"queue" | "merged" | "backlog", number>>;
 }
 
 /**
@@ -84,12 +84,12 @@ function rail({ folded = {}, sized = {} }: Drawn = {}, answer: () => UpdateSideb
   const open = section("open-section", OPEN_FOLD_KEY, folded.open);
   const queue = section("merge-queue-section", MERGE_QUEUE_FOLD_KEY, folded.queue);
   const merged = section("merged-section", MERGED_FOLD_KEY, folded.merged);
-  const hidden = section("hidden-section", HIDDEN_FOLD_KEY, folded.hidden);
+  const backlog = section("backlog-section", BACKLOG_FOLD_KEY, folded.backlog);
   drawSectionHeight(queue, MERGE_QUEUE_FOLD_KEY, sized.queue ?? null, sc);
   drawSectionHeight(merged, MERGED_FOLD_KEY, sized.merged ?? null, sc);
-  drawSectionHeight(hidden, HIDDEN_FOLD_KEY, sized.hidden ?? null, sc);
+  drawSectionHeight(backlog, BACKLOG_FOLD_KEY, sized.backlog ?? null, sc);
   document.body.replaceChildren(pane);
-  return { asked, requests, sc, pane, open, queue, merged, hidden };
+  return { asked, requests, sc, pane, open, queue, merged, backlog };
 }
 
 /** The grip over SECTION's rule, its pointer capture stubbed (jsdom has none). */
@@ -120,17 +120,17 @@ function drag(section: HTMLElement, to: number, hold = false): HTMLElement {
 describe("drawRosterSectionHeight", () => {
   it("reads a fitted section as null", () => {
     // Arrange / Act / Assert
-    expect(drawRosterSectionHeight({ case: "fitted", value: {} }, "hidden.height")).toBeNull();
+    expect(drawRosterSectionHeight({ case: "fitted", value: {} }, "backlog.height")).toBeNull();
   });
 
   it("reads a sized section's lines", () => {
     // Arrange / Act / Assert
-    expect(drawRosterSectionHeight({ case: "sized", value: { lines: 6 } }, "hidden.height")).toBe(6);
+    expect(drawRosterSectionHeight({ case: "sized", value: { lines: 6 } }, "backlog.height")).toBe(6);
   });
 
   it("refuses an unset height", () => {
     // Arrange / Act / Assert
-    expect(() => drawRosterSectionHeight({ case: undefined }, "hidden.height")).toThrow(MalformedView);
+    expect(() => drawRosterSectionHeight({ case: undefined }, "backlog.height")).toThrow(MalformedView);
   });
 });
 
@@ -150,18 +150,18 @@ describe("paintSectionHeight", () => {
 describe("drawSectionHeight", () => {
   it("draws the wire's height and a grip as the section's first child", () => {
     // Arrange / Act
-    const r = rail({ sized: { hidden: 3 } });
+    const r = rail({ sized: { backlog: 3 } });
     // Assert
-    expect([r.hidden.getAttribute(BAND_SIZED_ATTRIBUTE), r.hidden.firstElementChild?.className]).toEqual(["3", RESIZE_HANDLE_CLASS]);
+    expect([r.backlog.getAttribute(BAND_SIZED_ATTRIBUTE), r.backlog.firstElementChild?.className]).toEqual(["3", RESIZE_HANDLE_CLASS]);
   });
 
   it("draws the height this page asked for over a wire that has not caught up", () => {
     // Arrange
     const r = rail();
-    r.sc.view.ask(heightViewKey(HIDDEN_FOLD_KEY), 7);
+    r.sc.view.ask(heightViewKey(BACKLOG_FOLD_KEY), 7);
     const redrawn = document.createElement("div");
     // Act
-    drawSectionHeight(redrawn, HIDDEN_FOLD_KEY, null, r.sc);
+    drawSectionHeight(redrawn, BACKLOG_FOLD_KEY, null, r.sc);
     // Assert
     expect(redrawn.getAttribute(BAND_SIZED_ATTRIBUTE)).toBe("7");
   });
@@ -179,7 +179,7 @@ describe("resizePair", () => {
     // Arrange
     const r = rail();
     // Act / Assert
-    expect(resizePair(r.hidden)).toEqual({ upper: r.merged, lower: r.hidden });
+    expect(resizePair(r.backlog)).toEqual({ upper: r.merged, lower: r.backlog });
   });
 
   it("passes over a folded section to the open one above it", () => {
@@ -191,9 +191,9 @@ describe("resizePair", () => {
 
   it("pairs nothing with a folded band", () => {
     // Arrange
-    const r = rail({ folded: { hidden: true } });
+    const r = rail({ folded: { backlog: true } });
     // Act / Assert
-    expect(resizePair(r.hidden)).toBeNull();
+    expect(resizePair(r.backlog)).toBeNull();
   });
 
   it("pairs nothing with a band under no open section", () => {
@@ -246,13 +246,13 @@ describe("measuredSection", () => {
   it("logs a section the fit never measured", async () => {
     // Arrange
     const section = document.createElement("div");
-    section.className = "repo hidden-section";
+    section.className = "repo backlog-section";
     const capture = captureLogRecords("error");
     // Act
     expect(() => measuredSection(section, () => null)).toThrow();
     // Assert
     const record = await forwardedRecord(capture, "sidebar.section-resize.unfitted");
-    expect(record.context).toMatchObject({ section: "repo hidden-section" });
+    expect(record.context).toMatchObject({ section: "repo backlog-section" });
   });
 });
 
@@ -288,17 +288,17 @@ describe("installSectionResize", () => {
       r,
       new Map([
         [r.merged, { stops: stops(5), lines: 3 }],
-        [r.hidden, { stops: stops(4), lines: 2 }],
+        [r.backlog, { stops: stops(4), lines: 2 }],
       ]),
     );
     // Act
-    drag(r.hidden, 120);
+    drag(r.backlog, 120);
     // Assert
     await r.requests.reached(1);
     const change = r.asked[0].change;
     expect(change.case === "sizeSections" && change.value.sizes.map((s) => [s.section.case, s.height.case === "lines" ? s.height.value.lines : null])).toEqual([
       ["recentlyMerged", 4],
-      ["hidden", 1],
+      ["backlog", 1],
     ]);
   });
 
@@ -346,31 +346,31 @@ describe("installSectionResize", () => {
       r,
       new Map([
         [r.merged, { stops: stops(5), lines: 3 }],
-        [r.hidden, { stops: stops(1), lines: 1 }],
+        [r.backlog, { stops: stops(1), lines: 1 }],
       ]),
     );
     // Act
-    drag(r.hidden, 40);
+    drag(r.backlog, 40);
     // Assert
-    expect([r.asked.length, r.merged.hasAttribute(BAND_SIZED_ATTRIBUTE), r.hidden.hasAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([0, false, false]);
+    expect([r.asked.length, r.merged.hasAttribute(BAND_SIZED_ATTRIBUTE), r.backlog.hasAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([0, false, false]);
   });
 
   it("sizes only the band a rule between two bands changed, the other left as it stood", async () => {
     // Arrange: the lower band's next line is taller than the room one line of the upper frees
-    const r = rail({ sized: { hidden: 9 } });
+    const r = rail({ sized: { backlog: 9 } });
     install(
       r,
       new Map([
         [r.merged, { stops: stops(5), lines: 3 }],
-        [r.hidden, { stops: [0, 50, 100], lines: 0 }],
+        [r.backlog, { stops: [0, 50, 100], lines: 0 }],
       ]),
     );
     // Act
-    drag(r.hidden, 80);
+    drag(r.backlog, 80);
     // Assert
     await r.requests.reached(1);
     const change = r.asked[0].change;
-    expect([change.case === "sizeSections" && change.value.sizes.map((s) => s.section.case), r.hidden.getAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([["recentlyMerged"], "9"]);
+    expect([change.case === "sizeSections" && change.value.sizes.map((s) => s.section.case), r.backlog.getAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([["recentlyMerged"], "9"]);
   });
 
   it("asks nothing for a rule let go where it was pressed", () => {
@@ -435,32 +435,32 @@ describe("installSectionResize", () => {
 
   it("presses nothing on a folded band's rule", () => {
     // Arrange
-    const r = rail({ folded: { hidden: true } });
+    const r = rail({ folded: { backlog: true } });
     const { refit } = install(r, new Map());
     // Act
-    drag(r.hidden, 60);
+    drag(r.backlog, 60);
     // Assert
     expect([r.asked.length, refit.mock.calls.length]).toEqual([0, 0]);
   });
 
   it("fits the sections beside a double-clicked rule again", async () => {
     // Arrange
-    const r = rail({ sized: { merged: 2, hidden: 5 } });
+    const r = rail({ sized: { merged: 2, backlog: 5 } });
     const { refit } = install(r, new Map());
     // Act
-    grip(r.hidden).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    grip(r.backlog).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     // Assert
     await r.requests.reached(1);
     const change = r.asked[0].change;
     expect([
       change.case === "sizeSections" && change.value.sizes.map((s) => [s.section.case, s.height.case]),
       r.merged.hasAttribute(BAND_SIZED_ATTRIBUTE),
-      r.hidden.hasAttribute(BAND_SIZED_ATTRIBUTE),
+      r.backlog.hasAttribute(BAND_SIZED_ATTRIBUTE),
       refit.mock.calls.length,
     ]).toEqual([
       [
         ["recentlyMerged", "fitted"],
-        ["hidden", "fitted"],
+        ["backlog", "fitted"],
       ],
       false,
       false,

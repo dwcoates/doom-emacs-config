@@ -798,20 +798,20 @@ func TestANewWorkspaceIsShown(t *testing.T) {
 	ws := testWorkspace(t, s)
 
 	// Assert
-	if ws.Hidden {
-		t.Fatalf("a newly registered workspace is hidden")
+	if ws.Backlogged {
+		t.Fatalf("a newly registered workspace is backlogged")
 	}
 }
 
-func TestSetHiddenIsReadBack(t *testing.T) {
+func TestSetBackloggedIsReadBack(t *testing.T) {
 	tests := []struct {
 		name   string
 		writes []bool
 		want   bool
 	}{
 		{name: "hiding a workspace", writes: []bool{true}, want: true},
-		{name: "showing a hidden workspace again", writes: []bool{true, false}, want: false},
-		{name: "hiding a hidden workspace again", writes: []bool{true, true}, want: true},
+		{name: "showing a backlogged workspace again", writes: []bool{true, false}, want: false},
+		{name: "hiding a backlogged workspace again", writes: []bool{true, true}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -820,9 +820,9 @@ func TestSetHiddenIsReadBack(t *testing.T) {
 			ws := testWorkspace(t, s)
 
 			// Act
-			for _, hidden := range tt.writes {
-				if err := s.SetHidden(context.Background(), ws.ID, hidden, time.Unix(1_700_000_000, 0)); err != nil {
-					t.Fatalf("SetHidden(%v): %v", hidden, err)
+			for _, backlogged := range tt.writes {
+				if err := s.SetBacklogged(context.Background(), ws.ID, backlogged, time.Unix(1_700_000_000, 0)); err != nil {
+					t.Fatalf("SetBacklogged(%v): %v", backlogged, err)
 				}
 			}
 
@@ -831,34 +831,34 @@ func TestSetHiddenIsReadBack(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if got.Hidden != tt.want {
-				t.Fatalf("hidden = %v, want %v", got.Hidden, tt.want)
+			if got.Backlogged != tt.want {
+				t.Fatalf("backlogged = %v, want %v", got.Backlogged, tt.want)
 			}
 		})
 	}
 }
 
-func TestSetHiddenRecordsWhenTheWorkspaceWasHidden(t *testing.T) {
+func TestSetBackloggedRecordsWhenTheWorkspaceWasBacklogged(t *testing.T) {
 	first, second := time.Unix(1_700_000_000, 0), time.Unix(1_700_000_600, 0)
 	tests := []struct {
 		name   string
 		writes []struct {
-			hidden bool
-			at     time.Time
+			backlogged bool
+			at         time.Time
 		}
 		want *time.Time
 	}{
 		{name: "hiding stamps the instant", writes: []struct {
-			hidden bool
-			at     time.Time
+			backlogged bool
+			at         time.Time
 		}{{true, first}}, want: &first},
 		{name: "hiding again re-stamps the latest hide", writes: []struct {
-			hidden bool
-			at     time.Time
+			backlogged bool
+			at         time.Time
 		}{{true, first}, {true, second}}, want: &second},
 		{name: "showing clears the instant", writes: []struct {
-			hidden bool
-			at     time.Time
+			backlogged bool
+			at         time.Time
 		}{{true, first}, {false, second}}, want: nil},
 	}
 	for _, tt := range tests {
@@ -869,8 +869,8 @@ func TestSetHiddenRecordsWhenTheWorkspaceWasHidden(t *testing.T) {
 
 			// Act
 			for _, w := range tt.writes {
-				if err := s.SetHidden(context.Background(), ws.ID, w.hidden, w.at); err != nil {
-					t.Fatalf("SetHidden(%v): %v", w.hidden, err)
+				if err := s.SetBacklogged(context.Background(), ws.ID, w.backlogged, w.at); err != nil {
+					t.Fatalf("SetBacklogged(%v): %v", w.backlogged, err)
 				}
 			}
 
@@ -879,18 +879,18 @@ func TestSetHiddenRecordsWhenTheWorkspaceWasHidden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if (got.HiddenAt == nil) != (tt.want == nil) || got.HiddenAt != nil && !got.HiddenAt.Equal(*tt.want) {
-				t.Fatalf("hidden at = %v, want %v", got.HiddenAt, tt.want)
+			if (got.BackloggedAt == nil) != (tt.want == nil) || got.BackloggedAt != nil && !got.BackloggedAt.Equal(*tt.want) {
+				t.Fatalf("backlogged at = %v, want %v", got.BackloggedAt, tt.want)
 			}
 		})
 	}
 }
 
-func TestAHiddenRowWithNoHideInstantIsCorrupt(t *testing.T) {
-	// Arrange: a row hidden with no instant, which no write path produces.
+func TestABackloggedRowWithNoHideInstantIsCorrupt(t *testing.T) {
+	// Arrange: a row backlogged with no instant, which no write path produces.
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	if _, err := s.db().Exec(`UPDATE workspaces SET hidden = 1, hidden_at = NULL WHERE id = ?`, ws.ID); err != nil {
+	if _, err := s.db().Exec(`UPDATE workspaces SET backlogged = 1, backlogged_at = NULL WHERE id = ?`, ws.ID); err != nil {
 		t.Fatalf("corrupting the row: %v", err)
 	}
 
@@ -899,23 +899,23 @@ func TestAHiddenRowWithNoHideInstantIsCorrupt(t *testing.T) {
 
 	// Assert
 	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "hidden_at" {
-		t.Fatalf("Workspace = %v, want a hidden_at DecodeError", err)
+	if !errors.As(err, &decode) || decode.Field != "backlogged_at" {
+		t.Fatalf("Workspace = %v, want a backlogged_at DecodeError", err)
 	}
 }
 
-func TestSetHiddenRefusesAnUnknownWorkspace(t *testing.T) {
+func TestSetBackloggedRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)
 
 	// Act
-	err := s.SetHidden(context.Background(), WorkspaceID("no-such-workspace"), true, time.Unix(1_700_000_000, 0))
+	err := s.SetBacklogged(context.Background(), WorkspaceID("no-such-workspace"), true, time.Unix(1_700_000_000, 0))
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetHidden on an unknown workspace = %v, want ErrNotFound", err)
+		t.Fatalf("SetBacklogged on an unknown workspace = %v, want ErrNotFound", err)
 	}
-	if !loggedOperation(log, "daemon.wsm.set_hidden", "debug") {
+	if !loggedOperation(log, "daemon.wsm.set_backlogged", "debug") {
 		t.Fatalf("the missed write was not recorded under its operation: %v", log.Records())
 	}
 }
@@ -2212,29 +2212,29 @@ func TestVacatedDir(t *testing.T) {
 func TestHideColumns(t *testing.T) {
 	at := time.Unix(1_700_000_000, 0).UTC()
 	tests := []struct {
-		name   string
-		hidden bool
-		want   []workspaceColumn
+		name       string
+		backlogged bool
+		want       []workspaceColumn
 	}{
-		{name: "a hide stamps its instant and clears the lapse", hidden: true, want: []workspaceColumn{
-			{name: "hidden", value: true},
-			{name: "hidden_at", value: nanos(at)},
+		{name: "a hide stamps its instant and clears the lapse", backlogged: true, want: []workspaceColumn{
+			{name: "backlogged", value: true},
+			{name: "backlogged_at", value: nanos(at)},
 			{name: "cache_lapses_at", value: nil},
 			{name: "cache_lapse_gated_tokens", value: nil},
-			{name: "hidden_with", value: nil},
+			{name: "backlogged_with", value: nil},
 		}},
-		{name: "a show clears its instant and the lapse", hidden: false, want: []workspaceColumn{
-			{name: "hidden", value: false},
-			{name: "hidden_at", value: nil},
+		{name: "a show clears its instant and the lapse", backlogged: false, want: []workspaceColumn{
+			{name: "backlogged", value: false},
+			{name: "backlogged_at", value: nil},
 			{name: "cache_lapses_at", value: nil},
 			{name: "cache_lapse_gated_tokens", value: nil},
-			{name: "hidden_with", value: nil},
+			{name: "backlogged_with", value: nil},
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := hideColumns(tt.hidden, at)
+			got := hideColumns(tt.backlogged, at)
 
 			// Assert
 			if len(got) != len(tt.want) {
@@ -2251,11 +2251,11 @@ func TestHideColumns(t *testing.T) {
 
 func TestHideColumnsAreTheOneHideShape(t *testing.T) {
 	// Act
-	sites := sourcescan.Sites(t, `name: "hidden_at"`)
+	sites := sourcescan.Sites(t, `name: "backlogged_at"`)
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "workspaces.go" {
-		t.Fatalf("the hidden instant is written at %v, want only hideColumns in workspaces.go", sites)
+		t.Fatalf("the backlogged instant is written at %v, want only hideColumns in workspaces.go", sites)
 	}
 }
 

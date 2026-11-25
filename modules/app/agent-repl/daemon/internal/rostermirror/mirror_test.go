@@ -188,19 +188,19 @@ func streamsFrame(push *frontendv1.RosterPush) *agentreplv1.WatchWorkspaceRoster
 }
 
 // workspacesStream is a workspaces stream drawing OPEN in the open section
-// and HIDDEN in the hidden section.
-func workspacesStream(open, hidden []*frontendv1.RosterClosedRow) *frontendv1.WorkspaceRoster {
+// and BACKLOGGED in the backlog.
+func workspacesStream(open, backlog []*frontendv1.RosterClosedRow) *frontendv1.WorkspaceRoster {
 	var entries []*frontendv1.RosterRepoEntry
 	for _, r := range open {
 		entries = append(entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: r.GetRow()}}})
 	}
-	var hiddenRows []*frontendv1.RosterHiddenRow
-	for _, r := range hidden {
-		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: r.GetRow()})
+	var backlogRows []*frontendv1.RosterBacklogRow
+	for _, r := range backlog {
+		backlogRows = append(backlogRows, &frontendv1.RosterBacklogRow{Row: r.GetRow()})
 	}
 	return &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{Entries: entries}}},
-		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
+		Backlog:    &frontendv1.RosterBacklogSection{BacklogRows: &frontendv1.RosterBacklogRows{Rows: backlogRows}},
 	}
 }
 
@@ -301,7 +301,7 @@ func TestAPartialPushKeepsTheStreamsItLeavesOut(t *testing.T) {
 		want  map[ids.WorkspaceID]string
 	}{
 		{
-			name: "the first push mirrors the open, hidden and closed rows",
+			name: "the first push mirrors the open, backlogged and closed rows",
 			first: &frontendv1.RosterPush{
 				Workspaces: workspacesStream([]*frontendv1.RosterClosedRow{row("ws-o", thinking)}, []*frontendv1.RosterClosedRow{row("ws-h", done)}),
 				Closed:     &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{row("ws-c", done)}},

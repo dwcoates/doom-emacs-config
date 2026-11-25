@@ -1381,7 +1381,7 @@ func hostOnBattery() (bool, error) {
 }
 
 // expectBootReconnects expects the host and webview streams of every open,
-// unhidden workspace back, timed from started: the workspaces Emacs reopens
+// shown workspace back, timed from started: the workspaces Emacs reopens
 // after an ordinary boot.
 func expectBootReconnects(ctx context.Context, db interface {
 	ListWorkspaces(context.Context) ([]wsm.Workspace, error)
@@ -1392,7 +1392,7 @@ func expectBootReconnects(ctx context.Context, db interface {
 	}
 	var open []ids.WorkspaceID
 	for _, w := range workspaces {
-		if !w.Closed && !w.Hidden {
+		if !w.Closed && !w.Backlogged {
 			open = append(open, w.ID)
 		}
 	}

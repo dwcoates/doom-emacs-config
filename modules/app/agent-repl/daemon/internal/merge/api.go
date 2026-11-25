@@ -254,16 +254,16 @@ type Orchestrator interface {
 	// ColdGateRetired is told WS's recorded cold gate was retired (a session
 	// came up): its merge resumes at its place in line.
 	ColdGateRetired(ws ids.WorkspaceID)
-	// OnHidden is told WS was hidden: a merge standing at its cold gate
-	// leaves its queue (CauseHiddenAtColdGate). It returns at once.
-	OnHidden(ws ids.WorkspaceID)
+	// OnBacklogged is told WS was backlogged: a merge standing at its cold gate
+	// leaves its queue (CauseBackloggedAtColdGate). It returns at once.
+	OnBacklogged(ws ids.WorkspaceID)
 	// RevealMergeWorkspace draws a hidden async merge workspace in the tab bar
 	// and the sidebar from now on, naming CAUSE in its record, and restates the
 	// requester's bubble head with its switch. It is a no-op for a workspace
 	// that is no merge workspace or is already revealed. IT ENDS WITH THE
 	// WORKSPACE DRAWABLE OR WITH AN ERROR, recorded at ERROR: a reveal that
-	// cannot be recorded, or that left the workspace hidden, fails its two
-	// callers (a select, and a show through workspace.Verbs.SetHidden).
+	// cannot be recorded, or that left the workspace backlogged, fails its two
+	// callers (a select, and a show through workspace.Verbs.SetBacklogged).
 	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error
 	// WorkspaceLinksChanged draws again the heads of WS's merges, and of the
 	// async merges WS asked for, once WS's links changed: a merge's target
@@ -935,7 +935,7 @@ type DeployCheckWorkspaces interface {
 	// CloseSelf closes a deploy check workspace, at its running turn's end
 	// when one runs, answering whether it waits for that end.
 	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
-	// Resume shows a hidden deploy check workspace again: the mediator
+	// Resume shows a backlogged deploy check workspace again: the mediator
 	// stands in sight for good, so any hide of it is undone.
 	Resume(ctx context.Context, ws ids.WorkspaceID) error
 	// Refresh brings the standing fixer's worktree to its parent's tip

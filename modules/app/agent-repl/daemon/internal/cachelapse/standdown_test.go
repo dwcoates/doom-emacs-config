@@ -116,12 +116,12 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 			rec.KeepaliveRunBeats = KeepaliveRunCap
 			h.db.records[theWorkspace] = rec
 		}, want: ownerCold},
-		{name: "a hidden workspace whose lapse is armed", arrange: func(h *harness) {
-			h.db.records[theWorkspace] = hidden()
+		{name: "a backlogged workspace whose lapse is armed", arrange: func(h *harness) {
+			h.db.records[theWorkspace] = backlogged()
 			h.keeper.deadlines[theWorkspace] = lapseAt
 		}, want: ownerLapse},
-		{name: "a hidden workspace with no lapse armed", arrange: func(h *harness) {
-			rec := hidden()
+		{name: "a backlogged workspace with no lapse armed", arrange: func(h *harness) {
+			rec := backlogged()
 			worked := now.Add(-2 * time.Hour)
 			rec.LastWorkAt = &worked
 			h.db.records[theWorkspace] = rec
@@ -333,7 +333,7 @@ func TestAVisitEndsOnlyOnceItsSessionIsStoodDown(t *testing.T) {
 			h.db.sessions[theWorkspace] = session
 
 			// Act
-			h.reconcile("the workspace was hidden, shown, selected or deselected")
+			h.reconcile("the workspace was backlogged, shown, selected or deselected")
 
 			// Assert
 			if ended := h.db.records[theWorkspace].SettingsVisitAt == nil; ended != tt.wantEnd {
@@ -449,7 +449,7 @@ func TestTheColdParkWaitsOutTheGraceAfterTheLastWork(t *testing.T) {
 	if len(h.coldDowns) != 0 {
 		t.Fatalf("cold parks = %+v, want none inside the grace", h.coldDowns)
 	}
-	due := lastWorked().Add(StandDownGrace)
+	due := lastWorked().Add(testHoldAfterWork)
 	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) {
 		t.Fatalf("cold park armed at %v, want %v", got, due)
 	}
@@ -482,7 +482,7 @@ func TestATurnDuringTheGraceHandsTheParkToTheIdlePark(t *testing.T) {
 	h.reconcile("a turn's close was recorded")
 
 	// Assert: the idle park, timed from the turn, takes the cold park's place.
-	if got, want := h.keeper.idleDue[theWorkspace], ended.Add(StandDownGrace); !got.Equal(want) {
+	if got, want := h.keeper.idleDue[theWorkspace], ended.Add(testHoldAfterWork); !got.Equal(want) {
 		t.Fatalf("idle park armed at %v, want the turn's grace %v", got, want)
 	}
 	if got := h.keeper.owners[theWorkspace].owner; got != ownerCycle {
@@ -550,7 +550,7 @@ func TestAnIdleParkWaitsOutTheGraceAfterTheTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t, visible()).idleFor(5 * time.Minute)
 	h.reconcile("a turn's close was recorded")
-	due := now.Add(-5 * time.Minute).Add(StandDownGrace)
+	due := now.Add(-5 * time.Minute).Add(testHoldAfterWork)
 	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) {
 		t.Fatalf("idle park armed at %v, want %v", got, due)
 	}
@@ -586,7 +586,7 @@ func TestAnIdleParkIsMeasuredFromTheLastWork(t *testing.T) {
 	if len(h.idleDowns) != 0 {
 		t.Fatalf("idle parks = %+v, want none 5 minutes after the turn", h.idleDowns)
 	}
-	if got, want := h.keeper.idleDue[theWorkspace], ended.Add(StandDownGrace); !got.Equal(want) {
+	if got, want := h.keeper.idleDue[theWorkspace], ended.Add(testHoldAfterWork); !got.Equal(want) {
 		t.Fatalf("idle park armed at %v, want %v", got, want)
 	}
 }
@@ -675,7 +675,7 @@ func TestAKeepaliveCycleDoesNotMoveTheParkInstant(t *testing.T) {
 	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "the keep-alive's turn ended"})
 
 	// Assert
-	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) || !due.Equal(now.Add(-5*time.Minute).Add(StandDownGrace)) {
+	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) || !due.Equal(now.Add(-5*time.Minute).Add(testHoldAfterWork)) {
 		t.Fatalf("idle park armed at %v after the cycle, want the unmoved %v", got, due)
 	}
 	if len(h.db.works) != 0 {
@@ -708,10 +708,10 @@ func TestAHandoverDoesNotMoveTheParkInstant(t *testing.T) {
 	}
 }
 
-// INVARIANT B: a hidden workspace's idle session is owned and parked at its
+// INVARIANT B: a backlogged workspace's idle session is owned and parked at its
 // grace, whatever owns its stand-down: the lapse, with no lapse armed the
 // cold park, or the sweep.
-func TestAHiddenWorkspacesIdleSessionIsParked(t *testing.T) {
+func TestABackloggedWorkspacesIdleSessionIsParked(t *testing.T) {
 	tests := []struct {
 		name      string
 		arrange   func(h *harness)
@@ -723,11 +723,11 @@ func TestAHiddenWorkspacesIdleSessionIsParked(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, hidden()).idle()
+			h := newHarness(t, backlogged()).idle()
 			tt.arrange(h)
 
 			// Act
-			h.reconcile("the workspace was hidden, shown, selected or deselected")
+			h.reconcile("the workspace was backlogged, shown, selected or deselected")
 
 			// Assert
 			if got := h.keeper.owners[theWorkspace].owner; got != tt.wantOwner {
@@ -761,9 +761,9 @@ func TestASessionTheSweepOwnsIsParkedAtItsGrace(t *testing.T) {
 // hide that ends the showing reconciles the keeper, which parks the idle
 // session at once.
 func TestAWithheldStandDownIsTakenOnceTheWorkspaceIsHiddenAgain(t *testing.T) {
-	// Arrange: shown, in view, then hidden again.
-	h := newHarness(t, selectedHidden()).idle()
-	h.reconcile("the workspace was hidden, shown, selected or deselected")
+	// Arrange: shown, in view, then backlogged again.
+	h := newHarness(t, selectedBacklogged()).idle()
+	h.reconcile("the workspace was backlogged, shown, selected or deselected")
 	if len(h.idleDowns)+len(h.coldDowns) != 0 {
 		t.Fatalf("parks = %+v %+v, want none while in view", h.idleDowns, h.coldDowns)
 	}
@@ -773,7 +773,7 @@ func TestAWithheldStandDownIsTakenOnceTheWorkspaceIsHiddenAgain(t *testing.T) {
 	h.keeper.deadlines[theWorkspace] = lapseAt
 
 	// Act
-	h.reconcile("the workspace was hidden, shown, selected or deselected")
+	h.reconcile("the workspace was backlogged, shown, selected or deselected")
 
 	// Assert
 	if len(h.idleDowns) != 1 || !h.idleDowns[0].beat.Equal(now.Add(-2*time.Hour)) {
@@ -797,7 +797,7 @@ func TestTheKeeperMirrorsTheSessionsStandingIntoTheFactsTable(t *testing.T) {
 			h.db.remote = map[ids.WorkspaceID]bool{theWorkspace: true}
 		}, want: sessionwhy.Facts{Owner: sessionwhy.OwnerRemoteControl}},
 		{name: "a cold park waiting out its grace", rec: knownCold(), arrange: func(*harness) {},
-			want: sessionwhy.Facts{Owner: sessionwhy.OwnerCold, ParkDue: now.Add(-10 * time.Minute).Add(StandDownGrace)}},
+			want: sessionwhy.Facts{Owner: sessionwhy.OwnerCold, ParkDue: now.Add(-10 * time.Minute).Add(testHoldAfterWork)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -829,5 +829,104 @@ func TestASessionNoLongerServedIsForgottenInTheFactsTable(t *testing.T) {
 	// Assert
 	if got := h.why.Facts(theWorkspace); got != (sessionwhy.Facts{}) {
 		t.Fatalf("facts = %+v, want none for a session no shim serves", got)
+	}
+}
+
+func TestAnIdleParkFollowsTheWorkspacesShimHold(t *testing.T) {
+	tests := []struct {
+		name       string
+		hold       wsm.ShimHold
+		wantParked bool
+		wantArmed  bool
+	}{
+		{name: "a hold while its cause stands arms nothing and parks nothing", hold: wsm.ShimHold{Indefinite: true}},
+		{name: "a hold that ends later arms the park at its end", hold: wsm.ShimHold{Until: now.Add(time.Minute)}, wantArmed: true},
+		{name: "no hold parks the idle session at once", hold: wsm.ShimHold{}, wantParked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, knownCold())
+			h.hold = func(ids.WorkspaceID) wsm.ShimHold { return tt.hold }
+
+			// Act
+			h.reconcile("a session came up")
+
+			// Assert
+			if parked := len(h.coldDowns) == 1; parked != tt.wantParked {
+				t.Fatalf("cold parks = %+v, want parked %v", h.coldDowns, tt.wantParked)
+			}
+			if due, armed := h.keeper.idleDue[theWorkspace]; armed != tt.wantArmed || (armed && !due.Equal(tt.hold.Until)) {
+				t.Fatalf("idle park armed = %v at %v, want %v at %v", armed, due, tt.wantArmed, tt.hold.Until)
+			}
+		})
+	}
+}
+
+func TestAShimHoldChangeReconcilesTheWorkspace(t *testing.T) {
+	// Arrange: the hold stood while its cause did.
+	h := newHarness(t, knownCold())
+	h.hold = func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{Indefinite: true} }
+	h.reconcile("a session came up")
+	h.hold = func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{} }
+
+	// Act
+	h.keeper.ShimHoldChanged(theWorkspace)
+	h.applyQueued()
+
+	// Assert
+	if len(h.coldDowns) != 1 {
+		t.Fatalf("cold parks = %+v, want one once the hold ended", h.coldDowns)
+	}
+}
+
+func TestASessionBroughtUpForWorkIsNeverParkedBeforeItsTurnCloses(t *testing.T) {
+	tests := []struct {
+		name       string
+		upAgo      time.Duration
+		wantParked bool
+	}{
+		{name: "brought up for work after its last turn closed, it waits for the next close", upAgo: time.Second},
+		{name: "brought up for work before its last turn closed, it follows the ordinary hold", upAgo: 3 * time.Hour, wantParked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: no roster hold at all, which alone would park it.
+			h := newHarness(t, knownCold())
+			h.hold = func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{} }
+			s := liveSession(theWorkspace)
+			up := now.Add(-tt.upAgo)
+			s.WorkBroughtUpAt = &up
+			h.db.sessions[theWorkspace] = s
+
+			// Act
+			h.reconcile("a session came up")
+
+			// Assert
+			if parked := len(h.coldDowns) == 1; parked != tt.wantParked {
+				t.Fatalf("cold parks = %+v, want parked %v", h.coldDowns, tt.wantParked)
+			}
+		})
+	}
+}
+
+func TestAClosedWorkspacesSessionIsParkedAtOnceAndOwesOneLastBeat(t *testing.T) {
+	// Arrange: closed now, its cache warm from a turn ten minutes ago, and no
+	// resource allocation holding it, as the roster says of a closed workspace.
+	rec := warm()
+	rec.Closed = true
+	rec.Closure = &wsm.Closure{At: now}
+	h := newHarness(t, rec)
+	h.hold = func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{} }
+
+	// Act
+	h.reconcile("the workspace was closed or reopened")
+
+	// Assert: parked now, and its one last beat still owed.
+	if len(h.idleDowns) != 1 {
+		t.Fatalf("idle parks = %+v, want the closed workspace's session parked at once", h.idleDowns)
+	}
+	if _, armed := h.keeper.beats[theWorkspace]; !armed {
+		t.Fatal("no beat armed: a closed workspace owes its conversation one last keep-alive")
 	}
 }

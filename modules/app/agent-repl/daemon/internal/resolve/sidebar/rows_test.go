@@ -45,9 +45,9 @@ func TestRowNamesItsRepository(t *testing.T) {
 			want: []string{"alpha", "beta", "beta"},
 		},
 		{
-			name: "a hidden row, in no repository section, names its repository",
-			reg:  registry(hiddenWorkspace("w-hidden", "hidden")),
-			rows: hiddenRows,
+			name: "a backlogged row, in no repository section, names its repository",
+			reg:  registry(backloggedWorkspace("w-hidden", "hidden")),
+			rows: backlogRows,
 			want: []string{"alpha"},
 		},
 	}
@@ -74,7 +74,7 @@ func TestRowNamesItsRepository(t *testing.T) {
 func TestRowOfAnUnregisteredRepositoryNamesNoneAndIsRecorded(t *testing.T) {
 	// Arrange.
 	r, surfaces := newResolver(t)
-	stray := hiddenWorkspace("w-stray", "stray")
+	stray := backloggedWorkspace("w-stray", "stray")
 	stray.Repo = ids.RepoID("repo-missing")
 
 	// Act.
@@ -82,9 +82,9 @@ func TestRowOfAnUnregisteredRepositoryNamesNoneAndIsRecorded(t *testing.T) {
 
 	// Assert: the row is still drawn, names no repository, and the violation
 	// is recorded with the repository it names.
-	rows := hiddenRows(latest(t, r))
+	rows := backlogRows(latest(t, r))
 	if len(rows) != 1 || rows[0].Repository != nil {
-		t.Fatalf("hidden rows = %v, want the stray drawn with no repository", rows)
+		t.Fatalf("backlogged rows = %v, want the stray drawn with no repository", rows)
 	}
 	rec, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.sidebar.row_repository"})
 	if !ok || rec.Context["repo_id"] != "repo-missing" || rec.Context["workspace_id"] != "w-stray" {
@@ -578,19 +578,19 @@ func TestMergedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	}
 }
 
-func TestHiddenBeatsARunningTurnInTheWhenColumn(t *testing.T) {
+func TestBackloggedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	// Arrange.
 	ws := workspace(string(theWS), "one")
-	ws.Hidden = true
-	ws.HiddenAt = at(time.Hour)
+	ws.Backlogged = true
+	ws.BackloggedAt = at(time.Hour)
 	r := live(t, arrange(t, ws))
 
 	// Act.
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
-	// Assert: a hidden row counts from its hide.
-	row := hiddenRows(latest(t, r))[0]
-	if got := row.GetWhen().GetHidden().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
+	// Assert: a backlogged row counts from its hide.
+	row := backlogRows(latest(t, r))[0]
+	if got := row.GetWhen().GetBacklogged().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the hide instant", row.GetWhen())
 	}
 }
@@ -728,8 +728,8 @@ func TestRowDetailListsTheWorkspacesChildren(t *testing.T) {
 			want:     []listed{{name: "a"}, {name: "b"}},
 		},
 		{
-			name:     "a hidden child is listed",
-			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) { ws.Hidden, ws.HiddenAt = true, &later })},
+			name:     "a backlogged child is listed",
+			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) { ws.Backlogged, ws.BackloggedAt = true, &later })},
 			want:     []listed{{name: "a"}},
 		},
 		{
@@ -994,7 +994,7 @@ func TestRowStatesItsLiveDetachedWork(t *testing.T) {
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
 			r.SetTurnEnded(theWS, wsm.CloseCompleted)
-			r.SetInteracted(theWS, epoch)
+			r.SetInteracted(theWS, afterExemption)
 		}, wantStatus: "idle_async", wantLive: true},
 		{name: "a done with no detached work does not", arrange: func(t *testing.T, r sidebarResolver) {
 			finished(t, r)
@@ -1027,7 +1027,7 @@ func TestRowStatesItsLiveDetachedWork(t *testing.T) {
 	}
 }
 
-func TestATurnsOwnEndViewsNothing(t *testing.T) {
+func TestATurnsEndLeavesTheViewedMarkerAsItStood(t *testing.T) {
 	cases := []struct {
 		name       string
 		act        footer.SessionAct
@@ -1044,19 +1044,19 @@ func TestATurnsOwnEndViewsNothing(t *testing.T) {
 			// Arrange: the user interacted while the turn ran.
 			r := live(t, arrange(t))
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: tc.act})
-			r.SetInteracted(theWS, epoch)
+			r.SetInteracted(theWS, afterExemption)
 
 			// Act.
 			r.SetTurnEnded(theWS, tc.how)
 
-			// Assert: the end is a status change, so the row is FULL until the
-			// user interacts with what it now shows.
+			// Assert: only a turn's start lowers the marker, so the
+			// interaction made while the turn ran still stands.
 			row := onlyRow(t, r)
 			if got := statusName(row); got != tc.wantStatus {
 				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
 			}
-			if got := row.GetViewed(); got != nil {
-				t.Fatalf("viewed = %v, want unset: a turn's end raises no viewed marker", got)
+			if got := row.GetViewed(); got == nil {
+				t.Fatal("viewed = unset, want it standing: a turn's end lowers no viewed marker")
 			}
 		})
 	}
@@ -1079,13 +1079,13 @@ func TestATurnsEndIsRecordedNamingItsContextCut(t *testing.T) {
 	t.Fatal("no daemon.sidebar.result_ended record naming the clear")
 }
 
-func TestTheBackgroundEndingLowersTheViewedMarker(t *testing.T) {
+func TestTheBackgroundEndingLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange: the user interacted with the idle_async row.
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 	if got := onlyRow(t, r).GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want the idle_async row viewed — the arrangement did not interact")
 	}
@@ -1098,8 +1098,8 @@ func TestTheBackgroundEndingLowersTheViewedMarker(t *testing.T) {
 	if got := statusName(row); got != "done" {
 		t.Fatalf("status = %q, want done", got)
 	}
-	if got := row.GetViewed(); got != nil {
-		t.Fatalf("viewed = %v, want unset: idle_async to done is a status change", got)
+	if got := row.GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want it standing: only another turn lowers the marker")
 	}
 }
 
@@ -1118,34 +1118,11 @@ func TestViewedReportDrawsADoneRowPartial(t *testing.T) {
 	r := finished(t, arrange(t))
 
 	// Act.
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Assert: presence is the mode.
 	if got := onlyRow(t, r).GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want the marker the editor's report raises on a done row")
-	}
-}
-
-func TestAnInteractionWhileThinkingDoesNotSurviveIntoDone(t *testing.T) {
-	// Arrange: an interaction on a thinking row, which views it.
-	r := live(t, arrange(t))
-	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-	r.OnActivity(theWS, agent("a1"), &conversationv1.AgentActivity{})
-	r.SetInteracted(theWS, epoch)
-	if got := onlyRow(t, r).GetViewed(); got == nil {
-		t.Fatal("viewed = unset, want the thinking row viewed — every arm takes an interaction")
-	}
-
-	// Act: the turn finishes.
-	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-
-	// Assert: the finished response is new; the user has not seen it yet.
-	row := onlyRow(t, r)
-	if got := statusName(row); got != "done" {
-		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
-	}
-	if got := row.GetViewed(); got != nil {
-		t.Fatalf("viewed = %v, want unset: an interaction while thinking is not one with the done row", got)
 	}
 }
 
@@ -1154,7 +1131,7 @@ func TestAnInteractionThatViewsTheRowIsRecordedAtInfo(t *testing.T) {
 	r := live(t, arrange(t))
 
 	// Act.
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Assert.
 	for _, rec := range r.surfaces.Records() {
@@ -1168,10 +1145,10 @@ func TestAnInteractionThatViewsTheRowIsRecordedAtInfo(t *testing.T) {
 func TestViewedReportIsIdempotent(t *testing.T) {
 	// Arrange.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Act: marking an already-viewed workspace changes nothing.
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Assert.
 	if got := onlyRow(t, r).GetViewed(); got == nil {
@@ -1182,7 +1159,7 @@ func TestViewedReportIsIdempotent(t *testing.T) {
 func TestAStatusChangeClearsTheViewedMarker(t *testing.T) {
 	// Arrange: a viewed, done row.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Act: new activity, from an origin the editor never told the roster about.
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1200,7 +1177,7 @@ func TestAStatusChangeClearsTheViewedMarker(t *testing.T) {
 func TestAViewedMarkerClearedByAStatusChangeStaysClearedBackOnDone(t *testing.T) {
 	// Arrange: a viewed, done row that took another turn.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Act: that turn finishes too.
@@ -1219,7 +1196,7 @@ func TestAViewedMarkerClearedByAStatusChangeStaysClearedBackOnDone(t *testing.T)
 func TestAPushThatRestatesTheSameStatusKeepsTheViewedMarker(t *testing.T) {
 	// Arrange.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Act: a re-push that leaves the arm exactly where it was.
 	r.SetSummary(theWS, "a summary line")
@@ -1237,7 +1214,7 @@ func TestAnotherWorkspacesStatusChangeLeavesThisMarkerStanding(t *testing.T) {
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Act: the OTHER workspace takes a turn.
 	r.SetTurn(ids.WorkspaceID("w2"), &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1308,7 +1285,7 @@ func TestRevivingMarkerLeavesTheStatusArmAlone(t *testing.T) {
 func TestRevivingMarkerLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Act.
 	r.SetReviving(theWS, true)
@@ -1336,23 +1313,41 @@ func TestRevivingMarkerIsPerRow(t *testing.T) {
 	}
 }
 
-func TestALinkBlipLowersTheViewedMarker(t *testing.T) {
+func TestALinkBlipLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange: a done row the user has interacted with.
 	r := finished(t, arrange(t))
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 	r.OnLink(theWS, shimclient.LinkRedialing)
 
 	// Act: the route comes back.
 	r.OnLink(theWS, shimclient.LinkConnected)
 
-	// Assert: done to severed and back are two status changes, so the row is
-	// FULL until the user interacts again.
+	// Assert: done to severed and back is no turn, so the row stays PARTIAL.
 	row := onlyRow(t, r)
 	if got := statusName(row); got != "done" {
 		t.Fatalf("status = %q, want done — the arrangement did not restore the link", got)
 	}
-	if got := row.GetViewed(); got != nil {
-		t.Fatalf("viewed = %v, want unset after the blip's status changes", got)
+	if got := row.GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want it standing after the blip: only another turn lowers it")
+	}
+}
+
+func TestAnInteractionDuringATurnStandsThroughThatTurnsEnd(t *testing.T) {
+	// Arrange: the user scrolls a running turn.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.AckTurn(theWS)
+	r.SetInteracted(theWS, afterExemption)
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want the running row viewed — the arrangement did not interact")
+	}
+
+	// Act: the turn ends.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert: only a turn's start lowers the marker.
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want it standing: a turn's end lowers no viewed marker")
 	}
 }
 
@@ -1443,7 +1438,7 @@ func TestAnInteractionDrawsEveryStatusPartial(t *testing.T) {
 			}
 
 			// Act.
-			r.SetInteracted(theWS, epoch)
+			r.SetInteracted(theWS, afterExemption)
 
 			// Assert: every arm takes the user's interaction.
 			row := onlyRow(t, r)
@@ -2306,62 +2301,6 @@ func TestContextHeatUnchangedPublishesNothing(t *testing.T) {
 	}
 }
 
-// ---- The DORMANT marker: the session runs no work ------------------------
-//
-// PRESENT exactly while the session is dormant (wsm.Session.Dormant), which
-// the editor reads to hold no page of a dormant workspace off screen.
-
-func TestDormantMarkerFollowsTheSession(t *testing.T) {
-	restored := epoch.Add(time.Minute)
-	before, after := epoch, epoch.Add(2*time.Minute)
-	cases := []struct {
-		name        string
-		session     wsm.Session
-		turnStarted *time.Time
-		want        bool
-	}{
-		{name: "a live session", session: wsm.Session{Workspace: theWS}, want: false},
-		{name: "a parked session", session: wsm.Session{Workspace: theWS, Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}, want: true},
-		{name: "a killed session", session: wsm.Session{Workspace: theWS, Terminal: &wsm.SessionTerminal{Kind: "killed", At: epoch}}, want: false},
-		{name: "a keep-alive's restore with no turn since", session: wsm.Session{Workspace: theWS, KeepaliveRestoredAt: &restored}, turnStarted: &before, want: true},
-		{name: "a keep-alive's restore a turn has started since", session: wsm.Session{Workspace: theWS, KeepaliveRestoredAt: &restored}, turnStarted: &after, want: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			r := arrange(t)
-			rec := workspace(string(theWS), "one")
-			rec.LastTurnStartedAt = tc.turnStarted
-
-			// Act.
-			r.SetRegistry(sidebar.Registry{
-				View:         wsm.DefaultSidebarView,
-				Workspaces:   []wsm.Workspace{rec},
-				Repositories: []wsm.Repository{repo},
-				Sessions:     []wsm.Session{tc.session},
-			})
-
-			// Assert: presence is the fact.
-			if got := onlyRow(t, r).GetDormant() != nil; got != tc.want {
-				t.Fatalf("dormant present = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestAWorkspaceWithNoSessionIsNotMarkedDormant(t *testing.T) {
-	// Arrange.
-	r := arrange(t)
-
-	// Act.
-	row := onlyRow(t, r)
-
-	// Assert.
-	if got := row.GetDormant(); got != nil {
-		t.Fatalf("dormant = %v, want none for a workspace with no session", got)
-	}
-}
-
 func TestARepeatedInteractionPublishesOnlyWhenItReordersTheRecency(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -2377,11 +2316,11 @@ func TestARepeatedInteractionPublishesOnlyWhenItReordersTheRecency(t *testing.T)
 			other := workspace("w2", "two")
 			other.InteractedAt = tc.otherAt
 			r := live(t, arrange(t, workspace(string(theWS), "one"), other))
-			r.SetInteracted(theWS, epoch)
+			r.SetInteracted(theWS, afterExemption)
 			before := r.Revision()
 
 			// Act
-			r.SetInteracted(theWS, epoch.Add(time.Second))
+			r.SetInteracted(theWS, afterExemption.Add(time.Second))
 
 			// Assert
 			if got := r.Revision() != before; got != tc.wantPublish {

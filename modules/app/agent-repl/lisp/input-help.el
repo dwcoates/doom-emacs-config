@@ -172,7 +172,7 @@
      :title "Managing workspaces"
      :bindings ((agent-repl-finish-workspace "Finish this workspace: deploy its work, and close it once deployed.")
                 (agent-repl-hide-workspace "Hide this workspace from the tab bar.")
-                (agent-repl-show-hidden-workspace "Show a hidden workspace again and switch to it.")
+                (agent-repl-show-backlogged-workspace "Show a backlogged workspace again and switch to it.")
                 (agent-repl-workspace-move "Move this workspace onto the tab at a digit (0 is 10).")
                 (agent-repl-set-priority "Set or clear this workspace's priority.")
                 (agent-repl-bind-conversation "Point this workspace at another of its conversations.")
@@ -282,7 +282,7 @@
                 (agent-repl-daemon-shutdown-schedule "Schedule the daemon to drain and exit.")
                 (agent-repl-daemon-shutdown-cancel "Cancel a scheduled drain.")
                 (agent-repl-daemon-shutdown-now "Stop the daemon now.")
-                (agent-repl-send-hidden-keepalives "Send a keep-alive to every hidden workspace.")
+                (agent-repl-send-backlogged-keepalives "Send a keep-alive to every backlogged workspace.")
                 (agent-repl-persistent-wifi-mode-toggle "Turn persistent wifi mode, for lid-closed operation, on or off.")
                 (agent-repl-remote-control-toggle "Turn this workspace's remote control, its session reachable from claude.ai, on or off.")))
     (:id config

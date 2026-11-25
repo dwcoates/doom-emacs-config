@@ -11,12 +11,13 @@
  */
 import { create } from "@bufbuild/protobuf";
 import {
-  RosterHiddenRowSchema,
+  RosterBacklogRowSchema,
   RosterOpenRowRepositoryBlockSchema,
   RosterOpenRowSchema,
+  RosterOpenRowFoldCoverSchema,
   RosterOpenRowTabSchema,
   RosterRepoEntrySchema,
-  type RosterHiddenRow,
+  type RosterBacklogRow,
   type RosterOpenRow,
   type RosterRepoEntry,
   type RosterRepoSection,
@@ -26,7 +27,7 @@ import {
 /** Each row's children, as its builder was told them. */
 const familyOf = new WeakMap<RosterRow, readonly RosterRow[]>();
 
-/** Record CHILDREN as ROW's family, for `openRow` and `hiddenRow` to nest. Answers ROW. */
+/** Record CHILDREN as ROW's family, for `openRow` and `backlogRow` to nest. Answers ROW. */
 export function withFamily(row: RosterRow, children: readonly RosterRow[]): RosterRow {
   familyOf.set(row, children);
   return row;
@@ -34,14 +35,22 @@ export function withFamily(row: RosterRow, children: readonly RosterRow[]): Rost
 
 /**
  * ROW as an open row, its family nested as open rows. Its tab is FOLDED until
- * `numberTabs` numbers it, as the daemon does, in the Open section's walk.
+ * `numberTabs` numbers it, as the daemon does, in the Open section's walk. No
+ * fold covers it (frontend.v1.RosterOpenRow.fold_cover) until a test says so.
  */
 export function openRow(row: RosterRow): RosterOpenRow {
   return create(RosterOpenRowSchema, {
     row,
     tab: { tab: { case: "folded", value: {} } },
+    foldCover: { cover: { case: "uncovered", value: {} } },
     children: (familyOf.get(row) ?? []).map(openRow),
   });
+}
+
+/** OPEN with its fold cover set to ARM (frontend.v1.RosterOpenRow.fold_cover). Answers OPEN. */
+export function withCover(open: RosterOpenRow, arm: "uncovered" | "hidden" | "surfaced"): RosterOpenRow {
+  open.foldCover = create(RosterOpenRowFoldCoverSchema, { cover: { case: arm, value: {} } });
+  return open;
 }
 
 /** One repository block a test open row carries: its repository's id, its divider's name, its rows. */
@@ -69,9 +78,9 @@ export function withRepositoryBlocks(open: RosterOpenRow, blocks: readonly TestR
   return open;
 }
 
-/** ROW as a hidden row, its family nested as hidden rows. */
-export function hiddenRow(row: RosterRow): RosterHiddenRow {
-  return create(RosterHiddenRowSchema, { row, children: (familyOf.get(row) ?? []).map(hiddenRow) });
+/** ROW as a backlogged row, its family nested as backlogged rows. */
+export function backlogRow(row: RosterRow): RosterBacklogRow {
+  return create(RosterBacklogRowSchema, { row, children: (familyOf.get(row) ?? []).map(backlogRow) });
 }
 
 /** ROWS as a repository section's row entries, one each, in order (frontend.v1.RosterRepoEntry). */

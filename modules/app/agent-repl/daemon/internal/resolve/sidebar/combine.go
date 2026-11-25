@@ -97,6 +97,7 @@ type batchOutcome struct {
 	viewed        []viewedChange
 	statusChanges []statusChange
 	visibilities  map[ids.WorkspaceID]wsm.Visibility
+	shimHolds     []ids.WorkspaceID
 }
 
 // commit queues M and, on the committing view, returns once a roster carrying

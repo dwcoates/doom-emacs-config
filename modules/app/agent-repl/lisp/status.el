@@ -1357,7 +1357,7 @@ of the dot (`agent-repl-status-merge-glyphs\='), every other arm the dot,
 each inked by `agent-repl-status-roster-mark-color\=' and grey (the
 `shadow\=' face) where that answers nil.  GLYPH, when given, is the
 character drawn instead, inked the same way: a reader that marks a
-row\='s place rather than its kind (the switcher\='s hidden workspaces)
+row\='s place rather than its kind (the switcher\='s backlogged workspaces)
 keeps the status color the sidebar shows."
   (let ((char (or glyph
                   (agent-repl-status--glyph-char

@@ -38,14 +38,6 @@ const (
 	// window with an eight-minute margin against a slow turn. Deps.Interval
 	// carries it, or a test run's compressed cadence (IntervalFromEnv).
 	KeepaliveInterval = 52 * time.Minute
-	// StandDownGrace is how long a session must have been idle before it is
-	// parked: the user prompts with no shim start for twenty minutes after
-	// the work ends (owner ruling, 2026-11-23, which shortens the one
-	// interval of 2026-10-26). The idle park (ownIdle) and the cold park
-	// (ownCold) take it once it runs out, and a beat keeps up a session that
-	// fell free less than it ago. It is NOT the beat cadence (Deps.Interval),
-	// so a test run's compressed cadence never cycles its sessions down.
-	StandDownGrace = 20 * time.Minute
 	// RestoreLead is how long before its beat a parked session is restored.
 	// A shim that takes longer than this to start is a defect of its own
 	// (owner ruling, 2026-10-26).
@@ -85,10 +77,10 @@ func (k *Keeper) schedule(ctx context.Context, ws ids.WorkspaceID, why string) {
 	log.Debug(opDrive, "armed the workspace's next keep-alive", dlog.Context{"due": due, "parked": parked})
 }
 
-// withinGraceRule is why a beat sent within StandDownGrace of the
-// workspace's last real work leaves its shim up: the beat's record and a
+// withinGraceRule is why a beat sent while the workspace's resource
+// allocation holds its shim up leaves the shim up: the beat's record and a
 // keep-live run's answer both state it.
-const withinGraceRule = "the workspace did real work less than its grace ago; the shim stays up until the next keep-alive"
+const withinGraceRule = "the workspace's resource allocation holds its shim up; the shim stays up until its hold ends"
 
 // beatPlan is when a workspace's next beat is due, and what it beats.
 type beatPlan struct {
@@ -102,6 +94,9 @@ type beatPlan struct {
 	// parked reports that the workspace's parked conversation owes beats,
 	// and none of its keep-alives is out (parked.go).
 	parked bool
+	// bringUp is what the session's own bring-up holds (wsm.Session
+	// .BringUpHold), as the plan was made.
+	bringUp wsm.ShimHold
 	// idleSince is when the workspace last did real work, as the record the
 	// plan was read from says (wsm.Workspace.IdleSince).
 	idleSince time.Time
@@ -180,9 +175,6 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace has a merge queued", logsite.Msg("could not read whether the workspace has a merge queued; its keep-alive is not armed"), nil, err)
 		return beatPlan{}, false
 	}
-	if record.KeepaliveHeld() && !queued {
-		return none(noBeatCold, "it is hidden and nobody is looking at it; its cache lapses on its own clock")
-	}
 	if _, gated := k.deps.ColdGate(ws); gated {
 		return none(noBeatCold, "its session stands at the cold gate")
 	}
@@ -191,7 +183,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 	// A COLLAPSED SECTION WITHHOLDS NO KEEP-ALIVE (wsm.Workspace.KeptWarm).
 	if !record.KeptWarm(queued) {
-		return none(noBeatCold, "it is hidden, so it runs no session")
+		return none(noBeatCold, "it is backlogged, so it runs no session")
 	}
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
@@ -204,10 +196,22 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if session.Terminal != nil && !session.Parked() {
 		return none(noBeatNoSession, "its session is not live: "+session.Terminal.Kind)
 	}
-	// A CLOSED WORKSPACE OWES EACH CONVERSATION ONE LAST BEAT: none once that
-	// conversation's clock has passed the close.
+	// A CLOSED OR BACKLOGGED WORKSPACE OWES EACH CONVERSATION ONE LAST BEAT
+	// (owner rulings, 2026-10-17 and 2026-11-24): none once that
+	// conversation's clock has passed the close, or the backlog while nobody
+	// is looking at it (wsm.Workspace.KeepaliveHeld). Its cache then lapses on
+	// its own clock.
 	spent := func(clock time.Time) bool {
-		return record.Closed && !queued && (record.Closure == nil || !clock.Before(record.Closure.At))
+		switch {
+		case queued:
+			return false
+		case record.Closed:
+			return record.Closure == nil || !clock.Before(record.Closure.At)
+		case record.KeepaliveHeld():
+			return record.BackloggedAt == nil || !clock.Before(*record.BackloggedAt)
+		default:
+			return false
+		}
 	}
 	plan := beatPlan{sessionParked: session.Parked()}
 	// THE BOUND CONVERSATION, timed from THE CACHE CLOCK, NOT THE TURNS': a
@@ -242,6 +246,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		plan.due = k.deps.Clock.Now()
 	}
 	plan.idleSince = record.IdleSince()
+	plan.bringUp = session.BringUpHold(record.LastTurnEndedAt, k.deps.Clock.Now())
 	if k.deps.IdleCutoff > 0 && bringup.IdleHorizon(k.deps.IdleCutoff, plan.idleSince, queuedAt, queued).Before(plan.due) {
 		return none(noBeatSweep, "it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
@@ -437,14 +442,13 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			log.Error(opDrive, "could not record the keep-alive that was sent; this daemon times the next beat from it, a successor from the turn before it",
 				dlog.WithCause(fields, err))
 		}
-		// THE GRACE RUNS FROM THE WORK, NOT ONLY FROM THE TURN (owner rulings,
-		// 2026-10-26 and 2026-11-23): the user prompts with no shim start for
-		// StandDownGrace after the workspace last did real work. A beat that
-		// comes sooner, because detached work ended after the turn, goes out
-		// and leaves the shim up; the next one stands it down. The keep-alive's
-		// own turn is no work, so it never extends the grace.
+		// THE RESOURCE ALLOCATION DECIDES WHETHER THE SHIM STAYS UP (owner
+		// rulings, 2026-11-24; Deps.Hold): a beat that goes out while the
+		// workspace's hold stands leaves the shim up; the next edge after the
+		// hold ends stands it down. The keep-alive's own turn is no work, so it
+		// never extends the hold.
 		idleSince := plan.idleSince
-		withinGrace := now.Sub(idleSince) < StandDownGrace
+		withinGrace := plan.bringUp.Later(k.deps.Hold(ws)).HoldsAt(now)
 		// A KEEP-LIVE RUN AWAITS THE ANSWER EITHER WAY, and a session it
 		// started is stood down after it whatever its grace.
 		running, standDown := k.keepLiveSent(ws, withinGrace)

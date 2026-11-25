@@ -2,7 +2,7 @@ import { create } from "@bufbuild/protobuf";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { RosterOpenRowsSchema, RosterRepoSectionSchema, RosterRowSchema, type RosterRow } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { hiddenRow, numberTabs, openRow, rowEntries, sectionTabRegions, withFamily } from "./roster-families.js";
+import { backlogRow, numberTabs, openRow, rowEntries, sectionTabRegions, withFamily } from "./roster-families.js";
 
 function row(id: string, children: RosterRow[] = []): RosterRow {
   return withFamily(create(RosterRowSchema, { workspace: { workspace: { id, dir: `/w/${id}` } } }), children);
@@ -34,9 +34,9 @@ describe("openRow", () => {
   });
 });
 
-describe("hiddenRow", () => {
+describe("backlogRow", () => {
   it("nests the family recorded by withFamily, each child a hidden row", () => {
-    expect(hiddenRow(row("p", [row("c")])).children[0]?.row?.workspace?.workspace?.id).toBe("c");
+    expect(backlogRow(row("p", [row("c")])).children[0]?.row?.workspace?.workspace?.id).toBe("c");
   });
 });
 

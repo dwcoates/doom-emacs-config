@@ -61,7 +61,7 @@ func (r *resolver) rowRepository(rec wsm.Workspace, log dlog.Logger) *frontendv1
 }
 
 // row composes one workspace's row, as every list draws it. Its family is
-// its list's own row type's (openRow, hiddenRow).
+// its list's own row type's (openRow, backlogRow).
 // row composes REC's row.
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
 	// A ROW WHOSE INPUTS DID NOT MOVE IS KEPT (kept.go): its facts were
@@ -98,7 +98,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		if !s.lastArmSeen {
 			armName = statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
 		}
-		wasViewed = s.viewedOn(armName)
+		wasViewed = s.viewed()
 	} else {
 		// THE ARM WAS DECIDED BEFORE ANY ROW (resolveArms), so the visibility
 		// the rows are numbered by read the same arm this row draws.
@@ -114,28 +114,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		// THE MARKER IS DERIVED FROM THE VIEWED FACT, in the same breath as
 		// the status, so the row's display mode cannot lag its status by a
 		// push (`wsState.viewedOn`).
-		wasViewed = s.lastArmSeen && s.viewedOn(s.lastArm)
+		wasViewed = s.viewed()
 		var previousArm string
 		previousArm, armChanged = s.noteArm(armName)
-		// EVERY STATUS CHANGE LOWERS THE VIEWED MARKER, on any arm: the user
-		// has not interacted with what the row now shows. A fact the durable
-		// record seeded is the one exception until the row first draws its
-		// arm (wsState.viewedRestored): the bring-up's arms before it are no
-		// change the user missed.
-		if s.viewedRestored && armName == s.viewedArm {
-			s.viewedRestored = false
-			rowLog.Info("daemon.sidebar.viewed_restored",
-				"the row drew the status the user last interacted on before this daemon, so it is viewed as it stood", dlog.Context{
-					"status": armName,
-				})
-		} else if s.viewedArm != "" && !s.viewedRestored && armChanged {
-			rowLog.Debug("daemon.sidebar.row_viewed_cleared",
-				"the row's status changed, so it is no longer viewed and is drawn FULL", dlog.Context{
-					"status": armName, "viewed_on": s.viewedArm,
-				})
-			s.viewedArm = ""
-			s.viewedSettled = true
-		}
 		r.noteViewed(rec.ID, s, !mirrored, rowLog)
 		if armChanged {
 			r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
@@ -156,7 +137,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if !r.readOnly {
 		r.stats.rowsBuilt++
 	}
-	viewed := s.viewedOn(armName)
+	viewed := s.viewed()
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
 	detachedLive := s.asyncLive()
@@ -214,12 +195,8 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if s.reviving {
 		out.Reviving = &frontendv1.RosterRowReviving{}
 	}
-	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowDormant` states it: set
-	// while the session runs no work, so the editor holds no page of a
-	// dormant workspace off screen.
-	if session != nil && session.Dormant(rec.LastTurnStartedAt, runningTurnStart(clock) != nil) {
-		out.Dormant = &frontendv1.RosterRowDormant{}
-	}
+	// THE PAGE VERDICT, derived before any row (resolvePages, page.go).
+	out.Page = pageOf(r.state.page[rec.ID])
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowDetachedLive` states it:
 	// set exactly while detached work counts as live (asyncLive), on any arm.
 	// Every arm above the idle rung (thinking, a permission ask) can stand
@@ -408,7 +385,7 @@ func lastTurnStarted(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontend
 
 // lastUpdated resolves the row's update recency
 // (frontend.v1.RosterRowLastUpdated): the LATEST of the record's creation, its
-// latest turn start or close, its close record, its hidden instant, its merge
+// latest turn start or close, its close record, its backlogged instant, its merge
 // landing, its requester's landing, and its status change -- the durable one
 // and LIVE, the one this daemon stamped (wsState.statusChangedAt), whichever
 // is later. The selection instant is deliberately not among them: viewing a
@@ -422,7 +399,7 @@ func lastUpdated(rec wsm.Workspace, live *time.Time) *frontendv1.RosterRowLastUp
 		landedAt = &rec.Landed.At
 	}
 	latest := rec.CreatedAt
-	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.HiddenAt, rec.MergedAt, landedAt, rec.StatusChangedAt, live} {
+	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.BackloggedAt, rec.MergedAt, landedAt, rec.StatusChangedAt, live} {
 		if at != nil && at.After(latest) {
 			latest = *at
 		}
@@ -485,7 +462,7 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 // when resolves the when-column's ONE value.
 //
 // Precedence: MERGED WINS (that the workspace is done is the more interesting
-// fact), else HIDDEN (a hidden row counts from its hide, owner request
+// fact), else BACKLOGGED (a backlogged row counts from its hide, owner request
 // 2026-10-13), else a SYNC MERGE the workspace's footer strip draws (owner
 // request, 2026-10-14), counted from when it joined the queue, else the TURN
 // CLOCK the strip shows (owner request, 2026-10-13): a running turn counts
@@ -508,14 +485,14 @@ func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterCloc
 	case rec.MergedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
-	case rec.HiddenAt != nil:
-		hidden := &frontendv1.RosterRowWhenHidden{AtMs: rec.HiddenAt.UnixMilli()}
+	case rec.BackloggedAt != nil:
+		backlogged := &frontendv1.RosterRowWhenBacklogged{AtMs: rec.BackloggedAt.UnixMilli()}
 		// THE COLUMN COUNTS DOWN TO THE LAPSE once the daemon knows it
 		// (cachelapse.Keeper), and up from the hide until then.
 		if rec.CacheLapse != nil {
-			hidden.Cache = &frontendv1.RosterRowWhenHiddenCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
+			backlogged.Cache = &frontendv1.RosterRowWhenBackloggedCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
 		}
-		out.Shown = &frontendv1.RosterRowWhen_Hidden{Hidden: hidden}
+		out.Shown = &frontendv1.RosterRowWhen_Backlogged{Backlogged: backlogged}
 	case mergeStartedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_SyncMerging{
 			SyncMerging: &frontendv1.RosterRowWhenSyncMerging{StartedAtMs: *mergeStartedAt}}

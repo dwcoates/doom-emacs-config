@@ -30,7 +30,7 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
   NOW,
   appContext,
-  hiddenSection,
+  backlogSection,
   mergeQueueBand,
   mergedSection,
   mergingHead,
@@ -339,7 +339,7 @@ describe("installFocusFold", () => {
       drawWorkspaceRoster(
         roster({
           merged: mergedSection([merged], init.mergedCollapsed ?? false),
-          hidden: hiddenSection([row({ id: "ws-h" })]),
+          backlog: backlogSection([row({ id: "ws-h" })]),
           mergeQueue: mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })]),
         }),
         sc,
@@ -356,7 +356,7 @@ describe("installFocusFold", () => {
       request.change.case === "foldSection" ? [request.change.value.section.case, request.change.value.fold.case] : request.change.case,
     );
 
-  it("collapses an open Recently Merged and Hidden as the focus leaves, and no other section", async () => {
+  it("collapses an open Recently Merged and the Backlog as the focus leaves, and no other section", async () => {
     // Arrange
     const { asked, sc, host, focus } = rail();
     installFocusFold(host, sc, focus);
@@ -366,7 +366,7 @@ describe("installFocusFold", () => {
     // Assert
     expect(folds(asked)).toEqual([
       ["recentlyMerged", "collapse"],
-      ["hidden", "collapse"],
+      ["backlog", "collapse"],
     ]);
   });
 
@@ -374,7 +374,7 @@ describe("installFocusFold", () => {
     const { sc, host, focus } = rail();
     installFocusFold(host, sc, focus);
     focus.left("the page lost focus");
-    expect([".merged-section", ".hidden-section"].map((sel) => host.querySelector(sel)?.classList.contains("folded"))).toEqual([true, true]);
+    expect([".merged-section", ".backlog-section"].map((sel) => host.querySelector(sel)?.classList.contains("folded"))).toEqual([true, true]);
   });
 
   it("asks nothing of a section folded already", async () => {
@@ -382,7 +382,7 @@ describe("installFocusFold", () => {
     installFocusFold(host, sc, focus);
     focus.left("the page lost focus");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(folds(asked)).toEqual([["hidden", "collapse"]]);
+    expect(folds(asked)).toEqual([["backlog", "collapse"]]);
   });
 
   it("hears nothing once uninstalled", async () => {
@@ -415,10 +415,10 @@ describe("installFocusFold", () => {
     expect([record.context, asked]).toMatchObject([{ section: "merged", why: "the page lost focus" }, []]);
   });
 
-  it("folds exactly the Recently Merged and Hidden sections", () => {
+  it("folds exactly the Recently Merged and the Backlog sections", () => {
     expect(FOCUS_FOLDED_SECTIONS.map((shape) => [shape.className, shape.foldKey, shape.target?.case])).toEqual([
       ["merged-section", "merged", "recentlyMerged"],
-      ["hidden-section", "hidden", "hidden"],
+      ["backlog-section", "backlog", "backlog"],
     ]);
   });
 });

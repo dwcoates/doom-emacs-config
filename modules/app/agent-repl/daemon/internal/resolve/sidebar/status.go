@@ -33,11 +33,11 @@ import (
 // marker, so a daemon that restarted under open tabs draws them as they are.
 // It dominates every session state, and no footer is ever drawn for it.
 //
-// A SECOND ARM SITS ABOVE IT FOR THE SAME REASON: `cold_gate`, for a HIDDEN
+// A SECOND ARM SITS ABOVE IT FOR THE SAME REASON: `cold_gate`, for a BACKLOGGED
 // workspace whose cache has lapsed with a gated verdict (cachelapse.Keeper,
 // 2026-10-13). Its session was stood down at the lapse, and showing it again
 // will raise this gate, so its name is struck through the moment the lapse
-// comes. No footer is drawn for a hidden workspace, and the gate it projects
+// comes. No footer is drawn for a backlogged workspace, and the gate it projects
 // is raised by the start that shows it again, which then makes the claim the
 // footer draws.
 //
@@ -77,8 +77,8 @@ func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fro
 	if rec.Closed && (!s.live(session) || parked(session)) {
 		return "inactive"
 	}
-	if hiddenColdGate(rec, now) {
-		log.Debug("daemon.sidebar.status_decision", "the hidden workspace's cache lapsed with a gated verdict", dlog.Context{
+	if backloggedColdGate(rec, now) {
+		log.Debug("daemon.sidebar.status_decision", "the backlogged workspace's cache lapsed with a gated verdict", dlog.Context{
 			"lapses_at": rec.CacheLapse.LapsesAt, "gated_tokens": *rec.CacheLapse.GatedTokens,
 		})
 		return "cold_gate"
@@ -114,18 +114,18 @@ func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fro
 	return arm
 }
 
-// hiddenColdGate reports whether a hidden workspace's cache has lapsed with a
+// backloggedColdGate reports whether a backlogged workspace's cache has lapsed with a
 // gated verdict at NOW.
-func hiddenColdGate(rec wsm.Workspace, now time.Time) bool {
+func backloggedColdGate(rec wsm.Workspace, now time.Time) bool {
 	return armReadsClock(rec) && rec.CacheLapse.Lapsed(now)
 }
 
-// armReadsClock reports whether REC's arm depends on the clock: a hidden
+// armReadsClock reports whether REC's arm depends on the clock: a backlogged
 // workspace whose cache lapses with a gated verdict turns `cold_gate` at its
 // lapse whatever else changes, so no render keeps its arm (kept.go).
 func armReadsClock(rec wsm.Workspace) bool {
 	lapse := rec.CacheLapse
-	return rec.InHiddenSection() && lapse != nil && lapse.GatedTokens != nil
+	return rec.InBacklog() && lapse != nil && lapse.GatedTokens != nil
 }
 
 // projectArm names the roster arm that draws the footer's status on every rung
@@ -319,7 +319,7 @@ func asyncMergingMarker(asyncMerging bool, arm string, log dlog.Logger) *fronten
 // the marker is the one extra fact the surfaces draw, inking the name in the
 // turn end's color while the dot or `[N]` keeps the background's yellow.
 func idleAsyncUnreadMarker(s *wsState, arm string, log dlog.Logger) *frontendv1.RosterRowIdleAsyncUnread {
-	if arm != "idle_async" || !s.resultEndedNow() || s.viewedOn(arm) {
+	if arm != "idle_async" || !s.resultEndedNow() || s.viewed() {
 		return nil
 	}
 	end := s.turnEndArm()

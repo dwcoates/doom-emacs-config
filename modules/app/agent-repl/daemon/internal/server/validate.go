@@ -638,8 +638,8 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if req.SlackOrigin != nil {
 			return invalid("slack_origin", "an async merge's workspace is the queue's, and no Slack message started it")
 		}
-		if req.Hidden != nil {
-			return invalid("hidden", "an async merge's workspace is hidden by the queue already")
+		if req.Backlogged != nil {
+			return invalid("backlogged", "an async merge's workspace is hidden by the queue already")
 		}
 	}
 	if req.Placement != nil {
@@ -1006,9 +1006,9 @@ func validateReportPageStateRequest(req *agentreplv1.ReportPageStateRequest) *co
 	return nil
 }
 
-// validateSetWorkspaceHiddenRequest is SetWorkspaceHiddenRequest's base
+// validateSetWorkspaceBackloggedRequest is SetWorkspaceBackloggedRequest's base
 // function: a workspace and the place asked for are both required.
-func validateSetWorkspaceHiddenRequest(req *agentreplv1.SetWorkspaceHiddenRequest) *connect.Error {
+func validateSetWorkspaceBackloggedRequest(req *agentreplv1.SetWorkspaceBackloggedRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}

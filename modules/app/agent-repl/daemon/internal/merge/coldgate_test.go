@@ -370,13 +370,13 @@ func TestHidingAWorkspaceAtItsColdGateTakesItsMergeOffTheQueue(t *testing.T) {
 	head := headRowID(t, h, theWorkspace)
 
 	// Act
-	h.o.OnHidden(theWorkspace)
+	h.o.OnBacklogged(theWorkspace)
 
 	// Assert
 	if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{"ws-2"}) {
-		t.Fatalf("queue = %v, want the hidden workspace's merge gone", got)
+		t.Fatalf("queue = %v, want the backlogged workspace's merge gone", got)
 	}
-	if got, want := h.feed.lastAbandonedSummary(), abandonSummaries[CauseHiddenAtColdGate]; got != want {
+	if got, want := h.feed.lastAbandonedSummary(), abandonSummaries[CauseBackloggedAtColdGate]; got != want {
 		t.Fatalf("the bubble ended %q, want %q", got, want)
 	}
 	if folds := h.feed.foldsOf(theWorkspace); len(folds) != 1 || folds[0].row != head || !folds[0].folded {
@@ -389,7 +389,7 @@ func TestHidingAWorkspaceWhoseMergeIsNotAtItsColdGateLeavesItQueued(t *testing.T
 	h := twoInLine(t)
 
 	// Act
-	h.o.OnHidden(theWorkspace)
+	h.o.OnBacklogged(theWorkspace)
 
 	// Assert
 	if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace, "ws-2"}) {
@@ -508,7 +508,7 @@ func TestColdGateCausesRequeueOrRelease(t *testing.T) {
 		releases bool
 	}{
 		{"a cold gate puts the merge back", CauseColdGate, true, false},
-		{"hiding at the gate releases the merge", CauseHiddenAtColdGate, false, true},
+		{"hiding at the gate releases the merge", CauseBackloggedAtColdGate, false, true},
 		{"an eviction releases the merge", CauseUserDrop, false, true},
 		{"a closed workspace gives the merge up", CauseWorkspaceClosed, false, false},
 	}

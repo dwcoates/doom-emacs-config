@@ -457,6 +457,17 @@ func (c *controller) parkOnce(ctx context.Context, log dlog.Logger, ws ids.Works
 				dlog.WithCause(fields, err))
 			return parkDeferred
 		}
+		// NOR IS A STAND-DOWN THIS DAEMON ORDERED UNDER THE DIRECTIVE. A
+		// teardown that does not wait on this lease (a landed merge closing
+		// its workspace and removing its worktree) ended the shim while the
+		// directive was in flight, so the session is gone for a reason this
+		// daemon chose (shimclient.ErrStandDownOrdered), and the park is
+		// deferred to find it gone.
+		if errors.Is(err, shimclient.ErrStandDownOrdered) {
+			log.Info(why.op, "this daemon stood the session down under the hibernate directive; deferring the park",
+				dlog.WithCause(fields, err))
+			return parkDeferred
+		}
 		log.Error(why.op, "the hibernate directive failed; deferring the park",
 			dlog.WithCause(fields, err))
 		return parkFailed

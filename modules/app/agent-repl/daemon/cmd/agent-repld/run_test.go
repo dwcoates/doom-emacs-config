@@ -2080,12 +2080,12 @@ func TestABootExpectsEveryOpenWorkspacesStreamsBack(t *testing.T) {
 	var rec restarttimingtest.Recorder
 	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return started.Add(2 * time.Second) })
 	db := fakeWorkspaceList{workspaces: []wsm.Workspace{
-		{ID: "open"}, {ID: "hidden", Hidden: true}, {ID: "closed", Closed: true},
+		{ID: "open"}, {ID: "backlogged", Backlogged: true}, {ID: "closed", Closed: true},
 	}}
 
 	// Act
 	err := expectBootReconnects(context.Background(), db, r, started)
-	for _, ws := range []ids.WorkspaceID{"open", "hidden", "closed"} {
+	for _, ws := range []ids.WorkspaceID{"open", "backlogged", "closed"} {
 		r.Connected(ws, restarttiming.ReconnectHost)
 		r.Connected(ws, restarttiming.ReconnectWeb)
 	}

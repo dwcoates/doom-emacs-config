@@ -215,19 +215,19 @@ type fakeDB struct {
 	view                   *wsm.SidebarView
 	setMergedFoldedErr     error
 	setMergeQueueFoldedErr error
-	setHiddenFoldedErr     error
+	setBacklogFoldedErr    error
 	setOpenFoldedErr       error
 	// setSectionHeightsErr fails the band section heights write.
 	setSectionHeightsErr error
 	viewErr              error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
-	// setHiddenErr fails the hidden-flag write.
-	setHiddenErr error
-	// familyHiddenErr fails HideFamily and ShowFamily.
-	familyHiddenErr error
-	// hiddenWith is which family hide hid each workspace (HideFamily).
-	hiddenWith map[ids.WorkspaceID]ids.WorkspaceID
+	// setBackloggedErr fails the backlogged-flag write.
+	setBackloggedErr error
+	// familyBackloggedErr fails HideFamily and ShowFamily.
+	familyBackloggedErr error
+	// backloggedWith is which family hide hid each workspace (HideFamily).
+	backloggedWith map[ids.WorkspaceID]ids.WorkspaceID
 	// backlogErr fails the cold-gate backlog write; backlogs records the
 	// gate each backlog was asked for.
 	backlogErr error
@@ -784,7 +784,7 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	if facts.Closure != nil {
 		ws.Closed, ws.Closure = true, facts.Closure
 	}
-	// BORN HIDDEN, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR,
+	// BORN BACKLOGGED, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR,
 	// as the store's insert does.
 	if facts.Originator != "" {
 		if d.originators == nil {
@@ -793,9 +793,9 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 		d.originators[id] = facts.Originator
 		ws.EmojiAck = facts.Originator == wsm.OriginatorEmojiAck
 	}
-	if facts.Hidden || facts.Intake {
+	if facts.Backlogged || facts.Intake {
 		at := time.Unix(1, 0)
-		ws.Hidden, ws.HiddenAt = true, &at
+		ws.Backlogged, ws.BackloggedAt = true, &at
 	}
 	if facts.Intake {
 		d.intakes[id] = true
@@ -1359,21 +1359,21 @@ func (d *fakeDB) RestoreParent(_ context.Context, change wsm.ParentChange) (bool
 	return d.restoreStale, d.restoreErr
 }
 
-// SetHidden records the hidden flag and its instant on the workspace's
+// SetBacklogged records the backlogged flag and its instant on the workspace's
 // record, as WSM does, so the republished registry carries them.
-func (d *fakeDB) SetHidden(_ context.Context, id ids.WorkspaceID, hidden bool, at time.Time) error {
-	if d.setHiddenErr != nil {
-		return d.setHiddenErr
+func (d *fakeDB) SetBacklogged(_ context.Context, id ids.WorkspaceID, backlogged bool, at time.Time) error {
+	if d.setBackloggedErr != nil {
+		return d.setBackloggedErr
 	}
 	ws, ok := d.workspaces[id]
 	if !ok {
 		return wsm.ErrNotFound
 	}
-	ws.Hidden = hidden
-	ws.HiddenAt = nil
-	if hidden {
+	ws.Backlogged = backlogged
+	ws.BackloggedAt = nil
+	if backlogged {
 		stamped := at
-		ws.HiddenAt = &stamped
+		ws.BackloggedAt = &stamped
 	}
 	d.workspaces[id] = ws
 	return nil
@@ -1382,54 +1382,54 @@ func (d *fakeDB) SetHidden(_ context.Context, id ids.WorkspaceID, hidden bool, a
 // HideFamily hides ROOT with its open descendants that are shown, as the
 // store does (wsm familyhide.go), marking each.
 func (d *fakeDB) HideFamily(_ context.Context, root ids.WorkspaceID, at time.Time) ([]ids.WorkspaceID, error) {
-	if d.familyHiddenErr != nil {
-		return nil, d.familyHiddenErr
+	if d.familyBackloggedErr != nil {
+		return nil, d.familyBackloggedErr
 	}
 	if _, ok := d.workspaces[root]; !ok {
 		return nil, wsm.ErrNotFound
 	}
-	if d.hiddenWith == nil {
-		d.hiddenWith = map[ids.WorkspaceID]ids.WorkspaceID{}
+	if d.backloggedWith == nil {
+		d.backloggedWith = map[ids.WorkspaceID]ids.WorkspaceID{}
 	}
 	var members []ids.WorkspaceID
 	for _, id := range slices.Sorted(maps.Keys(d.workspaces)) {
 		ws := d.workspaces[id]
-		if id == root || ws.Closed || ws.Hidden || !d.descends(id, root) {
+		if id == root || ws.Closed || ws.Backlogged || !d.descends(id, root) {
 			continue
 		}
 		stamped := at
-		ws.Hidden, ws.HiddenAt = true, &stamped
+		ws.Backlogged, ws.BackloggedAt = true, &stamped
 		d.workspaces[id] = ws
-		d.hiddenWith[id] = root
+		d.backloggedWith[id] = root
 		members = append(members, id)
 	}
 	ws := d.workspaces[root]
 	stamped := at
-	ws.Hidden, ws.HiddenAt = true, &stamped
+	ws.Backlogged, ws.BackloggedAt = true, &stamped
 	d.workspaces[root] = ws
 	return members, nil
 }
 
 // ShowFamily shows ROOT and what HideFamily hid with it.
 func (d *fakeDB) ShowFamily(_ context.Context, root ids.WorkspaceID) ([]ids.WorkspaceID, error) {
-	if d.familyHiddenErr != nil {
-		return nil, d.familyHiddenErr
+	if d.familyBackloggedErr != nil {
+		return nil, d.familyBackloggedErr
 	}
 	ws, ok := d.workspaces[root]
 	if !ok {
 		return nil, wsm.ErrNotFound
 	}
-	ws.Hidden, ws.HiddenAt = false, nil
+	ws.Backlogged, ws.BackloggedAt = false, nil
 	d.workspaces[root] = ws
 	var members []ids.WorkspaceID
 	for _, id := range slices.Sorted(maps.Keys(d.workspaces)) {
-		if d.hiddenWith[id] != root || d.workspaces[id].Closed {
+		if d.backloggedWith[id] != root || d.workspaces[id].Closed {
 			continue
 		}
 		member := d.workspaces[id]
-		member.Hidden, member.HiddenAt = false, nil
+		member.Backlogged, member.BackloggedAt = false, nil
 		d.workspaces[id] = member
-		delete(d.hiddenWith, id)
+		delete(d.backloggedWith, id)
 		members = append(members, id)
 	}
 	return members, nil
@@ -1464,7 +1464,7 @@ func (d *fakeDB) BacklogColdGate(_ context.Context, id ids.WorkspaceID, gateLaps
 		return false, nil
 	}
 	stamped, gate := at, gateLapsedAt
-	ws.Hidden, ws.HiddenAt, ws.BackloggedGateAt = true, &stamped, &gate
+	ws.Backlogged, ws.BackloggedAt, ws.BackloggedGateAt = true, &stamped, &gate
 	d.workspaces[id] = ws
 	return true, nil
 }
@@ -2468,8 +2468,8 @@ type fakeMerge struct {
 	// raises the merge-queue question.
 	queued bool
 	closed []ids.WorkspaceID
-	// hidden are the workspaces OnHidden was told of, in order.
-	hidden []ids.WorkspaceID
+	// backlogged are the workspaces OnBacklogged was told of, in order.
+	backlogged []ids.WorkspaceID
 	// reveals are the workspaces RevealMergeWorkspace was asked to reveal, in
 	// order, and revealCauses the cause each named. reveal, when set, stands
 	// for the orchestrator's reveal and answers it; unset, a reveal answers
@@ -2573,9 +2573,9 @@ func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {
 	m.closed = append(m.closed, ws)
 }
 
-// OnHidden records the hidden workspace.
-func (m *fakeMerge) OnHidden(ws ids.WorkspaceID) {
-	m.hidden = append(m.hidden, ws)
+// OnBacklogged records the backlogged workspace.
+func (m *fakeMerge) OnBacklogged(ws ids.WorkspaceID) {
+	m.backlogged = append(m.backlogged, ws)
 }
 
 // RevealMergeWorkspace records the reveal and answers the scripted one.
@@ -4678,13 +4678,13 @@ func (d *fakeDB) SetMergeQueueSectionFolded(_ context.Context, folded bool) erro
 	return nil
 }
 
-// SetHiddenSectionFolded records the hidden section's fold.
-func (d *fakeDB) SetHiddenSectionFolded(_ context.Context, folded bool) error {
-	if d.setHiddenFoldedErr != nil {
-		return d.setHiddenFoldedErr
+// SetBacklogFolded records the backlog's fold.
+func (d *fakeDB) SetBacklogFolded(_ context.Context, folded bool) error {
+	if d.setBacklogFoldedErr != nil {
+		return d.setBacklogFoldedErr
 	}
 	view := d.currentView()
-	view.HiddenFolded = folded
+	view.BacklogFolded = folded
 	d.view = &view
 	return nil
 }
@@ -4702,8 +4702,8 @@ func (d *fakeDB) SetSectionHeights(_ context.Context, changes []wsm.SectionHeigh
 			view.MergeQueueHeight = c.Height
 		case wsm.BandMerged:
 			view.MergedHeight = c.Height
-		case wsm.BandHidden:
-			view.HiddenHeight = c.Height
+		case wsm.BandBacklog:
+			view.BacklogHeight = c.Height
 		default:
 			panic("fakeDB: unknown band section " + string(c.Section))
 		}

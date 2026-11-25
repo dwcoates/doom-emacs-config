@@ -148,20 +148,20 @@ func TestBringUpSessionlessGoesThroughTheSharedBringUp(t *testing.T) {
 	}
 }
 
-// TestBringUpSessionlessLeavesARecordThatReadsRunningHiddenOrNot pins the
+// TestBringUpSessionlessLeavesARecordThatReadsRunningBackloggedOrNot pins the
 // owner's ruling of 2026-11-23, which replaced the 2026-10-02 one: what
 // reaches the session-less bring-up reads a free lock, so a record that still
 // reads running is stale, whatever the workspace's visibility. It is not
 // started, and its end is recorded.
-func TestBringUpSessionlessLeavesARecordThatReadsRunningHiddenOrNot(t *testing.T) {
+func TestBringUpSessionlessLeavesARecordThatReadsRunningBackloggedOrNot(t *testing.T) {
 	cases := []struct {
 		name    string
 		arrange func(t *testing.T, h *harness, record wsm.Workspace)
 	}{
 		{name: "a visible workspace", arrange: func(*testing.T, *harness, wsm.Workspace) {}},
-		{name: "a hidden workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
-			if err := h.db.SetHidden(context.Background(), record.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+		{name: "a backlogged workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
+			if err := h.db.SetBacklogged(context.Background(), record.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 		}},
 		{name: "a collapsed workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
@@ -270,7 +270,7 @@ func TestTheTakeoverRecordsEachDecisionWithItsFacts(t *testing.T) {
 			arrange: func(*testing.T, *harness, ids.WorkspaceID) {},
 			rule:    takeoverRecordStale,
 			message: "the session record reads running but no shim held the workspace's lock at the handover; the takeover records the session's end and does not start it",
-			want:    dlog.Context{"was_up": true, "live": true, "cold_gate": false, "hidden": false},
+			want:    dlog.Context{"was_up": true, "live": true, "cold_gate": false, "backlogged": false},
 		},
 		{
 			name: "a parked session",
@@ -284,15 +284,15 @@ func TestTheTakeoverRecordsEachDecisionWithItsFacts(t *testing.T) {
 			want:    dlog.Context{"was_up": false, "live": false, "terminal": wsm.TerminalParked, "terminal_detail": "keepalive_cycle"},
 		},
 		{
-			name: "a hidden workspace whose record still reads running",
+			name: "a backlogged workspace whose record still reads running",
 			arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
-				if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-					t.Fatalf("SetHidden: %v", err)
+				if err := h.db.SetBacklogged(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
+					t.Fatalf("SetBacklogged: %v", err)
 				}
 			},
 			rule:    takeoverRecordStale,
 			message: "the session record reads running but no shim held the workspace's lock at the handover; the takeover records the session's end and does not start it",
-			want:    dlog.Context{"was_up": true, "hidden": true},
+			want:    dlog.Context{"was_up": true, "backlogged": true},
 		},
 	}
 	for _, tc := range cases {

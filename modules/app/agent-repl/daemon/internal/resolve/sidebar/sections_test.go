@@ -161,7 +161,7 @@ func TestRosterRecordsAWorkspaceNamingAnUnregisteredRepository(t *testing.T) {
 }
 
 // dirsInRoster walks the roster's streams exactly as the sidecar's log
-// forwarder does -- the repository sections, the hidden section and the
+// forwarder does -- the repository sections, the backlog and the
 // closed rows, each row and its children -- and then the merged pages, and
 // answers every workspace directory it can resolve a ref for.
 func dirsInRoster(t *testing.T, r sidebar.Resolver) map[string]bool {
@@ -485,54 +485,54 @@ func TestTheRecentlyMergedHeaderCountsEveryMerge(t *testing.T) {
 	}
 }
 
-// hiddenWorkspace is a registered workspace the user hid at the epoch.
-func hiddenWorkspace(id, name string) wsm.Workspace {
-	return hiddenAt(workspace(id, name), 0)
+// backloggedWorkspace is a registered workspace the user hid at the epoch.
+func backloggedWorkspace(id, name string) wsm.Workspace {
+	return backloggedAt(workspace(id, name), 0)
 }
 
-// hiddenAt is WS hidden D after the epoch: hidden and its instant, together,
+// backloggedAt is WS backlogged D after the epoch: backlogged and its instant, together,
 // as wsm records them.
-func hiddenAt(ws wsm.Workspace, d time.Duration) wsm.Workspace {
-	ws.Hidden = true
-	ws.HiddenAt = at(d)
+func backloggedAt(ws wsm.Workspace, d time.Duration) wsm.Workspace {
+	ws.Backlogged = true
+	ws.BackloggedAt = at(d)
 	return ws
 }
 
-func TestAHiddenWorkspaceHoistsOutOfTheRepositorySections(t *testing.T) {
+func TestABackloggedWorkspaceHoistsOutOfTheRepositorySections(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	reg := registry(hiddenWorkspace("w-hidden", "hidden"), workspace("w-live", "live"))
+	reg := registry(backloggedWorkspace("w-hidden", "hidden"), workspace("w-live", "live"))
 
 	// Act.
 	r.SetRegistry(reg)
 
 	// Assert.
 	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, []string{"live"}) {
-		t.Fatalf("repo rows = %v, want the hidden workspace hoisted out", got)
+		t.Fatalf("repo rows = %v, want the backlogged workspace hoisted out", got)
 	}
 }
 
-func TestTheHiddenSectionCarriesTheHiddenRow(t *testing.T) {
+func TestTheBacklogCarriesTheBackloggedRow(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 
 	// Act.
-	r.SetRegistry(registry(hiddenWorkspace("w-hidden", "hidden"), workspace("w-live", "live")))
+	r.SetRegistry(registry(backloggedWorkspace("w-hidden", "hidden"), workspace("w-live", "live")))
 
 	// Assert.
-	section := latest(t, r).GetHidden()
-	if got := rowNames(topHidden(latest(t, r))); !equal(got, []string{"hidden"}) {
-		t.Fatalf("hidden rows = %v, want the one hidden workspace", got)
+	section := latest(t, r).GetBacklog()
+	if got := rowNames(topBacklog(latest(t, r))); !equal(got, []string{"hidden"}) {
+		t.Fatalf("backlogged rows = %v, want the one backlogged workspace", got)
 	}
-	if got := section.GetHeader().GetLabel().GetText(); got != sidebar.HiddenSectionLabel {
-		t.Fatalf("hidden label = %q, want %q", got, sidebar.HiddenSectionLabel)
+	if got := section.GetHeader().GetLabel().GetText(); got != sidebar.BacklogSectionLabel {
+		t.Fatalf("backlogged label = %q, want %q", got, sidebar.BacklogSectionLabel)
 	}
 	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 1 {
-		t.Fatalf("hidden count = %d, want 1", got)
+		t.Fatalf("backlogged count = %d, want 1", got)
 	}
 }
 
-func TestTheHiddenSectionIsOnTheWireWithNothingHidden(t *testing.T) {
+func TestTheBacklogIsOnTheWireWithNothingBacklogged(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 
@@ -540,38 +540,38 @@ func TestTheHiddenSectionIsOnTheWireWithNothingHidden(t *testing.T) {
 	r.SetRegistry(registry(workspace("w-live", "live")))
 
 	// Assert.
-	section := latest(t, r).GetHidden()
+	section := latest(t, r).GetBacklog()
 	if section == nil || section.GetHeader() == nil || section.GetFold() == nil {
-		t.Fatalf("hidden section = %v, want it whole with no rows", section)
+		t.Fatalf("backlog = %v, want it whole with no rows", section)
 	}
-	if len(section.GetHiddenRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
-		t.Fatalf("hidden section = %v, want no rows and a zero count", section)
+	if len(section.GetBacklogRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
+		t.Fatalf("backlog = %v, want no rows and a zero count", section)
 	}
 }
 
-func TestAClosedHiddenWorkspaceIsInNoSection(t *testing.T) {
+func TestAClosedBackloggedWorkspaceIsInNoSection(t *testing.T) {
 	// Arrange: a closed workspace is listed nowhere but recently merged.
 	r, _ := newResolver(t)
-	closed := hiddenWorkspace("w-closed", "closed")
+	closed := backloggedWorkspace("w-closed", "closed")
 	closed.Closed = true
 
 	// Act.
-	r.SetRegistry(registry(closed, hiddenWorkspace("w-open", "open")))
+	r.SetRegistry(registry(closed, backloggedWorkspace("w-open", "open")))
 
 	// Assert.
-	section := latest(t, r).GetHidden()
-	if got := rowNames(topHidden(latest(t, r))); !equal(got, []string{"open"}) {
-		t.Fatalf("hidden rows = %v, want only the open one", got)
+	section := latest(t, r).GetBacklog()
+	if got := rowNames(topBacklog(latest(t, r))); !equal(got, []string{"open"}) {
+		t.Fatalf("backlogged rows = %v, want only the open one", got)
 	}
 	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 1 {
-		t.Fatalf("hidden count = %d, want 1", got)
+		t.Fatalf("backlogged count = %d, want 1", got)
 	}
 }
 
-func TestAMergedHiddenWorkspaceFilesUnderRecentlyMerged(t *testing.T) {
+func TestAMergedBackloggedWorkspaceFilesUnderRecentlyMerged(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	merged := hiddenWorkspace("w-merged", "merged")
+	merged := backloggedWorkspace("w-merged", "merged")
 	merged.MergedAt = at(0)
 	merged.Closed = true
 
@@ -580,15 +580,15 @@ func TestAMergedHiddenWorkspaceFilesUnderRecentlyMerged(t *testing.T) {
 
 	// Assert.
 	roster := latestPush(t, r)
-	if len(topHidden(roster.GetWorkspaces())) != 0 {
-		t.Fatal("a merged workspace was filed under hidden")
+	if len(topBacklog(roster.GetWorkspaces())) != 0 {
+		t.Fatal("a merged workspace was filed under the backlog")
 	}
 	if got := rowNames(mergedRows(t, r)); !equal(got, []string{"merged"}) {
 		t.Fatalf("merged rows = %v, want the merged workspace", got)
 	}
 }
 
-func TestHiddenSectionStatesItsFold(t *testing.T) {
+func TestBacklogStatesItsFold(t *testing.T) {
 	tests := []struct {
 		name          string
 		folded        bool
@@ -601,14 +601,14 @@ func TestHiddenSectionStatesItsFold(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			r, _ := newResolver(t)
-			reg := registry(hiddenWorkspace("w1", "one"))
-			reg.View.HiddenFolded = tt.folded
+			reg := registry(backloggedWorkspace("w1", "one"))
+			reg.View.BacklogFolded = tt.folded
 
 			// Act.
 			r.SetRegistry(reg)
 
 			// Assert: the arm is always set, and it is the recorded fold.
-			section := latest(t, r).GetHidden()
+			section := latest(t, r).GetBacklog()
 			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
 				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
 			}
@@ -869,37 +869,37 @@ func TestRepoDivergenceRefusesAMissingMeasure(t *testing.T) {
 	r.SetRepoDivergence(repo.ID, nil)
 }
 
-func TestTheHiddenSectionIsLabelledBacklog(t *testing.T) {
+func TestTheBacklogIsLabelledBacklog(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 
 	// Act.
-	r.SetRegistry(registry(hiddenWorkspace("w-hidden", "hidden")))
+	r.SetRegistry(registry(backloggedWorkspace("w-hidden", "hidden")))
 
 	// Assert.
-	if got := latest(t, r).GetHidden().GetHeader().GetLabel().GetText(); got != "Backlog" {
-		t.Fatalf("hidden label = %q, want %q", got, "Backlog")
+	if got := latest(t, r).GetBacklog().GetHeader().GetLabel().GetText(); got != "Backlog" {
+		t.Fatalf("backlogged label = %q, want %q", got, "Backlog")
 	}
 }
 
-func TestAHiddenRowCountsFromItsHide(t *testing.T) {
+func TestABackloggedRowCountsFromItsHide(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 
 	// Act.
-	r.SetRegistry(registry(hiddenAt(workspace("w1", "one"), time.Hour)))
+	r.SetRegistry(registry(backloggedAt(workspace("w1", "one"), time.Hour)))
 
 	// Assert.
-	got := topHidden(latest(t, r))[0].GetWhen().GetHidden()
+	got := topBacklog(latest(t, r))[0].GetWhen().GetBacklogged()
 	if got == nil || got.GetAtMs() != at(time.Hour).UnixMilli() {
-		t.Fatalf("when = %v, want the hide instant", topHidden(latest(t, r))[0].GetWhen())
+		t.Fatalf("when = %v, want the hide instant", topBacklog(latest(t, r))[0].GetWhen())
 	}
 }
 
-func TestAMergedHiddenRowCountsFromItsMerge(t *testing.T) {
-	// Arrange: merged wins over hidden, as it files under Recently Merged.
+func TestAMergedBackloggedRowCountsFromItsMerge(t *testing.T) {
+	// Arrange: merged wins over backlogged, as it files under Recently Merged.
 	r, _ := newResolver(t)
-	ws := hiddenAt(workspace("w1", "one"), time.Hour)
+	ws := backloggedAt(workspace("w1", "one"), time.Hour)
 	ws.MergedAt = at(2 * time.Hour)
 	ws.Closed = true
 
@@ -956,7 +956,7 @@ func TestOpenSectionStatesItsFold(t *testing.T) {
 
 func TestTheOpenCountCountsTheRowsTheOpenSectionLists(t *testing.T) {
 	// Arrange: a family of two, a workspace in another repository, a closed
-	// one, a hidden one and a merged one.
+	// one, a backlogged one and a merged one.
 	r, _ := newResolver(t)
 	parent := workspace("w-parent", "parent")
 	child := workspace("w-child", "child")
@@ -968,12 +968,12 @@ func TestTheOpenCountCountsTheRowsTheOpenSectionLists(t *testing.T) {
 	merged := workspace("w-merged", "merged")
 	merged.MergedAt = at(0)
 	merged.Closed = true
-	reg := twoRepoRegistry(parent, child, other, closed, hiddenWorkspace("w-hidden", "hidden"), merged)
+	reg := twoRepoRegistry(parent, child, other, closed, backloggedWorkspace("w-hidden", "hidden"), merged)
 
 	// Act.
 	r.SetRegistry(reg)
 
-	// Assert: the nested child counts; the closed, hidden and merged do not.
+	// Assert: the nested child counts; the closed, backlogged and merged do not.
 	if got := latest(t, r).GetRepository().GetOpenCount().GetWorkspaces(); got != 3 {
 		t.Fatalf("open count = %d, want 3", got)
 	}
@@ -2317,9 +2317,9 @@ func TestEveryBandSectionStatesItsHeight(t *testing.T) {
 		},
 		{
 			name: "hidden",
-			set:  func(v *wsm.SidebarView, h wsm.SectionHeight) { v.HiddenHeight = h },
+			set:  func(v *wsm.SidebarView, h wsm.SectionHeight) { v.BacklogHeight = h },
 			read: func(t *testing.T, r sidebar.Resolver) (bool, uint32, bool) {
-				s := latest(t, r).GetHidden()
+				s := latest(t, r).GetBacklog()
 				return s.GetFitted() != nil, s.GetSized().GetLines(), s.GetSized() != nil
 			},
 		},

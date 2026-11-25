@@ -155,8 +155,8 @@ func (s *fakeServer) SetWorkspacePriority(ctx context.Context, req *connect.Requ
 	return handleUnary[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse](ctx, s, "SetWorkspacePriority", req.Msg)
 }
 
-func (s *fakeServer) SetWorkspaceHidden(ctx context.Context, req *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
-	return handleUnary[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse](ctx, s, "SetWorkspaceHidden", req.Msg)
+func (s *fakeServer) SetWorkspaceBacklogged(ctx context.Context, req *connect.Request[v1.SetWorkspaceBackloggedRequest]) (*connect.Response[v1.SetWorkspaceBackloggedResponse], error) {
+	return handleUnary[v1.SetWorkspaceBackloggedRequest, v1.SetWorkspaceBackloggedResponse](ctx, s, "SetWorkspaceBacklogged", req.Msg)
 }
 
 func (s *fakeServer) SetWorkspaceParent(ctx context.Context, req *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error) {
@@ -323,8 +323,8 @@ func (s *fakeServer) RetryVendorError(ctx context.Context, req *connect.Request[
 	return handleUnary[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse](ctx, s, "RetryVendorError", req.Msg)
 }
 
-func (s *fakeServer) SendHiddenKeepalives(ctx context.Context, req *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error) {
-	return handleUnary[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse](ctx, s, "SendHiddenKeepalives", req.Msg)
+func (s *fakeServer) SendBackloggedKeepalives(ctx context.Context, req *connect.Request[v1.SendBackloggedKeepalivesRequest]) (*connect.Response[v1.SendBackloggedKeepalivesResponse], error) {
+	return handleUnary[v1.SendBackloggedKeepalivesRequest, v1.SendBackloggedKeepalivesResponse](ctx, s, "SendBackloggedKeepalives", req.Msg)
 }
 
 func (s *fakeServer) RegisterWorkspace(ctx context.Context, req *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error) {

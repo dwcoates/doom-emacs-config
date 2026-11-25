@@ -1,12 +1,11 @@
 // endpoint_report_page_state.proto — ReportPageState: Emacs tells the daemon
 // whether it holds a workspace's page in its web view, and why. HOST section.
 //
-// WHY A PAGE IS LOADED IS AN EDITOR FACT. Emacs decides every page load and
-// unload itself (page-unload.el: a page loads when the user shows its
-// workspace, when its session comes up for work, or when its slot is made
-// while the page is wanted, and unloads when its workspace goes dormant off
-// screen or stops being visible), so a workspace's visibility makes its page
-// ELIGIBLE and never says whether the page is held. This report is how the
+// WHETHER A PAGE IS LOADED IS THE DAEMON'S VERDICT, CARRIED OUT BY EMACS
+// (frontend.v1.RosterRowPage; page-unload.el): a page loads when the user
+// shows its workspace or when the verdict turns `loaded`, and unloads when the
+// verdict turns `unloaded` while the host does not show it, or when the
+// workspace stops being visible. The cold gate's hold-back is Emacs's own. This report is how the
 // daemon's metrics (agentrepl_pages_loaded, agentrepl_page_loads_total,
 // agentrepl_page_unloads_total) and the sidebar's count of loaded pages learn
 // why each page was loaded and what Emacs asked the web view to hold.
@@ -51,7 +50,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_report_page_state.proto.
  */
 export const file_agentrepl_v1_endpoint_report_page_state: GenFile = /*@__PURE__*/
-  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X3BhZ2Vfc3RhdGUucHJvdG8SDGFnZW50cmVwbC52MSKwAgoWUmVwb3J0UGFnZVN0YXRlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjUKBmxvYWRlZBgCIAEoCzIjLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkZWRIABI5Cgh1bmxvYWRlZBgDIAEoCzIlLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVVbmxvYWRlZEgAEjEKBGhlbGQYBCABKAsyIS5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlSGVsZEgAEjgKCG5vdF9oZWxkGAUgASgLMiQuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZU5vdEhlbGRIAEIICgZyZXBvcnQiUAoVUmVwb3J0UGFnZVN0YXRlTG9hZGVkEjcKBnJlYXNvbhgBIAEoCzInLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkUmVhc29uIlQKF1JlcG9ydFBhZ2VTdGF0ZVVubG9hZGVkEjkKBnJlYXNvbhgBIAEoCzIpLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVVbmxvYWRSZWFzb24iTgoTUmVwb3J0UGFnZVN0YXRlSGVsZBI3CgZyZWFzb24YASABKAsyJy5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlTG9hZFJlYXNvbiIYChZSZXBvcnRQYWdlU3RhdGVOb3RIZWxkIqQDChlSZXBvcnRQYWdlU3RhdGVMb2FkUmVhc29uEjcKBXNob3duGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZUxvYWRTaG93bkgAEjcKBWF3YWtlGAIgASgLMiYuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZUxvYWRBd2FrZUgAEjUKBHNsb3QYAyABKAsyJS5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlTG9hZFNsb3RIABJECg5sb2FkX3JlcXVlc3RlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkUmVxdWVzdGVkSAASOwoHdW5nYXRlZBgFIAEoCzIoLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkVW5nYXRlZEgAElEKE2hlbGRfYmVmb3JlX3JlYXNvbnMYBiABKAsyMi5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlTG9hZEhlbGRCZWZvcmVSZWFzb25zSABCCAoGcmVhc29uIhoKGFJlcG9ydFBhZ2VTdGF0ZUxvYWRTaG93biIaChhSZXBvcnRQYWdlU3RhdGVMb2FkQXdha2UiGQoXUmVwb3J0UGFnZVN0YXRlTG9hZFNsb3QiHgocUmVwb3J0UGFnZVN0YXRlTG9hZFJlcXVlc3RlZCIcChpSZXBvcnRQYWdlU3RhdGVMb2FkVW5nYXRlZCImCiRSZXBvcnRQYWdlU3RhdGVMb2FkSGVsZEJlZm9yZVJlYXNvbnMi6AEKG1JlcG9ydFBhZ2VTdGF0ZVVubG9hZFJlYXNvbhI9Cgdkb3JtYW50GAEgASgLMiouYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZVVubG9hZERvcm1hbnRIABI/CghkZXRhY2hlZBgCIAEoCzIrLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVVbmxvYWREZXRhY2hlZEgAEj8KCHJlbGVhc2VkGAMgASgLMisuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZVVubG9hZFJlbGVhc2VkSABCCAoGcmVhc29uIh4KHFJlcG9ydFBhZ2VTdGF0ZVVubG9hZERvcm1hbnQiHwodUmVwb3J0UGFnZVN0YXRlVW5sb2FkRGV0YWNoZWQiHwodUmVwb3J0UGFnZVN0YXRlVW5sb2FkUmVsZWFzZWQikQEKF1JlcG9ydFBhZ2VTdGF0ZVJlc3BvbnNlEjcKB3N1Y2Nlc3MYASABKAsyJC5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlU3VjY2Vzc0gAEjMKBWVycm9yGAIgASgLMiIuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZUVycm9ySABCCAoGcmVzdWx0IhgKFlJlcG9ydFBhZ2VTdGF0ZVN1Y2Nlc3Mi0wIKFFJlcG9ydFBhZ2VTdGF0ZUVycm9yEkoKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi0uYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZVVua25vd25Xb3Jrc3BhY2VIABJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjEuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLS5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlVHJhbnNmZXJyaW5nQXdheUgAEkUKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVOb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiIQofUmVwb3J0UGFnZVN0YXRlVW5rbm93bldvcmtzcGFjZSI7CiNSZXBvcnRQYWdlU3RhdGVXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMgofUmVwb3J0UGFnZVN0YXRlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkAKHFJlcG9ydFBhZ2VTdGF0ZU5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X3BhZ2Vfc3RhdGUucHJvdG8SDGFnZW50cmVwbC52MSKwAgoWUmVwb3J0UGFnZVN0YXRlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjUKBmxvYWRlZBgCIAEoCzIjLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkZWRIABI5Cgh1bmxvYWRlZBgDIAEoCzIlLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVVbmxvYWRlZEgAEjEKBGhlbGQYBCABKAsyIS5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlSGVsZEgAEjgKCG5vdF9oZWxkGAUgASgLMiQuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZU5vdEhlbGRIAEIICgZyZXBvcnQiUAoVUmVwb3J0UGFnZVN0YXRlTG9hZGVkEjcKBnJlYXNvbhgBIAEoCzInLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkUmVhc29uIlQKF1JlcG9ydFBhZ2VTdGF0ZVVubG9hZGVkEjkKBnJlYXNvbhgBIAEoCzIpLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVVbmxvYWRSZWFzb24iTgoTUmVwb3J0UGFnZVN0YXRlSGVsZBI3CgZyZWFzb24YASABKAsyJy5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlTG9hZFJlYXNvbiIYChZSZXBvcnRQYWdlU3RhdGVOb3RIZWxkIrkDChlSZXBvcnRQYWdlU3RhdGVMb2FkUmVhc29uEjcKBXNob3duGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZUxvYWRTaG93bkgAEjUKBHNsb3QYAyABKAsyJS5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlTG9hZFNsb3RIABJECg5sb2FkX3JlcXVlc3RlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkUmVxdWVzdGVkSAASOwoHdW5nYXRlZBgFIAEoCzIoLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVMb2FkVW5nYXRlZEgAElEKE2hlbGRfYmVmb3JlX3JlYXNvbnMYBiABKAsyMi5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlTG9hZEhlbGRCZWZvcmVSZWFzb25zSAASPwoJYWxsb2NhdGVkGAcgASgLMiouYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZUxvYWRBbGxvY2F0ZWRIAEIICgZyZWFzb25KBAgCEANSBWF3YWtlIhoKGFJlcG9ydFBhZ2VTdGF0ZUxvYWRTaG93biIZChdSZXBvcnRQYWdlU3RhdGVMb2FkU2xvdCIeChxSZXBvcnRQYWdlU3RhdGVMb2FkUmVxdWVzdGVkIhwKGlJlcG9ydFBhZ2VTdGF0ZUxvYWRVbmdhdGVkIiYKJFJlcG9ydFBhZ2VTdGF0ZUxvYWRIZWxkQmVmb3JlUmVhc29ucyIeChxSZXBvcnRQYWdlU3RhdGVMb2FkQWxsb2NhdGVkIv8BChtSZXBvcnRQYWdlU3RhdGVVbmxvYWRSZWFzb24SPwoIZGV0YWNoZWQYAiABKAsyKy5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlVW5sb2FkRGV0YWNoZWRIABI/CghyZWxlYXNlZBgDIAEoCzIrLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVVbmxvYWRSZWxlYXNlZEgAEkUKC2RlYWxsb2NhdGVkGAQgASgLMi4uYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZVVubG9hZERlYWxsb2NhdGVkSABCCAoGcmVhc29uSgQIARACUgdkb3JtYW50Ih8KHVJlcG9ydFBhZ2VTdGF0ZVVubG9hZERldGFjaGVkIh8KHVJlcG9ydFBhZ2VTdGF0ZVVubG9hZFJlbGVhc2VkIiIKIFJlcG9ydFBhZ2VTdGF0ZVVubG9hZERlYWxsb2NhdGVkIpEBChdSZXBvcnRQYWdlU3RhdGVSZXNwb25zZRI3CgdzdWNjZXNzGAEgASgLMiQuYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZVN1Y2Nlc3NIABIzCgVlcnJvchgCIAEoCzIiLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVFcnJvckgAQggKBnJlc3VsdCIYChZSZXBvcnRQYWdlU3RhdGVTdWNjZXNzItMCChRSZXBvcnRQYWdlU3RhdGVFcnJvchJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5SZXBvcnRQYWdlU3RhdGVXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLlJlcG9ydFBhZ2VTdGF0ZVRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuUmVwb3J0UGFnZVN0YXRlTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiEKH1JlcG9ydFBhZ2VTdGF0ZVVua25vd25Xb3Jrc3BhY2UiOwojUmVwb3J0UGFnZVN0YXRlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjIKH1JlcG9ydFBhZ2VTdGF0ZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSJAChxSZXBvcnRQYWdlU3RhdGVOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzc0IqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.ReportPageStateRequest
@@ -217,17 +216,8 @@ export type ReportPageStateLoadReason = Message<"agentrepl.v1.ReportPageStateLoa
     case: "shown";
   } | {
     /**
-     * The workspace's session came up for work while its slot stood with no
-     * page.
-     *
-     * @generated from field: agentrepl.v1.ReportPageStateLoadAwake awake = 2;
-     */
-    value: ReportPageStateLoadAwake;
-    case: "awake";
-  } | {
-    /**
-     * The workspace's slot was made while its page was wanted (visible, not
-     * cold-gated, not dormant).
+     * The workspace's slot was made while its page was wanted (the daemon's
+     * page verdict `loaded`, not cold-gated).
      *
      * @generated from field: agentrepl.v1.ReportPageStateLoadSlot slot = 3;
      */
@@ -260,6 +250,15 @@ export type ReportPageStateLoadReason = Message<"agentrepl.v1.ReportPageStateLoa
      */
     value: ReportPageStateLoadHeldBeforeReasons;
     case: "heldBeforeReasons";
+  } | {
+    /**
+     * The daemon's page verdict (frontend.v1.RosterRowPage) turned `loaded`
+     * while the workspace's slot stood with no page.
+     *
+     * @generated from field: agentrepl.v1.ReportPageStateLoadAllocated allocated = 7;
+     */
+    value: ReportPageStateLoadAllocated;
+    case: "allocated";
   } | { case: undefined; value?: undefined };
 };
 
@@ -286,21 +285,6 @@ export const ReportPageStateLoadShownSchema: GenMessage<ReportPageStateLoadShown
   messageDesc(file_agentrepl_v1_endpoint_report_page_state, 6);
 
 /**
- * The session came up for work.
- *
- * @generated from message agentrepl.v1.ReportPageStateLoadAwake
- */
-export type ReportPageStateLoadAwake = Message<"agentrepl.v1.ReportPageStateLoadAwake"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.ReportPageStateLoadAwake.
- * Use `create(ReportPageStateLoadAwakeSchema)` to create a new message.
- */
-export const ReportPageStateLoadAwakeSchema: GenMessage<ReportPageStateLoadAwake> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 7);
-
-/**
  * The slot was made while the page was wanted.
  *
  * @generated from message agentrepl.v1.ReportPageStateLoadSlot
@@ -313,7 +297,7 @@ export type ReportPageStateLoadSlot = Message<"agentrepl.v1.ReportPageStateLoadS
  * Use `create(ReportPageStateLoadSlotSchema)` to create a new message.
  */
 export const ReportPageStateLoadSlotSchema: GenMessage<ReportPageStateLoadSlot> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 8);
+  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 7);
 
 /**
  * The user asked for the held-back page.
@@ -328,7 +312,7 @@ export type ReportPageStateLoadRequested = Message<"agentrepl.v1.ReportPageState
  * Use `create(ReportPageStateLoadRequestedSchema)` to create a new message.
  */
 export const ReportPageStateLoadRequestedSchema: GenMessage<ReportPageStateLoadRequested> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 9);
+  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 8);
 
 /**
  * The gate holding the page back ended.
@@ -343,7 +327,7 @@ export type ReportPageStateLoadUngated = Message<"agentrepl.v1.ReportPageStateLo
  * Use `create(ReportPageStateLoadUngatedSchema)` to create a new message.
  */
 export const ReportPageStateLoadUngatedSchema: GenMessage<ReportPageStateLoadUngated> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 10);
+  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 9);
 
 /**
  * The page predates the recorded reasons, and no rule explains it now.
@@ -358,6 +342,21 @@ export type ReportPageStateLoadHeldBeforeReasons = Message<"agentrepl.v1.ReportP
  * Use `create(ReportPageStateLoadHeldBeforeReasonsSchema)` to create a new message.
  */
 export const ReportPageStateLoadHeldBeforeReasonsSchema: GenMessage<ReportPageStateLoadHeldBeforeReasons> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 10);
+
+/**
+ * The daemon's page verdict wanted the page.
+ *
+ * @generated from message agentrepl.v1.ReportPageStateLoadAllocated
+ */
+export type ReportPageStateLoadAllocated = Message<"agentrepl.v1.ReportPageStateLoadAllocated"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportPageStateLoadAllocated.
+ * Use `create(ReportPageStateLoadAllocatedSchema)` to create a new message.
+ */
+export const ReportPageStateLoadAllocatedSchema: GenMessage<ReportPageStateLoadAllocated> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_report_page_state, 11);
 
 /**
@@ -373,16 +372,6 @@ export type ReportPageStateUnloadReason = Message<"agentrepl.v1.ReportPageStateU
    * @generated from oneof agentrepl.v1.ReportPageStateUnloadReason.reason
    */
   reason: {
-    /**
-     * Its session went dormant (parked, or up only for a keep-alive) while the
-     * host did not show it, or the user switched away from it dormant. Its
-     * slot stays.
-     *
-     * @generated from field: agentrepl.v1.ReportPageStateUnloadDormant dormant = 1;
-     */
-    value: ReportPageStateUnloadDormant;
-    case: "dormant";
-  } | {
     /**
      * Its webview slot was taken down while the workspace stays open: the
      * panel closed, a bundle remount, the restart verb's bounce.
@@ -400,6 +389,15 @@ export type ReportPageStateUnloadReason = Message<"agentrepl.v1.ReportPageStateU
      */
     value: ReportPageStateUnloadReleased;
     case: "released";
+  } | {
+    /**
+     * The daemon's page verdict (frontend.v1.RosterRowPage) turned `unloaded`
+     * while the host did not show the workspace. Its slot stays.
+     *
+     * @generated from field: agentrepl.v1.ReportPageStateUnloadDeallocated deallocated = 4;
+     */
+    value: ReportPageStateUnloadDeallocated;
+    case: "deallocated";
   } | { case: undefined; value?: undefined };
 };
 
@@ -409,21 +407,6 @@ export type ReportPageStateUnloadReason = Message<"agentrepl.v1.ReportPageStateU
  */
 export const ReportPageStateUnloadReasonSchema: GenMessage<ReportPageStateUnloadReason> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_report_page_state, 12);
-
-/**
- * The session went dormant off screen.
- *
- * @generated from message agentrepl.v1.ReportPageStateUnloadDormant
- */
-export type ReportPageStateUnloadDormant = Message<"agentrepl.v1.ReportPageStateUnloadDormant"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.ReportPageStateUnloadDormant.
- * Use `create(ReportPageStateUnloadDormantSchema)` to create a new message.
- */
-export const ReportPageStateUnloadDormantSchema: GenMessage<ReportPageStateUnloadDormant> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 13);
 
 /**
  * The slot was taken down while the workspace stays open.
@@ -438,7 +421,7 @@ export type ReportPageStateUnloadDetached = Message<"agentrepl.v1.ReportPageStat
  * Use `create(ReportPageStateUnloadDetachedSchema)` to create a new message.
  */
 export const ReportPageStateUnloadDetachedSchema: GenMessage<ReportPageStateUnloadDetached> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 14);
+  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 13);
 
 /**
  * The workspace was released from the editor.
@@ -453,6 +436,21 @@ export type ReportPageStateUnloadReleased = Message<"agentrepl.v1.ReportPageStat
  * Use `create(ReportPageStateUnloadReleasedSchema)` to create a new message.
  */
 export const ReportPageStateUnloadReleasedSchema: GenMessage<ReportPageStateUnloadReleased> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_page_state, 14);
+
+/**
+ * The daemon's page verdict let the page go off screen.
+ *
+ * @generated from message agentrepl.v1.ReportPageStateUnloadDeallocated
+ */
+export type ReportPageStateUnloadDeallocated = Message<"agentrepl.v1.ReportPageStateUnloadDeallocated"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportPageStateUnloadDeallocated.
+ * Use `create(ReportPageStateUnloadDeallocatedSchema)` to create a new message.
+ */
+export const ReportPageStateUnloadDeallocatedSchema: GenMessage<ReportPageStateUnloadDeallocated> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_report_page_state, 15);
 
 /**

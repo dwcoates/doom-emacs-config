@@ -31,8 +31,8 @@ export const file_frontend_v1_workspace_mention: GenFile = /*@__PURE__*/
  * links them in its feed and completes them in its composer.
  *
  * THE SET IS RESOLVED, NOT RAW. It holds every workspace the roster carries
- * that is not closed -- the Open section's and the hidden section's alike,
- * since a hidden workspace is still one the user can name and select -- and
+ * that is not closed -- the Open section's and the backlog's alike,
+ * since a backlogged workspace is still one the user can name and select -- and
  * every workspace CLOSED within the daemon's recent window (five days, at or
  * after the instant five days before the resolve). A name two of them share
  * names one of them only when exactly one of those is in the viewer's own
@@ -60,8 +60,8 @@ export const file_frontend_v1_workspace_mention: GenFile = /*@__PURE__*/
  */
 export type WorkspaceMentionTargets = Message<"frontend.v1.WorkspaceMentionTargets"> & {
   /**
-   * The targets: the Open section's in its drawn order, then the hidden
-   * section's in its drawn order, then the recently closed ones (the
+   * The targets: the Open section's in its drawn order, then the backlog's
+   * rows in its drawn order, then the recently closed ones (the
    * recently merged, then the other closed, each in the roster's order).
    * Every name is distinct.
    *

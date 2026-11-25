@@ -27,7 +27,7 @@
 ;; - TAB RECONCILIATION from the rows' `closed' flag: a row with
 ;;   `closed = false' has a tab, one with `closed = true' has none, and the
 ;;   tab order is the roster's walk order strictly (repository sections in
-;;   order, rows depth-first, then the hidden rows, then the closed rows).
+;;   order, rows depth-first, then the backlogged rows, then the closed rows).
 ;;   The task view is IGNORED: it is the same rows regrouped, and drawing
 ;;   both would double every tab;
 ;; - TAB IDENTITY IS THE REF ID.  A row whose id matches an existing tab is
@@ -280,7 +280,7 @@ the sidebar paints the same number beside the row, so the bar's numbers and
 its slot gestures read this rather than counting the tabs Emacs draws: a
 tab held for its open (open-tabs.el) leaves a gap instead of shifting every
 tab after it onto a number the sidebar gives another workspace.  A folded,
-hidden or thread tab has no number and no pair.")
+backlogged or thread tab has no number and no pair.")
 
 (defvar agent-repl-roster--hidden-tabs nil
   "Tab names whose repository the daemon holds COLLAPSED, or that are HIDDEN.
@@ -467,13 +467,13 @@ its branch is in flight.  The tab bar paints its [N] run purple from it
 
 (defun agent-repl-roster--walk-rows (rows label section acc collapsed)
   "Walk the list rows ROWS depth-first under LABEL, pushing entries onto ACC.
-ROWS are one list's own row type (`RosterOpenRow', `RosterHiddenRow',
+ROWS are one list's own row type (`RosterOpenRow', `RosterBacklogRow',
 `RosterMergedRow', `RosterClosedRow'), each a plist carrying the shared
 `:row' and, for the lists that nest, its family (`agent-repl-roster-row-kin').
 Each entry
 is `(:row ROW :label LABEL :section SECTION :collapsed C :tab TAB)'.
 SECTION names which list the row sits in -- `:repository' (the Open
-section), `:hidden', `:merged' or `:closed' -- so a reader that treats them
+section), `:backlog', `:merged' or `:closed' -- so a reader that treats them
 differently asks the walk rather than re-deriving membership from a row's
 own fields.  COLLAPSED is called with each list row and answers whether its
 workspace is off the bar's drawing, numbering and navigation.  TAB is an
@@ -537,11 +537,11 @@ THE ROSTER IS ONE LISTING (`frontend.v1.WorkspaceRoster'): every workspace
 sits in exactly one list.  The Open section first -- repository sections in
 the resolver's order, each section's rows (its subsections' included,
 `agent-repl-roster-section-rows') depth-first, each open row's `:collapsed'
-read off its own folded tab -- then the hidden section's rows, then the
+read off its own folded tab -- then the backlog's rows, then the
 closed stream's rows.
 
 THE OPEN SECTION IS THE TAB BAR, so its walk is the bar's order and its
-numbers are the bar's (`agent-repl-roster--misnumbered').  A HIDDEN
+numbers are the bar's (`agent-repl-roster--misnumbered').  A BACKLOGGED
 WORKSPACE IS WALKED AS A FOLDED ONE IS: it keeps an undrawn tab (its session
 is untouched, so its perspective stays), `:collapsed' taking it off the
 bar's drawing, numbering and navigation by the one hiding machinery there
@@ -558,11 +558,11 @@ needs merged rows pages them (`agent-repl-roster-merged-entries-sync')."
        :repository
        acc
        #'agent-repl-roster--open-row-folded-p))
-    (let ((hidden (plist-get roster :hidden)))
+    (let ((backlog (plist-get roster :backlog)))
       (agent-repl-roster--walk-rows
-       (plist-get (plist-get hidden :hidden-rows) :rows)
-       (plist-get (plist-get (plist-get hidden :header) :label) :text)
-       :hidden
+       (plist-get (plist-get backlog :backlog-rows) :rows)
+       (plist-get (plist-get (plist-get backlog :header) :label) :text)
+       :backlog
        acc
        (lambda (_) t)))
     (agent-repl-roster--walk-rows
@@ -830,10 +830,35 @@ with the repo label rather than resolved by dropping a tab."
 (defun agent-repl-roster--tab-bar-entries (walked)
   "Return the WALKED entries that have a tab, in the tab bar's order.
 THE OPEN SECTION IS THE TAB BAR (`agent-repl-roster-walk'): every open row
-is a tab, drawn at its number or folded, and every hidden workspace keeps
+is a tab, drawn at its number or folded, and every backlogged workspace keeps
 an undrawn one.  Merged and closed rows have none."
-  (seq-filter (lambda (entry) (memq (plist-get entry :section) '(:repository :hidden)))
+  (seq-filter (lambda (entry) (memq (plist-get entry :section) '(:repository :backlog)))
               walked))
+
+(defun agent-repl-roster-open-entries (&optional roster)
+  "Return every open workspace ROSTER lists, in the Open section\='s walk order.
+Each is a plist `(:name NAME :ref REF :row ROW)': NAME is the name its tab
+has or would have (`agent-repl-roster--tab-name', collisions resolved as
+the bar resolves them), REF its `WorkspaceRef'.  It holds EVERY row of the
+Open section, the ones this editor holds no tab for included: a workspace a
+fold hides is not visible and gets no tab (`agent-repl-roster-desired-tabs'),
+but the recency walk still reaches it (owner ruling, 2026-11-24).  ROSTER
+defaults to `agent-repl-roster-view'."
+  (let* ((walked (agent-repl-roster-walk (or roster agent-repl-roster-view)))
+         (collisions (agent-repl-roster--colliding-names
+                      (agent-repl-roster--tab-bar-entries walked))))
+    (mapcar (lambda (entry)
+              (let ((row (plist-get entry :row)))
+                (list :name (agent-repl-roster--tab-name entry collisions)
+                      :ref (agent-repl-roster-row-ref row)
+                      :row row)))
+            (seq-filter (lambda (entry) (eq (plist-get entry :section) :repository))
+                        walked))))
+
+(defun agent-repl-roster-open-entry-named (name)
+  "Return the open entry (`agent-repl-roster-open-entries') named NAME, or nil."
+  (seq-find (lambda (entry) (equal (plist-get entry :name) name))
+            (agent-repl-roster-open-entries)))
 
 (defun agent-repl-roster--misnumbered (entries)
   "Return the first of ENTRIES whose tab number is not its place, or nil.
@@ -853,12 +878,12 @@ unusable and is dropped rather than drawn."
   "Return the tabs ROSTER asks for, in order: plists `(:id :name :ref)'.
 The Open section's walk is the order, and THE VISIBILITY IS THE
 MEMBERSHIP (`agent-repl-roster-row-visible-p'): Emacs opens a workspace only
-while the daemon says it is visible or the selection, so a folded or hidden
+while the daemon says it is visible or the selection, so a folded or backlogged
 workspace the user cannot see, and every merged or closed row, gets none,
 and costs this editor nothing (owner ruling, 2026-11-21).
 
-`:collapsed' is a tab off the bar, and `:hidden' the user\='s hide.  A
-visible row is collapsed only when it is hidden and the selection: a
+`:collapsed' is a tab off the bar, and `:backlogged' the user\='s hide.  A
+visible row is collapsed only when it is backlogged and the selection: a
 folded one is visible only while the daemon draws it inside its fold,
 numbered.
 
@@ -888,7 +913,7 @@ Once per push over every closed row, which is why it is DEBUG."
                       :ref (agent-repl-roster-row-ref row)
                       :availability (agent-repl-roster-row-availability row)
                       :collapsed (plist-get entry :collapsed)
-                      :hidden (eq (plist-get entry :section) :hidden))))
+                      :backlogged (eq (plist-get entry :section) :backlog))))
             (seq-filter (lambda (entry) (agent-repl-roster-row-visible-p (plist-get entry :row)))
                         entries))))
 
@@ -951,7 +976,7 @@ user picks a thread (`agent-repl-thread-pick')."
 Shaped as `agent-repl-roster-desired-tabs' returns them.  A thread is
 visible only while it is the selection (frontend.v1.RosterRowVisibility),
 so at most one is open here.  Each carries `:thread' t and is never `:collapsed'
-nor `:hidden': its page loads, it is only never drawn."
+nor `:backlogged': its page loads, it is only never drawn."
   (mapcar (lambda (row)
             (let ((ref (plist-get row :thread)))
               (list :id (plist-get ref :id)
@@ -959,7 +984,7 @@ nor `:hidden': its page loads, it is only never drawn."
                     :ref ref
                     :availability nil
                     :collapsed nil
-                    :hidden nil
+                    :backlogged nil
                     :thread t)))
           (seq-filter #'agent-repl-roster-row-visible-p
                       (agent-repl-roster-threads roster))))
@@ -969,7 +994,7 @@ nor `:hidden': its page loads, it is only never drawn."
 (defun agent-repl-roster--placements (roster)
   "Return where ROSTER places every row it lists, keyed by ref id.
 Each value is `(:section S :visibility V)': S the walk\='s section
-\(`:repository', `:hidden', `:closed'), or `:thread' for an open thread;
+\(`:repository', `:backlog', `:closed'), or `:thread' for an open thread;
 V the row\='s visibility as the daemon stamped it."
   (let ((rows (make-hash-table :test 'equal)))
     (dolist (entry (agent-repl-roster-walk roster))
@@ -1167,7 +1192,7 @@ contained here for the same reason a failing kill is: an escape would
 abort the reconcile walk mid-list.
 
 THE COMPOSER'S TEXT OUTLIVES THE TAB.  A workspace the roster stops
-marking visible (folded, hidden, or left) is torn down here while the daemon
+marking visible (folded, backlogged, or left) is torn down here while the daemon
 keeps it, so its composer is saved first as the history's unsent head
 \(`agent-repl--input-save-unsent'), as Emacs's own shutdown saves it, and
 the composer born on its next open puts it back.  A failed save is
@@ -1198,12 +1223,12 @@ the tab is gone."
 
 (defun agent-repl-roster--listed-open-ids (roster)
   "Return the ids ROSTER lists open, held here or not, as a hash set.
-Its Open and Hidden sections' rows and its open threads: the workspaces this
-editor closes only because they stopped being held, never because they
-closed."
+Its Open section's and its backlog's rows and its open threads: the
+workspaces this editor closes only because they stopped being held, never
+because they closed."
   (let ((ids (make-hash-table :test 'equal)))
     (dolist (entry (agent-repl-roster-walk roster))
-      (when (memq (plist-get entry :section) '(:repository :hidden))
+      (when (memq (plist-get entry :section) '(:repository :backlog))
         (puthash (agent-repl-roster-row-id (plist-get entry :row)) t ids)))
     (dolist (thread (agent-repl-roster-threads roster))
       (puthash (plist-get (plist-get thread :thread) :id) t ids))
@@ -1400,7 +1425,7 @@ LISTED-OPEN are the ids ROSTER lists open.  The whole of
               (push (cons name (plist-get want :number)) numbers))
             (push (list :id (plist-get want :id) :name name :ref (plist-get want :ref)
                         :collapsed (plist-get want :collapsed)
-                        :hidden (plist-get want :hidden))
+                        :backlogged (plist-get want :backlogged))
                   rows)
             ;; A THREAD IS NEVER DRAWN, but its page loads: it is hidden
             ;; from the bar while open-tabs asks for it like any shown tab.
@@ -1473,13 +1498,15 @@ Every row the roster lists, held here or not."
   (let ((id (plist-get (agent-repl--ws-get ws :ref) :id)))
     (and id (agent-repl-roster-row-of-id id))))
 
-(defun agent-repl-roster-row-dormant-p (row)
-  "Return non-nil when ROW\='s session runs no work (frontend.v1.RosterRowDormant)."
-  (plist-get row :dormant))
+(defun agent-repl-roster-row-page-loaded-p (row)
+  "Return non-nil when the daemon\='s page verdict holds ROW\='s page.
+The verdict is `frontend.v1.RosterRowPage'; the editor follows it."
+  (eq (plist-get row :page) :loaded))
 
-(defun agent-repl-roster-dormant-p (ws)
-  "Return non-nil when WS\='s session runs no work, nil before its first push."
-  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-dormant-p))
+(defun agent-repl-roster-page-loaded-p (ws)
+  "Return non-nil when the daemon\='s page verdict holds WS\='s page.
+Nil before WS\='s first push: no verdict holds a page."
+  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-page-loaded-p))
 
 (defun agent-repl-roster-status-for-ws (ws)
   "Return WS's roster status arm keyword, or nil before its first push."
@@ -1506,7 +1533,8 @@ row (`RosterThreadLastInteracted') for a chat thread, which the daemon
 fills from its own record of the user\='s interactions, so it survives an
 Emacs restart.  nil when the roster has neither row for WS or the user
 never interacted with it."
-  (let ((row (agent-repl-roster-row-for-ws ws)))
+  (let ((row (or (agent-repl-roster-row-for-ws ws)
+                 (plist-get (agent-repl-roster-open-entry-named ws) :row))))
     (if row
         (agent-repl-roster-row-instant-ms row :last-interacted)
       (let ((id (plist-get (agent-repl--ws-get ws :ref) :id)))
@@ -1669,8 +1697,8 @@ The sidebar paints the same number beside NAME's row
 Each repository section's top-level rows are one group whose PARENT-ID is
 nil (`agent-repl-roster-section-rows', its subsections' rows included), and
 every open row's family (`agent-repl-roster-row-kin') is a group under that
-row's id.  IDS are in drawn order.  The hidden section is no family: a
-hidden workspace is no stop of any walk."
+row's id.  IDS are in drawn order.  The backlog is no family: a
+backlogged workspace is no stop of any walk."
   (let ((groups nil))
     (cl-labels ((walk (rows parent)
                   (when rows
@@ -1716,7 +1744,7 @@ renumbering the tabs after it.  Before that -- a pre-roster boot draws the
 workspaces in their registration order -- each tab's 1-based place.
 
 A DRAWN TAB WITH NO NUMBER IS AN ERROR.  The drawn order is the Open
-section less its folded and hidden tabs, and the daemon numbers every
+section less its folded and backlogged tabs, and the daemon numbers every
 other one (`agent-repl-roster--misnumbered' drops a push that does not)."
   (if (null agent-repl-roster--tab-numbers)
       (number-sequence 1 (length names))

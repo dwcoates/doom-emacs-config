@@ -81,9 +81,9 @@ func TestAParkedConversationOwesNoBeat(t *testing.T) {
 	}
 }
 
-func TestAHiddenWorkspacesParkedConversationIsNotBeaten(t *testing.T) {
+func TestABackloggedWorkspacesParkedConversationIsNotBeaten(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, backlogged())
 	withParked(h, 50*time.Minute)
 
 	// Act
@@ -91,7 +91,7 @@ func TestAHiddenWorkspacesParkedConversationIsNotBeaten(t *testing.T) {
 
 	// Assert
 	if _, armed := h.keeper.beats[theWorkspace]; armed {
-		t.Fatal("a hidden workspace's parked conversation was armed a beat")
+		t.Fatal("a backlogged workspace's parked conversation was armed a beat")
 	}
 }
 

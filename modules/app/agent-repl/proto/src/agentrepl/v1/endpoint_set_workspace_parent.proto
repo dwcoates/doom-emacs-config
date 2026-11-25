@@ -134,7 +134,7 @@ message SetWorkspaceParentError {
     // prompt until the gate is answered, so the notice cannot be queued and
     // the retarget is not made. Answer the gate, then retarget.
     SetWorkspaceParentColdGate cold_gate = 10;
-    // The named parent, or the workspace to land into, is hidden or closed,
+    // The named parent, or the workspace to land into, is backlogged or closed,
     // and moving the workspace would make an open child of, or an open branch
     // landing into, a workspace outside the Open section.
     WorkspaceParentNotOpen parent_not_open = 11;

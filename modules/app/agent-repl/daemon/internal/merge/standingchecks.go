@@ -16,7 +16,7 @@ import (
 // THE STANDING MEDIATORS. The deploy mediator (owner rulings, 2026-11-17):
 // a repository
 // whose queue checks its deploys keeps ONE workspace across every deploy,
-// never one per check: it checks each deploy, hidden; fixes what it
+// never one per check: it checks each deploy, backlogged; fixes what it
 // dispatches itself, in sight in its repository's section; and settles an
 // escalation with the user. Its conversation carries what the earlier checks
 // found, fixed and settled, and is never cleared, only compacted: when a
@@ -273,7 +273,7 @@ func (o *orchestrator) show(ctx context.Context, r mediatorRole, mediator standi
 }
 
 // keepMediatorShown shows queue Q's mediator in role R whenever it is
-// hidden: it stands in its repository's section for good (owner ruling,
+// backlogged: it stands in its repository's section for good (owner ruling,
 // 2026-11-19, replacing 2026-11-17's sight only while at work), so a mediator
 // an earlier build hid, or the user hid, is shown again by the next pass.
 func (o *orchestrator) keepMediatorShown(ctx context.Context, r mediatorRole, q checkedQueue) {
@@ -293,20 +293,20 @@ func (o *orchestrator) keepMediatorShown(ctx context.Context, r mediatorRole, q 
 		o.deps.Log.Global().Error(opMediation, "could not read the mediator's workspace to keep it shown", withField(fields, "error", err.Error()))
 		return
 	}
-	if !record.Hidden {
+	if !record.Backlogged {
 		return
 	}
 	if err := o.deps.DeployChecks.Resume(ctx, mediator); err != nil {
 		// THE GATE PASSED (Mediate), BUT THE MEDIATOR MAY BE HANDED AWAY
 		// SINCE: a refusal on its standing is the daemon that serves it next
 		// to keep it shown.
-		if o.refusedOnStanding(fields, "keeping the hidden mediator shown", err) {
+		if o.refusedOnStanding(fields, "keeping the backlogged mediator shown", err) {
 			return
 		}
-		o.deps.Log.Global().Error(opMediation, "the hidden mediator could not be shown", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "the backlogged mediator could not be shown", withField(fields, "error", err.Error()))
 		return
 	}
-	o.deps.Log.Global().Info(opMediation, "showed the hidden mediator; it stands in its repository's section for good", fields)
+	o.deps.Log.Global().Info(opMediation, "showed the backlogged mediator; it stands in its repository's section for good", fields)
 }
 
 // markBriefed records queue Q's mediator in role R briefed, once its first

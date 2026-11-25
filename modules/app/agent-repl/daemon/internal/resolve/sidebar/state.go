@@ -113,28 +113,37 @@ type wsState struct {
 	// sink. A render whose result differs reports it (resolver.row).
 	persisted *wsm.TurnResult
 
-	// viewedArm is the VIEWED FACT: the status arm the user last interacted
-	// with the workspace on (SetInteracted), empty when the workspace is not
-	// viewed. The row's viewed (PARTIAL) marker is DERIVED from it
-	// (`viewedOn`). Every status change clears it (resolver.row), on any arm:
-	// the user has not interacted with what the row now shows.
+	// viewedArm is the VIEWED FACT: the status arm the user's interaction
+	// viewed the workspace on (SetInteracted), empty when the workspace is not
+	// viewed. The row's viewed (PARTIAL) marker is DERIVED from it (`viewed`).
+	// ONLY A TURN'S START CLEARS IT (owner rulings, 2026-11-24;
+	// clearViewedForTurn): never a turn's end, a deploy, a restart, a park, a
+	// revival, a link blip or a fold. It is durable (the viewed sink writes
+	// wsm's viewed_status) and seeded from the record at boot (restoreViewed).
+	// The arm is kept as evidence of what was viewed.
 	viewedArm string
 	// persistedViewed is the viewed arm the durable record holds, as far as
 	// this resolver knows; a render whose viewed arm differs reports it
 	// (noteViewed).
 	persistedViewed string
+	// leftAt is when the user last switched away from the workspace, nil
+	// until this roster saw them do so; leftFirstViewed reports that the visit
+	// left then first marked it viewed, and visitBeganViewed whether the
+	// current or last visit began viewed (page.go).
+	leftAt *time.Time
+	// awaySince is when this roster first saw the workspace a one-shot or in
+	// its synchronous merge, nil while it is neither (pageInputsOf).
+	awaySince        *time.Time
+	leftFirstViewed  bool
+	visitBeganViewed bool
+	// turnEndedAt is when this roster saw the workspace's last turn end
+	// (SetTurnEnded), nil until it has; the view exemption measures from the
+	// later of it and the durable record's LastTurnEndedAt.
+	turnEndedAt *time.Time
 	// viewedSettled reports that the viewed fact has been decided: by a live
-	// interaction or status change, or by seeding it ONCE from the durable
-	// record (restoreViewed).
+	// interaction or turn, or by seeding it ONCE from the durable record
+	// (restoreViewed).
 	viewedSettled bool
-	// viewedRestored reports a viewed arm seeded from the durable record that
-	// the row has not drawn yet. A booting row passes through the arms of its
-	// bring-up (none, init) before it settles, and none of them is a status
-	// change the user missed, so a restored fact waits for its own arm rather
-	// than being lowered by them; it becomes live the first time the row draws
-	// it (resolver.row). A turn the daemon accepts or closes meanwhile is a
-	// real change, and drops it (dropRestoredViewed).
-	viewedRestored bool
 	// interactedAt is when the user last interacted with the workspace, as
 	// this resolver heard it (SetInteracted); nil until it has. The row
 	// states the later of it and the durable record's.
@@ -301,11 +310,8 @@ func (s *wsState) restoreResult(rec wsm.Workspace) bool {
 }
 
 // restoreViewed seeds the viewed fact ONCE from the workspace's durable
-// record, while no live interaction or status change has decided it, so a
-// daemon that did not see the user's interaction draws the row viewed as it
-// stood. The arm it seeds is still only drawn while it is the row's arm
-// (viewedOn), and the first arm this resolver publishes clears it when it is
-// another (resolver.row).
+// record, while no live interaction or turn has decided it, so a daemon that
+// did not see the user's interaction draws the row viewed as it stood.
 func (s *wsState) restoreViewed(rec wsm.Workspace) {
 	if s.viewedSettled {
 		return
@@ -313,17 +319,16 @@ func (s *wsState) restoreViewed(rec wsm.Workspace) {
 	s.viewedSettled = true
 	s.viewedArm = rec.ViewedStatus
 	s.persistedViewed = rec.ViewedStatus
-	s.viewedRestored = rec.ViewedStatus != ""
 }
 
-// dropRestoredViewed drops a restored viewed fact the row has not drawn yet:
-// a turn accepted or closed since the restore is a status change the user did
-// not interact with. It answers whether it dropped one.
-func (s *wsState) dropRestoredViewed() bool {
-	if !s.viewedRestored {
+// clearViewedForTurn clears the viewed fact because a turn started: the one
+// change the user has not seen yet. It answers whether the row was
+// viewed.
+func (s *wsState) clearViewedForTurn() bool {
+	s.viewedSettled = true
+	if s.viewedArm == "" {
 		return false
 	}
-	s.viewedRestored = false
 	s.viewedArm = ""
 	return true
 }
@@ -388,35 +393,64 @@ func (s *wsState) noteArm(arm string) (string, bool) {
 	return previous, changed
 }
 
-// viewedOn reports whether a row on arm draws the viewed (PARTIAL) marker. It
-// is DERIVED, never stored: the marker stands exactly when arm is the arm the
-// user last interacted with the workspace on, and no status change has come
-// since (the change clears the fact, resolver.row). Every arm can be viewed:
-// "you have interacted with this since it last changed" is as true of a
-// running turn as of a finished one, and a working workspace stays visible
-// whatever this says (visibility.go).
-func (s *wsState) viewedOn(arm string) bool {
-	return s.viewedArm != "" && s.viewedArm == arm
+// viewed reports whether the row draws the viewed (PARTIAL) marker: the user
+// interacted with the workspace since its last turn started. Every
+// arm can be viewed: "you have interacted with this since its last turn" is as
+// true of a running turn as of a finished one, and a working workspace stays
+// visible whatever this says (visibility.go).
+func (s *wsState) viewed() bool {
+	return s.viewedArm != ""
 }
 
 // interacted records that the user interacted with the workspace at AT, on
-// the arm the row draws now. It answers whether the viewed fact changed. An
-// interaction before any arm has been published views nothing: there is no
-// row the user could have interacted with.
-func (s *wsState) interacted(at time.Time) bool {
+// the arm the row draws now, and views the row unless EXEMPT (ViewExemption).
+// It answers whether the viewed fact changed. An interaction before any arm
+// has been published views nothing: there is no row the user could have
+// interacted with. The instant is recorded either way, so the interaction
+// still counts toward the user's recency.
+func (s *wsState) interacted(at time.Time, exempt bool) bool {
 	if s.interactedAt == nil || at.After(*s.interactedAt) {
 		s.interactedAt = &at
 	}
-	s.viewedSettled = true
-	if !s.lastArmSeen {
+	if exempt {
 		return false
 	}
-	s.viewedRestored = false
-	if s.viewedArm == s.lastArm {
+	s.viewedSettled = true
+	if !s.lastArmSeen || s.viewedArm != "" {
 		return false
 	}
 	s.viewedArm = s.lastArm
 	return true
+}
+
+// lastTurnEnd answers when the workspace's last turn ended: the later of the
+// end this roster saw (s.turnEndedAt) and the durable record's (RECORDED),
+// nil when neither knows one. The view exemption and the allocation's clocks
+// all read it, so a daemon that did not see the end measures from the record.
+func (s *wsState) lastTurnEnd(recorded *time.Time) *time.Time {
+	return laterOf(s.turnEndedAt, recorded)
+}
+
+// ViewExemption is how long after a turn ends the user's interaction with the
+// workspace marks nothing viewed (owner ruling, 2026-11-24): a result read in
+// the minutes after it lands stays unread, so a fold keeps drawing it and its
+// page stays loaded, until the user interacts with it again after the window.
+// It is a product rule, not a bound on any operation.
+const ViewExemption = 10 * time.Minute
+
+// viewExempt reports whether an interaction at AT falls inside the view
+// exemption of the workspace's last turn end: the later of the one this
+// roster saw (s.turnEndedAt) and the durable record's (RECORDED). A running
+// turn is never exempt: there is no result to keep unread.
+func (s *wsState) viewExempt(at time.Time, recorded *time.Time) (time.Time, bool) {
+	if s.turn != nil {
+		return time.Time{}, false
+	}
+	ended := s.lastTurnEnd(recorded)
+	if ended == nil || at.Before(*ended) {
+		return time.Time{}, false
+	}
+	return *ended, at.Sub(*ended) < ViewExemption
 }
 
 // resultEndedNow reports whether a turn end stands, which holds the row on
@@ -464,6 +498,12 @@ type rosterState struct {
 	// visibility sink, or read from the registry, per workspace.
 	visibility     map[ids.WorkspaceID]wsm.Visibility
 	visibilityKept map[ids.WorkspaceID]wsm.Visibility
+	// page is every workspace's page verdict as the last render derived it
+	// (resolvePages): true when the editor holds its page.
+	page map[ids.WorkspaceID]bool
+	// shimHold is every workspace's shim hold as the last render derived it
+	// (resolveShimHolds).
+	shimHold map[ids.WorkspaceID]wsm.ShimHold
 	// regSeen reports whether any registry has been installed. Nothing
 	// publishes before one: the roster is a view OF the registry, and a roster
 	// built from live frames alone would name no workspaces.

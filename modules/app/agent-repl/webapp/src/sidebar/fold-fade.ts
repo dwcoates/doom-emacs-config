@@ -2,7 +2,7 @@
  * fold-fade — a row a fold drew stays drawn as it fades away.
  *
  * A COLLAPSED FOLD DRAWS A ROW IT COVERS only while the daemon marks it
- * surfaced (frontend.v1.RosterOpenRow.surfaced): the workspace the user is on,
+ * surfaced (frontend.v1.RosterOpenRow.fold_cover): the workspace the user is on,
  * or one whose turn started under the fold and still runs. The moment the
  * mark goes (the user switched away, the turn ended), the row stays drawn and
  * fades out over FOLD_FADE_MS, then the fold hides it (owner request,

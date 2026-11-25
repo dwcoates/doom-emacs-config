@@ -182,7 +182,7 @@ export type LifecycleConfig = Message<"repoconfig.v1.LifecycleConfig"> & {
   /**
    * The repository's DEPLOY CHECKS: every deploy holds the queue until it is
    * checked. A CHAIN of deploys begins at a deploy no other check was owed
-   * beside and ends when the queue advances. Each chain has one hidden
+   * beside and ends when the queue advances. Each chain has one backlogged
    * INTAKE workspace that states the problems THIS deploy caused, from facts
    * the daemon sorts for it, and approves the deploy, escalates it to the
    * user, or dispatches a fix (agentrepl.v1.UpdateMergeQueueMediation). A
@@ -216,7 +216,7 @@ export type LifecycleConfig = Message<"repoconfig.v1.LifecycleConfig"> & {
   pullRequests?: PullRequestFollowing | undefined;
 
   /**
-   * The repository's PRODUCTION CHECKS: after each deploy, a standing hidden
+   * The repository's PRODUCTION CHECKS: after each deploy, a standing backlogged
    * PRODUCTION MEDIATOR reviews what production logged while the version
    * before it served alone, from the moment the previous landing finished to
    * the moment this landing started, against the same span before it. It

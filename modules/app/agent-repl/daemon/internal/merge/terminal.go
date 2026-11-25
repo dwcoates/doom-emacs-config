@@ -234,7 +234,7 @@ func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out Detac
 //   - A workspace the user revealed is the user's, and stays open.
 //
 // Every other end (a failure, a dequeue, a merge dropped behind one that did
-// not land, given up, or hidden at its cold gate) closes it, with the daemon
+// not land, given up, or backlogged at its cold gate) closes it, with the daemon
 // as its closer. Closing ends its request off the queue in the same write
 // (wsm.markClosedInTx), and keeps its worktree and branch, which the
 // handback names.
@@ -569,9 +569,9 @@ func (r *run) stopped(ctx context.Context, err error) bool {
 // teardown is THE ONE RELEASE PATH. Every end a run can have -- landed,
 // failed, abandoned (a dequeue, an evict, its workspace closed), stopped --
 // comes through it, and it gives back everything the run held, in the one
-// order that is safe: the output address, the occupancy, the lease, the queue
-// entry, the displaced turn, the landed worktree, the queue's tree, and the
-// repository's slot and lock. It fires the self-reload last.
+// order that is safe: the output address, the occupancy, the lease, the
+// displaced turn, the queue entry, the landed worktree, the queue's tree, and
+// the repository's slot and lock. It fires the self-reload last.
 //
 // terminal, when set, publishes the run's terminal. It runs right after the
 // lease is released, so no client is told the workspace was handed back while
@@ -607,6 +607,17 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	}
 	r.keepOpenForHeldPrompts(ctx, log)
 	r.o.deps.Queue.OnLeaseChanged(r.ws)
+	// THE DISPLACED TURN GOES BACK THE MOMENT THE LEASE IS RELEASED, before
+	// the terminal, the run leaving its line, or any close or tree removal.
+	// Each of those can let the cache keeper park the workspace's session
+	// (wsm.Session.BringUpHold, cachelapse.Keeper.ShimHoldChanged): put back
+	// after them, the turn met a parked session and a revival, the gap
+	// between work owed and work running the allocation forbids. The
+	// resubmission is also a workspace-bound act -- it records a turn and
+	// writes to that workspace's own log sink, which is a symlink INSIDE the
+	// worktree -- so a removal ahead of it makes the "exactly once" guarantee
+	// unreachable.
+	r.resubmitDisplaced(ctx)
 	if terminal != nil {
 		terminal()
 	}
@@ -658,12 +669,6 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	}
 	r.o.mu.Unlock()
 	r.o.clearOffer(r.ws)
-
-	// THE DISPLACED TURN GOES BACK BEFORE ANY TREE GOES AWAY. The
-	// resubmission is a workspace-bound act -- it records a turn and writes to
-	// that workspace's own log sink, which is a symlink INSIDE the worktree --
-	// so a removal ahead of it makes the "exactly once" guarantee unreachable.
-	r.resubmitDisplaced(ctx)
 
 	// THE WORKSPACE A LANDING CLOSES goes only after the terminal was
 	// published, and only for a merge that landed: a failed merge's branch

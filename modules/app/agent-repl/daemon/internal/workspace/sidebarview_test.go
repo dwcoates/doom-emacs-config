@@ -71,7 +71,7 @@ func TestFoldMergedSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
-func TestFoldHiddenSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
+func TestFoldBacklogRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
 	tests := []struct {
 		name   string
 		folded bool
@@ -81,21 +81,21 @@ func TestFoldHiddenSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			prior := wsm.DefaultSidebarView
-			prior.HiddenFolded = !tt.folded
+			prior.BacklogFolded = !tt.folded
 			f.db.view = &prior
 
 			// Act
-			err := f.verbs.FoldHiddenSection(context.Background(), tt.folded)
+			err := f.verbs.FoldBacklog(context.Background(), tt.folded)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("FoldHiddenSection: %v", err)
+				t.Fatalf("FoldBacklog: %v", err)
 			}
 			if len(f.sidebar.registries) != 1 {
 				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
 			}
-			if got := f.sidebar.registries[0].View.HiddenFolded; got != tt.folded {
-				t.Fatalf("republished hidden fold = %v, want %v", got, tt.folded)
+			if got := f.sidebar.registries[0].View.BacklogFolded; got != tt.folded {
+				t.Fatalf("republished backlogged fold = %v, want %v", got, tt.folded)
 			}
 		})
 	}
@@ -202,19 +202,19 @@ func TestFoldMergeQueueSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
-func TestFoldHiddenSectionSurfacesAFailedWriteAtError(t *testing.T) {
+func TestFoldBacklogSurfacesAFailedWriteAtError(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	f.db.setHiddenFoldedErr = errors.New("disk I/O error")
+	f.db.setBacklogFoldedErr = errors.New("disk I/O error")
 
 	// Act
-	err := f.verbs.FoldHiddenSection(context.Background(), false)
+	err := f.verbs.FoldBacklog(context.Background(), false)
 
 	// Assert
 	if err == nil {
 		t.Fatal("a failed fold write was answered as success")
 	}
-	if !loggedAtError(f, opFoldHiddenSection) {
+	if !loggedAtError(f, opFoldBacklog) {
 		t.Fatal("the failed write was not recorded at error")
 	}
 	if len(f.sidebar.registries) != 0 {
@@ -261,7 +261,7 @@ func TestARepublishThatCannotReadTheViewPublishesNothingAndSaysSoAtError(t *test
 func TestPublishRegistryCarriesTheRecordedView(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	recorded := wsm.SidebarView{MergedFolded: true, HiddenFolded: true}
+	recorded := wsm.SidebarView{MergedFolded: true, BacklogFolded: true}
 	f.db.view = &recorded
 
 	// Act
@@ -363,7 +363,7 @@ func TestEverySingletonSectionFoldSharesOneShape(t *testing.T) {
 	}{
 		{"recently merged", opFoldMergedSection, "recently merged section", func(v Verbs) error { return v.FoldMergedSection(context.Background(), true) }},
 		{"merge queue", opFoldMergeQueueSection, "merge queue section", func(v Verbs) error { return v.FoldMergeQueueSection(context.Background(), true) }},
-		{"hidden", opFoldHiddenSection, "hidden section", func(v Verbs) error { return v.FoldHiddenSection(context.Background(), true) }},
+		{"backlogged", opFoldBacklog, "backlog", func(v Verbs) error { return v.FoldBacklog(context.Background(), true) }},
 		{"open", opFoldOpenSection, "open section", func(v Verbs) error { return v.FoldOpenSection(context.Background(), true) }},
 	}
 	for _, tt := range tests {
@@ -406,15 +406,15 @@ func TestSizeSectionsRecordsEveryHeightAndRepublishesTheRoster(t *testing.T) {
 			name: "a drag between two bands sizes both at once",
 			changes: []wsm.SectionHeightChange{
 				{Section: wsm.BandMerged, Height: wsm.SizedHeight(2)},
-				{Section: wsm.BandHidden, Height: wsm.SizedHeight(0)},
+				{Section: wsm.BandBacklog, Height: wsm.SizedHeight(0)},
 			},
-			want: wsm.SidebarView{MergedHeight: wsm.SizedHeight(2), HiddenHeight: wsm.SizedHeight(0)},
+			want: wsm.SidebarView{MergedHeight: wsm.SizedHeight(2), BacklogHeight: wsm.SizedHeight(0)},
 		},
 		{
 			name:    "a fitted height replaces a sized one and keeps the folds",
-			prior:   wsm.SidebarView{HiddenFolded: true, HiddenHeight: wsm.SizedHeight(4), MergedHeight: wsm.SizedHeight(3)},
-			changes: []wsm.SectionHeightChange{{Section: wsm.BandHidden, Height: wsm.FittedHeight()}},
-			want:    wsm.SidebarView{HiddenFolded: true, MergedHeight: wsm.SizedHeight(3)},
+			prior:   wsm.SidebarView{BacklogFolded: true, BacklogHeight: wsm.SizedHeight(4), MergedHeight: wsm.SizedHeight(3)},
+			changes: []wsm.SectionHeightChange{{Section: wsm.BandBacklog, Height: wsm.FittedHeight()}},
+			want:    wsm.SidebarView{BacklogFolded: true, MergedHeight: wsm.SizedHeight(3)},
 		},
 	}
 	for _, tt := range tests {
@@ -472,7 +472,7 @@ func TestSizeSectionsSurfacesAFailedWriteAtError(t *testing.T) {
 	f.db.setSectionHeightsErr = errors.New("disk I/O error")
 
 	// Act
-	err := f.verbs.SizeSections(context.Background(), []wsm.SectionHeightChange{{Section: wsm.BandHidden, Height: wsm.SizedHeight(1)}})
+	err := f.verbs.SizeSections(context.Background(), []wsm.SectionHeightChange{{Section: wsm.BandBacklog, Height: wsm.SizedHeight(1)}})
 
 	// Assert
 	if err == nil {

@@ -263,7 +263,7 @@ mechanics (`integration/shareddaemon_test.go`).
   and a refusal blocks it), `groupSelection` (the selected workspace is one
   per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
   catalog its login last served; no case of it starts a session) and
-  `groupHiddenKeepalives` (SendHiddenKeepalives asks every hidden shim of
+  `groupBackloggedKeepalives` (SendBackloggedKeepalives asks every backlogged shim of
   the daemon), `groupTabOrder` (tab numbers run across every repository,
   and the arrangement lists them all), `groupDesktopBanner` (a banner
   turns on the one editor's focus, and a focus gain claims the newest held
@@ -570,18 +570,19 @@ open's) starts only workspaces `bringup.OnlyVisible` keeps: those the persisted
 visibility (`wsm.Workspace.Visibility`) calls visible, widened by a queued
 merge, the deploy mediator and a fold's spared one-shots (`wsm.Workspace.Runs`).
 What visible means is `frontend.v1.RosterRowVisibility`'s alone: an open
-workspace no fold covers, or one that is working or unviewed, the parent of a
-visible one, and the selected one. A fold that makes a workspace not visible
+workspace that gets a number in the sidebar's Open section, its one
+definition in `webapp/src/sidebar/AGENTS.md` ("Visibility"). A fold that makes a workspace not visible
 stands the session down through the idle sweep's own gate and park (`drain/withheld.go`);
 a turn in flight defers it to the free edge that turn's end raises, and a
 workspace expanded again meanwhile is not stood down. A fold never stands down
 a one-shot or a workspace with a merge pending (`wsm.Workspace.FoldSpare`):
-it hides them and changes no status. HIDING leaves the cache
-to lapse first (`internal/cachelapse`, 2026-10-13): the keeper holds the
-shim's keep-alives, records the lapse the held shim projects on the row (the
-hidden section counts down to it), and stands the session down through the
-same withheld path when it comes; a hidden workspace's session is also
-started held. Records: `daemon.cachelapse.cadence` (INFO per hold or run),
+it hides them and changes no status. A BACKLOG interrupts the running turn,
+and its cache gets one last keep-alive beat before it lapses; the rules of
+which workspaces hold a page and a running shim live in
+`webapp/src/sidebar/AGENTS.md` ("Workspace resource allocation"). The keeper
+records the lapse the held shim projects on the row (the backlog counts down
+to it), and stands the session down through the same withheld path when it
+comes. Records: `daemon.cachelapse.cadence` (INFO per hold or run),
 `daemon.cachelapse.projection` (INFO per recorded or dropped projection),
 `daemon.cachelapse.lapse` (INFO per lapse taken or skipped),
 `daemon.opentabs.open` (INFO per answered workspace, with its
@@ -1936,7 +1937,7 @@ prompt was sent. Now:
   and a recorded conversation; the requested model is the session's. A read
   the user already paid for (`wsm.ColdReadPayment`) is never raised again: the
   pay answer sends no request, so its session restates the same lapsed read. The sidebar,
-  footer and composer dock draw it as any gate. A hidden or closed workspace
+  footer and composer dock draw it as any gate. A backlogged or closed workspace
   keeps its lapse (`Keeper.lapse`); a declined raise waits for the next projection.
 - **The session is parked at the gate whether or not the user is looking**
   (`drain.Controller.ColdDown` with `atGate`), because the answer's resume

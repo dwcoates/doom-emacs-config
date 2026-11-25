@@ -298,12 +298,12 @@ func TestASelectionRedrawsTheRowsItMoves(t *testing.T) {
 func TestAnArmThatReadsTheClockIsDerivedOnEveryRender(t *testing.T) {
 	// Arrange
 	r, surfaces := newResolver(t)
-	hidden := workspace("hidden", "hidden")
-	hidden.Hidden = true
-	hidden.HiddenAt = at(0)
+	backlogged := workspace("hidden", "hidden")
+	backlogged.Backlogged = true
+	backlogged.BackloggedAt = at(0)
 	gated := uint64(1)
-	hidden.CacheLapse = &wsm.CacheLapse{LapsesAt: epoch, GatedTokens: &gated}
-	r.SetRegistry(registry(hidden, workspace("other", "other")))
+	backlogged.CacheLapse = &wsm.CacheLapse{LapsesAt: epoch, GatedTokens: &gated}
+	r.SetRegistry(registry(backlogged, workspace("other", "other")))
 	mark := len(surfaces.Records())
 
 	// Act

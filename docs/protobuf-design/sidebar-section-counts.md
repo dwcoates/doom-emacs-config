@@ -32,7 +32,7 @@ scrolling.
 ### 2. The Recently Merged band shows what fits, and counts that
 
 > **Superseded 2026-10-11:** the band no longer hides rows past what fits.
-> Hidden Workspaces and Recently Merged are now scrolling viewports sized by
+> The Backlog and Recently Merged are now scrolling viewports sized by
 > `fitBands` (`webapp/src/sidebar/band-fit.ts`), their counts are the daemon's,
 > and Recently Merged holds a week of merges (`sidebar.MergedWindow`).
 

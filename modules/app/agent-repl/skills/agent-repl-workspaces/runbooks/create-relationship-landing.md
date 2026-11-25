@@ -11,7 +11,7 @@ not the relationship's default, its landing target:
     automatically without `workspace subscribe` (WS is told its questions,
     its landing and its close; NOT its turn ends, see "TURN-END
     SUBSCRIPTIONS" in `subscribe.md`), and WS reviews it and closes
-    it. WS cannot be closed, hidden, finished or merged away while the child
+    it. WS cannot be closed, backlogged, finished or merged away while the child
     is open.
   - `peer` is tangential, self-sufficient, fire-and-forget: top level,
     followed by nobody, with no owner, and it always lands itself. The

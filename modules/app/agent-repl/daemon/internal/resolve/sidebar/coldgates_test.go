@@ -18,8 +18,8 @@ func gateCard(tokens int64) *frontendv1.FeedColdGate {
 }
 
 func TestTheRosterCarriesTheShownColdGates(t *testing.T) {
-	hidden := workspace("w2", "two")
-	hidden.Hidden, hidden.HiddenAt = true, at(time.Hour)
+	backlogged := workspace("w2", "two")
+	backlogged.Backlogged, backlogged.BackloggedAt = true, at(time.Hour)
 	closed := workspace("w3", "three")
 	closed.Closed = true
 	row := &frontendv1.FeedId{Value: "cold-gate:w1"}
@@ -32,7 +32,7 @@ func TestTheRosterCarriesTheShownColdGates(t *testing.T) {
 		{name: "an open workspace's shown gate is carried", listed: workspace("w1", "one"), gate: gateCard(5),
 			want: []*frontendv1.RosterColdGate{{Workspace: workspace("w1", "one").Ref(), Row: row, Gate: gateCard(5)}}},
 		{name: "a lifted gate is no longer carried", listed: workspace("w1", "one"), gate: nil, want: nil},
-		{name: "a hidden workspace's gate is not carried", listed: hidden, gate: gateCard(5), want: nil},
+		{name: "a backlogged workspace's gate is not carried", listed: backlogged, gate: gateCard(5), want: nil},
 		{name: "a closed workspace's gate is not carried", listed: closed, gate: gateCard(5), want: nil},
 	}
 	for _, tt := range tests {

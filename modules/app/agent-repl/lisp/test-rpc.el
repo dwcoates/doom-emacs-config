@@ -116,9 +116,9 @@ would abort the very branch a test is asserting."
     ("ListMergedWorkspaces" agent-repl-rpc-list-merged-workspaces
      agent-repl-wire-encode-list-merged-workspaces-request
      agent-repl-wire-decode-list-merged-workspaces-response)
-    ("SetWorkspaceHidden" agent-repl-rpc-set-workspace-hidden
-     agent-repl-wire-encode-set-workspace-hidden-request
-     agent-repl-wire-decode-set-workspace-hidden-response)
+    ("SetWorkspaceBacklogged" agent-repl-rpc-set-workspace-backlogged
+     agent-repl-wire-encode-set-workspace-backlogged-request
+     agent-repl-wire-decode-set-workspace-backlogged-response)
     ("UpdateRemoteControlMode" agent-repl-rpc-update-remote-control-mode
      agent-repl-wire-encode-update-remote-control-mode-request
      agent-repl-wire-decode-update-remote-control-mode-response)

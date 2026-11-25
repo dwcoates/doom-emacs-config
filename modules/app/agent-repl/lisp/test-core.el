@@ -429,10 +429,10 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "answers the interactive history search")
     ("host.el" agent-repl-host--unheld-select-refused "[agent-repl] The switch to %s did not happen (%s): pick it again"
      "tells the user the workspace they picked could not be switched to, and that picking it again retries")
-    ("host.el" agent-repl-host-request-switch
+    ("host.el" agent-repl-host--request-switch-held
      "[agent-repl] Cannot switch to %s: the daemon has not registered it"
      "explains why the user's switch request went nowhere")
-    ("host.el" agent-repl-host-request-switch
+    ("host.el" agent-repl-host--request-switch-held
      "[agent-repl] Cannot switch to %s: no daemon connection"
      "explains why the user's switch request went nowhere")
     ("input.el" agent-repl--input-resent
@@ -570,7 +570,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their interrupt raised the merge-queue question and where to answer it")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
-    ("verbs.el" agent-repl-verb-set-hidden "agent-repl: %s %s"
+    ("verbs.el" agent-repl-verb-set-backlogged "agent-repl: %s %s"
      "confirms the user's hide or show of a workspace")
     ("verbs.el" agent-repl-verb-show-ref "agent-repl: %s shown"
      "confirms the hidden workspace the user asked to show again is shown")
@@ -580,7 +580,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "reports the remote-control mode the user's toggle left")
     ("verbs.el" agent-repl-remote-control-toggle "agent-repl: %s"
      "reports why the user's remote-control toggle was refused")
-    ("verbs.el" agent-repl-send-hidden-keepalives "agent-repl: %s"
+    ("verbs.el" agent-repl-send-backlogged-keepalives "agent-repl: %s"
      "reports how the user's keep-alive to the hidden workspaces went")
     ("verbs.el" agent-repl-verb-swap "agent-repl: swapped %s with %s"
      "confirms the user's swap command")

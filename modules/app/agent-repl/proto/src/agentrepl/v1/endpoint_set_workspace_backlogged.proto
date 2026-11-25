@@ -1,23 +1,23 @@
-// endpoint_set_workspace_hidden.proto — SetWorkspaceHidden: move a workspace
-// into the sidebar's HIDDEN WORKSPACES section, or back out of it. SIDEBAR
+// endpoint_set_workspace_backlogged.proto — SetWorkspaceBacklogged: move a workspace
+// into the sidebar's BACKLOG, or back out of it. SIDEBAR
 // section.
 //
-// A HIDDEN WORKSPACE'S CACHE IS LEFT TO LAPSE. Its worktree and its place in
+// A BACKLOGGED WORKSPACE'S CACHE IS LEFT TO LAPSE. Its worktree and its place in
 // the registry are kept; the roster resolver hoists its row out of every
-// grouping into frontend.v1.WorkspaceRoster.hidden, and the Emacs tab bar
+// grouping into frontend.v1.WorkspaceRoster.backlog, and the Emacs tab bar
 // stops drawing, numbering and navigating to its tab, exactly as it does for a
 // workspace whose repository section is collapsed. Its session's keep-alives
 // are HELD (the daemon sends them no more, 2026-10-13), so its prompt cache lapses on
-// its own clock, and the hidden row counts down to that moment
-// (frontend.v1.RosterRowWhenHiddenCache). When it comes, the session is stood
+// its own clock, and the backlogged row counts down to that moment
+// (frontend.v1.RosterRowWhenBackloggedCache). When it comes, the session is stood
 // down as the idle sweep stands one down (it sleeps, and its conversation is
 // kept), never under a running turn. SHOWING it again before then runs the
 // keep-alives again; showing it starts nothing by itself either way: the
 // editor asks for it with OpenTabs, which brings it up and answers when it is
 // open. The new state arrives on the roster stream.
 //
-// DURABLE: the daemon records the flag on the workspace, so a hidden
-// workspace stays hidden across a daemon restart.
+// DURABLE: the daemon records the flag on the workspace, so a backlogged
+// workspace stays backlogged across a daemon restart.
 
 syntax = "proto3";
 
@@ -28,76 +28,76 @@ import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-message SetWorkspaceHiddenRequest {
+message SetWorkspaceBackloggedRequest {
   // The workspace, echoed from its roster row (or the editor's tab).
   workspace.v1.WorkspaceRef workspace = 1;
-  // THE ARM IS THE PLACE ASKED FOR: into the hidden section, or back into
+  // THE ARM IS THE PLACE ASKED FOR: into the backlog, or back into
   // the groupings. Unset is a malformed request (Connect InvalidArgument).
   // Asking for the place a workspace already holds is NOT refused: two
   // clients may race to the same state, and both have what they asked for.
   oneof visibility {
-    SetWorkspaceHiddenHide hide = 2;
-    SetWorkspaceHiddenShow show = 3;
+    SetWorkspaceBackloggedHide hide = 2;
+    SetWorkspaceBackloggedShow show = 3;
   }
 }
 
-// Move the workspace into the hidden section. DELIBERATELY EMPTY: the arm is
+// Move the workspace into the backlog. DELIBERATELY EMPTY: the arm is
 // the request.
-message SetWorkspaceHiddenHide {}
+message SetWorkspaceBackloggedHide {}
 
 // Move the workspace back into the groupings it belongs to. DELIBERATELY
 // EMPTY: the arm is the request.
-message SetWorkspaceHiddenShow {}
+message SetWorkspaceBackloggedShow {}
 
 // THE ARM IS THE OUTCOME.
-message SetWorkspaceHiddenResponse {
+message SetWorkspaceBackloggedResponse {
   oneof result {
-    SetWorkspaceHiddenSuccess success = 1;
-    SetWorkspaceHiddenError error = 2;
+    SetWorkspaceBackloggedSuccess success = 1;
+    SetWorkspaceBackloggedError error = 2;
   }
 }
 
 // Recorded; the roster push carries the new state.
-message SetWorkspaceHiddenSuccess {}
+message SetWorkspaceBackloggedSuccess {}
 
 // The daemon's refusals. Validation failures (an unset field or arm, a blank
 // id) are Connect InvalidArgument, never an arm.
-message SetWorkspaceHiddenError {
+message SetWorkspaceBackloggedError {
   oneof cause {
     // The workspace id is not in the daemon's registry.
-    SetWorkspaceHiddenUnknownWorkspace unknown_workspace = 1;
+    SetWorkspaceBackloggedUnknownWorkspace unknown_workspace = 1;
     // The echoed dir disagrees with the registry's dir for this id.
-    SetWorkspaceHiddenWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    SetWorkspaceBackloggedWorkspaceRefMismatch workspace_ref_mismatch = 2;
     // This daemon released the workspace to a successor; dial `address`.
-    SetWorkspaceHiddenTransferringAway transferring_away = 3;
+    SetWorkspaceBackloggedTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
-    SetWorkspaceHiddenNotYetAdopted not_yet_adopted = 4;
-    // The workspace has open children (hidden ones included), and hiding it
+    SetWorkspaceBackloggedNotYetAdopted not_yet_adopted = 4;
+    // The workspace has open children (backlogged ones included), and hiding it
     // would leave them without their parent in the Open section.
     WorkspaceHasOpenChildren has_open_children = 5;
-    // The workspace's parent is hidden or closed, and showing it would make an
+    // The workspace's parent is backlogged or closed, and showing it would make an
     // open child of a parent outside the Open section.
     WorkspaceParentNotOpen parent_not_open = 6;
   }
 }
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
-message SetWorkspaceHiddenUnknownWorkspace {}
+message SetWorkspaceBackloggedUnknownWorkspace {}
 
 // The echoed dir disagrees with the registry's dir for this id.
-message SetWorkspaceHiddenWorkspaceRefMismatch {
+message SetWorkspaceBackloggedWorkspaceRefMismatch {
   // The dir the registry holds for this id.
   string registry_dir = 1;
 }
 
 // This daemon released the workspace to a successor.
-message SetWorkspaceHiddenTransferringAway {
+message SetWorkspaceBackloggedTransferringAway {
   // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
   string address = 1;
 }
 
 // A joining daemon has not finished adopting this workspace yet.
-message SetWorkspaceHiddenNotYetAdopted {
+message SetWorkspaceBackloggedNotYetAdopted {
   // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
   // joining daemon adopts it: the handover's incumbent. A client views and
   // acts on the workspace there in the meantime, and the incumbent's later

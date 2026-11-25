@@ -65,14 +65,14 @@
                  agent-repl-register-repository
                  agent-repl-set-priority
                  agent-repl-hide-workspace
-                 agent-repl-show-hidden-workspace
-                 agent-repl-send-hidden-keepalives))
+                 agent-repl-show-backlogged-workspace
+                 agent-repl-send-backlogged-keepalives))
     (should (commandp cmd))))
 
-(ert-deftest agent-repl-test-keybindings-spc-j-R-sends-the-hidden-keepalives ()
-  "`SPC j R' sends a keep-alive to every hidden workspace."
+(ert-deftest agent-repl-test-keybindings-spc-j-R-sends-the-backlogged-keepalives ()
+  "`SPC j R' sends a keep-alive to every backlogged workspace."
   (should (string-match-p
-           (regexp-quote "\"R\"  #'agent-repl-send-hidden-keepalives")
+           (regexp-quote "\"R\"  #'agent-repl-send-backlogged-keepalives")
            (agent-repl-test-keybindings--source))))
 
 (ert-deftest agent-repl-test-keybindings-spc-j-p-sets-the-priority ()
@@ -452,7 +452,7 @@ walked for KEY followed by its #\\='COMMAND."
               'agent-repl-open-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-h-hides-the-workspace ()
-  "`SPC TAB h\=' hides the current workspace: off the tab bar, into the sidebar's hidden section."
+  "`SPC TAB h\=' hides the current workspace: off the tab bar, into the sidebar's backlog."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "h")
               'agent-repl-hide-workspace)))
 
@@ -487,10 +487,10 @@ walked for KEY followed by its #\\='COMMAND."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "P")
               'agent-repl-workspace-move)))
 
-(ert-deftest agent-repl-test-keybindings-spc-tab-shift-h-shows-a-hidden-workspace ()
-  "`SPC TAB H\=' picks a hidden workspace, shows it again and switches to it."
+(ert-deftest agent-repl-test-keybindings-spc-tab-shift-h-shows-a-backlogged-workspace ()
+  "`SPC TAB H\=' picks a backlogged workspace, shows it again and switches to it."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "H")
-              'agent-repl-show-hidden-workspace)))
+              'agent-repl-show-backlogged-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-tab-switches-to-the-previous ()
   "`SPC TAB TAB\=' goes back to the workspace or thread selected before the one shown."

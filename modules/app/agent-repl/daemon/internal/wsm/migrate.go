@@ -393,7 +393,27 @@ var migrations = []migration{
 	{To: 207, Name: "remediation_finish_covered", Kind: MigrationAdditive, DDL: remediationFinishCoveredDDL},
 	// IT IS ADDITIVE: two defaulted columns the previous build never names.
 	{To: 208, Name: "slack_thread_poll", Kind: MigrationAdditive, DDL: slackThreadPollDDL},
+	// IT IS ADDITIVE: a new nullable column the previous build never names.
+	{To: 209, Name: "sessions_brought_up_at", Kind: MigrationAdditive, DDL: sessionsBroughtUpAtDDL},
+	// IT IS ADDITIVE: the backlog's columns beside the hidden ones, kept
+	// equal by triggers while the previous build writes the hidden ones
+	// (backlogged.go).
+	{To: 210, Name: "workspaces_backlogged", Kind: MigrationAdditive, DDL: backloggedDDL},
+	{To: 211, Name: "retired_hidden_columns", Kind: MigrationContract, DDL: retiredHiddenColumnsDDL},
 }
+
+// sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work
+// (a prompt, a merge step, a create, a fork, ...) last
+// brought a session up (Session.WorkBroughtUpAt), and when one the user asked
+// for that runs no turn of its own (a restart, a relaunch, a rebind, a swap,
+// a cold gate's answer)
+// did (Session.UserBroughtUpAt), so the cache keeper never parks a session in
+// the initialization they begin (Session.BringUpHold), and a successor reads
+// the same instants.
+const sessionsBroughtUpAtDDL = `
+ALTER TABLE sessions ADD COLUMN work_brought_up_at INTEGER;
+ALTER TABLE sessions ADD COLUMN user_brought_up_at INTEGER;
+`
 
 // sessionsKeepaliveRestoredAtDDL is the layout-196 addition: when a
 // keep-alive's restore last brought a session up (Session.KeepaliveRestoredAt),

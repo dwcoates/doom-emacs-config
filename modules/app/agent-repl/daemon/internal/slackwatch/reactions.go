@@ -48,7 +48,7 @@ const (
 	BriefOneShotDirective = "slack-reaction-one-shot"
 )
 
-// IntakeRequest is one fired binding's intake workspace: a hidden peer of
+// IntakeRequest is one fired binding's intake workspace: a backlogged peer of
 // the settings' repository, with a fresh context, whose one turn names the
 // task and forks itself into the workspace that does it.
 type IntakeRequest struct {

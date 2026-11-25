@@ -48,6 +48,19 @@
   (should (equal (agent-repl--recency-reach '("folded" "b" "a") '("b" "a") "folded")
                  '(("b" :older 1) ("a" :newer 1)))))
 
+(ert-deftest agent-repl-test-recency-reach-counts-an-unreported-stop-and-reports-only-drawn-tabs ()
+  "A workspace a fold hides takes a press but wears no gutter, since the sidebar draws no row for it."
+  (should (equal (agent-repl--recency-reach '("c" "folded" "b" "a") '("c" "folded" "b" "a") "c" '("c" "b" "a"))
+                 '(("b" :older 2) ("a" :newer 1)))))
+
+(ert-deftest agent-repl-test-recency-reach-now-counts-every-stop-of-the-ring ()
+  "The reach the gutters show counts every workspace the walk lands on, a tabless one included."
+  (cl-letf (((symbol-function 'agent-repl-host-pending-selection) #'ignore)
+            ((symbol-function 'agent-repl--ws-current-name) (lambda () "c"))
+            ((symbol-function 'agent-repl--recency-ring) (lambda (_current) '("c" "folded" "b" "a")))
+            ((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b" "c"))))
+    (should (equal (agent-repl--recency-reach-now) '(("b" :older 2) ("a" :newer 1))))))
+
 (ert-deftest agent-repl-test-recency-reach-of-a-lone-tab-is-empty ()
   "With no other tab nothing is reached."
   (should-not (agent-repl--recency-reach '("c") '("c") "c")))

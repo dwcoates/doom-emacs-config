@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// hiddenWith reads which family hide hid ID: empty when none did.
-func hiddenWith(t *testing.T, s *store, id WorkspaceID) string {
+// backloggedWith reads which family hide hid ID: empty when none did.
+func backloggedWith(t *testing.T, s *store, id WorkspaceID) string {
 	t.Helper()
 	var with *string
-	if err := s.db().QueryRow(`SELECT hidden_with FROM workspaces WHERE id = ?`, id).Scan(&with); err != nil {
-		t.Fatalf("read hidden_with of %s: %v", id, err)
+	if err := s.db().QueryRow(`SELECT backlogged_with FROM workspaces WHERE id = ?`, id).Scan(&with); err != nil {
+		t.Fatalf("read backlogged_with of %s: %v", id, err)
 	}
 	if with == nil {
 		return ""
@@ -40,16 +40,16 @@ func TestHideFamilyHidesTheParentWithEveryOpenDescendant(t *testing.T) {
 		t.Fatalf("HideFamily = %v, %v; want the child and the grandchild", members, err)
 	}
 	for _, ws := range []Workspace{f.parent, f.child, grandchild} {
-		if !workspaceNow(t, f.s, ws.ID).Hidden {
-			t.Fatalf("%s is shown, want the whole family hidden", ws.Name)
+		if !workspaceNow(t, f.s, ws.ID).Backlogged {
+			t.Fatalf("%s is shown, want the whole family backlogged", ws.Name)
 		}
 	}
-	if hiddenWith(t, f.s, f.child.ID) != string(f.parent.ID) || hiddenWith(t, f.s, grandchild.ID) != string(f.parent.ID) || hiddenWith(t, f.s, f.parent.ID) != "" {
-		t.Fatal("want the child and the grandchild marked as hidden with the parent, and the parent unmarked")
+	if backloggedWith(t, f.s, f.child.ID) != string(f.parent.ID) || backloggedWith(t, f.s, grandchild.ID) != string(f.parent.ID) || backloggedWith(t, f.s, f.parent.ID) != "" {
+		t.Fatal("want the child and the grandchild marked as backlogged with the parent, and the parent unmarked")
 	}
 }
 
-func TestHideFamilyLeavesAMemberHiddenBeforeUnmarked(t *testing.T) {
+func TestHideFamilyLeavesAMemberBackloggedBeforeUnmarked(t *testing.T) {
 	// Arrange
 	f := newFamily(t)
 	mustHide(t, f.s, f.child.ID)
@@ -58,8 +58,8 @@ func TestHideFamilyLeavesAMemberHiddenBeforeUnmarked(t *testing.T) {
 	members, err := f.s.HideFamily(context.Background(), f.parent.ID, time.Unix(10, 0))
 
 	// Assert
-	if err != nil || len(members) != 0 || hiddenWith(t, f.s, f.child.ID) != "" {
-		t.Fatalf("HideFamily = %v, %v, child marked %q; want the child left as the user hid it", members, err, hiddenWith(t, f.s, f.child.ID))
+	if err != nil || len(members) != 0 || backloggedWith(t, f.s, f.child.ID) != "" {
+		t.Fatalf("HideFamily = %v, %v, child marked %q; want the child left as the user hid it", members, err, backloggedWith(t, f.s, f.child.ID))
 	}
 }
 
@@ -73,12 +73,12 @@ func TestHideFamilyLeavesAClosedChildClosed(t *testing.T) {
 	members, err := f.s.HideFamily(context.Background(), f.parent.ID, time.Unix(10, 0))
 
 	// Assert
-	if err != nil || len(members) != 0 || !workspaceNow(t, f.s, f.parent.ID).Hidden {
-		t.Fatalf("HideFamily = %v, %v; want the parent hidden alone", members, err)
+	if err != nil || len(members) != 0 || !workspaceNow(t, f.s, f.parent.ID).Backlogged {
+		t.Fatalf("HideFamily = %v, %v; want the parent backlogged alone", members, err)
 	}
 }
 
-func TestShowFamilyShowsTheParentAndWhatWasHiddenWithIt(t *testing.T) {
+func TestShowFamilyShowsTheParentAndWhatWasBackloggedWithIt(t *testing.T) {
 	// Arrange
 	f, grandchild := threeGenerations(t)
 	if _, err := f.s.HideFamily(context.Background(), f.parent.ID, time.Unix(10, 0)); err != nil {
@@ -93,8 +93,8 @@ func TestShowFamilyShowsTheParentAndWhatWasHiddenWithIt(t *testing.T) {
 		t.Fatalf("ShowFamily = %v, %v; want the child, then the grandchild", members, err)
 	}
 	for _, ws := range []Workspace{f.parent, f.child, grandchild} {
-		if workspaceNow(t, f.s, ws.ID).Hidden || hiddenWith(t, f.s, ws.ID) != "" {
-			t.Fatalf("%s is still hidden or marked, want the family shown and unmarked", ws.Name)
+		if workspaceNow(t, f.s, ws.ID).Backlogged || backloggedWith(t, f.s, ws.ID) != "" {
+			t.Fatalf("%s is still backlogged or marked, want the family shown and unmarked", ws.Name)
 		}
 	}
 }
@@ -120,17 +120,17 @@ func TestShowFamilyShowsAChildBeforeTheGrandchildWhateverTheirPlaces(t *testing.
 
 func TestShowFamilyLeavesWhatTheUserHidOrClosedAsItIs(t *testing.T) {
 	tests := []struct {
-		name       string
-		arrange    func(t *testing.T, f family)
-		wantHidden bool
+		name           string
+		arrange        func(t *testing.T, f family)
+		wantBacklogged bool
 	}{
-		{name: "a child the user hid before stays hidden", wantHidden: true, arrange: func(t *testing.T, f family) {
+		{name: "a child the user hid before stays backlogged", wantBacklogged: true, arrange: func(t *testing.T, f family) {
 			mustHide(t, f.s, f.child.ID)
 			if _, err := f.s.HideFamily(context.Background(), f.parent.ID, time.Unix(10, 0)); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{name: "a child closed while hidden with it stays closed", wantHidden: true, arrange: func(t *testing.T, f family) {
+		{name: "a child closed while backlogged with it stays closed", wantBacklogged: true, arrange: func(t *testing.T, f family) {
 			if _, err := f.s.HideFamily(context.Background(), f.parent.ID, time.Unix(10, 0)); err != nil {
 				t.Fatal(err)
 			}
@@ -147,7 +147,7 @@ func TestShowFamilyLeavesWhatTheUserHidOrClosedAsItIs(t *testing.T) {
 			members, err := f.s.ShowFamily(context.Background(), f.parent.ID)
 
 			// Assert
-			if err != nil || len(members) != 0 || workspaceNow(t, f.s, f.child.ID).Hidden != tt.wantHidden {
+			if err != nil || len(members) != 0 || workspaceNow(t, f.s, f.child.ID).Backlogged != tt.wantBacklogged {
 				t.Fatalf("ShowFamily = %v, %v; want the child left as it was", members, err)
 			}
 		})
@@ -155,7 +155,7 @@ func TestShowFamilyLeavesWhatTheUserHidOrClosedAsItIs(t *testing.T) {
 }
 
 func TestShowFamilyRefusesARootWhoseParentIsNotOpen(t *testing.T) {
-	// Arrange: the root is a child of a hidden workspace.
+	// Arrange: the root is a child of a backlogged workspace.
 	f, grandchild := threeGenerations(t)
 	if _, err := f.s.HideFamily(context.Background(), f.parent.ID, time.Unix(10, 0)); err != nil {
 		t.Fatal(err)
@@ -165,8 +165,8 @@ func TestShowFamilyRefusesARootWhoseParentIsNotOpen(t *testing.T) {
 	members, err := f.s.ShowFamily(context.Background(), f.child.ID)
 
 	// Assert
-	requireParentNotOpen(t, err, f.parent, ParentHidden)
-	if len(members) != 0 || !workspaceNow(t, f.s, f.child.ID).Hidden || !workspaceNow(t, f.s, grandchild.ID).Hidden {
+	requireParentNotOpen(t, err, f.parent, ParentBacklogged)
+	if len(members) != 0 || !workspaceNow(t, f.s, f.child.ID).Backlogged || !workspaceNow(t, f.s, grandchild.ID).Backlogged {
 		t.Fatalf("ShowFamily = %v; want nothing shown", members)
 	}
 }
@@ -177,15 +177,15 @@ func TestAnOrdinaryShowForgetsTheFamilyHide(t *testing.T) {
 	if _, err := f.s.HideFamily(context.Background(), f.parent.ID, time.Unix(10, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.s.SetHidden(context.Background(), f.parent.ID, false, time.Unix(20, 0)); err != nil {
+	if err := f.s.SetBacklogged(context.Background(), f.parent.ID, false, time.Unix(20, 0)); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	err := f.s.SetHidden(context.Background(), f.child.ID, false, time.Unix(20, 0))
+	err := f.s.SetBacklogged(context.Background(), f.child.ID, false, time.Unix(20, 0))
 
 	// Assert
-	if err != nil || hiddenWith(t, f.s, f.child.ID) != "" {
-		t.Fatalf("SetHidden = %v, marked %q; want the child shown and unmarked", err, hiddenWith(t, f.s, f.child.ID))
+	if err != nil || backloggedWith(t, f.s, f.child.ID) != "" {
+		t.Fatalf("SetBacklogged = %v, marked %q; want the child shown and unmarked", err, backloggedWith(t, f.s, f.child.ID))
 	}
 }

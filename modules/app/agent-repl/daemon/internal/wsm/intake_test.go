@@ -19,7 +19,7 @@ func registerBornIntake(t *testing.T, s *store, repoDir, name string) Workspace 
 	return ws
 }
 
-func TestAnIntakeWorkspaceIsBornMarkedAndHidden(t *testing.T) {
+func TestAnIntakeWorkspaceIsBornMarkedAndBacklogged(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 
@@ -31,12 +31,12 @@ func TestAnIntakeWorkspaceIsBornMarkedAndHidden(t *testing.T) {
 	if err != nil || !intake {
 		t.Fatalf("IsIntake = %v, %v; want the intake workspace", intake, err)
 	}
-	if !ws.Hidden || ws.HiddenAt == nil {
-		t.Fatalf("the record Register answered = hidden %v at %v, want an intake workspace born hidden", ws.Hidden, ws.HiddenAt)
+	if !ws.Backlogged || ws.BackloggedAt == nil {
+		t.Fatalf("the record Register answered = backlogged %v at %v, want an intake workspace born backlogged", ws.Backlogged, ws.BackloggedAt)
 	}
 	got, err := s.Workspace(context.Background(), ws.ID)
-	if err != nil || !got.Hidden {
-		t.Fatalf("Workspace hidden = %v, %v; want the intake workspace hidden", got.Hidden, err)
+	if err != nil || !got.Backlogged {
+		t.Fatalf("Workspace backlogged = %v, %v; want the intake workspace backlogged", got.Backlogged, err)
 	}
 }
 

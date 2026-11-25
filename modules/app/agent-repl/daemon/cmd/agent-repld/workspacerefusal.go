@@ -126,21 +126,21 @@ func describeRetargetRefusal(ws string, e *agentreplv1.SetWorkspaceParentError) 
 	return "", fmt.Errorf("%w: retargeting %s: %v", errUndescribedWorkspaceRefusal, ws, e)
 }
 
-// describeHiddenRefusal says in one plain sentence why WS was not hidden or
-// shown. Every SetWorkspaceHiddenError arm has its own sentence.
-func describeHiddenRefusal(ws string, e *agentreplv1.SetWorkspaceHiddenError) (string, error) {
+// describeBackloggedRefusal says in one plain sentence why WS was not backlogged or
+// shown. Every SetWorkspaceBackloggedError arm has its own sentence.
+func describeBackloggedRefusal(ws string, e *agentreplv1.SetWorkspaceBackloggedError) (string, error) {
 	switch r := e.GetCause().(type) {
-	case *agentreplv1.SetWorkspaceHiddenError_UnknownWorkspace:
+	case *agentreplv1.SetWorkspaceBackloggedError_UnknownWorkspace:
 		return sayNoWorkspace(ws), nil
-	case *agentreplv1.SetWorkspaceHiddenError_WorkspaceRefMismatch:
+	case *agentreplv1.SetWorkspaceBackloggedError_WorkspaceRefMismatch:
 		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
-	case *agentreplv1.SetWorkspaceHiddenError_TransferringAway:
+	case *agentreplv1.SetWorkspaceBackloggedError_TransferringAway:
 		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "set it again"), nil
-	case *agentreplv1.SetWorkspaceHiddenError_NotYetAdopted:
+	case *agentreplv1.SetWorkspaceBackloggedError_NotYetAdopted:
 		return sayNotYetAdopted(ws, "set it again"), nil
-	case *agentreplv1.SetWorkspaceHiddenError_HasOpenChildren:
+	case *agentreplv1.SetWorkspaceBackloggedError_HasOpenChildren:
 		return sayOpenChildren(ws, r.HasOpenChildren, "hide it again"), nil
-	case *agentreplv1.SetWorkspaceHiddenError_ParentNotOpen:
+	case *agentreplv1.SetWorkspaceBackloggedError_ParentNotOpen:
 		return sayParentNotOpen(r.ParentNotOpen, "show "+ws+" again")
 	}
 	return "", undescribed("hiding or showing "+ws, e)

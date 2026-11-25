@@ -206,7 +206,7 @@ Either kind:
     that queue), `index_out_of_range` (carries `index` and `waiting`; the last
     place is waiting-1).
 - A merge's request lives until it lands or is discarded. Any exit short of a
-  landing (dequeue, failure, a restart that could not resume it, hidden at its
+  landing (dequeue, failure, a restart that could not resume it, backlogged at its
   cold gate, the merge ahead not landing) keeps it OFF THE QUEUE with its
   cause, keeping its branch, version part, changelog line, hooks and cleanup
   flags; an async merge's hidden merge workspace stays open under its name.

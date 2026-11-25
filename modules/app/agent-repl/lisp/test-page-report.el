@@ -53,17 +53,17 @@
   "A load sends the loaded arm with its reason."
   (agent-repl-test-pr--with
     ;; Act
-    (agent-repl-page-report-loaded "alpha" 'awake)
+    (agent-repl-page-report-loaded "alpha" 'allocated)
     ;; Assert
-    (should (equal agent-repl-test-pr--sent '(("alpha" (:arm :loaded :value :awake)))))))
+    (should (equal agent-repl-test-pr--sent '(("alpha" (:arm :loaded :value :allocated)))))))
 
 (ert-deftest agent-repl-test-pr-an-unload-is-reported-with-its-reason ()
   "An unload sends the unloaded arm with its reason."
   (agent-repl-test-pr--with
     ;; Act
-    (agent-repl-page-report-unloaded "alpha" 'dormant)
+    (agent-repl-page-report-unloaded "alpha" 'deallocated)
     ;; Assert
-    (should (equal agent-repl-test-pr--sent '(("alpha" (:arm :unloaded :value :dormant)))))))
+    (should (equal agent-repl-test-pr--sent '(("alpha" (:arm :unloaded :value :deallocated)))))))
 
 (ert-deftest agent-repl-test-pr-a-known-load-reason-passes-the-check ()
   "A reason a load path names passes the check, recording nothing."

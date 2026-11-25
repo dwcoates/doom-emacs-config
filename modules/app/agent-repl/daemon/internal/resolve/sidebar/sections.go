@@ -23,9 +23,9 @@ const MergedSectionLabel = "Recently Merged"
 // request, 2026-11-01).
 const MergeQueueSectionLabel = "Merge Queue"
 
-// HiddenSectionLabel is the hidden-workspaces section's heading. The section
+// BacklogSectionLabel is the backlog's heading. The section
 // is drawn as the BACKLOG (owner request, 2026-10-26).
-const HiddenSectionLabel = "Backlog"
+const BacklogSectionLabel = "Backlog"
 
 // OpenSectionLabel is the open-workspaces section's heading.
 const OpenSectionLabel = "Open"
@@ -622,9 +622,8 @@ func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc 
 	// covers is drawn inside the fold (wsm.Visibilities): the bar and the
 	// sidebar draw exactly the workspaces the editor holds.
 	drawn := r.state.visibility[node.ws.ID].Visible()
-	surfaced := folded && drawn
 	out := &frontendv1.RosterOpenRow{
-		Row: r.row(node.ws, rc, log), Tab: numbers.tab(!drawn), Surfaced: surfaced,
+		Row: r.row(node.ws, rc, log), Tab: numbers.tab(!drawn), FoldCover: foldCoverOf(folded, drawn),
 		RecencyGutter: r.recencyGutter(node.ws.ID),
 	}
 	// THE CHILDREN FOLD COVERS EVERY CHILD, the own-repository ones and every
@@ -855,34 +854,34 @@ func repoGroupHeader(repo wsm.Repository) *frontendv1.RosterMergedRepoGroupHeade
 	return &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}}
 }
 
-// hiddenSection resolves the hidden-workspaces section: the open workspaces
-// the user hid (SetWorkspaceHidden), which have NO TAB. Its rows nest by
-// lineage among the hidden workspaces alone, so a hidden family keeps its
-// shape (a workspace with open children cannot be hidden, so a hidden row's
-// family is hidden too); its top-level rows go in HIDE ORDER, the latest hide
-// first (sortHiddenNewestFirst, owner request 2026-10-13), and its count is
+// backlogSection resolves the backlog: the open workspaces
+// the user hid (SetWorkspaceBacklogged), which have NO TAB. Its rows nest by
+// lineage among the backlogged workspaces alone, so a backlogged family keeps its
+// shape (a workspace with open children cannot be backlogged, so a backlogged row's
+// family is backlogged too); its top-level rows go in HIDE ORDER, the latest hide
+// first (sortBackloggedNewestFirst, owner request 2026-10-13), and its count is
 // the rows it draws.
-func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenSection {
-	log = log.With(dlog.Context{"section": "hidden"})
-	tree := nest(hidden, log)
-	rows := &frontendv1.RosterHiddenRows{}
-	for _, ws := range sortHiddenNewestFirst(tree.roots) {
-		rows.Rows = append(rows.Rows, r.hiddenRow(ws, tree, rc, log))
+func (r *resolver) backlogSection(backlogged []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterBacklogSection {
+	log = log.With(dlog.Context{"section": "backlog"})
+	tree := nest(backlogged, log)
+	rows := &frontendv1.RosterBacklogRows{}
+	for _, ws := range sortBackloggedNewestFirst(tree.roots) {
+		rows.Rows = append(rows.Rows, r.backlogRow(ws, tree, rc, log))
 	}
-	section := &frontendv1.RosterHiddenSection{
-		Header:     sectionHeader(HiddenSectionLabel, len(rosterwalk.FlattenHidden(rows.GetRows()))),
-		HiddenRows: rows,
+	section := &frontendv1.RosterBacklogSection{
+		Header:      sectionHeader(BacklogSectionLabel, len(rosterwalk.FlattenBacklog(rows.GetRows()))),
+		BacklogRows: rows,
 	}
-	setHiddenFold(section, r.state.reg.View.HiddenFolded)
-	setHiddenHeight(section, r.state.reg.View.HiddenHeight)
+	setBacklogFold(section, r.state.reg.View.BacklogFolded)
+	setBacklogHeight(section, r.state.reg.View.BacklogHeight)
 	return section
 }
 
-// hiddenRow composes one hidden row and its hidden family below it.
-func (r *resolver) hiddenRow(ws wsm.Workspace, tree forest, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenRow {
-	out := &frontendv1.RosterHiddenRow{Row: r.row(ws, rc, log)}
+// backlogRow composes one backlogged row and its backlogged family below it.
+func (r *resolver) backlogRow(ws wsm.Workspace, tree forest, rc rowContext, log dlog.Logger) *frontendv1.RosterBacklogRow {
+	out := &frontendv1.RosterBacklogRow{Row: r.row(ws, rc, log)}
 	for _, child := range tree.children[ws.ID] {
-		out.Children = append(out.Children, r.hiddenRow(child, tree, rc, log))
+		out.Children = append(out.Children, r.backlogRow(child, tree, rc, log))
 	}
 	return out
 }
@@ -924,15 +923,15 @@ func sameWorkspaces(rows []*frontendv1.RosterClosedRow, closed []wsm.Workspace) 
 	return true
 }
 
-// setHiddenFold states the hidden section's fold. The fold is the daemon's so
+// setBacklogFold states the backlog's fold. The fold is the daemon's so
 // every page draws the same one (UpdateSidebarView); it folds sidebar rows
 // only, never a tab.
-func setHiddenFold(section *frontendv1.RosterHiddenSection, folded bool) {
+func setBacklogFold(section *frontendv1.RosterBacklogSection, folded bool) {
 	if folded {
-		section.Fold = &frontendv1.RosterHiddenSection_Collapsed{Collapsed: &frontendv1.RosterHiddenSectionCollapsed{}}
+		section.Fold = &frontendv1.RosterBacklogSection_Collapsed{Collapsed: &frontendv1.RosterBacklogSectionCollapsed{}}
 		return
 	}
-	section.Fold = &frontendv1.RosterHiddenSection_Expanded{Expanded: &frontendv1.RosterHiddenSectionExpanded{}}
+	section.Fold = &frontendv1.RosterBacklogSection_Expanded{Expanded: &frontendv1.RosterBacklogSectionExpanded{}}
 }
 
 // openSection resolves the open-workspaces section: its heading and its fold.
@@ -989,14 +988,14 @@ func setMergedHeight(section *frontendv1.RosterMergedSection, height wsm.Section
 	section.Height = &frontendv1.RosterMergedSection_Fitted{Fitted: &frontendv1.RosterMergedSectionFitted{}}
 }
 
-// setHiddenHeight states the hidden section's height. The height is the
+// setBacklogHeight states the backlog's height. The height is the
 // daemon's so every page draws the same one (UpdateSidebarView).
-func setHiddenHeight(section *frontendv1.RosterHiddenSection, height wsm.SectionHeight) {
+func setBacklogHeight(section *frontendv1.RosterBacklogSection, height wsm.SectionHeight) {
 	if lines, sized := height.Lines(); sized {
-		section.Height = &frontendv1.RosterHiddenSection_Sized{Sized: &frontendv1.RosterHiddenSectionSized{Lines: lines}}
+		section.Height = &frontendv1.RosterBacklogSection_Sized{Sized: &frontendv1.RosterBacklogSectionSized{Lines: lines}}
 		return
 	}
-	section.Height = &frontendv1.RosterHiddenSection_Fitted{Fitted: &frontendv1.RosterHiddenSectionFitted{}}
+	section.Height = &frontendv1.RosterBacklogSection_Fitted{Fitted: &frontendv1.RosterBacklogSectionFitted{}}
 }
 
 // sectionHeader composes a header outside the Open section (the Backlog's):
@@ -1007,5 +1006,20 @@ func sectionHeader(label string, count int) *frontendv1.RosterSectionHeader {
 	return &frontendv1.RosterSectionHeader{
 		Label: &frontendv1.RosterLabel{Text: label},
 		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(count)},
+	}
+}
+
+// foldCoverOf states an open row's standing under the folds: uncovered when
+// no fold covers it (FOLDED false), else surfaced when it is drawn anyway
+// (DRAWN, its visibility) and backlogged when it is not. It is THE ONE spelling of
+// the arm, so the sidebar never re-derives coverage from the folds it draws.
+func foldCoverOf(folded, drawn bool) *frontendv1.RosterOpenRowFoldCover {
+	switch {
+	case !folded:
+		return &frontendv1.RosterOpenRowFoldCover{Cover: &frontendv1.RosterOpenRowFoldCover_Uncovered{Uncovered: &frontendv1.RosterOpenRowFoldCoverUncovered{}}}
+	case drawn:
+		return &frontendv1.RosterOpenRowFoldCover{Cover: &frontendv1.RosterOpenRowFoldCover_Surfaced{Surfaced: &frontendv1.RosterOpenRowFoldCoverSurfaced{}}}
+	default:
+		return &frontendv1.RosterOpenRowFoldCover{Cover: &frontendv1.RosterOpenRowFoldCover_Hidden{Hidden: &frontendv1.RosterOpenRowFoldCoverHidden{}}}
 	}
 }

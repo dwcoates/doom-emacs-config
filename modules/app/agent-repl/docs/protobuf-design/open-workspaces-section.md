@@ -1,14 +1,14 @@
 # The open workspaces section
 
 The owner asked (2026-10-13) for an "OPEN" heading over the sidebar's main
-workspace list, drawn like the "HIDDEN" and "RECENTLY MERGED" headings (fold
+workspace list, drawn like the "BACKLOG" and "RECENTLY MERGED" headings (fold
 chevron, purple uppercase label), with the number of workspaces the section
 lists beside it whether the section is folded or not, in the font and color of
 Recently Merged's "(K today)". From here on, documentation calls that list
 the OPEN WORKSPACES SECTION of the sidebar.
 
-The shapes follow the nearest precedents (`frontend.v1.RosterHiddenSection`,
-`agentrepl.v1.SidebarViewHidden`), as `hidden-workspaces.md` did.
+The shapes follow the nearest precedents (`frontend.v1.RosterBacklogSection`,
+`agentrepl.v1.SidebarViewBacklog`), as `backlogged-workspaces.md` did.
 
 ## Landed changes
 

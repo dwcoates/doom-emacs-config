@@ -4540,7 +4540,7 @@ func TestEachSessionStartMeasuresItsWorkspacesShimForItsWholeStart(t *testing.T)
 
 func TestWithRecordTakesTheRecordsName(t *testing.T) {
 	// Act.
-	got := source{VendorSessionID: "vendor-1"}.withRecord(wsm.Workspace{ID: "w1", Name: "parser-fix", Hidden: true})
+	got := source{VendorSessionID: "vendor-1"}.withRecord(wsm.Workspace{ID: "w1", Name: "parser-fix", Backlogged: true})
 
 	// Assert.
 	if got.WorkspaceName != "parser-fix" || got.VendorSessionID != "vendor-1" {
@@ -5229,6 +5229,39 @@ func TestABringUpRecordsWhetherAKeepalivesRestoreMadeIt(t *testing.T) {
 			}
 			if got := session.KeepaliveRestoredAt != nil; got != tt.want {
 				t.Fatalf("recorded as a keep-alive's restore = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestABringUpRecordsWhetherItWasForWork(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause shimlife.StartCause
+		want  bool
+	}{
+		{name: "a prompt", cause: shimlife.StartPrompt, want: true},
+		{name: "a keep-alive's restore", cause: shimlife.StartKeepalive, want: false},
+		{name: "a boot's adoption", cause: shimlife.StartBoot, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+
+			// Act.
+			if err := f.fleet.Start(shimlife.WithStart(context.Background(), tt.cause), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			session, found, err := f.db.Session(context.Background(), ws.ID)
+			if err != nil || !found {
+				t.Fatalf("Session = (%v, %v)", found, err)
+			}
+			if got := session.WorkBroughtUpAt != nil; got != tt.want {
+				t.Fatalf("recorded as a bring-up for work = %v, want %v", got, tt.want)
 			}
 		})
 	}

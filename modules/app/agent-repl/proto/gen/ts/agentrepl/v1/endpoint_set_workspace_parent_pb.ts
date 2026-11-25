@@ -317,7 +317,7 @@ export type SetWorkspaceParentError = Message<"agentrepl.v1.SetWorkspaceParentEr
     case: "coldGate";
   } | {
     /**
-     * The named parent, or the workspace to land into, is hidden or closed,
+     * The named parent, or the workspace to land into, is backlogged or closed,
      * and moving the workspace would make an open child of, or an open branch
      * landing into, a workspace outside the Open section.
      *

@@ -27,8 +27,8 @@ func TestBacklogColdGateMovesAShownWorkspace(t *testing.T) {
 		t.Fatalf("BacklogColdGate = %v, %v; want moved", moved, err)
 	}
 	got := workspaceNow(t, s, ws.ID)
-	if !got.Hidden || got.HiddenAt == nil || !got.HiddenAt.Equal(backlogStamp) {
-		t.Fatalf("hidden = %v at %v, want hidden at %v", got.Hidden, got.HiddenAt, backlogStamp)
+	if !got.Backlogged || got.BackloggedAt == nil || !got.BackloggedAt.Equal(backlogStamp) {
+		t.Fatalf("backlogged = %v at %v, want backlogged at %v", got.Backlogged, got.BackloggedAt, backlogStamp)
 	}
 	if got.BackloggedGateAt == nil || !got.BackloggedGateAt.Equal(backlogGate) {
 		t.Fatalf("backlogged gate = %v, want %v", got.BackloggedGateAt, backlogGate)
@@ -45,7 +45,7 @@ func TestBacklogColdGateLeavesAWorkspaceAsItIs(t *testing.T) {
 				t.Fatalf("SetCurrent: %v", err)
 			}
 		}},
-		{name: "already hidden", arrange: func(t *testing.T, s *store, ws Workspace) {
+		{name: "already backlogged", arrange: func(t *testing.T, s *store, ws Workspace) {
 			mustHide(t, s, ws.ID)
 		}},
 		{name: "closed", arrange: func(t *testing.T, s *store, ws Workspace) {
@@ -55,8 +55,8 @@ func TestBacklogColdGateLeavesAWorkspaceAsItIs(t *testing.T) {
 			if _, err := s.BacklogColdGate(context.Background(), ws.ID, backlogGate, backlogGate); err != nil {
 				t.Fatalf("BacklogColdGate: %v", err)
 			}
-			if err := s.SetHidden(context.Background(), ws.ID, false, backlogGate); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+			if err := s.SetBacklogged(context.Background(), ws.ID, false, backlogGate); err != nil {
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 		}},
 	}
@@ -76,9 +76,9 @@ func TestBacklogColdGateLeavesAWorkspaceAsItIs(t *testing.T) {
 				t.Fatalf("BacklogColdGate = %v, %v; want left as it is", moved, err)
 			}
 			after := workspaceNow(t, s, ws.ID)
-			if after.Hidden != before.Hidden || !clocktest.SameInstant(after.HiddenAt, before.HiddenAt) || !clocktest.SameInstant(after.BackloggedGateAt, before.BackloggedGateAt) {
-				t.Fatalf("the row moved: before hidden=%v at %v gate %v, after hidden=%v at %v gate %v",
-					before.Hidden, before.HiddenAt, before.BackloggedGateAt, after.Hidden, after.HiddenAt, after.BackloggedGateAt)
+			if after.Backlogged != before.Backlogged || !clocktest.SameInstant(after.BackloggedAt, before.BackloggedAt) || !clocktest.SameInstant(after.BackloggedGateAt, before.BackloggedGateAt) {
+				t.Fatalf("the row moved: before backlogged=%v at %v gate %v, after backlogged=%v at %v gate %v",
+					before.Backlogged, before.BackloggedAt, before.BackloggedGateAt, after.Backlogged, after.BackloggedAt, after.BackloggedGateAt)
 			}
 		})
 	}
@@ -91,8 +91,8 @@ func TestBacklogColdGateMovesAShownWorkspaceAgainForANewGate(t *testing.T) {
 	if _, err := s.BacklogColdGate(context.Background(), ws.ID, backlogGate, backlogGate); err != nil {
 		t.Fatalf("BacklogColdGate: %v", err)
 	}
-	if err := s.SetHidden(context.Background(), ws.ID, false, backlogGate); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := s.SetBacklogged(context.Background(), ws.ID, false, backlogGate); err != nil {
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 	newGate := backlogGate.Add(48 * time.Hour)
 
@@ -103,8 +103,8 @@ func TestBacklogColdGateMovesAShownWorkspaceAgainForANewGate(t *testing.T) {
 	if err != nil || !moved {
 		t.Fatalf("BacklogColdGate = %v, %v; want moved", moved, err)
 	}
-	if got := workspaceNow(t, s, ws.ID); !got.Hidden || got.BackloggedGateAt == nil || !got.BackloggedGateAt.Equal(newGate) {
-		t.Fatalf("hidden = %v gate %v, want hidden for %v", got.Hidden, got.BackloggedGateAt, newGate)
+	if got := workspaceNow(t, s, ws.ID); !got.Backlogged || got.BackloggedGateAt == nil || !got.BackloggedGateAt.Equal(newGate) {
+		t.Fatalf("backlogged = %v gate %v, want backlogged for %v", got.Backlogged, got.BackloggedGateAt, newGate)
 	}
 }
 
@@ -117,8 +117,8 @@ func TestBacklogColdGateRefusesAParentWithOpenChildren(t *testing.T) {
 
 	// Assert
 	requireHasOpenChildren(t, err, f.parent, f.child)
-	if got := workspaceNow(t, f.s, f.parent.ID); moved || got.Hidden || got.BackloggedGateAt != nil {
-		t.Fatalf("a refused backlog moved the parent: moved=%v hidden=%v gate=%v", moved, got.Hidden, got.BackloggedGateAt)
+	if got := workspaceNow(t, f.s, f.parent.ID); moved || got.Backlogged || got.BackloggedGateAt != nil {
+		t.Fatalf("a refused backlog moved the parent: moved=%v backlogged=%v gate=%v", moved, got.Backlogged, got.BackloggedGateAt)
 	}
 }
 
@@ -181,7 +181,7 @@ func TestBacklogsColdGate(t *testing.T) {
 		{name: "a shown workspace backlogged for an earlier gate", ws: Workspace{BackloggedGateAt: &other}, want: true},
 		{name: "a shown workspace already backlogged for this gate", ws: Workspace{BackloggedGateAt: &backlogGate}, want: false},
 		{name: "the workspace the user is looking at", ws: Workspace{Current: true}, want: false},
-		{name: "a hidden workspace", ws: Workspace{Hidden: true}, want: false},
+		{name: "a backlogged workspace", ws: Workspace{Backlogged: true}, want: false},
 		{name: "a closed workspace", ws: Workspace{Closed: true}, want: false},
 		{name: "a merge workspace its async merge withholds", ws: Workspace{MergeOf: &mergeOf}, want: false},
 	}

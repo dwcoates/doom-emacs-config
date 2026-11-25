@@ -159,7 +159,7 @@ func TestAUsersCloseWhoseSubsectionRemovalFailsCommitsNothing(t *testing.T) {
 	}
 
 	// Act
-	err := s.MarkClosed(context.Background(), b.ID, Closure{At: hiddenAtInstant, By: CloseByUser})
+	err := s.MarkClosed(context.Background(), b.ID, Closure{At: backloggedAtInstant, By: CloseByUser})
 
 	// Assert
 	if err == nil {

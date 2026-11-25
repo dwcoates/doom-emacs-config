@@ -35,7 +35,7 @@ func closeWorkspace(t *testing.T, s *store, ws WorkspaceID) {
 // children are still open, which the user's close refuses.
 func closeWorkspaceBy(t *testing.T, s *store, ws WorkspaceID, cause CloseCause) {
 	t.Helper()
-	if err := s.MarkClosed(context.Background(), ws, Closure{At: hiddenAtInstant, By: cause}); err != nil {
+	if err := s.MarkClosed(context.Background(), ws, Closure{At: backloggedAtInstant, By: cause}); err != nil {
 		t.Fatalf("MarkClosed(%s): %v", ws, err)
 	}
 }

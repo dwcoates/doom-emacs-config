@@ -167,7 +167,7 @@ func TestSweepLeavesAWorkspace(t *testing.T) {
 		{name: "whose gate has stood exactly a day", rec: wsm.Workspace{ID: "w1"}, went: at(26, 10), now: at(27, 10)},
 		{name: "whose gate stood over a day only by counting the weekend", rec: wsm.Workspace{ID: "w1"}, went: at(30, 15), now: at(32, 20)},
 		{name: "the user is looking at", rec: wsm.Workspace{ID: "w1", Current: true}, went: at(26, 10), now: at(28, 10)},
-		{name: "already hidden", rec: wsm.Workspace{ID: "w1", Hidden: true}, went: at(26, 10), now: at(28, 10)},
+		{name: "already backlogged", rec: wsm.Workspace{ID: "w1", Backlogged: true}, went: at(26, 10), now: at(28, 10)},
 		{name: "already moved for this gate", rec: wsm.Workspace{ID: "w1", BackloggedGateAt: ptr(at(26, 10).UTC())}, went: at(26, 10), now: at(28, 10)},
 	}
 	for _, tt := range tests {

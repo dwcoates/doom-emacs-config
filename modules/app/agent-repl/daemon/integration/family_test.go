@@ -14,7 +14,7 @@ import (
 )
 
 // family_test.go exercises the family rules (agentrepl.v1 family.proto) end to
-// end: a parent with an open child is not closed, killed or hidden, a child is
+// end: a parent with an open child is not closed, killed or backlogged, a child is
 // not made under a parent that is not open, and two workspaces that are not
 // siblings do not swap places. Each refusal names the blocking workspace and
 // changes nothing the roster shows.
@@ -82,27 +82,27 @@ func TestAParentWithAnOpenChildIsNotKilled(t *testing.T) {
 	requireStillNested(t, f)
 }
 
-func TestAParentWithAnOpenChildIsNotHidden(t *testing.T) {
+func TestAParentWithAnOpenChildIsNotBacklogged(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRetargetFamily(t, harness.Opts{}, nil)
 
 	// Act
-	resp, err := f.d.Client().SetWorkspaceHidden(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{
-		Workspace: f.parent, Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}},
+	resp, err := f.d.Client().SetWorkspaceBacklogged(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
+		Workspace: f.parent, Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}},
 	}))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetWorkspaceHidden = error %v", err)
+		t.Fatalf("SetWorkspaceBacklogged = error %v", err)
 	}
 	requireOpenChildRefusal(t, f, resp.Msg.GetError().GetHasOpenChildren())
 	requireStillNested(t, f)
 }
 
-func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
+func TestAChildOfABackloggedParentIsNotCreated(t *testing.T) {
 	t.Parallel()
-	// Arrange: a parent with no children, hidden.
+	// Arrange: a parent with no children, backlogged.
 	d := canonicalView(t)
 	repository := createRepositoryRef(t, d, harness.NewRepo(t))
 	created, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository)))
@@ -123,8 +123,8 @@ func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 		t.Fatalf("CreateWorkspace(child) = error %v", err)
 	}
 	refused := resp.Msg.GetError().GetParentNotOpen()
-	if refused.GetParent().GetId() != parent.GetId() || refused.GetHidden() == nil {
-		t.Fatalf("result = %v, want parent_not_open naming the hidden parent", resp.Msg.GetResult())
+	if refused.GetParent().GetId() != parent.GetId() || refused.GetBacklogged() == nil {
+		t.Fatalf("result = %v, want parent_not_open naming the backlogged parent", resp.Msg.GetResult())
 	}
 }
 

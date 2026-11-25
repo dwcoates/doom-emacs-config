@@ -31,7 +31,7 @@ import (
 //     resync) moves the epoch, which every workspace's key carries.
 // A row's key also carries what the render decides before any row is drawn
 // (its arm, its visibility) and the selection, so a row is rebuilt whenever
-// any of them moves. The one arm read off the clock (a hidden workspace's
+// any of them moves. The one arm read off the clock (a backlogged workspace's
 // lapsing cache, armReadsClock) is derived on every render.
 
 // keptKey is the inputs of a workspace's kept facts: its own version and the
@@ -47,6 +47,8 @@ type rowKey struct {
 	arm        string
 	visibility wsm.Visibility
 	current    bool
+	// page is the page verdict, which a clock flips with no other input.
+	page bool
 }
 
 // kept is what the renders keep for one workspace.
@@ -155,6 +157,7 @@ func (r *resolver) rowKeyOf(ws ids.WorkspaceID, arm string, rc rowContext) rowKe
 		arm:        arm,
 		visibility: r.state.visibility[ws],
 		current:    rc.selected != nil && *rc.selected == ws,
+		page:       r.state.page[ws],
 	}
 }
 

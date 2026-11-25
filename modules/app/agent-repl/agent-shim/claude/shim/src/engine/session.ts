@@ -6182,7 +6182,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // EVERY SESSION IS BORN HELD AND STAYS HELD (owner ruling, 2026-10-26):
     // the daemon drives every keep-alive (shim.v1.SendKeepalive), so the
     // cadence never schedules a beat of its own. Held, it projects the lapse
-    // the daemon times its beats and its hidden countdown from.
+    // the daemon times its beats and its backlog countdown from.
     cadence.hold();
     cadence.start(cacheAnchor.anchor, cacheAnchor.reason);
     pushModel();

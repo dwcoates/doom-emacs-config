@@ -226,9 +226,9 @@ describe("scrollLineIntoBand", () => {
     expect(record.context).toMatchObject({ edge: "scrollPaddingBottom", value: "1.4rem", scroller: "sb-sections" });
   });
 
-  it("scrolls the Hidden Workspaces band's rows region too", () => {
+  it("scrolls the Backlog band's rows region too", () => {
     // Arrange
-    const b = band({ lines: 10, view: 3, cls: "hidden-section", regionClass: "rows" });
+    const b = band({ lines: 10, view: 3, cls: "backlog-section", regionClass: "rows" });
     // Act
     scrollLineIntoBand(b.line("ws-9"));
     // Assert

@@ -66,7 +66,7 @@ message SidebarMemoryWorkspaces {
 message SidebarMemoryWorkspacesVisible {
   // How many open workspaces are visible.
   uint32 visible = 1;
-  // How many workspaces are open (not hidden, not closed).
+  // How many workspaces are open (not backlogged, not closed).
   uint32 open = 2;
 }
 

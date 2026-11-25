@@ -521,6 +521,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// status edge. The roster is built after the footer (it takes the footer
 	// as its status source), so the edge rides a forwarder bound once it is.
 	statusChanged := &statusChangedForwarder{log: log}
+	shimHolds := &shimHoldForwarder{log: log}
 	// A DEPLOY'S EDGES REACH THE DEPLOY MEDIATION: its start owes a
 	// mediation, and its end (here or in a successor) runs the rounds. Every
 	// main turn's spend reaches it too, which meters the mediator's turns.
@@ -617,6 +618,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		sidebar.WithViewedSink(rosterDurable.ViewedSink()),
 		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
 		sidebar.WithVisibilitySink(rosterDurable.VisibilitySink()),
+		// THE SHIM HOLD REACHES THE CACHE KEEPER, built after the roster, so
+		// late-bound (shimHoldForwarder).
+		sidebar.WithShimHoldSink(shimHolds.ShimHoldChanged),
 		sidebar.WithVisibilityTelemetry(p.Metrics),
 		sidebar.WithQuiet(viewGate))
 	if err != nil {
@@ -967,7 +971,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// gate's edges reach it once it exists.
 	var coldGates merge.Orchestrator
 
-	// THE HIDDEN WORKSPACES' CACHE KEEPER, fed by the fleet's watchers (a held
+	// THE BACKLOGGED WORKSPACES' CACHE KEEPER, fed by the fleet's watchers (a held
 	// shim's projected lapse), the lifecycle sink (a session coming up) and
 	// the verbs (a hide or a show). It is built before the fleet and the drain
 	// controller it drives, so it reaches both late-bound: every edge it takes
@@ -992,10 +996,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// would dereference it (the 2026-11-11 boot loop).
 		Parked:   lateParkedKeepalive(p.Surfaces.Global(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil }),
 		ColdGate: func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
+		Hold:     sidebarResolver.ShimHold,
 		StandDowns: standDownsFunc(func(ws ids.WorkspaceID, trigger drain.WithheldTrigger) {
 			drainController.StandDownWithheld(ws, trigger)
 		}),
-		PublishRegistry: verbsRef.republishRoster("a hidden workspace's cache lapse moved"),
+		PublishRegistry: verbsRef.republishRoster("a backlogged workspace's cache lapse moved"),
 		IdleCutoff:      idleCutoff,
 		Interval:        keepaliveInterval,
 		CycleDown: func(ws ids.WorkspaceID, beat time.Time, done func(drain.CycleOutcome)) {
@@ -1045,6 +1050,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
 	}
 	lifecycle.caches = cacheKeeper
+	shimHolds.bind(cacheKeeper)
 	// A LONG OUTAGE PULLS THE NEAR KEEP-ALIVES FORWARD (cachelapse.outage.go):
 	// the restore edge tells the keeper how long the network was down.
 	network.OnRestored(func(outage netstate.Outage) { cacheKeeper.NetworkRestored(outage.Duration()) })
@@ -1170,7 +1176,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// off the bring-up's goroutine: the merge put back at its place may
 		// itself be what is bringing the session up (its repair's
 		// ensureSession), and putting it back waits for that run to stop.
-		// A HIDDEN OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
+		// A BACKLOGGED OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
 		// lapse (cachelapse.Keeper.ColdGateRaised).
 		// A PROMPT TYPED ON claude.ai INTO A PARKED WORKSPACE answers its
 		// cold gate through the verb the editor's answer takes.
@@ -1925,7 +1931,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	// THE COLD-GATE BACKLOG (owner request, 2026-10-26): a shown workspace
 	// whose cold gate has stood over a day of weekday time is moved into the
-	// hidden section, drawn as the Backlog, once per gate.
+	// backlog, drawn as the Backlog, once per gate.
 	coldBacklog, err := coldbacklog.New(coldbacklog.Deps{
 		DB:       p.DB,
 		Gates:    fleet.StandingColdGates,
@@ -2261,32 +2267,32 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				Shims: fleet, Feed: feedResolver, Status: footerResolver, Owed: p.DB, Bound: revision.Bound, Now: time.Now,
 				PromptsDir: paths.PromptsDir, Life: ctx, Log: log,
 			}),
-			LoudFaults:        loudFaults.Topic(),
-			Focus:             focus,
-			Emacs:             p.Metrics,
-			Banners:           notifier,
-			PersistentWifi:    wifi,
-			HiddenKeepalives:  cacheKeeper,
-			KeepLives:         cacheKeeper,
-			NewsDigest:        digest,
-			Storage:           storageSweep,
-			Worktrees:         reaper,
-			ClassifierPrompt:  classifierPrompt,
-			EditorInstances:   editors,
-			Opens:             opens,
-			StallBeat:         stallBeat,
-			Pages:             supersededPages,
-			Latencies:         p.Metrics,
-			HeldPages:         heldPages,
-			VendorSpend:       p.Metrics,
-			RPCs:              p.Metrics,
-			Reconnects:        p.Reconnects,
-			HotReload:         hotReload,
-			WebappDist:        paths.WebappDist,
-			ImageOrigin:       images.Handler(),
-			ChessBoards:       chessBoards,
-			ChessWidgetBundle: chessBoards,
-			Log:               p.Surfaces,
+			LoudFaults:           loudFaults.Topic(),
+			Focus:                focus,
+			Emacs:                p.Metrics,
+			Banners:              notifier,
+			PersistentWifi:       wifi,
+			BackloggedKeepalives: cacheKeeper,
+			KeepLives:            cacheKeeper,
+			NewsDigest:           digest,
+			Storage:              storageSweep,
+			Worktrees:            reaper,
+			ClassifierPrompt:     classifierPrompt,
+			EditorInstances:      editors,
+			Opens:                opens,
+			StallBeat:            stallBeat,
+			Pages:                supersededPages,
+			Latencies:            p.Metrics,
+			HeldPages:            heldPages,
+			VendorSpend:          p.Metrics,
+			RPCs:                 p.Metrics,
+			Reconnects:           p.Reconnects,
+			HotReload:            hotReload,
+			WebappDist:           paths.WebappDist,
+			ImageOrigin:          images.Handler(),
+			ChessBoards:          chessBoards,
+			ChessWidgetBundle:    chessBoards,
+			Log:                  p.Surfaces,
 		},
 		Boot: boot.Deps{
 			Restarts:            p.Metrics,

@@ -78,8 +78,8 @@ func mustClose(t *testing.T, s *store, id WorkspaceID, by CloseCause) {
 
 func mustHide(t *testing.T, s *store, id WorkspaceID) {
 	t.Helper()
-	if err := s.SetHidden(context.Background(), id, true, time.Unix(10, 0)); err != nil {
-		t.Fatalf("SetHidden(%s): %v", id, err)
+	if err := s.SetBacklogged(context.Background(), id, true, time.Unix(10, 0)); err != nil {
+		t.Fatalf("SetBacklogged(%s): %v", id, err)
 	}
 }
 
@@ -94,7 +94,7 @@ func queueClosingMergeOf(t *testing.T, s *store, id WorkspaceID) {
 // legacyHide hides ID behind the family rules' back, as a row from before them.
 func legacyHide(t *testing.T, s *store, id WorkspaceID) {
 	t.Helper()
-	if _, err := s.db().Exec(`UPDATE workspaces SET hidden = 1, hidden_at = 1 WHERE id = ?`, id); err != nil {
+	if _, err := s.db().Exec(`UPDATE workspaces SET backlogged = 1, backlogged_at = 1 WHERE id = ?`, id); err != nil {
 		t.Fatalf("hide %s: %v", id, err)
 	}
 }
@@ -149,7 +149,7 @@ func TestMarkClosedRecordsTheDaemonsOwnCloseOverOpenChildren(t *testing.T) {
 	}
 }
 
-func TestMarkClosedCountsAHiddenChildAsOpen(t *testing.T) {
+func TestMarkClosedCountsABackloggedChildAsOpen(t *testing.T) {
 	// Arrange
 	f := newFamily(t)
 	mustHide(t, f.s, f.child.ID)
@@ -217,37 +217,37 @@ func TestMarkClosedRestampsAClosedParentOverALegacyOpenChild(t *testing.T) {
 	}
 }
 
-func TestSetHiddenRefusesHidingAParentWithOpenChildren(t *testing.T) {
+func TestSetBackloggedRefusesHidingAParentWithOpenChildren(t *testing.T) {
 	// Arrange
 	f := newFamily(t)
 
 	// Act
-	err := f.s.SetHidden(context.Background(), f.parent.ID, true, time.Unix(10, 0))
+	err := f.s.SetBacklogged(context.Background(), f.parent.ID, true, time.Unix(10, 0))
 
 	// Assert
 	requireHasOpenChildren(t, err, f.parent, f.child)
-	if workspaceNow(t, f.s, f.parent.ID).Hidden {
-		t.Fatalf("the parent was hidden by a refused hide")
+	if workspaceNow(t, f.s, f.parent.ID).Backlogged {
+		t.Fatalf("the parent was backlogged by a refused hide")
 	}
 }
 
-func TestSetHiddenHidesAFamilyChildFirst(t *testing.T) {
+func TestSetBackloggedHidesAFamilyChildFirst(t *testing.T) {
 	// Arrange
 	f := newFamily(t)
 	mustHide(t, f.s, f.child.ID)
 	mustClose(t, f.s, f.child.ID, CloseByUser)
 
 	// Act
-	err := f.s.SetHidden(context.Background(), f.parent.ID, true, time.Unix(10, 0))
+	err := f.s.SetBacklogged(context.Background(), f.parent.ID, true, time.Unix(10, 0))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetHidden: %v", err)
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 }
 
-func TestSetHiddenRestampsAHiddenParentOverALegacyOpenChild(t *testing.T) {
-	// Arrange -- the parent was hidden before its child was made.
+func TestSetBackloggedRestampsABackloggedParentOverALegacyOpenChild(t *testing.T) {
+	// Arrange -- the parent was backlogged before its child was made.
 	s, _ := testStore(t)
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
@@ -255,21 +255,21 @@ func TestSetHiddenRestampsAHiddenParentOverALegacyOpenChild(t *testing.T) {
 	legacyHide(t, s, parent.ID)
 
 	// Act
-	err := s.SetHidden(context.Background(), parent.ID, true, time.Unix(10, 0))
+	err := s.SetBacklogged(context.Background(), parent.ID, true, time.Unix(10, 0))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetHidden: %v", err)
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 }
 
-func TestShowingAHiddenChildRequiresAnOpenParent(t *testing.T) {
+func TestShowingABackloggedChildRequiresAnOpenParent(t *testing.T) {
 	tests := []struct {
 		name  string
 		setUp func(t *testing.T, f family)
 		state ParentState
 	}{
-		{name: "a hidden parent", state: ParentHidden, setUp: func(t *testing.T, f family) { legacyHide(t, f.s, f.parent.ID) }},
+		{name: "a backlogged parent", state: ParentBacklogged, setUp: func(t *testing.T, f family) { legacyHide(t, f.s, f.parent.ID) }},
 		{name: "a closed parent", state: ParentClosed, setUp: func(t *testing.T, f family) { mustClose(t, f.s, f.parent.ID, CloseByDaemon) }},
 		{name: "a closing parent", state: ParentClosing, setUp: func(t *testing.T, f family) { legacyQueueClosingMergeOf(t, f.s, f.parent.ID) }},
 	}
@@ -281,28 +281,28 @@ func TestShowingAHiddenChildRequiresAnOpenParent(t *testing.T) {
 			tt.setUp(t, f)
 
 			// Act
-			err := f.s.SetHidden(context.Background(), f.child.ID, false, time.Unix(20, 0))
+			err := f.s.SetBacklogged(context.Background(), f.child.ID, false, time.Unix(20, 0))
 
 			// Assert
 			requireParentNotOpen(t, err, f.parent, tt.state)
-			if !workspaceNow(t, f.s, f.child.ID).Hidden {
+			if !workspaceNow(t, f.s, f.child.ID).Backlogged {
 				t.Fatalf("the child was shown by a refused show")
 			}
 		})
 	}
 }
 
-func TestShowingAHiddenChildOfAnOpenParentSucceeds(t *testing.T) {
+func TestShowingABackloggedChildOfAnOpenParentSucceeds(t *testing.T) {
 	// Arrange
 	f := newFamily(t)
 	mustHide(t, f.s, f.child.ID)
 
 	// Act
-	err := f.s.SetHidden(context.Background(), f.child.ID, false, time.Unix(20, 0))
+	err := f.s.SetBacklogged(context.Background(), f.child.ID, false, time.Unix(20, 0))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetHidden: %v", err)
+		t.Fatalf("SetBacklogged: %v", err)
 	}
 }
 
@@ -313,7 +313,7 @@ func TestReopenRefusesAChildWhoseParentIsNotOpen(t *testing.T) {
 		state ParentState
 	}{
 		{name: "a closed parent", state: ParentClosed, setUp: func(t *testing.T, f family) { mustClose(t, f.s, f.parent.ID, CloseByUser) }},
-		{name: "a hidden parent", state: ParentHidden, setUp: func(t *testing.T, f family) { mustHide(t, f.s, f.parent.ID) }},
+		{name: "a backlogged parent", state: ParentBacklogged, setUp: func(t *testing.T, f family) { mustHide(t, f.s, f.parent.ID) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -354,7 +354,7 @@ func TestRegisterWorkspaceRefusesAChildOfAParentThatIsNotOpen(t *testing.T) {
 		setUp func(t *testing.T, s *store, parent Workspace)
 		state ParentState
 	}{
-		{name: "a hidden parent", state: ParentHidden, setUp: func(t *testing.T, s *store, p Workspace) { mustHide(t, s, p.ID) }},
+		{name: "a backlogged parent", state: ParentBacklogged, setUp: func(t *testing.T, s *store, p Workspace) { mustHide(t, s, p.ID) }},
 		{name: "a closed parent", state: ParentClosed, setUp: func(t *testing.T, s *store, p Workspace) { mustClose(t, s, p.ID, CloseByUser) }},
 		{name: "a closing parent", state: ParentClosing, setUp: func(t *testing.T, s *store, p Workspace) { queueClosingMergeOf(t, s, p.ID) }},
 	}
@@ -380,7 +380,7 @@ func TestRegisterWorkspaceRefusesAChildOfAParentThatIsNotOpen(t *testing.T) {
 	}
 }
 
-func TestRegisterWorkspaceForksAMergeWorkspaceUnderAHiddenRequester(t *testing.T) {
+func TestRegisterWorkspaceForksAMergeWorkspaceUnderABackloggedRequester(t *testing.T) {
 	// Arrange -- a merge workspace is drawn nowhere, so it is no open child.
 	s, _ := testStore(t)
 	requester := testWorkspace(t, s)
@@ -407,7 +407,7 @@ func TestSetParentRefusesAParentThatIsNotOpen(t *testing.T) {
 	_, err := s.SetParent(context.Background(), ws.ID, ToParent(&parent.ID))
 
 	// Assert
-	requireParentNotOpen(t, err, parent, ParentHidden)
+	requireParentNotOpen(t, err, parent, ParentBacklogged)
 	if got := workspaceNow(t, s, ws.ID).Parent; got != nil {
 		t.Fatalf("parent = %s after a refused retarget, want none", *got)
 	}

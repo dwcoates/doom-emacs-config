@@ -116,7 +116,7 @@ type Mirror struct {
 	// held is the incumbent's roster as its pushes so far fold together
 	// (rosterwalk.Hold): a push carries only the streams it changed
 	// (frontend.v1.RosterPush), so a stream it leaves out keeps the snapshot
-	// held here. Rows are read off its open, hidden and closed rows. A merged
+	// held here. Rows are read off its open, backlogged and closed rows. A merged
 	// workspace is in no stream, and the incumbent serves none, so none is
 	// mirrored. nil before the first push and after the end.
 	held *frontendv1.RosterPush
@@ -289,7 +289,7 @@ func (m *Mirror) withdraw(ended string) {
 }
 
 // take installs the incumbent's PUSH: each stream it carries replaces the
-// snapshot held of it, and the arms are read off the open, hidden and closed
+// snapshot held of it, and the arms are read off the open, backlogged and closed
 // rows of the snapshots held. A row whose status this build cannot read (an
 // unset oneof, as an arm a newer or older schema names and this one does not
 // decodes, or an arm no claim places) is logged at ERROR when it becomes so

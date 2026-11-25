@@ -21,7 +21,7 @@
   or `left_up` with the rule that kept it up) or `busy`.
 - Refusal arms: `unknown_workspace`, `workspace_ref_mismatch`,
   `transferring_away`, `not_yet_adopted`, `closed`, `cold_gated`,
-  `owes_no_keepalive` (with the keeper's reason: hidden, a known-cold cache,
+  `owes_no_keepalive` (with the keeper's reason: backlogged, a known-cold cache,
   no session, idle past the cutoff), `cache_lapsed` (the session is parked
   and its next prompt meets the cold gate), `start_failed`, `beat_failed`,
   `stand_down_failed`, `timed_out` (the step, its bound and its measured

@@ -305,7 +305,7 @@ func permutePlaces(ctx context.Context, tx *sql.Tx, order []WorkspaceID) (map[Wo
 // standing answers the workspace the sidebar draws ID's row AS, which is the
 // one a tab move (MoveWorkspace, SwapPlaces) moves: ID itself when it has no
 // recorded parent or its parent is open, otherwise the same answer for its
-// parent. A workspace whose parent is not open (closed, hidden, a withheld
+// parent. A workspace whose parent is not open (closed, backlogged, a withheld
 // merge workspace) is drawn in its parent's place, at that parent's depth,
 // so its tab stands for its parent's: a tab drawn at the top level stands
 // for its stored root.

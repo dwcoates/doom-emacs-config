@@ -224,7 +224,7 @@ export type WorkspaceRelationship = Message<"agentrepl.v1.WorkspaceRelationship"
      * answers are not followed: a parent that drives the child's work turn by
      * turn subscribes to them itself (SubscribeWorkspace), which replaces the
      * one update; the parent reviews it and closes it; and the parent cannot be
-     * closed, hidden, finished or merged away while the child is open
+     * closed, backlogged, finished or merged away while the child is open
      * (WorkspaceHasOpenChildren). Its landing target defaults to its parent's
      * branch.
      *
@@ -264,7 +264,7 @@ export type WorkspaceRelationshipChild = Message<"agentrepl.v1.WorkspaceRelation
   /**
    * The parent, as the roster served it. A registered workspace of ANY
    * repository; a CLOSED parent is reopened before anything else is done, so
-   * the child has a session to coordinate with, and a hidden or closing one
+   * the child has a session to coordinate with, and a backlogged or closing one
    * refuses the create (WorkspaceParentNotOpen).
    *
    * @generated from field: workspace.v1.WorkspaceRef parent = 1;

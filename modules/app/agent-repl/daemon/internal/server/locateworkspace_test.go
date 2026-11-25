@@ -20,7 +20,7 @@ func locateHarness(t *testing.T, opts ...option) *harness {
 	t.Helper()
 	h := findHarness(t, opts...)
 	h.DB.workspaces["ws-merge"] = wsm.Workspace{ID: "ws-merge", Repo: "repo-1", Dir: "/src/merge", Name: "merge-one",
-		Hidden: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}}
+		Backlogged: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}}
 	return h
 }
 

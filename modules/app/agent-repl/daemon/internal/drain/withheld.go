@@ -19,7 +19,7 @@ const opWithheld = "daemon.drain.withheld"
 
 // A WORKSPACE THE USER WITHHELD RUNS NOTHING (owner principle 1,
 // docs/protobuf-design/open-tabs.md). Collapsing a repository's section, and a
-// hidden workspace's cache lapsing (cachelapse.Keeper), stands its session down
+// backlogged workspace's cache lapsing (cachelapse.Keeper), stands its session down
 // exactly as the idle sweep does — the same gate, the same hibernate directive, graceful
 // KillSession, parked terminal and cleared pids (park) — with its own reason
 // on the records and the terminal's detail.
@@ -53,7 +53,7 @@ const (
 	// repository section or subsection, or a parent's folded children. The
 	// attempt's record names the fold it read (sidebar.Fold).
 	WithheldCollapse WithheldTrigger = iota + 1
-	// WithheldCacheLapse: a hidden or closed workspace's cache lapsed
+	// WithheldCacheLapse: a backlogged or closed workspace's cache lapsed
 	// (cachelapse.Keeper.lapse).
 	WithheldCacheLapse
 	// WithheldMergeEnded: a hidden merge workspace's merge left every queue
@@ -98,7 +98,7 @@ const (
 )
 
 // StandDownWithheld asks for the stand-down of a workspace whose repository
-// section the user collapsed, or a hidden or closed one whose cache has
+// section the user collapsed, or a backlogged or closed one whose cache has
 // lapsed. It
 // returns at once; the attempt runs on the detached lifetime.
 func (c *controller) StandDownWithheld(ws ids.WorkspaceID, trigger WithheldTrigger) {
@@ -187,7 +187,7 @@ func withheldLife(trigger WithheldTrigger) shimlife.StandDownReason {
 func withheldReason(trigger WithheldTrigger) standDownReason {
 	return standDownReason{
 		op:      opWithheld,
-		detail:  "hidden, collapsed or closed by the user; the transcript was left as it stood",
+		detail:  "backlogged, collapsed or closed by the user; the transcript was left as it stood",
 		done:    logsite.Msg("stood a withheld workspace's session down"),
 		life:    withheldLife(trigger),
 		trigger: trigger.String(),
@@ -223,7 +223,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, 
 		return withheldSettled
 	}
 	// A WORKSPACE WITH A MERGE QUEUED IS NEVER STOOD DOWN (owner ruling,
-	// 2026-10-26), hidden or closed alike: its session carries the merge, and
+	// 2026-10-26), backlogged or closed alike: its session carries the merge, and
 	// the queue can hold it for hours (wsm.Workspace.Runs).
 	queued, err := bringup.MergeQueued(ctx, c.deps.DB, record)
 	if err != nil {
@@ -248,7 +248,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, 
 	if visibility.Fold != nil {
 		fields = dlog.Merge(fields, visibility.Fold.Fields())
 	}
-	fields = dlog.Merge(fields, dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed})
+	fields = dlog.Merge(fields, dlog.Context{"backlogged": record.InBacklog(), "closed": record.Closed})
 	if visibility.Runs && !record.Closed {
 		log.Info(opWithheld, "the workspace was shown or reopened before its session was stood down; it keeps running", fields)
 		c.deps.Why.SetHold(ws, sessionwhy.HoldWithheldShown)

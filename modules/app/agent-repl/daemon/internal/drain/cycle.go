@@ -30,7 +30,7 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // interrupts a turn or live detached work: a busy session stays PENDING and is
 // asked again on the daemon's own edges (RetryWithheld), never by a poll. And
 // it stands nothing down for the workspace the user is looking at, for a
-// hidden or closed one with no merge queued (the cache keeper's lapse owns
+// backlogged or closed one with no merge queued (the cache keeper's lapse owns
 // those), for one whose
 // remote control is on (claude.ai reaches it only through its shim; owner
 // ruling, 2026-10-31), or once a real turn has run since the beat -- that turn
@@ -148,6 +148,11 @@ type cycleState struct {
 	// merge is the entry a sync merge's park is scoped to, nil for every
 	// other reason.
 	merge *queuedMerge
+	// outranked is an unscoped ask that arrived while a sync merge's park
+	// was pending, nil when none did. It is taken only when the merge's park
+	// settles without parking the session (its entry left the line), so
+	// neither asker's stand-down is lost to the other's.
+	outranked *pendingAsk
 	// running is an attempt in flight on the detached lifetime.
 	running bool
 	// again is an edge that arrived while an attempt ran.
@@ -184,7 +189,7 @@ var cycleReason = standDownReason{
 // 2026-11-23). The keep-alive cycle stood a session down only once its next
 // beat had gone out, 52 minutes after its last turn, so an idle shim and its
 // vendor child held ~350MB for most of every hour. The cache keeper now asks
-// for this park once the session has been idle cachelapse.StandDownGrace
+// for this park once the workspace's shim hold ends (wsm.ShimHold)
 // (cachelapse.Keeper.ownIdle), under the keep-alive cycle's rules; the keeper
 // still restores it a minute before each beat it owes, and the beat's own
 // stand-down parks it again after.
@@ -245,9 +250,17 @@ func (c *controller) MergeQueuedDown(ws ids.WorkspaceID, repo wsm.RepoKey, ledge
 	c.askDownFor(ws, c.deps.Clock.Now(), mergeQueuedReason, &queuedMerge{repo: repo, ledger: ledger}, nil)
 }
 
+// pendingAsk is one unscoped stand-down ask: its instant and its reason.
+type pendingAsk struct {
+	beat   time.Time
+	reason standDownReason
+}
+
 // askDown asks for WS's stand-down for REASON unless the workspace has done
-// real work since BEAT (wsm.Workspace.WorkedSince). A later ask replaces the earlier one's instant and reason; DONE,
-// when given, joins the asks told how it settles.
+// real work since BEAT (wsm.Workspace.WorkedSince). A later ask replaces the
+// earlier one's instant and reason, except that an unscoped ask never
+// replaces a pending sync merge's park (askDownFor); DONE, when given, joins
+// the asks told how it settles.
 func (c *controller) askDown(ws ids.WorkspaceID, beat time.Time, reason standDownReason, done func(CycleOutcome)) {
 	c.askDownFor(ws, beat, reason, nil, done)
 }
@@ -263,7 +276,21 @@ func (c *controller) askDownFor(ws ids.WorkspaceID, beat time.Time, reason stand
 		st = &cycleState{}
 		c.cycles[ws] = st
 	}
-	st.beat, st.reason, st.merge = beat, reason, merge
+	switch {
+	case st.merge != nil && merge == nil:
+		// A SYNC MERGE'S PARK OUTRANKS AN UNSCOPED ASK. It is taken even for
+		// the workspace in view, and only while its entry waits, so an idle
+		// or keep-alive ask that replaced it lost both rules: the shim hold
+		// asks for the idle park the moment a waiting merge's turn ends
+		// (2026-11-25, the displaced-turn landing). The unscoped ask is kept
+		// for when the merge's park settles without a park.
+		st.outranked = &pendingAsk{beat: beat, reason: reason}
+	case st.merge == nil && merge != nil && st.reason.op != "":
+		st.outranked = &pendingAsk{beat: st.beat, reason: st.reason}
+		st.beat, st.reason, st.merge = beat, reason, merge
+	default:
+		st.beat, st.reason, st.merge = beat, reason, merge
+	}
 	if done != nil {
 		st.dones = append(st.dones, done)
 	}
@@ -303,6 +330,17 @@ func (c *controller) kickCycle(ws ids.WorkspaceID, st *cycleState) {
 			c.mu.Unlock()
 			outcome, settled := c.cycleDown(ctx, ws, beat, reason, merge)
 			c.mu.Lock()
+			if outcome == withheldSettled && merge != nil && st.merge == merge && !settled.Down && !settled.Failed && st.outranked != nil && ctx.Err() == nil {
+				// THE MERGE'S PARK WAS NOT TAKEN, so the ask it outranked is.
+				st.beat, st.reason, st.merge = st.outranked.beat, st.outranked.reason, nil
+				outranked := st.outranked.reason.op
+				st.outranked = nil
+				st.again = false
+				c.mu.Unlock()
+				c.log.Debug(reason.op, "the sync merge's park was not taken; the stand-down it outranked is asked now",
+					merge.fields(dlog.Context{"workspace": string(ws), "outranked": outranked}))
+				continue
+			}
 			var dones []func(CycleOutcome)
 			if outcome == withheldSettled {
 				dones, st.dones = st.dones, nil
@@ -314,6 +352,9 @@ func (c *controller) kickCycle(ws ids.WorkspaceID, st *cycleState) {
 				continue
 			}
 			st.running, st.again = false, false
+			if outcome == withheldSettled {
+				st.outranked = nil
+			}
 			if outcome == withheldSettled && c.cycles[ws] == st {
 				delete(c.cycles, ws)
 			}
@@ -431,6 +472,15 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Info(op, "a real turn ran since; the session is kept up",
 			dlog.Merge(fields, dlog.Context{"worked_at": worked}))
 		return withheldSettled, CycleOutcome{Why: "a real turn ran since; the session is kept up"}
+	} else if hold := session.BringUpHold(record.LastTurnEndedAt, c.deps.Clock.Now()); hold.HoldsAt(c.deps.Clock.Now()) {
+		// A SESSION ITS OWN BRING-UP HOLDS IS NEVER PARKED (owner ruling,
+		// 2026-11-24; wsm.Session.BringUpHold): a stand-down asked before a
+		// bring-up for work (a cold gate raised, then answered) is not taken
+		// over the session that came up, and the cache keeper asks again once
+		// the hold ends.
+		log.Info(op, "the session's own bring-up holds it up; the stand-down is not taken",
+			dlog.Merge(fields, dlog.Context{"indefinite": hold.Indefinite, "until": hold.Until}))
+		return withheldSettled, CycleOutcome{Why: "the session's own bring-up holds it up; the stand-down is not taken"}
 	}
 	switch gate := c.gate(ws); gate {
 	case gateOpen:

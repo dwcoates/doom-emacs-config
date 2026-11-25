@@ -53,7 +53,7 @@ import (
 //     overtook goes right behind them, ahead of every merge still waiting.
 //     Its workspace's one-shot standing is never touched.
 //   - PASSING THE GATE BY HIDING THE WORKSPACE TAKES IT OFF THE QUEUE
-//     (OnHidden, CauseHiddenAtColdGate); killing it does through the close
+//     (OnBacklogged, CauseBackloggedAtColdGate); killing it does through the close
 //     every kill makes (OnWorkspaceClosed).
 //
 // THE GATE'S EDGES ARE APPLIED IN THE ORDER THEY HAPPENED. A raise and the
@@ -75,9 +75,9 @@ const (
 	edgeRaised coldGateEdgeKind = iota + 1
 	// edgeRetired is the gate's record retired: the gate was passed.
 	edgeRetired
-	// edgeHidden is the workspace hidden, which passes a standing gate
+	// edgeBacklogged is the workspace backlogged, which passes a standing gate
 	// without an answer.
-	edgeHidden
+	edgeBacklogged
 	// edgeStoodAfterFailedAnswer is the gate standing again because an
 	// answer to it failed: kept as a raise is, never answered by the queue.
 	edgeStoodAfterFailedAnswer
@@ -159,8 +159,8 @@ func (o *orchestrator) applyColdGateEdge(ctx context.Context, edge coldGateEdge)
 		delete(o.coldFailed, edge.ws)
 		o.coldMu.Unlock()
 		o.coldGateRetired(ctx, edge.ws)
-	case edgeHidden:
-		o.hiddenAtColdGate(ctx, edge.ws)
+	case edgeBacklogged:
+		o.backloggedAtColdGate(ctx, edge.ws)
 	default:
 		panic(fmt.Sprintf("merge: cold gate edge kind %d names no edge", int(edge.kind)))
 	}
@@ -537,18 +537,18 @@ func (o *orchestrator) coldGateQueue(ctx context.Context, ws ids.WorkspaceID, ed
 	return "", false
 }
 
-// OnHidden is told WS was hidden. It is applied in order with WS's cold
-// gate's edges (hiddenAtColdGate).
-func (o *orchestrator) OnHidden(ws ids.WorkspaceID) {
-	o.queueColdGateEdge(coldGateEdge{ws: ws, kind: edgeHidden})
+// OnBacklogged is told WS was backlogged. It is applied in order with WS's cold
+// gate's edges (backloggedAtColdGate).
+func (o *orchestrator) OnBacklogged(ws ids.WorkspaceID) {
+	o.queueColdGateEdge(coldGateEdge{ws: ws, kind: edgeBacklogged})
 }
 
-// hiddenAtColdGate takes WS's merge off its queue when WS was hidden while
-// its merge stood at its cold gate (CauseHiddenAtColdGate): hiding the
+// backloggedAtColdGate takes WS's merge off its queue when WS was backlogged while
+// its merge stood at its cold gate (CauseBackloggedAtColdGate): hiding the
 // workspace is passing its gate without an answer. A workspace with no merge,
 // or whose merge is not at a cold gate, is left as it is.
-func (o *orchestrator) hiddenAtColdGate(ctx context.Context, ws ids.WorkspaceID) {
-	repo, ok := o.coldGateQueue(ctx, ws, "hidden")
+func (o *orchestrator) backloggedAtColdGate(ctx context.Context, ws ids.WorkspaceID) {
+	repo, ok := o.coldGateQueue(ctx, ws, "backlogged")
 	if !ok {
 		return
 	}
@@ -557,14 +557,14 @@ func (o *orchestrator) hiddenAtColdGate(ctx context.Context, ws ids.WorkspaceID)
 		return
 	}
 	if err != nil {
-		o.log(ctx, ws).Error(opColdGate, "could not read the queue entry of the hidden workspace", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		o.log(ctx, ws).Error(opColdGate, "could not read the queue entry of the backlogged workspace", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 		return
 	}
 	if !entry.ColdGated {
 		return
 	}
-	if err := o.dequeue(ctx, ws, CauseHiddenAtColdGate); err != nil {
-		o.log(ctx, ws).Error(opColdGate, "could not take the merge of a workspace hidden at its cold gate off its queue", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+	if err := o.dequeue(ctx, ws, CauseBackloggedAtColdGate); err != nil {
+		o.log(ctx, ws).Error(opColdGate, "could not take the merge of a workspace backlogged at its cold gate off its queue", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 	}
 }
 

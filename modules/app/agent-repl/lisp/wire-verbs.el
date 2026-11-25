@@ -5,7 +5,7 @@
 ;; The protojson CODEC for the agentrepl.v1 WORKSPACE VERBS and DAEMON-ADMIN
 ;; verbs Emacs calls: CreateWorkspace, RegisterRepository, OpenWorkspace,
 ;; CloseWorkspace, KillWorkspace, NukeWorkspace, FinishWorkspace,
-;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden,
+;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceBacklogged,
 ;; SwapWorkspaces, MoveWorkspace, SubmitPrompt, UpdateShutdownSchedule, Deploy,
 ;; UpdateMergeQueue, UpdateRemoteControlMode, DaemonHealth, SessionHealth
 ;; and ReportLatencies.
@@ -2092,7 +2092,7 @@ The merge a placement asked to stand behind is in no queue."
     (restartFailed . :restart-failed) (daemonShutdown . :daemon-shutdown)
     (pickFailed . :pick-failed) (finishFailed . :finish-failed)
     (aheadDidNotLand . :ahead-did-not-land)
-    (hiddenAtColdGate . :hidden-at-cold-gate) (adopted . :adopted)
+    (backloggedAtColdGate . :backlogged-at-cold-gate) (adopted . :adopted)
     (gaveUp . :gave-up))
   "Every arm of MergeQueueStatusOffQueueCause, as (WIRE-SYMBOL . KEYWORD).
 Each arm is an empty message: the arm is the cause.")
@@ -6126,58 +6126,58 @@ The one cause is `:unknown-repository\='."
    #'agent-repl-wire-decode-list-creation-models-success
    #'agent-repl-wire-decode-list-creation-models-error))
 
-;;;; ---- SetWorkspaceHidden ---------------------------------------------
+;;;; ---- SetWorkspaceBacklogged ---------------------------------------------
 ;;
-;; Move a workspace into the sidebar's hidden section, or back out of it.
-;; See endpoint_set_workspace_hidden.proto.
+;; Move a workspace into the sidebar's backlog, or back out of it.
+;; See endpoint_set_workspace_backlogged.proto.
 
-(defun agent-repl-wire-encode-set-workspace-hidden-hide (value)
-  "Encode SetWorkspaceHiddenHide from VALUE.  Empty: the arm is the request."
-  (agent-repl-wire--encode-empty "SetWorkspaceHiddenHide" value))
+(defun agent-repl-wire-encode-set-workspace-backlogged-hide (value)
+  "Encode SetWorkspaceBackloggedHide from VALUE.  Empty: the arm is the request."
+  (agent-repl-wire--encode-empty "SetWorkspaceBackloggedHide" value))
 
-(defun agent-repl-wire-encode-set-workspace-hidden-show (value)
-  "Encode SetWorkspaceHiddenShow from VALUE.  Empty: the arm is the request."
-  (agent-repl-wire--encode-empty "SetWorkspaceHiddenShow" value))
+(defun agent-repl-wire-encode-set-workspace-backlogged-show (value)
+  "Encode SetWorkspaceBackloggedShow from VALUE.  Empty: the arm is the request."
+  (agent-repl-wire--encode-empty "SetWorkspaceBackloggedShow" value))
 
-(defun agent-repl-wire-encode-set-workspace-hidden-request (request)
-  "Encode SetWorkspaceHiddenRequest from plist REQUEST.
+(defun agent-repl-wire-encode-set-workspace-backlogged-request (request)
+  "Encode SetWorkspaceBackloggedRequest from plist REQUEST.
 REQUEST is (:workspace REF :visibility (:arm ARM :value nil)), ARM `:hide'
 or `:show'.  Both are required: an unset visibility is refused here,
 before anything is sent."
-  (let ((message "SetWorkspaceHiddenRequest"))
+  (let ((message "SetWorkspaceBackloggedRequest"))
     (list (cons 'workspace
                 (agent-repl-wire-encode-workspace-ref
                  (agent-repl-wire-verbs--require message "workspace"
                                                   (plist-get request :workspace))))
           (agent-repl-wire-verbs--encode-oneof
            message "visibility" (plist-get request :visibility)
-           '((:hide hide agent-repl-wire-encode-set-workspace-hidden-hide)
-             (:show show agent-repl-wire-encode-set-workspace-hidden-show))))))
+           '((:hide hide agent-repl-wire-encode-set-workspace-backlogged-hide)
+             (:show show agent-repl-wire-encode-set-workspace-backlogged-show))))))
 
-(defun agent-repl-wire-decode-set-workspace-hidden-success (json)
-  "Decode SetWorkspaceHiddenSuccess from JSON.
+(defun agent-repl-wire-decode-set-workspace-backlogged-success (json)
+  "Decode SetWorkspaceBackloggedSuccess from JSON.
 Empty: the roster push carries the new state."
-  (agent-repl-wire-verbs--decode-empty "SetWorkspaceHiddenSuccess" json))
+  (agent-repl-wire-verbs--decode-empty "SetWorkspaceBackloggedSuccess" json))
 
-(defun agent-repl-wire-decode-set-workspace-hidden-error (json)
-  "Decode SetWorkspaceHiddenError from JSON into (:cause (:arm ARM :value V)).
+(defun agent-repl-wire-decode-set-workspace-backlogged-error (json)
+  "Decode SetWorkspaceBackloggedError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL: the four cross-cutting ownership arms, and the two
 family rules a hide and a show keep."
-  (let ((message "SetWorkspaceHiddenError"))
+  (let ((message "SetWorkspaceBackloggedError"))
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted hasOpenChildren parentNotOpen))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
-           (append (agent-repl-wire-verbs--handover-arms "SetWorkspaceHidden")
+           (append (agent-repl-wire-verbs--handover-arms "SetWorkspaceBacklogged")
                    (list agent-repl-wire-verbs--has-open-children-arm agent-repl-wire-verbs--parent-not-open-arm))))))
 
-(defun agent-repl-wire-decode-set-workspace-hidden-response (json)
-  "Decode SetWorkspaceHiddenResponse from JSON into (:arm ARM :value V)."
+(defun agent-repl-wire-decode-set-workspace-backlogged-response (json)
+  "Decode SetWorkspaceBackloggedResponse from JSON into (:arm ARM :value V)."
   (agent-repl-wire-verbs--decode-result
-   "SetWorkspaceHiddenResponse" json
-   #'agent-repl-wire-decode-set-workspace-hidden-success
-   #'agent-repl-wire-decode-set-workspace-hidden-error))
+   "SetWorkspaceBackloggedResponse" json
+   #'agent-repl-wire-decode-set-workspace-backlogged-success
+   #'agent-repl-wire-decode-set-workspace-backlogged-error))
 
 ;;;; ---- RetryVendorError -----------------------------------------------
 ;;
@@ -6231,18 +6231,18 @@ THE ARM IS THE REFUSAL: the four cross-cutting ownership arms, and
    #'agent-repl-wire-decode-retry-vendor-error-success
    #'agent-repl-wire-decode-retry-vendor-error-error))
 
-;;;; ---- SendHiddenKeepalives ------------------------------------------
+;;;; ---- SendBackloggedKeepalives ------------------------------------------
 
-(defun agent-repl-wire-encode-send-hidden-keepalives-request (&optional _request)
-  "Encode SendHiddenKeepalivesRequest.  Empty: the call is the request."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-send-hidden-keepalives-request")
+(defun agent-repl-wire-encode-send-backlogged-keepalives-request (&optional _request)
+  "Encode SendBackloggedKeepalivesRequest.  Empty: the call is the request."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-send-backlogged-keepalives-request")
   nil)
 
-(defun agent-repl-wire-decode-send-hidden-keepalives-skipped (json)
-  "Decode SendHiddenKeepalivesSkipped from JSON into (:reason ONEOF).
+(defun agent-repl-wire-decode-send-backlogged-keepalives-skipped (json)
+  "Decode SendBackloggedKeepalivesSkipped from JSON into (:reason ONEOF).
 ONEOF is (:arm :busy :value (:detail S)), (:arm :detached-work-live :value
 \(:live-items N)) or (:arm :cache-lapsed :value (:lapsed-at-ms MS))."
-  (let ((message "SendHiddenKeepalivesSkipped"))
+  (let ((message "SendBackloggedKeepalivesSkipped"))
     (agent-repl-wire-verbs--check-keys message json '(busy detachedWorkLive cacheLapsed))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
@@ -6250,23 +6250,23 @@ ONEOF is (:arm :busy :value (:detail S)), (:arm :detached-work-live :value
            (list (list 'busy :busy
                        (lambda (value)
                          (agent-repl-wire-verbs--decode-scalar-fields
-                          "SendHiddenKeepalivesSkippedBusy" value '((detail :detail)))))
+                          "SendBackloggedKeepalivesSkippedBusy" value '((detail :detail)))))
                  (list 'detachedWorkLive :detached-work-live
                        (lambda (value)
-                         (let ((arm "SendHiddenKeepalivesSkippedDetachedWorkLive"))
+                         (let ((arm "SendBackloggedKeepalivesSkippedDetachedWorkLive"))
                            (agent-repl-wire-verbs--check-keys arm value '(liveItems))
                            (list :live-items (agent-repl-wire--decode-uint32 arm 'liveItems value)))))
                  (list 'cacheLapsed :cache-lapsed
                        (lambda (value)
-                         (let ((arm "SendHiddenKeepalivesSkippedCacheLapsed"))
+                         (let ((arm "SendBackloggedKeepalivesSkippedCacheLapsed"))
                            (agent-repl-wire-verbs--check-keys arm value '(lapsedAtMs))
                            (list :lapsed-at-ms (agent-repl-wire--decode-int64 arm 'lapsedAtMs value))))))))))
 
-(defun agent-repl-wire-decode-send-hidden-keepalives-workspace (json)
-  "Decode SendHiddenKeepalivesWorkspace from JSON.
+(defun agent-repl-wire-decode-send-backlogged-keepalives-workspace (json)
+  "Decode SendBackloggedKeepalivesWorkspace from JSON.
 Returns (:workspace REF :outcome ONEOF), ONEOF's arm one of `:sent',
 `:skipped', `:not-running' or `:failed' (whose value is (:detail S))."
-  (let ((message "SendHiddenKeepalivesWorkspace"))
+  (let ((message "SendBackloggedKeepalivesWorkspace"))
     (agent-repl-wire-verbs--check-keys message json '(workspace sent skipped notRunning failed))
     (list :workspace (agent-repl-wire--decode-message
                       message 'workspace json #'agent-repl-wire-decode-workspace-ref)
@@ -6274,37 +6274,37 @@ Returns (:workspace REF :outcome ONEOF), ONEOF's arm one of `:sent',
           (agent-repl-wire-verbs--decode-oneof
            message "outcome" json
            (list (list 'sent :sent
-                       (agent-repl-wire-verbs--empty-arm "SendHiddenKeepalivesSent"))
-                 (list 'skipped :skipped #'agent-repl-wire-decode-send-hidden-keepalives-skipped)
+                       (agent-repl-wire-verbs--empty-arm "SendBackloggedKeepalivesSent"))
+                 (list 'skipped :skipped #'agent-repl-wire-decode-send-backlogged-keepalives-skipped)
                  (list 'notRunning :not-running
-                       (agent-repl-wire-verbs--empty-arm "SendHiddenKeepalivesNotRunning"))
+                       (agent-repl-wire-verbs--empty-arm "SendBackloggedKeepalivesNotRunning"))
                  (list 'failed :failed
                        (lambda (value)
                          (agent-repl-wire-verbs--decode-scalar-fields
-                          "SendHiddenKeepalivesFailed" value '((detail :detail))))))))))
+                          "SendBackloggedKeepalivesFailed" value '((detail :detail))))))))))
 
-(defun agent-repl-wire-decode-send-hidden-keepalives-success (json)
-  "Decode SendHiddenKeepalivesSuccess from JSON into (:workspaces LIST).
-LIST holds one decoded SendHiddenKeepalivesWorkspace per hidden
+(defun agent-repl-wire-decode-send-backlogged-keepalives-success (json)
+  "Decode SendBackloggedKeepalivesSuccess from JSON into (:workspaces LIST).
+LIST holds one decoded SendBackloggedKeepalivesWorkspace per backlogged
 workspace, in the registry's order; empty when the section is."
-  (let ((message "SendHiddenKeepalivesSuccess"))
+  (let ((message "SendBackloggedKeepalivesSuccess"))
     (agent-repl-wire-verbs--check-keys message json '(workspaces))
     (list :workspaces (agent-repl-wire-verbs--decode-repeated
                        message 'workspaces json
-                       #'agent-repl-wire-decode-send-hidden-keepalives-workspace))))
+                       #'agent-repl-wire-decode-send-backlogged-keepalives-workspace))))
 
-(defun agent-repl-wire-decode-send-hidden-keepalives-error (json)
-  "Decode SendHiddenKeepalivesError from JSON into (:cause (:arm ARM :value V))."
+(defun agent-repl-wire-decode-send-backlogged-keepalives-error (json)
+  "Decode SendBackloggedKeepalivesError JSON into (:cause (:arm ARM :value V))."
   (list :cause (agent-repl-wire-verbs--decode-scalar-arms
-                "SendHiddenKeepalivesError" "cause" json
+                "SendBackloggedKeepalivesError" "cause" json
                 '((registryUnreadable :registry-unreadable ((detail :detail)))))))
 
-(defun agent-repl-wire-decode-send-hidden-keepalives-response (json)
-  "Decode SendHiddenKeepalivesResponse from JSON into (:arm ARM :value V)."
+(defun agent-repl-wire-decode-send-backlogged-keepalives-response (json)
+  "Decode SendBackloggedKeepalivesResponse from JSON into (:arm ARM :value V)."
   (agent-repl-wire-verbs--decode-result
-   "SendHiddenKeepalivesResponse" json
-   #'agent-repl-wire-decode-send-hidden-keepalives-success
-   #'agent-repl-wire-decode-send-hidden-keepalives-error))
+   "SendBackloggedKeepalivesResponse" json
+   #'agent-repl-wire-decode-send-backlogged-keepalives-success
+   #'agent-repl-wire-decode-send-backlogged-keepalives-error))
 
 ;;;; ---- UpdateQuestionDraft --------------------------------------------
 ;;
@@ -6651,7 +6651,7 @@ Every field is accepted; only the standing is decoded."
   (let ((message "WorkspaceStatus"))
     (agent-repl-wire-verbs--check-keys
      message json
-     '(workspace name branch mergeTarget hidden standing oneShot awaiting repository
+     '(workspace name branch mergeTarget backlogged standing oneShot awaiting repository
        links relationship owner createdBy children summary))
     (list :standing (agent-repl-wire-decode-workspace-status-standing
                      (alist-get 'standing json)))))
@@ -6690,7 +6690,7 @@ Every field is accepted; only the standing is decoded."
 
 ;;;; ---- UpdateSidebarView --------------------------------------------
 ;;
-;; The editor folds the sidebar's one-of-a-kind sections: Hidden at every
+;; The editor folds the sidebar's one-of-a-kind sections: the backlog at every
 ;; startup (owner request, 2026-10-27).  A repository's or a subsection's
 ;; fold is the sidebar's own ask, never the editor's, so those arms are not
 ;; encoded here.  See endpoint_update_sidebar_view.proto.
@@ -6701,13 +6701,13 @@ Every field is accepted; only the standing is decoded."
 
 (defun agent-repl-wire-encode-sidebar-view-fold-section (value)
   "Encode SidebarViewFoldSection from plist VALUE.
-VALUE is (:section (:arm SECTION) :fold (:arm FOLD)), SECTION `:hidden',
+VALUE is (:section (:arm SECTION) :fold (:arm FOLD)), SECTION `:backlog',
 `:open' or `:recently-merged', FOLD `:expand' or `:collapse'.  Both are
 required."
   (let ((message "SidebarViewFoldSection"))
     (list (agent-repl-wire-verbs--encode-oneof
            message "section" (plist-get value :section)
-           (list (list :hidden 'hidden (agent-repl-wire-encode-sidebar-view-empty "SidebarViewHidden"))
+           (list (list :backlog 'backlog (agent-repl-wire-encode-sidebar-view-empty "SidebarViewBacklog"))
                  (list :open 'open (agent-repl-wire-encode-sidebar-view-empty "SidebarViewOpen"))
                  (list :recently-merged 'recentlyMerged
                        (agent-repl-wire-encode-sidebar-view-empty "SidebarViewRecentlyMerged"))))

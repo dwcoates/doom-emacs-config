@@ -529,7 +529,7 @@ func awaitRoster(t *testing.T, d *harness.Daemon, s *harness.Stream[*frontendv1.
 }
 
 // rosterRow finds a workspace's row anywhere in the roster's streams: the
-// repository sections, the hidden section, the closed rows and nested
+// repository sections, the backlog, the closed rows and nested
 // children alike. A merged workspace is in no stream (mergedRowOf).
 func rosterRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
 	for _, r := range rosterwalk.AllRows(roster) {

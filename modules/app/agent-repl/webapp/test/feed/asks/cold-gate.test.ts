@@ -8,9 +8,9 @@ import {
   KillWorkspaceResponseSchema,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
 import {
-  SetWorkspaceHiddenErrorSchema,
-  SetWorkspaceHiddenResponseSchema,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+  SetWorkspaceBackloggedErrorSchema,
+  SetWorkspaceBackloggedResponseSchema,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_backlogged_pb";
 import {
   AnswerColdGateErrorSchema,
   AnswerColdGateResponseSchema,
@@ -1225,8 +1225,8 @@ describe("the hide workspace button", () => {
   }
 
   /** A refused hide carrying CAUSE. */
-  function refusedHide(cause: MessageInitShape<typeof SetWorkspaceHiddenErrorSchema>["cause"]) {
-    return create(SetWorkspaceHiddenResponseSchema, { result: { case: "error", value: { cause } } });
+  function refusedHide(cause: MessageInitShape<typeof SetWorkspaceBackloggedErrorSchema>["cause"]) {
+    return create(SetWorkspaceBackloggedResponseSchema, { result: { case: "error", value: { cause } } });
   }
 
   it("sits between pay and kill", () => {
@@ -1380,7 +1380,7 @@ describe("the hide workspace button", () => {
 
   it("states an unset cause as unreadable rather than as a cause", async () => {
     const h = askHarness({
-      hide: create(SetWorkspaceHiddenResponseSchema, { result: { case: "error", value: {} } }),
+      hide: create(SetWorkspaceBackloggedResponseSchema, { result: { case: "error", value: {} } }),
     });
     const el = drawFeedColdGate(gate(standing()), h.rc);
     hideButton(el)?.click();

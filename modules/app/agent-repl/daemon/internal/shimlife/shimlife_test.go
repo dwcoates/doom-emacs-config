@@ -73,3 +73,37 @@ func TestTheStandDownDetailRidesTheContext(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryStartCauseSaysWhetherItIsForWork(t *testing.T) {
+	work := map[StartCause]bool{
+		StartPrompt: true, StartColdGateAnswer: false, StartCreate: true, StartFork: true,
+		StartThread: true, StartMerge: true, StartCompaction: true,
+		StartRelaunch: false, StartKeepalive: false, StartBoot: false, StartTakeover: false,
+		StartRestart: false, StartRebind: false, StartSettings: false, StartSwap: false, StartUnstated: false,
+		StartMergeLeftLine: false,
+	}
+	for cause, want := range work {
+		t.Run(string(cause), func(t *testing.T) {
+			// Act / Assert
+			if got := cause.ForWork(); got != want {
+				t.Fatalf("%s.ForWork() = %v, want %v", cause, got, want)
+			}
+		})
+	}
+}
+
+func TestEveryStartCauseSaysWhetherTheUserStartedIt(t *testing.T) {
+	user := map[StartCause]bool{
+		StartRestart: true, StartRelaunch: true, StartRebind: true, StartSwap: true, StartColdGateAnswer: true,
+		StartPrompt: false, StartKeepalive: false, StartBoot: false, StartTakeover: false, StartSettings: false, StartMerge: false,
+		StartMergeLeftLine: true,
+	}
+	for cause, want := range user {
+		t.Run(string(cause), func(t *testing.T) {
+			// Act / Assert
+			if got := cause.UserStarted(); got != want {
+				t.Fatalf("%s.UserStarted() = %v, want %v", cause, got, want)
+			}
+		})
+	}
+}

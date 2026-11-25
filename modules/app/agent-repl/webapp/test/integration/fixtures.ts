@@ -103,7 +103,7 @@ import {
 import { orderFor } from "../feed-order.js";
 import { ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { enduringLine } from "../footer/enduring-line.js";
-import { hiddenRow, numberTabs, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
+import { backlogRow, numberTabs, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
 import { sentTo } from "../feed/addresses.js";
 import { drawnBodyOf } from "../held/drawn-body.js";
 import { plainProse, servedProse } from "../prose.js";
@@ -2659,8 +2659,8 @@ export function roster(init?: {
   repositorySections?: { repositoryId: string; label: string; rows: RosterRow[]; collapsed?: boolean }[];
   /** The merged band's daemon-held fold; collapsed unless said, as the daemon's default is. */
   mergedCollapsed?: boolean;
-  /** The hidden section's rows; none unless said, so the section is not drawn. */
-  hidden?: RosterRow[];
+  /** The backlog's rows; none unless said, so the section is not drawn. */
+  backlog?: RosterRow[];
   /** The push's revision; 1 unless said. */
   revision?: bigint;
 }): RosterPush {
@@ -2689,9 +2689,9 @@ export function roster(init?: {
       openCount: { workspaces: rows.length },
     },
     open: { label: { text: "Open" }, fold: { case: "expanded", value: {} } },
-    hidden: {
-      header: { label: { text: "Hidden" }, count: { workspaces: (init?.hidden ?? []).length } },
-      hiddenRows: { rows: (init?.hidden ?? []).map(hiddenRow) },
+    backlog: {
+      header: { label: { text: "Backlog" }, count: { workspaces: (init?.backlog ?? []).length } },
+      backlogRows: { rows: (init?.backlog ?? []).map(backlogRow) },
       fold: { case: "expanded", value: {} },
       height: { case: "fitted", value: {} },
     },

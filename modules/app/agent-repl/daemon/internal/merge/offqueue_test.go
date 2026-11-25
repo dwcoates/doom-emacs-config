@@ -626,7 +626,7 @@ var exitCauses = map[string]string{
 	"causeDetachedForkFailed":   causeDetachedForkFailed,
 	"causeFinishFailed":         causeFinishFailed,
 	"CauseColdGate":             string(CauseColdGate),
-	"CauseHiddenAtColdGate":     string(CauseHiddenAtColdGate),
+	"CauseBackloggedAtColdGate": string(CauseBackloggedAtColdGate),
 	"CauseColdGateAnswerFailed": string(CauseColdGateAnswerFailed),
 }
 

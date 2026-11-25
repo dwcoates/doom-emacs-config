@@ -237,7 +237,7 @@ func TestAFoldedWorkspaceWhoseResultIsReadIsNotVisible(t *testing.T) {
 	turnFinished(r, theWS)
 
 	// Act
-	r.SetInteracted(theWS, epoch)
+	r.SetInteracted(theWS, afterExemption)
 
 	// Assert
 	if got := visibilities(t, r)[string(theWS)]; got != "not_visible" {
@@ -255,8 +255,9 @@ func TestAVisibleRowUnderAFoldHasANumberedSurfacedTab(t *testing.T) {
 
 	// Assert
 	row := rosterwalk.FlattenOpen(rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0]))[0]
-	if _, numbered := row.GetTab().GetTab().(*frontendv1.RosterOpenRowTab_Numbered); !numbered || !row.GetSurfaced() {
-		t.Fatalf("tab = %v surfaced = %v, want a numbered tab drawn inside the fold", row.GetTab(), row.GetSurfaced())
+	_, surfaced := row.GetFoldCover().GetCover().(*frontendv1.RosterOpenRowFoldCover_Surfaced)
+	if _, numbered := row.GetTab().GetTab().(*frontendv1.RosterOpenRowTab_Numbered); !numbered || !surfaced {
+		t.Fatalf("tab = %v fold cover = %v, want a numbered tab drawn inside the fold", row.GetTab(), row.GetFoldCover())
 	}
 }
 
@@ -307,12 +308,12 @@ func TestTheSelectionIsSelectedUnderAFold(t *testing.T) {
 	}
 }
 
-func TestAHiddenSelectionIsSelected(t *testing.T) {
+func TestABackloggedSelectionIsSelected(t *testing.T) {
 	// Arrange
 	r := arrange(t)
 
 	// Act
-	r.SetRegistrySelected(registry(hiddenWorkspace(string(theWS), "one")), theWS, sidebar.SelectStamp{})
+	r.SetRegistrySelected(registry(backloggedWorkspace(string(theWS), "one")), theWS, sidebar.SelectStamp{})
 
 	// Assert
 	if got := visibilities(t, r)[string(theWS)]; got != "selected" {
@@ -320,12 +321,12 @@ func TestAHiddenSelectionIsSelected(t *testing.T) {
 	}
 }
 
-func TestAHiddenWorkspaceNobodyIsOnIsNotVisible(t *testing.T) {
+func TestABackloggedWorkspaceNobodyIsOnIsNotVisible(t *testing.T) {
 	// Arrange
 	r := arrange(t)
 
 	// Act
-	r.SetRegistry(registry(hiddenWorkspace(string(theWS), "one")))
+	r.SetRegistry(registry(backloggedWorkspace(string(theWS), "one")))
 
 	// Assert
 	if got := visibilities(t, r)[string(theWS)]; got != "not_visible" {
@@ -474,7 +475,7 @@ func TestVisibilityBeforeAnyRenderIsTheStoredOne(t *testing.T) {
 	}{
 		{name: "a workspace stored selected", ws: "w-selected", want: wsm.Selected},
 		{name: "a workspace stored visible", ws: "w-visible", want: wsm.UnselectedVisible},
-		{name: "a workspace stored not visible", ws: "w-hidden", want: wsm.NotVisible},
+		{name: "a workspace stored not visible", ws: "w-backlogged", want: wsm.NotVisible},
 		{name: "a workspace the registry does not carry", ws: "w-unknown", want: wsm.NotVisible},
 	}
 	for _, tc := range cases {
@@ -483,7 +484,7 @@ func TestVisibilityBeforeAnyRenderIsTheStoredOne(t *testing.T) {
 			r := sidebar.UnrenderedHolding(
 				wsm.Workspace{ID: "w-selected", Visibility: wsm.Selected},
 				wsm.Workspace{ID: "w-visible", Visibility: wsm.UnselectedVisible},
-				wsm.Workspace{ID: "w-hidden", Visibility: wsm.NotVisible},
+				wsm.Workspace{ID: "w-backlogged", Visibility: wsm.NotVisible},
 			)
 
 			// Act
@@ -708,12 +709,12 @@ func TestAResultReadIsCountedByWhatReadIt(t *testing.T) {
 	}{
 		{name: "an interaction that views the row", act: func(r sidebarResolver) {
 			turnFinished(r, theWS)
-			r.SetInteracted(theWS, epoch)
+			r.SetInteracted(theWS, afterExemption)
 		}, want: []sidebar.ResultReadBy{sidebar.ReadByInteraction}},
 		{name: "a repeat on a row already viewed is not counted again", act: func(r sidebarResolver) {
 			turnFinished(r, theWS)
-			r.SetInteracted(theWS, epoch)
-			r.SetInteracted(theWS, epoch.Add(time.Second))
+			r.SetInteracted(theWS, afterExemption)
+			r.SetInteracted(theWS, afterExemption.Add(time.Second))
 		}, want: []sidebar.ResultReadBy{sidebar.ReadByInteraction}},
 	}
 	for _, tt := range tests {
@@ -748,5 +749,154 @@ func TestAVisibilityChangeRecordNamesItsReason(t *testing.T) {
 	recs := visibilityRecords(surfaces, theWS)
 	if len(recs) == 0 || recs[len(recs)-1].Context["reason"] != "covered" {
 		t.Fatalf("visibility records = %v, want the last naming reason covered", recs)
+	}
+}
+
+// subsectionFamily is a parent with a child and a grandchild, all in one
+// subsection of a collapsed repository section, beside a workspace in no
+// subsection.
+func subsectionFamily(subsectionFolded bool) sidebar.Registry {
+	sub := subsection("sub-1", "work", 1)
+	sub.Folded = subsectionFolded
+	parent := in(placed(workspace("s-p", "parent"), 1), sub)
+	kid := in(placed(workspace("s-k", "kid"), 1), sub)
+	kid.Parent = &parent.ID
+	grand := in(placed(workspace("s-g", "grand"), 1), sub)
+	grand.Parent = &kid.ID
+	reg := registry(parent, kid, grand, placed(workspace("s-loose", "loose"), 2))
+	reg.Repositories[0].Folded = true
+	reg.Subsections = []wsm.Subsection{sub}
+	return reg
+}
+
+func TestTheNearestFoldDecidesASubsectionsRows(t *testing.T) {
+	tests := []struct {
+		name             string
+		subsectionFolded bool
+		want             map[string]string
+	}{
+		{
+			name:             "an unfolded subsection in a collapsed repository shows its whole family",
+			subsectionFolded: false,
+			want:             map[string]string{"s-p": "unselected_visible", "s-k": "unselected_visible", "s-g": "unselected_visible", "s-loose": "not_visible"},
+		},
+		{
+			name:             "a folded subsection hides its rows at every depth",
+			subsectionFolded: true,
+			want:             map[string]string{"s-p": "not_visible", "s-k": "not_visible", "s-g": "not_visible", "s-loose": "not_visible"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reg := subsectionFamily(tt.subsectionFolded)
+			r := arrange(t)
+			r.SetRegistry(reg)
+
+			// Act
+			liveRegistry(r, reg)
+
+			// Assert
+			got := visibilities(t, r)
+			for id, want := range tt.want {
+				if got[id] != want {
+					t.Errorf("%s visibility = %s, want %s", id, got[id], want)
+				}
+			}
+		})
+	}
+}
+
+func TestAFoldedSubsectionsWorkingGrandchildIsVisibleWithItsChain(t *testing.T) {
+	// Arrange
+	reg := subsectionFamily(true)
+	r := arrange(t)
+	r.SetRegistry(reg)
+	liveRegistry(r, reg)
+
+	// Act
+	working(r, "s-g")
+
+	// Assert
+	got := visibilities(t, r)
+	for _, id := range []string{"s-p", "s-k", "s-g"} {
+		if got[id] != "unselected_visible" {
+			t.Errorf("%s visibility = %s, want unselected_visible: a working grandchild keeps its chain drawn", id, got[id])
+		}
+	}
+}
+
+// foldCoverName reads an open row's fold cover arm by name.
+func foldCoverName(row *frontendv1.RosterOpenRow) string {
+	switch row.GetFoldCover().GetCover().(type) {
+	case *frontendv1.RosterOpenRowFoldCover_Uncovered:
+		return "uncovered"
+	case *frontendv1.RosterOpenRowFoldCover_Hidden:
+		return "hidden"
+	case *frontendv1.RosterOpenRowFoldCover_Surfaced:
+		return "surfaced"
+	default:
+		return "unset"
+	}
+}
+
+func TestEveryOpenRowStatesItsFoldCover(t *testing.T) {
+	tests := []struct {
+		name    string
+		folded  bool
+		working bool
+		wantArm string
+	}{
+		{name: "a row no fold covers is uncovered", folded: false, wantArm: "uncovered"},
+		{name: "an idle row a fold covers is hidden", folded: true, wantArm: "hidden"},
+		{name: "a working row a fold covers is surfaced", folded: true, working: true, wantArm: "surfaced"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reg := registry(workspace(string(theWS), "one"))
+			reg.Repositories[0].Folded = tt.folded
+			r := arrange(t)
+			r.SetRegistry(reg)
+			liveRegistry(r, reg)
+
+			// Act
+			if tt.working {
+				working(r, theWS)
+			}
+
+			// Assert
+			row := rosterwalk.FlattenOpen(rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0]))[0]
+			if got := foldCoverName(row); got != tt.wantArm {
+				t.Fatalf("fold cover = %s, want %s", got, tt.wantArm)
+			}
+		})
+	}
+}
+
+func TestAnAlwaysShownWorkspaceIsVisibleUnderAFold(t *testing.T) {
+	tests := []struct {
+		name string
+		mark func(ws *wsm.Workspace)
+	}{
+		{name: "a deploy mediator", mark: func(ws *wsm.Workspace) { ws.Mediator = wsm.MediatorDeploy }},
+		{name: "a queue-bypass holder", mark: func(ws *wsm.Workspace) { ws.QueueBypassHeld = true }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reg := foldedOne()
+			tt.mark(&reg.Workspaces[0])
+			r := arrange(t)
+			r.SetRegistry(reg)
+
+			// Act
+			liveRegistry(r, reg)
+
+			// Assert
+			if got := visibilities(t, r)[string(theWS)]; got != "unselected_visible" {
+				t.Fatalf("visibility = %s, want unselected_visible: a fold never hides it", got)
+			}
+		})
 	}
 }

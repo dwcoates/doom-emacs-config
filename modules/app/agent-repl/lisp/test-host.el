@@ -1624,6 +1624,51 @@ an echo would race a newer request and take the frame back."
     (should (equal (agent-repl-test-host--selected-ids) '("ws-id-folded")))
     (should-not agent-repl-host-last-request)))
 
+(ert-deftest agent-repl-test-host-request-switch-by-name-of-an-unheld-workspace-selects-its-ref ()
+  "A switch by name to a workspace a fold hides selects it by the roster's ref."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (setq agent-repl-test-host--current-ws "ws-1")
+    (cl-letf (((symbol-function 'agent-repl-roster-open-entry-named)
+               (lambda (name) (and (equal name "folded")
+                                   (list :name "folded" :ref agent-repl-test-host--unheld-ref)))))
+      ;; Act
+      (agent-repl-host-request-switch "folded" 'picker))
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-folded")))))
+
+(ert-deftest agent-repl-test-host-a-walk-step-to-an-unheld-workspace-keeps-the-walk ()
+  "A recency-walk step to an unheld workspace keeps the history and records where it lands."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (setq agent-repl-test-host--current-ws "ws-1")
+    (let ((agent-repl--recency-walk-origin nil)
+          (agent-repl--recency-walk-landing nil))
+      (cl-letf (((symbol-function 'agent-repl-roster-open-entry-named)
+                 (lambda (name) (and (equal name "folded")
+                                     (list :name "folded" :ref agent-repl-test-host--unheld-ref)))))
+        ;; Act
+        (agent-repl-host-request-switch "folded" 'recency-walk))
+      ;; Assert
+      (should (equal (list agent-repl--recency-walk-origin agent-repl--recency-walk-landing)
+                     '("ws-1" "folded")))
+      (should (plist-get (car (agent-repl-test-host--select-requests)) :keep-selection-history)))))
+
+(ert-deftest agent-repl-test-host-a-switch-by-name-the-roster-does-not-list-is-unsent ()
+  "A name neither held nor listed open is refused loudly, as before."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl-roster-open-entry-named) (lambda (_name) nil)))
+      ;; Act
+      (should-not (agent-repl-host-request-switch "nowhere" 'picker)))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :warn "elisp.host.switch-request-unsent ws=nowhere trigger=picker reason=no-ref"))
+    (should-not (agent-repl-test-host--selected-ids))))
+
 (ert-deftest agent-repl-test-host-an-unheld-selection-the-daemon-refuses-is-reported ()
   "A refused selection of an unheld workspace is told: at ERROR and in the echo area."
   (agent-repl-test-host--with-harness

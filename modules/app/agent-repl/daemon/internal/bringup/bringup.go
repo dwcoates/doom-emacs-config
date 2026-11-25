@@ -2,7 +2,7 @@
 // come to serve with no session behind them.
 //
 // AN OPEN VISIBLE WORKSPACE IS NEVER SESSION-LESS (owner rulings, 2026-09-13
-// and 2026-10-02, narrowed to VISIBLE workspaces on 2026-10-12: a hidden or
+// and 2026-10-02, narrowed to VISIBLE workspaces on 2026-10-12: a backlogged or
 // collapsed one runs nothing, see visible.go). A daemon comes to serve a workspace in more than one way: a
 // fresh boot reconciles the registry and finds shims that did not survive, and
 // a joining successor takes workspaces over from the daemon it replaces, some

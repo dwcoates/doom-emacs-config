@@ -31,18 +31,19 @@ import (
 //     unless in view, so a pick through the agent API, which no switch away
 //     ever ends, ends by the same rule;
 //   - the keep-alive cycle, while a beat is owed: stood down after it;
-//   - the cache's lapse, while a hidden or closed workspace's lapse is
+//   - the cache's lapse, while a backlogged or closed workspace's lapse is
 //     armed;
 //   - the idle sweep, when the session will be idle past its cutoff first;
 //   - the cold park, when no beat is owed for any other reason: stood down
-//     once the session has been idle StandDownGrace (ownCold).
+//     once the workspace's shim hold ends (ownCold).
 //
-// WHICHEVER OWNS IT, A SESSION IS PARKED ONCE IT HAS BEEN IDLE
-// StandDownGrace (owner rule, 2026-11-23): the cycle, the lapse and the sweep
-// park it at its grace too (ownIdle, parkIdle), so a hidden workspace's
-// session waits neither for its cache's lapse nor for the sweep's cutoff of
-// hours. The grace is measured from the workspace's last real work
-// (wsm.Workspace.IdleSince), which no start, keep-alive or bounce moves.
+// WHICHEVER OWNS IT, AN IDLE SESSION IS PARKED ONCE ITS SHIM HOLD ENDS (owner
+// rulings, 2026-11-24; Deps.Hold, wsm.ShimHold): the roster's workspace
+// resource allocation says until when an idle shim stays up (the selection
+// and work for as long as they stand, an unread result for fifteen minutes
+// after its turn, a workspace the user left for as long as its page), and the
+// cycle, the lapse and the sweep park at it too (ownIdle, parkIdle), so no
+// session waits for its cache's lapse or the sweep's cutoff of hours.
 //
 // A session is LEFT UP, and owned by none, while the user is looking at it
 // or its remote control is on; the edge that ends either reconciles it
@@ -151,12 +152,11 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 }
 
 // ownCold gives RECORD's session to the cold park, which takes it once the
-// session has been idle StandDownGrace (idleSince), and arms that instant
-// until then (idleParksDue).
+// workspace's shim hold ends (parkWaits), and arms that instant until then
+// (idleParksDue).
 //
-// THE SAME GRACE AS THE IDLE PARK'S (owner rulings, 2026-10-26 and
-// 2026-11-23): the user prompts with no shim start for StandDownGrace after
-// the work. A session that came up cold for a reason -- a new workspace's
+// THE SAME HOLD AS THE IDLE PARK'S (owner rulings, 2026-11-24): the shim
+// stays up for as long as the workspace's resource allocation holds it. A session that came up cold for a reason -- a new workspace's
 // first prompt on its way, a cold gate's answer re-opening the session the
 // user asked for -- is not parked under it, since that prompt's delivery is
 // work; one adopted or started after hours idle is parked at once. The
@@ -166,21 +166,20 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 // one, and take no grace. ARMED is the instant armed before this decision,
 // when WASARMED, so its wait is recorded at INFO only when it moves.
 func (k *Keeper) ownCold(ctx context.Context, log dlog.Logger, record wsm.Workspace, why string, armed time.Time, wasArmed bool) {
-	since, ok := k.idleSince(ctx, log, record)
+	since, hold, ok := k.idleSince(ctx, log, record)
 	if !ok {
 		return
 	}
 	k.setStanding(log, record.ID, standing{owner: ownerCold}, why)
-	if k.parkWaits(log, record.ID, since, armed, wasArmed) {
+	if k.parkWaits(log, record.ID, hold, since, armed, wasArmed) {
 		return
 	}
 	k.parkCold(record.ID, k.deps.Clock.Now(), why, false)
 }
 
 // ownIdle parks RECORD's session, which owes the keep-alive due at BEAT,
-// once it has been idle StandDownGrace (owner ruling, 2026-11-23: "shim
-// parking happens after 20 minutes rather than an hour of inactivity"), and
-// arms that instant until then (idleParksDue). The keeper restores the
+// once its shim hold ends (parkWaits), and arms that instant until then
+// (idleParksDue). The keeper restores the
 // session a minute before the beat (RestoreLead), and the beat's own
 // stand-down parks it again once the vendor answers (settleAnswer), so:
 //
@@ -197,11 +196,17 @@ func (k *Keeper) ownIdle(ctx context.Context, log dlog.Logger, record wsm.Worksp
 	if _, awaiting := k.answering[ws]; awaiting {
 		return
 	}
-	since, ok := k.idleSince(ctx, log, record)
-	if !ok || !since.Add(StandDownGrace).Before(restoreAt) {
+	since, hold, ok := k.idleSince(ctx, log, record)
+	if !ok {
 		return
 	}
-	if k.parkWaits(log, ws, since, armed, wasArmed) {
+	// A HOLD THAT ENDS ONLY INSIDE THE BEAT'S RESTORE LEAD IS LEFT TO THE
+	// BEAT'S STAND-DOWN, and one that holds while its cause stands is never
+	// parked under it.
+	if hold.Indefinite || !hold.Until.Before(restoreAt) {
+		return
+	}
+	if k.parkWaits(log, ws, hold, since, armed, wasArmed) {
 		return
 	}
 	if !k.deps.Clock.Now().Before(restoreAt) {
@@ -211,13 +216,13 @@ func (k *Keeper) ownIdle(ctx context.Context, log dlog.Logger, record wsm.Worksp
 	k.deps.IdleDown(ws, since)
 }
 
-// parkIdle parks RECORD's session, owed no keep-alive, once it has been idle
-// StandDownGrace, and arms that instant until then (idleParksDue): the lapse's
-// and the sweep's sessions are parked at the same grace as every other's.
+// parkIdle parks RECORD's session, owed no keep-alive, once its shim hold
+// ends, and arms that instant until then (idleParksDue): the lapse's and the
+// sweep's sessions are parked at the same hold as every other's.
 // ARMED and WASARMED are ownCold's.
 func (k *Keeper) parkIdle(ctx context.Context, log dlog.Logger, record wsm.Workspace, armed time.Time, wasArmed bool) {
-	since, ok := k.idleSince(ctx, log, record)
-	if !ok || k.parkWaits(log, record.ID, since, armed, wasArmed) {
+	since, hold, ok := k.idleSince(ctx, log, record)
+	if !ok || k.parkWaits(log, record.ID, hold, since, armed, wasArmed) {
 		return
 	}
 	log.Debug(opOwner, "the session has been idle past its grace and owes no keep-alive; it is parked", dlog.Context{"idle_since": since})
@@ -225,36 +230,52 @@ func (k *Keeper) parkIdle(ctx context.Context, log dlog.Logger, record wsm.Works
 }
 
 // idleSince answers when RECORD's workspace last did real work
-// (wsm.Workspace.IdleSince): the one durable instant every park measures its
-// grace from, which no session start, keep-alive or bounce moves, so a
-// successor reads the same one. False when the session is gone (disowned) or
-// cannot be read (recorded at ERROR).
-func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Workspace) (time.Time, bool) {
+// (wsm.Workspace.IdleSince), for the record, and until when its idle shim is
+// held up (shimHold). False when the session is gone (disowned) or cannot be
+// read (recorded at ERROR).
+func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Workspace) (time.Time, wsm.ShimHold, bool) {
 	ws := record.ID
-	_, found, err := k.deps.DB.Session(ctx, ws)
+	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
 		if !leaving(ctx, log, opOwner, "reading the workspace's session", err) {
 			log.Error(opOwner, "could not read the workspace's session; its idle park is not armed", dlog.Context{"cause": err.Error()})
 		}
-		return time.Time{}, false
+		return time.Time{}, wsm.ShimHold{}, false
 	}
 	if !found {
 		k.disown(log, ws)
-		return time.Time{}, false
+		return time.Time{}, wsm.ShimHold{}, false
 	}
-	return record.IdleSince(), true
+	return record.IdleSince(), k.shimHold(record, session), true
 }
 
-// parkWaits arms WS's idle park at SINCE plus StandDownGrace when that is
-// still to come, answering true; its wait is recorded at INFO only when the
-// instant moved from ARMED (WASARMED).
-func (k *Keeper) parkWaits(log dlog.Logger, ws ids.WorkspaceID, since, armed time.Time, wasArmed bool) bool {
-	due := since.Add(StandDownGrace)
-	if !k.deps.Clock.Now().Before(due) {
+// shimHold answers until when RECORD's idle SESSION is held up: the later of
+// what its own bring-up holds (wsm.Session.BringUpHold: initializing for a
+// turn not yet closed, or a user-asked start's ShimIdleHold), read from its
+// own durable row so no roster render can lag it, and the roster's resource
+// allocation (Deps.Hold).
+func (k *Keeper) shimHold(record wsm.Workspace, session wsm.Session) wsm.ShimHold {
+	return session.BringUpHold(record.LastTurnEndedAt, k.deps.Clock.Now()).Later(k.deps.Hold(record.ID))
+}
+
+// parkWaits arms WS's idle park at the instant HOLD stops holding its idle
+// shim up (shimHold), when that is still to come, answering true; a hold for
+// as long as what decided it stands arms nothing, since its end reaches the
+// keeper as an edge (ShimHoldChanged, TurnClosed). SINCE is when the session
+// last did real work, for the record. The wait is recorded at INFO only when
+// the armed instant moved from ARMED (WASARMED).
+func (k *Keeper) parkWaits(log dlog.Logger, ws ids.WorkspaceID, hold wsm.ShimHold, since, armed time.Time, wasArmed bool) bool {
+	now := k.deps.Clock.Now()
+	if hold.Indefinite {
+		log.Debug(opOwner, "the session's resource allocation holds it up while what decided it stands; its park waits", dlog.Context{"idle_since": since})
+		return true
+	}
+	due := hold.Until
+	if !now.Before(due) {
 		return false
 	}
 	if !wasArmed || !armed.Equal(due) {
-		log.Info(opOwner, "the session was idle less than its grace ago; its park waits", dlog.Context{"idle_since": since, "due": due})
+		log.Info(opOwner, "the session's resource allocation holds it up until its hold ends; its park waits", dlog.Context{"idle_since": since, "due": due})
 	}
 	k.idleDue[ws] = due
 	k.deps.Why.SetParkDue(ws, due)
@@ -359,6 +380,13 @@ func (k *Keeper) SettingsVisitStarted(ws ids.WorkspaceID, at time.Time) {
 	}
 	log.Info(opVisit, "a settings pick started the workspace's shim; the visit owns its stand-down until it ends", dlog.Context{"since": at})
 	k.enqueue(edge{ws: ws, why: "a settings pick started its shim"})
+}
+
+// ShimHoldChanged is the roster's word that WS's shim hold moved
+// (sidebar.ShimHoldSink): the selection left it, it was read, its work ended.
+// Its stand-down is reconciled against the new hold.
+func (k *Keeper) ShimHoldChanged(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, why: "its shim hold moved"})
 }
 
 // RemoteControlChanged is WS's remote-control mode changed, already

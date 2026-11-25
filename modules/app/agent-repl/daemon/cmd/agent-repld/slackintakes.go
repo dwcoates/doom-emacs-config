@@ -22,7 +22,7 @@ type slackIntakes struct {
 }
 
 // CreateSlackIntake creates REQ's intake through the one intake helper
-// (workspace.CreateIntake): a hidden, fresh-context workspace of its
+// (workspace.CreateIntake): a backlogged, fresh-context workspace of its
 // repository whose first prompt is REQ's brief, retired when its turn ends.
 // The intake forks itself into the workspace the binding names; it is no
 // emoji-ack workspace itself, since that kind belongs to the workspace that

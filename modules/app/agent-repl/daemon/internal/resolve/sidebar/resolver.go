@@ -100,6 +100,11 @@ type core struct {
 	// pendingVisibilities are the visibility changes a render found, reported
 	// after the lock is released.
 	pendingVisibilities map[ids.WorkspaceID]wsm.Visibility
+	// pendingShimHolds are the workspaces whose shim hold a render changed,
+	// reported after the lock is released; shimHolds is told them
+	// (WithShimHoldSink), nil telling nobody.
+	pendingShimHolds []ids.WorkspaceID
+	shimHolds        ShimHoldSink
 	// visibilityMoves are the visibility changes the commit's renders found,
 	// recorded once the commit knows the roster that carries them
 	// (recordVisibilityMoves).
@@ -117,6 +122,13 @@ type core struct {
 
 	// now is the clock a status change is stamped by (WithClock).
 	now func() time.Time
+
+	// pageClock arms the page verdicts' clock (WithPageClock); nil is
+	// time.AfterFunc. pageWakeAt is the instant it is armed for, zero when
+	// none is, and pageWakeStop stops it (page.go). Caller holds mu.
+	pageClock    PageClock
+	pageWakeAt   time.Time
+	pageWakeStop func() bool
 
 	// quiet is the lid-closed quiet state's view gate (WithQuiet): while it
 	// stands, a change derives every row's facts but resolves and publishes
@@ -445,11 +457,13 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 		viewed:        r.pendingViewed,
 		statusChanges: r.pendingStatusChanges,
 		visibilities:  r.pendingVisibilities,
+		shimHolds:     r.pendingShimHolds,
 	}
 	r.pendingResults = nil
 	r.pendingViewed = nil
 	r.pendingStatusChanges = nil
 	r.pendingVisibilities = nil
+	r.pendingShimHolds = nil
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -523,6 +537,11 @@ func (r *resolver) report(batch []*mutation, out batchOutcome) {
 	}
 	if len(out.visibilities) > 0 {
 		r.visibilities(out.visibilities)
+	}
+	if r.shimHolds != nil {
+		for _, ws := range out.shimHolds {
+			r.shimHolds(ws)
+		}
 	}
 	if !out.applied {
 		return
@@ -619,7 +638,7 @@ func (r *resolver) rowContext(cause string) rowContext {
 
 // render resolves the roster's FOUR STREAMS in one walk under the one lock
 // (frontend.v1.RosterPush): the workspaces stream (the open repository view,
-// the hidden section, the selection and the rail's chrome), the merge queue,
+// the backlog, the selection and the rail's chrome), the merge queue,
 // the Recently Merged summary and the closed rows. It answers them unstamped
 // (no revision), with the merged set they were resolved from and that set's
 // token. CAUSE is the operation whose fact is being rendered, named on every
@@ -654,10 +673,11 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 	var judged map[ids.WorkspaceID]string
 	rc.arms, judged = r.resolveArms(rc)
 	r.resolveVisibility(repos, rc, judged)
+	r.resolvePages(rc, rc.arms)
 
 	workspaces := &frontendv1.WorkspaceRoster{
 		Repository: r.repositoryView(repos, orphans, rc, log),
-		Hidden:     r.hiddenSection(lists.hidden, rc, log),
+		Backlog:    r.backlogSection(lists.backlogged, rc, log),
 		Open:       r.openSection(),
 	}
 	for _, ws := range sortMergedNewestFirst(lists.merged) {
@@ -1067,12 +1087,12 @@ func (r *resolver) SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate 
 }
 
 // coldGates resolves the shown cold gates of the workspaces listed open, in
-// the registry's order: a closed or hidden workspace's gate has no page to be
+// the registry's order: a closed or backlogged workspace's gate has no page to be
 // shown over.
 func (r *resolver) coldGates() []*frontendv1.RosterColdGate {
 	var out []*frontendv1.RosterColdGate
 	for _, ws := range r.state.reg.Workspaces {
-		if ws.Closed || ws.Hidden || ws.IsThread() {
+		if ws.Closed || ws.Backlogged || ws.IsThread() {
 			continue
 		}
 		g, ok := r.state.gates[ws.ID]
@@ -1113,7 +1133,16 @@ func (r *resolver) DeployedVersion(v *deployedversion.Version) {
 func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_selected",
 		logsite.Msg("the roster took the selection and cleared the workspace's attention marker"),
-		nil, func(*wsState) {
+		nil, func(s *wsState) {
+			// A SWITCH ENDS ONE VISIT AND BEGINS ANOTHER, which the page
+			// verdict reads (page.go): when the user left, and whether that
+			// visit first marked the workspace viewed.
+			if prev := r.state.selected; prev != nil && *prev != ws {
+				noteDeparture(r.state.workspace(*prev), r.now())
+			}
+			if prev := r.state.selected; prev == nil || *prev != ws {
+				noteArrival(s)
+			}
 			selected := ws
 			r.state.selected = &selected
 		})
@@ -1137,20 +1166,32 @@ func (r *resolver) SetInteracted(ws ids.WorkspaceID, at time.Time) {
 		dlog.Context{"at": at.UTC()}, func(s *wsState, log dlog.Logger) bool {
 			was := s.viewedArm
 			newest := r.newestInteracted(ws, s)
-			if !s.interacted(at) {
+			var recorded *time.Time
+			if rec, ok := r.state.record(ws); ok {
+				recorded = rec.LastTurnEndedAt
+			}
+			if ended, exempt := s.viewExempt(at, recorded); exempt {
+				s.interacted(at, true)
+				log.Info("daemon.sidebar.interaction_view_exempt",
+					"the user interacted within the view exemption of the last turn's end, so the row stays unread; the interaction counts toward recency", dlog.Context{
+						"turn_ended_at": ended.UTC(), "exemption": ViewExemption.String(), "reorders": !newest,
+					})
+				return !newest
+			}
+			if !s.interacted(at, false) {
 				if !s.lastArmSeen {
 					log.Info("daemon.sidebar.interaction_before_arm",
 						"the user interacted before the roster drew the row any status, so nothing is viewed yet", nil)
 					return !newest
 				}
 				log.Debug("daemon.sidebar.interaction_restamped",
-					"the row was already viewed on its status; only its interaction instant moved", dlog.Context{
+					"the row was already viewed; only its interaction instant moved", dlog.Context{
 						"status": s.lastArm, "reorders": !newest,
 					})
 				return !newest
 			}
 			log.Info("daemon.sidebar.row_viewed",
-				"the user interacted with the workspace, so its row is viewed until its next status change", dlog.Context{
+				"the user interacted with the workspace, so its row is viewed until its next turn", dlog.Context{
 					"status": s.viewedArm, "was": was,
 				})
 			r.countResultRead(ReadByInteraction)
@@ -1298,9 +1339,9 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 				log.Info("daemon.sidebar.result_cleared",
 					"a new prompt started a turn, so the last turn's end no longer holds the row", nil)
 			}
-			if turn != nil && s.dropRestoredViewed() {
-				log.Info("daemon.sidebar.viewed_restore_dropped",
-					"a new turn started before the row drew its restored viewed status, so it is not viewed", nil)
+			if turn != nil && s.clearViewedForTurn() {
+				log.Info("daemon.sidebar.viewed_cleared_by_turn",
+					"a new turn started, so the row is no longer viewed", nil)
 			}
 			s.startTurn(turn)
 		})
@@ -1344,15 +1385,16 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn_ended", logsite.Msg("the roster took the turn's close"),
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			cut := contextCut(s.turn)
-			if s.dropRestoredViewed() {
-				log.Info("daemon.sidebar.viewed_restore_dropped",
-					"a turn ended before the row drew its restored viewed status, so it is not viewed", nil)
-			}
+			// A TURN'S END LOWERS NO VIEWED MARKER (owner ruling, 2026-11-24):
+			// only a turn's start does (SetTurn), so an end a deploy's
+			// adoption replays leaves the row as the user left it.
 			s.turn = nil
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = ""
 			s.turnEverRan = true
 			s.lastClose = how
+			ended := r.now()
+			s.turnEndedAt = &ended
 			s.endAnswered = false
 			s.compacting = false
 			s.settleResult()
@@ -1374,10 +1416,9 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 					})
 				return
 			}
-			// THE ROW IS NOT VIEWED BY ITS OWN END: the status change it makes
-			// lowers the viewed marker like any other, a completed /clear, a
-			// compaction and an interrupt included, and only the user's next
-			// interaction raises it (frontend.v1.RosterRowViewed).
+			// THE ROW'S VIEWED MARKER IS LEFT AS IT STOOD: the turn's start
+			// lowered it, and an interaction during the turn raised it again
+			// (frontend.v1.RosterRowViewed).
 			s.result = resultEnded
 			log.Info("daemon.sidebar.result_ended",
 				"the turn ended, so the row reports its end until the next turn", dlog.Context{

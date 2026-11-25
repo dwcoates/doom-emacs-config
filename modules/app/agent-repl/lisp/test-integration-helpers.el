@@ -1434,8 +1434,10 @@ its own rows, in the hidden section's and each
 merged group's `rows', a row's family under its own `children'.  The wire
 lists them as the daemon does (`frontend.v1.WorkspaceRoster'): each list's
 own row type -- an open row with its tab, numbered in the Open section's
-walk or folded under a collapsed repository or subsection; a hidden row
-nesting its family -- the family taken off the shared row, and every
+walk or folded under a collapsed repository or subsection, and its fold
+cover; a hidden row
+nesting its family -- the family taken off the shared row, every row given the page
+verdict `loaded' unless it states one, and every
 closed row of a section moved to the `closed' list.  A merged group\='s
 rows are in no stream: the group carries their SUMMARY (its count), and
 the Recently Merged header their count, beside the merged set\='s token.
@@ -1447,12 +1449,20 @@ answer into the push\='s streams."
   (if (assq 'closed roster)
       roster
     (let ((next 0) closed)
-      (cl-labels ((bare (row) (assq-delete-all 'children (copy-alist row)))
+      (cl-labels ((bare (row)
+                    ;; EVERY ROW CARRIES THE DAEMON'S PAGE VERDICT
+                    ;; (frontend.v1.RosterRowPage); a fixture that does not
+                    ;; state one is a row whose page is held.
+                    (let ((out (assq-delete-all 'children (copy-alist row))))
+                      (if (assq 'page out) out (append out '((page . ((loaded . ()))))))))
                   (family (row) (or (alist-get 'children row) []))
                   (closed-p (row) (eq (alist-get 'closed (alist-get 'closed row)) t))
                   (open-row (row folded)
                     (let ((tab (if folded '((folded . ())) `((numbered . ((number . ,(cl-incf next))))))))
                       `((row . ,(bare row)) (tab . ,tab)
+                        ;; A ROW UNDER A COLLAPSED REPOSITORY OR SUBSECTION IS
+                        ;; COVERED AND HIDDEN (frontend.v1.RosterOpenRowFoldCover).
+                        (foldCover . ,(if folded '((hidden . ())) '((uncovered . ()))))
                         (children . ,(vconcat (seq-map (lambda (child) (open-row child folded)) (family row)))))))
                   (open-rows (rows folded)
                     (let (out)
@@ -1487,11 +1497,11 @@ answer into the push\='s streams."
                                            (seq-map (lambda (sub) `((subsection . ,sub))) subs)))
                             (assq-delete-all 'subsections (assq-delete-all 'rows (copy-alist section))))))
                   (or (alist-get 'sections repository) []))))
-               (hidden (alist-get 'hidden roster))
+               (hidden (alist-get 'backlog roster))
                (merged (alist-get 'recentlyMerged roster)))
           (append
            `((repository . ,(cons (cons 'sections sections) (assq-delete-all 'sections (copy-alist repository))))
-             (hidden . ,(relist hidden 'hiddenRows `((rows . ,(vconcat (seq-map #'hidden-row (or (rows-of hidden) [])))))))
+             (backlog . ,(relist hidden 'backlogRows `((rows . ,(vconcat (seq-map #'hidden-row (or (rows-of hidden) [])))))))
              (closed . ((rows . ,(vconcat (nreverse closed))))))
            (when merged
              (let* ((groups (or (alist-get 'groups merged) []))
@@ -1510,7 +1520,7 @@ answer into the push\='s streams."
                                    groups)))
                      (mergedRevision . ((revision . "1")))
                      ,@(seq-filter (lambda (entry) (memq (car entry) '(expanded collapsed))) merged))))))
-           (seq-remove (lambda (entry) (memq (car entry) '(repository hidden recentlyMerged))) roster)))))))
+           (seq-remove (lambda (entry) (memq (car entry) '(repository backlog recentlyMerged))) roster)))))))
 
 (defun agent-repl-itest--streams (roster &optional revision)
   "Return the protojson `RosterPush' at REVISION carrying ROSTER\='s streams.

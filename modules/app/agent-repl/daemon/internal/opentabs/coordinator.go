@@ -59,7 +59,7 @@ type Workspace struct {
 	Name string
 	// Refused, when set, is the refusal it is answered with at once.
 	Refused *agentreplv1.OpenTabsOpenedRefused
-	// Hidden is a workspace that is not visible (hidden, or in a collapsed
+	// Hidden is a workspace that is not visible (backlogged, or in a collapsed
 	// repository section): it is answered `hidden` at once, nothing started.
 	Hidden bool
 	// Page is the editor loading the workspace's web page
@@ -488,7 +488,7 @@ func (s *sender) opened(ref *workspacev1.WorkspaceRef, set func(*agentreplv1.Ope
 }
 
 // begin sends what one workspace's open already knows at the run's start: a
-// refusal or a hidden answer at once, else the facts already standing.
+// refusal or a backlogged answer at once, else the facts already standing.
 func (c *Coordinator) begin(out *sender, work *openWork, sl *slot) {
 	ref := sl.ws.Ref
 	fields := dlog.Context{dlog.KeyWorkspaceID: ref.GetId(), "name": sl.ws.Name}
@@ -503,7 +503,7 @@ func (c *Coordinator) begin(out *sender, work *openWork, sl *slot) {
 		return
 	case sl.ws.Hidden:
 		sl.answered = true
-		c.deps.Log.Info(op, "a workspace the editor asked to open is hidden or collapsed; nothing was started", fields)
+		c.deps.Log.Info(op, "a workspace the editor asked to open is backlogged or collapsed; nothing was started", fields)
 		out.opened(ref, func(o *agentreplv1.OpenTabsOpened) {
 			o.Outcome = &agentreplv1.OpenTabsOpened_Hidden{Hidden: &agentreplv1.OpenTabsOpenedHidden{}}
 		})

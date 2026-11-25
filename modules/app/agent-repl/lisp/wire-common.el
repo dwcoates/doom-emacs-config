@@ -444,7 +444,7 @@ at INFO and reattaches to the live daemon rather than calling it lost."
 ;;
 ;; THE TWO FAMILY REFUSALS, one decoder each, which every error that can
 ;; carry them (CloseWorkspace, KillWorkspace, NukeWorkspace, FinishWorkspace,
-;; SetWorkspaceHidden, OpenWorkspace, CreateWorkspace, RegisterWorkspace)
+;; SetWorkspaceBacklogged, OpenWorkspace, CreateWorkspace, RegisterWorkspace)
 ;; decodes its arm through.
 
 (defun agent-repl-wire-decode-workspace-has-open-children (value)
@@ -474,10 +474,10 @@ both empty, so a refusal naming neither is refused as malformed."
 
 (defun agent-repl-wire-decode-workspace-parent-not-open (value)
   "Decode VALUE as `WorkspaceParentNotOpen', a plist `(:parent REF :state ARM)'.
-The arm is `:hidden', `:closed' or `:closing' (a queued merge closes the
+The arm is `:backlogged', `:closed' or `:closing' (a queued merge closes the
 parent once it lands); it is never unset."
   (let ((object (agent-repl-wire--object "WorkspaceParentNotOpen" value)))
-    (agent-repl-wire--check-keys "WorkspaceParentNotOpen" object '(parent hidden closed closing))
+    (agent-repl-wire--check-keys "WorkspaceParentNotOpen" object '(parent backlogged closed closing))
     (agent-repl-wire--decoded
      "WorkspaceParentNotOpen"
      (list :parent (agent-repl-wire--decode-message
@@ -485,7 +485,7 @@ parent once it lands); it is never unset."
                     #'agent-repl-wire-decode-workspace-ref)
            :state (agent-repl-wire--decode-oneof
                    "WorkspaceParentNotOpen" 'state object
-                   `((hidden :hidden ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenHidden" v)))
+                   `((backlogged :backlogged ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenBacklogged" v)))
                      (closed :closed ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenClosed" v)))
                      (closing :closing ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenClosing" v)))))))))
 

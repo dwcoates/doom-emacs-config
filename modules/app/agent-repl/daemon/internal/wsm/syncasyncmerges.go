@@ -58,12 +58,12 @@ func (ws Workspace) MergeHidden() bool {
 }
 
 // ListedOpen reports whether the workspace is listed in the sidebar's Open
-// section and has a tab: neither closed nor hidden (OPEN BEATS MERGED, so a
+// section and has a tab: neither closed nor backlogged (OPEN BEATS MERGED, so a
 // merge time alone does not take it out), and not a merge workspace still
 // withheld by its async merge. THE ONE STATEMENT of an open row: the roster
 // draws by it, and the arrangement resolves a dragged row by it (standing).
 func (ws Workspace) ListedOpen() bool {
-	return !ws.Closed && !ws.Hidden && !ws.MergeHidden()
+	return !ws.Closed && !ws.Backlogged && !ws.MergeHidden()
 }
 
 // RevealMergeWorkspace records that merge workspace ID has been revealed, and

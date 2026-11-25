@@ -54,9 +54,9 @@ func TestOnlyVisibleSplitsPending(t *testing.T) {
 		wantWithheld bool
 	}{
 		{name: "a visible workspace runs", ws: wsm.Workspace{ID: "a", Repo: "open", Visibility: wsm.UnselectedVisible}, wantRun: true},
-		{name: "the selection runs", ws: wsm.Workspace{ID: "a", Repo: "open", Hidden: true, Visibility: wsm.Selected}, wantRun: true},
+		{name: "the selection runs", ws: wsm.Workspace{ID: "a", Repo: "open", Backlogged: true, Visibility: wsm.Selected}, wantRun: true},
 		{name: "a workspace persisted not visible is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Visibility: wsm.NotVisible}, wantWithheld: true},
-		{name: "a hidden workspace is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Hidden: true}, wantWithheld: true},
+		{name: "a backlogged workspace is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Backlogged: true}, wantWithheld: true},
 		{name: "a workspace in a collapsed section is withheld", ws: wsm.Workspace{ID: "a", Repo: "folded"}, wantWithheld: true},
 		{name: "a hidden merge workspace whose merge is queued runs", ws: wsm.Workspace{ID: "queued", Repo: "open", MergeOf: &wsm.MergeOrigin{}}, wantRun: true},
 		{name: "a hidden merge workspace whose merge left every queue is withheld", ws: wsm.Workspace{ID: "ended", Repo: "open", MergeOf: &wsm.MergeOrigin{}}, wantWithheld: true},
@@ -144,12 +144,12 @@ func TestOnlyVisibleRefusesWhenTheQueuesCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestOnlyVisibleRunsAHiddenWorkspaceWithAMergeQueued(t *testing.T) {
+func TestOnlyVisibleRunsABackloggedWorkspaceWithAMergeQueued(t *testing.T) {
 	// Arrange: a workspace the user hid has a one-shot merge waiting.
 	reg := &fakeRegistry{queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "a"}}}}
 
 	// Act
-	run, withheld, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), []wsm.Workspace{{ID: "a", Hidden: true}})
+	run, withheld, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), []wsm.Workspace{{ID: "a", Backlogged: true}})
 
 	// Assert
 	if err != nil || len(run) != 1 || len(withheld) != 0 {

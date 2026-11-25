@@ -351,9 +351,9 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "dir",
 		},
 		{
-			name: "set hidden with no workspace",
+			name: "set backlogged with no workspace",
 			check: func() *connect.Error {
-				return validateSetWorkspaceHiddenRequest(&agentreplv1.SetWorkspaceHiddenRequest{})
+				return validateSetWorkspaceBackloggedRequest(&agentreplv1.SetWorkspaceBackloggedRequest{})
 			},
 			field: "workspace",
 		},
@@ -465,9 +465,9 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "workspace",
 		},
 		{
-			name: "set hidden with no visibility arm",
+			name: "set backlogged with no visibility arm",
 			check: func() *connect.Error {
-				return validateSetWorkspaceHiddenRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref()})
+				return validateSetWorkspaceBackloggedRequest(&agentreplv1.SetWorkspaceBackloggedRequest{Workspace: ref()})
 			},
 			field: "visibility",
 		},
@@ -599,11 +599,11 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1/p1730000000123456"}
 			return validateCreateWorkspaceRequest(req)
 		}, field: "slack_origin"},
-		{name: "an async merge asking to be born hidden", check: func() *connect.Error {
+		{name: "an async merge asking to be born backlogged", check: func() *connect.Error {
 			req := validAsyncMerge(nil)
-			req.Hidden = boolPtr(true)
+			req.Backlogged = boolPtr(true)
 			return validateCreateWorkspaceRequest(req)
-		}, field: "hidden"},
+		}, field: "backlogged"},
 		{name: "create with a placement naming no target", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.Placement = &agentreplv1.CreateWorkspacePlacement{}
@@ -823,11 +823,11 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			},
 		},
 		{
-			name: "set hidden",
+			name: "set backlogged",
 			check: func() *connect.Error {
-				return validateSetWorkspaceHiddenRequest(&agentreplv1.SetWorkspaceHiddenRequest{
+				return validateSetWorkspaceBackloggedRequest(&agentreplv1.SetWorkspaceBackloggedRequest{
 					Workspace:  ref(),
-					Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}},
+					Visibility: &agentreplv1.SetWorkspaceBackloggedRequest_Hide{Hide: &agentreplv1.SetWorkspaceBackloggedHide{}},
 				})
 			},
 		},

@@ -929,7 +929,7 @@ func (f *Fleet) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
 
 // StandingColdGate answers the cold facts the shim stated for a STANDING cold
 // gate: the session is parked on the user's choice, so its conversation is
-// already cold (cachelapse.Keeper records the gate's lapse on a hidden or
+// already cold (cachelapse.Keeper records the gate's lapse on a backlogged or
 // closed row). A gate an answer has taken is not standing: its remediation is
 // bringing the session back warm.
 func (f *Fleet) StandingColdGate(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
@@ -1824,8 +1824,13 @@ func (f *Fleet) sessionUp(
 // Fleet.Start reads them.
 func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdResume) error {
 	began := f.now()
+	// THE CAUSE RIDES THE BRING-UP ITSELF, not only its count: the session's
+	// record says it came up for the work the answer resumes
+	// (recordFacts, wsm.Session.WorkBroughtUpAt), so nothing parks it before
+	// that work's turn closes.
+	ctx = shimlife.WithStart(ctx, shimlife.StartColdGateAnswer)
 	err := f.resumeCold(ctx, ws, resume)
-	f.observeShimStart(shimlife.WithStart(ctx, shimlife.StartColdGateAnswer), ws, began, err)
+	f.observeShimStart(ctx, ws, began, err)
 	return err
 }
 
@@ -3337,7 +3342,7 @@ func coldGateCost(cold *conversationv1.SessionCold, window int64) footer.Figured
 // the gate the user sees and must answer. It is the host view's gate, and the
 // feed's standing gate row holds exactly as long (the row retires the moment an
 // answer takes the gate, and returns when a failed re-open raises it again), so
-// Emacs's hidden input and the webapp's docked banner move together.
+// Emacs's backlogged input and the webapp's docked banner move together.
 func (f *Fleet) ColdGateShown(ws ids.WorkspaceID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -3410,11 +3415,20 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		PermissionMode:    permissionModeName(started.GetPermissionMode()),
 		StartedAt:         previous.StartedAt,
 	}
-	// A KEEP-ALIVE'S RESTORE IS RECORDED AS ONE, so every view tells a
-	// session up only for its keep-alive (dormant, wsm.Session.Dormant) from
-	// one up for work; any other bring-up's record clears it.
-	if cause, _ := shimlife.StartOf(ctx); cause == shimlife.StartKeepalive {
+	// A KEEP-ALIVE'S RESTORE IS RECORDED AS ONE, as evidence of why the
+	// session came up; any other bring-up's record clears it.
+	cause, _ := shimlife.StartOf(ctx)
+	if cause == shimlife.StartKeepalive {
 		next.KeepaliveRestoredAt = &now
+	}
+	// A BRING-UP FOR WORK IS RECORDED AS ONE, so the cache keeper never parks
+	// the session before the turn it came up for has closed
+	// (wsm.Session.Initializing); any other bring-up's record clears it.
+	if cause.ForWork() {
+		next.WorkBroughtUpAt = &now
+	}
+	if cause.UserStarted() {
+		next.UserBroughtUpAt = &now
 	}
 	f.noteSDKVersion(log, started.GetRuntime().GetSdkVersion())
 	if next.StartedAt.IsZero() {

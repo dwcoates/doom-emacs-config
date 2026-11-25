@@ -2823,18 +2823,18 @@ func TestTheBootFailsWhenTheCarriesCannotBeTakenUp(t *testing.T) {
 	}
 }
 
-// TestAShimThatWasUpComesBackHiddenOrNot pins the owner ruling of 2026-10-28:
-// the session record alone decides the bring-up, and a hidden or collapsed
+// TestAShimThatWasUpComesBackBackloggedOrNot pins the owner ruling of 2026-10-28:
+// the session record alone decides the bring-up, and a backlogged or collapsed
 // workspace whose shim was up comes back (it was up for a reason: a turn, a
 // one-shot, a merge, a cache not yet lapsed).
-func TestAShimThatWasUpComesBackHiddenOrNot(t *testing.T) {
+func TestAShimThatWasUpComesBackBackloggedOrNot(t *testing.T) {
 	cases := []struct {
 		name    string
 		arrange func(t *testing.T, h *harness, ws wsm.Workspace)
 	}{
-		{name: "a hidden workspace", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
-			if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+		{name: "a backlogged workspace", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
+			if err := h.db.SetBacklogged(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetBacklogged: %v", err)
 			}
 		}},
 		{name: "a workspace in a collapsed repository section", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {

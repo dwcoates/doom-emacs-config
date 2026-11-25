@@ -16,9 +16,9 @@ import (
 // reading (Tabs) walks the very same tree, so none of them can disagree. The
 // conditions it holds, each by construction:
 //
-//   - EVERY WORKSPACE IS IN ONE LIST. A workspace is OPEN (here), HIDDEN
-//     (hiddenSection) or MERGED (mergedSection), never two: open is neither
-//     closed nor hidden, and OPEN BEATS MERGED, so a merged workspace that was
+//   - EVERY WORKSPACE IS IN ONE LIST. A workspace is OPEN (here), BACKLOGGED
+//     (backlogSection) or MERGED (mergedSection), never two: open is neither
+//     closed nor backlogged, and OPEN BEATS MERGED, so a merged workspace that was
 //     reopened is open and listed here.
 //   - IN OPEN IF AND ONLY IF IT HAS A TAB. Every open row carries a tab, and
 //     nothing else does. A folded repository's rows, and a folded
@@ -37,7 +37,7 @@ import (
 //   - A WORKSPACE WHOSE PARENT IS NOT OPEN TAKES ITS PARENT'S PLACE. The rules
 //     against hiding or closing a parent with open children keep this from
 //     arising; a family that predates them is still drawn, its open members
-//     where the closed or hidden ancestor stood.
+//     where the closed or backlogged ancestor stood.
 
 // openNode is one open workspace of the Open section and its open family:
 // its children of its own repository, then one block per other repository
@@ -55,22 +55,28 @@ type openRegion struct {
 	rows       []openNode
 }
 
-// folded reports whether the region's tabs are folded off the tab bar: its
-// repository is collapsed, or it is a named subsection that is. The one statement of a folded tab, which the sidebar's numbering and the
-// tab bar read alike.
+// folded reports whether the region's tabs are folded off the tab bar. The
+// one statement of a folded tab, which the sidebar's numbering and the tab bar
+// read alike.
 func (r openRegion) folded(repo wsm.Repository) bool {
 	return r.fold(repo) != nil
 }
 
 // fold names what folds the region's tabs off the tab bar, nil when nothing
-// does: its repository's collapse wins over its subsection's, as the walk
-// reads them.
+// does. ONLY THE NEAREST CONTAINER'S FOLD COUNTS (owner ruling, 2026-11-24):
+// a named subsection's rows are folded by the subsection's own collapse and
+// by nothing above it, so an unfolded subsection inside a collapsed
+// repository section shows every one of its top-level rows; the rows in no
+// subsection are folded by their repository's collapse.
 func (r openRegion) fold(repo wsm.Repository) *Fold {
+	if r.subsection != nil {
+		if r.subsection.Folded {
+			return &Fold{By: FoldedBySubsection, Repository: repo.Name, Subsection: r.subsection.Name}
+		}
+		return nil
+	}
 	if repo.Folded {
 		return &Fold{By: FoldedByRepository, Repository: repo.Name}
-	}
-	if r.subsection != nil && r.subsection.Folded {
-		return &Fold{By: FoldedBySubsection, Repository: repo.Name, Subsection: r.subsection.Name}
 	}
 	return nil
 }
@@ -280,7 +286,7 @@ func tabsOf(repos []openRepo) []Tab {
 		for _, region := range repo.regions {
 			// THE TAB'S WITHHOLDING IS wsm.Workspace.Withheld, the one statement
 			// the daemon's Runs and Holds read, so the bar and the daemon cannot
-			// disagree about a tab. An open row is never in the hidden section,
+			// disagree about a tab. An open row is never in the backlog,
 			// so it is Drawn or WithheldCollapsed.
 			walkOpen(region.rows, region.fold(repo.repo), func(ws wsm.Workspace, fold *Fold) {
 				out = append(out, Tab{Workspace: ws, Withheld: ws.Withheld(fold != nil), Fold: fold})
