@@ -23,6 +23,7 @@ import {
   writeSelection,
 } from "../../src/footer/footer.js";
 import { createEditorNotices, type EditorNotices } from "../../src/footer/editor-notice.js";
+import { createWorkspaceMove, type WorkspaceMove } from "../../src/footer/moved.js";
 import {
   AGENT_ROW,
   CRON_ROW,
@@ -77,6 +78,7 @@ function mount(
   selectDetachedWork: () => Promise<boolean> = async () => true,
   presence: Pick<Presence, "shown" | "onChange" | "embedded"> = pagePresence(),
   editorNotices: EditorNotices = createEditorNotices(),
+  workspaceMove: WorkspaceMove = createWorkspaceMove(),
 ) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
@@ -84,6 +86,7 @@ function mount(
     selectDetachedWork,
     presence,
     editorNotices,
+    workspaceMove,
   });
   mounted.push(footer);
   return { host, h, footer };
@@ -2091,5 +2094,113 @@ describe("mountFooter: the hovered bubble's stamp stands in for the activity lin
     footer.showHoverStamp(hoveredUsage("2.1k"));
     // Assert
     expect(host.querySelector(".footer-activity")).toBeNull();
+  });
+});
+
+describe("mountFooter: the workspace's move stands over every activity line", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  /** Mount a footer whose page records its move on the returned MOVE. */
+  function mountMoving() {
+    const move = createWorkspaceMove();
+    return { ...mount(harness(), async () => true, pagePresence(), createEditorNotices(), move), move };
+  }
+
+  it("draws the move in the activity cell, with no push after it", async () => {
+    // Arrange
+    const { host, h, move } = mountMoving();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Act
+    move.moved("127.0.0.1:8123");
+    // Assert
+    expect([tierOf(host), host.querySelector(".footer-activity")?.textContent]).toEqual(["moved", "workspace moved to 127.0.0.1:8123"]);
+  });
+
+  it("draws one activity cell, never the daemon's line beside the move", async () => {
+    // Arrange
+    const { host, h, move } = mountMoving();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Act
+    move.moved("127.0.0.1:8123");
+    // Assert
+    expect(host.querySelectorAll(".footer-activity")).toHaveLength(1);
+  });
+
+  it("keeps the move across a push", async () => {
+    // Arrange
+    const { host, h, move } = mountMoving();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    move.moved("127.0.0.1:8123");
+    // Act
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Assert
+    expect(tierOf(host)).toBe("moved");
+  });
+
+  it("stands over the hovered bubble's stamp", async () => {
+    // Arrange
+    const { host, h, footer, move } = mountMoving();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    footer.showHoverStamp(hoveredUsage("2.1k"));
+    // Act
+    move.moved("127.0.0.1:8123");
+    // Assert
+    expect(tierOf(host)).toBe("moved");
+  });
+
+  it("stands over the client's own verdict's line, keeping its status", async () => {
+    // Arrange
+    const { host, h, move } = mountMoving();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    // Act
+    move.moved("127.0.0.1:8123");
+    // Assert
+    expect([host.querySelector(".footer-status")?.getAttribute("data-arm"), tierOf(host)]).toEqual(["disconnected", "moved"]);
+  });
+
+  it("draws the move alone before the first push", async () => {
+    // Arrange
+    const { host, move } = mountMoving();
+    await settle();
+    // Act
+    move.moved("127.0.0.1:8123");
+    // Assert
+    expect([host.querySelectorAll(".footer-strip > *").length, tierOf(host)]).toEqual([1, "moved"]);
+  });
+
+  it("draws the move over a verdict before the first push", async () => {
+    // Arrange
+    const { host, move } = mountMoving();
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    // Act
+    move.moved("127.0.0.1:8123");
+    // Assert
+    expect([host.querySelector(".pfooter")?.getAttribute("data-client-verdict"), tierOf(host)]).toEqual(["unary_transport", "moved"]);
+  });
+
+  it("stops redrawing for a move once disposed", async () => {
+    // Arrange
+    const { host, footer, move } = mountMoving();
+    await settle();
+    footer.dispose();
+    // Act
+    move.moved("127.0.0.1:8123");
+    // Assert
+    expect(host.childElementCount).toBe(0);
   });
 });

@@ -186,7 +186,7 @@ they land on is judged sufficient. Listed so the owner can rule.
 | 17 | eight sidebar roster error statuses | sidebar row | `proto/src/frontend/v1/sidebar.proto:222-274` |
 | 18 | six client-local failure arms | the failure overlay | `webapp/src/failure/overlay.ts:76-83` |
 | 19 | ~60 typed unary refusal arms | the clicked control, ephemerally | `webapp/src/rpc/refuse.ts:117-144` |
-| 20 | the workspace-moved notice | the page-wide banner | `webapp/src/rpc/moved.ts` |
+| 20 | the workspace-moved notice | the footer's activity line | `webapp/src/footer/moved.ts` |
 
 ## 4. The cold-gate answer failure, traced
 

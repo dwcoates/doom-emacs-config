@@ -98,7 +98,7 @@ it(
 
     // Assert (2) — never quiet, never the moved notice.
     expect(app.ctx.isQuiesced()).toBe(false);
-    expect(app.$('[data-component="drain-banner"] [data-moved]')).toBeNull();
+    expect(app.$("[data-moved]")).toBeNull();
 
     // Assert (3) — its views drawn again from the successor, nothing filed.
     await awaitDrawn(

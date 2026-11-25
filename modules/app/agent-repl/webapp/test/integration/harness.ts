@@ -65,6 +65,7 @@ import { installProseLinkRouting } from "../../src/link";
 import { createRowRenderers } from "../../src/feed/row-renderers";
 import { mountFooter, type FooterHandle } from "../../src/footer/footer";
 import { createEditorNotices } from "../../src/footer/editor-notice";
+import { createWorkspaceMove } from "../../src/footer/moved";
 import { installHoverStamp } from "../../src/feed/hover-stamp";
 import { pageFocusLeft } from "../../src/focus-left";
 import { mountTopbar } from "../../src/topbar/topbar";
@@ -861,7 +862,9 @@ async function mountApp(
   // nowhere, since no test here reads the page's latencies.
   const promptEcho = createPromptEcho(() => Date.now(), () => undefined);
   handles.push({ dispose: installPromptEcho(promptEcho) });
-  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, deployPulseHost: shell.sidebar, newsDigest, reveals: createRevealRelay(), promptEcho }));
+  // THE MOVE, which the lifecycle records and the footer draws, as main.ts wires it.
+  const workspaceMove = createWorkspaceMove();
+  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, deployPulseHost: shell.sidebar, newsDigest, reveals: createRevealRelay(), promptEcho, workspaceMove }));
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),
@@ -876,6 +879,7 @@ async function mountApp(
     selectDetachedWork: (id: FeedId) => feed.selectDetachedWork(id),
     presence: pagePresence(),
     editorNotices: createEditorNotices(),
+    workspaceMove,
   });
   handles.push(footer);
   // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER, as main.ts wires it.

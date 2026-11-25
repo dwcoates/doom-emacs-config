@@ -75,7 +75,7 @@ describe("the transfer", () => {
    * page: it adopts its workspace in place, through whichever daemon its one
    * origin reaches (which forwards the call to the successor), and reopens
    * every stream there when that daemon serves this page's webapp build. On
-   * another build it draws "workspace moved to <address>" and goes quiet, for
+   * another build its footer says "workspace moved to <address>" and it goes quiet, for
    * the deploy's host reload. Nothing is ever sent to the successor's own
    * address.
    */
@@ -137,11 +137,11 @@ describe("the transfer", () => {
     expect(harness.failureArms()).not.toContain("daemonUnreachable");
   });
 
-  it("draws the moved notice and goes quiet when the adopting daemon serves another build", async () => {
+  it("draws the move in the footer and goes quiet when the adopting daemon serves another build", async () => {
     // Arrange / Act
     const { second } = await transfer("another-build");
     // Assert
-    expect(harness.$(`[data-moved="${second.baseUrl}"]`)).not.toBeNull();
+    expect(harness.$(`[data-component="footer"] [data-moved="${second.baseUrl}"]`)).not.toBeNull();
     expect(harness.ctx.isQuiesced()).toBe(true);
   });
 
@@ -578,18 +578,18 @@ describe.each(MOVE_SITES)("$name refused as transferring_away, adopted on anothe
     await harness.click(site.click);
   };
 
-  it("raises the page-wide moved notice", async () => {
+  it("draws the move in the footer", async () => {
     // Arrange / Act
     await refuseAsMoved();
     // Assert
-    expect(harness.$(`[data-moved="${REFUSAL_FACTS.address}"]`)).not.toBeNull();
+    expect(harness.$(`[data-component="footer"] [data-moved="${REFUSAL_FACTS.address}"]`)).not.toBeNull();
   });
 
-  it("names the successor's address in the notice", async () => {
+  it("names the successor's address in the footer's activity line", async () => {
     // Arrange / Act
     await refuseAsMoved();
     // Assert
-    expect(harness.$('[data-component="drain-banner"]')?.textContent).toContain(
+    expect(harness.$('[data-component="footer"] .footer-activity')?.textContent).toContain(
       REFUSAL_FACTS.address,
     );
   });
