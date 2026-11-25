@@ -5,7 +5,9 @@
 // queue, the daemon runs the repository's rule suites (testrun's roster
 // suites marked Rules: the checks that read the module's sources, such as
 // gofmt, the source scans, the byte-compiler and shellcheck) on the branch's
-// worktree, in the maker's name, through the test service. No targeted run of
+// worktree, in the maker's name, through the test service. An async merge's
+// branch that no worktree holds is not checked: the queue makes it a
+// worktree when its merge starts, and the gate checks it there. No targeted run of
 // a workspace ever names them, so before this check they first ran in the
 // merge gate, where they failed merge after merge. A refused merge records
 // nothing: the maker fixes what failed and asks again.
@@ -22,7 +24,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/merge_rule_checks_refusal.proto.
  */
 export const file_agentrepl_v1_merge_rule_checks_refusal: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvbWVyZ2VfcnVsZV9jaGVja3NfcmVmdXNhbC5wcm90bxIMYWdlbnRyZXBsLnYxIl0KFU1lcmdlUnVsZUNoZWNrc0ZhaWxlZBIQCgh3b3JrdHJlZRgBIAEoCRIOCgZzdWl0ZXMYAiADKAkSFQoNZmFpbGluZ190ZXN0cxgDIAEoCRILCgNsb2cYBCABKAkiKwoZTWVyZ2VSdWxlQ2hlY2tzTm9Xb3JrdHJlZRIOCgZicmFuY2gYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z");
+  fileDesc("CixhZ2VudHJlcGwvdjEvbWVyZ2VfcnVsZV9jaGVja3NfcmVmdXNhbC5wcm90bxIMYWdlbnRyZXBsLnYxIl0KFU1lcmdlUnVsZUNoZWNrc0ZhaWxlZBIQCgh3b3JrdHJlZRgBIAEoCRIOCgZzdWl0ZXMYAiADKAkSFQoNZmFpbGluZ190ZXN0cxgDIAEoCRILCgNsb2cYBCABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z");
 
 /**
  * The branch failed its rule suites, so its merge was not admitted.
@@ -69,27 +71,4 @@ export type MergeRuleChecksFailed = Message<"agentrepl.v1.MergeRuleChecksFailed"
  */
 export const MergeRuleChecksFailedSchema: GenMessage<MergeRuleChecksFailed> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_merge_rule_checks_refusal, 0);
-
-/**
- * No worktree has the async merge's branch checked out, so its rule suites
- * had nowhere to run. The branch is checked out in a worktree (the maker's)
- * and the merge asked for again.
- *
- * @generated from message agentrepl.v1.MergeRuleChecksNoWorktree
- */
-export type MergeRuleChecksNoWorktree = Message<"agentrepl.v1.MergeRuleChecksNoWorktree"> & {
-  /**
-   * The branch the merge names.
-   *
-   * @generated from field: string branch = 1;
-   */
-  branch: string;
-};
-
-/**
- * Describes the message agentrepl.v1.MergeRuleChecksNoWorktree.
- * Use `create(MergeRuleChecksNoWorktreeSchema)` to create a new message.
- */
-export const MergeRuleChecksNoWorktreeSchema: GenMessage<MergeRuleChecksNoWorktree> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_merge_rule_checks_refusal, 1);
 

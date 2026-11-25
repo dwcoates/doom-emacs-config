@@ -119,10 +119,6 @@ const (
 	// rule_checks_failed, CreateWorkspaceError's
 	// async_merge_rule_checks_failed).
 	ArmRuleChecksFailed = "rule_checks_failed"
-	// ArmRuleChecksNoWorktree refuses an async merge whose branch no
-	// worktree has checked out, so its rule suites have nowhere to run
-	// (CreateWorkspaceError.async_merge_rule_checks_no_worktree).
-	ArmRuleChecksNoWorktree = "async_merge_rule_checks_no_worktree"
 )
 
 // RefusalError is one pre-state refusal: which arm the contract owes it, and

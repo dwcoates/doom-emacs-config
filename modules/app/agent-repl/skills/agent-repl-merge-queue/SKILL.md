@@ -243,8 +243,8 @@ Either kind:
   `rule_checks_failed` (`async_merge_rule_checks_failed` for an async merge)
   names the failing cases with the command that reruns each group and the
   archived run; fix them, commit, and ask again. An async merge whose branch
-  no worktree has checked out is refused
-  `async_merge_rule_checks_no_worktree`. The contract is
+  no worktree has checked out is not checked first: the queue makes it a
+  worktree and the gate checks it. The contract is
   `modules/app/agent-repl/AGENTS.md`, "The merge queue's test gate and
   remediation contract".
 - `merge-queue pause -repository here|DIR|all` and `merge-queue resume

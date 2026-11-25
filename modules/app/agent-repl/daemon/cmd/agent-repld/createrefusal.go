@@ -101,8 +101,6 @@ func describeCreateRefusal(e *agentreplv1.CreateWorkspaceError) (string, error) 
 		return fmt.Sprintf("the repository's %s is unusable (%s)", r.AsyncMergeDeployConfigInvalid.GetPath(), r.AsyncMergeDeployConfigInvalid.GetDetail()), nil
 	case *agentreplv1.CreateWorkspaceError_AsyncMergeRuleChecksFailed:
 		return sayRuleChecksFailed("the async merge's branch", r.AsyncMergeRuleChecksFailed), nil
-	case *agentreplv1.CreateWorkspaceError_AsyncMergeRuleChecksNoWorktree:
-		return fmt.Sprintf("no worktree has the branch %s checked out, so its rule suites have nowhere to run before its merge; check it out in the maker's worktree and ask again", r.AsyncMergeRuleChecksNoWorktree.GetBranch()), nil
 	case *agentreplv1.CreateWorkspaceError_TransferringAway:
 		return fmt.Sprintf("the daemon is handing its workspaces to its successor at %s and admits no new create; create it again there", r.TransferringAway.GetAddress()), nil
 	case *agentreplv1.CreateWorkspaceError_StandingDown:

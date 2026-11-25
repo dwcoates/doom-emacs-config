@@ -1400,7 +1400,9 @@ like an improvement still needs that conversation. Code:
   the 93 failed gates in the 3.5 days before. `workspace async-merge` and
   `workspace finished`, asked by an agent, now run them on the branch's
   worktree (the finishing workspace's own; for an async merge, the worktree
-  that has its branch checked out), in the maker's name and on the test
+  that has its branch checked out, and none for a branch no worktree holds,
+  which the queue makes a worktree for and the gate checks), in the maker's
+  name and on the test
   service, before anything is recorded (`daemon/internal/merge/rulecheck.go`).
   A failure refuses the merge (`MergeRuleChecksFailed`: the failing cases,
   each group with the command that reruns it, recorded for the maker's

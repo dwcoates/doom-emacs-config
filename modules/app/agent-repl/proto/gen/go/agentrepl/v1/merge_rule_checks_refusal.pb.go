@@ -5,7 +5,9 @@
 // queue, the daemon runs the repository's rule suites (testrun's roster
 // suites marked Rules: the checks that read the module's sources, such as
 // gofmt, the source scans, the byte-compiler and shellcheck) on the branch's
-// worktree, in the maker's name, through the test service. No targeted run of
+// worktree, in the maker's name, through the test service. An async merge's
+// branch that no worktree holds is not checked: the queue makes it a
+// worktree when its merge starts, and the gate checks it there. No targeted run of
 // a workspace ever names them, so before this check they first ran in the
 // merge gate, where they failed merge after merge. A refused merge records
 // nothing: the maker fixes what failed and asks again.
@@ -110,54 +112,6 @@ func (x *MergeRuleChecksFailed) GetLog() string {
 	return ""
 }
 
-// No worktree has the async merge's branch checked out, so its rule suites
-// had nowhere to run. The branch is checked out in a worktree (the maker's)
-// and the merge asked for again.
-type MergeRuleChecksNoWorktree struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The branch the merge names.
-	Branch        string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MergeRuleChecksNoWorktree) Reset() {
-	*x = MergeRuleChecksNoWorktree{}
-	mi := &file_agentrepl_v1_merge_rule_checks_refusal_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MergeRuleChecksNoWorktree) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MergeRuleChecksNoWorktree) ProtoMessage() {}
-
-func (x *MergeRuleChecksNoWorktree) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_merge_rule_checks_refusal_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MergeRuleChecksNoWorktree.ProtoReflect.Descriptor instead.
-func (*MergeRuleChecksNoWorktree) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *MergeRuleChecksNoWorktree) GetBranch() string {
-	if x != nil {
-		return x.Branch
-	}
-	return ""
-}
-
 var File_agentrepl_v1_merge_rule_checks_refusal_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDesc = "" +
@@ -167,9 +121,7 @@ const file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDesc = "" +
 	"\bworktree\x18\x01 \x01(\tR\bworktree\x12\x16\n" +
 	"\x06suites\x18\x02 \x03(\tR\x06suites\x12#\n" +
 	"\rfailing_tests\x18\x03 \x01(\tR\ffailingTests\x12\x10\n" +
-	"\x03log\x18\x04 \x01(\tR\x03log\"3\n" +
-	"\x19MergeRuleChecksNoWorktree\x12\x16\n" +
-	"\x06branch\x18\x01 \x01(\tR\x06branchB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x03log\x18\x04 \x01(\tR\x03logB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDescOnce sync.Once
@@ -183,10 +135,9 @@ func file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDescData
 }
 
-var file_agentrepl_v1_merge_rule_checks_refusal_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_agentrepl_v1_merge_rule_checks_refusal_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_agentrepl_v1_merge_rule_checks_refusal_proto_goTypes = []any{
-	(*MergeRuleChecksFailed)(nil),     // 0: agentrepl.v1.MergeRuleChecksFailed
-	(*MergeRuleChecksNoWorktree)(nil), // 1: agentrepl.v1.MergeRuleChecksNoWorktree
+	(*MergeRuleChecksFailed)(nil), // 0: agentrepl.v1.MergeRuleChecksFailed
 }
 var file_agentrepl_v1_merge_rule_checks_refusal_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -207,7 +158,7 @@ func file_agentrepl_v1_merge_rule_checks_refusal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDesc), len(file_agentrepl_v1_merge_rule_checks_refusal_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

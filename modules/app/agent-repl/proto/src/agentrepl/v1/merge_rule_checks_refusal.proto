@@ -5,7 +5,9 @@
 // queue, the daemon runs the repository's rule suites (testrun's roster
 // suites marked Rules: the checks that read the module's sources, such as
 // gofmt, the source scans, the byte-compiler and shellcheck) on the branch's
-// worktree, in the maker's name, through the test service. No targeted run of
+// worktree, in the maker's name, through the test service. An async merge's
+// branch that no worktree holds is not checked: the queue makes it a
+// worktree when its merge starts, and the gate checks it there. No targeted run of
 // a workspace ever names them, so before this check they first ran in the
 // merge gate, where they failed merge after merge. A refused merge records
 // nothing: the maker fixes what failed and asks again.
@@ -30,12 +32,4 @@ message MergeRuleChecksFailed {
   string failing_tests = 3;
   // The path of the run's whole output, archived.
   string log = 4;
-}
-
-// No worktree has the async merge's branch checked out, so its rule suites
-// had nowhere to run. The branch is checked out in a worktree (the maker's)
-// and the merge asked for again.
-message MergeRuleChecksNoWorktree {
-  // The branch the merge names.
-  string branch = 1;
 }

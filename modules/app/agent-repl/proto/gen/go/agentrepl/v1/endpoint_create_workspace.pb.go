@@ -2327,7 +2327,6 @@ type CreateWorkspaceError struct {
 	//	*CreateWorkspaceError_AsyncMergeNoDeployConfig
 	//	*CreateWorkspaceError_AsyncMergeDeployConfigInvalid
 	//	*CreateWorkspaceError_AsyncMergeRuleChecksFailed
-	//	*CreateWorkspaceError_AsyncMergeRuleChecksNoWorktree
 	//	*CreateWorkspaceError_TransferringAway
 	//	*CreateWorkspaceError_StandingDown
 	//	*CreateWorkspaceError_ModelNotInCatalog
@@ -2727,15 +2726,6 @@ func (x *CreateWorkspaceError) GetAsyncMergeRuleChecksFailed() *MergeRuleChecksF
 	return nil
 }
 
-func (x *CreateWorkspaceError) GetAsyncMergeRuleChecksNoWorktree() *MergeRuleChecksNoWorktree {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeRuleChecksNoWorktree); ok {
-			return x.AsyncMergeRuleChecksNoWorktree
-		}
-	}
-	return nil
-}
-
 func (x *CreateWorkspaceError) GetTransferringAway() *CreateWorkspaceTransferringAway {
 	if x != nil {
 		if x, ok := x.Cause.(*CreateWorkspaceError_TransferringAway); ok {
@@ -3112,12 +3102,6 @@ type CreateWorkspaceError_AsyncMergeRuleChecksFailed struct {
 	AsyncMergeRuleChecksFailed *MergeRuleChecksFailed `protobuf:"bytes,65,opt,name=async_merge_rule_checks_failed,json=asyncMergeRuleChecksFailed,proto3,oneof"`
 }
 
-type CreateWorkspaceError_AsyncMergeRuleChecksNoWorktree struct {
-	// No worktree has the async merge's branch checked out, so its rule
-	// suites had nowhere to run. Nothing was recorded.
-	AsyncMergeRuleChecksNoWorktree *MergeRuleChecksNoWorktree `protobuf:"bytes,66,opt,name=async_merge_rule_checks_no_worktree,json=asyncMergeRuleChecksNoWorktree,proto3,oneof"`
-}
-
 type CreateWorkspaceError_TransferringAway struct {
 	// This daemon is handing its workspaces to a successor and admits no new
 	// create: a create admitted now could still be materializing when the
@@ -3293,8 +3277,6 @@ func (*CreateWorkspaceError_AsyncMergeNoDeployConfig) isCreateWorkspaceError_Cau
 func (*CreateWorkspaceError_AsyncMergeDeployConfigInvalid) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_AsyncMergeRuleChecksFailed) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeRuleChecksNoWorktree) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_TransferringAway) isCreateWorkspaceError_Cause() {}
 
@@ -5920,7 +5902,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12V\n" +
 	"\x11held_at_cold_gate\x18\x02 \x01(\v2+.agentrepl.v1.CreateWorkspaceHeldAtColdGateR\x0eheldAtColdGate\"F\n" +
 	"\x1dCreateWorkspaceHeldAtColdGate\x12%\n" +
-	"\x0econtext_tokens\x18\x01 \x01(\x04R\rcontextTokens\"\xa00\n" +
+	"\x0econtext_tokens\x18\x01 \x01(\x04R\rcontextTokens\"\xa8/\n" +
 	"\x14CreateWorkspaceError\x12l\n" +
 	"\x17ungated_without_consent\x18\x01 \x01(\v22.agentrepl.v1.CreateWorkspaceUngatedWithoutConsentH\x00R\x15ungatedWithoutConsent\x12>\n" +
 	"\ano_slug\x18\x02 \x01(\v2#.agentrepl.v1.CreateWorkspaceNoSlugH\x00R\x06noSlug\x12P\n" +
@@ -5960,8 +5942,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x13origin_fetch_failed\x18' \x01(\v2..agentrepl.v1.CreateWorkspaceOriginFetchFailedH\x00R\x11originFetchFailed\x12f\n" +
 	"\x1casync_merge_no_deploy_config\x18( \x01(\v2$.agentrepl.v1.LifecycleConfigMissingH\x00R\x18asyncMergeNoDeployConfig\x12p\n" +
 	"!async_merge_deploy_config_invalid\x18) \x01(\v2$.agentrepl.v1.LifecycleConfigInvalidH\x00R\x1dasyncMergeDeployConfigInvalid\x12i\n" +
-	"\x1easync_merge_rule_checks_failed\x18A \x01(\v2#.agentrepl.v1.MergeRuleChecksFailedH\x00R\x1aasyncMergeRuleChecksFailed\x12v\n" +
-	"#async_merge_rule_checks_no_worktree\x18B \x01(\v2'.agentrepl.v1.MergeRuleChecksNoWorktreeH\x00R\x1easyncMergeRuleChecksNoWorktree\x12\\\n" +
+	"\x1easync_merge_rule_checks_failed\x18A \x01(\v2#.agentrepl.v1.MergeRuleChecksFailedH\x00R\x1aasyncMergeRuleChecksFailed\x12\\\n" +
 	"\x11transferring_away\x18+ \x01(\v2-.agentrepl.v1.CreateWorkspaceTransferringAwayH\x00R\x10transferringAway\x12P\n" +
 	"\rstanding_down\x18, \x01(\v2).agentrepl.v1.CreateWorkspaceStandingDownH\x00R\fstandingDown\x12a\n" +
 	"\x14model_not_in_catalog\x181 \x01(\v2..agentrepl.v1.CreateWorkspaceModelNotInCatalogH\x00R\x11modelNotInCatalog\x12f\n" +
@@ -6205,9 +6186,8 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*LifecycleConfigMissing)(nil),                           // 95: agentrepl.v1.LifecycleConfigMissing
 	(*LifecycleConfigInvalid)(nil),                           // 96: agentrepl.v1.LifecycleConfigInvalid
 	(*MergeRuleChecksFailed)(nil),                            // 97: agentrepl.v1.MergeRuleChecksFailed
-	(*MergeRuleChecksNoWorktree)(nil),                        // 98: agentrepl.v1.MergeRuleChecksNoWorktree
-	(*v11.ModelOption)(nil),                                  // 99: conversation.v1.ModelOption
-	(*MergeQueueStatusOffQueueCause)(nil),                    // 100: agentrepl.v1.MergeQueueStatusOffQueueCause
+	(*v11.ModelOption)(nil),                                  // 98: conversation.v1.ModelOption
+	(*MergeQueueStatusOffQueueCause)(nil),                    // 99: agentrepl.v1.MergeQueueStatusOffQueueCause
 }
 var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	79,  // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
@@ -6300,47 +6280,46 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	95,  // 87: agentrepl.v1.CreateWorkspaceError.async_merge_no_deploy_config:type_name -> agentrepl.v1.LifecycleConfigMissing
 	96,  // 88: agentrepl.v1.CreateWorkspaceError.async_merge_deploy_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
 	97,  // 89: agentrepl.v1.CreateWorkspaceError.async_merge_rule_checks_failed:type_name -> agentrepl.v1.MergeRuleChecksFailed
-	98,  // 90: agentrepl.v1.CreateWorkspaceError.async_merge_rule_checks_no_worktree:type_name -> agentrepl.v1.MergeRuleChecksNoWorktree
-	42,  // 91: agentrepl.v1.CreateWorkspaceError.transferring_away:type_name -> agentrepl.v1.CreateWorkspaceTransferringAway
-	43,  // 92: agentrepl.v1.CreateWorkspaceError.standing_down:type_name -> agentrepl.v1.CreateWorkspaceStandingDown
-	40,  // 93: agentrepl.v1.CreateWorkspaceError.model_not_in_catalog:type_name -> agentrepl.v1.CreateWorkspaceModelNotInCatalog
-	41,  // 94: agentrepl.v1.CreateWorkspaceError.model_catalog_unknown:type_name -> agentrepl.v1.CreateWorkspaceModelCatalogUnknown
-	96,  // 95: agentrepl.v1.CreateWorkspaceError.lifecycle_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
-	78,  // 96: agentrepl.v1.CreateWorkspaceError.creation_hook_failed:type_name -> agentrepl.v1.CreateWorkspaceCreationHookFailed
-	31,  // 97: agentrepl.v1.CreateWorkspaceError.placement_on_child:type_name -> agentrepl.v1.CreateWorkspacePlacementOnChild
-	32,  // 98: agentrepl.v1.CreateWorkspaceError.placement_on_merge_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementOnMergeWorkspace
-	33,  // 99: agentrepl.v1.CreateWorkspaceError.placement_requires_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
-	34,  // 100: agentrepl.v1.CreateWorkspaceError.unknown_placement_subsection:type_name -> agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
-	35,  // 101: agentrepl.v1.CreateWorkspaceError.blank_placement_subsection_name:type_name -> agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
-	36,  // 102: agentrepl.v1.CreateWorkspaceError.gather_unknown_workspace:type_name -> agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
-	37,  // 103: agentrepl.v1.CreateWorkspaceError.gather_not_gatherable:type_name -> agentrepl.v1.CreateWorkspaceGatherNotGatherable
-	38,  // 104: agentrepl.v1.CreateWorkspaceError.requested_by_deploy_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
-	39,  // 105: agentrepl.v1.CreateWorkspaceError.requested_by_production_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByProductionMediator
-	88,  // 106: agentrepl.v1.CreateWorkspaceGatherNotGatherable.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 107: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 108: agentrepl.v1.CreateWorkspaceRequestedByProductionMediator.workspace:type_name -> workspace.v1.WorkspaceRef
-	99,  // 109: agentrepl.v1.CreateWorkspaceModelNotInCatalog.options:type_name -> conversation.v1.ModelOption
-	88,  // 110: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 111: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 112: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 113: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 114: agentrepl.v1.CreateWorkspaceNameHeld.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 115: agentrepl.v1.CreateWorkspaceNameBranchExists.landed_workspace:type_name -> workspace.v1.WorkspaceRef
-	57,  // 116: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
-	58,  // 117: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
-	59,  // 118: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
-	88,  // 119: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
-	88,  // 120: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 121: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 122: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 123: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
-	88,  // 124: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.workspace:type_name -> workspace.v1.WorkspaceRef
-	100, // 125: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
-	126, // [126:126] is the sub-list for method output_type
-	126, // [126:126] is the sub-list for method input_type
-	126, // [126:126] is the sub-list for extension type_name
-	126, // [126:126] is the sub-list for extension extendee
-	0,   // [0:126] is the sub-list for field type_name
+	42,  // 90: agentrepl.v1.CreateWorkspaceError.transferring_away:type_name -> agentrepl.v1.CreateWorkspaceTransferringAway
+	43,  // 91: agentrepl.v1.CreateWorkspaceError.standing_down:type_name -> agentrepl.v1.CreateWorkspaceStandingDown
+	40,  // 92: agentrepl.v1.CreateWorkspaceError.model_not_in_catalog:type_name -> agentrepl.v1.CreateWorkspaceModelNotInCatalog
+	41,  // 93: agentrepl.v1.CreateWorkspaceError.model_catalog_unknown:type_name -> agentrepl.v1.CreateWorkspaceModelCatalogUnknown
+	96,  // 94: agentrepl.v1.CreateWorkspaceError.lifecycle_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
+	78,  // 95: agentrepl.v1.CreateWorkspaceError.creation_hook_failed:type_name -> agentrepl.v1.CreateWorkspaceCreationHookFailed
+	31,  // 96: agentrepl.v1.CreateWorkspaceError.placement_on_child:type_name -> agentrepl.v1.CreateWorkspacePlacementOnChild
+	32,  // 97: agentrepl.v1.CreateWorkspaceError.placement_on_merge_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementOnMergeWorkspace
+	33,  // 98: agentrepl.v1.CreateWorkspaceError.placement_requires_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
+	34,  // 99: agentrepl.v1.CreateWorkspaceError.unknown_placement_subsection:type_name -> agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
+	35,  // 100: agentrepl.v1.CreateWorkspaceError.blank_placement_subsection_name:type_name -> agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
+	36,  // 101: agentrepl.v1.CreateWorkspaceError.gather_unknown_workspace:type_name -> agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
+	37,  // 102: agentrepl.v1.CreateWorkspaceError.gather_not_gatherable:type_name -> agentrepl.v1.CreateWorkspaceGatherNotGatherable
+	38,  // 103: agentrepl.v1.CreateWorkspaceError.requested_by_deploy_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
+	39,  // 104: agentrepl.v1.CreateWorkspaceError.requested_by_production_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByProductionMediator
+	88,  // 105: agentrepl.v1.CreateWorkspaceGatherNotGatherable.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 106: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 107: agentrepl.v1.CreateWorkspaceRequestedByProductionMediator.workspace:type_name -> workspace.v1.WorkspaceRef
+	98,  // 108: agentrepl.v1.CreateWorkspaceModelNotInCatalog.options:type_name -> conversation.v1.ModelOption
+	88,  // 109: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 110: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 111: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 112: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 113: agentrepl.v1.CreateWorkspaceNameHeld.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 114: agentrepl.v1.CreateWorkspaceNameBranchExists.landed_workspace:type_name -> workspace.v1.WorkspaceRef
+	57,  // 115: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
+	58,  // 116: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
+	59,  // 117: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
+	88,  // 118: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
+	88,  // 119: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 120: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 121: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
+	88,  // 122: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
+	88,  // 123: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.workspace:type_name -> workspace.v1.WorkspaceRef
+	99,  // 124: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
+	125, // [125:125] is the sub-list for method output_type
+	125, // [125:125] is the sub-list for method input_type
+	125, // [125:125] is the sub-list for extension type_name
+	125, // [125:125] is the sub-list for extension extendee
+	0,   // [0:125] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
@@ -6429,7 +6408,6 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceError_AsyncMergeNoDeployConfig)(nil),
 		(*CreateWorkspaceError_AsyncMergeDeployConfigInvalid)(nil),
 		(*CreateWorkspaceError_AsyncMergeRuleChecksFailed)(nil),
-		(*CreateWorkspaceError_AsyncMergeRuleChecksNoWorktree)(nil),
 		(*CreateWorkspaceError_TransferringAway)(nil),
 		(*CreateWorkspaceError_StandingDown)(nil),
 		(*CreateWorkspaceError_ModelNotInCatalog)(nil),

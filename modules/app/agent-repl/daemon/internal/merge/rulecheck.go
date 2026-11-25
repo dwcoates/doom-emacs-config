@@ -60,8 +60,7 @@ var errRuleCheckTimedOut = errors.New("merge: the rule check's run outlived its 
 // checkRules runs the repository's rule suites on the source branch's
 // worktree before an agent's merge is admitted: nil when they pass or the
 // request is not one the check covers, a refusal naming the failing cases
-// when they fail (ArmRuleChecksFailed), or naming the branch when no worktree
-// holds it (ArmRuleChecksNoWorktree), and an error when the run could not be
+// when they fail (ArmRuleChecksFailed), and an error when the run could not be
 // had at all.
 func (o *orchestrator) checkRules(ctx context.Context, requester wsm.Workspace, req Request, source wsm.MergeSource, deploy deployTarget, fields dlog.Context) error {
 	if req.By != RequestedByAgent {
@@ -76,14 +75,17 @@ func (o *orchestrator) checkRules(ctx context.Context, requester wsm.Workspace, 
 		log.Debug(opRuleCheck, "the repository's deploy runs no agent-repl suites, so no rule suite runs before its merge", fields)
 		return nil
 	}
-	tree, err := o.ruleCheckTree(ctx, requester, source)
+	tree, held, err := o.ruleCheckTree(ctx, requester, source)
 	if err != nil {
-		if _, refused := Refused(err); refused {
-			logRefusal(log, opRuleCheck, logsite.Msg("refused a merge whose branch no worktree holds, so its rule suites could not run"), fields, err)
-		} else {
-			log.Error(opRuleCheck, "could not find the worktree the merge's rule suites run in", dlog.WithCause(fields, err))
-		}
+		log.Error(opRuleCheck, "could not find the worktree the merge's rule suites run in", dlog.WithCause(fields, err))
 		return err
+	}
+	// A BRANCH NO WORKTREE HOLDS HAS NO TREE TO CHECK: the queue makes it a
+	// worktree of its own when its merge starts (branchSubject), and the gate
+	// runs every selected suite there.
+	if !held {
+		log.Info(opRuleCheck, "no worktree holds the merge's branch, so its rule suites run in the gate alone", withField(fields, "branch", source.Branch))
+		return nil
 	}
 	maker := ws
 	if req.Detached != nil && req.Detached.Maker != "" {
@@ -163,20 +165,12 @@ func (o *orchestrator) runRuleCheck(ctx context.Context, log dlog.Logger, tree s
 
 // ruleCheckTree answers the worktree a merge's rule suites run in: the
 // requester's own for a finish (its own branch is checked out there), and
-// for an async merge the worktree that has its branch checked out, refused
-// when none does.
-func (o *orchestrator) ruleCheckTree(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource) (string, error) {
+// for an async merge the worktree that has its branch checked out, HELD
+// false when none does.
+func (o *orchestrator) ruleCheckTree(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource) (string, bool, error) {
 	if source.Kind == wsm.MergeSourceOwnBranch {
-		return requester.Dir, nil
+		return requester.Dir, true, nil
 	}
 	dir, _, held, err := worktreeHolding(ctx, o.deps.Git, requester.Dir, source.Branch)
-	if err != nil {
-		return "", err
-	}
-	if held {
-		return dir, nil
-	}
-	refusal := refuse(ArmRuleChecksNoWorktree, requester.ID, "no worktree has the branch %q checked out, so its rule suites have nowhere to run; check it out in the maker's worktree and ask again", source.Branch)
-	refusal.Fields = map[string]any{"branch": source.Branch}
-	return "", refusal
+	return dir, held, err
 }

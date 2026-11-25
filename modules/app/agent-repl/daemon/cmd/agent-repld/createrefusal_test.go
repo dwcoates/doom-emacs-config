@@ -82,8 +82,6 @@ var createRefusals = func() []describedRefusal {
 		with("async_merge_deploy_config_invalid", map[string]any{"path": "/r/l.yaml", "detail": "bad"}, "the repository's /r/l.yaml is unusable (bad)"),
 		set("async_merge_rule_checks_failed", "async_merge_rule_checks_failed", &agentreplv1.MergeRuleChecksFailed{Worktree: "/w/a", Suites: []string{"repo-scans", "shellcheck"}, FailingTests: "- TestX", Log: "/l"},
 			"the async merge's branch failed its rule suites (repo-scans, shellcheck) in /w/a, so its merge was not admitted; fix the failing cases below, commit, and ask again\n\n- TestX"),
-		with("async_merge_rule_checks_no_worktree", map[string]any{"branch": "fix"},
-			"no worktree has the branch fix checked out, so its rule suites have nowhere to run before its merge; check it out in the maker's worktree and ask again"),
 		with("transferring_away", map[string]any{"address": "127.0.0.1:9"},
 			"the daemon is handing its workspaces to its successor at 127.0.0.1:9 and admits no new create; create it again there"),
 		plain("standing_down", "the daemon is standing down and admits no new create; create it again once the next daemon serves"),

@@ -760,9 +760,6 @@ message CreateWorkspaceError {
     // the worktree it is checked out in before the merge is admitted to the
     // queue. Nothing was recorded.
     MergeRuleChecksFailed async_merge_rule_checks_failed = 65;
-    // No worktree has the async merge's branch checked out, so its rule
-    // suites had nowhere to run. Nothing was recorded.
-    MergeRuleChecksNoWorktree async_merge_rule_checks_no_worktree = 66;
     // This daemon is handing its workspaces to a successor and admits no new
     // create: a create admitted now could still be materializing when the
     // handover snapshots what it serves. Nothing was created; the same

@@ -1,10 +1,12 @@
-package daemon_test
+package daemonrules
 
 import (
 	"testing"
 	"time"
 
 	"agentrepl/logging/logsite/scan"
+
+	"agent-repld/reposcans/internal/sourcescan"
 )
 
 // daemonLogCalls are the shapes of every dlog call: the four levels, each
@@ -20,6 +22,7 @@ var daemonLogCalls = scan.Calls(3, 1, 2, "Debug", "Info", "Warn", "Error")
 // first.
 func TestEveryDaemonLogSiteIsSound(t *testing.T) {
 	// Arrange.
+	sourcescan.InPackage(t, daemonRootDir)
 	spec := scan.Spec{Runtime: "daemon", Module: "agent-repld", Root: ".", Calls: daemonLogCalls}
 
 	// Act and Assert.

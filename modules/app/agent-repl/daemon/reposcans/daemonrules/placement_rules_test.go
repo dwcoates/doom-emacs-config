@@ -23,15 +23,19 @@ import (
 // (sourcescan, mdinlinetest) are internal to reposcans, so no test elsewhere
 // can call them; these scans catch the two other ways a test reads source.
 
+// sourceReaders are the packages that read Go source: the parser, and the
+// log-site scan every runtime's log calls are checked by.
+var sourceReaders = map[string]bool{"go/parser": true, "agentrepl/logging/logsite/scan": true}
+
 // goSourceReads answers, for one parsed Go file, every reason it reads Go
-// source: an import of go/parser, or a filesystem read whose arguments name a
+// source: an import of a source reader (sourceReaders), or a filesystem read whose arguments name a
 // .go file or pattern ("resolver.go", "*.go", a walk that keeps paths ending
 // ".go"). Each reason is "<decl>: <what>", with "import" for the import.
 func goSourceReads(file *ast.File) []string {
 	var reasons []string
 	for _, spec := range file.Imports {
-		if path, _ := strconv.Unquote(spec.Path.Value); path == "go/parser" {
-			reasons = append(reasons, "import: go/parser")
+		if path, _ := strconv.Unquote(spec.Path.Value); sourceReaders[path] {
+			reasons = append(reasons, "import: "+path)
 		}
 	}
 	imports := map[string]string{}
@@ -111,6 +115,7 @@ func TestGoSourceReadsFindsEveryWayATestReadsSource(t *testing.T) {
 		want []string
 	}{
 		{"an import of go/parser", "package p\nimport \"go/parser\"\nvar _ = parser.ParseFile\n", []string{"import: go/parser"}},
+		{"an import of the log-site scan", "package p\nimport \"agentrepl/logging/logsite/scan\"\nvar _ = scan.Require\n", []string{"import: agentrepl/logging/logsite/scan"}},
 		{"a read of one source file", "package p\nimport \"os\"\nfunc TestX() { os.ReadFile(\"resolver.go\") }\n", []string{"TestX: os.ReadFile of Go source"}},
 		{"a glob of the sources", "package p\nimport \"path/filepath\"\nfunc TestX() { filepath.Glob(filepath.Join(\"..\", \"*.go\")) }\n", []string{"TestX: path/filepath.Glob of Go source"}},
 		{"a walk keeping .go paths", "package p\nimport (\"path/filepath\"; \"strings\")\nfunc TestX() { filepath.WalkDir(\".\", func(p string, _ any, _ error) error { _ = strings.HasSuffix(p, \".go\"); return nil }) }\n", []string{"TestX: path/filepath.WalkDir of Go source"}},
