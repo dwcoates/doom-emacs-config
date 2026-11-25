@@ -346,9 +346,20 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 // abandoned (a stand-down, or its shim taken); and the failure otherwise,
 // the gate standing again.
 func (v *verbs) CompactRequeuedMergeColdGate(ctx context.Context, ws wsm.WorkspaceID) (bool, error) {
+	return v.compactColdGateUntilSettled(ctx, "CompactRequeuedMergeColdGate", ws,
+		logsite.Msg("a cold gate stands on the workspace of a requeued merge; it is answered by a compaction at once"))
+}
+
+// compactColdGateUntilSettled answers the cold gate standing on WS, for VERB,
+// by the compaction answerColdGateByCompaction makes, keeping the prompts held
+// at the gate and recording WHY, and answers once the answer's re-open has
+// settled: true when the session came up, false with no error when no gate
+// stood or the re-open was abandoned, and the failure otherwise, the gate
+// standing again. The wait adds no deadline of its own (the re-open's steps
+// are each bounded); CTX ending stops only the wait.
+func (v *verbs) compactColdGateUntilSettled(ctx context.Context, verb string, ws wsm.WorkspaceID, why logsite.Message) (bool, error) {
 	settled := make(chan ColdGateAnswerSettled, 1)
-	answered, err := v.answerColdGateByCompaction(ctx, "CompactRequeuedMergeColdGate", ws, false,
-		logsite.Msg("a cold gate stands on the workspace of a requeued merge; it is answered by a compaction at once"),
+	answered, err := v.answerColdGateByCompaction(ctx, verb, ws, false, why,
 		func(outcome ColdGateAnswerSettled) { settled <- outcome })
 	if err != nil || !answered {
 		return false, err
@@ -365,7 +376,7 @@ func (v *verbs) CompactRequeuedMergeColdGate(ctx context.Context, ws wsm.Workspa
 		}
 		panic(fmt.Sprintf("workspace: a cold gate's re-open settled with the undeclared outcome %q", outcome.Outcome))
 	case <-ctx.Done():
-		return false, fmt.Errorf("compact the requeued merge's cold gate on %s: the wait for its re-open ended: %w", ws, context.Cause(ctx))
+		return false, fmt.Errorf("compact the cold gate on %s (%s): the wait for its re-open ended: %w", ws, verb, context.Cause(ctx))
 	}
 }
 
