@@ -409,8 +409,13 @@ func scanEntries(r io.Reader, each func(pipeEntry)) error {
 }
 
 func (c *client) Thread(ctx context.Context, channel, threadTS string, limit int) ([]ThreadMessage, error) {
-	call := "gns slack thread " + channel + " " + threadTS
-	out, err := c.run(ctx, nil, "slack", "thread", channel, threadTS, "--limit", strconv.Itoa(limit), "--output", "json")
+	return c.thread(ctx, "gns slack thread "+channel+" "+threadTS, "slack", "thread", channel, threadTS, "--limit", strconv.Itoa(limit), "--output", "json")
+}
+
+// thread runs the `gns slack thread` ARGS, CALL as its record names it, and
+// answers the messages it read, oldest first.
+func (c *client) thread(ctx context.Context, call string, args ...string) ([]ThreadMessage, error) {
+	out, err := c.run(ctx, nil, args...)
 	if err != nil {
 		return nil, err
 	}
