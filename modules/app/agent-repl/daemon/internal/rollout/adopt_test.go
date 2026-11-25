@@ -3166,6 +3166,20 @@ func TestTheTakeoverTellsTheMergeQueueOfWhatItMadeOwnedOnceItIsOwned(t *testing.
 			}
 			h := newHarness(t, opts...)
 			first, second := joinedWithOneOfTwo(t, h)
+			if tt.elder {
+				// FIRST IS NEVER ADOPTED WHILE THE ELDER RUNS. The carry
+				// follower keeps looking until the elders end, and the
+				// takeover's own writes wake it to adopt FIRST headless, so
+				// whether that adoption finished before the takeover's tell
+				// was the scheduler's call. Holding the shim's adoption until
+				// the elder ends makes the not_yet_adopted the takeover tells
+				// the arrangement's, not the race's.
+				h.fleet.onAdopt = func(ws ids.WorkspaceID) {
+					if ws == first {
+						<-release
+					}
+				}
+			}
 			var mu sync.Mutex
 			var told [][2]Standing
 			h.merges.widened = func() {
