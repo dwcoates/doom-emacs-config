@@ -194,7 +194,7 @@ like any other switch; `:nothing-held' is a gain with no banner held, and
             (row (agent-repl-roster-row-of-id id)))
        (if (and row (not (agent-repl-roster-row-closed-p row)))
            ;; AN OPEN WORKSPACE IS LANDED ON, held here or not: a folded or
-           ;; hidden one is opened by the roster push its selection brings
+           ;; backlogged one is opened by the roster push its selection brings
            ;; (`agent-repl-host-request-switch-ref').
            (progn
              (agent-repl--info agent-repl--focus-log-scope

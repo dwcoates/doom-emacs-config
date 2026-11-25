@@ -986,32 +986,32 @@ stale blue status."
                     (format "{\"%s\":{\"atMs\":\"1\"}}" arm))
                    (list "RosterRowWhen" arm "unknown field")))))
 
-(ert-deftest agent-repl-test-wire-roster-when-hidden-carries-its-instant ()
-  "A hidden row whose cache lapse the daemon does not know decodes with no
+(ert-deftest agent-repl-test-wire-roster-when-backlogged-carries-its-instant ()
+  "A backlogged row whose cache lapse the daemon does not know decodes with no
 cache."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-when
                   "{\"backlogged\":{\"atMs\":\"1756400000000\"}}")
-                 '(:arm :hidden :value (:at-ms 1756400000000 :cache nil)))))
+                 '(:arm :backlogged :value (:at-ms 1756400000000 :cache nil)))))
 
-(ert-deftest agent-repl-test-wire-roster-when-hidden-carries-its-cache-lapse ()
-  "Regression watch: a hidden row's cache lapse (2026-10-13) must decode, or
+(ert-deftest agent-repl-test-wire-roster-when-backlogged-carries-its-cache-lapse ()
+  "Regression watch: a backlogged row's cache lapse (2026-10-13) must decode, or
 the strict decoder rejects the whole WatchWorkspaceRoster push and the tab
 bar goes dark."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-when
                   "{\"backlogged\":{\"atMs\":\"1\",\"cache\":{\"lapsesAtMs\":\"2\"}}}")
-                 '(:arm :hidden :value (:at-ms 1 :cache (:lapses-at-ms 2))))))
+                 '(:arm :backlogged :value (:at-ms 1 :cache (:lapses-at-ms 2))))))
 
-(ert-deftest agent-repl-test-wire-roster-when-hidden-refuses-an-extra-key ()
-  "An unknown field on a hidden row is a breach naming its message."
+(ert-deftest agent-repl-test-wire-roster-when-backlogged-refuses-an-extra-key ()
+  "An unknown field on a backlogged row is a breach naming its message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row-when-backlogged
                   "{\"atMs\":\"1\",\"extra\":1}")
                  '("RosterRowWhenBacklogged" extra "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-roster-when-hidden-cache-refuses-an-extra-key ()
-  "An unknown field on a hidden row's cache lapse is a breach naming its
+(ert-deftest agent-repl-test-wire-roster-when-backlogged-cache-refuses-an-extra-key ()
+  "An unknown field on a backlogged row's cache lapse is a breach naming its
 message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row-when-backlogged-cache
@@ -1373,7 +1373,7 @@ The row is uncovered: no fold covers it."
                    '(:tab (:arm :numbered :value (:number 3)))))))
 
 (ert-deftest agent-repl-test-wire-roster-backlog-row-decodes-its-family ()
-  "A hidden row nests its hidden family."
+  "A backlogged row nests its backlogged family."
   (let ((decoded (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-backlog-row
                   (format "{\"row\":%s,\"children\":[{\"row\":%s}]}"
@@ -1792,11 +1792,11 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
           "\"expanded\":{\"collapsible\":{}}}],\"openCount\":{\"workspaces\":2}},"
           "\"open\":{\"label\":{\"text\":\"Open\"},\"collapsed\":{}},"
-          "\"backlog\":{\"header\":{\"label\":{\"text\":\"Hidden\"},\"count\":{\"workspaces\":0}},"
+          "\"backlog\":{\"header\":{\"label\":{\"text\":\"Backlog\"},\"count\":{\"workspaces\":0}},"
           "\"backlogRows\":{\"rows\":[]},\"expanded\":{}},"
           "\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},"
           "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}}}")
-  "A whole workspaces stream: the repository sections, the open and hidden sections, and current.")
+  "A whole workspaces stream: the repository sections, the open and backlogs, and current.")
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-whole-roster ()
   "The workspaces stream is always whole, never a delta, and decodes as one picture."
@@ -1810,8 +1810,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                                             :entries nil))
                                :open-count (:workspaces 2 :unfolded 0))
                    :open (:label (:text "Open") :fold (:arm :collapsed :value nil))
-                   :hidden (:header (:label (:text "Hidden") :count (:workspaces 0))
-                            :hidden-rows (:rows nil)
+                   :backlog (:header (:label (:text "Backlog") :count (:workspaces 0))
+                            :backlog-rows (:rows nil)
                             :fold (:arm :expanded :value nil))
                    :current (:workspace (:id "ws-1" :dir "/w/1")
                              :selection-id "" :switch-started-at-ms nil
@@ -1952,33 +1952,33 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                           "\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]}}"))
                  '("WorkspaceRoster" repository "required message field is absent"))))
 
-(ert-deftest agent-repl-test-wire-roster-without-the-hidden-section-is-a-breach ()
-  "The hidden section is on every roster, empty when nothing is hidden."
+(ert-deftest agent-repl-test-wire-roster-without-the-backlog-is-a-breach ()
+  "The backlog is on every roster, empty when nothing is backlogged."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
                           "\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]}}"))
                  '("WorkspaceRoster" backlog "required message field is absent"))))
 
-(ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-hidden-section ()
-  "The hidden section decodes its header, rows and fold."
+(ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-backlog ()
+  "The backlog decodes its header, rows and fold."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-backlog-section
-                  (concat "{\"header\":{\"label\":{\"text\":\"Hidden Workspaces\"},\"count\":{\"workspaces\":1}},"
+                  (concat "{\"header\":{\"label\":{\"text\":\"Backlog\"},\"count\":{\"workspaces\":1}},"
                           "\"backlogRows\":{\"rows\":[]},\"collapsed\":{}}"))
-                 '(:header (:label (:text "Hidden Workspaces") :count (:workspaces 1))
-                   :hidden-rows (:rows nil)
+                 '(:header (:label (:text "Backlog") :count (:workspaces 1))
+                   :backlog-rows (:rows nil)
                    :fold (:arm :collapsed :value nil)))))
 
-(ert-deftest agent-repl-test-wire-roster-a-hidden-section-without-a-fold-is-a-breach ()
-  "The hidden section's fold is never unset on the wire."
+(ert-deftest agent-repl-test-wire-roster-a-backlog-without-a-fold-is-a-breach ()
+  "The backlog's fold is never unset on the wire."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-backlog-section
                   "{\"header\":{\"label\":{},\"count\":{}},\"backlogRows\":{}}")
                  '("RosterBacklogSection" fold "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-roster-a-hidden-section-refuses-a-key ()
-  "The hidden section has no key of its own; one is an unknown field."
+(ert-deftest agent-repl-test-wire-roster-a-backlog-refuses-a-key ()
+  "The backlog has no key of its own; one is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-backlog-section
                   "{\"key\":{},\"header\":{\"label\":{},\"count\":{}},\"backlogRows\":{},\"expanded\":{}}")
@@ -1996,9 +1996,9 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 
 ;;;; ---- The view state: folds and the grouping shown ----
 
-(defconst agent-repl-test-wire-roster--hidden-json
+(defconst agent-repl-test-wire-roster--backlog-json
   "\"backlog\":{\"header\":{\"label\":{},\"count\":{}},\"backlogRows\":{},\"expanded\":{}}"
-  "An empty hidden section, expanded, as a JSON member.")
+  "An empty backlog, expanded, as a JSON member.")
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-merged-band-fold ()
   "The merged band's fold is the daemon's view state, decoded as its arm."
@@ -3012,14 +3012,14 @@ its place and since it joined."
                    agent-repl-test-wire-roster--roster-json t t))
                  '("WorkspaceRoster" threads "required message field is absent"))))
 
-(ert-deftest agent-repl-test-wire-roster-a-sized-hidden-section-decodes-without-its-height ()
+(ert-deftest agent-repl-test-wire-roster-a-sized-backlog-decodes-without-its-height ()
   "Emacs lists the height arms, so a sized section decodes, and draws nothing from them."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-backlog-section
-                  (concat "{\"header\":{\"label\":{\"text\":\"Hidden Workspaces\"},\"count\":{\"workspaces\":1}},"
+                  (concat "{\"header\":{\"label\":{\"text\":\"Backlog\"},\"count\":{\"workspaces\":1}},"
                           "\"backlogRows\":{\"rows\":[]},\"collapsed\":{},\"sized\":{\"lines\":4}}"))
-                 '(:header (:label (:text "Hidden Workspaces") :count (:workspaces 1))
-                   :hidden-rows (:rows nil)
+                 '(:header (:label (:text "Backlog") :count (:workspaces 1))
+                   :backlog-rows (:rows nil)
                    :fold (:arm :collapsed :value nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-a-fitted-merge-queue-section-decodes-without-its-height ()

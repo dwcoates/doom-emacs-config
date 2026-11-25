@@ -342,9 +342,9 @@ sentence the shim and the daemon word it with."
   (if (string-empty-p stderr) "" (format " (%s)" stderr)))
 
 ;; A FAMILY STAYS IN ONE LIST OF THE ROSTER (agentrepl.v1 family.proto): a
-;; workspace with open children is not closed, killed, nuked, hidden or
+;; workspace with open children is not closed, killed, nuked, backlogged or
 ;; merged closed, and no open child is made, re-opened or shown under a parent
-;; that is hidden, closed or closing.  Both refusals are ANSWERS, not faults,
+;; that is backlogged, closed or closing.  Both refusals are ANSWERS, not faults,
 ;; and every verb that can meet one words it here, naming the workspaces in
 ;; the way, as the sidebar words it (webapp `rpc/family-refusal.ts').
 
@@ -379,7 +379,7 @@ any other arm, which is not a family refusal."
     (:parent-not-open
      (let ((parent (agent-repl-verbs--ref-label (plist-get fields :parent))))
        (pcase (plist-get (plist-get fields :state) :arm)
-         (:hidden (format "%s refused: its parent %s is hidden; show the parent first" op parent))
+         (:backlogged (format "%s refused: its parent %s is backlogged; show the parent first" op parent))
          (:closed (format "%s refused: its parent %s is closed; reopen the parent first" op parent))
          (:closing (format "%s refused: its parent %s closes once its queued merge lands" op parent))
          (state (error "agent-repl-verbs: parent_not_open state %S has no wording" state)))))))
@@ -988,29 +988,30 @@ sentinel level, so a nil priority omits it from the request entirely."
      (lambda (_)
        (message "agent-repl: priority %s" (or priority "cleared"))))))
 
-(defun agent-repl-verb-set-hidden (ws hidden)
-  "Move WS into the sidebar's hidden section when HIDDEN, else back out.
-A hidden workspace keeps its session and its tab; the roster push that
+(defun agent-repl-verb-set-backlogged (ws backlogged)
+  "Move WS into the sidebar's backlog when BACKLOGGED, else back out.
+A backlogged workspace keeps its session and its tab; the roster push that
 follows takes the tab off the bar's drawing, numbering and navigation,
 exactly as a collapsed repository's tabs are.  A success draws nothing
 of its own beyond the echo: the push is the new state."
   (let ((ref (agent-repl-verbs--ref ws)))
     (agent-repl-verbs--send
      #'agent-repl-rpc-set-workspace-backlogged (agent-repl-verbs--conn ws)
-     (list :workspace ref :visibility (list :arm (if hidden :hide :show) :value nil))
-     :ws ws :op (if hidden "hide" "show")
+     (list :workspace ref :visibility (list :arm (if backlogged :hide :show) :value nil))
+     :ws ws :op (if backlogged "hide" "show")
      :on-success
      (lambda (_)
-       (message "agent-repl: %s %s" ws (if hidden "hidden" "shown"))
-       (agent-repl-verbs--land-after-visibility ws hidden)))))
+       (message "agent-repl: %s %s" ws (if backlogged "backlogged" "shown"))
+       (agent-repl-verbs--land-after-visibility ws backlogged)))))
 
 (defun agent-repl-verb-show-ref (ref)
-  "Show the hidden workspace REF names again, and land on it.
-`agent-repl-verb-set-hidden' showing, for a hidden workspace this editor does
-not hold (frontend.v1.RosterRowVisibility): it has no name here, so it is
-addressed by its ref on the primary link.  Once shown it is drawn, so the
-roster push marks it held and opens it, and the switch requested on success
-lands the frame on it (`agent-repl-host-request-switch-ref')."
+  "Show the backlogged workspace REF names again, and land on it.
+`agent-repl-verb-set-backlogged' showing, for a backlogged workspace this
+editor does not hold (frontend.v1.RosterRowVisibility): it has no name
+here, so it is addressed by its ref on the primary link.  Once shown it
+is drawn, so the roster push marks it held and opens it, and the switch
+requested on success lands the frame on it
+\(`agent-repl-host-request-switch-ref')."
   (agent-repl-verbs--send
    #'agent-repl-rpc-set-workspace-backlogged (agent-repl-verbs--conn)
    (list :workspace ref :visibility (list :arm :show :value nil))
@@ -1119,7 +1120,7 @@ echo names the mode the request left, or why it was refused."
            t))))))
 
 (defun agent-repl-verbs--keepalive-outcome-text (outcome)
-  "Return the words for one hidden workspace's decoded keep-alive OUTCOME."
+  "Return the words for one backlogged workspace's decoded keep-alive OUTCOME."
   (let ((v (plist-get outcome :value)))
     (pcase (plist-get outcome :arm)
       (:sent "sent")
@@ -1136,18 +1137,18 @@ echo names the mode the request left, or why it was refused."
            (arm (error "agent-repl-verbs: keep-alive skip arm %S has no wording" arm)))))
       (arm (error "agent-repl-verbs: keep-alive outcome arm %S has no wording" arm)))))
 
-(defun agent-repl-verbs-describe-hidden-keepalives (workspaces)
+(defun agent-repl-verbs-describe-backlogged-keepalives (workspaces)
   "Return the one line reporting the decoded keep-alive WORKSPACES.
 Every workspace whose keep-alive was sent is counted; every other one is
 named, by its directory's base name, beside what happened to it."
   (if (null workspaces)
-      "no hidden workspaces to keep warm"
+      "no backlogged workspaces to keep warm"
     (let ((sent (cl-count-if (lambda (ws) (eq (plist-get (plist-get ws :outcome) :arm) :sent))
                              workspaces))
           (others (cl-remove-if (lambda (ws) (eq (plist-get (plist-get ws :outcome) :arm) :sent))
                                 workspaces)))
       (string-join
-       (cons (format "keep-alive sent to %d of %d hidden workspace(s)" sent (length workspaces))
+       (cons (format "keep-alive sent to %d of %d backlogged workspace(s)" sent (length workspaces))
              (mapcar (lambda (ws)
                        (format "%s %s"
                                (file-name-nondirectory
@@ -1157,9 +1158,9 @@ named, by its directory's base name, beside what happened to it."
        " · "))))
 
 (defun agent-repl-send-backlogged-keepalives ()
-  "Send one keep-alive to every hidden workspace's session.
-Each hidden workspace's cache is otherwise left to lapse; the keep-alive
-moves its lapse later, and the hidden section's countdowns follow on the
+  "Send one keep-alive to every backlogged workspace's session.
+Each backlogged workspace's cache is otherwise left to lapse; the keep-alive
+moves its lapse later, and the backlog's countdowns follow on the
 roster stream.  The echo says how each one went."
   (interactive)
   (agent-repl-verbs--send
@@ -1169,24 +1170,24 @@ roster stream.  The echo says how each one went."
    (lambda (value)
      (let ((workspaces (plist-get value :workspaces)))
        (agent-repl--info agent-repl--global-log-scope
-                         "elisp.verbs.hidden-keepalives workspaces={workspaces}" :workspaces (prin1-to-string workspaces))
-       (message "agent-repl: %s" (agent-repl-verbs-describe-hidden-keepalives workspaces))))))
+                         "elisp.verbs.backlogged-keepalives workspaces={workspaces}" :workspaces (prin1-to-string workspaces))
+       (message "agent-repl: %s" (agent-repl-verbs-describe-backlogged-keepalives workspaces))))))
 
-(defconst agent-repl-verbs-fold-hidden-request
+(defconst agent-repl-verbs-fold-backlog-request
   '(:change (:arm :fold-section
-             :value (:section (:arm :hidden) :fold (:arm :collapse))))
-  "The UpdateSidebarView request that folds the sidebar's Hidden section.")
+             :value (:section (:arm :backlog) :fold (:arm :collapse))))
+  "The UpdateSidebarView request that folds the sidebar's backlog.")
 
-(defun agent-repl-verbs-fold-hidden-section (conn)
-  "Fold the sidebar's Hidden section on CONN.
-The editor sends it once per startup (startup.el), so Hidden always opens
+(defun agent-repl-verbs-fold-backlog (conn)
+  "Fold the sidebar's backlog on CONN.
+The editor sends it once per startup (startup.el), so the backlog always opens
 folded (owner request, 2026-10-27); unfolding it afterwards is the
 sidebar's own ask.  The roster push that follows carries the fold."
   (agent-repl-verbs--send
-   #'agent-repl-rpc-update-sidebar-view conn agent-repl-verbs-fold-hidden-request
-   :op "fold-hidden"))
+   #'agent-repl-rpc-update-sidebar-view conn agent-repl-verbs-fold-backlog-request
+   :op "fold-backlog"))
 
-(defun agent-repl-verbs--land-after-visibility (ws hidden)
+(defun agent-repl-verbs--land-after-visibility (ws backlogged)
   "Request the switch an accepted visibility change of WS lands on.
 A SHOW lands on WS itself, which is what bringing a workspace back is for.
 
@@ -1197,7 +1198,7 @@ frame follows that selection off the roster push
 \(`agent-repl-roster-apply-current').  A second landing requested here
 raced the daemon's and won, so a hide always ended on the first tab --
 and hiding a workspace the user did NOT stand on moved them too."
-  (if hidden
+  (if backlogged
       (agent-repl--info ws "elisp.verbs.hide-landing ws={ws} owner=daemon" :ws ws)
     (agent-repl-host-request-switch ws 'show)))
 
@@ -2249,41 +2250,41 @@ Clearing is the absence of the field, which no level label can spell.")
 
 (defun agent-repl-hide-workspace (&optional ws)
   "Hide the current workspace (`SPC TAB h').
-It moves to the sidebar's HIDDEN WORKSPACES section and off the tab bar,
+It moves to the sidebar's BACKLOG and off the tab bar,
 so the tab numbers close up over it; its session runs on untouched,
 and the frame lands on the first tab the bar still draws.  Clicking its
 row in that section, or picking it from `SPC TAB H', shows it again."
   (interactive)
-  (agent-repl-verb-set-hidden (agent-repl-verbs--target-ws ws "Hide workspace: ") t))
+  (agent-repl-verb-set-backlogged (agent-repl-verbs--target-ws ws "Hide workspace: ") t))
 
-(defun agent-repl-verbs--hidden-rows (&optional roster)
-  "Return the rows of ROSTER's hidden section, in walk order.
-ROSTER defaults to `agent-repl-roster-view'.  The hidden list holds open
+(defun agent-repl-verbs--backlog-rows (&optional roster)
+  "Return the rows of ROSTER's backlog, in walk order.
+ROSTER defaults to `agent-repl-roster-view'.  The backlog holds open
 workspaces only (a closed one is in the closed list), so every row is one
 to switch back to."
   (let ((roster (agent-repl-verbs--roster-or-view roster)))
     (agent-repl-roster-flatten
-     (plist-get (plist-get (plist-get roster :hidden) :hidden-rows) :rows))))
+     (plist-get (plist-get (plist-get roster :backlog) :backlog-rows) :rows))))
 
-(defun agent-repl-show-hidden-workspace ()
-  "Show a hidden workspace again and switch to it (`SPC TAB H').
-Completes over the workspaces the sidebar's HIDDEN WORKSPACES section
-holds, by their roster names: a hidden workspace the user is not looking
+(defun agent-repl-show-backlogged-workspace ()
+  "Show a backlogged workspace again and switch to it (`SPC TAB H').
+Completes over the workspaces the sidebar's BACKLOG
+holds, by their roster names: a backlogged workspace the user is not looking
 at has no tab here (frontend.v1.RosterRowVisibility), so it is shown by its ref
 \(`agent-repl-verb-show-ref').  The chosen one comes back onto the tab bar,
 and the frame lands on it once the daemon accepts."
   (interactive)
   (let ((choices (mapcar (lambda (row)
                            (cons (agent-repl-roster-row-name row) (agent-repl-roster-row-ref row)))
-                         (agent-repl-verbs--hidden-rows))))
+                         (agent-repl-verbs--backlog-rows))))
     (unless choices
-      (agent-repl--info '(:agent-repl-central "the hidden-workspace picker spans every workspace")
-                        "elisp.verbs.show-hidden-none")
-      (user-error "agent-repl: no hidden workspaces"))
-    (let* ((choice (completing-read "Show hidden workspace: " (mapcar #'car choices) nil t))
+      (agent-repl--info '(:agent-repl-central "the backlogged-workspace picker spans every workspace")
+                        "elisp.verbs.show-backlogged-none")
+      (user-error "agent-repl: no backlogged workspaces"))
+    (let* ((choice (completing-read "Show backlogged workspace: " (mapcar #'car choices) nil t))
            (ref (cdr (assoc choice choices))))
-      (agent-repl--info '(:agent-repl-central "the hidden-workspace picker spans every workspace")
-                        "elisp.verbs.show-hidden-chosen name={name} id={id}" :name choice :id (plist-get ref :id))
+      (agent-repl--info '(:agent-repl-central "the backlogged-workspace picker spans every workspace")
+                        "elisp.verbs.show-backlogged-chosen name={name} id={id}" :name choice :id (plist-get ref :id))
       (agent-repl-verb-show-ref ref))))
 
 (defun agent-repl-set-priority (&optional ws)

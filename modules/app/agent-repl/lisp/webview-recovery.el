@@ -12,7 +12,7 @@
 ;;
 ;; THE HOST IS MADE REGARDLESS OF FOCUS (owner ruling, 2026-10-12): a page
 ;; is loaded when its workspace is asked open, whether or not Emacs is the
-;; focused app.  A HIDDEN workspace (hidden, or in a collapsed repository
+;; focused app.  A WITHHELD workspace (backlogged, or in a collapsed repository
 ;; section) is owed no page: it runs nothing (open-tabs.el).
 
 ;; THE STALE-WEBVIEW SWEEP IS GONE, and so is every script it drove.  A

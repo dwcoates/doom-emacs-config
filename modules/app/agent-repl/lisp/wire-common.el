@@ -474,7 +474,7 @@ both empty, so a refusal naming neither is refused as malformed."
 
 (defun agent-repl-wire-decode-workspace-parent-not-open (value)
   "Decode VALUE as `WorkspaceParentNotOpen', a plist `(:parent REF :state ARM)'.
-The arm is `:hidden', `:closed' or `:closing' (a queued merge closes the
+The arm is `:backlogged', `:closed' or `:closing' (a queued merge closes the
 parent once it lands); it is never unset."
   (let ((object (agent-repl-wire--object "WorkspaceParentNotOpen" value)))
     (agent-repl-wire--check-keys "WorkspaceParentNotOpen" object '(parent backlogged closed closing))
@@ -485,7 +485,7 @@ parent once it lands); it is never unset."
                     #'agent-repl-wire-decode-workspace-ref)
            :state (agent-repl-wire--decode-oneof
                    "WorkspaceParentNotOpen" 'state object
-                   `((backlogged :hidden ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenBacklogged" v)))
+                   `((backlogged :backlogged ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenBacklogged" v)))
                      (closed :closed ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenClosed" v)))
                      (closing :closing ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenClosing" v)))))))))
 

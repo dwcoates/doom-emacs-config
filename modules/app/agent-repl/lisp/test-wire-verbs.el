@@ -879,7 +879,7 @@ that outcome answering the editor\='s close is a contract breach."
                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-hide ()
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-hide ()
   "A hide carries the workspace and the empty `hide' arm."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-encode-set-workspace-backlogged-request
@@ -888,7 +888,7 @@ that outcome answering the editor\='s close is a contract breach."
                    '((workspace . ((id . "ws-1") (dir . "/w/one")))
                      (hide))))))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-show ()
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-show ()
   "A show carries the workspace and the empty `show' arm."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-encode-set-workspace-backlogged-request
@@ -897,29 +897,29 @@ that outcome answering the editor\='s close is a contract breach."
                    '((workspace . ((id . "ws-1") (dir . "/w/one")))
                      (show))))))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-without-visibility ()
-  "A hidden change with no visibility arm is incomplete and errors before send."
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-without-visibility ()
+  "A backlogged change with no visibility arm is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-set-workspace-backlogged-request
                    (list :workspace agent-repl-test-wire-verbs--ref))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-without-workspace ()
-  "A hidden change with no workspace is incomplete and errors before send."
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-without-workspace ()
+  "A backlogged change with no workspace is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-set-workspace-backlogged-request
                    '(:visibility (:arm :hide :value nil)))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-response-success ()
-  "An accepted hidden change decodes to the empty success arm."
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-response-success ()
+  "An accepted backlogged change decodes to the empty success arm."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-set-workspace-backlogged-response
                     (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
                    '(:arm :success :value nil)))))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-response-error ()
-  "A refused hidden change decodes to the error arm carrying its cause."
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-response-error ()
+  "A refused backlogged change decodes to the error arm carrying its cause."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-set-workspace-backlogged-response
                     (agent-repl-test-wire-verbs--parse
@@ -927,7 +927,7 @@ that outcome answering the editor\='s close is a contract breach."
                    '(:arm :error
                      :value (:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry"))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-error-refuses-an-unknown-arm ()
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-error-refuses-an-unknown-arm ()
   "An arm this codec does not know is refused as an unknown field."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-set-workspace-backlogged-error
@@ -939,7 +939,7 @@ that outcome answering the editor\='s close is a contract breach."
 (ert-deftest agent-repl-test-wire-verbs-update-sidebar-view-folds-a-section ()
   "A fold carries its section's empty arm and the fold's."
   (agent-repl-test-wire-verbs--with-common
-    (dolist (case '((:hidden backlog :collapse collapse)
+    (dolist (case '((:backlog backlog :collapse collapse)
                     (:open open :expand expand)
                     (:recently-merged recentlyMerged :collapse collapse)))
       (pcase-let ((`(,section ,wire-section ,fold ,wire-fold) case))
@@ -954,7 +954,7 @@ that outcome answering the editor\='s close is a contract breach."
   (agent-repl-test-wire-verbs--with-common
     (dolist (request '(nil
                        (:change (:arm :fold-section :value (:fold (:arm :collapse))))
-                       (:change (:arm :fold-section :value (:section (:arm :hidden))))
+                       (:change (:arm :fold-section :value (:section (:arm :backlog))))
                        (:change (:arm :fold-section :value (:section (:arm :repository) :fold (:arm :collapse))))))
       (should-error (agent-repl-wire-encode-update-sidebar-view-request request)
                     :type 'agent-repl-wire-error))))
@@ -6245,7 +6245,7 @@ instead diverges from it unseen."
 
 ;;;; ---- SendBackloggedKeepalives -------------------------------------------
 
-(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-request-is-empty ()
+(ert-deftest agent-repl-test-wire-verbs-backlogged-keepalives-request-is-empty ()
   "The request carries nothing: the call is the request."
   (should (equal (json-serialize
                   (or (agent-repl-test-wire-verbs--with-common
@@ -6253,7 +6253,7 @@ instead diverges from it unseen."
                       (make-hash-table)))
                  "{}")))
 
-(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-success-decodes-each-outcome ()
+(ert-deftest agent-repl-test-wire-verbs-backlogged-keepalives-success-decodes-each-outcome ()
   "A success decodes every workspace's ref and outcome arm, in order."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-send-backlogged-keepalives-response
@@ -6278,28 +6278,28 @@ instead diverges from it unseen."
                              :outcome (:arm :skipped :value (:reason (:arm :cache-lapsed
                                                                      :value (:lapsed-at-ms 1800000000000)))))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-empty-section-decodes-empty ()
-  "An empty hidden section is protojson's `{}' success: no workspaces."
+(ert-deftest agent-repl-test-wire-verbs-backlogged-keepalives-empty-section-decodes-empty ()
+  "An empty backlog is protojson's `{}' success: no workspaces."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-send-backlogged-keepalives-response
                   "{\"success\":{}}")
                  '(:arm :success :value (:workspaces nil)))))
 
-(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-workspace-without-outcome-refused ()
+(ert-deftest agent-repl-test-wire-verbs-backlogged-keepalives-workspace-without-outcome-refused ()
   "A workspace entry naming no outcome is a breach."
   (should (equal (agent-repl-test-wire-verbs--decode-breach
                   #'agent-repl-wire-decode-send-backlogged-keepalives-workspace
                   "{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"}}")
                  '("SendBackloggedKeepalivesWorkspace" "outcome" "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-unknown-field-refused ()
+(ert-deftest agent-repl-test-wire-verbs-backlogged-keepalives-unknown-field-refused ()
   "A field the codec does not hold is refused, not dropped."
   (should (equal (agent-repl-test-wire-verbs--decode-breach
                   #'agent-repl-wire-decode-send-backlogged-keepalives-workspace
                   "{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"},\"sent\":{},\"extra\":1}")
                  '("SendBackloggedKeepalivesWorkspace" "extra" "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-error-decodes-its-cause ()
+(ert-deftest agent-repl-test-wire-verbs-backlogged-keepalives-error-decodes-its-cause ()
   "An unreadable registry decodes its cause and the read's words."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-send-backlogged-keepalives-response
@@ -6875,7 +6875,7 @@ instead diverges from it unseen."
     (dolist (decoder '(agent-repl-wire-decode-open-workspace-error
                        agent-repl-wire-decode-create-workspace-error
                        agent-repl-wire-decode-set-workspace-backlogged-error))
-      (dolist (state '(("backlogged" . :hidden) ("closed" . :closed) ("closing" . :closing)))
+      (dolist (state '(("backlogged" . :backlogged) ("closed" . :closed) ("closing" . :closing)))
         (should (equal (funcall decoder (agent-repl-test-wire-verbs--parse
                                          (format "{\"parentNotOpen\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"%s\":{}}}"
                                                  (car state))))
@@ -6897,7 +6897,7 @@ instead diverges from it unseen."
                     (agent-repl-test-wire-verbs--parse "{\"notSiblings\":{}}"))
                    '(:cause (:arm :not-siblings :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-set-hidden-error-arms-pinned ()
+(ert-deftest agent-repl-test-wire-verbs-set-backlogged-error-arms-pinned ()
   "SetWorkspaceBackloggedError's arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_set_workspace_backlogged.pb.go" "SetWorkspaceBackloggedError")

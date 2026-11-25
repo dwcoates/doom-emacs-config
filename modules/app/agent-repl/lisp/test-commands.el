@@ -614,10 +614,10 @@ AT-MS, or 0 when neither is given: every row states one."
         :detail (list :branch nil :parent-branch nil :summary nil)
         :closed (list :closed (and closed t))))
 
-(defun agent-repl-test-commands--roster (rows &optional hidden merged)
+(defun agent-repl-test-commands--roster (rows &optional backlogged merged)
   "Return a decoded roster carrying ROWS: the open ones in one repo section.
 A closed one of ROWS is listed in the closed stream, as the daemon lists
-it.  HIDDEN is the hidden section's rows.  MERGED are merged rows, which
+it.  BACKLOGGED is the backlog's rows.  MERGED are merged rows, which
 no stream carries: the Recently Merged summary only counts them, and
 their rows are paged (`agent-repl-test-commands--with-merged-pages')."
   (let ((open (seq-remove #'agent-repl-roster-row-closed-p rows))
@@ -627,8 +627,8 @@ their rows are paged (`agent-repl-test-commands--with-merged-pages')."
                            (list (list :key (list :repository (list :id "r" :dir "/tmp"))
                                        :header (list :label (list :text "repo"))
                                        :entries (agent-repl-test--row-entries open)))))
-          :hidden (list :header (list :label (list :text "Hidden"))
-                        :hidden-rows (agent-repl-test--hidden-rows hidden))
+          :backlog (list :header (list :label (list :text "Backlog"))
+                        :backlog-rows (agent-repl-test--backlog-rows backlogged))
           :recently-merged (list :header (list :label (list :text "m")
                                                :count (list :workspaces (length merged)))
                                  :groups (and merged
@@ -2386,8 +2386,8 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (equal (plist-get agent-repl-test-commands--switched-ref :id) "id-folded"))
       (should-not agent-repl-test-commands--opened))))
 
-(ert-deftest agent-repl-test-commands-switcher-shows-a-hidden-workspace-with-no-tab-here ()
-  "Picking a hidden workspace this editor does not hold shows it by its ref."
+(ert-deftest agent-repl-test-commands-switcher-shows-a-backlogged-workspace-with-no-tab-here ()
+  "Picking a backlogged workspace this editor does not hold shows it by its ref."
   ;; Arrange
   (agent-repl-test-commands--switcher nil nil
     (let ((agent-repl-roster-view
@@ -2544,11 +2544,11 @@ and `--switched' to the workspace whose switch was requested of the daemon."
 
 ;;;; ---- `SPC p p' offers the current and recent workspaces ----
 
-(defun agent-repl-test-commands--offered-by (command rows &optional hidden merged)
-  "Run COMMAND over a roster of ROWS, HIDDEN and MERGED; answer what it offered.
+(defun agent-repl-test-commands--offered-by (command rows &optional backlogged merged)
+  "Run COMMAND over a roster of ROWS, BACKLOGGED and MERGED; answer what it offered.
 MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
   (let ((agent-repl-test-commands--offered nil)
-        (agent-repl-roster-view (agent-repl-test-commands--roster rows hidden merged)))
+        (agent-repl-roster-view (agent-repl-test-commands--roster rows backlogged merged)))
     (agent-repl-test-commands--with-merged-pages merged
      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
               ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
@@ -2563,10 +2563,10 @@ MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
       (funcall command)
       agent-repl-test-commands--offered))))
 
-(ert-deftest agent-repl-test-commands-switcher-unhides-a-chosen-hidden-workspace ()
-  "Choosing a hidden workspace in `SPC p p' shows it rather than only switching."
+(ert-deftest agent-repl-test-commands-switcher-unbacklogs-a-chosen-backlogged-workspace ()
+  "Choosing a backlogged workspace in `SPC p p' shows it rather than only switching."
   ;; Arrange
-  (let ((unhidden nil) (switched nil)
+  (let ((shown nil) (switched nil)
         (agent-repl-roster-view
          (agent-repl-test-commands--roster
           nil (list (agent-repl-test-commands--row "tucked" "id-tucked" 100)))))
@@ -2576,27 +2576,27 @@ MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
               ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil))
               ((symbol-function 'completing-read) (lambda (_p table &rest _)
                                                     (car (all-completions "" table))))
-              ((symbol-function 'agent-repl-verb-set-hidden)
-               (lambda (ws hidden) (push (list ws hidden) unhidden)))
+              ((symbol-function 'agent-repl-verb-set-backlogged)
+               (lambda (ws backlogged) (push (list ws backlogged) shown)))
               ((symbol-function 'agent-repl-host-request-switch)
                (lambda (ws _t) (setq switched ws))))
       ;; Act
       (agent-repl-test-commands--with-merged-pages nil
         (agent-repl-switch-to-project))
       ;; Assert
-      (should (equal unhidden '(("tucked" nil))))
+      (should (equal shown '(("tucked" nil))))
       (should-not switched))))
 
-(ert-deftest agent-repl-test-commands-switcher-offers-open-hidden-merged-and-user-closed ()
-  "`SPC p p' offers the open, hidden, merged and user-closed workspaces."
+(ert-deftest agent-repl-test-commands-switcher-offers-open-backlogged-merged-and-user-closed ()
+  "`SPC p p' offers the open, backlogged, merged and user-closed workspaces."
   ;; Arrange
   (let ((rows (list (agent-repl-test-commands--row "open" "id-open" 100)
                     (agent-repl-test-commands--closed-row "mine" :user 500)))
-        (hidden (list (agent-repl-test-commands--row "tucked" "id-tucked" 100)))
+        (backlogged (list (agent-repl-test-commands--row "tucked" "id-tucked" 100)))
         (merged (list (agent-repl-test-commands--merged-row "landed" 700))))
     ;; Act
     (let ((offered (agent-repl-test-commands--offered-by
-                    #'agent-repl-switch-to-project rows hidden merged)))
+                    #'agent-repl-switch-to-project rows backlogged merged)))
       ;; Assert
       (should (equal (sort (copy-sequence offered) #'string<)
                      '("landed" "mine" "open" "tucked"))))))
@@ -2607,11 +2607,11 @@ MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
   (let ((rows (list (agent-repl-test-commands--row "stale" "id-stale" 100 nil 900)
                     (agent-repl-test-commands--row "fresh" "id-fresh" 900 nil 100)
                     (agent-repl-test-commands--closed-row "mine" :user 500 400)))
-        (hidden (list (agent-repl-test-commands--row "tucked" "id-tucked" 800 nil 100)))
+        (backlogged (list (agent-repl-test-commands--row "tucked" "id-tucked" 800 nil 100)))
         (merged (list (agent-repl-test-commands--merged-row "landed" 700 600))))
     ;; Act
     (let ((offered (agent-repl-test-commands--offered-by
-                    #'agent-repl-switch-to-project rows hidden merged)))
+                    #'agent-repl-switch-to-project rows backlogged merged)))
       ;; Assert
       (should (equal offered '("fresh" "tucked" "landed" "mine" "stale"))))))
 
@@ -2945,14 +2945,14 @@ MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
       (should (equal mark "●"))
       (should (eq (get-text-property 0 'face mark) 'shadow)))))
 
-(ert-deftest agent-repl-test-commands-switch-mark-of-a-hidden-row-is-the-hidden-ring ()
-  "A hidden workspace draws the hidden ring in its status color."
+(ert-deftest agent-repl-test-commands-switch-mark-of-a-backlogged-row-is-the-backlogged-ring ()
+  "A backlogged workspace draws the backlogged ring in its status color."
   ;; Arrange
-  (let ((entry (list :row (agent-repl-test-commands--row "h" "id-h" 1) :section :hidden)))
+  (let ((entry (list :row (agent-repl-test-commands--row "h" "id-h" 1) :section :backlog)))
     ;; Act
     (let ((mark (agent-repl--switch-mark entry)))
       ;; Assert
-      (should (equal mark agent-repl--switch-hidden-glyph))
+      (should (equal mark agent-repl--switch-backlogged-glyph))
       (should (equal (get-text-property 0 'face mark)
                      (list :foreground (agent-repl-status-roster-mark-color :ready)))))))
 
@@ -2974,7 +2974,7 @@ MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
 
 (ert-deftest agent-repl-test-commands-switch-state-label-names-the-section-first ()
   "Where a workspace sits outranks how it would open."
-  (should (equal (agent-repl--switch-state-label '(:section :hidden :state :open)) "hidden"))
+  (should (equal (agent-repl--switch-state-label '(:section :backlog :state :open)) "backlogged"))
   (should (equal (agent-repl--switch-state-label '(:section :merged :state :closed)) "merged"))
   (should (equal (agent-repl--switch-state-label '(:section :repository :state :closed)) "closed"))
   (should (equal (agent-repl--switch-state-label '(:section :repository :state :not-here)) "not open here"))
@@ -2990,7 +2990,7 @@ MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
 
 (ert-deftest agent-repl-test-commands-switch-state-label-others-take-no-face ()
   "Every label but merged is plain text."
-  (dolist (entry '((:section :hidden :state :open)
+  (dolist (entry '((:section :backlog :state :open)
                    (:section :repository :state :closed)
                    (:section :repository :state :not-here)))
     (should-not (text-properties-at 0 (agent-repl--switch-state-label entry)))))
@@ -3723,15 +3723,15 @@ so no close pushes a tab to the back any more."
     (agent-repl-switch-to-workspace 2)
     (should (equal agent-repl-test-commands--switched "b"))))
 
-;;;; ---- A hidden or folded tab is no stop of a walk ----
+;;;; ---- A backlogged or folded tab is no stop of a walk ----
 
-(ert-deftest agent-repl-test-commands-switch-right-passes-over-a-user-hidden-tab ()
+(ert-deftest agent-repl-test-commands-switch-right-passes-over-a-user-backlogged-tab ()
   "Cycling right never lands on a tab the user hid."
   (agent-repl-test-commands--with-hidden-bar '("a" "hidden" "b") '("hidden") "a"
     (agent-repl-switch-right)
     (should (equal agent-repl-test-commands--switched "b"))))
 
-(ert-deftest agent-repl-test-commands-switch-left-passes-over-a-user-hidden-tab ()
+(ert-deftest agent-repl-test-commands-switch-left-passes-over-a-user-backlogged-tab ()
   "Cycling left never lands on a tab the user hid, wrapping included."
   (agent-repl-test-commands--with-hidden-bar '("a" "b" "hidden") '("hidden") "a"
     (agent-repl-switch-left)

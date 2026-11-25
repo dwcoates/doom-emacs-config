@@ -15,10 +15,10 @@
 ;;     (`agent-repl-open-tabs-holds-p'), and is then drawn at its place in
 ;;     the registry's tab order, never waiting on any other workspace;
 ;;   - every step the daemon reports is one minibuffer line;
-;;   - a HIDDEN workspace (hidden by the user, or in a collapsed repository
+;;   - a WITHHELD workspace (backlogged by the user, or in a collapsed repository
 ;;     section) is asked for too, and answered at once without starting
 ;;     anything; when it is shown again it is asked for again, and when an
-;;     open one is hidden by the user its page is dropped (the daemon leaves
+;;     open one is backlogged by the user its page is dropped (the daemon leaves
 ;;     its cache to lapse, then stands its session down);
 ;;   - A FOLD CLOSES WHAT IT MAKES NOT VISIBLE (owner ruling, 2026-11-21,
 ;;     which supersedes the request of 2026-10-30 that a fold unloaded its
@@ -132,9 +132,9 @@ again for every workspace it left unanswered, each with the page it holds
 then.  The entry goes with the workspace's answer or its stream's close.")
 
 (defvar agent-repl-open-tabs--rows nil
-  "The last roster walk's rows: plists `(:id :name :ref :collapsed :hidden)'.
-`:collapsed' is a tab off the bar, folded or hidden; `:hidden' is only the
-user\='s hide.")
+  "The last roster walk's rows: plists
+`(:id :name :ref :collapsed :backlogged)'.  `:collapsed' is a tab off the
+bar, folded or backlogged; `:backlogged' is only the user\='s hide.")
 
 (defvar agent-repl-open-tabs--startup 'expected
   "Where this process's first open stands.
@@ -168,17 +168,17 @@ Until it has, the frame has no workspace of the user's to move to."
   (let ((id (agent-repl-open-tabs--ws-id ws)))
     (and id (agent-repl-open-tabs--row id))))
 
-(defun agent-repl-open-tabs-hidden-p (ws)
+(defun agent-repl-open-tabs-backlogged-p (ws)
   "Return non-nil when the user hid workspace WS.
-This editor holds a hidden workspace only while it is the selection
+This editor holds a backlogged workspace only while it is the selection
 \(frontend.v1.RosterRowVisibility).  Read from the last roster walk; a workspace
-it did not meet is not hidden."
+it did not meet is not backlogged."
   (let ((row (agent-repl-open-tabs--ws-row ws)))
-    (and row (plist-get row :hidden) t)))
+    (and row (plist-get row :backlogged) t)))
 
 (defun agent-repl-open-tabs-holds-p (id)
   "Return non-nil while workspace ID's tab is kept out of the tab order.
-Every tab is held until the daemon has answered it open.  A HIDDEN one
+Every tab is held until the daemon has answered it open.  A BACKLOGGED one
 (`dormant') is not held: it keeps its place in the order and the bar
 leaves it undrawn, as it always has; shown again, it is held for its new
 open in the same walk."
@@ -278,7 +278,7 @@ left unasked, and the next link-up or roster walk asks again."
           (mapcar (lambda (row)
                     (list :workspace (plist-get row :ref)
                           :page (agent-repl-open-tabs--page (plist-get row :name)
-                                                            (plist-get row :hidden))))
+                                                            (plist-get row :backlogged))))
                   rows)))
     (dolist (id ids) (puthash id 'in-flight agent-repl-open-tabs--state))
     ;; THE PAGE WAITS ARE NOTED BEFORE THE SEND: a sender may answer before
@@ -399,15 +399,15 @@ Outside a walk the order is re-derived at once; a walk derives it itself."
 
 (defun agent-repl-open-tabs--withdraw (row)
   "Take open ROW's tab off the bar, now that the user hid it.
-It drops its page and slot (`agent-repl-open-tabs--hide').  A COLLAPSED ROW
-THIS EDITOR HOLDS IS ALWAYS HIDDEN: the daemon holds a folded workspace only
-while it draws it inside its fold (surfaced, or the selection), whose tab is
-numbered, and one it stops drawing is no longer held and is torn down
-\(frontend.v1.RosterRowVisibility).  A collapsed, held row that is not hidden is
-a broken contract, and is fatal."
-  (unless (plist-get row :hidden)
+It drops its page and slot (`agent-repl-open-tabs--hide').  A COLLAPSED
+ROW THIS EDITOR HOLDS IS ALWAYS BACKLOGGED: the daemon holds a folded
+workspace only while it draws it inside its fold (surfaced, or the
+selection), whose tab is numbered, and one it stops drawing is no longer
+held and is torn down \(frontend.v1.RosterRowVisibility).  A collapsed,
+held row that is not backlogged is a broken contract, and is fatal."
+  (unless (plist-get row :backlogged)
     (agent-repl--fatal (plist-get row :name)
-                       "elisp.open-tabs.withdraw-not-hidden ws={ws} id={id}"
+                       "elisp.open-tabs.withdraw-not-backlogged ws={ws} id={id}"
                        :ws (plist-get row :name) :id (plist-get row :id)))
   (agent-repl-open-tabs--hide row))
 
@@ -508,7 +508,7 @@ once a daemon is serving."
          ;; Closed while it opened: the walk already forgot it.
          (agent-repl--info ws "elisp.open-tabs.opened-gone ws={ws} id={id}" :ws ws :id id))
         ((plist-get row :collapsed)
-         ;; Folded or hidden while it opened: off the bar, and a hidden one
+         ;; Folded or backlogged while it opened: off the bar, and a backlogged one
          ;; drops its page (the daemon stands it down once its cache lapses).
          (agent-repl-open-tabs--withdraw row))
         (t

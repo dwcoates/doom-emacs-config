@@ -22,7 +22,7 @@
 (declare-function doom-run-hooks "doom-lib" (&rest hooks))
 (declare-function agent-repl-daemon--spawned-here-p "daemon" ())
 (declare-function agent-repl-latency-report-startup "latency-report" (milestones))
-(declare-function agent-repl-verbs-fold-hidden-section "verbs" (conn))
+(declare-function agent-repl-verbs-fold-backlog "verbs" (conn))
 
 (defconst agent-repl-startup--central
   '(:agent-repl-central "the editor's startup spans every workspace")
@@ -86,14 +86,14 @@ other is reached, so it is recorded at its own instant and in its order."
   "Reach `:daemon-linked' at the first link-up, on CONN.
 The first link-up also decides how this Emacs came to a daemon: a daemon
 this process spawned and still runs is `:spawned', any other `:running'.
-It also folds the sidebar's Hidden section, which every startup opens
+It also folds the sidebar's backlog, which every startup opens
 folded (owner request, 2026-10-27): once per process, so a later link-up
 \(a daemon handover) leaves the fold as the user left it."
   (unless agent-repl-startup--daemon
     (setq agent-repl-startup--daemon
           (if (agent-repl-daemon--spawned-here-p) :spawned :running))
     (agent-repl-startup-reach :daemon-linked)
-    (agent-repl-verbs-fold-hidden-section conn)))
+    (agent-repl-verbs-fold-backlog conn)))
 
 (defun agent-repl-startup-ended ()
   "The startup's open finished: reach `:all-tabs' and report the startup."

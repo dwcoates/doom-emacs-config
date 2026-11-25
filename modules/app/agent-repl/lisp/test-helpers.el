@@ -1422,9 +1422,9 @@ stamps every push."
                                           ((and drawn (not closed)) :unselected-visible)
                                           (t :not-visible)))))))
 
-(defun agent-repl-test--hidden-rows (rows)
+(defun agent-repl-test--backlog-rows (rows)
   "Return fixture ROWS as a decoded `RosterBacklogRows', families nested.
-A hidden row is visible only while it is the selection
+A backlogged row is visible only while it is the selection
 \(`agent-repl-test--stamp-visibility')."
   (cl-labels ((wrap (row) (list :row (agent-repl-test--stamp-visibility row nil)
                                 :children (mapcar #'wrap (gethash row agent-repl-test--families)))))

@@ -570,7 +570,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their interrupt raised the merge-queue question and where to answer it")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
-    ("verbs.el" agent-repl-verb-set-hidden "agent-repl: %s %s"
+    ("verbs.el" agent-repl-verb-set-backlogged "agent-repl: %s %s"
      "confirms the user's hide or show of a workspace")
     ("verbs.el" agent-repl-verb-show-ref "agent-repl: %s shown"
      "confirms the hidden workspace the user asked to show again is shown")

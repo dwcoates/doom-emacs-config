@@ -3459,7 +3459,7 @@ workspace rather than a persp placeholder."
                  ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                  ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                  ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                 ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) ,hidden))
+                 ((symbol-function 'agent-repl-open-tabs-backlogged-p) (lambda (_ws) ,hidden))
                  ((symbol-function 'agent-repl--panels-mount-awaited-view)
                   (lambda (ws) (push ws mounted)))
                  ((symbol-function 'agent-repl--emit-info)

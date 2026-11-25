@@ -587,18 +587,18 @@ shim judged: retried, nothing scheduled, busy or ended.")
   "SendBackloggedKeepalives"
   agent-repl-wire-encode-send-backlogged-keepalives-request
   agent-repl-wire-decode-send-backlogged-keepalives-response
-  "Send one keep-alive to every hidden workspace's session.
+  "Send one keep-alive to every backlogged workspace's session.
 Daemon-scoped: nothing names a workspace.  Each cadence stays held; the
 keep-alive's answer moves each cache's lapse later, which reaches the
-hidden section's countdown on the roster stream.  The success reports
-each hidden workspace's outcome; only an unreadable registry is an error.")
+backlog's countdown on the roster stream.  The success reports
+each backlogged workspace's outcome; only an unreadable registry is an error.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-set-workspace-backlogged
   "SetWorkspaceBacklogged"
   agent-repl-wire-encode-set-workspace-backlogged-request
   agent-repl-wire-decode-set-workspace-backlogged-response
-  "Move a workspace into the sidebar's hidden section, or back out of it.
-A hidden workspace keeps its session and its tab; the roster push that
+  "Move a workspace into the sidebar's backlog, or back out of it.
+A backlogged workspace keeps its session and its tab; the roster push that
 follows takes its tab off the bar's drawing, numbering and navigation.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-list-merged-workspaces

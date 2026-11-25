@@ -20,7 +20,7 @@
 (defvar agent-repl-test-startup--queued nil "Every batch handed to the report, newest first.")
 (defvar agent-repl-test-startup--records nil "Every info record, newest first, as (LEVEL TEXT).")
 (defvar agent-repl-test-startup--spawned nil "Whether the stubbed daemon was spawned by this Emacs.")
-(defvar agent-repl-test-startup--folds nil "Every connection the Hidden section was folded on, newest first.")
+(defvar agent-repl-test-startup--folds nil "Every connection the backlog was folded on, newest first.")
 
 (defmacro agent-repl-test-startup--with-milestones (&rest body)
   "Run BODY with fresh milestone state, a stepping clock and a recording report.
@@ -45,7 +45,7 @@ rebinds `agent-repl-test-startup--spawned'."
                 (lambda (_ws fmt &rest args) (push (list 'info (agent-repl-log-site-render fmt args)) agent-repl-test-startup--records)))
                ((symbol-function 'agent-repl-latency-report-startup)
                 (lambda (milestones) (push milestones agent-repl-test-startup--queued)))
-               ((symbol-function 'agent-repl-verbs-fold-hidden-section)
+               ((symbol-function 'agent-repl-verbs-fold-backlog)
                 (lambda (conn) (push conn agent-repl-test-startup--folds))))
        ,@body)))
 
@@ -87,15 +87,15 @@ rebinds `agent-repl-test-startup--spawned'."
       (should (eq agent-repl-startup--daemon (cdr case)))
       (should (equal agent-repl-startup--milestones '((:daemon-linked . 1)))))))
 
-(ert-deftest agent-repl-test-startup-the-first-link-up-folds-the-hidden-section ()
-  "The first link-up folds the sidebar's Hidden section on its connection."
+(ert-deftest agent-repl-test-startup-the-first-link-up-folds-the-backlog ()
+  "The first link-up folds the sidebar's backlog on its connection."
   (agent-repl-test-startup--with-milestones
     ;; Act
     (agent-repl-startup-on-link-up 'conn)
     ;; Assert
     (should (equal agent-repl-test-startup--folds '(conn)))))
 
-(ert-deftest agent-repl-test-startup-a-later-link-up-leaves-the-hidden-fold-alone ()
+(ert-deftest agent-repl-test-startup-a-later-link-up-leaves-the-backlog-fold-alone ()
   "A link-up after the first (a daemon handover) folds nothing, so the user's fold stands."
   (agent-repl-test-startup--with-milestones
     ;; Arrange

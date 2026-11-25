@@ -2092,7 +2092,7 @@ The merge a placement asked to stand behind is in no queue."
     (restartFailed . :restart-failed) (daemonShutdown . :daemon-shutdown)
     (pickFailed . :pick-failed) (finishFailed . :finish-failed)
     (aheadDidNotLand . :ahead-did-not-land)
-    (backloggedAtColdGate . :hidden-at-cold-gate) (adopted . :adopted)
+    (backloggedAtColdGate . :backlogged-at-cold-gate) (adopted . :adopted)
     (gaveUp . :gave-up))
   "Every arm of MergeQueueStatusOffQueueCause, as (WIRE-SYMBOL . KEYWORD).
 Each arm is an empty message: the arm is the cause.")
@@ -6128,7 +6128,7 @@ The one cause is `:unknown-repository\='."
 
 ;;;; ---- SetWorkspaceBacklogged ---------------------------------------------
 ;;
-;; Move a workspace into the sidebar's hidden section, or back out of it.
+;; Move a workspace into the sidebar's backlog, or back out of it.
 ;; See endpoint_set_workspace_backlogged.proto.
 
 (defun agent-repl-wire-encode-set-workspace-backlogged-hide (value)
@@ -6285,7 +6285,7 @@ Returns (:workspace REF :outcome ONEOF), ONEOF's arm one of `:sent',
 
 (defun agent-repl-wire-decode-send-backlogged-keepalives-success (json)
   "Decode SendBackloggedKeepalivesSuccess from JSON into (:workspaces LIST).
-LIST holds one decoded SendBackloggedKeepalivesWorkspace per hidden
+LIST holds one decoded SendBackloggedKeepalivesWorkspace per backlogged
 workspace, in the registry's order; empty when the section is."
   (let ((message "SendBackloggedKeepalivesSuccess"))
     (agent-repl-wire-verbs--check-keys message json '(workspaces))
@@ -6294,7 +6294,7 @@ workspace, in the registry's order; empty when the section is."
                        #'agent-repl-wire-decode-send-backlogged-keepalives-workspace))))
 
 (defun agent-repl-wire-decode-send-backlogged-keepalives-error (json)
-  "Decode SendBackloggedKeepalivesError from JSON into (:cause (:arm ARM :value V))."
+  "Decode SendBackloggedKeepalivesError JSON into (:cause (:arm ARM :value V))."
   (list :cause (agent-repl-wire-verbs--decode-scalar-arms
                 "SendBackloggedKeepalivesError" "cause" json
                 '((registryUnreadable :registry-unreadable ((detail :detail)))))))
@@ -6690,7 +6690,7 @@ Every field is accepted; only the standing is decoded."
 
 ;;;; ---- UpdateSidebarView --------------------------------------------
 ;;
-;; The editor folds the sidebar's one-of-a-kind sections: Hidden at every
+;; The editor folds the sidebar's one-of-a-kind sections: the backlog at every
 ;; startup (owner request, 2026-10-27).  A repository's or a subsection's
 ;; fold is the sidebar's own ask, never the editor's, so those arms are not
 ;; encoded here.  See endpoint_update_sidebar_view.proto.
@@ -6701,13 +6701,13 @@ Every field is accepted; only the standing is decoded."
 
 (defun agent-repl-wire-encode-sidebar-view-fold-section (value)
   "Encode SidebarViewFoldSection from plist VALUE.
-VALUE is (:section (:arm SECTION) :fold (:arm FOLD)), SECTION `:hidden',
+VALUE is (:section (:arm SECTION) :fold (:arm FOLD)), SECTION `:backlog',
 `:open' or `:recently-merged', FOLD `:expand' or `:collapse'.  Both are
 required."
   (let ((message "SidebarViewFoldSection"))
     (list (agent-repl-wire-verbs--encode-oneof
            message "section" (plist-get value :section)
-           (list (list :hidden 'backlog (agent-repl-wire-encode-sidebar-view-empty "SidebarViewBacklog"))
+           (list (list :backlog 'backlog (agent-repl-wire-encode-sidebar-view-empty "SidebarViewBacklog"))
                  (list :open 'open (agent-repl-wire-encode-sidebar-view-empty "SidebarViewOpen"))
                  (list :recently-merged 'recentlyMerged
                        (agent-repl-wire-encode-sidebar-view-empty "SidebarViewRecentlyMerged"))))

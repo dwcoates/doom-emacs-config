@@ -713,8 +713,8 @@ one place the handover walk lives."
 (defvar agent-repl-host--select-in-flight nil
   "The `WorkspaceRef' whose SelectWorkspace awaits its answer, or nil.
 A REF, NEVER A NAME: a workspace this editor does not hold (a folded or
-hidden one, frontend.v1.RosterRowVisibility) is selected through the same one
-queue as a held one, and it has no name here until its tab opens.
+backlogged one, frontend.v1.RosterRowVisibility) is selected through the
+same one queue as a held one, and it has no name here until its tab opens.
 EMACS SENDS ONE SELECTION AT A TIME.  Every unary call rides its own
 socket, so two selects sent back to back -- `s-}' pressed twice -- reach
 the daemon in whatever order its accepts are scheduled, and the older one

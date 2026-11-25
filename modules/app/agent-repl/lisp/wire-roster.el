@@ -594,7 +594,7 @@ nil when no turn of the workspace has ended."
 
 (defun agent-repl-wire-decode-roster-row-when-backlogged-cache (value)
   "Decode VALUE as `RosterRowWhenBackloggedCache', a plist `(:lapses-at-ms)'.
-When the hidden workspace's prompt cache lapses, epoch MILLISECONDS."
+When the backlogged workspace's prompt cache lapses, epoch MILLISECONDS."
   (let ((object (agent-repl-wire--object "RosterRowWhenBackloggedCache" value)))
     (agent-repl-wire--check-keys "RosterRowWhenBackloggedCache" object '(lapsesAtMs))
     (agent-repl-wire--decoded
@@ -604,9 +604,10 @@ When the hidden workspace's prompt cache lapses, epoch MILLISECONDS."
 
 (defun agent-repl-wire-decode-roster-row-when-backlogged (value)
   "Decode VALUE as `RosterRowWhenBacklogged', a plist `(:at-ms :cache)'.
-The instant the workspace was moved into the hidden section, and the lapse
-of its prompt cache when the daemon knows it (nil otherwise).  Emacs draws
-no hidden row, but the roster push carries them, so this decodes them whole."
+The instant the workspace was moved into the backlog, and the lapse
+of its prompt cache when the daemon knows it (nil otherwise).  Emacs
+draws no backlogged row, but the roster push carries them, so this
+decodes them whole."
   (let ((object (agent-repl-wire--object "RosterRowWhenBacklogged" value)))
     (agent-repl-wire--check-keys "RosterRowWhenBacklogged" object '(atMs cache))
     (agent-repl-wire--decoded
@@ -621,7 +622,7 @@ no hidden row, but the roster push carries them, so this decodes them whole."
     (turnRunning :turn-running agent-repl-wire-decode-roster-row-when-turn-running)
     (noTurnRunning :no-turn-running agent-repl-wire-decode-roster-row-when-no-turn-running)
     (merged :merged agent-repl-wire-decode-roster-row-when-merged)
-    (backlogged :hidden agent-repl-wire-decode-roster-row-when-backlogged))
+    (backlogged :backlogged agent-repl-wire-decode-roster-row-when-backlogged))
   "`RosterRowWhen.shown''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
 The ONE list of the when-column's arms: the oneof decode and the key
 allow-list both read it.")
@@ -1090,7 +1091,7 @@ other arm is a contract breach, refused loudly rather than drawn."
 ;;;; ---- The lists' rows ----
 ;;
 ;; EACH LIST WRAPS THE SHARED ROW IN ITS OWN ROW TYPE: an open row states its
-;; tab and nests its open family, a hidden row nests its hidden family, and a
+;; tab and nests its open family, a backlogged row nests its backlogged family, and a
 ;; merged or a closed row stands alone.  The roster lists every workspace in
 ;; exactly one of them.
 
@@ -1302,7 +1303,7 @@ nil when the recency walk reaches no tab of the row soon."
 
 (defun agent-repl-wire-decode-roster-backlog-row (value)
   "Decode VALUE as `RosterBacklogRow', a plist `(:row ROW :children ROWS)'.
-CHILDREN are the row's hidden family, each itself a hidden row."
+CHILDREN are the row's backlogged family, each itself a backlogged row."
   (let ((object (agent-repl-wire--object "RosterBacklogRow" value)))
     (agent-repl-wire--check-keys "RosterBacklogRow" object '(row children))
     (agent-repl-wire--decoded
@@ -1313,7 +1314,7 @@ CHILDREN are the row's hidden family, each itself a hidden row."
                       "RosterBacklogRow" 'children object #'agent-repl-wire-decode-roster-backlog-row)))))
 
 (defun agent-repl-wire-decode-roster-backlog-rows (value)
-  "Decode VALUE as `RosterBacklogRows', a plist `(:rows HIDDEN-ROWS)'."
+  "Decode VALUE as `RosterBacklogRows', a plist `(:rows BACKLOG-ROWS)'."
   (agent-repl-wire--decode-row-list "RosterBacklogRows" value #'agent-repl-wire-decode-roster-backlog-row))
 
 (defun agent-repl-wire-decode-roster-merged-row (value)
@@ -1865,8 +1866,9 @@ queue waits on stands, `:waiting' (the deploy still rolls out),
 `:checking' (the chain's intake assesses it), `:fixing' (a remediation
 workspace fixes it, or what its own gate failed on) or `:testing' (a
 remediation's or an escalation's fix runs its gate and lands while its
-workspace stands by hidden) or `:escalated' (the check waits on the user's
-escalation), and TARGET, the workspace ref a click on its label selects.
+workspace stands by in the backlog) or `:escalated' (the check waits on
+the user's escalation), and TARGET, the workspace ref a click on its
+label selects.
 TARGET is nil only while a deploy with no intake rolls out, or while an
 escalation is still being made; the standing is never unset."
   (let ((object (agent-repl-wire--object "RosterMergeQueueMediation" value)))
@@ -2225,7 +2227,7 @@ per repository whose queue is active."
                   '((expanded :expanded agent-repl-wire-decode-roster-merge-queue-section-expanded)
                     (collapsed :collapsed agent-repl-wire-decode-roster-merge-queue-section-collapsed)))))))
 
-;;;; ---- The hidden-workspaces section ----
+;;;; ---- The backlog ----
 
 (defun agent-repl-wire-decode-roster-backlog-section-header (value)
   "Decode `RosterBacklogSection''s `header' field VALUE."
@@ -2242,14 +2244,14 @@ per repository whose queue is active."
 (defun agent-repl-wire-decode-roster-backlog-section-fold (object)
   "Decode `RosterBacklogSection''s `fold' oneof from OBJECT.
 THE ARM IS THE FOLD, the daemon's view state; it is never unset.  It folds
-sidebar rows only: a hidden workspace is off the tab bar either way."
+sidebar rows only: a backlogged workspace is off the tab bar either way."
   (agent-repl-wire--decode-oneof
    "RosterBacklogSection" 'fold object
    '((expanded :expanded agent-repl-wire-decode-roster-backlog-section-expanded)
      (collapsed :collapsed agent-repl-wire-decode-roster-backlog-section-collapsed))))
 
 (defun agent-repl-wire-decode-roster-backlog-section (value)
-  "Decode VALUE as `RosterBacklogSection', a plist `(:header :hidden-rows :fold)'.
+  "Decode VALUE as `RosterBacklogSection', a plist `(:header :backlog-rows :fold)'.
 It has no key of its own — the roster carries exactly one — so a `key' on
 the wire is an unknown field."
   (let ((object (agent-repl-wire--object "RosterBacklogSection" value)))
@@ -2260,7 +2262,7 @@ the wire is an unknown field."
      (list :header (agent-repl-wire--decode-message
                     "RosterBacklogSection" 'header object
                     #'agent-repl-wire-decode-roster-backlog-section-header)
-           :hidden-rows (agent-repl-wire--decode-message
+           :backlog-rows (agent-repl-wire--decode-message
                          "RosterBacklogSection" 'backlogRows object
                          #'agent-repl-wire-decode-roster-backlog-rows)
            :fold (agent-repl-wire-decode-roster-backlog-section-fold object)))))
@@ -2365,7 +2367,7 @@ fields."
   (agent-repl-wire-decode-roster-repository-view value))
 
 (defun agent-repl-wire-decode-workspace-roster-backlog (value)
-  "Decode `WorkspaceRoster''s `hidden' field VALUE."
+  "Decode `WorkspaceRoster''s `backlog' field VALUE."
   (agent-repl-wire-decode-roster-backlog-section value))
 
 (defun agent-repl-wire-decode-workspace-roster-open (value)
@@ -2691,7 +2693,7 @@ read further."
 
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster', the WORKSPACES stream's snapshot.
-Returns `(:repository V :open O :hidden H :current C-or-nil
+Returns `(:repository V :open O :backlog H :current C-or-nil
 :version V-or-nil :app-switcher A :threads T :cold-gates G)'.  THERE IS
 NO TAB BAR MESSAGE: the Open section's rows are the tab bar, each stating
 its own tab.  The retired `recently_merged', `merge_queue', `closed' and
@@ -2709,7 +2711,7 @@ its own tab.  The retired `recently_merged', `merge_queue', `closed' and
            :open (agent-repl-wire--decode-message
                   "WorkspaceRoster" 'open object
                   #'agent-repl-wire-decode-workspace-roster-open)
-           :hidden (agent-repl-wire--decode-message
+           :backlog (agent-repl-wire--decode-message
                     "WorkspaceRoster" 'backlog object
                     #'agent-repl-wire-decode-workspace-roster-backlog)
            :current (agent-repl-wire--decode-optional-message

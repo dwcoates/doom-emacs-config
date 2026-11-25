@@ -111,7 +111,7 @@ A closed one of ROWS is listed in the closed stream, as the daemon lists it.
 MERGED-ROWS are only counted by the Recently Merged summary: a merged
 workspace is in no stream, and its row is paged
 \(`agent-repl-test-verbs--merged').  SECTIONS, when given, replace the one
-section.  HIDDEN-ROWS, when given, are the hidden section's rows."
+section.  BACKLOG-ROWS, when given, are the backlog's rows."
   (list :repository
         (list :sections
               (agent-repl-test--number-tabs
@@ -120,8 +120,8 @@ section.  HIDDEN-ROWS, when given, are the hidden section's rows."
                                :header (list :label (list :text "repo-one"))
                                :entries (agent-repl-test--row-entries
                                            (seq-remove #'agent-repl-roster-row-closed-p rows)))))))
-        :hidden (list :header (list :label (list :text "Hidden"))
-                      :hidden-rows (agent-repl-test--hidden-rows hidden-rows))
+        :backlog (list :header (list :label (list :text "Backlog"))
+                      :backlog-rows (agent-repl-test--backlog-rows hidden-rows))
         :recently-merged (list :header (list :label (list :text "Recently Merged")
                                              :count (list :workspaces (length merged-rows)))
                                :groups (and merged-rows
@@ -248,7 +248,7 @@ answers a bare success, which is what almost every verb's success is."
                 ((symbol-function 'agent-repl-rpc-set-workspace-priority)
                  (agent-repl-test-verbs--stub :set-priority))
                 ((symbol-function 'agent-repl-rpc-set-workspace-backlogged)
-                 (agent-repl-test-verbs--stub :set-hidden))
+                 (agent-repl-test-verbs--stub :set-backlogged))
                 ((symbol-function 'agent-repl-rpc-swap-workspaces)
                  (agent-repl-test-verbs--stub :swap))
                 ((symbol-function 'agent-repl-rpc-move-workspace)
@@ -262,7 +262,7 @@ answers a bare success, which is what almost every verb's success is."
                 ((symbol-function 'agent-repl-rpc-daemon-health)
                  (agent-repl-test-verbs--stub :daemon-health))
                 ((symbol-function 'agent-repl-rpc-send-backlogged-keepalives)
-                 (agent-repl-test-verbs--stub :hidden-keepalives))
+                 (agent-repl-test-verbs--stub :backlogged-keepalives))
                 ((symbol-function 'agent-repl-rpc-update-sidebar-view)
                  (agent-repl-test-verbs--stub :update-sidebar-view))
                 ((symbol-function 'agent-repl-rpc-retry-vendor-error)
@@ -805,27 +805,27 @@ still says where the question stands."
     (agent-repl-verb-set-priority "ws-one" nil)
     (should-not (plist-get (agent-repl-test-verbs--request :set-priority) :priority))))
 
-(ert-deftest agent-repl-verbs-set-hidden-carries-the-hide-arm ()
+(ert-deftest agent-repl-verbs-set-backlogged-carries-the-hide-arm ()
   "Hiding a workspace names it and sets the `hide' visibility arm."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-set-hidden "ws-one" t)
-    (let ((request (agent-repl-test-verbs--request :set-hidden)))
+    (agent-repl-verb-set-backlogged "ws-one" t)
+    (let ((request (agent-repl-test-verbs--request :set-backlogged)))
       (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
       (should (equal (plist-get request :visibility) (list :arm :hide :value nil))))))
 
-(ert-deftest agent-repl-verbs-set-hidden-carries-the-show-arm ()
+(ert-deftest agent-repl-verbs-set-backlogged-carries-the-show-arm ()
   "Showing a workspace again sets the `show' visibility arm."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-set-hidden "ws-one" nil)
-    (should (equal (plist-get (agent-repl-test-verbs--request :set-hidden) :visibility)
+    (agent-repl-verb-set-backlogged "ws-one" nil)
+    (should (equal (plist-get (agent-repl-test-verbs--request :set-backlogged) :visibility)
                    (list :arm :show :value nil)))))
 
 (ert-deftest agent-repl-verbs-show-ref-shows-the-workspace-by-its-ref ()
-  "Showing a hidden workspace this editor does not hold addresses it by its ref."
+  "Showing a backlogged workspace this editor does not hold addresses it by its ref."
   (agent-repl-test-verbs--with nil
     (let ((ref (agent-repl-test-verbs--ref "hid" "/tmp/h")))
       (agent-repl-verb-show-ref ref)
-      (let ((request (agent-repl-test-verbs--request :set-hidden)))
+      (let ((request (agent-repl-test-verbs--request :set-backlogged)))
         (should (equal (plist-get request :workspace) ref))
         (should (equal (plist-get request :visibility) (list :arm :show :value nil)))))))
 
@@ -839,22 +839,22 @@ still says where the question stands."
 (ert-deftest agent-repl-verbs-show-ref-refused-lands-nowhere ()
   "A refused show switches to nothing."
   (agent-repl-test-verbs--with
-      (list (cons :set-hidden (list :response (list :arm :error
+      (list (cons :set-backlogged (list :response (list :arm :error
                                                     :value (list :cause (list :arm :unknown-workspace :value nil))))))
     (agent-repl-verb-show-ref (agent-repl-test-verbs--ref "hid" "/tmp/h"))
     (should-not agent-repl-test-verbs--switch-requests)))
 
-(ert-deftest agent-repl-verbs-set-hidden-success-echoes-the-change ()
+(ert-deftest agent-repl-verbs-set-backlogged-success-echoes-the-change ()
   "An accepted hide says so in the echo area; the push is the new state."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-set-hidden "ws-one" t)
-    (should (agent-repl-test-verbs--messaged-p "ws-one hidden"))))
+    (agent-repl-verb-set-backlogged "ws-one" t)
+    (should (agent-repl-test-verbs--messaged-p "ws-one backlogged"))))
 
 (ert-deftest agent-repl-verbs-hide-command-targets-the-current-workspace ()
   "`agent-repl-hide-workspace' (`SPC TAB h') hides the current workspace."
   (agent-repl-test-verbs--with nil
     (agent-repl-hide-workspace)
-    (let ((request (agent-repl-test-verbs--request :set-hidden)))
+    (let ((request (agent-repl-test-verbs--request :set-backlogged)))
       (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
       (should (eq (plist-get (plist-get request :visibility) :arm) :hide)))))
 
@@ -1045,26 +1045,26 @@ still says where the question stands."
 
 (defun agent-repl-test-verbs--keepalives-answer (workspaces)
   "Return the answers alist for a SendBackloggedKeepalives success over WORKSPACES."
-  (list (cons :hidden-keepalives
+  (list (cons :backlogged-keepalives
               (list :response (list :arm :success :value (list :workspaces workspaces))))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-sends-the-empty-request ()
+(ert-deftest agent-repl-verbs-backlogged-keepalives-sends-the-empty-request ()
   "The command asks the daemon once, naming no workspace."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--keepalives-answer nil)
     (agent-repl-send-backlogged-keepalives)
-    (should (assq :hidden-keepalives agent-repl-test-verbs--sent))
-    (should-not (agent-repl-test-verbs--request :hidden-keepalives))))
+    (should (assq :backlogged-keepalives agent-repl-test-verbs--sent))
+    (should-not (agent-repl-test-verbs--request :backlogged-keepalives))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-counts-the-sent ()
+(ert-deftest agent-repl-verbs-backlogged-keepalives-counts-the-sent ()
   "Every workspace whose keep-alive went out is counted, not named."
   (agent-repl-test-verbs--with
       (agent-repl-test-verbs--keepalives-answer
        (list (agent-repl-test-verbs--keepalive "alpha" :sent)
              (agent-repl-test-verbs--keepalive "beta" :sent)))
     (agent-repl-send-backlogged-keepalives)
-    (should (agent-repl-test-verbs--messaged-p "keep-alive sent to 2 of 2 hidden workspace(s)"))))
+    (should (agent-repl-test-verbs--messaged-p "keep-alive sent to 2 of 2 backlogged workspace(s)"))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-names-each-one-not-sent ()
+(ert-deftest agent-repl-verbs-backlogged-keepalives-names-each-one-not-sent ()
   "A workspace whose keep-alive did not go out is named beside why."
   (agent-repl-test-verbs--with
       (agent-repl-test-verbs--keepalives-answer
@@ -1072,15 +1072,15 @@ still says where the question stands."
              (agent-repl-test-verbs--keepalive "beta" :not-running)))
     (agent-repl-send-backlogged-keepalives)
     (should (agent-repl-test-verbs--messaged-p
-             "keep-alive sent to 1 of 2 hidden workspace(s) · beta not running"))))
+             "keep-alive sent to 1 of 2 backlogged workspace(s) · beta not running"))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-says-so-when-none-are-hidden ()
-  "An empty hidden section is an answer, said in words."
+(ert-deftest agent-repl-verbs-backlogged-keepalives-says-so-when-none-are-backlogged ()
+  "An empty backlog is an answer, said in words."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--keepalives-answer nil)
     (agent-repl-send-backlogged-keepalives)
-    (should (agent-repl-test-verbs--messaged-p "no hidden workspaces to keep warm"))))
+    (should (agent-repl-test-verbs--messaged-p "no backlogged workspaces to keep warm"))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-words-each-outcome ()
+(ert-deftest agent-repl-verbs-backlogged-keepalives-words-each-outcome ()
   "Each outcome the daemon names has its own words."
   (dolist (case `((:failed (:detail "stream closed") "failed (stream closed)")
                   (:skipped (:reason (:arm :busy :value (:detail "a turn is in flight")))
@@ -1093,24 +1093,24 @@ still says where the question stands."
                     (list :arm (nth 0 case) :value (nth 1 case)))
                    (nth 2 case)))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-unknown-outcome-fails-loudly ()
+(ert-deftest agent-repl-verbs-backlogged-keepalives-unknown-outcome-fails-loudly ()
   "An outcome arm with no wording is a contract breach, never silence."
   (should-error (agent-repl-verbs--keepalive-outcome-text (list :arm :mystery :value nil))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-refusal-is-reported ()
+(ert-deftest agent-repl-verbs-backlogged-keepalives-refusal-is-reported ()
   "An unreadable registry reaches the generic refusal report."
   (agent-repl-test-verbs--with
-      '((:hidden-keepalives
+      '((:backlogged-keepalives
          . (:response (:arm :error
                        :value (:cause (:arm :registry-unreadable
                                        :value (:detail "database is locked")))))))
     (agent-repl-send-backlogged-keepalives)
     (should (agent-repl-test-verbs--messaged-p "send-backlogged-keepalives refused"))))
 
-(ert-deftest agent-repl-verbs-hidden-keepalives-transport-failure-is-loud ()
+(ert-deftest agent-repl-verbs-backlogged-keepalives-transport-failure-is-loud ()
   "A daemon that does not answer is reported, never swallowed."
   (agent-repl-test-verbs--with
-      '((:hidden-keepalives . (:failure (:kind :unreachable :message "boom"))))
+      '((:backlogged-keepalives . (:failure (:kind :unreachable :message "boom"))))
     (agent-repl-send-backlogged-keepalives)
     (should (agent-repl-test-verbs--messaged-p "send-backlogged-keepalives failed"))))
 
@@ -1149,7 +1149,7 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
   "An accepted hide requests no switch: the daemon's landing is the only one."
   (agent-repl-test-verbs--with nil
     ;; Act.
-    (agent-repl-verb-set-hidden "ws-one" t)
+    (agent-repl-verb-set-backlogged "ws-one" t)
     ;; Assert.
     (should-not agent-repl-test-verbs--switch-requests)))
 
@@ -1160,17 +1160,17 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
       (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) logged))))
         ;; Act.
-        (agent-repl-verb-set-hidden "ws-one" t))
+        (agent-repl-verb-set-backlogged "ws-one" t))
       ;; Assert.
       (should (member '("ws-one" . "elisp.verbs.hide-landing ws=ws-one owner=daemon") logged)))))
 
 (ert-deftest agent-repl-verbs-hide-refused-requests-no-switch ()
   "A refused hide leaves the frame where it is."
   (agent-repl-test-verbs--with
-      '((:set-hidden . (:response (:arm :error
+      '((:set-backlogged . (:response (:arm :error
                                    :value (:cause (:arm :unknown-workspace :value nil))))))
     ;; Act.
-    (agent-repl-verb-set-hidden "ws-one" t)
+    (agent-repl-verb-set-backlogged "ws-one" t)
     ;; Assert.
     (should-not agent-repl-test-verbs--switch-requests)))
 
@@ -1178,13 +1178,13 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
   "An accepted show switches to the workspace brought back."
   (agent-repl-test-verbs--with nil
     ;; Act.
-    (agent-repl-verb-set-hidden "ws-one" nil)
+    (agent-repl-verb-set-backlogged "ws-one" nil)
     ;; Assert.
     (should (equal agent-repl-test-verbs--switch-requests '("ws-one")))))
 
-(ert-deftest agent-repl-verbs-hidden-rows-flattens-the-family ()
-  "The hidden section's rows, children included, each before its family.
-The hidden list holds open workspaces only: a closed one is in the closed
+(ert-deftest agent-repl-verbs-backlog-rows-flattens-the-family ()
+  "The backlog's rows, children included, each before its family.
+The backlogged list holds open workspaces only: a closed one is in the closed
 list, so there is nothing to drop."
   ;; Arrange.
   (let* ((child (agent-repl-test-verbs--row
@@ -1194,45 +1194,45 @@ list, so there is nothing to drop."
                                              :children (list child)))
          (roster (agent-repl-test-verbs--roster nil nil nil (list parent))))
     ;; Act.
-    (let ((rows (agent-repl-verbs--hidden-rows roster)))
+    (let ((rows (agent-repl-verbs--backlog-rows roster)))
       ;; Assert.
       (should (equal (mapcar #'agent-repl-roster-row-name rows) '("parent" "child"))))))
 
-(ert-deftest agent-repl-verbs-hidden-rows-reads-the-roster-view ()
-  "With no ROSTER the hidden rows come from `agent-repl-roster-view'."
+(ert-deftest agent-repl-verbs-backlog-rows-reads-the-roster-view ()
+  "With no ROSTER the backlogged rows come from `agent-repl-roster-view'."
   ;; Arrange.
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster nil nil nil
                                         (list (agent-repl-test-verbs--row
                                                :name (list :text "hid"))))))
     ;; Act / Assert.
-    (should (equal (mapcar #'agent-repl-roster-row-name (agent-repl-verbs--hidden-rows))
+    (should (equal (mapcar #'agent-repl-roster-row-name (agent-repl-verbs--backlog-rows))
                    '("hid")))))
 
-(ert-deftest agent-repl-verbs-show-hidden-offers-row-names-shows-and-switches ()
-  "`SPC TAB H' offers the hidden workspaces by name, shows the pick by its ref and switches to it.
-A hidden workspace the user is not on has no tab here, so nothing is addressed by a tab name."
+(ert-deftest agent-repl-verbs-show-backlogged-offers-row-names-shows-and-switches ()
+  "`SPC TAB H' offers the backlogged workspaces by name, shows the pick by its ref and switches to it.
+A backlogged workspace the user is not on has no tab here, so nothing is addressed by a tab name."
   ;; Arrange.
   (let* ((ref (agent-repl-test-verbs--ref "hid" "/tmp/h"))
-         (hidden (agent-repl-test-verbs--row
+         (backlogged (agent-repl-test-verbs--row
                   :workspace (list :workspace ref)
                   :name (list :text "hidden-one")))
-         (agent-repl-roster-view (agent-repl-test-verbs--roster nil nil nil (list hidden)))
+         (agent-repl-roster-view (agent-repl-test-verbs--roster nil nil nil (list backlogged)))
          (offered nil))
     (agent-repl-test-verbs--with nil
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_p candidates &rest _) (setq offered candidates) "hidden-one")))
         ;; Act.
-        (agent-repl-show-hidden-workspace)
+        (agent-repl-show-backlogged-workspace)
         ;; Assert.
         (should (equal offered '("hidden-one")))
-        (let ((request (agent-repl-test-verbs--request :set-hidden)))
+        (let ((request (agent-repl-test-verbs--request :set-backlogged)))
           (should (equal (plist-get request :workspace) ref))
           (should (eq (plist-get (plist-get request :visibility) :arm) :show)))
         (should (equal agent-repl-test-verbs--switch-requests (list ref)))))))
 
-(ert-deftest agent-repl-verbs-show-hidden-with-none-refuses-and-logs ()
-  "`SPC TAB H' with nothing hidden is a user error, recorded, and sends nothing."
+(ert-deftest agent-repl-verbs-show-backlogged-with-none-refuses-and-logs ()
+  "`SPC TAB H' with nothing backlogged is a user error, recorded, and sends nothing."
   ;; Arrange.
   (let ((agent-repl-roster-view (agent-repl-test-verbs--roster nil))
         (logged nil))
@@ -1240,8 +1240,8 @@ A hidden workspace the user is not on has no tab here, so nothing is addressed b
       (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act / Assert.
-        (should-error (agent-repl-show-hidden-workspace) :type 'user-error)
-        (should (member "elisp.verbs.show-hidden-none" logged))
+        (should-error (agent-repl-show-backlogged-workspace) :type 'user-error)
+        (should (member "elisp.verbs.show-backlogged-none" logged))
         (should-not agent-repl-test-verbs--sent)
         (should-not agent-repl-test-verbs--switch-requests)))))
 
@@ -4999,19 +4999,19 @@ that answers or signals.  INFO and ERROR records land in
     (should-not agent-repl-test-verbs--tab-switched)))
 
 
-;;;; ---- Folding the Hidden section at startup ----------------------------
+;;;; ---- Folding the backlog at startup ----------------------------
 
-(ert-deftest agent-repl-verbs-fold-hidden-section-asks-the-hidden-collapse ()
-  "The startup fold asks the daemon to collapse the Hidden section, and nothing else."
+(ert-deftest agent-repl-verbs-fold-backlog-asks-the-backlogged-collapse ()
+  "The startup fold asks the daemon to collapse the backlog, and nothing else."
   (agent-repl-test-verbs--with nil
     ;; Act
-    (agent-repl-verbs-fold-hidden-section 'conn)
+    (agent-repl-verbs-fold-backlog 'conn)
     ;; Assert
     (should (equal (agent-repl-test-verbs--request :update-sidebar-view)
                    '(:change (:arm :fold-section
-                              :value (:section (:arm :hidden) :fold (:arm :collapse))))))))
+                              :value (:section (:arm :backlog) :fold (:arm :collapse))))))))
 
-(ert-deftest agent-repl-verbs-fold-hidden-section-reports-a-refusal ()
+(ert-deftest agent-repl-verbs-fold-backlog-reports-a-refusal ()
   "A refused fold is logged as the verb's refusal and said in the echo area."
   (let (logged)
     (agent-repl-test-verbs--with
@@ -5020,10 +5020,10 @@ that answers or signals.  INFO and ERROR records land in
                                           :value (list :cause (list :arm :holds-current :value nil))))))
       (cl-letf (((symbol-function 'agent-repl--emit-warn) (agent-repl-test--record-into logged)))
         ;; Act
-        (agent-repl-verbs-fold-hidden-section 'conn)
+        (agent-repl-verbs-fold-backlog 'conn)
         ;; Assert
-        (should (agent-repl-test-verbs--messaged-p "fold-hidden refused: holds-current"))
-        (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.fold-hidden-refused ws=nil arm=:holds-current" m))
+        (should (agent-repl-test-verbs--messaged-p "fold-backlog refused: holds-current"))
+        (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.fold-backlog-refused ws=nil arm=:holds-current" m))
                          logged))))))
 
 (provide 'test-verbs)
@@ -5689,7 +5689,7 @@ name or closed flag is roster.el's, so the two files cannot disagree."
 
 (ert-deftest agent-repl-verbs-family-sentence-names-the-parent-and-its-state ()
   "A refusal for a parent that is not open says which parent and what to do."
-  (dolist (spec '((:hidden "open refused: its parent parent is hidden; show the parent first")
+  (dolist (spec '((:backlogged "open refused: its parent parent is backlogged; show the parent first")
                   (:closed "open refused: its parent parent is closed; reopen the parent first")
                   (:closing "open refused: its parent parent closes once its queued merge lands")))
     (should (equal (agent-repl-verbs-family-sentence

@@ -1855,7 +1855,7 @@ and loaded no page."
                           :already-mounted))))
         (kill-buffer buf)))))
 
-(ert-deftest agent-repl-test-frontend-precreate-accepts-the-hidden-workspace-looked-at ()
+(ert-deftest agent-repl-test-frontend-precreate-accepts-the-backlogged-workspace-looked-at ()
   "A hidden workspace the user stands on is owed its page like any other."
   ;; Arrange
   (agent-repl-test--with-clean-state
@@ -1863,7 +1863,7 @@ and loaded no page."
               ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl-host-ref)
                (lambda (_ws) '(:id "ws-1" :dir "/w")))
-              ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-open-tabs-backlogged-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
               ((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t)))
       ;; Act / Assert
@@ -1880,7 +1880,7 @@ Only the page went (page-unload.el); its return is the slot's showing."
                     ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
                     ((symbol-function 'agent-repl-host-ref)
                      (lambda (_ws) '(:id "ws-1" :dir "/w")))
-                    ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) nil)))
+                    ((symbol-function 'agent-repl-open-tabs-backlogged-p) (lambda (_ws) nil)))
             (agent-repl--ws-put "alpha" :frontend-buffer slot)
             ;; Act / Assert
             (should (eq (agent-repl--frontend-precreate-refusal "alpha") :already-mounted)))

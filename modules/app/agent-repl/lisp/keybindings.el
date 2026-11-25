@@ -153,7 +153,7 @@ the module."
        :desc "New one-shot in explanation-engine (pick model)" "C-S-o" #'agent-repl-create-explanation-engine-oneshot-with-model
        :desc "Re-open a closed workspace" "C-r" #'agent-repl-open-workspace
        :desc "Hide current workspace (off the tab bar)" "h" #'agent-repl-hide-workspace
-       :desc "Show a hidden workspace and switch to it" "H" #'agent-repl-show-hidden-workspace
+       :desc "Show a backlogged workspace and switch to it" "H" #'agent-repl-show-backlogged-workspace
        :desc "Finish current workspace (deploys, closes once deployed)" "M" #'agent-repl-finish-workspace
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace
        :desc "Switch to the previously selected workspace or thread" "TAB" #'agent-repl-switch-to-previous-workspace
@@ -307,7 +307,7 @@ structurally; see the commentary above."
        :desc "NUKE workspace (deletes data)"       "X"   #'agent-repl-nuke-workspace
        :desc "Set/clear workspace priority"       "p"   #'agent-repl-set-priority
        :desc "Workspace notes"                    "n"   #'agent-repl-notes-open
-       :desc "Keep-alive to every hidden workspace" "R"  #'agent-repl-send-backlogged-keepalives
+       :desc "Keep-alive to every backlogged workspace" "R"  #'agent-repl-send-backlogged-keepalives
        :desc "Reload agent-repl config"            "C-r" #'agent-repl-reload-config
        :desc "Register repository from file"       "."   #'agent-repl-register-repository
        :desc "Bind workspace to a conversation"    "c"   #'agent-repl-bind-conversation

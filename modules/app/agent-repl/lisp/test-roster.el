@@ -83,20 +83,20 @@ stream, so ROWS are only counted."
                        :latest (list :merged-at-ms 1)
                        :recent nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections hidden merged closed current threads)
-  "Return an assembled roster view from SECTIONS, HIDDEN, MERGED and CURRENT.
+(cl-defun agent-repl-test-roster--roster (&key sections backlog merged closed current threads)
+  "Return an assembled roster view from SECTIONS, BACKLOG, MERGED and CURRENT.
 The shape `agent-repl-roster-view' holds: the workspaces stream\='s keys
 with `:closed' and `:recently-merged' beside them.  SECTIONS\=' open rows get
 their tabs numbered as the daemon numbers them
-\(`agent-repl-test--number-tabs').  HIDDEN is the hidden section's rows;
+\(`agent-repl-test--number-tabs').  BACKLOG is the backlog's rows;
 the section itself is always there, expanded, as the daemon always sends
 it.  MERGED are merged workspaces\=' rows, which no stream carries: the
 Recently Merged summary only counts them, in one group.  CLOSED is the
 closed stream's rows.  THREADS are the thread section's rows, each
 `(ID . NAME)', the one last interacted with first."
   (list :repository (list :sections (agent-repl-test--number-tabs sections))
-        :hidden (list :header (list :label (list :text "Hidden"))
-                      :hidden-rows (agent-repl-test--hidden-rows hidden)
+        :backlog (list :header (list :label (list :text "Backlog"))
+                      :backlog-rows (agent-repl-test--backlog-rows backlog)
                       :fold (list :arm :expanded :value nil))
         :closed (agent-repl-test--closed-rows closed)
         :recently-merged (list :header (list :label (list :text "Recently Merged")
@@ -597,7 +597,7 @@ A hand-rolled ref-to-section walk there would drift from the helper."
                                   (list (agent-repl-test-roster--row
                                          "p" "p" :ready
                                          :children (list (agent-repl-test-roster--row "c" "c" :ready))))))
-                 :hidden (list (agent-repl-test-roster--row "h" "h" :ready))
+                 :backlog (list (agent-repl-test-roster--row "h" "h" :ready))
                  :closed (list (agent-repl-test-roster--row "x" "x" :ready :closed t)))))
     ;; Act
     (let ((sections (mapcar (lambda (e) (cons (agent-repl-roster-row-id (plist-get e :row))
@@ -605,7 +605,7 @@ A hand-rolled ref-to-section walk there would drift from the helper."
                             (agent-repl-roster-walk roster))))
       ;; Assert
       (should (equal sections '(("p" . :repository) ("c" . :repository)
-                                ("h" . :hidden) ("x" . :closed)))))))
+                                ("h" . :backlog) ("x" . :closed)))))))
 
 ;;;; ---- Reconciliation ----
 
@@ -3400,14 +3400,14 @@ saying the roster had been asked for one and declined."
 ;;;; ---- The Open section is the tab bar ----
 
 (ert-deftest agent-repl-test-roster-desired-tabs-are-the-held-rows-in-the-open-walk ()
-  "The tabs are the Open section's held rows in its walk; a hidden one not looked at has none."
+  "The tabs are the Open section's held rows in its walk; a backlogged one not looked at has none."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
                    :sections (list (agent-repl-test-roster--section
                                     "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
                                                  (agent-repl-test-roster--row "b" "b" :ready))))
-                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready)))))
+                   :backlog (list (agent-repl-test-roster--row "h" "h" :ready)))))
       ;; Act
       (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
                           (agent-repl-roster-desired-tabs roster))))
@@ -3458,7 +3458,7 @@ saying the roster had been asked for one and declined."
                    :sections (list (agent-repl-test-roster--section
                                     "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
                                                  (agent-repl-test-roster--row "f" "f" :ready :visibility :not-visible))))
-                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready)))))
+                   :backlog (list (agent-repl-test-roster--row "h" "h" :ready)))))
       ;; Act
       (let ((entries (agent-repl-roster-open-entries roster)))
         ;; Assert
@@ -3495,17 +3495,17 @@ saying the roster had been asked for one and declined."
         ;; Assert
         (should (equal tabs '("a")))))))
 
-(ert-deftest agent-repl-test-roster-the-hidden-selection-is-a-collapsed-hidden-tab ()
-  "A hidden workspace the user is looking at is held: its tab is `:collapsed' and `:hidden'."
+(ert-deftest agent-repl-test-roster-the-backlogged-selection-is-a-collapsed-backlogged-tab ()
+  "A backlogged workspace the user is looking at is held: its tab is `:collapsed' and `:backlogged'."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
                    :sections (list (agent-repl-test-roster--section
                                     "shown" (list (agent-repl-test-roster--row "a" "a" :ready))))
-                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready :current t)))))
+                   :backlog (list (agent-repl-test-roster--row "h" "h" :ready :current t)))))
       ;; Act
       (let ((tabs (mapcar (lambda (tab) (list (plist-get tab :id) (plist-get tab :collapsed)
-                                              (plist-get tab :hidden)))
+                                              (plist-get tab :backlogged)))
                           (agent-repl-roster-desired-tabs roster))))
         ;; Assert
         (should (equal tabs '(("a" nil nil) ("h" t t))))))))
@@ -3846,13 +3846,13 @@ saying the roster had been asked for one and declined."
        ;; Assert
        (should (member "two" arrived))))))
 
-(ert-deftest agent-repl-test-roster-listed-open-ids-name-every-open-and-hidden-row-and-thread ()
-  "The rows a roster lists open are its Open and Hidden rows and open threads, held or not."
+(ert-deftest agent-repl-test-roster-listed-open-ids-name-every-open-and-backlogged-row-and-thread ()
+  "The rows a roster lists open are its Open and backlogged rows and open threads, held or not."
   ;; Arrange
   (let ((roster (agent-repl-test-roster--roster
                  :sections (list (agent-repl-test-roster--section
                                   "shut" (list (agent-repl-test-roster--row "w1" "one" :ready)) t))
-                 :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))
+                 :backlog (list (agent-repl-test-roster--row "w2" "two" :ready))
                  :closed (list (agent-repl-test-roster--row "w3" "three" :ready :closed t))
                  :threads '(("t1" . "why")))))
     ;; Act
@@ -3889,15 +3889,15 @@ saying the roster had been asked for one and declined."
     ;; Assert
     (should-not (agent-repl-roster-tab-number-of "two"))))
 
-(ert-deftest agent-repl-test-roster-a-hidden-workspaces-tab-has-no-number ()
-  "A hidden workspace's undrawn tab has no number."
+(ert-deftest agent-repl-test-roster-a-backlogged-workspaces-tab-has-no-number ()
+  "A backlogged workspace's undrawn tab has no number."
   (agent-repl-test-roster--with-editor
     ;; Act
     (agent-repl-roster-reconcile
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "repo" (list (agent-repl-test-roster--row "w1" "one" :ready))))
-      :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))))
+      :backlog (list (agent-repl-test-roster--row "w2" "two" :ready))))
     ;; Assert
     (should-not (agent-repl-roster-tab-number-of "two"))))
 
@@ -3946,40 +3946,40 @@ saying the roster had been asked for one and declined."
   (let ((agent-repl-roster--tab-numbers '(("one" . 1))))
     (should-error (agent-repl-roster-drawn-tab-numbers '("one" "stray")))))
 
-;;;; ---- A hidden workspace's tab is off the bar ----
+;;;; ---- A backlogged workspace's tab is off the bar ----
 
-(ert-deftest agent-repl-test-roster-walk-marks-every-hidden-row-collapsed ()
-  "The hidden section's rows, children included, walk as collapsed.
+(ert-deftest agent-repl-test-roster-walk-marks-every-backlogged-row-collapsed ()
+  "The backlog's rows, children included, walk as collapsed.
 Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
   (let ((walked (agent-repl-roster-walk
                  (agent-repl-test-roster--roster
                   :sections (list (agent-repl-test-roster--section
                                    "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
-                  :hidden (list (agent-repl-test-roster--row
+                  :backlog (list (agent-repl-test-roster--row
                                  "w2" "two" :ready
                                  :children (list (agent-repl-test-roster--row "w3" "three" :ready))))))))
     (should (equal (mapcar (lambda (entry) (plist-get entry :collapsed)) walked) '(nil t t)))))
 
-(ert-deftest agent-repl-test-roster-walk-puts-the-hidden-section-before-the-closed-stream ()
-  "The walk is repositories, then hidden, then the closed stream."
+(ert-deftest agent-repl-test-roster-walk-puts-the-backlog-before-the-closed-stream ()
+  "The walk is repositories, then backlogged, then the closed stream."
   (let ((walked (agent-repl-roster-walk
                  (agent-repl-test-roster--roster
                   :sections (list (agent-repl-test-roster--section
                                    "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
-                  :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))
+                  :backlog (list (agent-repl-test-roster--row "w2" "two" :ready))
                   :closed (list (agent-repl-test-roster--row "w3" "three" :ready :closed t))))))
     (should (equal (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row))) walked)
                    '("w1" "w2" "w3")))))
 
-(ert-deftest agent-repl-test-roster-reconcile-opens-no-tab-for-a-hidden-workspace ()
-  "A hidden workspace the user is not looking at gets no tab, and the numbering closes up."
+(ert-deftest agent-repl-test-roster-reconcile-opens-no-tab-for-a-backlogged-workspace ()
+  "A backlogged workspace the user is not looking at gets no tab, and the numbering closes up."
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-reconcile
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "repo" (list (agent-repl-test-roster--row "w1" "one" :ready)
                                     (agent-repl-test-roster--row "w3" "three" :ready))))
-      :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))))
+      :backlog (list (agent-repl-test-roster--row "w2" "two" :ready))))
     (should-not (member "two" (agent-repl-roster-tab-order)))
     (should (equal (agent-repl-roster-drawn-tab-order) '("one" "three")))))
 
@@ -3991,7 +3991,7 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
       (agent-repl-roster-reconcile
        (agent-repl-test-roster--roster
         :sections (list (agent-repl-test-roster--section "repo" (list one)))
-        :hidden (list two)))
+        :backlog (list two)))
       (agent-repl-roster-reconcile
        (agent-repl-test-roster--roster
         :sections (list (agent-repl-test-roster--section "repo" (list one two)))))
@@ -4238,7 +4238,7 @@ Each element is (WS LINE)."
 (ert-deftest agent-repl-test-roster-row-merged-at-of-an-unmerged-row-is-nil ()
   "Any other when-arm answers nil."
   (should-not (agent-repl-roster-row-merged-at
-               '(:when (:arm :hidden :value (:at-ms 7 :cache nil))))))
+               '(:when (:arm :backlogged :value (:at-ms 7 :cache nil))))))
 
 (ert-deftest agent-repl-test-roster-row-summary-reads-the-detail ()
   "The summary accessor reads the detail's summary text."
@@ -5147,7 +5147,7 @@ Each row's tab name is its id, upcased, so a reader that confused the two fails.
     (let ((infos nil)
           (stream (make-symbol "successor-stream")))
       (puthash stream "\"127.0.0.1:7801\"" agent-repl-roster--stream-addresses)
-      ;; Arrange: the row is held hidden, not visible, in the first roster.
+      ;; Arrange: the row is held backlogged, not visible, in the first roster.
       (agent-repl-roster-apply
        (plist-put (agent-repl-test-roster--fold-roster nil) :revision 4))
       (agent-repl-roster-apply

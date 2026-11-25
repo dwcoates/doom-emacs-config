@@ -486,12 +486,12 @@ model as the webapp."
         (should (equal (alist-get 'id (alist-get 'workspace body)) (plist-get ref :id)))))))
 
 (ert-deftest agent-repl-itest-verbs-show-sends-the-show-arm-then-selects ()
-  "Showing a hidden workspace sends the `show' arm, then selects that workspace."
+  "Showing a backlogged workspace sends the `show' arm, then selects that workspace."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
-      (agent-repl-verb-set-hidden agent-repl-itest-verbs--ws nil)
+      (agent-repl-verb-set-backlogged agent-repl-itest-verbs--ws nil)
       (agent-repl-itest--await-call daemon "SetWorkspaceBacklogged")
       (agent-repl-itest--await-call daemon "SelectWorkspace")
       ;; Assert.
@@ -1710,7 +1710,7 @@ rest of this suite already asserts against."
              (divergence . ((pending . ()))) (expanded . ((collapsible . ()))))])
          (openCount . ((workspaces . 1)))))
     (open . ((label . ((text . "Open"))) (expanded . ())))
-    (backlog . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
+    (backlog . ((header . ((label . ((text . "Backlog"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
