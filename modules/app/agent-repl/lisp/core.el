@@ -185,6 +185,11 @@ no unregistered chain to leave armed across a reload."
 ;; report runs again, reading the state as it stands then: the daemon's state
 ;; always ends on Emacs's.  THE ONE SERIALIZER every such report runs
 ;; through (the desktop focus, the composer's entries).
+;;
+;; A REPORT OF AN EVENT is sent one at a time too, but never coalesced: each
+;; is counted by the daemon, so every one is sent, in the order it was made,
+;; the next once the one in flight has ended (`agent-repl-serial-queue-send';
+;; the page loads and unloads).
 
 (cl-defstruct (agent-repl-serial
                (:constructor agent-repl-serial-create))
@@ -208,6 +213,29 @@ ran."
                       (setf (agent-repl-serial-owed serial) nil)
                       (funcall report))))
     :sent))
+
+(defun agent-repl-serial-queue-send (lines key send)
+  "Run SEND once every earlier send queued under KEY of LINES has ended.
+LINES is a hash table of the sends not yet ended, by key, the one in
+flight first.  SEND is called with one argument, DONE, a function to call
+once the call has ended, answered or failed; DONE then runs the next send
+queued under KEY.  Sends under different keys never wait on each other.
+Answers `:queued' when SEND waits behind another, `:sent' when it ran."
+  (let ((line (gethash key lines)))
+    (if line
+        (progn (puthash key (append line (list send)) lines) :queued)
+      (puthash key (list send) lines)
+      (agent-repl-serial--queue-run lines key send)
+      :sent)))
+
+(defun agent-repl-serial--queue-run (lines key send)
+  "Run SEND, the head of KEY's line in LINES, and on its end the next."
+  (funcall send (lambda ()
+                  (let ((rest (cdr (gethash key lines))))
+                    (if (null rest)
+                        (remhash key lines)
+                      (puthash key rest lines)
+                      (agent-repl-serial--queue-run lines key (car rest)))))))
 
 (declare-function agent-repl-link-newest "daemon-link")
 
