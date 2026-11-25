@@ -456,29 +456,39 @@ func TestExecRunnerCallsNoStartedForAProgramThatNeverStarted(t *testing.T) {
 }
 
 func TestRunWithinBoundsTheRun(t *testing.T) {
+	errExit1 := errors.New("/bin/x: exit status 1")
 	cases := []struct {
-		name    string
-		block   bool
-		wantErr error
+		name       string
+		block      bool
+		err        error
+		wantErr    error
+		wantPassed bool
 	}{
 		{name: "a run inside its bound answers the program's output", block: false, wantErr: nil},
-		{name: "a run past its bound answers the deadline", block: true, wantErr: context.DeadlineExceeded},
+		{name: "a run past its bound answers the deadline", block: true, wantErr: context.DeadlineExceeded, wantPassed: true},
+		{name: "a program failing inside its bound is no bound passing", err: errExit1, wantErr: errExit1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			runner := &fakeRunner{stdout: "out"}
+			runner := &fakeRunner{stdout: "out", err: tc.err}
+			bound := time.Hour
 			if tc.block {
 				runner.block = make(chan struct{})
+				bound = time.Millisecond
 			}
 			started := false
 
 			// Act
-			out, err := runWithin(context.Background(), time.Millisecond, runner, "/bin/x", []string{"a"}, func() { started = true })
+			out, err := runWithin(context.Background(), bound, runner, "/bin/x", []string{"a"}, func() { started = true })
 
 			// Assert
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("runWithin = %v, want %v", err, tc.wantErr)
+			}
+			var passed *boundPassedError
+			if got := errors.As(err, &passed); got != tc.wantPassed || (got && passed.bound != bound) {
+				t.Fatalf("runWithin = %v, want a bound passing %v of %v", err, tc.wantPassed, bound)
 			}
 			if tc.wantErr == nil && out != "out" {
 				t.Fatalf("runWithin answered %q, want the program's output", out)
@@ -500,7 +510,8 @@ func TestEveryProgramRunGoesThroughRunWithin(t *testing.T) {
 	}{
 		// launcher.go bounds one socket exchange with the launcher, which is no
 		// program run: the launcher is the one resident program, already running.
-		{substr: "context.WithTimeout(", want: []string{"backend.go", "launcher.go"}},
+		{substr: "context.WithTimeout(", want: []string{"launcher.go"}},
+		{substr: "context.WithTimeoutCause(", want: []string{"backend.go"}},
 		{substr: "runner.Run(", want: []string{"backend.go"}},
 	}
 	for _, tc := range cases {

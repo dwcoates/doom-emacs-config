@@ -59,10 +59,11 @@ func buildSpeech(standing desktopnotify.WifiStanding, selfExe string) *desktopno
 
 // speechPlatform is this GOOS's speech programs, the audio output read
 // through this daemon binary (selfExe), with the environment's overrides in
-// place.
+// place: the reading's player is the chime's, so the chime's override is its.
 func speechPlatform(selfExe string) desktopnotify.SpeechPlatform {
 	return desktopnotify.SpeechPlatformFor(runtime.GOOS, selfExe).WithOverrides(
-		os.Getenv(desktopnotify.EnvSayCmd), os.Getenv(desktopnotify.EnvAudioOutputCmd), os.Getenv(desktopnotify.EnvBluetoothCmd))
+		os.Getenv(desktopnotify.EnvSayCmd), os.Getenv(desktopnotify.EnvChimeCmd),
+		os.Getenv(desktopnotify.EnvAudioOutputCmd), os.Getenv(desktopnotify.EnvBluetoothCmd))
 }
 
 // wifiStandingForwarder carries the persistent-wifi controller's published
