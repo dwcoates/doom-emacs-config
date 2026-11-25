@@ -8,7 +8,9 @@
 ;; origin.  The host is on screen whenever any workspace's page is, so WebKit
 ;; never suspends it, and an iframe of a page on screen is never suspended
 ;; either: every workspace page is live and current before the user switches
-;; to it.  A switch only tells the host which iframe to show.
+;; to it.  A switch only tells the host which iframe to show.  The one
+;; exception is a page a reload of the host deferred: it boots when it is
+;; next shown (`agent-repl--webhost-replay').
 ;;
 ;; WHY.  With a WKWebView per workspace, WebKit froze each hidden page about
 ;; half a second after it loaded; on the switch to it the page woke (up to
@@ -98,9 +100,11 @@ Every drop of a page comes through `agent-repl-webhost-remove', so a
 caller that relied on the page drawing hears here that it never will.")
 
 (defvar agent-repl--webhost-pages (make-hash-table :test #'equal)
-  "Workspace id -> its held page, (:url URL :why WHY).  What the host should hold.
-URL is where the page is held; WHY is the reason it was loaded for
-\(`agent-repl-page-report-load-reasons').  THE REASON LIVES WITH THE PAGE, so
+  "Workspace id -> its held page, (:url URL :why WHY [:deferred t]).
+What the host should hold.  URL is where the page is held; WHY is the
+reason it was loaded for \(`agent-repl-page-report-load-reasons').  A
+DEFERRED page is held but was not handed to the host since its last reload:
+it is handed over when it is shown (`agent-repl--webhost-replay').  THE REASON LIVES WITH THE PAGE, so
 no page is held without one: a restatement reads it here
 \(`agent-repl-page-report-restate'), whatever connection asks.")
 
@@ -664,8 +668,10 @@ Signals when WS has no ref or no connection: its URL cannot be built
          (id (agent-repl--webhost-id ws))
          (was (gethash id agent-repl--webhost-pages)))
     (agent-repl-webhost-ensure)
-    (unless (and (equal (plist-get was :url) url) (eq (plist-get was :why) why))
-      (puthash id (list :url url :why why) agent-repl--webhost-pages)
+    ;; AN ENSURE HANDS THE PAGE TO THE HOST, so it is no longer deferred.
+    (unless (and (equal (plist-get was :url) url) (eq (plist-get was :why) why)
+                 (not (plist-get was :deferred)))
+      (puthash id (agent-repl--webhost-page-entry url why) agent-repl--webhost-pages)
       (agent-repl--info ws "elisp.webhost.page-ensured ws={ws} id={id} why={why}" :ws ws :id id :why why))
     ;; A HELD PAGE IS NO LONGER HELD BACK: the host drops its load button.
     (remhash id agent-repl--webhost-held-back)
@@ -756,6 +762,8 @@ show, so the page can measure it."
     (when (and id (not (equal id agent-repl--webhost-shown)))
       (setq agent-repl--webhost-shown id)
       (agent-repl--info ws "elisp.webhost.show ws={ws} id={id}" :ws ws :id id)
+      ;; A PAGE A RELOAD DEFERRED BOOTS NOW, the one page the show asks for.
+      (agent-repl--webhost-hand-over-deferred id)
       (agent-repl--webhost-call "show" id switch-started)
       ;; THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same command:
       ;; the sidebar is a web view of its own (sidebar-view.el).
@@ -852,16 +860,24 @@ NOT MOVE WITH A PAGE: they follow the link (`agent-repl-webhost-follow-daemon').
     (unless (gethash id agent-repl--webhost-pages)
       (agent-repl--error ws "elisp.webhost.reload-unheld ws={ws} id={id}" :ws ws :id id)
       (error "webhost: %s holds no page to reload" ws))
-    (if (equal (agent-repl--webhost-page-url id) url)
-        (apply #'agent-repl--webhost-call "reload" id started
-               (agent-repl--webhost-downtime-args id))
+    (cond
+     ;; A DEFERRED PAGE IS NOT IN THE HOST TO RELOAD: it is re-pointed here
+     ;; alone, and boots at its URL when it is shown.
+     ((agent-repl--webhost-deferred-p id)
+      (puthash id (plist-put (copy-sequence (gethash id agent-repl--webhost-pages)) :url url)
+               agent-repl--webhost-pages))
+     ((equal (agent-repl--webhost-page-url id) url)
+      (apply #'agent-repl--webhost-call "reload" id started
+             (agent-repl--webhost-downtime-args id)))
+     (t
       ;; A RE-POINTED PAGE KEEPS THE REASON IT WAS LOADED FOR: it is the same
       ;; page, held at the daemon WS moved to.
-      (puthash id (list :url url :why (agent-repl-webhost-page-reason ws))
+      (puthash id (agent-repl--webhost-page-entry url (agent-repl-webhost-page-reason ws))
                agent-repl--webhost-pages)
       (apply #'agent-repl--webhost-call "ensure" id url nil started
-               (agent-repl--webhost-downtime-args id)))
-    (agent-repl--info ws "elisp.webhost.page-reloaded ws={ws} id={id}" :ws ws :id id)
+             (agent-repl--webhost-downtime-args id))))
+    (agent-repl--info ws "elisp.webhost.page-reloaded ws={ws} id={id} deferred={deferred}"
+                      :ws ws :id id :deferred (and (agent-repl--webhost-deferred-p id) t))
     id))
 
 (defun agent-repl-webhost-follow-daemon ()
@@ -1047,12 +1063,49 @@ order given."
   (let ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id))))
     (and ws (fboundp 'agent-repl-host-adopting-p) (agent-repl-host-adopting-p ws))))
 
+(defun agent-repl--webhost-set-deferred (id deferred)
+  "Mark page ID's held entry DEFERRED, or no longer, keeping its URL and reason.
+A DEFERRED PAGE IS HELD HERE AND NOT BY THE HOST: a reload handed the host
+only the shown page (`agent-repl--webhost-replay'), and this one is handed
+over when it is shown (`agent-repl--webhost-hand-over-deferred')."
+  (when-let ((page (gethash id agent-repl--webhost-pages)))
+    (puthash id (if deferred
+                    (plist-put (copy-sequence page) :deferred t)
+                  (agent-repl--webhost-page-entry (plist-get page :url) (plist-get page :why)))
+             agent-repl--webhost-pages)))
+
+(defun agent-repl--webhost-page-entry (url why)
+  "A held page's entry: held at URL, loaded for WHY, handed to the host."
+  (list :url url :why why))
+
+(defun agent-repl--webhost-deferred-p (id)
+  "Non-nil when page ID is held here but not yet handed to the host since its reload."
+  (plist-get (gethash id agent-repl--webhost-pages) :deferred))
+
+(defun agent-repl--webhost-defer-page (id)
+  "Keep page ID held while the reloaded host is not handed it, until it is shown."
+  (agent-repl--webhost-set-deferred id t)
+  (agent-repl--info (agent-repl--webhost-answer-ws (list :id id))
+                    "elisp.webhost.page-deferred id={id}" :id id))
+
+(defun agent-repl--webhost-hand-over-deferred (id)
+  "Hand the host page ID now that it is shown, when a reload deferred it.
+It boots as a first switch to an unloaded page does: the host creates its
+frame, and the show that follows puts it on screen as it draws.  Non-nil
+when it was handed over."
+  (when (agent-repl--webhost-deferred-p id)
+    (agent-repl--info (agent-repl--webhost-answer-ws (list :id id))
+                      "elisp.webhost.page-handed-over id={id} why=shown" :id id)
+    (agent-repl--webhost-replay-page id nil)
+    t))
+
 (defun agent-repl--webhost-replay-page (id lane)
-  "Hand the host page ID and its state.
+  "Hand the host page ID and its state; ID is no longer deferred.
 Given a LANE, the host loads it once the pages before it in LANE have drawn.
 A replay after a reload hands the reload's start with the page
 \(`agent-repl--webhost-reload-started-ms')."
   (when-let ((url (agent-repl--webhost-page-url id)))
+    (agent-repl--webhost-set-deferred id nil)
     (apply #'agent-repl--webhost-call "ensure" id url lane agent-repl--webhost-reload-started-ms
            (agent-repl--webhost-downtime-args id))
     (when-let ((entries (gethash id agent-repl--webhost-held-ingress)))
@@ -1060,15 +1113,30 @@ A replay after a reload hands the reload's start with the page
 
 (defun agent-repl--webhost-replay ()
   "Hand the host everything it should hold, after a load: the host starts empty.
-THE PAGES COME BACK IN TWO LANES, ONE PAGE AT A TIME IN EACH (owner
-rulings, 2026-10-17).  Every page booting at once is what stalled the web
-process for up to 1.8s after a reconnect.  The shown page loads now; every
-other page is handed over IN TURN, in the lane after the current workspace
-or the lane before it, nearest first (`agent-repl--webhost-replay-lanes').
-The host loads each lane's next page once its last has drawn (host.ts), so
-the pages a switch is likeliest to reach either way are fresh first, two at
-a time and never piled up.  A switch to a page still waiting loads it at
-once.
+A RELOAD BOOTS ONE PAGE NOW, THE SHOWN ONE.  Every other page held before
+the reload stays held here, DEFERRED: the host is handed it only when the
+user shows it (`agent-repl--webhost-hand-over-deferred'), so a page nobody
+looks at costs the web process nothing until it is shown, and a page that
+was not held before the reload is not held after it.  On the 2026-11-25
+12:32 deploy the reload replayed 13 pages in two lanes beside the loads a
+new daemon asked for, 21 pages booted within 30 seconds on the web
+process\='s one main thread, and it stood blocked for about 15 of them
+\(`webhost.stall' blocks of 2.8s and 3.2s).  Booting each page when it is
+shown is decided over booting them one at a time while the host is idle: a
+page boot holds that same main thread for hundreds of milliseconds, so a
+switch the user makes during one waits on it, and the owner\='s ruling of
+2026-11-23 has a page that is not shown stay quiet until it is.  A switch
+to a deferred page shows what a first switch to an unloaded page shows:
+the host creates its frame and shows it as it boots.
+
+THE HOST\='S FIRST LOAD HANDS EVERY PAGE OVER IN TWO LANES, ONE PAGE AT A
+TIME IN EACH (owner rulings, 2026-10-17): no page was running before it,
+so each page held is one the daemon\='s verdict wants loaded now.  The
+shown page loads now; every other page is handed over IN TURN, in the lane
+after the current workspace or the lane before it, nearest first
+\(`agent-repl--webhost-replay-lanes').  The host loads each lane\='s next
+page once its last has drawn (host.ts).  A switch to a page still waiting
+loads it at once.
 
 A PAGE WHOSE WORKSPACE IS MID-ADOPT LOADS AT ONCE TOO.  A handover\='s
 first transfer reloads the host onto the successor, and the replay comes
@@ -1094,16 +1162,23 @@ out (`agent-repl-host-adopting-p')."
       (agent-repl--webhost-call "show" agent-repl--webhost-shown))
     (let* ((rest (delete agent-repl--webhost-shown (nreverse ids)))
            (adopting (cl-remove-if-not #'agent-repl--webhost-adopting-p rest))
-           (lanes (agent-repl--webhost-replay-lanes (cl-remove-if #'agent-repl--webhost-adopting-p rest))))
+           (others (cl-remove-if #'agent-repl--webhost-adopting-p rest)))
       (dolist (id adopting)
         (agent-repl--webhost-replay-page id nil))
-      (dolist (id (car lanes))
-        (agent-repl--webhost-replay-page id "after"))
-      (dolist (id (cdr lanes))
-        (agent-repl--webhost-replay-page id "before"))
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after={after} before={before} adopting={adopting} reload-started-ms={reload_started_ms}"
-                        :after (length (car lanes)) :before (length (cdr lanes)) :adopting (length adopting)
-                        :reload_started_ms agent-repl--webhost-reload-started-ms)))
+      (if agent-repl--webhost-reload-started-ms
+          (progn
+            (dolist (id others)
+              (agent-repl--webhost-defer-page id))
+            (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-shown-only deferred={deferred} adopting={adopting} reload-started-ms={reload_started_ms}"
+                              :deferred (length others) :adopting (length adopting)
+                              :reload_started_ms agent-repl--webhost-reload-started-ms))
+        (let ((lanes (agent-repl--webhost-replay-lanes others)))
+          (dolist (id (car lanes))
+            (agent-repl--webhost-replay-page id "after"))
+          (dolist (id (cdr lanes))
+            (agent-repl--webhost-replay-page id "before"))
+          (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after={after} before={before} adopting={adopting}"
+                            :after (length (car lanes)) :before (length (cdr lanes)) :adopting (length adopting))))))
   ;; THE RELOAD'S START WAS HANDED WITH THIS REPLAY'S PAGES; a later load is
   ;; not this reload's.
   (setq agent-repl--webhost-reload-started-ms nil)
@@ -1266,7 +1341,7 @@ when this runs, so it converts nothing."
   (let (converted)
     (maphash (lambda (id page)
                (when (stringp page)
-                 (push (cons id (list :url page :why (agent-repl--webhost-held-page-reason id)))
+                 (push (cons id (agent-repl--webhost-page-entry page (agent-repl--webhost-held-page-reason id)))
                        converted)))
              agent-repl--webhost-pages)
     (pcase-dolist (`(,id . ,entry) converted)
