@@ -183,6 +183,46 @@ func TestADueSpanIsToldToTheProductionMediatorWithItsSiteFile(t *testing.T) {
 	}
 }
 
+func TestASpanTheTallyNoLongerKeepsIsToldWithItsLossDeclared(t *testing.T) {
+	// Arrange: the span ended before the tally's oldest kept row.
+	h := production(t)
+	deployEnds(t, h, wsm.DeployFinished)
+	oldest := deployStarted.Add(3 * time.Hour)
+	h.sites.errs[priorDeploy] = &logsites.UnrecordedWindowError{Oldest: oldest}
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if strings.HasPrefix(submittedText(sub), BriefProductionIntake+" ") {
+			if _, err := h.o.DecideProduction(context.Background(), "ws-fixer", ProductionDecisionRequest{Summary: "read from the raw logs"}); err != nil {
+				t.Errorf("DecideProduction: %v", err)
+			}
+		}
+	}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if told := productionTellings(h); len(told) != 1 {
+		t.Fatalf("production tellings = %+v, want the unrecorded span told once", told)
+	}
+	file, err := os.ReadFile(ProductionSitePath(LogsDir(h.stateDir), deployStarted))
+	command := "`bin/logs.sh --all --level warn --since " + priorDeploy.Format(time.RFC3339) + " --until " + deployStarted.Format(time.RFC3339) + " --tally --sample 1`"
+	if err != nil || !strings.Contains(string(file), "UNRECORDED: the tally keeps no row before "+oldest.Format(time.RFC3339)) || !strings.Contains(string(file), command) {
+		t.Fatalf("site file = (%q, %v), want the loss declared with %s", file, err, command)
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "warn", Operation: opProduction,
+		Message: "the span's log sites were pruned before its mediator read them; it is told to read the span from the raw logs"})
+	if !ok || rec.Context["span_since"] != priorDeploy.Format(time.RFC3339Nano) || rec.Context["span_until"] != deployStarted.Format(time.RFC3339Nano) ||
+		rec.Context["oldest_kept"] != oldest.Format(time.RFC3339Nano) {
+		t.Fatalf("records = %v, want the loss at WARN with the span and the oldest kept row", h.logs.Records())
+	}
+	if _, failed := h.recordFor("error", opProduction); failed {
+		t.Fatalf("records = %v, want no ERROR: the span is told, not failed", h.logs.Records())
+	}
+	if c, err := h.db.ProductionCheckOf(context.Background(), mediationKey(h)); err != nil || c != nil {
+		t.Fatalf("after the decision the check to decide = (%+v, %v), want none", c, err)
+	}
+}
+
 func TestAnUndecidedProductionTurnIsResumedOnceThenRecordedUnanswered(t *testing.T) {
 	// Arrange: the mediator decides nothing in any turn.
 	h := production(t)
@@ -321,10 +361,11 @@ func TestRenderProductionSitesSaysHowMuchOfTheSpanTheTallyRead(t *testing.T) {
 	from, to := time.Date(2026, 11, 25, 16, 0, 0, 0, time.UTC), time.Date(2026, 11, 25, 17, 0, 0, 0, time.UTC)
 	c := wsm.ProductionCheck{Since: time.Date(2026, 11, 25, 4, 58, 6, 0, time.UTC), Until: time.Date(2026, 11, 25, 16, 31, 21, 0, time.UTC)}
 	cases := []struct {
-		name    string
-		partial bool
-		want    string
-		notWant string
+		name       string
+		partial    bool
+		unrecorded bool
+		want       string
+		notWant    string
 	}{
 		{
 			name:    "a span read whole says so",
@@ -337,11 +378,20 @@ func TestRenderProductionSitesSaysHowMuchOfTheSpanTheTallyRead(t *testing.T) {
 			want:    "PARTIAL: the tally keeps no row before 2026-11-25T16:00:00Z, so it read only 2026-11-25T16:00:00Z to 2026-11-25T17:00:00Z; what fired before then is unknown, not absent.\n",
 			notWant: "Read whole",
 		},
+		{
+			name:       "a span wholly before the oldest kept row says none of it was read and how to read it",
+			unrecorded: true,
+			want:       "UNRECORDED: the tally keeps no row before 2026-11-25T16:00:00Z, so none of this span was read from it; read the span from the raw logs with `bin/logs.sh --all --level warn --since 2026-11-25T04:58:06Z --until 2026-11-25T16:31:21Z --tally --sample 1`.\n",
+			notWant:    "Read whole",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			sites := ProductionSites{Baseline: "no earlier span", From: from, To: to, Partial: tc.partial}
+			if tc.unrecorded {
+				sites = ProductionSites{Baseline: "no earlier span", Unrecorded: true, OldestKept: from}
+			}
 
 			// Act
 			got := RenderProductionSites(sites, c)
