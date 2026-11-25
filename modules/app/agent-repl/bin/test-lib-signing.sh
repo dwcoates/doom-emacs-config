@@ -79,6 +79,21 @@ test_every_certificate_signer_asks_the_library() {
   if [ -z "$bad" ]; then pass "every script signing with a certificate takes it from local_signing_identity"; else fail "these scripts choose their signing identity themselves; source lib-signing.sh instead:$bad"; fi
 }
 
+# Every app macOS grants a permission is signed with the local identity, never
+# ad hoc, so a rebuild keeps the permission: the Wi-Fi helper (Location
+# Services) and Zettel (Accessibility).
+test_every_permission_holding_app_is_signed_with_the_local_identity() {
+  local build code bad=""
+  for build in wifi-helper/build.sh bin/build-launcher.sh; do
+    code="$(grep -vE '^[[:space:]]*#' "$MODULE_DIR/$build")"
+    if grep -qE 'codesign .*--sign -( |$)' <<<"$code" || ! grep -qE 'codesign .*--sign "\$identity"|codesign .*--sign "\$IDENTITY"' <<<"$code" \
+      || ! grep -qF 'local_signing_identity' <<<"$code"; then
+      bad="$bad $build"
+    fi
+  done
+  if [ -z "$bad" ]; then pass "the Wi-Fi helper and Zettel are signed with the local identity, never ad hoc"; else fail "these builds of an app holding a permission do not sign with the local identity:$bad"; fi
+}
+
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
   "$t"
 done

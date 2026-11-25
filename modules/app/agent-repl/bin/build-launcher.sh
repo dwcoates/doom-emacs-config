@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # build-launcher.sh — build Zettel.app, the launcher, which opens Emacs and posts
-# every macOS desktop banner (launcher/), into a complete, ad-hoc-signed bundle at OUT (default
+# every macOS desktop banner (launcher/), into a complete bundle, signed with the local identity, at OUT (default
 # ~/.cache/agent-repl/bin/Zettel.app), then, unless --no-install, install it
 # at ~/Applications/Zettel.app, register it with LaunchServices, and restart
 # its launchd agent (app.zettel.launcher) onto the new build.
@@ -54,7 +54,13 @@ for px in 16 32 128 256 512; do
     "$BIN/ZettelIcon" "$((px * 2))" "$WORK/AppIcon.iconset/icon_${px}x${px}@2x.png"
 done
 iconutil -c icns "$WORK/AppIcon.iconset" -o "$STAGE/Contents/Resources/AppIcon.icns"
-codesign --force --sign - "$STAGE"
+# SIGNED WITH THE ONE LOCAL IDENTITY, never ad hoc: macOS keys an ad hoc app's
+# Accessibility permission to its code's hash, so every deploy would lose the
+# permission the Slack notification closer needs (bin/lib-signing.sh).
+# shellcheck source=lib-signing.sh
+. "$ROOT/bin/lib-signing.sh"
+IDENTITY="$(local_signing_identity "$ROOT")"
+codesign --force --sign "$IDENTITY" "$STAGE"
 
 mkdir -p "$(dirname "$OUT")"
 rm -rf "$OUT.new"
