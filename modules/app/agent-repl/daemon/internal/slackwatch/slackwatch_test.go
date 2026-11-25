@@ -1075,15 +1075,15 @@ func TestATriggerSlackNamesNoLinkForIsRecordedOnceAndNotFiredAgain(t *testing.T)
 	// Arrange
 	r := newRig(t)
 	r.settle(t, ackBinding)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
 	linkless := reacted("1.2", "agent-ack")
 	linkless.Permalink = ""
 	r.gns.reacted = []gnsclient.ReactedMessage{linkless}
 	message := "Slack named no link for a triggering message; the trigger is recorded fired and creates nothing"
 
 	// Act
-	r.w.PollReactions(context.Background(), Lookback)
-	r.w.PollReactions(context.Background(), Lookback)
+	r.w.PollReactions(context.Background())
+	r.w.PollReactions(context.Background())
 
 	// Assert
 	rec := r.record(t, "error", opReactions, message)
