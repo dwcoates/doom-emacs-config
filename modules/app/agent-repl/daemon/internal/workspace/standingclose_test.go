@@ -3,9 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -412,5 +415,50 @@ func TestTheCloseWaitsOnTheWireCarryEveryBlocker(t *testing.T) {
 	c := got.GetOpenChildren()
 	if c.GetParent().GetId() != "w1" || len(c.GetChildren()) != 1 || c.GetChildren()[0].GetId() != "w2" || len(c.GetLandingInto()) != 0 {
 		t.Fatalf("open children = %v, want w1's child w2", c)
+	}
+}
+
+func TestMessageFieldsCarriesEveryScalarFieldWithItsDefault(t *testing.T) {
+	// Arrange
+	m := &agentreplv1.CloseWorkspaceBlocked{LiveWork: 2, Summary: "busy"}
+
+	// Act
+	got := messageFields(m)
+
+	// Assert
+	want := map[string]any{"turn_in_flight": false, "live_work": uint32(2), "held_prompts": uint32(0), "merge_queued": false, "summary": "busy"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("messageFields = %v, want %v", got, want)
+	}
+}
+
+func TestMessageFieldsRefusesANonScalarField(t *testing.T) {
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("messageFields did not panic on a message field")
+		}
+	}()
+
+	// Act
+	messageFields(&agentreplv1.WorkspaceCloseWaits{})
+}
+
+// THE REFUSAL AND THE STANDING CLOSE SHARE ONE MAPPING: the `blocked` arm's
+// fields are exactly the standing close's blocked evidence, field for field.
+func TestTheBlockedRefusalAndTheStandingCloseCarryTheSameEvidence(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.held["w1"] = []wsm.HeldPrompt{{Turn: "held-1"}}
+	blocked := &footer.CloseBlocked{HeldPrompts: 1, Detail: "1 held prompts have not been delivered; release or drop them first", Reason: "held_prompts"}
+
+	// Act
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+	// Assert
+	refusal := asRefusal(t, err, "blocked")
+	if want := messageFields(CloseWaits{Blocked: blocked}.Proto().GetBlocked()); !reflect.DeepEqual(refusal.Fields, want) {
+		t.Fatalf("refusal fields = %v, want the standing close's evidence %v", refusal.Fields, want)
 	}
 }

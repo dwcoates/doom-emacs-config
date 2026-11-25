@@ -8,6 +8,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -62,16 +63,42 @@ func (w CloseWaits) standing() *footer.CloseBlocked {
 // evidence with its composed sentence, and the family refusal's members.
 func (w CloseWaits) Proto() *agentreplv1.WorkspaceCloseWaits {
 	out := &agentreplv1.WorkspaceCloseWaits{}
-	if b := w.Blocked; b != nil {
-		out.Blocked = &agentreplv1.CloseWorkspaceBlocked{
-			TurnInFlight: b.TurnInFlight, LiveWork: b.LiveWork, HeldPrompts: b.HeldPrompts,
-			MergeQueued: b.MergeQueued, Summary: b.Detail,
-		}
+	if w.Blocked != nil {
+		out.Blocked = closeBlockedProto(w.Blocked)
 	}
 	if f := w.Family; f != nil {
 		out.OpenChildren = &agentreplv1.WorkspaceHasOpenChildren{
 			Parent: f.Parent.Ref(), Children: familyRefs(f.Children), LandingInto: familyRefs(f.LandingInto),
 		}
+	}
+	return out
+}
+
+// closeBlockedProto is BLOCKED on the wire (agentrepl.v1.CloseWorkspaceBlocked):
+// THE ONE MAPPING of the quietness evidence, which the `blocked` refusal
+// (refuseBlockedClose) and a standing close's waits (CloseWaits.Proto) both
+// carry, so the two can never say it differently.
+func closeBlockedProto(b *footer.CloseBlocked) *agentreplv1.CloseWorkspaceBlocked {
+	return &agentreplv1.CloseWorkspaceBlocked{
+		TurnInFlight: b.TurnInFlight, LiveWork: b.LiveWork, HeldPrompts: b.HeldPrompts,
+		MergeQueued: b.MergeQueued, Summary: b.Detail,
+	}
+}
+
+// messageFields is every scalar field of M keyed by its proto name, its
+// default included: a wire message as a Refusal's Fields carry it, so an arm
+// built from a message states every field the message does. A message, list
+// or map field is a caller's defect, since Fields carries scalars alone.
+func messageFields(m proto.Message) map[string]any {
+	r := m.ProtoReflect()
+	fields := r.Descriptor().Fields()
+	out := make(map[string]any, fields.Len())
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		if fd.IsList() || fd.IsMap() || fd.Message() != nil {
+			panic(fmt.Sprintf("workspace: %s.%s is no scalar field, which a refusal's fields cannot carry", r.Descriptor().FullName(), fd.Name()))
+		}
+		out[string(fd.Name())] = r.Get(fd).Interface()
 	}
 	return out
 }

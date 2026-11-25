@@ -145,13 +145,7 @@ func (v *verbs) refuseBlockedClose(log dlog.Logger, ws ids.WorkspaceID, blocked 
 		Rpc:    "CloseWorkspace",
 		Arm:    "blocked",
 		Reason: blocked.Detail,
-		Fields: map[string]any{
-			"turn_in_flight": blocked.TurnInFlight,
-			"live_work":      blocked.LiveWork,
-			"held_prompts":   blocked.HeldPrompts,
-			"merge_queued":   blocked.MergeQueued,
-			"summary":        blocked.Detail,
-		},
+		Fields: messageFields(closeBlockedProto(blocked)),
 	}
 }
 
