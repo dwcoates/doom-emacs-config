@@ -3422,6 +3422,9 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	if cause.ForWork() {
 		next.WorkBroughtUpAt = &now
 	}
+	if cause.UserStarted() {
+		next.UserBroughtUpAt = &now
+	}
 	f.noteSDKVersion(log, started.GetRuntime().GetSdkVersion())
 	if next.StartedAt.IsZero() {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: next.StartedAt.IsZero()", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})

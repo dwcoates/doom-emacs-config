@@ -140,8 +140,11 @@ CREATE TABLE sessions (
   keepalive_restored_at INTEGER,
   -- When a bring-up for work last brought the session up, NULL when the
   -- bring-up that last recorded it was not for work. See
-  -- sessionsWorkBroughtUpAtDDL.
+  -- sessionsBroughtUpAtDDL.
   work_brought_up_at INTEGER,
+  -- When a bring-up the user asked for that runs no turn of its own last
+  -- brought the session up. See sessionsBroughtUpAtDDL.
+  user_brought_up_at INTEGER,
   terminal_kind      TEXT,
   terminal_detail    TEXT,
   terminal_at        INTEGER

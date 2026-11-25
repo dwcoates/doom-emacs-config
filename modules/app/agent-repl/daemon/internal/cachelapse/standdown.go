@@ -249,16 +249,13 @@ func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Work
 	return record.IdleSince(), k.shimHold(record, session), true
 }
 
-// shimHold answers until when RECORD's idle SESSION is held up. A session
-// brought up for a turn that has not closed yet is INITIALIZING and held for
-// as long as that stands, read from its own durable row
-// (wsm.Session.Initializing), so no roster render can lag it; every other
-// session is held as the roster's resource allocation says (Deps.Hold).
+// shimHold answers until when RECORD's idle SESSION is held up: the later of
+// what its own bring-up holds (wsm.Session.BringUpHold: initializing for a
+// turn not yet closed, or a user-asked start's ShimIdleHold), read from its
+// own durable row so no roster render can lag it, and the roster's resource
+// allocation (Deps.Hold).
 func (k *Keeper) shimHold(record wsm.Workspace, session wsm.Session) wsm.ShimHold {
-	if session.Initializing(record.LastTurnEndedAt) {
-		return wsm.ShimHold{Indefinite: true}
-	}
-	return k.deps.Hold(record.ID)
+	return session.BringUpHold(record.LastTurnEndedAt, k.deps.Clock.Now()).Later(k.deps.Hold(record.ID))
 }
 
 // parkWaits arms WS's idle park at the instant HOLD stops holding its idle

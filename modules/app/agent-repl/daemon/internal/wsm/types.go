@@ -617,6 +617,12 @@ type Session struct {
 	// takeover's adoption, a settings pick). The session is INITIALIZING from
 	// it until a turn closes after it (Initializing).
 	WorkBroughtUpAt *time.Time
+	// UserBroughtUpAt is when a bring-up the user asked for that runs no turn
+	// of its own (shimlife.StartCause.UserStarted: a restart, a relaunch, a
+	// rebind, a swap) last brought the session up, nil otherwise. The session
+	// is held for ShimIdleHold from it unless a turn closes first
+	// (BringUpHold).
+	UserBroughtUpAt *time.Time
 	// ShimPID is the pid of the shim process serving this session, nil when no
 	// shim is up. It exists because the ROLLOUT's stand-down INTENT MANIFEST
 	// names a pid per session, and the incoming daemon reconciles that pid
@@ -650,6 +656,12 @@ type Session struct {
 // type that carries it.
 const TerminalParked = "parked"
 
+// ShimIdleHold is how long an idle shim stays up after the later of its
+// workspace's last turn end and the user's last interaction with it, and
+// after a bring-up the user asked for that runs no turn of its own (owner
+// ruling, 2026-11-24).
+const ShimIdleHold = 15 * time.Minute
+
 // Initializing reports whether the session was brought up for work that has
 // not finished yet (owner ruling, 2026-11-24): a bring-up for work recorded it
 // (WorkBroughtUpAt), it is not parked or dead, and no turn of the workspace
@@ -662,6 +674,40 @@ func (s Session) Initializing(lastTurnEnded *time.Time) bool {
 		return false
 	}
 	return lastTurnEnded == nil || !lastTurnEnded.After(*s.WorkBroughtUpAt)
+}
+
+// BringUpHold answers until when the session's own bring-up holds it up AT
+// NOW: for as long as it is initializing (Initializing), and for ShimIdleHold
+// after a bring-up the user asked for that runs no turn of its own
+// (UserBroughtUpAt) unless a turn has closed since. A parked or dead session,
+// or one brought up for neither, is held by nothing here.
+func (s Session) BringUpHold(lastTurnEnded *time.Time, now time.Time) ShimHold {
+	if s.Initializing(lastTurnEnded) {
+		return ShimHold{Indefinite: true}
+	}
+	if s.Terminal != nil || s.UserBroughtUpAt == nil {
+		return ShimHold{}
+	}
+	if lastTurnEnded != nil && lastTurnEnded.After(*s.UserBroughtUpAt) {
+		return ShimHold{}
+	}
+	if until := s.UserBroughtUpAt.Add(ShimIdleHold); now.Before(until) {
+		return ShimHold{Until: until}
+	}
+	return ShimHold{}
+}
+
+// Later answers whichever of H and O holds an idle shim up longer: one held
+// while its cause stands outlasts any instant.
+func (h ShimHold) Later(o ShimHold) ShimHold {
+	switch {
+	case h.Indefinite || o.Indefinite:
+		return ShimHold{Indefinite: true}
+	case o.Until.After(h.Until):
+		return o
+	default:
+		return h
+	}
 }
 
 // Parked reports whether this session was stood down ON PURPOSE while idle

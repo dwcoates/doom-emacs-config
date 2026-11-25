@@ -90,3 +90,18 @@ func TestEveryStartCauseSaysWhetherItIsForWork(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryStartCauseSaysWhetherTheUserStartedIt(t *testing.T) {
+	user := map[StartCause]bool{
+		StartRestart: true, StartRelaunch: true, StartRebind: true, StartSwap: true,
+		StartPrompt: false, StartKeepalive: false, StartBoot: false, StartTakeover: false, StartSettings: false, StartMerge: false,
+	}
+	for cause, want := range user {
+		t.Run(string(cause), func(t *testing.T) {
+			// Act / Assert
+			if got := cause.UserStarted(); got != want {
+				t.Fatalf("%s.UserStarted() = %v, want %v", cause, got, want)
+			}
+		})
+	}
+}

@@ -60,12 +60,25 @@ const (
 // answer, a create's or a fork's first prompt, a thread's question, a merge
 // step or an owed compaction. Such a session is initializing until that turn
 // closes (wsm.Session.Initializing) and is never parked meanwhile. A
-// keep-alive's restore, a boot's or a takeover's adoption, a relaunch, the
-// restart verb, a rebind, a swap and a settings pick run no turn of their own,
-// so their sessions follow the ordinary holds.
+// keep-alive's restore, a boot's or a takeover's adoption, a settings pick and
+// the starts UserStarted names run no turn of their own.
 func (c StartCause) ForWork() bool {
 	switch c {
 	case StartPrompt, StartColdGateAnswer, StartCreate, StartFork, StartThread, StartMerge, StartCompaction:
+		return true
+	default:
+		return false
+	}
+}
+
+// UserStarted reports whether a start of this cause is one the user asked for
+// that runs no turn of its own: the restart verb, a relaunch of a dead shim, a
+// rebind, a swap. Such a session is held for wsm.ShimIdleHold from its
+// bring-up (wsm.Session.UserBroughtUpAt), so it is never parked the moment it
+// comes up.
+func (c StartCause) UserStarted() bool {
+	switch c {
+	case StartRestart, StartRelaunch, StartRebind, StartSwap:
 		return true
 	default:
 		return false

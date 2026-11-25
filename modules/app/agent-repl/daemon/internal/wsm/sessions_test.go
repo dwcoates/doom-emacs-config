@@ -908,3 +908,51 @@ func TestSessionInitializing(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionBringUpHold(t *testing.T) {
+	up := instant
+	after := up.Add(time.Minute)
+	tests := []struct {
+		name  string
+		s     Session
+		ended *time.Time
+		now   time.Time
+		want  ShimHold
+	}{
+		{name: "initializing holds while it stands", s: Session{WorkBroughtUpAt: &up}, now: up.Add(time.Hour), want: ShimHold{Indefinite: true}},
+		{name: "a user-asked start holds for the idle hold", s: Session{UserBroughtUpAt: &up}, now: up.Add(time.Minute), want: ShimHold{Until: up.Add(ShimIdleHold)}},
+		{name: "a user-asked start past the idle hold holds nothing", s: Session{UserBroughtUpAt: &up}, now: up.Add(ShimIdleHold), want: ShimHold{}},
+		{name: "a turn closed since a user-asked start ends its hold", s: Session{UserBroughtUpAt: &up}, ended: &after, now: after, want: ShimHold{}},
+		{name: "a parked session holds nothing", s: Session{UserBroughtUpAt: &up, Terminal: &SessionTerminal{Kind: TerminalParked}}, now: up, want: ShimHold{}},
+		{name: "a bring-up for neither holds nothing", s: Session{}, now: up, want: ShimHold{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := tt.s.BringUpHold(tt.ended, tt.now); got != tt.want {
+				t.Fatalf("BringUpHold = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPutSessionRoundTripsTheUserBringUp(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	session := Session{
+		Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, UserBroughtUpAt: &instant,
+	}
+
+	// Act
+	if err := s.PutSession(context.Background(), session); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	got, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil || got.UserBroughtUpAt == nil || !got.UserBroughtUpAt.Equal(instant) {
+		t.Fatalf("Session = (%+v, %v), want the user bring-up at %v", got.UserBroughtUpAt, err, instant)
+	}
+}

@@ -37,10 +37,10 @@ const PageLeaveGrace = 10 * time.Second
 const PageFirstViewGrace = 15 * time.Minute
 
 // ShimIdleHold is how long an idle shim stays up after the later of its
-// workspace's last turn end and the user's last interaction with it (owner
-// ruling, 2026-11-24): a turn that ends at 0:00 and is viewed at 0:05 parks at
-// 0:20 unless the user interacts again.
-const ShimIdleHold = 15 * time.Minute
+// workspace's last turn end and the user's last interaction with it: a turn
+// that ends at 0:00 and is viewed at 0:05 parks at 0:20 unless the user
+// interacts again (wsm.ShimIdleHold, the one statement).
+const ShimIdleHold = wsm.ShimIdleHold
 
 // PageAwayGrace is how long after the user switched away, or after it became
 // one, a one-shot or a synchronous merge keeps its page (owner ruling,

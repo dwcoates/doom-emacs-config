@@ -569,9 +569,9 @@ func (r *run) stopped(ctx context.Context, err error) bool {
 // teardown is THE ONE RELEASE PATH. Every end a run can have -- landed,
 // failed, abandoned (a dequeue, an evict, its workspace closed), stopped --
 // comes through it, and it gives back everything the run held, in the one
-// order that is safe: the output address, the occupancy, the lease, the queue
-// entry, the displaced turn, the landed worktree, the queue's tree, and the
-// repository's slot and lock. It fires the self-reload last.
+// order that is safe: the output address, the occupancy, the lease, the
+// displaced turn, the queue entry, the landed worktree, the queue's tree, and
+// the repository's slot and lock. It fires the self-reload last.
 //
 // terminal, when set, publishes the run's terminal. It runs right after the
 // lease is released, so no client is told the workspace was handed back while
@@ -607,6 +607,17 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	}
 	r.keepOpenForHeldPrompts(ctx, log)
 	r.o.deps.Queue.OnLeaseChanged(r.ws)
+	// THE DISPLACED TURN GOES BACK THE MOMENT THE LEASE IS RELEASED, before
+	// the terminal, the run leaving its line, or any close or tree removal.
+	// Each of those can let the cache keeper park the workspace's session
+	// (wsm.Session.BringUpHold, cachelapse.Keeper.ShimHoldChanged): put back
+	// after them, the turn met a parked session and a revival, the gap
+	// between work owed and work running the allocation forbids. The
+	// resubmission is also a workspace-bound act -- it records a turn and
+	// writes to that workspace's own log sink, which is a symlink INSIDE the
+	// worktree -- so a removal ahead of it makes the "exactly once" guarantee
+	// unreachable.
+	r.resubmitDisplaced(ctx)
 	if terminal != nil {
 		terminal()
 	}
@@ -615,17 +626,6 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		log.Error(op, "could not settle the finished merge's queue tab", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
 	}
-	// THE DISPLACED TURN GOES BACK BEFORE THE RUN LEAVES ITS LINE, and so
-	// before any tree goes away. Leaving the line is what lets the cache keeper
-	// park the workspace's session (wsm.Session.Initializing,
-	// cachelapse.Keeper.ShimHoldChanged): put back after it, the turn met a
-	// parked session and a revival, the gap between work owed and work running
-	// the allocation forbids. The resubmission is also a workspace-bound act
-	// -- it records a turn and writes to that workspace's own log sink, which
-	// is a symlink INSIDE the worktree -- so a removal ahead of it makes the
-	// "exactly once" guarantee unreachable.
-	r.resubmitDisplaced(ctx)
-
 	// THE RUN LEAVES ITS LINE BEFORE ITS CHAIN (leaveLine). The exit keeps
 	// the request off the queue unless the merge landed or its workspace is
 	// closed (wsm.leaveQueueInTx): the terminal above already closed an async

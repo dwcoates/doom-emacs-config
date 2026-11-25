@@ -397,3 +397,25 @@ func TestTopPriority(t *testing.T) {
 		})
 	}
 }
+
+func TestShimHoldLater(t *testing.T) {
+	at := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		h, o ShimHold
+		want ShimHold
+	}{
+		{name: "an indefinite hold wins", h: ShimHold{Until: at}, o: ShimHold{Indefinite: true}, want: ShimHold{Indefinite: true}},
+		{name: "the later instant wins", h: ShimHold{Until: at}, o: ShimHold{Until: at.Add(time.Minute)}, want: ShimHold{Until: at.Add(time.Minute)}},
+		{name: "an earlier instant loses", h: ShimHold{Until: at.Add(time.Minute)}, o: ShimHold{Until: at}, want: ShimHold{Until: at.Add(time.Minute)}},
+		{name: "two empty holds stay empty", want: ShimHold{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert
+			if got := tt.h.Later(tt.o); got != tt.want {
+				t.Fatalf("Later = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

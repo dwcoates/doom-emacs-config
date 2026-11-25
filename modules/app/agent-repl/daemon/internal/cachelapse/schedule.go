@@ -94,9 +94,9 @@ type beatPlan struct {
 	// parked reports that the workspace's parked conversation owes beats,
 	// and none of its keep-alives is out (parked.go).
 	parked bool
-	// initializing reports that the session was brought up for a turn that
-	// has not closed yet (wsm.Session.Initializing): it is never stood down.
-	initializing bool
+	// bringUp is what the session's own bring-up holds (wsm.Session
+	// .BringUpHold), as the plan was made.
+	bringUp wsm.ShimHold
 	// idleSince is when the workspace last did real work, as the record the
 	// plan was read from says (wsm.Workspace.IdleSince).
 	idleSince time.Time
@@ -246,7 +246,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		plan.due = k.deps.Clock.Now()
 	}
 	plan.idleSince = record.IdleSince()
-	plan.initializing = session.Initializing(record.LastTurnEndedAt)
+	plan.bringUp = session.BringUpHold(record.LastTurnEndedAt, k.deps.Clock.Now())
 	if k.deps.IdleCutoff > 0 && bringup.IdleHorizon(k.deps.IdleCutoff, plan.idleSince, queuedAt, queued).Before(plan.due) {
 		return none(noBeatSweep, "it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
@@ -448,7 +448,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		// hold ends stands it down. The keep-alive's own turn is no work, so it
 		// never extends the hold.
 		idleSince := plan.idleSince
-		withinGrace := plan.initializing || k.deps.Hold(ws).HoldsAt(now)
+		withinGrace := plan.bringUp.Later(k.deps.Hold(ws)).HoldsAt(now)
 		// A KEEP-LIVE RUN AWAITS THE ANSWER EITHER WAY, and a session it
 		// started is stood down after it whatever its grace.
 		running, standDown := k.keepLiveSent(ws, withinGrace)
