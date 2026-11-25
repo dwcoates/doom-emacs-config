@@ -279,3 +279,64 @@ func TestAFailedRefreshKeepsTheList(t *testing.T) {
 		t.Fatalf("reads = %d, want a failed refresh to wait MaxAge before the next", f.reads.count())
 	}
 }
+
+func TestChannelIDsIsNilUntilAReadSucceedsAndStartsOne(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, readAnswer{channels: []*agentreplv1.SlackChannel{channel("C1", "general")}})
+	f.reads.gate = make(chan struct{})
+
+	// Act.
+	ids := f.dir.ChannelIDs()
+
+	// Assert.
+	if ids != nil {
+		t.Fatalf("ChannelIDs() before a read = %v, want nil", ids)
+	}
+	close(f.reads.gate)
+	f.awaitReads(t, 1)
+	if f.reads.count() != 1 {
+		t.Fatalf("reads = %d, want the ask to have started 1", f.reads.count())
+	}
+}
+
+func TestChannelIDsAnswersTheReadsChannelsByName(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, readAnswer{channels: []*agentreplv1.SlackChannel{
+		channel("C1", "general"), channel("C2", "random"), channel("C3", "general"),
+	}})
+	f.dir.ChannelIDs()
+	f.awaitReads(t, 1)
+
+	// Act.
+	ids := f.dir.ChannelIDs()
+
+	// Assert.
+	want := map[string]string{"general": "C1", "random": "C2"}
+	if len(ids) != len(want) || ids["general"] != "C1" || ids["random"] != "C2" {
+		t.Fatalf("ChannelIDs() = %v, want %v: a name answered twice keeps its first channel", ids, want)
+	}
+}
+
+func TestChannelIDsKeepsTheEarlierListWhenARefreshFails(t *testing.T) {
+	// Arrange.
+	f := newFixture(t,
+		readAnswer{channels: []*agentreplv1.SlackChannel{channel("C1", "general")}},
+		readAnswer{err: errors.New("gns is down")},
+	)
+	f.dir.ChannelIDs()
+	f.awaitReads(t, 1)
+	f.clock.advance(MaxAge)
+	f.dir.ChannelIDs()
+	records := f.awaitReads(t, 2)
+
+	// Act.
+	ids := f.dir.ChannelIDs()
+
+	// Assert.
+	if ids["general"] != "C1" {
+		t.Fatalf("ChannelIDs() after a failed refresh = %v, want the earlier list", ids)
+	}
+	if failed := records[1]; failed.Level != "error" || failed.Context["error"] != "gns is down" {
+		t.Fatalf("refresh record = %+v, want an error record naming the cause", failed)
+	}
+}

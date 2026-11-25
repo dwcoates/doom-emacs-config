@@ -66,23 +66,9 @@ func Markup(text string, spans []string) string {
 	}
 	ordered := append([]string(nil), spans...)
 	sort.SliceStable(ordered, func(i, j int) bool { return len(ordered[i]) > len(ordered[j]) })
-	var out strings.Builder
-	out.Grow(len(text))
-	doc := mdinline.Read(text)
-	for _, line := range doc.Lines {
-		if line.Kind != mdinline.Prose {
-			out.WriteString(line.Text)
-			continue
-		}
-		for _, s := range doc.Spans(line.Text) {
-			if s.Kind != mdinline.Text {
-				out.WriteString(s.Raw)
-				continue
-			}
-			markupPlain(&out, line.Text, s.At, s.At+len(s.Raw), ordered)
-		}
-	}
-	return out.String()
+	return mdinline.RewriteProse(text, false, func(out *strings.Builder, s mdinline.Stretch) {
+		markupPlain(out, s.Line, s.From, s.To, ordered)
+	})
 }
 
 // markupPlain writes LINE[FROM:TO], prose, to OUT with the spans it holds
