@@ -11,8 +11,8 @@ import (
 func hiddenWith(t *testing.T, s *store, id WorkspaceID) string {
 	t.Helper()
 	var with *string
-	if err := s.db().QueryRow(`SELECT hidden_with FROM workspaces WHERE id = ?`, id).Scan(&with); err != nil {
-		t.Fatalf("read hidden_with of %s: %v", id, err)
+	if err := s.db().QueryRow(`SELECT backlogged_with FROM workspaces WHERE id = ?`, id).Scan(&with); err != nil {
+		t.Fatalf("read backlogged_with of %s: %v", id, err)
 	}
 	if with == nil {
 		return ""

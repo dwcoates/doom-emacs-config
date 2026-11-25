@@ -1452,6 +1452,10 @@ func TestAJoinLeavesTheContractStepsAndTheTakeoverAppliesThem(t *testing.T) {
 // THE 2026-11-19 FAILURE, PINNED: an additive step after a contract step is
 // applied by the join, past the contract it owes, so the joined file holds
 // what the build reads while its incumbent still serves.
+//
+// The two steps are appended past the build's own rather than relabelled from
+// its last two: those may depend on each other (layout 211 drops the triggers
+// layout 210 creates), and only steps that commute may swap their order.
 func TestAJoinAppliesAnAdditiveStepPastAnOwedContract(t *testing.T) {
 	// Arrange: past this build's steps come a contract and an additive step
 	// apart from it. They are appended, never the real last two relabeled:

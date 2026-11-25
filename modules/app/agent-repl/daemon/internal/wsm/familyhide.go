@@ -39,13 +39,13 @@ func (s *store) HideFamily(ctx context.Context, root WorkspaceID, at time.Time) 
 		}
 		for _, id := range members {
 			var was bool
-			if err := scanWorkspaceRow(ctx, tx, id, "hidden", &was); err != nil {
+			if err := scanWorkspaceRow(ctx, tx, id, "backlogged", &was); err != nil {
 				return err
 			}
 			if was {
 				continue
 			}
-			if err := updateWorkspaceColumns(ctx, tx, id, append(hideColumns(true, at), workspaceColumn{name: "hidden_with", value: string(root)})...); err != nil {
+			if err := updateWorkspaceColumns(ctx, tx, id, append(hideColumns(true, at), workspaceColumn{name: "backlogged_with", value: string(root)})...); err != nil {
 				return err
 			}
 			hidden = append(hidden, id)
@@ -64,7 +64,7 @@ func (s *store) ShowFamily(ctx context.Context, root WorkspaceID) ([]WorkspaceID
 	var shown []WorkspaceID
 	err := s.write(ctx, "daemon.wsm.show_family", dlog.Context{"workspace": string(root)}, func(ctx context.Context, tx *sql.Tx) error {
 		var was bool
-		if err := scanWorkspaceRow(ctx, tx, root, "hidden", &was); err != nil {
+		if err := scanWorkspaceRow(ctx, tx, root, "backlogged", &was); err != nil {
 			return err
 		}
 		if was {
@@ -75,7 +75,7 @@ func (s *store) ShowFamily(ctx context.Context, root WorkspaceID) ([]WorkspaceID
 				return err
 			}
 		}
-		members, err := listRows(ctx, tx, `SELECT w.id FROM workspaces w WHERE w.hidden_with = ? AND w.hidden = 1 AND w.closed = 0 ORDER BY w.place`,
+		members, err := listRows(ctx, tx, `SELECT w.id FROM workspaces w WHERE w.backlogged_with = ? AND w.backlogged = 1 AND w.closed = 0 ORDER BY w.place`,
 			func(row interface{ Scan(...any) error }) (WorkspaceID, error) {
 				var id WorkspaceID
 				return id, row.Scan(&id)

@@ -257,7 +257,7 @@ func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) er
 		ref                    = FamilyRef{ID: parent}
 		closed, hidden, merged bool
 	)
-	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.hidden, `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, parent).
+	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.backlogged, `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, parent).
 		Scan(&ref.Dir, &ref.Name, &closed, &hidden, &merged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("wsm: parent %s: %w", parent, ErrNotFound)

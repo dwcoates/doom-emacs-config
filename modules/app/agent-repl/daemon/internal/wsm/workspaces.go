@@ -53,7 +53,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -259,7 +259,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	// one statement, and layout 43 stamped every row already hidden), so a
 	// row with one and not the other is corrupt.
 	if ws.Hidden != hiddenAt.Valid {
-		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "hidden_at", Err: errors.New("a workspace records when it was hidden exactly while it is hidden")}
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "backlogged_at", Err: errors.New("a workspace records when it was hidden exactly while it is hidden")}
 	}
 	ws.HiddenAt = optTime(hiddenAt)
 	lapse, err := decodeCacheLapse(ws, lapsesAt, gated)
@@ -991,7 +991,7 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 		var merged sql.NullInt64
 		var mergeOf sql.NullString
 		var hidden, closed bool
-		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, hidden, closed", &merged, &mergeOf, &hidden, &closed); err != nil {
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, backlogged, closed", &merged, &mergeOf, &hidden, &closed); err != nil {
 			return err
 		}
 		// A CLOSED CHILD IS RE-OPENED ONLY UNDER AN OPEN PARENT (family.go).
@@ -1178,7 +1178,7 @@ func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at t
 	}
 	return s.write(ctx, "daemon.wsm.set_hidden", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var was bool
-		if err := scanWorkspaceRow(ctx, tx, id, "hidden", &was); err != nil {
+		if err := scanWorkspaceRow(ctx, tx, id, "backlogged", &was); err != nil {
 			return err
 		}
 		// A FAMILY IS HIDDEN CHILD FIRST AND SHOWN PARENT FIRST (family.go).
@@ -1210,13 +1210,13 @@ func hideColumns(hidden bool, at time.Time) []workspaceColumn {
 		hiddenAt = nanos(at)
 	}
 	return []workspaceColumn{
-		{name: "hidden", value: hidden},
-		{name: "hidden_at", value: hiddenAt},
+		{name: "backlogged", value: hidden},
+		{name: "backlogged_at", value: hiddenAt},
 		{name: "cache_lapses_at", value: nil},
 		{name: "cache_lapse_gated_tokens", value: nil},
 		// An ordinary move forgets which family hide hid the workspace;
 		// HideFamily marks its members after.
-		{name: "hidden_with", value: nil},
+		{name: "backlogged_with", value: nil},
 	}
 }
 

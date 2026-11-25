@@ -56,7 +56,7 @@ func TestRegisterBornHiddenWritesTheHiddenColumnsInTheInsert(t *testing.T) {
 			if ws.Hidden != tt.wantHidden || (ws.HiddenAt != nil) != tt.wantHidden {
 				t.Fatalf("answered record hidden = %v at %v, want hidden %v", ws.Hidden, ws.HiddenAt, tt.wantHidden)
 			}
-			if stored := scalar[bool](t, s, `SELECT hidden FROM workspaces WHERE id = ?`, ws.ID); stored != tt.wantHidden {
+			if stored := scalar[bool](t, s, `SELECT backlogged FROM workspaces WHERE id = ?`, ws.ID); stored != tt.wantHidden {
 				t.Fatalf("stored hidden = %v, want %v", stored, tt.wantHidden)
 			}
 			if marked := scalar[int](t, s, `SELECT COUNT(*) FROM intake_workspaces WHERE workspace_id = ?`, ws.ID); (marked == 1) != tt.facts.Intake {

@@ -188,7 +188,7 @@ type BandSection string
 const (
 	BandMergeQueue BandSection = "merge_queue_lines"
 	BandMerged     BandSection = "merged_lines"
-	BandHidden     BandSection = "hidden_lines"
+	BandHidden     BandSection = "backlog_section_lines"
 )
 
 // SectionHeightChange is one band section's new height.
@@ -249,7 +249,7 @@ func (s *store) SetMergeQueueSectionFolded(ctx context.Context, folded bool) err
 // collapsed, leaving the rest of the view as it stands.
 func (s *store) SetHiddenSectionFolded(ctx context.Context, folded bool) error {
 	return s.updateSidebarView(ctx, "daemon.wsm.set_hidden_section_folded", dlog.Context{"folded": folded},
-		`UPDATE sidebar_view SET hidden_folded = ? WHERE id = 1`, folded)
+		`UPDATE sidebar_view SET backlog_section_folded = ? WHERE id = 1`, folded)
 }
 
 // SetOpenSectionFolded records whether the open-workspaces section is
@@ -324,7 +324,7 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 	err := s.read(ctx, "daemon.wsm.sidebar_view", dlog.Context{}, func(ctx context.Context) error {
 		var read SidebarView
 		var queueLines, mergedLines, hiddenLines sql.NullInt64
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, merge_queue_folded, hidden_folded, open_folded, merge_queue_lines, merged_lines, hidden_lines FROM sidebar_view WHERE id = 1`).
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, merge_queue_folded, backlog_section_folded, open_folded, merge_queue_lines, merged_lines, backlog_section_lines FROM sidebar_view WHERE id = 1`).
 			Scan(&read.MergedFolded, &read.MergeQueueFolded, &read.HiddenFolded, &read.OpenFolded, &queueLines, &mergedLines, &hiddenLines)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil

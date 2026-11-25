@@ -94,7 +94,7 @@ func (s *store) SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLa
 	recorded := false
 	err := s.write(ctx, "daemon.wsm.set_cache_lapse", fields, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`UPDATE workspaces SET cache_lapses_at = ?, cache_lapse_gated_tokens = ? WHERE id = ? AND ((hidden = 1 AND merged_at IS NULL AND is_current = 0) OR closed = 1)`,
+			`UPDATE workspaces SET cache_lapses_at = ?, cache_lapse_gated_tokens = ? WHERE id = ? AND ((backlogged = 1 AND merged_at IS NULL AND is_current = 0) OR closed = 1)`,
 			nanos(lapse.LapsesAt), gated, id)
 		if err != nil {
 			return err

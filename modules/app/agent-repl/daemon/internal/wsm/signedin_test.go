@@ -21,10 +21,10 @@ func TestTheMigrationStampsEveryHiddenRowWithAHideInstant(t *testing.T) {
 	handle.Close()
 
 	// Assert: hidden and its instant stand together, and nothing is dwelt.
-	if n := rawScalar[int](t, path, `SELECT count(*) FROM workspaces WHERE id = 'ws-hidden' AND hidden_at IS NOT NULL`); n != 1 {
+	if n := rawScalar[int](t, path, `SELECT count(*) FROM workspaces WHERE id = 'ws-hidden' AND backlogged_at IS NOT NULL`); n != 1 {
 		t.Fatal("the hidden row was not stamped with a hide instant")
 	}
-	if n := rawScalar[int](t, path, `SELECT count(*) FROM workspaces WHERE id = 'ws-shown' AND hidden_at IS NULL`); n != 1 {
+	if n := rawScalar[int](t, path, `SELECT count(*) FROM workspaces WHERE id = 'ws-shown' AND backlogged_at IS NULL`); n != 1 {
 		t.Fatal("a shown row was stamped with a hide instant")
 	}
 	if n := rawScalar[int](t, path, `SELECT count(*) FROM workspaces WHERE dwelt_at IS NOT NULL`); n != 0 {

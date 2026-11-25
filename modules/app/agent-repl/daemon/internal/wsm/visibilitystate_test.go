@@ -300,11 +300,20 @@ func TestACorruptStoredVisibilityIsADecodeError(t *testing.T) {
 
 // seedOver runs the migration's seed over S's workspaces as they stand, with
 // every visibility reset first, and answers each one's seeded visibility.
+// The seed runs at layout 192, whose file names the backlog `hidden` (layout
+// 205 retired that column for `backlogged`), so S is given that column again,
+// filled from `backlogged`, for the seed to read.
 func seedOver(t *testing.T, s *store, ids ...WorkspaceID) map[WorkspaceID]Visibility {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := s.db().Exec(`UPDATE workspaces SET visibility = 'not_visible'`); err != nil {
-		t.Fatalf("reset: %v", err)
+	for _, stmt := range []string{
+		`ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE workspaces SET hidden = backlogged`,
+		`UPDATE workspaces SET visibility = 'not_visible'`,
+	} {
+		if _, err := s.db().Exec(stmt); err != nil {
+			t.Fatalf("arrange the layout-192 shape %q: %v", stmt, err)
+		}
 	}
 	tx, err := s.db().BeginTx(ctx, nil)
 	if err != nil {
@@ -338,7 +347,7 @@ func TestTheVisibilitySeedDerivesFromTheRecord(t *testing.T) {
 		q    string
 		args []any
 	}{
-		{`UPDATE workspaces SET hidden = 1, hidden_at = 1 WHERE id IN (?, ?)`, []any{string(hidden.ID), string(picked.ID)}},
+		{`UPDATE workspaces SET backlogged = 1, backlogged_at = 1 WHERE id IN (?, ?)`, []any{string(hidden.ID), string(picked.ID)}},
 		{`UPDATE workspaces SET is_current = 1 WHERE id = ?`, []any{string(picked.ID)}},
 		{`UPDATE workspaces SET parent_id = ? WHERE id = ?`, []any{string(parent.ID), string(child.ID)}},
 		{`UPDATE workspaces SET children_folded = 1 WHERE id = ?`, []any{string(parent.ID)}},

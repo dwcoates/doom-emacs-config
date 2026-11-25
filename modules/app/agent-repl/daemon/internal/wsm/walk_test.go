@@ -558,7 +558,7 @@ func TestStanding(t *testing.T) {
 		{name: "a child of a hidden root stands for the root", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
 			parent := registerIn(t, s, repoDir, "parent", nil)
 			child := registerChild(t, s, repoDir, "child", parent.ID)
-			if _, err := s.db().ExecContext(context.Background(), `UPDATE workspaces SET hidden = 1, hidden_at = 100 WHERE id = ?`, parent.ID); err != nil {
+			if _, err := s.db().ExecContext(context.Background(), `UPDATE workspaces SET backlogged = 1, backlogged_at = 100 WHERE id = ?`, parent.ID); err != nil {
 				t.Fatalf("hide: %v", err)
 			}
 			return child.ID, parent.ID

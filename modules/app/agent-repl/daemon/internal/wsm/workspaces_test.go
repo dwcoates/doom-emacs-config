@@ -890,7 +890,7 @@ func TestAHiddenRowWithNoHideInstantIsCorrupt(t *testing.T) {
 	// Arrange: a row hidden with no instant, which no write path produces.
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	if _, err := s.db().Exec(`UPDATE workspaces SET hidden = 1, hidden_at = NULL WHERE id = ?`, ws.ID); err != nil {
+	if _, err := s.db().Exec(`UPDATE workspaces SET backlogged = 1, backlogged_at = NULL WHERE id = ?`, ws.ID); err != nil {
 		t.Fatalf("corrupting the row: %v", err)
 	}
 
@@ -899,8 +899,8 @@ func TestAHiddenRowWithNoHideInstantIsCorrupt(t *testing.T) {
 
 	// Assert
 	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "hidden_at" {
-		t.Fatalf("Workspace = %v, want a hidden_at DecodeError", err)
+	if !errors.As(err, &decode) || decode.Field != "backlogged_at" {
+		t.Fatalf("Workspace = %v, want a backlogged_at DecodeError", err)
 	}
 }
 
@@ -2217,18 +2217,18 @@ func TestHideColumns(t *testing.T) {
 		want   []workspaceColumn
 	}{
 		{name: "a hide stamps its instant and clears the lapse", hidden: true, want: []workspaceColumn{
-			{name: "hidden", value: true},
-			{name: "hidden_at", value: nanos(at)},
+			{name: "backlogged", value: true},
+			{name: "backlogged_at", value: nanos(at)},
 			{name: "cache_lapses_at", value: nil},
 			{name: "cache_lapse_gated_tokens", value: nil},
-			{name: "hidden_with", value: nil},
+			{name: "backlogged_with", value: nil},
 		}},
 		{name: "a show clears its instant and the lapse", hidden: false, want: []workspaceColumn{
-			{name: "hidden", value: false},
-			{name: "hidden_at", value: nil},
+			{name: "backlogged", value: false},
+			{name: "backlogged_at", value: nil},
 			{name: "cache_lapses_at", value: nil},
 			{name: "cache_lapse_gated_tokens", value: nil},
-			{name: "hidden_with", value: nil},
+			{name: "backlogged_with", value: nil},
 		}},
 	}
 	for _, tt := range tests {
@@ -2251,7 +2251,7 @@ func TestHideColumns(t *testing.T) {
 
 func TestHideColumnsAreTheOneHideShape(t *testing.T) {
 	// Act
-	sites := sourcescan.Sites(t, `name: "hidden_at"`)
+	sites := sourcescan.Sites(t, `name: "backlogged_at"`)
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "workspaces.go" {

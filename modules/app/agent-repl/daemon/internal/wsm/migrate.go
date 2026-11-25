@@ -395,6 +395,11 @@ var migrations = []migration{
 	{To: 208, Name: "slack_thread_poll", Kind: MigrationAdditive, DDL: slackThreadPollDDL},
 	// IT IS ADDITIVE: a new nullable column the previous build never names.
 	{To: 209, Name: "sessions_brought_up_at", Kind: MigrationAdditive, DDL: sessionsBroughtUpAtDDL},
+	// IT IS ADDITIVE: the backlog's columns beside the hidden ones, kept
+	// equal by triggers while the previous build writes the hidden ones
+	// (backlogged.go).
+	{To: 210, Name: "workspaces_backlogged", Kind: MigrationAdditive, DDL: backloggedDDL},
+	{To: 211, Name: "retired_hidden_columns", Kind: MigrationContract, DDL: retiredHiddenColumnsDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

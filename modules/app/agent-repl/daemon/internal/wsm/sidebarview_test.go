@@ -230,7 +230,7 @@ func TestTheMigrationAddsTheHiddenWorkspaces(t *testing.T) {
 
 	// Assert
 	s := handle.(*store)
-	for _, column := range []struct{ table, name string }{{"workspaces", "hidden"}, {"sidebar_view", "hidden_folded"}} {
+	for _, column := range []struct{ table, name string }{{"workspaces", "backlogged"}, {"sidebar_view", "backlog_section_folded"}} {
 		if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, column.table, column.name); got != 1 {
 			t.Fatalf("%s.%s columns after the migration = %d, want 1", column.table, column.name, got)
 		}
@@ -333,7 +333,7 @@ func TestSidebarViewRefusesAStoredHeightOutOfRange(t *testing.T) {
 			if err := s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: BandHidden, Height: SizedHeight(1)}}); err != nil {
 				t.Fatalf("SetSectionHeights: %v", err)
 			}
-			if _, err := s.db().Exec(`UPDATE sidebar_view SET hidden_lines = ? WHERE id = 1`, tt.lines); err != nil {
+			if _, err := s.db().Exec(`UPDATE sidebar_view SET backlog_section_lines = ? WHERE id = 1`, tt.lines); err != nil {
 				t.Fatalf("corrupt the height: %v", err)
 			}
 
@@ -387,7 +387,7 @@ func TestSectionHeightFieldsNamesEachSectionsHeight(t *testing.T) {
 	got := SectionHeightFields(changes)
 
 	// Assert
-	if len(got) != 2 || got["merge_queue_lines"] != uint32(3) || got["hidden_lines"] != "fitted" {
+	if len(got) != 2 || got["merge_queue_lines"] != uint32(3) || got["backlog_section_lines"] != "fitted" {
 		t.Fatalf("fields = %v, want the queue's 3 lines and hidden fitted", got)
 	}
 }

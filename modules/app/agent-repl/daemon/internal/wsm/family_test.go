@@ -94,7 +94,7 @@ func queueClosingMergeOf(t *testing.T, s *store, id WorkspaceID) {
 // legacyHide hides ID behind the family rules' back, as a row from before them.
 func legacyHide(t *testing.T, s *store, id WorkspaceID) {
 	t.Helper()
-	if _, err := s.db().Exec(`UPDATE workspaces SET hidden = 1, hidden_at = 1 WHERE id = ?`, id); err != nil {
+	if _, err := s.db().Exec(`UPDATE workspaces SET backlogged = 1, backlogged_at = 1 WHERE id = ?`, id); err != nil {
 		t.Fatalf("hide %s: %v", id, err)
 	}
 }
