@@ -565,9 +565,15 @@ func TestSetNameRefusesAMoveItCannotMake(t *testing.T) {
 		arm     string
 		field   string
 	}{
-		{name: "its merge stands in a queue", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
+		{name: "its own merge stands in a queue", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
+			f.db.mergeQueues = map[wsm.RepoKey][]wsm.MergeQueueEntry{"r": {{Workspace: "w1"}}}
+		}},
+		{name: "a merge in a queue lands its branch", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
+			f.db.mergeQueues = map[wsm.RepoKey][]wsm.MergeQueueEntry{"r": {{Workspace: "m1", Source: wsm.MergeSource{Branch: "ABC/sample"}}}}
+		}},
+		{name: "it is a merge's own workspace", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
 			ws := f.db.workspaces["w1"]
-			ws.MergePending = true
+			ws.MergeOf = &wsm.MergeOrigin{}
 			f.db.workspaces["w1"] = ws
 		}},
 		{name: "a merge holds its lease", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
@@ -862,5 +868,23 @@ func TestWorktreeOccupied(t *testing.T) {
 				t.Fatalf("worktreeOccupied = (%v, %v), want %v", occupied, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestSetNameMovesAWorkspaceWhoseForkedMergeLandsAnotherBranch(t *testing.T) {
+	// Arrange: a merge workspace forked from w1 stands in the queue, landing
+	// a branch of its own; w1's own merge facts are its derived flag alone.
+	f := renameFixture(t)
+	ws := f.db.workspaces["w1"]
+	ws.MergePending = true
+	f.db.workspaces["w1"] = ws
+	f.db.mergeQueues = map[wsm.RepoKey][]wsm.MergeQueueEntry{"r": {{Workspace: "m1", Source: wsm.MergeSource{Branch: "other-branch"}}}}
+
+	// Act
+	renamed, err := f.verbs.SetName(context.Background(), "w1", "better-name")
+
+	// Assert
+	if err != nil || renamed.Move != MoveOwed {
+		t.Fatalf("SetName = (%+v, %v), want the move owed: the merge names another branch", renamed, err)
 	}
 }

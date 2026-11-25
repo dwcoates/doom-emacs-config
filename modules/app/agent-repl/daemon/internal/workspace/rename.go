@@ -262,11 +262,13 @@ func (v *verbs) refuseMove(ctx context.Context, log dlog.Logger, record wsm.Work
 	return nil
 }
 
-// merging reports whether a merge holds or names RECORD: it is a merge's own
-// workspace, its merge stands in a queue, a merge holds its lease, or an
-// async merge waits to be made of its branch.
+// merging reports whether a merge holds or names RECORD's branch or
+// directory: it is a merge's own workspace, a merge holds its lease, a merge
+// queue entry is its own or lands its branch, or an async merge waits to be
+// made of its branch or of it. A merge that lands ANOTHER branch, in a merge
+// workspace forked from RECORD, names neither, and leaves it free to move.
 func (v *verbs) merging(ctx context.Context, record wsm.Workspace) (bool, error) {
-	if record.MergeOf != nil || record.MergePending {
+	if record.MergeOf != nil {
 		return true, nil
 	}
 	lease, held, err := v.deps.DB.Lease(ctx, record.ID)
@@ -275,6 +277,17 @@ func (v *verbs) merging(ctx context.Context, record wsm.Workspace) (bool, error)
 	}
 	if held && lease.Holder == wsm.HolderMerge {
 		return true, nil
+	}
+	queues, err := v.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read the merge queues: %w", err)
+	}
+	for _, entries := range queues {
+		for _, entry := range entries {
+			if entry.Workspace == record.ID || entry.Source.Branch == record.Branch {
+				return true, nil
+			}
+		}
 	}
 	requests, err := v.deps.DB.AllAsyncMergeRequests(ctx)
 	if err != nil {
