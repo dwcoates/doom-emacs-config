@@ -44,6 +44,14 @@ type fakeGNS struct {
 	rootErr   error
 	head      int64
 	headErr   error
+	// noPipe makes PipeHead answer that GNS keeps no such pipe, as it does
+	// for a direct message.
+	noPipe bool
+	// later is what ThreadAfter reads, then laterErr its failure; afters
+	// are the cursors it was asked to read after.
+	later    []gnsclient.ThreadMessage
+	laterErr error
+	afters   []string
 	channels  []string
 	// stream is what Stream reads, then streamErr its end.
 	stream    []gnsclient.PipeMessage
@@ -62,10 +70,19 @@ func (g *fakeGNS) SubscribeChannel(_ context.Context, channel string) error {
 	g.channels = append(g.channels, channel)
 	return nil
 }
-func (g *fakeGNS) ThreadRoot(_ context.Context, _, _ string) (string, error) {
-	return threadKey.ThreadTS, g.rootErr
+// ThreadRoot answers every message as its own thread's root.
+func (g *fakeGNS) ThreadRoot(_ context.Context, _, ts string) (string, error) {
+	return ts, g.rootErr
 }
-func (g *fakeGNS) PipeHead(context.Context, string) (int64, error) { return g.head, g.headErr }
+func (g *fakeGNS) PipeHead(context.Context, string) (int64, bool, error) {
+	return g.head, !g.noPipe, g.headErr
+}
+func (g *fakeGNS) ThreadAfter(_ context.Context, _, _, after string) ([]gnsclient.ThreadMessage, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.afters = append(g.afters, after)
+	return g.later, g.laterErr
+}
 func (g *fakeGNS) Stream(_ context.Context, _ string, after int64, _ string, each func(gnsclient.PipeMessage)) (int64, error) {
 	for _, m := range g.stream {
 		each(m)
@@ -224,10 +241,39 @@ func (r *rig) subscribe(t *testing.T, mode wsm.SlackThreadMode) wsm.SlackThreadS
 	return sub
 }
 
-// sub reads the rig's subscription back.
+// sub reads the rig's subscription to threadKey back.
 func (r *rig) sub(t *testing.T) wsm.SlackThreadSubscription {
 	t.Helper()
-	sub, ok, err := r.w.lookup(context.Background(), subKey{ws: r.ws.ID, thread: threadKey})
+	return r.subOf(t, threadKey)
+}
+
+// dmURL links a thread in a direct message, and dmKey is its key: GNS keeps
+// no echo pipe for its channel.
+const dmURL = "https://chesscom.slack.com/archives/D01ABTZFLBA/p1795570533281099"
+
+var dmKey = wsm.SlackThreadKey{Channel: "D01ABTZFLBA", ThreadTS: "1795570533.281099"}
+
+// subscribeDM subscribes the rig's workspace to the direct message's thread
+// in MODE, which it follows by polling.
+func (r *rig) subscribeDM(t *testing.T, mode wsm.SlackThreadMode) wsm.SlackThreadSubscription {
+	t.Helper()
+	r.gns.noPipe = true
+	sub, _, err := r.w.Subscribe(context.Background(), r.ws, dmURL, mode, wsm.SlackThreadOriginRequested)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	return sub
+}
+
+// reply is a reply in the direct message's thread at TS saying TEXT.
+func reply(ts, text string) gnsclient.ThreadMessage {
+	return gnsclient.ThreadMessage{TS: ts, ThreadTS: dmKey.ThreadTS, Author: "alice", Text: text}
+}
+
+// subOf reads the rig's subscription to THREAD back.
+func (r *rig) subOf(t *testing.T, thread wsm.SlackThreadKey) wsm.SlackThreadSubscription {
+	t.Helper()
+	sub, ok, err := r.w.lookup(context.Background(), subKey{ws: r.ws.ID, thread: thread})
 	if err != nil || !ok {
 		t.Fatalf("lookup = %v, %v", ok, err)
 	}

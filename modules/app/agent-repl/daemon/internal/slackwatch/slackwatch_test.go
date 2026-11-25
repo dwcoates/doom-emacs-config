@@ -138,7 +138,8 @@ func TestSubscribeStartsAtThePipesHeadAndAnnouncesItself(t *testing.T) {
 	sub, held, err := r.w.Subscribe(context.Background(), r.ws, threadURL, wsm.SlackThreadModeRespond, wsm.SlackThreadOriginRequested)
 
 	// Assert
-	if err != nil || held || sub.Thread != threadKey || sub.Cursor != 40 || sub.Mode != wsm.SlackThreadModeRespond || sub.PostsMade != 0 {
+	if err != nil || held || sub.Thread != threadKey || sub.Source != wsm.SlackThreadSourceEchoPipe || sub.Cursor != 40 || sub.CursorTS != "" ||
+		sub.Mode != wsm.SlackThreadModeRespond || sub.PostsMade != 0 {
 		t.Fatalf("Subscribe = %+v, %v, %v", sub, held, err)
 	}
 	if !reflect.DeepEqual(r.gns.channels, []string{threadKey.Channel}) || len(r.gns.posts) != 1 || !strings.Contains(r.gns.posts[0], ":peepo_wave_happy: agent attached in *respond* mode") {
@@ -352,6 +353,216 @@ func TestAPostSlackRefusesIsUnreachable(t *testing.T) {
 	}
 }
 
+func TestSubscribeFollowsADirectMessageByPollingFromItsLatestMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		later []gnsclient.ThreadMessage
+		want  string
+	}{
+		{name: "a thread of its root alone starts at the root", want: dmKey.ThreadTS},
+		{name: "a thread with replies starts at the latest", later: []gnsclient.ThreadMessage{reply("1795570600.000001", "a"), reply("1795570700.000002", "b")}, want: "1795570700.000002"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			r.gns.noPipe, r.gns.later = true, tt.later
+
+			// Act
+			sub, held, err := r.w.Subscribe(context.Background(), r.ws, dmURL, wsm.SlackThreadModeInteract, wsm.SlackThreadOriginRequested)
+
+			// Assert
+			if err != nil || held || sub.Thread != dmKey || sub.Source != wsm.SlackThreadSourceThreadPoll || sub.CursorTS != tt.want || sub.Cursor != 0 {
+				t.Fatalf("Subscribe = %+v, %v, %v; want a poll from %s", sub, held, err, tt.want)
+			}
+			if !reflect.DeepEqual(r.gns.afters, []string{dmKey.ThreadTS}) || len(r.gns.posts) != 1 {
+				t.Fatalf("read after %v, posts %v; want one read after the root and the announcement", r.gns.afters, r.gns.posts)
+			}
+		})
+	}
+}
+
+func TestSubscribingToADirectMessageRecordsThatItIsPolled(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+
+	// Act
+	r.subscribeDM(t, wsm.SlackThreadModeInteract)
+
+	// Assert
+	rec := r.record(t, "info", opVerb, "GNS keeps no echo pipe for the thread's channel; the thread is followed by polling it")
+	want := dlog.Context{"subscriber": string(r.ws.ID), "thread": dmKey.String(), "channel": "D01ABTZFLBA", "pipe": "user.dodge.tools.slack.channel.D01ABTZFLBA.echo",
+		"cursor_ts": dmKey.ThreadTS, "poll_every": "15s"}
+	if !reflect.DeepEqual(rec.Context, want) {
+		t.Fatalf("record context = %+v, want %+v", rec.Context, want)
+	}
+}
+
+func TestSubscribingToADirectMessageRefusesWhenItsThreadCannotBeRead(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.gns.noPipe, r.gns.laterErr = true, gnsFailure
+
+	// Act
+	_, _, err := r.w.Subscribe(context.Background(), r.ws, dmURL, wsm.SlackThreadModeInteract, wsm.SlackThreadOriginRequested)
+
+	// Assert
+	if refusal := RefusalOf(err); refusal == nil || refusal.Kind != RefusedUnreachable || !strings.Contains(refusal.Detail, "Invalid or expired JWT") {
+		t.Fatalf("Subscribe = %v; want an unreachable refusal", err)
+	}
+	if subs, _ := r.db.SlackThreadSubscriptions(context.Background()); len(subs) != 0 || len(r.gns.posts) != 0 {
+		t.Fatalf("a refused subscribe stored %+v and posted %v", subs, r.gns.posts)
+	}
+}
+
+func TestPollOnceStoresOthersMessagesAndAdvancesTheCursor(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	sub := r.subscribeDM(t, wsm.SlackThreadModeInteract)
+	own := r.gns.posts[0]
+	r.gns.later = []gnsclient.ThreadMessage{reply("1795570600.000001", "can you rebase?"), reply("1795570700.000002", own)}
+
+	// Act
+	err := r.w.PollOnce(context.Background(), sub)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.gns.afters[len(r.gns.afters)-1]; got != dmKey.ThreadTS {
+		t.Fatalf("polled after %s, want the subscription's cursor %s", got, dmKey.ThreadTS)
+	}
+	pending, _ := r.db.SlackThreadPending(context.Background(), r.ws.ID, dmKey)
+	if got := r.subOf(t, dmKey); len(pending) != 1 || pending[0].TS != "1795570600.000001" || got.CursorTS != "1795570700.000002" {
+		t.Fatalf("pending %+v, cursor %s; want only the other's message, the cursor at the latest", pending, got.CursorTS)
+	}
+	if wait, ok := r.w.untilNextDue(); !ok || wait != LowQuiet {
+		t.Fatalf("the digest is due in %v (%v), want %v", wait, ok, LowQuiet)
+	}
+}
+
+func TestAPollThatReadsNothing(t *testing.T) {
+	tests := []struct {
+		name        string
+		failing     bool
+		wantFailing bool
+	}{
+		{name: "leaves a healthy subscription as it stood"},
+		{name: "ends a failing stretch", failing: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			r.subscribeDM(t, wsm.SlackThreadModeInteract)
+			if tt.failing {
+				r.gns.laterErr = gnsFailure
+				r.w.recordStreamFailure(context.Background(), subKey{ws: r.ws.ID, thread: dmKey}, r.w.PollOnce(context.Background(), r.subOf(t, dmKey)))
+				r.gns.laterErr = nil
+			}
+
+			// Act
+			err := r.w.PollOnce(context.Background(), r.subOf(t, dmKey))
+
+			// Assert
+			if got := r.subOf(t, dmKey); err != nil || (got.FailingSince != nil) != tt.wantFailing || got.CursorTS != dmKey.ThreadTS || got.Pending != 0 {
+				t.Fatalf("PollOnce = %v, subscription %+v; want healthy at the root's cursor", err, got)
+			}
+		})
+	}
+}
+
+func TestAFailingPollBeginsOneStretch(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	sub := r.subscribeDM(t, wsm.SlackThreadModeInteract)
+	r.gns.laterErr = gnsFailure
+
+	// Act
+	err := r.w.PollOnce(context.Background(), sub)
+	r.w.recordStreamFailure(context.Background(), keyOf(sub), err)
+
+	// Assert
+	if got := r.subOf(t, dmKey); got.FailingSince == nil || !strings.Contains(got.FailureDetail, "Invalid or expired JWT") || got.CursorTS != dmKey.ThreadTS {
+		t.Fatalf("subscription = %+v, want failing at the kept cursor", got)
+	}
+	r.record(t, "info", opStream, "the thread's stream began failing; it is read again each window until it succeeds")
+}
+
+func TestFollowOnceFollowsBySource(t *testing.T) {
+	tests := []struct {
+		name       string
+		dm         bool
+		wantPolled bool
+	}{
+		{name: "an echo pipe is streamed"},
+		{name: "a direct message is polled", dm: true, wantPolled: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			sub := r.subscribe(t, wsm.SlackThreadModeRespond)
+			if tt.dm {
+				sub = r.subscribeDM(t, wsm.SlackThreadModeRespond)
+			}
+			reads := len(r.gns.afters)
+			r.gns.stream = []gnsclient.PipeMessage{pipe(41, "2.1", "from the pipe")}
+
+			// Act
+			err := r.w.FollowOnce(context.Background(), sub)
+
+			// Assert
+			polled := len(r.gns.afters) > reads
+			pending, _ := r.db.SlackThreadPending(context.Background(), r.ws.ID, threadKey)
+			if err != nil || polled != tt.wantPolled || (len(pending) == 1) == tt.wantPolled {
+				t.Fatalf("FollowOnce = %v, polled %v, pipe messages %d; want polled %v", err, polled, len(pending), tt.wantPolled)
+			}
+		})
+	}
+}
+
+func TestFollowOnceFailsHardOnAnUndeclaredSource(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	sub := r.subscribe(t, wsm.SlackThreadModeRespond)
+	sub.Source = "carrier_pigeon"
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("FollowOnce followed an undeclared source")
+		}
+	}()
+
+	// Act
+	_ = r.w.FollowOnce(context.Background(), sub)
+}
+
+func TestAPolledThreadIsPolledAgainAfterThePollInterval(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	sub := r.subscribeDM(t, wsm.SlackThreadModeInteract)
+	reads := len(r.gns.afters)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	// Act
+	go func() {
+		defer close(done)
+		r.w.work(ctx, keyOf(sub))
+	}()
+	wait := <-r.clock.Asked
+	cancel()
+	<-done
+
+	// Assert
+	r.gns.mu.Lock()
+	defer r.gns.mu.Unlock()
+	if wait != ThreadPollEvery || len(r.gns.afters) != reads+1 {
+		t.Fatalf("the worker waited %v after %d polls; want %v after one", wait, len(r.gns.afters)-reads, ThreadPollEvery)
+	}
+}
+
 func TestStreamOnceStoresOthersMessagesAndDropsTheWorkspacesOwn(t *testing.T) {
 	// Arrange
 	r := newRig(t)
@@ -412,11 +623,11 @@ func TestAFailingStreamBeginsOneStretch(t *testing.T) {
 // their digest's due time.
 func (r *rig) pend(t *testing.T, texts ...string) {
 	t.Helper()
-	var msgs []gnsclient.PipeMessage
+	var msgs []incoming
 	for i, text := range texts {
-		msgs = append(msgs, pipe(int64(50+i), "3."+string(rune('a'+i)), text))
+		msgs = append(msgs, incoming{TS: "3." + string(rune('a'+i)), Author: "alice", Text: text})
 	}
-	r.w.ingest(context.Background(), keyOf(r.sub(t)), msgs, 60)
+	r.w.ingest(context.Background(), keyOf(r.sub(t)), msgs, 60, "")
 	r.clock.Set(t0.Add(MaxWait))
 }
 
@@ -424,7 +635,7 @@ func TestFlushDueTellsNothingBeforeItIsDue(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	r.subscribe(t, wsm.SlackThreadModeRespond)
-	r.w.ingest(context.Background(), keyOf(r.sub(t)), []gnsclient.PipeMessage{pipe(50, "3.a", "hi")}, 50)
+	r.w.ingest(context.Background(), keyOf(r.sub(t)), []incoming{{TS: "3.a", Author: "alice", Text: "hi"}}, 50, "")
 
 	// Act
 	r.w.FlushDue(context.Background(), r.prompts)
@@ -499,7 +710,7 @@ func TestASupersededDigestIsSaidAgainFirst(t *testing.T) {
 	r.pend(t, "first")
 	r.w.FlushDue(context.Background(), r.prompts)
 	r.holds.retired = true
-	r.w.ingest(context.Background(), keyOf(r.sub(t)), []gnsclient.PipeMessage{pipe(70, "4.a", "second")}, 70)
+	r.w.ingest(context.Background(), keyOf(r.sub(t)), []incoming{{TS: "4.a", Author: "alice", Text: "second"}}, 70, "")
 	r.clock.Set(t0.Add(2 * MaxWait))
 
 	// Act
