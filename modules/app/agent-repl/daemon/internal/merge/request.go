@@ -755,9 +755,8 @@ func (o *orchestrator) queueRequestGated(ctx context.Context, ws ids.WorkspaceID
 	o.log(ctx, ws).Info(op, "put a merge in line; it is reported from here", dlog.Context{
 		"workspace": string(ws), "repo": string(repo), "position": position})
 	o.parkQueued(ctx, op, repo, entry.Source, ws, ledger)
-	// THE FIRST OF THE MERGE'S TWO BANNERS: it is in line. The second is its
-	// resolution (ended); nothing between raises one.
-	o.deps.Banners.Queued(ws, o.bubbleLabel(ctx, entry).text())
+	// A merge put in line raises no banner: only its end does (ended), and
+	// desktopnotify.MergeBanners raises one only when it did not land.
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return 0, false, false, err
 	}

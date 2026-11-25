@@ -36,9 +36,10 @@ func NewCommentBanners(poster Poster, summaries CommentSummaries) *CommentBanner
 
 // Commented posts the banner of AUTHOR's comment, whose markdown is COMMENT,
 // for the workspace WS that follows its pull request. The summary is asked on
-// the banner's own goroutine, so the caller never waits on the model.
+// the banner's own goroutine, so the caller never waits on the model. It is
+// raised whether or not Emacs is focused: someone else is waiting on the user.
 func (c *CommentBanners) Commented(ws ids.WorkspaceID, author, comment string) {
-	c.poster.Post(ws, KindPullRequestComment, func(ctx context.Context, name string) Banner {
+	c.poster.PostRegardlessOfFocus(ws, KindPullRequestComment, func(ctx context.Context, name string) Banner {
 		return Banner{Title: CommentTitle(name), Body: CommentBody(author, c.summaries.SummarizeComment(ctx, ws, comment))}
 	})
 }

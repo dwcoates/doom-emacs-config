@@ -14,8 +14,8 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// raisedBanner is one desktop banner a merge raised: "queued" with its
-// label, or its resolution's end with its summary.
+// raisedBanner is one desktop banner a merge reported: its resolution's end
+// with its summary.
 type raisedBanner struct {
 	ws   ids.WorkspaceID
 	kind string
@@ -32,12 +32,6 @@ type fakeBanners struct {
 	mu     sync.Mutex
 	raised []raisedBanner
 	toldAt []int
-}
-
-func (b *fakeBanners) Queued(ws ids.WorkspaceID, label string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.raised = append(b.raised, raisedBanner{ws: ws, kind: "queued", text: label})
 }
 
 func (b *fakeBanners) Mediated(ws ids.WorkspaceID, summary string) {
@@ -78,18 +72,17 @@ func (b *fakeBanners) kinds() []raisedBanner {
 	return out
 }
 
-// TestEveryEndOfARunningMergeRaisesOnlyItsQueuedAndResolvedBanners pins that
-// a merge raises at most two banners, whichever way it ends: one as it is put
-// in line, and one as it leaves the queue for good, which a merge the user or
-// the operator released does not raise.
-func TestEveryEndOfARunningMergeRaisesOnlyItsQueuedAndResolvedBanners(t *testing.T) {
+// TestEveryEndOfARunningMergeReportsOnlyItsResolution pins that a merge
+// reports at most one banner, whichever way it ends: as it leaves the queue
+// for good, which a merge the user or the operator released does not report.
+func TestEveryEndOfARunningMergeReportsOnlyItsResolution(t *testing.T) {
 	for _, tc := range releaseCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange and Act.
 			h := ended(t, tc.phase, tc.res)
 
 			// Assert.
-			want := []raisedBanner{{ws: theWorkspace, kind: "queued"}}
+			var want []raisedBanner
 			switch {
 			case tc.phase == phaseLanded:
 				want = append(want, raisedBanner{ws: theWorkspace, kind: "landed"})
@@ -100,20 +93,6 @@ func TestEveryEndOfARunningMergeRaisesOnlyItsQueuedAndResolvedBanners(t *testing
 				t.Fatalf("banners = %+v, want %+v", got, want)
 			}
 		})
-	}
-}
-
-func TestAQueuedMergesBannerCarriesWhatItLands(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	enqueue(t, h)
-
-	// Assert
-	got := h.banners.seen()
-	if len(got) != 1 || got[0].kind != "queued" || got[0].ws != theWorkspace || got[0].text == "" || got[0].text == string(theWorkspace) {
-		t.Fatalf("banners = %+v, want one queued banner carrying the merge's label", got)
 	}
 }
 
@@ -190,24 +169,16 @@ func TestDetachedOutcomeBannerLine(t *testing.T) {
 	}
 }
 
-func TestAnAgentsRequestRaisesNoBannerBeforeItsTurnEnds(t *testing.T) {
+func TestAMergePutInLineRaisesNoBanner(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.inFlight = "turn-asking"
-	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	before := h.banners.seen()
 
 	// Act
-	h.runWait(t)
+	enqueue(t, h)
 
 	// Assert
-	if len(before) != 0 {
-		t.Fatalf("banners before the requesting turn ended = %+v, want none", before)
-	}
-	if got := h.banners.kinds(); !reflect.DeepEqual(got, []raisedBanner{{ws: theWorkspace, kind: "queued"}}) {
-		t.Fatalf("banners once the turn ended = %+v, want the one queued banner", got)
+	if got := h.banners.seen(); len(got) != 0 {
+		t.Fatalf("banners = %+v, want none: a merge put in line raises no banner", got)
 	}
 }
 
@@ -248,7 +219,7 @@ func TestADetachedMergeRaisesItsBannersOnTheMergeWorkspace(t *testing.T) {
 	}
 
 	// Assert
-	want := []raisedBanner{{ws: theMergeWorkspace, kind: "queued"}, {ws: theMergeWorkspace, kind: "landed"}}
+	want := []raisedBanner{{ws: theMergeWorkspace, kind: "landed"}}
 	if got := h.banners.kinds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("banners = %+v, want %+v", got, want)
 	}
@@ -286,7 +257,7 @@ func TestAMergeTheRestartCouldNotResumeRaisesTheFailedBanner(t *testing.T) {
 	}
 
 	// Assert
-	want := []raisedBanner{{ws: theWorkspace, kind: "queued"}, {ws: theWorkspace, kind: "failed"}}
+	want := []raisedBanner{{ws: theWorkspace, kind: "failed"}}
 	if got := h.banners.kinds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("banners = %+v, want %+v", got, want)
 	}
@@ -308,7 +279,7 @@ func TestAWaitingMergeTheRestartCouldNotRequeueRaisesTheAbandonedBanner(t *testi
 	}
 
 	// Assert
-	want := []raisedBanner{{ws: theWorkspace, kind: "queued"}, {ws: theWorkspace, kind: "abandoned"}}
+	want := []raisedBanner{{ws: theWorkspace, kind: "abandoned"}}
 	if got := h.banners.kinds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("banners = %+v, want %+v", got, want)
 	}

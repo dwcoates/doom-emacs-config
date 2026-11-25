@@ -283,10 +283,8 @@ func TestAReleasedMergeIsHandedBackReleasedAndRaisesNoResolvedBanner(t *testing.
 				t.Fatalf("handbacks = %+v, want one marked released by %s", sent, tt.cause)
 			}
 			// Assert: no resolved banner, and the skip recorded at INFO.
-			for _, b := range h.banners.kinds() {
-				if b.kind != "queued" {
-					t.Fatalf("banners = %+v, want no resolved banner for a released merge", h.banners.kinds())
-				}
+			if got := h.banners.kinds(); len(got) != 0 {
+				t.Fatalf("banners = %+v, want no resolved banner for a released merge", got)
 			}
 			rec, ok := h.recordFor(dlog.LevelInfo, "daemon.merge.ended")
 			if !ok || rec.Context["cause"] != string(tt.cause) || rec.Context["outcome"] != "abandoned" {

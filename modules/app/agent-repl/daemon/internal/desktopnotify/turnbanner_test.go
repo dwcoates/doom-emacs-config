@@ -25,9 +25,21 @@ type fakePoster struct {
 	workspaces []ids.WorkspaceID
 	kinds      []string
 	banners    []Banner
+	// regardless records, per banner, whether it was posted regardless of
+	// Emacs's focus (PostRegardlessOfFocus).
+	regardless []bool
 }
 
 func (a *fakePoster) Post(ws ids.WorkspaceID, kind string, compose Compose) Decision {
+	return a.post(ws, kind, compose, false)
+}
+
+func (a *fakePoster) PostRegardlessOfFocus(ws ids.WorkspaceID, kind string, compose Compose) Decision {
+	return a.post(ws, kind, compose, true)
+}
+
+func (a *fakePoster) post(ws ids.WorkspaceID, kind string, compose Compose, regardless bool) Decision {
+	a.regardless = append(a.regardless, regardless)
 	a.workspaces = append(a.workspaces, ws)
 	a.kinds = append(a.kinds, kind)
 	a.banners = append(a.banners, compose(context.Background(), "my-ws"))

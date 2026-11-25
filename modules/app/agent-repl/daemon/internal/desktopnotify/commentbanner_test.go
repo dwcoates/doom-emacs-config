@@ -40,8 +40,8 @@ func TestCommentBannersCommented(t *testing.T) {
 
 			// Assert
 			want := Banner{Title: "💬 my-ws", Body: tc.wantBody}
-			if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindPullRequestComment || poster.workspaces[0] != "ws1" {
-				t.Fatalf("posted %+v (kinds %v, workspaces %v), want %+v as %s for ws1", poster.banners, poster.kinds, poster.workspaces, want, KindPullRequestComment)
+			if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindPullRequestComment || poster.workspaces[0] != "ws1" || !poster.regardless[0] {
+				t.Fatalf("posted %+v (kinds %v, workspaces %v, regardless %v), want %+v as %s for ws1, regardless of focus", poster.banners, poster.kinds, poster.workspaces, poster.regardless, want, KindPullRequestComment)
 			}
 			if len(summaries.asked) != 1 || summaries.asked[0] != "please rename the flag" || summaries.askedFor[0] != "ws1" {
 				t.Fatalf("summaries asked %v for %v, want the comment for ws1", summaries.asked, summaries.askedFor)
