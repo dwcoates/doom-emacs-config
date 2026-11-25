@@ -290,19 +290,30 @@ func (c *client) runVia(ctx context.Context, operation, exe, dir string, extra [
 	if err != nil {
 		return "", err
 	}
-	if in.exitCode != 0 {
-		failure := in.fail()
-		if remoteUnreachable(in.stderr) {
-			// A REMOTE THE NETWORK CANNOT REACH is the machine offline or its
-			// resolver down, which this daemon expects and cannot fix; the
-			// caller still gets the failure, and the next attempt answers.
-			c.log.Global().Info(operation, "git could not reach the remote; the network is down or the host does not resolve", dlog.AsTransient(in.logContext()))
-			return "", failure
-		}
-		c.log.Global().Error(operation, "git exited nonzero", in.logContext())
-		return "", failure
+	if err := c.judge(operation, in); err != nil {
+		return "", err
 	}
 	return strings.TrimRight(in.stdout, "\n"), nil
+}
+
+// judge is the ordinary path's verdict on an invocation git ran to its exit:
+// a zero exit answers nil, and any other exit is recorded once and answered
+// as git's own failure (*Error). A method that expects one particular
+// refusal records that refusal itself and leaves every other exit to judge.
+func (c *client) judge(operation string, in invocation) error {
+	if in.exitCode == 0 {
+		return nil
+	}
+	failure := in.fail()
+	if remoteUnreachable(in.stderr) {
+		// A REMOTE THE NETWORK CANNOT REACH is the machine offline or its
+		// resolver down, which this daemon expects and cannot fix; the
+		// caller still gets the failure, and the next attempt answers.
+		c.log.Global().Info(operation, "git could not reach the remote; the network is down or the host does not resolve", dlog.AsTransient(in.logContext()))
+		return failure
+	}
+	c.log.Global().Error(operation, "git exited nonzero", in.logContext())
+	return failure
 }
 
 // unreachableRemote is what git's transports print when the network cannot

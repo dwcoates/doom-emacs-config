@@ -308,10 +308,39 @@ func (c *client) AddDetachedWorktree(ctx context.Context, repoDir, worktreeDir, 
 // IT IS THE ONE GIT THAT CARRIES MergeQueueMarker: the repository's
 // reference-transaction hook lets master move only under it (when the
 // repository enforces the queue), so no other method may ever set it.
+//
+// A REFUSAL BECAUSE LOCAL CHANGES WOULD BE OVERWRITTEN is expected: the main
+// sync meets it on every sweep while the main checkout holds such changes,
+// and tells the main workspace about it. It is recorded at INFO and still
+// answered as git's own failure (*Error), so the caller reads the paths from
+// its stderr. Every other nonzero exit is judged as the ordinary path judges
+// it.
 func (c *client) FastForward(ctx context.Context, dir, commit string) error {
-	_, err := c.runWithEnv(ctx, "daemon.gitclient.fast_forward", dir,
+	const operation = "daemon.gitclient.fast_forward"
+
+	in, err := c.runRawWithEnv(ctx, operation, dir,
 		[]string{MergeQueueMarker + "=1"}, "merge", "--ff-only", commit)
-	return err
+	if err != nil {
+		return err
+	}
+	if in.exitCode != 0 && WouldOverwrite(in.stderr) {
+		c.log.Global().Info(operation, "git refused the fast-forward: local changes would be overwritten", in.logContext())
+		return in.fail()
+	}
+	return c.judge(operation, in)
+}
+
+// wouldOverwrite is what git prints when it refuses a merge or checkout
+// because tracked local changes, or untracked files, stand where the change
+// would write ("Your local changes to the following files would be
+// overwritten by merge:", "The following untracked working tree files would
+// be overwritten by merge:").
+const wouldOverwrite = "would be overwritten by"
+
+// WouldOverwrite reports whether STDERR is git refusing to overwrite local
+// changes or untracked files.
+func WouldOverwrite(stderr string) bool {
+	return strings.Contains(stderr, wouldOverwrite)
 }
 
 // TagsMerged lists the tags reachable from commit (`tag --list --merged`).

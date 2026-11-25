@@ -293,13 +293,13 @@ func causeOf(err error, upstream string) *agentreplv1.MainSyncFailureCause {
 
 // overwrittenPaths reads the paths git names when it refuses to overwrite
 // local changes or untracked files: the tab-indented lines after its
-// "would be overwritten" heading.
+// "would be overwritten" heading (gitclient.WouldOverwrite).
 func overwrittenPaths(stderr string) []string {
 	var paths []string
 	listing := false
 	for _, line := range strings.Split(stderr, "\n") {
 		switch {
-		case strings.Contains(line, "would be overwritten by merge:"):
+		case gitclient.WouldOverwrite(line):
 			listing = true
 		case listing && strings.HasPrefix(line, "\t"):
 			paths = append(paths, strings.TrimSpace(line))

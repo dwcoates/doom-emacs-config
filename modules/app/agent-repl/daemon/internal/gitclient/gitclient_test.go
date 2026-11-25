@@ -935,6 +935,107 @@ func TestFastForwardRefusalPropagatesTheGitEvidence(t *testing.T) {
 	}
 }
 
+const (
+	trackedOverwrite   = "error: Your local changes to the following files would be overwritten by merge:\n\t.claude/skills/create-or-update-pr/SKILL.md\nPlease commit your changes or stash them before you merge.\nAborting\n"
+	untrackedOverwrite = "error: The following untracked working tree files would be overwritten by merge:\n\tnew.go\nPlease move or remove them before you merge.\nAborting\n"
+)
+
+func TestFastForwardRefusedOverLocalChangesPropagatesTheGitEvidence(t *testing.T) {
+	// Arrange: the main sync reads the paths from the refusal's stderr.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, trackedOverwrite))
+
+	// Act.
+	err := git.FastForward(context.Background(), "/target", "abc123")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || failure.ExitCode != 1 || failure.Stderr != trackedOverwrite {
+		t.Fatalf("FastForward error = %v (%T), want git's own refusal as a *gitclient.Error", err, err)
+	}
+}
+
+func TestFastForwardIsRecordedAtItsLevel(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture gitFixture
+		level   string
+		message string
+	}{
+		{name: "a refusal over tracked local changes", fixture: fails(1, trackedOverwrite), level: "info",
+			message: "git refused the fast-forward: local changes would be overwritten"},
+		{name: "a refusal over untracked files", fixture: fails(1, untrackedOverwrite), level: "info",
+			message: "git refused the fast-forward: local changes would be overwritten"},
+		{name: "any other failure", fixture: fails(128, "fatal: Not possible to fast-forward, aborting.\n"), level: "error",
+			message: "git exited nonzero"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, logs := newTestClient(t)
+			newFakeGit(t, tt.fixture)
+
+			// Act.
+			_ = git.FastForward(context.Background(), "/target", "abc123")
+
+			// Assert: the one record at its level, with the invocation's evidence.
+			rec, ok := dlog.FindRecord(logs.records(), dlog.RecordQuery{Level: tt.level, Operation: "daemon.gitclient.fast_forward", Message: tt.message})
+			if !ok {
+				t.Fatalf("no %s record %q: %+v", tt.level, tt.message, logs.records())
+			}
+			if rec.Context["dir"] != "/target" || rec.Context["stderr"] == nil {
+				t.Fatalf("record context %v lacks the invocation's evidence", rec.Context)
+			}
+			for _, r := range logs.records() {
+				if r.Level != tt.level && (r.Level == "warn" || r.Level == "error") {
+					t.Fatalf("also recorded %+v", r)
+				}
+			}
+		})
+	}
+}
+
+func TestASuccessfulFastForwardRecordsNothingAtWarnOrAbove(t *testing.T) {
+	// Arrange.
+	git, logs := newTestClient(t)
+	newFakeGit(t, ok("Updating 50957cfb1b..3c64061248\n"))
+
+	// Act.
+	if err := git.FastForward(context.Background(), "/target", "abc123"); err != nil {
+		t.Fatalf("FastForward: %v", err)
+	}
+
+	// Assert.
+	for _, r := range logs.records() {
+		if r.Level == "warn" || r.Level == "error" {
+			t.Fatalf("a fast-forward recorded %+v", r)
+		}
+	}
+}
+
+func TestWouldOverwrite(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{name: "tracked local changes", stderr: trackedOverwrite, want: true},
+		{name: "untracked files", stderr: untrackedOverwrite, want: true},
+		{name: "a branch that moved", stderr: "fatal: Not possible to fast-forward, aborting.\n", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := WouldOverwrite(tt.stderr)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("WouldOverwrite = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsAncestorAsksMergeBase(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)
