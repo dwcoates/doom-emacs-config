@@ -82,6 +82,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
+import { activityCell } from "./activity-cell.js";
 import { CHIP_PANELS, type FooterChipPanel, type FooterPanel } from "./expanded.js";
 import { statusCellWord, textLine } from "./parts.js";
 import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
@@ -178,8 +179,7 @@ export function drawClientDisconnectedStrip(
   word.textContent = substatus;
   row.appendChild(word);
 
-  const cell = document.createElement("div");
-  cell.className = "pfooter-cell pfooter-grow footer-activity";
+  const cell = activityCell();
   cell.appendChild(textLine("footer-activity-client-verdict", activity));
   cell.title = activity;
   row.appendChild(cell);

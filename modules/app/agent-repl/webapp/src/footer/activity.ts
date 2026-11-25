@@ -119,6 +119,7 @@ import {
   requireMessage,
   unreachableArm,
 } from "../rpc/strict.js";
+import { activityCell } from "./activity-cell.js";
 import type { TransientExpirySchedule } from "./expiry.js";
 import { withEditorNotice, type EditorNotice } from "./editor-notice.js";
 import { footerAgeSpan, footerClockSpan } from "./clock-span.js";
@@ -281,8 +282,7 @@ export function drawFooterStatusActivity(
   deps: ActivityDeps,
   path: string,
 ): HTMLElement {
-  const cell = document.createElement("div");
-  cell.className = "pfooter-cell pfooter-grow footer-activity";
+  const cell = activityCell();
   const drawn = drawTier(activityTier(activity, path), deps, path);
   cell.setAttribute("data-tier", drawn.tier);
   cell.setAttribute("data-arm", drawn.arm);

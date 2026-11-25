@@ -22,6 +22,7 @@ import type { Ticker } from "../clock.js";
 import type { HoverStamp } from "../feed/hover-stamp.js";
 import { createLogger } from "../log.js";
 import { formatDurationCeil, formatTickedElapsed } from "../duration.js";
+import { activityCell, replaceActivityCell } from "./activity-cell.js";
 import { footerClockSpan } from "./clock-span.js";
 
 const log = createLogger("webapp.footer.hover-stamp");
@@ -31,9 +32,6 @@ export const HOVER_STAMP_TIER = "hover";
 
 /** The kind the hover line's cell wears as its `data-arm`. */
 export const HOVER_STAMP_ARM = "hover-stamp";
-
-/** The class of the activity cell, which the hover line takes the place of. */
-const ACTIVITY_CELL_CLASS = "footer-activity";
 
 /**
  * STAMP's settled duration, "1m 30s", or null when it has none to state: it is
@@ -54,8 +52,7 @@ export function hoverDuration(stamp: HoverStamp): string | null {
 export function drawHoverStampActivity(stamp: HoverStamp, ticker: Ticker): HTMLElement {
   const { atMs, startedAtMs } = stamp;
   const duration = hoverDuration(stamp);
-  const cell = document.createElement("div");
-  cell.className = `pfooter-cell pfooter-grow ${ACTIVITY_CELL_CLASS}`;
+  const cell = activityCell();
   cell.setAttribute("data-tier", HOVER_STAMP_TIER);
   cell.setAttribute("data-arm", HOVER_STAMP_ARM);
   const line = document.createElement("span");
@@ -99,13 +96,7 @@ export function drawHoverStampActivity(stamp: HoverStamp, ticker: Ticker): HTMLE
  * draws exactly once. A strip with none, or with more than one, is a defect.
  */
 export function overlayHoverStamp(strip: HTMLElement, stamp: HoverStamp, ticker: Ticker): void {
-  const cells = [...strip.children].filter((cell) => cell.classList.contains(ACTIVITY_CELL_CLASS));
-  if (cells.length !== 1) {
-    log.error("the hovered bubble's stamp found no single activity cell to stand in", {
-      operation: "footer.hover-stamp.no-cell",
-      context: { cells: cells.length, label: stamp.label },
-    });
-    throw new Error(`footer: a strip drew ${String(cells.length)} activity cells, not one`);
-  }
-  cells[0].replaceWith(drawHoverStampActivity(stamp, ticker));
+  replaceActivityCell(strip, drawHoverStampActivity(stamp, ticker), "footer.hover-stamp.no-cell", {
+    label: stamp.label,
+  });
 }
