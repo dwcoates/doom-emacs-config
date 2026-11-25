@@ -367,6 +367,63 @@ func (o *orchestrator) NoteDeployEnding(ctx context.Context, at time.Time, endin
 	return errors.Join(errs...)
 }
 
+// NoteTakenOverDeployEnding records ENDING on every check the deploy this
+// daemon took over owes, and makes the production spans it ended due. The
+// deploy began in the predecessor, so its start is not in memory: it is read
+// from the check owed, whose ending is not yet recorded. A repository that
+// owes no such check is recorded and left. A crash is never taken over (the
+// crashed daemon's successor owes it as a deploy of its own), so a crash
+// here is recorded at ERROR and panics. Each failure is recorded at ERROR
+// and answered; the check is told without its ending.
+func (o *orchestrator) NoteTakenOverDeployEnding(ctx context.Context, ending wsm.DeployEnding) error {
+	if ending == wsm.DaemonCrashed {
+		o.deps.Log.Global().Error(opMediation, "a crash was taken over as a deploy's ending; a crash is never taken over", dlog.Context{"ending": string(ending)})
+		panic("merge: a crash was taken over as a deploy's ending")
+	}
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, dlog.Context{"taken_over": true})
+		return nil
+	}
+	defer leave()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(life, cancel)()
+	queues, err := o.checkedQueues(ctx, opMediation)
+	if err != nil {
+		o.mediationFailed(ctx, nil, logsite.Msg("could not list the repositories a taken-over deploy's ending is recorded in; its checks are told without it"), err)
+		return err
+	}
+	var errs []error
+	for _, q := range queues {
+		fields := dlog.Context{"repo": string(q.key), "ending": string(ending)}
+		start, owed, err := o.deps.DB.OwedMediationStart(ctx, q.key)
+		if err != nil {
+			errs = append(errs, err)
+			o.deps.Log.Global().Error(opMediation, "could not read the start of the check the taken-over deploy owes; the intake is told without its ending", withField(fields, "error", err.Error()))
+			continue
+		}
+		if !owed {
+			o.deps.Log.Global().Info(opMediation, "no check awaited the taken-over deploy's ending", fields)
+			continue
+		}
+		fields = withField(fields, "deploy_started", start.UTC().Format(time.RFC3339Nano))
+		recorded, err := o.deps.DB.RecordMediationEnding(ctx, q.key, start, ending)
+		if err != nil {
+			errs = append(errs, err)
+			o.deps.Log.Global().Error(opMediation, "could not record how the taken-over deploy ended on its check; the intake is told without it", withField(fields, "error", err.Error()))
+			continue
+		}
+		if recorded {
+			o.deps.Log.Global().Info(opMediation, "recorded how the taken-over deploy ended on its check", fields)
+		}
+	}
+	if err := o.noteTakenOverProductionEnding(ctx, ending); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
 // ReleaseUnchangedDeploy implements Orchestrator: the deploy that began AT
 // changed nothing, every component up to date, so the check it owes is
 // released unchecked and its queue advances (2026-11-14: a deploy that

@@ -153,6 +153,22 @@ func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) er
 // production span it owed: a crash closes no span, so its span is dropped
 // and runs on; any other ending makes the span due.
 func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, ending wsm.DeployEnding) error {
+	return o.endProductionSpans(ctx, at, ending, dlog.Context{"deploy_started": at.UTC().Format(time.RFC3339Nano)})
+}
+
+// noteTakenOverProductionEnding makes due, in every repository that checks
+// its production, the spans the deploy this daemon took over ended. Its
+// start is not in memory, and none is needed: a span is made due by the
+// ending alone. A crash is never taken over (its successor owes it as a
+// deploy of its own), so ENDING is never DaemonCrashed.
+func (o *orchestrator) noteTakenOverProductionEnding(ctx context.Context, ending wsm.DeployEnding) error {
+	return o.endProductionSpans(ctx, time.Time{}, ending, dlog.Context{"taken_over": true})
+}
+
+// endProductionSpans is noteProductionEnding and
+// noteTakenOverProductionEnding: DEPLOY names the deploy that ended in each
+// record, and AT, its start, names the span a crash drops.
+func (o *orchestrator) endProductionSpans(ctx context.Context, at time.Time, ending wsm.DeployEnding, deploy dlog.Context) error {
 	queues, err := o.productionQueues(ctx, opProduction)
 	if err != nil {
 		o.mediationFailedUnder(ctx, opProduction, nil, logsite.Msg("could not list the repositories a deploy's ending makes a production check due in"), err)
@@ -160,7 +176,7 @@ func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, e
 	}
 	var errs []error
 	for _, q := range queues {
-		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano), "ending": string(ending)}
+		fields := withField(withField(deploy, "repo", string(q.key)), "ending", string(ending))
 		if ending == wsm.DaemonCrashed {
 			dropped, err := o.deps.DB.DropProductionCheck(ctx, q.key, at)
 			if err != nil {

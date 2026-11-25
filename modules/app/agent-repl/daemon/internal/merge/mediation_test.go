@@ -2115,3 +2115,109 @@ func TestHeldByWordsNamesEachHolder(t *testing.T) {
 		})
 	}
 }
+
+func TestATakenOverDeploysEndingIsRecordedOnItsOwedCheck(t *testing.T) {
+	cases := []struct {
+		name string
+		// owes is whether the repository owes the taken-over deploy's check.
+		owes bool
+		// ended is the ending already recorded on that check, if any.
+		ended       wsm.DeployEnding
+		wantEnding  wsm.DeployEnding
+		wantMessage string
+	}{
+		{name: "the owed check takes the ending, named by its start", owes: true, wantEnding: wsm.DeployStoppedShort,
+			wantMessage: "recorded how the taken-over deploy ended on its check"},
+		{name: "a repository that owes no check records nothing", wantMessage: "no check awaited the taken-over deploy's ending"},
+		{name: "a check whose deploy already ended keeps its ending", owes: true, ended: wsm.DeployFinished, wantEnding: wsm.DeployFinished,
+			wantMessage: "no check awaited the taken-over deploy's ending"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			if tc.owes {
+				owe(t, h)
+			}
+			if tc.ended != "" {
+				if err := h.o.NoteDeployEnding(context.Background(), deployStarted, tc.ended); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			err := h.o.NoteTakenOverDeployEnding(context.Background(), wsm.DeployStoppedShort)
+
+			// Assert
+			m := owedCheck(t, h)
+			if err != nil || (m == nil) == tc.owes || (m != nil && m.DeployEnding != tc.wantEnding) {
+				t.Fatalf("NoteTakenOverDeployEnding = %v, check %+v; want ending %q", err, m, tc.wantEnding)
+			}
+			rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: tc.wantMessage})
+			if !ok {
+				t.Fatalf("records = %v, want %q at info", h.logs.Records(), tc.wantMessage)
+			}
+			if tc.owes && tc.ended == "" && rec.Context["deploy_started"] != deployStarted.Format(time.RFC3339Nano) {
+				t.Fatalf("record context = %v, want deploy_started %s", rec.Context, deployStarted.Format(time.RFC3339Nano))
+			}
+		})
+	}
+}
+
+func TestATakenOverDeployMakesItsProductionChecksDue(t *testing.T) {
+	// Arrange
+	h := production(t)
+	owe(t, h)
+
+	// Act
+	err := h.o.NoteTakenOverDeployEnding(context.Background(), wsm.DeployFinished)
+
+	// Assert
+	c, readErr := h.db.ProductionCheckOf(context.Background(), mediationKey(h))
+	if err != nil || readErr != nil || c == nil || !c.Since.Equal(priorDeploy) || !c.Until.Equal(deployStarted) {
+		t.Fatalf("NoteTakenOverDeployEnding = %v, ProductionCheckOf = (%+v, %v); want the span %v to %v due", err, c, readErr, priorDeploy, deployStarted)
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opProduction, Message: "the deploy ended; its production checks are due"})
+	if !ok || rec.Context["taken_over"] != true {
+		t.Fatalf("records = %v, want the due spans recorded as taken over", h.logs.Records())
+	}
+}
+
+func TestATakenOverDeploysStartThatCannotBeReadIsAnsweredAndRecorded(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.db.mu.Lock()
+	h.db.owedStartErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.NoteTakenOverDeployEnding(context.Background(), wsm.DeployFinished)
+
+	// Assert
+	if err == nil {
+		t.Fatal("NoteTakenOverDeployEnding = nil, want the failure answered")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not read the start of the check the taken-over deploy owes; the intake is told without its ending"}); !ok {
+		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
+	}
+}
+
+func TestATakenOverCrashIsRecordedAndPanics(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("NoteTakenOverDeployEnding(DaemonCrashed) returned; want a panic")
+		}
+		if _, ok := h.recordFor("error", opMediation); !ok {
+			t.Fatalf("records = %v, want the violation at ERROR", h.logs.Records())
+		}
+	}()
+
+	// Act
+	_ = h.o.NoteTakenOverDeployEnding(context.Background(), wsm.DaemonCrashed)
+}

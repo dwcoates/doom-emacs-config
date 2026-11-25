@@ -131,6 +131,8 @@ type fakeDB struct {
 	landingOpened time.Time
 	// endingErr fails RecordMediationEnding.
 	endingErr error
+	// owedStartErr fails OwedMediationStart.
+	owedStartErr error
 	// deployingRecordErr fails RecordDeployingMerge, deployingReadErr
 	// DeployingMergeOf, and deployingEndErr EndDeployingMerge.
 	deployingRecordErr error
@@ -703,6 +705,16 @@ func (f *fakeDB) RecordMediationEnding(ctx context.Context, repo wsm.RepoKey, ow
 		return false, err
 	}
 	return f.checks.RecordMediationEnding(ctx, repo, owed, ending)
+}
+
+func (f *fakeDB) OwedMediationStart(ctx context.Context, repo wsm.RepoKey) (time.Time, bool, error) {
+	f.mu.Lock()
+	err := f.owedStartErr
+	f.mu.Unlock()
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return f.checks.OwedMediationStart(ctx, repo)
 }
 
 // aFixerTurn is a fixer's brief for a dispatch a test records by hand.
