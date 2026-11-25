@@ -222,7 +222,7 @@ func TestLandingTargetPassesOverWithheldTabs(t *testing.T) {
 		name     string
 		withheld wsm.Withholding
 	}{
-		{name: "a hidden ancestor is no landing", withheld: wsm.WithheldBacklogged},
+		{name: "a backlogged ancestor is no landing", withheld: wsm.WithheldBacklogged},
 		{name: "a collapsed ancestor is no landing", withheld: wsm.WithheldCollapsed},
 	}
 	for _, tt := range tests {
