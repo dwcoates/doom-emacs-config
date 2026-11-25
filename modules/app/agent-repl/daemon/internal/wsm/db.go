@@ -1154,9 +1154,20 @@ type DB interface {
 	QueuedCreates(ctx context.Context) ([]QueuedCreate, error)
 	// DeleteQueuedCreate releases the held create of a request key.
 	DeleteQueuedCreate(ctx context.Context, key string) error
-	// SetName records a workspace's new name, leaving its branch and
-	// directory as they are (rename.go). An empty name is refused.
+	// SetName records a workspace's new name and moves nothing (Rename with
+	// no move).
 	SetName(ctx context.Context, id WorkspaceID, name string) error
+	// Rename records a workspace's new name and, when a target is set, owes
+	// the move of its branch and directory there, in one transaction.
+	Rename(ctx context.Context, id WorkspaceID, name string, to *MoveTarget) error
+	// OwedMoveOf answers the move owed a workspace, and whether one is.
+	OwedMoveOf(ctx context.Context, id WorkspaceID) (OwedMove, bool, error)
+	// OwedMoves answers every owed move.
+	OwedMoves(ctx context.Context) ([]OwedMove, error)
+	// MarkMoving records that a workspace's owed move stood its shim down.
+	MarkMoving(ctx context.Context, id WorkspaceID) (bool, error)
+	// CompleteMove records that a workspace's owed move ran.
+	CompleteMove(ctx context.Context, id WorkspaceID) (OwedMove, bool, error)
 	// SetOneShot marks a workspace's creation a one-shot or unmarks it; a
 	// workspace with no creation job is ErrNotFound (standings.go).
 	SetOneShot(ctx context.Context, id WorkspaceID, oneShot bool) error

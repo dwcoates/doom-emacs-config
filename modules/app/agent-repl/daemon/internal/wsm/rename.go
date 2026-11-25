@@ -10,26 +10,12 @@ import (
 )
 
 // SetName records the workspace's new name (agentrepl.v1.SetWorkspaceName),
-// and owes it to the workspace's agent in the same transaction.
-// It writes the name column only: the branch and the worktree directory keep
-// the names the workspace was created with, so after a rename the name and
-// the branch may differ. Whether the name is legal and free is the caller's
-// check (workspace.verbs.SetName), made under the naming lock. An empty name
-// is a defect in the caller and is refused rather than stored, since every
-// reader draws the name and the roster refuses a blank one.
+// and owes it to the workspace's agent in the same transaction. It moves
+// nothing: it is Rename with no move, for the renames whose branch and
+// directory are not the workspace's to move (a repository's main checkout, a
+// zettel thread, a main workspace named after its repository).
 func (s *store) SetName(ctx context.Context, id WorkspaceID, name string) error {
-	const op = "daemon.wsm.set_name"
-	if name == "" {
-		err := fmt.Errorf("wsm: name of %s: %w", id, errEmptyName)
-		s.log.Error(op, "refused an empty workspace name", withError(dlog.Context{"workspace": string(id)}, err))
-		return err
-	}
-	return s.write(ctx, op, dlog.Context{"workspace": string(id), "name": name}, func(ctx context.Context, tx *sql.Tx) error {
-		if err := updateWorkspaceColumns(ctx, tx, id, workspaceColumn{name: "name", value: name}); err != nil {
-			return err
-		}
-		return oweRenameTx(ctx, tx, id, name)
-	})
+	return s.rename(ctx, "daemon.wsm.set_name", id, name, nil)
 }
 
 // owedRenamesDDL is the layout-146 addition: the name a workspace's agent has
