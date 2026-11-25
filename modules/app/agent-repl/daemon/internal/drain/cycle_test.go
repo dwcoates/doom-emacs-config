@@ -921,6 +921,91 @@ func TestAMergeQueuedParkIsNotTaken(t *testing.T) {
 	}
 }
 
+// TestAPendingMergeQueuedParkAndAnUnscopedAsk covers a sync merge's park
+// pending under a busy session while another asker (the shim hold's idle
+// park) asks too: neither ask is lost to the other, and the merge's park,
+// which outranks it, is the one taken while its entry waits.
+func TestAPendingMergeQueuedParkAndAnUnscopedAsk(t *testing.T) {
+	tests := []struct {
+		name string
+		// ask puts both asks in, under the busy session, in their order.
+		ask func(h *harness, ws ids.WorkspaceID, m queuedMerge)
+		// leave takes the merge out of line before the session falls free.
+		leave    bool
+		wantLife shimlife.StandDownReason
+		wantOp   string
+		wantDone string
+	}{
+		{
+			name: "an idle ask after the merge's park leaves the merge's park in force",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.mergeQueuedDown(ws, m)
+				h.c.IdleDown(ws, beatAfter)
+			},
+			wantLife: shimlife.StandDownMergeQueued, wantOp: opMergeQueued, wantDone: mergeQueuedReason.done.Template(),
+		},
+		{
+			name: "a merge's park after an idle ask takes its place",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.c.IdleDown(ws, beatAfter)
+				h.mergeQueuedDown(ws, m)
+			},
+			wantLife: shimlife.StandDownMergeQueued, wantOp: opMergeQueued, wantDone: mergeQueuedReason.done.Template(),
+		},
+		{
+			name: "the idle ask is taken once the merge left its line",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.mergeQueuedDown(ws, m)
+				h.c.IdleDown(ws, beatAfter)
+			},
+			leave:    true,
+			wantLife: shimlife.StandDownIdle, wantOp: opIdlePark, wantDone: idleParkReason.done.Template(),
+		},
+		{
+			name: "an idle ask outranked before the merge's park is taken once the merge left its line",
+			ask: func(h *harness, ws ids.WorkspaceID, m queuedMerge) {
+				h.c.IdleDown(ws, beatAfter)
+				h.mergeQueuedDown(ws, m)
+			},
+			leave:    true,
+			wantLife: shimlife.StandDownIdle, wantOp: opIdlePark, wantDone: idleParkReason.done.Template(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			m := queuedAt(t, h, ws, instant)
+			h.freeness.SetFree(ws, false)
+			tt.ask(h, ws, m)
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none under the turn", killed)
+			}
+			if tt.leave {
+				if err := h.db.RemoveMergeQueueEntry(context.Background(), m.repo, ws, "user_dequeue"); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+			}
+			h.freeness.SetFree(ws, true)
+
+			// Act
+			h.c.RetryWithheld(ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 1 || killed[0].Life != tt.wantLife {
+				t.Fatalf("kills = %+v, want one %v park", killed, tt.wantLife)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: tt.wantOp, Message: tt.wantDone}); !ok {
+				t.Fatalf("records = %+v, want %q under %s", records(h.log, tt.wantOp), tt.wantDone, tt.wantOp)
+			}
+			if h.cyclePending(ws) {
+				t.Fatal("a park taken stayed pending")
+			}
+		})
+	}
+}
+
 // mergeParkErrDB fails the one read a sync merge's park makes that READ
 // names.
 type mergeParkErrDB struct {
