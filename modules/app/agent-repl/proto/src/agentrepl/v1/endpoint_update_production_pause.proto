@@ -1,0 +1,102 @@
+// endpoint_update_production_pause.proto — UpdateProductionPause: pause or
+// resume ONE REPOSITORY's production checks
+// (repoconfig.v1.LifecycleConfig.production_checks). RUNTIME section.
+// `agent-repld production-mediation pause|resume -repository here|DIR` asks
+// it, and so does the topbar's production-checks chip
+// (frontend.v1.TopbarProductionChecks) on a click.
+//
+// THE PAUSE IS THE DAEMON'S, KEPT PER REPOSITORY. DURABLE: it survives a
+// daemon restart and a handover until it is resumed.
+//
+// PAUSING STOPS THE PRODUCTION MEDIATOR AT ONCE. The mediator's running turn
+// is interrupted, a span brief still waiting in its prompt queue is retired
+// unsent, and every span owed and not yet decided is dropped: none of them is
+// ever reviewed. While the pause stands the daemon tells the mediator no
+// span, refuses its decisions and folds (UpdateProductionMediationError
+// .paused), and opens every prompt that reaches it with a note saying
+// production mediation is paused, so it dispatches nothing and does not work
+// around the pause. Its open children are untouched: each lands or closes as
+// it would.
+//
+// RESUMING STARTS THE CHECKS AGAIN AT THE FIRST LANDING AFTER IT. A span that
+// ends during the pause is never reviewed, and neither is the one the first
+// landing after the resume closes, since it began during the pause: the first
+// span told after a resume runs from that landing to the next.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// What is asked of one repository's production checks.
+message UpdateProductionPauseRequest {
+  // The repository whose production checks are paused or resumed. REQUIRED.
+  workspace.v1.RepositoryRef repository = 1;
+  // THE ARM IS THE ACTION. REQUIRED.
+  oneof action {
+    // Pause the repository's production checks.
+    UpdateProductionPausePause pause = 2;
+    // Resume them.
+    UpdateProductionPauseResume resume = 3;
+  }
+}
+// Pause. No fields: the pause covers the request's repository.
+message UpdateProductionPausePause {}
+// Resume. No fields.
+message UpdateProductionPauseResume {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateProductionPauseResponse {
+  oneof result {
+    UpdateProductionPauseSuccess success = 1;
+    UpdateProductionPauseError error = 2;
+  }
+}
+// The action is applied.
+message UpdateProductionPauseSuccess {
+  // THE ARM IS WHAT WAS DONE.
+  oneof applied {
+    // The repository's production checks are paused.
+    UpdateProductionPauseSuccessPaused paused = 1;
+    // They are running again, from the first landing after now.
+    UpdateProductionPauseSuccessResumed resumed = 2;
+  }
+}
+// Paused, and what the pause stopped.
+message UpdateProductionPauseSuccessPaused {
+  // The production mediator whose running turn the pause interrupted. UNSET
+  // when it was running no turn, or the repository has no production mediator
+  // yet.
+  optional workspace.v1.WorkspaceRef interrupted = 1;
+  // How many spans owed and not yet decided were dropped, never to be
+  // reviewed. A span the mediator was being told of is among them.
+  uint32 dropped_spans = 2;
+}
+// Resumed. No fields: the next landing starts the checks again.
+message UpdateProductionPauseSuccessResumed {}
+
+// Why the action was refused. Nothing changed.
+message UpdateProductionPauseError {
+  oneof cause {
+    // `pause` while the repository's production checks are already paused.
+    UpdateProductionPauseAlreadyPaused already_paused = 1;
+    // `resume` while they are not paused.
+    UpdateProductionPauseNotPaused not_paused = 2;
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    UpdateProductionPauseUnknownRepository unknown_repository = 3;
+    // The repository's lifecycle config turns no production checks on, so
+    // there is nothing to pause or resume.
+    UpdateProductionPauseChecksOff checks_off = 4;
+  }
+}
+// Already paused. Empty: the echoed ref is the only identity involved.
+message UpdateProductionPauseAlreadyPaused {}
+// Not paused. Empty.
+message UpdateProductionPauseNotPaused {}
+// Unknown repository. Empty: the echoed ref is the only identity involved.
+message UpdateProductionPauseUnknownRepository {}
+// The repository checks no production. Empty.
+message UpdateProductionPauseChecksOff {}

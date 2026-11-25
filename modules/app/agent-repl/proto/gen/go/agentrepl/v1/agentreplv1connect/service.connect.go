@@ -292,6 +292,9 @@ const (
 	// AgentReplUpdateDeployHoldProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateDeployHold RPC.
 	AgentReplUpdateDeployHoldProcedure = "/agentrepl.v1.AgentRepl/UpdateDeployHold"
+	// AgentReplUpdateProductionPauseProcedure is the fully-qualified name of the AgentRepl's
+	// UpdateProductionPause RPC.
+	AgentReplUpdateProductionPauseProcedure = "/agentrepl.v1.AgentRepl/UpdateProductionPause"
 	// AgentReplRollOutLandingProcedure is the fully-qualified name of the AgentRepl's RollOutLanding
 	// RPC.
 	AgentReplRollOutLandingProcedure = "/agentrepl.v1.AgentRepl/RollOutLanding"
@@ -624,6 +627,7 @@ var (
 	agentReplDeployMethodDescriptor                             = agentReplServiceDescriptor.Methods().ByName("Deploy")
 	agentReplUpdateMergeQueueMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
 	agentReplUpdateDeployHoldMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("UpdateDeployHold")
+	agentReplUpdateProductionPauseMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("UpdateProductionPause")
 	agentReplRollOutLandingMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("RollOutLanding")
 	agentReplPruneStorageMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("PruneStorage")
 	agentReplReapWorktreesMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("ReapWorktrees")
@@ -1003,6 +1007,10 @@ type AgentReplClient interface {
 	// Hold or release one repository's deploy stage; releasing runs a skipped
 	// script deploy hook once. See endpoint_update_deploy_hold.proto.
 	UpdateDeployHold(context.Context, *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error)
+	// Pause or resume one repository's production checks; pausing interrupts
+	// its production mediator at once. See
+	// endpoint_update_production_pause.proto.
+	UpdateProductionPause(context.Context, *connect.Request[v1.UpdateProductionPauseRequest]) (*connect.Response[v1.UpdateProductionPauseResponse], error)
 	// agent-repl's deploy hook asks for the rollout of what a deploy landed. See
 	// endpoint_roll_out_landing.proto.
 	RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error)
@@ -1868,6 +1876,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdateDeployHoldMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		updateProductionPause: connect.NewClient[v1.UpdateProductionPauseRequest, v1.UpdateProductionPauseResponse](
+			httpClient,
+			baseURL+AgentReplUpdateProductionPauseProcedure,
+			connect.WithSchema(agentReplUpdateProductionPauseMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		rollOutLanding: connect.NewClient[v1.RollOutLandingRequest, v1.RollOutLandingResponse](
 			httpClient,
 			baseURL+AgentReplRollOutLandingProcedure,
@@ -2494,6 +2508,7 @@ type agentReplClient struct {
 	deploy                             *connect.Client[v1.DeployRequest, v1.DeployResponse]
 	updateMergeQueue                   *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
 	updateDeployHold                   *connect.Client[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse]
+	updateProductionPause              *connect.Client[v1.UpdateProductionPauseRequest, v1.UpdateProductionPauseResponse]
 	rollOutLanding                     *connect.Client[v1.RollOutLandingRequest, v1.RollOutLandingResponse]
 	pruneStorage                       *connect.Client[v1.PruneStorageRequest, v1.PruneStorageResponse]
 	reapWorktrees                      *connect.Client[v1.ReapWorktreesRequest, v1.ReapWorktreesResponse]
@@ -3039,6 +3054,11 @@ func (c *agentReplClient) UpdateMergeQueue(ctx context.Context, req *connect.Req
 // UpdateDeployHold calls agentrepl.v1.AgentRepl.UpdateDeployHold.
 func (c *agentReplClient) UpdateDeployHold(ctx context.Context, req *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error) {
 	return c.updateDeployHold.CallUnary(ctx, req)
+}
+
+// UpdateProductionPause calls agentrepl.v1.AgentRepl.UpdateProductionPause.
+func (c *agentReplClient) UpdateProductionPause(ctx context.Context, req *connect.Request[v1.UpdateProductionPauseRequest]) (*connect.Response[v1.UpdateProductionPauseResponse], error) {
+	return c.updateProductionPause.CallUnary(ctx, req)
 }
 
 // RollOutLanding calls agentrepl.v1.AgentRepl.RollOutLanding.
@@ -3759,6 +3779,10 @@ type AgentReplHandler interface {
 	// Hold or release one repository's deploy stage; releasing runs a skipped
 	// script deploy hook once. See endpoint_update_deploy_hold.proto.
 	UpdateDeployHold(context.Context, *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error)
+	// Pause or resume one repository's production checks; pausing interrupts
+	// its production mediator at once. See
+	// endpoint_update_production_pause.proto.
+	UpdateProductionPause(context.Context, *connect.Request[v1.UpdateProductionPauseRequest]) (*connect.Response[v1.UpdateProductionPauseResponse], error)
 	// agent-repl's deploy hook asks for the rollout of what a deploy landed. See
 	// endpoint_roll_out_landing.proto.
 	RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error)
@@ -4620,6 +4644,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdateDeployHoldMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplUpdateProductionPauseHandler := connect.NewUnaryHandler(
+		AgentReplUpdateProductionPauseProcedure,
+		svc.UpdateProductionPause,
+		connect.WithSchema(agentReplUpdateProductionPauseMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplRollOutLandingHandler := connect.NewUnaryHandler(
 		AgentReplRollOutLandingProcedure,
 		svc.RollOutLanding,
@@ -5335,6 +5365,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUpdateMergeQueueHandler.ServeHTTP(w, r)
 		case AgentReplUpdateDeployHoldProcedure:
 			agentReplUpdateDeployHoldHandler.ServeHTTP(w, r)
+		case AgentReplUpdateProductionPauseProcedure:
+			agentReplUpdateProductionPauseHandler.ServeHTTP(w, r)
 		case AgentReplRollOutLandingProcedure:
 			agentReplRollOutLandingHandler.ServeHTTP(w, r)
 		case AgentReplPruneStorageProcedure:
@@ -5880,6 +5912,10 @@ func (UnimplementedAgentReplHandler) UpdateMergeQueue(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) UpdateDeployHold(context.Context, *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateDeployHold is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdateProductionPause(context.Context, *connect.Request[v1.UpdateProductionPauseRequest]) (*connect.Response[v1.UpdateProductionPauseResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateProductionPause is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error) {
