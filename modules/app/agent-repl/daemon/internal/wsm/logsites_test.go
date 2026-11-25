@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"reflect"
 	"testing"
 	"time"
@@ -272,6 +273,71 @@ func TestPruneLogSiteDeploysKeepsTheMostRecent(t *testing.T) {
 
 			// Assert
 			deploys, _ := s.LogSiteDeploys(context.Background())
+			if err != nil || removed != tt.wantRemoved || !reflect.DeepEqual(deploys, tt.wantDeploys) {
+				t.Fatalf("PruneLogSiteDeploys = (%d, %v), deploys %v; want %d removed, deploys %v", removed, err, deploys, tt.wantRemoved, tt.wantDeploys)
+			}
+			for _, r := range allLogSiteRows(t, s) {
+				if r.Deploy.Before(deploys[0]) {
+					t.Fatalf("row %+v outlived its deploy", r)
+				}
+			}
+		})
+	}
+}
+
+func TestPruneLogSiteDeploysKeepsWhatAnUndecidedSpanNeeds(t *testing.T) {
+	a, b, c, d := logSiteHour, logSiteHour.Add(time.Hour), logSiteHour.Add(2*time.Hour), logSiteHour.Add(3*time.Hour)
+	spanSince := a.Add(30 * time.Minute)
+	at := func(t time.Time) time.Time { return fromNanos(nanos(t)) }
+	tests := []struct {
+		name string
+		// span is whether a production span from spanSince is recorded, and
+		// decided whether it is decided.
+		span        bool
+		decided     bool
+		wantDeploys []time.Time
+		wantRemoved int64
+	}{
+		{name: "an undecided span keeps the deploy running at its start and every later one", span: true,
+			wantDeploys: []time.Time{at(a), at(b), at(c), at(d)}, wantRemoved: 1},
+		{name: "a decided span keeps nothing past the kept deploys", span: true, decided: true,
+			wantDeploys: []time.Time{at(b), at(c), at(d)}, wantRemoved: 2},
+		{name: "no span prunes to the kept deploys",
+			wantDeploys: []time.Time{at(b), at(c), at(d)}, wantRemoved: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx := context.Background()
+			s, _ := testStore(t)
+			tally(t, s, LogSiteChunk{File: "f0", From: 0, To: 1, Counts: []LogSiteCount{logSiteCount(fromNanos(0), "aaaaaaaaaaaa", "info", a.Add(-time.Minute), "m")}})
+			for i, at := range []time.Time{a, b, c, d} {
+				if _, err := s.RecordLogSiteDeploy(ctx, fixedNow(at)); err != nil {
+					t.Fatalf("RecordLogSiteDeploy: %v", err)
+				}
+				tally(t, s, LogSiteChunk{File: "f" + string(rune('1'+i)), From: 0, To: 1, Counts: []LogSiteCount{logSiteCount(at, "bbbbbbbbbbbb", "info", at, "m")}})
+			}
+			if tt.span {
+				var decidedAt any
+				decision := ""
+				if tt.decided {
+					decidedAt, decision = nanos(d), string(ProductionNothingToDo)
+				}
+				err := s.write(ctx, "test.production_span", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `INSERT INTO production_checks (repo_key, span_since, span_until, deploy_at, decided_at, decision) VALUES ('repo', ?, ?, ?, ?, ?)`,
+						nanos(spanSince), nanos(b), nanos(b), decidedAt, decision)
+					return err
+				})
+				if err != nil {
+					t.Fatalf("recording the span: %v", err)
+				}
+			}
+
+			// Act
+			removed, err := s.PruneLogSiteDeploys(ctx, 3)
+
+			// Assert
+			deploys, _ := s.LogSiteDeploys(ctx)
 			if err != nil || removed != tt.wantRemoved || !reflect.DeepEqual(deploys, tt.wantDeploys) {
 				t.Fatalf("PruneLogSiteDeploys = (%d, %v), deploys %v; want %d removed, deploys %v", removed, err, deploys, tt.wantRemoved, tt.wantDeploys)
 			}

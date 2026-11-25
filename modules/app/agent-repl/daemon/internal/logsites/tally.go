@@ -63,7 +63,9 @@ const (
 	// KeepDeploys is how many deploys of rows the store keeps: the deploy
 	// serving now and the two before it, so a check can compare what fired
 	// since the last deploy with the deploy before (ListLogSites keeps at
-	// least three).
+	// least three). Rows an undecided production span needs are never
+	// pruned, however many deploys ago its span began
+	// (wsm.DB.PruneLogSiteDeploys).
 	KeepDeploys = 3
 	// ChunkBytes bounds how much of one file one transaction tallies, so a
 	// first read of a large file never holds the store's one connection for

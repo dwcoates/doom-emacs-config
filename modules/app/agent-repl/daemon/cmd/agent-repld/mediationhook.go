@@ -171,8 +171,10 @@ func (h *mediationHook) turnSpent(ws ids.WorkspaceID, spent footer.TurnSpent) {
 // A deploy that began here and changed nothing (UNCHANGED) first releases
 // the checks it owed (merge.Orchestrator.ReleaseUnchangedDeploy): there is
 // nothing new for an intake to read. A deploy that ended here without
-// beginning here (one a successor took over) never changed nothing: it
-// moved the daemon.
+// beginning here is one this daemon took over from its predecessor: it
+// never changed nothing, since it moved the daemon, and this successor is
+// the one that sees it end, so it records that ending, its start read from
+// the check owed (merge.Orchestrator.NoteTakenOverDeployEnding).
 func (h *mediationHook) ended(ending deployprogress.Ending) {
 	unchanged := ending == deployprogress.EndedUnchanged
 	h.mu.Lock()
@@ -183,6 +185,7 @@ func (h *mediationHook) ended(ending deployprogress.Ending) {
 	if o == nil {
 		return
 	}
+	takenOver := owed.IsZero() && !unchanged
 	if unchanged && owed.IsZero() {
 		h.log.Error(opMediationHook, "a deploy that changed nothing ended without having begun here; its check, if any, is left owed", nil)
 		unchanged = false
@@ -190,11 +193,14 @@ func (h *mediationHook) ended(ending deployprogress.Ending) {
 	inflight.Go(func() {
 		// THE ENDING IS RECORDED BEFORE THE ROUND, so the intake is told
 		// whether the deploy finished or stopped short (owner ruling,
-		// 2026-11-17). A deploy that ended here without beginning here has
-		// no start to name its check by; its ending is the successor's.
-		if !owed.IsZero() {
-			// An ending that cannot be recorded is recorded by the orchestrator.
+		// 2026-11-17). A deploy this daemon took over began in its
+		// predecessor; its ending is recorded here, by the check it owes.
+		// An ending that cannot be recorded is recorded by the orchestrator.
+		switch {
+		case !owed.IsZero():
 			_ = o.NoteDeployEnding(h.ctx, owed, wsmEnding(ending))
+		case takenOver:
+			_ = o.NoteTakenOverDeployEnding(h.ctx, wsmEnding(ending))
 		}
 		if unchanged {
 			// A check that cannot be released is recorded by the orchestrator.

@@ -44,6 +44,7 @@ import (
 	"agent-repld/internal/intakegate"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/wsm"
 )
@@ -293,13 +294,13 @@ func causeOf(err error, upstream string) *agentreplv1.MainSyncFailureCause {
 
 // overwrittenPaths reads the paths git names when it refuses to overwrite
 // local changes or untracked files: the tab-indented lines after its
-// "would be overwritten" heading.
+// "would be overwritten" heading (gitclient.WouldOverwrite).
 func overwrittenPaths(stderr string) []string {
 	var paths []string
 	listing := false
 	for _, line := range strings.Split(stderr, "\n") {
 		switch {
-		case strings.Contains(line, "would be overwritten by merge:"):
+		case gitclient.WouldOverwrite(line):
 			listing = true
 		case listing && strings.HasPrefix(line, "\t"):
 			paths = append(paths, strings.TrimSpace(line))
@@ -354,6 +355,14 @@ func (s *Syncer) tell(ctx context.Context, prompts prompthandler.Submitter, main
 		s.deps.Log.Error(opSync, "could not mint the repair prompt's idempotency key; the main workspace is told on a later sweep", dlog.WithCause(fields, err))
 		return
 	case briefprompt.StepSubmit:
+		if errors.Is(err, promptqueue.ErrColdGate) {
+			// The cold gate is the user's to answer and the daemon never
+			// passes it, so a refusal at it is no fault: nothing is recorded
+			// as told, and the first sweep after the user answers tells it.
+			fields["gate"] = coldGateDetail(err)
+			s.deps.Log.Info(opSync, "the main workspace is parked at its cold gate; the repair waits for the user to answer the gate", fields)
+			return
+		}
 		s.deps.Log.Error(opSync, "could not submit the repair prompt to the main workspace; it is told on a later sweep", dlog.WithCause(fields, err))
 		return
 	}
@@ -363,6 +372,16 @@ func (s *Syncer) tell(ctx context.Context, prompts prompthandler.Submitter, main
 		return
 	}
 	s.deps.Log.Info(opSync, "the main checkout could not be fast-forwarded; asked its workspace to repair it", fields)
+}
+
+// coldGateDetail is the gate's own sentence a cold-gate refusal carries, or
+// the refusal's text when it carries none.
+func coldGateDetail(err error) string {
+	var refusal *promptqueue.ColdGateRefusal
+	if errors.As(err, &refusal) && refusal.Detail != "" {
+		return refusal.Detail
+	}
+	return err.Error()
 }
 
 // briefValues are the repair brief's placeholders.

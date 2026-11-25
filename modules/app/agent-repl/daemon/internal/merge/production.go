@@ -153,6 +153,22 @@ func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) er
 // production span it owed: a crash closes no span, so its span is dropped
 // and runs on; any other ending makes the span due.
 func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, ending wsm.DeployEnding) error {
+	return o.endProductionSpans(ctx, at, ending, dlog.Context{"deploy_started": at.UTC().Format(time.RFC3339Nano)})
+}
+
+// noteTakenOverProductionEnding makes due, in every repository that checks
+// its production, the spans the deploy this daemon took over ended. Its
+// start is not in memory, and none is needed: a span is made due by the
+// ending alone. A crash is never taken over (its successor owes it as a
+// deploy of its own), so ENDING is never DaemonCrashed.
+func (o *orchestrator) noteTakenOverProductionEnding(ctx context.Context, ending wsm.DeployEnding) error {
+	return o.endProductionSpans(ctx, time.Time{}, ending, dlog.Context{"taken_over": true})
+}
+
+// endProductionSpans is noteProductionEnding and
+// noteTakenOverProductionEnding: DEPLOY names the deploy that ended in each
+// record, and AT, its start, names the span a crash drops.
+func (o *orchestrator) endProductionSpans(ctx context.Context, at time.Time, ending wsm.DeployEnding, deploy dlog.Context) error {
 	queues, err := o.productionQueues(ctx, opProduction)
 	if err != nil {
 		o.mediationFailedUnder(ctx, opProduction, nil, logsite.Msg("could not list the repositories a deploy's ending makes a production check due in"), err)
@@ -160,7 +176,7 @@ func (o *orchestrator) noteProductionEnding(ctx context.Context, at time.Time, e
 	}
 	var errs []error
 	for _, q := range queues {
-		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano), "ending": string(ending)}
+		fields := withField(withField(deploy, "repo", string(q.key)), "ending", string(ending))
 		if ending == wsm.DaemonCrashed {
 			dropped, err := o.deps.DB.DropProductionCheck(ctx, q.key, at)
 			if err != nil {
@@ -473,6 +489,11 @@ type ProductionSites struct {
 	// From was read (logsites.Answer).
 	From, To time.Time
 	Partial  bool
+	// Unrecorded is that the span ended before the tally's oldest kept row
+	// (OldestKept), so none of it was read: it lists no site, and the
+	// mediator is told to read the span from the raw logs.
+	Unrecorded bool
+	OldestKept time.Time
 }
 
 // RefiredSite is a fixed site that fired again.
@@ -483,9 +504,21 @@ type RefiredSite struct {
 }
 
 // productionSites reads span C's sites from the tally and compares them with
-// the span before it (DiffProductionSites).
+// the span before it (DiffProductionSites). A span whose rows the tally no
+// longer keeps is still told, with no sites and the loss declared
+// (ProductionSites.Unrecorded), recorded at WARN: failing it would leave it
+// due forever, and every span after it waiting.
 func (o *orchestrator) productionSites(ctx context.Context, q checkedQueue, c wsm.ProductionCheck) (ProductionSites, error) {
 	span, err := o.deps.LogSites.Window(ctx, c.Since, c.Until, "warn")
+	if unrecorded := (*logsites.UnrecordedWindowError)(nil); errors.As(err, &unrecorded) {
+		o.deps.Log.Global().Warn(opProduction, "the span's log sites were pruned before its mediator read them; it is told to read the span from the raw logs", dlog.Context{
+			"repo":        string(q.key),
+			"span_since":  c.Since.UTC().Format(time.RFC3339Nano),
+			"span_until":  c.Until.UTC().Format(time.RFC3339Nano),
+			"oldest_kept": unrecorded.Oldest.UTC().Format(time.RFC3339Nano),
+		})
+		return ProductionSites{Baseline: "nothing: the span was not read from the tally", Unrecorded: true, OldestKept: unrecorded.Oldest}, nil
+	}
 	if err != nil {
 		return ProductionSites{}, fmt.Errorf("merge: read the span's log sites: %w", err)
 	}
@@ -579,10 +612,15 @@ func ignored(site logsites.Site, kinds []wsm.IgnoredRecordKind) bool {
 func RenderProductionSites(sites ProductionSites, c wsm.ProductionCheck) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Production span %s to %s, compared with %s.\n", c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339), sites.Baseline))
-	if sites.Partial {
+	switch {
+	case sites.Unrecorded:
+		since, until := c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339)
+		b.WriteString(fmt.Sprintf("UNRECORDED: the tally keeps no row before %s, so none of this span was read from it; read the span from the raw logs with `bin/logs.sh --all --level warn --since %s --until %s --tally --sample 1`.\n",
+			sites.OldestKept.UTC().Format(time.RFC3339), since, until))
+	case sites.Partial:
 		b.WriteString(fmt.Sprintf("PARTIAL: the tally keeps no row before %s, so it read only %s to %s; what fired before then is unknown, not absent.\n",
 			sites.From.UTC().Format(time.RFC3339), sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
-	} else {
+	default:
 		b.WriteString(fmt.Sprintf("Read whole from the tally: %s to %s.\n", sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
 	}
 	b.WriteString(fmt.Sprintf("Left out: %d sites open children own, %d sites of ignored kinds.\n", sites.Owned, sites.Ignored))

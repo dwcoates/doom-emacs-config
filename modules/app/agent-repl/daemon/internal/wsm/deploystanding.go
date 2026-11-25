@@ -333,3 +333,29 @@ func (s *store) RecordMediationEnding(ctx context.Context, repo RepoKey, owed ti
 	})
 	return recorded, err
 }
+
+// OwedMediationStart answers the start of the deploy whose check REPO owes
+// while that check has no ending recorded: a successor that took a deploy
+// over has no start of its own to name the check by, so it reads it here.
+// It answers false when REPO owes no check or its check's deploy ended.
+func (s *store) OwedMediationStart(ctx context.Context, repo RepoKey) (time.Time, bool, error) {
+	const op = "daemon.wsm.owed_mediation_start"
+	fields := dlog.Context{"repo": string(repo)}
+	repo, err := s.normalizedRepoKey(op, repo, fields)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	var owed sql.NullInt64
+	err = s.read(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context) error {
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT mediation_owed_at FROM merge_queue_repos
+			WHERE repo_key = ? AND mediation_owed_at IS NOT NULL AND mediation_deploy_ending = ''`, string(repo)).Scan(&owed)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	if err != nil || !owed.Valid {
+		return time.Time{}, false, err
+	}
+	return fromNanos(owed.Int64), true, nil
+}

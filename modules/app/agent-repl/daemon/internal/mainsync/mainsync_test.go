@@ -2,6 +2,7 @@ package mainsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/wsm"
 )
@@ -90,9 +92,19 @@ func (f *fakeTurns) Exclusively(ctx context.Context, ws ids.WorkspaceID, what st
 type fakePrompts struct {
 	got    []string
 	origin conversationv1.PromptOrigin
+	// refusals answer the submissions in order, one each, before any is
+	// accepted; attempts counts every submission, refused or not.
+	refusals []error
+	attempts int
 }
 
 func (p *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, _ wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+	p.attempts++
+	if len(p.refusals) > 0 {
+		refusal := p.refusals[0]
+		p.refusals = p.refusals[1:]
+		return prompthandler.Outcome{}, refusal
+	}
 	p.got = append(p.got, said.GetContent().GetBlocks()[0].GetText().GetText())
 	p.origin = origin
 	return prompthandler.Outcome{Turn: "turn-1"}, nil
@@ -237,6 +249,75 @@ func TestAFailedFastForwardIsToldToTheMainWorkspaceOnce(t *testing.T) {
 				t.Fatalf("no record of the repeat left untold: %+v", r.log.Records())
 			}
 		})
+	}
+}
+
+// coldGate is the queue's refusal of a prompt to a session parked at its
+// cold gate, as prompthandler answers it.
+var coldGate = &promptqueue.ColdGateRefusal{Detail: "the conversation is cold at 138,295 context tokens"}
+
+func TestARefusedRepairSubmissionIsRecordedAtItsLevel(t *testing.T) {
+	tests := []struct {
+		name     string
+		refusal  error
+		level    string
+		message  string
+		wantGate any
+	}{
+		{name: "the main workspace parked at its cold gate", refusal: coldGate, level: "info",
+			message:  "the main workspace is parked at its cold gate; the repair waits for the user to answer the gate",
+			wantGate: "the conversation is cold at 138,295 context tokens"},
+		{name: "any other submission failure", refusal: errors.New("prompthandler: the queue is closed"), level: "error",
+			message: "could not submit the repair prompt to the main workspace; it is told on a later sweep"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			r.prompts.refusals = []error{tt.refusal}
+
+			// Act
+			r.sync(behind(1, 1))
+
+			// Assert
+			rec, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: tt.level, Operation: opSync, Message: tt.message})
+			if !ok {
+				t.Fatalf("no %s record %q: %+v", tt.level, tt.message, r.log.Records())
+			}
+			if got := rec.Context["gate"]; got != tt.wantGate {
+				t.Fatalf("gate = %v, want %v", got, tt.wantGate)
+			}
+		})
+	}
+}
+
+func TestARepairRefusedAtTheColdGateRecordsNothingAsTold(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.prompts.refusals = []error{coldGate}
+
+	// Act
+	r.sync(behind(1, 1))
+
+	// Assert
+	if told, ok := r.store.told[repoID]; ok {
+		t.Fatalf("recorded %+v as told; a refusal at the cold gate tells nothing", told)
+	}
+}
+
+func TestARepairRefusedAtTheColdGateIsToldOnTheSweepAfterTheGateIsAnswered(t *testing.T) {
+	// Arrange: the first sweep meets the gate; the user answers it before the
+	// next.
+	r := newRig(t)
+	r.prompts.refusals = []error{coldGate}
+	r.sync(behind(1, 1))
+
+	// Act
+	r.sync(behind(1, 1))
+
+	// Assert
+	if r.prompts.attempts != 2 || len(r.prompts.got) != 1 || r.store.told[repoID].UpstreamSHA != "sha-of-refs/agent-repl/origin/master" {
+		t.Fatalf("attempts %d, told %q, record %+v; want the second sweep to tell and record it", r.prompts.attempts, r.prompts.got, r.store.told[repoID])
 	}
 }
 
