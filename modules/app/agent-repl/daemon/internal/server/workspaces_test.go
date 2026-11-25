@@ -2254,6 +2254,35 @@ func TestANukeWhoseTeardownRefusesAnswersTheRefusalInBand(t *testing.T) {
 	}
 }
 
+// TestANukeWhoseTeardownSucceedsAnswersSuccessInBand pins a nuke with no
+// op_id whose teardown succeeds: the teardown runs inside the request, and
+// the request answers success only once it has.
+func TestANukeWhoseTeardownSucceedsAnswersSuccessInBand(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.teardownRan = make(chan error, 1)
+
+	// Act.
+	resp, err := h.Client.NukeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.NukeWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NukeWorkspace: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	select {
+	case ctxErr := <-h.Verbs.teardownRan:
+		if ctxErr != nil {
+			t.Fatalf("the teardown ran under an ended context: %v", ctxErr)
+		}
+	default:
+		t.Fatal("NukeWorkspace answered success without running the teardown")
+	}
+}
+
 // ---- SwapWorkspaces --------------------------------------------------------
 
 // swapHarness is a harness whose registry holds a second workspace, ws-2.

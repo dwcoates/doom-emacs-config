@@ -291,7 +291,9 @@ type fakeDB struct {
 	putJobs     []wsm.CreationJob
 	putJobErr   error
 	putSessions []wsm.Session
-	putTurns    []wsm.Turn
+	// putSessionErr fails every session write, recording nothing.
+	putSessionErr error
+	putTurns      []wsm.Turn
 	// putTurnErr fails every turn write, which the fake's own slice cannot.
 	putTurnErr error
 	// openTurns is what OpenTurns answers, and openTurnsErr fails the read.
@@ -1662,6 +1664,9 @@ func (d *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.Creatio
 }
 
 func (d *fakeDB) PutSession(_ context.Context, s wsm.Session) error {
+	if d.putSessionErr != nil {
+		return d.putSessionErr
+	}
 	d.putSessions = append(d.putSessions, s)
 	d.sessions[s.Workspace] = s
 	return nil

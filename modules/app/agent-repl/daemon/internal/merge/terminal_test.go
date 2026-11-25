@@ -3254,3 +3254,33 @@ func TestRepublishRoster(t *testing.T) {
 		})
 	}
 }
+
+// TestAnAbandonmentNamesItsCause pins abandonment.Error: the cause an abandon
+// cancels a running merge's context with reads, through context.Cause, as an
+// abandonment naming why.
+func TestAnAbandonmentNamesItsCause(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause AbandonCause
+		want  string
+	}{
+		{name: "an eviction", cause: CauseUserDrop, want: "merge: the merge was abandoned (evicted)"},
+		{name: "a dequeue", cause: CauseUserDequeue, want: "merge: the merge was abandoned (dequeued)"},
+		{name: "an agent that gave up", cause: CauseAgentGaveUp, want: "merge: the merge was abandoned (gave_up)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			ctx, cancel := context.WithCancelCause(context.Background())
+
+			// Act
+			cancel(&abandonment{cause: tc.cause})
+
+			// Assert
+			var got *abandonment
+			if err := context.Cause(ctx); !errors.As(err, &got) || got.cause != tc.cause || err.Error() != tc.want {
+				t.Fatalf("context.Cause = %v, want the abandonment %q", err, tc.want)
+			}
+		})
+	}
+}

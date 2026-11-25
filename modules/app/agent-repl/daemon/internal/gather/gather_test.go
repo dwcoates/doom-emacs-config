@@ -850,6 +850,28 @@ func TestTheDeadlineTimerTellsTheFirstUpdateThroughTheLoop(t *testing.T) {
 	}
 }
 
+// TestAFoldToldThroughTheAnswerSinkIsRecordedOnTheLoop pins PromptFolded, the
+// feed's fold edge: it reports the fold to the loop, which records the
+// succession for a workspace a gather waits on.
+func TestAFoldToldThroughTheAnswerSinkIsRecordedOnTheLoop(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	a := h.register("a")
+	h.made("a")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act: the fold is pending when the loop runs, so the stopping loop
+	// still handles it before Run returns.
+	h.svc.PromptFolded(a.ID, "a-turn", "running")
+	h.svc.Run(ctx, h.prompts)
+
+	// Assert
+	if got, err := h.db.SucceedingTurn(context.Background(), "a-turn"); err != nil || got != "running" {
+		t.Fatalf("SucceedingTurn = %q, %v; want the fold into %q recorded", got, err, "running")
+	}
+}
+
 func TestACreateAfterTheServiceStoppedIsRefused(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

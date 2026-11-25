@@ -90,6 +90,26 @@ func TestSetOneShotOfAWorkspaceWithNoCreationIsNotFound(t *testing.T) {
 	}
 }
 
+// TestMarkingAWorkspaceTheRegistryDoesNotHoldIsNotFound pins the main-
+// workspace check's pass on a workspace with no row: the check cannot call
+// it a main workspace, so the write itself answers ErrNotFound, recorded at
+// DEBUG as every absent-record write is.
+func TestMarkingAWorkspaceTheRegistryDoesNotHoldIsNotFound(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	err := s.SetOneShot(context.Background(), "ws-never-registered", true)
+
+	// Assert
+	if errors.Is(err, ErrMainWorkspaceOneShot) || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetOneShot = %v, want ErrNotFound, never the main-workspace refusal", err)
+	}
+	if !loggedOperation(log, "daemon.wsm.set_one_shot", "debug") || loggedOperation(log, "daemon.wsm.set_one_shot", "error") {
+		t.Fatalf("records = %v, want the absent record at DEBUG and no ERROR", log.Records())
+	}
+}
+
 func TestAMainWorkspaceIsNeverMarkedAOneShot(t *testing.T) {
 	tests := []struct {
 		name string

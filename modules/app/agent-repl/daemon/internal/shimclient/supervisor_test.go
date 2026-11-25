@@ -1373,3 +1373,33 @@ func TestAReadinessWaitWhoseContextEndsAnswersItsCause(t *testing.T) {
 		t.Fatalf("awaitReady = %v, want context.Canceled", err)
 	}
 }
+
+// TestAShimThatDiesDuringTheRedialBackoffEndsTheLadderWithItsDeath pins
+// afterFailedDial's backoff branch: a shim found alive when the dial failed
+// and gone before the backoff elapsed ends the ladder at once, with its
+// decoded death, not with the backoff's bare wakeup. The lock probe the
+// failed dial consults is the deterministic instant the shim dies in.
+func TestAShimThatDiesDuringTheRedialBackoffEndsTheLadderWithItsDeath(t *testing.T) {
+	// Arrange: an hour's backoff, so only the death can end the wait.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "s.sock"), backoff{Initial: time.Hour, Max: time.Hour, Factor: 1}, nil, nil)
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) {
+		c.publishExit(ExitInfo{PID: 4242, Code: 1})
+		return false, nil
+	}
+
+	// Act.
+	err := c.afterFailedDial(context.Background(), syscall.ECONNREFUSED, 3)
+
+	// Assert.
+	var death *BringUpDeathError
+	if !errors.As(err, &death) || death.Exit.PID != 4242 || death.Exit.Code != 1 {
+		t.Fatalf("afterFailedDial = %v, want the shim's decoded death", err)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.shimclient.dial", Message: "shim dial failed; retrying"}); !ok {
+		t.Fatalf("records = %+v, want the failed dial at DEBUG", log.Records())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.shimclient.exit", Message: "shim died"}); !ok {
+		t.Fatalf("records = %+v, want the death recorded at ERROR", log.Records())
+	}
+}

@@ -44,6 +44,8 @@ import (
 // fakeClient is a shimclient.Client whose StartSession answer the test
 // arranges.
 type fakeClient struct {
+	// hibernateErr is what Hibernate answers in place of its response.
+	hibernateErr error
 	// retryNowAsks counts every RetryVendorErrorNow, answered with
 	// retryNowResponse and retryNowErr.
 	retryNowAsks     int
@@ -353,6 +355,9 @@ func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*
 }
 
 func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
+	if c.hibernateErr != nil {
+		return nil, c.hibernateErr
+	}
 	return &shimv1.HibernateResponse{}, nil
 }
 
@@ -1786,6 +1791,35 @@ func TestStartFilesAFaultWhenTheStartSessionCallItselfFails(t *testing.T) {
 	// Assert.
 	if got := faultKinds(f.db.dbFaults); len(got) != 1 || got[0] != health.KindResumeFailed {
 		t.Fatalf("faults = %v, want exactly one %s", got, health.KindResumeFailed)
+	}
+}
+
+// TestAStartWhoseSessionFactsCannotBeRecordedFailsOnceTheWatchIsOpen pins
+// sessionUp's facts error: recordFacts's failed PutSession is recorded at
+// ERROR and returned, but only after the watcher opened, so the session it
+// started stays watched and usable, never announced as up.
+func TestAStartWhoseSessionFactsCannotBeRecordedFailsOnceTheWatchIsOpen(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	putErr := errors.New("disk I/O error")
+	f.db.putSessionErr = putErr
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if !errors.Is(err, putErr) || !strings.Contains(err.Error(), "record the session facts") {
+		t.Fatalf("Start() = %v, want the session-facts write's failure", err)
+	}
+	if !recordedAt(f, dlog.LevelError, opBringUp, "could not record the session facts") {
+		t.Fatalf("records = %+v, want the failed write recorded at ERROR", f.log.logger.Records())
+	}
+	if recordedAt(f, dlog.LevelInfo, opBringUp, "the session is up") {
+		t.Fatalf("records = %+v, want the session never announced up", f.log.logger.Records())
+	}
+	if !f.fleet.Live(ws.ID) || f.watcher.closed {
+		t.Fatalf("live = %v, watcher closed = %v; want the started session kept and watched", f.fleet.Live(ws.ID), f.watcher.closed)
 	}
 }
 
