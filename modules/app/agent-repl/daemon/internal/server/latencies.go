@@ -27,12 +27,14 @@ type LatencyRecorder interface {
 	ObserveLatency(ws ids.WorkspaceID, kind runtimemetrics.LatencyKind, seconds float64)
 	// ObserveEditorLatency records one validated editor-wide latency.
 	ObserveEditorLatency(kind runtimemetrics.LatencyKind, seconds float64)
+	// ObserveEditorStall records one validated editor stall by its culprit.
+	ObserveEditorStall(kind runtimemetrics.LatencyKind, culprit runtimemetrics.StallCulprit, seconds float64)
 	// The editor's startup milestones are recorded as restarts.
 	restarttiming.Recorder
 }
 
 // ReportLatencies records a client's finished interaction latencies, and the
-// editor's startup milestones and editor-wide latencies, in the always-on metrics
+// editor's startup milestones, editor-wide latencies and attributed stalls, in the always-on metrics
 // (endpoint_report_latencies.proto).
 //
 // THE BATCH IS ALL OR NOTHING ON A DEFECT, PER WORKSPACE ON A SCHEDULE. A
@@ -73,6 +75,15 @@ func (s *server) ReportLatencies(
 			return nil, invalid(fmt.Sprintf("editor_latencies[%d]", i), err.Error())
 		}
 		editorKinds[i] = kind
+	}
+	stallKinds := make([]runtimemetrics.LatencyKind, len(req.Msg.GetEditorStalls()))
+	stallCulprits := make([]runtimemetrics.StallCulprit, len(req.Msg.GetEditorStalls()))
+	for i, st := range req.Msg.GetEditorStalls() {
+		kind, culprit, err := runtimemetrics.ValidateEditorStall(st)
+		if err != nil {
+			return nil, invalid(fmt.Sprintf("editor_stalls[%d]", i), err.Error())
+		}
+		stallKinds[i], stallCulprits[i] = kind, culprit
 	}
 	resp := &agentreplv1.ReportLatenciesResponse{}
 	if !s.deps.Latencies.Enabled() {
@@ -132,6 +143,9 @@ func (s *server) ReportLatencies(
 	// AN EDITOR LATENCY NAMES NO WORKSPACE either, so none is ever dropped.
 	for i, l := range req.Msg.GetEditorLatencies() {
 		s.deps.Latencies.ObserveEditorLatency(editorKinds[i], l.GetSeconds())
+	}
+	for i, st := range req.Msg.GetEditorStalls() {
+		s.deps.Latencies.ObserveEditorStall(stallKinds[i], stallCulprits[i], st.GetSeconds())
 	}
 	success := &agentreplv1.ReportLatenciesSuccess{}
 	if dropped == 0 {

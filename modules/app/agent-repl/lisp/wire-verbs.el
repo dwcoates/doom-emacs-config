@@ -6480,32 +6480,88 @@ the seconds a finite, non-negative number since the process start."
   "The EditorLatencyKind vocabulary Emacs sends, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT, as for the startup milestones.")
 
+(defun agent-repl-wire-verbs--editor-seconds (message seconds)
+  "Answer SECONDS as a float, failing MESSAGE when it is not finite and non-negative.
+THE ONE check of an editor measurement's `seconds'."
+  (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
+    (agent-repl-wire-verbs--fail message "seconds" "not a finite, non-negative number"))
+  (float seconds))
+
 (defun agent-repl-wire-encode-reported-editor-latency (latency)
   "Encode one ReportedEditorLatency from plist LATENCY.
 LATENCY is (:kind KEYWORD :seconds NUMBER), each required: the kind from
 its closed vocabulary, the seconds a finite, non-negative number."
   (let* ((message "ReportedEditorLatency")
          (name (cdr (assq (plist-get latency :kind) agent-repl-wire-editor-latency-kinds)))
-         (seconds (plist-get latency :seconds)))
+         (seconds (agent-repl-wire-verbs--editor-seconds message (plist-get latency :seconds))))
     (unless name
       (agent-repl-wire-verbs--fail message "kind" "unknown kind"))
-    (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
-      (agent-repl-wire-verbs--fail message "seconds" "not a finite, non-negative number"))
     (list (cons 'kind name)
-          (cons 'seconds (float seconds)))))
+          (cons 'seconds seconds))))
+
+(defun agent-repl-wire-encode-editor-stall-function (fn)
+  "Encode the EditorStallFunction FN: a function symbol, or `:anonymous'."
+  (cond
+   ((eq fn :anonymous) (list (cons 'anonymous nil)))
+   ((and fn (symbolp fn)) (list (cons 'named (list (cons 'symbol (symbol-name fn))))))
+   (t (agent-repl-wire-verbs--fail "EditorStallFunction" "function" "neither a symbol nor :anonymous"))))
+
+(defun agent-repl-wire-encode-editor-stall-culprit (culprit)
+  "Encode the EditorStallCulprit from plist CULPRIT.
+CULPRIT is (:source SOURCE ...): `timer' or `command' with `:function', a
+symbol or `:anonymous'; `process-filter' or `process-sentinel' with
+`:method', an AgentRepl rpc method's name; `garbage-collection' or
+`unattributed' alone."
+  (let ((message "EditorStallCulprit")
+        (fn (plist-get culprit :function))
+        (method (plist-get culprit :method)))
+    (pcase (plist-get culprit :source)
+      ('timer
+       (list (cons 'timer (list (cons 'function (agent-repl-wire-encode-editor-stall-function fn))))))
+      ('command
+       (list (cons 'command (list (cons 'function (agent-repl-wire-encode-editor-stall-function fn))))))
+      ((and (or 'process-filter 'process-sentinel) source)
+       (unless (and (stringp method) (not (string-empty-p method)))
+         (agent-repl-wire-verbs--fail message "rpc_method" "not a method name"))
+       (list (cons (if (eq source 'process-filter) 'processFilter 'processSentinel)
+                   (list (cons 'rpcMethod method)))))
+      ('garbage-collection (list (cons 'garbageCollection nil)))
+      ('unattributed (list (cons 'unattributed nil)))
+      (source (agent-repl-wire-verbs--fail message "work" (format "unknown source %S" source))))))
+
+(defun agent-repl-wire-encode-reported-editor-stall (stall)
+  "Encode one ReportedEditorStall from plist STALL.
+STALL is (:seconds NUMBER :culprit PLIST), each required: the seconds a
+finite, non-negative number, the culprit one for
+`agent-repl-wire-encode-editor-stall-culprit'."
+  (let ((message "ReportedEditorStall"))
+    (unless (plist-get stall :culprit)
+      (agent-repl-wire-verbs--fail message "culprit" "missing"))
+    (list (cons 'seconds (agent-repl-wire-verbs--editor-seconds message (plist-get stall :seconds)))
+          (cons 'culprit (agent-repl-wire-encode-editor-stall-culprit (plist-get stall :culprit))))))
 
 (defun agent-repl-wire-encode-report-latencies-request (request)
   "Encode ReportLatenciesRequest from plist REQUEST.
 REQUEST is (:editor-startup MILESTONES :editor-latencies LATENCIES), each
 milestone a plist for `agent-repl-wire-encode-reported-editor-startup' and
-each latency one for `agent-repl-wire-encode-reported-editor-latency'.
+each latency one for `agent-repl-wire-encode-reported-editor-latency',
+except a stall (`:kind' `:attributed-stall'), which is one for
+`agent-repl-wire-encode-reported-editor-stall' and goes in `editorStalls'.
 Emacs reports no workspace's latency, so `latencies' is never spelled."
-  (list (cons 'editorStartup
-              (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-startup
-                               (plist-get request :editor-startup))))
-        (cons 'editorLatencies
-              (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-latency
-                               (plist-get request :editor-latencies))))))
+  (let ((latencies nil) (stalls nil))
+    (dolist (entry (plist-get request :editor-latencies))
+      (if (eq (plist-get entry :kind) :attributed-stall)
+          (push entry stalls)
+        (push entry latencies)))
+    (list (cons 'editorStartup
+                (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-startup
+                                 (plist-get request :editor-startup))))
+          (cons 'editorLatencies
+                (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-latency
+                                 (nreverse latencies))))
+          (cons 'editorStalls
+                (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-stall
+                                 (nreverse stalls)))))))
 
 (defun agent-repl-wire-decode-report-latencies-recorded (json)
   "Decode ReportLatenciesRecorded from JSON into (:recorded N)."

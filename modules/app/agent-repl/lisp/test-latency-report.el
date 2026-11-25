@@ -100,6 +100,20 @@
     (should-not agent-repl-latency-report--editor)
     (should-not agent-repl-latency-report--timer)))
 
+(ert-deftest agent-repl-test-latency-report-a-stall-rides-the-editor-queue-with-its-culprit ()
+  "A stall is queued in order beside the editor latencies, carrying its culprit, and sent after the delay."
+  (agent-repl-test-latency-report--with
+    ;; Arrange
+    (agent-repl-latency-report-editor :elisp-reload 0.3)
+    (agent-repl-latency-report-stall 0.2 '(:source unattributed))
+    ;; Act
+    (agent-repl-latency-report--scheduled)
+    ;; Assert
+    (should (equal (plist-get (car agent-repl-test-latency-report--sent) :editor-latencies)
+                   '((:kind :elisp-reload :seconds 0.3)
+                     (:kind :attributed-stall :seconds 0.2 :culprit (:source unattributed)))))
+    (should-not agent-repl-latency-report--editor)))
+
 (ert-deftest agent-repl-test-latency-report-a-report-that-did-not-arrive-is-sent-at-the-next-link-up ()
   "A transport failure keeps the batch, and the link-up handler sends it again."
   (agent-repl-test-latency-report--with

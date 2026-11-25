@@ -31,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_report_latencies.proto.
  */
 export const file_agentrepl_v1_endpoint_report_latencies: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X2xhdGVuY2llcy5wcm90bxIMYWdlbnRyZXBsLnYxIoIBCg9SZXBvcnRlZExhdGVuY3kSLwoEa2luZBgBIAEoDjIhLmFnZW50cmVwbC52MS5SZXBvcnRlZExhdGVuY3lLaW5kEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDwoHc2Vjb25kcxgDIAEoASLGAQoWUmVwb3J0TGF0ZW5jaWVzUmVxdWVzdBIwCglsYXRlbmNpZXMYASADKAsyHS5hZ2VudHJlcGwudjEuUmVwb3J0ZWRMYXRlbmN5EjsKDmVkaXRvcl9zdGFydHVwGAIgAygLMiMuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yU3RhcnR1cBI9ChBlZGl0b3JfbGF0ZW5jaWVzGAMgAygLMiMuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yTGF0ZW5jeSJXChVSZXBvcnRlZEVkaXRvckxhdGVuY3kSLQoEa2luZBgBIAEoDjIfLmFnZW50cmVwbC52MS5FZGl0b3JMYXRlbmN5S2luZBIPCgdzZWNvbmRzGAIgASgBIvkBChVSZXBvcnRlZEVkaXRvclN0YXJ0dXASNwoJbWlsZXN0b25lGAEgASgOMiQuYWdlbnRyZXBsLnYxLkVkaXRvclN0YXJ0dXBNaWxlc3RvbmUSOwoHc3Bhd25lZBgCIAEoCzIoLmFnZW50cmVwbC52MS5FZGl0b3JTdGFydHVwRGFlbW9uU3Bhd25lZEgAEjsKB3J1bm5pbmcYAyABKAsyKC5hZ2VudHJlcGwudjEuRWRpdG9yU3RhcnR1cERhZW1vblJ1bm5pbmdIABIjChtzZWNvbmRzX3NpbmNlX3Byb2Nlc3Nfc3RhcnQYBCABKAFCCAoGZGFlbW9uIhwKGkVkaXRvclN0YXJ0dXBEYWVtb25TcGF3bmVkIhwKGkVkaXRvclN0YXJ0dXBEYWVtb25SdW5uaW5nIpEBChdSZXBvcnRMYXRlbmNpZXNSZXNwb25zZRI3CgdzdWNjZXNzGAEgASgLMiQuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc1N1Y2Nlc3NIABIzCgVlcnJvchgCIAEoCzIiLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNFcnJvckgAQggKBnJlc3VsdCLmAQoWUmVwb3J0TGF0ZW5jaWVzU3VjY2VzcxI5CghyZWNvcmRlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNSZWNvcmRlZEgAEkYKD3BhcnRseV9yZWNvcmRlZBgCIAEoCzIrLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNQYXJ0bHlSZWNvcmRlZEgAEj4KC21ldHJpY3Nfb2ZmGAMgASgLMicuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc01ldHJpY3NPZmZIAEIJCgdvdXRjb21lIisKF1JlcG9ydExhdGVuY2llc1JlY29yZGVkEhAKCHJlY29yZGVkGAEgASgNIlQKHVJlcG9ydExhdGVuY2llc1BhcnRseVJlY29yZGVkEhAKCHJlY29yZGVkGAEgASgNEiEKGWRyb3BwZWRfdW5rbm93bl93b3Jrc3BhY2UYAiABKA0iGwoZUmVwb3J0TGF0ZW5jaWVzTWV0cmljc09mZiJ0ChRSZXBvcnRMYXRlbmNpZXNFcnJvchJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAEgASgLMjEuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc1dvcmtzcGFjZVJlZk1pc21hdGNoSABCBwoFY2F1c2UiZwojUmVwb3J0TGF0ZW5jaWVzV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMd29ya3NwYWNlX2lkGAEgASgJEhQKDHJlcG9ydGVkX2RpchgCIAEoCRIUCgxyZWdpc3RyeV9kaXIYAyABKAkq/AIKE1JlcG9ydGVkTGF0ZW5jeUtpbmQSJQohUkVQT1JURURfTEFURU5DWV9LSU5EX1VOU1BFQ0lGSUVEEAASJwojUkVQT1JURURfTEFURU5DWV9LSU5EX1NXSVRDSF9SRVBFQVQQARImCiJSRVBPUlRFRF9MQVRFTkNZX0tJTkRfU1dJVENIX0ZJUlNUEAISIwofUkVQT1JURURfTEFURU5DWV9LSU5EX1BBR0VfQk9PVBADEiUKIVJFUE9SVEVEX0xBVEVOQ1lfS0lORF9QUk9NUFRfRUNITxAEEiQKIFJFUE9SVEVEX0xBVEVOQ1lfS0lORF9QQUdFX1NUQUxMEAUSJgoiUkVQT1JURURfTEFURU5DWV9LSU5EX1JFTE9BRF9CTEFOSxAGEigKJFJFUE9SVEVEX0xBVEVOQ1lfS0lORF9TV0lUQ0hfU0lERUJBUhAHEikKJVJFUE9SVEVEX0xBVEVOQ1lfS0lORF9WSUVXRURfRE9XTlRJTUUQCCrKAQoRRWRpdG9yTGF0ZW5jeUtpbmQSIwofRURJVE9SX0xBVEVOQ1lfS0lORF9VTlNQRUNJRklFRBAAEh0KGUVESVRPUl9MQVRFTkNZX0tJTkRfU1RBTEwQARIkCiBFRElUT1JfTEFURU5DWV9LSU5EX0VMSVNQX1JFTE9BRBACEiIKHkVESVRPUl9MQVRFTkNZX0tJTkRfSU5QVVRfV0FJVBADEicKI0VESVRPUl9MQVRFTkNZX0tJTkRfVklFV0VEX1JFQVRUQUNIEAQq4AEKFkVkaXRvclN0YXJ0dXBNaWxlc3RvbmUSKAokRURJVE9SX1NUQVJUVVBfTUlMRVNUT05FX1VOU1BFQ0lGSUVEEAASIQodRURJVE9SX1NUQVJUVVBfTUlMRVNUT05FX0lOSVQQARIqCiZFRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfREFFTU9OX0xJTktFRBACEiYKIkVESVRPUl9TVEFSVFVQX01JTEVTVE9ORV9GSVJTVF9UQUIQAxIlCiFFRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfQUxMX1RBQlMQBEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X2xhdGVuY2llcy5wcm90bxIMYWdlbnRyZXBsLnYxIoIBCg9SZXBvcnRlZExhdGVuY3kSLwoEa2luZBgBIAEoDjIhLmFnZW50cmVwbC52MS5SZXBvcnRlZExhdGVuY3lLaW5kEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDwoHc2Vjb25kcxgDIAEoASKAAgoWUmVwb3J0TGF0ZW5jaWVzUmVxdWVzdBIwCglsYXRlbmNpZXMYASADKAsyHS5hZ2VudHJlcGwudjEuUmVwb3J0ZWRMYXRlbmN5EjsKDmVkaXRvcl9zdGFydHVwGAIgAygLMiMuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yU3RhcnR1cBI9ChBlZGl0b3JfbGF0ZW5jaWVzGAMgAygLMiMuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yTGF0ZW5jeRI4Cg1lZGl0b3Jfc3RhbGxzGAQgAygLMiEuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yU3RhbGwiWQoTUmVwb3J0ZWRFZGl0b3JTdGFsbBIPCgdzZWNvbmRzGAEgASgBEjEKB2N1bHByaXQYAiABKAsyIC5hZ2VudHJlcGwudjEuRWRpdG9yU3RhbGxDdWxwcml0IpMDChJFZGl0b3JTdGFsbEN1bHByaXQSLwoFdGltZXIYASABKAsyHi5hZ2VudHJlcGwudjEuRWRpdG9yU3RhbGxUaW1lckgAEkAKDnByb2Nlc3NfZmlsdGVyGAIgASgLMiYuYWdlbnRyZXBsLnYxLkVkaXRvclN0YWxsUHJvY2Vzc0ZpbHRlckgAEkQKEHByb2Nlc3Nfc2VudGluZWwYAyABKAsyKC5hZ2VudHJlcGwudjEuRWRpdG9yU3RhbGxQcm9jZXNzU2VudGluZWxIABIzCgdjb21tYW5kGAQgASgLMiAuYWdlbnRyZXBsLnYxLkVkaXRvclN0YWxsQ29tbWFuZEgAEkgKEmdhcmJhZ2VfY29sbGVjdGlvbhgFIAEoCzIqLmFnZW50cmVwbC52MS5FZGl0b3JTdGFsbEdhcmJhZ2VDb2xsZWN0aW9uSAASPQoMdW5hdHRyaWJ1dGVkGAYgASgLMiUuYWdlbnRyZXBsLnYxLkVkaXRvclN0YWxsVW5hdHRyaWJ1dGVkSABCBgoEd29yayJHChBFZGl0b3JTdGFsbFRpbWVyEjMKCGZ1bmN0aW9uGAEgASgLMiEuYWdlbnRyZXBsLnYxLkVkaXRvclN0YWxsRnVuY3Rpb24iLgoYRWRpdG9yU3RhbGxQcm9jZXNzRmlsdGVyEhIKCnJwY19tZXRob2QYASABKAkiMAoaRWRpdG9yU3RhbGxQcm9jZXNzU2VudGluZWwSEgoKcnBjX21ldGhvZBgBIAEoCSJJChJFZGl0b3JTdGFsbENvbW1hbmQSMwoIZnVuY3Rpb24YASABKAsyIS5hZ2VudHJlcGwudjEuRWRpdG9yU3RhbGxGdW5jdGlvbiIeChxFZGl0b3JTdGFsbEdhcmJhZ2VDb2xsZWN0aW9uIhkKF0VkaXRvclN0YWxsVW5hdHRyaWJ1dGVkIpsBChNFZGl0b3JTdGFsbEZ1bmN0aW9uEjcKBW5hbWVkGAEgASgLMiYuYWdlbnRyZXBsLnYxLkVkaXRvclN0YWxsRnVuY3Rpb25OYW1lZEgAEj8KCWFub255bW91cxgCIAEoCzIqLmFnZW50cmVwbC52MS5FZGl0b3JTdGFsbEZ1bmN0aW9uQW5vbnltb3VzSABCCgoIZnVuY3Rpb24iKgoYRWRpdG9yU3RhbGxGdW5jdGlvbk5hbWVkEg4KBnN5bWJvbBgBIAEoCSIeChxFZGl0b3JTdGFsbEZ1bmN0aW9uQW5vbnltb3VzIlcKFVJlcG9ydGVkRWRpdG9yTGF0ZW5jeRItCgRraW5kGAEgASgOMh8uYWdlbnRyZXBsLnYxLkVkaXRvckxhdGVuY3lLaW5kEg8KB3NlY29uZHMYAiABKAEi+QEKFVJlcG9ydGVkRWRpdG9yU3RhcnR1cBI3CgltaWxlc3RvbmUYASABKA4yJC5hZ2VudHJlcGwudjEuRWRpdG9yU3RhcnR1cE1pbGVzdG9uZRI7CgdzcGF3bmVkGAIgASgLMiguYWdlbnRyZXBsLnYxLkVkaXRvclN0YXJ0dXBEYWVtb25TcGF3bmVkSAASOwoHcnVubmluZxgDIAEoCzIoLmFnZW50cmVwbC52MS5FZGl0b3JTdGFydHVwRGFlbW9uUnVubmluZ0gAEiMKG3NlY29uZHNfc2luY2VfcHJvY2Vzc19zdGFydBgEIAEoAUIICgZkYWVtb24iHAoaRWRpdG9yU3RhcnR1cERhZW1vblNwYXduZWQiHAoaRWRpdG9yU3RhcnR1cERhZW1vblJ1bm5pbmcikQEKF1JlcG9ydExhdGVuY2llc1Jlc3BvbnNlEjcKB3N1Y2Nlc3MYASABKAsyJC5hZ2VudHJlcGwudjEuUmVwb3J0TGF0ZW5jaWVzU3VjY2Vzc0gAEjMKBWVycm9yGAIgASgLMiIuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc0Vycm9ySABCCAoGcmVzdWx0IuYBChZSZXBvcnRMYXRlbmNpZXNTdWNjZXNzEjkKCHJlY29yZGVkGAEgASgLMiUuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc1JlY29yZGVkSAASRgoPcGFydGx5X3JlY29yZGVkGAIgASgLMisuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc1BhcnRseVJlY29yZGVkSAASPgoLbWV0cmljc19vZmYYAyABKAsyJy5hZ2VudHJlcGwudjEuUmVwb3J0TGF0ZW5jaWVzTWV0cmljc09mZkgAQgkKB291dGNvbWUiKwoXUmVwb3J0TGF0ZW5jaWVzUmVjb3JkZWQSEAoIcmVjb3JkZWQYASABKA0iVAodUmVwb3J0TGF0ZW5jaWVzUGFydGx5UmVjb3JkZWQSEAoIcmVjb3JkZWQYASABKA0SIQoZZHJvcHBlZF91bmtub3duX3dvcmtzcGFjZRgCIAEoDSIbChlSZXBvcnRMYXRlbmNpZXNNZXRyaWNzT2ZmInQKFFJlcG9ydExhdGVuY2llc0Vycm9yElMKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYASABKAsyMS5hZ2VudHJlcGwudjEuUmVwb3J0TGF0ZW5jaWVzV29ya3NwYWNlUmVmTWlzbWF0Y2hIAEIHCgVjYXVzZSJnCiNSZXBvcnRMYXRlbmNpZXNXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSFAoMcmVwb3J0ZWRfZGlyGAIgASgJEhQKDHJlZ2lzdHJ5X2RpchgDIAEoCSr8AgoTUmVwb3J0ZWRMYXRlbmN5S2luZBIlCiFSRVBPUlRFRF9MQVRFTkNZX0tJTkRfVU5TUEVDSUZJRUQQABInCiNSRVBPUlRFRF9MQVRFTkNZX0tJTkRfU1dJVENIX1JFUEVBVBABEiYKIlJFUE9SVEVEX0xBVEVOQ1lfS0lORF9TV0lUQ0hfRklSU1QQAhIjCh9SRVBPUlRFRF9MQVRFTkNZX0tJTkRfUEFHRV9CT09UEAMSJQohUkVQT1JURURfTEFURU5DWV9LSU5EX1BST01QVF9FQ0hPEAQSJAogUkVQT1JURURfTEFURU5DWV9LSU5EX1BBR0VfU1RBTEwQBRImCiJSRVBPUlRFRF9MQVRFTkNZX0tJTkRfUkVMT0FEX0JMQU5LEAYSKAokUkVQT1JURURfTEFURU5DWV9LSU5EX1NXSVRDSF9TSURFQkFSEAcSKQolUkVQT1JURURfTEFURU5DWV9LSU5EX1ZJRVdFRF9ET1dOVElNRRAIKsoBChFFZGl0b3JMYXRlbmN5S2luZBIjCh9FRElUT1JfTEFURU5DWV9LSU5EX1VOU1BFQ0lGSUVEEAASHQoZRURJVE9SX0xBVEVOQ1lfS0lORF9TVEFMTBABEiQKIEVESVRPUl9MQVRFTkNZX0tJTkRfRUxJU1BfUkVMT0FEEAISIgoeRURJVE9SX0xBVEVOQ1lfS0lORF9JTlBVVF9XQUlUEAMSJwojRURJVE9SX0xBVEVOQ1lfS0lORF9WSUVXRURfUkVBVFRBQ0gQBCrgAQoWRWRpdG9yU3RhcnR1cE1pbGVzdG9uZRIoCiRFRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfVU5TUEVDSUZJRUQQABIhCh1FRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfSU5JVBABEioKJkVESVRPUl9TVEFSVFVQX01JTEVTVE9ORV9EQUVNT05fTElOS0VEEAISJgoiRURJVE9SX1NUQVJUVVBfTUlMRVNUT05FX0ZJUlNUX1RBQhADEiUKIUVESVRPUl9TVEFSVFVQX01JTEVTVE9ORV9BTExfVEFCUxAEQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * One finished interaction.
@@ -103,6 +103,16 @@ export type ReportLatenciesRequest = Message<"agentrepl.v1.ReportLatenciesReques
    * @generated from field: repeated agentrepl.v1.ReportedEditorLatency editor_latencies = 3;
    */
   editorLatencies: ReportedEditorLatency[];
+
+  /**
+   * The stalls of the editor's command loop since its last acknowledged
+   * report, oldest first, each with the work that held the loop. Sent by
+   * Emacs only, and kept and sent again with the next batch until a report is
+   * acknowledged, as `latencies' are.
+   *
+   * @generated from field: repeated agentrepl.v1.ReportedEditorStall editor_stalls = 4;
+   */
+  editorStalls: ReportedEditorStall[];
 };
 
 /**
@@ -111,6 +121,315 @@ export type ReportLatenciesRequest = Message<"agentrepl.v1.ReportLatenciesReques
  */
 export const ReportLatenciesRequestSchema: GenMessage<ReportLatenciesRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_report_latencies, 1);
+
+/**
+ * One stall of the editor's command loop: how late the editor's steady
+ * sampling timer ran, when it ran at least the vocabulary's detection floor
+ * late, and which work held the loop meanwhile. The daemon records the
+ * seconds as the `editor_stall' latency and, by culprit, in
+ * `agentrepl_editor_stall_culprit_seconds'.
+ *
+ * @generated from message agentrepl.v1.ReportedEditorStall
+ */
+export type ReportedEditorStall = Message<"agentrepl.v1.ReportedEditorStall"> & {
+  /**
+   * How late the sampling timer ran, in seconds. Finite and not negative;
+   * anything else is InvalidArgument.
+   *
+   * @generated from field: double seconds = 1;
+   */
+  seconds: number;
+
+  /**
+   * The work that held the loop longest between the sampler's two runs that
+   * bracket the stall. Required: an unset culprit is InvalidArgument.
+   *
+   * @generated from field: agentrepl.v1.EditorStallCulprit culprit = 2;
+   */
+  culprit?: EditorStallCulprit | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportedEditorStall.
+ * Use `create(ReportedEditorStallSchema)` to create a new message.
+ */
+export const ReportedEditorStallSchema: GenMessage<ReportedEditorStall> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 2);
+
+/**
+ * The work that held the editor's command loop longest across one stall.
+ * The editor times every timer it runs, every command and every process
+ * filter and sentinel of its daemon connections, each charged only the time
+ * it ran itself (a timer run inside a filter is the timer's, not the
+ * filter's), and names the one that ran longest; or garbage collection, when
+ * the collector ran longer than any of them; or nothing it timed, when the
+ * stall outlasts everything it timed together (redisplay, a page's widget,
+ * a process that is not a daemon connection).
+ *
+ * @generated from message agentrepl.v1.EditorStallCulprit
+ */
+export type EditorStallCulprit = Message<"agentrepl.v1.EditorStallCulprit"> & {
+  /**
+   * Which kind of work it was. Set but unassigned is a kind of work this
+   * schema revision does not name; the daemon records it as `unknown'.
+   *
+   * @generated from oneof agentrepl.v1.EditorStallCulprit.work
+   */
+  work: {
+    /**
+     * A timer the editor ran (`run-at-time', `run-with-idle-timer').
+     *
+     * @generated from field: agentrepl.v1.EditorStallTimer timer = 1;
+     */
+    value: EditorStallTimer;
+    case: "timer";
+  } | {
+    /**
+     * The filter of a daemon connection: the editor reading and handling
+     * what the daemon sent on it.
+     *
+     * @generated from field: agentrepl.v1.EditorStallProcessFilter process_filter = 2;
+     */
+    value: EditorStallProcessFilter;
+    case: "processFilter";
+  } | {
+    /**
+     * The sentinel of a daemon connection: the editor handling its end.
+     *
+     * @generated from field: agentrepl.v1.EditorStallProcessSentinel process_sentinel = 3;
+     */
+    value: EditorStallProcessSentinel;
+    case: "processSentinel";
+  } | {
+    /**
+     * A command the editor ran, typed or a special event's.
+     *
+     * @generated from field: agentrepl.v1.EditorStallCommand command = 4;
+     */
+    value: EditorStallCommand;
+    case: "command";
+  } | {
+    /**
+     * The garbage collector.
+     *
+     * @generated from field: agentrepl.v1.EditorStallGarbageCollection garbage_collection = 5;
+     */
+    value: EditorStallGarbageCollection;
+    case: "garbageCollection";
+  } | {
+    /**
+     * Work the editor does not time ran longer than everything it does.
+     *
+     * @generated from field: agentrepl.v1.EditorStallUnattributed unattributed = 6;
+     */
+    value: EditorStallUnattributed;
+    case: "unattributed";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallCulprit.
+ * Use `create(EditorStallCulpritSchema)` to create a new message.
+ */
+export const EditorStallCulpritSchema: GenMessage<EditorStallCulprit> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 3);
+
+/**
+ * A timer held the loop.
+ *
+ * @generated from message agentrepl.v1.EditorStallTimer
+ */
+export type EditorStallTimer = Message<"agentrepl.v1.EditorStallTimer"> & {
+  /**
+   * The function the timer ran.
+   *
+   * @generated from field: agentrepl.v1.EditorStallFunction function = 1;
+   */
+  function?: EditorStallFunction | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallTimer.
+ * Use `create(EditorStallTimerSchema)` to create a new message.
+ */
+export const EditorStallTimerSchema: GenMessage<EditorStallTimer> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 4);
+
+/**
+ * A daemon connection's filter held the loop.
+ *
+ * @generated from message agentrepl.v1.EditorStallProcessFilter
+ */
+export type EditorStallProcessFilter = Message<"agentrepl.v1.EditorStallProcessFilter"> & {
+  /**
+   * The AgentRepl rpc the connection carries, by its bare method name
+   * ("WatchHost"). Must name a method of service AgentRepl; anything else is
+   * InvalidArgument, which keeps the metric's label a closed set.
+   *
+   * @generated from field: string rpc_method = 1;
+   */
+  rpcMethod: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallProcessFilter.
+ * Use `create(EditorStallProcessFilterSchema)` to create a new message.
+ */
+export const EditorStallProcessFilterSchema: GenMessage<EditorStallProcessFilter> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 5);
+
+/**
+ * A daemon connection's sentinel held the loop.
+ *
+ * @generated from message agentrepl.v1.EditorStallProcessSentinel
+ */
+export type EditorStallProcessSentinel = Message<"agentrepl.v1.EditorStallProcessSentinel"> & {
+  /**
+   * The AgentRepl rpc the connection carries, as for
+   * EditorStallProcessFilter.rpc_method.
+   *
+   * @generated from field: string rpc_method = 1;
+   */
+  rpcMethod: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallProcessSentinel.
+ * Use `create(EditorStallProcessSentinelSchema)` to create a new message.
+ */
+export const EditorStallProcessSentinelSchema: GenMessage<EditorStallProcessSentinel> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 6);
+
+/**
+ * A command held the loop.
+ *
+ * @generated from message agentrepl.v1.EditorStallCommand
+ */
+export type EditorStallCommand = Message<"agentrepl.v1.EditorStallCommand"> & {
+  /**
+   * The command that ran.
+   *
+   * @generated from field: agentrepl.v1.EditorStallFunction function = 1;
+   */
+  function?: EditorStallFunction | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallCommand.
+ * Use `create(EditorStallCommandSchema)` to create a new message.
+ */
+export const EditorStallCommandSchema: GenMessage<EditorStallCommand> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 7);
+
+/**
+ * The garbage collector ran longer than any timed work. DELIBERATELY EMPTY:
+ * the arm is the fact.
+ *
+ * @generated from message agentrepl.v1.EditorStallGarbageCollection
+ */
+export type EditorStallGarbageCollection = Message<"agentrepl.v1.EditorStallGarbageCollection"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallGarbageCollection.
+ * Use `create(EditorStallGarbageCollectionSchema)` to create a new message.
+ */
+export const EditorStallGarbageCollectionSchema: GenMessage<EditorStallGarbageCollection> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 8);
+
+/**
+ * Nothing the editor times ran as long as the stall's untimed remainder.
+ * DELIBERATELY EMPTY: the arm is the fact.
+ *
+ * @generated from message agentrepl.v1.EditorStallUnattributed
+ */
+export type EditorStallUnattributed = Message<"agentrepl.v1.EditorStallUnattributed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallUnattributed.
+ * Use `create(EditorStallUnattributedSchema)` to create a new message.
+ */
+export const EditorStallUnattributedSchema: GenMessage<EditorStallUnattributed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 9);
+
+/**
+ * The function a timer or a command ran.
+ *
+ * @generated from message agentrepl.v1.EditorStallFunction
+ */
+export type EditorStallFunction = Message<"agentrepl.v1.EditorStallFunction"> & {
+  /**
+   * Whether the function has a name. Required: an unset arm is
+   * InvalidArgument.
+   *
+   * @generated from oneof agentrepl.v1.EditorStallFunction.function
+   */
+  function: {
+    /**
+     * A function named by a symbol.
+     *
+     * @generated from field: agentrepl.v1.EditorStallFunctionNamed named = 1;
+     */
+    value: EditorStallFunctionNamed;
+    case: "named";
+  } | {
+    /**
+     * A closure or other unnamed function.
+     *
+     * @generated from field: agentrepl.v1.EditorStallFunctionAnonymous anonymous = 2;
+     */
+    value: EditorStallFunctionAnonymous;
+    case: "anonymous";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallFunction.
+ * Use `create(EditorStallFunctionSchema)` to create a new message.
+ */
+export const EditorStallFunctionSchema: GenMessage<EditorStallFunction> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 10);
+
+/**
+ * A function named by a symbol.
+ *
+ * @generated from message agentrepl.v1.EditorStallFunctionNamed
+ */
+export type EditorStallFunctionNamed = Message<"agentrepl.v1.EditorStallFunctionNamed"> & {
+  /**
+   * The symbol's name, as `symbol-name' spells it. Non-empty. The daemon's
+   * metric labels agent-repl's own functions (a name beginning `agent-repl')
+   * by name and every other one as `other', so the label stays a set this
+   * codebase's own definitions bound; the editor's log carries every name.
+   *
+   * @generated from field: string symbol = 1;
+   */
+  symbol: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallFunctionNamed.
+ * Use `create(EditorStallFunctionNamedSchema)` to create a new message.
+ */
+export const EditorStallFunctionNamedSchema: GenMessage<EditorStallFunctionNamed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 11);
+
+/**
+ * A closure or another function with no name. DELIBERATELY EMPTY: the arm
+ * is the fact.
+ *
+ * @generated from message agentrepl.v1.EditorStallFunctionAnonymous
+ */
+export type EditorStallFunctionAnonymous = Message<"agentrepl.v1.EditorStallFunctionAnonymous"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.EditorStallFunctionAnonymous.
+ * Use `create(EditorStallFunctionAnonymousSchema)` to create a new message.
+ */
+export const EditorStallFunctionAnonymousSchema: GenMessage<EditorStallFunctionAnonymous> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 12);
 
 /**
  * One finished editor-wide interaction.
@@ -140,7 +459,7 @@ export type ReportedEditorLatency = Message<"agentrepl.v1.ReportedEditorLatency"
  * Use `create(ReportedEditorLatencySchema)` to create a new message.
  */
 export const ReportedEditorLatencySchema: GenMessage<ReportedEditorLatency> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 2);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 13);
 
 /**
  * One milestone of the editor's startup, timed by the editor from its own
@@ -196,7 +515,7 @@ export type ReportedEditorStartup = Message<"agentrepl.v1.ReportedEditorStartup"
  * Use `create(ReportedEditorStartupSchema)` to create a new message.
  */
 export const ReportedEditorStartupSchema: GenMessage<ReportedEditorStartup> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 3);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 14);
 
 /**
  * The editor found no daemon serving and started one, so its startup
@@ -212,7 +531,7 @@ export type EditorStartupDaemonSpawned = Message<"agentrepl.v1.EditorStartupDaem
  * Use `create(EditorStartupDaemonSpawnedSchema)` to create a new message.
  */
 export const EditorStartupDaemonSpawnedSchema: GenMessage<EditorStartupDaemonSpawned> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 4);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 15);
 
 /**
  * The editor linked to a daemon that was already serving. DELIBERATELY
@@ -228,7 +547,7 @@ export type EditorStartupDaemonRunning = Message<"agentrepl.v1.EditorStartupDaem
  * Use `create(EditorStartupDaemonRunningSchema)` to create a new message.
  */
 export const EditorStartupDaemonRunningSchema: GenMessage<EditorStartupDaemonRunning> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 5);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 16);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -259,7 +578,7 @@ export type ReportLatenciesResponse = Message<"agentrepl.v1.ReportLatenciesRespo
  * Use `create(ReportLatenciesResponseSchema)` to create a new message.
  */
 export const ReportLatenciesResponseSchema: GenMessage<ReportLatenciesResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 6);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 17);
 
 /**
  * The report was received: the client drops the batch. Which of the arms is
@@ -307,7 +626,7 @@ export type ReportLatenciesSuccess = Message<"agentrepl.v1.ReportLatenciesSucces
  * Use `create(ReportLatenciesSuccessSchema)` to create a new message.
  */
 export const ReportLatenciesSuccessSchema: GenMessage<ReportLatenciesSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 7);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 18);
 
 /**
  * Every latency in the batch was recorded.
@@ -317,9 +636,9 @@ export const ReportLatenciesSuccessSchema: GenMessage<ReportLatenciesSuccess> = 
 export type ReportLatenciesRecorded = Message<"agentrepl.v1.ReportLatenciesRecorded"> & {
   /**
    * How many latencies were recorded: the length of the batch's
-   * `latencies`. Every editor startup milestone and editor latency in the
-   * batch is recorded too and is not counted here, since neither names a
-   * workspace, so neither is ever dropped.
+   * `latencies`. Every editor startup milestone, editor latency and editor
+   * stall in the batch is recorded too and is not counted here, since none
+   * names a workspace, so none is ever dropped.
    *
    * @generated from field: uint32 recorded = 1;
    */
@@ -331,7 +650,7 @@ export type ReportLatenciesRecorded = Message<"agentrepl.v1.ReportLatenciesRecor
  * Use `create(ReportLatenciesRecordedSchema)` to create a new message.
  */
 export const ReportLatenciesRecordedSchema: GenMessage<ReportLatenciesRecorded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 8);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 19);
 
 /**
  * Part of the batch named workspaces the daemon's registry no longer holds:
@@ -362,7 +681,7 @@ export type ReportLatenciesPartlyRecorded = Message<"agentrepl.v1.ReportLatencie
  * Use `create(ReportLatenciesPartlyRecordedSchema)` to create a new message.
  */
 export const ReportLatenciesPartlyRecordedSchema: GenMessage<ReportLatenciesPartlyRecorded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 9);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 20);
 
 /**
  * The daemon was started without a metrics root, so it records no metrics.
@@ -379,7 +698,7 @@ export type ReportLatenciesMetricsOff = Message<"agentrepl.v1.ReportLatenciesMet
  * Use `create(ReportLatenciesMetricsOffSchema)` to create a new message.
  */
 export const ReportLatenciesMetricsOffSchema: GenMessage<ReportLatenciesMetricsOff> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 10);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 21);
 
 /**
  * The daemon's refusals. Validation failures (an unspecified kind, an unset
@@ -412,7 +731,7 @@ export type ReportLatenciesError = Message<"agentrepl.v1.ReportLatenciesError"> 
  * Use `create(ReportLatenciesErrorSchema)` to create a new message.
  */
 export const ReportLatenciesErrorSchema: GenMessage<ReportLatenciesError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 11);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 22);
 
 /**
  * A ref in the batch named a known workspace id with the wrong dir.
@@ -447,7 +766,7 @@ export type ReportLatenciesWorkspaceRefMismatch = Message<"agentrepl.v1.ReportLa
  * Use `create(ReportLatenciesWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const ReportLatenciesWorkspaceRefMismatchSchema: GenMessage<ReportLatenciesWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 12);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 23);
 
 /**
  * Which interaction a reported latency measured. Each value names one entry
@@ -574,6 +893,10 @@ export enum EditorLatencyKind {
    * A stall of the editor's command loop: how late the editor's steady
    * sampling timer ran, when it ran at least the vocabulary's detection floor
    * late. Every keystroke and every redisplay waits on the loop meanwhile.
+   * Sent only by an editor that does not attribute its stalls; an editor
+   * that does reports each stall as a ReportedEditorStall instead, and the
+   * daemon records both as the same `editor_stall' latency. An editor and a
+   * daemon are deployed and reloaded apart, so either may run the older code.
    *
    * @generated from enum value: EDITOR_LATENCY_KIND_STALL = 1;
    */

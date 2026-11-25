@@ -3572,9 +3572,30 @@ type fakeLatencies struct {
 	observed []observedLatency
 	restarts []restarttiming.Observation
 	editor   []observedLatency
+	stalls   []observedEditorStall
+}
+
+// observedEditorStall is one editor stall recorded with its culprit.
+type observedEditorStall struct {
+	kind    string
+	culprit runtimemetrics.StallCulprit
+	seconds float64
 }
 
 func (f *fakeLatencies) Enabled() bool { return f.enabled }
+
+func (f *fakeLatencies) ObserveEditorStall(kind runtimemetrics.LatencyKind, culprit runtimemetrics.StallCulprit, seconds float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stalls = append(f.stalls, observedEditorStall{kind: kind.Name, culprit: culprit, seconds: seconds})
+}
+
+// editorStalls answers every editor stall recorded.
+func (f *fakeLatencies) editorStalls() []observedEditorStall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]observedEditorStall(nil), f.stalls...)
+}
 
 func (f *fakeLatencies) ObserveEditorLatency(kind runtimemetrics.LatencyKind, seconds float64) {
 	f.mu.Lock()

@@ -104,7 +104,116 @@ message ReportLatenciesRequest {
   // one workspace. Sent by Emacs only, and kept and sent again with the next
   // batch until a report is acknowledged, as `latencies' are.
   repeated ReportedEditorLatency editor_latencies = 3;
+  // The stalls of the editor's command loop since its last acknowledged
+  // report, oldest first, each with the work that held the loop. Sent by
+  // Emacs only, and kept and sent again with the next batch until a report is
+  // acknowledged, as `latencies' are.
+  repeated ReportedEditorStall editor_stalls = 4;
 }
+
+// ---- Editor stalls: the command loop held, and by what ----
+
+// One stall of the editor's command loop: how late the editor's steady
+// sampling timer ran, when it ran at least the vocabulary's detection floor
+// late, and which work held the loop meanwhile. The daemon records the
+// seconds as the `editor_stall' latency and, by culprit, in
+// `agentrepl_editor_stall_culprit_seconds'.
+message ReportedEditorStall {
+  // How late the sampling timer ran, in seconds. Finite and not negative;
+  // anything else is InvalidArgument.
+  double seconds = 1;
+  // The work that held the loop longest between the sampler's two runs that
+  // bracket the stall. Required: an unset culprit is InvalidArgument.
+  EditorStallCulprit culprit = 2;
+}
+
+// The work that held the editor's command loop longest across one stall.
+// The editor times every timer it runs, every command and every process
+// filter and sentinel of its daemon connections, each charged only the time
+// it ran itself (a timer run inside a filter is the timer's, not the
+// filter's), and names the one that ran longest; or garbage collection, when
+// the collector ran longer than any of them; or nothing it timed, when the
+// stall outlasts everything it timed together (redisplay, a page's widget,
+// a process that is not a daemon connection).
+message EditorStallCulprit {
+  // Which kind of work it was. Set but unassigned is a kind of work this
+  // schema revision does not name; the daemon records it as `unknown'.
+  oneof work {
+    // A timer the editor ran (`run-at-time', `run-with-idle-timer').
+    EditorStallTimer timer = 1;
+    // The filter of a daemon connection: the editor reading and handling
+    // what the daemon sent on it.
+    EditorStallProcessFilter process_filter = 2;
+    // The sentinel of a daemon connection: the editor handling its end.
+    EditorStallProcessSentinel process_sentinel = 3;
+    // A command the editor ran, typed or a special event's.
+    EditorStallCommand command = 4;
+    // The garbage collector.
+    EditorStallGarbageCollection garbage_collection = 5;
+    // Work the editor does not time ran longer than everything it does.
+    EditorStallUnattributed unattributed = 6;
+  }
+}
+
+// A timer held the loop.
+message EditorStallTimer {
+  // The function the timer ran.
+  EditorStallFunction function = 1;
+}
+
+// A daemon connection's filter held the loop.
+message EditorStallProcessFilter {
+  // The AgentRepl rpc the connection carries, by its bare method name
+  // ("WatchHost"). Must name a method of service AgentRepl; anything else is
+  // InvalidArgument, which keeps the metric's label a closed set.
+  string rpc_method = 1;
+}
+
+// A daemon connection's sentinel held the loop.
+message EditorStallProcessSentinel {
+  // The AgentRepl rpc the connection carries, as for
+  // EditorStallProcessFilter.rpc_method.
+  string rpc_method = 1;
+}
+
+// A command held the loop.
+message EditorStallCommand {
+  // The command that ran.
+  EditorStallFunction function = 1;
+}
+
+// The garbage collector ran longer than any timed work. DELIBERATELY EMPTY:
+// the arm is the fact.
+message EditorStallGarbageCollection {}
+
+// Nothing the editor times ran as long as the stall's untimed remainder.
+// DELIBERATELY EMPTY: the arm is the fact.
+message EditorStallUnattributed {}
+
+// The function a timer or a command ran.
+message EditorStallFunction {
+  // Whether the function has a name. Required: an unset arm is
+  // InvalidArgument.
+  oneof function {
+    // A function named by a symbol.
+    EditorStallFunctionNamed named = 1;
+    // A closure or other unnamed function.
+    EditorStallFunctionAnonymous anonymous = 2;
+  }
+}
+
+// A function named by a symbol.
+message EditorStallFunctionNamed {
+  // The symbol's name, as `symbol-name' spells it. Non-empty. The daemon's
+  // metric labels agent-repl's own functions (a name beginning `agent-repl')
+  // by name and every other one as `other', so the label stays a set this
+  // codebase's own definitions bound; the editor's log carries every name.
+  string symbol = 1;
+}
+
+// A closure or another function with no name. DELIBERATELY EMPTY: the arm
+// is the fact.
+message EditorStallFunctionAnonymous {}
 
 // ---- Editor latencies: the editor as a whole, no workspace ----
 
@@ -117,6 +226,10 @@ enum EditorLatencyKind {
   // A stall of the editor's command loop: how late the editor's steady
   // sampling timer ran, when it ran at least the vocabulary's detection floor
   // late. Every keystroke and every redisplay waits on the loop meanwhile.
+  // Sent only by an editor that does not attribute its stalls; an editor
+  // that does reports each stall as a ReportedEditorStall instead, and the
+  // daemon records both as the same `editor_stall' latency. An editor and a
+  // daemon are deployed and reloaded apart, so either may run the older code.
   EDITOR_LATENCY_KIND_STALL = 1;
   // A deploy's pushed elisp reload (DaemonReloadElisp), from its first module
   // load to its heartbeat assertion done. The editor runs nothing else
@@ -228,9 +341,9 @@ message ReportLatenciesSuccess {
 // Every latency in the batch was recorded.
 message ReportLatenciesRecorded {
   // How many latencies were recorded: the length of the batch's
-  // `latencies`. Every editor startup milestone and editor latency in the
-  // batch is recorded too and is not counted here, since neither names a
-  // workspace, so neither is ever dropped.
+  // `latencies`. Every editor startup milestone, editor latency and editor
+  // stall in the batch is recorded too and is not counted here, since none
+  // names a workspace, so none is ever dropped.
   uint32 recorded = 1;
 }
 
