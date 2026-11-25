@@ -462,6 +462,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("A GNS subpage the work adds under a page the workspace does not own is stored owned");
   });
 
+  it("says a close something still blocks stands until agent-repl carries it out, and what withdraws it", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("A workspace's close that something still blocks stands as its close request, and agent-repl closes the workspace once nothing blocks it.");
+    expect(text).toContain("So a workspace never promises to close again once a child closes, nor asks to be prompted for it: its close already stands.");
+    expect(text).toContain("The request is withdrawn by `agent-repld workspace close here -cancel`, by any prompt I send the workspace, and by my releasing one of its held prompts.");
+  });
+
   it("requires every open pull request an agent makes to be shown in the menu, and owned links ahead of references", () => {
     // Arrange
     const home = homeOnThisRepository();
