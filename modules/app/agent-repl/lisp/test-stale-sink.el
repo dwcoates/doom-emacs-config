@@ -93,8 +93,8 @@
     (should (agent-repl-test-stale-sink--recorded-p 'info "departed workspace=\"gone-ws\".*no longer knows"))
     (should-not agent-repl-test-stale-sink--warnings)))
 
-(ert-deftest agent-repl-test-stale-sink-a-refused-ask-is-an-error ()
-  "A refusal of the ask leaves the gone directory unexplained: ERROR, no popup."
+(ert-deftest agent-repl-test-stale-sink-a-moved-workspace-is-recorded-at-info ()
+  "A daemon holding the workspace at another directory records its move at INFO."
   (agent-repl-test-stale-sink--with
     ;; Arrange
     (setq agent-repl-test-stale-sink--answer
@@ -102,7 +102,33 @@
     ;; Act
     (agent-repl-stale-sink-confirm "gone-ws" "/tmp/gone")
     ;; Assert
-    (should (agent-repl-test-stale-sink--recorded-p 'error "refused workspace=\"gone-ws\".*workspace-ref-mismatch"))
+    (should (agent-repl-test-stale-sink--recorded-p
+             'info "moved workspace=\"gone-ws\" registered-dir=/tmp/gone registry-dir=/elsewhere"))))
+
+(ert-deftest agent-repl-test-stale-sink-a-moved-workspace-raises-no-error-and-no-popup ()
+  "A moved workspace is explained: no warn or error record, no popup."
+  (agent-repl-test-stale-sink--with
+    ;; Arrange
+    (setq agent-repl-test-stale-sink--answer
+          '(:response (:arm :error :value (:arm :workspace-ref-mismatch :value (:registry-dir "/elsewhere")))))
+    ;; Act
+    (agent-repl-stale-sink-confirm "gone-ws" "/tmp/gone")
+    ;; Assert
+    (should-not agent-repl-test-stale-sink--warnings)
+    (should-not (cl-some (lambda (r) (memq (car r) '(warn error))) agent-repl-test-stale-sink--records))))
+
+(ert-deftest agent-repl-test-stale-sink-a-refused-ask-is-an-error ()
+  "A refusal of the ask leaves the gone directory unexplained: ERROR, no popup.
+GetWorkspaceStatusError's two arms today are both explanations, so the
+refusal here is an arm the contract may add later."
+  (agent-repl-test-stale-sink--with
+    ;; Arrange
+    (setq agent-repl-test-stale-sink--answer
+          '(:response (:arm :error :value (:arm :a-later-arm :value nil))))
+    ;; Act
+    (agent-repl-stale-sink-confirm "gone-ws" "/tmp/gone")
+    ;; Assert
+    (should (agent-repl-test-stale-sink--recorded-p 'error "refused workspace=\"gone-ws\".*a-later-arm"))
     (should-not agent-repl-test-stale-sink--warnings)))
 
 (ert-deftest agent-repl-test-stale-sink-a-failed-ask-is-an-error ()

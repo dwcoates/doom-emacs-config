@@ -653,6 +653,107 @@ looked at."
           (reverse (cl-remove-if-not (lambda (call) (equal (car call) "ReportUserInteraction"))
                                      agent-repl-test-host--calls))))
 
+;;;; ---- The ref's one writer ----
+
+(defmacro agent-repl-test-host--recording-ws-puts (puts &rest body)
+  "Run BODY with every `agent-repl--ws-put' pushed onto PUTS as (WS KEY VALUE)."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--ws-put)
+              (lambda (ws key value) (push (list ws key value) ,puts))))
+     ,@body))
+
+(ert-deftest agent-repl-test-host-take-ref-writes-the-workspace-plist ()
+  "The workspace plist's copy of the ref is written."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((puts nil)
+          (ref (agent-repl-test-host--ref "id-1" "/tmp/new")))
+      (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref "id-1" "/tmp/old"))
+      (agent-repl-test-host--recording-ws-puts puts
+        ;; Act
+        (agent-repl-host-take-ref "ws-1" ref))
+      ;; Assert
+      (should (member (list "ws-1" :ref ref) puts)))))
+
+(ert-deftest agent-repl-test-host-take-ref-writes-the-host-entry ()
+  "A workspace with a host entry answers the new ref from `agent-repl-host-ref'."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((ref (agent-repl-test-host--ref "id-1" "/tmp/new")))
+      (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref "id-1" "/tmp/old"))
+      ;; Act
+      (agent-repl-host-take-ref "ws-1" ref)
+      ;; Assert
+      (should (equal (agent-repl-host-ref "ws-1") ref)))))
+
+(ert-deftest agent-repl-test-host-take-ref-without-an-entry-writes-the-plist ()
+  "A workspace with no host entry still gets the ref on its plist."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((puts nil)
+          (ref (agent-repl-test-host--ref "id-1" "/tmp/new")))
+      (agent-repl-test-host--recording-ws-puts puts
+        ;; Act
+        (agent-repl-host-take-ref "ws-1" ref))
+      ;; Assert
+      (should (member (list "ws-1" :ref ref) puts)))))
+
+(ert-deftest agent-repl-test-host-take-ref-without-an-entry-creates-none ()
+  "No host entry is conjured: `agent-repl-host-ref' stays nil."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((ref (agent-repl-test-host--ref "id-1" "/tmp/new")))
+      ;; Act
+      (agent-repl-host-take-ref "ws-1" ref)
+      ;; Assert
+      (should (null (agent-repl-host-ref "ws-1")))
+      (should (null (agent-repl-host--entry "ws-1"))))))
+
+(ert-deftest agent-repl-test-host-take-ref-records-a-changed-dir-at-info ()
+  "An entry whose ref moves to another directory is recorded with both directories."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref "id-1" "/tmp/old"))
+    ;; Act
+    (agent-repl-host-take-ref "ws-1" (agent-repl-test-host--ref "id-1" "/tmp/new"))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.ref-taken ws=ws-1 id=\"id-1\" dir=\"/tmp/new\" was-dir=\"/tmp/old\""))))
+
+(ert-deftest agent-repl-test-host-take-ref-records-nothing-for-the-same-ref ()
+  "Re-taking the ref an entry already holds records nothing."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref "id-1" "/tmp/same"))
+    ;; Act
+    (agent-repl-host-take-ref "ws-1" (agent-repl-test-host--ref "id-1" "/tmp/same"))
+    ;; Assert
+    (should-not (agent-repl-test-host--logged-p :info "elisp.host.ref-taken"))))
+
+;; Two writers of the ref once diverged: a rename's move reached the
+;; workspace plist and not the host entry, and an adopt echoed the stale
+;; ref (2026-11-25).  A future third writer fails here.
+(ert-deftest agent-repl-test-host-take-ref-is-the-only-writer-of-the-ref ()
+  "No source writes either home of the ref but `agent-repl-host-take-ref'."
+  ;; Arrange
+  (let ((pattern "(agent-repl--ws-put [^ ]+ :ref \\|(agent-repl-host--put [^ ]+ :ref ")
+        (offenders nil))
+    ;; Act
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'"))
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (while (re-search-forward pattern nil t)
+            (unless (and (string= (file-name-nondirectory file) "host.el")
+                         (save-excursion
+                           (beginning-of-defun)
+                           (looking-at "(defun agent-repl-host-take-ref ")))
+              (push (format "%s:%d" (file-name-nondirectory file) (line-number-at-pos))
+                    offenders))))))
+    ;; Assert
+    (should-not offenders)))
+
 (ert-deftest agent-repl-test-host-interaction-echoes-the-ref-and-the-kind ()
   "ReportUserInteraction carries the daemon-minted ref and the kind it was handed."
   (agent-repl-test-host--with-harness

@@ -1376,6 +1376,44 @@ that follows must not care which of the two got there first."
     (should (equal (agent-repl-test-roster--tabs) '("new-name")))
     (should (equal (agent-repl--ws-get "new-name" :project-dir) "/w/new-name"))))
 
+(ert-deftest agent-repl-test-roster-a-moved-row-moves-its-host-ref ()
+  "A kept tab's host entry answers the ref at the new directory, the one an adopt echoes."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal)))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "name" :ready :dir "/w/old"))))))
+      (agent-repl-host--put "name" :ref (list :id "a" :dir "/w/old"))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "name" :ready :dir "/w/new")))))))
+      ;; Assert
+      (should (equal (plist-get (agent-repl-host-ref "name") :dir) "/w/new")))))
+
+(ert-deftest agent-repl-test-roster-a-renamed-and-moved-row-moves-its-host-ref ()
+  "A renamed and moved row's new name answers the ref at the new directory."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal)))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "old-name" :ready :dir "/w/old-name"))))))
+      (agent-repl-host--put "old-name" :ref (list :id "a" :dir "/w/old-name"))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready :dir "/w/new-name")))))))
+      ;; Assert
+      (should (equal (plist-get (agent-repl-host-ref "new-name") :dir) "/w/new-name")))))
+
 (ert-deftest agent-repl-test-roster-a-rename-re-keys-host-state ()
   "Host state is keyed on the name too, so the NEW name answers with the ref."
   ;; Arrange

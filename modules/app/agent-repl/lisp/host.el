@@ -188,6 +188,35 @@ roster and handed back verbatim.  Nil means the workspace has not been
 registered on the current daemon yet."
   (plist-get (agent-repl-host--entry ws) :ref))
 
+(defun agent-repl-host-take-ref (ws ref)
+  "Record REF as workspace WS's daemon-minted `WorkspaceRef', in both its homes.
+The ref WS echoes on every per-workspace call lives in TWO places: the
+workspace plist (`agent-repl--ws-get' WS `:ref'), which the roster and
+every module that holds a workspace name reads, and this file's host
+entry (`agent-repl-host-ref'), which every daemon verb echoes.  This is
+THE ONE WRITER of both, so neither copy can fall behind the other.
+
+Two writers once diverged: after a rename moved a workspace's directory
+\(`agent-repl--ws-move-dir'), the roster wrote the new ref onto the plist
+alone, the host entry kept the ref naming the old directory, and on
+2026-11-25 a handover's adopt echoed that stale ref and the daemon
+refused it (`workspace_ref_mismatch') for two workspaces, leaving both
+unadopted until a promotion re-registered them.
+
+The host entry is written only when WS has one: a workspace whose host
+stream was never started has no entry, and `agent-repl-host--attach'
+writes it through here when the stream starts.  An entry whose ref
+changes is recorded once, with the directory it named before."
+  (agent-repl--ws-put ws :ref ref)
+  (when-let* ((entry (agent-repl-host--entry ws)))
+    (let ((was (plist-get entry :ref)))
+      (when (and was (not (equal was ref)))
+        (agent-repl--info ws "elisp.host.ref-taken ws={ws} id={id} dir={dir} was-dir={was_dir}"
+                          :ws ws :id (prin1-to-string (plist-get ref :id))
+                          :dir (prin1-to-string (plist-get ref :dir))
+                          :was_dir (prin1-to-string (plist-get was :dir)))))
+    (agent-repl-host--put ws :ref ref)))
+
 (defun agent-repl-host--conn-id (conn)
   "Return a short identity for CONN, telling connections at one address apart.
 Every daemon of a handover serves the one shared address, so the address
@@ -1394,8 +1423,9 @@ docstring in `core.el\=')."
 (defun agent-repl-host--attach (ws conn ref)
   "Record REF and CONN as workspace WS's identity and owner.
 The ref is stored BOTH in this file's table and on workspace.el's plist
-under `:ref', so any module can read the identity from whichever it
-already holds; neither copy is ever derived from a path.
+under `:ref', through their one writer `agent-repl-host-take-ref', so any
+module can read the identity from whichever it already holds; neither
+copy is ever derived from a path.
 
 THE SELECTION THE ACTIVATION HOOK COULD NOT MAKE IS MADE HERE.
 `agent-repl-host--on-workspace-activated' issues the SelectWorkspace on
@@ -1415,9 +1445,8 @@ the user is standing in, the daemon is told.  Selecting is idempotent by
 the verb\='s own contract -- re-selecting the current workspace succeeds and
 re-stamps nothing -- so a re-subscribe after a reconnect or a revival
 costs a round trip and changes no view."
-  (agent-repl-host--put ws :ref ref)
   (agent-repl-host--put ws :conn conn)
-  (agent-repl--ws-put ws :ref ref)
+  (agent-repl-host-take-ref ws ref)
   ;; THE USER'S WORKSPACE, NOT A TRANSIENTLY ACTIVATED ONE.  `--ws-current-name'
   ;; answers the perspective that is active right now, and
   ;; `agent-repl--call-in-background-workspace' makes a BACKGROUND workspace's

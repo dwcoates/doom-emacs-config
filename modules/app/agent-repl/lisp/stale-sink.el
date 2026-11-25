@@ -82,6 +82,16 @@ Asked now when a link stands, else once the link is up."
         (agent-repl--info agent-repl--global-log-scope
                          "elisp.stale-sink.departed workspace={workspace} registered-dir={registered_dir}; the daemon no longer knows it, so its gone directory is its departure"
                          :workspace (prin1-to-string ws) :registered_dir dir))
+       ;; THE DAEMON HOLDS IT AT ANOTHER DIRECTORY: a rename moved the
+       ;; workspace there, so the registered directory is gone because it
+       ;; moved.  The roster push that follows carries the new ref and moves
+       ;; the tab (`agent-repl--ws-move-dir'); nothing here touches the
+       ;; workspace's state.
+       (:workspace-ref-mismatch
+        (agent-repl--info agent-repl--global-log-scope
+                         "elisp.stale-sink.moved workspace={workspace} registered-dir={registered_dir} registry-dir={registry_dir}; the daemon holds it at another directory, so its gone directory is its move and the roster follows it"
+                         :workspace (prin1-to-string ws) :registered_dir dir
+                         :registry_dir (plist-get (plist-get (plist-get response :value) :value) :registry-dir)))
        (arm
         (agent-repl--error agent-repl--global-log-scope
                          "elisp.stale-sink.refused workspace={workspace} registered-dir={registered_dir} arm={arm}; the daemon refused the status ask, so the gone directory is unexplained"
