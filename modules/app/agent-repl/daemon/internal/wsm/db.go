@@ -1328,6 +1328,8 @@ type DB interface {
 	MarkSlackReactionFired(ctx context.Context, t SlackReactionTrigger, at time.Time) (bool, error)
 	// RecordSlackReactionBaseline records the standing triggers unfired.
 	RecordSlackReactionBaseline(ctx context.Context, standing []SlackReactionTrigger, at time.Time) error
+	// RecordSlackReactionSearch records where the next search reads on from.
+	RecordSlackReactionSearch(ctx context.Context, at time.Time) error
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

@@ -109,6 +109,14 @@ ALTER TABLE slack_thread_subscriptions ADD COLUMN source TEXT NOT NULL DEFAULT '
 ALTER TABLE slack_thread_subscriptions ADD COLUMN cursor_ts TEXT NOT NULL DEFAULT '';
 `
 
+// slackReactionSearchedThroughDDL is the layout-213 addition: where the
+// reaction initiator's next search of the watch user's messages reads on
+// from (SlackReactionSettings.SearchedThrough). IT IS ADDITIVE: a new
+// nullable column the previous build never names.
+const slackReactionSearchedThroughDDL = `
+ALTER TABLE slack_reaction_settings ADD COLUMN searched_through INTEGER;
+`
+
 // SlackThreadKey names one Slack thread: its channel and root timestamp.
 type SlackThreadKey struct {
 	Channel  string

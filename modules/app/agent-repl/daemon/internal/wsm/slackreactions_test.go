@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"agent-repld/internal/dlog"
 )
 
 // p1 is the p1 priority, addressable.
@@ -102,14 +104,14 @@ func TestUnbinding(t *testing.T) {
 	}
 }
 
-func TestChangingTheWatchUserOwesANewBaseline(t *testing.T) {
+func TestChangingTheWatchUserOwesANewBaselineAndFirstSearch(t *testing.T) {
 	tests := []struct {
-		name      string
-		user      string
-		baselined bool
+		name string
+		user string
+		kept bool
 	}{
-		{name: "the same user keeps the baseline", user: "U7HH4U1J4", baselined: true},
-		{name: "another user owes a new one", user: "U0000000", baselined: false},
+		{name: "the same user keeps the baseline and where the search read to", user: "U7HH4U1J4", kept: true},
+		{name: "another user owes a new baseline and first search", user: "U0000000", kept: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,13 +123,16 @@ func TestChangingTheWatchUserOwesANewBaseline(t *testing.T) {
 			if err := s.RecordSlackReactionBaseline(context.Background(), nil, instant); err != nil {
 				t.Fatal(err)
 			}
+			if err := s.RecordSlackReactionSearch(context.Background(), instant); err != nil {
+				t.Fatal(err)
+			}
 
 			// Act
 			got, err := s.SetSlackReactionWatchUser(context.Background(), tt.user)
 
 			// Assert
-			if err != nil || got.WatchUser != tt.user || (got.BaselinedAt != nil) != tt.baselined {
-				t.Fatalf("SetSlackReactionWatchUser = %+v, %v; want baselined=%v", got, err, tt.baselined)
+			if err != nil || got.WatchUser != tt.user || (got.BaselinedAt != nil) != tt.kept || (got.SearchedThrough != nil) != tt.kept {
+				t.Fatalf("SetSlackReactionWatchUser = %+v, %v; want kept=%v", got, err, tt.kept)
 			}
 		})
 	}
@@ -175,5 +180,59 @@ func TestATriggerFiresOnceAndTheBaselineCountsAsFired(t *testing.T) {
 	got, _ := s.SlackReactionSettings(context.Background())
 	if got.BaselinedAt == nil || !got.BaselinedAt.Equal(instant) {
 		t.Fatalf("baselined at %v, want %v", got.BaselinedAt, instant)
+	}
+}
+
+func TestRecordingASearchSetsWhereTheNextReadsOn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	later := instant.Add(time.Minute)
+	if err := s.RecordSlackReactionSearch(context.Background(), instant); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := s.RecordSlackReactionSearch(context.Background(), later)
+
+	// Assert
+	got, readErr := s.SlackReactionSettings(context.Background())
+	if err != nil || readErr != nil || got.SearchedThrough == nil || !got.SearchedThrough.Equal(later) {
+		t.Fatalf("SearchedThrough = %v (%v, %v), want %v", got.SearchedThrough, err, readErr, later)
+	}
+}
+
+func TestRecordingASearchOnAReadOnlyHandleIsRefused(t *testing.T) {
+	// Arrange
+	ro, log := readOnlyUsageStore(t)
+
+	// Act
+	err := ro.RecordSlackReactionSearch(context.Background(), instant)
+
+	// Assert
+	if !errors.Is(err, ErrReadOnly) {
+		t.Fatalf("RecordSlackReactionSearch = %v, want ErrReadOnly", err)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.record_slack_reaction_search", Message: "refused a write on a read-only handle"})
+	if !ok || rec.Context["searched_through"] != instant.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("records %+v", log.Records())
+	}
+}
+
+func TestTheMigrationLeavesTheFirstSearchOwed(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 212)
+	execRaw(t, path, `INSERT INTO slack_reaction_settings (id, watch_user, baselined_at) VALUES (1, 'U7HH4U1J4', 5)`)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-212 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got, err := handle.SlackReactionSettings(context.Background())
+	if err != nil || got.WatchUser != "U7HH4U1J4" || got.BaselinedAt == nil || got.SearchedThrough != nil {
+		t.Fatalf("SlackReactionSettings = %+v, %v; want the baseline kept and the first search owed", got, err)
 	}
 }

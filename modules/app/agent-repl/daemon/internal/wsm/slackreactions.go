@@ -61,6 +61,11 @@ type SlackReactionSettings struct {
 	// BaselinedAt is when the standing reactions were recorded, nil while the
 	// baseline is owed.
 	BaselinedAt *time.Time
+	// SearchedThrough is when the latest search of the watch user's messages
+	// that read every page it needed began, nil until one has: every trigger
+	// typed before it was read then, but for the ones Slack's search had not
+	// indexed yet.
+	SearchedThrough *time.Time
 	// Bindings are every binding, by emoji.
 	Bindings []SlackReactionBinding
 }
@@ -111,11 +116,11 @@ type settingsQuerier interface {
 
 func reactionSettings(ctx context.Context, q settingsQuerier) (SlackReactionSettings, error) {
 	var (
-		out       SlackReactionSettings
-		user, rep sql.NullString
-		at        sql.NullInt64
+		out          SlackReactionSettings
+		user, rep    sql.NullString
+		at, searched sql.NullInt64
 	)
-	err := q.QueryRowContext(ctx, `SELECT watch_user, repo_id, baselined_at FROM slack_reaction_settings WHERE id = 1`).Scan(&user, &rep, &at)
+	err := q.QueryRowContext(ctx, `SELECT watch_user, repo_id, baselined_at, searched_through FROM slack_reaction_settings WHERE id = 1`).Scan(&user, &rep, &at, &searched)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return SlackReactionSettings{}, err
 	}
@@ -123,6 +128,10 @@ func reactionSettings(ctx context.Context, q settingsQuerier) (SlackReactionSett
 	if at.Valid {
 		t := fromNanos(at.Int64)
 		out.BaselinedAt = &t
+	}
+	if searched.Valid {
+		t := fromNanos(searched.Int64)
+		out.SearchedThrough = &t
 	}
 	out.Bindings, err = listRows(ctx, q, `SELECT emoji, thread, mode, one_shot, priority FROM slack_reaction_bindings ORDER BY emoji`,
 		func(row interface{ Scan(...any) error }) (SlackReactionBinding, error) {
@@ -148,16 +157,17 @@ func reactionSettings(ctx context.Context, q settingsQuerier) (SlackReactionSett
 	return out, err
 }
 
-// SetSlackReactionWatchUser watches USER, owing a new baseline when the user
-// changed: the standing reactions of another user say nothing about this
-// one's.
+// SetSlackReactionWatchUser watches USER, owing a new baseline and a new
+// first search when the user changed: what another user reacted with or
+// typed says nothing about this one.
 func (s *store) SetSlackReactionWatchUser(ctx context.Context, user string) (SlackReactionSettings, error) {
 	const op = "daemon.wsm.set_slack_reaction_watch_user"
 	var out SlackReactionSettings
 	err := s.write(ctx, op, dlog.Context{"watch_user": user}, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO slack_reaction_settings (id, watch_user) VALUES (1, ?)
 			ON CONFLICT(id) DO UPDATE SET watch_user = excluded.watch_user,
-			  baselined_at = CASE WHEN slack_reaction_settings.watch_user IS excluded.watch_user THEN slack_reaction_settings.baselined_at ELSE NULL END`, user); err != nil {
+			  baselined_at = CASE WHEN slack_reaction_settings.watch_user IS excluded.watch_user THEN slack_reaction_settings.baselined_at ELSE NULL END,
+			  searched_through = CASE WHEN slack_reaction_settings.watch_user IS excluded.watch_user THEN slack_reaction_settings.searched_through ELSE NULL END`, user); err != nil {
 			return err
 		}
 		var err error
@@ -277,6 +287,18 @@ func (s *store) RecordSlackReactionBaseline(ctx context.Context, standing []Slac
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO slack_reaction_settings (id, baselined_at) VALUES (1, ?)
 			ON CONFLICT(id) DO UPDATE SET baselined_at = excluded.baselined_at`, nanos(at))
+		return err
+	})
+}
+
+// RecordSlackReactionSearch records AT as the start of the latest search of
+// the watch user's messages that read every page it needed, so the next
+// poll's search reads on from there (SlackReactionSettings.SearchedThrough).
+func (s *store) RecordSlackReactionSearch(ctx context.Context, at time.Time) error {
+	const op = "daemon.wsm.record_slack_reaction_search"
+	return s.write(ctx, op, dlog.Context{"searched_through": at.UTC().Format(time.RFC3339Nano)}, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO slack_reaction_settings (id, searched_through) VALUES (1, ?)
+			ON CONFLICT(id) DO UPDATE SET searched_through = excluded.searched_through`, nanos(at))
 		return err
 	})
 }
