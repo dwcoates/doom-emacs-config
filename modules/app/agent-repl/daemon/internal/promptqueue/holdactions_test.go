@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -181,6 +182,14 @@ func TestReleaseOnAVendorStartedTurnDeliversAtItsRealEndExactlyOnce(t *testing.T
 	}
 	if tomb := h.db.retired("t1"); tomb == nil || tomb.Kind != tombstoneDelivered {
 		t.Fatalf("tombstone = %+v, want t1 retired as delivered", tomb)
+	}
+	if len(h.sender.joins) != 0 {
+		t.Fatalf("joins = %v, want t1 run as its own turn", h.sender.joins)
+	}
+	for _, r := range h.log.Records() {
+		if r.Operation == opRelease && strings.Contains(r.Message, "refused") {
+			t.Fatalf("release record %q, want no refusal", r.Message)
+		}
 	}
 }
 
@@ -366,6 +375,32 @@ func TestReleaseOfAnUninterruptibleHoldWaitsForTheCut(t *testing.T) {
 	err := h.q.Release(context.Background(), theWorkspace, "t1")
 	// Assert
 	waitsOn(t, h, err, "t1", "the /clear running now ends")
+}
+
+func TestAReleasedHoldBehindACutInterruptsNothingAndGoesAtTheCutsEnd(t *testing.T) {
+	// Arrange: a prompt held behind a running /clear, then sent now.
+	h := newHarness(t)
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActClear}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	running(t, h, "running-turn", "/clear")
+	heldPrompt(t, h, "t1", classifier.Verdict{})
+	if err := h.q.Release(context.Background(), theWorkspace, "t1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	killedAtRelease := h.sender.killed()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	if len(killedAtRelease) != 0 || len(h.sender.killed()) != 0 {
+		t.Fatalf("killed = %v, want nothing interrupting a context cut", h.sender.killed())
+	}
+	if started := h.sender.started(); len(started) == 0 || started[len(started)-1] != "t1" {
+		t.Fatalf("started = %v, want t1 delivered at the cut's end", started)
+	}
 }
 
 func TestReleaseOfAHoldWaitingOnASessionComingUpWaitsForIt(t *testing.T) {

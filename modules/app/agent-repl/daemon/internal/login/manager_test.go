@@ -270,16 +270,17 @@ func TestSecondOpenOnTheSameAccountRootJoins(t *testing.T) {
 
 func TestTwoAccountRootsRunConcurrentLogins(t *testing.T) {
 	// Arrange: two different accounts are genuinely independent.
-	routes, _, multiRoot := twoWorkspaces(t)
+	routes, defaultRoot, multiRoot := twoWorkspaces(t)
 	f := newFixture(t, routes)
-	if _, err := f.m.Open(context.Background(), "ws-a"); err != nil {
+	gotA, err := f.m.Open(context.Background(), "ws-a")
+	if err != nil {
 		t.Fatalf("Open(ws-a) = %v", err)
 	}
 	outA, err := f.m.Watch(context.Background(), "ws-a")
 	if err != nil {
 		t.Fatalf("Watch(ws-a) = %v", err)
 	}
-	awaitText(t, outA, "READY")
+	awaitText(t, outA, "config="+defaultRoot)
 
 	// Act.
 	got, err := f.m.Open(context.Background(), "ws-c")
@@ -295,7 +296,16 @@ func TestTwoAccountRootsRunConcurrentLogins(t *testing.T) {
 	if got != multiRoot {
 		t.Fatalf("Open(ws-c) = %q, want %q", got, multiRoot)
 	}
-	awaitText(t, outC, "config="+multiRoot)
+	if gotA != defaultRoot {
+		t.Fatalf("Open(ws-a) = %q, want the default root %q", gotA, defaultRoot)
+	}
+	seenC := awaitText(t, outC, "config="+multiRoot)
+	if strings.Contains(seenC, "config="+defaultRoot) {
+		t.Fatalf("ws-c's pty saw %q, want only its own account's child", seenC)
+	}
+	if n := f.spawnCount(t); n != 2 {
+		t.Fatalf("spawns = %d, want 2 (one pty per account root)", n)
+	}
 }
 
 func TestWatchReplaysTheScrollbackToALateViewer(t *testing.T) {
@@ -531,6 +541,9 @@ func TestOpenRefusesTheDefaultVendorBinaryWhenVendorCallsAreForbidden(t *testing
 	if !errors.As(err, &forbidden) {
 		t.Fatalf("Open() = %v, want *envc.ForbiddenError", err)
 	}
+	if forbidden.Site != "login" || !strings.Contains(err.Error(), "login") {
+		t.Fatalf("Open() = %v (site %q), want the refusal naming the site \"login\"", err, forbidden.Site)
+	}
 }
 
 func TestOpenPermitsAnExplicitBinaryWhenVendorCallsAreForbidden(t *testing.T) {
@@ -566,6 +579,9 @@ func TestOpenWhoseVendorBinaryCannotStartFailsLoudlyAndOpensNothing(t *testing.T
 	// Assert.
 	if err == nil {
 		t.Fatal("Open() = nil, want the spawn's failure")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("Open() = %v, want the failure naming the binary %q", err, missing)
 	}
 	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.login.open"})
 	if !ok || rec.Context["branch"] != "spawn-error" || rec.Context["vendor_bin"] != missing {

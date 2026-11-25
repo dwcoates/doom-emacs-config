@@ -1237,6 +1237,68 @@ func TestADeathAfterATurnEndedIsBroughtBackAgain(t *testing.T) {
 	}
 }
 
+func TestAPromptSentWhileTheDeathsRevivalRunsIsHeldAndDeliveredOnce(t *testing.T) {
+	// Arrange: the shim died on its own, and its revival is still bringing a
+	// session up when the prompt arrives.
+	h := newHarness(t)
+	h.noSession = true
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	h.reviveHook = func() {
+		close(entered)
+		<-release
+		h.noSession = false
+	}
+	depart(h, h.watcher, departedUnasked)
+	<-entered
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "the prompt sent into the gap"))
+	close(release)
+	h.waitRevivals()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit into the revival = %v, want it held, not refused", err)
+	}
+	if got.Held == nil || *got.Held != wsm.HoldReconnect {
+		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
+	}
+	if h.revivals != 1 || !slices.Equal(h.reviveCauses, []shimlife.StartCause{shimlife.StartRelaunch}) {
+		t.Fatalf("revivals = %d with causes %v, want the death's one relaunch", h.revivals, h.reviveCauses)
+	}
+	if started := h.sender.started(); !slices.Equal(started, []ids.TurnID{"t1"}) {
+		t.Fatalf("started = %v, want the prompt delivered once to the revived session", started)
+	}
+}
+
+func TestTheNextPromptBringsBackAWorkspaceLeftDownByTheLoopGuard(t *testing.T) {
+	// Arrange: brought back once, died again before any turn ended, left down.
+	h := newHarness(t)
+	dieAndRevive(h, departedUnasked)
+	dieAndRevive(h, departedUnasked)
+	h.noSession = true
+	h.reviveHook = func() { h.noSession = false }
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "the next prompt"))
+	h.waitRevivals()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit = %v, want it held pending the revival", err)
+	}
+	if got.Held == nil || *got.Held != wsm.HoldReconnect {
+		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
+	}
+	if h.revivals != 2 || len(h.reviveCauses) != 2 || h.reviveCauses[1] != shimlife.StartPrompt {
+		t.Fatalf("revivals = %d with causes %v, want the prompt's own revival second", h.revivals, h.reviveCauses)
+	}
+	if started := h.sender.started(); !slices.Equal(started, []ids.TurnID{"t1"}) {
+		t.Fatalf("started = %v, want exactly the next prompt", started)
+	}
+}
+
 // ---- a replacement and a move coalesce into two stages, never one ----
 
 // moving is a gate's request marked as moving the workspace off this daemon,

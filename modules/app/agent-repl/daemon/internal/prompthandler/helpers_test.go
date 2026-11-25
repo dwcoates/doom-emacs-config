@@ -249,6 +249,8 @@ type fakeQueue struct {
 	disposition promptqueue.Disposition
 	submitErr   error
 	actErr      error
+	// attempts counts every Submit and SubmitSessionAct, refused or not.
+	attempts int
 
 	// entered, when set, receives once each time Submit is entered, before
 	// it waits on gate.
@@ -268,6 +270,7 @@ func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promp
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.attempts++
 	if q.submitErr != nil {
 		return promptqueue.Disposition{}, q.submitErr
 	}
@@ -278,11 +281,19 @@ func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promp
 func (q *fakeQueue) SubmitSessionAct(_ context.Context, _ ids.WorkspaceID, act promptqueue.Act) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.attempts++
 	if q.actErr != nil {
 		return q.actErr
 	}
 	q.acts = append(q.acts, act)
 	return nil
+}
+
+// attempted answers how many times the queue was asked, refused or not.
+func (q *fakeQueue) attempted() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.attempts
 }
 
 func (q *fakeQueue) forwarded() []promptqueue.Submission {

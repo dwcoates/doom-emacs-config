@@ -227,6 +227,58 @@ func TestAFoldedJoinClosesItsTurnAsFoldedAndRaisesNoBanner(t *testing.T) {
 	if ended := h.banners.ended; len(ended) != 0 {
 		t.Fatalf("banners = %+v, want none for a prompt that ran no turn", ended)
 	}
+	r, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opJoin,
+		Message: "the vendor folded the prompt into the running turn; its own turn closed unrun"})
+	if !found || r.Context["folded_into"] != "running-turn" {
+		t.Fatalf("fold record = %+v (found %v), want one naming the running turn", r, found)
+	}
+}
+
+func TestAFoldedJoinLeavesTheSessionFreeAtTheRunningTurnsEnd(t *testing.T) {
+	// Arrange: the vendor folds the prompt in.
+	h := newHarness(t)
+	sentToJoin(t, h)
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseFolded)
+
+	// Act: the running turn ends, then the next prompt arrives.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	if _, err := h.q.Submit(context.Background(), submission("t2", "an unrelated question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t2" {
+		t.Fatalf("started = %v, want the next prompt started at once on a free session", started)
+	}
+}
+
+func TestAnUnfoldedJoinRunsAsItsOwnTurnAndTheNextPromptFollowsIt(t *testing.T) {
+	// Arrange: the running turn ends without folding the prompt in.
+	h := newHarness(t)
+	sentToJoin(t, h)
+	h.watcher.running("t1")
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Act: the joining prompt's own turn ends, then the next prompt arrives.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseCompleted)
+	if _, err := h.q.Submit(context.Background(), submission("t2", "an unrelated question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	r, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opJoin,
+		Message: "the turn the prompt was sent to join ended without folding it in; it runs as its own turn"})
+	if !found || r.Context["joining_turn"] != "t1" {
+		t.Fatalf("join record = %+v (found %v), want one naming the joining turn", r, found)
+	}
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t2" {
+		t.Fatalf("started = %v, want the next prompt started on its own", started)
+	}
+	if joins := h.sender.joins; len(joins) != 1 || joins[0] != "t1" {
+		t.Fatalf("joins = %v, want only t1 ever sent to join", joins)
+	}
 }
 
 // A FOLD READ BEFORE THE JOIN'S ANSWER IS TAKEN is the joining prompt's: the

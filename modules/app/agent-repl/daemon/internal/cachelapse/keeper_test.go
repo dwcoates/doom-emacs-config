@@ -771,6 +771,29 @@ func TestRecordStoresALapsingWorkspacesProjection(t *testing.T) {
 	}
 }
 
+func TestALaterProjectionMovesTheRecordedLapse(t *testing.T) {
+	// Arrange: a backlogged workspace's lapse recorded, then the keep-alive's
+	// answer re-anchors it.
+	h := newHarness(t, backlogged())
+	h.keeper.record(context.Background(), theWorkspace, stated(lapseAt, nil))
+	later := lapseAt.Add(time.Hour)
+
+	// Act
+	h.keeper.record(context.Background(), theWorkspace, stated(later, nil))
+
+	// Assert
+	got := h.db.records[theWorkspace].CacheLapse
+	if got == nil || !got.LapsesAt.Equal(later) {
+		t.Fatalf("CacheLapse = %+v, want lapsing at the later %v", got, later)
+	}
+	if !h.keeper.deadlines[theWorkspace].Equal(later) {
+		t.Fatalf("deadline = %v, want the later %v", h.keeper.deadlines[theWorkspace], later)
+	}
+	if h.publishes != 2 {
+		t.Fatalf("publishes = %d, want one per projection", h.publishes)
+	}
+}
+
 func TestRecordDropsAProjectionForAVisibleWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t, visible())

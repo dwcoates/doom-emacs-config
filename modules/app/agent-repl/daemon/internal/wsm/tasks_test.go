@@ -163,6 +163,39 @@ func TestTasksLoadsEveryRecord(t *testing.T) {
 	}
 }
 
+func TestTasksFailsWholeOnACorruptRow(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	if _, err := s.CreateTask(context.Background(), "sound"); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	broken, err := s.CreateTask(context.Background(), "broken")
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	corrupt(t, s, `UPDATE tasks SET done = 'not-a-bool' WHERE id = ?`, broken.ID)
+
+	// Act
+	got, err := s.Tasks(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Tasks succeeded over a corrupt done column, loading %+v", got)
+	}
+	if got != nil {
+		t.Fatalf("loaded %d tasks alongside the failure, want none", len(got))
+	}
+	var failures int
+	for _, r := range log.Records() {
+		if r.Operation == "daemon.wsm.tasks" && r.Level == "error" {
+			failures++
+		}
+	}
+	if failures != 1 {
+		t.Fatalf("daemon.wsm.tasks error records = %d, want exactly 1: %v", failures, log.Records())
+	}
+}
+
 func TestAssignWorkspaceTaskBindsThem(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

@@ -148,6 +148,24 @@ func TestDaemonUnhealthyReportsDaemonScopeFault(t *testing.T) {
 	}
 }
 
+func TestDaemonReportsAMissingPromptsDirByItsArmAndPath(t *testing.T) {
+	// Arrange.
+	db := &stubDB{faults: []wsm.Fault{{Kind: KindPromptsDirMissing, Evidence: map[string]string{"path": "/state/prompts"}}}}
+	r := newReporter(t, db, alwaysLive, newStubSurfaces())
+
+	// Act.
+	got, err := r.Daemon(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Daemon: %v", err)
+	}
+	faults := got.GetSuccess().GetUnhealthy().GetFaults()
+	if len(faults) != 1 || faults[0].GetPromptsDirMissing().GetPath() != "/state/prompts" {
+		t.Fatalf("Daemon() faults = %v, want one prompts_dir_missing fault naming /state/prompts", faults)
+	}
+}
+
 func TestDaemonIgnoresWorkspaceScopedFault(t *testing.T) {
 	// Arrange: a workspace-bound fault is SessionHealth's answer, never the
 	// daemon's.

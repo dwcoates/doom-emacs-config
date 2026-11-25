@@ -1304,6 +1304,9 @@ func TestSweepStillRecordsAGenuineDirectiveFailureAtError(t *testing.T) {
 	if !found {
 		t.Fatal("a genuine directive failure on a serving workspace was not recorded at error")
 	}
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want the session never forced down over a failed hibernate", killed)
+	}
 }
 
 // scheduleErrDB fails every schedule read with one error, leaving the rest of

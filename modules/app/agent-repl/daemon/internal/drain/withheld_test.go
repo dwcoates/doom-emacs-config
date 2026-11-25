@@ -541,6 +541,37 @@ func TestAFoldedWorkspaceHeldBackWhileBusyIsStoodDownOnceFree(t *testing.T) {
 	}
 }
 
+func TestAFoldedWorkspaceWhoseTurnEndedUnreadKeepsRunning(t *testing.T) {
+	// Arrange: collapsed under its turn, so the stand-down waits on the turn;
+	// the turn then ends with its result unread, which a fold never covers.
+	h := newHarness(t)
+	ws := h.collapsed(t)
+	h.freeness.SetFree(ws, false)
+	h.c.StandDownWithheld(ws, WithheldCollapse)
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none under the turn", killed)
+	}
+	h.visibility = map[ids.WorkspaceID]wsm.Visibility{ws: wsm.Visibilities([]wsm.VisibilityInput{{
+		ID: ws, Open: true, Covered: true, Unviewed: true,
+	}})[ws]}
+	h.freeness.SetFree(ws, true)
+
+	// Act
+	h.c.RetryWithheld(ws)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none for an unviewed workspace under a fold", killed)
+	}
+	if h.pending(ws) {
+		t.Fatal("the dropped stand-down stayed pending")
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opWithheld,
+		Message: "the workspace was shown or reopened before its session was stood down; it keeps running"}); !ok {
+		t.Fatalf("records = %+v, want the INFO verdict that the workspace keeps running", records(h.log, opWithheld))
+	}
+}
+
 func TestAFoldedWorkspaceThatQueuedAMergeWhileBusyIsSparedOnceFree(t *testing.T) {
 	// Arrange: busy at the fold, it finished its turn by queueing a merge.
 	h := newHarness(t)

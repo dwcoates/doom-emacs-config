@@ -583,11 +583,17 @@ func TestFireAnnouncesTheScheduledDrainCauseWithNoAddress(t *testing.T) {
 
 	// Assert
 	pushed := h.announcer.Shutdowns()[0]
-	if pushed.GetCause().GetScheduledDrain() == nil {
-		t.Fatalf("cause = %v, want the scheduled_drain arm", pushed.GetCause())
+	if pushed.GetCause().GetScheduledDrain().GetReason().GetDeploy() == nil {
+		t.Fatalf("cause = %v, want the scheduled_drain arm echoing the scheduled deploy reason", pushed.GetCause())
 	}
 	if pushed.Address != nil {
 		t.Fatalf("address = %q on a scheduled drain, want unset", *pushed.Address)
+	}
+	if want := h.clock.Now().UnixMilli(); pushed.GetMintedAtMs() != want {
+		t.Fatalf("minted_at_ms = %d, want the fire's own instant %d", pushed.GetMintedAtMs(), want)
+	}
+	if got := pushed.GetExpectedOutageMs(); got != 0 {
+		t.Fatalf("expected_outage_ms = %d on a scheduled drain, want 0: the drain states no outage", got)
 	}
 }
 

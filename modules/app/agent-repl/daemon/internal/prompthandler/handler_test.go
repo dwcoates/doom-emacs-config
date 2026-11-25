@@ -587,9 +587,34 @@ func TestSubmitSendsAModelChangeDownTheQueuesPathWithNoTurn(t *testing.T) {
 	if got.Turn != "" {
 		t.Fatalf("turn = %q, want none: a model change is not a turn", got.Turn)
 	}
+	if got.Recognition != RecognizedAct {
+		t.Fatalf("recognition = %v, want the session act", got.Recognition)
+	}
 	acts := h.queue.sessionActs()
 	if len(acts) != 1 || acts[0].Kind != promptqueue.ActSetModel || acts[0].Value != "opus" {
 		t.Fatalf("acts = %v, want the model act with its argument", acts)
+	}
+}
+
+func TestSubmitRefusesABareModelChangingNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got, err := h.submit("/model")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got.Recognition != RecognizedRefused || got.RefusedCommand != "/model" || got.Turn != "" {
+		t.Fatalf("outcome = %+v, want the refusal of the literal /model and no turn", got)
+	}
+	if acts, forwarded := h.queue.sessionActs(), h.queue.forwarded(); len(acts) != 0 || len(forwarded) != 0 {
+		t.Fatalf("acts = %v, forwarded = %v; want no model change and no prompt", acts, forwarded)
+	}
+	if refusals := h.feed.mirroredRefusals(); len(refusals) != 1 || refusals[0].Command != "/model" {
+		t.Fatalf("mirrored refusals = %+v, want the one /model refusal row", refusals)
 	}
 }
 
@@ -710,6 +735,9 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 		name    string
 		text    string
 		arrange func(t *testing.T, h *harness)
+		// wantAttempts is how many times the queue was asked in all, the
+		// retry's own included.
+		wantAttempts int
 	}{
 		{
 			name: "the process died between the claim and the acceptance",
@@ -718,6 +746,7 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 				h.db.claimed["key-1"] = &fakeClaim{turn: firstTurn}
 				h.respawn(t)
 			},
+			wantAttempts: 1,
 		},
 		{
 			name: "the queue refused the first submission",
@@ -729,6 +758,7 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 				}
 				h.queue.submitErr = nil
 			},
+			wantAttempts: 2,
 		},
 		{
 			name: "the first submission's caller gave up mid-submit",
@@ -740,6 +770,7 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 				}
 				h.queue.submitErr = nil
 			},
+			wantAttempts: 2,
 		},
 		{
 			name: "the queue refused the first context cut",
@@ -751,6 +782,7 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 				}
 				h.queue.actErr = nil
 			},
+			wantAttempts: 2,
 		},
 	}
 	for _, tc := range tests {
@@ -775,6 +807,9 @@ func TestSubmitDeliversARetryOfASubmissionTheQueueNeverAccepted(t *testing.T) {
 			}
 			if claim := h.db.claimOn("key-1"); !claim.accepted || claim.turn != firstTurn {
 				t.Fatalf("claim = %+v, want the first submission's turn stamped accepted", claim)
+			}
+			if got := h.queue.attempted(); got != tc.wantAttempts {
+				t.Fatalf("queue asked %d times, want %d: a retry of an unaccepted submission is delivered again", got, tc.wantAttempts)
 			}
 		})
 	}

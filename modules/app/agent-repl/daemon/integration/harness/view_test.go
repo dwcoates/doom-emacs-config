@@ -191,6 +191,43 @@ func TestAViewRequiresOnlyWhatItsOwnWorkspacesProduced(t *testing.T) {
 	}
 }
 
+func TestARequiredWarningCountsAsUnproducedUntilItIsProduced(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		want  []string
+	}{
+		{name: "an error record produces it", level: "error"},
+		{name: "a warn record produces it", level: "warn"},
+		{name: "an info record does not", level: "info", want: []string{"daemon.op"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			owner := newOwnerForViews(t, t)
+			view := owner.View(NewRecordingTB(t, "TestMine"))
+			mine := t.TempDir()
+			view.Claim(mine)
+			view.RequireWarnings("daemon.op")
+			before := view.UnproducedRequiredWarnings()
+			record := warnFor(mine, "daemon.op")
+			record.Level = tt.level
+
+			// Act
+			appendRecords(t, owner, record)
+			got := view.UnproducedRequiredWarnings()
+
+			// Assert
+			if !reflect.DeepEqual(before, []string{"daemon.op"}) {
+				t.Fatalf("UnproducedRequiredWarnings before any record = %v, want [daemon.op]", before)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("UnproducedRequiredWarnings after a %s record = %v, want %v", tt.level, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAViewRefusesWhatOnlyAnOwnerMayDo(t *testing.T) {
 	tests := []struct {
 		name string

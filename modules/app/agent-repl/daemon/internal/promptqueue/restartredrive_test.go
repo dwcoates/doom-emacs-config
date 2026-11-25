@@ -204,6 +204,76 @@ func TestAServingSessionWithATurnRunningLeavesTheDebtOwed(t *testing.T) {
 	}
 }
 
+// cutByARestart runs TURN, cuts it under a stand-down as a restart does, and
+// brings the restarted session up, which starts the resumption it owed.
+func cutByARestart(t *testing.T, h *harness, turn string) {
+	t.Helper()
+	h.standingDown.Store(true)
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, idsTurn(turn), wsm.CloseKilled)
+	h.standingDown.Store(false)
+	h.q.ReleaseReconnectHolds(theWorkspace)
+}
+
+func TestARestartContinuesTheCutTurnWithoutResubmittingIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "cut-turn", "long running work")
+
+	// Act
+	cutByARestart(t, h, "cut-turn")
+
+	// Assert
+	origins := h.sender.sentOrigins()
+	if len(origins) != 1 || origins[0] != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
+		t.Fatalf("started origins = %v, want the one resumption after restart", origins)
+	}
+	if got := h.sender.sentText(0); got == "long running work" {
+		t.Fatalf("the restarted session was sent %q, want the resumption, never the cut prompt again", got)
+	}
+}
+
+func TestTheResumptionsOwnEndStartsNoOtherTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "cut-turn", "long running work")
+	cutByARestart(t, h, "cut-turn")
+	resumed := h.sender.started()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, resumed[0], wsm.CloseCompleted)
+
+	// Assert
+	if started := h.sender.started(); len(started) != 1 || h.sender.attempts != 1 {
+		t.Fatalf("started = %v over %d attempts, want the one resumption", started, h.sender.attempts)
+	}
+}
+
+func TestADeferredPromptRunsAsItsOwnTurnAfterTheRestartsResumption(t *testing.T) {
+	// Arrange: a prompt deferred behind the turn the restart cuts.
+	h := newHarness(t)
+	running(t, h, "cut-turn", "start the work")
+	if _, err := h.q.Submit(context.Background(), deferredSubmission("t1", "run the tests afterwards")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	cutByARestart(t, h, "cut-turn")
+	atRelease := h.sender.started()
+	originsAtRelease := h.sender.sentOrigins()
+
+	// Act: the resumption ends.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, atRelease[0], wsm.CloseCompleted)
+
+	// Assert
+	if len(originsAtRelease) != 1 || originsAtRelease[0] != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
+		t.Fatalf("origins at the release = %v, want only the resumption", originsAtRelease)
+	}
+	if started := h.sender.started(); !slices.Equal(started, []ids.TurnID{atRelease[0], "t1"}) {
+		t.Fatalf("started = %v, want the resumption then the deferred prompt once, under its own id", started)
+	}
+}
+
 // resumeReports collects every account the queue gives of an owed resumption.
 func resumeReports(h *harness) func() []ResumeReport {
 	var mu sync.Mutex

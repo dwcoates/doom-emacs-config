@@ -1108,6 +1108,9 @@ func TestADeferredPromptBehindARunningTurnIsHeldForItsEndUnjudged(t *testing.T) 
 	if started := h.sender.started(); len(started) != 0 {
 		t.Fatalf("started = %v, want nothing interjected", started)
 	}
+	if killed := h.sender.killed(); len(killed) != 0 {
+		t.Fatalf("killed = %v, want the running turn never interrupted for a deferred prompt", killed)
+	}
 }
 
 func TestADeferredHoldRecordsItsDelivery(t *testing.T) {
@@ -1716,5 +1719,129 @@ func TestAHoldReconstructsItsThreadAsk(t *testing.T) {
 	// Assert
 	if sub.Ask.GetParentNodeID() != "n1" {
 		t.Fatalf("submission ask = %+v, want the hold's ask", sub.Ask)
+	}
+}
+
+// trayArmsOf answers, in push order, every verdict arm the tray was pushed
+// for TURN, consecutive repeats collapsed.
+func trayArmsOf(h *harness, turn ids.TurnID) []wsm.ClassificationArm {
+	h.holds.mu.Lock()
+	defer h.holds.mu.Unlock()
+	var out []wsm.ClassificationArm
+	for _, push := range h.holds.pushes {
+		for _, held := range push {
+			if held.Turn != turn || held.Classification == nil {
+				continue
+			}
+			if arm := held.Classification.Arm; len(out) == 0 || out[len(out)-1] != arm {
+				out = append(out, arm)
+			}
+		}
+	}
+	return out
+}
+
+func TestAJudgedPromptsTrayShowsClassifyingThenItsHold(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "the classifier rules it waits", arrange: func(h *harness) {
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+		}},
+		{name: "the classifier fails", arrange: func(h *harness) {
+			h.judge.err = errors.New("vendor calls are forbidden: classifier")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			tt.arrange(h)
+
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", "please also check the other file")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+
+			// Assert
+			want := []wsm.ClassificationArm{wsm.ArmClassifying, wsm.ArmHoldForTurnEnd}
+			if got := trayArmsOf(h, "t1"); !reflect.DeepEqual(got, want) {
+				t.Fatalf("tray arms for t1 = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestAnInterjectionIsDrawnInterjectingAndDeliveredAtTheInterruptedTurnsEnd(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: classifier.ExplicitInterruptReason, FastPath: true}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "stop and rebase instead")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	before := h.sender.started()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseKilled)
+
+	// Assert
+	if got := trayArmsOf(h, "t1"); len(got) == 0 || got[len(got)-1] != wsm.ArmInterject {
+		t.Fatalf("tray arms for t1 = %v, want it drawn interjecting", got)
+	}
+	if got := h.footer.interruptions(); len(got) == 0 || !got[0] {
+		t.Fatalf("footer interrupting = %v, want it raised at once", got)
+	}
+	if forces := h.sender.killedForces(); len(forces) != 1 || forces[0] {
+		t.Fatalf("kill forces = %v, want one unforced kill that spares detached work", forces)
+	}
+	if len(before) != 0 {
+		t.Fatalf("started before the turn ended = %v, want nothing", before)
+	}
+	if started := h.sender.started(); !reflect.DeepEqual(started, []ids.TurnID{"t1"}) {
+		t.Fatalf("started = %v, want the interjected prompt at the interrupted turn's end", started)
+	}
+}
+
+func TestAFailedInterjectGoesAheadOfALaterPromptInFifoOrder(t *testing.T) {
+	// Arrange: the interject is refused; an ordinary prompt follows it.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
+	h.sender.killErr = errors.New("the vendor refused the kill")
+	if _, err := h.q.Submit(context.Background(), submission("t2", "stop and rebase instead")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("t3", "second follow-up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	first := h.sender.started()
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "t2", wsm.CloseCompleted)
+
+	// Assert
+	if got := h.db.hold("t2").Classification.Arm; got != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("t2 arm = %s, want hold_for_turn_end", got.String())
+	}
+	if got := h.footer.interruptions(); len(got) == 0 || got[len(got)-1] {
+		t.Fatalf("footer interrupting = %v, want it cleared last", got)
+	}
+	if !reflect.DeepEqual(first, []ids.TurnID{"t2"}) {
+		t.Fatalf("started at the running turn's end = %v, want only the FIFO head t2", first)
+	}
+	if started := h.sender.started(); !reflect.DeepEqual(started, []ids.TurnID{"t2", "t3"}) {
+		t.Fatalf("started = %v, want t2 then t3", started)
 	}
 }

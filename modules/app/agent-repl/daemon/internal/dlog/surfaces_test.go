@@ -443,26 +443,50 @@ func TestClientLogLandsInTheClientsOwnSink(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			s, _ := testSurfaces(t)
+			s, runLogPath := testSurfaces(t)
 			dir := t.TempDir()
+			instant := "2026-09-10T16:34:56.789Z"
+			want, err := time.Parse(time.RFC3339, instant)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
 
 			// Act.
-			err := s.ClientLog(dir, ClientRecord{
+			err = s.ClientLog(dir, ClientRecord{
 				ClientKind: tc.kind,
-				Level:      LevelInfo,
+				Level:      LevelError,
 				Operation:  tc.kind + ".test.op",
 				Message:    "forwarded",
+				Timestamp:  instant,
+				Verbose:    true,
 			})
 
 			// Assert.
 			if err != nil {
 				t.Fatalf("ClientLog: %v", err)
 			}
-			if !hasOperation(workspaceRecords(t, dir, tc.sink), tc.kind+".test.op") {
-				t.Fatalf("%s.log does not carry the forwarded record", tc.sink)
+			records := workspaceRecords(t, dir, tc.sink)
+			if !hasOperation(records, tc.kind+".test.op") {
+				t.Fatalf("%s.log = %v, want the forwarded record", tc.sink, records)
+			}
+			if records[0]["runtime"] != tc.kind || records[0]["verbosity"] != VerbosityVerbose {
+				t.Fatalf("record runtime %v verbosity %v, want %q and %q", records[0]["runtime"], records[0]["verbosity"], tc.kind, VerbosityVerbose)
+			}
+			if got, _ := records[0]["timestamp"].(string); !timestampIs(t, got, want) {
+				t.Fatalf("timestamp = %q, want the client's own instant %v", got, want)
+			}
+			if hasOperation(readRecords(t, runLogPath), tc.kind+".test.op") {
+				t.Fatalf("the run log carries the client's own record, want it confined to %s.log", tc.sink)
 			}
 		})
 	}
+}
+
+// timestampIs reports whether the persisted timestamp GOT names the instant WANT.
+func timestampIs(t *testing.T, got string, want time.Time) bool {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, got)
+	return err == nil && parsed.Equal(want)
 }
 
 // TestClientLogPromotesTheClientsSessionIdentity pins the join key landing 15

@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/classifier"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -204,5 +205,31 @@ func TestATurnEndUnderAHoldingLeaseDeliversOnlyWhatItExempts(t *testing.T) {
 				t.Fatalf("started = %v, want %v", got, tt.wantStarted)
 			}
 		})
+	}
+}
+
+// TestAPromptHeldForTheTurnsEndIsStampedByAMergeLeaseThatArrives covers a
+// prompt held before the merge began: the merge's lease stamps it, so it
+// waits for the merge as one submitted during it does.
+func TestAPromptHeldForTheTurnsEndIsStampedByAMergeLeaseThatArrives(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	held := h.db.hold("t1")
+	if held.Hold == nil || *held.Hold != wsm.HoldMerge {
+		t.Fatalf("hold = %v, want the merge's stamp", held.Hold)
+	}
+	if held.Tombstone != nil {
+		t.Fatalf("tombstone = %+v, want the held prompt still standing", held.Tombstone)
+	}
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing delivered under the merge", started)
 	}
 }

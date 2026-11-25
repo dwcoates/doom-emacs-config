@@ -170,6 +170,7 @@ func TestRetargetNoticeNamesTheNewAndPreviousTargets(t *testing.T) {
 		}, want: []string{
 			"lands in the repository's main checkout at `/repo`, on its default branch `master`",
 			"used to land in the workspace `parent-ws`",
+			"`agent-repld workspace finished here -placement back`",
 		}},
 		{name: "to a parent of another repository", change: func() wsm.ParentChange {
 			c := toParent()

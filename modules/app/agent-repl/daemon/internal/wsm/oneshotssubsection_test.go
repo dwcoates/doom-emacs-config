@@ -217,3 +217,32 @@ func TestTheUserSubsectionQueryLeavesOutTheOneShotsSubsection(t *testing.T) {
 		t.Fatalf("empty pruned subsections = %+v, want the one-shots subsection", pruned)
 	}
 }
+
+func TestAOneShotDraggedOutOfTheOneShotsSubsectionLandsWherePlacedAndKeepsItsMark(t *testing.T) {
+	// Arrange -- a registered workspace beside a one-shot the user dispatched.
+	s, _ := testStore(t)
+	repoDir := oneShotsRepo(t, s, "repo")
+	a := registerIn(t, s, repoDir, "a", nil)
+	shot := registerUserOneShot(t, s, repoDir, "shot")
+	markOneShot(t, s, shot)
+	if a.Subsection != nil {
+		t.Fatalf("a was filed in subsection %s, want none", *a.Subsection)
+	}
+
+	// Act
+	mustPlace(t, s, shot.ID, nil, AtEnd{})
+
+	// Assert
+	if got := subsectionOf(t, s, shot.ID); got != nil {
+		t.Fatalf("the placed one-shot sits in subsection %s, want none", *got)
+	}
+	if !oneShotOf(t, s, shot.ID) {
+		t.Fatal("the placed one-shot lost its one-shot mark")
+	}
+	if names := orderedNames(t, s); names[len(names)-1] != "shot" {
+		t.Fatalf("place order = %v, want the placed one-shot last", names)
+	}
+	if _, ok := listedSubsection(t, s, *shot.Subsection); ok {
+		t.Fatal("the emptied one-shots subsection is still there")
+	}
+}
