@@ -330,21 +330,3 @@ func (s Store) Prune(now time.Time, ret Retention) (PruneResult, error) {
 	}
 	return res, nil
 }
-
-// EnvStore overrides DefaultStoreDir.
-const EnvStore = "AGENT_REPL_TEST_IMPACT"
-
-// DefaultStoreDir is where the host's impact records live: $AGENT_REPL_TEST_IMPACT
-// when set, else ~/.cache/agent-repl/test-impact, beside the run history
-// (history.DefaultPath) and the pass records (reuse.DefaultStoreDir), and
-// never the workspace_test_cases rerun table.
-func DefaultStoreDir() (string, error) {
-	if p := os.Getenv(EnvStore); p != "" {
-		return p, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("impact: resolve the home directory: %w", err)
-	}
-	return filepath.Join(home, ".cache", "agent-repl", "test-impact"), nil
-}
