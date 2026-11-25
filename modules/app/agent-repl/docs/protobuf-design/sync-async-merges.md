@@ -36,7 +36,7 @@ contract rather than per-increment agreement.
   user selects it. Once revealed it stays visible.
 - Consequences: the daemon stores whether a merge workspace has been revealed;
   the roster and the tab bar leave an unrevealed, unmerged merge workspace out
-  entirely (not even the hidden section draws it); a landed merge workspace is
+  entirely (not even the backlog draws it); a landed merge workspace is
   an ordinary closed workspace, drawn in Recently Merged and in the closed
   list whatever its revealed flag.
 - It does not claim that a revealed merge workspace looks different from any

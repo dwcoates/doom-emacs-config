@@ -37,7 +37,7 @@ shim still draws its whole conversation.
 
 - Selecting a workspace (`verbs.Select`), or the landing after a hide.
 - Opening it (`verbs.Open`, and the editor's `OpenTabs`, `opentabs.Coordinator`).
-- Showing a hidden workspace, expanding a collapsed repository, or reopening a
+- Showing a backlogged workspace, expanding a collapsed repository, or reopening a
   closed one. A reopen for an owner or a main worktree clears the closed flag,
   and the prompt sent to it starts the shim.
 - Emacs announcing a workspace (`verbs.Register`).
@@ -46,7 +46,7 @@ shim still draws its whole conversation.
 
 ### "Was up at the last stop"
 
-A boot or a handover brings back exactly the shims that were up, hidden or
+A boot or a handover brings back exactly the shims that were up, backlogged or
 not, and nothing else decides. The state is recorded at every park and unpark,
 never only at shutdown, so a crash leaves it true too: the session record in
 wsm. Every stand-down the daemon makes on purpose writes a terminal (the one
@@ -99,7 +99,7 @@ one owner (`cachelapse/standdown.go`), logged under
   been idle `StandDownGrace` (twenty minutes, owner ruling 2026-11-23; the
   idle park, `ownIdle`, reason `idle`), restored a minute before each beat,
   and parked again by the beat's own stand-down;
-- `cache_lapse` while a hidden or closed workspace's lapse is armed;
+- `cache_lapse` while a backlogged or closed workspace's lapse is armed;
 - `idle_sweep` when the session goes idle past the cutoff first;
 - `cold_park` otherwise, stood down once the session has been idle
   `StandDownGrace` since the latest of its last engagement and its last
@@ -207,7 +207,7 @@ timer of its own. The details live in `daemon/internal/cachelapse`:
   its cold gate owes no beat and is not pulled. The pulled beat is an
   ordinary beat that went out early, so the next one is timed an interval
   after it (`cachelapse/outage.go`).
-- **Hidden workspaces** beat no more, and their cache lapses on its own clock.
+- **Backlogged workspaces** beat no more, and their cache lapses on its own clock.
   **Closed workspaces** get the one beat they were owed, then lapse.
 - A parked session is never brought back by a read or a look. Only its next
   beat, a prompt, or a restart brings it back.

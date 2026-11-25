@@ -1,19 +1,19 @@
 # Delete the task and stage groupings of the sidebar roster
 
 The webhost's sidebar rail drew every grouping (repository, task, maturity)
-on every roster push, each with its own copy of the hidden and recently-merged
+on every roster push, each with its own copy of the backlog and recently-merged
 bands: 598 rows and 28k elements rebuilt per push (2026-10-15, perf
 investigation on the agent-repl-perf-regression branch). The owner ruled that
 the task and stage (maturity) groupings are not wanted at all, and that the
-rail shows only open workspaces, hidden workspaces and the 100 most recently
+rail shows only open workspaces, backlogged workspaces and the 100 most recently
 merged workspaces, the merged ones static.
 
 ## Core design principles
 
-### The rail shows open workspaces, hidden workspaces and the 100 most recent merges, and nothing else
+### The rail shows open workspaces, backlogged workspaces and the 100 most recent merges, and nothing else
 
 - In the owner's terms (2026-10-15): "It's a leak if it's showing anything
-  other than open workspaces, hidden workspaces, and the top 100 recently
+  other than open workspaces, backlogged workspaces, and the top 100 recently
   merged workspaces, and it shouldn't be really doing any work whatsoever for
   the recently merged ones, because they should be static."
 - Consequences for the contract: the roster carries one grouping (the
@@ -64,7 +64,7 @@ merged workspaces, the merged ones static.
 ## Implementation consequences
 
 - The webapp rail draws one pane per push (open repository sections, then
-  hidden, then recently merged), one copy each, instead of three panes each
+  backlog, then recently merged), one copy each, instead of three panes each
   carrying both bands. The grouping picker is gone; view state is folds only
   (`webapp/src/sidebar/view.ts`, `ViewValue` is a boolean).
 - The rail's task controls went with the task grouping: the task section's

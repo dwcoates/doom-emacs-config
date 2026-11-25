@@ -87,7 +87,7 @@ daemon/
                    pipe, pending messages and cursor stored together (wsm), one digest per quiet period as a
                    PROMPT_ORIGIN_SLACK_THREAD_NOTICE prompt (urgent = ordinary delivery, else deferred), posts
                    with a nonce footer recorded first so a workspace never hears itself; and the reaction
-                   initiator (search + reactions polls, sha256 fired ledger, first-read baseline, one hidden
+                   initiator (search + reactions polls, sha256 fired ledger, first-read baseline, one backlogged
                    intake workspace per fired binding)
     mergenotice/   merge queue subscription notices: buffers every reported queue change, and one loop tells each
                    subscriber's agent once of a merge put in line, a merge leaving or a deploy's end, in one short
@@ -1082,7 +1082,7 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   workspace is resolved first (`server.resolveOpens`): a refusal
   (`unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`,
   `not_yet_adopted`, the same checks every per-workspace rpc takes) or a
-  workspace that is not visible (`hidden`) is answered at once and nothing is
+  workspace that is not visible (answered `hidden`) is answered at once and nothing is
   started for it. A visible one that is not live is brought up through the
   shared bring-up (`editorBringUp` -> `bringup.Run` -> `Fleet.Start`); one
   another bring-up is already starting is followed, not restarted.
@@ -1116,7 +1116,7 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   `failed` on `failed`; a bring-up ending in a cold gate or a vendor refusal
   releases it too (the debt stays recorded). An open joining a resumption
   already being delivered waits for it; a workspace already serving when the
-  open began is not waited on. A hidden workspace is answered at once and its
+  open began is not waited on. A backlogged workspace is answered at once and its
   debt is untouched until it is shown and opened.
 - **`ready` and `failed` carry the roster row** (`sidebar.Resolver.Row`): the
   row and its push's `revision` taken together from the last resolved
@@ -1140,24 +1140,24 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   takeover's session-less starts and every open skip a workspace the user hid
   or whose repository section is collapsed. A hidden MERGE workspace still
   runs: its async merge withholds it, not the user.
-- **A hidden workspace's cache lapses first** (`cachelapse.Keeper`,
-  2026-10-13): `SetHidden` tells the keeper, whose one loop holds the shim's
+- **A backlogged workspace's cache lapses first** (`cachelapse.Keeper`,
+  2026-10-13): `SetBacklogged` tells the keeper, whose one loop holds the shim's
   keep-alives (`shim.v1.SetKeepalive`), records the lapse the held shim
   projects (`conversation.v1.SessionCacheLapse`) on the workspace's row, arms
   one deadline for it, and at the deadline calls `drain.StandDownWithheld`. A
   show, and every session coming up, reconciles the cadence with the stored
-  visibility, and a hidden workspace's `StartSession` carries
+  visibility, and a backlogged workspace's `StartSession` carries
   `hold_keepalive`, so no keep-alive fires between a start and a hold.
-- **The user can keep every hidden cache warm** (`SendBackloggedKeepalives`,
+- **The user can keep every backlogged cache warm** (`SendBackloggedKeepalives`,
   `SPC j R`, 2026-10-14): `cachelapse.Keeper.SendBackloggedKeepalives` asks each
-  hidden workspace's shim for one keep-alive at once
+  backlogged workspace's shim for one keep-alive at once
   (`shim.v1.SendKeepalive`), leaving every cadence held. The keep-alive's
   answer re-anchors the cache, the held shim restates its lapse, and the
   keeper records it like any projection, so the countdown moves on the
   roster with no second path.
 - **Collapse stands the session down** (`drain.StandDownWithheld`, called by
   `FoldRepository(collapse)`, which `UpdateSidebarView`'s repository fold
-  reaches, and by the cache keeper at a hidden workspace's lapse): the
+  reaches, and by the cache keeper at a backlogged workspace's lapse): the
   idle sweep's own gate and park, on the fleet's detached lifetime. A
   busy workspace stays pending and is retried on the daemon's own edges, the
   free edge a turn's end raises (`lifecycleSink.OnFree`) and a session coming

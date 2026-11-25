@@ -929,7 +929,7 @@ export function anchorLapsesAtMs(anchor: CacheAnchor): number {
  * - With no tier stated (no request yet), the cadence beats on the interval
  *   from its anchor, as it always did.
  *
- * HELD while the workspace is hidden (shim.v1.SetKeepalive, 2026-10-13): a held
+ * HELD while the workspace is backlogged (shim.v1.SetKeepalive, 2026-10-13): a held
  * cadence sends no beat, so the cache lapses on its own clock, and instead it
  * PROJECTS the lapse -- when it comes and the context a cold read would re-read
  * -- on every hold and on every anchor change while held. With no tier stated
@@ -1039,7 +1039,7 @@ export class KeepaliveCadence {
   }
 
   /**
-   * The workspace is hidden: send no beat, and project the lapse instead. A
+   * The workspace is backlogged: send no beat, and project the lapse instead. A
    * hold before the start takes effect at the start, so a session born held
    * never beats.
    */

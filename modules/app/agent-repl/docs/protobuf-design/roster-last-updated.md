@@ -15,7 +15,7 @@ for every row, and the editor only orders by it.
 
 - WHAT: a new REQUIRED element on the roster row, `RosterRowLastUpdated`,
   carrying `at_ms`: the latest of the workspace's creation, its latest turn
-  start or close, its close record, its hidden instant, its merge landing, a
+  start or close, its close record, its backlogged instant, its merge landing, a
   requester's landing, and its last status change. Ordering only, never
   drawn.
 - WHY REQUIRED: every workspace has at least its creation instant, so there is

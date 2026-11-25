@@ -1902,7 +1902,7 @@ the webapp's sidebar may drop an empty section.
 ## `SPC p p` offers the current and recent workspaces, `SPC p P` every known one
 
 Owner request, 2026-10-14. `SPC p p` (`agent-repl-switch-to-project`) offers
-the open workspaces, the hidden ones, the 25 most recently MERGED and the 25
+the open workspaces, the backlogged ones, the 25 most recently MERGED and the 25
 the USER most recently closed or killed (`agent-repl--switch-curated`). "The
 user closed it" is the daemon's close record (`frontend.v1.RosterRowClosure`,
 its `user` arm: CloseWorkspace or KillWorkspace), never inferred in Emacs: a
@@ -1915,7 +1915,7 @@ Both offer their workspaces MOST RECENTLY UPDATED FIRST, whichever section
 each sits in (owner request, 2026-10-14; `agent-repl--switch-by-recency`). The
 instant is the daemon's `frontend.v1.RosterRow.last_updated`: the latest of the
 workspace's lifecycle instants (created, turn start or close, closed or
-killed, hidden, merged) and of its last status change, which the daemon keeps
+killed, backlogged, merged) and of its last status change, which the daemon keeps
 durable (`wsm` layout 54, `status_changed_at`). Emacs orders by it and never
 derives it. See `docs/protobuf-design/roster-last-updated.md`.
 
@@ -1931,7 +1931,7 @@ both hoist through the one helper, and the unfiltered list keeps its recency
 order.
 
 Both draw each line with the sidebar's status mark before the name (a grey
-dot for a closed or merged row, `◌` in the status color for a hidden one,
+dot for a closed or merged row, `◌` in the status color for a backlogged one,
 `agent-repl-status-roster-mark` otherwise) and three columns after it: the
 state, how long ago the last turn ended (`agent-repl-format-age`) and the
 branch's commits past its merge-base. The columns ride in the completion
@@ -1963,7 +1963,7 @@ path here: a switcher that opened workspaces its own way is a second
 mechanism to disagree with the first.
 
 The candidate strings are the names and nothing else: whether a workspace is
-closed, hidden, merged or not open here is its state column. A name that
+closed, backlogged, merged or not open here is its state column. A name that
 collides with another candidate's is qualified by its directory, because
 `completing-read` answers with the string and two identical strings make the
 second unreachable.
@@ -2894,7 +2894,7 @@ the three; never use them for the per-workspace
   workspaces with `OpenTabs` (`lisp/open-tabs.el`,
   `docs/protobuf-design/open-tabs.md`): every roster row is asked for with its
   page loaded at once, each tab shows when the daemon answers it `opened`, and
-  each step is one minibuffer line. A hidden workspace is answered at once and
+  each step is one minibuffer line. A backlogged workspace is answered at once and
   runs nothing.
 - **A new instance also re-stands today's dismissed news digest** without a new
   run.
@@ -3544,7 +3544,7 @@ pids, the views told, the roster republished):
   turn closes after the mark.
 - A SETTINGS VISIT: the switch away from a model, permission-mode or effort
   pick that started a shim (`drain.Controller.VisitDown`).
-- A WITHHELD WORKSPACE: hidden, collapsed or closed (`drain/withheld.go`).
+- A WITHHELD WORKSPACE: backlogged, collapsed or closed (`drain/withheld.go`).
 - THE IDLE SWEEP (`drain/sweep.go`): a session idle past the cutoff, for the
   sessions no other trigger reaches (the workspace the user is looking at,
   one whose remote control is on). The cutoff defaults to **24 hours** (owner
@@ -3576,7 +3576,7 @@ claude.ai reaches it and answers the gate pay (owner ruling, 2026-11-02;
 A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
 daemon stopped (`bringup.OnlyWasUp`), plus every workspace with a recorded cold
 gate, whose start only raises the gate from its record and spawns nothing, so a
-gate shows the moment the daemon serves and not at the next prompt, hidden or not: the session record states
+gate shows the moment the daemon serves and not at the next prompt, backlogged or not: the session record states
 each workspace's shim, and nothing else decides.
 Emacs's re-announcement starts nothing.
 A HANDOVER PICKS UP WHERE THINGS WERE LEFT AND STARTS NOTHING THAT WAS NOT

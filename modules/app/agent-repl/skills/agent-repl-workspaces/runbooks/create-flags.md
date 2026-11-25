@@ -33,11 +33,11 @@
   channel, the person or the thread it came from), with no prefix or suffix of
   your own.
 - Give `-priority` or `-model` only when the user named one.
-- `-hidden` creates the workspace BORN HIDDEN: its row is inserted hidden, so
+- `-backlogged` creates the workspace BORN BACKLOGGED: its row is inserted in the backlog, so
   no sidebar draws it even for an instant. Use it for a workspace nobody is
   meant to open, such as an intake that works out a request and hands it on.
-  `workspace set -hidden` after the create leaves a window in which the
-  workspace is drawn, so a create that wants none uses `-hidden`.
+  `workspace set -backlogged` after the create leaves a window in which the
+  workspace is drawn, so a create that wants none uses `-backlogged`.
 
 - `-pre-deploy-prompt TEXT`, `-pre-deploy-script PATH:SECONDS`,
   `-post-deploy-prompt TEXT` and `-post-deploy-script PATH:SECONDS` (each

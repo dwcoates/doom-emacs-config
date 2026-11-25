@@ -4,7 +4,7 @@ The owner asked (2026-10-26) that `agent-repld` and its harness support finding
 workspaces, including ones no longer open: a list of workspaces, narrowed by a
 specification such as a timeframe or a repository, each with its name and its
 summary (the line the webapp's topbar draws as the title). The roster only
-carries open, hidden and recently merged workspaces, so nothing an agent could
+carries open, backlogged and recently merged workspaces, so nothing an agent could
 call answered "which workspace did X last week".
 
 The owner pre-approved contract changes for this work (standing ruling,

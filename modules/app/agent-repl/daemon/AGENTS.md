@@ -263,7 +263,7 @@ mechanics (`integration/shareddaemon_test.go`).
   and a refusal blocks it), `groupSelection` (the selected workspace is one
   per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
   catalog its login last served; no case of it starts a session) and
-  `groupHiddenKeepalives` (SendBackloggedKeepalives asks every hidden shim of
+  `groupBackloggedKeepalives` (SendBackloggedKeepalives asks every backlogged shim of
   the daemon), `groupTabOrder` (tab numbers run across every repository,
   and the arrangement lists them all), `groupDesktopBanner` (a banner
   turns on the one editor's focus, and a focus gain claims the newest held
@@ -1937,7 +1937,7 @@ prompt was sent. Now:
   and a recorded conversation; the requested model is the session's. A read
   the user already paid for (`wsm.ColdReadPayment`) is never raised again: the
   pay answer sends no request, so its session restates the same lapsed read. The sidebar,
-  footer and composer dock draw it as any gate. A hidden or closed workspace
+  footer and composer dock draw it as any gate. A backlogged or closed workspace
   keeps its lapse (`Keeper.lapse`); a declined raise waits for the next projection.
 - **The session is parked at the gate whether or not the user is looking**
   (`drain.Controller.ColdDown` with `atGate`), because the answer's resume

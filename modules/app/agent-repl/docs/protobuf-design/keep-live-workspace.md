@@ -40,9 +40,9 @@ Design ran autonomously (no co-design was asked for).
 - `busy` is a SUCCESS arm: the cache is warm, which is what the caller asked
   for.
 - `owes_no_keepalive` exists because the verb runs the keeper's own beat plan
-  (`beatPlanFor`): a hidden workspace, a known-cold cache, no session, a run
+  (`beatPlanFor`): a backlogged workspace, a known-cold cache, no session, a run
   at break-even, or idle past the cutoff owes no keep-alive, and the verb
-  starts nothing for it. Hidden is answered this way rather than with an arm
+  starts nothing for it. Backlogged is answered this way rather than with an arm
   of its own, because hiding is only one of the plan's reasons.
 - `timed_out.step` is a oneof of empty arms (no state enum); the bound and its
   measured expected time are siblings because they apply to every step.

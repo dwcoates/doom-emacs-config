@@ -270,7 +270,7 @@ A workspace keeps every link that bears on its task, such as its pull request, t
   - The daemon checks your messages and reactions about every 3 minutes.
   - Each message and emoji fires once, ever.
   - Reactions already on messages when the settings are first complete never fire; only ones you add afterwards do.
-- Firing creates a hidden intake workspace that reads the thread, names the task, and forks itself into the workspace that does it, then closes.
+- Firing creates a backlogged intake workspace that reads the thread, names the task, and forks itself into the workspace that does it, then closes.
 - The settings are the daemon's, set from a shell:
   - `agent-repld slack watch-user U…` is your Slack member id, from your Slack profile's "Copy member ID".
   - `agent-repld slack repository here|DIR` is the repository the workspaces are created in.
@@ -301,7 +301,7 @@ A rename changes the workspace's name and nothing else.
   - A box opens holding the current name; type the new one and press Enter.
   - Escape, or a click outside the box, closes it unchanged.
   - A refused name is explained beside the box, which stays open.
-  - Rows in Recently Deployed and Hidden don't offer it, because a click there reopens or shows the workspace.
+  - Rows in Recently Deployed and the Backlog don't offer it, because a click there reopens or shows the workspace.
 - **From a shell:** `agent-repld workspace set WS -name NAME`.
 - **The new name shows everywhere at once:**
   - the sidebar;
@@ -642,13 +642,13 @@ Every card in the feed has a question-mark icon: responses, tool cards, merge bu
 - **Clicking the question mark sets your draft aside.** Whatever the input window held is saved to its history, so the up arrow brings it back, and the input window is cleared and takes the keyboard.
 - **The pressed question mark is tinted in the orange a response tree's citations wear** while the question stands. Only one card's question mark is pressed at a time: clicking another card's moves the question there.
 - **Clicking the pressed question mark again withdraws the question.** The draft it set aside comes back into the input window, and anything you had typed since is saved to history.
-- **Sending hands the question to a hidden intake workspace.** agent-repl creates it for the question in its own repository, with a fresh context, and hands it the card, quoted, then your words.
+- **Sending hands the question to a backlogged intake workspace.** agent-repl creates it for the question in its own repository, with a fresh context, and hands it the card, quoted, then your words.
   - A response or a prompt is quoted as its text.
   - Every other card is quoted as the data agent-repl drew it from, in JSON.
   - The intake workspace first acknowledges this workspace with a message, which is the first thing you see.
   - A question is answered in a second message to this workspace.
   - A request for a change becomes a one-shot workspace, a child of this one, which lands the change, and the message names it.
-  - The intake workspace is removed once it has done that. It sits in the hidden section until then.
+  - The intake workspace is removed once it has done that. It sits in the backlog until then.
   - Nothing is added to this workspace's feed, and no turn runs here.
   - The question mark is released, and the draft it set aside stays in history.
 - **A later question about the same card goes to the workspace already working on it.** No new intake workspace is created for it.
@@ -714,7 +714,7 @@ A restart, a deploy or a landed merge never changes which workspace is selected.
 
 - When Emacs starts again, it opens on the workspace you had selected before it quit.
   - Other workspaces may finish opening first; Emacs waits for yours rather than switching to them.
-  - If that workspace is hidden, in a collapsed section, or could not be opened, Emacs opens on the first tab that is ready instead.
+  - If that workspace is backlogged, in a collapsed section, or could not be opened, Emacs opens on the first tab that is ready instead.
 - When the daemon restarts or a deploy rolls out, the frame stays where it was.
 - A merge that lands moves you only when you were standing on the workspace it closes.
 
@@ -945,20 +945,20 @@ The top bar's phone chip, on the left after the account and just left of the wif
 - **The sidebar lists workspaces in three sections, top to bottom.**
   - The open workspaces section, headed "OPEN", holds the grouping you picked (repositories, tasks or stages).
   - "DEPLOYS" holds the deploy queue and the merges of the last week.
-  - "HIDDEN" holds the workspaces you hid.
+  - "BACKLOG" holds the workspaces you moved into the backlog.
     - It starts folded every time agent-repl starts in Emacs.
 - **The sidebar itself never scrolls; a section too long for its room scrolls its own rows.**
-  - "OPEN" takes the room first, down to three rows each for "DEPLOYS" and "HIDDEN".
-  - "DEPLOYS" and "HIDDEN" share those six rows, so a "DEPLOYS" of one row leaves "HIDDEN" five.
+  - "OPEN" takes the room first, down to three rows each for "DEPLOYS" and "BACKLOG".
+  - "DEPLOYS" and "BACKLOG" share those six rows, so a "DEPLOYS" of one row leaves "BACKLOG" five.
   - "DEPLOYS" claims that room only for its queue and today's merges.
     - Older merges show only in room the other sections leave.
   - An expanded "RECENTLY DEPLOYED" keeps room for at least five workspaces.
-    - It takes that room from "HIDDEN" first, then from "OPEN".
-  - A sidebar too short for those six rows shrinks "HIDDEN" first.
-    - "DEPLOYS" gives up rows only once "HIDDEN" shows none.
-- **`SPC j R` sends every hidden workspace one keep-alive.**
-  - A hidden workspace's cache is otherwise left to lapse, and its session stops when it does.
-  - The keep-alive moves each lapse later, so the "HIDDEN" countdowns grow back.
+    - It takes that room from "BACKLOG" first, then from "OPEN".
+  - A sidebar too short for those six rows shrinks "BACKLOG" first.
+    - "DEPLOYS" gives up rows only once "BACKLOG" shows none.
+- **`SPC j R` sends every backlogged workspace one keep-alive.**
+  - A backlogged workspace's cache is otherwise left to lapse, and its session stops when it does.
+  - The keep-alive moves each lapse later, so the "BACKLOG" countdowns grow back.
   - The echo area counts the keep-alives sent and names each workspace that got none, with why.
 - **Each heading folds its section with the chevron beside it.**
   - Every workspace's page shows the same folds.
@@ -998,7 +998,7 @@ The top bar's phone chip, on the left after the account and just left of the wif
 - **The time at the right of an open workspace's row is its running turn's duration.**
   - It reads the same number as the footer's turn clock.
   - A workspace with no turn running reads `0s`.
-  - A hidden row counts from its hide, and a merged row from its merge.
+  - A backlogged row counts from its hide, and a merged row from its merge.
 - **Resting the pointer on a workspace's name for three seconds shows its branch panel.**
   - The panel lists the branch, the branch it was cut from, its commit count and its last prompt.
   - This works in all three sections; the status dot does not open it.
@@ -1058,7 +1058,7 @@ The top bar's phone chip, on the left after the account and just left of the wif
 - **The magnifier left of "Workspaces" opens a search bar under the sidebar's header.**
   - The bar slides down over the top of the list rather than pushing it down.
 - **Typing narrows every section to the workspaces whose names match.**
-  - The open workspaces section (under every grouping), Hidden Workspaces and Recently Deployed are all narrowed.
+  - The open workspaces section (under every grouping), the Backlog and Recently Deployed are all narrowed.
   - A space matches anything, so `fix side` finds `fix-the-sidebar`.
   - The words must appear in the order typed, and case does not matter.
   - A section left with no match is hidden until the search changes.
@@ -1081,7 +1081,7 @@ The top bar's phone chip, on the left after the account and just left of the wif
 ## Switching workspaces from the keyboard
 
 - **`SPC p p` lists the workspaces you are working with now.**
-  - Every open workspace, and every hidden one.
+  - Every open workspace, and every backlogged one.
   - The 25 most recently merged.
   - The 25 you most recently closed or killed yourself; one closed by an agent, a merge or agent-repl is not listed.
 - **`SPC p P` lists every workspace agent-repl knows, however old.**
@@ -1090,10 +1090,10 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - Only switching to a workspace does not move it.
 - **Each line shows the workspace's status mark as the sidebar draws it.**
   - A closed or merged workspace has the grey dot.
-  - A hidden workspace has a dotted ring, `◌`, in its status color.
+  - A backlogged workspace has a dotted ring, `◌`, in its status color.
 - **After the name, five columns.**
   - The repository it belongs to.
-  - Whether it is closed, hidden, merged or not open in this Emacs.
+  - Whether it is closed, backlogged, merged or not open in this Emacs.
   - How long ago its last turn ended.
   - How many commits its branch has past where it was cut.
   - Its summary, the line the topbar draws over its name.
@@ -1143,31 +1143,31 @@ The top bar's phone chip, on the left after the account and just left of the wif
 
 ## Where you land when the workspace you are on goes away
 
-- **Closing, hiding or folding away the workspace you are on selects the workspace nearest it that you selected most recently.**
+- **Closing, backlogging or folding away the workspace you are on selects the workspace nearest it that you selected most recently.**
   - First its ancestors, the workspaces it was spawned from.
   - Then the other workspaces of its sidebar subsection.
   - Then the other workspaces of its repository.
   - Then its repository's main workspace, when none of those was ever selected.
   - Only when its repository has no other tab drawn does it reach into another repository.
 
-## Hidden workspaces
+## The backlog
 
-- **Hiding a workspace keeps its conversation's cache warm for a while instead of stopping it at once.**
+- **Moving a workspace into the backlog keeps its conversation's cache warm for a while instead of stopping it at once.**
   - Its keep-alives stop, so the cache runs out on its own clock.
   - Showing it again before then brings it back with the cache still warm.
-- **The Hidden Workspaces section counts down to the moment the cache runs out.**
+- **The Backlog counts down to the moment the cache runs out.**
   - The time reads like `12m 34s`, and `cold cache` once it has run out.
   - Its color moves from green, an hour or more out, to deep red when it runs out.
-  - A row with no countdown is one whose cache was not being kept when it was hidden; it counts up from the hide instead.
+  - A row with no countdown is one whose cache was not being kept when it was backlogged; it counts up from the hide instead.
 - **When the cache runs out, the workspace's session is stopped, as idle workspaces are.**
   - Its conversation is kept.
   - A workspace whose conversation is large enough to need the cold-cache choice when it resumes has its name struck through.
   - Showing it again asks that choice, as any cold resume does.
-- **A hidden workspace you are looking at runs like a shown one.**
+- **A backlogged workspace you are looking at runs like a shown one.**
   - Selecting it from a picker keeps its session up and its cache warm while you are on it.
   - Moving off it leaves its cache to run out again.
-- **Answering a hidden workspace's cold-cache choice shows it again.**
-  - It moves out of Hidden Workspaces the moment you click, whichever choice you made.
+- **Answering a backlogged workspace's cold-cache choice shows it again.**
+  - It moves out of the Backlog the moment you click, whichever choice you made.
 
 ## When Claude does not start
 

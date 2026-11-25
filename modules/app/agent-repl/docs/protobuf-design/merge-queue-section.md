@@ -106,7 +106,7 @@ for a repository to leave the section once its line empties.
 
 The section is renamed and moved: "Merge Queue" is now "Deploys", its merged
 groups' heading "Recently Deployed", and it is drawn directly under the Open
-section, above Hidden. The message keeps its name
+section, above the Backlog. The message keeps its name
 (`frontend.v1.RosterMergedSection`); only the labels the daemon composes change.
 
 ### `frontend.v1.RosterMergedSection.queue_label`
@@ -123,10 +123,10 @@ section, above Hidden. The message keeps its name
 
 - The heading over no queue is a line of its own, so it claims a row of the
   section's share.
-- A rail too short for the bands' share shrinks Hidden first, down to no rows,
+- A rail too short for the bands' share shrinks the Backlog first, down to no rows,
   and only then Deploys. Spare share and room the Open section leaves go to
-  Deploys' queue and today's merges first, then Hidden, then older merges.
-- Hidden is now the lowest section, so it is the one stretched to the rail's
+  Deploys' queue and today's merges first, then the Backlog, then older merges.
+- The Backlog is now the lowest section, so it is the one stretched to the rail's
   foot.
 
 ## Follow-up: a queue held for its deploy check reads as paused (owner ruling, 2026-11-22)

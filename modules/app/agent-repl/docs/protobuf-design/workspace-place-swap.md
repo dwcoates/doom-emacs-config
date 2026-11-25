@@ -187,7 +187,7 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   number; moving right shifts the tabs it passes left (`| A | B | C | D |`,
   A to tab 3 gives `| B | C | A | D |`), moving left shifts them right.
 - **Collapsed repositories** keep taking their workspaces off the tab bar.
-- **Hidden workspaces** keep their registry place; showing one again draws it
+- **Backlogged workspaces** keep their registry place; showing one again draws it
   where the registry says.
 - **Repository sections** keep their current sort; only rows within a section,
   and children under their parent, sort by registry order.
@@ -213,7 +213,7 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
 - **Consequences:** Emacs' tab bar, numerals, `s-{`/`s-}` and the daemon's
   startup bring-up order read this list; `agent-repl-roster-walk` and
   `sidebar.TabOrder()` stop deriving tab order from the groupings. Collapsed
-  and hidden workspaces behave exactly as today (no number, no stop).
+  and backlogged workspaces behave exactly as today (no number, no stop).
 
 ### MoveWorkspace replaces SwapWorkspacePlaces (2026-10-11)
 
@@ -338,7 +338,7 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
 
 - **The roster is one listing the tab bar and the sidebar share.** Every
   workspace the roster draws is in exactly one of three lists: OPEN (the
-  repository sections), HIDDEN, MERGED. The tab bar is the Open list's
+  repository sections), BACKLOG, MERGED. The tab bar is the Open list's
   depth-first walk; nothing else orders tabs.
   - Consequences: `frontend.v1.WorkspaceRoster.tab_bar` is retired; each open
     row states its own tab (`RosterOpenRow.tab`: numbered or folded).
@@ -350,17 +350,17 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   subtree is one unbroken run at every depth; a subsection never spans
   repositories; a family never splits across subsections; every workspace
   is in one list; a workspace is in Open iff it has a tab (folding aside);
-  hidden workspaces have no tab and merged workspaces are never open (OPEN
+  backlogged workspaces have no tab and merged workspaces are never open (OPEN
   BEATS MERGED: a reopened merged workspace returns to Open); numbers run
   1..N with no gap; only the daemon holds the order and no client reorders
   locally; only an explicit request changes the order; a request that would
   break a condition is refused and changes nothing; the order survives
   restarts.
-- **Family rules.** A workspace with open children (hidden children count as
-  open) cannot be hidden, closed, killed, nuked, or merged by a merge that
+- **Family rules.** A workspace with open children (backlogged children count as
+  open) cannot be backlogged, closed, killed, nuked, or merged by a merge that
   closes it; the merge refusal names the children, to be resolved and
   closed first. A workspace cannot be created, re-parented, reopened or
-  shown as the open child of a hidden, closed or CLOSING parent (one a
+  shown as the open child of a backlogged, closed or CLOSING parent (one a
   merge waiting in its queue closes once it lands). A hidden merge
   workspace is no open child: it is the merge's machinery, drawn nowhere.
   Every rule is checked in the same wsm transaction as the write it guards,
@@ -402,5 +402,5 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   `hidden` arms; moving them was not needed for any condition.
 - **Consequences:** the daemon hoists (an open workspace whose parent is not
   open takes its place), which clients used to do; Emacs builds its tabs
-  from the Open walk, plus an undrawn entry per hidden workspace so a hidden
+  from the Open walk, plus an undrawn entry per backlogged workspace so a backlogged
   workspace keeps its perspective; the webapp paints each row's own number.

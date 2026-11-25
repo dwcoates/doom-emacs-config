@@ -1,6 +1,6 @@
 # Roster row: when the workspace was closed, and by whom
 
-The owner asked for `SPC p p` to offer, beside the open and hidden
+The owner asked for `SPC p p` to offer, beside the open and backlogged
 workspaces and the 25 most recently merged, the 25 workspaces the USER most
 recently closed or killed: explicitly, by their own gesture, never one the
 daemon or an agent closed on its own. The roster said only THAT a row was

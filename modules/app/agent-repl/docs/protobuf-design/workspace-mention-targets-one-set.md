@@ -14,16 +14,16 @@ the canonical mention with its code markers stripped.
 - The page's response linker searched only TLDR trees, so a prose response
   linked nothing. The format drift of one session (prose since its compaction
   on 2026-11-19) is what made this visible; no code change caused it.
-- Selecting a hidden workspace is not refused by the daemon
+- Selecting a backlogged workspace is not refused by the daemon
   (`selectSubject` reveals only merge-hidden workspaces specially), so a
-  hidden workspace can be a link target.
+  backlogged workspace can be a link target.
 
 ## Landed changes
 
 ### `frontend.v1.WorkspaceMentionTargets` is the composer's set too
 
 - WHAT: the set's comment now states it is what the viewer's page links AND
-  what the viewer's composer completes. Hidden workspaces are now targets
+  what the viewer's composer completes. Backlogged workspaces are now targets
   (after the Open section's, in drawn order). A shared name names the one
   carrier in the viewer's own repository when exactly one is there, and
   otherwise no one. The viewer is never a target, and a name the viewer

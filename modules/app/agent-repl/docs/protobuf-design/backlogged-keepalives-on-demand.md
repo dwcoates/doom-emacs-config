@@ -1,14 +1,14 @@
-# Keep every hidden workspace's cache warm on demand
+# Keep every backlogged workspace's cache warm on demand
 
 Owner request, 2026-10-14: a command bound to `SPC j R` sends a keep-alive to
-every hidden workspace, so each one's cache lapse (and the hidden section's
+every backlogged workspace, so each one's cache lapse (and the backlog's
 countdown to it) moves later. Contracts are the owner's standing delegation
 (decide and carry proto changes through, report after).
 
 ## Premise, verified
 
-- A hidden workspace's session is kept running until its prompt cache lapses
-  (`docs/protobuf-design/hidden-cache-lapse.md`,
+- A backlogged workspace's session is kept running until its prompt cache lapses
+  (`docs/protobuf-design/backlogged-cache-lapse.md`,
   `daemon/internal/cachelapse/keeper.go`), with its keep-alives HELD.
   - The owner called the lapse "the compaction gate"; the code calls it the
     cold gate. Same moment: the lapse is where the cold gate would ask.
@@ -27,7 +27,7 @@ countdown to it) moves later. Contracts are the owner's standing delegation
   - Outcome: success with `sent` or `skipped{main_agent_busy |
     detached_work_live | cache_lapsed}`, or error `no_session` or
     `submit_failed{detail}`.
-- WHY: the hidden workspace's cadence is held on purpose; the user asking for
+- WHY: the backlogged workspace's cadence is held on purpose; the user asking for
   one more keep-alive must not un-hold it.
 - Decisions.
   - A new rpc rather than a third `SetKeepaliveRequest.cadence` arm: a beat
@@ -49,15 +49,15 @@ countdown to it) moves later. Contracts are the owner's standing delegation
 ### `agentrepl.v1.SendBackloggedKeepalives`
 
 - WHAT: a daemon-scoped rpc (SIDEBAR section) with an empty request.
-  - The daemon reads the hidden section (`wsm.Workspace.InHiddenSection`),
+  - The daemon reads the backlog (`wsm.Workspace.InBacklog`),
     asks each served shim concurrently, and answers one
-    `SendBackloggedKeepalivesWorkspace` per hidden workspace: `sent`, `skipped`,
+    `SendBackloggedKeepalivesWorkspace` per backlogged workspace: `sent`, `skipped`,
     `not_running`, or `failed{detail}`.
   - Error arm: `registry_unreadable`, when the registry list itself fails.
 - WHY: `SPC j R` reports how it went in the echo area; the countdowns
   themselves move on the roster stream.
 - Decisions.
-  - `not_running` is an answer, not a failure: a hidden workspace whose lapse
+  - `not_running` is an answer, not a failure: a backlogged workspace whose lapse
     already came has no session and no cache to keep. A shim answering
     `no_session` maps to it too.
   - The skip vocabulary is re-spelled in `agentrepl.v1` rather than importing

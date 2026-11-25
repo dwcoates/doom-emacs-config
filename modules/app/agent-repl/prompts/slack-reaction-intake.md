@@ -1,4 +1,4 @@
-<!-- used by: daemon/internal/slackwatch (reactions.go, the hidden intake workspace a fired Slack emoji binding creates); placeholders: {{link}}, {{channel}}, {{ts}}, {{emoji}}, {{fork_command}}, {{directives}} -->
+<!-- used by: daemon/internal/slackwatch (reactions.go, the backlogged intake workspace a fired Slack emoji binding creates); placeholders: {{link}}, {{channel}}, {{ts}}, {{emoji}}, {{fork_command}}, {{directives}} -->
 You are the INTAKE for a Slack-thread-triggered task. The triggering message is {{link}} (channel {{channel}}, ts {{ts}}, trigger :{{emoji}}:). Your whole job, in this first and only turn, is to name the task and fork yourself into the workspace that does it:
 
 1. Read the originating thread: `gns slack convo {{link}} --all --json`. The triggering message is EXACTLY the one at ts {{ts}} in channel {{channel}}; the :{{emoji}}: was either typed in that message or added to it as a reaction, and that message is the SOLE work item. Use the rest of the thread for CONTEXT only: ack emojis or reactions on any other message are not additional triggers.
