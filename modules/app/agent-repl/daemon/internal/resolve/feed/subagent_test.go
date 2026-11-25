@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -2842,31 +2841,6 @@ func TestACreatedShellIsBuiltAsTheShimStatesReadoptedWork(t *testing.T) {
 	}
 }
 
-// The two ways a feed test hands the resolver a created shell share one shape.
-func TestEveryCreatedShellInTheseTestsIsBuiltByCreatedShell(t *testing.T) {
-	for _, file := range []string{"subagent_test.go", "turnended_test.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Arrange.
-			text, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Act.
-			n := strings.Count(string(text), "DetachableWork_"+"Bash{")
-
-			// Assert: only createdShell itself builds one by hand.
-			want := 0
-			if file == "subagent_test.go" {
-				want = 1
-			}
-			if n != want {
-				t.Fatalf("%s builds %d created shells by hand, want %d (use createdShell)", file, n, want)
-			}
-		})
-	}
-}
-
 func TestACreatedShellIsHeldUntilItsCallDrawsAndThenReplacesIt(t *testing.T) {
 	// Arrange: a re-announced live shell whose call the feed has not drawn.
 	h := newHarness(t)
@@ -3549,25 +3523,6 @@ func TestDrawReleasedSpawnReportsAFrameItCannotFold(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want the ERROR naming the occasion", h.records())
-}
-
-// TestEveryReleasedHoldIsDrawnThroughOneHelper pins the consolidation: a hold
-// released without a naming frame is drawn by drawReleasedSpawn alone, so a
-// hand-rolled second copy of its fold-compose-push cannot drift from it.
-func TestEveryReleasedHoldIsDrawnThroughOneHelper(t *testing.T) {
-	// Arrange.
-	source, err := os.ReadFile("subagent.go")
-	if err != nil {
-		t.Fatalf("reading subagent.go: %v", err)
-	}
-
-	// Act.
-	count := strings.Count(string(source), "r.composeSubagent(s, state.feed, unitID, state, commission)")
-
-	// Assert.
-	if count != 1 {
-		t.Fatalf("subagent.go composes a released hold at %d sites, want exactly one (drawReleasedSpawn)", count)
-	}
 }
 
 // ---- A SUBAGENT RESUMED BY SENDMESSAGE: the announcement names the agent ----

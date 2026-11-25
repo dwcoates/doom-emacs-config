@@ -2,7 +2,6 @@ package wsm
 
 import (
 	"errors"
-	"regexp"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -10,8 +9,6 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // withUnknown is MSG carrying the raw fields RAW as unknown ones.
@@ -129,29 +126,6 @@ func TestCarryUnknown(t *testing.T) {
 	}
 }
 
-// TestRetiredFieldsAreCarriedThroughCarryUnknown keeps every step's carry of
-// a retired field on the one helper, which removes the field only after its
-// successor is written: a hand-rolled peek-then-take is a second copy to
-// drift, and the one this replaced stripped the field from a row it then
-// refused.
-func TestRetiredFieldsAreCarriedThroughCarryUnknown(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`peekUnknown\(`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if file.Name != "rowrewrite.go" && handRolled.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v peek a retired field themselves; carry it through carryUnknown", offenders)
-	}
-}
-
 // TestWalkMessagesVisitsParentsBeforeChildren pins the walk's order and
 // reach: a nested message and a list element are each visited, after the
 // message holding them.
@@ -180,27 +154,6 @@ func TestWalkMessagesVisitsParentsBeforeChildren(t *testing.T) {
 		if visited[i] != want[i] {
 			t.Fatalf("visited %v, want %v", visited, want)
 		}
-	}
-}
-
-// TestOnlyTheSharedLoopRewritesStoredRows keeps every layout step's row
-// rewrite on rewriteDurableRows: a step re-encoding rows its own way is a
-// second copy of the loop to drift.
-func TestOnlyTheSharedLoopRewritesStoredRows(t *testing.T) {
-	// Arrange
-	writes := regexp.MustCompile(`UPDATE durable_feed_rows SET row =`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if file.Name != "rowrewrite.go" && writes.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v rewrite stored rows by hand; use rewriteDurableRows", offenders)
 	}
 }
 
@@ -280,27 +233,5 @@ func TestEditFeedRowAnswersTheEditsError(t *testing.T) {
 	// Assert
 	if !errors.Is(err, refused) || changed || out != nil {
 		t.Fatalf("editFeedRow = (%x, %v, %v), want the edit's error and no row", out, changed, err)
-	}
-}
-
-// TestEveryRowRewriteReEncodesThroughEditFeedRow keeps each layout step's row
-// rewrite on editFeedRow: a step decoding and re-encoding a row its own way is
-// a second copy of the skeleton to drift, such as one that re-encodes a row it
-// never changed.
-func TestEveryRowRewriteReEncodesThroughEditFeedRow(t *testing.T) {
-	// Arrange
-	reEncodes := regexp.MustCompile(`proto\.Marshal\(row\)`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if file.Name != "rowrewrite.go" && reEncodes.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v re-encode stored rows by hand; edit them through editFeedRow", offenders)
 	}
 }

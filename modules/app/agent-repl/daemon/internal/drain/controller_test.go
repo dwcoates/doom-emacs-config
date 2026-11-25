@@ -13,7 +13,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1437,24 +1436,5 @@ func TestReadFailedLevelsByTheCause(t *testing.T) {
 				t.Fatalf("the caller's fields were mutated: %v", fields)
 			}
 		})
-	}
-}
-
-// TestEveryDrainReadIsLevelledThroughReadFailed keeps the cut-or-failed split
-// in one place: no drain source but readFailed asks ctxend for it.
-func TestEveryDrainReadIsLevelledThroughReadFailed(t *testing.T) {
-	// Act
-	var sites []string
-	for _, f := range sourcescan.Production(t) {
-		for i, line := range strings.Split(string(f.Source), "\n") {
-			if strings.Contains(line, "ctxend.") && !strings.Contains(line, "\"agent-repld/internal/ctxend\"") {
-				sites = append(sites, fmt.Sprintf("%s:%d", f.Name, i+1))
-			}
-		}
-	}
-
-	// Assert
-	if len(sites) != 1 || !strings.HasPrefix(sites[0], "controller.go:") {
-		t.Fatalf("ctxend is asked at %v, want only inside readFailed", sites)
 	}
 }

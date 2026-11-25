@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -128,32 +127,5 @@ func TestAtCallerIsTheCallersOwnWorktree(t *testing.T) {
 	if rootErr != nil || locateErr != nil || root != "/wt/caller" || len(refs) != 1 || refs[0].GetId() != "ws-caller" ||
 		deps.getenv(shimclient.EnvWorkspaceDir) != "" {
 		t.Fatalf("root %q (%v), located %v (%v); want ws-caller's own worktree /wt/caller with no session", root, rootErr, refs, locateErr)
-	}
-}
-
-// TestEveryCallerOnlyFixtureSharesAtCaller fails a test file that hand-rolls
-// the caller seams atCaller owns, so the copies cannot drift apart.
-func TestEveryCallerOnlyFixtureSharesAtCaller(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	const shape = `locateOver(cliRow("ws-caller", "/wt/caller", "caller"))`
-
-	for _, file := range files {
-		if file == "caller_test.go" {
-			continue
-		}
-		// Act
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// Assert
-		if strings.Contains(string(src), shape) {
-			t.Errorf("%s hand-rolls the caller seams; use atCaller", file)
-		}
 	}
 }

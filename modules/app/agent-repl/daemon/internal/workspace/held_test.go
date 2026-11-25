@@ -1,10 +1,7 @@
 package workspace
 
 import (
-	"strings"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 )
 
 func TestLiveHeldIsWhetherItsClientIsReaped(t *testing.T) {
@@ -29,24 +26,5 @@ func TestLiveHeldIsWhetherItsClientIsReaped(t *testing.T) {
 				t.Fatalf("held() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-// TestEveryReapedCheckGoesThroughHeld pins that the fleet reads a client's
-// reaping only through live.held, so a hand-rolled check cannot drift from it.
-func TestEveryReapedCheckGoesThroughHeld(t *testing.T) {
-	// Arrange, Act.
-	var sites []string
-	for _, file := range sourcescan.Production(t) {
-		for _, line := range strings.Split(string(file.Source), "\n") {
-			if strings.Contains(line, "client.Reaped()") {
-				sites = append(sites, file.Name+":"+strings.TrimSpace(line))
-			}
-		}
-	}
-
-	// Assert.
-	if len(sites) != 1 || sites[0] != "sessions.go:_, reaped := l.client.Reaped()" {
-		t.Fatalf("reaped checks outside live.held: %v", sites)
 	}
 }

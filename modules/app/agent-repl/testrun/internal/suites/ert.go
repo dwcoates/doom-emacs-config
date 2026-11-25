@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,52 @@ import (
 const ertAggregator = "test-agent-repl.el"
 
 var ertLoadLine = regexp.MustCompile(`\(load \(expand-file-name "(test-[^"]+\.el)" dir\)`)
+
+// ertHelpers is the shared helpers file every ERT chunk loads first.
+const ertHelpers = "test-helpers.el"
+
+// ERTFiles answers ERT suite s's files in lispDir (its resolved Path): the
+// roster its chunks are checked against, helpers first, and the items it
+// runs. A suite with its own glob (roster.Suite.ERTFiles) runs exactly the
+// files it matches, in name order, beside the helpers it loads but does not
+// run. Any other runs every file the aggregator loads, the helpers included,
+// and refuses an aggregator that loads a file another ERT suite of the same
+// directory runs: that file would run in both.
+func ERTFiles(lispDir string, s roster.Suite) (rosterFiles, items []string, err error) {
+	if s.ERTFiles != "" {
+		matches, err := filepath.Glob(filepath.Join(lispDir, s.ERTFiles))
+		if err != nil {
+			return nil, nil, fmt.Errorf("suites: %s's files %q: %w", s.Name, s.ERTFiles, err)
+		}
+		for _, m := range matches {
+			items = append(items, filepath.Base(m))
+		}
+		if len(items) == 0 {
+			return nil, nil, fmt.Errorf("suites: %s's files %q match nothing in %s", s.Name, s.ERTFiles, lispDir)
+		}
+		sort.Strings(items)
+		return append([]string{ertHelpers}, items...), items, nil
+	}
+	files, err := ERTRoster(lispDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, other := range roster.Suites {
+		if other.Kind != roster.ERT || other.ERTFiles == "" || other.Path != s.Path {
+			continue
+		}
+		for _, f := range files {
+			ok, err := filepath.Match(other.ERTFiles, f)
+			if err != nil {
+				return nil, nil, fmt.Errorf("suites: %s's files %q: %w", other.Name, other.ERTFiles, err)
+			}
+			if ok {
+				return nil, nil, fmt.Errorf("suites: %s loads %s, which the %s suite runs: a file runs in one ERT suite alone", filepath.Join(lispDir, ertAggregator), f, other.Name)
+			}
+		}
+	}
+	return files, files, nil
+}
 
 // ERTRoster is every test file the aggregator loads, in its order.
 func ERTRoster(lispDir string) ([]string, error) {
@@ -35,7 +82,7 @@ func ERTRoster(lispDir string) ([]string, error) {
 		seen[f] = true
 		files = append(files, f)
 	}
-	if len(files) == 0 || files[0] != "test-helpers.el" {
+	if len(files) == 0 || files[0] != ertHelpers {
 		return nil, fmt.Errorf("suites: %s must load test-helpers.el first and then every test file; found %v", path, files)
 	}
 	return files, nil
@@ -43,7 +90,7 @@ func ERTRoster(lispDir string) ([]string, error) {
 
 func ertUnits(l Layout, s roster.Suite) (Units, error) {
 	lispDir := l.resolve(s.Path)
-	files, err := ERTRoster(lispDir)
+	files, items, err := ERTFiles(lispDir, s)
 	if err != nil {
 		return Units{}, err
 	}
@@ -70,7 +117,7 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	splits := batchSplits(s.Name, s.Name, BatchFiles(files, ERTArea, neverReused(s), PooledArea, s.Batching()), chunk, named)
+	splits := batchSplits(s.Name, s.Name, BatchFiles(items, ERTArea, neverReused(s), PooledArea, s.Batching()), chunk, named)
 	for i := range splits {
 		splits[i].Deps = []string{build.ID}
 		// THE DRIVER SCOPES EACH FILE'S NAMES TO THAT FILE, so two named

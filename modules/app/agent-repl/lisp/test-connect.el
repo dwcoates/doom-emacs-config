@@ -1830,21 +1830,6 @@ carries the call's whole argument plist, the filter closure included.")
   ;; Act / Assert
   (should-not (agent-repl-connect-connection-at-p nil "127.0.0.1:9001")))
 
-(defconst agent-repl-test-connect--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The `lisp/' directory these tests were loaded from.")
-
-(ert-deftest agent-repl-test-connect-connection-at-p-is-the-one-spelling ()
-  "No source compares a connection\='s address to ADDRESS by hand."
-  (let ((dir agent-repl-test-connect--lisp-dir))
-    (dolist (file (directory-files dir t "\\`[a-z-]+\\.el\\'"))
-      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
-                  (equal (file-name-nondirectory file) "connect.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (should-not (re-search-forward
-                       "(equal address (agent-repl-connect-connection-address" nil t)))))))
-
 (provide 'test-connect)
 
 ;;; test-connect.el ends here

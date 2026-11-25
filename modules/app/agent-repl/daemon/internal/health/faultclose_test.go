@@ -49,12 +49,19 @@ var wantStandingEdges = map[string][]Edge{
 // wantMomentary is every kind the plan declares momentary.
 var wantMomentary = []string{KindBounceDied, KindBounceDisposition, KindSessionAbsent, KindStateUnreadable}
 
-// allEdges answers every recovery edge, sorted.
-func allEdges(t *testing.T) []Edge {
-	t.Helper()
-	var out []Edge
-	for _, value := range edgeConsts(t) {
-		out = append(out, Edge(value))
+// allEdges answers every recovery edge, sorted: EdgeRecorded and every edge
+// the lifetime table names. That this is every Edge constant is the rule
+// daemonrules.TestEveryRecoveryEdgeClosesSomeKind holds over the sources.
+func allEdges() []Edge {
+	seen := map[Edge]bool{EdgeRecorded: true}
+	for _, lifetime := range faultLifetimes {
+		for _, edge := range lifetime.Edges {
+			seen[edge] = true
+		}
+	}
+	out := make([]Edge, 0, len(seen))
+	for edge := range seen {
+		out = append(out, edge)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
@@ -73,7 +80,7 @@ func TestEveryStandingKindClosesOnItsEdgesAndNoOther(t *testing.T) {
 		for _, e := range edges {
 			declared[e] = true
 		}
-		for _, edge := range allEdges(t) {
+		for _, edge := range allEdges() {
 			tests = append(tests, row{kind + " on " + string(edge), kind, edge, declared[edge]})
 		}
 	}

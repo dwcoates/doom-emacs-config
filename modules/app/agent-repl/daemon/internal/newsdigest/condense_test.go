@@ -10,7 +10,6 @@ import (
 
 	"agent-repld/internal/headless"
 	"agent-repld/internal/prompts"
-	"agent-repld/internal/sourcescan"
 )
 
 // allowedFixture is the link set the answer tests validate against.
@@ -428,18 +427,6 @@ func TestValidLink(t *testing.T) {
 	}
 }
 
-// TestEveryModelWrittenLinkPassesValidLink holds the package to one link
-// check: a source file checking a link's scheme on its own fails here.
-func TestEveryModelWrittenLinkPassesValidLink(t *testing.T) {
-	// Act
-	checks := sourcescan.Count(t, `Scheme != "https"`)
-
-	// Assert
-	if checks != 1 {
-		t.Fatalf("the https check appears %d times in the package, want once, in validLink", checks)
-	}
-}
-
 func TestDecodeAnswer(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -474,17 +461,5 @@ func TestDecodeAnswer(t *testing.T) {
 				t.Fatalf("decodeAnswer = %v with %+v, want %q", err, a, tt.want)
 			}
 		})
-	}
-}
-
-// TestEveryModelAnswerIsDecodedByDecodeAnswer holds the package's parsers to
-// one strict decode: a parser building its own decoder fails here.
-func TestEveryModelAnswerIsDecodedByDecodeAnswer(t *testing.T) {
-	// Act
-	counts := []int{sourcescan.Count(t, "stripFence(text)"), sourcescan.Count(t, "decodeAnswer(text, &a)")}
-
-	// Assert
-	if counts[0] != 1 || counts[1] != 3 {
-		t.Fatalf("strict decoders = %d and decodeAnswer calls = %d, want one decoder in decodeAnswer called by the three parsers", counts[0], counts[1])
 	}
 }

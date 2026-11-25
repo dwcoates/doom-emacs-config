@@ -7,8 +7,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-
-	"agent-repld/internal/sourcescan"
 )
 
 func TestResolveAllNamingResolvesEveryRefInOrder(t *testing.T) {
@@ -79,28 +77,5 @@ func TestValidateWorkspacePairAcceptsTwoWorkspaces(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("validateWorkspacePair = %v, want nil", err)
-	}
-}
-
-func TestEveryRefListIsResolvedThroughResolveAllNaming(t *testing.T) {
-	// Arrange: a loop over refs calling resolveNaming is resolveAllNaming
-	// written again.
-	handRolled := regexp.MustCompile(`for _, ref := range [^\n]*\n[^\n]*resolveNaming\(`)
-	var offenders []string
-
-	// Act.
-	for _, file := range sourcescan.Production(t) {
-		if handRolled.Match(file.Source) && file.Name != "workspaces.go" {
-			offenders = append(offenders, file.Name)
-		}
-	}
-	occurrences := 0
-	for _, file := range sourcescan.Production(t) {
-		occurrences += len(handRolled.FindAll(file.Source, -1))
-	}
-
-	// Assert: the one loop left is resolveAllNaming's own.
-	if len(offenders) != 0 || occurrences != 1 {
-		t.Fatalf("hand-rolled ref loops in %v (%d in all), want only resolveAllNaming's", offenders, occurrences)
 	}
 }

@@ -4,11 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -28,7 +23,6 @@ import (
 	"agent-repld/internal/agentverbs"
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/shimclient"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/workspacefind"
 	"agent-repld/internal/workspacesubs"
@@ -1610,19 +1604,6 @@ func TestKeepLiveRefusesAnExtraArgument(t *testing.T) {
 	}
 }
 
-func TestEveryWorkspaceRequesterIsBuiltByCallingRequester(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("agentcli.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert: the one place a calling workspace becomes a requester.
-	if got := strings.Count(string(src), "&agentreplv1.WorkspaceRequesterWorkspace{"); got != 1 {
-		t.Fatalf("agentcli.go builds %d WorkspaceRequesterWorkspace values; want only callingRequester's", got)
-	}
-}
-
 func TestWorkspaceModelSendsTheModelAndTheRequester(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -2236,59 +2217,6 @@ func TestOnWorkspaceRefusesAnythingAfterTheWorkspace(t *testing.T) {
 	}
 }
 
-// EVERY ONE-WORKSPACE VERB GOES THROUGH onWorkspace: a verb that parses its
-// one workspace by hand and then makes a single call fails here.
-func TestEveryOneWorkspaceVerbIsOnWorkspace(t *testing.T) {
-	// Arrange
-	var raw []byte
-	for _, file := range sourcescan.Production(t) {
-		if file.Name == "agentcli.go" {
-			raw = file.Source
-		}
-	}
-	verb := regexp.MustCompile(`(?s)func workspace(Kill|Select)\(c \*cliCall, args \[\]string\) int \{\n(.*?)\n}\n`)
-
-	// Act
-	matches := verb.FindAllSubmatch(raw, -1)
-
-	// Assert
-	if len(matches) == 0 {
-		t.Fatal("found no one-workspace verb to check")
-	}
-	for _, m := range matches {
-		if !strings.HasPrefix(strings.TrimSpace(string(m[2])), "return onWorkspace(") {
-			t.Errorf("workspace%s parses its workspace by hand instead of onWorkspace", m[1])
-		}
-	}
-}
-
-// A ONE-WORKSPACE VERB WITH FLAGS OF ITS OWN PARSES THROUGH onlyWorkspace, the
-// parse onWorkspace runs, so its refusal of anything after the workspace
-// cannot drift from onWorkspace's.
-func TestEveryFlaggedOneWorkspaceVerbParsesThroughOnlyWorkspace(t *testing.T) {
-	// Arrange
-	var raw []byte
-	for _, file := range sourcescan.Production(t) {
-		if file.Name == "agentcli.go" {
-			raw = file.Source
-		}
-	}
-	body := regexp.MustCompile(`(?s)func (onWorkspace\[Res any\]|workspaceRestart)\(.*?\) int \{\n(.*?)\n}\n`)
-
-	// Act
-	matches := body.FindAllSubmatch(raw, -1)
-
-	// Assert
-	if len(matches) != 2 {
-		t.Fatalf("found %d of onWorkspace and workspaceRestart, want both", len(matches))
-	}
-	for _, m := range matches {
-		if !strings.Contains(string(m[2]), "c.onlyWorkspace(") {
-			t.Errorf("%s parses its workspace without onlyWorkspace", m[1])
-		}
-	}
-}
-
 func TestRestartAsksForItsMode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2709,24 +2637,6 @@ func TestEveryTargetedVerbRefusesAMissingTargetAndDialsNothing(t *testing.T) {
 				t.Fatalf("exit %d, stderr %q, requests %v; want %q and nothing asked", code, f.errOut.String(), f.client.requests, tt.want)
 			}
 		})
-	}
-}
-
-func TestTheTargetedVerbsShareOneArgumentPreamble(t *testing.T) {
-	// Arrange: the parse-then-dial preamble lives in targetArgs alone.
-	src, err := os.ReadFile("agentcli.go")
-	if err != nil {
-		t.Fatalf("read agentcli.go: %v", err)
-	}
-
-	// Act
-	handRolled := strings.Count(string(src), "c.usageFailed(\"the command names its workspace\")") +
-		strings.Count(string(src), "c.usageFailed(\"the command names its merge\")")
-
-	// Assert
-	if handRolled != 0 || strings.Count(string(src), "c.targetArgs(fs, stateDir, args, ") != 2 {
-		t.Fatalf("usage refusals %d, targetArgs calls %d; want the one preamble shared by workspaceArg and queuedArg",
-			handRolled, strings.Count(string(src), "c.targetArgs(fs, stateDir, args, "))
 	}
 }
 
@@ -3768,19 +3678,6 @@ func TestRepositoryFlag(t *testing.T) {
 	}
 }
 
-func TestEveryRepositoryFlagIsReadByRepositoryFlag(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("agentcli.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert
-	if n := strings.Count(string(src), `strings.Cut(*repository, "/")`); n != 0 {
-		t.Fatalf("%d -repository flags are split by hand; read every one through repositoryFlag", n)
-	}
-}
-
 func TestPullRequestEventSpellingsAreTheStoresEvents(t *testing.T) {
 	// Assert
 	members := wsm.AllPullRequestEvents().Members()
@@ -4463,116 +4360,6 @@ func TestListWithoutLoginNarrowsToNoLogin(t *testing.T) {
 	}
 }
 
-// describerName is the shape of a refusal describer's name.
-var describerName = regexp.MustCompile(`^describe\w+Refusal$`)
-
-// scanDescribedAnswers reads every answerDescribed and onWorkspace call in
-// the production sources and answers the response each describes (the
-// agentrepl.v1 message its describer closure takes), sorted and once each,
-// with every call site that does not name a describer: a closure that is not
-// one return of a describe…Refusal call, so a constant sentence such as the
-// old "the daemon refused" cannot come back.
-func scanDescribedAnswers(t *testing.T) (responses, problems []string) {
-	t.Helper()
-	fset := token.NewFileSet()
-	seen := map[string]bool{}
-	for _, file := range sourcescan.Production(t) {
-		parsed, err := parser.ParseFile(fset, file.Name, file.Source, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", file.Name, err)
-		}
-		for _, decl := range parsed.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			inOnWorkspace := fn.Name.Name == "onWorkspace"
-			ast.Inspect(fn, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				callee, ok := call.Fun.(*ast.Ident)
-				if !ok || (callee.Name != "answerDescribed" && callee.Name != "onWorkspace") || len(call.Args) == 0 {
-					return true
-				}
-				where := fset.Position(call.Pos()).String()
-				lit, ok := call.Args[len(call.Args)-1].(*ast.FuncLit)
-				if !ok {
-					problems = append(problems, where+": the describer is not a closure")
-					return true
-				}
-				params := lit.Type.Params.List
-				last := params[len(params)-1]
-				star, ok := last.Type.(*ast.StarExpr)
-				if !ok {
-					problems = append(problems, where+": the closure takes no response")
-					return true
-				}
-				generic := false
-				switch typ := star.X.(type) {
-				case *ast.SelectorExpr:
-					if pkg, ok := typ.X.(*ast.Ident); !ok || pkg.Name != "agentreplv1" {
-						problems = append(problems, where+": the closure takes no agentrepl.v1 response")
-						return true
-					}
-					if !seen[typ.Sel.Name] {
-						seen[typ.Sel.Name] = true
-						responses = append(responses, typ.Sel.Name)
-					}
-				case *ast.Ident:
-					generic = inOnWorkspace && typ.Name == "Res"
-				}
-				if len(lit.Body.List) != 1 {
-					problems = append(problems, where+": the closure is not one return")
-					return true
-				}
-				ret, ok := lit.Body.List[0].(*ast.ReturnStmt)
-				if !ok || len(ret.Results) != 1 {
-					problems = append(problems, where+": the closure is not one return")
-					return true
-				}
-				said, ok := ret.Results[0].(*ast.CallExpr)
-				if !ok {
-					problems = append(problems, where+": the closure returns no describer's sentence")
-					return true
-				}
-				name, ok := said.Fun.(*ast.Ident)
-				if !ok || !(describerName.MatchString(name.Name) || (generic && name.Name == "why")) {
-					problems = append(problems, where+": the closure returns no describe…Refusal call")
-				}
-				return true
-			})
-		}
-	}
-	slices.Sort(responses)
-	return responses, problems
-}
-
-// describedResponses is every response an answerDescribed call site
-// describes, for the reflection test over their errors' arms.
-func describedResponses(t *testing.T) []string {
-	t.Helper()
-	responses, _ := scanDescribedAnswers(t)
-	return responses
-}
-
-// TestEveryAnsweredRefusalNamesItsDescriber pins that every verb answers
-// through a describer of its rpc's error: no call site says a refusal with a
-// sentence of its own, so none can fall back to "the daemon refused".
-func TestEveryAnsweredRefusalNamesItsDescriber(t *testing.T) {
-	// Act
-	responses, problems := scanDescribedAnswers(t)
-
-	// Assert
-	if len(responses) == 0 {
-		t.Fatal("found no answerDescribed call site to check")
-	}
-	for _, p := range problems {
-		t.Error(p)
-	}
-}
-
 func TestMergeQueueLandingsSendsItsWindow(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -4696,23 +4483,6 @@ func TestWhenFlagReadsATimeFlagAsEpochMilliseconds(t *testing.T) {
 				t.Fatalf("whenFlag = %d, %v (stderr %q); want %d, %v naming %q", ms, ok, errOut.String(), tt.wantMs, tt.wantOK, tt.stderr)
 			}
 		})
-	}
-}
-
-func TestEveryTimeFlagIsReadThroughWhenFlag(t *testing.T) {
-	// Arrange
-	body, err := os.ReadFile("agentcli.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	calls := strings.Count(string(body), "parseWhen(value, c.deps.now())")
-	all := strings.Count(string(body), "parseWhen(")
-
-	// Assert: the definition and whenFlag's one call.
-	if calls != 1 || all != 2 {
-		t.Fatalf("parseWhen is called %d times (%d through whenFlag); want only whenFlag to call it", all-1, calls)
 	}
 }
 

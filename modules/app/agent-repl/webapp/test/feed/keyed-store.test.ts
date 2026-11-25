@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { createKeyedStore, type Disposable } from "../../src/feed/keyed-store.js";
-import toolGroupSource from "../../src/feed/tool-group.ts?raw";
-import responseRunSource from "../../src/feed/response-run.ts?raw";
 
 /** An entry that counts its disposals. */
 function entry(): Disposable & { disposed: number } {
@@ -70,15 +68,5 @@ describe("createKeyedStore", () => {
     store.prune();
     // Assert
     expect(dropped.disposed).toBe(1);
-  });
-});
-
-describe("the arrangement's run stores share the keyed store", () => {
-  it.each([
-    ["tool-group.ts", toolGroupSource],
-    ["response-run.ts", responseRunSource],
-  ])("%s keeps its runs in createKeyedStore", (_name, source) => {
-    expect(source).toContain("createKeyedStore<");
-    expect(source).not.toMatch(/new Map<string, [A-Z]\w*>\(\);\s*let seen/);
   });
 });

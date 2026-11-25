@@ -339,42 +339,25 @@ func everyDescribedRefusal() []describedRefusal {
 	return all
 }
 
-// TestEveryDescribedRpcSaysEveryArm holds every rpc whose answer the CLI
-// describes (each answerDescribed call site's response) to a sentence for
-// every arm of its error, enumerated off the proto itself, nested choices
-// included: an arm added to the proto without a sentence fails here, with
-// no table to remember to extend.
-func TestEveryDescribedRpcSaysEveryArm(t *testing.T) {
-	// Arrange
-	byError := map[protoreflect.FullName]describedRefusal{}
+// TestEveryDescribedRefusalSaysEveryArm holds every rpc error the CLI
+// describes (everyDescribedRefusal) to a sentence for every arm of its error,
+// enumerated off the proto itself, nested choices included: an arm added to
+// the proto without a sentence fails here, with no table to remember to
+// extend. That every answerDescribed call site's response is in
+// everyDescribedRefusal is a rule over the sources, held in reposcans
+// (daemonrules.TestEveryDescribedRpcIsADescribedRefusal).
+func TestEveryDescribedRefusalSaysEveryArm(t *testing.T) {
 	for _, d := range everyDescribedRefusal() {
-		byError[d.empty.ProtoReflect().Descriptor().FullName()] = d
-	}
-	responses := describedResponses(t)
-	if len(responses) == 0 {
-		t.Fatal("found no described response to check")
-	}
-	for _, response := range responses {
-		t.Run(response, func(t *testing.T) {
-			mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName("agentrepl.v1." + response))
-			if err != nil {
-				t.Fatalf("no message agentrepl.v1.%s: %v", response, err)
-			}
-			field := mt.Descriptor().Fields().ByName("error")
-			if field == nil || field.Message() == nil {
-				t.Fatalf("%s has no error arm to describe", response)
-			}
-			d, ok := byError[field.Message().FullName()]
-			if !ok {
-				t.Fatalf("%s's describer is not in everyDescribedRefusal", field.Message().FullName())
+		message := d.empty.ProtoReflect().Descriptor()
+		t.Run(string(message.FullName()), func(t *testing.T) {
+			// Arrange
+			oneof := message.Oneofs().ByName(protoreflect.Name(d.oneof))
+			if oneof == nil {
+				t.Fatalf("%s declares no oneof %q", message.FullName(), d.oneof)
 			}
 
 			// Act / Assert
-			oneof := field.Message().Oneofs().ByName(protoreflect.Name(d.oneof))
-			if oneof == nil {
-				t.Fatalf("%s declares no oneof %q", field.Message().FullName(), d.oneof)
-			}
-			for _, v := range armVariants(field.Message(), 0) {
+			for _, v := range armVariants(message, 0) {
 				got, err := d.describe(v.Interface())
 				if err != nil || got == "" {
 					t.Errorf("%v: describe = %q, %v; want a sentence", v.Interface(), got, err)

@@ -8,8 +8,6 @@ import (
 	"os/exec"
 	"slices"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // The kernel reader is proven against this test process itself: the kernel
@@ -114,20 +112,6 @@ func TestKernelReadsTheHost(t *testing.T) {
 	}
 	if h.MemoryPressure != 1 && h.MemoryPressure != 2 && h.MemoryPressure != 4 {
 		t.Fatalf("pressure = %d, want 1, 2 or 4", h.MemoryPressure)
-	}
-}
-
-// The host's CPU times are read by agentrepl/logging/hostcpu alone, the one
-// reader testrun's CPU governor shares, so the two can never disagree on what
-// the host's load is.
-func TestTheHostsCPUTimesAreReadThroughHostcpu(t *testing.T) {
-	// Act
-	direct := sourcescan.Count(t, "HOST_CPU_LOAD_INFO")
-	shared := sourcescan.Count(t, "hostcpu.Read()")
-
-	// Assert
-	if direct != 0 || shared != 1 {
-		t.Fatalf("procmetrics reads HOST_CPU_LOAD_INFO %d times and hostcpu.Read() %d; want 0 and 1", direct, shared)
 	}
 }
 

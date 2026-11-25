@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import responseSource from "../src/feed/cards/response.ts?raw";
 import { cssString, fitsReserve, reserveLabels, reserveLabelsCss, zeroFigures } from "../src/width-reserve.js";
 
 describe("zeroFigures", () => {
@@ -39,13 +38,6 @@ describe("reserveLabelsCss", () => {
     // Arrange / Act / Assert
     expect(reserveLabelsCss(["00s", "00m 00s"])).toBe('"00s\\A 00m 00s"');
   });
-
-  it("is the one zeroing the response usage corner uses", () => {
-    // Arrange -- a hand-rolled zeroing would repeat the digit pattern.
-    const handRolled = responseSource.match(/replace\(\/\\d\/g, "0"\)/g) ?? [];
-    // Act + Assert
-    expect(handRolled).toEqual([]);
-  });
 });
 
 describe("cssString", () => {
@@ -62,12 +54,5 @@ describe("cssString", () => {
   it("escapes each reserved label the same way", () => {
     // Arrange / Act / Assert
     expect(reserveLabelsCss(['0"s', "00m"])).toBe('"0\\"s\\A 00m"');
-  });
-
-  it("is the one CSS string the response corner hands its ghost", () => {
-    // Arrange -- a hand-rolled quoting would wrap a template in quotes.
-    const handRolled = responseSource.match(/`"\$\{/g) ?? [];
-    // Act + Assert
-    expect(handRolled).toEqual([]);
   });
 });

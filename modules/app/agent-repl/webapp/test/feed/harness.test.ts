@@ -2,11 +2,9 @@
 /**
  * The feed harness's shared setup helpers: a harness whose root feed has a
  * live tail (`liveRootHarness`), and the scroll box holding the feed's host
- * (`scrollHost`). The feed suite builds both through them, and the scan below
- * fails a test that hand-rolls either again.
+ * (`scrollHost`). The feed suite builds both through them, and
+ * rules/feed/harness.rules.test.ts fails a test that hand-rolls either again.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OpenFeedRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
@@ -91,28 +89,6 @@ describe("scrollHost", () => {
     const { scroll } = scrollHost();
     // Assert
     expect([...document.body.children]).toEqual([scroll]);
-  });
-});
-
-/**
- * THE FEED SUITE SHARES THE SETUP: a hand-rolled root channel or scroll box is
- * the drift the helpers exist to prevent.
- */
-describe("the feed suite's setup call sites", () => {
-  const suite = readFileSync(join(process.cwd(), "test/feed/feed.test.ts"), "utf8");
-
-  it("registers no root channel by hand", () => {
-    // Arrange / Act
-    const handRolled = /channels\.set\(\s*"tok:root"/.test(suite);
-    // Assert
-    expect([handRolled, suite.includes("liveRootHarness(")]).toEqual([false, true]);
-  });
-
-  it("builds no scroll box around a host by hand", () => {
-    // Arrange / Act
-    const handRolled = /const scroll = document\.createElement\("div"\);\s*const host = document\.createElement\("div"\);\s*scroll\.append\(host\);/.test(suite);
-    // Assert
-    expect([handRolled, suite.includes("scrollHost()")]).toEqual([false, true]);
   });
 });
 

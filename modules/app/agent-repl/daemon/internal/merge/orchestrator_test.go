@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"errors"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -223,35 +222,5 @@ func TestRegisteredQueuesSurfacesAFailedRegistryRead(t *testing.T) {
 	// Assert
 	if err == nil || got != nil {
 		t.Fatalf("registeredQueues = %+v, %v; want the registry's error", got, err)
-	}
-}
-
-func TestOnlyRegisteredQueuesKeysTheRegistry(t *testing.T) {
-	// Arrange: every walk of the registry, the status read's included, is
-	// registeredQueues', which passes an unresolvable repository over.
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var walkers []string
-
-	// Act
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(raw), "repoKeyFor(ctx, repository.Dir)") {
-			walkers = append(walkers, name)
-		}
-	}
-
-	// Assert
-	if !slices.Equal(walkers, []string{"orchestrator.go"}) {
-		t.Fatalf("the registry is keyed by hand in %v, want orchestrator.go (registeredQueues) alone", walkers)
 	}
 }

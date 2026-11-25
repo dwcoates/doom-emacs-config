@@ -10,9 +10,9 @@ import { mountBubble, type BubbleOverlay, type OverlayControls, type WireFold } 
 import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
-import STYLESHEET from "../../src/styles.css?raw";
-import { installStylesheet, rulesOf } from "../stylesheet.js";
-import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
+import { installStylesheet } from "../stylesheet.js";
+import { mount, panelOf } from "./bubble-mount.js";
+import { defaultBubbleBody } from "../../src/feed/renderers.js";
 import {
   Channel,
   harness,
@@ -30,7 +30,6 @@ import {
   type Harness,
   pagedRowContext,
 } from "./harness.js";
-import type { RowContext } from "../../src/feed/cards/context.js";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import { TailFollow } from "../../src/scroll.js";
 import { DEFAULT_BACKOFF_INITIAL_MS, DEFAULT_BACKOFF_MAX_MS } from "../../src/rpc/streams.js";
@@ -54,70 +53,6 @@ function mergeFold(row: FeedRow): WireFold {
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 30; i += 1) await vi.advanceTimersByTimeAsync(0);
-}
-
-/** Mount a bubble for ROW with a marked head and the default body. */
-function mount(
-  row: FeedRow,
-  h: Harness = harness(),
-  opts: {
-    folded?: boolean;
-    composerFactory?: (host: HTMLElement) => Handle;
-    /** What the head states about itself, per draw. */
-    states?: (string | null)[];
-    /** A head of the suite's own, in place of the marked stub. */
-    head?: (rc: RowContext) => HTMLElement;
-    /** The page's scroll box and tail owner. */
-    scroll?: { box: Element; tail: TailFollow };
-    /** The daemon's fold, read off each push (a merge row ships one). */
-    foldOf?: (row: FeedRow) => WireFold;
-    merge?: boolean;
-    /** Told each fold the reader makes with the head's toggle. */
-    readerFold?: (folded: boolean) => void;
-    /** Whether the reader may fold the bubble as its row stands. */
-    collapsible?: (row: FeedRow) => boolean;
-    /** The question drawn in place of the sub-feed. */
-    overlay?: BubbleOverlay;
-    /** Leave the bubble off the page, as the feed does before it places a row. */
-    detached?: boolean;
-    /** The feed the row sits in: the root feed unless a sub-feed is named. */
-    feed?: RowContext["feed"];
-  } = {},
-) {
-  const heads: number[] = [];
-  const bubble = mountBubble({
-    ctx: h.ctx,
-    row,
-    rc: rowContext(h.ctx, row, opts.feed === undefined ? {} : { feed: opts.feed }),
-    head: (_row, rc) => {
-      if (opts.head !== undefined) return opts.head(rc);
-      const el = document.createElement("span");
-      el.className = "stub-head";
-      const state = opts.states?.[heads.length];
-      if (state !== undefined && state !== null) el.setAttribute("data-state", state);
-      heads.push(1);
-      return el;
-    },
-    body: defaultBubbleBody,
-    renderers: stubRenderers(),
-    revealRow: async () => false,
-    bubble: () => {
-      throw new Error("no nested bubble in this fixture");
-    },
-    composerFactory:
-      opts.composerFactory === undefined
-        ? undefined
-        : (host) => opts.composerFactory!(host),
-    initialFolded: opts.folded ?? true,
-    foldOf: opts.foldOf,
-    merge: opts.merge,
-    readerFold: opts.readerFold,
-    collapsible: opts.collapsible,
-    overlay: opts.overlay,
-    scroll: opts.scroll,
-  });
-  if (opts.detached !== true) document.body.replaceChildren(bubble.element);
-  return { bubble, h, heads };
 }
 
 describe("mountBubble: a head redraw reads its previous head", () => {
@@ -1270,44 +1205,12 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
   // the author sheet says (measured -- an author `.agent-panel { display: flex
   // }` over a hidden element still computes `none` there), so the browser's
   // answer is asserted where the browser is, in a real webview,
-  // and what is asserted HERE is the sheet the browser will read.
+  // and what is asserted of the sheet the browser will read is a rule
+  // (rules/feed/bubble.rules.test.ts).
   //
   // THE SELECTOR COMES FROM THE PRODUCTION ELEMENT, never restated: the class
   // is read off a mounted bubble's own panel, so renaming it in `bubble.ts`
   // moves this assertion with it rather than leaving it pinning a dead name.
-
-  /** The sub-feed panel of a mounted bubble. */
-  function panelOf(bubble: { element: HTMLElement }): HTMLElement {
-    const panel = bubble.element.querySelector<HTMLElement>("[data-subfeed]");
-    if (panel === null) throw new Error("the bubble mounted no sub-feed panel");
-    return panel;
-  }
-
-  /** Every rule block in the sheet, in source order, as selector + body. */
-  function rules(): { selector: string; body: string }[] {
-    return rulesOf(STYLESHEET).map((rule) => ({ selector: rule.selectors.join(", "), body: rule.declarations }));
-  }
-
-  it("guards every display the sheet sets on the panel with a [hidden] rule", () => {
-    // Arrange: the class production actually puts on the sub-feed panel.
-    const { bubble } = mount(subagentRow("b1"));
-    const classes = [...panelOf(bubble).classList];
-    expect(classes.length).toBeGreaterThan(0);
-    // Act: the sheet's rules that set `display` on any of those classes, and
-    // the ones that set it on the same class WHEN HIDDEN.
-    const sets = rules().filter(
-      (rule) =>
-        classes.some((cls) => rule.selector.includes(`.${cls}`)) &&
-        /(^|[;\s])display\s*:/.test(rule.body),
-    );
-    const guards = sets.filter(
-      (rule) => rule.selector.includes("[hidden]") && /display\s*:\s*none/.test(rule.body),
-    );
-    // Assert: the LAST word on display for a hidden panel is `none`.
-    expect(sets.length).toBeGreaterThan(0);
-    expect(guards.length).toBeGreaterThan(0);
-    expect(sets.indexOf(guards[guards.length - 1])).toBe(sets.length - 1);
-  });
 
   // AND IT STACKS. The bubble is now a `.tool-card` (owner ruling,
   // 2026-09-14), and `.tool-card` sets no `display`, so `.tool-card.bubble-fold`
@@ -1364,41 +1267,9 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
   // shorthand is one jsdom cannot parse into longhands (see the outer-card note
   // above), so its computed border-style stays `none` whether or not the flush
   // override lands -- so the border removal is asserted from the sheet's own
-  // source order, scoped to the rules that ACTUALLY match the panel element
+  // source order (rules/feed/bubble.rules.test.ts), scoped to the rules that ACTUALLY match the panel element
   // (`.matches`, so `.fold-fixed > .agent-panel` and the scrollbar
   // pseudo-element rules that merely mention `.agent-panel` are excluded).
-
-  /** The panel-matching rules that set PROP, in the sheet's source order. */
-  function panelSetters(bubble: { element: HTMLElement }, prop: string): { selector: string; body: string }[] {
-    const panel = panelOf(bubble);
-    return rules().filter(
-      (rule) =>
-        new RegExp(`(^|[;\\s])${prop}\\s*:`).test(rule.body) &&
-        rule.selector
-          .split(",")
-          .some((group) => {
-            const bare = group.trim().replace(/::[a-z-]+$/i, "");
-            if (bare === "") return false;
-            try {
-              return panel.matches(bare);
-            } catch {
-              return false;
-            }
-          }),
-    );
-  }
-
-  it("drops the inner box border so the sub-feed is not a card-within-a-card", () => {
-    // Arrange
-    const { bubble } = mount(subagentRow("b1"));
-    // Act: the last word the cascade gives the panel's border.
-    const setters = panelSetters(bubble, "border");
-    const last = setters[setters.length - 1];
-    // Assert: the flush `.bubble-subfeed` rule wins, removing the border.
-    expect(setters.length).toBeGreaterThan(0);
-    expect(last.selector).toContain(".bubble-subfeed");
-    expect(last.body).toMatch(/(^|[;\s])border\s*:\s*none/);
-  });
 
   it("drops the inner box fill so the interior reads on the card grey", () => {
     // Arrange: the base panel fills with `var(--bg)`; the flush override clears
@@ -2097,13 +1968,6 @@ describe("mountBubble: an overlay question in place of the sub-feed", () => {
     expect(capture.sent.filter((r) => r.operation === "feed.bubble-overlay-drawn")).toHaveLength(1);
   });
 
-  it("guards the overlay's display with a [hidden] rule", () => {
-    const sets = rulesOf(STYLESHEET).filter(
-      (rule) => rule.selectors.join(", ").includes(".bubble-overlay") && /(^|[;\s])display\s*:/.test(rule.declarations),
-    );
-    const last = sets[sets.length - 1];
-    expect(sets.length === 0 || (last.selectors.join(", ").includes("[hidden]") && /display\s*:\s*none/.test(last.declarations))).toBe(true);
-  });
 });
 
 describe("mountBubble: a press on a bubble's control is no fold", () => {

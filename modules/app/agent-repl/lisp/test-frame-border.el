@@ -14,10 +14,6 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-(defconst agent-repl-test-frame-border--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The module's lisp directory, for the ownership scan below.")
-
 (defmacro agent-repl-test-frame-border--with-frame (&rest body)
   "Run BODY against the batch frame, bound as `frame', holding neither state.
 `logs' collects every line the canonical log helper receives.  Both
@@ -160,21 +156,6 @@ into another."
   ;; Act + Assert
   (should (memq #'agent-repl-frame-border-sync-all agent-repl-input-background-painters))
   (should (memq #'agent-repl--frame-border-on-theme enable-theme-functions)))
-
-(ert-deftest agent-repl-test-frame-border-is-the-only-writer-of-the-border ()
-  "No module but frame-border.el sets the `internal-border' face."
-  ;; Arrange
-  (let ((writers nil))
-    ;; Act
-    (dolist (file (directory-files agent-repl-test-frame-border--lisp-dir t "\\`[^.].*\\.el\\'"))
-      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
-                  (equal (file-name-nondirectory file) "frame-border.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward "(set-face-attribute 'internal-border" nil t)
-            (push (file-name-nondirectory file) writers)))))
-    ;; Assert
-    (should-not writers)))
 
 (provide 'test-frame-border)
 ;;; test-frame-border.el ends here

@@ -5,7 +5,6 @@ package integration
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -47,30 +46,6 @@ func requireNoStrays(t *testing.T, d *harness.Daemon, why string) {
 	t.Helper()
 	if left := d.StrayPIDs(); len(left) > 0 {
 		t.Fatalf("%d process(es) still name the state directory: %v; %s", len(left), left, why)
-	}
-}
-
-func TestEveryStrayCheckGoesThroughRequireNoStrays(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob the package's tests: %v", err)
-	}
-	for _, name := range files {
-		// Act.
-		raw, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-
-		// Assert: a leak check reads StrayPIDs only through the helper (or to
-		// prove, before an act, that there is something to reclaim). The
-		// helper's own read is the one line that may.
-		for _, line := range strings.Split(string(raw), "\n") {
-			if strings.Contains(line, "StrayPIDs(); len(") && !strings.Contains(line, "== 0") && strings.TrimSpace(line) != "if left := d.StrayPIDs(); len(left) > 0 {" {
-				t.Fatalf("%s checks for strays by hand (%q); use requireNoStrays", name, strings.TrimSpace(line))
-			}
-		}
 	}
 }
 

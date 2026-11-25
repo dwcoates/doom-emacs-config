@@ -1,12 +1,8 @@
 // @vitest-environment jsdom
 /** A verb whose answer is the next view (src/rpc/gesture.ts). */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { filesUnder } from "../files-under.js";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { ShowChatNodeResponseSchema, type ShowChatNodeResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb";
 import { spyLog } from "../log-spy.js";
@@ -56,16 +52,5 @@ describe("sendGesture", () => {
         throw new ConnectError("down", Code.Unavailable);
       }),
     ).resolves.toBeNull();
-  });
-});
-
-describe("the gesture sites", () => {
-  it("note a refused arm only through sendGesture, but for the chat search that reads its success", () => {
-    const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../src");
-    const noting = filesUnder(src, [".ts", ".tsx"])
-      .filter((file) => /noteRefusedArm\(/.test(readFileSync(file, "utf8")))
-      .map((file) => path.relative(src, file))
-      .sort();
-    expect(noting).toEqual(["rpc/gesture.ts", "rpc/refusal.ts", "sidebar/chat-search.ts"]);
   });
 });

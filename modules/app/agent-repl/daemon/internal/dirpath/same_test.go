@@ -3,7 +3,6 @@ package dirpath
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -44,42 +43,5 @@ func TestSame(t *testing.T) {
 				t.Fatalf("Same(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestNoPackageRespellsSame pins that every comparison of two directories by
-// their resolved symlinks is Same's, so no package keeps a drifting copy.
-func TestNoPackageRespellsSame(t *testing.T) {
-	// Arrange
-	internal, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var copies []string
-
-	// Act
-	err = filepath.WalkDir(internal, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Dir(path) == filepath.Join(internal, "dirpath") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), "func sameDir(") || strings.Contains(string(raw), "func sameDirectory(") {
-			copies = append(copies, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(copies) != 0 {
-		t.Fatalf("directory comparisons respelled in %v, want dirpath.Same", copies)
 	}
 }

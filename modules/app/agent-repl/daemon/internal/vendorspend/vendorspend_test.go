@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"agent-repld/internal/sourcescan"
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -149,15 +148,5 @@ func TestValidate(t *testing.T) {
 				t.Errorf("the error %v does not wrap ErrInvalid", err)
 			}
 		})
-	}
-}
-
-func TestTheCachePricesHaveOneDefinition(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "PriceTenths  = ")
-	// Assert: the run cap reads them through cachelapse's alias, which
-	// names this package's constants, never a figure of its own.
-	if len(sites) != 1 || sites[0] != "vendorspend.go" {
-		t.Fatalf("the cache prices are defined in %v, want vendorspend.go alone", sites)
 	}
 }

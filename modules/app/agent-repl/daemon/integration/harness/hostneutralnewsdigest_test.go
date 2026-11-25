@@ -19,10 +19,3 @@ func TestTheNeutralNewsDigestStartDelayOutlastsTheLongestSuiteTimeout(t *testing
 		t.Fatalf("NeutralNewsDigestStartDelay = %s, want longer than any suite's timeout", NeutralNewsDigestStartDelay)
 	}
 }
-
-func TestStartDaemonAppliesHostNeutralNewsDigestEnvAfterTheInheritedEnvironment(t *testing.T) {
-	// The one call site must state the delayed schedule after os.Environ()
-	// and before ExtraEnv, so it beats the host's value and a digest test can
-	// still set its own.
-	assertAppendedBetweenInheritedAndExtra(t, "HostNeutralNewsDigestEnv")
-}

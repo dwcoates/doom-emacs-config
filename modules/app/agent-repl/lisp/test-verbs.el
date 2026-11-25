@@ -1129,22 +1129,6 @@ still says where the question stands."
   (let ((agent-repl-roster-view nil))
     (should-not (agent-repl-verbs--roster-or-view nil))))
 
-(defconst agent-repl-test-verbs--source
-  (expand-file-name "verbs.el" (file-name-directory (or load-file-name buffer-file-name)))
-  "verbs.el beside this suite, for the tests that read its source.")
-
-(ert-deftest agent-repl-verbs-roster-defaulting-has-one-home ()
-  "Every roster reader in verbs.el defaults through `agent-repl-verbs--roster-or-view'.
-A reader that hand-rolls the defaulting reads the view a second time and fails here."
-  ;; Arrange.
-  (with-temp-buffer
-    (insert-file-contents agent-repl-test-verbs--source)
-    ;; Act.
-    (let ((reads (how-many (regexp-quote "(boundp 'agent-repl-roster-view)")
-                           (point-min) (point-max))))
-      ;; Assert.
-      (should (= reads 1)))))
-
 (ert-deftest agent-repl-verbs-hide-requests-no-switch-of-its-own ()
   "An accepted hide requests no switch: the daemon's landing is the only one."
   (agent-repl-test-verbs--with nil
@@ -5613,33 +5597,7 @@ ANSWER is (KEY . VALUE): the callback KEY the fake dispatcher invokes."
       (agent-repl-verbs--send-op "op-c" #'ignore nil nil :on-error (lambda (_) 'mine)))
     (should (eq claimed 'mine))))
 
-(ert-deftest agent-repl-verbs-no-verb-forgets-its-op-by-hand ()
-  "Every verb that registers an op sends through `agent-repl-verbs--send-op'.
-A verb that forgets its op by hand is the one that misses a path."
-  (dolist (expected '(("verbs.el" . 1) ("conversations.el" . 0)))
-    (let ((source (with-temp-buffer
-                    (insert-file-contents
-                     (expand-file-name (car expected)
-                                       (file-name-directory
-                                        (symbol-file 'agent-repl-verbs--send-op 'defun))))
-                    (buffer-string)))
-          (count 0) (start 0))
-      (while (setq start (string-search "(agent-repl-mutation-progress-forget op-id)" source start))
-        (setq count (1+ count) start (1+ start)))
-      ;; The one occurrence in verbs.el is `agent-repl-verbs--send-op' itself.
-      (should (equal (cons (car expected) count) expected)))))
-
 ;;;; ---- One set of row readers ----
-
-(ert-deftest agent-repl-test-verbs-reads-rows-through-the-roster-readers ()
-  "verbs.el spells no row reader of its own: every read of a row's ref,
-name or closed flag is roster.el's, so the two files cannot disagree."
-  ;; Arrange
-  (let ((source (with-temp-buffer
-                  (insert-file-contents agent-repl-test-verbs--source)
-                  (buffer-string))))
-    ;; Act / Assert
-    (should-not (string-match-p "(defun agent-repl-verbs--row-\\(ref\\|name\\|closed-p\\) " source))))
 
 (ert-deftest agent-repl-verbs-section-of-ws-finds-a-workspace-in-a-subsection ()
   "A workspace whose row sits in a subsection is in its section's repository."
@@ -5905,18 +5863,6 @@ and the create is sent once then."
            '(:op-id "op-stage" :event (:arm :create :value (:arm :entered-stage :value :naming)))))
         ;; Assert.
         (should (equal stages '(:naming)))))))
-
-(ert-deftest agent-repl-verbs-every-create-progress-is-registered-by-the-one-helper ()
-  "Only the shared registration renders a create's stages."
-  (let ((count 0))
-    (dolist (file (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'"))
-      (unless (string-prefix-p "test-" (file-name-nondirectory file))
-       (with-temp-buffer
-        (insert-file-contents file)
-        (goto-char (point-min))
-        (while (search-forward "(agent-repl-verbs--create-stage-message stage)" nil t)
-          (setq count (1+ count))))))
-    (should (= count 1))))
 
 ;;;; ---- Create: images pasted into a creation prompt ----
 

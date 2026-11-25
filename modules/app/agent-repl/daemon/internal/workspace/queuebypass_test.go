@@ -3,9 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -406,39 +403,6 @@ func TestTheDefaultContextHasNoEchoToken(t *testing.T) {
 
 	// Act
 	QueueBypassContextDefault.Proto()
-}
-
-// TestTheContextArmsAreBuiltOnlyByProto fails on a hand-rolled echo token
-// anywhere in the daemon's production code: every one comes from
-// QueueBypassContext.Proto.
-func TestTheContextArmsAreBuiltOnlyByProto(t *testing.T) {
-	// Arrange
-	const spelling = "TopbarQueueBypassContext_FullMain{FullMain:"
-	var offenders []string
-
-	// Act
-	err := filepath.WalkDir(filepath.Join("..", ".."), func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
-			path == filepath.Join("..", "..", "internal", "workspace", "queuebypass.go") {
-			return err
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(body), spelling) {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("walk the daemon: %v", err)
-	}
-	if len(offenders) != 0 {
-		t.Fatalf("files building the context's echo token by hand = %v, want every one through QueueBypassContext.Proto", offenders)
-	}
 }
 
 func TestLetQueueThroughAfterBypassTurn(t *testing.T) {

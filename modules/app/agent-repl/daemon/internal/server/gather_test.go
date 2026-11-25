@@ -16,7 +16,6 @@ import (
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -248,15 +247,5 @@ func TestAgentSentPrompt(t *testing.T) {
 				t.Errorf("said %q, want hello", text)
 			}
 		})
-	}
-}
-
-func TestAgentSentPromptIsTheOneAgentSentRequest(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "gather.go" {
-		t.Fatalf("an agent-sent SubmitPrompt request is built at %v, want only agentSentPrompt in gather.go", sites)
 	}
 }

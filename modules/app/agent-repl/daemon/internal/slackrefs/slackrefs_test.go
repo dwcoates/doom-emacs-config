@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/externalbrowser"
-	"agent-repld/internal/mdinline/mdinlinetest"
 )
 
 var channels = Channels{Subdomain: "acme", IDs: map[string]string{
@@ -101,11 +100,6 @@ func TestPermalink(t *testing.T) {
 	}
 }
 
-// Linkify walks prose through the one shared walk (mdinline.RewriteProse).
-func TestLinkifyRewritesThroughTheSharedWalk(t *testing.T) {
-	mdinlinetest.AssertRewriteShape(t, "slackrefs.go", "Linkify")
-}
-
 // A permalink is the shape the Slack-opening path hands to the desktop app.
 func TestPermalinkOpensInTheSlackApp(t *testing.T) {
 	// Arrange
@@ -118,9 +112,4 @@ func TestPermalinkOpensInTheSlackApp(t *testing.T) {
 	if !ok || deep != "slack://channel?team=T0123ABCD&id=C0123ABCD" {
 		t.Fatalf("SlackDeepLink(Permalink()) = (%q, %v, %q), want the channel's deep link", deep, ok, why)
 	}
-}
-
-// Every link the rewrite adds is written through mdinline.WriteLink.
-func TestLinksAreWrittenThroughWriteLink(t *testing.T) {
-	mdinlinetest.AssertNoHandWrittenLinks(t, "slackrefs.go")
 }

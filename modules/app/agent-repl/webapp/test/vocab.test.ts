@@ -14,8 +14,7 @@ import renderColors from "../../proto/vocab/render-colors.json";
 import paintClasses from "../../proto/vocab/paint-classes.json";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
-import stylesheet from "../src/styles.css?raw";
-import { mediaBlocksOf, rulesOf } from "./stylesheet.js";
+import { mediaBlocksOf } from "./css-text.js";
 import {
   COLOR_THEMES,
   COLOR_TOKENS,
@@ -592,17 +591,6 @@ describe("color_values, each color's one value per theme", () => {
       "render-colors.json#color_values",
       colorValuesStylesheet(),
     ]);
-  });
-
-  it.each([...Object.values(COLOR_TOKENS), ...Object.values(INK_TOKENS)])("leaves %s's value to the file: styles.css declares none", (token) => {
-    // Arrange
-    const declaration = new RegExp(`(?:^|;)\\s*${token}\\s*:`);
-
-    // Act
-    const declaredInCss = rulesOf(stylesheet).some((rule) => declaration.test(rule.declarations));
-
-    // Assert
-    expect(declaredInCss).toBe(false);
   });
 });
 

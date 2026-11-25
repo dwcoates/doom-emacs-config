@@ -7,8 +7,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // text is a text block.
@@ -80,19 +78,6 @@ func TestFenced(t *testing.T) {
 				t.Fatalf("Fenced(%q) = %q, want %q", tt.text, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestEveryFenceInThePackageIsComposedByFenced pins that the package's quote
-// composes its fence through Fenced: a second hand-built fence-text-fence
-// would drift from it (another separator, a fence one short).
-func TestEveryFenceInThePackageIsComposedByFenced(t *testing.T) {
-	// Arrange / Act
-	calls := sourcescan.Count(t, "Fence(")
-
-	// Assert: Fence's own definition and Fenced's one call of it.
-	if calls != 2 {
-		t.Fatalf("Fence( occurs %d times in the package, want 2: its definition and Fenced's one call", calls)
 	}
 }
 

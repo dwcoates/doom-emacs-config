@@ -202,23 +202,6 @@ func TestAHeldErrorWithNoNamedHolderSaysSo(t *testing.T) {
 	}
 }
 
-// Every lock file this package opens goes through recordlock.OpenFile: a
-// hand-rolled open here is a drifted copy, and closing one would drop a held
-// record lock.
-func TestEveryLockFileOpenGoesThroughRecordlock(t *testing.T) {
-	for _, name := range []string{"lock.go", "recordlock.go", "claim.go"} {
-		body, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		for i, line := range strings.Split(string(body), "\n") {
-			if strings.Contains(line, "os.OpenFile(") {
-				t.Errorf("%s:%d opens a file by hand; use recordlock.OpenFile: %s", name, i+1, strings.TrimSpace(line))
-			}
-		}
-	}
-}
-
 func TestLookingUpTheHoldersOfAbsentLocksCreatesNoFile(t *testing.T) {
 	// Arrange.
 	addrPath := filepath.Join(t.TempDir(), "daemon.addr")

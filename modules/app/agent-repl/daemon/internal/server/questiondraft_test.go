@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -155,44 +153,6 @@ func TestUpdateQuestionDraftRefusesARowOfAnotherWorkspace(t *testing.T) {
 	if len(h.Verbs.draftEdits) != 0 {
 		t.Fatal("an edit was applied for another workspace's row")
 	}
-}
-
-// THE CARD VERBS SHARE ONE PROLOGUE (askRow): a handler that decodes its row by
-// hand drifts from the others' refusals, so the source is held to the helper.
-func TestEveryCardVerbDecodesItsRowThroughAskRow(t *testing.T) {
-	// Arrange.
-	raw, err := os.ReadFile("answers.go")
-	if err != nil {
-		t.Fatalf("read answers.go: %v", err)
-	}
-	src := string(raw)
-
-	// Act / Assert: each card verb calls askRow, and askIDFrom is called only
-	// by askRow and by interruptRow, whose refusal arm is the target's own.
-	for _, rpc := range []string{"AnswerPermission", "AnswerQuestion", "UpdateQuestionDraft"} {
-		body := funcBody(t, src, "func (s *server) "+rpc+"(")
-		if !strings.Contains(body, "s.askRow(") || strings.Contains(body, "askIDFrom(") {
-			t.Errorf("%s does not decode its row through askRow", rpc)
-		}
-	}
-	if n := strings.Count(src, ":= askIDFrom(rpc"); n != 2 {
-		t.Errorf("askIDFrom is called %d times, want 2 (askRow and interruptRow)", n)
-	}
-}
-
-// funcBody answers the text of the top-level function starting at header, up
-// to the next top-level declaration.
-func funcBody(t *testing.T, src, header string) string {
-	t.Helper()
-	start := strings.Index(src, header)
-	if start < 0 {
-		t.Fatalf("no %q in the source", header)
-	}
-	rest := src[start+len(header):]
-	if end := strings.Index(rest, "\n}\n"); end >= 0 {
-		return rest[:end]
-	}
-	return rest
 }
 
 func TestAskRowAnswersARowOfAnotherWorkspaceAsNotStandingOnEveryCardVerb(t *testing.T) {

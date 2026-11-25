@@ -3,12 +3,8 @@ package bringup
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -270,41 +266,5 @@ func TestOnlyWasUpAnswersTheFactsItSplitBy(t *testing.T) {
 	}
 	if !facts["ws-up"].StartsShim() || facts["ws-gated"].StartsShim() || !facts["ws-gated"].ColdGate {
 		t.Fatalf("facts = %+v, want ws-up live and ws-gated at its gate", facts)
-	}
-}
-
-// TestEveryBringUpMarkerRaiseGoesThroughRaiseMarkers pins that no boot or
-// takeover raises the bring-up marker by hand: each raise goes through
-// RaiseMarkers, so a start that runs no shim is never marked.
-func TestEveryBringUpMarkerRaiseGoesThroughRaiseMarkers(t *testing.T) {
-	// Arrange
-	handRaise := regexp.MustCompile(`BringingUp\([^)]*,\s*true\)`)
-	var offenders []string
-	for _, dir := range []string{"../boot", "../rollout"} {
-		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
-		if err != nil {
-			t.Fatalf("Glob(%s): %v", dir, err)
-		}
-		if len(files) == 0 {
-			t.Fatalf("no Go files under %s: the scan read nothing", dir)
-		}
-		for _, file := range files {
-			if strings.HasSuffix(file, "_test.go") {
-				continue
-			}
-			src, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("ReadFile(%s): %v", file, err)
-			}
-			// Act
-			if handRaise.Match(src) {
-				offenders = append(offenders, file)
-			}
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("files raising the bring-up marker by hand = %v, want every raise through bringup.RaiseMarkers", offenders)
 	}
 }

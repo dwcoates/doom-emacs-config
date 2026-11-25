@@ -17,20 +17,6 @@ describe("drawnEntries", () => {
     // Act / Assert
     expect(drawnEntries(list)).toEqual(["a", "[foo]"]);
   });
-
-  it("is the one spelling the sidebar tests read a section's list by", () => {
-    // Arrange
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- see "is the one primary pointer the sidebar tests build".
-    const sources = import.meta.glob("./*.test.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-
-    // Act
-    const handRolled = Object.entries(sources)
-      .filter(([, source]) => /getAttribute\("data-roster-row"\) \?\? `\[\$\{el\.getAttribute\("data-subsection"\)/.test(source))
-      .map(([file]) => file);
-
-    // Assert
-    expect(handRolled).toEqual([]);
-  });
 });
 
 describe("scrollable", () => {

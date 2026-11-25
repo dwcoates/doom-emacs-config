@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 // The one fold every daemon-held sidebar fold draws. See src/sidebar/section-fold.ts.
 import { create } from "@bufbuild/protobuf";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   UpdateSidebarViewResponseSchema,
@@ -22,7 +20,6 @@ import {
 } from "../../src/sidebar/section-fold.js";
 import { spyLog } from "../log-spy.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { codeOf } from "../source-text.js";
 import { createFocusLeft } from "../../src/focus-left.js";
 import { createPresence } from "../../src/presence.js";
 import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
@@ -295,20 +292,6 @@ describe("drawRosterHoldsCurrent", () => {
     expect(() => drawRosterHoldsCurrent({ case: "expanded", value: { collapse: { case: undefined } } }, "fold")).toThrow(
       MalformedView,
     );
-  });
-});
-
-describe("the sidebar's folds", () => {
-  it("make their fold control and ask their fold only through section-fold", () => {
-    // A fold control or a fold ask spelled by hand could fold one way here and another there.
-    const dir = join(__dirname, "..", "..", "src", "sidebar");
-    const offenders = readdirSync(dir)
-      .filter((name) => name.endsWith(".ts") && name !== "section-fold.ts")
-      .filter((name) => {
-        const code = codeOf(readFileSync(join(dir, name), "utf8"));
-        return code.includes(`"data-section-fold", ""`) || code.includes(`case: "foldSection"`);
-      });
-    expect(offenders).toEqual([]);
   });
 });
 

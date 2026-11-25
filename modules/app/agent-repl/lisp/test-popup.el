@@ -334,36 +334,4 @@ system does."
       ;; Assert
       (should (equal bound (list 'normal agent-repl-popup-mode-map "q" #'agent-repl-popup-quit))))))
 
-;;;; ---- Every popup call site shares the subroutine ----
-
-(defconst agent-repl-test-popup--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The lisp/ directory the module sources live in.")
-
-(defun agent-repl-test-popup--source (name)
-  "Return the text of the module source NAME under lisp/."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name name agent-repl-test-popup--lisp-dir))
-    (buffer-string)))
-
-(ert-deftest agent-repl-test-popup-no-module-displays-a-popup-itself ()
-  "No module but popup.el calls `display-buffer' for a popup.
-magit.el's same-window display is the one other call, and it is not a popup."
-  ;; Arrange
-  (let ((sources (cl-remove-if (lambda (name) (string-prefix-p "test-" name))
-                               (directory-files agent-repl-test-popup--lisp-dir nil "\\.el\\'"))))
-    ;; Act
-    (let ((callers (cl-remove-if-not
-                    (lambda (name)
-                      (string-match-p "(display-buffer\\(-in-side-window\\)? "
-                                      (agent-repl-test-popup--source name)))
-                    sources)))
-      ;; Assert
-      (should (equal (sort callers #'string<) '("magit.el" "popup.el"))))))
-
-(ert-deftest agent-repl-test-popup-information-views-use-the-shared-popup ()
-  "The build log and the health report are shown through `agent-repl-popup-show'."
-  (dolist (name '("daemon.el" "verbs.el"))
-    (should (string-match-p "(agent-repl-popup-show " (agent-repl-test-popup--source name)))))
-
 ;;; test-popup.el ends here

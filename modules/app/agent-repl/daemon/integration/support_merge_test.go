@@ -3,9 +3,6 @@
 package integration
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -86,24 +83,5 @@ func TestIsMergeTerminalReadsALandingOrAnErrorAndNothingElse(t *testing.T) {
 				t.Fatalf("isMergeTerminal = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestEveryAwaitOfAMergesEndReadsIsMergeTerminal(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range files {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
-		}
-
-		// Act / Assert: the predicate is spelled once, in isMergeTerminal.
-		if n := strings.Count(string(body), "GetSuccess() != nil || m.GetError() != nil") + strings.Count(string(body), "GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil"); n > 0 && file != "support_merge_test.go" {
-			t.Fatalf("%s spells a merge's end by hand %d times instead of isMergeTerminal", file, n)
-		}
 	}
 }

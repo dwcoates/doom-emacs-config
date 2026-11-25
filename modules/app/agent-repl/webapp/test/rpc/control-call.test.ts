@@ -16,11 +16,6 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { scriptedAppContext } from "./app-context.js";
 import { recordingFailures } from "../failure-sink.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { codeUnder } from "../files-under.js";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src");
 
 /** A page whose daemon answers SelectFeedRow through ANSWER. */
 function page(answer: () => unknown): { ctx: ReturnType<typeof scriptedAppContext>; reported: FailureKind[] } {
@@ -114,19 +109,5 @@ describe("controlCall", () => {
     const { ctx } = page(() => create(SelectFeedRowResponseSchema, {}));
     // Act, Assert
     await expect(clear(ctx)).rejects.toThrow(MalformedView);
-  });
-});
-
-describe("the control call's call sites", () => {
-  it("leave the transport-failure-to-chip shape to controlCall", () => {
-    // Arrange
-    const offenders: string[] = [];
-    // Act
-    for (const [file, code] of codeUnder(SRC)) {
-      if (file === path.join("rpc", "control-call.ts")) continue;
-      if (/controlPlaneFailed\([^)]*callFailure\(err\)\.text/.test(code)) offenders.push(file);
-    }
-    // Assert
-    expect(offenders).toEqual([]);
   });
 });

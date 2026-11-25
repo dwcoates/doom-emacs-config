@@ -836,6 +836,8 @@ export function finishWorkspaceRefusal(cause: CauseOf<FinishWorkspaceError>): st
       return "this workspace's merge left the queue without landing and still stands; requeue or discard it in the merge queue";
     case "placementConflictsWithStored":
       return "this workspace was made to join the queue at a place of its own; finish it without naming another";
+    case "ruleChecksFailed":
+      return `this branch failed its rule suites (${cause.value.suites.join(", ")}); fix the failing cases in ${cause.value.log} and finish again`;
     default:
       return unreachableArm("FinishWorkspaceError.cause", cause.case);
   }

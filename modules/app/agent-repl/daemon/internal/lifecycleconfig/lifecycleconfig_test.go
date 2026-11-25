@@ -445,61 +445,6 @@ func TestPromptHookAndScriptHookAreCheckedHooks(t *testing.T) {
 	}
 }
 
-// TestNoProductionCodeHandBuildsAHook pins that every production site builds a
-// hook through PromptHook or ScriptHook, so one spelling of a hook stands.
-func TestNoProductionCodeHandBuildsAHook(t *testing.T) {
-	// Arrange
-	daemon, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var byHand []string
-
-	// Act
-	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
-			strings.HasSuffix(path, ".pb.go") || filepath.Dir(path) == filepath.Join(daemon, "internal", "lifecycleconfig") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), "repoconfigv1.Hook_Prompt{") || strings.Contains(string(raw), "repoconfigv1.Hook_Script{") {
-			byHand = append(byHand, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(byHand) != 0 {
-		t.Fatalf("hooks built by hand in %v, want PromptHook and ScriptHook", byHand)
-	}
-}
-
-func TestEveryScriptIsCheckedByCheckScript(t *testing.T) {
-	// Arrange: a stage's script hook and a queue_drained script are held to
-	// one set of rules, so the timeout rule is spelled once.
-	raw, err := os.ReadFile("lifecycleconfig.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	spelled := strings.Count(string(raw), "GetTimeoutSeconds() < 1")
-
-	// Assert
-	if spelled != 1 {
-		t.Fatalf("the script timeout rule is spelled %d times in lifecycleconfig.go, want once, in checkScript", spelled)
-	}
-}
-
 func TestPathIsRelBeneathTheRoot(t *testing.T) {
 	// Act
 	got := Path("/repo")
@@ -535,42 +480,6 @@ func TestTestScript(t *testing.T) {
 				t.Fatalf("TestScript = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestNoProductionCodeReadsTheTestScriptByHand(t *testing.T) {
-	// Arrange
-	daemon, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var byHand []string
-
-	// Act
-	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
-			strings.HasSuffix(path, ".pb.go") || filepath.Dir(path) == filepath.Join(daemon, "internal", "lifecycleconfig") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), "GetAgentReplSuites()") {
-			byHand = append(byHand, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(byHand) != 0 {
-		t.Fatalf("the test script read by hand in %v, want lifecycleconfig.TestScript", byHand)
 	}
 }
 
@@ -623,44 +532,6 @@ func TestCheckHookRefusesABuiltinInARequest(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "no built-in default") {
 		t.Fatalf("CheckHook = %v, want the builtin refused", err)
-	}
-}
-
-// TestNoProductionCodeRunsAScriptHookByItsOwnPath pins that every runner of a
-// script hook builds its command with ScriptArgv, so a built-in default's
-// absolute path and a config's relative one resolve one way.
-func TestNoProductionCodeRunsAScriptHookByItsOwnPath(t *testing.T) {
-	// Arrange
-	daemon, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var byHand []string
-
-	// Act
-	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.HasSuffix(path, ".pb.go") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), "filepath.Join(repoDir, script.GetPath())") || strings.Contains(string(raw), "script.GetPath())}") {
-			byHand = append(byHand, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(byHand) != 0 {
-		t.Fatalf("a script hook's command built by hand in %v, want ScriptArgv", byHand)
 	}
 }
 

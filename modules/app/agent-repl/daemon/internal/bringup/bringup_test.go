@@ -17,7 +17,6 @@ import (
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/shimclient"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -587,17 +586,6 @@ func TestIsStandDownNamesEveryStopThisDaemonOrdered(t *testing.T) {
 				t.Fatalf("IsStandDown(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestTheStandDownClassificationHasOneHome(t *testing.T) {
-	// Assert: the three stand-down errors are tested together only inside
-	// IsStandDown, so no start site in this package classifies its own way.
-	if got := sourcescan.Sites(t, "errors.Is(err, ErrNotServed)"); !slices.Equal(got, []string{"bringup.go"}) {
-		t.Fatalf("ErrNotServed classified at %v, want only IsStandDown in bringup.go", got)
-	}
-	if got := sourcescan.Count(t, "IsStandDown(err)"); got < 1 {
-		t.Fatalf("IsStandDown(err) called %d times in bringup, want the bring-up's own start to use it", got)
 	}
 }
 

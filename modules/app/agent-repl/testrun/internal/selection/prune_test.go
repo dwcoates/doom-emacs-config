@@ -75,6 +75,7 @@ func pruneTree(t *testing.T) suites.Layout {
 		"lisp/test-helpers.el":                "",
 		"lisp/test-wire.el":                   "",
 		"lisp/test-orphan.el":                 "",
+		"lisp/test-rules-scan.el":             "",
 		"bin/test-readiness-report.sh":        "",
 		"bin/test-background.sh":              "",
 	}
@@ -131,6 +132,7 @@ func TestPruneKeepsOrDropsEachCase(t *testing.T) {
 		{name: "a renamed ERT test is dropped", sel: ertNamed("test-wire.el", "test-wire-encodes"), wantDetail: "no longer defines test-wire-encodes"},
 		{name: "an ERT file the roster no longer loads is dropped", sel: ertAll("test-orphan.el"), wantDetail: "roster no longer loads it"},
 		{name: "a deleted ERT file is dropped", sel: ertAll("test-gone.el"), wantDetail: "no longer in the tree"},
+		{name: "an ERT file a suite's own glob runs is kept", sel: ertAll("test-rules-scan.el")},
 		{name: "a harness group it lists is kept", sel: harness(mod+"bin/test-readiness-report.sh", "report")},
 		{name: "a whole harness is kept", sel: harness(mod + "bin/test-background.sh")},
 		{name: "a harness group it no longer lists is dropped", sel: harness(mod+"bin/test-readiness-report.sh", "gone"), wantDetail: "no longer lists the group gone"},
@@ -214,6 +216,50 @@ func TestPruneFindsAVitestFileItsIntegrationConfigCollects(t *testing.T) {
 	// Assert
 	if err != nil || len(dropped) != 0 || len(kept.GetSelections()) != 1 {
 		t.Fatalf("Prune = %v, %v, %v; want the integration file's case kept", kept, dropped, err)
+	}
+}
+
+func TestPruneListsARuleFileUnderItsSuitesOwnConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		config     string // the config whose listing collects the file
+		wantDetail string // "" keeps the case
+	}{
+		{name: "a rule file its suite's own config collects is kept", config: "vitest.rules.config.ts"},
+		{name: "a rule file only the package's default config would collect is dropped", config: "", wantDetail: "collects no test in it"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			l := pruneTree(t)
+			rule := filepath.Join(l.Module, "webapp", "rules", "a.rules.test.ts")
+			if err := os.MkdirAll(filepath.Dir(rule), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(rule, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			list := aLister()
+			list.vitest[tt.config] = map[string][]string{"rules/a.rules.test.ts": {"the rule > holds"}}
+			sel := vitestNamed(mod+"webapp/rules/a.rules.test.ts", "the rule holds")
+
+			// Act
+			kept, dropped, err := Prune(&testrunv1.TestRunRequest{DropMissing: true, Selections: []*testrunv1.TestSelection{sel}}, l, list)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Prune: %v", err)
+			}
+			if tt.wantDetail == "" {
+				if len(dropped) != 0 || len(kept.GetSelections()) != 1 {
+					t.Fatalf("kept %v, dropped %+v; want the rule file's case kept", kept.GetSelections(), dropped)
+				}
+				return
+			}
+			if len(dropped) != 1 || !strings.Contains(dropped[0].Detail, tt.wantDetail) {
+				t.Fatalf("kept %v, dropped %+v; want the case dropped, saying %q", kept.GetSelections(), dropped, tt.wantDetail)
+			}
+		})
 	}
 }
 

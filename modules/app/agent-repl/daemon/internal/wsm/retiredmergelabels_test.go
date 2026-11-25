@@ -1,15 +1,11 @@
 package wsm
 
 import (
-	"go/ast"
-	"go/token"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // storedHeadRow is a stored merge head row whose head is HEAD.
@@ -130,28 +126,5 @@ func TestDecodeDurableFeedRow(t *testing.T) {
 				t.Fatalf("the answered bytes are not the decoded row (%v)", err)
 			}
 		})
-	}
-}
-
-// TestStoredRowsAreDecodedInOnePlace pins DecodeDurableFeedRow as the one
-// decode of a stored row outside this package: a reader that carries the
-// retired label by hand would drift from it.
-func TestStoredRowsAreDecodedInOnePlace(t *testing.T) {
-	// Arrange
-	var stray []string
-
-	// Act
-	sourcescan.EachDaemonSource(t, sourcescan.DaemonRoot(t), []string{"internal/wsm"}, func(fset *token.FileSet, file *ast.File) {
-		ast.Inspect(file, func(n ast.Node) bool {
-			if sourcescan.IsSelector(n, "wsm", "CarryRetiredMergeHeadLabel") {
-				stray = append(stray, fset.Position(n.Pos()).String())
-			}
-			return true
-		})
-	})
-
-	// Assert
-	if len(stray) > 0 {
-		t.Fatalf("stored rows are decoded by hand at %v; call wsm.DecodeDurableFeedRow", stray)
 	}
 }

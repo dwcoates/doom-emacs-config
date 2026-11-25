@@ -3981,6 +3981,9 @@ func writeRunEvents(argv []string, units []*testrunv1.TestRunUnitEnded) error {
 
 // harness is one orchestrator with every fake it was built from.
 type harness struct {
+	// ruleSuites is what Deps.RuleSuites answers: none, so no rule check
+	// runs, unless a rule check test names some.
+	ruleSuites []string
 	// meter keeps every metric the orchestrator recorded.
 	meter *fakeMeter
 	// timers are the timers the orchestrator armed, fired only by a test.
@@ -4535,6 +4538,11 @@ func (h *harness) deps() Deps {
 			h.gateTrees = append(h.gateTrees, tree)
 			h.gateWorkspaces = append(h.gateWorkspaces, workspace)
 			return []string{"bash", h.script}
+		},
+		RuleSuites: func() []string {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.ruleSuites
 		},
 		TestRunner: h.runner,
 		Tests:      h.tests,

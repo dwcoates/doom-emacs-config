@@ -379,29 +379,6 @@ module); stubbed so here, the failing module is still recorded."
       ;; Assert
       (should (equal (mapcar #'car agent-repl--load-errors) '("probe"))))))
 
-(ert-deftest agent-repl-config-test-load-resets-the-record ()
-  "Every load of config.el starts the record over, like its load errors.
-Read from the source rather than by re-loading config.el here: a real load
-re-loads every module, which this suite has no business doing again.  The
-reset must be a top-level `setq' that precedes the first module load."
-  ;; Arrange
-  (let ((forms (with-temp-buffer
-                 (insert-file-contents
-                  (expand-file-name "config.el" agent-repl-config-test--module-root))
-                 (let (acc)
-                   (condition-case nil
-                       (while t (push (read (current-buffer)) acc))
-                     (end-of-file nil))
-                   (nreverse acc)))))
-    ;; Act
-    (let ((reset (cl-position '(setq agent-repl--elisp-module-builds nil) forms
-                              :test #'equal))
-          (first-load (cl-position-if
-                       (lambda (form) (eq (car-safe form) 'agent-repl--load-module))
-                       forms)))
-      ;; Assert
-      (should (and reset first-load (< reset first-load))))))
-
 ;;;; ---- Every module loads ----
 
 (ert-deftest agent-repl-config-test-every-module-loads-in-batch ()
@@ -508,61 +485,6 @@ Binds `infos' and `warns', the formatted boot records, newest first."
     (let ((err (should-error (agent-repl--report-load-errors '(("splash" error "b"))))))
       ;; Assert
       (should (string-search "FATAL: 1 module(s) failed to load" (cadr err))))))
-
-(defun agent-repl-config-test--top-level-forms ()
-  "Every top-level form of config.el, in order."
-  (with-temp-buffer
-    (insert-file-contents
-     (expand-file-name "config.el" agent-repl-config-test--module-root))
-    (let (acc)
-      (condition-case nil
-          (while t (push (read (current-buffer)) acc))
-        (end-of-file nil))
-      (nreverse acc))))
-
-(ert-deftest agent-repl-config-test-lifecycle-is-registered-before-load-errors-signal ()
-  "config.el registers the lifecycle hooks BEFORE it reports the load errors.
-Regression, 2026-10-25: the report signalled first, and a cosmetic module
-failing its load left Emacs with no daemon at all.  Read from the source:
-a real load of config.el re-loads every module."
-  ;; Arrange
-  (let ((forms (agent-repl-config-test--top-level-forms)))
-    ;; Act
-    (let ((register (cl-position '(agent-repl--register-lifecycle-hooks noninteractive)
-                                 forms :test #'equal))
-          (report (cl-position-if
-                   (lambda (form)
-                     (and (eq (car-safe form) 'if)
-                          (equal (nth 1 form) 'agent-repl--load-errors)))
-                   forms))
-          (last-load (cl-position-if
-                      (lambda (form) (eq (car-safe form) 'agent-repl--load-module))
-                      forms :from-end t)))
-      ;; Assert
-      (should (and register report last-load (< last-load register report))))))
-
-;;;; ---- config.el's load list ----
-
-(ert-deftest agent-repl-config-test-loads-verbs ()
-  "verbs.el is in the load list: without it every workspace verb is unbound."
-  (should (string-match-p "(agent-repl--load-module \"verbs\")"
-                          (with-temp-buffer
-                            (insert-file-contents
-                             (expand-file-name "config.el"
-                                               agent-repl-config-test--module-root))
-                            (buffer-string)))))
-
-(ert-deftest agent-repl-config-test-loads-no-deleted-module ()
-  "config.el names no module this branch deleted.
-A load of a missing module file is a load ERROR, which fails the whole
-module, so this is the cheapest place to catch a stale load line."
-  (let ((text (with-temp-buffer
-                (insert-file-contents
-                 (expand-file-name "config.el" agent-repl-config-test--module-root))
-                (buffer-string))))
-    (dolist (name '("merge-handlers" "workspace-create-client"))
-      (should-not (string-match-p (format "(agent-repl--load-module \"%s\")" name)
-                                  text)))))
 
 ;;;; ---- The doctor's daemon probe ----
 ;;
@@ -684,12 +606,6 @@ Every doctor log record lands in `agent-repl-config-test--doctor-records'."
         (should (equal called (list (expand-file-name "bin/requirements.sh" agent-repl-config-test--module-root)
                                     "check" "--json")))))))
 
-(ert-deftest agent-repl-config-test-doctor-aggregates-the-requirements-provider ()
-  "The aggregation names the requirements provider, so doom doctor runs it."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "doctor.el" agent-repl-config-test--module-root))
-    (should (search-forward "agent-repl--doctor-requirements-issues\n" nil t))))
-
 ;;;; ---- Spotlight and the agent worktrees ----
 
 (defconst agent-repl-config-test--workspace-list
@@ -739,12 +655,6 @@ Every doctor log record lands in `agent-repl-config-test--doctor-records'."
   (agent-repl-config-test--with-workspace-list 1 "no daemon\n"
     (should (equal (agent-repl--doctor-spotlight-issues)
                    '((warn . "agent-repl: the Spotlight check could not list the workspaces (exit 1): no daemon"))))))
-
-(ert-deftest agent-repl-config-test-doctor-aggregates-the-spotlight-provider ()
-  "The aggregation names the Spotlight provider, so doom doctor runs it."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "doctor.el" agent-repl-config-test--module-root))
-    (should (search-forward "agent-repl--doctor-spotlight-issues\n" nil t))))
 
 (ert-deftest agent-repl-config-test-doctor-loaded-as-a-library-runs-no-check ()
   "Loading doctor.el with the checks inhibited starts no process."

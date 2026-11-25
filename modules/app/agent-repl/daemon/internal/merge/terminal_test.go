@@ -3,8 +3,6 @@ package merge
 import (
 	"context"
 	"errors"
-	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -20,7 +18,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/shimlife"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -2242,24 +2239,6 @@ func TestAbandonedSentenceOfAnUndeclaredCauseNamesItAndRecordsTheGap(t *testing.
 	}
 }
 
-func TestEveryAbandonedSentenceIsReadThroughAbandonedSentence(t *testing.T) {
-	// Arrange.
-	for _, file := range []string{"terminal.go", "queue.go"} {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
-		}
-
-		// Act.
-		uses := strings.Count(string(body), "cause.summary()") + strings.Count(string(body), "cause.summaryRunning()")
-
-		// Assert: only abandonedSentence (terminal.go) reads the sentences.
-		if want := map[string]int{"terminal.go": 2, "queue.go": 0}[file]; uses != want {
-			t.Fatalf("%s reads a cause's sentence %d times, want %d: every reading goes through abandonedSentence", file, uses, want)
-		}
-	}
-}
-
 // TestAFinishedRunLeavesItsLineBeforeItsEntryGoes pins the order the chain's
 // check against its queue relies on (standingFront): the run is marked out of
 // its line before its queue entry is removed.
@@ -2825,24 +2804,6 @@ func TestDrainStep(t *testing.T) {
 	}
 }
 
-// Every step the drain waits out under its one bound goes through drainStep,
-// so a step added by hand cannot drift from the others' recording.
-func TestEveryDrainStepGoesThroughDrainStep(t *testing.T) {
-	// Act
-	steps := sourcescan.Sites(t, "drainStep(ctx, log, op, expired.C,")
-	byHand := sourcescan.Sites(t, "case <-expired.C:")
-
-	// Assert
-	if len(steps) != 4 {
-		t.Fatalf("drainStep is called at %v, want the off-queue judgement, the mediation, the admissions and the suspended runs", steps)
-	}
-	// The two left are not steps of that shape: the terminal waits record
-	// every merge left undrained, and the git stop records what it waited.
-	if want := []string{"terminal.go", "terminal.go"}; !slices.Equal(byHand, want) {
-		t.Fatalf("the bound is waited by hand at %v, want only the terminal waits and the git stop", byHand)
-	}
-}
-
 func TestRetireLandedWorktreeTearsDownALandedWorkspace(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -2882,26 +2843,6 @@ func TestRetireLandedWorktreeTearsDownALandedWorkspace(t *testing.T) {
 				t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)
 			}
 		})
-	}
-}
-
-// TestEveryForcedSessionStopGoesThroughStopSessionForced pins that the
-// queue's merges and a remediation's direct landing share the one teardown,
-// and that an unlanded merge's session end is the one other forced stop: a
-// forced session stop appears nowhere in the package's sources but
-// stopSessionForced, whose callers are those two.
-func TestEveryForcedSessionStopGoesThroughStopSessionForced(t *testing.T) {
-	// Act
-	sites := sourcescan.SitesMatching(t, regexp.MustCompile(`\.StopSession\([^\n]*, true\)`))
-	callers := callersOf(t, "o.stopSessionForced(")
-	slices.Sort(callers)
-
-	// Assert
-	if !slices.Equal(sites, []string{"terminal.go"}) {
-		t.Fatalf("forced session stops at %v, want only stopSessionForced's", sites)
-	}
-	if want := []string{"terminal.go:endSession", "terminal.go:retireLandedWorktree"}; !slices.Equal(callers, want) {
-		t.Fatalf("stopSessionForced callers = %v, want %v", callers, want)
 	}
 }
 
@@ -3200,38 +3141,6 @@ func TestEveryTerminalEndOfAnAsyncMergeClosesItsMergeWorkspaceOnce(t *testing.T)
 	}
 }
 
-// THE END OF A MERGE REACHES ITS WORKSPACES THROUGH ONE PATH: settle alone
-// hands an end back and closes the merge workspace, and only ended and a merge
-// never put in line settle. A site that handed an end back its own way would
-// bypass the close (2026-11-23).
-func TestEveryEndOfAMergeIsSettledThroughOnePath(t *testing.T) {
-	tests := []struct {
-		needle string
-		want   []string
-	}{
-		{needle: "o.settle(", want: []string{"terminal.go:ended", "terminal.go:publishAbandonedWith"}},
-		{needle: "o.handBack(", want: []string{"terminal.go:settle"}},
-		{needle: "o.closeEnded(", want: []string{"terminal.go:settle"}},
-		// A finish withdrawn before it was in line is a sync merge's, in its
-		// own workspace: there is no merge workspace to close.
-		{needle: "o.handBackInPlace(", want: []string{"finish.go:withdrawFinished", "terminal.go:handBack"}},
-		// A merge never forked has no merge workspace to close (dropDetached).
-		{needle: "Detached.HandBack(", want: []string{"request.go:dropDetached", "terminal.go:handBack", "terminal.go:handBackInPlace"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.needle, func(t *testing.T) {
-			// Arrange, Act
-			got := callersOf(t, tt.needle)
-
-			// Assert
-			slices.Sort(got)
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("callers of %s = %v, want %v", tt.needle, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRepublishRoster(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -3274,17 +3183,5 @@ func TestRepublishRoster(t *testing.T) {
 				t.Fatalf("error record = %+v, want the message, the fields and the cause", record)
 			}
 		})
-	}
-}
-
-// THE ROSTER IS REPUBLISHED THROUGH ONE HELPER: a site that called the
-// registry itself would word and guard its failure its own way.
-func TestTheRosterIsRepublishedOnlyThroughRepublishRoster(t *testing.T) {
-	// Arrange, Act
-	got := callersOf(t, "deps.PublishRegistry(")
-
-	// Assert
-	if want := []string{"terminal.go:republishRoster"}; !slices.Equal(got, want) {
-		t.Fatalf("callers of deps.PublishRegistry( = %v, want %v", got, want)
 	}
 }

@@ -1,13 +1,8 @@
 package childproc
 
 import (
-	"go/ast"
-	"go/token"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 )
 
 func TestRun(t *testing.T) {
@@ -79,50 +74,5 @@ func TestRunRefusesAnOutputThatCannotBeCaptured(t *testing.T) {
 	// Assert
 	if err == nil || runErr != nil || cmd.Process != nil {
 		t.Fatalf("Run = %v, %v (process %v); want the capture refused and nothing started", runErr, err, cmd.Process)
-	}
-}
-
-// capturedRunSites are the daemon sources that call CaptureOutput themselves
-// rather than Run: gitclient records the child's pid and its duration between
-// the start and the wait, which Run does not answer.
-var capturedRunSites = map[string]bool{"internal/gitclient/run.go": true}
-
-// TestEveryCapturedRunGoesThroughRun holds every daemon source outside this
-// package to Run: a hand-rolled capture, start, wait and read drifts from the
-// others in how it reports a child that never started.
-func TestEveryCapturedRunGoesThroughRun(t *testing.T) {
-	// Arrange
-	root := sourcescan.DaemonRoot(t)
-	var offenders []string
-
-	// Act
-	sourcescan.EachDaemonSource(t, root, []string{"internal/childproc"}, func(fset *token.FileSet, file *ast.File) {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "CaptureOutput" {
-				return true
-			}
-			if pkg, isIdent := sel.X.(*ast.Ident); !isIdent || pkg.Name != "childproc" {
-				return true
-			}
-			pos := fset.Position(call.Pos())
-			rel, err := filepath.Rel(root, pos.Filename)
-			if err != nil {
-				t.Fatalf("relative path of %s: %v", pos.Filename, err)
-			}
-			if !capturedRunSites[filepath.ToSlash(rel)] && !strings.HasSuffix(rel, "_test.go") {
-				offenders = append(offenders, pos.String())
-			}
-			return true
-		})
-	})
-
-	// Assert
-	if len(offenders) > 0 {
-		t.Fatalf("these sites capture, start and wait on a child by hand; use childproc.Run:\n%s", strings.Join(offenders, "\n"))
 	}
 }

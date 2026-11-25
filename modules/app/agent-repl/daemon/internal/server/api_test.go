@@ -2,9 +2,6 @@ package server
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -546,38 +543,6 @@ func TestWithoutDepStripsOnlyTheOneDependency(t *testing.T) {
 	}
 	if deps.DB == nil || deps.WebappDist != h.Deps.WebappDist {
 		t.Fatal("withoutDep stripped more than the one dependency")
-	}
-}
-
-// TestNoTestHandBuildsTheSurfacesDeps fails a test that spells its own Deps
-// literal instead of stripping the harness's complete set: a hand-built set
-// passes or fails on New's check ORDER rather than on the dependency it names.
-func TestNoTestHandBuildsTheSurfacesDeps(t *testing.T) {
-	// Arrange.
-	handBuilt := regexp.MustCompile(`(:= |New\()Deps\{[^}]`)
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	var offenders []string
-
-	// Act.
-	for _, file := range files {
-		if file == "fakes_test.go" {
-			continue
-		}
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if handBuilt.MatchString(string(raw)) {
-			offenders = append(offenders, file)
-		}
-	}
-
-	// Assert.
-	if len(offenders) != 0 {
-		t.Fatalf("hand-built Deps literals in %v; strip the harness's set with withoutDep", offenders)
 	}
 }
 

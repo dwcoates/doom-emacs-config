@@ -15,9 +15,6 @@ import { drawRosterMergeQueue } from "../../src/sidebar/merge-queue-view.js";
 import { drawRosterRow } from "../../src/sidebar/row.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { mergingHead, row, sidebarContext } from "./harness.js";
-import styles from "../../src/styles.css?raw";
-import mergeQueueSource from "../../src/sidebar/merge-queue-view.ts?raw";
-import rowSource from "../../src/sidebar/row.ts?raw";
 
 /** The repository a test's queue group is drawn for. */
 const REPOSITORY = { key: create(RepositoryRefSchema, { id: "repo-1", dir: "/r/repo-1" }), name: "doom" };
@@ -101,13 +98,5 @@ describe("the shared cold-gate style", () => {
     const open = paintOf(row, () => row.querySelector(":scope > .row > .name"));
     const queued = paintOf(line, () => line.querySelector(".sb-mq-name"));
     expect([queued, open[0]]).toEqual([open, "line-through"]);
-  });
-
-  it("is drawn by the one helper in both sections", () => {
-    expect([rowSource, mergeQueueSource].map((source) => source.includes("markColdGatedName("))).toEqual([true, true]);
-  });
-
-  it("is one rule in the stylesheet, keyed on the shared class", () => {
-    expect([styles.includes('[data-arm="coldGate"] > .row > .name'), styles.split(`.${COLD_GATED_NAME_CLASS} {`).length - 1]).toEqual([false, 1]);
   });
 });

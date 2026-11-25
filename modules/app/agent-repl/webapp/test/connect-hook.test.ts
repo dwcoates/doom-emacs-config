@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createConnectHookElement } from "../src/connect-hook.js";
-import { codeUnder } from "./files-under.js";
-
-const SRC = join(process.cwd(), "src");
-
 
 describe("createConnectHookElement", () => {
   it("builds an element of the tag it is given", () => {
@@ -52,18 +47,5 @@ describe("createConnectHookElement", () => {
     host.append(el);
     document.body.replaceChildren(host);
     expect(runs).toBe(1);
-  });
-});
-
-describe("every element that waits to join the document is a connect-hook element", () => {
-  const sources = codeUnder(SRC);
-
-  it("defines a custom element nowhere but connect-hook.ts", () => {
-    const defining = [...sources].filter(([, code]) => /customElements\.define\(/.test(code)).map(([p]) => p);
-    expect(defining).toEqual(["connect-hook.ts"]);
-  });
-
-  it.each(["bubble/body.ts", "feed/bubble.ts"])("builds its connect-hook element through the helper in %s", (file) => {
-    expect(sources.get(file)).toMatch(/\bcreateConnectHookElement\(/);
   });
 });

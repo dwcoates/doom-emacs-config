@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { createTicker } from "../../src/clock.js";
 import { describe, expect, it, vi } from "vitest";
-import stylesheet from "../../src/styles.css?raw";
 import {
   FEED_TAB_CLASS,
   FEED_TAB_STRIP_CLASS,
@@ -24,15 +23,6 @@ describe("drawFeedTabStrip", () => {
     // Assert
     expect(strip.getAttribute("role")).toBe("tablist");
     expect([...strip.classList]).toEqual([FEED_TAB_STRIP_CLASS, "feed-group-strip"]);
-  });
-
-  it("states the strip's size once, and no position", () => {
-    // Arrange
-    const match = /\.feed-tab-strip\s*\{([^}]*)\}/.exec(stylesheet);
-    // Assert
-    expect(match).not.toBeNull();
-    expect(match?.[1]).toMatch(/(^|[;\s])gap\s*:\s*0\.156rem\s*;/);
-    expect(match?.[1]).not.toMatch(/position\s*:/);
   });
 });
 
@@ -62,15 +52,6 @@ describe("drawFeedTabline", () => {
     const line = drawFeedTabline(drawFeedTabStrip(), null);
     // Assert
     expect(line.querySelector(`.${FEED_TABLINE_CLOCK_CLASS}`)?.childElementCount).toBe(0);
-  });
-
-  it("lays the strip and its clock out as one row, the clock after the tabs", () => {
-    // Arrange
-    const line = /\.feed-tabline\s*\{([^}]*)\}/.exec(stylesheet);
-    const strip = /\.feed-tabline > \.feed-tab-strip\s*\{([^}]*)\}/.exec(stylesheet);
-    // Assert
-    expect(line?.[1]).toMatch(/(^|[;\s])display\s*:\s*flex\s*;/);
-    expect(strip?.[1]).toMatch(/(^|[;\s])flex\s*:\s*1 1 auto\s*;/);
   });
 });
 

@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { connectionRequestIds, createDaemonTransport, createPageTransport, REQUEST_ID_HEADER } from "../../src/rpc/transport.js";
 import { beginPage, endPage } from "../../src/page-teardown.js";
-import { codeUnder } from "../files-under.js";
-import { join } from "node:path";
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 
 describe("createDaemonTransport", () => {
@@ -246,14 +244,5 @@ describe("createPageTransport", () => {
       vi.unstubAllGlobals();
       beginPage();
     }
-  });
-
-  it("is the only way the webapp's sources build a daemon transport", () => {
-    // Arrange: every source file but the transport module itself.
-    const sources = [...codeUnder(join(__dirname, "../../src"))].filter(([file]) => file !== join("rpc", "transport.ts"));
-    // Act
-    const byHand = sources.filter(([, code]) => code.includes("createDaemonTransport(")).map(([file]) => file);
-    // Assert
-    expect(byHand).toEqual([]);
   });
 });

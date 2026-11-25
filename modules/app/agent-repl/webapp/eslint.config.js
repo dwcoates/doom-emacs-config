@@ -24,10 +24,10 @@ export default tseslint.config(
 
   js.configs.recommended,
 
-  // ---- the type-aware program: src/ and test/, exactly what tsconfig.json
-  // compiles ------------------------------------------------------------
+  // ---- the type-aware program: src/, test/ and rules/, exactly what
+  // tsconfig.json compiles ----------------------------------------------
   {
-    files: ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"],
+    files: ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "rules/**/*.ts"],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -164,7 +164,7 @@ export default tseslint.config(
     //
     // Scoped, not global: `src/` — the mocked vendor in `src/fake/` included —
     // keeps all three.
-    files: ["test/**/*.ts", "test/**/*.tsx"],
+    files: ["test/**/*.ts", "test/**/*.tsx", "rules/**/*.ts"],
     rules: {
       "@typescript-eslint/only-throw-error": "off",
       "@typescript-eslint/prefer-promise-reject-errors": "off",

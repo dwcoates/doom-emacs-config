@@ -1,16 +1,11 @@
 // @vitest-environment jsdom
 // A row's "⋯" verb menu, opened beside its row as its hover panel is. See
 // src/sidebar/row-menu.ts.
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowMenus, rowMenuKey, type RowMenus } from "../../src/sidebar/row-menu.js";
 import { recordingPopupMirror } from "../host/popup-channel.js";
 import { captureLogRecords } from "../log-capture.js";
-
-const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src");
 
 /** A drawn row: its line at TOP with the "⋯" control in it, and its shut menu. */
 function drawnRow(top = 40) {
@@ -215,18 +210,5 @@ describe("a row's verb menu, in the sidebar page", () => {
     // ASSERT
     const record = capture.sent.find((r) => r.operation === "sidebar.row-menu.open");
     expect(record?.level.case).toBe("debug");
-  });
-});
-
-describe("the menu's place is the row's panel's", () => {
-  it("is placed through the one placeBeside the panel is placed through", () => {
-    const source = readFileSync(path.join(SRC, "sidebar", "row-menu.ts"), "utf8");
-    expect(/placeBeside\(/.test(source)).toBe(true);
-  });
-
-  it("wears the panel's card: the stylesheet draws both from one rule", () => {
-    const css = readFileSync(path.join(SRC, "styles.css"), "utf8");
-    const card = /#ws-sidebar \.ws\.open > \.detail,\s*#ws-sidebar \.detail\.sb-memory\.open,\s*#ws-sidebar \.ws > \.sb-menu \{[^}]*position: fixed;[^}]*background: var\(--card\);/;
-    expect(card.test(css)).toBe(true);
   });
 });

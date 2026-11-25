@@ -2,7 +2,6 @@ package lifecycleconfig
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -330,43 +329,6 @@ func TestHookEnv(t *testing.T) {
 				t.Fatalf("HookEnv = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-// TestEveryWorkspaceScriptHookEnvironmentIsHookEnvs pins that no runner of a
-// workspace's script hook spells the stage variable itself.
-func TestEveryWorkspaceScriptHookEnvironmentIsHookEnvs(t *testing.T) {
-	// Arrange
-	daemon, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var byHand []string
-
-	// Act
-	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) == "lifecycleconfig" {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), "EnvCallingWorkspace + \"=\"") || strings.Contains(string(raw), "EnvSlackThread+\"=\"") {
-			byHand = append(byHand, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(byHand) != 0 {
-		t.Fatalf("a script hook's environment built by hand in %v, want HookEnv", byHand)
 	}
 }
 

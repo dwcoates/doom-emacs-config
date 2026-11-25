@@ -1,8 +1,6 @@
 package server
 
 import (
-	"os"
-	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -55,28 +53,5 @@ func TestStandingPushRecordsAnEmptyValueAndSendsNothing(t *testing.T) {
 	if len(records) != 1 || records[0].Level != "error" ||
 		records[0].Message != "a publisher raised an empty persistent-wifi standing; it was not sent" {
 		t.Fatalf("records = %+v, want one ERROR naming the empty standing", records)
-	}
-}
-
-// TestEveryClientOnlyStandingTopicGoesThroughOneShape pins that the
-// WatchDaemon loop takes each standing topic only one kind of client is told
-// (the Emacs-only faults and persistent wifi, the webview-only news digest)
-// through standingPush rather than a hand-rolled case of its own.
-func TestEveryClientOnlyStandingTopicGoesThroughOneShape(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("streams.go")
-	if err != nil {
-		t.Fatalf("read streams.go: %v", err)
-	}
-
-	// Act.
-	calls := strings.Count(string(src), "standingPush(s.log,")
-	handRolled := strings.Count(string(src), `"a publisher raised an empty fault set`) +
-		strings.Count(string(src), `"a publisher raised an empty persistent-wifi`) +
-		strings.Count(string(src), `"a publisher raised an empty news digest`)
-
-	// Assert.
-	if calls != 3 || handRolled != 0 {
-		t.Fatalf("standingPush call sites = %d (want 3), hand-rolled empty-value records = %d (want 0)", calls, handRolled)
 	}
 }

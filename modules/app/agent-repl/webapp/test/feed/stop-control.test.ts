@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -196,14 +194,4 @@ describe("drawStopControl", () => {
     // Assert
     expect(el.querySelectorAll(".refusal")).toHaveLength(1);
   });
-});
-
-describe("the stop control's call sites", () => {
-  it.each(["src/feed/rows/subagent.ts", "src/feed/merge/tab-panels.ts", "src/feed/cards/shell.ts"])(
-    "%s draws its stop through drawStopControl rather than a control of its own",
-    (file) => {
-      const source = readFileSync(join(process.cwd(), file), "utf8");
-      expect([source.includes("drawStopControl("), source.includes('client.interrupt(')]).toEqual([true, false]);
-    },
-  );
 });

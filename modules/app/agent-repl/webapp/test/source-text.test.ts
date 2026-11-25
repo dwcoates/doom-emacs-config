@@ -1,19 +1,9 @@
 /**
- * THE SHARED COMMENT STRIPPERS (`test/source-text.ts`), AND THE PROOF EVERY
- * SCAN USES THEM.
- *
- * The last case fails any test file that hand-rolls its own comment strip or
- * stylesheet rule scan instead of going through `source-text.ts` and
- * `stylesheet.ts`, so the stripping rule cannot drift between scans again.
+ * THE SHARED COMMENT STRIPPERS (`test/source-text.ts`). The proof every scan
+ * uses them is `rules/source-text.rules.test.ts`.
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { codeOf, functionBody, withoutBlockComments } from "./source-text.js";
-import { filesUnder } from "./files-under.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("withoutBlockComments", () => {
   it.each([
@@ -67,43 +57,5 @@ describe("functionBody", () => {
     const code = "function f() { g(); }";
     // Act + Assert
     expect(() => functionBody(code, "f")).toThrow("the function f has no closing brace at the start of a line");
-  });
-});
-
-describe("the call sites", () => {
-
-  it("strip comments, scan stylesheet rules, find media blocks and cut function bodies only through the shared readers", () => {
-    // Arrange: the hand-rolled shapes the shared readers replaced.
-    const shapes = [
-      String.raw`/\/\*[\s\S]*?\*\//g`,
-      String.raw`/^\s*\/\/.*$/gm`,
-      String.raw`/([^{}]+)\{([^{}]*)\}/g`,
-      'indexOf("@media',
-      'split("@media',
-      String.raw`indexOf("\n}\n"`,
-    ];
-    const owners = new Set([
-      path.join(here, "source-text.ts"),
-      path.join(here, "stylesheet.ts"),
-      fileURLToPath(import.meta.url),
-    ]);
-    // Act
-    const handRolled = filesUnder(here).filter(
-      (file) => !owners.has(file) && shapes.some((shape) => readFileSync(file, "utf8").includes(shape)),
-    );
-    // Assert
-    expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);
-  });
-
-  it("import raw source text at collection, never inside a test", () => {
-    // Arrange: a dynamic `?raw` import inside a test body pays Vite's transform
-    // against that test's timeout, which a loaded run overruns.
-    const inTest = /await import\([^)]*\?raw["'`]\)/;
-    // Act
-    const offenders = filesUnder(here).filter(
-      (file) => file !== fileURLToPath(import.meta.url) && inTest.test(readFileSync(file, "utf8")),
-    );
-    // Assert
-    expect(offenders.map((file) => path.relative(here, file))).toEqual([]);
   });
 });

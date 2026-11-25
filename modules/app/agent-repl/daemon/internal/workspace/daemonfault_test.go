@@ -3,12 +3,10 @@ package workspace
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -88,24 +86,5 @@ func TestRaiseDaemonFaultRecordsWhatFailed(t *testing.T) {
 				t.Fatalf("records = %+v, want an ERROR %q with the kind, the caller's fields and the cause", f.log.logger.Records(), tt.message)
 			}
 		})
-	}
-}
-
-// TestEveryDaemonFaultRaiserSharesRaiseDaemonFault pins that a fault the verbs
-// raise once per condition goes through the one helper: a hand-rolled
-// read-then-open would drift from it (another dedupe, a record left out).
-func TestEveryDaemonFaultRaiserSharesRaiseDaemonFault(t *testing.T) {
-	// Arrange / Act
-	shared := sourcescan.Count(t, "v.raiseDaemonFault(")
-	var byHand []string
-	for _, file := range sourcescan.Production(t) {
-		if file.Name != "daemonfault.go" && strings.Contains(string(file.Source), "Health.OpenFaults(ctx, wsm.FaultScope{Kind:") {
-			byHand = append(byHand, file.Name)
-		}
-	}
-
-	// Assert
-	if shared != 2 || len(byHand) != 0 {
-		t.Fatalf("shared raisers = %d, hand-rolled in %v; want 2 and none", shared, byHand)
 	}
 }

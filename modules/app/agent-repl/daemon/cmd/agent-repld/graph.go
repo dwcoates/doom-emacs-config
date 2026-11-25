@@ -15,6 +15,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	testroster "agentrepl/testrun/roster"
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/agentreplsession"
@@ -1732,6 +1733,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Briefs:          merge.BriefsFrom(paths.PromptsDir),
 		StateDir:        p.Layout.Dir(),
 		TestCommand:     merge.TestCommandFor,
+		RuleSuites:      testroster.RuleSuites,
 		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
 		Tests:           testsclient.New(p.Opts.testsSocket),

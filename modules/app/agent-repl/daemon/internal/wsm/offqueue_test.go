@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"slices"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/semver"
-	"agent-repld/internal/sourcescan"
 )
 
 // fullRequest is a request carrying every value a merge is asked for with,
@@ -177,36 +175,6 @@ func TestARefusedExitKeepsNoRequest(t *testing.T) {
 				t.Fatal("a refused exit kept a request off the queue")
 			}
 		})
-	}
-}
-
-// TestNoQueueRowIsDeletedOutsideTheOneTransition holds every exit to
-// leaveQueueInTx: a statement deleting a queue row anywhere else could delete
-// a request it did not land. The one other delete is the layout-128 move of
-// async requests into their own table, which deletes only what it copied.
-func TestNoQueueRowIsDeletedOutsideTheOneTransition(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "DELETE FROM merge_queue ")
-
-	// Assert
-	if want := []string{"asyncrequests.go", "offqueue.go"}; !slices.Equal(sites, want) {
-		t.Fatalf("merge_queue rows are deleted in %v, want only the layout-128 move and the one transition (%v)", sites, want)
-	}
-}
-
-// Every refusal of a workspace already on its queue is refuseQueued's, so a
-// request and a requeue answer the same place in the same words.
-func TestOneReadRefusesAWorkspaceAlreadyOnItsQueue(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "SELECT seq, state FROM merge_queue WHERE repo_key = ? AND workspace_id = ?")
-	callers := sourcescan.Sites(t, "refuseQueued(ctx, tx, key, id)")
-
-	// Assert
-	if want := []string{"offqueue.go"}; !slices.Equal(sites, want) {
-		t.Fatalf("a workspace's queue row is read for a refusal in %v, want only refuseQueued's %v", sites, want)
-	}
-	if want := []string{"mergequeue.go", "offqueue.go"}; !slices.Equal(callers, want) {
-		t.Fatalf("refuseQueued is called in %v, want the request and the requeue (%v)", callers, want)
 	}
 }
 

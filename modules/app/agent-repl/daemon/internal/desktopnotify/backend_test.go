@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"agent-repld/internal/sourcescan"
 )
 
 // fakeRunner answers one scripted stdout and records the argv it was handed.
@@ -495,33 +493,6 @@ func TestRunWithinBoundsTheRun(t *testing.T) {
 			}
 			if !started || runner.bin != "/bin/x" || !reflect.DeepEqual(runner.args, []string{"a"}) {
 				t.Fatalf("ran %s %q (started=%v), want /bin/x [a] started", runner.bin, runner.args, started)
-			}
-		})
-	}
-}
-
-// TestEveryProgramRunGoesThroughRunWithin pins that no backend, chime or
-// speech bounds a run of its own: the one bounded run is runWithin, across
-// every production source of the package.
-func TestEveryProgramRunGoesThroughRunWithin(t *testing.T) {
-	cases := []struct {
-		substr string
-		want   []string
-	}{
-		// launcher.go bounds one socket exchange with the launcher, which is no
-		// program run: the launcher is the one resident program, already running.
-		{substr: "context.WithTimeout(", want: []string{"launcher.go"}},
-		{substr: "context.WithTimeoutCause(", want: []string{"backend.go"}},
-		{substr: "runner.Run(", want: []string{"backend.go"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.substr, func(t *testing.T) {
-			// Act
-			got := sourcescan.Sites(t, tc.substr)
-
-			// Assert
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("%q occurs in %v, want only runWithin's %v", tc.substr, got, tc.want)
 			}
 		})
 	}

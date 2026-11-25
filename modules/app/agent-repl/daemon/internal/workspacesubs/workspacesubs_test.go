@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -484,29 +483,6 @@ func TestAnUntoldWorkspaceNoticeThatCannotBeReadOrRecordedIsRecorded(t *testing.
 				t.Fatalf("no error record %q: %+v", tt.message, f.logs.Records())
 			}
 		})
-	}
-}
-
-func TestBothNotifiersShareOneSupersession(t *testing.T) {
-	// Arrange: the supersede-and-carry decision lives in internal/untoldnotice
-	// alone; a notifier that hand-rolled its own would call Supersede itself.
-	var calls int
-	for _, path := range []string{"workspacesubs.go", "../mergenotice/mergenotice.go"} {
-		src, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-
-		// Act
-		if strings.Contains(string(src), ".Supersede(") {
-			t.Errorf("%s calls Supersede itself; take untoldnotice.Carried", path)
-		}
-		calls += strings.Count(string(src), "untoldnotice.Carried(")
-	}
-
-	// Assert
-	if calls != 2 {
-		t.Fatalf("untoldnotice.Carried calls = %d, want one per notifier", calls)
 	}
 }
 

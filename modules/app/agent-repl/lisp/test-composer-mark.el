@@ -15,10 +15,6 @@
 
 (require 'cl-lib)
 
-(defconst agent-repl-test-composer-mark--dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "This suite's directory, where the composer's mark kinds' sources live.")
-
 (defun agent-repl-test-composer-mark--find-word (word)
   "Return a finder answering each occurrence of WORD before its limit."
   (lambda (limit)
@@ -99,16 +95,6 @@
   "The command completion's old face name resolves to the canonical face."
   (should (eq (get 'agent-repl-command-completion-known 'face-alias)
               'agent-repl-composer-known)))
-
-(ert-deftest agent-repl-test-composer-mark-every-kind-marks-through-the-helper ()
-  "Every composer mark function calls `agent-repl-composer-mark-lines', none hand-rolls one."
-  (let ((dir agent-repl-test-composer-mark--dir))
-    (dolist (file '("command-completion.el" "workspace-completion.el"))
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name file dir))
-        (should (search-forward "(agent-repl-composer-mark-lines" nil t))
-        (goto-char (point-min))
-        (should-not (search-forward "(make-overlay" nil t))))))
 
 (provide 'test-composer-mark)
 ;;; test-composer-mark.el ends here

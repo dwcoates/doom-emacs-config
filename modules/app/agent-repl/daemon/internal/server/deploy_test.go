@@ -18,7 +18,6 @@ import (
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestDeployPassesTheForceThrough(t *testing.T) {
@@ -625,32 +624,12 @@ func TestTheEdgesThatCanReloadTheWebviewHostReconcileIt(t *testing.T) {
 	}
 }
 
-func TestEveryEditorPushGoesThroughPushToEditors(t *testing.T) {
-	// Arrange / Act: only pushToEditors writes an Emacs stream's addressed queue.
-	sites := sourcescan.Count(t, "w.elisp <- ")
-
-	// Assert
-	if sites != 1 {
-		t.Fatalf("Emacs addressed pushes are written at %d sites, want 1: pushToEditors", sites)
-	}
-}
-
 func TestEveryEditorKeepsEveryEmacsStream(t *testing.T) {
 	// Arrange / Act / Assert
 	for _, w := range []*daemonWatcher{{emacs: true, id: "stream-1"}, {emacs: true, id: "stream-2", elispBuild: "b"}} {
 		if !everyEditor(w) {
 			t.Fatalf("everyEditor(%s) = false, want every Emacs stream kept", w.id)
 		}
-	}
-}
-
-func TestNoPushToEveryEditorSpellsItsOwnFilter(t *testing.T) {
-	// Act
-	sites := sourcescan.Count(t, "func(*daemonWatcher) bool { return true }")
-
-	// Assert
-	if sites != 0 {
-		t.Fatalf("%d push sites spell the every-editor filter inline, want 0: use everyEditor", sites)
 	}
 }
 
@@ -760,15 +739,5 @@ func TestReloadElispPushNamesTheRootAndTheBuild(t *testing.T) {
 	// Assert
 	if got := push.GetReloadElisp(); got.GetModuleRoot() != "/root" || got.GetBuild() != "fresh" {
 		t.Fatalf("push = %v, want reload_elisp{/root, fresh}", push)
-	}
-}
-
-func TestEveryReloadElispFrameIsBuiltByReloadElispPush(t *testing.T) {
-	// Arrange / Act: every production site that builds a reload_elisp frame.
-	sites := sourcescan.Sites(t, "WatchDaemonResponse_ReloadElisp{")
-
-	// Assert: reloadElispPush's own, in deploy.go, and no other.
-	if strings.Join(sites, ",") != "deploy.go" {
-		t.Fatalf("reload_elisp frames built at %v, want only reloadElispPush's in deploy.go; use reloadElispPush", sites)
 	}
 }

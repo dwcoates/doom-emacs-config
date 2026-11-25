@@ -1,8 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readMentionTargets } from "../../src/feed/workspace-mentions.js";
-import { filesUnder } from "../files-under.js";
 import { closedTarget, mentionTargets, openTarget } from "./mention-targets.js";
 
 describe("mention-targets", () => {
@@ -23,20 +20,5 @@ describe("mention-targets", () => {
     const read = readMentionTargets(mentionTargets(openTarget("alpha"), closedTarget("gone")));
     // ASSERT
     expect([...read.byId.values()].map((t) => `${t.workspace.id}:${t.standing}`)).toEqual(["ws-alpha:open", "ws-gone:closed"]);
-  });
-
-  it("is the only way a test builds served targets", () => {
-    // ARRANGE: the malformed table in workspace-mentions.test.ts builds raw
-    // targets on purpose, since a malformed target is what it tests.
-    const allowed = new Set(["feed/mention-targets.ts", "feed/workspace-mentions.test.ts"]);
-    const root = join(__dirname, "..");
-    // Spelled in two pieces so this file does not match its own search.
-    const schema = ["WorkspaceMentionTargets", "Schema"].join("");
-    // ACT
-    const handRolled = filesUnder(root, [".ts", ".tsx"])
-      .map((full) => relative(root, full))
-      .filter((f) => !allowed.has(f) && readFileSync(join(root, f), "utf8").includes(schema));
-    // ASSERT
-    expect(handRolled).toEqual([]);
   });
 });

@@ -5,12 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/token"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -40,7 +37,6 @@ import (
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/shimsocket"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -4568,29 +4564,6 @@ func TestResumeColdTimesItsVendorStartAsAColdAnswer(t *testing.T) {
 	}
 }
 
-// EVERY BRING-UP TAKES THE RECORD'S FACTS THROUGH withRecord: no other code
-// in the package sets a source's record facts, so a path that hand-copied one
-// and forgot another fails here.
-func TestEveryBringUpTakesTheRecordThroughWithRecord(t *testing.T) {
-	// Arrange.
-	handCopied := regexp.MustCompile(`(HoldKeepalive|WorkspaceName)\s*[:=]\s*record\.`)
-	helperBody := regexp.MustCompile(`(?s)func \(src source\) withRecord\(.*?\n}\n`)
-
-	// Act.
-	var found []string
-	for _, file := range sourcescan.Production(t) {
-		// withRecord's own body is the one copy there is meant to be.
-		if handCopied.Match(helperBody.ReplaceAll(file.Source, nil)) {
-			found = append(found, file.Name)
-		}
-	}
-
-	// Assert.
-	if len(found) > 0 {
-		t.Fatalf("these files copy the record onto a source by hand instead of withRecord: %v", found)
-	}
-}
-
 // withBook is ANSWER naming BOOK as the workspace's book.
 func withBook(answer *shimv1.StartSessionResponse, book string) *shimv1.StartSessionResponse {
 	answer.Book = &conversationv1.AgentId{Value: book}
@@ -5111,46 +5084,6 @@ func TestStandDownsCountsAColdGatesShimStoodDown(t *testing.T) {
 	// Assert.
 	if got := f.fleet.StandDowns(ws); got != 1 {
 		t.Fatalf("StandDowns(%s) = %d, want the gate's stand-down counted", ws, got)
-	}
-}
-
-// TestEveryOrderedRemovalGoesThroughRemoveStoodDownLocked pins that the
-// fleet takes a session out of its map only through removeStoodDownLocked,
-// which counts it, or through retireReaped, which records a death: a removal
-// written by hand would leave StandDowns blind to it, and a revival would
-// then read the stand-down as a revival that lied.
-func TestEveryOrderedRemovalGoesThroughRemoveStoodDownLocked(t *testing.T) {
-	// Arrange.
-	allowed := map[string]bool{"removeStoodDownLocked": true, "retireReaped": true}
-	var offenders []string
-
-	// Act.
-	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, file *ast.File) {
-		name := filepath.Base(fset.Position(file.Pos()).Filename)
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil || allowed[fn.Name.Name] {
-				continue
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok || len(call.Args) != 2 {
-					return true
-				}
-				if id, ok := call.Fun.(*ast.Ident); !ok || id.Name != "delete" {
-					return true
-				}
-				if sel, ok := call.Args[0].(*ast.SelectorExpr); ok && sel.Sel.Name == "sessions" {
-					offenders = append(offenders, name+": "+fn.Name.Name)
-				}
-				return true
-			})
-		}
-	})
-
-	// Assert.
-	if len(offenders) != 0 {
-		t.Fatalf("sessions removed from the fleet's map by hand in %v; use removeStoodDownLocked", offenders)
 	}
 }
 

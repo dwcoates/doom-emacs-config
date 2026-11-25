@@ -3,9 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { isStill } from "../bubble/still.js";
 import { boxRect as scriptedRect } from "../dom-rect.js";
 import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { filesUnder } from "../files-under.js";
 import { OpenFeedResumedSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import {
   FeedBreadcrumbSchema,
@@ -31,7 +28,6 @@ import {
   forgetOwnTurns,
   rememberOwnTurn,
 } from "../../src/composer/own-turns.js";
-import feedViewSource from "../../src/feed/feed-view.ts?raw";
 import {
   createFeedController,
   discardRow,
@@ -86,7 +82,6 @@ import {
   type WalkHold,
 } from "../../src/scroll.js";
 import { responseCapLines } from "../../src/feed/cards/response.js";
-import { codeOf } from "../source-text.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { selectable } from "../selectable.js";
 import { sentTo } from "./addresses.js";
@@ -448,17 +443,6 @@ describe("createFeedController: resuming", () => {
     controller.applyPage(page([userPromptRow("a", "1")]), "replace");
     controller.applyOpened(page([userPromptRow("b", "2")]), create(OpenFeedResumedSchema, { standing: [feedId("a"), feedId("b")] }));
     expect(drawnIds(host)).toEqual(["a", "b"]);
-  });
-
-  it("is the one place an open's answer is told apart from a resume's", () => {
-    // Arrange
-    const sources = filesUnder(join(process.cwd(), "src"));
-    // Act
-    const offenders = sources.filter(
-      (file) => !file.endsWith("feed-view.ts") && /\.applyResumed\(/.test(readFileSync(file, "utf8")),
-    );
-    // Assert
-    expect(offenders).toEqual([]);
   });
 });
 
@@ -938,13 +922,6 @@ describe("discardRow", () => {
     const r = drawnRow(false);
     // Act + Assert
     expect(() => discardRow(r.state)).not.toThrow();
-  });
-
-  it("is the only place feed-view.ts tears a row down", () => {
-    // Arrange -- a hand-rolled drop would repeat the bubble's disposal.
-    const disposals = feedViewSource.match(/\.bubble\?\.dispose\(\)/g) ?? [];
-    // Act + Assert
-    expect(disposals).toHaveLength(1);
   });
 });
 
@@ -4749,29 +4726,6 @@ describe("createFeedController: every row is placed by its order key", () => {
     // Assert
     expect(h.sink.reported).toEqual(["frameUndecodable"]);
   });
-
-  it("never places a new row by arrival order (source scan)", () => {
-    // Arrange — feed-view.ts, comments stripped.
-    const source = codeOf(
-      readFileSync(join(process.cwd(), "src/feed/feed-view.ts"), "utf8"),
-    );
-    // Act — every insertion into the order, and every arrival-order index.
-    const insertions = [
-      ...source.matchAll(/\border\.splice\(([^,)]*),\s*0\b/g),
-    ].map((m) => m[1].trim());
-    const arrival = [
-      ...source.matchAll(/\border\.(?:push|unshift)\(/g),
-      ...source.matchAll(/\(\s*[^()]*order\.length[^()]*,\s*0\s*,/g),
-      ...source.matchAll(
-        /(?:adopt|insertAt|adoptPageRow)\([^;]*order\.length/g,
-      ),
-    ].map((m) => m[0]);
-    // Assert — one insertion, at the index the key's binary search found.
-    expect({ insertions, arrival }).toEqual({
-      insertions: ["index"],
-      arrival: [],
-    });
-  });
 });
 
 describe("createFeedController: selected and expanded are one state", () => {
@@ -5147,19 +5101,6 @@ describe("createFeedController: freeing rows older than the newest daemon page",
       ["olderThan", "first"],
       ["k3", "k4"],
     ]);
-  });
-});
-
-describe("createFeedController's held-row lookup", () => {
-  it("is the one place a row in the order is looked up as held", () => {
-    // Arrange
-    const source = readFileSync(join(__dirname, "../../src/feed/feed-view.ts"), "utf8");
-
-    // Act
-    const throws = source.match(/is ordered but not held/g) ?? [];
-
-    // Assert
-    expect(throws).toHaveLength(1);
   });
 });
 

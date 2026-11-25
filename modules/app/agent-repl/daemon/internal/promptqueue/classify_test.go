@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -1347,30 +1345,6 @@ func TestNeverJudgedAnswersEveryPromptTheModelIsNeverAsked(t *testing.T) {
 				t.Fatalf("neverJudged = (%+v, why set %v), want hold_for_turn_end with its record", verdict, why != nil)
 			}
 		})
-	}
-}
-
-// TestEveryUnjudgedVerdictIsReadThroughNeverJudged pins that hold,
-// classifyHeld and verdictFor share ONE reading: a site calling
-// sessionActVerdict or deferredVerdict directly could keep a kind of prompt
-// from the model on one path and hand it over on another.
-func TestEveryUnjudgedVerdictIsReadThroughNeverJudged(t *testing.T) {
-	// Arrange
-	body, err := os.ReadFile("classify.go")
-	if err != nil {
-		t.Fatalf("read classify.go: %v", err)
-	}
-
-	// Act
-	calls := map[string]int{}
-	for _, name := range []string{"q.sessionActVerdict(", "q.deferredVerdict(", "q.neverJudged("} {
-		calls[name] = strings.Count(string(body), name)
-	}
-
-	// Assert: each primitive is read once, inside neverJudged, and the three
-	// deciding sites read neverJudged.
-	if calls["q.sessionActVerdict("] != 1 || calls["q.deferredVerdict("] != 1 || calls["q.neverJudged("] != 3 {
-		t.Fatalf("call counts = %v, want sessionActVerdict 1, deferredVerdict 1 (both in neverJudged) and neverJudged 3", calls)
 	}
 }
 

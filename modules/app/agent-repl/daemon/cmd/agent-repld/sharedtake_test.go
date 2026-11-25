@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/token"
 	"io"
 	"net"
 	"net/http"
@@ -23,7 +21,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/server"
-	"agent-repld/internal/sourcescan"
 )
 
 // advertisingClaim records what the shared take advertises.
@@ -371,20 +368,6 @@ func TestInstanceAddressAnswersWhereARunningDaemonIs(t *testing.T) {
 	}
 }
 
-// TestOnlyInstanceAddressResolvesADaemonsPrivateAddress keeps the lookup of
-// another daemon's private address in one place: a second site that probes
-// and reads it by hand would judge "runs" and "records an address" apart from
-// the one every forward rests on.
-func TestOnlyInstanceAddressResolvesADaemonsPrivateAddress(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "daemonaddr.InstanceAddress(")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "sharedtake.go" {
-		t.Fatalf("daemonaddr.InstanceAddress is called from %v, want only instanceAddress in sharedtake.go", sites)
-	}
-}
-
 func TestServingElsewhereFollowsTheServingRow(t *testing.T) {
 	// Arrange: a state root where instance "elder" lives and records its address.
 	addrPath := filepath.Join(t.TempDir(), "daemon.addr")
@@ -426,35 +409,6 @@ func TestServingElsewhereFollowsTheServingRow(t *testing.T) {
 				t.Fatalf("servingElsewhere = (%q, %v, %v), want (%q, %v)", got, ok, err, tc.want, tc.wantOK)
 			}
 		})
-	}
-}
-
-// TestTheDaemonsHolderTakeIsSocketholdsTimedTake pins the one bounded, timed holder take: the daemon calls
-// sockethold.TakeTimed and keeps no take bound of its own.
-func TestTheDaemonsHolderTakeIsSocketholdsTimedTake(t *testing.T) {
-	// Arrange
-	calls, ownBound := 0, ""
-
-	// Act
-	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, f *ast.File) {
-		ast.Inspect(f, func(n ast.Node) bool {
-			if v, ok := n.(*ast.ValueSpec); ok {
-				for _, id := range v.Names {
-					if strings.Contains(id.Name, "TakeBound") || strings.Contains(id.Name, "takeBound") {
-						ownBound = fset.Position(id.Pos()).String()
-					}
-				}
-			}
-			if sourcescan.IsSelector(n, "sockethold", "TakeTimed") {
-				calls++
-			}
-			return true
-		})
-	})
-
-	// Assert
-	if ownBound != "" || calls != 1 {
-		t.Fatalf("own take bound at %q, %d sockethold.TakeTimed calls; want none of its own and exactly one call", ownBound, calls)
 	}
 }
 

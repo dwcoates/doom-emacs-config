@@ -3,11 +3,9 @@ package wsm
 import (
 	"context"
 	"errors"
-	"regexp"
 	"testing"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 	"agentrepl/logging/logsite"
 )
 
@@ -270,27 +268,6 @@ func TestRequireInstance(t *testing.T) {
 				t.Fatalf("logged at error = %v, want %v: %v", got, tt.wantErr, log.Records())
 			}
 		})
-	}
-}
-
-// TestServingWritesRefuseAnEmptyInstanceThroughRequireInstance keeps every
-// serving write's empty-instance refusal on the one helper: an inline check is
-// a second spelling of the refusal to drift.
-func TestServingWritesRefuseAnEmptyInstanceThroughRequireInstance(t *testing.T) {
-	// Arrange
-	inline := regexp.MustCompile(`== ""\s*\{\s*err := errors\.New\("wsm: empty daemon instance id"\)`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if inline.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v refuse an empty instance inline; use requireInstance", offenders)
 	}
 }
 

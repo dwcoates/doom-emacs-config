@@ -793,6 +793,10 @@ type Deps struct {
 	// is appended. WORKSPACE is the requesting workspace's name, which the
 	// run names itself by in the RAM disk seat it holds.
 	TestCommand func(tree, script, workspace string) []string
+	// RuleSuites answers the repository's rule suites, by roster name
+	// (roster.RuleSuites): what an agent's merge runs on its branch before it
+	// is admitted (rulecheck.go). None means no rule check runs.
+	RuleSuites func() []string
 	// TestMetricsRoot is the metrics root every gate's test runner pushes its
 	// tests' times under (gateArgv); empty when the daemon records no metrics.
 	TestMetricsRoot string

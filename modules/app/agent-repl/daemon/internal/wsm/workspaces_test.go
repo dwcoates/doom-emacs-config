@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -14,7 +13,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
-	"agent-repld/internal/sourcescan"
 )
 
 func TestNormalizeDirCollapsesEverySpelling(t *testing.T) {
@@ -1979,24 +1977,6 @@ func TestTouchedRow(t *testing.T) {
 	}
 }
 
-// TestEveryTouchedQuestionAsksTouchedRow pins that no store write hand-rolls
-// "did it touch a row" off RowsAffected: a count compared with zero is
-// touchedRow's one question.
-func TestEveryTouchedQuestionAsksTouchedRow(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`n, err :?= res\.RowsAffected\(\)(?s:.{0,200}?)\bn (>|==|!=) 0\b`)
-
-	for _, file := range sourcescan.Production(t) {
-		// Act
-		src := strings.Replace(string(file.Source), "func touchedRow(res sql.Result) (bool, error) {\n\tn, err := res.RowsAffected()\n\treturn n > 0, err", "", 1)
-
-		// Assert
-		if loc := handRolled.FindStringIndex(src); loc != nil {
-			t.Errorf("%s hand-rolls touchedRow: %q", file.Name, src[loc[0]:loc[1]])
-		}
-	}
-}
-
 // THE MERGE TURN START is derived on read: the newest start of the
 // workspace's own turns at or before its own merge-queue entry was enqueued.
 func TestTheWorkspaceReadAnswersTheStartOfTheTurnThatAskedForItsMerge(t *testing.T) {
@@ -2246,16 +2226,6 @@ func TestHideColumns(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestHideColumnsAreTheOneHideShape(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, `name: "backlogged_at"`)
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "workspaces.go" {
-		t.Fatalf("the backlogged instant is written at %v, want only hideColumns in workspaces.go", sites)
 	}
 }
 
@@ -2573,16 +2543,6 @@ func TestOptionalWorkspaceID(t *testing.T) {
 				t.Fatalf("got %v, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestOptionalWorkspaceIDIsTheOneOptionalIDRead(t *testing.T) {
-	// Act
-	sites := sourcescan.SitesMatching(t, regexp.MustCompile(`var id WorkspaceID\s+err :=[^\n]*QueryRowContext`))
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "workspaces.go" {
-		t.Fatalf("a lone workspace id that may be absent is read at %v, want only optionalWorkspaceID in workspaces.go", sites)
 	}
 }
 

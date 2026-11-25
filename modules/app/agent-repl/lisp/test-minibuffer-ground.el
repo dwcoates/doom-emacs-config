@@ -11,11 +11,6 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-(defconst agent-repl-test-minibuffer-ground--source
-  (expand-file-name "minibuffer-ground.el"
-                    (file-name-directory (or load-file-name buffer-file-name)))
-  "The module's source, for the scan below.")
-
 (defmacro agent-repl-test-minibuffer-ground--with-buffer (&rest body)
   "Run BODY in a fresh buffer, `logs' collecting every canonical log line."
   (declare (indent 0))
@@ -157,16 +152,6 @@
       (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
         (let ((agent-repl-input-background original))
           (agent-repl-minibuffer-ground-paint-all))))))
-
-(ert-deftest agent-repl-test-minibuffer-ground-names-no-color-of-its-own ()
-  "The module writes no hex color: it wears `agent-repl-input-background'."
-  (with-temp-buffer
-    ;; Arrange
-    (insert-file-contents agent-repl-test-minibuffer-ground--source)
-    ;; Act
-    (let ((literal (re-search-forward "#[0-9a-fA-F]\\{6\\}" nil t)))
-      ;; Assert
-      (should-not literal))))
 
 (provide 'test-minibuffer-ground)
 ;;; test-minibuffer-ground.el ends here

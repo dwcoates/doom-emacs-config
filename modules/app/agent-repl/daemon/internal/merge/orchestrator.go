@@ -525,6 +525,7 @@ func (d Deps) validate() error {
 	check(d.HookRunner != nil, "HookRunner")
 	check(d.Builtins.CheckoutRoot != "", "Builtins.CheckoutRoot")
 	check(d.TestCommand != nil, "TestCommand")
+	check(d.RuleSuites != nil, "RuleSuites")
 	if len(missing) > 0 {
 		return fmt.Errorf("merge: the orchestrator is missing %v", missing)
 	}

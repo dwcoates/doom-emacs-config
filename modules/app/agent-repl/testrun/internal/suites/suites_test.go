@@ -342,6 +342,77 @@ func TestERTRoster(t *testing.T) {
 	}
 }
 
+func TestERTFiles(t *testing.T) {
+	aggregator := `(load (expand-file-name "test-helpers.el" dir) nil t)
+(load (expand-file-name "test-b.el" dir) nil t)
+(load (expand-file-name "test-a.el" dir) nil t)`
+	tests := []struct {
+		name       string
+		suite      roster.Suite
+		aggregator string
+		files      []string
+		wantRoster []string
+		wantItems  []string
+		wantErr    string
+	}{
+		{
+			name:       "an aggregated suite runs its whole roster, the helpers included",
+			suite:      roster.Suite{Name: "ert", Kind: roster.ERT, Path: "lisp"},
+			aggregator: aggregator,
+			files:      []string{"test-rules-x.el"},
+			wantRoster: []string{"test-helpers.el", "test-b.el", "test-a.el"},
+			wantItems:  []string{"test-helpers.el", "test-b.el", "test-a.el"},
+		},
+		{
+			name:       "a globbed suite runs its matches in name order beside the helpers",
+			suite:      roster.Suite{Name: "ert-rules", Kind: roster.ERT, Path: "lisp", ERTFiles: "test-rules-*.el"},
+			aggregator: aggregator,
+			files:      []string{"test-rules-z.el", "test-rules-a.el", "test-a.el"},
+			wantRoster: []string{"test-helpers.el", "test-rules-a.el", "test-rules-z.el"},
+			wantItems:  []string{"test-rules-a.el", "test-rules-z.el"},
+		},
+		{
+			name:    "a glob matching nothing is refused",
+			suite:   roster.Suite{Name: "ert-rules", Kind: roster.ERT, Path: "lisp", ERTFiles: "test-rules-*.el"},
+			files:   []string{"test-a.el"},
+			wantErr: "match nothing",
+		},
+		{
+			name:  "an aggregator loading a file another suite's glob runs is refused",
+			suite: roster.Suite{Name: "ert", Kind: roster.ERT, Path: "lisp"},
+			aggregator: `(load (expand-file-name "test-helpers.el" dir) nil t)
+(load (expand-file-name "test-rules-x.el" dir) nil t)`,
+			wantErr: "which the ert-rules suite runs",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			if tt.aggregator != "" {
+				write(t, filepath.Join(dir, ertAggregator), tt.aggregator, 0o644)
+			}
+			for _, f := range tt.files {
+				write(t, filepath.Join(dir, f), "", 0o644)
+			}
+
+			// Act
+			gotRoster, gotItems, err := ERTFiles(dir, tt.suite)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(gotRoster, tt.wantRoster) || !reflect.DeepEqual(gotItems, tt.wantItems) {
+				t.Fatalf("ERTFiles = %v, %v, %v; want %v, %v", gotRoster, gotItems, err, tt.wantRoster, tt.wantItems)
+			}
+		})
+	}
+}
+
 func TestERTRosterOfAMissingAggregatorFails(t *testing.T) {
 	// Act
 	_, err := ERTRoster(t.TempDir())
@@ -353,8 +424,9 @@ func TestERTRosterOfAMissingAggregatorFails(t *testing.T) {
 }
 
 func TestTheRealERTRosterMatchesEveryTestFile(t *testing.T) {
-	// Arrange: the aggregator must load every lisp/test-*.el that defines tests,
-	// or the chunk driver's own check fails the run; this pins it statically.
+	// Arrange: some ERT suite must run every lisp/test-*.el that defines
+	// tests (the aggregator's load list, or a suite's own glob), or the chunk
+	// driver's own check fails the run; this pins it statically.
 	lisp := filepath.Join("..", "..", "..", "lisp")
 	files, err := filepath.Glob(filepath.Join(lisp, "test-*.el"))
 	if err != nil {
@@ -362,16 +434,21 @@ func TestTheRealERTRosterMatchesEveryTestFile(t *testing.T) {
 	}
 
 	// Act
-	got, err := ERTRoster(lisp)
+	onRoster := map[string]bool{}
+	for _, s := range roster.Suites {
+		if s.Kind != roster.ERT {
+			continue
+		}
+		_, items, err := ERTFiles(lisp, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range items {
+			onRoster[f] = true
+		}
+	}
 
 	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	onRoster := map[string]bool{}
-	for _, f := range got {
-		onRoster[f] = true
-	}
 	deftest := regexp.MustCompile(`(?m)^\(ert-deftest `)
 	for _, f := range files {
 		data, err := os.ReadFile(f)
@@ -379,7 +456,7 @@ func TestTheRealERTRosterMatchesEveryTestFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		if deftest.Match(data) && !onRoster[filepath.Base(f)] {
-			t.Errorf("%s defines tests but lisp/test-agent-repl.el does not load it", filepath.Base(f))
+			t.Errorf("%s defines tests but lisp/test-agent-repl.el does not load it and no ERT suite's glob matches it", filepath.Base(f))
 		}
 	}
 }
@@ -1603,6 +1680,118 @@ func TestVitestBatchOfGroup(t *testing.T) {
 			// Assert
 			if (err != nil) != tt.wantErr || batch != tt.batch || config != tt.config {
 				t.Fatalf("VitestBatchOfGroup = %q %q %v, want %q %q error %v", batch, config, err, tt.batch, tt.config, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestVitestBatchOfGroupOfASuiteWithItsOwnConfig(t *testing.T) {
+	// Arrange
+	s := roster.Suite{Name: "webapp-rules", Kind: roster.Vitest, VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/"}
+
+	// Act
+	batch, config, err := VitestBatchOfGroup(s, "webapp-rules/pooled")
+
+	// Assert
+	if err != nil || batch != "pooled" || config != "vitest.rules.config.ts" {
+		t.Fatalf("VitestBatchOfGroup = %q %q %v, want %q %q", batch, config, err, "pooled", "vitest.rules.config.ts")
+	}
+}
+
+func TestVitestSuiteWithItsOwnConfig(t *testing.T) {
+	own := roster.Suite{Name: "webapp-rules", Kind: roster.Vitest, Path: "webapp", VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/"}
+	tests := []struct {
+		name     string
+		coverage bool
+	}{
+		{"an ordinary run", false},
+		{"a coverage run", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			l := Layout{Module: dir, Work: t.TempDir(), Self: "/testrun", Coverage: tt.coverage}
+
+			// Act
+			u, err := vitestUnitsForBatches(l, own, dir, soloBatches([]string{"rules/a.rules.test.ts"}))
+
+			// Assert: its files run under its config, uninstrumented, with
+			// none of the package's checks, which are the ordinary suite's.
+			if err != nil {
+				t.Fatal(err)
+			}
+			chunk := u.Splits[0].Chunk("webapp-rules#00", []string{"rules/a.rules.test.ts"})
+			argv := strings.Join(chunk.Argv, " ")
+			if !strings.HasPrefix(argv, "npx vitest run --config vitest.rules.config.ts --maxWorkers=1 ") || strings.Contains(argv, "--coverage") {
+				t.Fatalf("the chunk runs %q, want its own config, one worker, and no coverage", argv)
+			}
+			for _, e := range chunk.Env {
+				if e == CoverageLoadedOnlyEnv+"=1" {
+					t.Fatalf("the chunk's env %v asks for coverage", chunk.Env)
+				}
+			}
+			if len(u.Atomic) != 0 {
+				ids := make([]string, len(u.Atomic))
+				for i, a := range u.Atomic {
+					ids[i] = a.ID
+				}
+				t.Fatalf("the suite runs %v, want no typecheck, knip or coverage report of its own", ids)
+			}
+		})
+	}
+}
+
+func TestVitestOrdinarySuiteRunsUnderNoConfigFlag(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir()}
+
+	// Act
+	u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp", Kind: roster.Vitest}, dir, soloBatches([]string{"test/a.test.ts"}))
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := u.Splits[0].Chunk("webapp#00", []string{"test/a.test.ts"})
+	if slices.Contains(chunk.Argv, "--config") {
+		t.Fatalf("the ordinary suite's chunk runs %v, want its package's default config", chunk.Argv)
+	}
+}
+
+func TestCheckVitestOwnership(t *testing.T) {
+	own := roster.Suite{Name: "webapp-rules", Kind: roster.Vitest, Path: "webapp", VitestConfig: "vitest.rules.config.ts", VitestDir: "rules/"}
+	ordinary := roster.Suite{Name: "webapp", Kind: roster.Vitest, Path: "webapp"}
+	elsewhere := roster.Suite{Name: "shim", Kind: roster.Vitest, Path: "agent-shim/claude/shim"}
+	tests := []struct {
+		name  string
+		suite roster.Suite
+		files []string
+		want  string
+	}{
+		{"an own-config suite's files inside its directory", own, []string{"rules/a.rules.test.ts", "rules/feed/b.rules.test.ts"}, ""},
+		{"an own-config suite's file outside its directory", own, []string{"rules/a.rules.test.ts", "test/b.test.ts"},
+			"webapp-rules's vitest.rules.config.ts runs files outside its directory rules/: test/b.test.ts"},
+		{"the ordinary suite's files outside every own directory", ordinary, []string{"test/a.test.ts"}, ""},
+		{"the ordinary suite's file in the rule suite's directory", ordinary, []string{"test/a.test.ts", "rules/b.rules.test.ts"},
+			"webapp's vitest.config.ts runs files another suite owns: rules/b.rules.test.ts (webapp-rules's)"},
+		{"another package's file in a directory of the same name", elsewhere, []string{"rules/a.test.ts"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := checkVitestOwnership(tt.suite, tt.files)
+
+			// Assert
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
 	}

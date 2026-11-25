@@ -3,8 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -224,24 +222,5 @@ func TestThroughShimWithNoShimAsksNothing(t *testing.T) {
 	// Assert.
 	if asked || !errors.Is(err, feed.ErrNoHistorySource) {
 		t.Fatalf("asked = %t, err = %v; want no read and no source", asked, err)
-	}
-}
-
-func TestEveryFeedLookupThroughAShimSharesThroughShim(t *testing.T) {
-	// Arrange: the lookups the feed asks a workspace's shim for.
-	files := []string{"peerdelivery.go", "vendortask.go"}
-
-	// Act, Assert.
-	for _, name := range files {
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		if !strings.Contains(string(source), "return throughShim(f, ws,") {
-			t.Errorf("%s does not ask through throughShim", name)
-		}
-		if strings.Count(string(source), "f.Client(ws)") > 0 && name != "peerdelivery.go" {
-			t.Errorf("%s reaches the shim client by hand", name)
-		}
 	}
 }

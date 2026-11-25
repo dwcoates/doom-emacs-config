@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -22,7 +19,6 @@ import (
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwhy"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1291,20 +1287,6 @@ func TestGateLapsedAt(t *testing.T) {
 	}
 }
 
-func TestAGateIsDatedOnlyByGateLapsedAt(t *testing.T) {
-	// Arrange: a cache lifetime ADDED to an instant is a gate being dated; naming the
-	// lifetime's tier (telemetry's coldGateOutcome) dates nothing.
-	dating := regexp.MustCompile(`(\+=|\.Add\().*GetCacheTtlMs\(\)`)
-
-	// Act
-	sites := sourcescan.SitesMatching(t, dating)
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "keeper.go" {
-		t.Fatalf("a gate is dated by its cache lifetime at %v, want only GateLapsedAt in keeper.go", sites)
-	}
-}
-
 func TestGateLapsePanicsOnAGateOverNoContext(t *testing.T) {
 	// Arrange
 	cold := coldLapsed()
@@ -1485,18 +1467,6 @@ func TestRunStandsDownABackloggedWorkspaceWhoseSessionParkedAtItsGate(t *testing
 	}
 }
 
-// TestLapseWritesHaveOneHome fails when a source file in this package writes
-// a cache lapse other than through Keeper.store.
-func TestLapseWritesHaveOneHome(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, ".SetCacheLapse(ctx")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "keeper.go" {
-		t.Fatalf("a cache lapse is written at %v, want only Keeper.store in keeper.go", sites)
-	}
-}
-
 func TestReconcileOfAMergeWorkspace(t *testing.T) {
 	selected := mergeWorkspace()
 	selected.Current = true
@@ -1645,33 +1615,6 @@ func TestApplyQueuedAppliesEveryQueuedEdgeInOrder(t *testing.T) {
 	}
 	if !slices.Equal(edges, []string{"the workspace was closed or reopened", "a session came up"}) {
 		t.Fatalf("edges applied = %v, want the close then the session, in order", edges)
-	}
-}
-
-// TestQueuedEdgesAreAppliedOnlyThroughApplyQueued fails when a test of this
-// package hand-rolls the take-and-apply loop applyQueued owns.
-func TestQueuedEdgesAreAppliedOnlyThroughApplyQueued(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-
-	// Act
-	var sites []string
-	for _, name := range files {
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", name, err)
-		}
-		for range regexp.MustCompile(`range \w+\.keeper\.take\(\)`).FindAllIndex(source, -1) {
-			sites = append(sites, name)
-		}
-	}
-
-	// Assert
-	if !slices.Equal(sites, []string{"keeper_test.go"}) {
-		t.Fatalf("the take-and-apply loop is at %v, want only harness.applyQueued in keeper_test.go", sites)
 	}
 }
 

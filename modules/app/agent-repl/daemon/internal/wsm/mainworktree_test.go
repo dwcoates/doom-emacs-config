@@ -1,10 +1,6 @@
 package wsm
 
 import (
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -42,40 +38,5 @@ func TestMainWorkspaceName(t *testing.T) {
 	// Assert
 	if got != "main (doom)" {
 		t.Fatalf("MainWorkspaceName(%q) = %q, want %q", repository, got, "main (doom)")
-	}
-}
-
-// TestNoSiteHandRollsTheMainWorktreeRule pins that the registry and the
-// workspace verbs ask IsMainWorktree (or isMainWorkspace, its in-transaction
-// reading) rather than comparing a directory with a repository directory
-// themselves, in Go or in SQL.
-func TestNoSiteHandRollsTheMainWorktreeRule(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`(==|!=)\s*repoDir\b|\brepoDir\s*(==|!=)|\bdir\s*=\s*repositories\.dir\b`)
-	var offenders []string
-
-	// Act
-	for _, dir := range []string{".", filepath.Join("..", "workspace")} {
-		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
-		if err != nil {
-			t.Fatalf("glob %s: %v", dir, err)
-		}
-		for _, file := range files {
-			if strings.HasSuffix(file, "_test.go") || filepath.Base(file) == "mainworktree.go" {
-				continue
-			}
-			src, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("read %s: %v", file, err)
-			}
-			if handRolled.Match(src) {
-				offenders = append(offenders, file)
-			}
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("these files compare a directory with repoDir by hand; use IsMainWorktree: %v", offenders)
 	}
 }

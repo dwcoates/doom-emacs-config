@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"slices"
 	"sync"
 	"testing"
@@ -20,7 +17,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -594,93 +590,6 @@ func TestAStepAsideTakesTheEntryOutOfLineBeforeItCutsTheRun(t *testing.T) {
 	}
 }
 
-// TestEveryWriteThatMovesTheChainsEntriesHoldsTheLineLock covers the shape
-// every such write shares: it runs inside a lineWrite or leaveLine closure,
-// so no hand-rolled write moves the line under a decision that read it.
-func TestEveryWriteThatMovesTheChainsEntriesHoldsTheLineLock(t *testing.T) {
-	// Arrange: the writes that move a chain member's entry, and the files
-	// whose every call of them must hold the lock (nil: every file).
-	guarded := map[string][]string{
-		"StepAsideMerge":        nil,
-		"ReturnRemediatedMerge": nil,
-		"RemoveMergeQueueEntry": {"terminal.go"},
-	}
-	fset := token.NewFileSet()
-	seen := map[string]int{}
-	for _, source := range sourcescan.Production(t) {
-		file := source.Name
-		parsed, err := parser.ParseFile(fset, file, source.Source, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", file, err)
-		}
-
-		// Act: walk every call, tracking the lock closures it stands in.
-		var stack []ast.Node
-		ast.Inspect(parsed, func(n ast.Node) bool {
-			if n == nil {
-				stack = stack[:len(stack)-1]
-				return true
-			}
-			stack = append(stack, n)
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			only, guardedCall := guarded[sel.Sel.Name]
-			if !guardedCall || only != nil && !slices.Contains(only, file) || forwards(stack, sel.Sel.Name) {
-				return true
-			}
-			seen[sel.Sel.Name]++
-
-			// Assert
-			if !underLineLock(stack) {
-				t.Errorf("%s: %s is called outside a lineWrite or leaveLine closure", fset.Position(call.Pos()), sel.Sel.Name)
-			}
-			return true
-		})
-	}
-	for name := range guarded {
-		if seen[name] == 0 {
-			t.Errorf("no call of %s was found; the guarded set is stale", name)
-		}
-	}
-}
-
-// forwards reports whether the innermost node of STACK stands in a method
-// named NAME: a store decorator (rosterQueueDB, queueEventsDB) handing the
-// write on to the store it wraps, which its caller's lock already covers.
-func forwards(stack []ast.Node, name string) bool {
-	for _, n := range stack {
-		if decl, ok := n.(*ast.FuncDecl); ok {
-			return decl.Recv != nil && decl.Name.Name == name
-		}
-	}
-	return false
-}
-
-// underLineLock reports whether the innermost node of STACK stands inside a
-// function literal passed to lineWrite or leaveLine.
-func underLineLock(stack []ast.Node) bool {
-	for i := len(stack) - 2; i > 0; i-- {
-		lit, ok := stack[i].(*ast.FuncLit)
-		if !ok {
-			continue
-		}
-		call, ok := stack[i-1].(*ast.CallExpr)
-		if !ok || !slices.Contains(call.Args, ast.Expr(lit)) {
-			continue
-		}
-		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "lineWrite" || sel.Sel.Name == "leaveLine") {
-			return true
-		}
-	}
-	return false
-}
-
 // ---- Conflict step aside (owner request, 2026-11-03) ----
 
 // keepMergeTurns records every merge prompt's turn as the session's, so a
@@ -1122,56 +1031,6 @@ func TestATakeBackOfARemediatingMergeWhoseRecordWaitsOnNoTurnIsRefused(t *testin
 	h.o.mu.Unlock()
 	if armed {
 		t.Fatal("a refused take-back armed a wait")
-	}
-}
-
-// TestEveryStepAsideGoesThroughHandOff covers the one path both triggers
-// share: stepAside is reached only through handOff, and handOff is called for
-// every reason there is.
-func TestEveryStepAsideGoesThroughHandOff(t *testing.T) {
-	// Arrange
-	fset := token.NewFileSet()
-	reasons := map[string]int{}
-	for _, source := range sourcescan.Production(t) {
-		parsed, err := parser.ParseFile(fset, source.Name, source.Source, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", source.Name, err)
-		}
-
-		// Act
-		var enclosing string
-		ast.Inspect(parsed, func(n ast.Node) bool {
-			if decl, ok := n.(*ast.FuncDecl); ok {
-				enclosing = decl.Name.Name
-			}
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			switch sel.Sel.Name {
-			case "stepAside":
-				// Assert
-				if enclosing != "handOff" {
-					t.Errorf("%s: stepAside is called from %s, not through handOff", fset.Position(call.Pos()), enclosing)
-				}
-			case "handOff":
-				if len(call.Args) >= 2 {
-					if id, ok := call.Args[1].(*ast.Ident); ok {
-						reasons[id.Name]++
-					}
-				}
-			}
-			return true
-		})
-	}
-	for _, why := range []string{"AsideForTests", "AsideForConflicts"} {
-		if reasons[why] == 0 {
-			t.Errorf("no step asks handOff to step aside for %s", why)
-		}
 	}
 }
 

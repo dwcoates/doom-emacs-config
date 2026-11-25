@@ -1,8 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { TailFollow, type ReaderInput, type SubscribeInput } from "../src/scroll.js";
-import { filesUnder } from "./files-under.js";
 import { tailTriggers } from "./tail-triggers.js";
 
 /** A tail owner whose three subscriptions are recorded as they fire. */
@@ -32,15 +29,5 @@ describe("tailTriggers", () => {
     act(triggers);
     // Assert
     expect(r.fired).toEqual(expected);
-  });
-
-  it("is the only test code that subscribes a tail owner by hand", () => {
-    // Arrange
-    const self = fileURLToPath(import.meta.url);
-    const files = filesUnder(fileURLToPath(new URL(".", import.meta.url)), [".test.ts"]).filter((f) => f !== self);
-    // Act
-    const offenders = files.filter((f) => /\btail\.observe\(/.test(readFileSync(f, "utf8")));
-    // Assert
-    expect(offenders).toEqual([]);
   });
 });

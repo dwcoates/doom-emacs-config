@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
 import { type Control } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
@@ -38,8 +36,6 @@ import { createTicker } from "../../src/clock.js";
 import { stoppedClock } from "./cards/tool-card-head-shape.js";
 import { tick } from "../../src/feed/ticking.js";
 import { orderFor } from "../feed-order.js";
-import { filesUnder } from "../files-under.js";
-import renderersSource from "../../src/feed/renderers.ts?raw";
 import { plainProse } from "../prose.js";
 
 beforeEach(() => {
@@ -313,11 +309,6 @@ describe("drawPlaced", () => {
     const row = create(FeedRowSchema, { order: orderFor("x") });
     drawPlaced(row, viewOf([]), placed);
     expect(placed.size).toBe(0);
-  });
-
-  it("is the arranger's only way to draw a row", () => {
-    const draws = renderersSource.match(/view\.drawRow\(/g) ?? [];
-    expect(draws).toHaveLength(1);
   });
 });
 
@@ -774,19 +765,5 @@ describe("defaultBubbleBody", () => {
     const shown = mount.querySelector('.feed-group-panel [data-feed-row="a"]') as HTMLElement;
     const newest = mount.querySelector('.feed-group-panel [data-feed-row="c"]') as HTMLElement;
     expect([shown.hidden, newest.hidden]).toEqual([false, true]);
-  });
-});
-
-describe("the row context", () => {
-  it("is declared once, in cards/context.ts, and only re-exported elsewhere", () => {
-    // Arrange: every webapp source.
-    const root = join(process.cwd(), "src");
-    const sources = filesUnder(root);
-    // Act
-    const declaring = sources
-      .filter((path) => /\binterface RowContext\b/.test(readFileSync(path, "utf8")))
-      .map((path) => relative(root, path));
-    // Assert
-    expect(declaring).toEqual(["feed/cards/context.ts"]);
   });
 });

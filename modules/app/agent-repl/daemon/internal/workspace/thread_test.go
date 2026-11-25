@@ -280,23 +280,6 @@ func TestCreateThreadAdmitsTheThreadAsEveryWorkspaceIs(t *testing.T) {
 	}
 }
 
-func TestEveryRegistrationAdmitsThroughAdmit(t *testing.T) {
-	// Arrange / Act: the one admission, and every site that admits a row.
-	sites := 0
-	for _, file := range []string{"register.go", "thread.go"} {
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sites += strings.Count(string(src), "v.admit(ctx, log, record, ")
-	}
-
-	// Assert
-	if sites != 2 {
-		t.Fatalf("admit is called at %d sites, want registerRow's and CreateThread's", sites)
-	}
-}
-
 func TestCreateThreadRefusals(t *testing.T) {
 	cases := []struct {
 		name     string

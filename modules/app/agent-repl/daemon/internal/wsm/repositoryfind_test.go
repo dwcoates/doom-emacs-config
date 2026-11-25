@@ -1,11 +1,6 @@
 package wsm
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -104,77 +99,5 @@ func TestLookupsOverAnEmptyRegistryFindNothing(t *testing.T) {
 	// Assert.
 	if byID || byDir || byRef {
 		t.Fatalf("found by id = %v, by dir = %v, by ref = %v, want nothing in an empty registry", byID, byDir, byRef)
-	}
-}
-
-// handRolledLookup matches a loop over a repository list (named `repos` or
-// `repositories`, as every site names ListRepositories' answer) whose body
-// opens by comparing each repository's ID or Dir, for a match or (behind an
-// optional "is this criterion set" guard) a skip: the shape RepositoryWithID,
-// RepositoryAt and RepositoryNamed replaced at every site.
-var handRolledLookup = regexp.MustCompile(`for _, (\w+) := range (?:repos|repositories) \{\s*if (?:[\w.]+ != "" && )?(?:string\()?(\w+)\.(?:ID|Dir)\)? [!=]= `)
-
-// lookupHome is the one file allowed the loop: the lookups themselves.
-const lookupHome = "repositoryfind.go"
-
-// TestTheLookupShapeIsDetected keeps the scan below honest: it must match the
-// very shape it forbids, or it passes vacuously.
-func TestTheLookupShapeIsDetected(t *testing.T) {
-	// Arrange.
-	for _, sample := range []string{
-		"for _, repository := range repositories {\n\t\tif repository.ID == repo {",
-		"for _, repo := range repos {\n\t\tif scope.ID != \"\" && repo.ID != scope.ID {",
-	} {
-		// Act.
-		match := handRolledLookup.FindStringSubmatch(sample)
-
-		// Assert.
-		if match == nil || match[1] != match[2] {
-			t.Fatalf("the scan does not recognize a hand-rolled repository lookup: %q", sample)
-		}
-	}
-}
-
-// TestNoProductionCodeHandRollsARepositoryLookup pins that every site that
-// finds a repository in a listed registry goes through RepositoryWithID or
-// RepositoryAt, so a new site that loops by hand fails here instead of
-// drifting from the shared lookup.
-func TestNoProductionCodeHandRollsARepositoryLookup(t *testing.T) {
-	// Arrange: the daemon's module root, two directories up.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the module root: %v", err)
-	}
-
-	// Act.
-	var offenders []string
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		if path == filepath.Join(root, "internal", "wsm", lookupHome) {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, match := range handRolledLookup.FindAllStringSubmatch(string(data), -1) {
-			if match[1] == match[2] {
-				offenders = append(offenders, path)
-			}
-		}
-		return nil
-	})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("hand-rolled repository lookups in %v; use wsm.RepositoryWithID or wsm.RepositoryAt", offenders)
 	}
 }

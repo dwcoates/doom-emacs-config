@@ -3,13 +3,8 @@ package wsm
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -1791,54 +1786,6 @@ func TestTurnFactsSurfacesAFailedReadUnderItsOperation(t *testing.T) {
 	}
 	if !loggedAt(logs, "daemon.wsm.test_facts") {
 		t.Fatal("the failed read was not recorded under its operation")
-	}
-}
-
-// THE PER-TURN REPLAY READS SHARE ONE BODY: each is a turnFacts call and
-// scans no turn of its own, so a hand-rolled read that drifts from it fails
-// here.
-func TestThePerTurnReadsAreTurnFactsCalls(t *testing.T) {
-	// Arrange
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
-	if err != nil {
-		t.Fatalf("parse the package: %v", err)
-	}
-	want := map[string]bool{"TurnAddresses": false, "TurnMirrors": false, "TurnSenders": false}
-
-	// Act
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Recv == nil {
-					continue
-				}
-				if _, named := want[fn.Name.Name]; !named {
-					continue
-				}
-				calls := map[string]bool{}
-				ast.Inspect(fn.Body, func(n ast.Node) bool {
-					if call, ok := n.(*ast.CallExpr); ok {
-						if id, ok := call.Fun.(*ast.Ident); ok {
-							calls[id.Name] = true
-						}
-					}
-					return true
-				})
-				if !calls["turnFacts"] || calls["scanTurn"] {
-					t.Errorf("%s does not read through turnFacts alone (calls %v)", fn.Name.Name, calls)
-				}
-				want[fn.Name.Name] = true
-			}
-		}
-	}
-
-	// Assert
-	for name, found := range want {
-		if !found {
-			t.Errorf("%s was not found in the package", name)
-		}
 	}
 }
 

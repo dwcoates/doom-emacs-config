@@ -1,10 +1,5 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { plainProse, servedProse, treeProse } from "./prose.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("plainProse", () => {
   it.each([
@@ -61,17 +56,5 @@ describe("servedProse", () => {
   it("serves text with no tree as one plain block", () => {
     // Act + Assert
     expect(servedProse("hello")).toEqual(plainProse("hello"));
-  });
-
-  it("is the one helper every fixture builder that takes either kind uses", () => {
-    // Arrange — a builder handing a text variable to plainProse would refuse a
-    // tree only when one is passed, so no builder does.
-    const builders = ["feed/harness.ts", "integration/fixtures.ts"];
-    // Act
-    const handRolled = builders.filter((file) =>
-      /plainProse\([a-z][A-Za-z]*\)/.test(readFileSync(path.join(here, file), "utf8")),
-    );
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });

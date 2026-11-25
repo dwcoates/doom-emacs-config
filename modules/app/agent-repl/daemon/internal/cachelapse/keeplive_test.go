@@ -3,8 +3,6 @@ package cachelapse
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/token"
 	"slices"
 	"testing"
 	"time"
@@ -15,7 +13,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
-	"agent-repld/internal/sourcescan"
 )
 
 // keepLiveHarness is a visible workspace whose cache was warmed ten minutes
@@ -415,50 +412,6 @@ func TestAKeepLiveEndsWithTheBeatTimedFromTheClockAgain(t *testing.T) {
 	if due := h.keeper.beats[theWorkspace]; !due.Equal(now.Add(KeepaliveInterval)) {
 		t.Fatalf("next beat = %v, want an interval after the keep-alive", due)
 	}
-}
-
-// TestTheVerbAndTheScheduledBeatShareOneSubroutine fails when the keep-live
-// verb or the scheduled beat reaches the shim's keep-alive other than through
-// sendBeat, so the two can never drift apart.
-func TestTheVerbAndTheScheduledBeatShareOneSubroutine(t *testing.T) {
-	// Arrange
-	callers := map[string][]string{}
-	sourcescan.EachSourceIn(t, ".", false, func(_ *token.FileSet, f *ast.File) {
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				if call, ok := n.(*ast.CallExpr); ok {
-					if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-						callers[sel.Sel.Name] = append(callers[sel.Sel.Name], fn.Name.Name)
-					}
-				}
-				return true
-			})
-		}
-	})
-
-	// Assert
-	if got, want := callers["sendBeat"], []string{"beginKeepLive", "beatsDue"}; !sameSet(got, want) {
-		t.Fatalf("sendBeat is called from %v, want only %v", got, want)
-	}
-	// SendBackloggedKeepalives' beat (`SPC j R`) keeps its cadence held and owns
-	// no stand-down, so it is the one other caller of the shim's keep-alive.
-	if got, want := callers["Beat"], []string{"sendBeat", "beat"}; !sameSet(got, want) {
-		t.Fatalf("the shim's keep-alive is asked from %v, want only %v", got, want)
-	}
-	if got, want := callers["settleAnswer"], []string{"answered", "answeredFailed", "answersDue"}; !sameSet(got, want) {
-		t.Fatalf("the answer is settled from %v, want only %v", got, want)
-	}
-}
-
-func sameSet(got, want []string) bool {
-	got, want = slices.Clone(got), slices.Clone(want)
-	slices.Sort(got)
-	slices.Sort(want)
-	return slices.Equal(got, want)
 }
 
 func TestAKeepLiveCallThatEndsFirstAbandonsTheWaitNotTheRun(t *testing.T) {

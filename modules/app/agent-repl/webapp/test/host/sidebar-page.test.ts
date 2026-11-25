@@ -20,7 +20,6 @@ import { captureLogRecords } from "../log-capture.js";
 import { quietWebhostRuntime } from "./webhost-runtime.js";
 import type { WebhostRuntime } from "../../src/host/document.js";
 import { beginPage, tearDownPage } from "../../src/page-teardown.js";
-import { levelApplyShapeOf } from "./level-apply-shape.js";
 
 const log = createLogger("webapp.test.host.sidebar-page");
 
@@ -339,14 +338,6 @@ describe("setLogLevel", () => {
 
     // Assert
     expect(outcome(answer)).toBe("refused");
-  });
-
-  it("applies the level through the level window, never by hand", () => {
-    // Act
-    const shape = levelApplyShapeOf("host/sidebar-page.ts");
-
-    // Assert
-    expect(shape).toEqual({ applies: true, handRolls: false });
   });
 });
 

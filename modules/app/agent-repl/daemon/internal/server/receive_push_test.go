@@ -3,10 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -89,52 +85,4 @@ func TestReceivePushFailsNamingWhatItWaitedFor(t *testing.T) {
 	if got != nil || len(rec.fatals) != 1 || !strings.Contains(rec.fatals[0], "before a never-sent push arrived") {
 		t.Fatalf("answer = %v, fatals = %q; want nil and one failure naming the push", got, rec.fatals)
 	}
-}
-
-// TestEveryStreamReaderIsAPickOverReceivePush pins that no receive* test
-// reader loops over a stream by hand: each one hands receivePush its pick, so
-// the skip-until-found loop and its failure message exist once.
-func TestEveryStreamReaderIsAPickOverReceivePush(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	fset := token.NewFileSet()
-	var handRolled []string
-
-	// Act
-	for _, name := range files {
-		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "receive") || fn.Name.Name == "receivePush" {
-				continue
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				if loop, ok := n.(*ast.ForStmt); ok && callsReceive(loop.Cond) {
-					handRolled = append(handRolled, fmt.Sprintf("%s:%s", name, fn.Name.Name))
-				}
-				return true
-			})
-		}
-	}
-
-	// Assert
-	if len(handRolled) != 0 {
-		t.Fatalf("readers looping over a stream by hand: %v; hand receivePush a pick instead", handRolled)
-	}
-}
-
-// callsReceive reports whether EXPR is a `<x>.Receive()` call.
-func callsReceive(expr ast.Expr) bool {
-	call, ok := expr.(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	return ok && sel.Sel.Name == "Receive"
 }

@@ -22,7 +22,6 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/recordlock"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"agent-repld/internal/wsm"
 )
@@ -849,33 +848,6 @@ func TestSweepFailed(t *testing.T) {
 				t.Fatalf("record = %+v, want %s %q with the cause and fields", r, tc.wantLevel, tc.wantMsg)
 			}
 		})
-	}
-}
-
-// TestSweepSitesShareSweepFailed fails a sweep step that records its failure
-// by hand instead of through sweepFailed, which is what keeps a stand-down
-// from reading as a failure.
-func TestSweepSitesShareSweepFailed(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("mergeworkspace.go")
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	text := string(src)
-	start := strings.Index(text, "func (s *Service) Sweep(")
-	end := strings.Index(text, "func (s *Service) inAnyQueue(")
-	if start < 0 || end < start {
-		t.Fatal("the sweep's functions were not found")
-	}
-	sweep := text[start:end]
-
-	// Act
-	byHand := strings.Count(sweep, "log.Error(op") + strings.Count(sweep, "log.Warn(op")
-	shared := strings.Count(sweep, "sweepFailed(")
-
-	// Assert
-	if byHand != 0 || shared == 0 {
-		t.Fatalf("the sweep records %d failures by hand and %d through sweepFailed", byHand, shared)
 	}
 }
 
@@ -1713,19 +1685,6 @@ func TestAHandBackCutShortByAStandDownSaysSoAtInfo(t *testing.T) {
 	}
 	if _, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-handback"); !ok {
 		t.Fatalf("records = %+v, want the cut-short handback at INFO", f.logs.Records())
-	}
-}
-
-// TestTheCompactionIsSpelledOnlyBySessionCommand pins that the merge
-// workspace service spells no /compact by hand: sessioncommand.Literal reads
-// it off the schema.
-func TestTheCompactionIsSpelledOnlyBySessionCommand(t *testing.T) {
-	// Act
-	n := sourcescan.Count(t, `"/compact"`)
-
-	// Assert
-	if n != 0 {
-		t.Errorf("the service's sources spell /compact by hand %d times", n)
 	}
 }
 

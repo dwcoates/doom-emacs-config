@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"agent-repld/internal/mdinline/mdinlinetest"
 	"agent-repld/internal/usersetup"
 )
 
@@ -204,14 +203,4 @@ func TestPullURL(t *testing.T) {
 	if want := "https://github.com/ChessCom/explanation-engine/pull/7"; got != want {
 		t.Fatalf("PullURL = %q, want %q", got, want)
 	}
-}
-
-// Linkify walks prose through the one shared walk (mdinline.RewriteProse).
-func TestLinkifyRewritesThroughTheSharedWalk(t *testing.T) {
-	mdinlinetest.AssertRewriteShape(t, "pullrefs.go", "Linkify")
-}
-
-// Every link the rewrite adds is written through mdinline.WriteLink.
-func TestLinksAreWrittenThroughWriteLink(t *testing.T) {
-	mdinlinetest.AssertNoHandWrittenLinks(t, "pullrefs.go")
 }

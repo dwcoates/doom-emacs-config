@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import { createControl, type Control } from "../../src/control.js";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
@@ -81,8 +79,6 @@ import {
   runVerb,
 } from "../../src/sidebar/verbs.js";
 import { oneofArms } from "../arms.js";
-import { codeOf } from "../source-text.js";
-import { filesUnder } from "../files-under.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 const TARGET_WS = create(WorkspaceRefSchema, { id: "ws-7", dir: "/w/seven" });
@@ -179,7 +175,6 @@ describe("the requests each verb is", () => {
     const request = buildSetWorkspaceBackloggedRequest(TARGET_WS, backlogged);
     expect([request.workspace, request.visibility.case]).toEqual([TARGET_WS, arm]);
   });
-
 });
 
 describe("the menu", () => {
@@ -226,7 +221,6 @@ describe("the menu", () => {
     );
     expect(levels).toEqual(["p05", "p1", "p2", "p3", "clear"]);
   });
-
 });
 
 describe("the two destructive verbs", () => {
@@ -887,7 +881,6 @@ describe("the per-rpc causes, worded at their own site", () => {
     const refusal = await refuseWith(verbNamed("FinishWorkspace"), "mergeOffQueue");
     expect(refusal?.textContent).toContain("requeue or discard it in the merge queue");
   });
-
 });
 
 describe("a refusal", () => {
@@ -1151,77 +1144,6 @@ describe("the in-flight lockout", () => {
     const record = await forwardedRecord(capture, "sidebar.verbs.refused");
     expect([record.level.case, record.context?.rpc]).toEqual(["warn", "SelectInEditor"]);
   });
-
-  // EVERY SELECT GOES THROUGH runSelectVerb: a select spelled through runVerb
-  // would lock its line out again, the stale lockout this pins against.
-  it("is skipped by every select the sidebar spells", () => {
-    // Arrange
-    const dir = join(__dirname, "..", "..", "src", "sidebar");
-    const spellers: string[] = [];
-
-    // Act
-    for (const name of readdirSync(dir).filter((file) => file.endsWith(".ts"))) {
-      const code = codeOf(readFileSync(join(dir, name), "utf8"));
-      for (const match of code.matchAll(/rpc: "Select(?:InEditor|Workspace)"/g)) {
-        const before = code.slice(0, match.index);
-        const opener = [...before.matchAll(/\b(runVerb|runSelectVerb|fireVerb|sendHeld)\(/g)].at(-1)?.[1];
-        spellers.push(`${name}:${opener ?? "none"}`);
-      }
-    }
-
-    // Assert
-    expect(spellers.filter((speller) => !speller.endsWith(":runSelectVerb"))).toEqual([]);
-  });
-
-  // THE MERGE QUEUE SELECTS THROUGH THE ROW'S SELECT (`selectWorkspace`), so
-  // the rail's one select is spelled once, in row.ts.
-  it("is spelled once in the sidebar, by the row", () => {
-    const dir = join(__dirname, "..", "..", "src", "sidebar");
-    const spelled = readdirSync(dir)
-      .filter((file) => file.endsWith(".ts"))
-      .filter((name) => /rpc: "Select(?:InEditor|Workspace)"/.test(codeOf(readFileSync(join(dir, name), "utf8"))));
-    expect(spelled).toEqual(["row.ts"]);
-  });
-});
-
-/** Every webapp source file under DIR, recursively, as paths relative to DIR. */
-function sourcesUnder(dir: string): string[] {
-  return filesUnder(dir).map((file) => relative(dir, file));
-}
-
-// SELECTING IS ONE ACT (AGENTS.md "Selecting a workspace is one act"): every
-// selection a page makes is the editor's own switch, relayed by SelectInEditor.
-// A page that sent SelectWorkspace left the frame to follow the roster later,
-// and the rail drew the workspace selected while Emacs showed another
-// (a merge queue entry's click, 2026-11-11).
-describe("a page's selection", () => {
-  const src = join(__dirname, "..", "..", "src");
-
-  it("is never a SelectWorkspace", () => {
-    const senders = sourcesUnder(src).filter((name) => {
-      const code = codeOf(readFileSync(join(src, name), "utf8"));
-      return /\.selectWorkspace\(|"SelectWorkspace"/.test(code);
-    });
-    expect(senders).toEqual([]);
-  });
-
-  it("is built by the one SelectInEditor request builder", () => {
-    const builders = sourcesUnder(src).filter((name) =>
-      /SelectInEditorRequestSchema\b/.test(codeOf(readFileSync(join(src, name), "utf8"))),
-    );
-    expect(builders).toEqual(["sidebar/verbs.ts"]);
-  });
-
-  it("is found by the scan in each place a page selects", () => {
-    const callers = sourcesUnder(src).filter((name) =>
-      /buildSelectInEditorRequest\(/.test(codeOf(readFileSync(join(src, name), "utf8"))),
-    );
-    expect(callers.filter((name) => name !== "sidebar/verbs.ts").sort()).toEqual([
-      "feed/merge/jump.ts",
-      "sidebar/row.ts",
-      "sidebar/threads.ts",
-    ]);
-  });
 });
 
 describe("a response with no outcome arm", () => {
@@ -1415,7 +1337,6 @@ describe("the menu's own controls, clicked", () => {
     await click(entry);
     expect(priority).toBeUndefined();
   });
-
 });
 
 describe("an arm no wording table knows", () => {
@@ -1430,6 +1351,21 @@ describe("an arm no wording table knows", () => {
   it.each(WORDINGS)("refuses %s rather than inventing a sentence", (path, word) => {
     expect(() => word({ case: "aFutureArm", value: {} } as never)).toThrow(
       new MalformedView(path, "arm 'aFutureArm' is not one this build can draw"),
+    );
+  });
+});
+
+describe("a finish whose branch failed its rule suites", () => {
+  it("names the suites and the archived run to fix from", () => {
+    // Act
+    const text = finishWorkspaceRefusal({
+      case: "ruleChecksFailed",
+      value: { worktree: "/w/a", suites: ["repo-scans", "shellcheck"], failingTests: "- TestX", log: "/s/rule_check-1-0.log" },
+    } as never);
+
+    // Assert
+    expect(text).toBe(
+      "this branch failed its rule suites (repo-scans, shellcheck); fix the failing cases in /s/rule_check-1-0.log and finish again",
     );
   });
 });

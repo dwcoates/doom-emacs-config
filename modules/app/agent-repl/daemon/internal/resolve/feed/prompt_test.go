@@ -2,14 +2,8 @@ package feed
 
 import (
 	"agent-repld/internal/prose"
-	"agent-repld/internal/sourcescan"
 	"context"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"regexp"
-	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -1180,54 +1174,6 @@ func TestRepublishRowsRestatesTheStampsOfTheRowsItMatches(t *testing.T) {
 	}
 }
 
-// EVERY ROW RE-PUBLICATION GOES THROUGH republishRows: neither caller walks
-// the feeds itself, so a hand-rolled loop that drifts from it fails here.
-func TestTheRowRepublishersShareRepublishRows(t *testing.T) {
-	files := map[string]string{
-		"settleTurnPrompts":     "prompt.go",
-		"restampPromptCommands": "commands.go",
-	}
-	for fn, file := range files {
-		t.Run(fn, func(t *testing.T) {
-			// Arrange.
-			parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
-			if err != nil {
-				t.Fatalf("parse %s: %v", file, err)
-			}
-			var body *ast.BlockStmt
-			for _, decl := range parsed.Decls {
-				if d, ok := decl.(*ast.FuncDecl); ok && d.Name.Name == fn {
-					body = d.Body
-				}
-			}
-			if body == nil {
-				t.Fatalf("%s declares no %s", file, fn)
-			}
-
-			// Act.
-			calls, ranges := false, false
-			ast.Inspect(body, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.SelectorExpr:
-					if n.Sel.Name == "republishRows" {
-						calls = true
-					}
-				case *ast.RangeStmt:
-					if sel, ok := n.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "feeds" {
-						ranges = true
-					}
-				}
-				return true
-			})
-
-			// Assert.
-			if !calls || ranges {
-				t.Fatalf("%s: calls republishRows = %v, walks the feeds itself = %v", fn, calls, ranges)
-			}
-		})
-	}
-}
-
 // promptAwaiting answers the awaiting-user flag on the turn's user-prompt row.
 func (h *harness) promptAwaiting(turn string) bool {
 	h.t.Helper()
@@ -1619,20 +1565,5 @@ func TestIsPromptRowNamesBothKindsOfPromptAndNothingElse(t *testing.T) {
 				t.Fatalf("isPromptRow = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-// EVERY RULE THAT TREATS BOTH KINDS OF PROMPT ALIKE ASKS isPromptRow, so a
-// hand-rolled pair of arm checks cannot drift from it.
-func TestNoSourceHandRollsThePromptRowTest(t *testing.T) {
-	// Arrange.
-	pair := regexp.MustCompile(`GetUserPrompt\(\) != nil \|\| [a-z]+\.GetAgentPrompt\(\) != nil`)
-
-	// Act.
-	rolled := sourcescan.SitesMatching(t, pair)
-
-	// Assert: isPromptRow's own body is the one pair.
-	if !slices.Equal(rolled, []string{"prompt.go"}) {
-		t.Fatalf("hand-rolled prompt row tests = %v, want only isPromptRow's own in prompt.go", rolled)
 	}
 }

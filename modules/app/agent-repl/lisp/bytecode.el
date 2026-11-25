@@ -29,7 +29,7 @@
 ;; GLib's emission list then names a dead stack frame, and the next
 ;; `notify' signal anywhere in the process segfaults walking it (the e2e
 ;; sandbox's Emacs, 2026-10-25 on, caught in the act by a longjmp
-;; interposer).  `test-no-throw-on-input.el' keeps every module off it.
+;; interposer).  `test-rules-no-throw-on-input.el' keeps every module off it.
 ;;
 ;; A FUNCTION THAT CLOSES OVER A LEXICAL BINDING IS LEFT INTERPRETED.
 ;; Compiling such a closure copies the captured values, so two functions

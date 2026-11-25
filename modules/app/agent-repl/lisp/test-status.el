@@ -15,10 +15,6 @@
 
 (defvar agent-repl-roster--tab-numbers)
 
-(defconst agent-repl-test-status--dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "Directory holding this suite, for tests that read its own source.")
-
 ;;;; ---- Tests: Typed state setters (ws-set-agent-state, ws-set-repl-state) ----
 
 (ert-deftest agent-repl-test-ws-set-agent-state-nil-ws-errors ()
@@ -3012,34 +3008,6 @@ but nothing stops Emacs's own line recalculation from moving it."
     (should (eq outer-window-hook window-configuration-change-hook))
     (should (eq outer-setup-hook window-setup-hook))))
 
-(ert-deftest agent-repl-test-tabbar-install-tests-share-the-harness ()
-  "Every installer test runs inside the shared install harness."
-  ;; Arrange
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "test-status.el"
-                                     agent-repl-test-status--dir))
-                  (buffer-string)))
-        (start 0)
-        (checked 0)
-        (bare nil))
-    ;; Act: each deftest whose body calls the installer must use the macro.
-    (while (string-match "^(ert-deftest \\([^ ]+\\)" source start)
-      (let* ((name (match-string 1 source))
-             (beg (match-beginning 0))
-             (end (or (string-match "^(ert-deftest " source (match-end 0))
-                      (length source)))
-             (body (substring source beg end)))
-        (when (string-match-p "(agent-repl--install-fixed-height-tab-bar)" body)
-          (setq checked (1+ checked))
-          (unless (string-match-p "agent-repl-test-status--with-tabbar-install"
-                                  body)
-            (push name bare)))
-        (setq start end)))
-    ;; Assert: the scan saw the installer tests, and none is hand-rolled.
-    (should (>= checked 4))
-    (should-not bare)))
-
 (ert-deftest agent-repl-test-tabbar-reassert-hides-bar-when-webview-shown ()
   "A two-row frame that now shows the webview is re-pinned to zero rows."
   ;; Arrange
@@ -4322,16 +4290,6 @@ bracket-only paint, which is the blessed treatment."
   (dolist (case agent-repl-status--priority-labels)
     (should (file-exists-p (agent-repl-status--priority-file (car case))))))
 
-(ert-deftest agent-repl-test-status-priority-labels-are-the-shared-vocabulary ()
-  "The labels are proto/vocab/priority-labels.json's, never spelled in status.el."
-  (let ((vocab (agent-repl-vocab-read "priority-labels.json" "labels")))
-    (should (= (hash-table-count vocab) (length agent-repl-status--priority-labels)))
-    (dolist (cell agent-repl-status--priority-labels)
-      (should (equal (gethash (car cell) vocab) (cdr cell)))))
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "status.el" agent-repl-test-status--dir))
-    (should-not (search-forward "\"P0.5\"" nil t))))
-
 (ert-deftest agent-repl-test-status-name-prefix-draws-the-emoji-ack-glyph-at-the-measured-height ()
   "The emoji-ack glyph is drawn verbatim, scaled to the name's own line."
   (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) 0.5)))
@@ -4847,18 +4805,4 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
       (should (equal (list (plist-get attrs :background) (plist-get attrs :foreground))
                      (list (plist-get (plist-get row :unselected) :bg)
                            (plist-get (plist-get row :unselected) :fg)))))))
-
-(ert-deftest agent-repl-test-every-colored-tab-face-is-an-agent-repl-defface ()
-  "Each colored tab face is defined by `agent-repl-defface', so a load re-specs it."
-  ;; Arrange
-  (let ((defined nil))
-    ;; Act
-    (dolist (form (agent-repl-test--file-forms
-                   (expand-file-name "status.el" agent-repl-test--module-dir)))
-      (when (and (eq (car-safe form) 'agent-repl-defface)
-                 (eq (car-safe (cadr form)) 'quote))
-        (push (cadr (cadr form)) defined)))
-    ;; Assert
-    (dolist (pair agent-repl--tab-state-faces)
-      (should (memq (car pair) defined)))))
 

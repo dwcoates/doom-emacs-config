@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
 
 // family is a parent with one open child, both in one repository.
@@ -726,16 +725,6 @@ func TestScanFamilyRefReadsTheIDThenTheDirThenTheName(t *testing.T) {
 	// Assert
 	if err != nil || got != (FamilyRef{ID: "ws-1", Dir: "/w/one", Name: "one"}) {
 		t.Fatalf("scanFamilyRef = (%+v, %v), want one (ws-1) at /w/one", got, err)
-	}
-}
-
-func TestEveryFamilyListScansThroughScanFamilyRef(t *testing.T) {
-	// Act
-	handRolled := sourcescan.Count(t, "row.Scan(&ref.ID, &ref.Dir, &ref.Name)")
-
-	// Assert: the helper's own scan is the only one.
-	if handRolled != 1 {
-		t.Fatalf("family member scans = %d, want only scanFamilyRef's", handRolled)
 	}
 }
 

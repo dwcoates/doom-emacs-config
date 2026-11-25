@@ -1,13 +1,9 @@
 /**
  * log-capture — the one way a test reads back forwarded log records.
  */
-import { readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "../src/log.js";
 import { captureLogRecords, forwardedRecord, forwardedRecords, recordFor } from "./log-capture.js";
-import { filesUnder } from "./files-under.js";
 
 const log = createLogger("webapp.test.log-capture");
 
@@ -65,23 +61,5 @@ describe("recordFor", () => {
   it("throws, naming the operation, when no record went for it", () => {
     // Act + Assert
     expect(() => recordFor([], "log-capture.test.absent")).toThrow("no forwarded record for log-capture.test.absent");
-  });
-});
-
-describe("the one capture", () => {
-  it("is the only place a test builds a logger that keeps what it forwards", () => {
-    // Arrange: log.test.ts is the logger's own suite, which builds loggers
-    // directly to test them; every other suite reads records through here.
-    const here = dirname(fileURLToPath(import.meta.url));
-    const allowed = new Set(["log-capture.ts", "log.test.ts", "log-capture.test.ts"]);
-
-    // Act
-    const handRolled = filesUnder(here)
-      .map((path) => relative(here, path))
-      .filter((path) => !allowed.has(path))
-      .filter((path) => /new\s+(\w+\.)?ForwardingLogger\([\s\S]{0,200}?\.push\(record\)/.test(readFileSync(resolve(here, path), "utf8")));
-
-    // Assert
-    expect(handRolled).toEqual([]);
   });
 });

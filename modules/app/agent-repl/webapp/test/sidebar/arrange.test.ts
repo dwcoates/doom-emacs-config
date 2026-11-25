@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -23,7 +20,6 @@ import {
 } from "../../src/sidebar/arrange.js";
 import { spyLog } from "../log-spy.js";
 import { appContext, roster, sidebarContext } from "./harness.js";
-import { codeOf } from "../source-text.js";
 
 /** Every roster stream as of the push at REVISION. */
 function at(revision: number): RosterStreams {
@@ -174,14 +170,6 @@ describe("sending a held verb", () => {
 
     expect([took, sc.arrange.hold.holding(), revision.mock.calls.length]).toEqual([false, false, 0]);
   });
-
-  it("is the only place the sidebar awaits its arrangement hold", () => {
-    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/sidebar");
-    const awaiting = readdirSync(dir)
-      .filter((file) => file.endsWith(".ts"))
-      .flatMap((file) => (readFileSync(path.join(dir, file), "utf8").match(/hold\.await\(\)/g) ?? []).map(() => file));
-    expect(awaiting).toEqual(["arrange.ts"]);
-  });
 });
 
 describe("sending held steps", () => {
@@ -270,17 +258,6 @@ describe("sending held steps", () => {
     await expect(sendHeldSteps(sc, sc.arrange.status, [])).rejects.toThrow("invariant: a held sequence asks at least one step");
     expect(sc.arrange.hold.holding()).toBe(false);
   });
-
-  it("is what sendHeld asks through, so a held verb has one way to fire", () => {
-    // Arrange
-    const source = codeOf(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/sidebar/arrange.ts"), "utf8"));
-
-    // Act
-    const fired = source.match(/fireVerb\(/g) ?? [];
-
-    // Assert
-    expect([fired.length, /return sendHeldSteps\(sc, control, \[heldStep\(verb\)\]\)/.test(source)]).toEqual([1, true]);
-  });
 });
 
 describe("the arrangement verb", () => {
@@ -317,16 +294,5 @@ describe("successRevision", () => {
 
   it("answers null for a response naming no outcome", () => {
     expect(successRevision(create(ArrangeSidebarResponseSchema, {}))).toBeNull();
-  });
-
-  it.each(["arrange.ts", "rename.ts", "nest.ts"])("is how %s reads its held verb's revision", (file) => {
-    // Arrange
-    const source = codeOf(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "sidebar", file), "utf8"));
-
-    // Act
-    const reads = [source.includes("revision: successRevision"), source.includes(".rosterRevision : null")];
-
-    // Assert
-    expect(reads).toEqual([true, file === "arrange.ts"]);
   });
 });

@@ -2,7 +2,6 @@ package harness
 
 import (
 	"agent-repld/internal/procgroup"
-	"agent-repld/internal/sourcescan"
 	"bufio"
 	"context"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -721,23 +719,6 @@ func TestStandInDiesWithItsWholeGroup(t *testing.T) {
 	}
 }
 
-func TestEveryLoopingStandInIsStartedByStandIn(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("kill_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act: shells started by hand, outside standInTo and groupUnderKill.
-	byHand := strings.Count(string(src), "exec.Command("+`"/bin/sh"`)
-
-	// Assert: standInTo, groupUnderKill and the reaped-flag table, which
-	// leaves its group to the Kill under test.
-	if byHand != 3 {
-		t.Fatalf("kill_test.go starts %d shells by hand, want 3: start a looping stand-in with standIn", byHand)
-	}
-}
-
 func TestKillGroupKillsALiveGroupAndTakesAGoneOneAsNoFailure(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1041,44 +1022,5 @@ func TestStallListingShowsTheSelectedProcess(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "STAT") || !strings.Contains(string(out), strconv.Itoa(os.Getpid())) {
 		t.Fatalf("the listing shows neither its columns nor this process:\n%s", out)
-	}
-}
-
-// TestEveryStallReportListsThroughStallListing pins that both stuck-kill
-// reports share the one listing, so their columns cannot drift apart.
-func TestEveryStallReportListsThroughStallListing(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("daemon.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	direct := strings.Count(string(src), `"pid,ppid,pgid,stat,wchan,flags,time,command"`)
-	shared := strings.Count(string(src), "stallListing(")
-
-	// Assert
-	if direct != 1 || shared != 3 {
-		t.Fatalf("the listing's columns are spelled %d times and stallListing named %d times, want 1 and 3 (its definition and both reports)", direct, shared)
-	}
-}
-
-// TestTheHarnessKillsAStoppedGroupThroughOneHelper pins that the harness
-// SIGKILLs and continues a process group only through killStoppedGroup, so
-// Kill's own group kill and awaitGroupEnd's re-kill cannot drift apart: no
-// production file of the package signals a group's SIGKILL or SIGCONT itself.
-func TestTheHarnessKillsAStoppedGroupThroughOneHelper(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-	handRolled := regexp.MustCompile(`signalGroup\([^)]*syscall\.SIG(KILL|CONT)\)`)
-
-	for _, f := range files {
-		// Act
-		loc := handRolled.FindIndex(f.Source)
-
-		// Assert
-		if loc != nil {
-			t.Errorf("%s signals a group's SIGKILL or SIGCONT by hand (%q); use killStoppedGroup", f.Name, f.Source[loc[0]:loc[1]])
-		}
 	}
 }

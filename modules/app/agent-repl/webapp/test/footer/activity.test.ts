@@ -1,8 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createTicker } from "../../src/clock.js";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -29,7 +26,6 @@ import {
 } from "../../src/footer/activity.js";
 import { TRANSIENT_WINDOW_MS, type EditorNotice } from "../../src/footer/editor-notice.js";
 import { footerStatusActivity } from "../../src/footer/strip.js";
-import ACTIVITY_SOURCE from "../../src/footer/activity.ts?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { FOOTER_STATUS_CASES, activityDatumClass } from "../../src/footer/tones.js";
 import { coldGatePercentColor, pressurePercentColor } from "../../src/pressure-color.js";
@@ -1438,12 +1434,6 @@ describe("the enduring line", () => {
     ]);
   });
 
-  it("draws the divider between the allowances through the one helper", () => {
-    expect(ACTIVITY_SOURCE).not.toMatch(
-      /append\([^)]*drawFooterRateSeparator\(\)/,
-    );
-  });
-
   it("sets the separator bold in the stylesheet", () => {
     // Arrange
     const teardown = installStylesheet();
@@ -2102,23 +2092,6 @@ describe("footerCountdownSpan", () => {
 
   it("draws the bare remaining time under an empty label", () => {
     expect(footerCountdownSpan(createTicker(1000), undefined, "", NOW + 12_000).textContent).toBe("12s");
-  });
-});
-
-// EVERY LABELED FOOTER COUNTDOWN IS BUILT BY footerCountdownSpan: a countdown
-// painting `label + remainingLabel(...)` by hand is a second spelling of the
-// same shape, which drifts (one once counted up past its instant).
-describe("the footer's countdowns share one builder", () => {
-  it("paints label-plus-remaining only inside footerCountdownSpan", () => {
-    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "footer");
-    const handPainted = readdirSync(dir)
-      .filter((file) => file.endsWith(".ts"))
-      .flatMap((file) =>
-        (readFileSync(path.join(dir, file), "utf8").match(/textContent = (`[^`]*\$\{)?remainingLabel\(/g) ?? []).map(
-          (site) => `${file}: ${site}`,
-        ),
-      );
-    expect(handPainted).toEqual(["activity.ts: textContent = `${label}${remainingLabel("]);
   });
 });
 

@@ -3,9 +3,6 @@ package wsm
 import (
 	"context"
 	"errors"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -479,78 +476,5 @@ func TestListedOpen(t *testing.T) {
 				t.Fatalf("ListedOpen() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-// TestNoCallSiteSpellsOutListedOpen holds every reader of whether a row is
-// open to ListedOpen: a site that combines the three by hand would drift
-// from it.
-func TestNoCallSiteSpellsOutListedOpen(t *testing.T) {
-	// Arrange
-	root := filepath.Join("..", "..")
-	var offenders []string
-
-	// Act
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(src), "!ws.Closed && !ws.Hidden && !ws.MergeHidden()") && !strings.HasSuffix(path, filepath.Join("wsm", "syncasyncmerges.go")) {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if len(offenders) != 0 {
-		t.Fatalf("these files spell out an open row by hand instead of ListedOpen: %v", offenders)
-	}
-}
-
-// TestNoCallSiteSpellsOutMergeHidden holds every reader of a merge workspace's
-// visibility to MergeHidden: a site that tests MergeRevealed by hand would drift
-// from it (the landed case is the one a hand-rolled test forgets).
-func TestNoCallSiteSpellsOutMergeHidden(t *testing.T) {
-	// Arrange
-	root := filepath.Join("..", "..")
-	var offenders []string
-
-	// Act
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		if strings.HasSuffix(path, filepath.Join("wsm", "syncasyncmerges.go")) || strings.HasSuffix(path, filepath.Join("wsm", "workspaces.go")) {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(src), ".MergeRevealed") {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if len(offenders) != 0 {
-		t.Fatalf("these files read MergeRevealed by hand instead of MergeHidden: %v", offenders)
 	}
 }

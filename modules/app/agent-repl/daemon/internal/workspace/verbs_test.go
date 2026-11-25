@@ -3,10 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"slices"
 	"strings"
 	"testing"
 
@@ -14,7 +10,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -242,48 +237,6 @@ func TestDeferredBriefMintsAFreshTurnEachTime(t *testing.T) {
 	}
 }
 
-// TestOnlyDeferredBriefDefersASubmission pins deferredBrief as the one place
-// this package composes a deferred submission: a verb hand-rolling one would
-// be free to drift from it.
-func TestOnlyDeferredBriefDefersASubmission(t *testing.T) {
-	// Arrange, Act.
-	got := functionsReferencing(t, "DeliveryDeferred")
-
-	// Assert.
-	if !slices.Equal(got, []string{"deferredBrief"}) {
-		t.Fatalf("functions naming DeliveryDeferred = %v, want only deferredBrief", got)
-	}
-}
-
-// functionsReferencing names, sorted and once each, every function of this
-// package's production sources whose body names the identifier NAME, bare or
-// as a selector's field.
-func functionsReferencing(t *testing.T, name string) []string {
-	t.Helper()
-	files := token.NewFileSet()
-	var found []string
-	for _, file := range sourcescan.Production(t) {
-		parsed, err := parser.ParseFile(files, file.Name, file.Source, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", file.Name, err)
-		}
-		for _, decl := range parsed.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				if ident, ok := node.(*ast.Ident); ok && ident.Name == name && !slices.Contains(found, fn.Name.Name) {
-					found = append(found, fn.Name.Name)
-				}
-				return true
-			})
-		}
-	}
-	slices.Sort(found)
-	return found
-}
-
 func TestQueueBriefRecordsAndFailsWhatTheQueueDidNotTake(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -370,38 +323,6 @@ func TestQueueDeferredBrief(t *testing.T) {
 				t.Errorf("submission = %+v under turn %s, want w1's deferred merge-revert BRIEF under it", got, turn)
 			}
 		})
-	}
-}
-
-// TestEveryDeferredBriefIsComposedByQueueDeferredBrief pins the brief sites
-// to queueDeferredBrief's shape: a site composing its own deferredBrief can
-// drift from the queueing every other site shares.
-func TestEveryDeferredBriefIsComposedByQueueDeferredBrief(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "deferredBrief(")
-
-	// Assert: the definition and queueDeferredBrief's call, both in verbs.go.
-	if !slices.Equal(sites, []string{"verbs.go", "verbs.go"}) {
-		t.Fatalf("deferredBrief sites = %v, want only its definition and queueDeferredBrief in verbs.go", sites)
-	}
-}
-
-// TestEveryDeferredBriefIsQueuedThroughQueueBrief pins that the brief sites
-// share queueBrief's shape: a file composing a deferred brief that hands it
-// to the queue itself would take a refused brief for a delivered one.
-func TestEveryDeferredBriefIsQueuedThroughQueueBrief(t *testing.T) {
-	// Arrange / Act.
-	var direct []string
-	for _, file := range sourcescan.Production(t) {
-		source := string(file.Source)
-		if file.Name != "verbs.go" && strings.Contains(source, "deferredBrief(") && strings.Contains(source, "v.deps.Queue.Submit(") {
-			direct = append(direct, file.Name)
-		}
-	}
-
-	// Assert.
-	if len(direct) != 0 {
-		t.Fatalf("files queuing a deferred brief outside queueBrief = %v, want none", direct)
 	}
 }
 

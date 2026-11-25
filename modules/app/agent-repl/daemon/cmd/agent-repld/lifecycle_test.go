@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
-	"strings"
 	"testing"
 
 	"agentrepl/logging/logsite"
@@ -410,22 +408,6 @@ func TestCloseOnEdgeClosesTheWorkspacesFaultsTheEdgeEnds(t *testing.T) {
 				t.Fatalf("closed %v, want closed = %v", reporter.closed, tt.closes)
 			}
 		})
-	}
-}
-
-// TestEveryLifecycleEdgeCloseGoesThroughCloseOnEdge keeps the sink's
-// stand-alone recovery edges on one helper: each is named once in
-// lifecycle.go, in its closeOnEdge call, so a hand-rolled close of either
-// fails here.
-func TestEveryLifecycleEdgeCloseGoesThroughCloseOnEdge(t *testing.T) {
-	src, err := os.ReadFile("lifecycle.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, edge := range []string{"health.EdgeWatchOpened", "health.EdgeLinkRestored"} {
-		if all, viaHelper := strings.Count(string(src), edge), strings.Count(string(src), "s.closeOnEdge(ws, "+edge); all != 1 || viaHelper != 1 {
-			t.Fatalf("lifecycle.go names %s %d times, %d through closeOnEdge; want once, through it", edge, all, viaHelper)
-		}
 	}
 }
 

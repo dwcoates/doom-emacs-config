@@ -21,7 +21,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 )
 
 // newBareClient builds a client with no process and no connection, for the
@@ -1766,18 +1765,6 @@ func TestARedialCountsItsConnectionBeforeAnnouncingIt(t *testing.T) {
 	}
 	if n := client.Connections(); n != 2 {
 		t.Fatalf("Connections() = %d once the redial's LinkConnected was read, want 2", n)
-	}
-}
-
-// connected() is the one place a link is announced, so no site can publish
-// LinkConnected without advancing the count a consumer relies on.
-func TestOnlyConnectedAnnouncesALink(t *testing.T) {
-	// Act
-	announcements := sourcescan.Count(t, "publish(LinkConnected)")
-
-	// Assert
-	if announcements != 1 {
-		t.Fatalf("production source publishes LinkConnected at %d sites; only connected() may", announcements)
 	}
 }
 

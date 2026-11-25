@@ -6,7 +6,6 @@ import {
   RosterRepositoryViewSchema,
   type RosterRepoSection,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { readFileSync } from "node:fs";
 import {
   familyRows,
   openKin,
@@ -167,17 +166,6 @@ describe("openRowWorkspaces", () => {
     // Assert
     expect(read).toThrow(/an open row names no workspace/);
   });
-
-  it("is the read every slot painter keys rows by", () => {
-    // Arrange
-    const source = (file: string): string => readFileSync(new URL(`../../src/sidebar/${file}`, import.meta.url), "utf8");
-
-    // Act / Assert
-    for (const file of ["tab-numbers.ts", "recency-gutters.ts"]) {
-      expect(source(file)).toContain("openRowWorkspaces(");
-      expect(source(file)).not.toContain("openKin(");
-    }
-  });
 });
 
 describe("familyRows", () => {
@@ -212,18 +200,5 @@ describe("familyRows", () => {
 
     // Assert
     expect(rows.map((at) => at.path)).toEqual(["r", "r.children[0]", "r.children[0].children[0]", "r.repositoryBlocks[0].rows[0]"]);
-  });
-
-  // THE ONE WALK: every reader of a family's nested rows takes familyRows,
-  // so no hand-rolled recursion over openKin can walk them differently.
-  it.each(["subsections.ts", "keyed-rows.ts", "tab-numbers.ts", "roster.ts", "row.ts"])("leaves %s no recursion of its own over openKin", (file) => {
-    // Arrange
-    const source = readFileSync(new URL(`../../src/sidebar/${file}`, import.meta.url), "utf8");
-
-    // Act
-    const walks = source.match(/openKin\(/g) ?? [];
-
-    // Assert
-    expect(walks).toEqual([]);
   });
 });

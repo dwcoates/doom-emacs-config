@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { codeOf } from "../../source-text.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -156,13 +153,6 @@ describe("jumpToWorkspace", () => {
     const record = await forwardedRecord(capture, "merge.test-jump-failed");
     expect(record.level.case).toBe("error");
   });
-
-  it("is the one SelectInEditor call site in the merge bubble", () => {
-    for (const file of ["queue.ts", "merge.ts", "merge-body.ts", "workspace-switch.ts", "step-tabs.ts"]) {
-      const source = codeOf(readFileSync(join(process.cwd(), "src/feed/merge", file), "utf8"));
-      expect(source.includes("selectInEditor("), file).toBe(false);
-    }
-  });
 });
 
 /** A context whose OpenWorkspace answers OPENED and whose SelectInEditor answers SELECTED. */
@@ -266,12 +256,5 @@ describe("jumpForStanding", () => {
   it("refuses a standing it does not know as a malformed view naming the served field", () => {
     expect(() => jumpForStanding("parked" as JumpStanding, "Test.standing")).toThrow(MalformedView);
     expect(() => jumpForStanding("parked" as JumpStanding, "Test.standing")).toThrow(/Test\.standing/);
-  });
-
-  it("is the one choice of jump by standing: no caller picks between the two jumps itself", () => {
-    for (const file of ["feed/workspace-mentions.ts", "feed/pull-request-owner.ts"]) {
-      const source = codeOf(readFileSync(join(process.cwd(), "src", file), "utf8"));
-      expect([source.includes("jumpForStanding("), source.includes("openAndJumpToWorkspace")], file).toEqual([true, false]);
-    }
   });
 });

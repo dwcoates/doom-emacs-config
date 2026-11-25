@@ -3,11 +3,6 @@ package promptqueue
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -95,61 +90,6 @@ func TestRetireDeliveredSurfacesAFailedTombstoneAndLogsIt(t *testing.T) {
 	}
 }
 
-// TestTurnsAreHandedOverAndRetiredThroughOneHelper fails a queue source that
-// hands a turn to the watcher, or tombstones a delivered hold, by hand
-// instead of through handOver and retireDelivered.
-func TestTurnsAreHandedOverAndRetiredThroughOneHelper(t *testing.T) {
-	// Arrange
-	owners := map[string]string{"OnTurnOpened": "handOver", "tombstoneDelivered": "retireDelivered"}
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the package: %v", err)
-	}
-	var offenders []string
-
-	// Act
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				var used string
-				switch x := n.(type) {
-				case *ast.SelectorExpr:
-					used = x.Sel.Name
-				case *ast.CompositeLit:
-					for _, elt := range x.Elts {
-						if kv, ok := elt.(*ast.KeyValueExpr); ok {
-							if id, ok := kv.Value.(*ast.Ident); ok && id.Name == "tombstoneDelivered" {
-								used = "tombstoneDelivered"
-							}
-						}
-					}
-				}
-				if owner, ok := owners[used]; ok && fn.Name.Name != owner {
-					offenders = append(offenders, name+":"+fn.Name.Name+" uses "+used)
-				}
-				return true
-			})
-		}
-	}
-
-	// Assert
-	if len(offenders) > 0 {
-		t.Fatalf("hand-rolled hand-over or retirement: %v", offenders)
-	}
-}
-
 func TestVerdictStaleLockedAnswersWhetherTheContentMoved(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -177,39 +117,5 @@ func TestVerdictStaleLockedAnswersWhetherTheContentMoved(t *testing.T) {
 				t.Fatalf("stale = %v, logged = %v; want both %v", stale, logged, tt.wantStale)
 			}
 		})
-	}
-}
-
-// TestTheEpochIsComparedOnlyByVerdictStaleLocked fails a queue source that
-// reads a turn's content epoch to judge a verdict by hand.
-func TestTheEpochIsComparedOnlyByVerdictStaleLocked(t *testing.T) {
-	// Arrange
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the package: %v", err)
-	}
-	var offenders []string
-
-	// Act
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		if strings.Count(string(src), `"content_epoch"`) > 0 && name != "classify.go" {
-			offenders = append(offenders, name)
-		}
-		if strings.Count(string(src), `"content_epoch"`) > 1 {
-			offenders = append(offenders, name+" (twice)")
-		}
-	}
-
-	// Assert
-	if len(offenders) > 0 {
-		t.Fatalf("a stale-verdict check written by hand in %v", offenders)
 	}
 }

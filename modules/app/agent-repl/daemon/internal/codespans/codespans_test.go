@@ -3,8 +3,6 @@ package codespans
 import (
 	"reflect"
 	"testing"
-
-	"agent-repld/internal/mdinline/mdinlinetest"
 )
 
 func TestExtract(t *testing.T) {
@@ -119,9 +117,4 @@ func TestUnmark(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Markup walks prose through the one shared walk (mdinline.RewriteProse).
-func TestMarkupRewritesThroughTheSharedWalk(t *testing.T) {
-	mdinlinetest.AssertRewriteShape(t, "codespans.go", "Markup")
 }

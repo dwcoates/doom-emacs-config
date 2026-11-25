@@ -14,7 +14,6 @@ import (
 
 	"agent-repld/internal/audiooutput"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
@@ -621,31 +620,6 @@ func TestEveryKindOfBannerIsReadAloud(t *testing.T) {
 			}
 			if got := f.runner.spoken(); !reflect.DeepEqual(got, []string{SpokenText(banners[0])}) {
 				t.Fatalf("spoke %q, want the banner %+v read aloud", got, banners[0])
-			}
-		})
-	}
-}
-
-// TestSpeechHasOneChokePoint pins that every banner reaches the platform
-// through the one Backend.Post call, and is read aloud from its made edge
-// alone: no kind of banner can speak, or skip speaking, on its own.
-func TestSpeechHasOneChokePoint(t *testing.T) {
-	cases := []struct {
-		substr string
-		want   []string
-	}{
-		{substr: "Backend.Post(", want: []string{"notifier.go"}},
-		{substr: "n.speak(", want: []string{"notifier.go"}},
-		{substr: ".Speak(", want: []string{"notifier.go"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.substr, func(t *testing.T) {
-			// Act
-			got := sourcescan.Sites(t, tc.substr)
-
-			// Assert
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("%q is called in %v, want only %v", tc.substr, got, tc.want)
 			}
 		})
 	}

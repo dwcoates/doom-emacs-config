@@ -3,8 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -40,32 +38,5 @@ func TestBoundaryFailureOfAnEndedRequestIsCanceled(t *testing.T) {
 	// Assert.
 	if got.Code() != connect.CodeCanceled {
 		t.Fatalf("boundaryFailure code = %v, want canceled", got.Code())
-	}
-}
-
-// TestEveryWrapperAnswersABoundaryFailureThroughTheOneHelper fails a wrapper
-// that hand-rolls its own answer instead of sharing boundaryFailure.
-func TestEveryWrapperAnswersABoundaryFailureThroughTheOneHelper(t *testing.T) {
-	// Arrange.
-	raw, err := os.ReadFile("requestlog_server.go")
-	if err != nil {
-		t.Fatalf("read requestlog_server.go: %v", err)
-	}
-	source := string(raw)
-
-	// Act.
-	// A WRAPPER HAS TWO BOUNDARY STEPS: the forward to the daemon serving the
-	// workspace (forwardTarget), then its own request's begin, and each one's
-	// failure is a boundary failure.
-	begins := strings.Count(source, "s.server.beginRequest(")
-	forwards := strings.Count(source, "s.server.forwardTarget(")
-	shared := strings.Count(source, "boundaryFailure(err)")
-
-	// Assert.
-	if begins == 0 || forwards != begins || begins+forwards != shared {
-		t.Fatalf("%d wrappers call beginRequest, %d call forwardTarget, and %d answer through boundaryFailure; every boundary step of every wrapper must share the helper", begins, forwards, shared)
-	}
-	if strings.Contains(source, "connect.CodeInternal") {
-		t.Fatal("a wrapper spells its own internal error instead of calling boundaryFailure")
 	}
 }

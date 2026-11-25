@@ -1,11 +1,7 @@
 package integration
 
 import (
-	"bytes"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -114,40 +110,5 @@ func TestRequireRPCSuccess(t *testing.T) {
 				t.Fatalf("msg = %v, want present=%v", msg, tt.wantMsg)
 			}
 		})
-	}
-}
-
-// TestNoRPCAssertionReadsAResponseAfterAFailedCall pins that no failure line
-// formats resp.Msg in a branch a failed rpc reaches: such a site panics on the
-// very failure it reports. requireRPCAnswered is the shared step instead.
-func TestNoRPCAssertionReadsAResponseAfterAFailedCall(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	handRolled := regexp.MustCompile(`err != nil \|\| (\w+)\.Msg[^\n]*\{\n\s*t\.(?:Fatalf|Errorf)\([^\n]*`)
-
-	// Act.
-	var sites []string
-	for _, file := range files {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", file, err)
-		}
-		if file == "support_rpc_test.go" {
-			continue
-		}
-		for _, m := range handRolled.FindAllSubmatch(body, -1) {
-			failureLine := m[0][bytes.LastIndexByte(m[0], '\n'):]
-			if regexp.MustCompile(`\b` + string(m[1]) + `\.Msg\b`).Match(failureLine) {
-				sites = append(sites, fmt.Sprintf("%s: %s", file, bytes.TrimSpace(failureLine)))
-			}
-		}
-	}
-
-	// Assert.
-	if len(sites) != 0 {
-		t.Fatalf("hand-rolled rpc success checks read the response after a failed call: %v; use requireRPCAnswered or requireRPCSuccess", sites)
 	}
 }

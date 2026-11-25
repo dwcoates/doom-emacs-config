@@ -58,6 +58,9 @@ var finishRefusalCases = []refusalCase{
 		Requested: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: "other"}}},
 	}}},
 		want: "ws's create fixed its finish at the front of the merge queue, and this finish asked for behind=other; finish again with no -placement"},
+	{name: "rule_checks_failed", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_RuleChecksFailed{RuleChecksFailed: &agentreplv1.MergeRuleChecksFailed{
+		Worktree: "/w/a", Suites: []string{"repo-scans"}, FailingTests: "- TestX", Log: "/l"}}},
+		want: "ws's branch failed its rule suites (repo-scans) in /w/a, so its merge was not admitted; fix the failing cases below, commit, and ask again\n\n- TestX"},
 }
 
 // oneShotRefusalCases holds one case per SetWorkspaceOneShotError arm.

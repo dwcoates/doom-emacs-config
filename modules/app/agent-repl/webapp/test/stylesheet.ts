@@ -16,9 +16,12 @@
  * as the literal `var(--async)` rather than a color. That is enough, and it is
  * also the honest assertion: the token is the vocabulary the app is written in,
  * and pinning the resolved hex would pin the theme instead of the register.
+ *
+ * Reading the stylesheet's TEXT (its rules, a keyframes or media block) is a
+ * rule over the source, not a drawing test: those readers are
+ * `rules/stylesheet-text.ts`.
  */
 import stylesheet from "../src/styles.css?raw";
-import { withoutBlockComments } from "./source-text.js";
 
 /**
  * Install `src/styles.css` into the current document, and answer a teardown
@@ -82,101 +85,4 @@ export function inDocument<T>(drawn: HTMLElement, check: (drawn: HTMLElement) =>
     drawn.remove();
     teardown();
   }
-}
-
-/** One `selector-list { declarations }` block of a stylesheet. */
-export interface CssRule {
-  selectors: string[];
-  declarations: string;
-}
-
-/**
- * Every `selector { declarations }` pair in CSS, in source order, comments
- * stripped. A comment that mentions a selector is prose, never part of the
- * selector of the rule that follows it, so a scan that kept comments would
- * credit a rule with every class its preceding comment happens to name.
- */
-export function rulesOf(css: string): CssRule[] {
-  const text = withoutBlockComments(css);
-  const rules: CssRule[] = [];
-  const pattern = /([^{}]+)\{([^{}]*)\}/g;
-  let match = pattern.exec(text);
-  while (match !== null) {
-    rules.push({
-      selectors: (match[1] ?? "").split(",").map((one) => one.trim()).filter((one) => one !== ""),
-      declarations: match[2] ?? "",
-    });
-    match = pattern.exec(text);
-  }
-  return rules;
-}
-
-/**
- * Whether RULE is SELECTOR's OWN rule: its selector list is SELECTOR alone, so
- * what it declares reaches nothing else. Every scan that asks for a selector's
- * own rule asks through here.
- */
-export function isOwnRule(rule: CssRule, selector: string): boolean {
-  return rule.selectors.length === 1 && rule.selectors[0] === selector;
-}
-
-/**
- * The body of the `@keyframes NAME` block in CSS (the real stylesheet by
- * default): everything between its opening brace and the closing brace on its
- * own line, so a block of any number of stops comes back whole. Fails loudly
- * when the stylesheet has no such block.
- */
-export function keyframesOf(name: string, css: string = stylesheet): string {
-  const opener = `@keyframes ${name} {`;
-  const start = css.indexOf(opener);
-  if (start === -1) throw new Error(`the stylesheet has no @keyframes ${name}`);
-  const bodyStart = start + opener.length;
-  const end = css.indexOf("\n}", bodyStart);
-  if (end === -1) throw new Error(`the stylesheet's @keyframes ${name} never closes`);
-  return css.slice(bodyStart, end);
-}
-
-/** One `@media` block of a stylesheet, as `mediaBlocksOf` finds it. */
-export interface MediaBlock {
-  /** Where the block's `@media` starts. */
-  start: number;
-  /** Just past the block's closing brace. */
-  end: number;
-  /** Everything between the block's braces. */
-  body: string;
-}
-
-/**
- * Every `@media (QUERY)` block in CSS (the real stylesheet by default), in
- * source order, each matched brace by brace from its opening `{`: `rulesOf`'s
- * flat scan cannot tell a rule inside a media block from one outside it, and
- * the same selector often stands on both sides. Fails loudly on a block that
- * never closes.
- */
-export function mediaBlocksOf(query: string, css: string = stylesheet): MediaBlock[] {
-  const head = `@media (${query})`;
-  const blocks: MediaBlock[] = [];
-  for (let start = css.indexOf(head); start !== -1; start = css.indexOf(head, start + head.length)) {
-    const open = css.indexOf("{", start);
-    let depth = 0;
-    let cursor = open;
-    for (; cursor !== -1 && cursor < css.length; cursor += 1) {
-      if (css[cursor] === "{") depth += 1;
-      if (css[cursor] === "}") depth -= 1;
-      if (depth === 0) break;
-    }
-    if (open === -1 || depth !== 0) throw new Error(`the stylesheet's ${head} block never closes`);
-    blocks.push({ start, end: cursor + 1, body: css.slice(open + 1, cursor) });
-  }
-  return blocks;
-}
-
-/**
- * The selector PATTERN's first group captures from the real stylesheet,
- * comments stripped, or a loud failure naming WHAT the test looked for.
- */
-export function selectorOf(pattern: RegExp, what: string): string {
-  const found = pattern.exec(withoutBlockComments(stylesheet))?.[1]?.trim();
-  if (found === undefined) throw new Error(`the stylesheet has no ${what}`);
-  return found;
 }

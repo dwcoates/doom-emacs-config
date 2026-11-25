@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +17,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/logsites"
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -688,20 +686,5 @@ func TestSubmitMarkedTurnRecordsTheTurnBeforeItSubmitsTheBrief(t *testing.T) {
 				t.Fatalf("submissions %d, want %d", got, tc.wantSubmits)
 			}
 		})
-	}
-}
-
-func TestEveryCheckTurnMarkGoesThroughSubmitMarkedTurn(t *testing.T) {
-	// Arrange
-	marks := regexp.MustCompile(`DB\.(MarkMediationResumed|MarkProductionCheckPrompted|MarkProductionCheckResumed)\(`)
-
-	// Act, Assert: each such record is made inside submitMarkedTurn's mark.
-	for _, file := range sourcescan.Production(t) {
-		for _, at := range marks.FindAllIndex(file.Source, -1) {
-			before := string(file.Source[max(0, at[0]-300):at[0]])
-			if !strings.Contains(before, "submitMarkedTurn(") {
-				t.Fatalf("%s records a check turn outside submitMarkedTurn: %s", file.Name, file.Source[at[0]:at[1]])
-			}
-		}
 	}
 }

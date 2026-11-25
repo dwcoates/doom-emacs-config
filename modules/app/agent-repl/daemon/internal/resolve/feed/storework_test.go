@@ -3,14 +3,9 @@ package feed
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/token"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
-
-	"agent-repld/internal/sourcescan"
 )
 
 func TestQueuedStoreWorkRunsOffTheLockOnceItIsReleased(t *testing.T) {
@@ -169,84 +164,4 @@ func TestAWriteOutcomeIsKnownOnceTheHoldIsReleased(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestEveryEntryPointPrimesItsWorkspace pins prime's one rule: every
-// exported method of the resolver whose first argument names a workspace
-// primes it as its first statement, so nothing it reaches under the lock
-// reads the store (prime.go). The exceptions name why.
-func TestEveryEntryPointPrimesItsWorkspace(t *testing.T) {
-	// Arrange.
-	exempt := map[string]string{
-		"MarkMergeWorkspaceRemoved": "it never wakes a workspace whose feed is not held",
-		"SetWorkspaceName":          "a push of a name, which reads nothing",
-	}
-	var unprimed []string
-
-	// Act.
-	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, file *ast.File) {
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv == nil || !fn.Name.IsExported() || !receiverIsResolver(fn) || exempt[fn.Name.Name] != "" {
-				continue
-			}
-			ws, ok := firstWorkspaceParam(fn)
-			if !ok {
-				continue
-			}
-			if !primesFirst(fn, ws) {
-				unprimed = append(unprimed, fset.Position(fn.Pos()).String()+" "+fn.Name.Name)
-			}
-		}
-	})
-
-	// Assert.
-	if len(unprimed) > 0 {
-		t.Fatalf("entry points that do not prime their workspace first: %v", unprimed)
-	}
-}
-
-func receiverIsResolver(fn *ast.FuncDecl) bool {
-	star, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
-	if !ok {
-		return false
-	}
-	id, ok := star.X.(*ast.Ident)
-	return ok && id.Name == "resolver"
-}
-
-// firstWorkspaceParam answers the name of FN's first ids.WorkspaceID
-// parameter when it is FN's first one past a context.
-func firstWorkspaceParam(fn *ast.FuncDecl) (string, bool) {
-	for _, field := range fn.Type.Params.List {
-		if sourcescan.IsSelector(field.Type, "context", "Context") {
-			continue
-		}
-		if !sourcescan.IsSelector(field.Type, "ids", "WorkspaceID") || len(field.Names) == 0 {
-			return "", false
-		}
-		return field.Names[0].Name, true
-	}
-	return "", false
-}
-
-// primesFirst reports whether FN's first statement is r.prime(WS, ...).
-func primesFirst(fn *ast.FuncDecl, ws string) bool {
-	if fn.Body == nil || len(fn.Body.List) == 0 {
-		return false
-	}
-	stmt, ok := fn.Body.List[0].(*ast.ExprStmt)
-	if !ok {
-		return false
-	}
-	call, ok := stmt.X.(*ast.CallExpr)
-	if !ok || len(call.Args) == 0 {
-		return false
-	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "prime" {
-		return false
-	}
-	arg, ok := call.Args[0].(*ast.Ident)
-	return ok && strings.EqualFold(arg.Name, ws)
 }

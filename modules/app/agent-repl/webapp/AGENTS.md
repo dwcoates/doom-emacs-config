@@ -34,6 +34,7 @@ src/login/ src/lifecycle/ src/failure/      the remaining components
 src/news-digest/          the daily Claude news digest overlay over the feed
 test/                     one test file per source module, mirroring src/
 test/integration/         the whole app under jsdom against a fake daemon
+rules/                    the rule tests (the webapp-rules suite), mirroring test/
 ```
 
 ## Mount order (src/main.ts, mirrored by test/integration/harness.ts)
@@ -199,7 +200,7 @@ and are contract on the same terms:
 ## Commands
 
 ```
-npm run typecheck          tsc over src/ AND test/, integration suite included
+npm run typecheck          tsc over src/, test/ AND rules/, integration suite included
 npm run build              typecheck plus vite build
 ```
 
@@ -875,8 +876,8 @@ hand any more:
 ## Verification
 
 ```bash
-npm run lint             # eslint, type-aware, over src/, test/ and the root configs
-npm run typecheck        # tsc over src/ and test/
+npm run lint             # eslint, type-aware, over src/, test/, rules/ and the root configs
+npm run typecheck        # tsc over src/, test/ and rules/
 ```
 
 The package's coverage is a coverage run of its suite (`agent-repld test run
@@ -957,6 +958,23 @@ reviewer would accept, and unused ones fail the run.
 - Every branch has a test: every arm rendered, every malformed input rejected
   (unset oneof, unset required field, unknown arm), every refusal arm drawn at
   its call site, every tick and every format.
+
+### Rule tests live in rules/, as the webapp-rules suite
+
+A rule test reads the webapp's own source (`src/`, its stylesheets, the page
+shell, the test code itself) to hold it to a structural rule: "the one
+maker", "no source calls X but Y", the stylesheet's own shape. Every rule test
+lives in `rules/`, mirroring `test/` (`test/feed/bubble.test.ts`'s rules are
+`rules/feed/bubble.rules.test.ts`), with the readers they share
+(`rules/files-under.ts`, `rules/stylesheet-text.ts`). They run as their own
+suite, `webapp-rules` (`vitest.rules.config.ts`), which every branch runs
+before its merge is admitted to the queue; the ordinary config excludes
+`rules/`. A behavior test that needs the real stylesheet or shell loads it
+through `test/stylesheet.ts` or `test/shell-html.ts`.
+`rules/source-reads.test.ts` fails any file under `test/` that reads the
+webapp's source anywhere else, naming the file and the read; its
+`BEHAVIOR_READS` lists, each with its reason, the few reads that load the
+source to run it rather than to check it.
 
 ### Integration cases share one mounted app
 

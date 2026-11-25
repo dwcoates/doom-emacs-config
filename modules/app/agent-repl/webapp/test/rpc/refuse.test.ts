@@ -1,8 +1,5 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { codeOf } from "../source-text.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { registerWorkspaceMoved } from "../../src/rpc/moved.js";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -311,16 +308,5 @@ describe("drawRefusalAfter and clearRefusalsAfter", () => {
 
   it("clears nothing for a card already gone", () => {
     expect(() => clearRefusalsAfter(null, "offer-refusal")).not.toThrow();
-  });
-});
-
-describe("every card that notes a refusal beside its controls uses the shared helpers", () => {
-  it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts"])("%s", (file) => {
-    const code = codeOf(readFileSync(join(process.cwd(), "src", file), "utf8"));
-    expect([
-      /\bdrawRefusalAfter\(/.test(code),
-      /\bclearRefusalsAfter\(/.test(code),
-      /\.after\(\s*refusal\s*\)/.test(code),
-    ]).toEqual([true, true, false]);
   });
 });

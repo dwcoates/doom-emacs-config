@@ -30,10 +30,7 @@ import {
   updateTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
 import type { Ticker } from "../../../src/clock.js";
-import TESTS_TAB from "../../../src/feed/merge/tests-tab.ts?raw";
 import { oneofArms } from "../../arms.js";
-import STYLESHEET from "../../../src/styles.css?raw";
-import { rulesOf } from "../../stylesheet.js";
 
 /** The source text a reused suite names in these tests. */
 const REUSED_SOURCE = "passed 2026-10-14 23:37 on master 0123456789";
@@ -134,44 +131,6 @@ describe("drawFeedMergeTestSuite: the counts column", () => {
   it("sits in the suite's head line, after the name", () => {
     const head = counted({ passed: 0, failed: 0, total: 2 }).querySelector(".merge-suite-head");
     expect(head?.lastElementChild?.classList.contains("merge-suite-counts")).toBe(true);
-  });
-});
-
-describe("the stylesheet's suite colors", () => {
-  /** The declarations of the rule whose selector is exactly SELECTOR. */
-  function declarationsOf(selector: string): string {
-    return rulesOf(STYLESHEET)
-      .filter((rule) => rule.selectors.includes(selector))
-      .map((rule) => rule.declarations)
-      .join(";");
-  }
-
-  it.each([
-    [".merge-suite-glyph.is-passing", "var(--suite-running)"],
-    [".merge-suite-glyph.is-failing", "var(--err)"],
-    [".merge-suite-glyph.is-unreported", "var(--suite-running)"],
-    [".merge-suite-glyph.is-succeeded", "var(--ok)"],
-    [".merge-suite-glyph.is-failed", "var(--err)"],
-    [".merge-suite-counts .is-passed", "var(--ok)"],
-    [".merge-suite-counts .is-failed", "var(--err)"],
-  ])("colors %s with %s", (selector, color) => {
-    expect(declarationsOf(selector)).toContain(`color: ${color}`);
-  });
-
-  it("paints no running suite dot green", () => {
-    const green = rulesOf(STYLESHEET).filter(
-      (rule) =>
-        rule.selectors.some((one) => one === ".merge-suite-glyph.is-unreported" || one === ".merge-suite-glyph.is-passing") &&
-        rule.declarations.includes("--ok"),
-    );
-    expect(green).toEqual([]);
-  });
-
-  it("paints no suite dot purple", () => {
-    const purple = rulesOf(STYLESHEET).filter(
-      (rule) => rule.selectors.some((one) => one.startsWith(".merge-suite-glyph")) && rule.declarations.includes("--blocked"),
-    );
-    expect(purple).toEqual([]);
   });
 });
 
@@ -532,10 +491,6 @@ describe("placeFeedMergeTestCounts", () => {
     placeFeedMergeTestCounts(host, undefined);
     expect(host.querySelector(".merge-suite-counts")).toBeNull();
   });
-
-  it("is the one placement of counts in tests-tab", () => {
-    expect(TESTS_TAB.match(/:scope > \.merge-suite-counts/g)).toHaveLength(1);
-  });
 });
 
 describe("sumFeedMergeTestCounts", () => {
@@ -576,24 +531,6 @@ describe("drawFeedMergeTestsRunTally", () => {
   });
 });
 
-describe("the stylesheet's run tally", () => {
-  const declarationsOf = (selector: string) =>
-    rulesOf(STYLESHEET)
-      .filter((rule) => rule.selectors.includes(selector))
-      .map((rule) => rule.declarations)
-      .join(";");
-
-  it("draws the tally in the run's badge at the duration's font size", () => {
-    expect([declarationsOf(".merge-tab > .merge-run-tally"), declarationsOf(".merge-tab-duration")].map((d) =>
-      d.match(/font-size: [^;]+/)?.[0],
-    )).toEqual(["font-size: 0.85em", "font-size: 0.85em"]);
-  });
-
-  it("no longer pushes the tally to the run strip's right end", () => {
-    expect(declarationsOf(".merge-strip > .merge-run-tally")).toBe("");
-  });
-});
-
 describe("a reused suite names the earlier run that passed its inputs", () => {
   it("draws the run's source after the suite's name", () => {
     const head = drawFeedMergeTestSuite(suite("daemon", "reused")).querySelector(".merge-suite-head");
@@ -626,11 +563,6 @@ describe("a reused suite names the earlier run that passed its inputs", () => {
   it("refuses a reused suite that names no run", () => {
     const bare = create(FeedMergeTestSuiteSchema, { name: "daemon", state: { case: "reused", value: {} } });
     expect(() => drawFeedMergeTestSuite(bare)).toThrow(MalformedView);
-  });
-
-  it("styles the source quieter than the name", () => {
-    const rules = rulesOf(STYLESHEET).filter((rule) => rule.selectors.includes(".merge-suite-reused"));
-    expect(rules.map((rule) => rule.declarations)).toEqual([expect.stringContaining("var(--muted)")]);
   });
 });
 

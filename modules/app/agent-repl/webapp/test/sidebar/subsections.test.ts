@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -59,7 +56,6 @@ import { boxAt, boxRect } from "../dom-rect.js";
 import { withRepositoryBlocks } from "../roster-families.js";
 import type { RosterOpenRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { REPOSITORY_BLOCK_CLASS } from "../../src/sidebar/row.js";
-import { codeOf } from "../source-text.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE } from "../../src/sidebar/band-fit.js";
 
 /**
@@ -1246,20 +1242,6 @@ describe("a nested row", () => {
   });
 });
 
-describe("the placement a dropped row asks for", () => {
-  it("is built in one place, so the top-level row's drop and the freed child's drop ask the same shape", () => {
-    // Arrange
-    const source = codeOf(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/sidebar/subsections.ts"), "utf8"));
-
-    // Act
-    const built = source.match(/case: "placeWorkspace"/g) ?? [];
-    const asked = source.match(/placement\(workspace, l, before, refs\)/g) ?? [];
-
-    // Assert
-    expect([built.length, asked.length]).toEqual([1, 2]);
-  });
-});
-
 describe("showsNoRows", () => {
   /** A subsection drawn with ROWS and COLLAPSED. */
   function drawnFoo(rows: ReturnType<typeof row>[], collapsed: boolean): HTMLElement {
@@ -1937,5 +1919,4 @@ describe("a subsection whose workspaces work", () => {
       0,
     ]);
   });
-
 });

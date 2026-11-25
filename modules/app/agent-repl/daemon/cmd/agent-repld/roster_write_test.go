@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"reflect"
 	"testing"
 
@@ -79,43 +76,6 @@ func TestRosterWrite(t *testing.T) {
 			if tt.wantError && (record.Message != "could not keep the test value durable" ||
 				record.Context["workspace"] != "ws-1" || record.Context["cause"] != "disk full" || record.Context["value"] != 7) {
 				t.Fatalf("record = %+v, want the message, the workspace, the cause and the change's fields", record)
-			}
-		})
-	}
-}
-
-// TestEveryRosterSinkWritesThroughRosterWrite pins the extraction: each
-// roster sink that keeps a change durable is built by rosterWrite and records
-// nothing itself, so a hand-rolled sink that logs its own failure fails here.
-func TestEveryRosterSinkWritesThroughRosterWrite(t *testing.T) {
-	for _, file := range []string{"roster_results.go", "roster_status_changes.go", "roster_visibilities.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Arrange
-			parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
-			if err != nil {
-				t.Fatalf("parse %s: %v", file, err)
-			}
-
-			// Act
-			calls := map[string]int{}
-			ast.Inspect(parsed, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				switch fn := call.Fun.(type) {
-				case *ast.Ident:
-					calls[fn.Name]++
-				case *ast.SelectorExpr:
-					calls["."+fn.Sel.Name]++
-				}
-				return true
-			})
-
-			// Assert
-			if calls["rosterWrite"] != 1 || calls[".Error"] != 0 {
-				t.Fatalf("%s calls rosterWrite %d times and .Error %d times, want once and never",
-					file, calls["rosterWrite"], calls[".Error"])
 			}
 		})
 	}

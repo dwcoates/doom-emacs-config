@@ -100,7 +100,12 @@ func TestResolveFindsTheSuiteThatOwnsEachTarget(t *testing.T) {
 		{name: "a daemon package", sel: goAll(mod + "daemon/internal/merge"), want: "daemon"},
 		{name: "the e2e module's root package", sel: goAll(mod + "e2e"), want: "e2e"},
 		{name: "a webapp vitest file", sel: vitestNamed(mod+"webapp/src/a.test.ts", "a test"), want: "webapp"},
+		{name: "a webapp rule test file", sel: vitestNamed(mod+"webapp/rules/feed/a.rules.test.ts", "a rule"), want: "webapp-rules"},
+		{name: "a webapp test file beside the rules", sel: vitestNamed(mod+"webapp/test/rules.test.ts", "a test"), want: "webapp"},
 		{name: "an ERT file", sel: ertAll(mod + "lisp/test-status.el"), want: "ert"},
+		{name: "a rule test file", sel: ertAll(mod + "lisp/test-rules-scan.el"), want: "ert-rules"},
+		{name: "a rule test file by its bare name", sel: ertAll("test-rules-scan.el"), want: "ert-rules"},
+		{name: "the shared helpers", sel: ertAll(mod + "lisp/test-helpers.el"), want: "ert"},
 		{name: "a whole harness", sel: harness(mod + "bin/test-test-all.sh"), want: "orchestrator-harness"},
 		{name: "a whole suite", sel: suiteSel("webapp"), want: "webapp"},
 	}

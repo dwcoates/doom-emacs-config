@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BACKLOG_SECTION_CLASS,
@@ -17,12 +15,6 @@ describe("the sections' classes", () => {
       "merged-section",
       "merge-queue-section",
     ]);
-  });
-
-  it("live in a module that imports nothing, so no import cycle can leave them undefined", () => {
-    const source = readFileSync(join(process.cwd(), "src/sidebar/section-classes.ts"), "utf8");
-
-    expect(source).not.toMatch(/^\s*import\b/m);
   });
 
   it("are defined where a module reads them at its top level", () => {

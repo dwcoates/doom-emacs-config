@@ -1,11 +1,6 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { heatColor } from "../src/heat.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("heatColor", () => {
   it.each([
@@ -25,15 +20,4 @@ describe("heatColor", () => {
   it.each([[-0.01], [1.01], [Number.NaN], [Number.POSITIVE_INFINITY]])("refuses %d", (position) => {
     expect(() => heatColor(position, "p")).toThrow(MalformedView);
   });
-
-  it.each(["src/footer/strip.ts", "src/feed/hover-stamp.ts"])(
-    "%s colors its token figure through the shared helper",
-    (file) => {
-      // Arrange
-      const source = readFileSync(path.join(here, "..", file), "utf8");
-      // Assert
-      expect(source).toContain("heatColor(");
-      expect(source).not.toContain("--token-heat-0");
-    },
-  );
 });

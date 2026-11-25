@@ -1,15 +1,8 @@
 // The one way a page module waits for the next animation frame. See
 // src/frame.ts.
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { nextFrame } from "../src/frame.js";
-import { codeUnder } from "./files-under.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(here, "../src");
-
 
 /** Stub the page's frame scheduler; answers the callbacks it was handed. */
 function stubFrames(): FrameRequestCallback[] {
@@ -68,20 +61,5 @@ describe("nextFrame", () => {
 
     // Assert
     expect(handed).toEqual([]);
-  });
-});
-
-describe("who waits for a frame", () => {
-  it("leaves every page module to nextFrame, but those reading the scheduler off a view", () => {
-    // Arrange: the modules that own a view's missing scheduler (src/frame.ts).
-    const ownView = new Set(["frame.ts", "type-out.ts", path.join("bubble", "body.ts")]);
-
-    // Act
-    const rolled = [...codeUnder(SRC)]
-      .filter(([file, code]) => !ownView.has(file) && /requestAnimationFrame/.test(code))
-      .map(([file]) => file);
-
-    // Assert
-    expect(rolled).toEqual([]);
   });
 });

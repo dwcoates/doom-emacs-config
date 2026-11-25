@@ -1,17 +1,16 @@
 package merge
 
 import (
-	"agent-repld/internal/sourcescan"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -723,27 +722,6 @@ func TestEnqueueRefusesAMergePlacedFrontAndBehind(t *testing.T) {
 	}
 }
 
-// TestMergeRequestRefusalsAreRecordedThroughLogRefusal keeps every typed
-// refusal of a merge request on the one INFO helper: a refusal recorded at
-// WARN by hand is the drift this replaced.
-func TestMergeRequestRefusalsAreRecordedThroughLogRefusal(t *testing.T) {
-	// Arrange
-	byHand := regexp.MustCompile(`log\.(Warn|Info)\(op, "refused`)
-
-	// Act
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if (file.Name == "request.go" || file.Name == "interrupttab.go") && byHand.Match(file.Source) {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v record a refusal by hand; use logRefusal", offenders)
-	}
-}
-
 func TestTakeRequestingTurn(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -933,4 +911,57 @@ func TestParkQueuedAsksOnlyForAnOwnBranchMergeWithNoPick(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorktreeHoldingFindsTheOneWorktreeWithTheBranch(t *testing.T) {
+	tests := []struct {
+		name      string
+		worktrees []gitclient.Worktree
+		wantDir   string
+		wantHeld  bool
+	}{
+		{name: "a worktree has the branch", worktrees: []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}, {Dir: "/w/fix", Branch: "fix"}}, wantDir: "/w/fix", wantHeld: true},
+		{name: "none has it", worktrees: []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}}},
+		{name: "a bare entry never holds it", worktrees: []gitclient.Worktree{{Dir: "/w/repo.git", Branch: "fix", Bare: true}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.git.mu.Lock()
+			h.git.worktrees = tt.worktrees
+			h.git.mu.Unlock()
+
+			// Act
+			dir, main, held, err := worktreeHolding(context.Background(), h.git, theWorkspaceDir(h), "fix")
+
+			// Assert
+			if err != nil || dir != tt.wantDir || held != tt.wantHeld || main == "" {
+				t.Fatalf("worktreeHolding = %q, %q, %v, %v; want %q, the main worktree, %v", dir, main, held, err, tt.wantDir, tt.wantHeld)
+			}
+		})
+	}
+}
+
+func TestWorktreeHoldingFailsWhenTheMainWorktreeCannotBeRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.mainWorktreeErr = errors.New("not a repository")
+	h.git.mu.Unlock()
+
+	// Act
+	_, _, held, err := worktreeHolding(context.Background(), h.git, theWorkspaceDir(h), "fix")
+
+	// Assert
+	if err == nil || held {
+		t.Fatalf("worktreeHolding = %v, %v; want the failure", held, err)
+	}
+}
+
+// theWorkspaceDir answers the harness workspace's worktree.
+func theWorkspaceDir(h *harness) string {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	return h.db.workspaces[theWorkspace].Dir
 }

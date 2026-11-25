@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -32,6 +33,15 @@ func sayHandedOver(ws, successor, again string) string {
 // sayNotYetAdopted is the not_yet_adopted sentence.
 func sayNotYetAdopted(ws, again string) string {
 	return fmt.Sprintf("the daemon is restarting and has not taken %s over yet; %s once the restart finishes", ws, again)
+}
+
+// sayRuleChecksFailed is the rule-check refusal of every verb that asks for
+// a merge (FinishWorkspace's rule_checks_failed, CreateWorkspace's
+// async_merge_rule_checks_failed): what failed, then the failing cases with
+// the command that reruns each group, so the maker fixes them and asks again.
+func sayRuleChecksFailed(subject string, e *agentreplv1.MergeRuleChecksFailed) string {
+	return fmt.Sprintf("%s failed its rule suites (%s) in %s, so its merge was not admitted; fix the failing cases below, commit, and ask again\n\n%s",
+		subject, strings.Join(e.GetSuites(), ", "), e.GetWorktree(), e.GetFailingTests())
 }
 
 // sayBehindNotInLine is the placement_behind_not_in_line sentence of every

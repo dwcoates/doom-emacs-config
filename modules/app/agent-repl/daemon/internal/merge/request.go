@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
@@ -115,6 +116,14 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		logRefusal(log, op, logsite.Msg("refused a deploy request for its version increment"), fields, err)
 		return Enqueued{}, err
 	}
+	// AN AGENT'S FINISH RUNS ITS RULE SUITES FIRST (rulecheck.go), once every
+	// cheaper refusal has been asked, and before anything is recorded. An
+	// async merge runs them below, once its maker is known to be registered.
+	if req.Detached == nil {
+		if err := o.checkRules(ctx, record, req, source, deploy, fields); err != nil {
+			return Enqueued{}, err
+		}
+	}
 	// releaseName lets go of an async request's name claim; a no-op for every
 	// other request. It runs once the request is recorded or refused.
 	var enqueued Enqueued
@@ -147,6 +156,12 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			} else {
 				log.Error(op, "could not read whether a merge off its queue holds the async merge's name", withField(fields, "error", err.Error()))
 			}
+			return Enqueued{}, err
+		}
+		// AN ASYNC MERGE RUNS ITS BRANCH'S RULE SUITES before its name is
+		// claimed: the run takes minutes, and a claim held through it would
+		// refuse every other ask for the name meanwhile.
+		if err := o.checkRules(ctx, record, req, source, deploy, fields); err != nil {
 			return Enqueued{}, err
 		}
 		branch, release, taken, err := o.deps.Names.ClaimMergeName(ctx, record.Dir, req.Detached.Name)
@@ -476,29 +491,47 @@ func (o *orchestrator) checkAsync(ctx context.Context, requester wsm.Workspace, 
 // none does or the one that does is never a cleanup's to remove: a registered
 // workspace's, the requester's, or the repository's main worktree.
 func (o *orchestrator) cleanupDirFor(ctx context.Context, requester wsm.Workspace, branch string) (string, error) {
-	main, err := o.deps.Git.MainWorktree(ctx, requester.Dir)
-	if err != nil {
-		return "", fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
+	dir, main, held, err := worktreeHolding(ctx, o.deps.Git, requester.Dir, branch)
+	if err != nil || !held {
+		return "", err
 	}
-	worktrees, err := o.deps.Git.ListWorktrees(ctx, main)
+	if filepath.Clean(dir) == filepath.Clean(main) || filepath.Clean(dir) == filepath.Clean(requester.Dir) {
+		return "", nil
+	}
+	if _, err := o.deps.DB.WorkspaceByDir(ctx, dir); err == nil {
+		return "", nil
+	} else if !errors.Is(err, wsm.ErrNotFound) {
+		return "", fmt.Errorf("merge: asking whether %s is a workspace's worktree: %w", dir, err)
+	}
+	return dir, nil
+}
+
+// worktreeLister is what finding a branch's worktree asks of git.
+type worktreeLister interface {
+	MainWorktree(ctx context.Context, dir string) (string, error)
+	ListWorktrees(ctx context.Context, repoDir string) ([]gitclient.Worktree, error)
+}
+
+// worktreeHolding answers the worktree of the repository holding IN that has
+// BRANCH checked out (git checks a branch out in at most one), with the
+// repository's main worktree, and HELD false when none has it: THE ONE
+// LOOKUP of a branch's worktree, which an async merge's cleanup, its rule
+// check and a branch merge's subject share.
+func worktreeHolding(ctx context.Context, git worktreeLister, in, branch string) (dir, main string, held bool, err error) {
+	main, err = git.MainWorktree(ctx, in)
 	if err != nil {
-		return "", fmt.Errorf("merge: listing the repository's worktrees: %w", err)
+		return "", "", false, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
+	}
+	worktrees, err := git.ListWorktrees(ctx, main)
+	if err != nil {
+		return "", "", false, fmt.Errorf("merge: listing the repository's worktrees: %w", err)
 	}
 	for _, wt := range worktrees {
-		if wt.Bare || wt.Branch != branch {
-			continue
+		if !wt.Bare && wt.Branch == branch {
+			return wt.Dir, main, true, nil
 		}
-		if filepath.Clean(wt.Dir) == filepath.Clean(main) || filepath.Clean(wt.Dir) == filepath.Clean(requester.Dir) {
-			return "", nil
-		}
-		if _, err := o.deps.DB.WorkspaceByDir(ctx, wt.Dir); err == nil {
-			return "", nil
-		} else if !errors.Is(err, wsm.ErrNotFound) {
-			return "", fmt.Errorf("merge: asking whether %s is a workspace's worktree: %w", wt.Dir, err)
-		}
-		return wt.Dir, nil
 	}
-	return "", nil
+	return "", main, false, nil
 }
 
 // withCheckedOutBranch answers source carrying the branch checked out in the

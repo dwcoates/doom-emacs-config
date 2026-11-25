@@ -1,8 +1,6 @@
 package feed
 
 import (
-	"os"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -404,25 +402,6 @@ func TestRewriteRecordedHeadRestatesTheStoredRowOnly(t *testing.T) {
 	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetBranchLine().GetSource().GetText()
 	if got := row.GetActivity().GetMerge().GetHead().GetBranchLine().GetSource().GetText(); got != "rewritten" || drawn == "rewritten" {
 		t.Fatalf("recorded label = %q, drawn label = %q; want only the record rewritten", got, drawn)
-	}
-}
-
-func TestEveryRecordedHeadRewriteGoesThroughOneHelper(t *testing.T) {
-	// Arrange
-	source, err := os.ReadFile("mergefold_test.go")
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-
-	// The needle is assembled so this test's own source never matches it.
-	needle := "encoded, err := proto." + "Marshal(row)"
-
-	// Act
-	marshals := strings.Count(string(source), needle)
-
-	// Assert
-	if marshals != 1 {
-		t.Fatalf("a recorded head is re-marshalled at %d sites in mergefold_test.go, want one, in rewriteRecordedHead", marshals)
 	}
 }
 

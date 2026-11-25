@@ -1681,6 +1681,13 @@ func TestFinishWorkspaceMapsTheQueuesRefusalsOntoItsArms(t *testing.T) {
 			got: func(e *agentreplv1.FinishWorkspaceError) bool {
 				return e.GetMergeOffQueue().GetCause().GetFailed() != nil
 			}},
+		{name: "its branch failed its rule suites", refusal: &merge.RefusalError{Arm: merge.ArmRuleChecksFailed, Reason: "failed",
+			Fields: map[string]any{"worktree": "/w/a", "suites": []string{"repo-scans", "shellcheck"}, "failing_tests": "- TestX", "log": "/s/rule_check-1-0.log"}},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool {
+				r := e.GetRuleChecksFailed()
+				return r.GetWorktree() == "/w/a" && slices.Equal(r.GetSuites(), []string{"repo-scans", "shellcheck"}) &&
+					r.GetFailingTests() == "- TestX" && r.GetLog() == "/s/rule_check-1-0.log"
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

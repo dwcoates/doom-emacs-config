@@ -2,7 +2,6 @@ package server
 
 import (
 	"agent-repld/internal/restarttiming"
-	"agent-repld/internal/sourcescan"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -11,9 +10,6 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -799,26 +795,6 @@ func TestServeThenEndFollowsACleanBodyWithTheEnding(t *testing.T) {
 	}
 }
 
-// TestEveryEndingStreamServesThroughServeThenEnd pins that no stream re-spells
-// serveThenEnd: outside it, endStandingStream is called only by the page's own
-// drain and the host stream, whose endings follow work of their own.
-func TestEveryEndingStreamServesThroughServeThenEnd(t *testing.T) {
-	// Act.
-	sites := sourcescan.Sites(t, "\tendStandingStream(s, ")
-	sends := sourcescan.Sites(t, "\tsendStandingEnding(")
-
-	// Assert: the lifetime's ending is serveThenEnd's and the host stream's;
-	// the page's drain sends its ending through the one sender at the exit
-	// and at the hand-off to the successor alike.
-	want := []string{"streams.go", "streams.go"}
-	if !slices.Equal(sites, want) {
-		t.Fatalf("endStandingStream call sites = %v, want %v (serveThenEnd, the host stream)", sites, want)
-	}
-	if wantSends := []string{"page.go", "streams.go"}; !slices.Equal(sends, wantSends) {
-		t.Fatalf("sendStandingEnding call sites = %v, want %v (the page's drain, endStandingStream)", sends, wantSends)
-	}
-}
-
 // standingFaults is a one-fault standing set.
 func standingFaults(id string) *agentreplv1.DaemonFaultsStanding {
 	return &agentreplv1.DaemonFaultsStanding{Faults: []*agentreplv1.DaemonStandingFault{{
@@ -1548,36 +1524,6 @@ func TestDialHostStreamLeavesTheFirstEventToTheTest(t *testing.T) {
 	}
 }
 
-// TestEveryHostStreamDialInTheseTestsGoesThroughTheHelpers pins the shared
-// shape: a test that opens the workspace's host stream and fails on a dial
-// error does it through dialHostStream, so a hand-rolled copy fails here.
-func TestEveryHostStreamDialInTheseTestsGoesThroughTheHelpers(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("list the test files: %v", err)
-	}
-	handRolled := regexp.MustCompile(`h\.Client\.WatchHostWorkspace\(ctx,\s*connect\.NewRequest\(&agentreplv1\.WatchHostWorkspaceRequest\{\s*Workspace: ref\(\),?\s*\}\)\)\s*if \w+ != nil \{\s*t\.Fatalf`)
-
-	// Act.
-	counts := map[string]int{}
-	for _, file := range files {
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if n := len(handRolled.FindAllIndex(src, -1)); n > 0 {
-			counts[file] = n
-		}
-	}
-
-	// Assert: dialHostStream's own body is the one site.
-	want := map[string]int{"streams_test.go": 1}
-	if !maps.Equal(counts, want) {
-		t.Fatalf("hand-rolled host stream dials = %v, want only dialHostStream's own %v; use dialHostStream or openHostStream", counts, want)
-	}
-}
-
 func TestAnEmacsStreamMeasuresTheEmacsItStatesWhileItStands(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -1892,33 +1838,6 @@ func TestParticipantHopsFieldsCarryEveryStreamAndHop(t *testing.T) {
 	want := dlog.Context{"host_stream": false, "web_stream": false, "host_hop": true, "web_hop": true}
 	if !maps.Equal(got, want) {
 		t.Fatalf("fields = %v, want %v", got, want)
-	}
-}
-
-// TestEveryParticipantEdgeStatesItsHopsThroughOneShape pins the shared shape:
-// the hops are recorded only by participantHops.fields and stated to the
-// resolvers only by publishParticipants, so a hand-rolled site that reads the
-// held counts itself fails here rather than drawing its own connectivity.
-func TestEveryParticipantEdgeStatesItsHopsThroughOneShape(t *testing.T) {
-	tests := []struct {
-		name   string
-		substr string
-		want   []string
-	}{
-		{name: "the hop record", substr: `"web_hop":`, want: []string{"streams.go"}},
-		{name: "the footer's hops", substr: "Footer.SetParticipants(", want: []string{"streams.go"}},
-		{name: "the topbar's hops", substr: "Topbar.SetParticipants(", want: []string{"streams.go"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			sites := sourcescan.Sites(t, tt.substr)
-
-			// Assert.
-			if !slices.Equal(sites, tt.want) {
-				t.Fatalf("%q sites = %v, want %v; read the hops through participantHopsLocked", tt.substr, sites, tt.want)
-			}
-		})
 	}
 }
 

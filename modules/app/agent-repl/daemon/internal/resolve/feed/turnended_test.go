@@ -1,9 +1,6 @@
 package feed
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -13,7 +10,6 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/turnfault"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -185,47 +181,6 @@ func TestARebuiltUserStopDrawsItsRecordedCommand(t *testing.T) {
 				t.Fatalf("ending rows = %d, want exactly 1", n)
 			}
 		})
-	}
-}
-
-// TestOnlyInterruptedArmBuildsTheInterruptedOutcome pins that both paths that
-// draw a stopped turn's ending — the terminal's and the daemon-built close's —
-// go through interruptedArm: no other production function in this package
-// spells the interrupted outcome, so the two cannot drift apart.
-func TestOnlyInterruptedArmBuildsTheInterruptedOutcome(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-	fset := token.NewFileSet()
-
-	// Act
-	var builders []string
-	for _, file := range files {
-		name := file.Name
-		parsed, err := parser.ParseFile(fset, name, file.Source, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		for _, declaration := range parsed.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Body == nil {
-				continue
-			}
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				literal, ok := node.(*ast.CompositeLit)
-				if !ok {
-					return true
-				}
-				if selector, ok := literal.Type.(*ast.SelectorExpr); ok && selector.Sel.Name == "FeedTurnEnded_Interrupted" {
-					builders = append(builders, name+":"+function.Name.Name)
-				}
-				return true
-			})
-		}
-	}
-
-	// Assert
-	if len(builders) != 1 || builders[0] != "turnended.go:interruptedArm" {
-		t.Fatalf("interrupted outcome built in %v, want only turnended.go:interruptedArm", builders)
 	}
 }
 

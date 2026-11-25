@@ -109,24 +109,6 @@ func TestAskBinary(t *testing.T) {
 	}
 }
 
-// EVERY QUESTION TO THE STAGED BINARY GOES THROUGH askBinary: a question
-// spelled with its own exec would drift from the bound and the error shape.
-func TestTheBinaryQuestionsShareAskBinary(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("layout.go")
-	if err != nil {
-		t.Fatalf("read layout.go: %v", err)
-	}
-
-	// Act
-	execs := strings.Count(string(src), "childproc.CommandContext(")
-
-	// Assert
-	if execs != 1 {
-		t.Fatalf("layout.go runs %d processes by hand, want the one inside askBinary", execs)
-	}
-}
-
 func TestAskBinaryRefusesAnOutputThatCannotBeCaptured(t *testing.T) {
 	// Arrange: no file for the answer can be made.
 	bin := standInDaemon(t, "echo answer\n")

@@ -3,7 +3,6 @@ package harness
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -12,7 +11,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/audiooutput"
-	"agent-repld/internal/sourcescan"
 )
 
 // runRecorder runs the fake with args and answers its exit status.
@@ -117,40 +115,6 @@ func TestRecorderRecordsEveryArgumentVerbatim(t *testing.T) {
 	}
 }
 
-func TestNoTestSetsTheRetiredTestAllVariable(t *testing.T) {
-	// Arrange: the daemon no longer reads AGENT_REPL_TEST_ALL_SCRIPT; a merge
-	// gate runs the script checked in to the tree it tests
-	// (Repo.TestAllScript), so a test still setting it would set nothing.
-	var files []string
-	for _, glob := range []string{"../*.go", "../../../e2e/*.go", "../../../e2e/kit/*.go"} {
-		matched, err := filepath.Glob(glob)
-		if err != nil {
-			t.Fatalf("glob %s: %v", glob, err)
-		}
-		files = append(files, matched...)
-	}
-	if len(files) == 0 {
-		t.Fatal("found no test files to read")
-	}
-
-	// Act
-	var offenders []string
-	for _, file := range files {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if strings.Contains(string(body), "AGENT_REPL_TEST_ALL"+"_SCRIPT") {
-			offenders = append(offenders, file)
-		}
-	}
-
-	// Assert
-	if len(offenders) != 0 {
-		t.Fatalf("%v name the retired test-all variable; check the script in with Repo.TestAllScript", offenders)
-	}
-}
-
 func TestWriteExecutableWritesAnExecutable(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "bin", "hook.sh")
@@ -162,25 +126,6 @@ func TestWriteExecutableWritesAnExecutable(t *testing.T) {
 	info, err := os.Stat(path)
 	if err != nil || info.Mode()&0o111 == 0 {
 		t.Fatalf("stat = %v, %v; want an executable", info, err)
-	}
-}
-
-// TestEveryHarnessExecutableIsWrittenThroughWriteExecutable pins that no
-// harness source writes an executable by hand.
-func TestEveryHarnessExecutableIsWrittenThroughWriteExecutable(t *testing.T) {
-	// Act
-	var byHand []string
-	for _, f := range sourcescan.Production(t) {
-		for i, line := range strings.Split(string(f.Source), "\n") {
-			if strings.Contains(line, "os.WriteFile(") && strings.Contains(line, "0o755") {
-				byHand = append(byHand, fmt.Sprintf("%s:%d", f.Name, i+1))
-			}
-		}
-	}
-
-	// Assert
-	if len(byHand) != 0 {
-		t.Fatalf("executables written by hand at %v, want writeExecutable", byHand)
 	}
 }
 

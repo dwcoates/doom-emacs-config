@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"fmt"
@@ -941,19 +940,6 @@ func TestRecordBackloggedSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
-// TestTheBackloggedFlagHasOneWrite fails when a verb writes the backlogged flag by
-// hand instead of through recordBacklogged, which would skip the roster push or
-// the cache keeper's edge.
-func TestTheBackloggedFlagHasOneWrite(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "v.deps.DB.SetBacklogged(")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "select.go" {
-		t.Fatalf("the backlogged flag is written at %v, want only recordBacklogged in select.go", sites)
-	}
-}
-
 // hiddenMergeWorkspace registers WS as a merge workspace its async merge still
 // withholds, with the backlogged flag as BACKLOGGED, and makes the fixture's merge
 // queue reveal through the verbs' own durable reveal, as the orchestrator does.
@@ -1117,20 +1103,6 @@ func TestAShowIsRefusedByAnyErrorItsRevealAnswers(t *testing.T) {
 	if !f.db.workspaces["ws-merge"].Backlogged || len(f.sidebar.registries) != 0 {
 		t.Fatalf("backlogged = %v, roster republications = %d; want the flag untouched and no roster",
 			f.db.workspaces["ws-merge"].Backlogged, len(f.sidebar.registries))
-	}
-}
-
-// A show and a select are the two callers that reveal a merge workspace for
-// the user, and both go through the orchestrator's one reveal: the verbs ask
-// it only from revealMergeHidden, and never write the reveal around it.
-func TestAShowRevealsThroughTheOrchestratorsOneReveal(t *testing.T) {
-	// Act
-	asked := sourcescan.Sites(t, "v.deps.Merge.RevealMergeWorkspace(")
-	written := sourcescan.Sites(t, "v.deps.DB.RevealMergeWorkspace(")
-
-	// Assert
-	if len(asked) != 1 || asked[0] != "select.go" || len(written) != 1 || written[0] != "select.go" {
-		t.Fatalf("the reveal is asked for at %v and written at %v, want each once in select.go", asked, written)
 	}
 }
 
@@ -1726,17 +1698,6 @@ func TestPlaceRefusal(t *testing.T) {
 	}
 }
 
-func TestSwapAndMoveShareThePlaceRefusal(t *testing.T) {
-	// Act.
-	shared := sourcescan.Count(t, "placeRefusal(log, ")
-	byHand := sourcescan.Count(t, "ArmNotSiblings, err.Error()")
-
-	// Assert.
-	if shared != 3 || byHand != 1 {
-		t.Fatalf("placeRefusal calls = %d and hand-spelled not_siblings arms = %d, want Swap, Move and the arrangement sharing the one helper", shared, byHand)
-	}
-}
-
 func TestSelectAsARecencyWalkStepLeavesTheSelectionInstant(t *testing.T) {
 	// Arrange: w1 was last chosen an hour ago; the walk steps onto it now.
 	f := newFixture(t)
@@ -2008,18 +1969,6 @@ func TestBacklogColdGateSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
 		t.Fatalf("republications %d, edges %v; want none for a failed write", len(f.sidebar.registries), f.visibilityEdges)
-	}
-}
-
-// TestEveryBacklogMoveEndsInBackloggedRecorded fails when a move into or
-// out of the backlog republishes or raises the keeper's edge by hand.
-func TestEveryBacklogMoveEndsInBackloggedRecorded(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "v.backloggedRecorded(ctx, log, ws, ")
-
-	// Assert
-	if !slices.Equal(sites, []string{"select.go", "select.go"}) {
-		t.Fatalf("backloggedRecorded is called at %v, want recordBacklogged and BacklogColdGate in select.go", sites)
 	}
 }
 

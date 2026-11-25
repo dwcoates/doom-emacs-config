@@ -3,8 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -53,22 +51,6 @@ func TestDefaultSummarizerAnswerIsTheDefaultSummarizersCompaction(t *testing.T) 
 	want := &agentreplv1.AnswerColdGateCompact{Model: wantSummarizer.GetModel(), Scope: wantSummarizer.GetScope()}
 	if !proto.Equal(got, want) {
 		t.Fatalf("defaultSummarizerAnswer() = %v, want %v", got, want)
-	}
-}
-
-func TestEveryGateAnswerTheDaemonChoosesUsesTheDefaultSummarizerAnswer(t *testing.T) {
-	// Arrange.
-	for _, file := range []string{"deploychecks.go", "answers.go"} {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// Assert: the gate answers the daemon makes on its own build their
-		// compaction through one helper, never by hand.
-		if !strings.Contains(string(body), "defaultSummarizerAnswer()") || strings.Contains(string(body), "&agentreplv1.AnswerColdGateCompact{") {
-			t.Fatalf("%s builds a gate's compaction by hand; it must use defaultSummarizerAnswer()", file)
-		}
 	}
 }
 

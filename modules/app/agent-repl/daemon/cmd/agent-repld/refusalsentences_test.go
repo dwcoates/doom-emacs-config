@@ -2,8 +2,6 @@ package main
 
 import (
 	"errors"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -197,21 +195,5 @@ func TestASharedNestedSentenceWithNoChoiceIsABug(t *testing.T) {
 				t.Fatalf("sentence = %q, %v; want the undescribed-arm bug", got, err)
 			}
 		})
-	}
-}
-
-func TestEveryNotOnGithubSentenceIsSaidBySayNotOnGithub(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("subscriptionrefusal.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert
-	if n := strings.Count(string(src), "is not on github.com"); n != 0 {
-		t.Fatalf("subscriptionrefusal.go says the not_on_github sentence by hand %d times; every describer says it through sayNotOnGithub", n)
-	}
-	if n := strings.Count(string(src), "sayNotOnGithub(subscriber, r.NotOnGithub.GetOrigin())"); n != 2 {
-		t.Fatalf("%d describers say not_on_github through sayNotOnGithub, want the merge queue's and the workflow run's", n)
 	}
 }

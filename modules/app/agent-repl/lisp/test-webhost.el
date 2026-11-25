@@ -194,26 +194,6 @@ RAW defaults to `agent-repl-test-wh--retired'."
   (file-name-directory (or load-file-name buffer-file-name))
   "The directory this suite and the sources it reads live in.")
 
-(defun agent-repl-test-wh--count-in-source (file needle)
-  "How many times NEEDLE occurs in lisp/FILE."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name file agent-repl-test-wh--lisp-dir))
-    (let ((n 0))
-      (while (search-forward needle nil t) (cl-incf n))
-      n)))
-
-(ert-deftest agent-repl-test-wh-both-views-watch-their-loads-through-the-shared-helper ()
-  "The host and the sidebar install their callbacks through the one helper."
-  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-watch-load xw '")))
-  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-watch-load xw '"))))
-
-(ert-deftest agent-repl-test-wh-no-view-sets-its-callback-by-hand ()
-  "Only the shared helper puts an xwidget's callback.
-The host's one other put is its hot-reload heal (`agent-repl--webhost-rewatch'),
-which restores a known prior handler rather than keeping the current one."
-  (should (= 2 (agent-repl-test-wh--count-in-source "webhost.el" "(xwidget-put xw 'callback")))
-  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(xwidget-put xw 'callback"))))
-
 (defmacro agent-repl-test-wh--with-answer-records (&rest body)
   "Run BODY binding `records' to every answer record, as (LEVEL SCOPE TEXT), newest first."
   (declare (indent 0))
@@ -257,16 +237,6 @@ which restores a known prior handler rather than keeping the current one."
     (should (eq (nth 1 (car records)) 'central))
     (should (string-prefix-p "elisp.view.answer-unreadable raw=\"not json\"" (nth 2 (car records))))))
 
-(ert-deftest agent-repl-test-wh-both-views-record-answers-through-the-shared-helper ()
-  "The host and the sidebar record their answers through the one helper."
-  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-answered raw \"elisp.webhost\"")))
-  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-answered raw \"elisp.sidebar-view\"")))
-  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl-webhost-parse-answer raw)"))))
-
-(ert-deftest agent-repl-test-wh-every-held-page-entry-is-built-through-the-one-helper ()
-  "Every held page's entry is made by `agent-repl--webhost-page-entry'."
-  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(list :url"))))
-
 (ert-deftest agent-repl-test-wh-a-page-entry-holds-its-url-and-reason-and-no-deferral ()
   "A page entry is held at its URL for its reason, handed to the host."
   (should (equal (agent-repl--webhost-page-entry "http://ws-a.localhost:1/" 'shown)
@@ -296,18 +266,6 @@ which restores a known prior handler rather than keeping the current one."
 (ert-deftest agent-repl-test-wh-a-view-s-other-load-stages-do-nothing ()
   "Only the commit acts: one replay per document."
   (should-not (agent-repl-test-wh--on-commit "load-finished" "http://host.localhost:1/?host=1")))
-
-(ert-deftest agent-repl-test-wh-both-views-decide-a-commit-through-the-shared-helper ()
-  "The host and the sidebar decide a committed load through the one helper."
-  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-on-commit\n")))
-  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-on-commit status")))
-  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "\"load-committed\""))))
-
-(ert-deftest agent-repl-test-wh-both-views-read-their-boot-through-the-shared-helper ()
-  "The host and the sidebar read a finished load's boot through the one helper."
-  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-on-finish\n")))
-  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-on-finish status")))
-  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "\"load-finished\""))))
 
 (defmacro agent-repl-test-wh--with-made-view (live &rest body)
   "Run BODY with web view creation stubbed: a fresh buffer, an xwidget when LIVE.
@@ -2445,28 +2403,6 @@ The current tab's page, not shown here, is the nearest of all."
       (should (equal made "http://host.localhost:3/?host=1&reload=0"))
       (should (equal agent-repl--webhost-url "http://host.localhost:3/?host=1"))
       (kill-buffer agent-repl--webhost-buffer))))
-
-(ert-deftest agent-repl-test-wh-every-document-load-goes-through-the-generation-url ()
-  "No host or sidebar load spells its URL without the reload generation.
-A load that did would state no generation, and the daemon could not tell a
-host that has not reloaded yet from one that ignored its reload."
-  ;; Arrange
-  (let (offenders)
-    (dolist (file '("webhost.el" "sidebar-view.el"))
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name file agent-repl-test--module-dir))
-        (goto-char (point-min))
-        ;; Act
-        (while (re-search-forward "(agent-repl--\\(frontend-webview-navigate-widget\\|webview-make-hidden\\)[ \n]" nil t)
-          (let ((call (save-excursion
-                        (goto-char (match-beginning 0))
-                        (buffer-substring-no-properties (point) (progn (forward-sexp) (point))))))
-            (unless (or (string-match-p "agent-repl-webhost-document-url" call)
-                        (save-excursion (beginning-of-defun)
-                                        (looking-at "(defun agent-repl--webview-make-hidden ")))
-              (push (format "%s:%d" file (line-number-at-pos)) offenders))))))
-    ;; Assert
-    (should-not offenders)))
 
 ;;; test-webhost.el ends here
 

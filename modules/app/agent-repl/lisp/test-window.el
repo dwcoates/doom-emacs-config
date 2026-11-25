@@ -915,19 +915,6 @@ startup activated persp-mode's \"main\" (2026-11-02)."
       (should (agent-repl-window-test--record-matching
                records "window--panel-window: ws=main kind=:view")))))
 
-(ert-deftest agent-repl-test-window-perspective-records-share-the-one-scope-helper ()
-  "window.el scopes every record about a perspective through `--ws-log-scope'.
-`agent-repl--ws-log-name' answers nil for a name without a sink, which
-leaves the record to the ambient context; a site using it would raise a
-routing error again whenever it runs outside one."
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "window.el"
-                                     (file-name-directory
-                                      (symbol-file 'agent-repl-window--panel-window))))
-                  (buffer-string))))
-    (should-not (string-match-p "(agent-repl--ws-log-name " source))))
-
 (ert-deftest agent-repl-test-window-panel-window-routable-ws-keeps-attribution ()
   "Asking about a REAL workspace's panel keeps the record attributed to it."
   (agent-repl-test--with-clean-state
@@ -1048,23 +1035,6 @@ that empty minibuffer back in the mini-window after it had exited."
   (let ((before window-persistent-parameters))
     (agent-repl-window--with-layout-parameters #'ignore)
     (should (equal window-persistent-parameters before))))
-
-(ert-deftest agent-repl-test-window-panels-saves-and-restores-layouts-through-the-helpers ()
-  "panels.el saves and restores every layout through the window.el pair.
-A bare `current-window-configuration' or `set-window-configuration'
-drops the layout parameters, which is how the sidebar's side survived a
-close."
-  (with-temp-buffer
-    (insert-file-contents
-     (expand-file-name "panels.el"
-                       (file-name-directory
-                        (symbol-file 'agent-repl-window--panel-window))))
-    (should (= 0 (how-many (regexp-quote "(set-window-configuration ") (point-min) (point-max))))
-    (should (= 0 (how-many (regexp-quote "(current-window-configuration)") (point-min) (point-max))))
-    (should (= 2 (how-many (regexp-quote "(agent-repl-window--restore-configuration ")
-                           (point-min) (point-max))))
-    (should (= 2 (how-many (regexp-quote "(agent-repl-window--save-configuration)")
-                           (point-min) (point-max))))))
 
 ;;; test-window.el ends here
 

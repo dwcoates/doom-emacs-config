@@ -9,7 +9,6 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 )
 
 // overdue is a visible workspace whose last turn ended more than an interval
@@ -212,18 +211,6 @@ func TestTheNextTurnsEndResumesTheBeats(t *testing.T) {
 	}
 }
 
-// TestColdMarkWritesHaveOneHome fails when a source file in this package
-// writes the cold mark other than through Keeper.markCold.
-func TestColdMarkWritesHaveOneHome(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, ".MarkCacheCold(ctx")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "coldmark.go" {
-		t.Fatalf("the cold mark is written at %v, want only Keeper.markCold in coldmark.go", sites)
-	}
-}
-
 func TestTheCacheKnownColdParksTheSession(t *testing.T) {
 	tests := []struct {
 		name string
@@ -307,17 +294,5 @@ func TestAnAnswerParksNothing(t *testing.T) {
 	}
 	if len(h.coldDowns) != 0 {
 		t.Fatalf("cold parks = %+v, want none for an answer", h.coldDowns)
-	}
-}
-
-// TestColdParkAsksHaveOneHome fails when a source file in this package asks
-// for the cold park other than through Keeper.parkCold.
-func TestColdParkAsksHaveOneHome(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "k.deps.ColdDown(")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "coldmark.go" {
-		t.Fatalf("the cold park is asked at %v, want only Keeper.parkCold in coldmark.go", sites)
 	}
 }

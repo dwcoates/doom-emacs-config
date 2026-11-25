@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 	"agentrepl/logging/logsite"
 )
 
@@ -3293,17 +3292,5 @@ func TestFormattedRecordsRefusesALineWithAnotherFieldCount(t *testing.T) {
 	record, logged := recordFor(surfaces.records(), "error", "op")
 	if !logged || record.Context["line"] != "c" || record.Context["fields"] != 1 || record.Context["dir"] != "/repo" || record.Context["tip"] != "t" {
 		t.Fatalf("refusal record = %+v (logged %v), want an ERROR carrying the line, its field count, the dir and the caller's context", record, logged)
-	}
-}
-
-// TestEveryFormattedOutputIsSplitByFormattedRecords holds the call sites to
-// the one parser: no other code in the package splits a line by fieldSep.
-func TestEveryFormattedOutputIsSplitByFormattedRecords(t *testing.T) {
-	// Arrange, Act.
-	n := sourcescan.Count(t, "strings.Split(line, fieldSep)")
-
-	// Assert.
-	if n != 1 {
-		t.Fatalf("lines split by fieldSep %d times in the package, want exactly one: formattedRecords's own", n)
 	}
 }

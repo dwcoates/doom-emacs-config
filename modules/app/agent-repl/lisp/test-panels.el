@@ -13,10 +13,6 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-(defconst agent-repl-test-panels--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The directory holding the elisp sources, for the source scans below.")
-
 ;; persp-mode's hook, bound dynamically by the snapshot-count tests that
 ;; drive its deactivation protocol; persp-mode itself is not loaded here.
 (defvar persp-before-deactivate-functions)
@@ -1593,19 +1589,6 @@ foreign directory."
       (kill-buffer webview-buf)
       (should-not (agent-repl--webview-window "test-ws"))
       (should-not (agent-repl--webview-window "no-such-ws")))))
-
-(ert-deftest agent-repl-test-panels-webview-window-is-the-one-lookup ()
-  "Every caller handing the keyboard to the feed looks the window up through
-`agent-repl--webview-window', never by hand off `:frontend-buffer'."
-  (let ((hits 0))
-    (dolist (file '("panels.el" "verbs.el"))
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name file agent-repl-test-panels--lisp-dir))
-        (goto-char (point-min))
-        (while (re-search-forward "(get-buffer-window[[:space:]]+webview)" nil t)
-          (setq hits (1+ hits)))))
-    ;; The helper's own body is the one site.
-    (should (= hits 1))))
 
 ;;;; ---- Tests: focus-input show-or-focus branch ----
 
@@ -4779,20 +4762,6 @@ it is covered by the mount, not by the user's work."
     ;; Act / Assert
     (should-not (agent-repl--panels-open-placeholder "test-ws"))))
 
-(ert-deftest agent-repl-test-panels-open-placeholder-is-asked-only-through-the-helper ()
-  "panels.el asks open-progress.el for the placeholder in one place only."
-  ;; Arrange
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "panels.el" agent-repl-test-panels--lisp-dir))
-                  (buffer-string))))
-    ;; Act
-    (let ((calls (cl-loop with start = 0
-                          while (string-match "(agent-repl--open-progress-placeholder " source start)
-                          count t do (setq start (match-end 0)))))
-      ;; Assert
-      (should (= calls 1)))))
-
 (ert-deftest agent-repl-test-panels-a-frame-showing-the-placeholder-is-covered ()
   "A frame holding only the placeholder is covered by the mount."
   ;; Arrange
@@ -4842,28 +4811,6 @@ it is covered by the mount, not by the user's work."
             (should (eq (agent-repl--ws-get "test-ws" :fullscreen-config) 'users-frame)))
         (kill-buffer placeholder)
         (delete-other-windows)))))
-
-(defconst agent-repl-test-panels--dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The lisp/ directory the mount sources are read from.")
-
-(ert-deftest agent-repl-test-panels-every-mount-saves-through-the-one-helper ()
-  "No mount site records `:fullscreen-config' by hand.
-The layout under the mount is saved by `agent-repl--save-pre-panel-layout'
-alone; a site writing a configuration into the key itself would save
-whatever the mount had already put on the frame.  The helper saves through
-`agent-repl-window--save-configuration', which keeps the side and panel
-window parameters a restore must put back."
-  (let ((dir agent-repl-test-panels--dir))
-    (dolist (file '("frontend.el" "open-progress.el" "panels.el"))
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name file dir))
-        (goto-char (point-min))
-        (let ((hits 0))
-          (while (re-search-forward
-                  ":fullscreen-config (agent-repl-window--save-configuration)" nil t)
-            (setq hits (1+ hits)))
-          (should (= hits (if (equal file "panels.el") 1 0))))))))
 
 ;;;; ---- A restore that awaited its view ----
 
@@ -4927,22 +4874,6 @@ the user switched away and back."
       (agent-repl--panels-mount-awaited-view "ws-a")
       ;; Assert
       (should (equal (nreverse calls) '((mount "ws-a") (restore "ws-a")))))))
-
-(ert-deftest agent-repl-test-panels-mount-awaited-view-is-the-one-site-that-announces-a-view ()
-  "No module announces a made view to the panels by hand.
-Every mount a switch or a pass owes goes through
-`agent-repl--panels-mount-awaited-view', so a site that mounted and
-announced on its own could drift from it: panels.el holds the one call."
-  (let ((dir agent-repl-test-panels--dir))
-    (dolist (file '("page-unload.el" "webview-recovery.el" "panels.el"))
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name file dir))
-        (goto-char (point-min))
-        (let ((hits 0))
-          (while (re-search-forward "^[ \t]+(agent-repl--panels-on-view-created ws)" nil t)
-            (setq hits (1+ hits)))
-          (should (equal (cons file hits)
-                         (cons file (if (equal file "panels.el") 1 0)))))))))
 
 ;;;; ---- Switch trigger capture -------------------------------------------
 

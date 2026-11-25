@@ -3,8 +3,6 @@ package wsm
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -53,26 +51,5 @@ func TestSetWorkspaceColumnsRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no daemon.wsm.test record names the workspace: %v", log.Records())
-	}
-}
-
-// TestPlainWorkspaceUpdatesGoThroughSetWorkspaceColumns pins the shared shape:
-// workspaces.go spells its plain update-by-id once, in setWorkspaceColumns.
-func TestPlainWorkspaceUpdatesGoThroughSetWorkspaceColumns(t *testing.T) {
-	// Arrange
-	source, err := os.ReadFile("workspaces.go")
-	if err != nil {
-		t.Fatalf("read workspaces.go: %v", err)
-	}
-
-	// Act
-	spelled := strings.Count(string(source), "UPDATE workspaces SET ")
-
-	// Assert: setWorkspaceColumns, MarkClosed's, SetCurrent's two (the clear
-	// and the set), SetPriority's, and RetireSpawnedShim's compare-and-clear,
-	// which share a transaction with another statement (the priority's
-	// re-landing of the workspace's place) or assign NULLs and literals.
-	if spelled != 6 {
-		t.Fatalf("workspaces.go spells a workspace update %d times, want 6 (setWorkspaceColumns, MarkClosed, SetCurrent twice, SetPriority, RetireSpawnedShim)", spelled)
 	}
 }

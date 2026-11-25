@@ -1,10 +1,7 @@
 package childproc
 
 import (
-	"agent-repld/internal/sourcescan"
 	"context"
-	"go/ast"
-	"go/token"
 	"os"
 	"os/exec"
 	"strings"
@@ -75,32 +72,5 @@ func TestAChildRunsInItsDirectoryWhenTheDaemonsIsDeleted(t *testing.T) {
 	// Assert
 	if err != nil || strings.TrimSpace(string(out)) != Stable {
 		t.Fatalf("pwd = %q, %v; want %q", out, err, Stable)
-	}
-}
-
-// TestEveryChildIsBuiltHere holds every daemon source outside this package to
-// Command and CommandContext: a site calling os/exec's builders directly
-// would start its child wherever the daemon stands.
-func TestEveryChildIsBuiltHere(t *testing.T) {
-	// Arrange
-	var offenders []string
-
-	// Act
-	sourcescan.EachDaemonSource(t, sourcescan.DaemonRoot(t), []string{"internal/childproc"}, func(fset *token.FileSet, file *ast.File) {
-		ast.Inspect(file, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "exec" && (sel.Sel.Name == "Command" || sel.Sel.Name == "CommandContext") {
-				offenders = append(offenders, fset.Position(sel.Pos()).String())
-			}
-			return true
-		})
-	})
-
-	// Assert
-	if len(offenders) > 0 {
-		t.Fatalf("these sites build a child with os/exec directly; use childproc.Command or childproc.CommandContext:\n%s", strings.Join(offenders, "\n"))
 	}
 }

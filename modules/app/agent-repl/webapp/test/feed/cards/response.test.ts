@@ -2,23 +2,13 @@
 import { CODE_RUN_CLASS } from "../../../src/run-control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   FeedComposerEntrySchema,
-  FeedIdSchema,
   FeedResponseSchema,
-  FeedRowSchema,
   type FeedResponse,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createTicker } from "../../../src/clock.js";
-import type { FailureSink } from "../../../src/failure/sink.js";
-import { createAgentReplClient } from "../../../src/rpc/client.js";
-import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { OUTCOME_CARD_CLASS } from "../../../src/feed/marker.js";
-import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
   RESPONSE_CUT_SHORT_ACTIONS_CLASS,
@@ -46,9 +36,8 @@ import { visibleWidth, columnMeasure } from "../../../src/metaprompt-tree.js";
 import { installTreeLayout, stagedCols, stagedMeasure, useTreeLayout } from "../../tree-layout.js";
 import { stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
-import stylesheet from "../../../src/styles.css?raw";
-import responseSource from "../../../src/feed/cards/response.ts?raw";
-import { cascadedValue, installStylesheet, selectorOf } from "../../stylesheet.js";
+import { PACE, response, rowContext } from "./response-context.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { HAS_MORE_CLASS, refreshHasMore } from "../../../src/feed/bubble-more.js";
 import {
@@ -61,7 +50,6 @@ import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { fakePageSeen } from "../../page-seen-fake.js";
 import type { PageSeen } from "../../../src/page-seen.js";
-import { orderFor } from "../../feed-order.js";
 import { plainProse, servedProse, treeProse } from "../../prose.js";
 import { boundCopyText } from "../../../src/copy-control.js";
 import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
@@ -69,37 +57,6 @@ import { BUBBLE_QUESTION_CLASS, QUESTION_ROW_ATTRIBUTE } from "../../../src/feed
 import { COMPOSER_ENTRY_CLASS, createComposerEntryHighlight } from "../../../src/feed/composer-entry.js";
 import { applyMentionTargets, resetMentionTargets, WORKSPACE_MENTION_ATTRIBUTE } from "../../../src/feed/workspace-mentions.js";
 import { mentionTargets, openTarget } from "../mention-targets.js";
-
-const SINK: FailureSink = { report: () => {}, retract: () => {} };
-
-/** The reveal pace every live draw carries: the daemon's thinking default. */
-const PACE = { minCharsPerSecond: 45, maxCharsPerSecond: 55, bankLimitMs: 1500 };
-
-/** A row context on a page SEEN says; the response card calls no verb of its own. */
-function rowContext(previous?: HTMLElement, seen: PageSeen = fakePageSeen()): RowContext {
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {});
-  });
-  return {
-    ctx: testAppContext({
-      client: createAgentReplClient(transport),
-      workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
-      ticker: createTicker(1000),
-      failures: SINK,
-      seen,
-      composerEnabled: false,
-    }),
-    feed: "root",
-    arrival: "page",
-    row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
-    revealRow: async () => true,
-    previous,
-  };
-}
-
-function response(init: MessageInitShape<typeof FeedResponseSchema>): FeedResponse {
-  return create(FeedResponseSchema, init);
-}
 
 /**
  * The rendered prose's length as the reveal counts it (src/bubble/text-reveal.ts):
@@ -695,10 +652,6 @@ describe("carriedNumber", () => {
   it("answers nothing when the attribute is absent", () => {
     expect(carriedNumber(document.createElement("div"), "data-x")).toBeUndefined();
   });
-
-  it("is the one parse every carried reveal fact goes through", () => {
-    expect(responseSource.match(/Number\.parse(?:Int|Float)\(/g)).toHaveLength(1);
-  });
 });
 
 describe("a malformed response", () => {
@@ -1013,7 +966,6 @@ describe("the wrapped tree a settled response carries", () => {
       expect(width).toBe("fit-content");
       expect(width).not.toBe("77%");
       expect(maxWidth).toBe("var(--bubble-max-width)");
-      expect(stylesheet).toMatch(/--bubble-max-width:\s*77%;/);
       el.remove();
     } finally {
       teardown();
@@ -1063,7 +1015,6 @@ describe("the wrapped tree a settled response carries", () => {
     expect(() => fireResize(column)).toThrow();
   });
 });
-
 
 describe("a tree's first paint waits for the body to join the document", () => {
   const staged = useTreeLayout();
@@ -1202,7 +1153,6 @@ describe("a tree's first paint waits for the body to join the document", () => {
     expect(() => fireResize(second)).not.toThrow();
   });
 });
-
 
 describe("the record of the drawn response", () => {
   it("records a row's FIRST draw at info, the bubble appearing being the action", async () => {
@@ -1968,71 +1918,6 @@ describe("the one-line cap", () => {
 });
 
 /**
- * A ONE-LINE BUBBLE SAYS "MORE" WITH THE ELLIPSIS, NEVER THE FADE (owner
- * request, 2026-10-08): the held prompt's own mechanism (`data-more`
- * `ellipsis`), the collapsed body clamped to its line. jsdom lays nothing
- * out, so each case states the geometry the engine would give it.
- */
-describe("the one-line bubble's more signal", () => {
-  const LINE_PX = 20;
-
-  /** The ellipsis clamp on a collapsed body, as the stylesheet writes it. */
-  const CLAMPED_BODY = selectorOf(/([^{}]*\.bubble-body)\s*\{[^{}]*-webkit-line-clamp/, "ellipsis clamp");
-
-  /** The box whose fade the ellipsis hides, as the stylesheet writes it (the pseudo dropped). */
-  const FADE_HIDDEN_ON = selectorOf(/([^{}]*\.bubble-scroll)::after\s*\{\s*display:\s*none;\s*\}/, "hidden fade");
-
-  /** A drawn response (THINKING or not) in ARM whose body renders LINES lines under a one-line cap. */
-  function mounted(thinking: boolean, arm: "success" | "update", lines: number): { box: HTMLElement; body: HTMLElement } {
-    const host = document.createElement("div");
-    installClickExpand(host, () => "", (section) => refreshHasMore(section));
-    const bubble = drawFeedResponse(
-      response({ thinking, interim: !thinking, result: { case: arm, value: { prose: { prose: plainProse("weighing") } } } }),
-      rowContext(),
-    );
-    host.append(bubble);
-    document.body.append(host);
-    const box = bubble.querySelector(`:scope > .${BUBBLE_SCROLL_CLASS}`) as HTMLElement;
-    const body = box.querySelector(":scope > .bubble-body") as HTMLElement;
-    const shown = Math.min(lines, 1) * LINE_PX;
-    Object.defineProperty(box, "clientHeight", { configurable: true, value: shown });
-    // A clamped body's own box ends at its cap; an unclamped one holds every line.
-    const own = body.matches(CLAMPED_BODY) ? shown : lines * LINE_PX;
-    Object.defineProperty(body, "offsetHeight", { configurable: true, value: own });
-    Object.defineProperty(body, "scrollHeight", { configurable: true, value: lines * LINE_PX });
-    refreshHasMore(box);
-    return { box, body };
-  }
-
-  /** Whether the collapsed line ends in the ellipsis: the clamp holds it, and something follows it. */
-  const ellipsized = ({ box, body }: { box: HTMLElement; body: HTMLElement }): boolean =>
-    body.matches(CLAMPED_BODY) && box.classList.contains(HAS_MORE_CLASS);
-
-  /** Whether the box draws the fade: it has more, and nothing hides the fade. */
-  const faded = ({ box }: { box: HTMLElement }): boolean =>
-    box.classList.contains(HAS_MORE_CLASS) && !box.matches(FADE_HIDDEN_ON);
-
-  it.each([
-    { name: "an arriving thinking bubble", thinking: true, arm: "update" },
-    { name: "a landed thinking bubble", thinking: true, arm: "success" },
-    { name: "an arriving interim response", thinking: false, arm: "update" },
-    { name: "a settled interim response", thinking: false, arm: "success" },
-  ] as const)("ends $name's one line in the ellipsis when more follows", ({ thinking, arm }) => {
-    // Arrange / Act
-    const drawn = mounted(thinking, arm, 4);
-    // Assert
-    expect([ellipsized(drawn), faded(drawn)]).toEqual([true, false]);
-  });
-
-  it("draws neither the ellipsis nor the fade on a one-line bubble with no more", () => {
-    // Arrange / Act
-    const drawn = mounted(true, "success", 1);
-    // Assert
-    expect([ellipsized(drawn), faded(drawn)]).toEqual([false, false]);
-  });
-});
-
-/**
  * THE TURN'S ANSWER IS NEVER ABBREVIATED (owner request, 2026-09-27). The
  * response the daemon named the turn's answer (green), arriving or settled,
  * and a response the turn's death cut short are drawn `BUBBLE_UNCAPPED`: their
@@ -2489,7 +2374,6 @@ describe("the data-driven final-answer green", () => {
     // the deterministic proof, mirrored from styles.test.ts.)
     expect(el.matches(".bubble.final-response")).toBe(true);
     expect(el.matches(".bubble.entry-selected")).toBe(true);
-    expect(stylesheet).toMatch(/\.bubble\.entry-selected\s*\{\s*outline:\s*0\.5px solid var\(--blocked\);\s*outline-offset:\s*-0\.5px;\s*\}/);
   });
 });
 
@@ -2780,13 +2664,6 @@ describe("a final response revised from highlighted words", () => {
     // Assert
     expect(draw).toThrow(MalformedView);
   });
-
-  it("highlights a final response's words in the one purple", () => {
-    // Arrange
-    const rule = /\.bubble\.final-response:not\(\.thinking-bubble\) \.response-prose ::selection \{([^}]*)\}/.exec(stylesheet);
-    // Assert
-    expect(rule?.[1]).toContain("background: var(--blocked)");
-  });
 });
 
 describe("a footer note under a response's prose", () => {
@@ -2795,19 +2672,5 @@ describe("a footer note under a response's prose", () => {
     const note = footerNote("some-note", "said");
     // Assert
     expect([note.tagName, note.className, note.textContent]).toEqual(["SPAN", "some-note", "said"]);
-  });
-
-  it("is drawn for both notes by the one stylesheet rule", () => {
-    // Arrange
-    const rule = /\.response-cut-short-marker,\s*\.response-revision-failed\s*\{([^}]*)\}/.exec(stylesheet);
-    // Assert
-    expect(rule?.[1]).toContain("color: var(--err)");
-  });
-
-  it("is the only way the response card makes a note", () => {
-    // Arrange: the card's own source, every note going through footerNote.
-    const made = responseSource.match(/document\.createElement\("span"\)/g) ?? [];
-    // Assert
-    expect(made).toHaveLength(1);
   });
 });

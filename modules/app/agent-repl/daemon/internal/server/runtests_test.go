@@ -826,30 +826,6 @@ func TestATestRunForAWorkspaceHandedToTheSuccessorIsAnsweredAsHandedOver(t *test
 	}
 }
 
-// THE TEST ENDPOINTS RESOLVE THEIR WORKTREE ONE WAY: through testWorktreeOf,
-// never a hand-rolled resolve and script read of their own.
-func TestTheTestEndpointsResolveThroughTestWorktreeOf(t *testing.T) {
-	for _, file := range []string{"runtests.go", "runredundancy.go"} {
-		// Arrange
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := string(src)
-		if file == "runtests.go" {
-			body = body[:strings.Index(body, "func (s *server) testWorktreeOf(")]
-		}
-
-		// Act
-		handRolled := strings.Contains(body, "s.resolveRef(") || strings.Contains(body, "testScriptOf(")
-
-		// Assert
-		if handRolled || !strings.Contains(body, "s.testWorktreeOf(") {
-			t.Fatalf("%s resolves its worktree by hand; use testWorktreeOf", file)
-		}
-	}
-}
-
 // mainTestsWorkspace registers a repository's main workspace whose main
 // checkout holds a deploy config and a `.git/worktrees` directory, and
 // answers its ref.

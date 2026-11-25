@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CreateWorkspaceErrorSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import { SubmitPromptErrorSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
@@ -25,14 +24,5 @@ describe("the agent-only refusal arms", () => {
       "blocked",
       "unknownWorkspace",
     ]);
-  });
-});
-
-describe("the suites that word refusal arms off the schema", () => {
-  it.each([
-    "test/composer/composer.test.ts",
-    "test/integration/refusals.integration.test.ts",
-  ])("%s takes the agent-only arms out through userRefusalArms", (file) => {
-    expect(readFileSync(new URL(`../${file}`, import.meta.url), "utf8")).toContain("userRefusalArms(");
   });
 });

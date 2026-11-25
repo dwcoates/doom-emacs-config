@@ -128,13 +128,15 @@ var createRefusalArms = map[string]bool{
 	"version_increment_unexpected":          true,
 	"async_merge_requester_merging":         true,
 	"async_merge_requester_session_deleted": true,
-	ArmPlacementOnChild:                     true,
-	ArmPlacementOnMergeWorkspace:            true,
-	ArmPlacementRequiresWorkspace:           true,
-	ArmUnknownPlacementSubsection:           true,
-	ArmBlankPlacementSubsectionName:         true,
-	ArmGatherUnknownWorkspace:               true,
-	ArmGatherNotGatherable:                  true,
+	// The branch failed its rule suites: the caller fixes it and asks again.
+	"async_merge_rule_checks_failed": true,
+	ArmPlacementOnChild:              true,
+	ArmPlacementOnMergeWorkspace:     true,
+	ArmPlacementRequiresWorkspace:    true,
+	ArmUnknownPlacementSubsection:    true,
+	ArmBlankPlacementSubsectionName:  true,
+	ArmGatherUnknownWorkspace:        true,
+	ArmGatherNotGatherable:           true,
 	// The deploy mediator asked: it does its work in its own session.
 	ArmRequestedByDeployMediator: true,
 	// The production mediator asked directly: it dispatches its children.

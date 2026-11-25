@@ -363,7 +363,7 @@ func TestReadFailingTestsOrdersSuitesAsTheRoster(t *testing.T) {
 
 func TestRenderSaysWhenNoSuiteCouldBeAttributed(t *testing.T) {
 	// Act.
-	text := failingTests{}.render("/state/merge-logs/l-tests-1.log")
+	text := failingTests{}.render(gateFailingIntro, "/state/merge-logs/l-tests-1.log")
 
 	// Assert.
 	if !strings.Contains(text, "No failing test could be attributed to a suite: read the archive.") {
@@ -376,7 +376,7 @@ func TestRenderPointsAnUnnamedUnitToItsBlockInTheArchive(t *testing.T) {
 	found := failingTests{suites: []*failingSuite{{name: "daemon", unnamed: []string{"daemon:vet"}}}}
 
 	// Act.
-	text := found.render("/logs/x.log")
+	text := found.render(gateFailingIntro, "/logs/x.log")
 
 	// Assert.
 	if !strings.Contains(text, "the tests of daemon:vet could not be named") || !strings.Contains(text, "grep -n 'daemon:vet' /logs/x.log") {
@@ -392,7 +392,7 @@ func TestRenderListsEachGroupsCommandAndTests(t *testing.T) {
 	found := failingTests{worktree: "/", suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{selections: selections, names: []string{"TestA", "TestB"}, shown: []string{"TestA", "TestB"}}}}}}
 
 	// Act.
-	text := found.render("/logs/x.log")
+	text := found.render(gateFailingIntro, "/logs/x.log")
 
 	// Assert.
 	if !strings.Contains(text, "suite daemon:\n\nrun: "+TestRunCommand+" -go '/p=TestA,TestB'\n- TestA\n- TestB\n") {
@@ -415,7 +415,7 @@ func TestRenderWritesNoMarkdownHeading(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act.
-			text := tt.found.render("/logs/x.log")
+			text := tt.found.render(gateFailingIntro, "/logs/x.log")
 
 			// Assert: the brief carries the text inline, and the feed draws
 			// a line that opens with `#` as a heading.
@@ -674,7 +674,7 @@ func TestRenderRunsEveryFailingTestInOneCommand(t *testing.T) {
 		failedUnit("ert#00", "ert", "   FAILED  1/2  agent-repl-a (0.1 sec) at test-core.el:12")
 
 	// Act.
-	text := readFailingTests(out, testWorktree).render("/logs/x.log")
+	text := readFailingTests(out, testWorktree).render(gateFailingIntro, "/logs/x.log")
 
 	// Assert.
 	// In roster order: the ERT suite before the daemon's.
@@ -733,7 +733,7 @@ func TestNoFailingTestCommandRunsATestByHand(t *testing.T) {
 		failedUnit("background-harness", "background-harness", "  FAIL: x")
 
 	// Act.
-	text := readFailingTests(out, testWorktree).render("/logs/x.log")
+	text := readFailingTests(out, testWorktree).render(gateFailingIntro, "/logs/x.log")
 
 	// Assert.
 	for _, line := range strings.Split(text, "\n") {

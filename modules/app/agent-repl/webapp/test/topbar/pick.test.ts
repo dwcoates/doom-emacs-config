@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { SetEffortResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_effort_pb";
@@ -10,8 +7,6 @@ import { createControl } from "../../src/control.js";
 import type { SentenceTable } from "../../src/rpc/refuse.js";
 import { sendPick } from "../../src/topbar/pick.js";
 import { RecordingSink, appContext, topbarContext } from "./fixtures.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 const CAUSES = { noSession: () => "no session" } as unknown as SentenceTable;
 
@@ -95,16 +90,4 @@ describe("sendPick", () => {
       null,
     ]);
   });
-});
-
-describe("the selectors share the one pick path", () => {
-  it.each(["src/topbar/model.ts", "src/topbar/effort.ts", "src/topbar/permission-mode.ts", "src/topbar/queue-bypass.ts"])(
-    "%s sends through sendPick and never calls an rpc itself",
-    (file) => {
-      // Arrange
-      const source = readFileSync(path.join(here, "..", "..", file), "utf8");
-      // Act / Assert
-      expect([source.includes("sendPick("), source.includes("callUnary(")]).toEqual([true, false]);
-    },
-  );
 });

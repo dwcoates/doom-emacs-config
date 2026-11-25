@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/token"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,7 +12,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -914,22 +910,6 @@ func TestDeliverKindStopsTheDeliveryWhenItsNoticesCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestEveryNoticeKindIsDeliveredThroughDeliverKind(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("poller.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert
-	if n := strings.Count(string(src), "could not read the owed "); n != 1 {
-		t.Fatalf("poller.go reads owed notices in %d places; every kind goes through deliverKind", n)
-	}
-	if n := strings.Count(string(src), "deliverKind(ctx, w, prompts, "); n != 3 {
-		t.Fatalf("deliverOwed delivers %d kinds through deliverKind, want all 3", n)
-	}
-}
-
 func TestEachTierReadsOnlyItsOwnPullRequests(t *testing.T) {
 	owned := wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 21}
 	other := wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 22}
@@ -1089,36 +1069,5 @@ func TestNewRefusesACadenceThatIsNotPositive(t *testing.T) {
 				t.Fatal("New = nil, want the cadence refused")
 			}
 		})
-	}
-}
-
-func TestOnlyAnchorAsAnchorsAndRecordsASubscription(t *testing.T) {
-	// Arrange
-	var sites []string
-
-	// Act
-	sourcescan.EachSourceIn(t, ".", true, func(fset *token.FileSet, file *ast.File) {
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			anchors, records := false, false
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				if sel, ok := n.(*ast.SelectorExpr); ok {
-					anchors = anchors || sel.Sel.Name == "Anchor"
-					records = records || sel.Sel.Name == "SubscribePullRequest"
-				}
-				return true
-			})
-			if anchors && records {
-				sites = append(sites, fset.Position(fn.Pos()).String()+" "+fn.Name.Name)
-			}
-		}
-	})
-
-	// Assert
-	if len(sites) != 1 || !strings.HasSuffix(sites[0], " anchorAs") {
-		t.Fatalf("functions that anchor and record a subscription = %v, want rig.anchorAs alone", sites)
 	}
 }

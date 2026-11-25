@@ -13,7 +13,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -586,16 +585,6 @@ func TestEndAbandonedBubbleOfAnEntryWithNoQueuedTimeIsAnError(t *testing.T) {
 	}
 }
 
-func TestOnlyEndAbandonedBubbleDrawsAnAbandonedHeadForAMergeWithNoRun(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "}, headAbandoned)")
-
-	// Assert
-	if !slices.Equal(sites, []string{"terminal.go"}) {
-		t.Fatalf("an abandoned head is drawn at %v, want only endAbandonedBubble in terminal.go", sites)
-	}
-}
-
 func TestAColdGateRaisedOnAQueuedMergesWorkspaceIsAnsweredByACompaction(t *testing.T) {
 	// Arrange
 	h := twoInLine(t)
@@ -1083,16 +1072,6 @@ func TestAMergeTurnsAnswerThatBringsNoSessionUpWithTheGateStandingFailsTheTurn(t
 	}
 	if _, ok := coldGateRecord(h, "error", "the answer to a merge's workspace cold gate settled with no session up and the gate still standing; the merge's turn is not submitted, and the merge fails"); !ok {
 		t.Fatalf("records %v, want the abandoned answer recorded at ERROR", h.logs.Records())
-	}
-}
-
-func TestOnlyTheHandOffAndTheHeldDeliveryPassTheColdGate(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "o.passColdGate(")
-
-	// Assert: every merge turn reaches its queue through one of the two.
-	if !slices.Equal(sites, []string{"resume.go", "run.go"}) {
-		t.Fatalf("the gate is passed at %v, want bringTurnOn's held delivery and handOff alone", sites)
 	}
 }
 

@@ -22,9 +22,3 @@ func TestHostNeutralCheckoutEnvLeavesTheWorldsMultiRepoRootInForce(t *testing.T)
 		}
 	}
 }
-
-func TestStartDaemonAppliesHostNeutralCheckoutEnvAfterTheInheritedEnvironment(t *testing.T) {
-	// The one call site must state the cleared checkout after os.Environ() and
-	// before ExtraEnv, so it beats the host's value and a test can still set one.
-	assertAppendedBetweenInheritedAndExtra(t, "HostNeutralCheckoutEnv")
-}

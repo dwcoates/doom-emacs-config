@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { codeOf } from "../../source-text.js";
 import { describe, expect, it } from "vitest";
 import { drawHandbackBadge, type HandbackBadgeKind } from "../../../src/feed/rows/handback-badge.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
@@ -25,13 +22,5 @@ describe("drawHandbackBadge", () => {
     drawHandbackBadge("work reported back", KIND);
     const record = await forwardedRecord(capture, "feed.draw-test-handback");
     expect(record.level.case).toBe("info");
-  });
-
-  it("is what every handback badge row draws through", () => {
-    for (const file of ["subagent-handback.ts", "merge-handback.ts"]) {
-      const source = codeOf(readFileSync(join(process.cwd(), "src/feed/rows", file), "utf8"));
-      expect(source.includes("drawHandbackBadge("), file).toBe(true);
-      expect(source.includes("createElement("), file).toBe(false);
-    }
   });
 });

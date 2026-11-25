@@ -107,7 +107,7 @@ const (
 // and vitest config imports, selects: bin/'s own, and the webapp's and the
 // shim's.
 var viteServerSuites = append(append([]string(nil), scriptHarnessSuites...),
-	repoScans, "webapp", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e")
+	repoScans, "webapp", "webapp-rules", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e")
 
 // suiteRules is the mapping, most specific first: the FIRST rule that matches a
 // path decides it. Each entry answers "a change here can break what?".
@@ -143,9 +143,9 @@ var suiteRules = []suiteRule{
 	// THE WEBAPP'S PARSED-PROSE FIXTURE IS THE DAEMON'S ANSWER: the daemon's
 	// prose suite writes it from its inputs and fails while it is stale, and
 	// the webapp's tests draw from it.
-	{Kind: matchSubtree, Path: moduleRoot + "webapp/test/fixtures/", Suites: []string{"daemon", "webapp", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "webapp/test/fixtures/", Suites: []string{"daemon", "webapp", "webapp-rules", repoScans}},
 	// e2e-kit reads the webapp layer's areas (its scenario matrix) and its driver's boot budget.
-	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e-kit", "e2e", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "webapp-rules", "build-frontend-harness", "e2e-kit", "e2e", repoScans}},
 	// The whole-module scans are their own suite; nothing else reads them.
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/reposcans/", Suites: []string{repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e-kit", "e2e", repoScans}},
@@ -168,7 +168,7 @@ var suiteRules = []suiteRule{
 	// sidecar, the lock helper, the test runner, zettel and the test service; its TS half is imported by the shim and the
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
-		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "sockethold", "zettel", "testservice", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e-kit", "e2e", repoScans}},
+		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "sockethold", "zettel", "testservice", "shim", "webapp", "webapp-rules", "build-frontend-harness", testrunSuite, "e2e-kit", "e2e", repoScans}},
 	// The TLDR-tree grammars: their consumer, the daemon (which parses every
 	// drawn text with tldr through cgo, internal/prose, and holds its reading
 	// to tldr's golden answers), the end-to-end suites whose real daemon serves
@@ -206,10 +206,10 @@ var suiteRules = []suiteRule{
 	// files Doom's module loader resolves by exact path (config.el, packages.el,
 	// doctor.el) stay directly at the module root. `ert` carries Emacs's unit
 	// and integration tests both.
-	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert"}},
+	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert", "ert-rules"}},
 	// The repo scans read the wire decoders against the schema
 	// (reposcans/wire_decoders_test.go).
-	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", byteCompile, repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", "ert-rules", byteCompile, repoScans}},
 
 	// OUTSIDE THE MODULE, the paths a roster harness reads select exactly the
 	// suites that read them (roster.Suites spells them with a leading "/").

@@ -145,63 +145,6 @@ tabs permanently drawn as though the panels were closed."
 
 ;;;; ---- Tests: Logging ----
 
-(defun agent-repl-test--production-lisp-files ()
-  "Return the hand-written production Elisp files subject to source lints."
-  (seq-filter
-   (lambda (path)
-     (not (string-prefix-p "test-" (file-name-nondirectory path))))
-   (directory-files agent-repl-test--module-dir t "\\.el\\'")))
-
-(defun agent-repl-test--walk-executable-form (form file owner visit)
-  "Call VISIT for executable list forms within FORM from FILE and OWNER.
-Quoted data, function argument lists, and variable binding names are not
-executable forms and are deliberately excluded."
-  (cond
-   ((atom form))
-   ((memq (car form) '(quote function declare-function)))
-   ((memq (car form) '(defun defmacro cl-defun cl-defmacro))
-    (dolist (body-form (cdddr form))
-      (agent-repl-test--walk-executable-form
-       body-form file (cadr form) visit)))
-   ((eq (car form) 'lambda)
-    (dolist (body-form (cddr form))
-      (agent-repl-test--walk-executable-form body-form file owner visit)))
-   ((memq (car form) '(let let*))
-    (dolist (binding (cadr form))
-      (when (consp binding)
-        (dolist (initializer (cdr binding))
-          (agent-repl-test--walk-executable-form initializer file owner visit))))
-    (dolist (body-form (cddr form))
-      (agent-repl-test--walk-executable-form body-form file owner visit)))
-   (t
-    (funcall visit file owner form)
-    (let ((tail form))
-      (while (consp tail)
-        (agent-repl-test--walk-executable-form (car tail) file owner visit)
-        (setq tail (cdr tail)))
-      (when tail
-        (agent-repl-test--walk-executable-form tail file owner visit))))))
-
-(defun agent-repl-test--production-source-calls (callees)
-  "Return production calls whose head is one of CALLEES.
-Each result is `(RELATIVE-FILE OWNER FORM)'."
-  (let (calls)
-    (dolist (file (agent-repl-test--production-lisp-files))
-      (with-temp-buffer
-        (insert-file-contents file)
-        (goto-char (point-min))
-        (condition-case nil
-            (while t
-              (agent-repl-test--walk-executable-form
-               (read (current-buffer)) file nil
-               (lambda (source owner form)
-                 (when (memq (car form) callees)
-                   (push (list (file-relative-name source agent-repl-test--module-dir)
-                               owner form)
-                         calls)))))
-          (end-of-file nil))))
-    (nreverse calls)))
-
 (defun agent-repl-test--source-format-prefix (form)
   "Return FORM's statically knowable leading format text, or nil."
   (cond
@@ -212,417 +155,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
       (while (and parts (stringp (car parts)))
         (setq prefix (concat prefix (pop parts))))
       (unless (string-empty-p prefix) prefix)))))
-
-(ert-deftest agent-repl-test-logging-has-one-record-builder-and-writer ()
-  "Only the canonical emitter may build a record or call the file writer."
-  ;; Arrange / Act
-  (let ((calls (agent-repl-test--production-source-calls
-                '(agent-repl--log-record agent-repl--do-log-to-file
-                  write-region))))
-    ;; Assert
-    (should
-     (equal
-      (mapcar (lambda (call) (list (car call) (cadr call) (car (nth 2 call))))
-              calls)
-      ;; The first pair is the once-per-workspace central-fallback record: a
-      ;; workspace that cannot host a durable sink is announced from inside
-      ;; the emitter precisely so the one builder and the one writer stay one.
-      '(("core.el" agent-repl--do-log-to-file write-region)
-        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
-        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
-        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
-        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
-        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
-        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
-        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
-        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
-        ;; The last pair is the same record rerouted centrally when the
-        ;; workspace's directory went between routing and writing.
-        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
-        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file))))))
-
-(ert-deftest agent-repl-test-every-logging-rung-calls-the-canonical-emitter ()
-  "Every public severity rung's emitter is a thin call into one emitter."
-  ;; Arrange / Act
-  (let* ((rungs '(agent-repl--emit-log agent-repl--emit-log-verbose agent-repl--emit-info
-                  agent-repl--emit-warn agent-repl--emit-warn-once agent-repl--emit-error
-                  agent-repl--emit-fatal agent-repl--emit-backend-phase
-                  agent-repl--emit-phase-echo))
-         (calls (agent-repl-test--production-source-calls
-                 '(agent-repl--emit-log-record)))
-         (owners (delete-dups (mapcar #'cadr calls))))
-    ;; Assert
-    (dolist (rung rungs)
-      (should (memq rung owners)))))
-
-(defun agent-repl-test--reasoned-log-scope (form tag)
-  "Return FORM's reason when FORM is a quoted `(TAG REASON)' scope marker."
-  (when (and (consp form)
-             (eq (car form) 'quote)
-             (consp (cadr form))
-             (eq (car (cadr form)) tag)
-             (consp (cdr (cadr form)))
-             (null (cddr (cadr form)))
-             (stringp (cadr (cadr form)))
-             (not (string-empty-p (cadr (cadr form)))))
-    (cadr (cadr form))))
-
-(ert-deftest agent-repl-test-log-sites-have-explicit-attribution ()
-  "Every log site names a workspace expression or a reasoned scope marker."
-  ;; Arrange
-  (let ((print-length nil)
-        (print-level nil)
-        (rungs '(agent-repl--log agent-repl--log-verbose agent-repl--info
-                 agent-repl--warn agent-repl--warn-once agent-repl--error
-                 agent-repl--fatal agent-repl--backend-phase))
-        bare-nil
-        malformed-markers
-        central-sites)
-    ;; Act
-    (dolist (call (agent-repl-test--production-source-calls rungs))
-      (let* ((form (nth 2 call))
-             (scope (nth 1 form))
-             (quoted (and (consp scope) (eq (car scope) 'quote)
-                          (cadr scope)))
-             (tag (and (consp quoted) (car quoted))))
-        (when (null scope)
-          (push (list (car call) (cadr call) form) bare-nil))
-        (when (memq tag '(:agent-repl-central :agent-repl-context))
-          (let ((reason (agent-repl-test--reasoned-log-scope scope tag)))
-            (if reason
-                (when (eq tag :agent-repl-central)
-                  (push (list (car call) (cadr call) reason) central-sites))
-              (push (list (car call) (cadr call) scope) malformed-markers))))))
-    ;; Assert
-    (should (null (nreverse bare-nil)))
-    (should (null (nreverse malformed-markers)))
-    ;; Keep the complete reasoned inventory in the assertion value so any
-    ;; malformed central marker reports every reviewed central site beside it.
-    (should (cl-every (lambda (site) (stringp (nth 2 site)))
-                      (nreverse central-sites)))))
-
-(defconst agent-repl-test--user-facing-message-sites
-  '(("commands.el" agent-repl--push-release-callback "agent-repl: %s"
-     "tells the user the release push they asked for landed, in the script's own words")
-    ("commands.el" agent-repl--push-release-callback "agent-repl: release push failed: %s"
-     "tells the user the release push they asked for failed, in the script's own words")
-    ("commands.el" agent-repl-push-release "agent-repl: pushing master to origin as a release..."
-     "acknowledges the interactive release push while it runs")
-    ("commands.el" agent-repl-copy-reference "Copied: %s"
-     "confirms an interactive clipboard write")
-    ("commands.el" agent-repl-copy-workspace-name "Copied workspace name: %s"
-     "confirms an interactive clipboard write")
-    ("commands.el" agent-repl-open-most-recent-workspace
-     "All workspaces visited -- cycle reset"
-     "reports the interactive workspace-cycle boundary")
-    ("commands.el" agent-repl-switch-to-previous-workspace
-     "[agent-repl] No previous workspace or thread to switch to"
-     "tells the user SPC TAB TAB found no other workspace or thread to go back to")
-    ("commands.el" agent-repl-switch-sidebar-app
-     "[agent-repl] The sidebar shows no app yet to switch from"
-     "tells the user SPC SPC pressed before the first roster had nothing to switch from")
-    ("commands.el" agent-repl-switch-sidebar-app
-     "[agent-repl] No workspace to switch to"
-     "tells the user SPC SPC from Chat found no workspace to go back to")
-    ("commands.el" agent-repl--jump-to-ranked-workspace "[agent-repl] %s"
-     "tells the user SPC TAB g or M-0 or M-s-0 or M-) found no other workspace to jump to, in the gesture's own words")
-    ("commands.el" agent-repl-switch-to-workspace
-     "[agent-repl] No workspace tabs on the bar"
-     "explains why the requested interactive switch did nothing")
-    ("commands.el" agent-repl-switch-to-workspace
-     "[agent-repl] No workspace tab %d -- the bar's last is %S"
-     "explains why the requested interactive switch did nothing")
-    ("commands.el" agent-repl-switch-to-workspace
-     "[agent-repl] Tab %d (%s) is still opening"
-     "explains why the requested interactive switch did nothing")
-    ("commands.el" agent-repl--act-on-tab-slot
-     "[agent-repl] The current workspace has no tab to %s"
-     "explains why the requested interactive swap or move did nothing")
-    ("commands.el" agent-repl--act-on-tab-slot
-     "[agent-repl] No workspace tab %d -- the bar's last is %S"
-     "explains why the requested interactive swap or move did nothing")
-    ("commands.el" agent-repl--act-on-tab-slot
-     "[agent-repl] %s is already tab %d"
-     "explains why the requested interactive swap or move did nothing")
-    ("core.el" agent-repl--migrate-legacy-state
-     "[agent-repl] migrated state %s -> %s"
-     "announces an on-disk state migration")
-    ("core.el" agent-repl--migrate-legacy-state
-     "[agent-repl] WARNING: state migration %s -> %s failed: %S"
-     "warns that on-disk state still needs user attention")
-    ("core.el" agent-repl--do-log-to-file
-     "[agent-repl] LOG SINK FAILURE path=%s error=%S"
-     "the failed sink cannot persist its own emergency")
-    ("core.el" agent-repl--emit-message "%s"
-     "the canonical presentation boundary intentionally owns all log echoes")
-    ("core.el" agent-repl-toggle-debug "[agent-repl] debug logging: %s"
-     "confirms the interactive visibility toggle")
-    ("core.el" agent-repl-set-log-file-level
-     "[agent-repl] durable log level: %s"
-     "confirms the interactive durability threshold")
-    ("core.el" agent-repl-toggle-verbose-to-disk
-     "[agent-repl] verbose logging to disk: %s%s"
-     "confirms the interactive verbose-record toggle")
-    ("core.el" agent-repl-print-git-branch
-     "agent-repl loaded on branch: %s"
-     "answers the interactive branch-report command")
-    ("daemon-link.el" agent-repl-link--faults-standing "agent-repl: %s"
-     "surfaces a failed deploy (the daemon's loud faults) however it was started")
-    ("daemon.el" agent-repl-frontend-daemon-ensure "agent-repl: %s"
-     "surfaces a daemon readiness failure to the requesting user")
-    ("daemon.el" agent-repl-frontend-daemon-stop
-     "agent-repl: no daemon link to stop"
-     "explains why the interactive stop did nothing")
-    ("daemon.el" agent-repl-frontend-daemon-stop
-     "agent-repl: daemon shutting down"
-     "confirms acceptance of the interactive stop")
-    ("daemon.el" agent-repl-frontend-daemon-stop
-     "agent-repl: daemon refused the shutdown"
-     "reports refusal of the interactive stop")
-    ("daemon.el" agent-repl-frontend-daemon-stop
-     "agent-repl: could not reach the daemon to stop it"
-     "reports failure of the interactive stop")
-    ("daemon.el" agent-repl-frontend-daemon-restart
-     "agent-repl: not restarted: %s"
-     "reports the daemon-provided reason why interactive restart aborted")
-    ("daemon.el" agent-repl-frontend-daemon-restart
-     "agent-repl: not restarted: the accepted daemon stop never completed"
-     "reports that interactive restart timed out before daemon departure")
-    ("elisp-build.el" agent-repl-elisp-reload-handle
-     "agent-repl: elisp reload REFUSED -- the deploy is for %s, this Emacs runs %s"
-     "tells the user a deploy's reload was refused because it names another checkout")
-    ("elisp-build.el" agent-repl--elisp-reload-report-heartbeat
-     "agent-repl: elisp reload left required timers unarmed: %s"
-     "tells the user the reload left the editor's heartbeat broken")
-    ("elisp-build.el" agent-repl--elisp-reload-run
-     "agent-repl: elisp reload FAILED -- %s names no module"
-     "tells the user the reload loaded nothing and why")
-    ("elisp-build.el" agent-repl--elisp-reload-run
-     "agent-repl: elisp reload FAILED -- %s could not be read: %s"
-     "tells the user the reload loaded nothing and why")
-    ("elisp-build.el" agent-repl--elisp-reload-finish
-     "agent-repl: elisp reload: %d module(s) failed to load: %s"
-     "tells the user which modules the reload could not load")
-    ("emoji.el" agent-repl-install-commit-emoji-hook
-     "Backed up existing hook to %s"
-     "reports the backup made by the interactive installer")
-    ("emoji.el" agent-repl-install-commit-emoji-hook
-     "Installed prepare-commit-msg hook to %s"
-     "confirms the interactive installer")
-    ("find-file-workspace.el" agent-repl-find-file-workspace-reset
-     "agent-repl: find-file routing reset"
-     "confirms the interactive routing reset")
-    ("find-file-workspace.el" agent-repl--ffw-acquire
-     "agent-repl: could not open the workspace for %s; opening the file here"
-     "warns the user that file placement differs from the request")
-    ("held-edit.el" agent-repl--held-edit-enter
-     "agent-repl: no composer is open to edit the held prompt in; the edit is cancelled"
-     "tells the user why the held-prompt edit they began did not reach a composer")
-    ("held-edit.el" agent-repl--held-edit-enter
-     "agent-repl: the held prompt carries content the composer cannot hold; the edit is cancelled"
-     "tells the user why the held-prompt edit they began was cancelled")
-    ("held-edit.el" agent-repl--held-edit-on-refusal
-     "agent-repl: editing the held prompt was refused -- %s"
-     "reports why the user's held-prompt edit step was not taken")
-    ("history.el" agent-repl-history-search
-     "[agent-repl] input history is empty"
-     "answers the interactive history search")
-    ("host.el" agent-repl-host--unheld-select-refused "[agent-repl] The switch to %s did not happen (%s): pick it again"
-     "tells the user the workspace they picked could not be switched to, and that picking it again retries")
-    ("host.el" agent-repl-host--request-switch-held
-     "[agent-repl] Cannot switch to %s: the daemon has not registered it"
-     "explains why the user's switch request went nowhere")
-    ("host.el" agent-repl-host--request-switch-held
-     "[agent-repl] Cannot switch to %s: no daemon connection"
-     "explains why the user's switch request went nowhere")
-    ("input.el" agent-repl--input-resent
-     "rollback: done, the prompt was sent again"
-     "tells the user the rollback they confirmed is done and their words were sent in the prompt's place")
-    ("input.el" agent-repl--input-refilled
-     "%s"
-     "tells the user the rollback they confirmed is done, with the files it restored")
-    ("input.el" agent-repl--input-rollback
-     "rollback: cancelled"
-     "confirms the user declined the rollback confirmation, so nothing was rolled back")
-    ("input.el" agent-repl-input-selection-escape
-     "%s"
-     "warns, in the minibuffer, that a second consecutive command-mode escape clears the feed selection")
-    ("input.el" agent-repl--input-on-success
-     "[agent-repl] Asked %s…"
-     "tells the user their question about a card was handed to an intake workspace")
-    ("input.el" agent-repl--input-on-bubble-refusal
-     "agent-repl: the prompt was refused for this agent (%S)"
-     "reports a prompt refusal requiring user action")
-    ("input.el" agent-repl--input-on-bubble-refusal
-     "agent-repl: refused -- %s%s"
-     "reports a prompt refusal requiring user action")
-    ("input.el" agent-repl--input-say-refusal
-     "agent-repl: %s%s"
-     "tells the user why their prompt was refused: the cold gate, no session yet, or an ask that settled first")
-    ("input.el" agent-repl--input-on-error
-     "agent-repl: refused -- a merge is in flight for this workspace"
-     "reports why the user's prompt was not accepted")
-    ("input.el" agent-repl--input-on-error
-     "agent-repl: this submission's key was already accepted; the earlier submission stands"
-     "reports idempotent acceptance to the submitting user")
-    ("input.el" agent-repl--input-on-error
-     "agent-repl: model change refused%s"
-     "tells the user their model change was refused, in the refusal's own words")
-    ("input.el" agent-repl--input-on-error
-     "agent-repl: submission refused (%S)"
-     "reports why the user's prompt was not accepted")
-    ("input.el" agent-repl--input-on-failure
-     "agent-repl: the daemon did not answer; the prompt is held"
-     "tells the user their submitted text is held for the daemon")
-    ("input.el" agent-repl--input-hold
-     "agent-repl: the prompt could not be saved for the daemon (%s); it is in the input history: %s"
-     "tells the user their prompt could not be held, with its words")
-    ("input.el" agent-repl-send-held-now
-     "agent-repl: no prompt sent from this composer to send now"
-     "tells the user the send-now chord had no sent prompt to release")
-    ("input.el" agent-repl-send-held-now
-     "agent-repl: send now: %s"
-     "tells the user why the daemon refused to send their held prompt now")
-    ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
-     "confirms the interactive source reload")
-    ("magit.el" agent-repl-magit-copy-commit-link
-     "GitHub commit link copied to clipboard: %s"
-     "confirms an interactive clipboard write")
-    ("magit.el" agent-repl-open-workspace-pr-in-browser "Opened PR: %s"
-     "confirms the interactive browser action")
-    ("magit.el" agent-repl-magit-log-commit
-     "agent-repl: %s is not among the commits %s's log shows"
-     "tells the user the commit they clicked is not in the log that opened")
-    ("persistent-wifi.el" agent-repl-persistent-wifi-handle "agent-repl: %s"
-     "tells the user the machine's persistent-wifi standing changed")
-    ("persistent-wifi.el" agent-repl-persistent-wifi--on-success "agent-repl: %s · %s · %s · %s"
-     "reports what the user's persistent-wifi toggle left, step by step")
-    ("prompt-queue.el" agent-repl-queue-deferred-prompt
-     "agent-repl: no input to queue"
-     "explains why the interactive queue command did nothing")
-    ("prompt-queue.el" agent-repl-queue-deferred-prompt
-     "agent-repl: deferred the prompt for %s (it runs as its own turn once the current one ends)"
-     "confirms the interactive queue command")
-    ("roster.el" agent-repl-roster-echo-finished
-     "Agent finished in workspace: %s"
-     "is the configured user-facing completion notification")
-    ("spell.el" agent-repl--spell-guarded-word
-     "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
-     "tells the user the spell checker stopped answering and was reset")
-    ("status.el" agent-repl-tabbar-apply-row-count
-     "agent-repl: tab-bar set to %s on this frame"
-     "confirms the interactive tab-bar layout command")
-    ("terminal.el" agent-repl-terminal-finished
-     "agent-repl: the command exited with status %s; SPC o t shows its output"
-     "tells the user the shell code block they ran failed, since its terminal popup closes on exit")
-    ("threads.el" agent-repl-threads--create "[agent-repl] Starting a thread…"
-     "tells the user their new-thread question was sent")
-    ("threads.el" agent-repl-threads--create "[agent-repl] The thread was not started: the daemon could not be reached"
-     "reports why the user's new thread was not started")
-    ("threads.el" agent-repl-threads--created "[agent-repl] Thread %s started"
-     "confirms the user's new thread, by its name")
-    ("threads.el" agent-repl-threads--created "[agent-repl] The thread was not started: %s"
-     "reports why the daemon refused the user's new thread")
-    ("threads.el" agent-repl-threads--created "[agent-repl] The daemon answered the new thread with %S"
-     "reports an answer to the user's new thread this build cannot read")
-    ("threads.el" agent-repl-thread-send-background "[agent-repl] Asked %s"
-     "confirms the question sent to the last thread without switching to it, by the thread's name")
-    ("threads.el" agent-repl-threads--open-recent-launched
-     "[agent-repl] There is no thread yet; SPC TAB t starts one"
-     "tells the user who opened Chats from outside Emacs that there is no thread to show")
-    ("verbs.el" agent-repl-verbs--on-refusal "%s refused: %s"
-     "tells the user why a workspace with nothing left to restore it from cannot be opened")
-    ("verbs.el" agent-repl-verbs--on-refusal "agent-repl: %s"
-     "tells the user which workspace of the family stands in the way of their command")
-    ("verbs.el" agent-repl-verbs--on-refusal
-     "%s refused: the shim's lock helper %s %s; no other process owns this conversation"
-     "tells the user the shim's lock helper failed, with its binary and how it failed")
-    ("verbs.el" agent-repl-verbs--on-refusal "%s refused: %s%s"
-     "reports a workspace command refusal to its user")
-    ("verbs.el" agent-repl-verbs--send
-     "agent-repl: %s failed -- the daemon did not answer"
-     "reports failure of the user's workspace command")
-    ("verbs.el" agent-repl-verb-close "close blocked -- %s"
-     "reports why the user's close command was refused")
-    ("verbs.el" agent-repl-verbs--send-teardown
-     "agent-repl: %s of %s FAILED after its tab closed: %s"
-     "tells the user a kill or nuke they ordered failed after its tab had already closed")
-    ("verbs.el" agent-repl-verb-finish "deploy enqueued"
-     "confirms the user's finish command")
-    ("verbs.el" agent-repl-verb-restart "agent-repl: the restart failed: %s"
-     "tells the user their restart failed")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped"
-     "confirms the user's interrupt stopped the running turn")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, prompt kept (%s)"
-     "tells the user their interrupt stopped the turn but could not roll its prompt back, and why")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: nothing to interrupt"
-     "tells the user there was no running turn to interrupt")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: %s stopped"
-     "confirms the user's interrupt stopped the response updates and how many")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, %s also ended"
-     "confirms the interrupt stopped the turn and how many agents it also ended")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: the interrupt answer could not be read"
-     "tells the user the interrupt outcome could not be read")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn left running"
-     "tells the user the interrupt left the turn running")
-    ("verbs.el" agent-repl-verbs--focus-merge-queue-offer
-     "agent-repl: the merge is queued -- Evict, Prioritize or Cancel in its bubble"
-     "tells the user their interrupt raised the merge-queue question and where to answer it")
-    ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
-     "confirms the user's priority command")
-    ("verbs.el" agent-repl-verb-set-backlogged "agent-repl: %s %s"
-     "confirms the user's hide or show of a workspace")
-    ("verbs.el" agent-repl-verb-show-ref "agent-repl: %s shown"
-     "confirms the hidden workspace the user asked to show again is shown")
-    ("verbs.el" agent-repl-verb-retry-vendor-error "%s"
-     "reports what the user's RET in an empty composer did to the scheduled retry")
-    ("verbs.el" agent-repl-remote-control-toggle "agent-repl: remote control %s for %s"
-     "reports the remote-control mode the user's toggle left")
-    ("verbs.el" agent-repl-remote-control-toggle "agent-repl: %s"
-     "reports why the user's remote-control toggle was refused")
-    ("verbs.el" agent-repl-send-backlogged-keepalives "agent-repl: %s"
-     "reports how the user's keep-alive to the hidden workspaces went")
-    ("verbs.el" agent-repl-verb-swap "agent-repl: swapped %s with %s"
-     "confirms the user's swap command")
-    ("verbs.el" agent-repl-verbs--no-tab-to-take
-     "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
-     "explains why the daemon refused the user's swap or move command")
-    ("verbs.el" agent-repl-verbs--no-tab-to-take
-     "agent-repl: %s and %s are not siblings, so %s cannot take that tab"
-     "explains why the daemon refused the user's swap or move command")
-    ("verbs.el" agent-repl-verb-move "agent-repl: moved %s onto %s's tab"
-     "confirms the user's move command")
-    ("verbs.el" agent-repl-verbs-select-minted
-     "agent-repl: the new workspace carries no directory to switch to"
-     "reports why the requested new workspace cannot be selected")
-    ("verbs.el" agent-repl-verb-shutdown-schedule "agent-repl: shutdown %s"
-     "confirms the user's shutdown-schedule command")
-    ("verbs.el" agent-repl-verbs--merge-queue-on-error
-     "merge-queue refused: the daemon's registry does not hold repository %S"
-     "reports why the user's merge-queue command was refused")
-    ("verbs.el" agent-repl-verb-merge-queue "agent-repl: merge queue %s"
-     "confirms the user's merge-queue command")
-    ("verbs.el" agent-repl-verbs--deploy-on-success "agent-repl: deploy%s: %s"
-     "reports every component's decision for the user's deploy command")
-    ("verbs.el" agent-repl-verbs--deploy-on-error "agent-repl: deploy refused: %s"
-     "reports why the user's deploy command was refused, with its detail"))
-  "Every permitted production `message' call and its user-facing reason.")
-
-(ert-deftest agent-repl-test-message-sites-are-explicitly-user-facing ()
-  "No diagnostic may use `message' unless this audit names its user purpose."
-  ;; Arrange / Act
-  (let ((actual
-         (mapcar (lambda (call)
-                   (list (car call) (cadr call) (nth 1 (nth 2 call))))
-                 (agent-repl-test--production-source-calls '(message))))
-        (allowed
-         (mapcar (lambda (entry)
-                   (should (and (stringp (nth 3 entry))
-                                (not (string-empty-p (nth 3 entry)))))
-                   (cl-subseq entry 0 3))
-                 agent-repl-test--user-facing-message-sites)))
-    ;; Assert
-    (should (equal actual allowed))))
 
 (ert-deftest agent-repl-test-log-respects-debug-flag ()
   "When `agent-repl-debug' is nil, `agent-repl--log' should NOT call `message'.
@@ -1457,10 +989,6 @@ one to its caller.  A caller that must abort signals for itself."
 
 ;;;; ---- Tests: atomic file writes ----
 
-(defconst agent-repl-test-core--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The directory this suite and the sources it reads live in.")
-
 (defmacro agent-repl-test--with-atomic-dir (var &rest body)
   "Run BODY with VAR naming a fresh temporary directory, removed afterwards."
   (declare (indent 1))
@@ -1552,20 +1080,6 @@ one to its caller.  A caller that must abort signals for itself."
       ;; Assert.
       (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "before"))
       (should (equal (agent-repl-test--atomic-dir-files dir) '("f.txt"))))))
-
-(ert-deftest agent-repl-test-write-file-atomically-is-the-shared-write-path ()
-  "Every atomic writer goes through the shared helper, never a hand-rolled rename."
-  ;; Arrange.
-  (let ((sources (mapcar (lambda (name)
-                           (with-temp-buffer
-                             (insert-file-contents
-                              (expand-file-name name agent-repl-test-core--lisp-dir))
-                             (buffer-string)))
-                         '("history.el" "held-ingress.el" "clipboard-image.el"))))
-    ;; Assert.
-    (dolist (source sources)
-      (should (string-match-p "(agent-repl--write-file-atomically" source))
-      (should-not (string-match-p "(rename-file" source)))))
 
 ;;;; ---- Tests: legacy-state migration ----
 
@@ -1951,22 +1465,6 @@ own run log, never in the OS temporary root the system may sweep."
   (let ((cut (agent-repl--log-excerpt "abcdefghij" 4)))
     ;; Assert
     (should (equal cut "abcd [6 more characters not logged]"))))
-
-(ert-deftest agent-repl-test-log-excerpt-is-every-excerpt-s-one-cut ()
-  "No agent-repl source but core.el writes the excerpt marker by hand."
-  ;; Arrange
-  (let ((dir (file-name-directory (symbol-file 'agent-repl--log-excerpt)))
-        (hand-rolled nil))
-    (dolist (file (directory-files dir t "\\`[a-z-]+\\.el\\'"))
-      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
-                  (equal (file-name-nondirectory file) "core.el"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          ;; Act
-          (when (search-forward "more characters not logged]" nil t)
-            (push (file-name-nondirectory file) hand-rolled)))))
-    ;; Assert
-    (should (null hand-rolled))))
 
 (defun agent-repl-test--workspace-log-record (ws)
   "Return the LAST JSONL record written to WS's durable Emacs log sink."
@@ -2769,45 +2267,6 @@ string sent, `(coding DECODE ENCODE)' and `eof'."
       (funcall real "pr-view" "/tmp/repo" '("pr" "view") #'ignore))
     ;; Assert
     (should (equal ran '("pr-view" "/tmp/repo" ("gh" "pr" "view") ignore)))))
-
-(ert-deftest agent-repl-test-async-command-is-the-only-async-start-process ()
-  "Only the async runners call `start-process', so a new spawn reuses them."
-  ;; Arrange
-  (let ((offenders nil))
-    (dolist (file (agent-repl-test--production-lisp-files))
-      (with-temp-buffer
-        (insert-file-contents file)
-        (goto-char (point-min))
-        ;; Act
-        (while (re-search-forward "#'start-process" nil t)
-          (let ((defun-name (save-excursion
-                              (beginning-of-defun)
-                              (and (looking-at "(defun \\(\\_<.+?\\_>\\)")
-                                   (match-string 1)))))
-            (unless (member defun-name '("agent-repl--async-command"
-                                         "agent-repl--async-git"))
-              (push (cons (file-name-nondirectory file) defun-name) offenders))))))
-    ;; Assert
-    (should (equal offenders nil))))
-
-(ert-deftest agent-repl-test-async-command-is-the-only-stdin-feed ()
-  "Only `agent-repl--async-command' closes a program's stdin, so a fed spawn reuses it."
-  ;; Arrange
-  (let ((offenders nil))
-    (dolist (file (agent-repl-test--production-lisp-files))
-      (with-temp-buffer
-        (insert-file-contents file)
-        (goto-char (point-min))
-        ;; Act
-        (while (re-search-forward "(process-send-eof\\_>" nil t)
-          (let ((defun-name (save-excursion
-                              (beginning-of-defun)
-                              (and (looking-at "(defun \\(\\_<.+?\\_>\\)")
-                                   (match-string 1)))))
-            (unless (equal defun-name "agent-repl--async-command")
-              (push (cons (file-name-nondirectory file) defun-name) offenders))))))
-    ;; Assert
-    (should (equal offenders nil))))
 
 (ert-deftest agent-repl-test-capture-process-output-uses-make-process-when-suppress-stderr ()
   "When SUPPRESS-STDERR is non-nil, `--capture-process-output' uses
@@ -5311,26 +4770,6 @@ survives into the rest of the batch run."
           (should (equal '(:test-heartbeat) (plist-get (cdr outcome) :rearmed)))
           (should (null agent-repl--heartbeat-assert-deferral-timer)))))))
 
-(ert-deftest agent-repl-test-every-required-timer-key-names-a-loadable-owner ()
-  "A required key whose owner file does not exist can never be satisfied.
-`:readiness-poll' and `:workspace-status-export' outlived readiness.el
-and workspace-status-export.el, so every cold start warned
-`outcome=unavailable reason=owner-not-loaded' twice, a second after the
-module loaded, about jobs nothing owns any more."
-  ;; Arrange: the arm functions the production sources actually define.
-  (let ((defined nil))
-    (dolist (file (agent-repl-test--production-lisp-files))
-      (with-temp-buffer
-        (insert-file-contents file)
-        (goto-char (point-min))
-        (while (re-search-forward "^(defun \\([^ \t\n()]+\\)" nil t)
-          (push (intern (match-string 1)) defined))))
-    ;; Act / Assert: every required key's owner is one of them.  Read off
-    ;; the SOURCES, never `fboundp', because the suite's own process has
-    ;; loaded files a cold start would not have reached yet.
-    (dolist (entry agent-repl--required-timer-keys)
-      (should (memq (cdr entry) defined)))))
-
 (ert-deftest agent-repl-test-core-input-buffer-name-carries-the-title ()
   "The title rides after the identity segment, inside the name form."
   (should (equal (agent-repl--input-buffer-name "ws-1" "Refactor the codec")
@@ -5471,26 +4910,6 @@ module loaded, about jobs nothing owns any more."
     ;; Act / Assert
     (should-error (agent-repl-refill-keymap '(not-a-keymap) (lambda (_) (setq called t))))
     (should-not called)))
-
-(defun agent-repl-test-core--defvar-keymaps-built-inline ()
-  "Return (FILE . VAR) for each top-level keymap `defvar' in lisp/ built inline.
-A `-map' `defvar' whose initializer is anything but `(make-sparse-keymap)'
-builds its bindings once per Emacs, so a reload never updates it."
-  (let (found)
-    (dolist (file (agent-repl-test--module-sources))
-      (dolist (form (agent-repl-test--file-forms file))
-        (when (and (eq (car-safe form) 'defvar)
-                   (string-suffix-p "-map" (symbol-name (cadr form)))
-                   (cddr form)
-                   (not (equal (nth 2 form) '(make-sparse-keymap))))
-          (push (cons (file-name-nondirectory file) (cadr form)) found))))
-    found))
-
-(ert-deftest agent-repl-test-refill-keymap-every-module-keymap-starts-empty ()
-  "Every module keymap `defvar' starts empty and is filled by a reloadable form.
-Shared shape with `agent-repl-refill-keymap': a keymap built inside its
-`defvar' silently keeps the first load's bindings across every reload."
-  (should-not (agent-repl-test-core--defvar-keymaps-built-inline)))
 
 ;;;; ---- Tests: decisions recorded when they change ----
 
@@ -7480,25 +6899,6 @@ Each is a response for `:on-response', or `(:failure D)' for `:on-failure'.
           ;; Assert
           (should (equal (list asked agent-repl--merged-log-links-token) '(0 nil))))))))
 
-(ert-deftest agent-repl-test-core-every-registered-boundary-is-defined ()
-  "Every external-boundary registry entry names a function some source defines.
-A stale entry guards nothing and hides that the wrapper it named is gone."
-  ;; Arrange
-  (let ((sources (append (agent-repl-test--production-lisp-files)
-                         (list (expand-file-name "../config.el" agent-repl-test--module-dir))))
-        (defined nil))
-    (dolist (file sources)
-      (with-temp-buffer
-        (insert-file-contents file)
-        (goto-char (point-min))
-        (while (re-search-forward "^(defun \\([^ \n]+\\) " nil t)
-          (push (intern (match-string 1)) defined))))
-    ;; Act
-    (let ((stale (seq-remove (lambda (name) (memq name defined))
-                             agent-repl--external-boundary-functions)))
-      ;; Assert
-      (should (equal stale nil)))))
-
 ;;;; ---- Tests: the one PATH lookup ----
 
 (ert-deftest agent-repl-test-core-executable-find-is-a-registered-boundary ()
@@ -7519,22 +6919,6 @@ A stale entry guards nothing and hides that the wrapper it named is gone."
         ;; Assert
         (should (equal asked "tool"))
         (should (equal answer "/opt/bin/tool"))))))
-
-(ert-deftest agent-repl-test-core-no-module-looks-up-path-itself ()
-  "Only core.el's wrapper calls `executable-find'; every module calls the wrapper.
-A module with a PATH lookup of its own is a boundary the harness cannot guard."
-  ;; Arrange
-  (let ((offenders nil))
-    (dolist (file (agent-repl-test--production-lisp-files))
-      (unless (equal (file-name-nondirectory file) "core.el")
-        (with-temp-buffer
-          (insert-file-contents file)
-          (goto-char (point-min))
-          ;; Act
-          (when (re-search-forward "(executable-find " nil t)
-            (push (file-name-nondirectory file) offenders)))))
-    ;; Assert
-    (should (equal offenders nil))))
 
 ;;;; ---- Tests: a record nobody will read costs nearly nothing ----
 ;;
@@ -7756,23 +7140,6 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
   "The real vocabulary directory resolves beside the module."
   (should (natnump (agent-repl-vocab-read "image-thumbnail.json" "height_px"))))
 
-(ert-deftest agent-repl-test-core-every-vocab-file-is-read-through-the-reader ()
-  "No source outside core.el resolves a proto/vocab path by hand."
-  ;; Arrange
-  (let* ((dir (file-name-directory (symbol-file 'agent-repl-vocab-read)))
-         (sources (seq-remove (lambda (f) (string-prefix-p "test-" (file-name-nondirectory f)))
-                              (directory-files dir t "\\.el\\'"))))
-    ;; Act
-    (let ((hand-rolled
-           (seq-filter (lambda (f)
-                         (and (not (equal (file-name-nondirectory f) "core.el"))
-                              (with-temp-buffer
-                                (insert-file-contents f)
-                                (re-search-forward "\"\\.\\./proto/vocab/" nil t))))
-                       sources)))
-      ;; Assert
-      (should-not hand-rolled))))
-
 ;;;; ---- Tests: a durable level other than info is a window ----
 
 (defvar agent-repl-test--level-window-fixture-path
@@ -7975,23 +7342,6 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
   (should (equal (list (agent-repl-plural-noun 1 "update") (agent-repl-plural-noun 2 "update"))
                  '("update" "updates"))))
 
-(ert-deftest agent-repl-test-core-no-source-hand-rolls-the-plural ()
-  "No source file spells the singular-or-s rule itself: every count's noun
-goes through `agent-repl-plural-noun'."
-  ;; Arrange.
-  (let* ((dir agent-repl-test-core--lisp-dir)
-         (sources (seq-remove (lambda (f) (string-prefix-p "test-" (file-name-nondirectory f)))
-                              (directory-files dir t "\\.el\\'")))
-         (hand-rolled (rx " 1) \"\" \"s\")")))
-    ;; Act.
-    (let ((offenders (seq-filter (lambda (f)
-                                   (with-temp-buffer
-                                     (insert-file-contents f)
-                                     (re-search-forward hand-rolled nil t)))
-                                 sources)))
-      ;; Assert.
-      (should (null (mapcar #'file-name-nondirectory offenders))))))
-
 ;;;; ---- Tests: how long ago ----
 
 (ert-deftest agent-repl-test-core-annotation-column-is-gap-past-the-widest-name ()
@@ -8024,30 +7374,9 @@ goes through `agent-repl-plural-noun'."
             ((symbol-function 'frame-char-width) (lambda (&rest _) 10)))
     (should (= (agent-repl-display-width (propertize " " 'display "img")) 5))))
 
-(ert-deftest agent-repl-test-core-display-width-is-the-tab-bars-measure ()
-  "The tab bar's packer measures its entries through `agent-repl-display-width'."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name "status.el" agent-repl-test-core--lisp-dir))
-    (goto-char (point-min))
-    (emacs-lisp-mode)
-    (should (search-forward "(defun agent-repl--tabline-entry-width (entry)" nil t))
-    (goto-char (match-beginning 0))
-    (should (search-forward "(agent-repl-display-width entry)"
-                            (save-excursion (forward-sexp 1) (point)) t))))
-
 (ert-deftest agent-repl-test-core-annotation-column-of-no-names-is-the-gap ()
   "No names, and the column is the gap alone."
   (should (= (agent-repl-annotation-column nil 4) 4)))
-
-(ert-deftest agent-repl-test-core-annotation-column-callers-share-the-measure ()
-  "Every completion list aligning a column past its names measures it through
-the helper, never a hand-rolled widest-name measure."
-  (dolist (file '("commands.el" "workspace-completion.el"))
-    (with-temp-buffer
-      (insert-file-contents (expand-file-name file agent-repl-test-core--lisp-dir))
-      (should (search-forward "(agent-repl-annotation-column " nil t))
-      (goto-char (point-min))
-      (should-not (re-search-forward "(apply #'max 0 (mapcar (lambda ([a-z]+) (string-width" nil t)))))
 
 (ert-deftest agent-repl-test-core-format-age-reads-seconds ()
   "A span under a minute reads in seconds."
@@ -8087,37 +7416,10 @@ the helper, never a hand-rolled widest-name measure."
   (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1700000000.25)))
     (should (equal (agent-repl--now) 1700000000.25))))
 
-(ert-deftest agent-repl-test-core-no-source-wraps-the-wall-clock-by-hand ()
-  "No source but core.el defines a function whose body is `(float-time)'.
-A measurement reads its clock through `agent-repl--now', so a test steps
-every measurement's clock the same way."
-  (let (offenders)
-    (dolist (file (agent-repl-test--production-lisp-files))
-      (unless (equal (file-name-nondirectory file) "core.el")
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward "(defun [^ ]+ ()\n\\(?:  \".*\n\\(?:.*\n\\)*?\\)?  (float-time))" nil t)
-            (push (file-name-nondirectory file) offenders)))))
-    (should-not offenders)))
-
 (ert-deftest agent-repl-test-core-now-unix-ms-reads-the-wall-clock-in-milliseconds ()
   "The instant is the wall clock's seconds times 1000, truncated to an integer."
   (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1700000000.1239)))
     (should (equal (agent-repl--now-unix-ms) 1700000000123))))
-
-(ert-deftest agent-repl-test-core-every-unix-ms-instant-reads-the-one-helper ()
-  "No source but core.el converts the wall clock to milliseconds by hand.
-Every instant Emacs stamps or compares in Unix milliseconds goes through
-`agent-repl--now-unix-ms', so none can drift from the clock the daemon and
-the page read."
-  (let (offenders)
-    (dolist (file (agent-repl-test--production-lisp-files))
-      (unless (equal (file-name-nondirectory file) "core.el")
-        (with-temp-buffer
-          (insert-file-contents file)
-          (when (re-search-forward "(\\* 1000 (float-time))" nil t)
-            (push (file-name-nondirectory file) offenders)))))
-    (should-not offenders)))
 
 ;;;; ---- Serialized reports ----
 
@@ -8211,15 +7513,6 @@ A reporter that read the newest link itself would drift from the others."
     (funcall done)
     (should (equal reported '(first)))))
 
-(ert-deftest agent-repl-test-core-every-serialized-report-goes-through-the-serializer ()
-  "The focus report and the composer's entries report run through `agent-repl-serial-send'."
-  (let ((dir (file-name-directory (symbol-file 'agent-repl-serial-send 'defun))))
-    (dolist (file '("notifications.el" "prompt-entries.el"))
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name file dir))
-        (should (save-excursion (search-forward "(agent-repl-serial-send" nil t)))
-        (should-not (re-search-forward "in-flight nil$" nil t))))))
-
 ;;;; ---- Tests: completion reads that tune ivy ----
 
 (defvar agent-repl-test-core--ivy-alist nil
@@ -8264,16 +7557,6 @@ A reporter that read the newest link itself would drift from the others."
       ;; Assert
       (should (equal args '("p: " table nil t)))
       (should-not (boundp alist)))))
-
-(ert-deftest agent-repl-test-core-ivy-tuned-reads-share-the-helper ()
-  "Every read that tunes an ivy alist goes through the one helper.
-A hand-rolled `let' of an ivy alist around a read would drift from it."
-  (let ((dir (file-name-directory (symbol-file 'agent-repl--completing-read-under-ivy 'defun))))
-    (dolist (file '("commands.el" "input.el"))
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name file dir))
-        (should (save-excursion (search-forward "(agent-repl--completing-read-under-ivy" nil t)))
-        (should-not (re-search-forward "(let\\*? ((ivy-[a-z-]+-alist" nil t))))))
 
 ;;;; ---- Tests: warn and error records live in their own file ----
 

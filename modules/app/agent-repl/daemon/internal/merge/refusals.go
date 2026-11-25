@@ -113,6 +113,12 @@ const (
 	// ArmMoveBlocked refuses a one-place move that leaves its merge where it
 	// stands, its `cause` naming why (UpdateMergeQueueError.move_blocked).
 	ArmMoveBlocked = "move_blocked"
+	// ArmRuleChecksFailed refuses an agent's merge whose branch failed its
+	// repository's rule suites, run before the merge is admitted
+	// (agentrepl.v1.MergeRuleChecksFailed: FinishWorkspaceError's
+	// rule_checks_failed, CreateWorkspaceError's
+	// async_merge_rule_checks_failed).
+	ArmRuleChecksFailed = "rule_checks_failed"
 )
 
 // RefusalError is one pre-state refusal: which arm the contract owes it, and

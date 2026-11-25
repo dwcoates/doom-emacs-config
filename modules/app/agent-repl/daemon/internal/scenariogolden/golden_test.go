@@ -3,7 +3,6 @@ package scenariogolden
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -61,18 +60,6 @@ func TestMapJSONLeavesMintsTokensInSortedKeyOrder(t *testing.T) {
 	// Act / Assert
 	if got := minted(); got != `{"a":1,"m":2,"z":3}` {
 		t.Fatalf("tokens = %s, want them minted in sorted key order", got)
-	}
-}
-
-func TestTheScenarioGoldensWalkJSONOnlyThroughMapJSONLeaves(t *testing.T) {
-	// A hand-rolled walk drifts from the shared one's sorted order and drops;
-	// only mapJSONLeaves may recurse over a decoded value here.
-	src, err := os.ReadFile("golden.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(src), "\n\tvar walk func("); n != 1 {
-		t.Fatalf("golden.go declares %d JSON walks, want one, inside mapJSONLeaves", n)
 	}
 }
 

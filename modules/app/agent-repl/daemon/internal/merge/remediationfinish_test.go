@@ -1,12 +1,9 @@
 package merge
 
 import (
-	"agent-repld/internal/prompts"
-	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"testing"
 	"time"
@@ -508,31 +505,6 @@ func TestARemediationClosedBeforeItsFixDeploysHandsTheHoldBack(t *testing.T) {
 				t.Fatalf("banner %v, want %v", h.bannerRaised(desktopnotify.KindDeployMediated), tt.wantEscalate)
 			}
 		})
-	}
-}
-
-// TestEveryBriefTheQueueNamesIsCheckedIn pins that each brief name the merge
-// package declares has its prompt in the repository: the remediation's
-// gate-failure brief was named but never written, so a failed gate stranded
-// the finish (2026-11-15, deploy-escalation-20261115-174608).
-func TestEveryBriefTheQueueNamesIsCheckedIn(t *testing.T) {
-	// Arrange
-	declared := regexp.MustCompile(`\bBrief[A-Za-z]+\s*=\s*"([a-z][a-z-]*)"`)
-	var names []string
-	for _, f := range sourcescan.Production(t) {
-		for _, m := range declared.FindAllSubmatch(f.Source, -1) {
-			names = append(names, string(m[1]))
-		}
-	}
-	if len(names) == 0 {
-		t.Fatal("no brief name was found; the scan reads nothing")
-	}
-
-	// Act, Assert
-	for _, name := range names {
-		if _, err := prompts.Load("../../../prompts", name); err != nil {
-			t.Errorf("brief %q: %v", name, err)
-		}
 	}
 }
 

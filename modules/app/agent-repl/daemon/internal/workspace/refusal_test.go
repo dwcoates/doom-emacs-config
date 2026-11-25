@@ -4,16 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -227,19 +224,6 @@ func TestRefuseUnrestorableCarriesTheRecordedDirAndBranch(t *testing.T) {
 	}
 }
 
-// TestOnlyRefuseUnrestorableRaisesTheUnrestorableArm pins refuseUnrestorable as
-// the one place this package raises worktree_unrestorable, so no refusal of it
-// can leave out the evidence the arm carries.
-func TestOnlyRefuseUnrestorableRaisesTheUnrestorableArm(t *testing.T) {
-	// Arrange, Act.
-	got := functionsReferencing(t, "ArmWorktreeUnrestorable")
-
-	// Assert.
-	if !slices.Equal(got, []string{"refuseUnrestorable"}) {
-		t.Fatalf("functions naming ArmWorktreeUnrestorable = %v, want only refuseUnrestorable", got)
-	}
-}
-
 func TestRefusedByFamilyAnswersOnlyTheFamilyRules(t *testing.T) {
 	tests := []struct {
 		name string
@@ -303,17 +287,6 @@ func TestRequireOpenParent(t *testing.T) {
 	}
 }
 
-func TestEveryParentPreCheckGoesThroughRequireOpenParent(t *testing.T) {
-	// Act.
-	direct := sourcescan.Count(t, "v.deps.DB.RequireOpenParent(")
-	shared := sourcescan.Count(t, "v.requireOpenParent(ctx, ")
-
-	// Assert.
-	if direct != 1 || shared != 3 {
-		t.Fatalf("direct reads = %d, shared calls = %d; want Open, and Create's parent and landing target, all through the one helper", direct, shared)
-	}
-}
-
 func TestRefuseNamingWorkspaceCarriesTheWorkspaceRefAsItsOneField(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
@@ -331,24 +304,5 @@ func TestRefuseNamingWorkspaceCarriesTheWorkspaceRefAsItsOneField(t *testing.T) 
 	}
 	if records := log.Records(); len(records) != 1 || records[0].Context["arm_workspace"] != r.Fields["workspace"] {
 		t.Fatalf("records = %v, want one refusal recording the workspace ref", records)
-	}
-}
-
-// TestNoRefusalHandRollsAWorkspaceRefField pins that every refusal whose one
-// field is a `workspace` ref goes through refuseNamingWorkspace, so the field's
-// name and shape are spelled once.
-func TestNoRefusalHandRollsAWorkspaceRefField(t *testing.T) {
-	// Act.
-	perFile := map[string]int{}
-	for _, file := range sourcescan.Production(t) {
-		if n := strings.Count(string(file.Source), `map[string]any{"workspace": &workspacev1.WorkspaceRef{`); n > 0 {
-			perFile[file.Name] = n
-		}
-	}
-
-	// Assert: the helper's own spelling alone.
-	want := map[string]int{"refusal.go": 1}
-	if !reflect.DeepEqual(perFile, want) {
-		t.Fatalf("hand-rolled workspace ref fields per file = %v, want %v", perFile, want)
 	}
 }

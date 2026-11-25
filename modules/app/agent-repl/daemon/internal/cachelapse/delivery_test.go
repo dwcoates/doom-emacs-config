@@ -16,7 +16,6 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -540,17 +539,5 @@ func TestAStoppedKeeperWhoseFaultCannotBeRecordedIsAnError(t *testing.T) {
 		Message: "could not record the stopped keeper's fault; the stop stands on the record above alone"})
 	if !ok || record.Context["cause"] != "disk full" {
 		t.Fatalf("records = %+v, want the failed fault write at ERROR", h.log.Records())
-	}
-}
-
-// TestTheUndeliveredFaultHasOneOpen fails when a source of this package opens
-// the undelivered fault other than through Keeper.raiseUndelivered.
-func TestTheUndeliveredFaultHasOneOpen(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "Kind:      health.KindKeepaliveUndelivered")
-
-	// Assert
-	if len(sites) != 1 || sites[0] != "delivery.go" {
-		t.Fatalf("the undelivered fault is opened at %v, want only Keeper.raiseUndelivered in delivery.go", sites)
 	}
 }

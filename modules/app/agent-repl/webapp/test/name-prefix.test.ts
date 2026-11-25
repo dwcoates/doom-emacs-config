@@ -17,12 +17,8 @@ import {
 } from "../src/name-prefix.js";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { cascadedValue, installStylesheet } from "./stylesheet.js";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import priorityLabels from "../../proto/vocab/priority-labels.json";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 const ARMS: readonly PriorityArm[] = ["p05", "p1", "p2", "p3"];
 const LABELS: Readonly<Record<PriorityArm, string>> = { p05: "P0.5", p1: "P1", p2: "P2", p3: "P3" };
 
@@ -67,11 +63,6 @@ describe("the priority labels", () => {
   it.each(ARMS)("labels the %s icon from the shared vocabulary", (arm) => {
     const icon = drawNamePriority(prefixOf(arm).priority!, "P") as HTMLImageElement;
     expect(icon.alt).toBe(priorityLabels.labels[arm]);
-  });
-
-  it("never spells a label in the drawer itself", () => {
-    const source = readFileSync(path.join(here, "../src/name-prefix.ts"), "utf8");
-    expect(source).not.toContain('"P0.5"');
   });
 });
 
@@ -186,16 +177,5 @@ describe("the prefix's drawn order", () => {
       "P",
     );
     expect([...(prefix?.children ?? [])].map((mark) => mark.className)).toEqual([NAME_PRIORITY_CLASS, NAME_EMOJI_ACK_CLASS]);
-  });
-
-  // EVERY SURFACE DRAWS THE PREFIX THROUGH THIS ONE HELPER: a surface that
-  // built its own mark element would draw it apart from the others.
-  it.each(["src/sidebar/row.ts", "src/topbar/strip.ts"])("is the one drawing %s uses", (file) => {
-    const source = readFileSync(path.join(here, "..", file), "utf8");
-    expect([source.includes("drawNamePrefix("), source.includes('"name-emoji-ack"'), source.includes('"name-priority"')]).toEqual([
-      true,
-      false,
-      false,
-    ]);
   });
 });

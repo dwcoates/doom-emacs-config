@@ -23,7 +23,6 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1799,46 +1798,6 @@ func TestResolveBaseAnswersTheCommit(t *testing.T) {
 	// Assert.
 	if err != nil || commit != "sha-of-main" {
 		t.Fatalf("resolveBase = (%q, %v), want sha-of-main", commit, err)
-	}
-}
-
-// TestNoVerbReadsTheClockAroundItsNilDefault pins that every verb reads the
-// clock through v.now(), which falls back to time.Now when Deps.Now is nil
-// as production leaves it: a direct v.deps.Now() call panicked the daemon on
-// every deploy check (2026-11-17 17:35, releaseMergedHolder).
-func TestNoVerbReadsTheClockAroundItsNilDefault(t *testing.T) {
-	// Act.
-	var offenders []string
-	for _, file := range sourcescan.Production(t) {
-		if strings.Contains(string(file.Source), "v.deps.Now()") {
-			offenders = append(offenders, file.Name)
-		}
-	}
-
-	// Assert.
-	if len(offenders) != 0 {
-		t.Fatalf("files calling v.deps.Now() directly = %v, want every read through v.now()", offenders)
-	}
-}
-
-// TestNoCreatePathAsksAboutAncestry pins that a create never asks git whether
-// a base lies on the primary branch: a workspace is always cut from its
-// source's tip. The package's one ancestry question -- whether a reopened
-// merged workspace's branch lies inside its parent (advanceMerged, open.go) --
-// is pinned to its own file, so no create path grows one unseen.
-func TestNoCreatePathAsksAboutAncestry(t *testing.T) {
-	// Act.
-	perFile := map[string]int{}
-	for _, file := range sourcescan.Production(t) {
-		if n := strings.Count(string(file.Source), "Git.IsAncestor("); n > 0 {
-			perFile[file.Name] = n
-		}
-	}
-
-	// Assert: advanceMerged's call alone; no create path asks it.
-	want := map[string]int{"open.go": 1}
-	if !reflect.DeepEqual(perFile, want) {
-		t.Fatalf("Git.IsAncestor( calls per file = %v, want %v", perFile, want)
 	}
 }
 

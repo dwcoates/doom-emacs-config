@@ -4,11 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
-	"strings"
 	"testing"
 
 	"agentrepl/logging/logsite"
@@ -1199,60 +1194,5 @@ func TestReadRecordedRecordsAFailedReadAndAnswersNothing(t *testing.T) {
 	if !h.hasRecordWith("error", "daemon.feed.test_unreadable", "cause", "database is locked") ||
 		!h.hasRecordWith("error", "daemon.feed.test_unreadable", "turns", 2) {
 		t.Fatalf("records = %+v, want the failure at ERROR with its cause and turn count", h.records())
-	}
-}
-
-// THE REPLAYED PER-TURN READS SHARE ONE BODY: each is a readRecorded call and
-// calls its Deps reader nowhere else, so a hand-rolled read that drifts from
-// it fails here.
-func TestTheReplayedPerTurnReadsAreReadRecordedCalls(t *testing.T) {
-	// Arrange
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
-	if err != nil {
-		t.Fatalf("parse the package: %v", err)
-	}
-	want := map[string]bool{"recordedAddresses": false, "recordedMirrors": false, "recordedSenders": false, "recordedCloses": false}
-
-	// Act
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Recv == nil {
-					continue
-				}
-				if _, named := want[fn.Name.Name]; !named {
-					continue
-				}
-				helper, direct := false, false
-				ast.Inspect(fn.Body, func(n ast.Node) bool {
-					call, ok := n.(*ast.CallExpr)
-					if !ok {
-						return true
-					}
-					switch fun := call.Fun.(type) {
-					case *ast.Ident:
-						helper = helper || fun.Name == "readRecorded"
-					case *ast.SelectorExpr:
-						if deps, ok := fun.X.(*ast.SelectorExpr); ok && deps.Sel.Name == "deps" {
-							direct = true
-						}
-					}
-					return true
-				})
-				if !helper || direct {
-					t.Errorf("%s does not read through readRecorded alone", fn.Name.Name)
-				}
-				want[fn.Name.Name] = true
-			}
-		}
-	}
-
-	// Assert
-	for name, found := range want {
-		if !found {
-			t.Errorf("%s was not found in the package", name)
-		}
 	}
 }

@@ -1,9 +1,6 @@
 package daemonaddr
 
 import (
-	"agent-repld/internal/sourcescan"
-	"go/ast"
-	"go/token"
 	"testing"
 )
 
@@ -27,43 +24,6 @@ func TestClientAddressNamesTheSharedAddressWheneverOneIsShared(t *testing.T) {
 			// Assert
 			if got != tt.want {
 				t.Fatalf("ClientAddress(%q, %q) = %q, want %q", tt.shared, tt.private, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestNoPackageHandRollsTheClientAddress pins the one choice of the address a
-// client is told: every package that tells one calls ClientAddress, and none
-// keeps a clientAddress of its own deciding it.
-func TestNoPackageHandRollsTheClientAddress(t *testing.T) {
-	tests := []struct {
-		name string
-		dir  string
-	}{
-		{name: "the server's refusals", dir: "../server"},
-		{name: "the rollout's announcements and transfer pushes", dir: "../rollout"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			calls, ownDecider := 0, ""
-
-			// Act
-			sourcescan.EachSourceIn(t, tt.dir, false, func(fset *token.FileSet, f *ast.File) {
-				ast.Inspect(f, func(n ast.Node) bool {
-					if d, ok := n.(*ast.FuncDecl); ok && d.Name.Name == "clientAddress" {
-						ownDecider = fset.Position(d.Pos()).String()
-					}
-					if sourcescan.IsSelector(n, "daemonaddr", "ClientAddress") {
-						calls++
-					}
-					return true
-				})
-			})
-
-			// Assert
-			if ownDecider != "" || calls == 0 {
-				t.Fatalf("own clientAddress at %q, %d daemonaddr.ClientAddress calls; want none of its own and at least one call", ownDecider, calls)
 			}
 		})
 	}

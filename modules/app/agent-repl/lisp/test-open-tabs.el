@@ -781,22 +781,6 @@ collapsed section: both are `:collapsed', only the first `:backlogged'."
       ;; Act / Assert
       (should-not (agent-repl-open-tabs--ws-id "a")))))
 
-(ert-deftest agent-repl-test-open-tabs-every-name-to-row-read-shares-ws-row ()
-  "No function of open-tabs.el reads a workspace's id by its ref by hand."
-  ;; Arrange
-  (let ((source (with-temp-buffer
-                  (insert-file-contents (replace-regexp-in-string "\\.elc\\'" ".el" (symbol-file 'agent-repl-open-tabs--ws-row)))
-                  (buffer-string))))
-    ;; Act / Assert: the one read is `agent-repl-open-tabs--ws-id' itself.
-    (should (= (agent-repl-test-open-tabs--occurrences "(agent-repl--ws-get ws :ref) :id)" source) 1))))
-
-(defun agent-repl-test-open-tabs--occurrences (needle haystack)
-  "How many times NEEDLE occurs in HAYSTACK."
-  (let ((count 0) (start 0))
-    (while (setq start (string-search needle haystack start))
-      (setq count (1+ count) start (1+ start)))
-    count))
-
 ;;;; ---- Folding ----
 
 (ert-deftest agent-repl-test-open-tabs-backlogged-p-is-nil-for-a-folded-row ()

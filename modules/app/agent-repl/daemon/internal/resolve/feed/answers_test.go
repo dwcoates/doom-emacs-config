@@ -1,9 +1,7 @@
 package feed
 
 import (
-	"os"
 	"slices"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -206,23 +204,6 @@ func TestPromptEntriesReadsAPromptsEntriesInOrder(t *testing.T) {
 				t.Fatalf("promptEntries labels = %v, promptEntryLabels = %v, want %v", got, promptEntryLabels(tc.row), tc.want)
 			}
 		})
-	}
-}
-
-func TestEveryReaderOfAPromptsEntriesWalksThemThroughPromptEntries(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("answers.go")
-	if err != nil {
-		t.Fatalf("read answers.go: %v", err)
-	}
-
-	// Act
-	walks := strings.Count(string(src), ".GetEntries()")
-	calls := strings.Count(string(src), "promptEntries(row)")
-
-	// Assert: the one walk is promptEntries' own, and its one reader calls it.
-	if walks != 1 || calls != 1 {
-		t.Fatalf("answers.go reads GetEntries() %d times and calls promptEntries %d times, want 1 and 1", walks, calls)
 	}
 }
 

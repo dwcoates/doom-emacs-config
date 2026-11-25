@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { filesUnder } from "./files-under.js";
 import { frameQueue } from "./frame-queue.js";
 
 describe("frameQueue", () => {
@@ -77,19 +75,5 @@ describe("frameQueue", () => {
 
     // Assert
     expect(queue.asked()).toBe(2);
-  });
-});
-
-describe("the tests' frame seams", () => {
-  it("all take frameQueue rather than a hand-rolled array of callbacks", () => {
-    // Arrange
-    const root = new URL(".", import.meta.url).pathname;
-    const handRolled = /frames\s*(?:\.push\(|:\s*(?:Array<\(\) => void>|\(\(\) => void\)\[\]))/;
-
-    // Act
-    const offenders = filesUnder(root).filter((path) => handRolled.test(readFileSync(path, "utf8")));
-
-    // Assert
-    expect(offenders).toEqual([]);
   });
 });

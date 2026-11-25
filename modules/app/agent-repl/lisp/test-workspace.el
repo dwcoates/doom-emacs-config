@@ -2841,24 +2841,6 @@ The screen must only demote names that could not be routed at all."
     ;; Act / Assert
     (should (equal (agent-repl--ws-live-ref-id (car case)) (cdr case)))))
 
-(ert-deftest agent-repl-test-both-ref-id-lookups-share-one-rule ()
-  "`agent-repl--ws-by-ref-id' and `agent-repl--ws-ref-id-table' find a
-workspace by `agent-repl--ws-live-ref-id', and neither reads :killed-at
-itself, so the two cannot drift apart."
-  (dolist (fn '("agent-repl--ws-by-ref-id" "agent-repl--ws-ref-id-table"))
-    (with-temp-buffer
-      ;; Arrange
-      (insert-file-contents (expand-file-name "workspace.el" agent-repl-test--module-dir))
-      (emacs-lisp-mode)
-      (goto-char (point-min))
-      (re-search-forward (concat "^(defun " (regexp-quote fn) " "))
-      (beginning-of-defun)
-      ;; Act
-      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
-        ;; Assert
-        (should (string-match-p "agent-repl--ws-live-ref-id" body))
-        (should-not (string-match-p ":killed-at)" body))))))
-
 (ert-deftest agent-repl-test-ws-ref-id-table-answers-a-shared-id-as-the-lookup-does ()
   "Two live workspaces carrying one id answer as `agent-repl--ws-by-ref-id'."
   ;; Arrange
@@ -2868,24 +2850,6 @@ itself, so the two cannot drift apart."
     ;; Act / Assert
     (should (equal (gethash "ws-1" (agent-repl--ws-ref-id-table))
                    (agent-repl--ws-by-ref-id "ws-1")))))
-
-(ert-deftest agent-repl-test-roster-wide-walks-resolve-rows-through-the-ref-id-table ()
-  "The walks over every roster row read one table per push, never one
-registry scan per row (`agent-repl--ws-ref-id-table')."
-  (dolist (spec '(("status.el" . "agent-repl-status-sync-attention")
-                  ("roster.el" . "agent-repl-roster--walk-status-transitions")))
-    (with-temp-buffer
-      ;; Arrange
-      (insert-file-contents (expand-file-name (car spec) agent-repl-test--module-dir))
-      (emacs-lisp-mode)
-      (goto-char (point-min))
-      (re-search-forward (concat "^(defun " (regexp-quote (cdr spec)) " "))
-      (beginning-of-defun)
-      ;; Act
-      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
-        ;; Assert
-        (should (string-match-p "agent-repl--ws-ref-id-table" body))
-        (should-not (string-match-p "agent-repl--ws-by-ref-id" body))))))
 
 (ert-deftest agent-repl-test-ws-by-ref-id-does-not-match-on-the-dir ()
   "The dir is display, never a key: paths have many spellings."
@@ -3703,31 +3667,6 @@ so no half-torn-down workspace is left behind its surviving tab."
 
 ;;; --- No agent-repl source calls Doom's kill
 
-(defconst agent-repl-test-ws--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The `lisp/' directory this suite lives in, captured at LOAD time.")
-
-(ert-deftest agent-repl-test-no-source-calls-doom-workspace-kill ()
-  "No agent-repl source under `lisp/' calls or references Doom's `+workspace/kill'
-as code.  Its current-workspace branch puts `doom-fallback-buffer' into
-the landing workspace's panel window; teardown goes through
-`agent-repl--ws-land-then-kill' instead.  Mentions in docstrings and
-comments, written `+workspace/kill' with a leading backquote, are allowed."
-  ;; Arrange
-  (let ((offenders nil))
-    (dolist (file (directory-files agent-repl-test-ws--lisp-dir t "\\`[^.].*\\.el\\'"))
-      (unless (string-prefix-p "test-" (file-name-nondirectory file))
-        (with-temp-buffer
-          (insert-file-contents file)
-          ;; Act
-          (goto-char (point-min))
-          (while (re-search-forward "\\(?:(\\|'\\|declare-function \\)\\+workspace/kill\\_>" nil t)
-            (push (format "%s:%d" (file-name-nondirectory file)
-                          (line-number-at-pos (match-beginning 0)))
-                  offenders)))))
-    ;; Assert
-    (should-not offenders)))
-
 ;;;; ---- Tests: a persp built-in may never claim a workspace directory ----
 
 (ert-deftest agent-repl-test-ws-put-refuses-project-dir-on-pseudo-perspective ()
@@ -4123,25 +4062,6 @@ failure is re-signalled rather than swallowed."
           (should (zerop switches))
           (should (agent-repl-test-ws--logged-p
                    infos "elisp.workspace.background-build-dropped ws=target-ws reason=workspace-gone")))))))
-
-(ert-deftest agent-repl-test-every-automatic-frame-move-goes-through-the-minibuffer-hold ()
-  "The background build, the roster's follow and a minted workspace's landing
-each reach the frame through `agent-repl--when-minibuffer-free', so none of
-them can take the user out of a minibuffer by a path of its own."
-  (dolist (spec '(("workspace.el" . "agent-repl--call-in-background-workspace")
-                  ("roster.el" . "agent-repl-roster-apply-current")
-                  ("verbs.el" . "agent-repl-verbs--land")))
-    (with-temp-buffer
-      ;; Arrange
-      (insert-file-contents (expand-file-name (car spec) agent-repl-test--module-dir))
-      (emacs-lisp-mode)
-      (goto-char (point-min))
-      (re-search-forward (concat "^(defun " (regexp-quote (cdr spec)) " "))
-      (beginning-of-defun)
-      ;; Act
-      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
-        ;; Assert
-        (should (string-match-p "(agent-repl--when-minibuffer-free" body))))))
 
 ;;;; ---- agent-repl--call-in-background-workspace ----
 
@@ -4611,15 +4531,6 @@ them can take the user out of a minibuffer by a path of its own."
             (agent-repl--ws-put "ws1" :project-dir project)
             (should (equal (agent-repl--ws-log-scope "ws1") "ws1")))
         (delete-directory project t)))))
-
-(ert-deftest agent-repl-test-ws-log-scope-is-the-one-perspective-scope-in-panels ()
-  "panels.el's perspective-lifecycle paths share the one scope helper.
-A hand-rolled `log-ws'-or-global scope there would drift from it."
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "panels.el" agent-repl-test-ws--lisp-dir))
-                  (buffer-string))))
-    (should-not (string-match-p "(if log-ws log-ws agent-repl--global-log-scope)" source))))
 
 ;;;; ---- Tests: persp-mode's restore-collapse boundary ----
 

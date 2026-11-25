@@ -419,16 +419,22 @@ func readScriptUnit(s *failingSuite, suite roster.Suite, lines []string) bool {
 	return named
 }
 
-// render writes the failing tests as the file the fixing agent reads.
-func (f failingTests) render(archive string) string {
+// gateFailingIntro is what a failing gate run's cases open with: INTRO of
+// render, its %s the archive.
+const gateFailingIntro = `The failing tests of the merge queue's last test gate run.
+The whole run is archived at %s.
+Run exactly these while fixing, through the daemon, with the command given
+for each group or the one that runs them all.
+After your turn the queue runs the selected suites again.
+`
+
+// render writes the failing tests as the file the fixing agent reads: INTRO,
+// its %s the ARCHIVE the whole run is in, then each suite's groups.
+func (f failingTests) render(intro, archive string) string {
 	var b strings.Builder
 	// PLAIN TEXT, NO MARKDOWN HEADING (owner ruling, 2026-11-19): the brief
 	// carries this inline, and the feed drew a `#` line as a heading.
-	b.WriteString("The failing tests of the merge queue's last test gate run.\n")
-	b.WriteString(fmt.Sprintf("The whole run is archived at %s.\n", archive))
-	b.WriteString("Run exactly these while fixing, through the daemon, with the command given\n")
-	b.WriteString("for each group or the one that runs them all.\n")
-	b.WriteString("After your turn the queue runs the selected suites again.\n")
+	b.WriteString(fmt.Sprintf(intro, archive))
 	if len(f.suites) == 0 {
 		b.WriteString("\nNo failing test could be attributed to a suite: read the archive.\n")
 		return b.String()
@@ -484,7 +490,7 @@ func (r *run) writeFailingTests(ctx context.Context, archive string) (string, er
 		return "", err
 	}
 	path := filepath.Join(r.subject.dir, FailingTestsFile)
-	body := found.render(archive)
+	body := found.render(gateFailingIntro, archive)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("merge: writing the failing tests to %s: %w", path, err)
 	}

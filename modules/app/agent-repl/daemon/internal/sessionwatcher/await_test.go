@@ -3,8 +3,6 @@ package sessionwatcher
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -980,23 +978,5 @@ func TestAwaitLatch(t *testing.T) {
 				t.Fatalf("awaitLatch = %v, want %v", err, tt.want)
 			}
 		})
-	}
-}
-
-// TestTheWatchersLatchesShareOneWait fails a latch wait hand-rolled beside
-// awaitLatch: a select on the watcher's own close belongs in it alone.
-func TestTheWatchersLatchesShareOneWait(t *testing.T) {
-	// Arrange.
-	source, err := os.ReadFile("await.go")
-	if err != nil {
-		t.Fatalf("read await.go: %v", err)
-	}
-
-	// Act.
-	selects := strings.Count(string(source), "case <-w.ctx.Done():")
-
-	// Assert.
-	if selects != 1 {
-		t.Fatalf("await.go selects on the watcher's close %d times, want once, in awaitLatch", selects)
 	}
 }

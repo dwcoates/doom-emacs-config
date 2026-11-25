@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { WorkspaceRosterSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -32,14 +29,5 @@ describe("rosterApps", () => {
     expect(row.summary?.text).toBe("light");
     expect(row.current).toBeDefined();
     expect(roster.threads?.newThread?.label).toBe("New thread");
-  });
-
-  it.each(["sidebar/harness.ts", "integration/fixtures.ts"])("is how %s's roster carries the app boxes", (file) => {
-    // Arrange
-    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), file), "utf8");
-
-    // Assert
-    expect(source).toContain("...rosterApps(");
-    expect(source).not.toContain("appSwitcher: {");
   });
 });

@@ -32,8 +32,6 @@ import {
 } from "../../src/topbar/strip.js";
 import { drawLinkIcon } from "../../src/topbar/link-icon.js";
 import { LINK_BADGE_CLASS, LINK_MARK_CLASS } from "../../src/topbar/link-badge.js";
-import styles from "../../src/styles.css?raw";
-import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
 import { appContext, openPanel, topbarContext } from "./fixtures.js";
 
@@ -635,11 +633,6 @@ describe("a summary menu row's owned tint and service icon", () => {
   it("refuses an icon arm this build cannot draw", () => {
     expect(() => drawLinkIcon(99 as TopbarTitleLinkIcon)).toThrow(/TopbarTitleLinkIcon/);
   });
-
-  it("tints an owned row on a ground between the menu's and the topbar's", () => {
-    const rule = withoutBlockComments(styles).match(/\.topbar-title-link-option\.is-owned\s*\{([^}]*)\}/);
-    expect(rule?.[1]).toMatch(/background:\s*color-mix\(in srgb, var\(--bg\) 50%, var\(--sidebar-ground\)\)/);
-  });
 });
 
 describe("a summary menu row's pull request badge and owned label", () => {
@@ -661,18 +654,6 @@ describe("a summary menu row's pull request badge and owned label", () => {
   it("draws no badge, and reserves no margin, for a row served none", () => {
     const [row] = rowsOf([{ label: "The doc", url: "https://example.com/doc" }]);
     expect([row!.querySelector(`.${LINK_BADGE_CLASS}`), row!.classList.contains(BADGED_LINK_CLASS)]).toEqual([null, false]);
-  });
-
-  it.each([
-    ["open", "--fg"],
-    ["draft", "--muted"],
-    ["merged", "--ok"],
-    ["closed", "--err"],
-  ])("colors the %s badge with %s", (state, token) => {
-    const rule = withoutBlockComments(styles).match(
-      new RegExp(`\\.topbar-title-link-badge\\[data-badge="${state}"\\]\\s*\\{([^}]*)\\}`),
-    );
-    expect(rule?.[1]).toMatch(new RegExp(`color:\\s*var\\(${token}\\)`));
   });
 
   it("draws an owned row's label, and only its label, in the summary's purple", () => {
@@ -734,19 +715,6 @@ describe("a summary menu row's owned and subscribed marks and its untinted icon"
     click(row!.querySelector<HTMLElement>(`.${LINK_MARK_CLASS}`)!);
     // Assert
     await first;
-  });
-
-  it.each([
-    ["owned", "--fg"],
-    ["subscribed", "--ok"],
-  ])("draws the %s mark's text and border in %s", (mark, token) => {
-    const css = withoutBlockComments(styles);
-    const rule = css.match(new RegExp(`\\.topbar-title-link-mark\\[data-mark="${mark}"\\]\\s*\\{([^}]*)\\}`));
-    const base = css.match(/\.topbar-title-link-mark\s*\{([^}]*)\}/);
-    expect([rule?.[1].match(new RegExp(`color:\\s*var\\(${token}\\)`)) !== null, base?.[1].includes("border-color: currentColor")]).toEqual([
-      true,
-      true,
-    ]);
   });
 
   it("draws an owned row's icon in the foreground, not the label's purple", () => {

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"agent-repld/internal/dirpath"
-	"agent-repld/internal/sourcescan"
 	"agentrepl/logging/logsite"
 )
 
@@ -1697,23 +1696,6 @@ func TestNewWorkspaceEntryRecordsTheMintedEntry(t *testing.T) {
 	}
 }
 
-// TestEveryWorkspaceEntryIsBuiltByTheOneConstructor fails a hand-built entry.
-func TestEveryWorkspaceEntryIsBuiltByTheOneConstructor(t *testing.T) {
-	// Arrange.
-	raw, err := os.ReadFile("surfaces.go")
-	if err != nil {
-		t.Fatalf("read surfaces.go: %v", err)
-	}
-
-	// Act.
-	built := strings.Count(string(raw), "&workspaceSinks{")
-
-	// Assert.
-	if built != 1 {
-		t.Fatalf("surfaces.go builds a workspace entry %d times, want once, in newWorkspaceEntryLocked", built)
-	}
-}
-
 // TestADetachmentSurvivesTheWorkspacesEviction: a merged workspace is closed
 // (evicted) after its worktree is removed, and a record still in flight for it
 // must not re-create the tree. The retirement this replaced ended at Evict.
@@ -2354,17 +2336,6 @@ func TestOpenSinksSnapshotsEveryOpenSink(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("openSinks = %v, want %v", got, want)
-	}
-}
-
-func TestEveryPeriodicSinkPassSnapshotsThroughOpenSinks(t *testing.T) {
-	// Act: the production call sites of the helper, and of the hand-rolled loop.
-	viaHelper := sourcescan.Count(t, "range s.openSinks()")
-	byHand := sourcescan.Count(t, "for name, sk := range ws.sinks {")
-
-	// Assert: the scan and the retention pass, and the helper's own loop alone.
-	if viaHelper != 2 || byHand != 1 {
-		t.Fatalf("range s.openSinks() appears %d times and a hand-rolled sink loop %d times; want 2 and 1 (the helper's own)", viaHelper, byHand)
 	}
 }
 

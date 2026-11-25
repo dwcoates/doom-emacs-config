@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import { createDeploysFold, DEPLOYS_GROUP_CLASS, DEPLOYS_REPOSITORY_ATTRIBUTE, DEPLOYS_SECTION_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -57,7 +55,6 @@ import {
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
 import { contextFigureColor } from "../../src/topbar/context-chip.js";
-import { codeOf, functionBody } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { GetWorkspaceMemoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_workspace_memory_pb";
@@ -75,8 +72,8 @@ import {
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
 import { SELECTION_NUMBER_RISE, SELECTION_NUMBER_RISE_MS, createSelectionFade } from "../../src/sidebar/selection-fade.js";
-import stylesheet from "../../src/styles.css?raw";
-import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
+import { cascadedValue, inRail } from "../stylesheet.js";
+import { lineOf, moreOf } from "./row-parts.js";
 import { boxRect } from "../dom-rect.js";
 import { createLogger } from "../../src/log.js";
 
@@ -93,9 +90,6 @@ const SELECT_OK = create(SelectInEditorResponseSchema, {
   result: { case: "success", value: { route: { case: "relayed", value: {} } } },
 });
 
-/** The row line: what the pointer and the keyboard focus are read from. */
-const lineOf = (drawn: HTMLElement): HTMLElement =>
-  drawn.querySelector(":scope > .row") as HTMLElement;
 
 /** This row's own detail panel. */
 const panelOf = (drawn: HTMLElement): HTMLElement =>
@@ -123,9 +117,6 @@ function hoverDuration(drawn: HTMLElement): void {
   lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
   durationOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
 }
-
-/** The row's "⋯" control, which opens the panel at once too (owner request, 2026-11-02). */
-const moreOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(":scope > .sb-more") as HTMLElement;
 
 /** Bring the pointer onto the row's "⋯", by way of its line. */
 function hoverMore(drawn: HTMLElement): void {
@@ -336,7 +327,6 @@ describe("the breathing name", () => {
   });
 });
 
-
 describe("the highlight and the receded styling", () => {
   it("highlights the row the RESOLVER called current", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", current: true }), sidebarContext(), "R");
@@ -362,51 +352,6 @@ describe("the highlight and the receded styling", () => {
     expect([drawn.hasAttribute("data-current"), drawn.classList.contains("current")]).toEqual([want, want]);
   });
 
-  /** The declarations of every stylesheet rule that paints a current row. */
-  const currentRowDeclarations = (): string[] =>
-    rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.some((sel) => sel.includes(".ws.current")))
-      .map((rule) => rule.declarations);
-
-  it("draws no gutter bar on the current row (owner request, 2026-10-25)", () => {
-    // Arrange / Act
-    const declarations = currentRowDeclarations();
-    // Assert
-    expect(declarations.some((d) => /border-left/.test(d))).toBe(false);
-  });
-
-  it("rounds every row's fill subtly", () => {
-    // Arrange / Act
-    const row = rulesOf(stylesheet).find((rule) => rule.selectors.includes("#ws-sidebar .row"))?.declarations;
-    // Assert
-    expect(row).toMatch(/border-radius:\s*5px/);
-  });
-
-  it("fills the current row's line midway from --card toward the rail, 4.4% brighter", () => {
-    // Arrange / Act
-    const declarations = currentRowDeclarations();
-    const token = (name: string): string | undefined =>
-      rulesOf(stylesheet)
-        .filter((rule) => rule.selectors.includes("#ws-sidebar"))
-        .map((rule) => new RegExp(`${name}:\\s*([^;]+);`).exec(rule.declarations)?.[1])
-        .find((value) => value !== undefined);
-    // Assert
-    expect([
-      declarations.some((d) => /background-color:\s*var\(--row-highlight-tint\)/.test(d)),
-      token("--row-highlight-tint"),
-    ]).toEqual([true, "var(--highlight-grey)"]);
-  });
-
-  it("derives the shared highlight grey midway from --card toward the rail, 4.4% brighter", () => {
-    // Arrange / Act
-    const root = rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.includes(":root"))
-      .map((rule) => /--highlight-grey:\s*([^;]+);/.exec(rule.declarations)?.[1])
-      .find((value) => value !== undefined);
-    // Assert
-    expect(root).toBe("color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)))");
-  });
-
   it("paints the current row's tint through the cascade", () => {
     // Arrange
     const ws = drawRosterRow(row({ id: "ws-1", current: true }), sidebarContext(), "R");
@@ -414,31 +359,6 @@ describe("the highlight and the receded styling", () => {
     const background = inRail(ws, () => cascadedValue(ws.querySelector(".row")!, "background-color"));
     // Assert
     expect(background).toBe("var(--row-highlight-tint)");
-  });
-
-  // THE HOVER AND SELECTED HIGHLIGHTS ARE ONE BRIGHTNESS (owner request,
-  // 2026-10-26), in the workspaces list and the chat list alike: every
-  // hovered and every selected row fill names the one tint.
-  it.each([
-    "#ws-sidebar:not(.sb-hover-suspended) .row:hover",
-    "#ws-sidebar:not(.sb-hover-suspended) .sb-outline-row:hover",
-    "#ws-sidebar .ws.current > .row",
-    "#ws-sidebar .sb-outline-row.shown",
-  ])("fills %s with the one highlight tint", (selector) => {
-    // Arrange / Act
-    const fill = rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.includes(selector))
-      .map((rule) => /background(?:-color)?:\s*([^;]+);/.exec(rule.declarations)?.[1])
-      .filter((value) => value !== undefined);
-    // Assert
-    expect(fill).toEqual(["var(--row-highlight-tint)"]);
-  });
-
-  it("does not embolden the current row", () => {
-    // Arrange / Act
-    const declarations = currentRowDeclarations();
-    // Assert
-    expect(declarations.filter((d) => /\bfont-weight\s*:/.test(d))).toEqual([]);
   });
 
   it("recedes a closed workspace", () => {
@@ -719,32 +639,6 @@ describe("the when-column", () => {
     // Assert
     expect(position).toBe(want);
   });
-
-  it("stands an open row's ⋯ at the one right padding a row and a merge queue line share", () => {
-    // Arrange
-    const rules = rulesOf(stylesheet);
-    const paddingRight = (selector: string): string | undefined =>
-      /padding:\s*\S+\s+(\S+)/.exec(rules.find((rule) => rule.selectors.includes(selector))?.declarations ?? "")?.[1];
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    // Act
-    const right = inRail(drawn, () => cascadedValue(moreOf(drawn), "right"));
-    // Assert
-    expect([right, paddingRight("#ws-sidebar .row"), paddingRight("#ws-sidebar .sb-mq-waiting")]).toEqual([
-      "var(--row-pad-right)",
-      "var(--row-pad-right)",
-      "var(--row-pad-right)",
-    ]);
-  });
-
-  it("draws a hovered open row's ⋯ in its duration's place", () => {
-    // Arrange / Act
-    const hiding = rulesOf(stylesheet).find((rule) =>
-      rule.selectors.includes("#ws-sidebar:not(.sb-hover-suspended) .ws:not(.receded) > .row:hover > .when"),
-    )?.declarations;
-    // Assert
-    expect(hiding).toMatch(/visibility:\s*hidden/);
-  });
-
 });
 
 describe("the detail panel", () => {
@@ -896,12 +790,6 @@ describe("the detail panel", () => {
     expect(
       inRail(drawn, (rail) => cascadedValue(rail.querySelector(".detail dd code") as Element, "background-color")),
     ).toBe("rgba(0, 0, 0, 0)");
-  });
-
-  it("derives the value grey from the titles' grey", () => {
-    const root = rulesOf(stylesheet).filter((rule) => rule.selectors.includes(":root"));
-    const values = root.map((rule) => /--detail-value:\s*([^;]+);/.exec(rule.declarations)?.[1]).filter(Boolean);
-    expect(values).toEqual(["color-mix(in srgb, var(--muted) 82%, #000000)"]);
   });
 
   it("draws the children block after the summary", () => {
@@ -1299,20 +1187,6 @@ describe("kidsBoxOf", () => {
 
     // Act / Assert
     expect(() => kidsBoxOf(ws)).toThrow(/invariant/);
-  });
-
-  it.each([
-    ["row.ts", "appendRowKids"],
-    ["subsections.ts", "nestLists"],
-  ])("is how %s finds or makes a row's box", (file, fn) => {
-    // Arrange
-    const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
-
-    // Act
-    const body = functionBody(source, fn);
-
-    // Assert
-    expect([body.includes("kidsBoxOf"), body.includes("createElement")]).toEqual([true, false]);
   });
 });
 
@@ -3347,19 +3221,7 @@ describe("appendRowKids", () => {
     // Assert
     expect(ws.querySelector(`:scope > .kids > .${REPOSITORY_BLOCK_CLASS} > [data-roster-row='ws-2']`)).not.toBeNull();
   });
-
-  it("is the one place a row nests its children", () => {
-    // Arrange
-    const source = readFileSync(join(__dirname, "../../src/sidebar/row.ts"), "utf8");
-
-    // Act
-    const handRolled = source.match(/kids\.className = /g) ?? [];
-
-    // Assert
-    expect(handRolled).toHaveLength(1);
-  });
 });
-
 
 describe("the tab number slot", () => {
   it("leads an open row's line with its empty gutter slot, then an empty number slot, then the status mark", () => {

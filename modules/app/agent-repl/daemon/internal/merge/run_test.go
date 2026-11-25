@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -23,7 +21,6 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -768,28 +765,6 @@ func TestDrawLiveStandsAnAgenticRoundLive(t *testing.T) {
 	}
 }
 
-// TestEveryAgenticRoundOpensThroughDrawLive is the drift guard on the shared
-// shape: a round addressed anywhere else is a hand-rolled copy of drawLive.
-func TestEveryAgenticRoundOpensThroughDrawLive(t *testing.T) {
-	// Arrange.
-	sources := []string{"run.go", "process.go", "resume.go", "gate.go", "terminal.go", "recover.go"}
-
-	// Act.
-	sites := 0
-	for _, name := range sources {
-		body, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("reading %s: %v", name, err)
-		}
-		sites += strings.Count(string(body), "r.address(")
-	}
-
-	// Assert.
-	if sites != 1 {
-		t.Fatalf("r.address( appears %d times, want once (inside drawLive)", sites)
-	}
-}
-
 func TestTakeSessionHoldsTheOccupancyGuard(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -1025,23 +1000,6 @@ func TestCutUnder(t *testing.T) {
 	}
 }
 
-func TestTheMergeAsksWhetherAContextEndedOnlyThroughItsTwoHelpers(t *testing.T) {
-	// Act.
-	var sites []string
-	for _, f := range sourcescan.Production(t) {
-		for i, line := range strings.Split(string(f.Source), "\n") {
-			if strings.Contains(line, "ctxend.") && !strings.Contains(line, "\"agent-repld/internal/ctxend\"") {
-				sites = append(sites, fmt.Sprintf("%s:%d", f.Name, i+1))
-			}
-		}
-	}
-
-	// Assert: one in cutUnder (process.go), one in recordFailed (run.go).
-	if len(sites) != 2 || !strings.HasPrefix(sites[0], "process.go:") || !strings.HasPrefix(sites[1], "run.go:") {
-		t.Fatalf("ctxend is asked at %v, want only inside cutUnder and recordFailed", sites)
-	}
-}
-
 // TestNewRunAndNewBackgroundRunBuildTheShapeBuildRunMakes covers the run
 // builders: a run built for the head is no background rebase, and a waiting
 // member's rebase is built background.
@@ -1067,38 +1025,6 @@ func TestNewRunAndNewBackgroundRunBuildTheShapeBuildRunMakes(t *testing.T) {
 			// Assert.
 			if r.background != tc.wantBackground || r.resolving || r.ws != theWorkspace || r.repo != h.repoKey() || r.finished == nil || r.atBoundary == nil {
 				t.Fatalf("built run = %+v, want background %v and the shape buildRun makes", r, tc.wantBackground)
-			}
-		})
-	}
-}
-
-// TestEveryRunIsBuiltByBuildRun holds the package to its one run shape: only
-// buildRun spells a run, and only newBackgroundRun marks one background.
-func TestEveryRunIsBuiltByBuildRun(t *testing.T) {
-	// Arrange.
-	cases := []struct{ pattern, wantSite string }{
-		{pattern: "&run{", wantSite: "func (o *orchestrator) buildRun("},
-		{pattern: ".background = true", wantSite: "func (o *orchestrator) newBackgroundRun("},
-	}
-	for _, tc := range cases {
-		t.Run(tc.pattern, func(t *testing.T) {
-			// Act: each occurrence's enclosing top-level func.
-			var sites []string
-			for _, f := range sourcescan.Production(t) {
-				enclosing := ""
-				for _, line := range strings.Split(string(f.Source), "\n") {
-					if strings.HasPrefix(line, "func ") {
-						enclosing = line
-					}
-					if strings.Contains(line, tc.pattern) {
-						sites = append(sites, enclosing)
-					}
-				}
-			}
-
-			// Assert.
-			if len(sites) != 1 || !strings.HasPrefix(sites[0], tc.wantSite) {
-				t.Fatalf("%q appears in %v, want only in %s", tc.pattern, sites, tc.wantSite)
 			}
 		})
 	}
@@ -1184,44 +1110,6 @@ func TestCausedRunReadsTheCauseItsRunWasCutWith(t *testing.T) {
 				t.Fatalf("run = %+v, want the harness's merge as newRun builds it", r)
 			}
 		})
-	}
-}
-
-// TestEveryTestRunWithACauseIsBuiltByCausedRun holds the suite's runs that
-// read their cut's cause to causedRun, so no test hand-rolls a copy.
-func TestEveryTestRunWithACauseIsBuiltByCausedRun(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("listing the test files: %v", err)
-	}
-
-	// Act.
-	sites := 0
-	for _, name := range files {
-		src, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("reading %s: %v", name, err)
-		}
-		sites += strings.Count(string(src), "func() error { return context.Cause(ctx) }")
-	}
-
-	// Assert: causedRun's own, and this test's needle.
-	if sites != 2 {
-		t.Fatalf("%d sites read a run's cause, want causedRun's alone", sites-1)
-	}
-}
-
-// TestEveryRunOpensItsLedgerThroughOpenLedger pins the one shape every run's
-// ledger open shares: a run that opened the ledger by hand would number its
-// rounds from one again and overwrite an earlier run's intervals.
-func TestEveryRunOpensItsLedgerThroughOpenLedger(t *testing.T) {
-	// Act.
-	callers := sourcescan.Sites(t, "DB.OpenMergeLedger(")
-
-	// Assert.
-	if !slices.Equal(callers, []string{"run.go"}) {
-		t.Fatalf("DB.OpenMergeLedger is called from %v, want run.go's openLedger alone", callers)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,7 +16,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -732,26 +730,6 @@ func TestRecordLikeReturnsTheRecordItMatched(t *testing.T) {
 	}
 }
 
-func TestEveryContainingLogMatchRunsThroughLoggedLike(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range files {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
-		}
-
-		// Act / Assert: a hand loop matching a message by containment is a
-		// second matcher; only loggedLike loops so.
-		if n := strings.Count(string(body), "strings.Contains(r.Message,"); n > 0 && file != "recover_test.go" {
-			t.Fatalf("%s matches log records by hand %d times instead of loggedLike", file, n)
-		}
-	}
-}
-
 func TestRecoverUnderAPausedQueueRecordsThatTheMergeStaysSuspended(t *testing.T) {
 	// Arrange: a merge a restart interrupted in its tests, on a paused queue.
 	h := newHarness(t)
@@ -1057,30 +1035,6 @@ func TestDisplacedResubmissionPutsTheTextBackUnderTheClaimedTurn(t *testing.T) {
 	}
 }
 
-// TestBothDisplacedPutBacksSubmitTheOneShape holds the merge's release and the
-// boot sweep to displacedResubmission, so a hand-rolled put-back that mints its
-// own turn (and so names a turn its claim never recorded) fails here.
-func TestBothDisplacedPutBacksSubmitTheOneShape(t *testing.T) {
-	for _, file := range []string{"terminal.go", "recover.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Arrange
-			raw, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			source := string(raw)
-
-			// Assert
-			if !strings.Contains(source, "displacedResubmission(") {
-				t.Errorf("%s does not put a displaced turn back through displacedResubmission", file)
-			}
-			if file == "terminal.go" && strings.Contains(source, "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME") {
-				t.Errorf("%s spells the displaced-turn submission by hand", file)
-			}
-		})
-	}
-}
-
 func TestARestartTakesAWaitingReturnerBackToResumeAtItsPlace(t *testing.T) {
 	// Arrange: the failed head came back in line, first, and the daemon
 	// restarts before it heads the queue.
@@ -1165,25 +1119,6 @@ func TestRecoverBackInLineTakesNothingOfAWaitingMergeWithNoRecord(t *testing.T) 
 	// Assert
 	if err != nil || h.o.pendingResume(theWorkspace) {
 		t.Fatalf("recoverBackInLine = %v, pending %v; want an ordinary waiting merge left as it is", err, h.o.pendingResume(theWorkspace))
-	}
-}
-
-// TestEveryTakeBackOfARecordGoesThroughTakeBackResume pins the shape both
-// take-backs share: a merge resuming admitted (recoverResumable) and one
-// waiting back in line from its repair (recoverBackInLine) are stood as
-// resumes and drawn by the one helper, so neither hand-rolls a divergent
-// draw.
-func TestEveryTakeBackOfARecordGoesThroughTakeBackResume(t *testing.T) {
-	// Arrange + Act
-	calls := sourcescan.Sites(t, "o.takeBackResume(")
-	draws := sourcescan.Sites(t, "headWaiting, headRecover)")
-
-	// Assert
-	if !slices.Equal(calls, []string{"recover.go", "recover.go"}) {
-		t.Fatalf("takeBackResume is called at %v, want once by each take-back in recover.go", calls)
-	}
-	if !slices.Equal(draws, []string{"recover.go"}) {
-		t.Fatalf("a taken-back merge is drawn waiting at %v, want only in takeBackResume", draws)
 	}
 }
 
@@ -1307,18 +1242,5 @@ func TestQueueReposAnswersEveryRepositoryInKeyOrder(t *testing.T) {
 				t.Fatalf("queueRepos = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-// TestEveryWalkOverAllTheQueuesTakesQueueRepos pins that no walk over all
-// the merge queues builds its own list of their repositories: queueRepos is
-// the one range over the map in the package.
-func TestEveryWalkOverAllTheQueuesTakesQueueRepos(t *testing.T) {
-	// Act
-	sites := sourcescan.Sites(t, "for repo := range queues {")
-
-	// Assert
-	if !slices.Equal(sites, []string{"recover.go"}) {
-		t.Fatalf("ranges over all the queues in %v, want only queueRepos's in recover.go", sites)
 	}
 }

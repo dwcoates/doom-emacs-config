@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -136,24 +134,6 @@ func TestInterruptSucceededAnswersTheSuccessItIsGiven(t *testing.T) {
 	// Assert.
 	if err != nil || answered.Msg.GetSuccess() != success {
 		t.Fatalf("interruptSucceeded() = %v, %v, want the given success", answered.Msg, err)
-	}
-}
-
-// TestInterruptAnswersEverySuccessThroughInterruptSucceeded pins that no
-// Interrupt site hand-builds its success answer.
-func TestInterruptAnswersEverySuccessThroughInterruptSucceeded(t *testing.T) {
-	// Arrange.
-	src, err := os.ReadFile("answers.go")
-	if err != nil {
-		t.Fatalf("read answers.go: %v", err)
-	}
-
-	// Act.
-	sites := strings.Count(string(src), "InterruptResponse_Success{")
-
-	// Assert.
-	if sites != 1 {
-		t.Fatalf("answers.go builds InterruptResponse_Success at %d sites, want only interruptSucceeded", sites)
 	}
 }
 

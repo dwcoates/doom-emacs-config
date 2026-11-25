@@ -9,7 +9,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
-	"agent-repld/internal/sourcescan"
 )
 
 // vendorRetryScheduled is the shim stating its ATTEMPT-th retry at AT,
@@ -334,33 +333,6 @@ func TestAttemptOfRetryCountsTheFirstRetryAsTheSecondAttempt(t *testing.T) {
 				t.Errorf("attemptOfRetry(%d) = %d, want %d", tt.retry, got, tt.want)
 			}
 		})
-	}
-}
-
-// EVERY RETRY SCHEDULE THE FOOTER DRAWS CONVERTS ITS COUNT THROUGH ONE HELPER:
-// a site adding one to a schedule's attempt by hand is a second spelling of
-// the convention, which drifts.
-func TestNoFooterSourceConvertsARetryCountByHand(t *testing.T) {
-	// Arrange, Act.
-	n := sourcescan.Count(t, "GetAttempt()) + 1")
-
-	// Assert.
-	if n != 0 {
-		t.Fatalf("hand-converted retry counts = %d, want every site through attemptOfRetry", n)
-	}
-}
-
-func TestEveryUntimedRetryArmGoesThroughObserveUntimedRetry(t *testing.T) {
-	// Arrange, Act: the one retryState built with a now or awaitingNetwork
-	// clause is observeUntimedRetry's.
-	nows := sourcescan.Count(t, "now:             u.now,")
-	awaits := sourcescan.Count(t, "awaitingNetwork: u.awaitingNetwork,")
-	handNows := sourcescan.Count(t, "now:     true,")
-	handAwaits := sourcescan.Count(t, "awaitingNetwork: true,\n\t\t}")
-
-	// Assert.
-	if nows != 1 || awaits != 1 || handNows != 0 || handAwaits != 0 {
-		t.Fatalf("untimed retry builds = %d/%d, hand-built = %d/%d, want every untimed arm through observeUntimedRetry", nows, awaits, handNows, handAwaits)
 	}
 }
 

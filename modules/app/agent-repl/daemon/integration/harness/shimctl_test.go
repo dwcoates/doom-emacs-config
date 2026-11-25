@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -282,19 +280,5 @@ func TestStampedPush(t *testing.T) {
 				t.Fatalf("stampedPush = %+v, want %+v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestEveryEntryPushSendsStampedPush(t *testing.T) {
-	// A push variant that builds its own command can drop a stamp the others
-	// carry; only the op constants may spell the two entry ops.
-	src, err := os.ReadFile("shimctl.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, op := range []string{`"push_agent_frame"`, `"push_user_prompt"`} {
-		if n := strings.Count(string(src), op); n != 1 {
-			t.Fatalf("shimctl.go spells %s %d times, want once, in its op constant", op, n)
-		}
 	}
 }

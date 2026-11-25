@@ -3,13 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -181,43 +174,6 @@ func TestFailedWatcherStartKeepsTheSelectionOwed(t *testing.T) {
 	}
 }
 
-// TestFirstPageRequestsHaveNamedSitesOnly is the structural half of the rule:
-// it fails the moment any other path could request a first page without a
-// pointer.
-//
-//   - The two replay openings each have ONE production caller, the fleet's
-//     openingFor.
-//   - A WatchAgentRequest is built in ONE place, the watcher's watchRequest,
-//     which opens tail_only or from the pointer the watcher holds.
-//   - A StartTurnRequest is built in ONE place, the sender's startTurn (behind
-//     both StartTurn and JoinRunningTurn), which opens tail_only or from the
-//     main pointer the daemon holds.
-//   - A history's newest page is asked for in ONE place, the store reader's
-//     Newest, which the fleet's ReadHistory calls only for a reader's
-//     request (feed paging on demand): no watch and no turn reads history,
-//     and no shim is asked for it.
-func TestFirstPageRequestsHaveNamedSitesOnly(t *testing.T) {
-	// Arrange.
-	want := map[string][]string{
-		"sessionwatcher.WorkspaceOpened":            {"internal/workspace/opening.go:openingFor"},
-		"sessionwatcher.TranscriptSelected":         {"internal/workspace/opening.go:openingFor"},
-		"shimv1.WatchAgentRequest":                  {"internal/sessionwatcher/watcher.go:watchRequest"},
-		"shimv1.StartTurnRequest":                   {"internal/workspace/sender.go:startTurn"},
-		"storereadv1.ReadHistoryPageNewest":         {"internal/storereader/storereader.go:Newest"},
-		"storereadv1.ReadHistoryPageRequest_Newest": {"internal/storereader/storereader.go:Newest"},
-	}
-
-	// Act.
-	got := firstPageSites(t, daemonRoot(t), want)
-
-	// Assert.
-	for name, sites := range want {
-		if strings.Join(got[name], ",") != strings.Join(sites, ",") {
-			t.Errorf("%s is referenced from %v, want only %v", name, got[name], sites)
-		}
-	}
-}
-
 // startedThenStopped brings a workspace up, has its watcher served
 // openingPointer, and stops it: the retired watcher a restart replaces.
 func startedThenStopped(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
@@ -245,98 +201,6 @@ func handedOver(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
 	delete(f.fleet.watched, ws)
 	f.fleet.mu.Unlock()
 	f.fleet.ResumeWatchesFrom(ws, sessionwatcher.Pointers{Main: carriedPointer})
-}
-
-// daemonRoot is the daemon module's root: the directory holding go.mod.
-func daemonRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("no go.mod above the test's directory")
-		}
-		dir = parent
-	}
-}
-
-// firstPageSites answers, for every watched name, the production sites (the
-// integration harness excluded) that
-// reference it as "<file relative to root>:<enclosing func>", sorted.
-func firstPageSites(t *testing.T, root string, watched map[string][]string) map[string][]string {
-	t.Helper()
-	got := map[string][]string{}
-	fset := token.NewFileSet()
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			// PRODUCTION ONLY: the integration suite's harness is test support
-			// that scripts a shim's requests, not a daemon path that sends one.
-			if name := d.Name(); name == "integration" || name == "testdata" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			ast.Inspect(fn, func(n ast.Node) bool {
-				// A SITE IS A CALL OR A LITERAL — what builds an opening or a
-				// request. A type named in a signature builds nothing.
-				var expr ast.Expr
-				switch node := n.(type) {
-				case *ast.CallExpr:
-					expr = node.Fun
-				case *ast.CompositeLit:
-					expr = node.Type
-				default:
-					return true
-				}
-				sel, ok := expr.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkg, ok := sel.X.(*ast.Ident)
-				if !ok {
-					return true
-				}
-				name := pkg.Name + "." + sel.Sel.Name
-				if _, watch := watched[name]; watch {
-					got[name] = append(got[name], filepath.ToSlash(rel)+":"+fn.Name.Name)
-				}
-				return true
-			})
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
-	for name := range got {
-		sort.Strings(got[name])
-	}
-	return got
 }
 
 func TestCarriedPointersAreSpentByTheWatcherThatStarts(t *testing.T) {
