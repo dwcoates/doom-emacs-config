@@ -48,12 +48,25 @@ func (v *verbs) productionChecksOf(ctx context.Context, repo ids.RepoID) (topbar
 	return chip, nil
 }
 
-// RestateProductionChecks implements Verbs: every open workspace of
-// repository REPO draws its repository's production-check standing as it
-// now is.
-func (v *verbs) RestateProductionChecks(ctx context.Context, repo ids.RepoID) error {
+// RestateProductionChecks implements Verbs: every open workspace of the
+// repository SCOPE names draws its repository's production-check standing as
+// it now is.
+func (v *verbs) RestateProductionChecks(ctx context.Context, scope merge.RepositoryScope) error {
 	log := v.deps.Log.Global()
-	fields := dlog.Context{"repository": string(repo)}
+	fields := dlog.Context{"repository": string(scope.ID), "dir": scope.Dir}
+	repos, err := v.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		log.Error(opProductionChecks, "could not list the repositories to restate a production-checks chip; its workspaces' chips are stale", dlog.WithCause(fields, err))
+		return fmt.Errorf("list the repositories: %w", err)
+	}
+	repository, found := wsm.RepositoryNamed(repos, scope.ID, scope.Dir)
+	if !found {
+		err := fmt.Errorf("the registry holds no repository %q at %q", scope.ID, scope.Dir)
+		log.Error(opProductionChecks, "could not find the repository whose production-checks chip changed; its workspaces' chips are stale", dlog.WithCause(fields, err))
+		return err
+	}
+	repo := repository.ID
+	fields["repository"] = string(repo)
 	chip, err := v.productionChecksOf(ctx, repo)
 	if err != nil {
 		log.Error(opProductionChecks, "could not resolve the repository's production-checks chip; its workspaces' chips are stale", dlog.WithCause(fields, err))

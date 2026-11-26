@@ -93,7 +93,7 @@ func TestRestateProductionChecksReachesEveryOpenWorkspaceOfTheRepository(t *test
 	f.merge.productionStanding = merge.ProductionStanding{On: true, Paused: true}
 
 	// Act
-	err := f.verbs.RestateProductionChecks(context.Background(), "repo-1")
+	err := f.verbs.RestateProductionChecks(context.Background(), merge.RepositoryScope{ID: "repo-1"})
 
 	// Assert
 	if err != nil {
@@ -128,6 +128,24 @@ func containsAll(got []ids.WorkspaceID, want ...ids.WorkspaceID) bool {
 	return true
 }
 
+func TestRestateProductionChecksOfAnUnknownRepositoryStatesNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.merge.productionStanding = merge.ProductionStanding{On: true}
+
+	// Act
+	err := f.verbs.RestateProductionChecks(context.Background(), merge.RepositoryScope{ID: "repo-gone"})
+
+	// Assert
+	if err == nil || len(f.topbarProductionChecks) != 0 {
+		t.Fatalf("RestateProductionChecks = %v, stated %v; want the failure and nothing stated", err, f.topbarProductionChecks)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opProductionChecks}); !ok {
+		t.Fatalf("records = %v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
 func TestRestateProductionChecksThatCannotResolveStatesNothing(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -135,7 +153,7 @@ func TestRestateProductionChecksThatCannotResolveStatesNothing(t *testing.T) {
 	f.merge.productionStandingErr = errors.New("database is locked")
 
 	// Act
-	err := f.verbs.RestateProductionChecks(context.Background(), "repo-1")
+	err := f.verbs.RestateProductionChecks(context.Background(), merge.RepositoryScope{ID: "repo-1"})
 
 	// Assert
 	if err == nil || len(f.topbarProductionChecks) != 0 {

@@ -126,6 +126,8 @@ func (s *server) productionRefusal(log dlog.Logger, rpc string, resp *agentreplv
 	case merge.ArmChildRefused:
 		index, _ := refused.Fields["child"].(int)
 		e.Cause = &agentreplv1.UpdateProductionMediationError_ChildRefused{ChildRefused: &agentreplv1.UpdateProductionMediationChildRefused{Child: uint32(index), Detail: refused.Reason}}
+	case merge.ArmProductionPaused:
+		e.Cause = &agentreplv1.UpdateProductionMediationError_Paused{Paused: &agentreplv1.UpdateProductionMediationPaused{}}
 	default:
 		return nil, fail(log, rpc, fmt.Errorf("an orchestrator refusal %q this rpc declares no arm for: %w", refused.Arm, err))
 	}

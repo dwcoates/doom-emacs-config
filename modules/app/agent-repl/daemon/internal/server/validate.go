@@ -1907,6 +1907,18 @@ func validateUpdateDeployHoldRequest(req *agentreplv1.UpdateDeployHoldRequest) *
 	return nil
 }
 
+// validateUpdateProductionPauseRequest is UpdateProductionPauseRequest's base
+// function: a repository and an action arm.
+func validateUpdateProductionPauseRequest(req *agentreplv1.UpdateProductionPauseRequest) *connect.Error {
+	if req.GetRepository() == nil {
+		return invalid("repository", "the repository whose production checks are paused or resumed is required")
+	}
+	if req.GetAction() == nil {
+		return invalid("action", "a production pause action arm (pause or resume) is required")
+	}
+	return nil
+}
+
 // validateRollOutLandingRequest is RollOutLandingRequest's base function: a
 // named deploy carries its ledger.
 func validateRollOutLandingRequest(req *agentreplv1.RollOutLandingRequest) *connect.Error {
