@@ -48,10 +48,6 @@ func (s *server) AdoptHostWorkspace(
 		// the host's adopt answers left no trace, and on 2026-10-11 hundreds of
 		// them in a row were invisible in every log.
 		refused.Info = true
-		// THE PLAIN BOOT'S ANSWER NAMES THE PAGE, as the success arm does.
-		if refused.Arm == "no_transfer_announced" {
-			refused.Fields["page"] = webPageOf(subject.Record)
-		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
 	subject.Log.Info("daemon.server.adopt_host", "the host adopted the workspace", s.adoptionCall(req.Header(), began))

@@ -156,8 +156,11 @@ func TestAdoptHostAnswersNoTransferAnnouncedAtInfo(t *testing.T) {
 		t.Fatalf("result = %v, want no_transfer_announced", resp.Msg.GetResult())
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "AdoptHostWorkspace", Message: "answered a typed refusal",
-		Match: func(r dlog.Record) bool { return r.Context["arm"] == "no_transfer_announced" }}); !ok {
-		t.Fatalf("records = %+v, want the no_transfer_announced refusal at INFO", log.Records())
+		Match: func(r dlog.Record) bool {
+			_, named := r.Context["page"]
+			return r.Context["arm"] == "no_transfer_announced" && !named
+		}}); !ok {
+		t.Fatalf("records = %+v, want the no_transfer_announced refusal at INFO without a page (the host arm carries none)", log.Records())
 	}
 }
 
