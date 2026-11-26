@@ -2084,3 +2084,71 @@ func TestAConsistentUsageRecordsNoContradiction(t *testing.T) {
 		}
 	}
 }
+
+func TestNewResolverRefusesANilClock(t *testing.T) {
+	// Arrange, Act
+	_, err := newResolver(testColors(), dlog.NewTestSurfaces(), WithClock(nil))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "needs a clock") {
+		t.Fatalf("newResolver = %v, want the missing clock refused", err)
+	}
+}
+
+func TestOnActivityNamesTheFramesArm(t *testing.T) {
+	unmodeled := &conversationv1.AgentActivity{Item: &conversationv1.AgentActivity_Unmodeled{Unmodeled: &conversationv1.AgentUnmodeled{}}}
+	tests := []struct {
+		name     string
+		act      *conversationv1.AgentActivity
+		wantArms []string
+	}{
+		{name: "an unmodeled frame is named unmodeled", act: unmodeled, wantArms: []string{"unmodeled"}},
+		{name: "a modeled frame is named other", act: responseSettled("r1", usage(0, 1, 0, 0, 0)), wantArms: []string{"other"}},
+		{name: "a nil frame is ignored", act: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			h.r.OnActivity(testWS, nil, tt.act)
+
+			// Assert
+			var arms []string
+			for _, rec := range dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Operation: "daemon.topbar.on_activity"}) {
+				arms = append(arms, fmt.Sprint(rec.Context["arm"]))
+			}
+			if !slices.Equal(arms, tt.wantArms) {
+				t.Fatalf("on_activity arms = %v, want %v", arms, tt.wantArms)
+			}
+		})
+	}
+}
+
+func TestSessionArmNamesTheArmsTheTopbarDrawsNothingFrom(t *testing.T) {
+	tests := []struct {
+		name   string
+		update *conversationv1.SessionUpdate
+		want   string
+	}{
+		{name: "a died query", update: &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}}}, want: "query_died"},
+		{name: "a rate limit status", update: &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: &conversationv1.SessionRateLimitStatus{}}}, want: "rate_limit_status"},
+		{name: "a compaction", update: &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_Compacting{Compacting: &conversationv1.SessionCompacting{}}}, want: "compacting"},
+		{name: "an update with no arm", update: &conversationv1.SessionUpdate{}, want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			arm, _ := h.r.sessionArm(tt.update)
+
+			// Assert
+			if arm != tt.want {
+				t.Fatalf("sessionArm = %q, want %q", arm, tt.want)
+			}
+		})
+	}
+}

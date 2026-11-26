@@ -131,3 +131,24 @@ func TestTruncationCountsRunesNotBytes(t *testing.T) {
 		t.Fatalf("truncate = %q, want three runes and the mark", got)
 	}
 }
+
+func TestTrimZero(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{name: "a bare trailing .0 is dropped", in: "18.0", want: "18"},
+		{name: "another decimal is kept", in: "18.5", want: "18.5"},
+		{name: "a string too short to carry a decimal is kept", in: ".0", want: ".0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			got := trimZero(tt.in)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("trimZero(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
