@@ -60,8 +60,6 @@ import {
   githubPlaceText,
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_GITHUB_CLASS,
-  MERGE_QUEUE_ASYNC_OF_CLASS,
-  MERGE_QUEUE_ASYNC_OF_LINK_CLASS,
   MERGE_QUEUE_OFF_QUEUE_CLASS,
   MERGE_QUEUE_OFF_QUEUE_RULE_CLASS,
   COLD_GATED_REQUEUE_TITLE,
@@ -961,16 +959,7 @@ describe("dragging a waiting merge", () => {
 });
 
 describe("waitingMergeRef", () => {
-  it("names the merge itself, never the requester two async merges share", () => {
-    const first = waitingMerge("asker", { subject: queueSubject("asker", { async: true, name: "fix-a", merge: "merge-a" }) });
-    const second = waitingMerge("asker", { subject: queueSubject("asker", { async: true, name: "fix-b", merge: "merge-b" }) });
-    expect([waitingMergeRef(first, "w[0]").id, waitingMergeRef(second, "w[1]").id]).toEqual(["merge-a", "merge-b"]);
-  });
 
-  it("refuses a subject that names no merge", () => {
-    const subject = create(RosterMergeQueueSubjectSchema, { workspace: { id: "w1", dir: "/w/w1" }, name: "one", mode: { mode: { case: "sync", value: {} } } });
-    expect(() => waitingMergeRef(waitingMerge("w1", { subject }), "w[0]")).toThrow(MalformedView);
-  });
 });
 
 describe("drawRosterMergeQueueHead", () => {
@@ -978,12 +967,6 @@ describe("drawRosterMergeQueueHead", () => {
     const { sc } = daemon();
     const card = drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { name: "one" }) }), undefined, glyph(), sc, "head", NONE_COLD_GATED);
     expect([card.querySelector(".test-glyph")?.textContent, card.querySelector(".sb-mq-name")?.textContent]).toEqual([MERGE_GLYPH, "one"]);
-  });
-
-  it("says an async merge is async on hover", () => {
-    const { sc } = daemon();
-    const card = drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { async: true }) }), undefined, glyph(), sc, "head", NONE_COLD_GATED);
-    expect(card.querySelector(".sb-mq-name")?.getAttribute("title")).toBe("async merge");
   });
 
   it("draws each stage in order", () => {
@@ -1173,38 +1156,6 @@ describe("drawRosterMergeQueueWaiting", () => {
     ]);
   });
 
-  it("notes an async merge's requester after its name, whole on the line's hover", () => {
-    const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(
-      waitingMerge("w1", { clock: waitingClock(NOW - 3_000), subject: queueSubject("w1", { name: "fix-it", async: true, requester: "triage" }) }),
-      1,
-      sc,
-      "w",
-      NONE_COLD_GATED,
-    );
-    expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
-      ["sb-mq-position", "1"],
-      ["sb-mq-name", "fix-it"],
-      [MERGE_QUEUE_ASYNC_OF_CLASS, "(triage)"],
-      ["sb-mq-clock", formatTickedElapsed(3_000)],
-    ]);
-    expect([line.title, line.querySelector(".sb-mq-name")?.hasAttribute("title")]).toEqual(["(triage)", false]);
-  });
-
-  it("notes nothing after a sync merge's name", () => {
-    const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w", NONE_COLD_GATED);
-    expect([line.querySelector(`.${MERGE_QUEUE_ASYNC_OF_CLASS}`), line.title]).toEqual([null, ""]);
-  });
-
-  it("refuses an async merge that names no requester", () => {
-    const { sc } = daemon();
-    const subject = create(RosterMergeQueueSubjectSchema, {
-      workspace: { id: "w1", dir: "/w/w1" }, name: "one", mode: { mode: { case: "async", value: {} } }, merge: { id: "w1" },
-    });
-    expect(() => drawRosterMergeQueueWaiting(waitingMerge("w1", { subject }), 1, sc, "w", NONE_COLD_GATED)).toThrow(MalformedView);
-  });
-
   it("counts a waiting merge's waiting before its last active stretch, and no active stretch", () => {
     const { sc } = daemon();
     const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { clock: waitingClock(NOW - 3_000, 40 * 60_000) }), 1, sc, "w", NONE_COLD_GATED);
@@ -1333,10 +1284,10 @@ describe("drawCardLine", () => {
   });
 });
 
-/** A merge credited to workspace ID off its queue for CAUSE, standing as MERGE, which its controls name. */
+/** The merge of workspace ID off its queue for CAUSE, its controls naming MERGE (ID unless said). */
 function offQueue(id: string, cause: string, merge = id) {
   return create(RosterMergeQueueOffQueueSchema, {
-    subject: queueSubject(id, { merge }),
+    subject: queueSubject(id),
     cause: { text: cause },
     requeue: { merge: { id: merge, dir: `/wt/${merge}` } },
     discard: { merge: { id: merge, dir: `/wt/${merge}` } },
@@ -1356,7 +1307,7 @@ function offQueueDaemon() {
       },
       discardMerge: (request: DiscardMergeRequest) => {
         discarded.push(request);
-        return create(DiscardMergeResponseSchema, { result: { case: "success", value: { discarded: { case: "ownBranch", value: {} } } } });
+        return create(DiscardMergeResponseSchema, { result: { case: "success", value: {} } });
       },
       selectWorkspace: (request: SelectWorkspaceRequest) => {
         selected.push(request);
@@ -1384,28 +1335,6 @@ describe("drawRosterMergeQueueOffQueue", () => {
     const { sc } = offQueueDaemon();
     const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`);
     expect([line?.querySelector(".sb-mq-name")?.textContent, line?.querySelector(".sb-mq-off-queue-cause")?.textContent]).toEqual(["w2", "evicted"]);
-  });
-
-  it("notes an async merge's requester after its name, before why it left", () => {
-    const { sc } = offQueueDaemon();
-    const off = offQueue("w2", "evicted");
-    off.subject = queueSubject("w2", { name: "fix-it", async: true, requester: "triage" });
-    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector<HTMLElement>(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`)!;
-    expect([...line.children].slice(0, 3).map((el) => el.textContent)).toEqual(["fix-it", "(triage)", "evicted"]);
-    expect(line.title).toBe("(triage)");
-  });
-
-  it("selects the requester alone when its name in the note is clicked, never the line", async () => {
-    const { sc, selected } = offQueueDaemon();
-    const off = offQueue("w2", "evicted");
-    off.subject = queueSubject("w2", { name: "fix-it", async: true, requester: "triage", reveal: "bubble-1" });
-    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector<HTMLElement>(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`)!;
-    const link = line.querySelector<HTMLElement>(`.${MERGE_QUEUE_ASYNC_OF_LINK_CLASS}`)!;
-    expect(link.textContent).toBe("triage");
-    link.click();
-    await settled();
-    expect(selected).toHaveLength(1);
-    expect(selected.map((r) => [r.workspace?.id, "reveal" in r ? r.reveal : undefined])).toEqual([["w2", undefined]]);
   });
 
   it("requeues the merge's own workspace at the back, as the user, without selecting the line", async () => {

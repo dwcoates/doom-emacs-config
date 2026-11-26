@@ -19,13 +19,12 @@ import {
 } from "../../src/sidebar/tones.js";
 import { readGlyphPicture } from "../glyph-pictures";
 
-
 const ROSTER_STATUS = renderColors.roster_status as Record<string, string>;
 const MERGE_GLYPHS = renderColors.merge_glyphs as Record<string, string>;
 const GATE_GLYPHS = renderColors.gate_glyphs as Record<string, string>;
 const GLYPH_INKS = renderColors.glyph_inks as Record<string, string>;
 /** A one-shot row carrying no other marker. */
-const ONE_SHOT: RowMarkers = { oneShot: true, asyncMerging: false, mergeTurn: false, mergePaused: false };
+const ONE_SHOT: RowMarkers = { oneShot: true, mergeTurn: false, mergePaused: false };
 /** The arms a one-shot's glyph replaces the mark on, in the generated spelling. */
 const ONE_SHOT_ARMS: string[] = ROSTER_STATUS_CASES.filter((arm) =>
   renderColors.one_shot_glyph_arms.includes(protoArmName(arm)),
@@ -208,56 +207,11 @@ describe("a row's mark with its one-shot mark", () => {
   });
 });
 
-// AN ASYNC MERGE OF THE WORKSPACE'S OWN BRANCH (owner request, 2026-10-13):
-// the plain dot gives way to the shared vocabulary's async-merge glyph, ink
-// and motion, on the arm's own tone; every other mark outranks it.
-describe("a row's mark with its async-merging marker", () => {
-  const ASYNC_MERGING: RowMarkers = { oneShot: false, asyncMerging: true, mergeTurn: false, mergePaused: false };
-  const PLAIN_DOT_ARMS = ROSTER_STATUS_CASES.filter(
-    (arm) => rosterArmMark(arm).glyph === "dot" && rosterArmMark(arm).ink === undefined,
-  );
-  const OTHER_MARK_ARMS = ROSTER_STATUS_CASES.filter((arm) => !PLAIN_DOT_ARMS.includes(arm));
-
-  it.each(PLAIN_DOT_ARMS)("draws the purple merge glyph, breathing, over the plain %s dot on the arm's own tone", (arm) => {
-    expect(rosterRowMark(arm, ASYNC_MERGING)).toEqual({
-      ...rosterArmMark(arm),
-      glyph: "merge",
-      image: GLYPH_IMAGES.merge,
-      ink: "purple",
-      motion: "breathes",
-    });
-  });
-
-  it("draws the same picture as a running merge", () => {
-    expect(rosterRowMark("ready", ASYNC_MERGING).image).toBe(rosterArmMark("merging").image);
-  });
-
-  it.each(OTHER_MARK_ARMS)("keeps the %s arm's own mark over the async merge", (arm) => {
-    expect(rosterRowMark(arm, ASYNC_MERGING)).toEqual(rosterArmMark(arm));
-  });
-
-  it("keeps the compaction's orange dot over the async merge", () => {
-    expect(rosterRowMark("compacting", ASYNC_MERGING).ink).toBe("orange");
-  });
-
-  it.each(ONE_SHOT_ARMS)("keeps a working one-shot's target over the async merge on %s", (arm) => {
-    expect(rosterRowMark(arm, { oneShot: true, asyncMerging: true, mergeTurn: false, mergePaused: false })).toEqual(rosterRowMark(arm, ONE_SHOT));
-  });
-
-  it("covers the idle and working dots among the plain ones", () => {
-    expect(["ready", "done", "idleAsync", "thinking"].every((arm) => PLAIN_DOT_ARMS.includes(arm as never))).toBe(true);
-  });
-
-  it("refuses an arm the rail cannot draw even under an async merge", () => {
-    expect(() => rosterRowMark("notAnArm", ASYNC_MERGING)).toThrow(MalformedView);
-  });
-});
-
 // A MERGE IN FLIGHT RUNNING A TURN (owner request, 2026-11-15): the merge
 // glyph the `merging` arm draws stands in place of the turn's mark, in the
 // merging ink, while the row keeps the turn's tone and breath.
 describe("a row's mark with its merge-turn marker", () => {
-  const MERGE_TURN: RowMarkers = { oneShot: false, asyncMerging: false, mergeTurn: true, mergePaused: false };
+  const MERGE_TURN: RowMarkers = { oneShot: false, mergeTurn: true, mergePaused: false };
   const TURN_ARMS = ["submitting", "thinking", "vendorSilent", "clearing", "compacting"] as const;
 
   it.each(TURN_ARMS)("draws the merging glyph in the merging ink over the %s arm's mark on its own tone and motion", (arm) => {
@@ -291,29 +245,10 @@ describe("a row's mark with its merge-turn marker", () => {
 // draws takes the shared vocabulary's paused ink, the merge's breath stops,
 // and the arm's tone stands.
 describe("a row's mark with its merge-paused marker", () => {
-  const PAUSED: RowMarkers = { oneShot: false, asyncMerging: false, mergeTurn: false, mergePaused: true };
-  const PAUSED_ASYNC: RowMarkers = { oneShot: false, asyncMerging: true, mergeTurn: false, mergePaused: true };
+  const PAUSED: RowMarkers = { oneShot: false, mergeTurn: false, mergePaused: true };
 
   it.each(["merging", "mergeQueued"] as const)("inks the paused %s glyph amber and holds it still on its own tone", (arm) => {
     expect(rosterRowMark(arm, PAUSED)).toEqual({ ...rosterArmMark(arm), ink: "amber", motion: "still" });
-  });
-
-  it("ambers the async-merge mark over a plain idle dot and holds it still", () => {
-    expect(rosterRowMark("ready", PAUSED_ASYNC)).toEqual({
-      ...rosterArmMark("ready"),
-      glyph: "merge",
-      image: GLYPH_IMAGES.merge,
-      ink: "amber",
-      motion: "still",
-    });
-  });
-
-  it("keeps a turn's own breath under a paused async merge", () => {
-    expect(rosterRowMark("thinking", PAUSED_ASYNC).motion).toBe("breathes");
-  });
-
-  it("keeps a gate's own mark under a paused async merge", () => {
-    expect(rosterRowMark("permission", PAUSED_ASYNC)).toEqual(rosterArmMark("permission"));
   });
 
   it("reads its ink and motion from the shared vocabulary", () => {

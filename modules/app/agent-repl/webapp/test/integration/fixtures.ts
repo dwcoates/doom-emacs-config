@@ -1378,7 +1378,6 @@ export const commandRefusedRow = (
 // ---- FeedMerge and FeedMergeTab -------------------------------------------
 
 export const MERGE_TAB_KINDS = [
-  "resolving",
   "queue",
   "hookPrompt",
   "rebasing",
@@ -1398,13 +1397,12 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 /** The state arms every tab kind carries: live, held (its merge or its queue holds it), or settled. */
 export const MERGE_TAB_STATES = ["live", "onHold", "settled"] as const;
 /**
- * The kinds that can also wait on the user: the pick, a conflict resolution
- * and a fixing attempt, whose agent asks, the resolving-conflicts and
+ * The kinds that can also wait on the user: a conflict resolution and a
+ * fixing attempt, whose agent asks, the resolving-conflicts and
  * fixing-tests tabs they are drawn in, and the rebasing tab, its commit and
  * the tests tab they serve.
  */
 export const MERGE_TAB_WAITING_KINDS = [
-  "resolving",
   "rebasing",
   "rebaseCommit",
   "resolvingConflicts",
@@ -1549,8 +1547,6 @@ const mergeTabKindValue = (
       };
     case "fixingTests":
       return { case: "fixingTests", value: { state: agenticState(state) } };
-    case "resolving":
-      return { case: "resolving", value: { state: agenticState(state) } };
     case "tests":
       return { case: "tests", value: { state: agenticState(state) } };
     case "testsRun":

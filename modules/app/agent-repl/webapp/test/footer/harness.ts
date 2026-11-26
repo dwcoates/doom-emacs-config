@@ -28,7 +28,7 @@ import {
   FooterExpandedSchema,
   FooterExpandedTokensSchema,
   FooterLiveWorkChipsSchema,
-  FooterMergeRowSchema,
+  FooterChildRowSchema,
   FooterMonitorRowSchema,
   FooterShellRowSchema,
   FooterStatusIdleSchema,
@@ -273,7 +273,7 @@ export interface ExpandedInit {
   tasks?: readonly MessageInitShape<typeof FooterTaskRowSchema>[];
   shells?: readonly MessageInitShape<typeof FooterShellRowSchema>[];
   monitors?: readonly MessageInitShape<typeof FooterMonitorRowSchema>[];
-  merges?: readonly MessageInitShape<typeof FooterMergeRowSchema>[];
+  children?: readonly MessageInitShape<typeof FooterChildRowSchema>[];
   crons?: readonly MessageInitShape<typeof FooterCronRowSchema>[];
   wakeup?: MessageInitShape<typeof FooterWakeupRowSchema>;
 }
@@ -299,7 +299,7 @@ export function expanded(init: ExpandedInit = {}): FooterExpanded {
     shells: { rows: [...(init.shells ?? [])] },
     monitors: { rows: [...(init.monitors ?? [])] },
     crons: { rows: [...(init.crons ?? [])], wakeup: init.wakeup },
-    merges: { rows: [...(init.merges ?? [])] },
+    children: { rows: [...(init.children ?? [])] },
   });
 }
 
@@ -355,12 +355,12 @@ export const MONITOR_ROW = {
   runtime: { startedAtMs: BigInt(NOW - 90_000) },
 };
 
-/** One async merge row. */
-export const MERGE_ROW = {
-  work: { value: "lease-1" },
-  jump: toEntry("merge-head"),
-  label: { text: "fix-flaky → master" },
-  runtime: { startedAtMs: BigInt(NOW - 90_000) },
+/** One open child row. */
+export const CHILD_ROW = {
+  name: { text: "fix-flaky" },
+  status: { text: "thinking", tone: "red" },
+  shortSummary: { text: "Fix the flaky reconnect test" },
+  select: { target: { id: "ws-child" } },
 };
 
 /** One scheduled job row. */
