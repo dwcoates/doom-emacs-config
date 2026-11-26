@@ -169,3 +169,76 @@ func TestSidecarStepSurfacesTheSidecarHalfsFailure(t *testing.T) {
 		t.Fatalf("run = %v, want the sidecar half's failure", err)
 	}
 }
+
+func TestAfterGateDoesNotRunBeforeTheGateOpens(t *testing.T) {
+	// Arrange
+	gate := newServiceGate()
+	started := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	wrapped := afterGate(gate, func(context.Context) error { started <- struct{}{}; return nil })
+	done := make(chan error, 1)
+	go func() { done <- wrapped(ctx) }()
+
+	// Act: the run is cancelled while the gate is still shut, so it returns
+	// only after deciding not to run.
+	cancel()
+	err := <-done
+
+	// Assert
+	if err != nil || len(started) != 0 {
+		t.Fatalf("wrapped = %v, started = %d; want nil and no run before the gate opened", err, len(started))
+	}
+}
+
+func TestAfterGateRunsOnceTheGateOpens(t *testing.T) {
+	stepFailure := errors.New("the holder could not be installed")
+	cases := []struct {
+		name    string
+		stepErr error
+	}{
+		{name: "after a successful step", stepErr: nil},
+		{name: "after a failed step", stepErr: stepFailure},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			gate := newServiceGate()
+			release := make(chan struct{})
+			step := gate.step(func(context.Context) error { <-release; return tc.stepErr })
+			runResult := errors.New("the run's own answer")
+			wrapped := afterGate(gate, func(context.Context) error { return runResult })
+			done := make(chan error, 1)
+			go func() { done <- wrapped(context.Background()) }()
+			stepDone := make(chan error, 1)
+			go func() { stepDone <- step(context.Background()) }()
+
+			// Act
+			close(release)
+			err := <-done
+
+			// Assert
+			if !errors.Is(err, runResult) {
+				t.Fatalf("wrapped = %v, want the run's own answer", err)
+			}
+			if got := <-stepDone; !errors.Is(got, tc.stepErr) {
+				t.Fatalf("step = %v, want %v", got, tc.stepErr)
+			}
+		})
+	}
+}
+
+func TestAfterGateRunsAtOnceWhenTheGateIsAlreadyOpen(t *testing.T) {
+	// Arrange
+	gate := newServiceGate()
+	_ = gate.step(func(context.Context) error { return nil })(context.Background())
+	var ran bool
+	wrapped := afterGate(gate, func(context.Context) error { ran = true; return nil })
+
+	// Act
+	err := wrapped(context.Background())
+
+	// Assert
+	if err != nil || !ran {
+		t.Fatalf("wrapped = %v, ran = %v; want the run run", err, ran)
+	}
+}

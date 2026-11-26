@@ -3419,18 +3419,21 @@ or (:arm :display-awake :value (:detail TEXT))."
 
 (defun agent-repl-wire-decode-persistent-wifi-state (json)
   "Decode PersistentWifiState from JSON.
-Returns (:wifi ONEOF :mode ONEOF :lid ONEOF :quiet QUIET).  Each ONEOF is
+Returns (:wifi ONEOF :mode ONEOF :lid ONEOF :quiet QUIET
+:service-unreachable UNREACHABLE).  Each ONEOF is
 \(:arm ARM :value V), or nil when the daemon could not read that fact (for
 the lid: has not heard it yet) -- the facts are independent, and an
 unassigned one is the daemon saying it does not know, never a contract
 breach.  QUIET is `agent-repl-wire-decode-persistent-wifi-quiet''s plist
-while the lid-closed quiet state stands, else nil.  Shared by the WatchDaemon
-push and UpdatePersistentWifiMode's
-success."
+while the lid-closed quiet state stands, else nil.  UNREACHABLE is
+\(:detail TEXT) while the daemon cannot reach the persistent-wifi service
+\(from its start until the service first answers, and whenever the watch
+ends), and every other fact is then unset; else nil.  Shared by the
+WatchDaemon push and UpdatePersistentWifiMode's success."
   (let ((message "PersistentWifiState")
         (object (agent-repl-wire--object "PersistentWifiState" json)))
     (agent-repl-wire--check-keys message object
-                                 (append '(joined notJoined on off quiet)
+                                 (append '(joined notJoined on off quiet serviceUnreachable)
                                          (mapcar #'car agent-repl-wire-persistent-wifi-lid-arms)))
     (agent-repl-wire--decoded
      message
@@ -3454,7 +3457,13 @@ success."
                          agent-repl-wire-persistent-wifi-lid-arms)
                  t)
            :quiet (agent-repl-wire--decode-optional-message
-                   message 'quiet object #'agent-repl-wire-decode-persistent-wifi-quiet)))))
+                   message 'quiet object #'agent-repl-wire-decode-persistent-wifi-quiet)
+           :service-unreachable
+           (agent-repl-wire--decode-optional-message
+            message 'serviceUnreachable object
+            (lambda (value)
+              (agent-repl-wire-verbs--decode-scalar-fields
+               (format "%s.serviceUnreachable" message) value '((detail :detail)))))))))
 
 (defun agent-repl-wire-encode-update-persistent-wifi-mode-request (request)
   "Encode UpdatePersistentWifiModeRequest from plist REQUEST (:action ONEOF).

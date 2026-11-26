@@ -6384,7 +6384,7 @@ instead diverges from it unseen."
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{\"networkName\":\"Home\"},\"on\":{}}")
                  '(:wifi (:arm :joined :value (:network-name "Home"))
-                   :mode (:arm :on :value nil) :lid nil :quiet nil))))
+                   :mode (:arm :on :value nil) :lid nil :quiet nil :service-unreachable nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-withheld-name-is-nil ()
   "A joined network whose name macOS withholds decodes with no name."
@@ -6392,13 +6392,13 @@ instead diverges from it unseen."
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{},\"off\":{}}")
                  '(:wifi (:arm :joined :value (:network-name nil))
-                   :mode (:arm :off :value nil) :lid nil :quiet nil))))
+                   :mode (:arm :off :value nil) :lid nil :quiet nil :service-unreachable nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unread-facts-are-nil ()
   "Facts the daemon could not read are unassigned oneofs, never a breach."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-persistent-wifi-state "{}")
-                 '(:wifi nil :mode nil :lid nil :quiet nil))))
+                 '(:wifi nil :mode nil :lid nil :quiet nil :service-unreachable nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-decodes-each-lid-arm ()
   "Each lid arm decodes arm for arm, the unwatched one with its detail."
@@ -6423,6 +6423,28 @@ instead diverges from it unseen."
                                #'agent-repl-wire-decode-persistent-wifi-state (car case))
                               :quiet)
                    (cdr case)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-decodes-the-unreachable-service ()
+  "A standing of an unreachable service decodes its detail, every other fact unset."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-persistent-wifi-state
+                  "{\"serviceUnreachable\":{\"detail\":\"has not answered\"}}")
+                 '(:wifi nil :mode nil :lid nil :quiet nil
+                   :service-unreachable (:detail "has not answered")))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-reachable-service-is-nil ()
+  "A standing read from the service carries no unreachable arm."
+  (should (null (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                            #'agent-repl-wire-decode-persistent-wifi-state
+                            "{\"joined\":{},\"on\":{},\"lidOpen\":{}}")
+                           :service-unreachable))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-unreachable-unknown-field-refused ()
+  "An unreachable standing carrying a field the codec does not hold is a breach."
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
+                  #'agent-repl-wire-decode-persistent-wifi-state
+                  "{\"serviceUnreachable\":{\"detail\":\"x\",\"since\":1}}")
+                 '("PersistentWifiState.serviceUnreachable" "since" "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-quiet-without-a-display-refused ()
   "A quiet state that names no display arm is a breach."
@@ -6478,7 +6500,7 @@ instead diverges from it unseen."
                           "\"display\":{\"slept\":{}}}}"))
                  '(:arm :success
                    :value (:state (:wifi (:arm :joined :value (:network-name nil))
-                                   :mode (:arm :on :value nil) :lid nil :quiet nil)
+                                   :mode (:arm :on :value nil) :lid nil :quiet nil :service-unreachable nil)
                            :hotspot (:arm :failed :value (:network-name "Phone" :detail "not visible"))
                            :energy-mode (:arm :failed :value (:detail "refused"))
                            :display (:arm :slept :value nil))))))
@@ -6493,7 +6515,7 @@ instead diverges from it unseen."
                                                 "\"display\":{\"woke\":{}}}}"))
                                        :value)
                             :state)
-                 '(:wifi nil :mode nil :lid nil :quiet nil))))
+                 '(:wifi nil :mode nil :lid nil :quiet nil :service-unreachable nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-energy-mode-decodes-each-arm ()
   "Each energy mode outcome arm decodes arm for arm, the restored one with its mode."

@@ -204,8 +204,9 @@ func TestRestartLauncherRegistersThenRestartsTheService(t *testing.T) {
 		restartErr        error
 		notLoaded         bool
 		definitionWritten bool
-		defineErr         error
+		ensureServiceErr  error
 		wantRegistered    bool
+		wantBroughtUp     bool
 		wantRestart       bool
 		wantStart         bool
 		wantErr           string
@@ -221,9 +222,10 @@ func TestRestartLauncherRegistersThenRestartsTheService(t *testing.T) {
 			wantErr: "no such label", wantRecord: "the launcher restart failed"},
 		{name: "an unloaded service whose definition is installed is started, not restarted",
 			notLoaded: true, definitionWritten: true, wantRegistered: true, wantStart: true},
-		{name: "an unloaded service with no definition has it written, then is started", notLoaded: true, wantRegistered: true, wantStart: true},
-		{name: "a definition that cannot be written is the error", notLoaded: true, defineErr: errors.New("no entry"), wantRegistered: true,
-			wantErr: "no entry", wantRecord: "a service's definition could not be written from its requirements entry"},
+		{name: "an unloaded service with no definition is brought up from its requirements entry, and not started again", notLoaded: true,
+			wantRegistered: true, wantBroughtUp: true},
+		{name: "a service that cannot be brought up is the error", notLoaded: true, ensureServiceErr: errors.New("no entry"), wantRegistered: true,
+			wantBroughtUp: true, wantErr: "no entry", wantRecord: "a service could not be built, installed and loaded from its requirements entry"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -238,17 +240,19 @@ func TestRestartLauncherRegistersThenRestartsTheService(t *testing.T) {
 			if tc.noHolder {
 				holder, wantEnsured = "", nil
 			}
-			var registered, ensured []string
+			var registered, ensured, broughtUp []string
 			r := &Restarter{Services: services, Log: log, LauncherApp: "/Apps/Zettel.app", LauncherHolder: holder,
 				EnsureHolder: func(_ context.Context, id string) error {
 					ensured = append(ensured, id)
 					return tc.holderErr
 				},
-				// Define writes the definition from its requirements entry, as
-				// bin/requirements.sh define-service does.
-				Define: func(_ context.Context, label string) error {
-					if tc.defineErr != nil {
-						return tc.defineErr
+				// EnsureService builds, writes the definition of and loads the
+				// service from its requirements entry, as bin/requirements.sh
+				// ensure-service does.
+				EnsureService: func(_ context.Context, label string) error {
+					broughtUp = append(broughtUp, label)
+					if tc.ensureServiceErr != nil {
+						return tc.ensureServiceErr
 					}
 					writeFile(t, filepath.Join(dir, label+".plist"), "<plist/>")
 					return nil
@@ -267,6 +271,9 @@ func TestRestartLauncherRegistersThenRestartsTheService(t *testing.T) {
 			}
 			if got := len(registered) == 1 && registered[0] == "/Apps/Zettel.app"; got != tc.wantRegistered {
 				t.Fatalf("registered %v, want registered: %v", registered, tc.wantRegistered)
+			}
+			if got := len(broughtUp) == 1 && broughtUp[0] == LauncherLabel; got != tc.wantBroughtUp || len(broughtUp) > 1 {
+				t.Fatalf("brought up %v, want brought up: %v", broughtUp, tc.wantBroughtUp)
 			}
 			if services.restarted != tc.wantRestart || services.started != tc.wantStart {
 				t.Fatalf("restarted = %v, started = %v; want restarted %v, started %v", services.restarted, services.started, tc.wantRestart, tc.wantStart)

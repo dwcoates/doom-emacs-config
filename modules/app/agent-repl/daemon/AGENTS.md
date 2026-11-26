@@ -761,7 +761,8 @@ so it steers no later return to Emacs.
   passed through `wifirpc.Client.Update`; the standing the topbar and the Emacs
   streams show is the one `wifirpc.Client` follows (`persistentwifi.v1.WatchStanding`)
   on a socket a socket holder owns, so a connect queues until the service
-  accepts. The daemon moves its own view gate (`viewquiet`) from the quiet state
+  accepts. The standing watch dials only once the boot's standalone step, which
+  ensures that holder, has returned (`afterGate` in `cmd/agent-repld`). The daemon moves its own view gate (`viewquiet`) from the quiet state
   the standing carries (`wifiStandingReceiver`): its views stop and its page
   views freeze while the lid is closed, as before.
 - A STANDING THE SERVICE DID NOT SERVE IS NEVER SHOWN. The client publishes

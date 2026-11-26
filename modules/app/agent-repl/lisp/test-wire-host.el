@@ -1929,7 +1929,16 @@ OpenTabs streams."
                   "{\"persistentWifi\":{\"notJoined\":{},\"on\":{}}}")
                  '(:arm :persistent-wifi
                    :value (:wifi (:arm :not-joined :value nil) :mode (:arm :on :value nil)
-                           :lid nil :quiet nil)))))
+                           :lid nil :quiet nil :service-unreachable nil)))))
+
+(ert-deftest agent-repl-test-wire-host-persistent-wifi-push-decodes-the-unreachable-service ()
+  "The persistent-wifi push of an unreachable service decodes its detail."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"persistentWifi\":{\"serviceUnreachable\":{\"detail\":\"not answered\"}}}")
+                 '(:arm :persistent-wifi
+                   :value (:wifi nil :mode nil :lid nil :quiet nil
+                           :service-unreachable (:detail "not answered"))))))
 
 (ert-deftest agent-repl-test-wire-host-reload-webhost-push-decodes-its-build ()
   "The web view host's reload push decodes to the build it names."

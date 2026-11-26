@@ -14,6 +14,11 @@
 
 ;;;; ---- Fixtures --------------------------------------------------------
 
+(defconst agent-repl-test-pwifi--unreachable
+  '(:wifi nil :mode nil :lid nil :quiet nil
+    :service-unreachable (:detail "the persistent-wifi service has not answered since this daemon started"))
+  "A decoded standing of an unreachable persistent-wifi service.")
+
 (defun agent-repl-test-pwifi--state (wifi mode &optional name)
   "A decoded standing: WIFI and MODE arm keywords (nil = unread), joined NAME."
   (list :wifi (and wifi (list :arm wifi :value (and (eq wifi :joined) (list :network-name name))))
@@ -69,6 +74,12 @@ written inside BODY after the act."
       (should (equal (agent-repl-persistent-wifi-describe state)
                      (concat "persistent wifi on: the lid can close · no Wi-Fi · "
                              (nthcdr 2 case)))))))
+
+(ert-deftest agent-repl-test-pwifi-describe-names-an-unreachable-service-alone ()
+  "A standing of an unreachable service reads as that one line."
+  (should (equal (agent-repl-persistent-wifi-describe agent-repl-test-pwifi--unreachable)
+                 (concat "persistent-wifi service unreachable: the persistent-wifi service "
+                         "has not answered since this daemon started"))))
 
 (ert-deftest agent-repl-test-pwifi-describe-refuses-an-unknown-quiet-display-arm ()
   "A quiet display arm the wording does not know fails hard."
@@ -152,6 +163,20 @@ written inside BODY after the act."
     (should (equal (echoed) '("agent-repl: persistent wifi off: closing the lid sleeps · no Wi-Fi")))
     (should (assoc 'info (logged)))))
 
+(ert-deftest agent-repl-test-pwifi-an-unreachable-service-is-echoed-as-a-change ()
+  "A service that stops answering is recorded and echoed as a change."
+  (agent-repl-test-pwifi--capturing
+    ;; Arrange
+    (agent-repl-persistent-wifi-handle (agent-repl-test-pwifi--state :joined :on))
+    ;; Act
+    (agent-repl-persistent-wifi-handle agent-repl-test-pwifi--unreachable)
+    ;; Assert
+    (should (equal agent-repl-persistent-wifi-state agent-repl-test-pwifi--unreachable))
+    (should (equal (echoed)
+                   (list (concat "agent-repl: persistent-wifi service unreachable: the persistent-wifi "
+                                 "service has not answered since this daemon started"))))
+    (should (string-prefix-p "elisp.persistent-wifi.changed" (cdr (car (last (logged))))))))
+
 (ert-deftest agent-repl-test-pwifi-a-replayed-standing-is-silent ()
   "A resubscribe's replay of the same standing is recorded at debug only."
   (agent-repl-test-pwifi--capturing
@@ -219,6 +244,20 @@ cancelled, and re-arming one records it."
       ;; Assert
       (should (equal (sort (armed) #'string<) '(:stall-sampler :state-poll)))
       (should (null agent-repl--quiet-paused-timer-keys))
+      (should (equal (told) '(t nil)))
+      (should-not (agent-repl-persistent-wifi-quiet-p)))))
+
+(ert-deftest agent-repl-test-pwifi-an-unreachable-service-ends-the-quiet-state ()
+  "A service that stops answering during the quiet state wakes Emacs."
+  (agent-repl-test-pwifi--capturing
+    (agent-repl-test-pwifi--following-quiet
+      ;; Arrange
+      (agent-repl-persistent-wifi-handle
+       (append (agent-repl-test-pwifi--state :joined :on) (list :quiet agent-repl-test-pwifi--quiet)))
+      ;; Act
+      (agent-repl-persistent-wifi-handle agent-repl-test-pwifi--unreachable)
+      ;; Assert
+      (should (equal (sort (armed) #'string<) '(:stall-sampler :state-poll)))
       (should (equal (told) '(t nil)))
       (should-not (agent-repl-persistent-wifi-quiet-p)))))
 

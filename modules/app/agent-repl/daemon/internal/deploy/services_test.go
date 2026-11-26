@@ -121,6 +121,12 @@ func (l *fakeServiceManager) Start(_ context.Context, label string) error {
 	if l.startErr != nil {
 		return l.startErr
 	}
+	l.load(label)
+	return nil
+}
+
+// load holds label as the manager's start does, running the start hooks.
+func (l *fakeServiceManager) load(label string) {
 	l.mu.Lock()
 	l.loaded[label] = true
 	l.mu.Unlock()
@@ -132,7 +138,13 @@ func (l *fakeServiceManager) Start(_ context.Context, label string) error {
 	if label == StoreLabel && l.onRestart != nil {
 		l.onRestart()
 	}
-	return nil
+}
+
+// held answers whether the manager holds label.
+func (l *fakeServiceManager) held(label string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.loaded[label]
 }
 
 func (l *fakeServiceManager) Definition(label string) string {
@@ -163,6 +175,12 @@ type restarterHarness struct {
 	// definition every service is installed with, so a restart finds it
 	// unchanged.
 	definition string
+	// ensureServiceErr is what EnsureService answers; nil installs the
+	// service's binary and definition and loads it when it is not held.
+	// ensureServiceWritesNothing makes a successful EnsureService leave no
+	// definition.
+	ensureServiceErr           error
+	ensureServiceWritesNothing bool
 	// holderErr is what EnsureHolder answers; ensuredHolders records each
 	// holder it was asked for.
 	holderErr      error
@@ -253,6 +271,33 @@ func (h *restarterHarness) define(_ context.Context, label string) error {
 	return os.WriteFile(filepath.Join(h.services.dir, label+".plist"), []byte(body), 0o644)
 }
 
+// ensureService is the harness's EnsureService: it records "ensure-service
+// <label>" among the service manager's calls and, as bin/requirements.sh
+// ensure-service does, installs a standalone's binary, writes the label's
+// plist, and loads the service when the manager does not hold it.
+func (h *restarterHarness) ensureService(_ context.Context, label string) error {
+	h.services.record("ensure-service " + label)
+	if h.ensureServiceErr != nil {
+		return h.ensureServiceErr
+	}
+	for _, sv := range Standalones {
+		if sv.Label == label {
+			if err := os.WriteFile(filepath.Join(h.r.CacheBin, sv.Service), []byte("built "+sv.Short), 0o755); err != nil {
+				return err
+			}
+		}
+	}
+	if !h.ensureServiceWritesNothing {
+		if err := os.WriteFile(filepath.Join(h.services.dir, label+".plist"), []byte("<plist/>"), 0o644); err != nil {
+			return err
+		}
+	}
+	if !h.services.held(label) {
+		h.services.load(label)
+	}
+	return nil
+}
+
 // processExit is the harness's ProcessExit: it waits on the pid's entry in
 // exits, or answers at once for a pid that has none.
 func (h *restarterHarness) processExit(ctx context.Context, pid int) error {
@@ -334,6 +379,7 @@ func newRestarter(t *testing.T) *restarterHarness {
 		ResourceWindows: &h.windows,
 		ProcessExit:     h.processExit,
 		Define:          h.define,
+		EnsureService:   h.ensureService,
 		EnsureHolder:    h.ensureHolder,
 		HolderServing: func(context.Context, string) (bool, error) {
 			return !h.holderDown, h.probeErr
@@ -343,6 +389,11 @@ func newRestarter(t *testing.T) *restarterHarness {
 		TestsAnswer: h.testsAnswer,
 	}
 	h.testsSock = h.r.TestsSocket
+	// Every standalone is installed with its binary; a test that needs one
+	// missing removes it.
+	for _, sv := range Standalones {
+		writeFile(t, filepath.Join(h.r.CacheBin, sv.Service), "installed "+sv.Short)
+	}
 	h.testRuns = &fakeTestRuns{services: h.services}
 	h.r.TestRuns = h.testRuns
 	listen(t, h.testsSock)
@@ -494,11 +545,12 @@ func TestAStoreStartedFromNothingHasItsHolderEnsuredFirst(t *testing.T) {
 	// Act
 	_ = h.r.EnsureLoaded(context.Background())
 
-	// Assert
+	// Assert: the store is brought up from its requirements entry (which
+	// starts it) only once its holder serves, and never started a second time.
 	acts := h.acts()
 	at := func(act string) int { return slices.Index(acts, act) }
-	if at("ensure-holder store-holder") < 0 || at("start "+StoreLabel) < 0 || at("ensure-holder store-holder") > at("start "+StoreLabel) {
-		t.Fatalf("acts %v, want the store's holder ensured before the store starts", acts)
+	if at("ensure-holder store-holder") < 0 || at("ensure-service "+StoreLabel) < 0 || at("ensure-holder store-holder") > at("ensure-service "+StoreLabel) || at("start "+StoreLabel) >= 0 {
+		t.Fatalf("acts %v, want the store's holder ensured before the store is brought up, and no start of its own", acts)
 	}
 }
 
@@ -1006,9 +1058,9 @@ func TestEnsureLoadedBootstrapsAnUnloadedSidecarWithoutTouchingTheStore(t *testi
 	}
 }
 
-// An unloaded service with no plist has its definition written before it is
-// started (ensureLoaded); one whose definition cannot be written is refused,
-// and nothing is started.
+// An unloaded service with no plist is built, installed and loaded from its
+// requirements entry (ensureLoaded); one that cannot be is refused, and
+// nothing is started.
 func TestEnsureLoadedRefusesAnUnloadedServiceWhosePlistCannotBeWritten(t *testing.T) {
 	// Arrange: the store is unloaded with no definition.
 	h := newRestarter(t)
@@ -1016,14 +1068,14 @@ func TestEnsureLoadedRefusesAnUnloadedServiceWhosePlistCannotBeWritten(t *testin
 	if err := os.Remove(filepath.Join(h.services.dir, StoreLabel+".plist")); err != nil {
 		t.Fatal(err)
 	}
-	h.defineErr = errors.New("define-service exited 1")
+	h.ensureServiceErr = errors.New("ensure-service exited 1")
 
 	// Act.
 	err := h.r.EnsureLoaded(context.Background())
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "write the definition of "+StoreLabel) {
-		t.Fatalf("EnsureLoaded = %v, want a refusal naming the definition write", err)
+	if err == nil || !errors.Is(err, h.ensureServiceErr) || !strings.Contains(err.Error(), "bring up "+StoreLabel+" from its requirements entry") {
+		t.Fatalf("EnsureLoaded = %v, want a refusal naming the bring-up", err)
 	}
 	if slices.Contains(h.services.Calls(), "start "+StoreLabel) {
 		t.Fatalf("calls = %v, want nothing started", h.services.Calls())
@@ -1480,10 +1532,16 @@ func TestEnsureCurrentKeepsEveryStandaloneLoadedAndCurrent(t *testing.T) {
 func TestEnsureStandaloneCurrentSurfacesAnUnreadableInstalledBuild(t *testing.T) {
 	for _, sv := range Standalones {
 		t.Run(sv.Short, func(t *testing.T) {
-			// Arrange: the service runs, but nothing is installed to judge it against.
+			// Arrange: the service runs, but what is installed cannot be read
+			// to judge it against (a missing binary is built and installed
+			// first: TestAStandaloneWithNoInstalledBinaryIsBuiltAndInstalledBeforeItIsJudged).
 			h := newRestarter(t)
 			h.running(t, sv.Label, sv.Service, 40, "new "+sv.Short, "new "+sv.Short)
-			if err := os.Remove(filepath.Join(h.r.CacheBin, sv.Service)); err != nil {
+			installed := filepath.Join(h.r.CacheBin, sv.Service)
+			if err := os.Remove(installed); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(installed, 0o755); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1534,7 +1592,7 @@ func TestEnsureStandaloneLoadedNeverRestartsARunningOne(t *testing.T) {
 func TestEnsureStandalonesTriesEveryOneWhateverAnotherAnswers(t *testing.T) {
 	// Arrange: the first standalone's definition is missing, the second's loads.
 	h := newRestarter(t)
-	h.defineErr = errors.New("define-service exited 1")
+	h.ensureServiceErr = errors.New("ensure-service exited 1")
 	h.services.loaded[Standalones[0].Label] = false
 	writeFile(t, filepath.Join(h.services.dir, Standalones[1].Label+".plist"), "<plist/>")
 	h.services.loaded[Standalones[1].Label] = false
@@ -1543,36 +1601,34 @@ func TestEnsureStandalonesTriesEveryOneWhateverAnotherAnswers(t *testing.T) {
 	err := h.r.EnsureStandalonesLoaded(context.Background())
 
 	// Assert
-	if want := []string{"define " + Standalones[0].Label, "start " + Standalones[1].Label}; err == nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+	if want := []string{"ensure-service " + Standalones[0].Label, "start " + Standalones[1].Label}; err == nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureStandalonesLoaded = %v, acts %v; want the first's failure and the second started", err, h.acts())
 	}
 }
 
-func TestEnsureLoadedWritesAMissingDefinitionBeforeStartingTheService(t *testing.T) {
+func TestEnsureLoadedBringsUpAServiceWithNoDefinitionFromItsRequirementsEntry(t *testing.T) {
 	cases := []struct {
 		name          string
-		defineErr     error
+		ensureErr     error
 		writesNothing bool
 		wantErr       string
-		wantActs      []string
+		wantLoaded    bool
 		wantLog       string
 		level         string
 	}{
-		{name: "a written definition starts the service",
-			wantActs: []string{"define " + TestsLabel, "start " + TestsLabel},
-			wantLog:  "a service is not loaded and has no definition; writing it from its requirements entry", level: "info"},
-		{name: "a definition that cannot be written starts nothing", defineErr: errors.New("define-service exited 1"),
-			wantErr: "write the definition of " + TestsLabel, wantActs: []string{"define " + TestsLabel},
-			wantLog: "a service's definition could not be written from its requirements entry", level: "error"},
-		{name: "a definition still missing once written starts nothing", writesNothing: true,
-			wantErr: "is still unreadable", wantActs: []string{"define " + TestsLabel},
+		{name: "a service brought up is loaded, and not started a second time", wantLoaded: true,
+			wantLog: "a service is not loaded and has no definition; it is built, installed and loaded from its requirements entry", level: "info"},
+		{name: "a service that cannot be brought up is the error, and nothing starts it", ensureErr: errors.New("ensure-service exited 1"),
+			wantErr: "bring up " + TestsLabel + " from its requirements entry",
+			wantLog: "a service could not be built, installed and loaded from its requirements entry", level: "error"},
+		{name: "a definition still missing once brought up is the error", writesNothing: true, wantErr: "is still unreadable", wantLoaded: true,
 			wantLog: "a service's definition is still missing after it was written", level: "error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: the test service is unloaded and has no plist.
 			h := newRestarter(t)
-			h.defineErr, h.defineWritesNothing = tc.defineErr, tc.writesNothing
+			h.ensureServiceErr, h.ensureServiceWritesNothing = tc.ensureErr, tc.writesNothing
 			h.services.loaded[TestsLabel] = false
 
 			// Act
@@ -1582,8 +1638,14 @@ func TestEnsureLoadedWritesAMissingDefinitionBeforeStartingTheService(t *testing
 			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatalf("EnsureStandaloneLoaded = %v, want error containing %q", err, tc.wantErr)
 			}
-			if fmt.Sprint(h.acts()) != fmt.Sprint(tc.wantActs) {
-				t.Fatalf("acts = %v, want %v", h.acts(), tc.wantActs)
+			if tc.ensureErr != nil && !errors.Is(err, tc.ensureErr) {
+				t.Fatalf("EnsureStandaloneLoaded = %v, want it to wrap %v", err, tc.ensureErr)
+			}
+			if want := []string{"ensure-service " + TestsLabel}; fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+				t.Fatalf("acts = %v, want %v", h.acts(), want)
+			}
+			if h.services.held(TestsLabel) != tc.wantLoaded {
+				t.Fatalf("held = %v, want %v", h.services.held(TestsLabel), tc.wantLoaded)
 			}
 			if !loggedTo(h.log, tc.level, tc.wantLog) {
 				t.Fatalf("records = %+v, want %s %q", h.log.Records(), tc.level, tc.wantLog)
@@ -1592,17 +1654,112 @@ func TestEnsureLoadedWritesAMissingDefinitionBeforeStartingTheService(t *testing
 	}
 }
 
+func TestAStandaloneWithNoInstalledBinaryIsBuiltAndInstalledBeforeItIsJudged(t *testing.T) {
+	cases := []struct {
+		name      string
+		act       func(r *Restarter, sv Standalone) error
+		ensureErr error
+		wantActs  func(sv Standalone) []string
+		wantErr   bool
+		wantLog   string
+		level     string
+	}{
+		{name: "the boot's judgement builds and installs it, then finds it current",
+			act:      func(r *Restarter, sv Standalone) error { return r.EnsureStandaloneCurrent(context.Background(), sv) },
+			wantActs: func(sv Standalone) []string { return []string{"ensure-service " + sv.Label} },
+			wantLog:  "the service's binary is not installed; it is built and installed from its requirements entry", level: "info"},
+		{name: "a joining successor's step builds and installs it",
+			act:      func(r *Restarter, sv Standalone) error { return r.EnsureStandaloneLoaded(context.Background(), sv) },
+			wantActs: func(sv Standalone) []string { return []string{"ensure-service " + sv.Label} },
+			wantLog:  "the service's binary is not installed; it is built and installed from its requirements entry", level: "info"},
+		{name: "a restart builds and installs it before restarting it",
+			act: func(r *Restarter, sv Standalone) error { return r.restartStandalone(context.Background(), sv) },
+			wantActs: func(sv Standalone) []string {
+				return []string{"ensure-service " + sv.Label, "define " + sv.Label, "restart " + sv.Label}
+			},
+			wantLog: "the service's binary is not installed; it is built and installed from its requirements entry", level: "info"},
+		{name: "a build that fails is the error, and nothing is judged or started",
+			act:       func(r *Restarter, sv Standalone) error { return r.EnsureStandaloneCurrent(context.Background(), sv) },
+			ensureErr: errors.New("ensure-service exited 1"), wantErr: true,
+			wantActs: func(sv Standalone) []string { return []string{"ensure-service " + sv.Label} },
+			wantLog:  "a service whose binary is not installed could not be built and installed from its requirements entry", level: "error"},
+	}
+	for _, sv := range Standalones {
+		for _, tc := range cases {
+			t.Run(sv.Short+"/"+tc.name, func(t *testing.T) {
+				// Arrange: the manager holds the service on its definition
+				// with no process (launchd respawning it at exit 127), and its
+				// binary is not installed.
+				h := newRestarter(t)
+				writeFile(t, filepath.Join(h.services.dir, sv.Label+".plist"), "<plist/>")
+				if err := os.Remove(filepath.Join(h.r.CacheBin, sv.Service)); err != nil {
+					t.Fatal(err)
+				}
+				h.ensureServiceErr = tc.ensureErr
+
+				// Act
+				err := tc.act(h.r, sv)
+
+				// Assert
+				if (err != nil) != tc.wantErr || (tc.ensureErr != nil && !errors.Is(err, tc.ensureErr)) {
+					t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+				}
+				if want := tc.wantActs(sv); fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+					t.Fatalf("acts = %v, want %v", h.acts(), want)
+				}
+				if !loggedTo(h.log, tc.level, tc.wantLog) {
+					t.Fatalf("records = %+v, want %s %q", h.log.Records(), tc.level, tc.wantLog)
+				}
+			})
+		}
+	}
+}
+
+func TestAStandaloneWithItsBinaryInstalledIsNeverBuilt(t *testing.T) {
+	for _, sv := range Standalones {
+		t.Run(sv.Short, func(t *testing.T) {
+			// Arrange: the service is held with no process, its binary installed.
+			h := newRestarter(t)
+			writeFile(t, filepath.Join(h.services.dir, sv.Label+".plist"), "<plist/>")
+
+			// Act
+			err := h.r.EnsureStandaloneCurrent(context.Background(), sv)
+
+			// Assert
+			if err != nil || slices.ContainsFunc(h.acts(), func(a string) bool { return strings.HasPrefix(a, "ensure-service ") }) {
+				t.Fatalf("EnsureStandaloneCurrent = %v, acts %v; want no ensure-service", err, h.acts())
+			}
+		})
+	}
+}
+
+func TestAStandaloneWhoseInstalledBinaryCannotBeReadIsTheError(t *testing.T) {
+	// Arrange: CacheBin cannot be searched, so the binary's presence cannot be
+	// told.
+	h := newRestarter(t)
+	h.r.CacheBin = filepath.Join(h.r.CacheBin, Tests.Service, "below-a-file")
+
+	// Act
+	err := h.r.EnsureStandaloneCurrent(context.Background(), Tests)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "read the installed "+Tests.Service) || len(h.acts()) != 0 ||
+		!loggedTo(h.log, "error", "the service's installed binary cannot be read") {
+		t.Fatalf("EnsureStandaloneCurrent = %v, acts %v, records %+v; want the error at ERROR and nothing touched", err, h.acts(), h.log.Records())
+	}
+}
+
 func TestRestartStandaloneLoadsAServiceTheManagerDoesNotHold(t *testing.T) {
 	cases := []struct {
 		name      string
-		defineErr error
+		ensureErr error
 		wantActs  func(Standalone) []string
 		wantErr   bool
 	}{
-		{name: "an unloaded one with no definition is defined and started, never kickstarted",
-			wantActs: func(sv Standalone) []string { return []string{"define " + sv.Label, "start " + sv.Label} }},
-		{name: "one whose definition cannot be written is neither started nor kickstarted", defineErr: errors.New("define-service exited 1"),
-			wantActs: func(sv Standalone) []string { return []string{"define " + sv.Label} }, wantErr: true},
+		{name: "an unloaded one with no definition is brought up from its requirements entry, never kickstarted",
+			wantActs: func(sv Standalone) []string { return []string{"ensure-service " + sv.Label} }},
+		{name: "one that cannot be brought up is neither started nor kickstarted", ensureErr: errors.New("ensure-service exited 1"),
+			wantActs: func(sv Standalone) []string { return []string{"ensure-service " + sv.Label} }, wantErr: true},
 	}
 	for _, sv := range Standalones {
 		for _, tc := range cases {
@@ -1610,7 +1767,7 @@ func TestRestartStandaloneLoadsAServiceTheManagerDoesNotHold(t *testing.T) {
 				// Arrange
 				h := newRestarter(t)
 				h.services.loaded[sv.Label] = false
-				h.defineErr = tc.defineErr
+				h.ensureServiceErr = tc.ensureErr
 
 				// Act
 				err := h.r.RestartStandalone(context.Background(), sv)

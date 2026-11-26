@@ -53,8 +53,9 @@ func toolExited(binary string, args []string, code int, out string) error {
 // ScriptRequirements runs bin/requirements.sh in ModuleRoot for what a deploy
 // brings up from its requirements entry: the one renderer and installer
 // install uses, so a deploy and an install can never write different
-// definitions. Restarter.Define is its Define, and the holder ensure's
-// install (holderensure.Ensurer.Install) is its EnsureHolder.
+// definitions. Restarter.Define is its Define, Restarter.EnsureService its
+// EnsureService, and the holder ensure's install (holderensure.Ensurer.Install)
+// is its EnsureHolder.
 //
 // THE ROOTS IT RENDERS ARE THE ROOTS THIS DAEMON ROUTES SESSIONS TO. The
 // script names every Claude config root a session runs under
@@ -92,6 +93,14 @@ func (d ScriptRequirements) Define(ctx context.Context, label string) error {
 // own words.
 func (d ScriptRequirements) EnsureHolder(ctx context.Context, id string) error {
 	return d.run(ctx, "ensure-holder", id)
+}
+
+// EnsureService builds and installs the service label's program when it is
+// not installed, writes its definition, and loads it when the service manager
+// does not hold it (ensure-service), leaving a held one running as it is; a
+// non-zero exit is a failure in the script's own words.
+func (d ScriptRequirements) EnsureService(ctx context.Context, label string) error {
+	return d.run(ctx, "ensure-service", label)
 }
 
 // envBinary states a run's environment ahead of the script it runs.

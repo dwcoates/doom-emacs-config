@@ -472,6 +472,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE SERVICES' LATCH: every spawn waits until the boot's service step
 	// has made the store and the sidecar current (see serviceGate).
 	services := newServiceGate()
+	// THE STANDALONES' LATCH: the persistent-wifi standing watch waits until
+	// the boot's standalone step has ensured the service's socket holder.
+	standalones := newServiceGate()
 	sidecar := &sidecarStep{}
 	supervisor, err := shimclient.NewSupervisor(p.Surfaces,
 		shimclient.WithServicesReady(services.Ready()),
@@ -2166,7 +2169,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "repo_divergence", Run: divergence.Run},
 		{Name: "selection_follow", Run: selectionFollower.Run},
 		{Name: "lock_watchdog", Run: stalls.Run},
-		{Name: "persistent_wifi_standing", Run: wifi.Run},
+		// THE STANDING WATCH DIALS ONLY ONCE THE BOOT'S STANDALONE STEP HAS
+		// RETURNED: that step ensures the socket holder the service's socket is
+		// held by (installing it on a machine that predates it), and a dial made
+		// before it finds no socket and ends the follow for the daemon's life
+		// (2026-11-26). The gate opens on a failed step too, so a holder that
+		// could not be installed still fails loudly at the dial.
+		{Name: "persistent_wifi_standing", Run: afterGate(standalones, wifi.Run)},
 		{Name: "network_watch", Run: networkWatch.Run},
 		{Name: "network_changed", Run: func(ctx context.Context) error {
 			netwatch.Follow(ctx, networkWatch.Changed, fleet.NetworkChanged)
@@ -2322,7 +2331,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StartSession:           fleet.Start,
 			EnsureServices:         services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, sidecar.storeCurrent(restarter.EnsureStoreCurrent))),
 			EnsureSidecar:          sidecar.run,
-			EnsureStandalones:      bootServiceStep(p.Opts.joining != "", restarter.EnsureStandalonesLoaded, restarter.EnsureStandalonesCurrent),
+			EnsureStandalones:      standalones.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureStandalonesLoaded, restarter.EnsureStandalonesCurrent)),
 			Unserved:               fleet.MarkUnserved,
 			BringingUp:             bringingUp,
 			AdoptBound:             adoptBound,

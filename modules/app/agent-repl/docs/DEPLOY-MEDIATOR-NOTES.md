@@ -182,3 +182,26 @@ Its brief names this file, and it is the mediator's to write.
   since 2026-11-26 the review leaves such merges to their adoption
   (`rollout.controller.adoptionHandsMerges`), so one seen again is a defect in
   that predicate, never a reason to re-level the record.
+- A `daemon.wifirpc.client.watch` error "ended before it served a standing; it
+  is not reopened" whose cause is `connect: no such file or directory`, at a
+  boot and followed by `daemon.holder.ensure` installing
+  `socket-holder-persistent-wifi`, means the standing watch dialed before the
+  boot's standalone step had installed the holder that holds the service's
+  socket; since 2026-11-26 the loop waits on that step's gate
+  (`cmd/agent-repld` `standalones` service gate), so one seen again is a
+  holder that could not be installed, whose own error record stands beside it,
+  never a reason to re-level the record.
+- A `daemon.deploy.services` "a service is not loaded and has no definition"
+  record for a service whose stderr log then says its binary does not exist
+  (launchd exit 127 every throttle interval) means a service landed whose
+  first deploy was run by a daemon built before the service existed, so that
+  deploy installed no binary; since 2026-11-26 the boot builds and installs
+  the binary through `requirements.sh ensure-service` before the service is
+  defined and started, so one seen again is a defect in that verb or its
+  caller (`deploy.Restarter.ensureLoaded`).
+- An Emacs `elisp.wire.contract-breach message=<Message> field=<arm>
+  reason=unknown field` right after a landing that added that arm to the proto
+  means the landing taught the daemon the arm and not Emacs: the elisp codec
+  is hand-written (`lisp/wire-verbs.el`, `lisp/wire-host.el`), so a proto arm
+  added to a message Emacs decodes lands with its codec change and tests, and
+  the record is fixed by adding the arm, never by re-leveling.

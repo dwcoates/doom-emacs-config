@@ -476,6 +476,8 @@ quiet state, not the switch.
     chip draws it as every fact unread (the muted glyph the contract
     promises the tooltip explains) with a tooltip sentence naming the arm and
     its detail; a distinct paint is a look-and-feel call left to the owner.
+    Emacs decodes the arm as `:service-unreachable` (`(:detail TEXT)`) and
+    echoes it as the one line "persistent-wifi service unreachable: DETAIL".
     The daemon's boot no longer waits on the service
     (`wifirpc.Client.Start`, in place of a boot read). A connection the
     service accepts but never answers is recorded at ERROR once, at the

@@ -16,6 +16,12 @@ import (
 // ERROR by the bring-up, and each shim then raises its own store fault, which
 // is what puts a dead store on every surface; holding the spawns forever
 // would hide it behind sessions that never start.
+//
+// The same type latches the boot's STANDALONE step
+// (boot.Deps.EnsureStandalones) as well: the persistent-wifi standing watch
+// waits on that gate (afterGate), since the step is what installs the socket
+// holder the service's socket is held by. Whatever waits on a gate learns only
+// that its step has returned; the step's failure is its own to record.
 type serviceGate struct {
 	ready chan struct{}
 	once  sync.Once
@@ -32,6 +38,21 @@ func (g *serviceGate) step(ensure func(context.Context) error) func(context.Cont
 	return func(ctx context.Context) error {
 		defer g.once.Do(func() { close(g.ready) })
 		return ensure(ctx)
+	}
+}
+
+// afterGate defers run until gate has opened: the wrapped run starts once the
+// gate's step has returned, whatever it returned, and a context ended while it
+// waits returns nil without running, as a background loop stopped before it
+// began.
+func afterGate(gate *serviceGate, run func(context.Context) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		select {
+		case <-gate.Ready():
+		case <-ctx.Done():
+			return nil
+		}
+		return run(ctx)
 	}
 }
 
