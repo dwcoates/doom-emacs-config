@@ -452,12 +452,14 @@ func TestEverySuiteDeclaresItsInputs(t *testing.T) {
 	}
 }
 
-// TestTheWifiHelperIsReadByNoSuite pins the Wi-Fi helper app's placement: no
-// suite builds or runs it, so its sources sit in ReadByNoSuite and nowhere
-// else. Unplaced, they failed every run's placement check (2026-11-14).
+// TestTheWifiHelperIsReadByTheShellcheckGateAndItsOwnHarness pins the Wi-Fi
+// helper app's placement: the suites that read its sources declare them, and
+// no suite builds or runs the app. Unplaced, they failed every run's placement
+// check (2026-11-14).
 func TestTheWifiHelperIsReadByTheShellcheckGateAndItsOwnHarness(t *testing.T) {
-	// Assert: shellcheck lints its build.sh and wifi-helper-harness tests its
-	// standing.swift; no suite builds or runs the app.
+	// Assert: shellcheck lints its build.sh, signing-lib-harness checks that
+	// build.sh takes its identity from lib-signing.sh, and wifi-helper-harness
+	// tests its standing.swift; no suite builds or runs the app.
 	if slices.Contains(ReadByNoSuite, "wifi-helper/") {
 		t.Fatalf("ReadByNoSuite = %v, but the shellcheck gate reads wifi-helper/", ReadByNoSuite)
 	}
@@ -467,8 +469,8 @@ func TestTheWifiHelperIsReadByTheShellcheckGateAndItsOwnHarness(t *testing.T) {
 			readers = append(readers, s.Name)
 		}
 	}
-	if !slices.Equal(readers, []string{"wifi-helper-harness", "shellcheck"}) {
-		t.Fatalf("suites reading wifi-helper/ = %v, want wifi-helper-harness and shellcheck", readers)
+	if !slices.Equal(readers, []string{"signing-lib-harness", "wifi-helper-harness", "shellcheck"}) {
+		t.Fatalf("suites reading wifi-helper/ = %v, want signing-lib-harness, wifi-helper-harness and shellcheck", readers)
 	}
 }
 

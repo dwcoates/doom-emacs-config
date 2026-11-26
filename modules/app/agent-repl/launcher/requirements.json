@@ -58,8 +58,20 @@
     },
     {
       "id": "launcher-notification-permission",
-      "kind": "notification_permission",
+      "kind": "app_permission",
+      "permission": "notifications",
       "why": "macOS shows Zettel's banners only once it is allowed to notify",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "~/Applications/Zettel.app/Contents/MacOS/Zettel"
+    },
+    {
+      "id": "launcher-accessibility-permission",
+      "kind": "app_permission",
+      "permission": "accessibility",
+      "why": "Zettel closes each Slack notification after its time on screen (SlackNotificationSeconds), which it reaches only through the Accessibility API",
       "profile": "run",
       "platforms": [
         "darwin"

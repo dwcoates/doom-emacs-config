@@ -955,10 +955,10 @@ test_skills_dirs_are_the_config_roots_skills_dirs() {
 }
 
 # ---------------------------------------------------------------------------
-# notification_permission.
+# app_permission.
 # ---------------------------------------------------------------------------
 
-PERMISSION='{"id": "notify", "kind": "notification_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel"}'
+PERMISSION='{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel", "permission": "notifications"}'
 
 test_an_authorized_notifier_is_ok() {
   new_case; manifest "[$PERMISSION]"
@@ -978,12 +978,44 @@ test_install_asks_for_an_unauthorized_notifiers_permission() {
 
 test_a_notifier_at_a_home_path_is_found() {
   new_case
-  manifest '[{"id": "notify", "kind": "notification_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "~/Applications/Zettel.app/Contents/MacOS/Zettel"}]'
+  manifest '[{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "~/Applications/Zettel.app/Contents/MacOS/Zettel", "permission": "notifications"}]'
   mkdir -p "$CASE/home/Applications/Zettel.app/Contents/MacOS"
   printf '#!/bin/sh\necho "Zettel may notify"\n' >"$CASE/home/Applications/Zettel.app/Contents/MacOS/Zettel"
   chmod +x "$CASE/home/Applications/Zettel.app/Contents/MacOS/Zettel"
   run check
   if [ "$RC" -eq 0 ] && has "ok          notify: Zettel may notify"; then pass "a ~/ command is the user's home"; else fail "home-path notifier" "rc=$RC" "$OUT"; fi
+}
+
+test_an_accessibility_permission_is_checked_and_asked_by_its_own_flags() {
+  new_case
+  manifest '[{"id": "ax", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel", "permission": "accessibility"}]'
+  write_stub zettel 'case "$1" in --check-accessibility) echo "Zettel may not use Accessibility"; exit 1 ;; esac'
+  run install
+  if [ "$RC" -eq 1 ] && ran "zettel --request-accessibility" && has "Zettel may not use Accessibility" && has "Privacy & Security → Accessibility"; then
+    pass "an accessibility permission is checked and asked by its own flags, and names where the user allows it"
+  else fail "accessibility permission" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_the_launcher_is_signed_before_it_asks_for_its_permissions() {
+  local order
+  order="$(jq -r '.requirements[] | select(.id == "local-signing") | .id' "$MODULE/requirements.json")"
+  order="$order $(jq -r '.requirements[] | select(.id == "service-launcher" or .id == "launcher-accessibility-permission") | .id' "$MODULE/launcher/requirements.json" | paste -sd' ' -)"
+  if [ "$order" = "local-signing service-launcher launcher-accessibility-permission" ] \
+    && jq -e '.includes | index("launcher/requirements.json")' "$MODULE/requirements.json" >/dev/null; then
+    pass "the local signing identity is made before the launcher is built, and the launcher before it asks for Accessibility"
+  else fail "launcher order" "$order"; fi
+}
+
+test_an_app_permission_with_no_permission_is_refused() {
+  new_case; manifest '[{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'notify: app_permission needs "permission"'; then pass "an app_permission with no permission is refused"; else fail "permission missing" "rc=$RC" "$OUT"; fi
+}
+
+test_an_app_permission_naming_an_unknown_permission_is_refused() {
+  new_case; manifest '[{"id": "notify", "kind": "app_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel", "permission": "camera"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has "notify: an app_permission permission is notifications or accessibility, not camera"; then pass "an app_permission naming an unknown permission is refused"; else fail "unknown permission" "rc=$RC" "$OUT"; fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1154,8 +1186,8 @@ test_a_signing_identity_with_no_name_is_refused() {
 
 test_the_wifi_helper_is_built_after_its_signing_identity() {
   local order
-  order="$(jq -r '.requirements[] | select(.id == "wifi-helper-signing" or .id == "wifi-helper") | .id' "$MODULE/requirements.json" | paste -sd' ' -)"
-  if [ "$order" = "wifi-helper-signing wifi-helper" ]; then
+  order="$(jq -r '.requirements[] | select(.id == "local-signing" or .id == "wifi-helper") | .id' "$MODULE/requirements.json" | paste -sd' ' -)"
+  if [ "$order" = "local-signing wifi-helper" ]; then
     pass "the Wi-Fi helper's signing identity is made before the helper is built"
   else fail "signing before build" "order: $order"; fi
 }

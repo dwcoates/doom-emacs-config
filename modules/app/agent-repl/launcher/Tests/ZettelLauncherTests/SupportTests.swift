@@ -206,6 +206,8 @@ final class OptionsTests: XCTestCase {
     func testThePermissionModesAreRead() throws {
         XCTAssertEqual(try parseOptions(["--check-notifications"], environment: [:], home: home).mode, .checkNotifications)
         XCTAssertEqual(try parseOptions(["--request-notifications"], environment: [:], home: home).mode, .requestNotifications)
+        XCTAssertEqual(try parseOptions(["--check-accessibility"], environment: [:], home: home).mode, .checkAccessibility)
+        XCTAssertEqual(try parseOptions(["--request-accessibility"], environment: [:], home: home).mode, .requestAccessibility)
         XCTAssertEqual(try parseOptions([], environment: [:], home: home).mode, .run)
     }
 

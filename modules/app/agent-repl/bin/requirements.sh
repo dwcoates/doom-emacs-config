@@ -30,10 +30,11 @@
 #   env                      an environment variable the user sets
 #   group                    the user belongs to a group (`name`), which only an
 #                            administrator grants
-#   notification_permission  macOS lets an app notify: `command` (a `~/` path
-#                            is the user's home) answers
-#                            `--check-notifications` (exit 0 when it may) and
-#                            asks with `--request-notifications`
+#   app_permission           macOS allows an app one `permission`
+#                            (`notifications`, `accessibility`): `command` (a `~/` path is the
+#                            user's home) answers `--check-<permission>` (exit
+#                            0 when allowed) and asks with
+#                            `--request-<permission>`
 #   app_build                a macOS app built from the module (`build.module`, a
 #                            script taking the app's path, which answers its
 #                            sources' hash under `--source-hash`) into the cache
@@ -404,7 +405,9 @@ validate_entries() {
                  | "\($e._file): \($e.id): an emacs install.source.darwin needs \"app\"")))
        elif $e.kind == "env" then need($e; ["name", "doc"])
        elif $e.kind == "group" then need($e; ["name", "platforms"])
-       elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
+       elif $e.kind == "app_permission" then need($e; ["command", "permission", "platforms"]),
+         (select($e.permission != null and ($e.permission | IN("notifications", "accessibility") | not))
+           | "\($e._file): \($e.id): an app_permission permission is notifications or accessibility, not \($e.permission)")
        elif $e.kind == "app_build" then need($e; ["app", "build", "platforms"]),
          (select($e.build != null and $e.build.module == null) | "\($e._file): \($e.id): an app_build build is a path in the module (\"module\")")
        elif $e.kind == "location_permission" then need($e; ["app", "platforms"])
@@ -692,18 +695,28 @@ check_group() {
   fi
 }
 
-# permission_command ENTRY: the notification_permission entry's command, a
-# leading `~/` taken as the user's home.
+# permission_command ENTRY: the app_permission entry's command, a leading
+# `~/` taken as the user's home.
 permission_command() { field "$1" .command | sed "s|^~/|$HOME/|"; }
 
-check_notification_permission() {
-  local e="$1" cmd out
+# permission_fix PERMISSION: what the user does once install has asked macOS
+# for PERMISSION.
+permission_fix() {
+  case "$1" in
+    notifications) printf '%s\n' "install asks macOS (its prompt, the first time); then allow it in System Settings → Notifications" ;;
+    accessibility) printf '%s\n' "install asks macOS, which opens System Settings → Privacy & Security → Accessibility; turn the app on there" ;;
+  esac
+}
+
+check_app_permission() {
+  local e="$1" cmd permission out
   cmd="$(permission_command "$e")"
-  FIX="install asks macOS (its prompt, the first time); then allow it in System Settings → Notifications"
+  permission="$(field "$e" .permission)"
+  FIX="$(permission_fix "$permission")"
   if ! command -v "$cmd" >/dev/null 2>&1; then
     STATUS=missing; DETAIL="$cmd is not installed"; return
   fi
-  if out="$("$cmd" --check-notifications 2>&1)"; then STATUS=ok; else STATUS=missing; fi
+  if out="$("$cmd" "--check-$permission" 2>&1)"; then STATUS=ok; else STATUS=missing; fi
   # The answer's first line is the detail.
   DETAIL="${out%%$'\n'*}"
 }
@@ -1587,14 +1600,15 @@ install_env() { return 1; }
 
 install_group() { return 1; }
 
-install_notification_permission() {
-  local cmd
+install_app_permission() {
+  local cmd permission
   cmd="$(permission_command "$1")"
+  permission="$(field "$1" .permission)"
   command -v "$cmd" >/dev/null 2>&1 || return 1
   # Asking is what makes macOS prompt, once; a refusal is the not-yet-allowed
   # state the re-check reports.
-  "$cmd" --request-notifications >/dev/null 2>&1 \
-    || say "install: macOS has not allowed $cmd to notify; System Settings → Notifications allows it"
+  "$cmd" "--request-$permission" >/dev/null 2>&1 \
+    || say "install: macOS has not allowed $cmd its $permission permission; $(permission_fix "$permission")"
   return 0
 }
 
