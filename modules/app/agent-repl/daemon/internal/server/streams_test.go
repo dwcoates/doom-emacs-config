@@ -202,6 +202,31 @@ func TestWatchDaemonServesEveryClient(t *testing.T) {
 	}
 }
 
+// TestDrainCancelledReachesAWatchDaemonStream pins that a cancelled schedule
+// reaches whoever holds the daemon stream, so every banner comes down.
+func TestDrainCancelledReachesAWatchDaemonStream(t *testing.T) {
+	// Arrange: a client PROVEN subscribed by the schedule it has taken.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialEmacsDaemon(t, h, ctx, emacsDaemonRequest)
+	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 11})
+	if !stream.Receive() {
+		t.Fatalf("receive the schedule that proves the subscription: %v", stream.Err())
+	}
+
+	// Act.
+	h.Server.DrainCancelled(&agentreplv1.DaemonDrainCancelled{})
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("receive the cancellation: %v", stream.Err())
+	}
+	if stream.Msg().GetDrainCancelled() == nil {
+		t.Fatalf("push = %v, want drain_cancelled", stream.Msg())
+	}
+}
+
 // TestShutdownAnnouncedReachesAClientBeforeTheSurfaceCloses pins the ONE
 // ordering the announcement exists for: every caller of ShutdownAnnounced ends
 // the process immediately afterwards, so an announcement that were merely

@@ -135,6 +135,9 @@ func (r *resolver) Settle() {
 	r.qmu.Lock()
 	defer r.qmu.Unlock()
 	for r.reportsBefore(m.batch) {
+		if r.onSettleWaits != nil {
+			r.onSettleWaits()
+		}
 		r.reported.Wait()
 	}
 }

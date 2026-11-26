@@ -59,17 +59,26 @@ func TestAdoptsASurvivingShimRatherThanRespawningIt(t *testing.T) {
 // its bounce_unknown standing.
 func TestTheBootClosesAnAdoptedWorkspacesUndeterminedBounce(t *testing.T) {
 	tests := []struct {
-		name   string
-		lock   sessionlock.State
-		closes bool
+		name string
+		lock sessionlock.State
+		// unreachable makes the survivor's adoption overrun its bound, so a
+		// held lock is left unadopted.
+		unreachable bool
+		closes      bool
 	}{
-		{"an adopted workspace attached healthy", sessionlock.StateHeld, true},
-		{"a client-less workspace has not attached yet", sessionlock.StateFree, false},
+		{"an adopted workspace attached healthy", sessionlock.StateHeld, false, true},
+		{"a client-less workspace has not attached yet", sessionlock.StateFree, false, false},
+		{"a held survivor this boot could not adopt has not attached", sessionlock.StateHeld, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			h := newHarness(t)
+			h := newHarness(t, func(deps *Deps, h *harness) {
+				if tt.unreachable {
+					deps.AdoptBound = 20 * time.Millisecond
+					h.supervisor.hang = true
+				}
+			})
 			ws := h.register(t, t.TempDir(), tt.lock)
 			workspace := ws.ID
 			h.rollout.onReconcile = func() {

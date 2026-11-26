@@ -1108,6 +1108,29 @@ func TestHibernateAnswersTheTypedNoLiveSessionState(t *testing.T) {
 	}
 }
 
+// TestHibernateAnswersTheShimsFailure pins Hibernate's error: a live shim's
+// failed Hibernate call is the sweep's answer, unwrapped, and the session is
+// never recorded as hibernated.
+func TestHibernateAnswersTheShimsFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+	f.fleet.remember(ws, &live{client: f.client})
+	hibernateErr := errors.New("the shim hung up")
+	f.client.hibernateErr = hibernateErr
+
+	// Act.
+	response, err := f.fleet.Hibernate(context.Background(), ws)
+
+	// Assert.
+	if !errors.Is(err, hibernateErr) || response != nil {
+		t.Fatalf("Hibernate = %v, %v; want the shim's failure and no response", response, err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opFleetRollout, Message: "hibernated the workspace session"}); ok {
+		t.Fatalf("records = %+v, want no hibernation recorded for a failed call", f.log.logger.Records())
+	}
+}
+
 // TestKillSessionSkipsTheDirectiveWhenNoSessionWasStarted is the other half of
 // the stand-down ordering above: a shim that never started a session can only
 // answer the directive `no_session`, and the daemon reported that answer as a

@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/workspace"
@@ -39,23 +40,39 @@ func TestOpenLoginAnswersTheConfigDir(t *testing.T) {
 }
 
 // TestOpenLoginWhoseSpawnFailsAnswersSpawnFailed pins the arm a failure that
-// is not a typed refusal reaches the caller as, carrying the failure's text.
+// is not a typed refusal reaches the caller as, its detail carrying the
+// failure's text: the binary that would not spawn, or the vendor guard's
+// refusal naming its site (asRefusal does not recognize *envc.ForbiddenError).
 func TestOpenLoginWhoseSpawnFailsAnswersSpawnFailed(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Login.openErr = errors.New("fork/exec /no/such/claude: no such file or directory")
-
-	// Act.
-	resp, err := h.Client.OpenLogin(context.Background(),
-		connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: ref()}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("OpenLogin: %v", err)
+	tests := []struct {
+		name    string
+		openErr error
+		want    string
+	}{
+		{name: "a vendor binary that will not spawn names its path",
+			openErr: errors.New("fork/exec /no/such/claude: no such file or directory"), want: "/no/such/claude"},
+		{name: "the vendor guard's refusal names the login site",
+			openErr: &envc.ForbiddenError{Site: "login"}, want: "login"},
 	}
-	if resp.Msg.GetError().GetSpawnFailed() == nil ||
-		!strings.Contains(resp.Msg.GetError().String(), "no such file or directory") {
-		t.Fatalf("result = %v, want spawn_failed carrying the spawn's failure", resp.Msg.GetResult())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Login.openErr = tt.openErr
+
+			// Act.
+			resp, err := h.Client.OpenLogin(context.Background(),
+				connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: ref()}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("OpenLogin: %v", err)
+			}
+			spawnFailed := resp.Msg.GetError().GetSpawnFailed()
+			if spawnFailed == nil || !strings.Contains(spawnFailed.GetDetail(), tt.want) {
+				t.Fatalf("result = %v, want spawn_failed whose detail names %q", resp.Msg.GetResult(), tt.want)
+			}
+		})
 	}
 }
 

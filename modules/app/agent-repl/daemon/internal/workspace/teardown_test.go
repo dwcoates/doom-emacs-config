@@ -308,15 +308,20 @@ func TestNukeKillsALiveSessionFirst(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.fleet.live["w1"] = true
+	nukedAtKill := -1
+	f.shim.onKillSession = func() { nukedAtKill = len(f.git.nuked) }
 
 	// Act.
 	if err := f.verbs.Nuke(context.Background(), "w1"); err != nil {
 		t.Fatalf("Nuke: %v", err)
 	}
 
-	// Assert.
+	// Assert: the kill ran before any worktree was removed.
 	if len(f.shim.killedSession) != 1 {
 		t.Fatalf("KillSession calls = %v, want one before the nuke", f.shim.killedSession)
+	}
+	if nukedAtKill != 0 || len(f.git.nuked) != 1 {
+		t.Fatalf("worktrees removed when KillSession was asked = %d (after: %d), want none before the kill and one after", nukedAtKill, len(f.git.nuked))
 	}
 }
 

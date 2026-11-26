@@ -161,6 +161,36 @@ func TestTheCompletionDirectiveIsTheLeadAndTheDaemonsDirective(t *testing.T) {
 	}
 }
 
+// TestAOneShotCarriesTheDaemonsDirectiveNotItsRepositorys pins where the
+// directive is read: the daemon's own prompts directory, never the policy
+// source the preamble comes from, so a repository's own
+// oneshot-completion-directive.md never reaches the prompt.
+func TestAOneShotCarriesTheDaemonsDirectiveNotItsRepositorys(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	v := f.verbs.(*verbs)
+	repository := prompts.Source{Dir: "/repo/.agent-repl/prompts", Kind: prompts.SourceRepository, RepositoryRoot: "/repo"}
+	daemons := v.load
+	v.load = func(dir, name string) (prompts.Prompt, error) {
+		if dir == repository.Dir && name == BriefOneShotCompletionDirective {
+			return prompts.Prompt{Name: name, Body: "file a report in the ledger."}, nil
+		}
+		return daemons(dir, name)
+	}
+
+	// Act.
+	got, err := v.decorateOneShot("USER TEXT", repository)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("decorateOneShot: %v", err)
+	}
+	if strings.Contains(got, "file a report in the ledger.") || !strings.Contains(got, completionDirectiveLead+"DIRECTIVE") {
+		t.Fatalf("decorated prompt = %q, want the daemon's directive alone", got)
+	}
+}
+
 func TestTheCompletionDirectiveRefusesAMissingDirective(t *testing.T) {
 	// Arrange
 	f := newFixture(t)

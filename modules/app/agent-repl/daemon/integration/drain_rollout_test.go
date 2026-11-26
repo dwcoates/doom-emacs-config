@@ -29,108 +29,6 @@ import (
 
 // ---- UpdateShutdownSchedule ----
 
-func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := viewInGroup(t, groupShutdownSchedule)
-	stream := d.WatchDaemonStream()
-	if _, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
-			AtMs: time.Now().Add(time.Hour).UnixMilli(), Reason: drainReasonDeploy(),
-		}},
-	})); err != nil {
-		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
-	}
-	harness.AwaitView(t, d.Ctx(), stream, "drain_scheduled", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetDrainScheduled() != nil
-	})
-
-	// Act
-	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Cancel{Cancel: &agentreplv1.UpdateShutdownScheduleCancel{}},
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("UpdateShutdownSchedule{cancel} = (%v, %v), want a success", resp, err)
-	}
-	harness.AwaitView(t, d.Ctx(), stream, "drain_cancelled", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetDrainCancelled() != nil
-	})
-}
-
-func TestUpdateShutdownScheduleWithABlankOperatorNoteIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := viewInGroup(t, groupShutdownSchedule)
-
-	// Act
-	_, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
-			AtMs:   time.Now().Add(time.Hour).UnixMilli(),
-			Reason: &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Operator{Operator: &agentreplv1.DrainReasonOperator{Note: "   "}}},
-		}},
-	}))
-
-	// Assert
-	if err == nil {
-		t.Fatal("UpdateShutdownSchedule{schedule} with a blank operator note = success, want a refusal")
-	}
-	if connectCode(err) != connect.CodeInvalidArgument || !containsField(err, "note") {
-		t.Fatalf("UpdateShutdownSchedule refusal = %v, want InvalidArgument naming the blank note", err)
-	}
-}
-
-func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	stream := d.WatchDaemonStream()
-
-	// Act
-	before := time.Now()
-	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{Reason: drainReasonOperator("operator maintenance")}},
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("UpdateShutdownSchedule{now} = (%v, %v), want a success", resp, err)
-	}
-	announced := harness.AwaitView(t, d.Ctx(), stream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetShutdownAnnounced() != nil
-	}).GetShutdownAnnounced()
-	after := time.Now()
-	if announced.GetCause().GetImmediate() == nil {
-		t.Fatalf("shutdown_announced.cause = %v, want immediate", announced.GetCause())
-	}
-	if got := announced.GetCause().GetImmediate().GetReason().GetOperator().GetNote(); got != "operator maintenance" {
-		t.Fatalf("shutdown_announced.cause.immediate.reason.operator.note = %q, want the reason echoed verbatim", got)
-	}
-	if announced.Address != nil {
-		t.Fatalf("shutdown_announced.address = %q, want unset (a plain bounce, no successor)", announced.GetAddress())
-	}
-	// Enrichment (critique 15): minted_at_ms is this announcement's own mint
-	// instant (internal/drain/controller.go ShutdownNow: deps.Clock.Now()), so
-	// it falls inside the wall-clock window the rpc call bracketed.
-	// The comparison is in MILLISECONDS on both sides: minted_at_ms is
-	// truncated to the millisecond, and comparing it against a wall-clock
-	// instant carrying sub-millisecond precision fails whenever the bracket's
-	// own remainder happens to be non-zero.
-	mintedAt := time.UnixMilli(announced.GetMintedAtMs())
-	if mintedAt.UnixMilli() < before.UnixMilli() || mintedAt.UnixMilli() > after.UnixMilli() {
-		t.Fatalf("shutdown_announced.minted_at_ms = %d, want between %d and %d", announced.GetMintedAtMs(), before.UnixMilli(), after.UnixMilli())
-	}
-	// An immediate operator shutdown states no bounded outage: unlike the
-	// self-merge rollout's handover.go (which states rollout.DefaultExpectedOutage),
-	// internal/drain/controller.go's ShutdownNow never sets ExpectedOutageMs.
-	if got := announced.GetExpectedOutageMs(); got != 0 {
-		t.Fatalf("shutdown_announced.expected_outage_ms for an immediate shutdown = %d, want 0 (the drain controller states no outage)", got)
-	}
-	// An immediate shutdown with a valid reason logs only at INFO
-	// (internal/drain/controller.go opNow): no WARN/ERROR is reached.
-}
-
 // TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate is the
 // process-tree half of the host's stop, and the defect it pins was MEASURED:
 // over one 24-scenario Emacs e2e run the reaper found 17 leaked `agent-repld`
@@ -1305,41 +1203,6 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	}
 }
 
-// TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo is
-// critique 14's second arm: AdoptWebWorkspace on a plain boot — no handover
-// ever announced — is refused with no_transfer_announced, and
-// internal/server/adopt.go marks this refusal Info (the ORDINARY case on
-// every non-handover page boot), never WARN.
-func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *testing.T) {
-	t.Parallel()
-	// Arrange: an ordinary opened workspace; no handover was ever announced on
-	// this daemon.
-	f := newCanonical(t)
-
-	// Act
-	resp, err := f.d.Client().AdoptWebWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
-
-	// Assert: the typed refusal.
-	if err != nil {
-		t.Fatalf("AdoptWebWorkspace on a plain boot = error %v, want a typed no_transfer_announced answer", err)
-	}
-	if resp.Msg.GetError().GetNoTransferAnnounced() == nil {
-		t.Fatalf("AdoptWebWorkspace on a plain boot = %v, want error.no_transfer_announced", resp.Msg)
-	}
-
-	// Assert: logged at INFO, naming the arm, never WARN. AdoptWebWorkspace is
-	// a PER-WORKSPACE rpc, so its refusal record goes to that workspace's own
-	// sink — a record about one workspace in the global run log is the
-	// invariant violation the logging contract names.
-	rec := f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "AdoptWebWorkspace")
-	if strings.ToLower(rec.Level) != "info" {
-		t.Fatalf("AdoptWebWorkspace's no_transfer_announced refusal logged at %q, want info", rec.Level)
-	}
-	if got := rec.Context["arm"]; got != "no_transfer_announced" {
-		t.Fatalf("AdoptWebWorkspace refusal record's arm = %v, want no_transfer_announced", got)
-	}
-}
-
 // ---- Drain schedule durability ----
 
 // TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears is
@@ -1398,27 +1261,6 @@ func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T
 }
 
 // ---- Asset origin ----
-
-func TestAssetsAreServedWithoutNoStore(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-
-	// Act
-	resp, err := d.HTTP().Get("http://" + d.Addr + "/assets/app.js")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("GET /assets/app.js = error %v, want the served asset", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /assets/app.js = %d, want 200", resp.StatusCode)
-	}
-	if got := resp.Header.Get("Cache-Control"); got == "no-store" {
-		t.Fatalf("GET /assets/app.js Cache-Control = %q, want the entry point's no-store NOT applied to a hashed asset", got)
-	}
-}
 
 // ---- drain/rollout helpers (prefixed drain* so they cannot collide) ----
 

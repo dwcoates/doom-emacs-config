@@ -13,7 +13,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
 	"agent-repld/internal/desktopnotify"
@@ -63,44 +62,6 @@ func bannerCarrying(argvs [][]string, words ...string) bool {
 	return false
 }
 
-// TestQuestionAskedRaisesABannerAndSetsAttention pins that a question batch
-// raises the workspace's desktop banner — the question's line under the
-// workspace's name — and the roster's attention marker.
-func TestQuestionAskedRaisesABannerAndSetsAttention(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newInGroup(t, groupDesktopBanner)
-	f.submit("go", "k-notify-question", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	roster := f.d.WatchRoster()
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
-			Id: &conversationv1.AgentQuestionId{Value: "q-notify"},
-			Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
-				Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
-					Question: &conversationv1.AgentQuestionText{Text: "Which auth method?"},
-					Header:   "Auth method",
-					Choices: &conversationv1.AgentQuestionAsked_SingleSelect{SingleSelect: &conversationv1.AgentQuestionSingleSelect{
-						Options: []*conversationv1.AgentQuestionOption{{Label: &conversationv1.AgentQuestionOptionLabel{Label: "OAuth"}}},
-					}},
-				}}},
-				StartedAt: startedAt(1),
-			}},
-		}},
-	}))
-
-	// Assert
-	argvs := awaitBannerSettled(t, f, "the question banner")
-	if !bannerCarrying(argvs, "Auth method") {
-		t.Fatalf("banners %q, want one carrying the question's line", argvs)
-	}
-	awaitRoster(t, f.d, roster, "the attention marker set by the question", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetAttention() != nil
-	})
-}
-
 // TestACompletedTurnRaisesTheCompletedBanner pins the turn-end banner: a turn
 // that concluded raises "✅ <name>" over the summary the
 // daemon's headless call wrote (the fake vendor answers a question that is
@@ -145,52 +106,6 @@ func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
 	})
 	if got := f.d.PostedBannersFor(f.ws.GetId()); len(got) != 0 {
 		t.Fatalf("a reported-focused Emacs got %d banners, want none", len(got))
-	}
-}
-
-// reportFocus reports Emacs's focus and answers the report's success.
-func reportFocus(t *testing.T, d *harness.Daemon, focus *agentreplv1.EditorFocus) *agentreplv1.ReportEditorFocusSuccess {
-	t.Helper()
-	resp, err := d.Client().ReportEditorFocus(context.Background(),
-		connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{Focus: focus}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ReportEditorFocus = (%v, %v), want success", resp, err)
-	}
-	return resp.Msg.GetSuccess()
-}
-
-// TestAFocusGainClaimsTheHeldBannerInTheSameReport pins the claim on macOS: a
-// banner handed to the platform while Emacs was away names its workspace in
-// the answer to the report that brings Emacs forward, once, and the platform
-// is asked nothing on the way.
-func TestAFocusGainClaimsTheHeldBannerInTheSameReport(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("only a macOS banner is handed to the platform and held past its program")
-	}
-	t.Parallel()
-	// Arrange
-	f := newInGroup(t, groupDesktopBanner)
-	f.d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
-	f.submit("go", "k-claimed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	pushConcludedTurn(f.shim, mainAgent, "answer-1")
-	awaitBannerSettled(t, f, "the handed turn banner")
-	runs := len(f.d.PostedBannersFor(f.ws.GetId()))
-
-	// Act
-	first := reportFocus(t, f.d, harness.FocusedEditor())
-	reportFocus(t, f.d, harness.UnfocusedEditor())
-	second := reportFocus(t, f.d, harness.FocusedEditor())
-
-	// Assert
-	got := first.GetBanner().GetWorkspace()
-	if got.GetId() != f.ws.GetId() || got.GetDir() != f.ws.GetDir() {
-		t.Fatalf("first gain = %v, want the banner arm naming %v", first, f.ws)
-	}
-	if second.GetNothingHeld() == nil {
-		t.Fatalf("second gain = %v, want nothing_held: the first consumed the banner", second)
-	}
-	if after := f.d.PostedBannersFor(f.ws.GetId()); len(after) != runs {
-		t.Fatalf("banners %v posted after the gains, want none: the claim asks the platform nothing", after[runs:])
 	}
 }
 

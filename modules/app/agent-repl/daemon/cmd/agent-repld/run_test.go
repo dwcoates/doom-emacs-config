@@ -814,6 +814,96 @@ func TestPprofIsOffByDefault(t *testing.T) {
 	}
 }
 
+// pprofBoot is what one boot with the profiling surface on a unix socket
+// showed: the GET /debug/pprof/ the graph hook made over the socket while the
+// spine ran, and the spine's own answer.
+type pprofBoot struct {
+	socket string
+	status int
+	getErr error
+	runErr error
+	// warnings are the records of the run log's warnings file.
+	warnings []dlog.Record
+}
+
+// bootWithPprofSocket runs the spine with --pprof naming a unix socket under
+// the state root. Its graph hook, which runs after the surface opened and
+// before run returns, GETs /debug/pprof/ over the socket.
+func bootWithPprofSocket(t *testing.T) pprofBoot {
+	t.Helper()
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
+	root := shortRoot(t)
+	out := pprofBoot{socket: filepath.Join(root, "p.sock")}
+	th := newTestHooks()
+	th.Graph = func(ctx context.Context, _ process) (*graph, error) {
+		client := &http.Client{Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var dialer net.Dialer
+				return dialer.DialContext(ctx, "unix", out.socket)
+			},
+		}}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/debug/pprof/", nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		resp, err := client.Do(req)
+		out.getErr = err
+		if err == nil {
+			out.status = resp.StatusCode
+			resp.Body.Close()
+		}
+		client.CloseIdleConnections()
+		return nil, errServed
+	}
+	opts := options{stateDir: root, holder: testHolder(t), pprof: out.socket}
+	out.runErr = run(context.Background(), opts, th.hooks)
+	// A WARN GOES TO THE RUN LOG'S WARNINGS FILE alone (dlog's runLog).
+	warnings := logging.WarningsPath(filepath.Join(root, "logs", "daemon.run.log"))
+	raw, err := os.ReadFile(warnings)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", warnings, err)
+	}
+	out.warnings = parseRunLog(t, raw)
+	return out
+}
+
+// TestPprofServesOverAUnixSocketWhileTheDaemonRuns pins the unix-socket
+// --pprof shape (pprofsurface's isSocketPath): the surface run opens serves
+// /debug/pprof/ over the socket while the spine runs, and says so at boot.
+func TestPprofServesOverAUnixSocketWhileTheDaemonRuns(t *testing.T) {
+	// Arrange, Act.
+	boot := bootWithPprofSocket(t)
+
+	// Assert.
+	if !errors.Is(boot.runErr, errServed) {
+		t.Fatalf("run error = %v, want the spine to have reached the graph with pprof on", boot.runErr)
+	}
+	if boot.getErr != nil || boot.status != http.StatusOK {
+		t.Fatalf("GET /debug/pprof/ over the socket = %d, %v; want 200", boot.status, boot.getErr)
+	}
+	record, ok := dlog.FindRecord(boot.warnings, dlog.RecordQuery{Operation: "daemon.pprof.enabled", Level: dlog.LevelWarn})
+	if !ok || record.Context["network"] != "unix" || record.Context["address"] != boot.socket {
+		t.Fatalf("daemon.pprof.enabled = %+v (found %v), want a WARN naming the unix socket %s", record, ok, boot.socket)
+	}
+}
+
+// TestThePprofSurfaceClosesWhenTheDaemonEnds pins run's deferred Close of an
+// open profiling surface: once run returns, its socket is gone.
+func TestThePprofSurfaceClosesWhenTheDaemonEnds(t *testing.T) {
+	// Arrange, Act.
+	boot := bootWithPprofSocket(t)
+
+	// Assert.
+	if boot.getErr != nil {
+		t.Fatalf("GET /debug/pprof/ while running = %v, want the surface open before run returned", boot.getErr)
+	}
+	if _, err := os.Stat(boot.socket); !os.IsNotExist(err) {
+		t.Fatalf("stat %s after run returned = %v, want the socket removed by the surface's Close", boot.socket, err)
+	}
+}
+
 // TestAnIncumbentAdvertisesItsMetricsTarget pins that the metrics target is
 // written beside daemon.addr and names a listener that answers /metrics.
 func TestAnIncumbentAdvertisesItsMetricsTarget(t *testing.T) {

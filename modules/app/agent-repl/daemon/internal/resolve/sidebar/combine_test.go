@@ -386,6 +386,15 @@ func TestSettleWaitsForTheReportOfEveryBatchBeforeIt(t *testing.T) {
 	}))
 	fx.r.Posting().SetOpening(wsB, true)
 	<-entered
+	// THE RELEASE WAITS FOR SETTLE TO WAIT: released any sooner, the report
+	// could end before Settle looks, and Settle would never wait at all.
+	waiting := make(chan struct{}, 1)
+	sidebar.SetOnSettleWaits(fx.r, func() {
+		select {
+		case waiting <- struct{}{}:
+		default:
+		}
+	})
 
 	// Act
 	settled := make(chan struct{})
@@ -393,6 +402,7 @@ func TestSettleWaitsForTheReportOfEveryBatchBeforeIt(t *testing.T) {
 		defer close(settled)
 		fx.r.Settle()
 	}()
+	<-waiting
 	close(release)
 	<-settled
 

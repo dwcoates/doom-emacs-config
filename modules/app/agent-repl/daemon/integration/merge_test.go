@@ -313,27 +313,6 @@ func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testi
 	}
 }
 
-// TestReleasingTheHoldRunsTheSkippedDeployHook covers a release: the deploy
-// hook the hold skipped runs once, and rolls out what landed during the hold.
-func TestReleasingTheHoldRunsTheSkippedDeployHook(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d2, repoRef := heldLanding(t)
-
-	// Act
-	resp := holdDeploys(t, d2, repoRef, true)
-
-	// Assert
-	released := resp.GetSuccess().GetReleased()
-	if released.GetScriptRan().GetPath() != harness.DeployLandingScript || released.GetSkippedDeploys() != 1 {
-		t.Fatalf("release = %v, want the deploy script run once for the one skipped deploy", resp)
-	}
-	d2.AwaitLandingDeployed()
-	if got := len(d2.Deploy.Invocations()); got == 0 {
-		t.Fatal("the release built nothing, want what landed during the hold deployed")
-	}
-}
-
 // heldLanding holds the repository's deploys, stops the daemon that took the
 // hold, and lands a deploy on main under its successor, answering the
 // successor and the repository's ref.
@@ -377,76 +356,6 @@ func heldLanding(t *testing.T) (*harness.Daemon, *workspacev1.RepositoryRef) {
 // tests below are the two ways of being "half right": agent-repl's local merge
 // landing in a parent workspace's worktree, and a deploy of hooks alone.
 // ---------------------------------------------------------------------------
-
-func TestALocalMergeIntoAParentWorktreeRunsNoDeployHook(t *testing.T) {
-	t.Parallel()
-	// Arrange: agent-repl's deploy config, a top-level PARENT workspace, and
-	// a CHILD nested under it whose deploy lands into the PARENT's worktree:
-	// the local merge runs a real `git merge` there, but the landing is not
-	// on main, so the deploy hook (runs_for: main) does not run.
-	repo := harness.NewRepo(t)
-	script := repo.TestAllScript()
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-	repo.DeploysAsAgentRepl()
-	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.MergeChainTimeout})
-	repoRef := mergeRepositoryRef(t, d, repo)
-	parent := mergeCreateChild(t, d, repoRef, "sibling7a-parent", "the parent work", nil)
-
-	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
-		Repository:    repoRef,
-		Requester:     harness.User(),
-		ContextOrigin: harness.Fresh(),
-		// The child carries an initial prompt: the arrangement below waits for
-		// its StartTurn and terminates it, and a promptless create opens no
-		// turn to wait for at all.
-		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Relationship:  harness.Child(parent.ws),
-			InitialPrompt: said("the child work"),
-			Name:          strPtr("sibling7a-child"),
-		}},
-	}))
-	if err != nil || childResp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(child) = (%v, %v), want a success", childResp, err)
-	}
-	child := childResp.Msg.GetSuccess().GetWorkspace()
-	childShim := d.Shim(child)
-	childShim.ExpectStartSession()
-	childShim.ExpectStartTurn()
-	pushConcludedTurn(childShim, mainAgent, "sibling7a-child-initial")
-	// A commit that WOULD classify into this daemon's own subsystem, so
-	// nothing but the hook's scope is what keeps the deploy off.
-	writeCommit(t, repo, child.GetDir(), "modules/app/agent-repl/daemon/cmd/agent-repld/main.go", "landed\n")
-
-	// Act
-	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(child))); err != nil {
-		t.Fatalf("FinishWorkspace(child) = error %v, want the merge enqueued", err)
-	}
-	roster := d.WatchRoster()
-	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, child.GetId())
-		return row != nil && row.GetMerged() != nil
-	})
-
-	// Assert: the local merge DID run -- a real `git merge` targeted the
-	// parent's worktree, never the main checkout.
-	targetedParent := false
-	for _, c := range d.Git.Calls() {
-		if createArgsContain(c.Args, "merge") && createGitDir(c.Args) == parent.ws.GetDir() {
-			targetedParent = true
-		}
-	}
-	if !targetedParent {
-		t.Fatalf("git calls = %v, want a merge run inside the parent's worktree %q", d.Git.Calls(), parent.ws.GetDir())
-	}
-
-	// Assert: the rollout never fires -- the landing was not on main.
-	if got := len(d.Deploy.Invocations()); got != 0 {
-		t.Fatalf("deploy builds = %d, want 0: a landing in a parent's worktree runs no main-only deploy hook", got)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // The non-Emacs-repo method: only pre/post prompts, never the Emacs-only

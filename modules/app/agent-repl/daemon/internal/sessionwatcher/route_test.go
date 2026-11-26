@@ -150,6 +150,9 @@ func TestRouteQuestion(t *testing.T) {
 	if note.Header != "Pick a branch" {
 		t.Fatalf("notification header = %q, want the first question's chip label", note.Header)
 	}
+	if note.Text != "Pick a branch" {
+		t.Fatalf("notification text = %q, want the banner to carry the chip label", note.Text)
+	}
 }
 
 // TestRouteQuestionFallsBackToTheQuestionText covers a batch whose first
@@ -3320,6 +3323,28 @@ func TestTheTurnAFoldedPromptJoinedEndsWithNothingBehindIt(t *testing.T) {
 	// Assert.
 	if turn := h.w.TurnInFlight(); turn != nil {
 		t.Fatalf("turn in flight = %v, want none once the joined turn ends", turn)
+	}
+}
+
+// TestTheTurnAFoldedPromptJoinedEndsTheFootersTurnAndOpensNoOther pins what
+// the footer is handed when the folded-into turn ends: that turn's terminal,
+// and no turn opened behind it, since the fold ran none of its own (the strip
+// then reads idle·done).
+func TestTheTurnAFoldedPromptJoinedEndsTheFootersTurnAndOpensNoOther(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+	h.route(h.main, entryFoldedPrompt("turn-2", "turn-1", "main-1"))
+
+	// Act.
+	got := endTurn1(h)
+
+	// Assert.
+	terminal := requireEvent(t, got, "footer.OnAgentTerminal")
+	if terminal.turn == nil || *terminal.turn != "turn-1" {
+		t.Fatalf("footer terminal turn = %v, want turn-1", terminal.turn)
+	}
+	if _, opened := find(got, "footer.OnTurnOpened"); opened {
+		t.Fatalf("routed to %v, want no turn opened on the footer behind a fold", names(got))
 	}
 }
 

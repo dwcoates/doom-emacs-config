@@ -5,7 +5,6 @@ package integration
 import (
 	"agentrepl/protohelpers/oneofarm"
 	"agentrepl/protohelpers/rosterwalk"
-	"slices"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -14,7 +13,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
-	"agent-repld/internal/wsm"
 
 	"connectrpc.com/connect"
 )
@@ -172,76 +170,6 @@ func TestASubsectionMovedBeforeAWorkspaceTakesItsTabsThere(t *testing.T) {
 		entries := r.GetWorkspaces().GetRepository().GetSections()[0].GetEntries()
 		return len(entries) == 4 && entries[1].GetSubsection().GetNamed().GetKey().GetSubsectionId() == created.GetId() &&
 			sameOrder(tabBarIDs(r), []string{order[0], order[3], order[1], order[2]})
-	})
-}
-
-// unsectionedMarks answers R's first repository's rows in no subsection, in
-// drawn order, each by its workspace id and whether it draws the one-shot mark.
-func unsectionedMarks(r *frontendv1.RosterPush) (ids []string, oneShot map[string]bool) {
-	oneShot = map[string]bool{}
-	sections := r.GetWorkspaces().GetRepository().GetSections()
-	if len(sections) == 0 {
-		return nil, oneShot
-	}
-	for _, open := range rosterwalk.UnsectionedRows(sections[0]) {
-		id := open.GetRow().GetWorkspace().GetWorkspace().GetId()
-		ids = append(ids, id)
-		oneShot[id] = open.GetRow().GetOneShot() != nil
-	}
-	return ids, oneShot
-}
-
-func TestAOneShotIsDrawnWhereItIsPlacedAndKeepsItsMark(t *testing.T) {
-	t.Parallel()
-	// Arrange: a one-shot the user dispatched beside a registered workspace,
-	// which the daemon files into its repository's One-shots subsection
-	// (owner request, 2026-11-24).
-	d := viewInGroup(t, groupTabOrder)
-	repo := harness.NewRepo(t)
-	roster := d.WatchRoster()
-	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
-		Repository:    createRepositoryRef(t, d, repo),
-		Requester:     harness.User(),
-		ContextOrigin: harness.Fresh(),
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Relationship: harness.Peer(),
-			Prompt:       said("ship the fix"),
-		}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
-	}
-	oneShot := resp.Msg.GetSuccess().GetWorkspace()
-	awaitRoster(t, d, roster, "the marked one-shot alone in the One-shots subsection, a in none", func(r *frontendv1.RosterPush) bool {
-		ids, _ := unsectionedMarks(r)
-		sections := r.GetWorkspaces().GetRepository().GetSections()
-		if len(sections) == 0 {
-			return false
-		}
-		subs := rosterwalk.Subsections(sections[0])
-		if len(subs) != 1 || subs[0].GetHeader().GetLabel().GetText() != wsm.OneShotsSubsectionName {
-			return false
-		}
-		rows := subs[0].GetOpenRows().GetRows()
-		return len(rows) == 1 && rows[0].GetRow().GetWorkspace().GetWorkspace().GetId() == oneShot.GetId() &&
-			rows[0].GetRow().GetOneShot() != nil && slices.Contains(ids, a.GetId()) && !slices.Contains(ids, oneShot.GetId())
-	})
-
-	// Act: the one-shot is dragged out, to the end of the unsectioned rows.
-	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
-		Workspace: oneShot,
-		Into:      &agentreplv1.ArrangePlaceWorkspace_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}},
-		At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
-	}}})
-
-	// Assert: the one-shot stands where it was placed, still marked, and the
-	// emptied One-shots subsection is gone.
-	awaitRoster(t, d, roster, "the placed one-shot last, still marked, and no subsection", func(r *frontendv1.RosterPush) bool {
-		ids, marks := unsectionedMarks(r)
-		return marks[oneShot.GetId()] && slices.Contains(ids, a.GetId()) && ids[len(ids)-1] == oneShot.GetId() &&
-			len(rosterwalk.Subsections(r.GetWorkspaces().GetRepository().GetSections()[0])) == 0
 	})
 }
 

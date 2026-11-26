@@ -172,9 +172,10 @@ func TestOpenServesTheProfilingIndex(t *testing.T) {
 func TestOpenServesOnAUnixSocket(t *testing.T) {
 	// Arrange.
 	socket := socketPath(t)
+	log := dlog.NewTestLogger()
 
 	// Act.
-	s, err := Open(context.Background(), socket, dlog.NewTestLogger())
+	s, err := Open(context.Background(), socket, log)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", socket, err)
 	}
@@ -183,6 +184,10 @@ func TestOpenServesOnAUnixSocket(t *testing.T) {
 	// Assert.
 	if s.Network() != "unix" {
 		t.Fatalf("Network = %q, want unix", s.Network())
+	}
+	rec, ok := findRecord(log.Records(), "daemon.pprof.enabled")
+	if !ok || rec.Context["network"] != "unix" || rec.Context["address"] != s.Address() || s.Address() == "" {
+		t.Fatalf("daemon.pprof.enabled = %+v (%v), want network unix and the socket's address %q", rec, ok, s.Address())
 	}
 	client := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {

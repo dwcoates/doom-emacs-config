@@ -584,6 +584,36 @@ func TestAQuestionInFlightGoesFromWaitingToANode(t *testing.T) {
 	}
 }
 
+// TestAFoldConcernsNoThread pins PromptFolded: one turn is one thread
+// question, so a fold of a question's turn changes nothing a thread shows,
+// records nothing and starts no job.
+func TestAFoldConcernsNoThread(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.zettel.seed("", 0)
+	f.zettel.seed("n1", 0)
+	f.open()
+	f.turns.ask("turn-9", "and then?", "n1", "")
+	if err := f.svc.Asked(context.Background(), thr, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.deferJobs()
+	before := proto.Clone(f.view())
+	outlines, records := len(f.outlines), len(f.log.Records())
+
+	// Act
+	f.svc.PromptFolded(thr, "turn-9", "turn-10")
+
+	// Assert
+	if after := f.view(); !proto.Equal(after, before) {
+		t.Fatalf("view = %v, want it unchanged from %v", after, before)
+	}
+	if len(f.outlines) != outlines || len(f.jobs) != 0 || len(f.log.Records()) != records {
+		t.Fatalf("outlines %d -> %d, jobs %d, records %d -> %d; want nothing published, started or recorded",
+			outlines, len(f.outlines), len(f.jobs), records, len(f.log.Records()))
+	}
+}
+
 func TestAnAnswerRecordedAfterItsTurnClosedIsShownBelowItsParent(t *testing.T) {
 	// Arrange: a highlight's question asked of n1, whose shown child is n2.
 	f := newFixture(t)

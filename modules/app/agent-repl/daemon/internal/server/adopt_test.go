@@ -23,19 +23,25 @@ import (
 // AdoptWebWorkspace and gets this answer. It is an answer, not a fault.
 func TestAdoptWebAnswersNoTransferAnnouncedOnAnOrdinaryBoot(t *testing.T) {
 	// Arrange.
-	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: dlog.NewTestLogger(), workspace: log} })
 	h.Rollout.adoptWebErr = rollout.ErrNoTransferAnnounced
 
 	// Act.
 	resp, err := h.Client.AdoptWebWorkspace(context.Background(),
 		connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref()}))
 
-	// Assert.
+	// Assert: answered as its arm, and recorded at INFO on the workspace's
+	// own sink, naming the arm.
 	if err != nil {
 		t.Fatalf("AdoptWebWorkspace: %v", err)
 	}
 	if resp.Msg.GetError().GetNoTransferAnnounced() == nil {
 		t.Fatalf("result = %v, want no_transfer_announced", resp.Msg.GetResult())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "AdoptWebWorkspace",
+		Match: func(r dlog.Record) bool { return r.Context["arm"] == "no_transfer_announced" }}); !ok {
+		t.Fatalf("workspace records = %+v, want the no_transfer_announced refusal at INFO", log.Records())
 	}
 }
 

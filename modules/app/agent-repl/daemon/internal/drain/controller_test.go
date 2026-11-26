@@ -164,6 +164,12 @@ func TestShutdownNowAnnouncesTheImmediateCauseAndExits(t *testing.T) {
 	if pushed[0].GetCause().GetImmediate().GetReason().GetOperator().GetNote() != "the operator said so" {
 		t.Fatalf("cause = %v, want the immediate arm carrying the operator's note", pushed[0].GetCause())
 	}
+	if want := h.clock.Now().UnixMilli(); pushed[0].GetMintedAtMs() != want {
+		t.Fatalf("minted_at_ms = %d, want the announcement's own instant %d", pushed[0].GetMintedAtMs(), want)
+	}
+	if got := pushed[0].GetExpectedOutageMs(); got != 0 {
+		t.Fatalf("expected_outage_ms = %d on an immediate shutdown, want 0: it states no outage", got)
+	}
 	select {
 	case <-h.exits:
 	default:

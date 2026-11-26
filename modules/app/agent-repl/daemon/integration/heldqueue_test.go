@@ -6,13 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
-
-	"connectrpc.com/connect"
 )
 
 // TestTheOwnersWorkedExampleOfTheHeldQueue is the owner's worked example of
@@ -92,133 +88,5 @@ func TestTheOwnersWorkedExampleOfTheHeldQueue(t *testing.T) {
 	}
 	if kills := f.shim.Count(harness.RPCKillTurn); kills != 0 {
 		t.Fatalf("KillTurn calls = %d, want nothing interrupted", kills)
-	}
-}
-
-// TestSendNowOnAPromptHeldBehindAnAgentStartedTurnDeliversIt is the worked
-// example of 2026-11-10 (workspace torch-human-perf): the agent starts a turn
-// on its own, the user's prompt is held behind it, and the user presses Send
-// now. The turn is never joined, so the release interrupts it, and its real
-// end delivers the prompt, once, with no refusal answered.
-func TestSendNowOnAPromptHeldBehindAnAgentStartedTurnDeliversIt(t *testing.T) {
-	t.Parallel()
-
-	// Arrange: the vendor starts a turn; a prompt is held behind it.
-	f := newCanonical(t)
-	// A turn id is unique across the daemon (the turns table's key), so the
-	// vendor's is the workspace's own, as a vendor's UUID is.
-	vendorTurn := "turn-vendor-started-" + f.ws.GetId()
-	holds := f.d.WatchHolds(f.ws)
-	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
-		Id:     &conversationv1.TurnId{Value: vendorTurn},
-		Agent:  &conversationv1.AgentId{Value: mainAgent},
-		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
-	})
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO record of the adopted turn", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.turn_adopted" && r.Level == "info" && r.Context["turn"] == vendorTurn
-	})
-	held := f.submit("the held prompt", "k-send-now", origin).GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the prompt held for the agent-started turn", func(tray *frontendv1.FeedHeld) bool {
-		return promptHeldEntry(tray, held).GetHoldForTurnEnd() != nil
-	})
-
-	// Act: Send now.
-	resp, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
-		Workspace: f.ws,
-		Turn:      held,
-		Action:    &agentreplv1.UpdateHeldPromptRequest_Release{Release: &agentreplv1.UpdateHeldPromptRelease{}},
-	}))
-
-	// Assert: accepted, the agent's turn interrupted, the prompt delivered
-	// once at its end, and no refusal recorded.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("UpdateHeldPrompt{release} = (%v, %v), want success", resp, err)
-	}
-	if kill := f.shim.ExpectKillTurn(); kill.GetTurn().GetValue() != vendorTurn {
-		t.Fatalf("KillTurn = %v, want the agent-started turn interrupted", kill)
-	}
-	if start := f.shim.ExpectStartTurn(); start.GetTurn().GetValue() != held.GetValue() || start.GetJoinRunningTurn() {
-		t.Fatalf("StartTurn = %v, want the released prompt run as its own turn", start)
-	}
-	awaitView(t, f, holds, "the delivered prompt off the tray", func(tray *frontendv1.FeedHeld) bool {
-		return promptHeldEntry(tray, held) == nil
-	})
-	if n := f.shim.Count(harness.RPCStartTurn); n != 1 {
-		t.Fatalf("StartTurn count = %d, want the prompt delivered exactly once", n)
-	}
-	for _, r := range f.d.WorkspaceLog(f.repo.Dir, "daemon") {
-		if r.Operation == "daemon.promptqueue.release" && strings.Contains(r.Message, "refused") {
-			t.Fatalf("release record %q, want no refusal", r.Message)
-		}
-	}
-}
-
-// joinedTurn opens a running turn and sends a second prompt to join it,
-// answering both turn ids.
-func joinedTurn(t *testing.T, f *fixture) (running, joining string) {
-	t.Helper()
-	running = f.submit("port the footer", "k-running", origin).GetSuccess().GetTurn().GetTurn().GetValue()
-	f.shim.ExpectStartTurn()
-	joining = f.submit("[after-tool-call] also cover the edge case", "k-joining", origin).GetSuccess().GetTurn().GetTurn().GetValue()
-	if join := f.shim.ExpectStartTurn(); !join.GetJoinRunningTurn() {
-		t.Fatalf("StartTurn = %v, want the second prompt sent to join the running turn", join)
-	}
-	return running, joining
-}
-
-// TestAFoldedJoinRunsNoTurnOfItsOwn covers the vendor folding the joining
-// prompt in: its prompt row names the running turn, its own turn closes
-// unrun, and the running turn's end leaves the session free.
-func TestAFoldedJoinRunsNoTurnOfItsOwn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	running, joining := joinedTurn(t, f)
-
-	// Act: the vendor folds the prompt in, then the running turn ends.
-	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
-		Id:         &conversationv1.TurnId{Value: joining},
-		Agent:      &conversationv1.AgentId{Value: mainAgent},
-		Origin:     origin,
-		FoldedInto: &conversationv1.TurnId{Value: running},
-	})
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's record of the folded join", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.join" && r.Level == "info" && r.Context["turn"] == joining &&
-			r.Message == "the vendor folded the prompt into the running turn; its own turn closed unrun"
-	})
-	pushConcludedTurn(f.shim, mainAgent, "answer-both")
-
-	// Assert
-	awaitFooter(t, f, footer, "idle.done once the running turn ends", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
-	})
-}
-
-// TestAnUnfoldedJoinRunsAsTheNextTurn covers the running turn ending with no
-// tool boundary left: the joining prompt runs as its own turn in its place,
-// nothing is popped into it, and the next prompt starts once it ends.
-func TestAnUnfoldedJoinRunsAsTheNextTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	running, joining := joinedTurn(t, f)
-
-	// Act: the running turn ends, and the joining prompt opens its own turn.
-	f.shim.PushAgentFrameIn(mainAgent, running, successFrame(mainAgent, nil))
-	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
-		Id:     &conversationv1.TurnId{Value: joining},
-		Agent:  &conversationv1.AgentId{Value: mainAgent},
-		Origin: origin,
-	})
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's record of the join running as its own turn", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.join" && r.Level == "info" && r.Context["joining_turn"] == joining
-	})
-	f.shim.PushAgentFrameIn(mainAgent, joining, successFrame(mainAgent, nil))
-
-	// Assert: the next prompt starts as an ordinary turn.
-	f.submit("an unrelated question", "k-next", origin)
-	if next := f.shim.ExpectStartTurn(); next.GetJoinRunningTurn() || text(next.GetSaid()) != "an unrelated question" {
-		t.Fatalf("StartTurn = %v, want the next prompt started on its own", next)
 	}
 }

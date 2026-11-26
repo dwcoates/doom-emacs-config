@@ -731,6 +731,60 @@ func TestVerbsForwarderMergeReachesTheBoundVerbs(t *testing.T) {
 	}
 }
 
+// statusVerbs is a workspace.Verbs whose only live method is the status
+// read: it answers status or err, and records the workspace it was asked.
+type statusVerbs struct {
+	workspace.Verbs
+	asked  []ids.WorkspaceID
+	status *agentreplv1.WorkspaceStatus
+	err    error
+}
+
+func (v *statusVerbs) Status(_ context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error) {
+	v.asked = append(v.asked, ws)
+	return v.status, v.err
+}
+
+func TestVerbsForwarderStatus(t *testing.T) {
+	answered := &agentreplv1.WorkspaceStatus{Standing: &agentreplv1.WorkspaceStatusStanding{}}
+	tests := []struct {
+		name       string
+		bind       bool
+		err        error
+		want       *agentreplv1.WorkspaceStatus
+		wantAsked  int
+		wantErrMsg string
+	}{
+		{name: "a read the bound verbs answer", bind: true, want: answered, wantAsked: 1},
+		{name: "a read the bound verbs refuse", bind: true, err: errors.New("registry unreadable"), wantAsked: 1, wantErrMsg: "registry unreadable"},
+		{name: "a read before the verbs are bound", wantErrMsg: "agent-repld: a followed workspace's status was read before the workspace verbs existed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := &verbsForwarder{}
+			target := &statusVerbs{status: tc.want, err: tc.err}
+			if tc.bind {
+				f.bind(target)
+			}
+
+			// Act.
+			got, err := f.status(context.Background(), "ws-1")
+
+			// Assert.
+			if len(target.asked) != tc.wantAsked || (tc.wantAsked == 1 && target.asked[0] != "ws-1") {
+				t.Fatalf("asked = %v, want %d read(s) of ws-1", target.asked, tc.wantAsked)
+			}
+			if tc.wantErrMsg == "" && (err != nil || got != tc.want) {
+				t.Fatalf("status = %v, %v; want the bound verbs' answer", got, err)
+			}
+			if tc.wantErrMsg != "" && (err == nil || err.Error() != tc.wantErrMsg || got != nil) {
+				t.Fatalf("status = %v, %v; want %q", got, err, tc.wantErrMsg)
+			}
+		})
+	}
+}
+
 // boundDetached answers a detached forwarder bound to a service over a fresh
 // in-memory state client holding one owed landing report.
 func boundDetached(t *testing.T) (*detachedForwarder, wsm.DB, *dlog.TestSurfaces) {
