@@ -147,6 +147,9 @@ type Client interface {
 	Search(ctx context.Context, query string, page int) (SearchPage, error)
 	// ListReacted reads the messages USERID reacted to, most recent first.
 	ListReacted(ctx context.Context, userID string) ([]ReactedMessage, error)
+	// Permalink answers the link of the message at TS in CHANNEL, for a
+	// message Slack's own listings name none for (a direct message).
+	Permalink(ctx context.Context, channel, ts string) (string, error)
 	// ListMyChannels reads every channel the login's user is a member of,
 	// every page, in Slack's order, under ChannelsBound.
 	ListMyChannels(ctx context.Context) ([]Channel, error)
@@ -637,6 +640,31 @@ func (c *client) ListReacted(ctx context.Context, userID string) ([]ReactedMessa
 		}
 	}
 	return res, nil
+}
+
+func (c *client) Permalink(ctx context.Context, channel, ts string) (string, error) {
+	ref := channel + ":" + ts
+	call := "gns slack messages " + ref
+	out, err := c.run(ctx, nil, "slack", "messages", ref, "--json")
+	if err != nil {
+		return "", err
+	}
+	var raw struct {
+		Messages []struct {
+			Permalink string `json:"permalink"`
+			Status    string `json:"status"`
+		} `json:"messages"`
+	}
+	if err := c.decode(call, out, &raw); err != nil {
+		return "", err
+	}
+	if len(raw.Messages) != 1 {
+		return "", c.failed(call, fmt.Sprintf("Slack answered %d messages for one reference", len(raw.Messages)))
+	}
+	if m := raw.Messages[0]; m.Status != "ok" || m.Permalink == "" {
+		return "", c.failed(call, fmt.Sprintf("Slack named no link for the message (status %q)", m.Status))
+	}
+	return raw.Messages[0].Permalink, nil
 }
 
 func (c *client) ListMyChannels(ctx context.Context) ([]Channel, error) {

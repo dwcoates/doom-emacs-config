@@ -65,6 +65,11 @@ type fakeGNS struct {
 	searchErr error
 	queries   []string
 	reacted   []gnsclient.ReactedMessage
+	// permalinks is every Permalink call's channel:ts; permalink and
+	// permalinkErr are its answer.
+	permalinks   []string
+	permalink    string
+	permalinkErr error
 }
 
 func (g *fakeGNS) Whoami(context.Context) (string, error) { return g.username, g.whoamiErr }
@@ -116,6 +121,13 @@ func (g *fakeGNS) Search(_ context.Context, query string, page int) (gnsclient.S
 }
 func (g *fakeGNS) ListReacted(context.Context, string) ([]gnsclient.ReactedMessage, error) {
 	return g.reacted, nil
+}
+
+func (g *fakeGNS) Permalink(_ context.Context, channel, ts string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.permalinks = append(g.permalinks, channel+":"+ts)
+	return g.permalink, g.permalinkErr
 }
 
 // ListMyChannels is never the watcher's: the channel list is slackchannels'.
