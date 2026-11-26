@@ -639,8 +639,7 @@ type Verbs interface {
 	// answering the summary the workspace now has.
 	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) (wsm.WorkspaceSummary, error)
 	// SetBacklogged moves the workspace into the roster's backlog, or back
-	// out of it, and republishes the roster. A show also reveals a hidden
-	// merge workspace, so it ends with the workspace drawn or with an error.
+	// out of it, and republishes the roster.
 	SetBacklogged(ctx context.Context, ws ids.WorkspaceID, backlogged bool) error
 	// BacklogColdGate moves a shown workspace whose cold gate, lapsed at
 	// gateLapsedAt, has stood too long into the backlog, once per gate
@@ -750,7 +749,7 @@ type Verbs interface {
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error
 	// RequireCatalogModel refuses MODEL as not_in_catalog unless the catalog
 	// the session's login last served offers it: the check a model a session
-	// will START under passes, which needs no live selector (a hidden merge
+	// will START under passes, which needs no live selector (a backlogged
 	// workspace serves none).
 	RequireCatalogModel(ctx context.Context, ws ids.WorkspaceID, model string) error
 	// SetEffort switches the session's reasoning effort to a level the

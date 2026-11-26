@@ -495,8 +495,7 @@ type Resolver interface {
 	// merging, nil while none is. A turn the merge runs is drawn as the turn,
 	// so this, never the drawn arm, is what says a merge is in flight. The
 	// roster's when-column counts a sync merge from it, and the workspace
-	// status reports the merge by it. A merge workspace's footer is never
-	// told its merge (an async merge runs there), so it answers nil there.
+	// status reports the merge by it.
 	MergeStartedAt(ws ids.WorkspaceID) *int64
 	// TurnClock answers the turn clock the workspace's strip shows. The
 	// roster's when-column counts from its start, so each change of it is

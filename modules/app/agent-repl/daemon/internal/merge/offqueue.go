@@ -39,9 +39,6 @@ const (
 	// a requeue now goes in line and answers the gate by a compaction
 	// (Requeue). It stays named because the protobuf still declares its arm.
 	ArmColdGated = "cold_gated"
-	// ArmNameOffQueue refuses an async request whose name a merge off its
-	// queue holds: that merge is requeued, never asked for again.
-	ArmNameOffQueue = "async_merge_name_off_queue"
 )
 
 // offQueueCauses maps every cause a request is kept off its queue for onto
@@ -369,27 +366,4 @@ func mergeOffQueueRefusal(record wsm.Workspace, cause string) *RefusalError {
 	refusal := refuse(ArmMergeOffQueue, record.ID, "the merge left its queue without landing (%s) and its request stands; requeue it with `agent-repld merge-queue requeue %s`, or discard it with `agent-repld merge-queue discard %s` before asking again", cause, record.Name, record.Name)
 	refusal.Fields = map[string]any{"cause": OffQueueCause(cause)}
 	return refusal
-}
-
-// refuseNameOffQueue refuses an async request under NAME when a merge off its
-// queue in REQUESTER's repository holds it: that merge is requeued as
-// itself, never asked for again. Nil when no such merge holds the name.
-func (o *orchestrator) refuseNameOffQueue(ctx context.Context, requester wsm.Workspace, name string) error {
-	records, err := o.deps.DB.OffQueueMerges(ctx)
-	if err != nil {
-		return fmt.Errorf("merge: reading the merges off their queues: %w", err)
-	}
-	for _, rec := range records {
-		ws, err := o.deps.DB.Workspace(ctx, rec.Workspace)
-		if err != nil {
-			return fmt.Errorf("merge: reading the workspace of the merge %s off its queue: %w", rec.Workspace, err)
-		}
-		if ws.Repo != requester.Repo || ws.Name != name {
-			continue
-		}
-		refusal := refuse(ArmNameOffQueue, requester.ID, "the merge %q left its queue without landing and its request stands; requeue it with `agent-repld merge-queue requeue %s`", name, name)
-		refusal.Fields = map[string]any{"name": name, "workspace": ws.Ref(), "cause": OffQueueCause(rec.Cause)}
-		return refusal
-	}
-	return nil
 }

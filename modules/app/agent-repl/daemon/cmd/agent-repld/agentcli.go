@@ -166,7 +166,7 @@ func readRoster(ctx context.Context, client agentreplv1connect.AgentReplClient) 
 }
 
 // locateWorkspaces asks the daemon which workspaces REQ names. The registry
-// answers, not the roster, so a hidden merge workspace and an open workspace
+// answers, not the roster, so a backlogged workspace and an open workspace
 // the sidebar does not draw are found (agentrepl.v1.LocateWorkspace).
 func locateWorkspaces(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
 	resp, err := client.LocateWorkspace(ctx, connect.NewRequest(req))
@@ -429,7 +429,7 @@ func (c *cliCall) callerIfAny() (*workspacev1.WorkspaceRef, bool) {
 
 // callingRef answers the calling workspace's ref, nil when the caller is no
 // workspace's, with the working directory. The registry answers (locate), so
-// a hidden merge workspace's own worktree is its caller's.
+// an unrostered workspace's own worktree is its caller's.
 //
 // THE CALLER IS THE WORKSPACE WHOSE OWN WORKTREE IT RUNS IN, never one whose
 // directory merely contains it: a subagent in a separate git worktree nested
@@ -498,8 +498,8 @@ func (c *cliCall) locateOne(req *agentreplv1.LocateWorkspaceRequest, matched str
 }
 
 // named answers the workspace NAME names: `here`, a directory, or a name,
-// which must name exactly one workspace. The registry answers (locate), so a
-// hidden merge workspace is named by its directory or its name.
+// which must name exactly one workspace. The registry answers (locate), so an
+// unrostered workspace is named by its directory or its name.
 func (c *cliCall) named(name string) (*workspacev1.WorkspaceRef, bool) {
 	if name == here {
 		return c.calling()

@@ -22,8 +22,6 @@ const (
 	// production mediator asked for directly: it makes its children only by
 	// dispatching them (agentrepl.v1.UpdateProductionMediation).
 	ArmRequestedByProductionMediator = "requested_by_production_mediator"
-	// ArmPlacementOnMergeWorkspace is a placement beside an async merge.
-	ArmPlacementOnMergeWorkspace = "placement_on_merge_workspace"
 	// ArmPlacementRequiresWorkspace is a placement asked by the user.
 	ArmPlacementRequiresWorkspace = "placement_requires_workspace"
 	// ArmUnknownPlacementSubsection names a subsection the repository lacks.

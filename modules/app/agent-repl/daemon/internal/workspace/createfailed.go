@@ -89,9 +89,8 @@ func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause 
 // THE TWO MAPS ARE EXHAUSTIVE TOGETHER (TestCreateRefusalArmsClassifyEveryArm
 // checks them against the contract), so a new arm cannot reach the main
 // worktree as a failed create merely because nobody remembered to exclude it.
-// Arms only the async-merge path or the transport raise are classified too;
-// they are named by their contract spelling where this package declares no
-// constant.
+// Arms only the transport raises are classified too; they are named by their
+// contract spelling where this package declares no constant.
 var createRefusalArms = map[string]bool{
 	// The caller's input.
 	ArmUngatedWithoutConsent:        true,
@@ -110,45 +109,29 @@ var createRefusalArms = map[string]bool{
 	ArmUnknownOwner:                 true,
 	ArmUnknownLandingTarget:         true,
 	ArmUnknownRequester:             true,
-	"async_merge_unknown_branch":    true,
-	"async_merge_unknown_subagent":  true,
-	"async_merge_unknown_maker":     true,
-	"async_merge_context_not_maker": true,
-	"async_merge_name_taken":        true,
-	// A name a merge off its queue holds: the caller requeues that merge.
-	"async_merge_name_off_queue":            true,
-	"placement_behind_not_in_line":          true,
-	"async_merge_unknown_close_after":       true,
-	"op_id_with_async_merge":                true,
-	"version_increment_required":            true,
-	"version_increment_unexpected":          true,
-	"async_merge_requester_merging":         true,
-	"async_merge_requester_session_deleted": true,
-	// The branch failed its rule suites: the caller fixes it and asks again.
-	"async_merge_rule_checks_failed": true,
-	ArmPlacementOnChild:              true,
-	ArmPlacementOnMergeWorkspace:     true,
-	ArmPlacementRequiresWorkspace:    true,
-	ArmUnknownPlacementSubsection:    true,
-	ArmBlankPlacementSubsectionName:  true,
-	ArmGatherUnknownWorkspace:        true,
-	ArmGatherNotGatherable:           true,
+	ArmUnknownSourceBranch:          true,
+	ArmUnknownSubagent:              true,
+	ArmUnknownCloseAfter:            true,
+	ArmPlacementOnChild:             true,
+	ArmPlacementRequiresWorkspace:   true,
+	ArmUnknownPlacementSubsection:   true,
+	ArmBlankPlacementSubsectionName: true,
+	ArmGatherUnknownWorkspace:       true,
+	ArmGatherNotGatherable:          true,
 	// The deploy mediator asked: it does its work in its own session.
 	ArmRequestedByDeployMediator: true,
 	// The production mediator asked directly: it dispatches its children.
 	ArmRequestedByProductionMediator: true,
 	// A fault of the daemon, the repository or the machine.
-	ArmBriefMissing:                     false,
-	ArmUnknownRepository:                false,
-	"worktree_creation_failed":          false,
-	ArmSpawnFailed:                      false,
-	ArmOneShotPolicyMissing:             false,
-	ArmNamingFailed:                     false,
-	ArmOriginFetchFailed:                false,
-	"async_merge_no_deploy_config":      false,
-	"async_merge_deploy_config_invalid": false,
-	ArmLifecycleConfigInvalid:           false,
-	ArmCreationHookFailed:               false,
+	ArmBriefMissing:            false,
+	ArmUnknownRepository:       false,
+	"worktree_creation_failed": false,
+	ArmSpawnFailed:             false,
+	ArmOneShotPolicyMissing:    false,
+	ArmNamingFailed:            false,
+	ArmOriginFetchFailed:       false,
+	ArmLifecycleConfigInvalid:  false,
+	ArmCreationHookFailed:      false,
 	// A handover.
 	ArmTransferringAway: false,
 	ArmStandingDown:     false,
