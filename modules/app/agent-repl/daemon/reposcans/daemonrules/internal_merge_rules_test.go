@@ -34,7 +34,7 @@ func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 		resolved += strings.Count(string(file.Source), "Banners.Resolved(")
 		raised += strings.Count(string(file.Source), "o.raiseResolved(")
 		ordered += strings.Count(string(file.Source), "o.tellThenRaise(")
-		handBacks += strings.Count(string(file.Source), "o.handBack(ctx")
+		handBacks += strings.Count(string(file.Source), "o.handBackInPlace(ctx")
 		settles += strings.Count(string(file.Source), "o.settle(ctx")
 	}
 
@@ -45,11 +45,11 @@ func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	if raised != 1 {
 		t.Errorf("raiseResolved is called at %d sites, want 1: tellThenRaise", raised)
 	}
-	if ordered != 2 {
-		t.Errorf("tellThenRaise is called at %d sites, want 2: ended and the failed fork", ordered)
+	if ordered != 1 {
+		t.Errorf("tellThenRaise is called at %d sites, want 1: ended", ordered)
 	}
-	if handBacks != 1 {
-		t.Errorf("handBack is called at %d sites, want 1: settle", handBacks)
+	if handBacks != 2 {
+		t.Errorf("handBackInPlace is called at %d sites, want 2: settle and a withdrawn finish", handBacks)
 	}
 	if settles != 2 {
 		t.Errorf("settle is called at %d sites, want 2: ended and a merge never put in line", settles)
@@ -942,9 +942,8 @@ func TestEveryDrainStepGoesThroughDrainStep(t *testing.T) {
 
 // TestEveryForcedSessionStopGoesThroughStopSessionForced pins that the
 // queue's merges and a remediation's direct landing share the one teardown,
-// and that an unlanded merge's session end is the one other forced stop: a
-// forced session stop appears nowhere in the package's sources but
-// stopSessionForced, whose callers are those two.
+// a forced session stop appears nowhere in the package's sources but
+// stopSessionForced, whose one caller is that retirement.
 func TestEveryForcedSessionStopGoesThroughStopSessionForced(t *testing.T) {
 	sourcescan.InPackage(t, internalMergeDir)
 	// Act
@@ -956,15 +955,15 @@ func TestEveryForcedSessionStopGoesThroughStopSessionForced(t *testing.T) {
 	if !slices.Equal(sites, []string{"terminal.go"}) {
 		t.Fatalf("forced session stops at %v, want only stopSessionForced's", sites)
 	}
-	if want := []string{"terminal.go:endSession", "terminal.go:retireLandedWorktree"}; !slices.Equal(callers, want) {
+	if want := []string{"terminal.go:retireLandedWorktree"}; !slices.Equal(callers, want) {
 		t.Fatalf("stopSessionForced callers = %v, want %v", callers, want)
 	}
 }
 
-// THE END OF A MERGE REACHES ITS WORKSPACES THROUGH ONE PATH: settle alone
-// hands an end back and closes the merge workspace, and only ended and a merge
-// never put in line settle. A site that handed an end back its own way would
-// bypass the close (2026-11-23).
+// THE END OF A MERGE REACHES ITS WORKSPACE THROUGH ONE PATH: settle alone
+// hands an end back, and only ended and a merge never put in line settle; a
+// finish withdrawn before it was in line hands its own end back. A site that
+// handed an end back its own way would skip the handback's rules (2026-11-23).
 func TestEveryEndOfAMergeIsSettledThroughOnePath(t *testing.T) {
 	sourcescan.InPackage(t, internalMergeDir)
 	tests := []struct {
@@ -972,13 +971,8 @@ func TestEveryEndOfAMergeIsSettledThroughOnePath(t *testing.T) {
 		want   []string
 	}{
 		{needle: "o.settle(", want: []string{"terminal.go:ended", "terminal.go:publishAbandonedWith"}},
-		{needle: "o.handBack(", want: []string{"terminal.go:settle"}},
-		{needle: "o.closeEnded(", want: []string{"terminal.go:settle"}},
-		// A finish withdrawn before it was in line is a sync merge's, in its
-		// own workspace: there is no merge workspace to close.
-		{needle: "o.handBackInPlace(", want: []string{"finish.go:withdrawFinished", "terminal.go:handBack"}},
-		// A merge never forked has no merge workspace to close (dropDetached).
-		{needle: "Detached.HandBack(", want: []string{"request.go:dropDetached", "terminal.go:handBack", "terminal.go:handBackInPlace"}},
+		{needle: "o.handBackInPlace(", want: []string{"finish.go:withdrawFinished", "terminal.go:settle"}},
+		{needle: "HandBacks.HandBack(", want: []string{"terminal.go:handBackInPlace"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.needle, func(t *testing.T) {
@@ -1141,7 +1135,7 @@ func TestTheMergesViewIsDrawnThroughOnePath(t *testing.T) {
 		needle string
 		want   []string
 	}{
-		{needle: "tabRow(at.ws, lease, key, tab)", want: []string{"tabs.go:upsertTab"}},
+		{needle: "tabRow(ws, lease, key, tab)", want: []string{"tabs.go:upsertTab"}},
 		{needle: "o.upsertTab(", want: []string{"bubbleview.go:republishBubbles", "tabs.go:publishTab"}},
 		{needle: "renderTab(", want: []string{"bubbleview.go:republishBubbles", "tabs.go:publishTab"}},
 		{needle: "RosterMergeQueueStage{", want: []string{"rosterstages.go:rosterStages"}},
@@ -1273,8 +1267,9 @@ func TestEveryBranchWorktreeLookupGoesThroughWorktreeHolding(t *testing.T) {
 	// Act
 	sites := sourcescan.Sites(t, internalMergeDir, ".ListWorktrees(ctx, main)")
 
-	// Assert
-	if !slices.Equal(sites, []string{"request.go"}) {
-		t.Fatalf("worktree listings = %v, want worktreeHolding's alone in request.go", sites)
+	// Assert: the one lookup is gitclient.WorktreeHolding, which the package
+	// calls rather than listing worktrees itself.
+	if len(sites) != 0 {
+		t.Fatalf("worktree listings = %v, want none: gitclient.WorktreeHolding is the one lookup", sites)
 	}
 }

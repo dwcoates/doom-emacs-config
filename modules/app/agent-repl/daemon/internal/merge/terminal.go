@@ -215,8 +215,7 @@ func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out Endin
 
 // stopSessionForced ends WS's session at once, whatever turn it runs, stating
 // REASON as its stand-down. It is the package's ONE forced session stop: a
-// landed workspace's before its worktree goes (retireLandedWorktree), and an
-// unlanded merge's (endSession).
+// landed workspace's before its worktree goes (retireLandedWorktree).
 func (o *orchestrator) stopSessionForced(ctx context.Context, ws ids.WorkspaceID, reason shimlife.StandDownReason) error {
 	return o.deps.StopSession(shimlife.WithStandDown(ctx, reason), ws, true)
 }

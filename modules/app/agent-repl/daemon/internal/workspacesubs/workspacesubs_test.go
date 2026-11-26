@@ -803,7 +803,7 @@ func TestALandingCompactsTheRequesterOnlyWhenItsCreatorAsked(t *testing.T) {
 				return
 			}
 			compaction := f.prompts.got[1]
-			if compaction.ws != watcherA || compaction.text != CompactCommand || compaction.origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER || !compaction.defer_ {
+			if compaction.ws != watcherA || compaction.text != prompthandler.CompactionText("") || compaction.origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER || !compaction.defer_ {
 				t.Fatalf("compaction = %+v, want the deferred /compact to the requester", compaction)
 			}
 			if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op,

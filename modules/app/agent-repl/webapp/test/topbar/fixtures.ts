@@ -1,5 +1,6 @@
 // Shared arrangement for the topbar suites: a context whose rpcs a test
 // scripts, and a reveal layer over a host with the anchors already present.
+import { jumpToWorkspace, type JumpSite } from "../../src/feed/merge/jump.js";
 import { onTestFinished } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
@@ -70,6 +71,9 @@ export function appContext(
   });
 }
 
+/** Where a fixture's switch is recorded and its refusal drawn. */
+const FIXTURE_JUMP: JumpSite = { describe: "a topbar test", operation: "topbar.test-select", refusalClass: "topbar-test-refusal" };
+
 /** A mounted host, its reveal layer, and the TopbarContext over both. */
 export function topbarContext(
   ctx: AppContext = appContext(),
@@ -82,7 +86,10 @@ export function topbarContext(
   // test opened closes on a later file's click, after the logger it writes to
   // was reset, and throws there.
   onTestFinished(() => reveals.dispose());
-  return { host, tc: { ctx, reveals, openLogin } };
+  return {
+    host,
+    tc: { ctx, reveals, openLogin, selectWorkspace: (where, target) => jumpToWorkspace(where, ctx, target, FIXTURE_JUMP) },
+  };
 }
 
 /** The reveal currently drawn, or null. */

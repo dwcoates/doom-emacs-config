@@ -45,6 +45,7 @@
  */
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import { jumpToWorkspace, type JumpSite } from "../feed/merge/jump.js";
 import { stopTicking } from "../feed/ticking.js";
 import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -73,6 +74,13 @@ import {
 const log = createLogger("webapp.topbar.topbar");
 
 /** What every mount answers with. */
+/** Where the summary's child menu's jump is recorded and its refusal drawn. */
+const CHILD_JUMP: JumpSite = {
+  describe: "a child that is not open",
+  operation: "topbar.child-menu.select",
+  refusalClass: "topbar-child-refusal",
+};
+
 export interface Handle {
   dispose(): void;
 }
@@ -154,7 +162,12 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
         throw new Error("the topbar was asked to watch twice");
       }
       log.info("watching the topbar", { operation: "topbar.watch" });
-      const watching: TopbarContext = { reveals, ctx, openLogin: watchDeps.openLogin };
+      const watching: TopbarContext = {
+        reveals,
+        ctx,
+        openLogin: watchDeps.openLogin,
+        selectWorkspace: (host, target) => jumpToWorkspace(host, ctx, target, CHILD_JUMP),
+      };
       /** The sign-in request this page last opened the login for. */
       let openedSignIn: string | null = null;
       stream = watchStream(ctx, {

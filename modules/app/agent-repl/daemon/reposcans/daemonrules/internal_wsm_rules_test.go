@@ -216,7 +216,7 @@ func TestNoQueueReadSpellsOutItsColumns(t *testing.T) {
 	}
 
 	// Act
-	spelled := strings.Count(string(src), "pick_started_at, pick_turn, slot, slot_since")
+	spelled := strings.Count(string(src), "source_front, source_behind, slot, slot_since")
 
 	// Assert
 	if spelled != 1 {
@@ -483,16 +483,17 @@ func TestEverySingleSubscriptionEndGoesThroughEndSubscription(t *testing.T) {
 
 // TestNoQueueRowIsDeletedOutsideTheOneTransition holds every exit to
 // leaveQueueInTx: a statement deleting a queue row anywhere else could delete
-// a request it did not land. The one other delete is the layout-128 move of
-// async requests into their own table, which deletes only what it copied.
+// a request it did not land. The others are historical layouts: the
+// layout-128 move of async requests into their own table, which deletes only
+// what it copied, and layout 221's retirement of every async request's row.
 func TestNoQueueRowIsDeletedOutsideTheOneTransition(t *testing.T) {
 	sourcescan.InPackage(t, internalWsmDir)
 	// Act
 	sites := sourcescan.Sites(t, internalWsmDir, "DELETE FROM merge_queue ")
 
 	// Assert
-	if want := []string{"asyncrequests.go", "offqueue.go"}; !slices.Equal(sites, want) {
-		t.Fatalf("merge_queue rows are deleted in %v, want only the layout-128 move and the one transition (%v)", sites, want)
+	if want := []string{"asyncrequests.go", "offqueue.go", "retiredasyncmerges.go", "retiredasyncmerges.go"}; !slices.Equal(sites, want) {
+		t.Fatalf("merge_queue rows are deleted in %v, want only the historical layouts and the one transition (%v)", sites, want)
 	}
 }
 
@@ -1046,7 +1047,7 @@ func TestThePerTurnReadsAreTurnFactsCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse the package: %v", err)
 	}
-	want := map[string]bool{"TurnAddresses": false, "TurnMirrors": false, "TurnSenders": false}
+	want := map[string]bool{"TurnAddresses": false, "TurnSenders": false}
 
 	// Act
 	for _, pkg := range pkgs {

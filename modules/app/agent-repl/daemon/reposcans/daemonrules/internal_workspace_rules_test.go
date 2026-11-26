@@ -55,7 +55,6 @@ func TestEveryCreateSpecBuilderGoesThroughNewCreateSpec(t *testing.T) {
 	want := []string{
 		"internal/server/workspaces.go:CreateWorkspace",
 		"internal/workspace/commandsupport.go:RequestCommandSupport",
-		"internal/workspace/create.go:CreateMergeWorkspace",
 		"internal/workspace/deploychecks.go:mediatorSpec",
 		"internal/workspace/intake.go:CreateIntake",
 		"internal/workspace/pendingcreates.go:decodeHeldSpec",
@@ -653,21 +652,6 @@ func TestTheBackloggedFlagHasOneWrite(t *testing.T) {
 	// Assert
 	if len(sites) != 1 || sites[0] != "select.go" {
 		t.Fatalf("the backlogged flag is written at %v, want only recordBacklogged in select.go", sites)
-	}
-}
-
-// A show and a select are the two callers that reveal a merge workspace for
-// the user, and both go through the orchestrator's one reveal: the verbs ask
-// it only from revealMergeHidden, and never write the reveal around it.
-func TestAShowRevealsThroughTheOrchestratorsOneReveal(t *testing.T) {
-	sourcescan.InPackage(t, internalWorkspaceDir)
-	// Act
-	asked := sourcescan.Sites(t, internalWorkspaceDir, "v.deps.Merge.RevealMergeWorkspace(")
-	written := sourcescan.Sites(t, internalWorkspaceDir, "v.deps.DB.RevealMergeWorkspace(")
-
-	// Assert
-	if len(asked) != 1 || asked[0] != "select.go" || len(written) != 1 || written[0] != "select.go" {
-		t.Fatalf("the reveal is asked for at %v and written at %v, want each once in select.go", asked, written)
 	}
 }
 

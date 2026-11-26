@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"strings"
+	"errors"
 
 	"connectrpc.com/connect"
 
@@ -13,10 +13,8 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/prompthandler"
-	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/workspace"
-	"agent-repld/internal/wsm"
 )
 
 // CompactWorkspace submits the vendor's compaction to a workspace's prompt
@@ -63,12 +61,11 @@ func (s *server) submitCompaction(
 	if subject.Record.Closed {
 		return prompthandler.Outcome{}, &workspace.Refusal{Arm: "closed", Reason: "a closed workspace runs no session to compact"}, nil
 	}
-	key, err := prompthandler.MintKey("workspace-compact")
-	if err != nil {
+	outcome, err = prompthandler.SubmitCompaction(ctx, s.deps.Prompts, subject.Record.ID, instructions.GetText(),
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, prompthandler.MintKey, "workspace-compact")
+	if errors.Is(err, prompthandler.ErrCompactionKey) {
 		return prompthandler.Outcome{}, nil, err
 	}
-	outcome, err = s.deps.Prompts.Submit(ctx, subject.Record.ID, feed.SaidText(CompactionPrompt(instructions)), key,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		return prompthandler.Outcome{}, err, nil
 	}
@@ -76,13 +73,10 @@ func (s *server) submitCompaction(
 }
 
 // CompactionPrompt is the compaction a CompactWorkspace request submits: the
-// vendor's command, followed by the summary's instructions when it names any.
+// vendor's command, followed by the summary's instructions when it names any
+// (prompthandler.CompactionText).
 func CompactionPrompt(instructions *agentreplv1.CompactWorkspaceInstructions) string {
-	compact := sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
-	if instructions == nil {
-		return compact
-	}
-	return compact + " " + strings.TrimSpace(instructions.GetText())
+	return prompthandler.CompactionText(instructions.GetText())
 }
 
 // agentSlashCommand answers the slash command an agent-sent prompt begins

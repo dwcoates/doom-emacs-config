@@ -57,7 +57,6 @@ import { drawLinkIcon } from "./link-icon.js";
 import { createLogger } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { guardMalformed } from "../rpc/guard.js";
-import { jumpToWorkspace, type JumpSite } from "../feed/merge/jump.js";
 import { toneClass, topbarTone } from "../vocab.js";
 import { drawNamePrefix } from "../name-prefix.js";
 import type { TopbarContext } from "./context.js";
@@ -221,13 +220,6 @@ export function drawTopbarTitle(u: TopbarTitle, tc: TopbarContext): HTMLElement 
   return element;
 }
 
-/** Where a child menu row's jump is recorded and its refusal drawn. */
-const CHILD_JUMP: JumpSite = {
-  describe: "a child that is not open",
-  operation: "topbar.child-menu.select",
-  refusalClass: "topbar-child-refusal",
-};
-
 /**
  * Wire the summary's click to the menu of the workspace's children that are
  * not open (`TopbarTitle.child_menu`). The summary takes a pointer and a
@@ -279,7 +271,7 @@ export function drawTitleChildMenu(menu: TopbarTitleChildMenu, tc: TopbarContext
     row.append(mark);
     row.addEventListener("click", () => {
       tc.reveals.close();
-      void guardMalformed(tc.ctx, "topbar.child-menu.select", jumpToWorkspace(row, tc.ctx, target, CHILD_JUMP));
+      void guardMalformed(tc.ctx, "topbar.child-menu.select", tc.selectWorkspace(row, target));
     });
     list.append(row);
   });

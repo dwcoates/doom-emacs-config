@@ -119,7 +119,7 @@ func TestTheReplayedPerTurnReadsAreReadRecordedCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse the package: %v", err)
 	}
-	want := map[string]bool{"recordedAddresses": false, "recordedMirrors": false, "recordedSenders": false, "recordedCloses": false}
+	want := map[string]bool{"recordedAddresses": false, "recordedSenders": false, "recordedCloses": false}
 
 	// Act
 	for _, pkg := range pkgs {

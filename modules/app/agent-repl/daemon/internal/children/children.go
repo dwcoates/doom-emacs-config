@@ -310,7 +310,7 @@ func (t *Tracker) standingLocked(child wsm.Workspace, removed bool, removedAt ti
 	switch {
 	case removed:
 		return &frontendv1.FeedChildStanding{Standing: &frontendv1.FeedChildStanding_Removed{Removed: &frontendv1.FeedChildStandingRemoved{RemovedAtMs: removedAt.UnixMilli()}}}
-	case child.Closed && child.MergedAt != nil:
+	case child.MergeSettled():
 		return &frontendv1.FeedChildStanding{Standing: &frontendv1.FeedChildStanding_Merged{Merged: &frontendv1.FeedChildStandingMerged{}}}
 	case child.Closed:
 		return &frontendv1.FeedChildStanding{Standing: &frontendv1.FeedChildStanding_Closed{Closed: &frontendv1.FeedChildStandingClosed{}}}

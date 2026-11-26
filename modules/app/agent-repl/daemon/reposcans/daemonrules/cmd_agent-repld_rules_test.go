@@ -508,10 +508,9 @@ func TestTheWorktreeLockSitesShareOnePath(t *testing.T) {
 	shared := strings.Count(text.String(), "worktreeLockPath(")
 	byHand := strings.Count(text.String(), "worktreeReapLockName)")
 
-	// Assert: the helper's definition, the reaper and the merge workspace
-	// sweep.
-	if shared != 3 || byHand != 1 {
-		t.Fatalf("the worktree lock is named through the helper %d times and by hand %d times, want 3 and 1 (the helper's own body)", shared, byHand)
+	// Assert: the helper's definition and the reaper.
+	if shared != 2 || byHand != 1 {
+		t.Fatalf("the worktree lock is named through the helper %d times and by hand %d times, want 2 and 1 (the helper's own body)", shared, byHand)
 	}
 }
 

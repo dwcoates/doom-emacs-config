@@ -31,6 +31,7 @@ package workspacesubs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -46,8 +47,6 @@ import (
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/prwatch"
-	"agent-repld/internal/resolve/feed"
-	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/untoldnotice"
 	"agent-repld/internal/wsm"
 )
@@ -63,11 +62,6 @@ const BriefNotice = "workspace-notice"
 // by: ONE LINE (owner ruling, 2026-11-26: landing reports are brief), as the
 // child's own feed and its bubble in the parent's feed say the rest.
 const BriefChildLanded = "workspace-child-landed"
-
-// CompactCommand is what a one-shot's requester that asked to be compacted
-// once it lands (wsm.LandingEffects.CompactRequester) is sent: the vendor's own
-// /compact, recognized by the prompt handler as the context cut it is.
-var CompactCommand = sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
 
 // Origin is every notice's prompt origin.
 const Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE
@@ -519,10 +513,9 @@ var storeEvents = func() map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent
 }()
 
 // compactRequester sends the requester of landed workspace WS its /compact
-// when WS's creator asked for it (wsm.LandingEffects.CompactRequester). It
-// goes through the same prompt path the landing's notice took, which
-// recognizes it as the context cut it is: deferred behind the notice's turn,
-// drawn with no prompt bubble, and shown as any compaction is. Every failure
+// when WS's creator asked for it (wsm.LandingEffects.CompactRequester),
+// through the one compaction path (prompthandler.SubmitCompaction): deferred
+// behind the landing notice's turn. Every failure
 // is recorded here and ends the compaction; the landing stands.
 func (s *Service) compactRequester(ctx context.Context, prompts prompthandler.Submitter, ws ids.WorkspaceID) {
 	log := s.deps.Log.Global()
@@ -543,13 +536,12 @@ func (s *Service) compactRequester(ctx context.Context, prompts prompthandler.Su
 		panic(fmt.Sprintf("workspacesubs: %s asks to compact a requester it does not record", ws))
 	}
 	fields["requester"] = string(*record.RequestedBy)
-	key, err := s.deps.MintKey("compact-requester")
-	if err != nil {
+	outcome, err := prompthandler.SubmitCompaction(ctx, prompts, *record.RequestedBy, "",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, s.deps.MintKey, "compact-requester")
+	if errors.Is(err, prompthandler.ErrCompactionKey) {
 		log.Error(op, "could not mint the idempotency key of a landed one-shot's compaction; its requester is not compacted", dlog.WithCause(fields, err))
 		return
 	}
-	outcome, err := prompts.Submit(ctx, *record.RequestedBy, feed.SaidText(CompactCommand), key,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		log.Error(op, "could not submit the compaction a landed one-shot asked for; its requester is not compacted", dlog.WithCause(fields, err))
 		return

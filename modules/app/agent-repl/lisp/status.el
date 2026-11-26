@@ -2145,9 +2145,9 @@ workspace the roster does report on, or a `:ready' workspace whose
 panels are not open), the spec is built via
 `agent-repl--tab-spec-bracket-only' so only the [N] bracket keeps the
 arm's color.  The bracket label is the tab's number INDEX and nothing
-else: state reaches the bracket as COLOR.  While a FULL `idle_async' tab carries the
-unread-turn-end marker, the `[N]' bracket keeps the yellow and the name
-takes the unread turn end's color \(`agent-repl--tab-name-state').
+else: state reaches the bracket as COLOR.  While a FULL `idle_async' tab
+carries the unread-turn-end marker, the `[N]' bracket keeps the yellow and
+the name takes the unread turn end's color \(`agent-repl--tab-name-state').
 
 The badge run — the roster's priority label and the arm's glyph — is
 drawn BEFORE the name.

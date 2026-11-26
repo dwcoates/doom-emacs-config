@@ -19,7 +19,7 @@ func TestStandDownSitesShareCutShort(t *testing.T) {
 	cases := []string{
 		"../desktopnotify/notifier.go",
 		"../desktopnotify/summary.go",
-		"../mergeworkspace/mergeworkspace.go",
+		"../landingreports/landingreports.go",
 	}
 	for _, file := range cases {
 		t.Run(file, func(t *testing.T) {
