@@ -166,38 +166,6 @@ func TestThinkingTokensAreReadFromTheVendorsOutputTokenDetails(t *testing.T) {
 	}
 }
 
-func TestDisagreeingThinkingCountsAreWarned(t *testing.T) {
-	tests := []struct {
-		name     string
-		usage    string
-		wantWarn bool
-	}{
-		{name: "the two names disagree", usage: `{"output_tokens_details":{"thinking_tokens":209,"reasoning_tokens":7}}`, wantWarn: true},
-		{name: "the two names agree", usage: `{"output_tokens_details":{"thinking_tokens":7,"reasoning_tokens":7}}`, wantWarn: false},
-		{name: "only thinking_tokens", usage: `{"output_tokens_details":{"thinking_tokens":209}}`, wantWarn: false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// Arrange.
-			c, sink := loggedConverter(t)
-
-			// Act.
-			convertLines(t, c, usageLine(test.usage))
-
-			// Assert.
-			warned := strings.Contains(sink.String(), "two different thinking counts")
-			if warned != test.wantWarn {
-				t.Fatalf("warned = %v, want %v: %s", warned, test.wantWarn, sink.String())
-			}
-			if test.wantWarn {
-				if got := levelForMessage(t, sink, "two different thinking counts"); got != "warn" {
-					t.Fatalf("level = %q, want warn", got)
-				}
-			}
-		})
-	}
-}
-
 func TestFilePlaneUsageIsSettledNotProvisional(t *testing.T) {
 	// Arrange. The file plane reads the record the vendor wrote once the
 	// response settled; its usage supersedes the stream plane's snapshot.

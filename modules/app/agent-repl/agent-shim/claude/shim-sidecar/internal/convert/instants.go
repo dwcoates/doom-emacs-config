@@ -12,7 +12,6 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
 // parseInstant reads the vendor's RFC3339 timestamp into unix millis. A record
@@ -70,7 +69,7 @@ func settledAt(ms, startMs int64) *conversationv1.AgentActivitySettledAt {
 // PROVISIONAL STAYS FALSE: the file plane reads the record the vendor itself
 // wrote once the response settled, so its usage is the settled one, and it
 // supersedes the stream plane's in-flight snapshot of the same unit.
-func (c *Converter) readUsage(usage map[string]any, at Attribution, operation string) *conversationv1.TokenUsage {
+func readUsage(usage map[string]any) *conversationv1.TokenUsage {
 	if usage == nil {
 		return nil
 	}
@@ -83,34 +82,23 @@ func (c *Converter) readUsage(usage map[string]any, at Attribution, operation st
 			Unwritten: uint64(number(usage["input_tokens"])),
 		},
 		OutputTokens:         uint64(number(usage["output_tokens"])),
-		OutputThinkingTokens: c.thinkingTokens(obj(usage["output_tokens_details"]), at, operation),
+		OutputThinkingTokens: thinkingTokens(obj(usage["output_tokens_details"])),
 	}
 }
 
 // thinkingTokens reads the thinking tokens out of the vendor's output-token
 // details.
 //
-// THE VENDOR WRITES thinking_tokens (transcript record 6ed6dcd3 of session
-// 43614927 on 2026-11-26 carries output_tokens_details.thinking_tokens: 209,
-// and no top-level output_thinking_tokens); reasoning_tokens is the name the
-// earlier harvest modeled and is still read. Both present and differing is a
-// vendor contradiction: it is warned and thinking_tokens, the vendor's current
-// name, is taken. No details at all means no thinking: 0.
-func (c *Converter) thinkingTokens(details map[string]any, at Attribution, operation string) uint64 {
-	if details == nil {
-		return 0
-	}
-	thinking, hasThinking := details["thinking_tokens"].(float64)
-	reasoning, hasReasoning := details["reasoning_tokens"].(float64)
-	if hasThinking && hasReasoning && thinking != reasoning {
-		c.log.With(at.ctxWarn(operation)).
-			Log("the vendor's output-token details name two different thinking counts (thinking_tokens={thinking}, reasoning_tokens={reasoning}); taking thinking_tokens",
-				logging.Values{"thinking": thinking, "reasoning": reasoning})
-	}
-	if hasThinking {
+// Each producer writes its own name: the vendor's transcript on disk, which
+// this plane reads, writes output_tokens_details.thinking_tokens, and the SDK's
+// stream writes output_tokens_details.reasoning_tokens. No producer writes both
+// in one usage block, so thinking_tokens is read when present, else
+// reasoning_tokens. No details at all means no thinking: 0.
+func thinkingTokens(details map[string]any) uint64 {
+	if thinking, ok := details["thinking_tokens"].(float64); ok {
 		return uint64(thinking)
 	}
-	return uint64(reasoning)
+	return uint64(number(details["reasoning_tokens"]))
 }
 
 // readModel reads the model the vendor says answered a response, nil when it

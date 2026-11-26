@@ -367,13 +367,13 @@ describe("the vendor's usage block", () => {
     expect(usageOf(USAGE)?.provisional).toBe(true);
   });
 
-  it("reads thinking_tokens, the vendor's name, out of the output-token details", () => {
+  it("reads thinking_tokens, the transcript's name, out of the output-token details", () => {
     const carried = usageOf({ ...USAGE, output_tokens_details: { thinking_tokens: 209 } });
 
     expect(carried?.outputThinkingTokens).toBe(209n);
   });
 
-  it("still reads reasoning_tokens, the name the earlier harvest modeled", () => {
+  it("reads reasoning_tokens, the SDK stream's name, out of the output-token details", () => {
     const carried = usageOf({ ...USAGE, output_tokens_details: { reasoning_tokens: 7 } });
 
     expect(carried?.outputThinkingTokens).toBe(7n);
@@ -383,26 +383,6 @@ describe("the vendor's usage block", () => {
     const carried = usageOf({ ...USAGE, output_tokens_details: { thinking_tokens: 209, reasoning_tokens: 7 } });
 
     expect(carried?.outputThinkingTokens).toBe(209n);
-  });
-
-  it("warns when the two names disagree", () => {
-    const records = logRecordsDuring(() =>
-      usageOf({ ...USAGE, output_tokens_details: { thinking_tokens: 209, reasoning_tokens: 7 } }),
-    );
-
-    expect(
-      records
-        .filter((r) => r.message === "the vendor's output-token details name two different thinking counts; taking thinking_tokens")
-        .map((r) => ({ level: r.level, thinking: r.context.thinking_tokens, reasoning: r.context.reasoning_tokens })),
-    ).toEqual([{ level: "warn", thinking: 209, reasoning: 7 }]);
-  });
-
-  it("does not warn when the two names agree", () => {
-    const records = logRecordsDuring(() =>
-      usageOf({ ...USAGE, output_tokens_details: { thinking_tokens: 7, reasoning_tokens: 7 } }),
-    );
-
-    expect(records.filter((r) => r.level === "warn")).toEqual([]);
   });
 
   it("counts no thinking when the vendor wrote no output-token details", () => {

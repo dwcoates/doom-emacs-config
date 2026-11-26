@@ -105,7 +105,7 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		CreatedAgentId:       agentID(created),
 		Prompt:               prompt,
 		Report:               subagentReport(result),
-		Totals:               c.subagentTotals(result, at),
+		Totals:               subagentTotals(result),
 		ResolvedSubagentType: optionalString(pick(result, "agentType", "resolvedSubagentType")),
 		SettledAt:            settledAt(ts, call.startedAt),
 	}
@@ -181,12 +181,12 @@ func subagentReport(result map[string]any) *conversationv1.AgentSubagentReport {
 // subagentTotals: THE SET ARM IS THE SPAWN PATH'S HONESTY. A sync run carries the
 // full billed breakdown; an async one carries at most a total-tokens scalar, so a
 // full breakdown on an async run is unproducible and unrepresentable.
-func (c *Converter) subagentTotals(result map[string]any, at Attribution) *conversationv1.AgentSubagentTotals {
+func subagentTotals(result map[string]any) *conversationv1.AgentSubagentTotals {
 	totals := &conversationv1.AgentSubagentTotals{
 		DurationMs:   uint64(number(pick(result, "totalDurationMs", "durationMs"))),
 		ToolUseCount: uint32(number(pick(result, "totalToolUseCount", "toolUseCount"))),
 	}
-	if usage := c.readUsage(obj(result["usage"]), at, "subagent"); usage != nil {
+	if usage := readUsage(obj(result["usage"])); usage != nil {
 		totals.Usage = &conversationv1.AgentSubagentTotals_Full{Full: usage}
 	} else {
 		totals.Usage = &conversationv1.AgentSubagentTotals_TotalOnly{TotalOnly: &conversationv1.AgentSubagentAsyncUsage{

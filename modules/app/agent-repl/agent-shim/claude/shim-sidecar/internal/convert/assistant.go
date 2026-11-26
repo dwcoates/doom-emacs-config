@@ -55,7 +55,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 		return []*storev1.StoreEntry{UnknownEntry(at, "assistant.empty_content", "message.content", record)}
 	}
 
-	usage := c.readUsage(obj(message["usage"]), at, "assistant-line")
+	usage := readUsage(obj(message["usage"]))
 	effort := readEffort(pick(record, "effort"))
 	model := readModel(message["model"])
 
