@@ -85,6 +85,7 @@ import {
   closingSubagentTerminal,
   findAnnouncedKind,
   findUnit,
+  holdsUnitRow,
   resumedAgentAnnouncement,
   revivalFate,
   resumedRecipient,
@@ -2314,7 +2315,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       cause = spawn?.cause ?? turnCause;
     }
     const retry = running.kind === "send" && ledger.retries(running.send.turnId);
-    ledger.countMessage(message as { message?: unknown; isApiErrorMessage?: unknown }, agent, cause, coldNowMs(), retry);
+    ledger.countMessage(message, agent, cause, coldNowMs(), retry);
     const content = (message.message as { content?: unknown } | undefined)?.content;
     if (!Array.isArray(content)) return;
     for (const block of content as readonly { type?: unknown; id?: unknown; name?: unknown; input?: unknown }[]) {
@@ -6957,13 +6958,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     const book = [...first.entries];
     const missing = new Set(units);
-    const mark = (entries: readonly conversationv1.HistoryEntryAt[]): void => {
+    // A UNIT IS FOUND ONCE ITS OWN ROW IS, beyond doubt (`holdsUnitRow`): the
+    // row of a run a send resumed shares the send's id and is placed after it,
+    // so it is met first, and stopping there left the send unread.
+    const mark = (): void => {
       for (const unit of [...missing]) {
         const id = create(conversationv1.AgentActivityIdSchema, { value: unit });
-        if (findUnit(entries, id) !== undefined) missing.delete(unit);
+        if (holdsUnitRow(book, id)) missing.delete(unit);
       }
     };
-    mark(first.entries);
+    mark();
     let boundary = first.boundary;
     let pages = 1;
     while (missing.size > 0 && boundary.case === "more") {
@@ -6972,7 +6976,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const older = await deps.persistence.readAgentPage(agentId, oldest);
       if (older.entries.length === 0) break;
       book.push(...older.entries);
-      mark(older.entries);
+      mark();
       boundary = older.boundary;
       pages++;
     }

@@ -165,18 +165,7 @@ function recordedCreatedAgent(
   recorded: conversationv1.AgentSubagent,
   spawn: conversationv1.AgentActivityId,
 ): conversationv1.AgentId {
-  switch (recorded.result.case) {
-    case "start":
-    case "success":
-    case "failure": {
-      const created = recorded.result.value.createdAgentId;
-      if (created !== undefined && created.value !== "") return created;
-      break;
-    }
-    default:
-      break;
-  }
-  return subagentId(spawn.value);
+  return subagentId(statedCreatedAgent(recorded) ?? spawn.value);
 }
 
 export function closingSubagentTerminal(
@@ -446,12 +435,29 @@ interface ReconcilerOptions extends ReadRetryOptions {
  * A PLAIN SEARCH OVER PAGES the caller already has, deliberately: the reconciler
  * does not open a reading session of its own, because the engine is already
  * paging the book it is reconciling and a second walk would double the reads.
+ *
+ * THE UNIT'S OWN ROW, never a resumed run's: see {@link unitRows}.
  */
 export function findUnit(
   entries: readonly conversationv1.HistoryEntryAt[],
   unit: conversationv1.AgentActivityId,
 ): conversationv1.AgentActivity["item"] | undefined {
   return findUnitEntry(entries, unit)?.item;
+}
+
+/**
+ * Whether the pages read so far hold the unit's OWN row beyond doubt, so a
+ * reader looking for it may stop paging.
+ *
+ * A subagent arm the handle's own announcement shows to be the run a SEND
+ * resumed is not the unit's: the send's own row lies further back, and the
+ * reader keeps paging for it.
+ */
+export function holdsUnitRow(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  unit: conversationv1.AgentActivityId,
+): boolean {
+  return unitRows(entries, unit).settled;
 }
 
 /** One unit's row in a book: its latest item, and the place the row first took. */
@@ -470,6 +476,42 @@ function findUnitEntry(
   entries: readonly conversationv1.HistoryEntryAt[],
   unit: conversationv1.AgentActivityId,
 ): UnitEntry | undefined {
+  return unitRows(entries, unit).own;
+}
+
+/** What a book's pages say about one unit's own row. */
+interface UnitRows {
+  /** The unit's own row, when the pages hold one that is not a resumed run's. */
+  readonly own: UnitEntry | undefined;
+  /** Whether a reader may stop paging: nothing in the pages read says the unit's own row lies further back. */
+  readonly settled: boolean;
+}
+
+/**
+ * THE UNIT'S OWN ROW, told apart from the row of the run a send resumed.
+ *
+ * TWO ROWS SHARE ONE ACTIVITY ID when a SEND resumes a subagent: the send's
+ * card is `activity:<send>`, and the run it woke is filed `resumed-run:<send>`
+ * (`resumedRunUpsertKey`) under the same activity id, as a SUBAGENT arm. Pages
+ * are served newest first and the run starts after the send, so the first row a
+ * search meets is the run's; taken as the unit's, it described a spawn that
+ * created an agent named by the SEND's id, and the daemon drew the resumed
+ * agent's bubble under an agent that does not exist (2026-11-25,
+ * daemon-integration-tier-reorg: `daemon.feed.announced_agent_conflict`).
+ *
+ * Only a subagent arm can be a run's row, so:
+ *
+ * - a row that is NOT a subagent arm is the unit's own, beyond doubt;
+ * - a subagent arm whose handle's own announcement in the book names another
+ *   agent than the unit is a run's row, and never the unit's: the reader pages
+ *   on for the send it shares its id with;
+ * - any other subagent arm is the unit's own. Its own created agent proves
+ *   nothing either way (a recorded spawn may state an agent the minting rule
+ *   would not), and paging on past every live spawn's row read the whole book.
+ */
+function unitRows(entries: readonly conversationv1.HistoryEntryAt[], unit: conversationv1.AgentActivityId): UnitRows {
+  let call: UnitEntry | undefined;
+  let subagent: UnitEntry | undefined;
   for (const at of entries) {
     const entry = at.entry?.entry;
     if (entry?.case !== "agentFrame") continue;
@@ -479,9 +521,33 @@ function findUnitEntry(
     if (update.case !== "activity") continue;
     if (update.value.activityId?.value !== unit.value) continue;
     const place = at.place.case === undefined ? undefined : at.place.value.atMs;
-    return { item: update.value.item, openedAtMs: place === undefined || place <= 0n ? undefined : place };
+    const found = { item: update.value.item, openedAtMs: place === undefined || place <= 0n ? undefined : place };
+    if (found.item.case === "subagent") subagent ??= found;
+    else call ??= found;
   }
-  return undefined;
+  if (call !== undefined) return { own: call, settled: true };
+  if (subagent === undefined) return { own: undefined, settled: false };
+  const kind = announcedKindOf(entries, create(conversationv1.DetachedWorkIdSchema, { value: unit.value }));
+  const announced = kind?.case === "subagent" ? statedAgent(kind.value.agentId) : undefined;
+  if (announced !== undefined && announced !== subagentId(unit.value).value) return { own: undefined, settled: false };
+  return { own: subagent, settled: true };
+}
+
+/** The created agent a recorded subagent arm states, when its arm states one. */
+function statedCreatedAgent(recorded: conversationv1.AgentSubagent): string | undefined {
+  switch (recorded.result.case) {
+    case "start":
+    case "success":
+    case "failure":
+      return statedAgent(recorded.result.value.createdAgentId);
+    default:
+      return undefined;
+  }
+}
+
+/** An agent id's value, when it states one: an empty id names no agent. */
+function statedAgent(agent: conversationv1.AgentId | undefined): string | undefined {
+  return agent === undefined || agent.value === "" ? undefined : agent.value;
 }
 
 /** What a revived shim does with one live item, decided by where it ran. */
@@ -538,13 +604,24 @@ export function findAnnouncedKind(
   entries: readonly conversationv1.HistoryEntryAt[],
   handle: conversationv1.DetachedWorkId,
 ): conversationv1.DetachedWorkKind["kind"]["case"] {
+  return announcedKindOf(entries, handle)?.case;
+}
+
+/**
+ * The kind the first announcement of HANDLE in this book that states one
+ * states, with what it says (a subagent's agent); undefined when none does.
+ */
+function announcedKindOf(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  handle: conversationv1.DetachedWorkId,
+): conversationv1.DetachedWorkKind["kind"] | undefined {
   for (const at of entries) {
     const entry = at.entry?.entry;
     if (entry?.case !== "agentFrame") continue;
     const result = entry.value.result;
     if (result.case !== "detachedWork" || result.value.work?.value !== handle.value) continue;
-    const kind = result.value.kind?.kind.case;
-    if (kind !== undefined) return kind;
+    const kind = result.value.kind?.kind;
+    if (kind?.case !== undefined) return kind;
   }
   return undefined;
 }

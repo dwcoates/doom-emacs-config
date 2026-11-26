@@ -16252,6 +16252,84 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     expect(live?.map((work) => work.work?.value)).toEqual([]);
   });
 
+  /** The run the send woke, as its own row: a running beat under the send's id, placed after the send. */
+  function resumedRunBeat(): conversationv1.HistoryEntryAt {
+    return bookUnit("3", "toolu_send", {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "update",
+          value: create(conversationv1.AgentSubagentUpdateSchema, {}),
+        },
+      }),
+    });
+  }
+
+  /** The send's own detachment, naming the agent it resumed. */
+  function sendAnnouncement(): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "2a" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "detachedWork",
+              value: create(conversationv1.AgentDetachedWorkSchema, {
+                work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_send" }),
+                kind: create(conversationv1.DetachedWorkKindSchema, {
+                  kind: { case: "subagent", value: create(conversationv1.DetachedWorkKindSubagentSchema, { agentId: SPAWN }) },
+                }),
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  /** The failure the closing of `activity:toolu_send` settles with, or undefined. */
+  function sendClosing(h: Harness): conversationv1.AgentSubagentFailure | undefined {
+    const closing = h.persistence.buffered.find((entry) => entry.upsertKey === "activity:toolu_send");
+    const frame = closing?.item.kind === "frame" ? closing.item.frame : undefined;
+    const activity = frame?.result.case === "update" && frame.result.value.update.case === "activity" ? frame.result.value.update.value : undefined;
+    return activity?.item.case === "subagent" && activity.item.value.result.case === "failure" ? activity.item.value.result.value : undefined;
+  }
+
+  it("closes a send-resumed run under the agent the store names when the run's own row is newer than the send", async () => {
+    // THE REGRESSION (2026-11-25, daemon-integration-tier-reorg): the run's
+    // `resumed-run:<send>` row shares the send's id and is served first, and
+    // taking it as the unit's minted an agent named by the send's id.
+    // Arrange.
+    const h = restoredHarness();
+    const book = resumedBook();
+    h.persistence.page = create(conversationv1.HistoryPageSchema, { ...book, entries: [resumedRunBeat(), ...book.entries] });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(sendClosing(h)?.createdAgentId?.value).toBe("toolu_spawn");
+  });
+
+  it("reads past the run's own row to the send on an older page", async () => {
+    // Arrange.
+    const h = restoredHarness();
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [resumedRunBeat(), sendAnnouncement()],
+      boundary: { case: "more", value: create(conversationv1.HistoryMoreSchema, {}) },
+    });
+    h.persistence.olderPages = [resumedBook()];
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect([h.persistence.olderPageAfter.length, sendClosing(h)?.createdAgentId?.value]).toEqual([1, "toolu_spawn"]);
+  });
+
   it("closes a send-resumed run the store names no agent for under the send's own id, at ERROR", async () => {
     // Arrange.
     const h = restoredHarness();
@@ -18215,7 +18293,7 @@ describe("the slash-command catalog", () => {
     return {
       ...query.contextUsage,
       skills: { totalSkills: 1, includedSkills: 1, tokens: 1, skillFrontmatter: [{ name: skill, source: "projectSettings", path: file, tokens: 1 }] },
-    } as ContextUsageLike;
+    };
   }
 
   it("restates the catalog with each skill's file once the context reading lands", async () => {

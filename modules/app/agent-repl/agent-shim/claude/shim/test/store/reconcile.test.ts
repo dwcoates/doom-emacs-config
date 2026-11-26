@@ -26,11 +26,13 @@ import {
   ownedRunsOf,
   revivalFate,
   findUnit,
+  holdsUnitRow,
   reconciledCoordinate,
   resumedAgentAnnouncement,
   resumedRecipient,
   stoppedBashTerminal,
 } from "../../src/store/reconcile.js";
+import { detachedWorkKind } from "../../src/convert/detached.js";
 import { createPersistence } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import { agent, readEntry, socketPathForTest, spawnEntry, unit } from "./persistence-fixtures.js";
@@ -1055,6 +1057,160 @@ describe("findUnit", () => {
       expect(found).toBeUndefined();
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// The unit's own row, told apart from the run a send resumed
+// ---------------------------------------------------------------------------
+
+describe("the unit's own row beside the run a send resumed", () => {
+  const SEND = create(conversationv1.AgentActivityIdSchema, { value: "toolu_send" });
+
+  /** One frame of the book, at `at`. */
+  function frameAt(at: string, result: conversationv1.AgentFrame["result"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: at }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: { case: "agentFrame", value: create(conversationv1.AgentFrameSchema, { agentId: BOOK, result }) },
+      }),
+    });
+  }
+
+  /** One activity row of the send's id. */
+  function row(at: string, item: conversationv1.AgentActivity["item"]): conversationv1.HistoryEntryAt {
+    return frameAt(at, {
+      case: "update",
+      value: create(conversationv1.AgentUpdateSchema, {
+        update: { case: "activity", value: create(conversationv1.AgentActivitySchema, { activityId: SEND, item }) },
+      }),
+    });
+  }
+
+  /** A subagent arm under the send's id. */
+  const subagentRow = (at: string, result: conversationv1.AgentSubagent["result"]): conversationv1.HistoryEntryAt =>
+    row(at, { case: "subagent", value: create(conversationv1.AgentSubagentSchema, { result }) });
+
+  const beat = (): conversationv1.HistoryEntryAt =>
+    subagentRow("3", { case: "update", value: create(conversationv1.AgentSubagentUpdateSchema, {}) });
+
+  const settledNaming = (created: string): conversationv1.HistoryEntryAt =>
+    subagentRow("3", {
+      case: "success",
+      value: create(conversationv1.AgentSubagentSuccessSchema, { createdAgentId: agent(created) }),
+    });
+
+  const startNaming = (created: string): conversationv1.HistoryEntryAt =>
+    subagentRow("1", {
+      case: "start",
+      value: create(conversationv1.AgentSubagentStartSchema, { createdAgentId: agent(created) }),
+    });
+
+  const sendRow = (): conversationv1.HistoryEntryAt =>
+    row("1", { case: "sendMessage", value: create(conversationv1.AgentSendMessageSchema, {}) });
+
+  const bashRow = (): conversationv1.HistoryEntryAt =>
+    row("1", {
+      case: "bash",
+      value: create(conversationv1.AgentBashSchema, {
+        result: { case: "start", value: create(conversationv1.AgentBashStartSchema, {}) },
+      }),
+    });
+
+  /** The handle's own announcement, naming `named` as the agent it runs. */
+  const announcing = (named: string): conversationv1.HistoryEntryAt =>
+    frameAt("2", {
+      case: "detachedWork",
+      value: create(conversationv1.AgentDetachedWorkSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: SEND.value }),
+        kind: detachedWorkKind({ kind: "subagent", agent: agent(named), commission: undefined }),
+      }),
+    });
+
+  const cases: readonly {
+    readonly name: string;
+    readonly book: readonly conversationv1.HistoryEntryAt[];
+    readonly own: string | undefined;
+    readonly settled: boolean;
+  }[] = [
+    { name: "a run's beat served before the send", book: [beat(), sendRow()], own: "sendMessage", settled: true },
+    { name: "a beat alone, which nothing shows to be a run's", book: [beat()], own: "subagent", settled: true },
+    { name: "a settle stating an agent the minting rule would not", book: [settledNaming("toolu_spawn")], own: "subagent", settled: true },
+    { name: "a run's beat whose announcement names the agent it resumed", book: [beat(), announcing("toolu_spawn")], own: undefined, settled: false },
+    { name: "a run's settle whose announcement names the agent it resumed", book: [settledNaming("toolu_spawn"), announcing("toolu_spawn")], own: undefined, settled: false },
+    { name: "a spawn's beat whose announcement names the unit", book: [beat(), announcing("toolu_send")], own: "subagent", settled: true },
+    { name: "a spawn's start naming the unit", book: [startNaming("toolu_send")], own: "subagent", settled: true },
+    { name: "a shell's row", book: [bashRow()], own: "bash", settled: true },
+    { name: "no row of the unit", book: [announcing("toolu_send")], own: undefined, settled: false },
+  ];
+
+  for (const testCase of cases) {
+    it(`finds ${testCase.own ?? "no row"} as the unit's own, given ${testCase.name}`, () => {
+      // Act.
+      const found = findUnit(testCase.book, SEND);
+
+      // Assert.
+      expect(found?.case).toBe(testCase.own);
+    });
+
+    it(`${testCase.settled ? "holds" : "does not yet hold"} the unit's own row, given ${testCase.name}`, () => {
+      // Act, Assert.
+      expect(holdsUnitRow(testCase.book, SEND)).toBe(testCase.settled);
+    });
+  }
+
+  it("reads the handle's agent past an announcement that states no kind, as findAnnouncedKind reads its kind", () => {
+    // Arrange: the older announcement, written before every one carried its kind, is served first.
+    const kindless = frameAt("2", {
+      case: "detachedWork",
+      value: create(conversationv1.AgentDetachedWorkSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: SEND.value }),
+      }),
+    });
+    const book = [beat(), kindless, announcing("toolu_spawn")];
+
+    // Act, Assert.
+    expect([
+      findAnnouncedKind(book, create(conversationv1.DetachedWorkIdSchema, { value: SEND.value })),
+      findUnit(book, SEND),
+    ]).toEqual(["subagent", undefined]);
+  });
+
+  it("hands a send's handle to the resume path rather than describing the run's row as a spawn", () => {
+    // Arrange.
+    const undescribed: string[] = [];
+
+    // Act.
+    const announced = announceLiveWork(
+      [beat(), announcing("toolu_spawn"), sendRow()],
+      [create(conversationv1.DetachedWorkIdSchema, { value: SEND.value })],
+      BOOK,
+      (handle) => undescribed.push(handle.value),
+    );
+
+    // Assert.
+    expect([announced, undescribed]).toEqual([[], ["toolu_send"]]);
+  });
+
+  it("reads the send's recipient though the run's row is served first", () => {
+    // Arrange.
+    const send = row("1", {
+      case: "sendMessage",
+      value: create(conversationv1.AgentSendMessageSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentSendMessageSuccessSchema, {
+            recipient: { case: "recipientAgentId", value: agent("a5583") },
+          }),
+        },
+      }),
+    });
+
+    // Act, Assert.
+    expect(resumedRecipient([beat(), send], create(conversationv1.DetachedWorkIdSchema, { value: SEND.value }))).toEqual({
+      kind: "locator",
+      vendorTaskId: "a5583",
+    });
+  });
 });
 
 describe("announceLiveWork for the non-shell kinds", () => {
