@@ -304,6 +304,52 @@ final class NotificationCloserTests: XCTestCase {
         XCTAssertEqual(warnings.map { $0.context["window"] }, ["w1", "w2"])
         XCTAssertEqual(warnings.map { $0.context["layout"] }, ["AXWindow(AXGroup)", "AXWindow"])
     }
+
+    func testAWindowEmptiedAfterItsNotificationLeftIsNotWarned() {
+        // Arrange
+        screen.shown = ScreenScan(notifications: [slack("A")], notificationWindows: ["w1"])
+        closer.screenChanged()
+        scheduler.fireArmed()
+
+        // Act: the closed banner's window lingers for a moment, empty.
+        screen.shown = ScreenScan(notifications: [], emptyWindows: ["w1": "AXWindow(AXGroup)"])
+        closer.screenChanged()
+        closer.screenChanged()
+
+        // Assert
+        XCTAssertTrue(log.records.filter { $0.level == .warn }.isEmpty)
+        let emptied = log.records.filter { $0.level == .debug && $0.message == "a Notification Center window emptied as its notification left" }
+        XCTAssertEqual(emptied.map { $0.context["window"] }, ["w1"])
+        XCTAssertEqual(emptied.first?.context["layout"], "AXWindow(AXGroup)")
+    }
+
+    func testAnEmptyWindowThatNeverHeldANotificationIsWarned() {
+        // Arrange
+        screen.shown = ScreenScan(notifications: [], emptyWindows: ["w1": "AXWindow(AXGroup)"])
+
+        // Act
+        closer.screenChanged()
+
+        // Assert
+        let warnings = log.records.filter { $0.level == .warn && $0.message.hasPrefix("a Notification Center window holds no notification") }
+        XCTAssertEqual(warnings.map { $0.context["layout"] }, ["AXWindow(AXGroup)"])
+    }
+
+    func testAClosedWindowIsForgottenSoItsKeyReusedEmptyIsWarned() {
+        // Arrange: w1 held a notification, then closed.
+        screen.shown = ScreenScan(notifications: [slack("A")], notificationWindows: ["w1"])
+        closer.screenChanged()
+        screen.shown = ScreenScan(notifications: [])
+        closer.screenChanged()
+
+        // Act: a new window under the same key opens empty.
+        screen.shown = ScreenScan(notifications: [], emptyWindows: ["w1": "AXWindow"])
+        closer.screenChanged()
+
+        // Assert
+        let warnings = log.records.filter { $0.level == .warn && $0.message.hasPrefix("a Notification Center window holds no notification") }
+        XCTAssertEqual(warnings.count, 1)
+    }
 }
 
 final class NotificationDurationTests: XCTestCase {
