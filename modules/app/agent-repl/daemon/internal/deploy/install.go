@@ -271,11 +271,12 @@ func stampsBeside(stagedDir, liveDir, prefix string) map[string]string {
 // machine has healed, so a clean cache bin logs nothing.
 func (d *Deployer) removeStrayLauncherApp(live Live) error {
 	stray := live.CacheBinPath(LauncherBundle)
-	if _, err := os.Lstat(stray); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	stands, err := pathStands(stray)
+	if err != nil {
 		return fmt.Errorf("read whether a stray launcher app stands at %s: %w", stray, err)
+	}
+	if !stands {
+		return nil
 	}
 	if err := os.RemoveAll(stray); err != nil {
 		return fmt.Errorf("remove the stray launcher app at %s: %w", stray, err)
