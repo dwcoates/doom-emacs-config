@@ -674,9 +674,12 @@ type fakeFleet struct {
 	// parkedAdoptions records every AdoptParked, with the gate it raised.
 	parkedAdoptions map[ids.WorkspaceID]*conversationv1.SessionCold
 	// listening are the workspaces an inert survivor listens for, whose
-	// AdoptInert holds one; inertAdoptions records each it held.
+	// StandDownInert adopts one and stands it down; inertAdoptions records
+	// each it adopted. inertErr is what StandDownInert answers, per
+	// workspace.
 	listening      map[ids.WorkspaceID]bool
 	inertAdoptions []ids.WorkspaceID
+	inertErr       map[ids.WorkspaceID]error
 	// stoodDown records every StandDown of a held shim.
 	stoodDown []ids.WorkspaceID
 	// factsAwaited records every AwaitFacts.
@@ -712,6 +715,7 @@ func newFakeFleet(order *steps) *fakeFleet {
 
 		parkedAdoptions: make(map[ids.WorkspaceID]*conversationv1.SessionCold),
 		listening:       make(map[ids.WorkspaceID]bool),
+		inertErr:        make(map[ids.WorkspaceID]error),
 	}
 }
 
@@ -770,18 +774,27 @@ func (f *fakeFleet) AdoptParked(_ context.Context, ws ids.WorkspaceID, cold *con
 	return c, nil
 }
 
-// AdoptInert holds the scripted inert survivor, when one listens.
-func (f *fakeFleet) AdoptInert(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, bool, error) {
-	f.order.record("adopt_inert")
+// StandDownInert adopts the scripted inert survivor, when one listens, and
+// stands it down, answering the scripted failure.
+func (f *fakeFleet) StandDownInert(ctx context.Context, ws ids.WorkspaceID) (int, bool, error) {
+	f.order.record("stand_down_inert")
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	if err := f.inertErr[ws]; err != nil {
+		f.mu.Unlock()
+		return 0, false, err
+	}
 	if !f.listening[ws] {
-		return nil, false, nil
+		f.mu.Unlock()
+		return 0, false, nil
 	}
 	f.inertAdoptions = append(f.inertAdoptions, ws)
 	c := newFakeShim(5454, f.order)
 	f.live[ws] = c
-	return c, true, nil
+	f.mu.Unlock()
+	if err := f.StandDown(ctx, ws); err != nil {
+		return c.PID(), false, err
+	}
+	return c.PID(), true, nil
 }
 
 // InertAdoptionsAndStandDowns answers every inert survivor held and every

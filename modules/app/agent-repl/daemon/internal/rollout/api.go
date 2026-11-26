@@ -880,10 +880,13 @@ type ShimFleet interface {
 	// AdoptParked dials a running shim parked at its cold gate, holds it with
 	// no watcher, and raises the carried gate on this daemon.
 	AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (shimclient.Client, error)
-	// AdoptInert holds the inert survivor of a workspace this daemon serves
-	// with no shim -- a process listening whose lock reads free -- and answers
-	// false when no listener is there (workspace.Fleet.AdoptInert).
-	AdoptInert(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, bool, error)
+	// StandDownInert adopts and stands down, under the workspace's start
+	// gate, the inert survivor of a workspace this daemon serves with no shim
+	// -- a process listening whose lock reads free -- answering its pid and
+	// true once it is stood down, and false when no survivor is there: no
+	// listener, or a client this daemon's own bring-up holds
+	// (workspace.Fleet.StandDownInert).
+	StandDownInert(ctx context.Context, ws ids.WorkspaceID) (int, bool, error)
 	// RaiseCarriedColdGate raises a carried cold gate over the parked shim a
 	// fresh boot already adopted: the boot's adoption dials it, the gate is
 	// daemon memory the carry brought across.
