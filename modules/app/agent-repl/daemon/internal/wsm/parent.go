@@ -546,9 +546,9 @@ func describeTarget(ctx context.Context, tx *sql.Tx, repo RepoID, parent *Worksp
 // following recorded parents upward from start. The chain is bounded by the
 // number of workspaces: a longer walk means the stored parents already cycle,
 // which no write admits, so it is corruption and is returned as an error.
-func descendsFrom(ctx context.Context, tx *sql.Tx, start, ancestor WorkspaceID) (bool, error) {
+func descendsFrom(ctx context.Context, q rowQuerier, start, ancestor WorkspaceID) (bool, error) {
 	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&total); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&total); err != nil {
 		return false, err
 	}
 	at := start
@@ -557,7 +557,7 @@ func descendsFrom(ctx context.Context, tx *sql.Tx, start, ancestor WorkspaceID) 
 			return true, nil
 		}
 		var parent sql.NullString
-		if err := scanWorkspaceRow(ctx, tx, at, "parent_id", &parent); err != nil {
+		if err := scanWorkspaceRow(ctx, q, at, "parent_id", &parent); err != nil {
 			return false, fmt.Errorf("wsm: walk the parents of %s at %s: %w", start, at, err)
 		}
 		if !parent.Valid {

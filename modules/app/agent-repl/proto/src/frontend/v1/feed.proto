@@ -3425,24 +3425,26 @@ message FeedWorktreeBranch {
 }
 
 // ⑦ A CHILD WORKSPACE'S BUBBLE: the door to a child from the workspace that
-// made it. ONE ROW, NO SUB-FEED: the bubble mirrors none of the child's turns
-// and carries none of its merge's tabs. Its content is the child's own
-// summaries, and a click on the child's name selects the child, whose own
-// feed holds everything else.
+// made it. A BUBBLE ROW, like a subagent's: this message is its HEAD, and its
+// SUB-FEED is the CHILD'S OWN ROOT FEED, opened on the row's own FeedId
+// (agentrepl.v1.OpenFeedRequest.feed) and served from the child's workspace,
+// never copied into this one. A click on the child's name selects the child.
 //
 //   ┌─ border: the child's status color while it is open ─────────────────┐
 //   │ ⇄ fix-flaky → ~/.config/doom   merged 0.591.1              2m 6s    │
 //   │   Fix the flaky reconnect test                   (folded: short)    │
 //   │   • Retries the reconnect … • Pins the backoff …  (open: long)      │
+//   │   … the child's own feed, its newest page then live …  (open)       │
 //   └─────────────────────────────────────────────────────────────────────┘
 //
 // A ROW PER CHILD, whatever the child does: one made to land a branch it was
 // cut from, one made to do new work, sync or not. The daemon re-publishes the
 // row whole whenever anything it draws changes: the child's status, its
 // summaries, its landing, its close, its removal. THE FOLD IS THE READER'S,
-// webview-local: the bubble is drawn folded at first, showing the short
-// summary, and open it shows the long one. Both summaries ride every push, so
-// a fold needs no round-trip.
+// as every bubble's that ships no fold is: the bubble is drawn folded at
+// first, showing the short summary, and open it shows the long one above the
+// child's feed. Both summaries ride every push, so a fold needs no round-trip
+// for them.
 message FeedChild {
   // The head line: the child's identity, where it lands, how it stands, its
   // clock.

@@ -46,7 +46,9 @@ export type GetFeedPageRequest = Message<"agentrepl.v1.GetFeedPageRequest"> & {
 
   /**
    * WHICH feed. UNSET = the workspace's root feed; SET = a sub-feed's
-   * address (a subagent bubble row's own FeedId), echoed as served.
+   * address (a bubble row's own FeedId), echoed as served. A feed of this
+   * workspace or of any workspace beneath it is served, as OpenFeed's is
+   * (agentrepl.v1.OpenFeedRequest.feed).
    *
    * @generated from field: optional frontend.v1.FeedId feed = 2;
    */
@@ -176,7 +178,8 @@ export type GetFeedPageError = Message<"agentrepl.v1.GetFeedPageError"> & {
    */
   cause: {
     /**
-     * The workspace id is not in the daemon's registry.
+     * The workspace id, or the workspace whose feed `feed` addresses, is not
+     * in the daemon's registry.
      *
      * @generated from field: agentrepl.v1.GetFeedPageUnknownWorkspace unknown_workspace = 1;
      */
@@ -216,7 +219,8 @@ export type GetFeedPageError = Message<"agentrepl.v1.GetFeedPageError"> & {
     case: "feedUndecodable";
   } | {
     /**
-     * The FeedId decodes to another workspace.
+     * The FeedId decodes to a workspace that is neither this one nor beneath
+     * it.
      *
      * @generated from field: agentrepl.v1.GetFeedPageFeedNotInWorkspace feed_not_in_workspace = 7;
      */

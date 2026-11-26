@@ -612,10 +612,25 @@ type server struct {
 // session; past it, an unminted identity is the real defect the ERROR names.
 const hostIdentityDescribeBound = 10 * time.Second
 
-// tokenTarget is the workspace and feed one minted watch token addresses.
+// tokenTarget is the workspace and feed one minted watch token addresses, and
+// the workspace whose page opened it.
 type tokenTarget struct {
-	WS   ids.WorkspaceID
+	// WS is the workspace that owns the feed.
+	WS ids.WorkspaceID
+	// Feed is the feed within WS.
 	Feed feedid.Feed
+	// Viewer is the workspace whose page opened the feed: WS itself, or an
+	// ancestor of WS whose page draws a child's feed in a child bubble.
+	Viewer ids.WorkspaceID
+}
+
+// pageRoot reports whether the token tails the root feed OF THE PAGE THAT
+// OPENED IT, the one feed the page's root-only pushes (its selection, image
+// overlay, composer entry, response question and highlight) ride. A child's
+// root feed drawn in its parent's bubble is a sub-feed of that page and
+// carries none of them.
+func (t tokenTarget) pageRoot() bool {
+	return t.Feed.Root && t.WS == t.Viewer
 }
 
 // New builds the handler graph. The returned handler serves Connect over

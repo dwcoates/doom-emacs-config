@@ -1,5 +1,6 @@
 // endpoint_open_feed.proto — OpenFeed: opens ONE feed — the workspace's root
-// feed, or a subagent bubble's sub-feed. FEED section. Answers with the
+// feed, or a bubble's sub-feed (a subagent's, a merge's, a shell's, or a
+// child's, which is the child workspace's own root feed). FEED section. Answers with the
 // feed's newest page and mints the watch token WatchFeed echoes; the client
 // paints the page, then tails. Called when a workspace view opens (root) and
 // when a bubble is expanded (sub-feed); a collapsed bubble's token is simply
@@ -20,8 +21,12 @@ message OpenFeedRequest {
   // The workspace whose feed universe this is.
   workspace.v1.WorkspaceRef workspace = 1;
   // WHICH feed. UNSET = the workspace's root feed. SET = a sub-feed the
-  // client was shown — a subagent bubble row's own FeedId, which addresses
-  // the feed within it. Only served ids open; a client never constructs one.
+  // client was shown — a bubble row's own FeedId, which addresses the feed
+  // within it. A child bubble's (frontend.v1.FeedChild) addresses the CHILD
+  // workspace's own root feed, and any row of that feed addresses its own
+  // sub-feed in the child: a feed of this workspace OR OF ANY WORKSPACE
+  // BENEATH IT opens on this workspace's page. Only served ids open; a client
+  // never constructs one.
   optional frontend.v1.FeedId feed = 2;
   // WHAT THE READER ALREADY HOLDS of this feed, when it opens it again (a
   // page reattaching after a handover, a tail that ended and reopens). SET:
@@ -71,8 +76,9 @@ message OpenFeedSuccess {
   // open), as the whole replacement WatchFeedResponse.row carries.
   FeedWatchToken watch = 2;
   // The root feed's held section as it stands at the pin, drawn after the
-  // page's rows. SET for the root feed and UNSET for every sub-feed, which has
-  // no held section. Every later change of it arrives as a WatchFeed
+  // page's rows. SET for the workspace's own root feed and UNSET for every
+  // sub-feed, a child's root feed drawn in its bubble included, which has no
+  // held section. Every later change of it arrives as a WatchFeed
   // held-section frame.
   optional frontend.v1.FeedHeld held = 3;
   // SET exactly when the request carried `resume`: `page` then carries only
@@ -98,7 +104,8 @@ message OpenFeedResumed {
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message OpenFeedError {
   oneof cause {
-    // The workspace id is not in the daemon's registry.
+    // The workspace id, or the workspace whose feed `feed` addresses, is not
+    // in the daemon's registry.
     OpenFeedUnknownWorkspace unknown_workspace = 1;
     // The echoed dir disagrees with the registry's dir for this id.
     OpenFeedWorkspaceRefMismatch workspace_ref_mismatch = 2;
@@ -108,7 +115,8 @@ message OpenFeedError {
     OpenFeedNotYetAdopted not_yet_adopted = 4;
     // The FeedId does not decode.
     OpenFeedFeedUndecodable feed_undecodable = 5;
-    // The FeedId decodes to another workspace.
+    // The FeedId decodes to a workspace that is neither this one nor beneath
+    // it.
     OpenFeedFeedNotInWorkspace feed_not_in_workspace = 6;
   }
 }

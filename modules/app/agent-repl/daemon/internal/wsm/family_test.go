@@ -668,3 +668,52 @@ func TestFamilyRefusalsNameEachWorkspaceByItsName(t *testing.T) {
 		})
 	}
 }
+
+func TestDescendsFromFollowsTheRecordedParents(t *testing.T) {
+	tests := []struct {
+		name     string
+		ws       string
+		ancestor string
+		want     bool
+	}{
+		{name: "a workspace is its own ancestor", ws: "parent", ancestor: "parent", want: true},
+		{name: "a child descends from its parent", ws: "child", ancestor: "parent", want: true},
+		{name: "a grandchild descends from its grandparent", ws: "grandchild", ancestor: "parent", want: true},
+		{name: "a parent does not descend from its child", ws: "parent", ancestor: "child", want: false},
+		{name: "a stranger does not descend from the parent", ws: "stranger", ancestor: "parent", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "parent", "child", "grandchild", "stranger")
+			f.retarget(t, s, "child", "parent")
+			f.retarget(t, s, "grandchild", "child")
+
+			// Act
+			got, err := s.DescendsFrom(context.Background(), *f.id(tt.ws), *f.id(tt.ancestor))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("DescendsFrom: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("DescendsFrom(%s, %s) = %v, want %v", tt.ws, tt.ancestor, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDescendsFromRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newParentFamily(t, s, "parent")
+
+	// Act
+	_, err := s.DescendsFrom(context.Background(), WorkspaceID("ws-unknown"), *f.id("parent"))
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DescendsFrom of an unknown workspace = %v, want ErrNotFound", err)
+	}
+}

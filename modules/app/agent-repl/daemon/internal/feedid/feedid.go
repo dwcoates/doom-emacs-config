@@ -97,7 +97,8 @@ const (
 	// on the deploy mediator's root feed. Keyed by the deploy's start.
 	KindHotReload RowKind = "hot_reload"
 	// KindChild is a child workspace's bubble in its parent's root feed
-	// (frontend.v1.FeedChild), keyed by the child (internal/children).
+	// (frontend.v1.FeedChild), keyed by the child (internal/children). Its
+	// FeedId resolves (via DecodeFeed) to the child's own root feed.
 	KindChild RowKind = "child"
 )
 
@@ -345,6 +346,16 @@ func DecodeFeed(id *frontendv1.FeedId) (WorkspaceID, Feed, error) {
 		}
 		shell := ShellID(row.ID)
 		return ws, Feed{Shell: &shell}, nil
+	case row.Kind == KindChild:
+		// A child bubble row addresses the CHILD'S OWN ROOT FEED, the feed its
+		// own page draws: the bubble's sub-feed is the child's conversation,
+		// served from the child's workspace rather than copied into the
+		// parent's. The answered workspace is therefore the child's, not the
+		// workspace whose feed carries the row.
+		if row.ID == "" {
+			return "", Feed{}, fmt.Errorf("feedid: child row carries no workspace id")
+		}
+		return WorkspaceID(row.ID), Feed{Root: true}, nil
 	default:
 		return "", Feed{}, fmt.Errorf("feedid: row kind %q addresses no sub-feed", row.Kind)
 	}

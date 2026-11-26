@@ -188,6 +188,18 @@ func (s *store) OpenChildren(ctx context.Context, parent WorkspaceID) ([]FamilyR
 	return out, err
 }
 
+// DescendsFrom answers whether WS is ANCESTOR itself or lies beneath it,
+// following recorded parents upward (descendsFrom).
+func (s *store) DescendsFrom(ctx context.Context, ws, ancestor WorkspaceID) (bool, error) {
+	var out bool
+	err := s.read(ctx, "daemon.wsm.descends_from", dlog.Context{"workspace": string(ws), "ancestor": string(ancestor)}, func(ctx context.Context) error {
+		var err error
+		out, err = descendsFrom(ctx, s.q(ctx), ws, ancestor)
+		return err
+	})
+	return out, err
+}
+
 // familyQuerier is what a family rule reads through: the write's own
 // transaction, or the handle for a verb's read ahead of it.
 type familyQuerier interface {

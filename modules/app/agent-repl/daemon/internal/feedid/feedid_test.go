@@ -306,6 +306,35 @@ func TestDecodeFeedDerivesMergeSubFeedFromMergeHead(t *testing.T) {
 	}
 }
 
+func TestDecodeFeedDerivesTheChildsRootFeedFromAChildRow(t *testing.T) {
+	// Arrange: a child's bubble row, on its parent's root feed.
+	ref := Ref{WS: "ws-parent", Feed: Feed{Root: true}, Row: RowKey{Kind: KindChild, ID: "ws-child"}}
+
+	// Act.
+	ws, feed, err := DecodeFeed(Encode(ref))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("DecodeFeed: %v", err)
+	}
+	if ws != "ws-child" || !feed.Root {
+		t.Fatalf("DecodeFeed = (%s, %+v), want the child's root feed (ws-child, root)", ws, feed)
+	}
+}
+
+func TestDecodeFeedRejectsAChildRowWithNoWorkspace(t *testing.T) {
+	// Arrange: a child row whose key names no child.
+	ref := Ref{WS: "ws-parent", Feed: Feed{Root: true}, Row: RowKey{Kind: KindChild}}
+
+	// Act.
+	_, _, err := DecodeFeed(Encode(ref))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("DecodeFeed accepted a child row that names no child")
+	}
+}
+
 func TestDecodeFeedRejectsRowWithNoSubFeed(t *testing.T) {
 	// Arrange: an ordinary prompt row addresses no sub-feed.
 	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: RowKey{Kind: KindPrompt, ID: "p1"}}
