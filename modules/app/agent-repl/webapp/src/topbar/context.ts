@@ -21,5 +21,5 @@ export interface TopbarContext {
    * click. The mount wires it to the feed's one jump (`jumpToWorkspace`), so
    * the strip's modules import no feed module.
    */
-  readonly selectWorkspace: (host: HTMLElement, target: WorkspaceRef) => Promise<void>;
+  readonly jumpTo: (host: HTMLElement, target: WorkspaceRef) => Promise<void>;
 }

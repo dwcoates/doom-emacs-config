@@ -166,7 +166,7 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
         reveals,
         ctx,
         openLogin: watchDeps.openLogin,
-        selectWorkspace: (host, target) => jumpToWorkspace(host, ctx, target, CHILD_JUMP),
+        jumpTo: (host, target) => jumpToWorkspace(host, ctx, target, CHILD_JUMP),
       };
       /** The sign-in request this page last opened the login for. */
       let openedSignIn: string | null = null;

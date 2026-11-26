@@ -88,7 +88,7 @@ export function topbarContext(
   onTestFinished(() => reveals.dispose());
   return {
     host,
-    tc: { ctx, reveals, openLogin, selectWorkspace: (where, target) => jumpToWorkspace(where, ctx, target, FIXTURE_JUMP) },
+    tc: { ctx, reveals, openLogin, jumpTo: (where, target) => jumpToWorkspace(where, ctx, target, FIXTURE_JUMP) },
   };
 }
 

@@ -271,7 +271,7 @@ export function drawTitleChildMenu(menu: TopbarTitleChildMenu, tc: TopbarContext
     row.append(mark);
     row.addEventListener("click", () => {
       tc.reveals.close();
-      void guardMalformed(tc.ctx, "topbar.child-menu.select", tc.selectWorkspace(row, target));
+      void guardMalformed(tc.ctx, "topbar.child-menu.select", tc.jumpTo(row, target));
     });
     list.append(row);
   });
