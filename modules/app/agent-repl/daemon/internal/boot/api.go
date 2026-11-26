@@ -310,7 +310,9 @@ type Deps struct {
 	// service) loaded and on the installed build
 	// (deploy.Restarter.EnsureStandalonesCurrent). It runs BESIDE the
 	// bring-up's starts like the sidecar's half: no shim writes into one, so
-	// nothing waits on it.
+	// no bring-up waits on it. The persistent-wifi standing watch does
+	// (cmd/agent-repld's standalones gate): this step installs the socket
+	// holder that watch dials.
 	EnsureStandalones func(context.Context) error
 	// Unserved states, on a workspace's views, that this daemon serves no
 	// session for it: its link is dead before it ever connected. The

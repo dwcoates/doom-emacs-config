@@ -81,7 +81,9 @@ const DefaultFirstStandingBound = 2100 * time.Millisecond
 // standing, so a service that restarted is read again from its first message.
 // The socket is owned by a socket holder, so a connect made while the service
 // restarts queues until the next one accepts, and there is no start-up ordering
-// and no retry timer. A connection that ends after serving at least one
+// and no retry timer. The daemon dials only after its boot's standalone step
+// has ensured that holder (cmd/agent-repld gates the loop), so the one dial
+// that finds no socket is a holder that could not be installed. A connection that ends after serving at least one
 // standing is reopened at once. One that never served any ends the follow with
 // an error instead, since reopening it at once would only spin. A connection
 // the service accepts but does not answer within the first-standing bound is
