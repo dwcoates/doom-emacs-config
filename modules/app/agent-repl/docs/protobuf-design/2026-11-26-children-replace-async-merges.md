@@ -183,3 +183,60 @@ next:
   - The async merge's off-queue request records, name reservations and
     `requeue`/`discard` for async names lose their reason to exist. Stage 5
     sweeps them.
+
+### 2. The feed's child bubble
+
+- **What changed**
+  - `frontend.v1.FeedRow` gains the `child` arm (tag 27), `frontend.v1.FeedChild`.
+  - The bubble is one row with no sub-feed. Its parts:
+    - a head: `frontend.v1.FeedChildHead`, holding the glyph, the name, the
+      target, the standing and the runtime
+    - an optional summary: `frontend.v1.FeedChildSummary`, holding the short
+      summary and an optional long one
+    - an optional border: `frontend.v1.FeedChildBorder`, carrying a color
+      name from `render-colors.json`
+- **Drawing**, recorded as the layout the messages were checked against:
+
+  ```text
+  ┌─ FeedChildBorder: status color while open ───────────────────────────┐
+  │ FeedChildHead: [glyph] [name] → [target] [standing badge] [runtime]  │
+  │ FeedChildSummary: short while folded │ long markdown while open      │
+  └──────────────────────────────────────────────────────────────────────┘
+  ```
+
+- **Why**: the owner kept the merge bubble's header look, dropped the "open
+  merge workspace" button, made the name itself the clickable door in the
+  canonical purple, and put the short summary under the header while folded
+  and the long summary while open. A thin border in the child's status color
+  shows its live status, with none once the child is not open.
+- **Decisions**
+  - The standing is a oneof: open, merging (waiting or merging), merged
+    (with its version), closed, or removed.
+    - The version rides only the merged arm, the one standing it means
+      anything in.
+    - The child's finer status (working, idle, waiting on you) is the
+      border's color, never a second badge.
+  - The name's `select` is optional. It is unset once the workspace is
+    removed, because then there is nothing to select.
+  - THE FOLD IS WEBVIEW-LOCAL, folded at first. Both summaries ride every
+    push, so folding needs no round-trip and no rpc.
+    - Rejected: a daemon-held fold like `agentrepl.v1.FoldMergeBubble`'s.
+      That fold exists because merge bubbles have owner rulings about their
+      defaults across reloads. A child bubble has no such ruling, so a
+      durable fold would be an rpc with nothing to decide.
+  - The border's color is a color NAME from `render-colors.json`'s `colors`,
+    resolved by the daemon from the same status ladder the roster's row
+    projects, as `frontend.v1.FeedPageErrorHeadline.tone` already does. So
+    the bubble, the footer row and the sidebar row can't disagree.
+  - The long summary is markdown, bulleted per sentence by
+    `textline.Bullets`, the same rendering as the topbar's hover.
+  - The version and target are duplicated as `frontend.v1.FeedChild*`
+    element messages, not shared with `frontend.v1.FeedMerge*`, per
+    figma-to-idl's "one fact in two views is two dedicated wrappers".
+- **Consequences**
+  - The daemon's feed resolver must publish a child row into the originator's
+    feed when the create is accepted. It must then re-publish the row on
+    every change to the child's status, summary, standing, links, close or
+    removal, which means the feed resolver now subscribes to other
+    workspaces' facts.
+  - A child the user created (no requesting workspace) has no bubble.

@@ -353,6 +353,11 @@ message FeedRow {
     // Drawn on the requesting workspace's root feed only. Never a prompt
     // bubble and never the report itself: the merge is read in its bubble.
     FeedMergeHandbackBadge merge_handback = 23;
+    // A CHILD WORKSPACE'S BUBBLE, drawn on its ORIGINATOR's root feed (the
+    // workspace that asked for its create) where the create was asked for,
+    // and placed there for the child's whole life. A door to the child, never
+    // a mirror of it: see FeedChild.
+    FeedChild child = 27;
   }
   // PRESENT WHEN THE READER CAN SELECT THIS ROW'S BUBBLE: click it to select
   // (and so expand) it, reply to it, and search its text from the composer.
@@ -3417,6 +3422,225 @@ message FeedWorktreePath {
 message FeedWorktreeBranch {
   // The branch name, drawn verbatim.
   string text = 1;
+}
+
+// ⑦ A CHILD WORKSPACE'S BUBBLE: the door to a child from the workspace that
+// made it. ONE ROW, NO SUB-FEED: the bubble mirrors none of the child's turns
+// and carries none of its merge's tabs. Its content is the child's own
+// summaries, and a click on the child's name selects the child, whose own
+// feed holds everything else.
+//
+//   ┌─ border: the child's status color while it is open ─────────────────┐
+//   │ ⇄ fix-flaky → ~/.config/doom   merged 0.591.1              2m 6s    │
+//   │   Fix the flaky reconnect test                   (folded: short)    │
+//   │   • Retries the reconnect … • Pins the backoff …  (open: long)      │
+//   └─────────────────────────────────────────────────────────────────────┘
+//
+// A ROW PER CHILD, whatever the child does: one made to land a branch it was
+// cut from, one made to do new work, sync or not. The daemon re-publishes the
+// row whole whenever anything it draws changes: the child's status, its
+// summaries, its landing, its close, its removal. THE FOLD IS THE READER'S,
+// webview-local: the bubble is drawn folded at first, showing the short
+// summary, and open it shows the long one. Both summaries ride every push, so
+// a fold needs no round-trip.
+message FeedChild {
+  // The head line: the child's identity, where it lands, how it stands, its
+  // clock.
+  FeedChildHead head = 1;
+  // The child's summaries, drawn beneath the head. UNSET until the child's
+  // agent has set a summary (agentrepl.v1.SetWorkspaceSummary); the bubble
+  // is then the head alone.
+  optional FeedChildSummary summary = 2;
+  // The thin border in the child's canonical status color. PRESENT while the
+  // child is OPEN, and UNSET once it is not (merged, closed or removed): a
+  // bubble with no border is a child that no longer runs.
+  optional FeedChildBorder border = 3;
+}
+
+// The bubble's head line, left to right: glyph, name, arrow, target, standing,
+// runtime. The arrow is the client's glyph.
+message FeedChildHead {
+  // The kind glyph.
+  FeedChildGlyph glyph = 1;
+  // The child's name, drawn in the canonical purple, and the door to it.
+  FeedChildName name = 2;
+  // Where the child lands, drawn after the arrow. UNSET only when the
+  // child's landing target could not be read; the head then draws no arrow.
+  optional FeedChildTarget target = 3;
+  // How the child stands, the head's badge.
+  FeedChildStanding standing = 4;
+  // The head's clock.
+  FeedChildRuntime runtime = 5;
+}
+
+// The kind glyph, a name from the shared vocabulary ("merge", the same ⇄ a
+// merge bubble's head draws).
+message FeedChildGlyph {
+  string icon = 1;
+}
+
+// The child's name, drawn verbatim in the canonical purple.
+message FeedChildName {
+  // The child's workspace name, drawn verbatim.
+  string text = 1;
+  // What a click on the name does. PRESENT while the child's workspace
+  // exists, open or closed; UNSET once the daemon removed it (nuked, or
+  // reaped after its idle days), and the name is then drawn without the
+  // purple and takes no click.
+  optional FeedChildNameSelect select = 2;
+}
+
+// A click on the name selects the child: agentrepl.v1.SelectWorkspace with
+// `target`, the same switch the sidebar row makes. A closed child is reopened
+// by that call, so the name never needs a second verb.
+message FeedChildNameSelect {
+  // The child, echoed verbatim on the click.
+  workspace.v1.WorkspaceRef target = 1;
+}
+
+// Where the child lands: the checkout of its landing target, drawn verbatim,
+// and, for a child whose deploy goes through a GitHub pull request, that pull
+// request, which a click on the target opens.
+message FeedChildTarget {
+  // The checkout the child lands in ("~/.config/doom"), drawn verbatim.
+  string text = 1;
+  // The pull request the child's deploy goes through. PRESENT only when the
+  // child owns exactly one GitHub pull request that was not closed unmerged,
+  // stored as an owned link (agentrepl.v1.WorkspaceLinkOwned). UNSET on every
+  // other child, and until the link is stored.
+  optional FeedChildTargetPullRequest pull_request = 2;
+}
+
+// The pull request a child's target opens, through
+// agentrepl.v1.AgentRepl.OpenExternal in the Chrome profile of the child's
+// login, never in the page.
+message FeedChildTargetPullRequest {
+  // The pull request's github.com url, as the owned link stores it.
+  string url = 1;
+}
+
+// How the child stands. THE ARM IS THE STANDING, and the head's badge word is
+// the client's drawing of the arm. The child's finer status (working, idle,
+// waiting on you) is the border's color, not a badge.
+message FeedChildStanding {
+  // Exactly one is set on every head the daemon publishes.
+  oneof standing {
+    // Open and not merging: working, idle, or anything else the roster
+    // draws. No badge.
+    FeedChildStandingOpen open = 1;
+    // The child's own merge is in flight: waiting in its queue or being
+    // merged.
+    FeedChildStandingMerging merging = 2;
+    // The child landed. A child reopened after landing stands `open` again.
+    FeedChildStandingMerged merged = 3;
+    // The child closed without landing.
+    FeedChildStandingClosed closed = 4;
+    // The daemon removed the child's workspace (nuked, or reaped after its
+    // idle days); there is nothing to select.
+    FeedChildStandingRemoved removed = 5;
+  }
+}
+// Open and not merging. No badge.
+message FeedChildStandingOpen {}
+// The child's merge is in flight. THE ARM IS WHERE IT STANDS in its queue,
+// the badge word: `waiting` in line behind the merges ahead of it, `merging`
+// once its run is admitted.
+message FeedChildStandingMerging {
+  oneof stage {
+    // Waiting in the repository's queue.
+    FeedChildStandingMergingWaiting waiting = 1;
+    // Admitted and being merged.
+    FeedChildStandingMergingMerging merging = 2;
+  }
+}
+// Waiting in line. Badge word "waiting".
+message FeedChildStandingMergingWaiting {}
+// Being merged. Badge word "merging".
+message FeedChildStandingMergingMerging {}
+// The child landed. Badge word "merged", in green.
+message FeedChildStandingMerged {
+  // The agent-repl version the landing produced. PRESENT once a landing onto
+  // agent-repl's own master that carried a version increment has its version
+  // tag; UNSET on every other landing.
+  optional FeedChildVersion version = 1;
+}
+// The child closed without landing. Badge word "closed".
+message FeedChildStandingClosed {}
+// The child's workspace was removed. Badge word "removed".
+message FeedChildStandingRemoved {
+  // When the daemon removed it, epoch milliseconds.
+  int64 removed_at_ms = 1;
+}
+
+// The version a child's landing produced ("0.591.1"), in three runs so the
+// one number the landing incremented is drawn apart, in green. Concatenated,
+// the runs are exactly the version's tag.
+message FeedChildVersion {
+  // Everything before the incremented number, its separator included
+  // ("0.591."). Never empty.
+  FeedChildVersionLeading leading = 1;
+  // The incremented number ("1"), drawn green.
+  FeedChildVersionIncremented incremented = 2;
+  // Everything after the incremented number, its separator included. UNSET
+  // after a patch increment, which moves the last number.
+  optional FeedChildVersionTrailing trailing = 3;
+}
+// The version's text before the incremented number. Drawn verbatim.
+message FeedChildVersionLeading {
+  string text = 1;
+}
+// The incremented number. Drawn verbatim, in green.
+message FeedChildVersionIncremented {
+  string text = 1;
+}
+// The version's text after the incremented number. Drawn verbatim.
+message FeedChildVersionTrailing {
+  string text = 1;
+}
+
+// The head's clock: how long the child has existed while it is open, and how
+// long it lived once it is not. The client ticks from `started_at_ms` while
+// `ended_at_ms` is unset.
+message FeedChildRuntime {
+  // When the child was created, epoch milliseconds.
+  int64 started_at_ms = 1;
+  // When the child stopped being open (landed, closed or removed), epoch
+  // milliseconds. UNSET while it is open; a reopened child's clock runs
+  // again from its creation.
+  optional int64 ended_at_ms = 2;
+}
+
+// The child's summaries, both always shipped once a summary stands: the
+// folded bubble draws the short one, the open bubble the long one.
+message FeedChildSummary {
+  // The one-sentence short summary, drawn verbatim while the bubble is
+  // folded.
+  FeedChildShortSummary short_summary = 1;
+  // The long summary, drawn while the bubble is open. UNSET when the child's
+  // summary has no long part; the open bubble then draws the short one.
+  optional FeedChildLongSummary long_summary = 2;
+}
+// The short summary element.
+message FeedChildShortSummary {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The long summary element.
+message FeedChildLongSummary {
+  // MARKDOWN: a bulleted list, one "- " item per sentence of the child's long
+  // summary, which the daemon splits (the agent writes plain sentences). The
+  // client renders it as markdown, as the topbar's hover does.
+  string markdown = 1;
+}
+
+// The border's color: the child's CANONICAL STATUS COLOR, the same one its
+// sidebar row draws, resolved by the daemon from the one status ladder the
+// roster projects, so the bubble and the row never disagree.
+message FeedChildBorder {
+  // A color name from proto/vocab/render-colors.json's `colors` section
+  // ("red", "green", "purple", ...). The client paints that color's token and
+  // holds no table; a name not in the file is refused and reported.
+  string tone = 1;
 }
 
 // ⑥ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
