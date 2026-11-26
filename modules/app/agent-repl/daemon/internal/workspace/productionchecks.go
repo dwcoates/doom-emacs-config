@@ -19,25 +19,29 @@ import (
 
 const opProductionChecks = "daemon.workspace.production_checks"
 
-// productionChecksOf resolves repository REPO's production-checks chip, the
-// same for every workspace of it.
-func (v *verbs) productionChecksOf(ctx context.Context, repo ids.RepoID) (topbar.ProductionChecks, error) {
-	standing, err := v.deps.Merge.ProductionStanding(ctx, merge.RepositoryScope{ID: repo})
+// productionStandings is every registered repository's production standing,
+// read once (readProductionStandings) for a pass that names workspaces, so a
+// pass naming every workspace resolves the repositories once rather than once
+// per workspace. A repository absent from it checks no production.
+type productionStandings map[ids.RepoID]merge.ProductionStanding
+
+// readProductionStandings reads every repository's production standing.
+func (v *verbs) readProductionStandings(ctx context.Context) (productionStandings, error) {
+	standings, err := v.deps.Merge.ProductionStandings(ctx)
 	if err != nil {
-		return topbar.ProductionChecks{}, fmt.Errorf("read the production standing of repository %q: %w", repo, err)
+		return nil, fmt.Errorf("read the repositories' production standings: %w", err)
 	}
+	return standings, nil
+}
+
+// productionChecksOf resolves repository REPO's production-checks chip from
+// STANDINGS, the same for every workspace of it.
+func (v *verbs) productionChecksOf(ctx context.Context, standings productionStandings, repo ids.RepoID) (topbar.ProductionChecks, error) {
+	standing := standings[repo]
 	if !standing.On {
 		return topbar.ProductionChecks{}, nil
 	}
-	repos, err := v.deps.DB.ListRepositories(ctx)
-	if err != nil {
-		return topbar.ProductionChecks{}, fmt.Errorf("list the repositories to name %q's: %w", repo, err)
-	}
-	repository, found := wsm.RepositoryNamed(repos, repo, "")
-	if !found {
-		return topbar.ProductionChecks{}, fmt.Errorf("the registry holds no repository %q, whose production standing was read", repo)
-	}
-	chip := topbar.ProductionChecks{On: true, Paused: standing.Paused, Repository: repo, RepositoryDir: repository.Dir}
+	chip := topbar.ProductionChecks{On: true, Paused: standing.Paused, Repository: repo, RepositoryDir: standing.Dir}
 	if standing.Mediator != "" {
 		mediator, err := v.deps.DB.Workspace(ctx, standing.Mediator)
 		if err != nil {
@@ -67,7 +71,12 @@ func (v *verbs) RestateProductionChecks(ctx context.Context, scope merge.Reposit
 	}
 	repo := repository.ID
 	fields["repository"] = string(repo)
-	chip, err := v.productionChecksOf(ctx, repo)
+	standings, err := v.readProductionStandings(ctx)
+	if err != nil {
+		log.Error(opProductionChecks, "could not read the repositories' production standings; the repository's workspaces' chips are stale", dlog.WithCause(fields, err))
+		return err
+	}
+	chip, err := v.productionChecksOf(ctx, standings, repo)
 	if err != nil {
 		log.Error(opProductionChecks, "could not resolve the repository's production-checks chip; its workspaces' chips are stale", dlog.WithCause(fields, err))
 		return err

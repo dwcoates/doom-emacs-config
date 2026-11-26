@@ -334,7 +334,12 @@ func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace
 		return err
 	}
 	v.deps.Footer.Prime(record.ID)
-	if err := v.publishNaming(ctx, log, record); err != nil {
+	standings, err := v.readProductionStandings(ctx)
+	if err != nil {
+		log.Error(opRegister, "could not read the repositories' production standings for the workspace's topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
+		return err
+	}
+	if err := v.publishNaming(ctx, log, record, standings); err != nil {
 		return err
 	}
 	// THIS DAEMON SERVES IT from here. The claim is what a handover hands
@@ -596,14 +601,33 @@ func (v *verbs) bindResolvers(ctx context.Context, log dlog.Logger, record wsm.W
 // needs before anything is drawn for it, in the order the naming needs, since
 // it writes to the sinks the binding resolves. Both record their own failures,
 // so the caller only propagates one.
-func (v *verbs) bringUpViews(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+//
+// STANDINGS are every repository's production standings, read once by the
+// caller for its whole pass.
+func (v *verbs) bringUpViews(ctx context.Context, log dlog.Logger, record wsm.Workspace, standings productionStandings) error {
 	if err := v.bindResolvers(ctx, log, record); err != nil {
 		return err
 	}
-	if err := v.publishNaming(ctx, log, record); err != nil {
+	if err := v.publishNaming(ctx, log, record, standings); err != nil {
 		return fmt.Errorf("publish the naming of %q: %w", record.ID, err)
 	}
 	return nil
+}
+
+// bringUpViewsAlone is bringUpViews for a pass that brings up ONE
+// workspace, reading the production standings it names it with. A thread
+// names no production checks (publishNaming), so none are read for it.
+func (v *verbs) bringUpViewsAlone(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+	var standings productionStandings
+	if !record.IsThread() {
+		read, err := v.readProductionStandings(ctx)
+		if err != nil {
+			log.Error(opRegister, "could not read the repositories' production standings for the workspace's topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
+			return err
+		}
+		standings = read
+	}
+	return v.bringUpViews(ctx, log, record, standings)
 }
 
 // publishNaming installs the topbar's naming and account lines: both are
@@ -616,7 +640,7 @@ func (v *verbs) bringUpViews(ctx context.Context, log dlog.Logger, record wsm.Wo
 //
 // EVERY FAILURE IS RECORDED HERE, at ERROR, before it is returned, so its
 // callers propagate it and never record it again.
-func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.Workspace, standings productionStandings) error {
 	configDir, err := v.accountRoot(ctx, record)
 	if err != nil {
 		log.Error(opRegister, "could not read the workspace's account root for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
@@ -644,7 +668,7 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 	// no production, so it draws no chip.
 	var production topbar.ProductionChecks
 	if !record.IsThread() {
-		production, err = v.productionChecksOf(ctx, record.Repo)
+		production, err = v.productionChecksOf(ctx, standings, record.Repo)
 		if err != nil {
 			log.Error(opRegister, "could not read the workspace's repository's production-check standing for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
 			return err
@@ -809,6 +833,13 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		return fmt.Errorf("publish the opening roster: read the arrangement: %w", err)
 	}
 	workspaces := arrangement.Workspaces
+	// THE PRODUCTION STANDINGS ARE READ ONCE FOR THE WHOLE WALK: each
+	// repository's is the same for every workspace of it.
+	standings, err := v.readProductionStandings(ctx)
+	if err != nil {
+		log.Error(opRegister, "could not read the repositories' production standings for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: %w", err)
+	}
 	// Every workspace the registry already holds is bound too: a daemon that
 	// has just restarted did not run Register for the rows it inherited, and
 	// an unbound resolver cannot serve their views.
@@ -850,7 +881,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 			})
 			continue
 		}
-		if err := v.bringUpViews(ctx, global, *ws); err != nil {
+		if err := v.bringUpViews(ctx, global, *ws, standings); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 	}

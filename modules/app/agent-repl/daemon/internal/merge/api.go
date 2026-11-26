@@ -173,10 +173,12 @@ type Orchestrator interface {
 	// ResumeProduction resumes them; the first landing after it starts them
 	// again (agentrepl.v1.UpdateProductionPause.resume).
 	ResumeProduction(ctx context.Context, scope RepositoryScope) error
-	// ProductionStanding answers whether the repository SCOPE names checks
-	// its production, whether the checks are paused, and its production
-	// mediator: what the topbar's production-checks chip draws.
-	ProductionStanding(ctx context.Context, scope RepositoryScope) (ProductionStanding, error)
+	// ProductionStandings answers, for every registered repository that
+	// checks its production, whether its checks are paused and its
+	// production mediator: what the topbar's production-checks chips draw.
+	// One pass covers every repository, so a pass naming many workspaces
+	// resolves the repositories once.
+	ProductionStandings(ctx context.Context) (map[ids.RepoID]ProductionStanding, error)
 	// RollOutLanding is a deploy hook's ask for the rollout of what its deploy
 	// landed: registered on the running deploy LEDGER names, fired at its
 	// teardown, and answered true; with no ledger, started at once and

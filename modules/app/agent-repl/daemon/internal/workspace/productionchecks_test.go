@@ -17,64 +17,61 @@ func TestProductionChecksOfResolvesTheRepositorysChip(t *testing.T) {
 	cases := []struct {
 		name     string
 		standing merge.ProductionStanding
-		want     func(dir string) topbar.ProductionChecks
+		want     topbar.ProductionChecks
 	}{
-		{name: "a repository that checks no production draws no chip",
-			want: func(string) topbar.ProductionChecks { return topbar.ProductionChecks{} }},
+		{name: "a repository that checks no production draws no chip"},
 		{name: "running checks with no mediator yet name none",
-			standing: merge.ProductionStanding{On: true},
-			want: func(dir string) topbar.ProductionChecks {
-				return topbar.ProductionChecks{On: true, Repository: "repo-1", RepositoryDir: dir}
-			}},
+			standing: merge.ProductionStanding{On: true, Dir: "/repos/one"},
+			want:     topbar.ProductionChecks{On: true, Repository: "repo-1", RepositoryDir: "/repos/one"}},
 		{name: "paused checks name their mediator by its name",
-			standing: merge.ProductionStanding{On: true, Paused: true, Mediator: "w1"},
-			want: func(dir string) topbar.ProductionChecks {
-				return topbar.ProductionChecks{On: true, Paused: true, Mediator: "sample", Repository: "repo-1", RepositoryDir: dir}
-			}},
+			standing: merge.ProductionStanding{On: true, Paused: true, Mediator: "w1", Dir: "/repos/one"},
+			want:     topbar.ProductionChecks{On: true, Paused: true, Mediator: "sample", Repository: "repo-1", RepositoryDir: "/repos/one"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			record := f.workspace("w1", t.TempDir())
-			f.merge.productionStanding = tc.standing
 
 			// Act
-			got, err := f.verbs.(*verbs).productionChecksOf(context.Background(), record.Repo)
+			got, err := f.verbs.(*verbs).productionChecksOf(context.Background(), productionStandings{"repo-1": tc.standing}, record.Repo)
 
 			// Assert
-			if want := tc.want(f.db.repositories[0].Dir); err != nil || got != want {
-				t.Fatalf("productionChecksOf = (%+v, %v), want %+v", got, err, want)
+			if err != nil || got != tc.want {
+				t.Fatalf("productionChecksOf = (%+v, %v), want %+v", got, err, tc.want)
 			}
 		})
 	}
 }
 
-func TestProductionChecksOfSurfacesWhatItCannotRead(t *testing.T) {
-	cases := []struct {
-		name     string
-		standing merge.ProductionStanding
-		err      error
-		want     string
-	}{
-		{name: "an unreadable standing", err: errors.New("database is locked"), want: "database is locked"},
-		{name: "a mediator the registry does not hold", standing: merge.ProductionStanding{On: true, Mediator: "gone"}, want: `"gone"`},
+func TestProductionChecksOfSurfacesAMediatorItCannotName(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	record := f.workspace("w1", t.TempDir())
+
+	// Act
+	_, err := f.verbs.(*verbs).productionChecksOf(context.Background(), productionStandings{"repo-1": {On: true, Mediator: "gone"}}, record.Repo)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), `"gone"`) {
+		t.Fatalf("productionChecksOf = %v, want an error naming the mediator", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			record := f.workspace("w1", t.TempDir())
-			f.merge.productionStanding, f.merge.productionStandingErr = tc.standing, tc.err
+}
 
-			// Act
-			_, err := f.verbs.(*verbs).productionChecksOf(context.Background(), record.Repo)
+func TestTheOpeningRosterReadsTheProductionStandingsOnce(t *testing.T) {
+	// Arrange: three workspaces of the repository.
+	f := newFixture(t)
+	for _, id := range []ids.WorkspaceID{"w1", "w2", "w3"} {
+		f.workspace(id, t.TempDir())
+	}
+	f.merge.productionStanding = merge.ProductionStanding{On: true, Dir: "/repos/one"}
 
-			// Assert
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("productionChecksOf = %v, want an error naming %s", err, tc.want)
-			}
-		})
+	// Act
+	err := f.verbs.PublishRegistry(context.Background())
+
+	// Assert
+	if err != nil || f.merge.standingsReads != 1 {
+		t.Fatalf("PublishRegistry = %v after %d standings reads, want one read for the whole walk", err, f.merge.standingsReads)
 	}
 }
 
@@ -90,7 +87,7 @@ func TestRestateProductionChecksReachesEveryOpenWorkspaceOfTheRepository(t *test
 	other := f.workspace("w4", t.TempDir())
 	other.Repo = "repo-2"
 	f.db.with(other)
-	f.merge.productionStanding = merge.ProductionStanding{On: true, Paused: true}
+	f.merge.productionStanding = merge.ProductionStanding{On: true, Paused: true, Dir: "/repos/one"}
 
 	// Act
 	err := f.verbs.RestateProductionChecks(context.Background(), merge.RepositoryScope{ID: "repo-1"})
@@ -165,11 +162,15 @@ func TestRestateProductionChecksThatCannotResolveStatesNothing(t *testing.T) {
 }
 
 func TestRegistrationStatesTheProductionChecksOnTheNaming(t *testing.T) {
-	// Arrange
+	// Arrange: the main worktree registered once, which mints its repository.
 	f := newFixture(t)
-	f.merge.productionStanding = merge.ProductionStanding{On: true}
+	record, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	f.merge.productionStanding, f.merge.standingRepo = merge.ProductionStanding{On: true}, record.Repo
 
-	// Act
+	// Act: Emacs announces it again.
 	if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -203,13 +204,13 @@ func TestAThreadsNamingDrawsNoProductionChecksAndAsksNoStanding(t *testing.T) {
 	f.merge.productionStandingErr = errors.New("the zettel home is no registered repository")
 
 	// Act
-	err := f.verbs.(*verbs).publishNaming(context.Background(), f.log.logger, record)
+	err := f.verbs.(*verbs).bringUpViewsAlone(context.Background(), f.log.logger, record)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("publishNaming = %v, want the thread named", err)
 	}
-	if n := len(f.topbarNamings); n == 0 || f.topbarNamings[n-1].ProductionChecks.On {
-		t.Fatalf("namings = %+v, want the last drawing no production-checks chip", f.topbarNamings)
+	if n := len(f.topbarNamings); n == 0 || f.topbarNamings[n-1].ProductionChecks.On || f.merge.standingsReads != 0 {
+		t.Fatalf("namings = %+v after %d standings reads, want the last drawing no chip and none read", f.topbarNamings, f.merge.standingsReads)
 	}
 }
