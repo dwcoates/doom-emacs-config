@@ -7189,7 +7189,6 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .st.ink-red { color: var(--err); }
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
 #ws-sidebar .st.ink-blue { color: var(--init); }
-#ws-sidebar .st.ink-purple { color: var(--blocked); }
 /* A PAUSED QUEUE'S MERGE INDICATORS (render-colors.json paused_merge_mark,
    owner ruling 2026-10-14, amber per owner request 2026-10-25): the merge
    glyph of a merging or queued merge whose queue is paused, in the

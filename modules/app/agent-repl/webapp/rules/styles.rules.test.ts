@@ -4326,11 +4326,10 @@ describe("the rail's tone rules", () => {
 
   // THE ONE DECLARED EXCEPTION is a mark's own ink, which must come after the
   // tones: an arm's (render-colors.json glyph_inks, owner ruling 2026-10-13)
-  // an async merge's (async_merge_mark.ink, owner request 2026-10-13), or a
-  // paused queue's merge indicators' (paused_merge_mark.ink, owner ruling
-  // 2026-10-14).
+  // or a paused queue's merge indicators' (paused_merge_mark.ink, owner
+  // ruling 2026-10-14).
   const DECLARED_INKS = [
-    ...new Set([...Object.values(renderColors.glyph_inks), renderColors.async_merge_mark.ink, renderColors.paused_merge_mark.ink]),
+    ...new Set([...Object.values(renderColors.glyph_inks), renderColors.paused_merge_mark.ink]),
   ];
 
   it("lets no rail status rule but a declared ink set a color after the tone rules", () => {
