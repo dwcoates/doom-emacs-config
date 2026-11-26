@@ -142,16 +142,17 @@ func TestAScanLeavesNoAnswerFileBehind(t *testing.T) {
 	}
 }
 
-func TestVisibleKnown(t *testing.T) {
+func TestSightingMatchesEitherApostrophe(t *testing.T) {
 	// Arrange
-	scan := inSight("", "Cafe", "Stranger", "Home’s")
+	scan := inSight("", "Cafe", "Home’s")
 
 	// Act
-	got := visibleKnown([]string{"Home's", "Office", "Cafe"}, scan)
+	seen, ok := scan.sighting("Home's")
+	_, strangerSeen := scan.sighting("Stranger")
 
-	// Assert: preference order, apostrophes matched as macOS names them.
-	if strings.Join(got, ",") != "Home's,Cafe" {
-		t.Fatalf("visibleKnown = %v, want the known networks in sight in preference order", got)
+	// Assert: apostrophes matched as macOS names them, and the sighting as seen.
+	if !ok || seen.SSID != "Home’s" || seen.RSSI != -41 || strangerSeen {
+		t.Fatalf("sighting = (%+v, %v), stranger %v, want the curly sighting and no stranger", seen, ok, strangerSeen)
 	}
 }
 
@@ -228,13 +229,16 @@ func TestAnAuthorizeLaunchThatFailsIsAnError(t *testing.T) {
 
 func TestHelperLaunch(t *testing.T) {
 	cases := []struct {
-		name string
-		wait helperWait
-		verb string
-		want string
+		name  string
+		wait  helperWait
+		verb  string
+		flags []string
+		want  string
 	}{
 		{name: "a scan waits for its answer", wait: helperWaits, verb: "scan", want: argScan + "/f"},
 		{name: "an authorize is launched and left", wait: helperLeftRunning, verb: "authorize", want: argAuthorize + "/f"},
+		{name: "a verb's flags come before its answer file", wait: helperWaits, verb: "probe", flags: []string{"--name", "A B"},
+			want: "/t/open -W -n -g -a /t/AgentReplWifi.app --args probe --name A B --out /f"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -242,7 +246,7 @@ func TestHelperLaunch(t *testing.T) {
 			tools := Tools{Open: "/t/open", WifiApp: "/t/AgentReplWifi.app"}
 
 			// Act
-			got := strings.Join(helperLaunch(tools, tc.wait, tc.verb, "/f"), " ")
+			got := strings.Join(helperLaunch(tools, tc.wait, tc.verb, "/f", tc.flags...), " ")
 
 			// Assert: the very argv every controller launch is scripted against.
 			if got != tc.want {

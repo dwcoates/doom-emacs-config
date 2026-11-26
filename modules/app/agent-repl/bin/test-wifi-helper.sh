@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# test-wifi-helper.sh: the Wi-Fi helper's decisions (wifi-helper/standing.swift)
-# and its Location Services seats (wifi-helper/seats.swift), each compiled with
+# test-wifi-helper.sh: the Wi-Fi helper's decisions (wifi-helper/standing.swift),
+# its Location Services seats (wifi-helper/seats.swift), its command line
+# (wifi-helper/args.swift) and its hotspot join (wifi-helper/hotspot.swift), each compiled with
 # its tests (wifi-helper/test-<source>.swift) and run here, each of their cases
 # reported through lib-harness-report.sh.
 #
@@ -73,4 +74,6 @@ fi
 
 run_tests standing CoreLocation
 run_tests seats Foundation
+run_tests args Foundation
+run_tests hotspot Foundation
 harness_finish

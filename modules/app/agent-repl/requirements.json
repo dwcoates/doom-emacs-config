@@ -527,19 +527,10 @@
     {
       "id": "persistent-wifi-hotspot",
       "kind": "env",
-      "why": "names the phone hotspot persistent-wifi mode joins when Wi-Fi is lost with the lid closed and none of the saved networks can be rejoined; without it only the saved networks are tried, and when none returns every agent stops until the lid opens",
+      "why": "names the phone hotspot persistent-wifi mode joins when Wi-Fi is lost with the lid closed and macOS has rejoined no saved network; without it nothing is joined, and every agent stops until the lid opens or a saved network returns",
       "profile": "run",
       "optional": false,
       "name": "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT",
-      "doc": "docs/USER-GUIDE.md#setup"
-    },
-    {
-      "id": "persistent-wifi-join-known",
-      "kind": "env",
-      "why": "turns persistent-wifi mode's first failover step, joining a saved network in range, on (true, the default when unset) or off (false, every attempt joining only the hotspot); any other value stops the daemon at startup",
-      "profile": "run",
-      "optional": true,
-      "name": "AGENT_REPL_PERSISTENT_WIFI_JOIN_KNOWN",
       "doc": "docs/USER-GUIDE.md#setup"
     },
     {

@@ -250,7 +250,7 @@ func TestLinuxSetSleepDisabledFailures(t *testing.T) {
 	}
 }
 
-func TestLinuxPreferredNetworksAreSavedWifiSSIDs(t *testing.T) {
+func TestLinuxSavedNetworksAreSavedWifiSSIDs(t *testing.T) {
 	// Arrange
 	h, r, _ := newLinuxHostFor(t)
 	r.on(lConnections, answer{out: "Wired connection 1:802-3-ethernet\nHome:802-11-wireless\nPhone profile:802-11-wireless\n"})
@@ -258,11 +258,11 @@ func TestLinuxPreferredNetworksAreSavedWifiSSIDs(t *testing.T) {
 	r.on("/t/nmcli -g 802-11-wireless.ssid connection show id Phone profile", answer{out: "Dodge’s iPhone\n"})
 
 	// Act
-	got, err := h.PreferredNetworks(context.Background(), "wlp2s0")
+	got, err := h.savedNetworks(context.Background())
 
 	// Assert
 	if err != nil || !reflect.DeepEqual(got, []string{"Home Net", "Dodge’s iPhone"}) {
-		t.Fatalf("PreferredNetworks() = (%q, %v), want the Wi-Fi connections' SSIDs", got, err)
+		t.Fatalf("savedNetworks() = (%q, %v), want the Wi-Fi connections' SSIDs", got, err)
 	}
 }
 
@@ -273,7 +273,7 @@ func TestLinuxWifiSteps(t *testing.T) {
 		want string
 	}{
 		{name: "a join connects the SSID on the device", act: func(h *linuxHost) error {
-			return h.JoinNetwork(context.Background(), "wlp2s0", "Home Net")
+			return h.joinSaved(context.Background(), "wlp2s0", "Home Net")
 		}, want: "/t/nmcli device wifi connect Home Net ifname wlp2s0"},
 		{name: "a disconnect leaves the radio on", act: func(h *linuxHost) error {
 			return h.Disconnect(context.Background(), "wlp2s0")
@@ -317,11 +317,11 @@ func TestLinuxAFailedJoinNamesNmclisWords(t *testing.T) {
 	r.on("/t/nmcli device wifi connect Home Net ifname wlp2s0", answer{out: "Error: No network with SSID 'Home Net' found.", code: 10})
 
 	// Act
-	err := h.JoinNetwork(context.Background(), "wlp2s0", "Home Net")
+	err := h.joinSaved(context.Background(), "wlp2s0", "Home Net")
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "No network with SSID") {
-		t.Fatalf("JoinNetwork() = %v, want nmcli's own words", err)
+		t.Fatalf("joinSaved() = %v, want nmcli's own words", err)
 	}
 }
 
@@ -428,5 +428,45 @@ func TestLinuxHostReadsNoBluetoothPower(t *testing.T) {
 	// Assert.
 	if power != "" || !errors.Is(err, errNoBluetoothReader) {
 		t.Fatalf("BluetoothPower() = (%q, %v), want errNoBluetoothReader", power, err)
+	}
+}
+
+func TestLinuxJoinHotspot(t *testing.T) {
+	cases := []struct {
+		name        string
+		saved       answer
+		joinArgv    string
+		joinSays    answer
+		wantNetwork string
+		wantErr     string
+	}{
+		{name: "the saved spelling of the hotspot is joined", saved: answer{out: "Phone profile:802-11-wireless\n"},
+			joinArgv: "/t/nmcli device wifi connect Dodge’s iPhone ifname wlp2s0", wantNetwork: "Dodge’s iPhone"},
+		{name: "no saved match tries the configured name, saying so", saved: answer{out: "Wired:802-3-ethernet\n"},
+			joinArgv: "/t/nmcli device wifi connect Dodge's iPhone ifname wlp2s0", joinSays: answer{out: "Error: No network", code: 10},
+			wantNetwork: "Dodge's iPhone", wantErr: "no saved network matches Dodge's iPhone, so the configured name was tried as given"},
+		{name: "an unreadable saved list tries the configured name, saying why", saved: answer{out: "denied", code: 1},
+			joinArgv: "/t/nmcli device wifi connect Dodge's iPhone ifname wlp2s0", joinSays: answer{out: "Error: No network", code: 10},
+			wantNetwork: "Dodge's iPhone", wantErr: "the saved networks could not be read (/t/nmcli exited 1: denied)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h, r, _ := newLinuxHostFor(t)
+			r.on(lConnections, tc.saved)
+			r.on("/t/nmcli -g 802-11-wireless.ssid connection show id Phone profile", answer{out: "Dodge’s iPhone\n"})
+			r.on(tc.joinArgv, tc.joinSays)
+
+			// Act
+			join, err := h.JoinHotspot(context.Background(), "wlp2s0", "Dodge's iPhone")
+
+			// Assert
+			if join.network != tc.wantNetwork || r.count(tc.joinArgv) != 1 {
+				t.Fatalf("JoinHotspot() joined %q (calls %v), want %q", join.network, r.ran(), tc.wantNetwork)
+			}
+			if (tc.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("JoinHotspot() error = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
 }

@@ -66,12 +66,6 @@ type visibleNetwork struct {
 // authorized reports whether the scan could name networks.
 func (s wifiScan) authorized() bool { return s.Authorization == "authorized" }
 
-// sees reports whether the scan saw a network named NAME.
-func (s wifiScan) sees(name string) bool {
-	_, ok := s.sighting(name)
-	return ok
-}
-
 // sighting answers the scan's network named NAME (sameNetwork), and whether
 // the scan saw one.
 func (s wifiScan) sighting(name string) (visibleNetwork, bool) {
@@ -119,17 +113,20 @@ const (
 const (
 	verbScan      = "scan"
 	verbAuthorize = "authorize"
+	verbHotspot   = "hotspot"
 )
 
-// helperLaunch is the one argv that runs the Wi-Fi helper's VERB, answering in
-// OUT: a fresh instance (-n) in the background (-g), launched by `open` so
-// macOS attributes the permission to the helper's own bundle.
-func helperLaunch(tools Tools, wait helperWait, verb, out string) []string {
+// helperLaunch is the one argv that runs the Wi-Fi helper's VERB with FLAGS,
+// answering in OUT: a fresh instance (-n) in the background (-g), launched by
+// `open` so macOS attributes the permission to the helper's own bundle.
+func helperLaunch(tools Tools, wait helperWait, verb, out string, flags ...string) []string {
 	argv := []string{tools.Open}
 	if wait {
 		argv = append(argv, "-W")
 	}
-	return append(argv, "-n", "-g", "-a", tools.WifiApp, "--args", verb, "--out", out)
+	argv = append(argv, "-n", "-g", "-a", tools.WifiApp, "--args", verb)
+	argv = append(argv, flags...)
+	return append(argv, "--out", out)
 }
 
 // scanWifi runs one scan, bounded by scanBound. A scan that could not run,

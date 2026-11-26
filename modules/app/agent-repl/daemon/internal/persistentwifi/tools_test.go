@@ -112,21 +112,6 @@ func TestConfigFromEnv(t *testing.T) {
 			want: Config{Platform: "darwin", Tools: homeTools(), Hotspot: "Other Phone", FreezeApps: appfreeze.DefaultApps},
 		},
 		{
-			name: "the known-network step set true is on",
-			env:  map[string]string{"HOME": "/home/owner", EnvJoinKnown: "true"},
-			want: Config{Platform: "darwin", Tools: homeTools(), FreezeApps: appfreeze.DefaultApps},
-		},
-		{
-			name: "the known-network step set false is off",
-			env:  map[string]string{"HOME": "/home/owner", EnvJoinKnown: "false"},
-			want: Config{Platform: "darwin", Tools: homeTools(), FreezeApps: appfreeze.DefaultApps, KnownJoinOff: true},
-		},
-		{
-			name:    "the known-network step set to neither true nor false is refused",
-			env:     map[string]string{"HOME": "/home/owner", EnvJoinKnown: "no"},
-			wantErr: true,
-		},
-		{
 			name:    "a relative tools dir is refused",
 			env:     map[string]string{EnvToolsDir: "fake/bin", EnvLid: "/fake/lid", EnvPowerSource: "ac"},
 			wantErr: true,
@@ -182,16 +167,6 @@ func TestSameNetworkFoldsTheApostropheSpellings(t *testing.T) {
 	}
 }
 
-func TestPreferredNetworksParsesTheIndentedSSIDs(t *testing.T) {
-	// Act.
-	got := preferredNetworks("Preferred networks on en0:\n\tHome\n\tSomeone’s iPhone\n")
-
-	// Assert.
-	if len(got) != 2 || got[0] != "Home" || got[1] != "Someone’s iPhone" {
-		t.Fatalf("preferredNetworks = %q, want the two saved SSIDs", got)
-	}
-}
-
 // homeTools is the production layout for HOME /home/owner.
 func homeTools() Tools {
 	t := DefaultTools()
@@ -233,38 +208,6 @@ func TestConfigFromEnvOnLinux(t *testing.T) {
 			// Assert
 			if err != nil || !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("configFromEnv(linux) = (%+v, %v), want %+v", got, err, tt.want)
-			}
-		})
-	}
-}
-
-func TestKnownJoinOff(t *testing.T) {
-	cases := []struct {
-		name    string
-		value   string
-		wantOff bool
-		wantErr string
-	}{
-		{name: "unset leaves the step on", value: ""},
-		{name: "true leaves the step on", value: "true"},
-		{name: "false turns the step off", value: "false", wantOff: true},
-		{name: "anything else is refused, naming the variable and the value", value: "False",
-			wantErr: `persistentwifi: AGENT_REPL_PERSISTENT_WIFI_JOIN_KNOWN="False" is neither true nor false`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			off, err := knownJoinOff(tc.value)
-
-			// Assert.
-			if tc.wantErr != "" {
-				if err == nil || err.Error() != tc.wantErr {
-					t.Fatalf("knownJoinOff(%q) error = %v, want %q", tc.value, err, tc.wantErr)
-				}
-				return
-			}
-			if err != nil || off != tc.wantOff {
-				t.Fatalf("knownJoinOff(%q) = (%t, %v), want (%t, nil)", tc.value, off, err, tc.wantOff)
 			}
 		})
 	}

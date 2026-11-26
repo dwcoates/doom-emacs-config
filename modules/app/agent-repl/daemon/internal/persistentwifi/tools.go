@@ -42,15 +42,10 @@ const EnvToolsDir = "AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR"
 // EnvHotspot names the phone hotspot turning the mode on joins and turning it
 // off leaves. It is per-user and has no default: unset leaves the hotspot step
 // unconfigured, which every mode change answers as a failed hotspot step
-// pointing at the user guide. Either apostrophe spelling joins, because the
-// join resolves the name against the saved networks (savedHotspot).
+// pointing at the user guide. Either apostrophe spelling joins: the Wi-Fi
+// helper matches the phone's name either way (wifi-helper/hotspot.swift), as
+// Linux matches the saved connections (linuxHost.JoinHotspot).
 const EnvHotspot = "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"
-
-// EnvJoinKnown turns the Wi-Fi failover's first step (joinVisibleKnown, a
-// saved network in sight) on or off: "true" or "false", unset is "true". Off,
-// every attempt goes straight to the hotspot (owner request, 2026-11-20: to
-// see the lid-closed hotspot join on its own). Any other value is refused.
-const EnvJoinKnown = "AGENT_REPL_PERSISTENT_WIFI_JOIN_KNOWN"
 
 // Tools are the absolute paths of every host tool the package runs.
 type Tools struct {
@@ -157,9 +152,6 @@ type Config struct {
 	// Linux are Linux's tools.
 	Linux   LinuxTools
 	Hotspot string
-	// KnownJoinOff is EnvJoinKnown set to "false": the failover skips its
-	// saved-network step. The zero value is the default, the step on.
-	KnownJoinOff bool
 	// FreezeApps are the applications the quiet state freezes
 	// (appfreeze.AppsFromEnv). A fake host freezes none unless the variable
 	// names some: its process table is a fake tool's.
@@ -241,23 +233,5 @@ func configFromEnv(goos string, getenv func(string) string) (Config, error) {
 		}
 		cfg.Hotspot = hotspot
 	}
-	off, err := knownJoinOff(getenv(EnvJoinKnown))
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.KnownJoinOff = off
 	return cfg, nil
-}
-
-// knownJoinOff reads EnvJoinKnown's VALUE: unset and "true" leave the
-// saved-network step on, "false" turns it off, and anything else is refused
-// rather than read as either.
-func knownJoinOff(value string) (bool, error) {
-	switch value {
-	case "", "true":
-		return false, nil
-	case "false":
-		return true, nil
-	}
-	return false, fmt.Errorf("persistentwifi: %s=%q is neither true nor false", EnvJoinKnown, value)
 }
