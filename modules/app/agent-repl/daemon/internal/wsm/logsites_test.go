@@ -595,3 +595,34 @@ func TestOldestLogSiteHourAnswersTheEarliestKeptRow(t *testing.T) {
 		})
 	}
 }
+
+func TestLogSiteInstantsReadsOneInstantColumnInOrder(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		want    []time.Time
+		wantErr bool
+	}{
+		{name: "the deploys, oldest first", query: `SELECT started_at FROM log_site_deploys ORDER BY started_at`,
+			want: []time.Time{fromNanos(0), fromNanos(nanos(logSiteHour))}},
+		{name: "no row answers none", query: `SELECT at FROM log_site_marks ORDER BY at`},
+		{name: "a query that does not run fails", query: `SELECT at FROM no_such_table`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			if _, err := s.RecordLogSiteDeploy(context.Background(), fixedNow(logSiteHour)); err != nil {
+				t.Fatalf("RecordLogSiteDeploy: %v", err)
+			}
+
+			// Act
+			got, err := logSiteInstants(context.Background(), s.db(), tt.query)
+
+			// Assert
+			if (err != nil) != tt.wantErr || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("logSiteInstants = (%v, %v), want %v (error %v)", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}

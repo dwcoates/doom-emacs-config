@@ -169,7 +169,15 @@ func (s *store) LogSiteSnapshot(ctx context.Context, now func() time.Time) (LogS
 
 // logSiteMarks reads every kept mark, oldest first.
 func logSiteMarks(ctx context.Context, tx *sql.Tx) ([]time.Time, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT at FROM log_site_marks ORDER BY at`)
+	return logSiteInstants(ctx, tx, `SELECT at FROM log_site_marks ORDER BY at`)
+}
+
+// logSiteInstants reads the one instant column QUERY selects, in its order:
+// the deploys' and the marks' one reading.
+func logSiteInstants(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, query string) ([]time.Time, error) {
+	rows, err := q.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -252,20 +260,8 @@ func (s *store) LogSiteEdgeAt(ctx context.Context, at time.Time) (LogSiteEdge, e
 func logSiteDeploys(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) ([]time.Time, error) {
-	rows, err := q.QueryContext(ctx, `SELECT started_at FROM log_site_deploys ORDER BY started_at`)
+	out, err := logSiteInstants(ctx, q, `SELECT started_at FROM log_site_deploys ORDER BY started_at`)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []time.Time
-	for rows.Next() {
-		var at int64
-		if err := rows.Scan(&at); err != nil {
-			return nil, err
-		}
-		out = append(out, fromNanos(at))
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	if len(out) == 0 {
