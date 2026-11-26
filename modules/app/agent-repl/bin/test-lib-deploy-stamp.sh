@@ -181,6 +181,27 @@ replace agentrepl/logging => ../logging/go'
 import "agentrepl/logging"
 
 func main() { _ = logging.Log() }'
+    # The daemon's module holds two commands: the daemon and the persistent-wifi
+    # service, each importing a package of its own.
+    write "$root" daemon/go.mod 'module agentrepl/daemon
+
+go 1.24.0'
+    write "$root" daemon/cmd/agent-repld/main.go 'package main
+
+import "agentrepl/daemon/internal/merge"
+
+func main() { _ = merge.M }'
+    write "$root" daemon/cmd/agent-repl-wifi/main.go 'package main
+
+import "agentrepl/daemon/internal/wifi"
+
+func main() { _ = wifi.W }'
+    write "$root" daemon/internal/merge/merge.go 'package merge
+
+var M = 1'
+    write "$root" daemon/internal/wifi/wifi.go 'package wifi
+
+var W = 1'
     printf '.fakegit\n' > "$root/.gitignore"
     git -C "$root" init -q
     commit "$root" seed
@@ -240,6 +261,21 @@ test_go_change_in_an_embedded_file_or_the_module_files_changes_the_id() {
         "$root" shim-store agent-shim/shim-store/go.sum
     assert_edit_effect changes "go: a change in an imported module's go.mod changes the id" \
         "$root" shim-store proto/gen/go/go.mod
+}
+
+# THE PERSISTENT-WIFI SERVICE IS A COMMAND OF THE DAEMON'S MODULE, and its id
+# is its own package closure: a daemon change the service does not compile from
+# must leave the service running through the deploy.
+test_the_persistent_wifi_service_id_is_its_own_closure_and_not_the_daemons() {
+    local root; root="$(new_go_fixture)"
+    assert_edit_effect keeps "go: a change in a daemon package the persistent-wifi service does not import keeps its id" \
+        "$root" agent-repl-wifi daemon/internal/merge/merge.go
+    assert_edit_effect keeps "go: a change in the daemon's own command keeps the persistent-wifi service's id" \
+        "$root" agent-repl-wifi daemon/cmd/agent-repld/main.go
+    assert_edit_effect changes "go: a change in a package the persistent-wifi service imports changes its id" \
+        "$root" agent-repl-wifi daemon/internal/wifi/wifi.go
+    assert_edit_effect changes "go: a change in the persistent-wifi service's own command changes its id" \
+        "$root" agent-repl-wifi daemon/cmd/agent-repl-wifi/main.go
 }
 
 test_go_target_whose_files_cannot_be_listed_has_no_source_set() {
@@ -448,7 +484,7 @@ test_unknown_system_has_no_source_set() {
 test_every_go_system_is_listed_by_the_one_table() {
     local root name missing=""
     root="$(new_go_fixture)"
-    for name in shim-store zettel shim-lock; do
+    for name in shim-store zettel shim-lock agent-repl-wifi; do
         deploy_stamp_system_files "$name" "$root" "" >/dev/null 2>&1 || missing="$missing $name"
     done
     if [ -z "$missing" ]; then
