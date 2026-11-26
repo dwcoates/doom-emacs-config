@@ -160,3 +160,41 @@ log of the branch first.
     delivered, in the workspace-notice path.
   - `close_after` and `cleanup_source_worktree` run in the merge terminal,
     read off the landing workspace's `wsm.LandingEffects`.
+
+### Status at the second checkpoint
+
+- Every daemon production package compiles (`go build ./...`), and the
+  integration harness compiles.
+- `internal/landingreports` replaces `internal/mergeworkspace`
+  - `HandBack` covers an in-place merge that did not land.
+  - `CoverLandings` and `DeployEnded` replace `CoverOwed` and `PayOwed`.
+  - The prompt is `prompts/merge-handback.md`.
+- `gitclient.WorktreeHolding` is the one branch-worktree finder, shared by
+  merge and create.
+- The create path now carries:
+  - `CreateSpec.SourceBranch`, cut at the resolved tip
+  - `CreateSpec.Effects`, with the cleanup directory resolved by
+    `sourceWorktreeToCleanUp`
+  - `CleanupSourceWorktree` and `ForkSubagent`
+  - the server's `closeAfterOf` and `subagentSpawner`
+- `agentrepl.v1.CreateWorkspaceError.name_reserved` (tag 18) is reinstated,
+  re-documented as a name another create in flight claims.
+- Still to do
+  - Unit tests: `go vet ./...` lists the failing packages.
+    - Tests of deleted subjects are deleted.
+    - Their replacements are in "Replacement test specs" above, plus a
+      relaunched daemon redrawing a landed child's `frontend.v1.FeedChild`
+      in its parent's feed.
+  - THE SUBAGENT FORK
+    - `CreateSpec.ForkSubagent` is set but the fork step still forks the
+      spawner's main conversation.
+    - The shim needs `shim.v1.ForkSessionRequest` to fork a subagent's side
+      transcript. That is a contract increment, re-entering design per the
+      vetting item.
+    - Until it lands, the create must refuse loudly rather than fork the
+      wrong conversation.
+  - `internal/workspace/retire.go` (`RetireLanded`), `wsm.Landing`
+    (`landed_head`, `landed_at`), and worktreereap's landed-branch reading
+    are async-only and should be retired, with their columns dropped in
+    layout 221.
+  - B2 to B5, and phases C, D and E.
