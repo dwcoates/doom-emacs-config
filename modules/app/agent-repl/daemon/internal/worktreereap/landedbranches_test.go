@@ -20,15 +20,14 @@ const landedHead = "1a2d000000000000000000000000000000000001"
 // parent exist.
 func landedWorkspace(w *world, repoDir, name, branch, parent string) wsm.Workspace {
 	w.t.Helper()
-	return landedWorkspaceAt(w, repoDir, name, branch, parent, longAgo.Add(time.Hour), nil)
+	return landedWorkspaceAt(w, repoDir, name, branch, parent, longAgo.Add(time.Hour))
 }
 
-// landedWorkspaceAt is landedWorkspace merged at MERGED, with LANDED the head
-// its detached merge recorded (nil for an in-place merge, which records none).
-func landedWorkspaceAt(w *world, repoDir, name, branch, parent string, merged time.Time, landed *wsm.Landing) wsm.Workspace {
+// landedWorkspaceAt is landedWorkspace merged at MERGED.
+func landedWorkspaceAt(w *world, repoDir, name, branch, parent string, merged time.Time) wsm.Workspace {
 	w.t.Helper()
 	ws := w.register(repoDir, filepath.Join(w.root, "trees", name), wsm.Workspace{
-		Name: name, Branch: branch, ParentBranch: parent, Closed: true, MergedAt: &merged, Landed: landed,
+		Name: name, Branch: branch, ParentBranch: parent, Closed: true, MergedAt: &merged,
 	})
 	w.git.branches[branch] = true
 	if parent != "" {
@@ -48,8 +47,6 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 		arrange     func(w *world, repoDir string)
 		wantDeleted bool
 		wantInto    string
-		// wantJudgedBy is the deletion record's judged_by.
-		wantJudgedBy string
 		// wantWorkspace is the merged workspace the branch is judged by,
 		// when the case arranges more than one.
 		wantWorkspace string
@@ -59,41 +56,18 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 			arrange: func(w *world, repoDir string) {
 				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "master")
 			},
-			wantDeleted:  true,
-			wantInto:     "master",
-			wantJudgedBy: "ancestry",
-		},
-		{
-			name: "a rebased landing whose tip is its recorded landed head is deleted though it is not inside its parent",
-			arrange: func(w *world, repoDir string) {
-				landedWorkspaceAt(w, repoDir, "inv", "ramdisk-leak-investigation", "master", longAgo.Add(time.Hour),
-					&wsm.Landing{Head: landedHead, At: longAgo.Add(time.Hour)})
-				w.git.notInside[landedHead] = true
-			},
-			wantDeleted:  true,
-			wantInto:     "master",
-			wantJudgedBy: "recorded_head",
-		},
-		{
-			name: "a branch that moved past its recorded landed head and is not inside its parent is kept",
-			arrange: func(w *world, repoDir string) {
-				landedWorkspaceAt(w, repoDir, "inv", "ramdisk-leak-investigation", "master", longAgo.Add(time.Hour),
-					&wsm.Landing{Head: "0ld0000000000000000000000000000000000000", At: longAgo.Add(time.Hour)})
-				w.git.notInside[landedHead] = true
-			},
+			wantDeleted: true,
+			wantInto:    "master",
 		},
 		{
 			name: "a branch several merged workspaces named is judged by the most recent landing",
 			arrange: func(w *world, repoDir string) {
-				landedWorkspaceAt(w, repoDir, "inv-old", "ramdisk-leak-investigation", "master", longAgo, nil)
-				landedWorkspaceAt(w, repoDir, "inv-new", "ramdisk-leak-investigation", "master", longAgo.Add(2*time.Hour),
-					&wsm.Landing{Head: landedHead, At: longAgo.Add(2 * time.Hour)})
-				landedWorkspaceAt(w, repoDir, "inv-mid", "ramdisk-leak-investigation", "master", longAgo.Add(time.Hour), nil)
-				w.git.notInside[landedHead] = true
+				landedWorkspaceAt(w, repoDir, "inv-old", "ramdisk-leak-investigation", "old-parent", longAgo)
+				landedWorkspaceAt(w, repoDir, "inv-new", "ramdisk-leak-investigation", "master", longAgo.Add(2*time.Hour))
+				landedWorkspaceAt(w, repoDir, "inv-mid", "ramdisk-leak-investigation", "mid-parent", longAgo.Add(time.Hour))
 			},
 			wantDeleted:   true,
 			wantInto:      "master",
-			wantJudgedBy:  "recorded_head",
 			wantWorkspace: "inv-new",
 		},
 		{
@@ -101,9 +75,8 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 			arrange: func(w *world, repoDir string) {
 				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "")
 			},
-			wantDeleted:  true,
-			wantInto:     "main",
-			wantJudgedBy: "ancestry",
+			wantDeleted: true,
+			wantInto:    "main",
 		},
 		{
 			name: "a landed branch whose parent branch is gone is judged against the default branch",
@@ -111,9 +84,8 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "fix/retired-parent")
 				w.git.branches["fix/retired-parent"] = false
 			},
-			wantDeleted:  true,
-			wantInto:     "main",
-			wantJudgedBy: "ancestry",
+			wantDeleted: true,
+			wantInto:    "main",
 		},
 		{
 			name: "a landed branch whose parent branch is gone and that is not inside the default branch is kept",
@@ -130,9 +102,8 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 				w.git.branches["origin/master"] = false
 				w.git.remoteRefs["origin/master"] = true
 			},
-			wantDeleted:  true,
-			wantInto:     "origin/master",
-			wantJudgedBy: "ancestry",
+			wantDeleted: true,
+			wantInto:    "origin/master",
 		},
 		{
 			name: "a landed branch holding commits its parent does not is kept",
@@ -189,8 +160,8 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 				if !ok {
 					t.Fatalf("no INFO %s record of the deletion: %+v", opLandedBranch, w.log.Records())
 				}
-				if record.Context["into"] != tc.wantInto || record.Context["branch"] != "ramdisk-leak-investigation" || record.Context["judged_by"] != tc.wantJudgedBy {
-					t.Fatalf("the record's context is %v, want the branch into %s judged by %s", record.Context, tc.wantInto, tc.wantJudgedBy)
+				if record.Context["into"] != tc.wantInto || record.Context["branch"] != "ramdisk-leak-investigation" {
+					t.Fatalf("the record's context is %v, want the branch into %s", record.Context, tc.wantInto)
 				}
 				if tc.wantWorkspace != "" {
 					var want string

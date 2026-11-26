@@ -383,20 +383,17 @@ func lastTurnStarted(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontend
 // lastUpdated resolves the row's update recency
 // (frontend.v1.RosterRowLastUpdated): the LATEST of the record's creation, its
 // latest turn start or close, its close record, its backlogged instant, its merge
-// landing, its requester's landing, and its status change -- the durable one
+// landing, and its status change -- the durable one
 // and LIVE, the one this daemon stamped (wsState.statusChangedAt), whichever
 // is later. The selection instant is deliberately not among them: viewing a
 // workspace is not an update to it. Like lastSelected it is never drawn.
 func lastUpdated(rec wsm.Workspace, live *time.Time) *frontendv1.RosterRowLastUpdated {
-	var closedAt, landedAt *time.Time
+	var closedAt *time.Time
 	if rec.Closure != nil {
 		closedAt = &rec.Closure.At
 	}
-	if rec.Landed != nil {
-		landedAt = &rec.Landed.At
-	}
 	latest := rec.CreatedAt
-	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.BackloggedAt, rec.MergedAt, landedAt, rec.StatusChangedAt, live} {
+	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.BackloggedAt, rec.MergedAt, rec.StatusChangedAt, live} {
 		if at != nil && at.After(latest) {
 			latest = *at
 		}

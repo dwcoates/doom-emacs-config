@@ -2,10 +2,7 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -14,130 +11,16 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// opRetire is RetireLanded's operation.
-const opRetire = "daemon.workspace.retire_landed"
-
-// Why RetireLanded left a requester as it is. The empty value is a retirement.
-const (
-	// RetireKeptNotLanded: no landing stands, or the workspace has merged.
-	RetireKeptNotLanded = "not_landed"
-	// RetireKeptParent: an open workspace was cut from it, and merges into
-	// its worktree.
-	RetireKeptParent = "parent_of_open_workspace"
-	// RetireKeptNotQuiet: a turn, live work, a held prompt or a merge stands.
-	RetireKeptNotQuiet = "not_quiet"
-	// RetireKeptMissing: the worktree's directory is not there.
-	RetireKeptMissing = "directory_missing"
-	// RetireKeptMovedOn: the worktree's HEAD is no longer the commit that
-	// landed. The landing is cleared: what the branch holds now never landed.
-	RetireKeptMovedOn = "moved_on"
-	// RetireKeptDirty: the worktree has modified or untracked content.
-	RetireKeptDirty = "dirty"
-)
-
-// RetireLanded retires a REQUESTER WHOSE DETACHED MERGE LANDED (its
-// wsm.Landing) into the state an in-place merge leaves its requester in: its
-// session stopped, its worktree removed, and the workspace closed and stamped
-// merged at the instant its merge landed. Its branch is deleted once it is
-// verified inside the branch it landed into, as an in-place merge's is.
-//
-// It answers why it kept the workspace instead, empty when it retired it. It
-// keeps every workspace that might still hold something that did not land: one
-// whose HEAD moved past the landing (whose landing it clears), one with
-// modified or untracked content, one that is not quiet, and one an open
-// workspace was cut from. The worktree goes through git's clean door, so a
-// tree dirtied after it was judged is refused by git and kept.
-//
-// The caller decides WHEN: it is the merge workspace sweep's, once the
-// requester has been idle long enough.
-func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, error) {
-	record, log, err := v.owned(ctx, opRetire, ws)
-	if err != nil {
-		return "", err
-	}
-	fields := dlog.Context{"workspace": string(ws), "dir": record.Dir, "branch": record.Branch}
-	if record.Landed == nil || record.MergedAt != nil {
-		return v.keepRetire(log, RetireKeptNotLanded, fields), nil
-	}
-	landing := *record.Landed
-	fields["landed_head"], fields["landed_at"] = landing.Head, landing.At
-
-	parent, err := v.parentOfOpen(ctx, record)
-	if err != nil {
-		log.Error(opRetire, "could not read whether an open workspace was cut from the requester; it is kept", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("retire %q: %w", ws, err)
-	}
-	if parent != "" {
-		fields["child"] = string(parent)
-		return v.keepRetire(log, RetireKeptParent, fields), nil
-	}
-	blocked, err := v.closeBlocker(ctx, ws)
-	if err != nil {
-		log.Error(opRetire, "could not judge whether the requester is quiet; it is kept", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("retire %q: %w", ws, err)
-	}
-	if blocked != nil {
-		fields["blocked"] = blocked.Reason
-		return v.keepRetire(log, RetireKeptNotQuiet, fields), nil
-	}
-
-	if _, err := os.Stat(record.Dir); errors.Is(err, fs.ErrNotExist) {
-		return v.keepRetire(log, RetireKeptMissing, fields), nil
-	} else if err != nil {
-		log.Error(opRetire, "could not read the requester's worktree; it is kept", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("retire %q: stat %s: %w", ws, record.Dir, err)
-	}
-	head, err := v.deps.Git.ResolveRef(ctx, record.Dir, "HEAD")
-	if err != nil {
-		log.Error(opRetire, "could not read the requester's HEAD; it is kept", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("retire %q: resolve HEAD: %w", ws, err)
-	}
-	fields["head"] = head
-	if head != landing.Head {
-		if err := v.deps.DB.SetLanded(ctx, ws, nil); err != nil {
-			log.Error(opRetire, "could not clear the landing of a requester that moved past it; it is kept", dlog.WithCause(fields, err))
-			return "", fmt.Errorf("retire %q: clear the landing: %w", ws, err)
-		}
-		log.Info(opRetire, "the requester moved past the commit that landed; its landing is cleared and it is kept", fields)
-		return RetireKeptMovedOn, nil
-	}
-	clean, err := v.deps.Git.IsClean(ctx, record.Dir)
-	if err != nil {
-		log.Error(opRetire, "could not read whether the requester's worktree is clean; it is kept", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("retire %q: cleanliness: %w", ws, err)
-	}
-	if !clean {
-		return v.keepRetire(log, RetireKeptDirty, fields), nil
-	}
-	repoDir, err := v.repoDirOf(ctx, record)
-	if err != nil {
-		log.Error(opRetire, "could not resolve the repository the requester's worktree is removed from; it is kept", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("retire %q: %w", ws, err)
-	}
-	fields["repo"] = repoDir
-
-	// ITS LANDED BRANCH IS JUDGED BY THE HEAD ITS LANDING RECORDED: a
-	// detached merge lands REBASED copies of the branch's commits, so the
-	// branch's tip is never inside the branch it landed into, and only the
-	// recorded head says it landed.
-	if err := v.retireTree(ctx, log, opRetire, record, repoDir, landing.At, landing.Head, fields); err != nil {
-		return "", err
-	}
-	log.Info(opRetire, "retired a requester whose detached merge landed: its session stopped, its worktree removed", fields)
-	return "", nil
-}
-
 // retireTree retires RECORD, a closed or quiet workspace whose work landed,
 // into the state a landed merge leaves its workspace in: its session
 // stopped, its worktree (clean, judged by its caller) removed through git's
 // clean door, the workspace stamped merged at AT, and its branch deleted
-// once landedbranch.Retire judges it inside its parent branch or at HEAD,
-// the commit the daemon recorded landing (empty when none was recorded). A
-// branch left behind refuses every later create of the same name
+// once landedbranch.Retire judges it inside its parent branch. A branch left
+// behind refuses every later create of the same name
 // (2026-11-03, `ramdisk-leak-investigation`). Every step that fails is
 // recorded under OP and answered; the branch's own outcome is recorded by
 // landedbranch.Retire.
-func (v *verbs) retireTree(ctx context.Context, log dlog.Logger, op string, record wsm.Workspace, repoDir string, at time.Time, head string, fields dlog.Context) error {
+func (v *verbs) retireTree(ctx context.Context, log dlog.Logger, op string, record wsm.Workspace, repoDir string, at time.Time, fields dlog.Context) error {
 	ws := record.ID
 	// THE SESSION GOES BEFORE THE TREE, as it does for a merge's own
 	// requester: no shim is left running in a directory that is gone.
@@ -153,16 +36,9 @@ func (v *verbs) retireTree(ctx context.Context, log dlog.Logger, op string, reco
 		return fmt.Errorf("retire %q: stamp merged: %w", ws, err)
 	}
 	_, _ = landedbranch.Retire(ctx, v.deps.Git, log, op, repoDir, record.Branch,
-		landedbranch.Landing{Into: record.ParentBranch, Head: head}, fields)
+		landedbranch.Landing{Into: record.ParentBranch}, fields)
 	v.republishRegistry(ctx, log, op)
 	return nil
-}
-
-// keepRetire records a requester RetireLanded left as it is, and answers why.
-func (v *verbs) keepRetire(log dlog.Logger, reason string, fields dlog.Context) string {
-	fields["reason"] = reason
-	log.Debug(opRetire, "kept a requester whose detached merge landed", fields)
-	return reason
 }
 
 // parentOfOpen answers an open workspace cut from RECORD, empty when none is:

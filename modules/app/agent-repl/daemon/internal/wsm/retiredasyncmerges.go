@@ -24,7 +24,9 @@ import (
 //     merge workspace's request held: none can run;
 //   - drops the merge workspace's marks (workspaces.merge_of, its request,
 //     its fork head and its reveal), its removal record, the owed handbacks
-//     and the turn mirrors, which nothing reads;
+//     and the turn mirrors, which nothing reads, and the requester's record
+//     of its detached landing (landed_head, landed_at), which only a rebased
+//     landing ever needed;
 //   - carries the async merge's landing effects onto the one-shot's own
 //     (LandingEffects): the close-after, the cleanup directory and the
 //     compaction of the requester, renamed for what they now are, plus the
@@ -56,6 +58,8 @@ ALTER TABLE workspaces DROP COLUMN merge_request_id;
 ALTER TABLE workspaces DROP COLUMN merge_fork_head;
 ALTER TABLE workspaces DROP COLUMN merge_revealed;
 ALTER TABLE workspaces DROP COLUMN merge_cleanup_worktree;
+ALTER TABLE workspaces DROP COLUMN landed_head;
+ALTER TABLE workspaces DROP COLUMN landed_at;
 ALTER TABLE workspaces RENAME COLUMN merge_compact_after TO landing_compact_requester;
 ALTER TABLE workspaces RENAME COLUMN merge_close_on_landing TO landing_close_after;
 ALTER TABLE workspaces RENAME COLUMN merge_cleanup_dir TO landing_cleanup_dir;

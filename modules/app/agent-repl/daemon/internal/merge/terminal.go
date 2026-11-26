@@ -668,11 +668,9 @@ func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger
 	// refuses every later create of the same name. Retire records its own
 	// outcome and failure; a branch it cannot judge is kept.
 	//
-	// ANCESTRY IS THIS LANDING'S OWN FACT, so no landed head is passed: an
-	// in-place merge rebases the branch itself, in its own worktree, and the
-	// merge commit's second parent is the branch's tip. Only a detached
-	// merge lands rebased copies the branch never points at, and its
-	// requester's retirement passes the head it recorded (RetireLanded).
+	// ANCESTRY IS THIS LANDING'S OWN FACT: a merge rebases the branch
+	// itself, in its own worktree, and the merge commit's second parent is
+	// the branch's tip.
 	_, _ = landedbranch.Retire(ctx, git, log, op, targetDir, branch, landedbranch.Landing{Into: "HEAD"},
 		dlog.Context{"workspace": string(ws)})
 	return nil

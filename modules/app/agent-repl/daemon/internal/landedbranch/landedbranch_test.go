@@ -75,14 +75,11 @@ func TestRetire(t *testing.T) {
 		wantDeleted []string
 		wantLevel   string
 		wantMessage string
-		// wantJudgedBy is the deleted record's judged_by, empty for a kept
-		// branch or an error.
-		wantJudgedBy string
 		// wantAncestryAsked is whether git was asked the ancestry question.
 		wantAncestryAsked bool
 	}{
 		{
-			name:              "a merged branch with no recorded head is deleted at its judged tip by ancestry",
+			name:              "a merged branch is deleted at its judged tip",
 			git:               fakeGit{exists: true, ancestor: true},
 			branch:            "ramdisk-leak-investigation",
 			landing:           Landing{Into: "master"},
@@ -90,60 +87,9 @@ func TestRetire(t *testing.T) {
 			wantDeleted:       []string{"ramdisk-leak-investigation@" + testHead},
 			wantLevel:         "info",
 			wantMessage:       "deleted the landed branch",
-			wantJudgedBy:      "ancestry",
 			wantAncestryAsked: true,
 		},
-		{
-			name:         "a rebased landing whose tip is the recorded landed head is deleted though no tip is an ancestor",
-			git:          fakeGit{exists: true, ancestor: false},
-			branch:       "ramdisk-leak-investigation",
-			landing:      Landing{Into: "master", Head: testHead},
-			want:         Deleted,
-			wantDeleted:  []string{"ramdisk-leak-investigation@" + testHead},
-			wantLevel:    "info",
-			wantMessage:  "deleted the landed branch",
-			wantJudgedBy: "recorded_head",
-		},
-		{
-			name:              "a tip that moved past the recorded landed head and did not land is kept",
-			git:               fakeGit{exists: true, ancestor: false},
-			branch:            "moved-on",
-			landing:           Landing{Into: "master", Head: "0ldhead"},
-			want:              KeptNotLanded,
-			wantLevel:         "info",
-			wantMessage:       "kept the branch: its tip is neither the head its landing recorded nor inside the ref it landed into",
-			wantAncestryAsked: true,
-		},
-		{
-			name:              "a tip that moved past the recorded landed head but is inside the target is deleted by ancestry",
-			git:               fakeGit{exists: true, ancestor: true},
-			branch:            "moved-and-landed",
-			landing:           Landing{Into: "master", Head: "0ldhead"},
-			want:              Deleted,
-			wantDeleted:       []string{"moved-and-landed@" + testHead},
-			wantLevel:         "info",
-			wantMessage:       "deleted the landed branch",
-			wantJudgedBy:      "ancestry",
-			wantAncestryAsked: true,
-		},
-		{
-			name:        "a checked-out branch whose tip is the recorded landed head is kept",
-			git:         fakeGit{exists: true, worktrees: []gitclient.Worktree{{Dir: "/wt", Branch: "busy-landed"}}},
-			branch:      "busy-landed",
-			landing:     Landing{Into: "master", Head: testHead},
-			want:        KeptCheckedOut,
-			wantLevel:   "info",
-			wantMessage: "kept the landed branch: a worktree has it checked out",
-		},
-		{
-			name:        "an absent branch with a recorded landed head is left alone",
-			git:         fakeGit{exists: false},
-			branch:      "gone-landed",
-			landing:     Landing{Into: "master", Head: testHead},
-			want:        KeptAbsent,
-			wantLevel:   "debug",
-			wantMessage: "the landed branch is already gone",
-		},
+
 		{
 			name:        "a branch that is already gone is left alone",
 			git:         fakeGit{exists: false},
@@ -163,13 +109,13 @@ func TestRetire(t *testing.T) {
 			wantMessage: "kept the landed branch: a worktree has it checked out",
 		},
 		{
-			name:              "an unmerged branch with no recorded head is kept",
+			name:              "an unmerged branch is kept",
 			git:               fakeGit{exists: true, ancestor: false},
 			branch:            "ramdisk-leak-investigation-vdy",
 			landing:           Landing{Into: "master"},
 			want:              KeptNotLanded,
 			wantLevel:         "info",
-			wantMessage:       "kept the branch: its tip is neither the head its landing recorded nor inside the ref it landed into",
+			wantMessage:       "kept the branch: its tip is not inside the ref it landed into",
 			wantAncestryAsked: true,
 		},
 		{
@@ -251,7 +197,7 @@ func TestRetire(t *testing.T) {
 			name:        "a branch that is its own landing ref is refused",
 			git:         fakeGit{exists: true, ancestor: true},
 			branch:      "master",
-			landing:     Landing{Into: "master", Head: testHead},
+			landing:     Landing{Into: "master"},
 			wantErr:     true,
 			wantLevel:   "error",
 			wantMessage: "could not retire the landed branch: check the request; the branch is kept",
@@ -285,17 +231,14 @@ func TestRetire(t *testing.T) {
 			if !ok {
 				t.Fatalf("no %s record %q; records: %+v", tc.wantLevel, tc.wantMessage, log.Records())
 			}
-			if rec.Context["branch"] != tc.branch || rec.Context["workspace"] != "w1" || rec.Context["repo"] != testRepo || rec.Context["landed_head"] != tc.landing.Head {
-				t.Fatalf("record context = %v, want branch %q, workspace w1, repo %q, landed_head %q", rec.Context, tc.branch, testRepo, tc.landing.Head)
+			if rec.Context["branch"] != tc.branch || rec.Context["workspace"] != "w1" || rec.Context["repo"] != testRepo {
+				t.Fatalf("record context = %v, want branch %q, workspace w1, repo %q", rec.Context, tc.branch, testRepo)
 			}
 			if errs := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: "error"}); tc.wantLevel != "error" && len(errs) != 0 {
 				t.Fatalf("want no ERROR record, got %+v", errs)
 			}
 			if tc.wantErr && rec.Context["cause"] == nil {
 				t.Fatalf("the record's context %v carries no cause", rec.Context)
-			}
-			if tc.wantJudgedBy != "" && rec.Context["judged_by"] != tc.wantJudgedBy {
-				t.Fatalf("judged_by = %v, want %q", rec.Context["judged_by"], tc.wantJudgedBy)
 			}
 			if asked := git.ancestorCalls > 0; asked != tc.wantAncestryAsked {
 				t.Fatalf("ancestry asked = %v, want %v", asked, tc.wantAncestryAsked)

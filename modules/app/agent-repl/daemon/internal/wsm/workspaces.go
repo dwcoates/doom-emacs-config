@@ -48,7 +48,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, landing_compact_requester, landing_close_after, landing_cleanup_dir, landing_profile_gate, landed_head, landed_at, commit_count, place, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, closure_how, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_requested_at, close_requested_by, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, landing_compact_requester, landing_close_after, landing_cleanup_dir, landing_profile_gate, commit_count, place, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, closure_how, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_requested_at, close_requested_by, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
@@ -103,8 +103,6 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		closes        sql.NullString
 		cleanDir      sql.NullString
 		profileGate   bool
-		landHead      sql.NullString
-		landAt        sql.NullInt64
 		commits       sql.NullInt64
 		ended         sql.NullInt64
 		started       sql.NullInt64
@@ -139,7 +137,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &compact, &closes, &cleanDir, &profileGate, &landHead, &landAt, &commits, &ws.Place, &lapsesAt, &gated, &closedAt, &closedBy, &closedHow, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &closeAt, &closeBy, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld, &ws.Intake); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &compact, &closes, &cleanDir, &profileGate, &commits, &ws.Place, &lapsesAt, &gated, &closedAt, &closedBy, &closedHow, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &closeAt, &closeBy, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld, &ws.Intake); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)
@@ -153,11 +151,6 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	if effects := (LandingEffects{CloseAfter: WorkspaceID(closes.String), CleanupDir: cleanDir.String, CompactRequester: compact, ProfileGate: profileGate}); !effects.Zero() {
 		ws.Effects = &effects
 	}
-	landed, err := decodeLanding(ws.ID, landHead, landAt)
-	if err != nil {
-		return Workspace{}, err
-	}
-	ws.Landed = landed
 	if end.Valid {
 		result := TurnResultEnd(end.String)
 		if !result.valid() {
@@ -958,9 +951,8 @@ func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects)
 // taking it back to revise what it landed, so the same statement retires the
 // merge's settlement: merged_at (the row leaves Recently Merged for its
 // groupings), the count the merge landed (commit_count goes back to "never
-// counted", and the next turn close recounts it live), and the landing
-// (landed_head, landed_at). A row that is not merged keeps every one of those
-// columns as it stands.
+// counted", and the next turn close recounts it live). A row that is not
+// merged keeps both columns as it stands.
 //
 // A CLOSED WORKSPACE WHOSE PARENT IS NOT OPEN IS NOT RE-OPENED: the family
 // rules refuse it with ParentNotOpenError, and nothing is written (family.go).
@@ -1004,9 +996,7 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 		if merged.Valid {
 			columns = append(columns,
 				workspaceColumn{name: "merged_at", value: nil},
-				workspaceColumn{name: "commit_count", value: nil},
-				workspaceColumn{name: "landed_head", value: nil},
-				workspaceColumn{name: "landed_at", value: nil})
+				workspaceColumn{name: "commit_count", value: nil})
 		}
 		return updateWorkspaceColumns(ctx, tx, id, columns...)
 	})

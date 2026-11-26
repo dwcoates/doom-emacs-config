@@ -277,9 +277,6 @@ type Workspace struct {
 	// Effects are what a one-shot does once its own branch lands, beyond
 	// landing it (LandingEffects). Nil for every workspace created with none.
 	Effects *LandingEffects
-	// Landed is set on a workspace whose own branch landed: the commit that
-	// landed, and when (see landed.go). Nil when none has.
-	Landed *Landing
 	// OneShot reports that the workspace was CREATED as a one-shot. It is
 	// READ-ONLY here: the fact is the creation job's (CreationJob.OneShot),
 	// read through the shared select list, so the record and the job can never

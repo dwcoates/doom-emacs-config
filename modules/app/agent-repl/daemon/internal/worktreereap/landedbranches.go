@@ -22,9 +22,7 @@ const opLandedBranch = "daemon.worktreereap.landed_branch"
 //
 // A BRANCH IS JUDGED BY ITS MOST RECENT LANDING. Several merged workspaces may
 // have named one branch in turn; the branch as it stands is the last one's, so
-// that workspace's recorded landed head (wsm.Workspace.Landed, set by a
-// detached merge, whose rebased landing no ancestry can show) is the one
-// passed. A landing that recorded no head is judged by ancestry alone.
+// the ref that workspace landed into is the one its ancestry is judged by.
 //
 // A BRANCH ANY UNMERGED WORKSPACE NAMES IS NEVER TOUCHED: a name reused after
 // its landing belongs to the workspace that reused it, and a closed workspace
@@ -92,9 +90,6 @@ func (s *repoSweep) sweepLandedBranches(ctx context.Context) {
 						"workspace": string(ws.ID), "repo_id": string(s.repo.ID)})
 				landing.Into = s.defaultBranch
 			}
-		}
-		if ws.Landed != nil {
-			landing.Head = ws.Landed.Head
 		}
 		outcome, err := landedbranch.Retire(ctx, s.r.deps.Git, s.r.deps.Log, opLandedBranch, s.repo.Dir, branch, landing,
 			dlog.Context{"workspace": string(ws.ID), "repo_id": string(s.repo.ID)})
