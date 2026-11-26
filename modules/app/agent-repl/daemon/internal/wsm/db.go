@@ -859,8 +859,9 @@ type DB interface {
 	// the repository's race findings (racefindings.go).
 	RecordGateFailures(ctx context.Context, repo RepoKey, failures []GateTestFailure) error
 	// PromoteRaces promotes every candidate a pass under its digest shows
-	// was a race, answering the findings it made or updated.
-	PromoteRaces(ctx context.Context, repo RepoKey, passes []TestPass) ([]Promotion, error)
+	// was a race, answering the findings it made or updated and the passes
+	// that matched no candidate of their test.
+	PromoteRaces(ctx context.Context, repo RepoKey, passes []TestPass) (RacePromotions, error)
 	// UnpromotedGateFailures answers the failures of a merge no pass has
 	// promoted to a race finding.
 	UnpromotedGateFailures(ctx context.Context, repo RepoKey, merge string, failed []TestPass) ([]RaceFindingRef, error)

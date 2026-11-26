@@ -20,17 +20,27 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// unit is a unit verdict of SUITE under DIGEST ("" for none) with TESTS, each
-// "name" passed or "!name" failed; a unit with a failed test failed, its
-// output tail TAIL.
+// unit is a unit verdict of SUITE whose unit and tests are under DIGEST (""
+// for none) with TESTS, each "name" passed or "!name" failed; a unit with a
+// failed test failed, its output tail TAIL.
 func unit(suite, digest, tail string, tests ...string) *testrunv1.TestRunUnitEnded {
+	return batchUnit(suite, digest, digest, tail, tests...)
+}
+
+// batchUnit is unit with the unit under UNITDIGEST and its tests under
+// TESTDIGEST, as a batch's digest covers every file it ran and each test is
+// under its file's own ("" for none).
+func batchUnit(suite, unitDigest, testDigest, tail string, tests ...string) *testrunv1.TestRunUnitEnded {
 	u := &testrunv1.TestRunUnitEnded{UnitId: suite + ":x#00", Suite: suite}
-	if digest != "" {
-		u.InputsDigest = &digest
+	if unitDigest != "" {
+		u.InputsDigest = &unitDigest
 	}
 	failed := false
 	for _, name := range tests {
 		r := &testrunv1.TestRunTestResult{Name: strings.TrimPrefix(name, "!")}
+		if testDigest != "" {
+			r.InputsDigest = &testDigest
+		}
 		if strings.HasPrefix(name, "!") {
 			failed = true
 			r.Outcome = &testrunv1.TestRunTestResult_Failed{Failed: &testrunv1.TestRunTestFailed{}}
@@ -49,7 +59,7 @@ func unit(suite, digest, tail string, tests ...string) *testrunv1.TestRunUnitEnd
 
 var racyRef = wsm.RaceFindingRef{Suite: "daemon", Test: "TestRacy"}
 
-func TestTestOutcomesReadsEachTestUnderItsUnitsDigest(t *testing.T) {
+func TestTestOutcomesReadsEachTestUnderItsOwnDigest(t *testing.T) {
 	tests := []struct {
 		name       string
 		units      []*testrunv1.TestRunUnitEnded
@@ -61,6 +71,11 @@ func TestTestOutcomesReadsEachTestUnderItsUnitsDigest(t *testing.T) {
 			wantFailed: []string{"daemon/TestA@d1:boom"}, wantPassed: []string{"daemon/TestB@d1"}},
 		{name: "a unit with no digest proves nothing",
 			units: []*testrunv1.TestRunUnitEnded{unit("daemon", "", "boom", "!TestA", "TestB")}},
+		{name: "a batch's tests are under their file's digest, never the batch's",
+			units:      []*testrunv1.TestRunUnitEnded{batchUnit("shim", "batch", "file", "boom", "!a.test.ts > x", "a.test.ts > y")},
+			wantFailed: []string{"shim/a.test.ts > x@file:boom"}, wantPassed: []string{"shim/a.test.ts > y@file"}},
+		{name: "a test carrying only its unit's digest proves nothing",
+			units: []*testrunv1.TestRunUnitEnded{batchUnit("daemon", "d1", "", "boom", "!TestA", "TestB")}},
 		{name: "a subtest's failure fails its top-level test",
 			units:      []*testrunv1.TestRunUnitEnded{unit("daemon", "d1", "boom", "!TestA/case_one")},
 			wantFailed: []string{"daemon/TestA@d1:boom"}},
@@ -222,6 +237,7 @@ func TestAFixThatCommitsNothingFailsTheMergeWhileAFailureIsNoRace(t *testing.T) 
 	}{
 		{name: "a failure no pass promoted", units: []*testrunv1.TestRunUnitEnded{unit("daemon", "d1", "boom", "!TestRacy")}},
 		{name: "a failed unit with no digest", units: []*testrunv1.TestRunUnitEnded{unit("daemon", "", "boom", "!TestRacy")}},
+		{name: "a failed test carrying only its unit's digest", units: []*testrunv1.TestRunUnitEnded{batchUnit("daemon", "d1", "", "boom", "!TestRacy")}},
 		{name: "a failed unit naming no test", units: []*testrunv1.TestRunUnitEnded{{UnitId: "daemon:build", Suite: "daemon", InputsDigest: ptrTo("d1"),
 			Verdict: &testrunv1.TestRunUnitEnded_Failed{Failed: &testrunv1.TestRunUnitFailed{ExitCode: 2}}}}},
 	}
@@ -343,6 +359,78 @@ func TestAWorkspacesRunPromotesItsRepositorysCandidates(t *testing.T) {
 			logged := h.recordsFor("error", opRaceFinding, "could not resolve the repository of a workspace's test run; its passes promote no race candidate")
 			if (len(logged) == 1) != tt.wantError {
 				t.Fatalf("records %+v, want the resolution failure recorded: %v", logged, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestATargetedRerunOfAGatesBatchedTestProvesItsRace(t *testing.T) {
+	// Arrange: the gate ran the file in a batch of many files and failed the
+	// test; the remediation reran that one test alone, so its batch's digest
+	// differs, and the file's own does not (2026-11-25, prod-mediator-children).
+	h := newHarness(t)
+	ctx := context.Background()
+	repo := wsm.RepoKey(h.targetD + "/.git")
+	name := "test/engine/session.test.ts > the retry label > never gives a start longer than the init bound"
+	events := writeEvents(t, batchUnit("shim", "batch-of-28", "session-file", "boom", "!"+name))
+	h.o.observeGateRaces(ctx, repo, "prod-mediator-children", events, "/archive", time.Unix(1, 0))
+
+	// Act
+	h.o.ObserveTestRun(ctx, h.targetD, "ws-a", []*testrunv1.TestRunUnitEnded{batchUnit("shim", "batch-of-1", "session-file", "", name)})
+
+	// Assert
+	findings, err := h.db.RaceFindings(ctx, repo)
+	if err != nil || len(findings) != 1 || findings[0].Ref.Test != name || !slices.Equal(findings[0].Merges, []string{"prod-mediator-children"}) {
+		t.Fatalf("findings = (%+v, %v), want the batched test's race found from its targeted rerun", findings, err)
+	}
+}
+
+func TestAPassMatchingNoCandidateOfItsTestIsRecordedOnlyForAWorkspacesRun(t *testing.T) {
+	const message = "a workspace's run passed a test that failed in a merge gate, but on other inputs than every failure of it: no race is proven"
+	tests := []struct {
+		name    string
+		observe func(h *harness, repo wsm.RepoKey, t *testing.T)
+		want    bool
+	}{
+		{name: "a workspace's pass on other inputs is recorded with the candidates' digests and merges", want: true,
+			observe: func(h *harness, _ wsm.RepoKey, _ *testing.T) {
+				h.o.ObserveTestRun(context.Background(), h.targetD, "ws-a", []*testrunv1.TestRunUnitEnded{unit("daemon", "d2", "", "TestRacy")})
+			}},
+		{name: "a gate's pass on other inputs is the course of a fix and is not",
+			observe: func(h *harness, repo wsm.RepoKey, t *testing.T) {
+				h.o.observeGateRaces(context.Background(), repo, "next", writeEvents(t, unit("daemon", "d2", "", "TestRacy")), "/archive", time.Unix(2, 0))
+			}},
+		{name: "a workspace's pass of a test with no candidate is not",
+			observe: func(h *harness, _ wsm.RepoKey, _ *testing.T) {
+				h.o.ObserveTestRun(context.Background(), h.targetD, "ws-a", []*testrunv1.TestRunUnitEnded{unit("daemon", "d2", "", "TestCalm")})
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			repo := wsm.RepoKey(h.targetD + "/.git")
+			if err := h.db.RecordGateFailures(context.Background(), repo, []wsm.GateTestFailure{{Ref: racyRef, InputsDigest: "d1", Merge: "m", FailedAt: time.Unix(1, 0)}}); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			tt.observe(h, repo, t)
+
+			// Assert
+			logged := h.recordsFor("info", opRaceFinding, message)
+			if !tt.want {
+				if len(logged) != 0 {
+					t.Fatalf("records %+v, want none", logged)
+				}
+				return
+			}
+			if len(logged) != 1 {
+				t.Fatalf("records %+v, want the unmatched pass recorded once", logged)
+			}
+			c := logged[0].Context
+			if c["test"] != "daemon/TestRacy" || c["inputs_digest"] != "d2" || c["candidate_digests"] != "d1" || c["merges"] != "m" || c["run_workspace"] != "ws-a" || c["repo"] != string(repo) {
+				t.Fatalf("record context %v, want the test, its digest, the candidates' digests and merges, the workspace and the repository", c)
 			}
 		})
 	}

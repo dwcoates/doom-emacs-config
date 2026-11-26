@@ -25,8 +25,9 @@ import (
 // so a race that failed only under the gate's load passed on its rerun and
 // was never fixed: the same race failed merge after merge. A test that
 // failed in a gate and then passed on the SAME inputs digest
-// (testrun.v1.TestRunUnitEnded.inputs_digest) failed for no change of the
-// code it ran, whichever merge it ran in, so the daemon records it as a race
+// (testrun.v1.TestRunTestResult.inputs_digest, the test's own: its file's
+// key in a batch, so a targeted rerun of it and a gate's batch agree) failed
+// for no change of the code it ran, whichever merge it ran in, so the daemon records it as a race
 // finding (wsm racefindings.go), and the deploy mediator is handed every open
 // one at its next check (intakeBrief), and dispatches its fix as it does a
 // deploy's problem.
@@ -60,7 +61,7 @@ func raceEvent(p wsm.Promotion) string {
 	return RaceFindingRecurred
 }
 
-// failedTest is one test a run failed, under the digest of its unit.
+// failedTest is one test a run failed, under the digest of its inputs.
 type failedTest struct {
 	ref     wsm.RaceFindingRef
 	digest  string
@@ -68,10 +69,14 @@ type failedTest struct {
 }
 
 // TestOutcomes reads a run's unit verdicts into the tests it failed and the
-// tests it passed, each under its unit's inputs digest. A unit with no digest
-// was not confined to its inputs and proves nothing, so it is left out. A Go
-// test is named by its top-level name: a subtest's failure fails its test,
-// and a test passed only when none of its subtests failed in the run.
+// tests it passed, each under the digest of the inputs it reads
+// (testrun.v1.TestRunTestResult.inputs_digest), never its unit's: a batch's
+// digest covers every file it ran, so it differs between runs that batch the
+// file differently. A test with no digest was not confined to its inputs, or
+// ran under a script older than the field, and proves nothing, so it is left
+// out. A Go test is named by its top-level name: a subtest's failure fails
+// its test, and a test passed only when none of its subtests failed in the
+// run.
 func TestOutcomes(units []*testrunv1.TestRunUnitEnded) (failed []failedTest, passed []wsm.TestPass) {
 	type key struct{ suite, test, digest string }
 	failures := map[key]string{}
@@ -79,11 +84,11 @@ func TestOutcomes(units []*testrunv1.TestRunUnitEnded) (failed []failedTest, pas
 	passes := map[key]bool{}
 	var passOrder []key
 	for _, u := range units {
-		if u.InputsDigest == nil || u.GetInputsDigest() == "" {
-			continue
-		}
 		for _, t := range u.GetTests() {
-			k := key{suite: u.GetSuite(), test: topLevelTest(t.GetName()), digest: u.GetInputsDigest()}
+			if t.GetInputsDigest() == "" {
+				continue
+			}
+			k := key{suite: u.GetSuite(), test: topLevelTest(t.GetName()), digest: t.GetInputsDigest()}
 			switch {
 			case t.GetFailed() != nil:
 				if _, seen := failures[k]; !seen {
@@ -177,7 +182,9 @@ func (o *orchestrator) observeGateRaces(ctx context.Context, repo wsm.RepoKey, m
 			o.deps.Log.Global().Info(opRaceFinding, "kept the gate's failed tests as race candidates until a pass on their inputs", withField(fields, "failed", len(failed)))
 		}
 	}
-	o.promoteRaces(ctx, repo, passed, fields)
+	// A GATE'S PASS ON OTHER INPUTS IS THE COURSE OF A FIX: the branch it
+	// ran changed what the test reads, so its mismatches are not recorded.
+	_ = o.promoteRaces(ctx, repo, passed, fields)
 }
 
 // eventsOf is the events file beside the tests log ARCHIVE (testsLogOf).
@@ -188,8 +195,8 @@ func eventsOf(archive string) string {
 // racesOnly reports whether every test the run's last failed gate failed
 // is a race finding its failure was promoted to: the gate's events name each
 // failed test, each under its digest, and none is still a candidate. A gate
-// with a failed unit that names no test, or carries no digest, failed for
-// something no race explains. Reading the events or the store failing is an
+// with a failed unit that names no failed test, or a failed test that carries
+// no digest, failed for something no race explains. Reading the events or the store failing is an
 // error the merge fails on.
 func (r *run) racesOnly(ctx context.Context) (bool, error) {
 	if r.failedArchive == "" {
@@ -208,9 +215,15 @@ func (r *run) racesOnly(ctx context.Context) (bool, error) {
 		}
 		named := false
 		for _, t := range u.GetTests() {
-			named = named || t.GetFailed() != nil
+			if t.GetFailed() == nil {
+				continue
+			}
+			if t.GetInputsDigest() == "" {
+				return false, nil
+			}
+			named = true
 		}
-		if !named || u.GetInputsDigest() == "" {
+		if !named {
 			return false, nil
 		}
 	}
@@ -236,8 +249,11 @@ func (r *run) racesOnly(ctx context.Context) (bool, error) {
 // ObserveTestRun implements Orchestrator: a workspace's own run in the
 // worktree DIR reported UNITS, and every test it passed promotes the gate
 // failures of DIR's repository its digest matches. Only a gate's failures are
-// candidates: a workspace's own failure is work in progress. A repository
-// that cannot be resolved is recorded at ERROR and its passes promote none.
+// candidates: a workspace's own failure is work in progress. A pass that
+// matched none while candidates of its test stand under other digests is
+// recorded, so a rerun a remediation took for a race's proof that proved
+// nothing says why. A repository that cannot be resolved is recorded at
+// ERROR and its passes promote none.
 func (o *orchestrator) ObserveTestRun(ctx context.Context, dir string, workspace ids.WorkspaceID, units []*testrunv1.TestRunUnitEnded) {
 	_, passed := TestOutcomes(units)
 	if len(passed) == 0 {
@@ -249,22 +265,28 @@ func (o *orchestrator) ObserveTestRun(ctx context.Context, dir string, workspace
 		o.deps.Log.Global().Error(opRaceFinding, "could not resolve the repository of a workspace's test run; its passes promote no race candidate", withField(fields, "error", err.Error()))
 		return
 	}
-	o.promoteRaces(ctx, repo, passed, withField(fields, "repo", string(repo)))
+	for _, u := range o.promoteRaces(ctx, repo, passed, withField(fields, "repo", string(repo))) {
+		o.deps.Log.Global().Info(opRaceFinding, "a workspace's run passed a test that failed in a merge gate, but on other inputs than every failure of it: no race is proven", dlog.Context{
+			"dir": dir, "run_workspace": string(workspace), "repo": string(repo),
+			"test": u.Pass.Ref.String(), "inputs_digest": u.Pass.InputsDigest,
+			"candidate_digests": strings.Join(u.CandidateDigests, ","), "merges": strings.Join(u.Merges, ",")})
+	}
 }
 
 // promoteRaces promotes REPO's candidates PASSED matches, records each
-// finding made or updated, and counts it. A failure is recorded at ERROR:
-// the candidates stay for the next pass.
-func (o *orchestrator) promoteRaces(ctx context.Context, repo wsm.RepoKey, passed []wsm.TestPass, fields dlog.Context) {
+// finding made or updated, and counts it, answering the passes that matched
+// no candidate of their test. A failure is recorded at ERROR: the
+// candidates stay for the next pass.
+func (o *orchestrator) promoteRaces(ctx context.Context, repo wsm.RepoKey, passed []wsm.TestPass, fields dlog.Context) []wsm.UnmatchedPass {
 	if len(passed) == 0 {
-		return
+		return nil
 	}
-	promoted, err := o.deps.DB.PromoteRaces(ctx, repo, passed)
+	result, err := o.deps.DB.PromoteRaces(ctx, repo, passed)
 	if err != nil {
 		o.deps.Log.Global().Error(opRaceFinding, "could not promote the gate failures the run's passes match; they wait for the next pass", withField(withField(fields, "passed", len(passed)), "error", err.Error()))
-		return
+		return nil
 	}
-	for _, p := range promoted {
+	for _, p := range result.Promoted {
 		event := raceEvent(p)
 		o.deps.Meter.CountRaceFinding(event)
 		o.deps.Log.Global().Info(opRaceFinding, "a test that failed in a merge gate passed on the same inputs: its failure is a race, handed to the deploy mediator's next check", dlog.Context{
@@ -272,4 +294,5 @@ func (o *orchestrator) promoteRaces(ctx context.Context, repo wsm.RepoKey, passe
 			"recurrences": p.Finding.Recurrences, "merges": strings.Join(p.Finding.Merges, ","),
 			"artifacts": p.Finding.Artifacts, "taken_on": !p.Finding.Open()})
 	}
+	return result.Unmatched
 }
