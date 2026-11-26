@@ -74,7 +74,7 @@
       "id": "launcher-accessibility-permission",
       "kind": "app_permission",
       "permission": "accessibility",
-      "why": "Zettel closes each Slack notification after its time on screen (SlackNotificationSeconds), which it reaches only through the Accessibility API",
+      "why": "Zettel closes each Slack and Zettel notification after its time on screen (NotificationSeconds), which it reaches only through the Accessibility API",
       "profile": "run",
       "platforms": [
         "darwin"

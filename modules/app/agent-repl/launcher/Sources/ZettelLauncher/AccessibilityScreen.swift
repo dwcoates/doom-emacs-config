@@ -157,12 +157,12 @@ public final class AccessibilityScreen: NotificationScreen {
     /// Observes the running Notification Center process, once Zettel may.
     private func attach(because reason: String) {
         guard AXIsProcessTrusted() else {
-            log.error(SlackOp.close, "Zettel may not use Accessibility, so Slack notifications are not closed; allow Zettel in System Settings → Privacy & Security → Accessibility",
+            log.error(CloserOp.close, "Zettel may not use Accessibility, so notifications are not closed; allow Zettel in System Settings → Privacy & Security → Accessibility",
                       ["reason": reason])
             return
         }
         guard let process = NSRunningApplication.runningApplications(withBundleIdentifier: notificationCenterBundleID).first else {
-            log.error(SlackOp.close, "Notification Center is not running, so Slack notifications are not closed until it starts",
+            log.error(CloserOp.close, "Notification Center is not running, so notifications are not closed until it starts",
                       ["reason": reason, "bundle": notificationCenterBundleID])
             return
         }
@@ -176,7 +176,7 @@ public final class AccessibilityScreen: NotificationScreen {
         }
         let made = AXObserverCreate(pid, callback, &created)
         guard made == .success, let created else {
-            log.error(SlackOp.close, "creating the observer of Notification Center failed, so Slack notifications are not closed",
+            log.error(CloserOp.close, "creating the observer of Notification Center failed, so notifications are not closed",
                       ["pid": pid, "cause": "\(AccessibilityError(call: "AXObserverCreate", code: made.rawValue))"])
             return
         }
@@ -185,7 +185,7 @@ public final class AccessibilityScreen: NotificationScreen {
         for name in [kAXWindowCreatedNotification, kAXLayoutChangedNotification] {
             let added = AXObserverAddNotification(created, app, name as CFString, refcon)
             guard added == .success else {
-                log.error(SlackOp.close, "watching Notification Center failed, so Slack notifications are not closed",
+                log.error(CloserOp.close, "watching Notification Center failed, so notifications are not closed",
                           ["pid": pid, "notification": name, "cause": "\(AccessibilityError(call: "AXObserverAddNotification", code: added.rawValue))"])
                 return
             }
@@ -194,7 +194,7 @@ public final class AccessibilityScreen: NotificationScreen {
         observer = created
         application = app
         watchedPID = pid
-        log.info(SlackOp.close, "watching Notification Center for Slack notifications", ["pid": pid, "reason": reason])
+        log.info(CloserOp.close, "watching Notification Center for notifications to close", ["pid": pid, "reason": reason])
         changed()
     }
 

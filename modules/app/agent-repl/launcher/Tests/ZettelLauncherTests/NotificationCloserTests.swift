@@ -65,19 +65,23 @@ func slack(_ identifier: String, actions: [String] = ["Show Details", "Reply", "
     ShownNotification(identifier: identifier, description: "Slack, New message in #general, hello", actions: actions)
 }
 
-final class SlackNotificationCloserTests: XCTestCase {
+func zettel(_ identifier: String) -> ShownNotification {
+    ShownNotification(identifier: identifier, description: "Zettel, footer-activity-updates, finished its turn", actions: ["Show Details", "Close"])
+}
+
+final class NotificationCloserTests: XCTestCase {
     var screen: FakeScreen!
     var scheduler: FakeScheduler!
     var log: RecordingLogger!
-    var duration: SlackNotificationDuration = .seconds(15)
-    var closer: SlackNotificationCloser!
+    var duration: NotificationDuration = .seconds(15)
+    var closer: NotificationCloser!
 
     override func setUp() {
         screen = FakeScreen()
         scheduler = FakeScheduler()
         log = RecordingLogger()
         duration = .seconds(15)
-        closer = SlackNotificationCloser(screen: screen, scheduler: scheduler, duration: { [unowned self] in self.duration }, log: log)
+        closer = NotificationCloser(screen: screen, scheduler: scheduler, duration: { [unowned self] in self.duration }, log: log)
     }
 
     func testASlackNotificationIsClosedAfterItsTime() {
@@ -92,8 +96,33 @@ final class SlackNotificationCloserTests: XCTestCase {
         XCTAssertEqual(scheduler.calls.first?.date, Date(timeIntervalSince1970: 1_015))
         XCTAssertEqual(screen.performed.map(\.action), ["Close"])
         XCTAssertEqual(screen.performed.map(\.identifier), ["A"])
-        XCTAssertEqual(log.first(.info, "closed a Slack notification after its time on screen")?.context["identifier"], "A")
+        XCTAssertEqual(log.first(.info, "closed a notification after its time on screen")?.context["identifier"], "A")
         XCTAssertTrue(closer.pending.isEmpty)
+    }
+
+    func testAZettelNotificationIsClosedAfterItsTime() {
+        // Arrange
+        screen.shown = ScreenScan(notifications: [zettel("Z")])
+
+        // Act
+        closer.screenChanged()
+        scheduler.fireArmed()
+
+        // Assert
+        XCTAssertEqual(screen.performed.map(\.identifier), ["Z"])
+        XCTAssertEqual(log.first(.info, "closed a notification after its time on screen")?.context["app"], "Zettel")
+        XCTAssertTrue(closer.pending.isEmpty)
+    }
+
+    func testEachRecordNamesTheNotificationsApp() {
+        // Arrange
+        screen.shown = ScreenScan(notifications: [slack("A")])
+
+        // Act
+        closer.screenChanged()
+
+        // Assert
+        XCTAssertEqual(log.first(.info, "a notification appeared; it closes after its time on screen")?.context["app"], "Slack")
     }
 
     func testAnotherAppsNotificationIsLeftAlone() {
@@ -150,7 +179,7 @@ final class SlackNotificationCloserTests: XCTestCase {
         // Assert
         XCTAssertTrue(closer.pending.isEmpty)
         XCTAssertNil(scheduler.armed)
-        XCTAssertNotNil(log.first(.debug, "a Slack notification left the screen before its time"))
+        XCTAssertNotNil(log.first(.debug, "a notification left the screen before its time"))
     }
 
     func testANotificationGoneAtItsDeadlineIsNotActedOn() {
@@ -177,7 +206,7 @@ final class SlackNotificationCloserTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(closer.pending["A"], Date(timeIntervalSince1970: 1_040))
-        XCTAssertEqual(log.first(.info, "a Slack notification appeared; it closes after its time on screen")?.context["seconds"], "40")
+        XCTAssertEqual(log.first(.info, "a notification appeared; it closes after its time on screen")?.context["seconds"], "40")
     }
 
     func testAnInvalidDurationLeavesTheNotificationUpAndIsRecordedOnce() {
@@ -190,7 +219,7 @@ final class SlackNotificationCloserTests: XCTestCase {
         closer.screenChanged()
 
         // Assert
-        let refusals = log.records.filter { $0.level == .error && $0.message.hasPrefix("SlackNotificationSeconds is not") }
+        let refusals = log.records.filter { $0.level == .error && $0.message.hasPrefix("NotificationSeconds is not") }
         XCTAssertEqual(refusals.count, 1)
         XCTAssertEqual(refusals.first?.context["value"], "soon")
         XCTAssertEqual(refusals.first?.context["identifier"], "A")
@@ -207,7 +236,7 @@ final class SlackNotificationCloserTests: XCTestCase {
         scheduler.fireArmed()
 
         // Assert
-        let record = log.first(.error, "a Slack notification offers no Close action, so it stays on screen; macOS may have changed its notifications' actions")
+        let record = log.first(.error, "a notification offers no Close action, so it stays on screen; macOS may have changed its notifications' actions")
         XCTAssertEqual(record?.context["actions"], "Show Details")
         XCTAssertEqual(record?.context["identifier"], "A")
         XCTAssertTrue(screen.performed.isEmpty)
@@ -224,7 +253,7 @@ final class SlackNotificationCloserTests: XCTestCase {
         scheduler.fireArmed()
 
         // Assert
-        let record = log.first(.error, "closing a Slack notification failed, so it stays on screen")
+        let record = log.first(.error, "closing a notification failed, so it stays on screen")
         XCTAssertEqual(record?.context["cause"], "AXError -25205")
         XCTAssertEqual(record?.context["identifier"], "A")
         XCTAssertTrue(closer.pending.isEmpty)
@@ -241,7 +270,7 @@ final class SlackNotificationCloserTests: XCTestCase {
         closer.screenChanged()
 
         // Assert
-        XCTAssertEqual(log.first(.error, "reading Notification Center's windows failed, so Slack notifications stay on screen")?.context["cause"], "AXError -25204")
+        XCTAssertEqual(log.first(.error, "reading Notification Center's windows failed, so notifications stay on screen")?.context["cause"], "AXError -25204")
         XCTAssertEqual(closer.pending["A"], Date(timeIntervalSince1970: 1_015))
     }
 
@@ -276,7 +305,7 @@ final class SlackNotificationCloserTests: XCTestCase {
     }
 }
 
-final class SlackNotificationDurationTests: XCTestCase {
+final class NotificationDurationTests: XCTestCase {
     var defaults: UserDefaults!
     let suite = "zettel-tests-\(UUID().uuidString)"
 
@@ -289,42 +318,61 @@ final class SlackNotificationDurationTests: XCTestCase {
     }
 
     func testUnsetIsTheDefault() {
-        XCTAssertEqual(slackNotificationDuration(defaults), .seconds(15))
+        XCTAssertEqual(notificationDuration(defaults), .seconds(15))
     }
 
     func testAWholeNumberIsThatManySeconds() {
-        defaults.set(30, forKey: slackNotificationSecondsKey)
-        XCTAssertEqual(slackNotificationDuration(defaults), .seconds(30))
+        defaults.set(30, forKey: notificationSecondsKey)
+        XCTAssertEqual(notificationDuration(defaults), .seconds(30))
     }
 
     func testANumberWrittenAsTextIsThatManySeconds() {
-        defaults.set("20", forKey: slackNotificationSecondsKey)
-        XCTAssertEqual(slackNotificationDuration(defaults), .seconds(20))
+        defaults.set("20", forKey: notificationSecondsKey)
+        XCTAssertEqual(notificationDuration(defaults), .seconds(20))
     }
 
     func testZeroIsInvalid() {
-        defaults.set(0, forKey: slackNotificationSecondsKey)
-        XCTAssertEqual(slackNotificationDuration(defaults), .invalid("0"))
+        defaults.set(0, forKey: notificationSecondsKey)
+        XCTAssertEqual(notificationDuration(defaults), .invalid("0"))
     }
 
     func testANegativeNumberIsInvalid() {
-        defaults.set(-5, forKey: slackNotificationSecondsKey)
-        XCTAssertEqual(slackNotificationDuration(defaults), .invalid("-5"))
+        defaults.set(-5, forKey: notificationSecondsKey)
+        XCTAssertEqual(notificationDuration(defaults), .invalid("-5"))
     }
 
     func testAFractionIsInvalid() {
-        defaults.set(2.5, forKey: slackNotificationSecondsKey)
-        XCTAssertEqual(slackNotificationDuration(defaults), .invalid("2.5"))
+        defaults.set(2.5, forKey: notificationSecondsKey)
+        XCTAssertEqual(notificationDuration(defaults), .invalid("2.5"))
     }
 
     func testABooleanIsInvalid() {
-        defaults.set(true, forKey: slackNotificationSecondsKey)
-        XCTAssertEqual(slackNotificationDuration(defaults), .invalid("1"))
+        defaults.set(true, forKey: notificationSecondsKey)
+        XCTAssertEqual(notificationDuration(defaults), .invalid("1"))
     }
 
     func testTextThatIsNoNumberIsInvalid() {
-        defaults.set("soon", forKey: slackNotificationSecondsKey)
-        XCTAssertEqual(slackNotificationDuration(defaults), .invalid("soon"))
+        defaults.set("soon", forKey: notificationSecondsKey)
+        XCTAssertEqual(notificationDuration(defaults), .invalid("soon"))
+    }
+}
+
+final class ClosedAppsTests: XCTestCase {
+    func testTheClosedAppsAreSlackAndZettel() {
+        XCTAssertEqual(closedApps, ["Slack", "Zettel"])
+    }
+
+    func testZettelsNameIsItsBundlesName() throws {
+        // Arrange: macOS names Zettel's banners by the bundle's CFBundleName.
+        let plist = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Bundle/Info.plist")
+
+        // Act
+        let info = try PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil) as? [String: Any]
+
+        // Assert
+        XCTAssertEqual(info?["CFBundleName"] as? String, zettelAppName)
     }
 }
 
