@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1681,6 +1682,81 @@ func TestRegistrationStatesTheNamesPrefixOnTheNaming(t *testing.T) {
 			want := nameprefix.Of(tt.want)
 			if n := len(f.topbarNamings); n == 0 || !proto.Equal(f.topbarNamings[n-1].NamePrefix, want) {
 				t.Fatalf("namings = %+v, want the last carrying prefix %v", f.topbarNamings, want)
+			}
+		})
+	}
+}
+
+func TestPublishNamingRecordsAnUnreadableAccountRootAtError(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	v := f.verbs.(*verbs)
+	record := f.workspace("w1", worktreeDir(t))
+	f.db.sessionErr = errors.New("the state client is closed")
+
+	// Act.
+	err := v.publishNaming(context.Background(), v.deps.Log.Global(), record)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the state client is closed") {
+		t.Fatalf("publishNaming = %v, want the session read's failure", err)
+	}
+	got, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRegister, Message: "could not read the workspace's account root for its topbar"})
+	if !ok {
+		t.Fatalf("no ERROR record of the account root: %+v", f.log.logger.Records())
+	}
+	if got.Context["workspace"] != "w1" || !strings.Contains(fmt.Sprint(got.Context["cause"]), "the state client is closed") {
+		t.Fatalf("record = %+v, want the workspace and the cause", got)
+	}
+}
+
+func TestBringUpViews(t *testing.T) {
+	cases := []struct {
+		name       string
+		arrange    func(*fixture)
+		wantErr    string
+		wantBound  bool
+		wantNaming bool
+	}{
+		{name: "binds the directory and then publishes the naming", wantBound: true, wantNaming: true},
+		{
+			name:    "a failed bind publishes no naming",
+			arrange: func(f *fixture) { f.footer.setDirErr = errors.New("bind exploded") },
+			wantErr: "bind exploded",
+		},
+		{
+			name:      "a failed naming is surfaced after the bind",
+			arrange:   func(f *fixture) { f.db.sessionErr = errors.New("session exploded") },
+			wantErr:   "session exploded",
+			wantBound: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			v := f.verbs.(*verbs)
+			record := f.workspace("w1", worktreeDir(t))
+			if tc.arrange != nil {
+				tc.arrange(f)
+			}
+			namingsBefore := len(f.topbarNamings)
+
+			// Act.
+			err := v.bringUpViews(context.Background(), v.deps.Log.Global(), record)
+
+			// Assert.
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("bringUpViews = %v, want nil", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("bringUpViews = %v, want an error carrying %q", err, tc.wantErr)
+			}
+			if _, bound := f.footer.dirs["w1"]; bound != tc.wantBound {
+				t.Fatalf("footer bound = %v, want %v", bound, tc.wantBound)
+			}
+			if named := len(f.topbarNamings) > namingsBefore; named != tc.wantNaming {
+				t.Fatalf("naming published = %v, want %v", named, tc.wantNaming)
 			}
 		})
 	}

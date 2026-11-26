@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
@@ -34,6 +37,9 @@ func (v *verbs) SettleMissingDirectory(ctx context.Context, op string, ws wsm.Wo
 		dlog.KeyWorkspaceDir: ws.Dir,
 		"error":              statErr.Error(),
 	}
+	// THE SETTLE TAKES THE WORKSPACE'S DIRECTORY GATE (dirGates), so it never
+	// restores beside an Open restoring the same directory.
+	defer v.dirGates.Lock(ws.ID)()
 	// THE ROW IS READ AGAIN, AFTER THE STAT THAT FOUND THE DIRECTORY GONE.
 	// The caller's row was read BEFORE that stat, and every teardown writes
 	// its row first (a landing stamps merged_at and closes it, a nuke stamps
@@ -59,6 +65,24 @@ func (v *verbs) SettleMissingDirectory(ctx context.Context, op string, ws wsm.Wo
 	if ws.NukeOwedAt != nil {
 		log.Info(op, "the workspace directory is gone because a nuke is under way; it is left for the nuke to finish", fields)
 		return false, nil
+	}
+	// THE DIRECTORY IS STATTED AGAIN, UNDER THE GATE. An Open that held the
+	// gate first may have restored it, and a `worktree add` into the
+	// directory it made would fail and close the workspace it just brought
+	// back. The views are bound and the naming published here all the same,
+	// as a restore does, so a recreated answer always means a bound
+	// workspace, whoever brought the directory back.
+	if _, err := os.Stat(ws.Dir); err == nil {
+		wsLog := v.deps.Log.WorkspaceOrCentral(ws.Dir).With(dlog.Context{"workspace": string(ws.ID)})
+		if err := v.bringUpViews(ctx, wsLog, ws); err != nil {
+			return false, fmt.Errorf("bring up the views of %q, restored meanwhile: %w", ws.ID, err)
+		}
+		log.Info(op, "the workspace directory was gone and was restored meanwhile; its views are bound", fields)
+		return true, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		fields["cause"] = err.Error()
+		log.Error(op, "could not tell again whether the workspace directory is gone; it is left as it is", fields)
+		return false, fmt.Errorf("stat the missing-directory workspace %q again: %w", ws.ID, err)
 	}
 	restored, err := v.RestoreMissingWorktree(ctx, op, ws)
 	if restored {

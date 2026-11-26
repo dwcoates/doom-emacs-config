@@ -367,14 +367,7 @@ func shimGone(err error) bool {
 // remoteControlGate answers workspace WS's remote-control gate, minting it on
 // first use.
 func (f *Fleet) remoteControlGate(ws ids.WorkspaceID) *sync.Mutex {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	gate, ok := f.remoteControlGates[ws]
-	if !ok {
-		gate = &sync.Mutex{}
-		f.remoteControlGates[ws] = gate
-	}
-	return gate
+	return f.remoteControlGates.For(ws)
 }
 
 // HoldRemoteControl takes workspace WS's remote-control gate and answers its

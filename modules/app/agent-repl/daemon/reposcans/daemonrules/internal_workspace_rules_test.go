@@ -951,3 +951,33 @@ func TestEveryReadAnsweringASummaryTakesSummaryFields(t *testing.T) {
 		t.Fatalf("SummaryFields sites = %v, hand-rolled = %v; want the status read and its own definition, and none hand-rolled", callers, handRolled)
 	}
 }
+
+// TestEveryBindThenNameGoesThroughBringUpViews fails when a source binds a
+// workspace's resolvers and publishes its naming back to back by hand rather
+// than through bringUpViews, so a site that drifts from it fails here.
+func TestEveryBindThenNameGoesThroughBringUpViews(t *testing.T) {
+	sourcescan.InPackage(t, internalWorkspaceDir)
+	// Arrange
+	const window = 6
+	var pairs []string
+
+	// Act
+	for _, file := range sourcescan.Production(t, internalWorkspaceDir) {
+		lines := strings.Split(string(file.Source), "\n")
+		for i, line := range lines {
+			if !strings.Contains(line, "v.bindResolvers(") {
+				continue
+			}
+			for j := i + 1; j < len(lines) && j <= i+window; j++ {
+				if strings.Contains(lines[j], "v.publishNaming(") {
+					pairs = append(pairs, file.Name)
+				}
+			}
+		}
+	}
+
+	// Assert
+	if !slices.Equal(pairs, []string{"register.go"}) {
+		t.Fatalf("bind-then-name pairs = %v, want exactly the one in bringUpViews (register.go)", pairs)
+	}
+}

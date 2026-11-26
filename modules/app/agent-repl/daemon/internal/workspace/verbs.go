@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/keyedmutex"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -107,6 +108,13 @@ type verbs struct {
 	// stopped holds the workspaces whose turn the user stopped and whom no
 	// user prompt has followed yet (standings.go TakeBackOneShot).
 	stopped sync.Map
+	// dirGates serialize, per workspace, every step that finds its directory
+	// gone and brings it back: an Open, and the missing-directory settle
+	// (SettleMissingDirectory). Each is held across the whole step, so a
+	// second step never finds a directory the first is still restoring, and
+	// never answers before the first has bound the restored workspace's
+	// views (open.go).
+	dirGates keyedmutex.Set[ids.WorkspaceID]
 	// intakeHandoffs makes a card's question handed to its open intake
 	// workspace and that intake's retirement one after the other (intake.go
 	// AskAboutCard, retireIntake).

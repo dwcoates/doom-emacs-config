@@ -329,17 +329,7 @@ func (r *resolver) planOpening(s *wsState, f *feedState) (loadPlan, bool) {
 // readers never read and draw the same older page twice. It is held across
 // the read, which is why it is not the resolver's own mutex.
 func (r *resolver) loadMu(ws ids.WorkspaceID) *sync.Mutex {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.loads == nil {
-		r.loads = map[ids.WorkspaceID]*sync.Mutex{}
-	}
-	mu, ok := r.loads[ws]
-	if !ok {
-		mu = &sync.Mutex{}
-		r.loads[ws] = mu
-	}
-	return mu
+	return r.loads.For(ws)
 }
 
 // loaded is what one load drew in its feed: the oldest row, when it drew any.

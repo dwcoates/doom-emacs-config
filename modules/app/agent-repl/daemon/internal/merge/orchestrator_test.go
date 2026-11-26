@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -222,5 +223,43 @@ func TestRegisteredQueuesSurfacesAFailedRegistryRead(t *testing.T) {
 	// Assert
 	if err == nil || got != nil {
 		t.Fatalf("registeredQueues = %+v, %v; want the registry's error", got, err)
+	}
+}
+
+func TestKeyedLockCallSitesShareTheOrchestratorsSets(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer func(*harness) *sync.Mutex
+		stored func(*harness) *sync.Mutex
+	}{
+		{
+			name:   "the line lock",
+			answer: func(h *harness) *sync.Mutex { return h.o.lineLock(h.repoKey()) },
+			stored: func(h *harness) *sync.Mutex { return h.o.lines.For(h.repoKey()) },
+		},
+		{
+			name:   "the hand-off lock",
+			answer: func(h *harness) *sync.Mutex { return h.o.handOffLock(theWorkspace) },
+			stored: func(h *harness) *sync.Mutex { return h.o.handOffLocks.For(theWorkspace) },
+		},
+		{
+			name:   "the drop lock",
+			answer: func(h *harness) *sync.Mutex { return h.o.dropLock(theWorkspace) },
+			stored: func(h *harness) *sync.Mutex { return h.o.dropLocks.For(theWorkspace) },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			first, again := tc.answer(h), tc.answer(h)
+
+			// Assert.
+			if first == nil || first != again || tc.stored(h) != first {
+				t.Fatalf("answered %p then %p, set holds %p; want one lock, kept in the orchestrator's set", first, again, tc.stored(h))
+			}
+		})
 	}
 }

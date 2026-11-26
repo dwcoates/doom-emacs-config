@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/keyedmutex"
 	"agent-repld/internal/latestmodel"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/publish"
@@ -54,7 +55,7 @@ type resolver struct {
 	loggers map[ids.WorkspaceID]dlog.Logger
 	// loads serializes each workspace's page loads across the read they make
 	// off mu (book.go loadMu).
-	loads map[ids.WorkspaceID]*sync.Mutex
+	loads keyedmutex.Set[ids.WorkspaceID]
 	// held is each workspace's held section accumulation (held.go). It lives
 	// here rather than on wsState so a bind's reset, which empties the feed,
 	// keeps what the prompt queue and the merge orchestrator still hold.

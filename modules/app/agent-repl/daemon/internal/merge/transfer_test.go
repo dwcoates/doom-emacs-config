@@ -758,9 +758,7 @@ func TestTheMoveLockIsHeldPerWorkspaceUntilReleased(t *testing.T) {
 	unlock := h.o.lockMove(theWorkspace)
 
 	// Assert.
-	h.o.mu.Lock()
-	lock := h.o.moveLocks[theWorkspace]
-	h.o.mu.Unlock()
+	lock := h.o.moveLocks.For(theWorkspace)
 	if lock.TryLock() {
 		t.Fatal("the move lock was free while held")
 	}

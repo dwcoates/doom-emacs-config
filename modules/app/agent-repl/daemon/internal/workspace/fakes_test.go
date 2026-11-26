@@ -2097,6 +2097,9 @@ type fakeGit struct {
 	unregisterErr error
 	restored      []restoredWorktree
 	restoreErr    error
+	// duringRestore, when set, runs inside RestoreWorktree once the directory
+	// is made, while the restore is still mid-flight.
+	duringRestore func()
 	// refsUnder answers ListRefs per prefix; listRefsErr fails it, and
 	// listedRefs is every prefix it was asked about.
 	refsUnder   map[string][]string
@@ -2367,7 +2370,13 @@ func (g *fakeGit) RestoreWorktree(_ context.Context, repoDir, worktreeDir, branc
 		}
 	}
 	g.restored = append(g.restored, restoredWorktree{repoDir, worktreeDir, branch})
-	return os.MkdirAll(filepath.Join(worktreeDir, ".git"), 0o755)
+	if err := os.MkdirAll(filepath.Join(worktreeDir, ".git"), 0o755); err != nil {
+		return err
+	}
+	if g.duringRestore != nil {
+		g.duringRestore()
+	}
+	return nil
 }
 
 func (g *fakeGit) ListRefs(_ context.Context, _, prefix string) ([]string, error) {
@@ -3064,8 +3073,10 @@ type fakeFooter struct {
 	interrupting map[ids.WorkspaceID]bool
 	// startFailed is the bring-up failure each workspace was told to stand.
 	startFailed map[ids.WorkspaceID]*footer.StartFailed
-	// dirs is what registration bound, keyed by workspace.
-	dirs map[ids.WorkspaceID]string
+	// dirs is what registration bound, keyed by workspace. setDirErr fails
+	// every bind.
+	dirs      map[ids.WorkspaceID]string
+	setDirErr error
 	// parked records every park state the verbs installed or lifted, in order.
 	parked []bool
 	// primed records every workspace registration primed the footer for.
@@ -4637,6 +4648,9 @@ func (s stubTopbar) SetNextKeepalive(ids.WorkspaceID, time.Time) {}
 // The three resolvers registration BINDS record the directory it bound, which
 // is all any verb test needs of them.
 func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
+	if f.setDirErr != nil {
+		return f.setDirErr
+	}
 	if f.dirs == nil {
 		f.dirs = map[ids.WorkspaceID]string{}
 	}

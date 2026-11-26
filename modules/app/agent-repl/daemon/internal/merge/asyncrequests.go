@@ -182,7 +182,7 @@ func readyRequests(requests []wsm.AsyncMergeRequest, turn ids.TurnID, inFlight b
 
 // handOffLock answers the lock WS's hand-offs are serialized by.
 func (o *orchestrator) handOffLock(ws ids.WorkspaceID) *sync.Mutex {
-	return keyedLock(o, o.handOffLocks, ws)
+	return o.handOffLocks.For(ws)
 }
 
 // handOffReady hands each of WS's ready requests to its merge workspace,

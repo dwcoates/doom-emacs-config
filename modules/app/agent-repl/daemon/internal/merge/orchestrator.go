@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/keyedmutex"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 
@@ -194,12 +195,12 @@ type orchestrator struct {
 	asyncWaits map[ids.WorkspaceID]*asyncWait
 	// handOffLocks serialize each requester's hand-offs, so its async
 	// requests join the line in the order they were asked for.
-	handOffLocks map[ids.WorkspaceID]*sync.Mutex
+	handOffLocks keyedmutex.Set[ids.WorkspaceID]
 	// dropLocks serialize each workspace's drops of its waiting merge
 	// (dropQueued), so two exits asking at once (a cold gate raised twice,
 	// an eviction beside it) never both act on one entry: the second reads
 	// the entry the first already took off (leftFirst).
-	dropLocks map[ids.WorkspaceID]*sync.Mutex
+	dropLocks keyedmutex.Set[ids.WorkspaceID]
 	// requestingTurns is the turn in flight when each workspace's merge was
 	// asked for, until TakeRequestingTurn is asked about it.
 	requestingTurns map[ids.WorkspaceID]ids.TurnID
@@ -247,9 +248,8 @@ type orchestrator struct {
 	// clears takenAway drops the merge instead of resuming it. Recorded and
 	// consumed under the same lock as takenAway (dequeue, AdoptWorkspace).
 	abandonsAtTakeBack map[ids.WorkspaceID]AbandonCause
-	// moveLocks are the workspaces' move locks (lockMove), made on first use
-	// under mu.
-	moveLocks map[ids.WorkspaceID]*sync.Mutex
+	// moveLocks are the workspaces' move locks (lockMove), made on first use.
+	moveLocks keyedmutex.Set[ids.WorkspaceID]
 	// serviceGates are the gates' runs on the test service, and a restart's
 	// hold of them (testservicehold.go).
 	serviceGates serviceGates
@@ -269,7 +269,7 @@ type orchestrator struct {
 	// chain's members: a remediated merge returning (returnRemediated), a
 	// race recorded (claimRace), and a run leaving its line (leaveLine). See
 	// lineWrite.
-	lines map[wsm.RepoKey]*sync.Mutex
+	lines keyedmutex.Set[wsm.RepoKey]
 	// headLeases are the merge leases admitFront took for the heads it
 	// admitted, handed to start: the lease goes first and the admission
 	// after, so an admitted head always has its run's lease.
@@ -414,8 +414,6 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		requested:          map[ids.WorkspaceID]*requestWait{},
 		requestingTurns:    map[ids.WorkspaceID]ids.TurnID{},
 		asyncWaits:         map[ids.WorkspaceID]*asyncWait{},
-		handOffLocks:       map[ids.WorkspaceID]*sync.Mutex{},
-		dropLocks:          map[ids.WorkspaceID]*sync.Mutex{},
 		ledgerOf:           map[ids.WorkspaceID]ids.LeaseID{},
 		originsOf:          map[ids.WorkspaceID]*mergeOrigin{},
 		heads:              newHeadBook(),
@@ -424,14 +422,12 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		remediating:        map[ids.WorkspaceID]*remediation{},
 		takenAway:          map[ids.WorkspaceID]suspension{},
 		passedOverOf:       map[wsm.RepoKey]map[ids.WorkspaceID]passReason{},
-		moveLocks:          map[ids.WorkspaceID]*sync.Mutex{},
 		abandonsAtTakeBack: map[ids.WorkspaceID]AbandonCause{},
 		offers:             map[ids.WorkspaceID]bool{},
 		repoOf:             map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:            map[wsm.RepoKey]bool{},
 		drainRetries:       map[wsm.RepoKey]*drainRetry{},
 		afterFunc:          func(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop },
-		lines:              map[wsm.RepoKey]*sync.Mutex{},
 		headLeases:         map[ids.WorkspaceID]wsm.Lease{},
 		leaseWaits:         map[ids.WorkspaceID]wsm.RepoKey{},
 		events:             newQueueEvents(),

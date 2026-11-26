@@ -1175,7 +1175,7 @@ func (e *entryGone) Unwrap() error { return e.found }
 
 // dropLock answers the lock WS's drops are serialized by (dropLocks).
 func (o *orchestrator) dropLock(ws ids.WorkspaceID) *sync.Mutex {
-	return keyedLock(o, o.dropLocks, ws)
+	return o.dropLocks.For(ws)
 }
 
 // leftFirst answers a drop of WS's merge for CAUSE that found its entry in
