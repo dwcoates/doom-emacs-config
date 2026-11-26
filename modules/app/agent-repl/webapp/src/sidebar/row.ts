@@ -90,7 +90,7 @@ import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.j
 import { drawRecencyGutterSlot } from "./recency-gutters.js";
 import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
-import { applyNameTint, nameTint } from "./name-tint.js";
+import { NAME_VIEWED_CLASS, applyNameTint, nameTint } from "./name-tint.js";
 import { markColdGatedName } from "./cold-gate-name.js";
 import { drawNameInk } from "./name-ink.js";
 import { drawNamePrefix } from "../name-prefix.js";
@@ -343,14 +343,17 @@ export function drawRosterRow(
     u.viewed !== undefined && drawRosterRowViewed(u.viewed, `${path}.viewed`),
   );
   if (mode === "partial" && !backlog) {
-    label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
+    // An open row's name ink is `name-tint.ts`'s (below), which keeps a
+    // working or merging name in its color; a band row's name greys here.
+    if (place !== "grouping") label.classList.add(NAME_VIEWED_CLASS);
   }
-  // THE UNREAD TURN END IS NOT INKED ON THE NAME (owner request, 2026-10-29):
-  // names are greyscale, so the marker only validates and tags the row.
+  // THE UNREAD TURN END UNDER A BACKGROUND ROW inks its name (owner ruling,
+  // 2026-11-25, `name-tint.ts`), and tags the row.
+  let unreadTurnEnd: string | undefined;
   if (u.idleAsyncUnread !== undefined && !backlog) {
-    const end = drawRosterRowIdleAsyncUnread(u.idleAsyncUnread, status.case, `${path}.idleAsyncUnread`);
-    ws.setAttribute("data-unread-turn-end", end);
+    unreadTurnEnd = drawRosterRowIdleAsyncUnread(u.idleAsyncUnread, status.case, `${path}.idleAsyncUnread`);
+    ws.setAttribute("data-unread-turn-end", unreadTurnEnd);
   }
   // A BAND ROW'S NAME TAKES THE REPOSITORY NAMES' COLOUR, Recently Merged and
   // the Backlog alike (owner requests, 2026-10-03 and 2026-10-13); a merged row's
@@ -366,12 +369,22 @@ export function drawRosterRow(
   // mark stands still. Only a row that draws a mark breathes, so the bands'
   // names never do.
   if (place === "grouping" && mark.motion !== "still") label.classList.add(mark.motion);
-  // THE NAME WEARS ITS STATUS COLOR UNTIL THE ROW IS VIEWED (owner request,
-  // 2026-11-23, `name-tint.ts`), whatever the status and however long ago its
-  // turn ended. Only an open row, never a band's.
+  // THE NAME'S INK (owner rulings, 2026-11-23 and 2026-11-25, `name-tint.ts`):
+  // a working or merging name holds its status color, and an idle name, an
+  // async-merging one included, wears its color until the row is viewed.
+  // Only an open row, never a band's.
   if (place === "grouping" && !backlog) {
     const shown = requireCase(requireMessage(u.when, `${path}.when`).shown, `${path}.when.shown`);
-    applyNameTint(label, nameTint(shown.case, mark.toneClass, mode === "partial"));
+    applyNameTint(
+      label,
+      nameTint({
+        shown: shown.case,
+        arm: status.case,
+        tone: mark.toneClass,
+        viewed: mode === "partial",
+        unreadTurnEnd,
+      }),
+    );
   }
   // THE LOOPS RUN ON THE COMPOSITOR (2026-11-16): the breath and the shimmer
   // move copies of the name (`name-ink.ts`), never its color or its mask.

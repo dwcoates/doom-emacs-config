@@ -1882,10 +1882,9 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
   font-size: calc(var(--ws-mark-size) * 1.25);
 }
 /* A WORKSPACE NAME'S RESTING INK is the repository headers' (owner request,
-   2026-10-29): what a name with no status color draws in. A name not viewed
-   wears its status tone over it (src/sidebar/name-tint.ts, below), a viewed
-   one the muted grey (below), and a cold gate strikes the name, in the dimmer
-   grey once viewed (below). */
+   2026-10-29): what a name with no status color draws in. A tinted name wears its status tone over it, a viewed one the
+   muted grey (src/sidebar/name-tint.ts decides which, below), and a cold gate
+   strikes the name, in the dimmer grey once viewed (below). */
 #ws-sidebar .row .name {
   --name-rest: var(--repo-head-expanded);
   --name-peak: var(--fg);

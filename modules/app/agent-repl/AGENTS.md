@@ -2830,9 +2830,11 @@ The same two words, `full` and `partial`, name a SECOND thing a workspace
 carries, and it is drawn on the Emacs tab-bar and in the webapp sidebar alike.
 A workspace the user has interacted with since its status last changed is
 **partial**: the tab's name falls back to the bar's ground (`[N]` keeps the
-status colour) and the sidebar row's name greys to `--muted`. A **full** row's
-sidebar name wears its status colour (`webapp/src/sidebar/name-tint.ts`), on
-every status and with no fade. **The status itself never recedes**: the
+status colour) and an idle sidebar row's name greys to `--muted`. A **full**
+idle row's sidebar name wears its status colour, with no fade. A working (red)
+or merging (purple) row's sidebar name holds its colour in either mode, and an
+async merge changes nothing of the name; the whole rule is
+`webapp/src/sidebar/name-tint.ts`'s. **The status itself never recedes**: the
 bracket and the sidebar dot keep their colour in either mode. The mode says
 what the user has acted on; the colour says what the workspace is DOING.
 
