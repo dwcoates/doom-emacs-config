@@ -43,8 +43,9 @@ public func actionName(_ raw: String) -> String {
 }
 
 /// Reads Notification Center's windows, each with the key naming it: every
-/// notification shown on screen, by identifier with its element, and every
-/// window that is neither the panel nor holds a notification.
+/// notification shown on screen, by identifier with its element, each window
+/// holding one, each window that is neither the panel nor holds a
+/// notification group, and each holding a group it cannot act on.
 public func scanWindows<Node: AccessibilityNode>(_ windows: [(key: String, node: Node)]) -> (scan: ScreenScan, elements: [String: Node]) {
     var scan = ScreenScan(notifications: [])
     var elements: [String: Node] = [:]
@@ -52,7 +53,7 @@ public func scanWindows<Node: AccessibilityNode>(_ windows: [(key: String, node:
         if holdsPanelList(window.node) { continue }
         let found = notificationGroups(in: window.node)
         if found.isEmpty {
-            scan.unrecognizedWindows[window.key] = layoutOutline(window.node)
+            scan.emptyWindows[window.key] = layoutOutline(window.node)
             continue
         }
         for group in found {
@@ -62,6 +63,7 @@ public func scanWindows<Node: AccessibilityNode>(_ windows: [(key: String, node:
                 scan.unrecognizedWindows[window.key] = layoutOutline(window.node)
                 continue
             }
+            scan.notificationWindows.insert(window.key)
             scan.notifications.append(ShownNotification(identifier: identifier, description: group.nodeDescription,
                                                         actions: group.rawActionNames.map(actionName)))
             elements[identifier] = group

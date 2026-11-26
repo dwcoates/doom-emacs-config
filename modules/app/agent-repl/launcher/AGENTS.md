@@ -89,7 +89,9 @@ events notify, so Slack's per-channel settings hold.
   measured on macOS 26.2.
 - Apple does not document that layout, so EVERY WAY IT CAN STOP MATCHING IS
   RECORDED at WARN or ERROR (`launcher.notification_closer`): a window holding
-  no notification the launcher recognizes, a notification naming no app, one
+  no notification the launcher recognizes (with its layout; a banner's window
+  left empty for a moment after its notification leaves is DEBUG, since the
+  same window held a notification), a notification naming no app, one
   offering no `Close`, a failed scan or close, Accessibility not allowed, an
   invalid `NotificationSeconds`. A macOS update that breaks the closer
   shows in the log the first time, never as notifications that silently

@@ -58,7 +58,7 @@ final class ScanWindowsTests: XCTestCase {
         // Assert
         XCTAssertEqual(result.scan, ScreenScan(notifications: [
             ShownNotification(identifier: "A", description: "Slack, New message, hi", actions: ["AXPress", "Show Details", "Close"]),
-        ]))
+        ], notificationWindows: ["w1"]))
         XCTAssertEqual(result.elements["A"]?.nodeDescription, "Slack, New message, hi")
     }
 
@@ -98,10 +98,12 @@ final class ScanWindowsTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(result.scan.notifications.map(\.identifier), ["A", "B"])
+        XCTAssertEqual(result.scan.notificationWindows, ["w1", "w2"])
         XCTAssertTrue(result.scan.unrecognizedWindows.isEmpty)
+        XCTAssertTrue(result.scan.emptyWindows.isEmpty)
     }
 
-    func testAWindowWithNoNotificationIsUnrecognized() {
+    func testAWindowWithNoNotificationGroupIsEmpty() {
         // Arrange: a group whose subrole no longer names a notification.
         let renamed = FakeNode(role: "AXGroup", subrole: "AXSomethingNew", identifier: "A", nodeDescription: "Slack, a, b")
         let windows = [(key: "w1", node: bannerWindow([renamed]))]
@@ -110,7 +112,7 @@ final class ScanWindowsTests: XCTestCase {
         let result = scanWindows(windows)
 
         // Assert
-        XCTAssertEqual(result.scan, ScreenScan(notifications: [], unrecognizedWindows: ["w1": layoutOutline(windows[0].node)]))
+        XCTAssertEqual(result.scan, ScreenScan(notifications: [], emptyWindows: ["w1": layoutOutline(windows[0].node)]))
     }
 
     func testANotificationWithNoIdentifierMakesItsWindowUnrecognized() {
@@ -123,18 +125,21 @@ final class ScanWindowsTests: XCTestCase {
         // Assert
         XCTAssertEqual(result.scan.notifications.map(\.identifier), ["B"])
         XCTAssertEqual(Array(result.scan.unrecognizedWindows.keys), ["w1"])
+        XCTAssertTrue(result.scan.emptyWindows.isEmpty)
     }
 
-    func testAnEmptyWindowIsUnrecognizedWithItsLayout() {
-        // Arrange: a window whose notification has gone.
-        let windows = [(key: "w1", node: bannerWindow([]))]
+    func testABannerWindowLeftAfterItsNotificationIsEmptyWithItsLayout() {
+        // Arrange: the window macOS 26.2 leaves for a moment after a Close
+        // (measured 2026-11-26): the banner's group without its subrole.
+        let windows = [(key: "w1", node: bannerWindow([FakeNode(role: "AXGroup")]))]
 
         // Act
         let result = scanWindows(windows)
 
         // Assert
-        XCTAssertEqual(result.scan.unrecognizedWindows,
-                       ["w1": "AXWindow/AXSystemDialog(AXGroup/AXHostingView(AXGroup(AXScrollArea),AXGroup#widgets-overlay-view))"])
+        XCTAssertEqual(result.scan.emptyWindows,
+                       ["w1": "AXWindow/AXSystemDialog(AXGroup/AXHostingView(AXGroup(AXScrollArea(AXGroup)),AXGroup#widgets-overlay-view))"])
+        XCTAssertTrue(result.scan.notificationWindows.isEmpty)
     }
 }
 
