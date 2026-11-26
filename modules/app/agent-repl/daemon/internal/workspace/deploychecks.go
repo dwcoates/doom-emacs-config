@@ -286,15 +286,44 @@ func (v *verbs) DeployCheckContextTokens(ws wsm.WorkspaceID) int64 {
 // the user (owner ruling, 2026-11-17: no deploy check waits on a cold gate).
 // A workspace that is no standing deploy check, or has no gate standing, is
 // left as it is.
+//
+// THE ANSWER AWAITS THE ADOPTION rather than reading the standing once: at a
+// handover the gate is raised inside the adoption itself (Fleet.AdoptParked
+// stands the carried gate) before the rollout marks the workspace owned, so
+// a single read refused the answer not_yet_adopted at every handover and the
+// gate stood with no answerer (2026-11-26 02:04:57Z handover, the production
+// mediator). A deploy check handed to a successor instead is left to the
+// daemon that serves it.
 func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceID) error {
 	// EVERY GATE RAISED COMES HERE, so a workspace that is no standing deploy
 	// check is passed over before any ownership is asked: a handover raises
 	// gates again on workspaces this daemon has not adopted yet (2026-11-17
 	// 13:24: five not_yet_adopted ERRORs, none a deploy check).
-	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.IsMediator() {
+	record, err := v.deps.DB.Workspace(ctx, ws)
+	if err != nil || !record.IsMediator() {
 		return err
 	}
-	_, err := v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,
+	log := v.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(ws)})
+	first, err := v.deps.Ownership.Standing(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("answer the deploy check %s's cold gate: read its serving standing: %w", ws, err)
+	}
+	reached, err := v.deps.Ownership.AwaitAdopted(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("answer the deploy check %s's cold gate: await its adoption: %w", ws, err)
+	}
+	switch reached {
+	case StandingOwned:
+		if first == StandingNotYetAdopted {
+			log.Info(opDeployChecks, "the gate was raised before this daemon adopted the deploy check; its answer waited for the adoption", nil)
+		}
+	case StandingTransferringAway:
+		log.Info(opDeployChecks, "the deploy check was handed to a successor daemon; its gate's answer is left to the daemon that serves the workspace", dlog.Context{"standing": "transferring_away"})
+		return nil
+	default:
+		return fmt.Errorf("answer the deploy check %s's cold gate: the adoption wait ended at the standing %d", ws, reached)
+	}
+	_, err = v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,
 		logsite.Msg("a cold gate stands on the standing deploy check; it is answered compact-and-resume at once"), nil)
 	return err
 }

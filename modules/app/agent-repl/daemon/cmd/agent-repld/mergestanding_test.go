@@ -21,6 +21,10 @@ func (o stubOwnership) Standing(context.Context, ids.WorkspaceID) (workspace.Sta
 	return o.standing, o.err
 }
 
+func (o stubOwnership) AwaitAdopted(context.Context, ids.WorkspaceID) (workspace.Standing, error) {
+	return o.standing, o.err
+}
+
 func (stubOwnership) Created(ids.WorkspaceID) {}
 
 func TestTheMergeQueueReadsTheStandingTheVerbsRefuseOn(t *testing.T) {

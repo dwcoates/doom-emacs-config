@@ -466,6 +466,10 @@ func (f *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (workspace.St
 	return f.standing, f.err
 }
 
+func (f *fakeOwnership) AwaitAdopted(context.Context, ids.WorkspaceID) (workspace.Standing, error) {
+	return f.standing, f.err
+}
+
 func (f *fakeOwnership) Created(ids.WorkspaceID) {}
 
 // retargetCall is one Retarget the operation received.

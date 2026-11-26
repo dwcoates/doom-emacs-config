@@ -3879,9 +3879,19 @@ type fakeOwnership struct {
 	standing Standing
 	err      error
 	created  []ids.WorkspaceID
+	// awaitAdopted, when set, answers AwaitAdopted; unset, the wait answers
+	// the fixed standing at once.
+	awaitAdopted func(ws ids.WorkspaceID) (Standing, error)
 }
 
 func (o *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (Standing, error) {
+	return o.standing, o.err
+}
+
+func (o *fakeOwnership) AwaitAdopted(_ context.Context, ws ids.WorkspaceID) (Standing, error) {
+	if o.awaitAdopted != nil {
+		return o.awaitAdopted(ws)
+	}
 	return o.standing, o.err
 }
 
