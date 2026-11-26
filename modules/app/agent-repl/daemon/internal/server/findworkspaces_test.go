@@ -387,11 +387,17 @@ func TestFindWorkspacesAnswersHowAClosedWorkspaceEnded(t *testing.T) {
 			want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool { return h.GetKilled() != nil }},
 		{name: "a close recorded before its kind", closure: &wsm.Closure{At: time.UnixMilli(3_000), By: wsm.CloseByUser, How: wsm.HowUnrecorded},
 			want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool { return h.GetUnrecorded() != nil }},
+		{name: "a nuke whose record is not yet forgotten", closure: &wsm.Closure{At: time.UnixMilli(3_000), By: wsm.CloseByUser, How: wsm.HowNuked},
+			want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool { return h.GetNuked() != nil }},
 		{name: "a close with no record", want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool { return h.GetUnrecorded() != nil }},
 		{name: "a fold names the child it went into", closure: &wsm.Closure{At: time.UnixMilli(3_000), By: wsm.CloseByDaemon, How: wsm.HowClosed}, fold: "ws-open",
-			want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool { return h.GetFolded().GetInto().GetDir() == "/src/open" }},
+			want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool {
+				return h.GetFolded().GetInto().GetDir() == "/src/open"
+			}},
 		{name: "a fold into a forgotten child names none", closure: &wsm.Closure{At: time.UnixMilli(3_000), By: wsm.CloseByDaemon, How: wsm.HowClosed}, fold: "ws-gone",
-			want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool { return h.GetFolded() != nil && h.GetFolded().Into == nil }},
+			want: func(h *agentreplv1.FoundWorkspaceClosedHow) bool {
+				return h.GetFolded() != nil && h.GetFolded().Into == nil
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
