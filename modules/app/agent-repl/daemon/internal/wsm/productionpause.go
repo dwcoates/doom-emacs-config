@@ -97,23 +97,9 @@ func (s *store) PauseProduction(ctx context.Context, repo RepoKey, at time.Time)
 		if pausedAt.Valid {
 			return ErrProductionPaused
 		}
-		rows, err := tx.QueryContext(ctx,
-			`SELECT `+productionCheckColumns+` FROM production_checks WHERE repo_key = ? AND decided_at IS NULL ORDER BY span_until`, string(key))
+		dropped, err = listRows(ctx, tx,
+			`SELECT `+productionCheckColumns+` FROM production_checks WHERE repo_key = ? AND decided_at IS NULL ORDER BY span_until`, scanProductionCheck, string(key))
 		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			c, err := scanProductionCheck(rows)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			dropped = append(dropped, c)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if err := rows.Err(); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM production_checks WHERE repo_key = ? AND decided_at IS NULL`, string(key)); err != nil {

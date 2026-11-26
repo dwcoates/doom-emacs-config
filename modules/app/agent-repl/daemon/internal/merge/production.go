@@ -307,8 +307,18 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 	fields = withField(fields, "mediator", string(ws))
 	var closed wsm.TurnClose
 	if !c.Prompted() {
-		turn, marked, failed, err := o.submitProductionTurn(ctx, q, ws, brief, func(turn ids.TurnID) (bool, error) {
-			return o.deps.DB.MarkProductionCheckPrompted(ctx, q.key, c.Until, o.deps.Now(), turn)
+		// THE MARK AND THE SUBMIT RUN UNDER THE PRODUCTION LOCK, so a pause
+		// either drops the span before the mark reads it or finds the brief
+		// submitted and retires it (productionpause.go).
+		var (
+			turn   ids.TurnID
+			marked bool
+			failed turnFailure
+		)
+		o.underProductionLock(q.key, func() {
+			turn, marked, failed, err = o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+				return o.deps.DB.MarkProductionCheckPrompted(ctx, q.key, c.Until, o.deps.Now(), turn)
+			})
 		})
 		switch {
 		case failed == turnMarkFailed:
@@ -411,8 +421,16 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the undecided production mediator's resuming brief could not be composed; the span stays due"), err)
 		return
 	}
-	turn, marked, failed, err := o.submitProductionTurn(ctx, q, ws, brief, func(turn ids.TurnID) (bool, error) {
-		return o.deps.DB.MarkProductionCheckResumed(ctx, q.key, c.Until, turn)
+	// Under the production lock, as productionRound's first telling.
+	var (
+		turn   ids.TurnID
+		marked bool
+		failed turnFailure
+	)
+	o.underProductionLock(q.key, func() {
+		turn, marked, failed, err = o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+			return o.deps.DB.MarkProductionCheckResumed(ctx, q.key, c.Until, turn)
+		})
 	})
 	fields = withField(fields, "turn", string(turn))
 	switch {
@@ -434,16 +452,6 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 		return
 	}
 	o.productionTurnEnded(ctx, q, ws, c, closed, fields)
-}
-
-// submitProductionTurn is submitMarkedTurn for a production brief, under Q's
-// production lock, so a pause either drops the span before MARK reads it or
-// finds the brief already submitted and retires it (productionpause.go).
-func (o *orchestrator) submitProductionTurn(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, brief string, mark func(ids.TurnID) (bool, error)) (turn ids.TurnID, marked bool, failed turnFailure, err error) {
-	o.underProductionLock(q.key, func() {
-		turn, marked, failed, err = o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, mark)
-	})
-	return turn, marked, failed, err
 }
 
 // reattachProductionTurn brings span C's told turn on again, under Q's

@@ -75,7 +75,9 @@ func (o *orchestrator) productionQueueOf(ctx context.Context, op, what string, s
 	}
 	q, found := queueKeyed(queues, key)
 	if !found {
-		o.deps.Log.Global().Info(op, "refused {what} of a repository that checks no production", withField(withField(fields, "what", what), "arm", ArmProductionChecksOff))
+		o.deps.Log.Global().Info(op, "refused {what} of a repository that checks no production", dlog.Context{
+			"repo": string(key), "repository": repository.Dir, "what": what, "arm": ArmProductionChecksOff,
+		})
 		return checkedQueue{}, nil, refuse(ArmProductionChecksOff, "", "the repository %s turns no production checks on", repository.Dir)
 	}
 	return q, fields, nil

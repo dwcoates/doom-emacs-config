@@ -37,7 +37,9 @@ func TestAProductionPauseAnswersWhatItStoppedAndRestatesTheChip(t *testing.T) {
 				return p.GetInterrupted().GetId() == "ws-mediator" && p.GetDroppedSpans() == 2
 			}},
 		{name: "a pause that interrupted nothing leaves it unset", paused: merge.ProductionPaused{},
-			check: func(p *agentreplv1.UpdateProductionPauseSuccessPaused) bool { return p.Interrupted == nil && p.GetDroppedSpans() == 0 }},
+			check: func(p *agentreplv1.UpdateProductionPauseSuccessPaused) bool {
+				return p.Interrupted == nil && p.GetDroppedSpans() == 0
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

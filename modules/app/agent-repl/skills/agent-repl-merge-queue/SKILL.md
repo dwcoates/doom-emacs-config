@@ -347,8 +347,9 @@ Either kind:
     input) and folds one child into another with
     `production-mediation fold -folded WS -surviving WS`; its instructions are its
     own metaprompt, `metaprompt-production-mediator.md`.
-  - Any agent pauses or resumes a repository's production checks with
-    `production-mediation pause|resume -repository here|DIR`, as the topbar's
+  - Any agent pauses a repository's production checks with
+    `production-mediation pause -repository here|DIR` and resumes them with
+    `production-mediation resume -repository here|DIR`, as the topbar's
     production-checks chip does on a click. A pause interrupts the mediator,
     drops every undecided span, and refuses its decisions and folds with
     `paused`; a resume starts the checks again at the first landing after it.
