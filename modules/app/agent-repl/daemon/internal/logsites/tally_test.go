@@ -466,6 +466,31 @@ func TestAPassPastItsBoundFailsNamingIt(t *testing.T) {
 	}
 }
 
+func TestAPassCutByItsCallersCancellationIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.write(t, "daemon.run.log", keyed(t0.Add(time.Minute), "info", "pkg.A", "said {what}", "said x"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := f.t.Pass(ctx, "test")
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Pass = %v, want the caller's cancellation", err)
+	}
+	if !recorded(f.log, dlog.LevelInfo, "the log site pass was cut by its caller's cancellation; the next pass reads on from the same cursors") {
+		t.Fatalf("records = %+v, want the cut pass at INFO", f.log.Records())
+	}
+	if recorded(f.log, dlog.LevelError, "the log site pass could not tally every sink") {
+		t.Fatalf("records = %+v, want no failed pass at ERROR", f.log.Records())
+	}
+	if rows := f.rows(t); len(rows) != 0 {
+		t.Fatalf("rows = %v, want nothing tallied", counts(rows))
+	}
+}
+
 func TestDeployBeganRecordsTheDeployAndRunsAPass(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
