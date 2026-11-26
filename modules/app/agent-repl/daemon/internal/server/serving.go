@@ -111,6 +111,9 @@ type Serving struct {
 	// quiet is closed when the count reaches zero. It exists only while
 	// somebody is waiting, so an ordinary call pays one comparison.
 	quiet chan struct{}
+	// awaitingQuiet is nil outside tests. A test sets it to learn that
+	// AwaitQuiet has registered its wait on quiet, which no other event shows.
+	awaitingQuiet func()
 	// streams counts the standing streams whose handler has not returned.
 	streams int
 	// streamPaths counts the same streams by procedure path, so an exit that
@@ -246,6 +249,9 @@ func (s *Serving) AwaitQuiet(bound time.Duration) int {
 	}
 	quiet := s.quiet
 	s.mu.Unlock()
+	if s.awaitingQuiet != nil {
+		s.awaitingQuiet()
+	}
 
 	timer := time.NewTimer(bound)
 	defer timer.Stop()

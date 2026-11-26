@@ -12,7 +12,6 @@ import (
 	"net/http/httptest"
 	neturl "net/url"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -115,26 +114,6 @@ func parkedCall(t *testing.T, log dlog.Logger, release <-chan struct{}) (*Servin
 	return serving, answered
 }
 
-// awaitWaiter blocks until an AwaitQuiet caller has registered its wait on
-// serving's quiet channel. NO EVENT EXISTS for that registration, so this is
-// the one poll; it yields rather than sleeps, and is bounded.
-func awaitWaiter(t *testing.T, serving *Serving) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		serving.mu.Lock()
-		waiting := serving.quiet != nil
-		serving.mu.Unlock()
-		if waiting {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("AwaitQuiet never registered its wait")
-		}
-		runtime.Gosched()
-	}
-}
-
 // TestAwaitQuietReturnsWhenTheLastCallIsAnsweredInsideItsBound pins the wait's
 // own end: a call answered while the exit waits ends the wait at once, with
 // nothing left in flight and nothing recorded.
@@ -143,9 +122,11 @@ func TestAwaitQuietReturnsWhenTheLastCallIsAnsweredInsideItsBound(t *testing.T) 
 	log := dlog.NewTestLogger()
 	release := make(chan struct{})
 	serving, answered := parkedCall(t, log, release)
+	waiting := make(chan struct{})
+	serving.awaitingQuiet = func() { close(waiting) }
 	left := make(chan int, 1)
 	go func() { left <- serving.AwaitQuiet(time.Minute) }()
-	awaitWaiter(t, serving)
+	<-waiting
 
 	// Act
 	close(release)
