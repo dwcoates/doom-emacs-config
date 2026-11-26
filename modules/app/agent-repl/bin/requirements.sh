@@ -1755,6 +1755,26 @@ cmd_ensure_holder() {
   say "ensure-holder: $(field "$e" .label) is loaded"
 }
 
+# retire_services ENTRY: boot out and delete the definition of every service
+# the entry's retires lists, the services this entry replaced, so a machine
+# that installed one stops running it beside its replacement. The daemon's
+# deploy retires the same labels (deploy.RetiredNotifierLabel).
+retire_services() {
+  local retired definition
+  while IFS= read -r retired; do
+    [ -n "$retired" ] || continue
+    if service_held "$retired"; then
+      service_stop "$retired" || { err "install: $(field "$1" .id): could not boot out the retired service $retired"; return 1; }
+      say "install: $(field "$1" .id): booted out the retired service $retired"
+    fi
+    definition="$(service_definition_path "$retired")"
+    if [ -e "$definition" ]; then
+      rm -f "$definition" || { err "install: $(field "$1" .id): could not delete $definition"; return 1; }
+      say "install: $(field "$1" .id): deleted the retired service's definition $definition"
+    fi
+  done < <(printf '%s\n' "$1" | jq -r '(.retires // [])[]')
+}
+
 install_service() {
   local e="$1" label dest
   label="$(field "$e" .label)"
@@ -1779,6 +1799,7 @@ install_service() {
   # The service manager reads the definition just written, keeps the service
   # at every login, and runs it now from that definition (lib-service.sh).
   service_load "$label" || { err "install: $(field "$e" .id): $SERVICE_FAILED_STEP failed"; return 1; }
+  retire_services "$e"
 }
 
 # fetch_download ENTRY WORK: download and unzip the entry's archive into WORK,
