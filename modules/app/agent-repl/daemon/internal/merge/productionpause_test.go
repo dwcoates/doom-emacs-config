@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -363,19 +364,21 @@ func TestAProductionTurnEndingUnderAPauseSaysItsSpanWasDropped(t *testing.T) {
 	}
 }
 
-func TestTheProductionStandingSaysWhatTheChipDraws(t *testing.T) {
+func TestTheProductionStandingsSayWhatTheChipsDraw(t *testing.T) {
 	cases := []struct {
 		name    string
 		harness func(t *testing.T) *harness
 		arrange func(t *testing.T, h *harness)
-		want    ProductionStanding
+		want    map[ids.RepoID]ProductionStanding
 	}{
-		{name: "a repository that checks no production is off", harness: checked, arrange: func(*testing.T, *harness) {}},
-		{name: "checks with no mediator yet run", harness: production, arrange: func(*testing.T, *harness) {}, want: ProductionStanding{On: true}},
+		{name: "a repository that checks no production is absent", harness: checked, arrange: func(*testing.T, *harness) {},
+			want: map[ids.RepoID]ProductionStanding{}},
+		{name: "checks with no mediator yet run", harness: production, arrange: func(*testing.T, *harness) {},
+			want: map[ids.RepoID]ProductionStanding{theRepository: {On: true, Dir: "<root>"}}},
 		{name: "paused checks name their mediator", harness: production, arrange: func(t *testing.T, h *harness) {
 			toldProduction(t, h)
 			pauseProduction(t, h)
-		}, want: ProductionStanding{On: true, Paused: true, Mediator: "ws-fixer"}},
+		}, want: map[ids.RepoID]ProductionStanding{theRepository: {On: true, Paused: true, Mediator: "ws-fixer", Dir: "<root>"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -384,24 +387,30 @@ func TestTheProductionStandingSaysWhatTheChipDraws(t *testing.T) {
 			tc.arrange(t, h)
 
 			// Act
-			got, err := h.o.ProductionStanding(context.Background(), theScope)
+			got, err := h.o.ProductionStandings(context.Background())
 
 			// Assert
-			if err != nil || got != tc.want {
-				t.Fatalf("ProductionStanding = (%+v, %v), want %+v", got, err, tc.want)
+			for repo, standing := range tc.want {
+				if standing.Dir == "<root>" {
+					standing.Dir = h.repoRoot
+					tc.want[repo] = standing
+				}
+			}
+			if err != nil || !maps.Equal(got, tc.want) {
+				t.Fatalf("ProductionStandings = (%+v, %v), want %+v", got, err, tc.want)
 			}
 		})
 	}
 }
 
-func TestAProductionStandingThatCannotBeReadIsAnError(t *testing.T) {
+func TestProductionStandingsThatCannotBeReadAreAnError(t *testing.T) {
 	// Arrange
 	h := production(t)
 	cause := errors.New("disk I/O error")
 	h.db.productionPauseErr = cause
 
 	// Act
-	_, err := h.o.ProductionStanding(context.Background(), theScope)
+	_, err := h.o.ProductionStandings(context.Background())
 
 	// Assert
 	if !errors.Is(err, cause) {

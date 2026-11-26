@@ -74,7 +74,7 @@ func (v *verbs) SettleMissingDirectory(ctx context.Context, op string, ws wsm.Wo
 	// workspace, whoever brought the directory back.
 	if _, err := os.Stat(ws.Dir); err == nil {
 		wsLog := v.deps.Log.WorkspaceOrCentral(ws.Dir).With(dlog.Context{"workspace": string(ws.ID)})
-		if err := v.bringUpViews(ctx, wsLog, ws); err != nil {
+		if err := v.bringUpViewsAlone(ctx, wsLog, ws); err != nil {
 			return false, fmt.Errorf("bring up the views of %q, restored meanwhile: %w", ws.ID, err)
 		}
 		log.Info(op, "the workspace directory was gone and was restored meanwhile; its views are bound", fields)

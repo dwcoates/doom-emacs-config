@@ -1695,7 +1695,7 @@ func TestPublishNamingRecordsAnUnreadableAccountRootAtError(t *testing.T) {
 	f.db.sessionErr = errors.New("the state client is closed")
 
 	// Act.
-	err := v.publishNaming(context.Background(), v.deps.Log.Global(), record)
+	err := v.publishNaming(context.Background(), v.deps.Log.Global(), record, nil)
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "the state client is closed") {
@@ -1743,7 +1743,7 @@ func TestBringUpViews(t *testing.T) {
 			namingsBefore := len(f.topbarNamings)
 
 			// Act.
-			err := v.bringUpViews(context.Background(), v.deps.Log.Global(), record)
+			err := v.bringUpViews(context.Background(), v.deps.Log.Global(), record, nil)
 
 			// Assert.
 			if tc.wantErr == "" && err != nil {

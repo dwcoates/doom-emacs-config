@@ -2637,9 +2637,14 @@ func (q *fakeQueue) SubmitSessionAct(_ context.Context, ws ids.WorkspaceID, act 
 type fakeMerge struct {
 	merge.Orchestrator
 
-	// productionStanding and productionStandingErr answer ProductionStanding.
+	// productionStanding and productionStandingErr answer
+	// ProductionStandings, and standingsReads counts its calls.
 	productionStanding    merge.ProductionStanding
 	productionStandingErr error
+	standingsReads        int
+	// standingRepo is the repository productionStanding is answered for,
+	// repo-1 when empty.
+	standingRepo ids.RepoID
 
 	facts       map[ids.WorkspaceID]footer.MergeFacts
 	interrupted []ids.WorkspaceID
@@ -2706,9 +2711,19 @@ func (f *fakeMerge) Unpause(context.Context, *merge.RepositoryScope) error {
 }
 
 // ResumeOwnPause records the resume and answers ownResumeErr.
-// ProductionStanding answers productionStanding and productionStandingErr.
-func (f *fakeMerge) ProductionStanding(context.Context, merge.RepositoryScope) (merge.ProductionStanding, error) {
-	return f.productionStanding, f.productionStandingErr
+// ProductionStandings answers productionStanding for standingRepo (repo-1,
+// the fixture's repository, when unset), and productionStandingErr; it counts its calls in
+// standingsReads.
+func (f *fakeMerge) ProductionStandings(context.Context) (map[ids.RepoID]merge.ProductionStanding, error) {
+	f.standingsReads++
+	if f.productionStandingErr != nil {
+		return nil, f.productionStandingErr
+	}
+	repo := f.standingRepo
+	if repo == "" {
+		repo = "repo-1"
+	}
+	return map[ids.RepoID]merge.ProductionStanding{repo: f.productionStanding}, nil
 }
 
 func (f *fakeMerge) ResumeOwnPause(_ context.Context, scope merge.RepositoryScope, ws ids.WorkspaceID) (bool, error) {
