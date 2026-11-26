@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/scriptrunner"
 )
 
 const (
@@ -22,20 +23,40 @@ const (
 	awaitBound = 5 * time.Second
 )
 
-// fakeRunner answers each gns call from handler and records every call.
+// errTimedOut is what a handler answers for a call past its bound: the fake
+// answers it as the runner does, TimedOut with exit -1 and no error.
+var errTimedOut = errors.New("timed out")
+
+// fakeRunner answers each gns call from handler and records every call and
+// the bound it was handed.
 type fakeRunner struct {
 	mu      sync.Mutex
 	calls   []string
+	bounds  map[string]time.Duration
 	handler func(args string) (string, int, error)
 }
 
-func (f *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
+func (f *fakeRunner) RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
 	args := strings.Join(argv, " ")
 	f.mu.Lock()
 	f.calls = append(f.calls, args)
+	if f.bounds == nil {
+		f.bounds = map[string]time.Duration{}
+	}
+	f.bounds[args] = opts.Timeout
 	handler := f.handler
 	f.mu.Unlock()
-	return handler(args)
+	output, code, err := handler(args)
+	if errors.Is(err, errTimedOut) {
+		return scriptrunner.Run{Output: output, ExitCode: -1, TimedOut: true}, nil
+	}
+	return scriptrunner.Run{Output: output, ExitCode: code}, err
+}
+
+func (f *fakeRunner) bound(args string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.bounds[args]
 }
 
 func (f *fakeRunner) count(args string) int {
@@ -283,21 +304,105 @@ func TestAProbeThatIsNotARefusalStartsNoSignIn(t *testing.T) {
 }
 
 func TestAProbePastItsBoundStartsNoSignIn(t *testing.T) {
-	// Arrange: a probe whose context has already run out.
-	f := newFixture(t, func(string) (string, int, error) { return "", 0, context.DeadlineExceeded })
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
+	// Arrange: a probe the runner answers as past its bound.
+	f := newFixture(t, func(string) (string, int, error) { return "", 0, errTimedOut })
 
 	// Act.
-	f.r.probe(ctx)
+	f.r.probe(context.Background())
 
-	// Assert.
-	rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Operation: opProbe, Level: "warn"})
-	if !ok || rec.Context["branch"] != "bound" {
-		t.Fatalf("probe record = (%v, %v), want the bound warning", rec, ok)
+	// Assert: the probe's warning is the one record of the overrun.
+	records := f.log.Records()
+	if len(records) != 1 || records[0].Operation != opProbe || records[0].Level != "warn" || records[0].Context["branch"] != "bound" {
+		t.Fatalf("records = %v, want only the probe's bound warning", records)
 	}
 	if got := f.run.count("gns auth login --env production --device"); got != 0 {
 		t.Fatalf("sign-ins started = %d, want 0", got)
+	}
+}
+
+func TestEveryGNSCallHandsTheRunnerItsBound(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, healthyRenewal())
+
+	// Act.
+	f.r.probe(context.Background())
+	f.awaitOutcome(t, 1)
+
+	// Assert: each bound is the runner's timeout, never a context deadline the
+	// runner would record as a script that could not be run.
+	cases := []struct {
+		args string
+		want time.Duration
+	}{
+		{"gns whoami", ProbeBound},
+		{"gns auth login --env production --device", StartBound},
+		{"gns auth login --env production --device-poll", PollBound},
+		{"gns auth status", StatusBound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.args, func(t *testing.T) {
+			if got := f.run.bound(tc.args); got != tc.want {
+				t.Fatalf("bound handed to the runner = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPollPastItsBoundIsOnePendingPoll(t *testing.T) {
+	// Arrange: the first poll is held past its bound, the second completes.
+	handler := healthyRenewal()
+	held := false
+	f := newFixture(t, func(args string) (string, int, error) {
+		if args == "gns auth login --env production --device-poll" && !held {
+			held = true
+			return "", 0, errTimedOut
+		}
+		return handler(args)
+	})
+
+	// Act.
+	f.r.probe(context.Background())
+	outcome := f.awaitOutcome(t, 1)
+
+	// Assert.
+	if outcome.Message != "the GNS credential is renewed" {
+		t.Fatalf("outcome = %v, want the credential renewed", outcome)
+	}
+	if got := f.run.count("gns auth login --env production --device-poll"); got != 3 {
+		t.Fatalf("polls = %d, want 3 (held, pending, done)", got)
+	}
+}
+
+func TestAPollIsBoundedByWhatIsLeftOfTheSignIn(t *testing.T) {
+	// Arrange: every poll pends, and each moves the clock to a minute short
+	// of the sign-in's bound, then past it.
+	polls := 0
+	var f *fixture
+	f = newFixture(t, func(args string) (string, int, error) {
+		switch args {
+		case "gns whoami":
+			return rejection, 1, nil
+		case "gns auth login --env production --device":
+			return startOut, 0, nil
+		}
+		polls++
+		f.clock.Set(f.clock.Now().Add(SignInBound - time.Minute))
+		return "authorization_pending", 1, nil
+	})
+
+	// Act.
+	f.r.probe(context.Background())
+	outcome := f.awaitOutcome(t, 1)
+
+	// Assert.
+	if outcome.Level != "error" || !strings.Contains(outcome.Context["error"].(string), "not completed within "+SignInBound.String()) {
+		t.Fatalf("outcome = %v, want the sign-in's bound", outcome)
+	}
+	if polls != 2 {
+		t.Fatalf("polls = %d, want 2", polls)
+	}
+	if got := f.run.bound("gns auth login --env production --device-poll"); got != time.Minute {
+		t.Fatalf("last poll's bound = %v, want what was left of the sign-in", got)
 	}
 }
 
@@ -330,6 +435,15 @@ func TestARenewalThatCannotCompleteIsLoggedOnceAndOpensNoPersonalPage(t *testing
 					return rejection, 1, nil
 				}
 				return "boom", 3, nil
+			},
+		},
+		{
+			name: "the start runs past its bound", email: workEmail, wantOpens: 0, wantError: "gns auth login ran past its " + StartBound.String() + " bound",
+			handler: func(args string) (string, int, error) {
+				if args == "gns whoami" {
+					return rejection, 1, nil
+				}
+				return "", 0, errTimedOut
 			},
 		},
 		{

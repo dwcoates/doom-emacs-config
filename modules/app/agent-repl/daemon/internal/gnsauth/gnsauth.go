@@ -37,6 +37,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/outputtext"
+	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/usersetup"
 )
 
@@ -107,10 +108,14 @@ func SignInURL(output string) (string, error) {
 	return url, nil
 }
 
-// Runner runs argv in dir and answers its combined output and exit code
-// (scriptrunner.Runner).
+// Runner runs argv in dir under opts and answers the run (scriptrunner.Runner).
+// Every gns call hands the runner its bound as opts.Timeout, so a call past
+// its bound is answered as TimedOut, an outcome the runner records at DEBUG
+// and this package judges once. A bound set on the context instead read as a
+// script that could not be run, recorded at ERROR beside this package's own
+// record of the same event (2026-11-25, the probe during a network outage).
 type Runner interface {
-	Run(ctx context.Context, dir string, argv []string) (string, int, error)
+	RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error)
 }
 
 // Opener opens a page in the Chrome profile an account signs in as
@@ -190,11 +195,10 @@ func (r *Renewer) Watch(ctx context.Context) error {
 // refusal raises a renewal. Any other failure is logged and raises nothing: a
 // network that is down says nothing about the credential.
 func (r *Renewer) probe(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, ProbeBound)
-	defer cancel()
-	output, code, err := r.deps.Run.Run(ctx, r.deps.Dir, []string{"gns", "whoami"})
+	run, err := r.runGNS(ctx, ProbeBound, "whoami")
+	output, code := run.Output, run.ExitCode
 	switch {
-	case ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+	case run.TimedOut:
 		r.deps.Log.Warn(opProbe, "the credential probe ran past its bound; no sign-in was started", dlog.Context{
 			"bound": ProbeBound.String(), "expected": "0.4-0.9s", "branch": "bound",
 		})
@@ -292,25 +296,26 @@ func (r *Renewer) renew(ctx context.Context) error {
 }
 
 // awaitSignIn polls the device code until the person completes the sign-in:
-// exit 0 is done, 1 pending, anything else a refusal.
+// exit 0 is done, 1 pending, anything else a refusal. Each poll's bound is
+// PollBound or what is left of SignInBound, whichever is shorter, so the
+// sign-in's own bound ends a poll as the runner's timeout too.
 func (r *Renewer) awaitSignIn(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, SignInBound)
-	defer cancel()
+	deadline := r.deps.Clock.Now().Add(SignInBound)
 	for {
-		pollCtx, pollCancel := context.WithTimeout(ctx, PollBound)
-		output, code, err := r.deps.Run.Run(pollCtx, r.deps.Dir, []string{"gns", "auth", "login", "--env", r.deps.Env, "--device-poll"})
-		pollCancel()
+		left := deadline.Sub(r.deps.Clock.Now())
+		if left <= 0 {
+			return fmt.Errorf("the sign-in was not completed within %s", SignInBound)
+		}
+		run, err := r.runGNS(ctx, min(PollBound, left), "auth", "login", "--env", r.deps.Env, "--device-poll")
 		switch {
-		case ctx.Err() != nil:
-			return fmt.Errorf("the sign-in was not completed within %s: %w", SignInBound, ctx.Err())
-		case err != nil && errors.Is(pollCtx.Err(), context.DeadlineExceeded):
+		case run.TimedOut:
 			// A poll held open past its bound is one pending poll, not a refusal.
 		case err != nil:
 			return fmt.Errorf("polling the sign-in: %w", err)
-		case code == 0:
+		case run.ExitCode == 0:
 			return nil
-		case code != 1:
-			return fmt.Errorf("the sign-in was refused (device-poll exit %d): %s", code, outputtext.LastLine(output))
+		case run.ExitCode != 1:
+			return fmt.Errorf("the sign-in was refused (device-poll exit %d): %s", run.ExitCode, outputtext.LastLine(run.Output))
 		}
 	}
 }
@@ -318,16 +323,20 @@ func (r *Renewer) awaitSignIn(ctx context.Context) error {
 // gns runs `gns args...` under bound, answering its output, and an error for
 // a run that could not start, ran past its bound, or exited non-zero.
 func (r *Renewer) gns(ctx context.Context, bound time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, bound)
-	defer cancel()
-	output, code, err := r.deps.Run.Run(ctx, r.deps.Dir, append([]string{"gns"}, args...))
+	run, err := r.runGNS(ctx, bound, args...)
 	switch {
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return output, fmt.Errorf("gns %s ran past its %s bound", args[0]+" "+args[1], bound)
+	case run.TimedOut:
+		return run.Output, fmt.Errorf("gns %s ran past its %s bound", args[0]+" "+args[1], bound)
 	case err != nil:
-		return output, err
-	case code != 0:
-		return output, fmt.Errorf("gns exited %d: %s", code, outputtext.LastLine(output))
+		return run.Output, err
+	case run.ExitCode != 0:
+		return run.Output, fmt.Errorf("gns exited %d: %s", run.ExitCode, outputtext.LastLine(run.Output))
 	}
-	return output, nil
+	return run.Output, nil
+}
+
+// runGNS is every gns call's one way to the runner: `gns args...` in Dir, with
+// bound as the runner's own timeout, so a call past it answers TimedOut.
+func (r *Renewer) runGNS(ctx context.Context, bound time.Duration, args ...string) (scriptrunner.Run, error) {
+	return r.deps.Run.RunLinesWith(ctx, r.deps.Dir, append([]string{"gns"}, args...), scriptrunner.Options{Timeout: bound}, nil)
 }
