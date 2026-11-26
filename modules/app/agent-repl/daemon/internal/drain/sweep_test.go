@@ -1722,9 +1722,6 @@ var sparingPaths = []standDownPath{
 	{name: "a backlogged workspace's cache lapse", op: opWithheld, trigger: "cache_lapse",
 		withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.hide(t, ws) },
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.StandDownWithheld(ws, WithheldCacheLapse) }},
-	{name: "a hidden merge workspace's ended merge", op: opWithheld, trigger: "merge_ended",
-		withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.hide(t, ws) },
-		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.StandDownWithheld(ws, WithheldMergeEnded) }},
 	{name: "the keep-alive cycle", op: opCycle, trigger: "keepalive_cycle",
 		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.CycleDown(ws, beatAfter) }},
@@ -1942,7 +1939,7 @@ func TestAnUnreadableRemoteControlModeStandsNothingDown(t *testing.T) {
 func allReasons(c *controller) []standDownReason {
 	return []standDownReason{
 		c.idleReason(), cycleReason, idleParkReason, visitReason, coldReason, coldGateReason, mergeQueuedReason,
-		withheldReason(WithheldCollapse), withheldReason(WithheldCacheLapse), withheldReason(WithheldMergeEnded),
+		withheldReason(WithheldCollapse), withheldReason(WithheldCacheLapse),
 	}
 }
 

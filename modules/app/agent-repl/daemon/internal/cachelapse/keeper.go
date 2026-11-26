@@ -573,9 +573,8 @@ func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID, judged bool) {
 	k.enqueue(edge{ws: ws, kind: edgeGateRaised, why: "the session parked at its cold gate"})
 }
 
-// MergeLeftQueue is WS's entry leaving its merge queue: a hidden merge
-// workspace whose merge left every queue is stood down, and any other's
-// cadence reconciled, so a backlogged or closed one lets its cache lapse again.
+// MergeLeftQueue is WS's entry leaving its merge queue: its cadence is
+// reconciled, so a backlogged or closed workspace lets its cache lapse again.
 // It never blocks.
 func (k *Keeper) MergeLeftQueue(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "its merge left its queue"})

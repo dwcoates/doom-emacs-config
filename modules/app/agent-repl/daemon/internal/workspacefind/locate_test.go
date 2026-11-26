@@ -22,7 +22,7 @@ func locateRegistry() []wsm.WorkspaceHead {
 	landed := epoch()
 	return heads(
 		wsm.Workspace{ID: "ws-open", Dir: "/wt/open", Name: "open-one"},
-		wsm.Workspace{ID: "ws-merge", Dir: "/wt/merge", Name: "merge-one", Backlogged: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}},
+		wsm.Workspace{ID: "ws-backlogged", Dir: "/wt/backlogged", Name: "backlogged-one", Backlogged: true},
 		wsm.Workspace{ID: "ws-nested", Dir: "/wt/open/nested", Name: "nested-one"},
 		wsm.Workspace{ID: "ws-drawn", Dir: "/wt/drawn", Name: "drawn-one", Closed: true},
 		wsm.Workspace{ID: "ws-gone", Dir: "/wt/gone", Name: "gone-one", Closed: true},
@@ -56,16 +56,16 @@ func TestLocate(t *testing.T) {
 		want []wsm.WorkspaceID
 	}{
 		{name: "an open workspace by name, its thread left out", by: LocateBy{Name: "open-one"}, want: []wsm.WorkspaceID{"ws-open"}},
-		{name: "a hidden merge workspace by name", by: LocateBy{Name: "merge-one"}, want: []wsm.WorkspaceID{"ws-merge"}},
+		{name: "a backlogged workspace by name", by: LocateBy{Name: "backlogged-one"}, want: []wsm.WorkspaceID{"ws-backlogged"}},
 		{name: "a closed workspace the closed stream draws by name", by: LocateBy{Name: "drawn-one"}, want: []wsm.WorkspaceID{"ws-drawn"}},
 		{name: "a merged workspace, in no stream, by name", by: LocateBy{Name: "merged-one"}, want: []wsm.WorkspaceID{"ws-merged"}},
 		{name: "a merged workspace contains its worktree's subdirectory", by: LocateBy{Containing: "/wt/merged/src"}, want: []wsm.WorkspaceID{"ws-merged"}},
 		{name: "a closed workspace the roster no longer draws is not located", by: LocateBy{Name: "gone-one"}},
 		{name: "an unknown name", by: LocateBy{Name: "nobody"}},
-		{name: "a hidden merge workspace at its directory", by: LocateBy{At: "/wt/merge"}, want: []wsm.WorkspaceID{"ws-merge"}},
+		{name: "a backlogged workspace at its directory", by: LocateBy{At: "/wt/backlogged"}, want: []wsm.WorkspaceID{"ws-backlogged"}},
 		{name: "an exact directory reads a trailing slash as the same", by: LocateBy{At: "/wt/open/"}, want: []wsm.WorkspaceID{"ws-open"}},
 		{name: "a directory inside a worktree is not at it", by: LocateBy{At: "/wt/open/src"}},
-		{name: "a hidden merge workspace contains its worktree's subdirectory", by: LocateBy{Containing: "/wt/merge/modules/app"}, want: []wsm.WorkspaceID{"ws-merge"}},
+		{name: "a backlogged workspace contains its worktree's subdirectory", by: LocateBy{Containing: "/wt/backlogged/modules/app"}, want: []wsm.WorkspaceID{"ws-backlogged"}},
 		{name: "the deepest of nested worktrees contains", by: LocateBy{Containing: "/wt/open/nested/src"}, want: []wsm.WorkspaceID{"ws-nested"}},
 		{name: "the outer worktree contains outside the nested one", by: LocateBy{Containing: "/wt/open/src"}, want: []wsm.WorkspaceID{"ws-open"}},
 		{name: "a sibling sharing a prefix is not contained", by: LocateBy{Containing: "/wt/openly"}},
@@ -231,7 +231,7 @@ func TestCandidatesPanicsOnALocateThatNamesNothing(t *testing.T) {
 func TestCandidatesThenLocateMatchesLocateOverTheWholeRegistry(t *testing.T) {
 	bys := []LocateBy{
 		{Name: "open-one"}, {Name: "merged-one"}, {Name: "gone-one"},
-		{At: "/wt/merge"}, {At: "/wt/open/"}, {At: "/wt/open/src"},
+		{At: "/wt/backlogged"}, {At: "/wt/open/"}, {At: "/wt/open/src"},
 		{Containing: "/wt/open/nested/src"}, {Containing: "/wt/open/src"}, {Containing: "/wt/merged/src"}, {Containing: "/wt/openly"},
 	}
 	for _, by := range bys {

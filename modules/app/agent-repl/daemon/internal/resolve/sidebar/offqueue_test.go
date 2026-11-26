@@ -14,9 +14,9 @@ func TestAMergeOffItsQueueIsDrawnWithItsControls(t *testing.T) {
 		wantClick string
 	}{
 		{name: "a workspace's own merge is named and selected as itself",
-			entry: sidebar.OffQueueEntry{Workspace: "w1", Credited: "w1", Cause: "evicted"}, wantName: "one", wantClick: "w1"},
-		{name: "an async merge is named as its merge workspace and selects its requester",
-			entry: sidebar.OffQueueEntry{Workspace: "w2", Credited: "w1", Async: true, Cause: "failed"}, wantName: "two-merge", wantClick: "w1"},
+			entry: sidebar.OffQueueEntry{Workspace: "w1", Cause: "evicted"}, wantName: "one", wantClick: "w1"},
+		{name: "another workspace's merge is named and selected as that workspace",
+			entry: sidebar.OffQueueEntry{Workspace: "w2", Cause: "failed"}, wantName: "two", wantClick: "w2"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -25,7 +25,7 @@ func TestAMergeOffItsQueueIsDrawnWithItsControls(t *testing.T) {
 			r.SetOffQueue([]sidebar.OffQueueEntry{tc.entry})
 
 			// Act.
-			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two-merge")))
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
 
 			// Assert: the repository is listed for it alone, the row names it
 			// and its cause, and both controls echo the merge's own workspace.
@@ -48,7 +48,7 @@ func TestAClosedWorkspacesMergeOffItsQueueIsNotDrawn(t *testing.T) {
 	// Arrange: the close ended the request in the store; the roster has the
 	// close before the orchestrator's next set.
 	r, _ := newResolver(t)
-	r.SetOffQueue([]sidebar.OffQueueEntry{{Workspace: "w1", Credited: "w1", Cause: "evicted"}})
+	r.SetOffQueue([]sidebar.OffQueueEntry{{Workspace: "w1", Cause: "evicted"}})
 
 	// Act.
 	r.SetRegistry(queueView(closedWorkspace(workspace("w1", "one"))))

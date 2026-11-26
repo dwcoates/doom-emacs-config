@@ -739,7 +739,7 @@ func (h *harness) liveStanding(ws ids.WorkspaceID) (wsm.Visibility, *sidebar.Fol
 	}
 	return wsm.Visibilities([]wsm.VisibilityInput{{
 		ID:       ws,
-		Open:     !record.Closed && !record.Backlogged && !record.IsThread() && !record.MergeHidden(),
+		Open:     !record.Closed && !record.Backlogged && !record.IsThread(),
 		Covered:  covered,
 		Selected: record.Current,
 	}})[ws], folds

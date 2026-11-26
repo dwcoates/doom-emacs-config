@@ -772,12 +772,6 @@ func TestRowDetailListsTheWorkspacesChildren(t *testing.T) {
 			want:     []listed{{name: "a", receded: true}},
 		},
 		{
-			name: "a hidden merge workspace is not listed",
-			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) {
-				ws.MergeOf = &wsm.MergeOrigin{}
-			})},
-		},
-		{
 			name: "a grandchild is its parent's child, not the grandparent's",
 			children: []wsm.Workspace{
 				child("w-a", "a", 1, nil),
@@ -1643,109 +1637,6 @@ func TestTheRosterRecordsEachPublishedStatusArmChange(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestAMergeWorkspaceNestsUnderTheWorkspaceItWasForkedFrom(t *testing.T) {
-	// Arrange: a revealed merge workspace.
-	r, _ := newResolver(t)
-	requester := workspace("w1", "one")
-	merging := workspace("w2", "one-merge")
-	parent := requester.ID
-	merging.Parent = &parent
-	merging.MergeOf = &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}
-	merging.MergeRevealed = true
-
-	// Act
-	r.SetRegistry(registry(requester, merging))
-
-	// Assert
-	rows := repoOpen(t, latest(t, r))
-	if len(rows) != 1 || len(rows[0].GetChildren()) != 1 || rows[0].GetChildren()[0].GetRow().GetName().GetText() != "one-merge" {
-		t.Fatalf("rows = %v, want the merge workspace nested under its requester", rowNames(innerRows(rows)))
-	}
-}
-
-// hiddenMergeWorkspace is an unrevealed merge workspace forked from REQUESTER,
-// nested under it.
-func hiddenMergeWorkspace(requester ids.WorkspaceID) wsm.Workspace {
-	merging := workspace("w2", "one-merge")
-	merging.Parent = &requester
-	merging.ParentBranch = "master"
-	merging.MergeOf = &wsm.MergeOrigin{Requester: requester, Request: "request-1"}
-	return merging
-}
-
-func TestAHiddenMergeWorkspaceIsInNoSection(t *testing.T) {
-	// Arrange
-	r, _ := newResolver(t)
-	requester := workspace("w1", "one")
-
-	// Act
-	r.SetRegistry(registry(requester, hiddenMergeWorkspace(requester.ID)))
-
-	// Assert
-	for _, row := range rosterwalk.AllRows(latestPush(t, r)) {
-		if row.GetWorkspace().GetWorkspace().GetId() == "w2" {
-			t.Fatalf("the hidden merge workspace has a row: %v", row)
-		}
-	}
-	rows := repoOpen(t, latest(t, r))
-	if len(rows) != 1 || len(rows[0].GetChildren()) != 0 {
-		t.Fatalf("rows = %v, want the requester alone, with no child", rowNames(innerRows(rows)))
-	}
-}
-
-func TestAHiddenMergeWorkspaceHasNoTab(t *testing.T) {
-	// Arrange
-	r, _ := newResolver(t)
-	requester := workspace("w1", "one")
-
-	// Act
-	r.SetRegistry(registry(requester, hiddenMergeWorkspace(requester.ID)))
-
-	// Assert
-	for _, open := range rosterwalk.OpenRows(latest(t, r)) {
-		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == "w2" {
-			t.Fatalf("the hidden merge workspace has a tab: %v", open.GetTab())
-		}
-	}
-}
-
-func TestALandedHiddenMergeWorkspaceIsInRecentlyMerged(t *testing.T) {
-	// Arrange: it never needed the user, and its branch landed.
-	r, _ := newResolver(t)
-	requester := workspace("w1", "one")
-	merged := hiddenMergeWorkspace(requester.ID)
-	merged.MergedAt = at(0)
-	merged.Closed = true
-	merged.Closed = true
-
-	// Act
-	r.SetRegistry(registry(requester, merged))
-
-	// Assert
-	if row := rowFor(mergedRows(t, r), "w2"); row == nil {
-		t.Fatal("the landed merge workspace is not under Recently Merged")
-	}
-}
-
-func TestARevealedMergeWorkspaceHasATab(t *testing.T) {
-	// Arrange
-	r, _ := newResolver(t)
-	requester := workspace("w1", "one")
-	revealed := hiddenMergeWorkspace(requester.ID)
-	revealed.MergeRevealed = true
-
-	// Act
-	r.SetRegistry(registry(requester, revealed))
-
-	// Assert
-	for _, open := range rosterwalk.OpenRows(latest(t, r)) {
-		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == "w2" && open.GetTab().GetNumbered() != nil {
-			return
-		}
-	}
-	t.Fatal("the revealed merge workspace has no tab")
 }
 
 func TestTheRowCarriesTheDurableLastTurnEndedInstant(t *testing.T) {

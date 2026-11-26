@@ -468,16 +468,14 @@ func TestAReopenedMergedWorkspaceIsOpenWithATab(t *testing.T) {
 }
 
 // tabsRegistry is one registry holding every kind of tab: drawn, backlogged,
-// collapsed, closed and hidden-merge, placed out of slice order.
+// collapsed and closed, placed out of slice order.
 func tabsRegistry() sidebar.Registry {
 	folded := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Folded: true, Place: 2}
 	collapsed := placed(workspace("w-c", "collapsed"), 2)
 	collapsed.Repo = folded.ID
 	closed := placed(workspace("w-x", "closed"), 4)
 	closed.Closed = true
-	mergeHidden := placed(workspace("w-q", "merge"), 5)
-	mergeHidden.MergeOf = &wsm.MergeOrigin{}
-	reg := registry(placed(workspace("w-d", "drawn"), 3), collapsed, closed, mergeHidden, placed(backloggedWorkspace("w-h", "hidden"), 1))
+	reg := registry(placed(workspace("w-d", "drawn"), 3), collapsed, closed, placed(backloggedWorkspace("w-h", "hidden"), 1))
 	reg.Repositories = append(reg.Repositories, folded)
 	return reg
 }
@@ -490,7 +488,7 @@ func TestTabs(t *testing.T) {
 	got := sidebar.Tabs(reg, dlog.NewTestLogger())
 
 	// Assert: repository by repository; a folded repository's tab withheld as
-	// collapsed; hidden, closed and hidden-merge workspaces have no tab.
+	// collapsed; hidden and closed workspaces have no tab.
 	want := []sidebar.Tab{
 		{Workspace: reg.Workspaces[0], Withheld: wsm.Drawn},
 		{Workspace: reg.Workspaces[1], Withheld: wsm.WithheldCollapsed},

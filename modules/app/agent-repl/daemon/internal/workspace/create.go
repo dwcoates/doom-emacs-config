@@ -701,6 +701,16 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		log.Error(opCreate, "a create spec forks a subagent with no spawning workspace", dlog.Context{"agent_id": spec.ForkSubagent})
 		return fmt.Errorf("create: the subagent fork of %q names no spawning workspace", spec.ForkSubagent)
 	}
+	// THE SUBAGENT FORK WAITS ON THE SHIM: the vendor forks a session by its
+	// id, and whether it can fork a subagent's side transcript is unverified
+	// (docs/protobuf-design/2026-11-26-children-replace-async-merges.vetting.md,
+	// item 1). Until the shim forks one, the create fails here rather than
+	// fork the spawner's own conversation in its place.
+	if spec.ForkSubagent != "" {
+		err := fmt.Errorf("create: forking the subagent %q's own conversation is not built yet: the shim forks only whole sessions", spec.ForkSubagent)
+		log.Error(opCreate, "a subagent fork was asked for, which the shim cannot make yet", dlog.WithCause(dlog.Context{"agent_id": spec.ForkSubagent}, err))
+		return err
+	}
 	// AN INTAKE WORKSPACE IS ONLY EVER ASKED FOR BY CreateIntake, so a spec that
 	// contradicts itself is a defect in that caller: it is a named, prompted
 	// peer with a fresh context, and nothing lands from it.
