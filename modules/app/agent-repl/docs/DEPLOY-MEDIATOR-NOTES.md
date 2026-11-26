@@ -143,3 +143,9 @@ Its brief names this file, and it is the mediator's to write.
   sees the daemon record it, so that file was kept at its committed version;
   the drift between the in-process projection and the daemon is a harness
   defect still to fix.
+- A `daemon.deploy.run` record "a staged artifact could not be hashed" whose
+  cause names a path in `staging/*/cache-bin/` that the staged tree lacks
+  means a landing changed the staged layout, which the running daemon, built
+  from the previous revision, reads (2026-11-26T09:02:38Z: the launcher
+  renamed to `Zettel.app.staged`). The fix restores the staged path, never a
+  second landing.
