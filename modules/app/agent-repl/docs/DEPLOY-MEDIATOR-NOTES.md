@@ -104,3 +104,14 @@ Its brief names this file, and it is the mediator's to write.
   three-deploy window; the sidecar locate is owned by
   `sidecar-locate-times-out-at-handover` (prod-mediator's one-shot child,
   2026-11-25). Read `conn_pressure` first when either recurs.
+- `daemon.topbar.usage_contradiction` "it reported two different usages"
+  (2026-11-26): before `TokenUsage.provisional` landed, every streamed
+  response logged it once, because the stream plane's in-flight snapshot and
+  the file plane's settled usage of the same unit looked like two reports.
+  After the landing, a record of it means two SETTLED reports of one unit
+  differ, which is a real producer defect: read the unit's write ledger
+  (`sqlite3 ~/.cache/agent-repl/store/events.db "select * from write_ledger
+  where upsert_key='activity:<unit>'"`) to see which producer wrote each.
+  "it reports more thinking tokens than output tokens" with `taken: false`
+  is a provisional report arriving after the settled one, not a change to the
+  breakdown.

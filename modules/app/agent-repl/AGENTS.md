@@ -3283,6 +3283,19 @@ must show up as a big figure. The daemon computes it in exactly one place,
 `daemon/internal/freshinput`, and a test fails any other site that sums the two
 misses by hand.
 
+**A unit's usage arrives twice by design**, and the daemon reconciles the two
+reports in exactly one place, `daemon/internal/tokenusage`. The shim's stream
+plane writes the vendor's in-flight snapshot while a response streams
+(`conversation.v1.TokenUsage.provisional` true); the sidecar's file plane
+writes the settled usage from the record the vendor wrote (provisional false).
+`tokenusage.Reconcile` takes a settled report over a provisional one without
+calling it a contradiction, keeps a settled report over a provisional one that
+arrives after it (the planes carry no ordering), and names two differing
+settled reports the producer contradiction they are. A test fails any resolver
+that compares two usages by hand or spells a contradiction outside the
+package (2026-11-26: the topbar warned "two different usages" on every
+streamed response because the wire could not say which report was which).
+
 Every figure is ONE agent's fresh input, never its subagents':
 
 - the footer's tokens cell (`frontend.v1.FooterTokensCell`) is the MAIN agent's
