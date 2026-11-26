@@ -155,7 +155,9 @@ type Report struct {
 // Pass reads every sink from its cursor and tallies what it read. REASON
 // names why the pass runs, for its record. A file that cannot be read or
 // tallied is recorded at ERROR and fails the pass once every other file was
-// read.
+// read. A pass cut by its caller's cancellation (the daemon exiting) is
+// recorded at INFO and still fails: every file's cursor stands before any
+// record not yet tallied, so the next pass reads on from it.
 func (t *Tallier) Pass(ctx context.Context, reason string) (Report, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -173,6 +175,10 @@ func (t *Tallier) Pass(ctx context.Context, reason string) (Report, error) {
 		t.log.With(fields).Error(opPass, "the log site pass ran past its bound of {bound}", dlog.Context{
 			"bound": t.passBound.String(), "cause": err.Error(),
 		})
+		return report, err
+	}
+	if errors.Is(err, context.Canceled) {
+		t.log.With(fields).Info(opPass, "the log site pass was cut by its caller's cancellation; the next pass reads on from the same cursors", dlog.Context{"cause": err.Error()})
 		return report, err
 	}
 	if err != nil {
