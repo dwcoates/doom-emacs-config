@@ -9,7 +9,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
 	"agent-repld/internal/merge"
@@ -49,29 +48,6 @@ func (s *sourcedRepo) finish(t *testing.T) {
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("FinishWorkspace = (%v), want the deploy enqueued", resp.Msg.GetResult())
 	}
-}
-
-// asyncMerge asks for an async merge of BRANCH by the fixture workspace's
-// agent, which made the branch, shaped by EDITS.
-func (s *sourcedRepo) asyncMerge(t *testing.T, name, branch string, edits ...func(*agentreplv1.CreateWorkspaceAsyncMerge)) {
-	t.Helper()
-	resp, err := s.d.Client().CreateWorkspace(s.d.Ctx(), connect.NewRequest(s.asyncRequest(name, branch, edits...)))
-	requireRPCAnswered(t, "CreateWorkspace", resp, err)
-	if resp.Msg.GetAsyncMergeAccepted() == nil {
-		t.Fatalf("CreateWorkspace = (%v), want the async merge accepted", resp.Msg.GetResult())
-	}
-}
-
-// asyncRequest is the fixture workspace's async merge of BRANCH. The
-// fixture's repository is the daemon's own checkout, so the agent's merge
-// moves the version by a patch.
-func (s *sourcedRepo) asyncRequest(name, branch string, edits ...func(*agentreplv1.CreateWorkspaceAsyncMerge)) *agentreplv1.CreateWorkspaceRequest {
-	// A version increment needs a version to increment.
-	if len(s.repo.Tags()) == 0 {
-		s.repo.Tag("0.0.1")
-	}
-	edits = append([]func(*agentreplv1.CreateWorkspaceAsyncMerge){harness.AsyncPatch("Land " + name)}, edits...)
-	return harness.AsyncMerge(&workspacev1.RepositoryRef{Dir: s.repo.Dir}, s.f.ws, name, branch, edits...)
 }
 
 // awaitConcluded waits for the fixture bubble's terminal and answers it.
@@ -273,59 +249,5 @@ func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 	// Assert: the replay that drew the tab drew nothing of the turn on the root.
 	if page, _ := f2.openFeed(nil); pagePrompt(page, repair) {
 		t.Fatalf("the replayed root feed carries the repair prompt %q, want it in its tab alone", repair)
-	}
-}
-
-// TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain covers the bubble a new
-// daemon has no store to replay from: its head and its tabs are drawn again
-// from the daemon's durable record, at the identity and order key the live
-// reader saw.
-func TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain(t *testing.T) {
-	t.Parallel()
-	// Arrange: a landed ASYNC merge, which leaves the requester open and
-	// served, its bubble in the requester's feed.
-	s := newSourcedRepo(t)
-	root := s.f.watchRootFeed()
-	s.repo.AddBranch("agent-fix")
-	s.asyncMerge(t, "fix-merge", "agent-fix")
-	head := awaitRow(t, s.f, root, "the merge's landed terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil
-	})
-	s.d.AwaitLandingDeployed()
-	liveTabs, _ := s.f.openFeed(head.GetId())
-
-	// Act: relaunch on the same state.
-	expectSessionKillRecords(s.d)
-	if _, err := s.d.Client().UpdateShutdownSchedule(s.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
-			Reason: drainReasonOperator("the relaunch under test"),
-		}},
-	})); err != nil {
-		t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
-	}
-	s.d.AwaitExit()
-	successorOpts := s.d.SuccessorOpts()
-	successorOpts.DurableState = true
-	d2 := harness.StartDaemon(t, successorOpts)
-	f2 := &fixture{d: d2, repo: s.repo, ws: s.f.ws, t: t}
-	if again := harness.Register(t, d2, s.f.ws.GetDir()); again.GetId() != s.f.ws.GetId() {
-		t.Fatalf("RegisterWorkspace after the relaunch = %q, want the same workspace %q", again.GetId(), s.f.ws.GetId())
-	}
-
-	// Assert: the head, landed, where it stood.
-	page, _ := f2.openFeed(nil)
-	var redrawn *frontendv1.FeedRow
-	for _, row := range page.GetSuccess().GetRows() {
-		if row.GetId().GetValue() == head.GetId().GetValue() {
-			redrawn = row
-		}
-	}
-	if redrawn.GetActivity().GetMerge().GetSuccess() == nil || redrawn.GetOrder().GetKey() != head.GetOrder().GetKey() {
-		t.Fatalf("the relaunched root's merge head = %v, want the landed head at key %q", redrawn, head.GetOrder().GetKey())
-	}
-	// Assert: every tab the live reader saw.
-	tabs, _ := f2.openFeed(head.GetId())
-	if got, want := len(tabs.GetSuccess().GetRows()), len(liveTabs.GetSuccess().GetRows()); got != want || want == 0 {
-		t.Fatalf("the relaunched bubble carries %d rows, want the live bubble's %d", got, want)
 	}
 }

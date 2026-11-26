@@ -889,3 +889,14 @@ func TestAQueuedMergeWhoseSessionParksAtItsColdGateKeepsItsPlaceInTheQueue(t *te
 		return row != nil && row.GetMergeQueued() != nil
 	})
 }
+
+// leftForMerged reports whether PUSH has taken WS out of its streams into
+// the Recently Merged summary, and its merged page draws it as OK says.
+func leftForMerged(t *testing.T, d *harness.Daemon, push *frontendv1.RosterPush, ws string, ok func(*frontendv1.RosterRow) bool) bool {
+	t.Helper()
+	if rosterRow(push, ws) != nil || push.GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces() == 0 {
+		return false
+	}
+	row := mergedRowOf(t, d, ws)
+	return row != nil && ok(row)
+}

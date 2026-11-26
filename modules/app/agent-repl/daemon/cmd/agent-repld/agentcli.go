@@ -243,7 +243,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"move-up":            {usage: "move-up MERGE|here", run: queueMove(true)},
 		"move-down":          {usage: "move-down MERGE|here", run: queueMove(false)},
 		"move":               {usage: "move MERGE|here -placement front|back|behind=MERGE|index=N", run: queueMoveTo},
-		"requeue":            {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
+		"requeue":            {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-model M]", run: queueRequeue},
 		"discard":            {usage: "discard MERGE|here", run: queueDiscard},
 		"pause":              {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
 		"resume":             {usage: "resume -repository here|DIR|all", run: queuePause(false)},
@@ -2757,13 +2757,10 @@ func (c *cliCall) mergeArg(fs *flag.FlagSet, stateDir *string, args []string, no
 }
 
 // queueRequeue puts a merge that left its queue without landing back in line
-// as itself. Its placement defaults to the back; the version increment is
-// only for a merge whose request recorded none (an adopted one).
+// as itself. Its placement defaults to the back.
 func queueRequeue(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	place := fs.String("placement", "back", "back, front or behind=MERGE")
-	part := fs.String("version-part", "", "minor or patch, only for a merge whose request recorded no version increment")
-	line := fs.String("changelog-line", "", "the version tag's changelog line, with -version-part")
 	model := fs.String("model", "", "the model the merge's session resumes under, from its login's catalog")
 	named, ref, rest, ok := c.offQueueArg(fs, stateDir, args)
 	if !ok {
@@ -2776,15 +2773,11 @@ func queueRequeue(c *cliCall, args []string) int {
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	version, err := versionIncrement(*part, *line)
-	if err != nil {
-		return c.usageFailed("%v", err)
-	}
 	requester, ok := c.requester(false)
 	if !ok {
 		return exitFailure
 	}
-	req := &agentreplv1.RequeueMergeRequest{Workspace: ref, Placement: where, Version: version, Requester: requester}
+	req := &agentreplv1.RequeueMergeRequest{Workspace: ref, Placement: where, Requester: requester}
 	if *model != "" {
 		req.Model = &conversationv1.AgentModel{Name: *model}
 	}

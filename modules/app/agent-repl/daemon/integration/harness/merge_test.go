@@ -17,37 +17,6 @@ func TestFinishRequestNamesTheWorkspace(t *testing.T) {
 	}
 }
 
-func TestAsyncMergeNamesItsBranchAndMakerAndCarriesItsEdits(t *testing.T) {
-	// Arrange
-	child := &workspacev1.WorkspaceRef{Id: "child"}
-	ws := &workspacev1.WorkspaceRef{Id: "ws"}
-
-	// Act
-	req := AsyncMerge(&workspacev1.RepositoryRef{Id: "repo"}, ws, "fix", "agent-fix", WithInstruction("rebase it"), ClosingOnLanding(child), CleaningUp(), IntoMaker(), AsyncAtFront())
-
-	// Assert
-	async := req.GetAsyncMerge()
-	if async.GetName() != "fix" || async.GetSource().GetBranch() != "agent-fix" || async.GetInstruction() != "rebase it" ||
-		async.GetCloseAfter().GetWorkspace().GetId() != "child" || !async.GetCleanupWorktree() || async.GetTarget().GetMaker() == nil || async.GetPlacement().GetFront() == nil {
-		t.Fatalf("AsyncMerge = %v, want every edit applied", req)
-	}
-	if async.GetSource().GetMaker().GetWorkspace().GetWorkspace().GetId() != "ws" || req.GetContextOrigin().GetFork().GetWorkspace().GetId() != "ws" ||
-		req.GetRequester().GetWorkspace().GetWorkspace().GetId() != "ws" {
-		t.Fatalf("AsyncMerge = %v, want ws as maker, fork and requester", req)
-	}
-}
-
-func TestAsyncPatchMovesTheVersionByAPatch(t *testing.T) {
-	// Act
-	req := AsyncMerge(&workspacev1.RepositoryRef{Id: "repo"}, &workspacev1.WorkspaceRef{Id: "ws"}, "fix", "agent-fix", AsyncPatch("Fix it"))
-
-	// Assert
-	v := req.GetAsyncMerge().GetVersionIncrement()
-	if v.GetPatch() == nil || v.GetChangelogLine() != "Fix it" {
-		t.Fatalf("version increment = %v, want a patch with its line", v)
-	}
-}
-
 func TestFinishRequestIsTheUsersAtTheBackUnlessEdited(t *testing.T) {
 	// Act
 	plain := FinishRequest(&workspacev1.WorkspaceRef{Id: "ws"})

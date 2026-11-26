@@ -86,8 +86,8 @@ type deployerParams struct {
 	SelfExe string
 	Bundle  *buildid.ShimBundle
 	Rollout deploy.Rollout
-	// Reports are the landing reports a deploy covers and pays.
-	Reports deploy.OwedReports
+	// Reports are the landing reports a deploy covers and tells.
+	Reports deploy.LandingReports
 	Clients deploy.Clients
 	Runner  deploy.Runner
 	// WifiTools is the daemon's one persistent Wi-Fi tool set

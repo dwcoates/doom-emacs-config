@@ -884,7 +884,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// durable close, the record the prompt queue's door wrote.
 		TurnCloses:    p.DB.TurnCloses,
 		TurnAddresses: p.DB.TurnAddresses,
-		TurnMirrors:   p.DB.TurnMirrors,
 		TurnSenders:   p.DB.TurnSenders,
 		// A MERGE'S BUBBLE is drawn again by a new daemon from this record.
 		DurableRows: p.DB,
