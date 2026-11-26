@@ -235,3 +235,49 @@ func TestTheHarnessDaemonStatesTheUnservedZettel(t *testing.T) {
 		t.Fatal("daemon.go states no UnservedZettelEnv")
 	}
 }
+
+// TestWritePinnedConfigLaysOnlyTheLoader pins that laying a checkout's loader
+// writes config.el and nothing global: runPinned states PinnedElispBuild once,
+// and a per-daemon write from parallel tests would race on it.
+func TestWritePinnedConfigLaysOnlyTheLoader(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func(t *testing.T, dir string)
+	}{
+		{
+			name: "config.el carries the pinned loader",
+			check: func(t *testing.T, dir string) {
+				body, err := os.ReadFile(filepath.Join(dir, "config.el"))
+				if err != nil || string(body) != pinnedConfigEl {
+					t.Fatalf("config.el = %q, %v; want %q", body, err, pinnedConfigEl)
+				}
+			},
+		},
+		{
+			name: "PinnedElispBuild is untouched",
+			check: func(t *testing.T, _ string) {
+				if PinnedElispBuild != "stated-once" {
+					t.Fatalf("PinnedElispBuild = %q, want it untouched", PinnedElispBuild)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			previous := PinnedElispBuild
+			PinnedElispBuild = "stated-once"
+			t.Cleanup(func() { PinnedElispBuild = previous })
+			dir := t.TempDir()
+
+			// Act
+			if err := writePinnedConfig(dir); err != nil {
+				t.Fatalf("writePinnedConfig = %v", err)
+			}
+
+			// Assert
+			tc.check(t, dir)
+		})
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-repld/internal/buildid"
 )
 
 // TestBuildIdentityEnvPinsOneString pins the invariant the whole suite depends
@@ -178,5 +180,97 @@ func TestThePinnedCheckoutStandsAsARepositorysMainWorktree(t *testing.T) {
 	}
 	if info, err := os.Stat(filepath.Join(checkout, ".git")); err != nil || !info.IsDir() {
 		t.Fatalf("the pinned checkout's .git = %v, %v; want the directory its fake common dir names", info, err)
+	}
+}
+
+// useCheckoutRepo points newDaemonCheckout at the real repository for one
+// test, as runPinned does for the suite, and restores the previous root.
+func useCheckoutRepo(t *testing.T) {
+	t.Helper()
+	previous := checkoutRepo
+	checkoutRepo = RepoRoot(t)
+	t.Cleanup(func() { checkoutRepo = previous })
+}
+
+// TestEveryDaemonLaysItsOwnCheckout pins what makes parallel deploys safe: two
+// daemons' checkouts are two directories, each a whole pinned checkout with no
+// build stamp, so one daemon's install never touches another's files.
+func TestEveryDaemonLaysItsOwnCheckout(t *testing.T) {
+	// Arrange
+	useCheckoutRepo(t)
+	parent := t.TempDir()
+
+	// Act
+	first := newDaemonCheckout(t, filepath.Join(parent, "first", "checkout"))
+	second := newDaemonCheckout(t, filepath.Join(parent, "second", "checkout"))
+
+	// Assert
+	if first == second {
+		t.Fatalf("both daemons' checkouts are %s, want two directories", first)
+	}
+	tests := []struct {
+		name    string
+		rel     string
+		present bool
+	}{
+		{name: "the fake repository's common dir", rel: ".git", present: true},
+		{name: "the elisp loader", rel: "config.el", present: true},
+		{name: "the requirements manifest", rel: "requirements.json", present: true},
+		{name: "the render vocabulary link", rel: "proto", present: true},
+		{name: "no deploy stamp", rel: filepath.Join("daemon", "bin", ".built-sha"), present: false},
+		{name: "no shim stamp", rel: filepath.Join("agent-shim", "claude", "shim", "dist", ".built-sha"), present: false},
+	}
+	for _, checkout := range []string{first, second} {
+		for _, tc := range tests {
+			t.Run(filepath.Base(filepath.Dir(checkout))+"/"+tc.name, func(t *testing.T) {
+				_, err := os.Lstat(filepath.Join(checkout, tc.rel))
+				if got := err == nil; got != tc.present {
+					t.Fatalf("%s present = %v (%v), want %v", tc.rel, got, err, tc.present)
+				}
+			})
+		}
+	}
+}
+
+// TestLayingADaemonCheckoutLeavesThePinnedElispBuild pins that the global
+// every Emacs stream reports is stated once by runPinned: a daemon laying its
+// checkout from a parallel test never writes it.
+func TestLayingADaemonCheckoutLeavesThePinnedElispBuild(t *testing.T) {
+	// Arrange
+	useCheckoutRepo(t)
+	previous := PinnedElispBuild
+	PinnedElispBuild = "stated-once"
+	t.Cleanup(func() { PinnedElispBuild = previous })
+
+	// Act
+	newDaemonCheckout(t, filepath.Join(t.TempDir(), "checkout"))
+
+	// Assert
+	if PinnedElispBuild != "stated-once" {
+		t.Fatalf("PinnedElispBuild = %q after laying a daemon checkout, want it untouched", PinnedElispBuild)
+	}
+}
+
+// TestADaemonCheckoutsElispBuildIsTheTemplates pins why one global suffices:
+// every daemon's checkout carries the template's loader, so the build the
+// daemon reads from its own checkout is the one PinnedElispBuild states.
+func TestADaemonCheckoutsElispBuildIsTheTemplates(t *testing.T) {
+	// Arrange
+	useCheckoutRepo(t)
+	template, err := newPinnedCheckout(filepath.Join(t.TempDir(), "template"), checkoutRepo)
+	if err != nil {
+		t.Fatalf("newPinnedCheckout = %v, want a laid-out template", err)
+	}
+	want, err := buildid.Elisp(template)
+	if err != nil {
+		t.Fatalf("the template's elisp build: %v", err)
+	}
+
+	// Act
+	got, err := buildid.Elisp(newDaemonCheckout(t, filepath.Join(t.TempDir(), "checkout")))
+
+	// Assert
+	if err != nil || got != want {
+		t.Fatalf("the daemon checkout's elisp build = %q, %v; want the template's %q", got, err, want)
 	}
 }

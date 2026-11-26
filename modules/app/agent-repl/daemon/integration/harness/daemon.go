@@ -485,6 +485,11 @@ type Opts struct {
 
 // Daemon is one running agent-repld process and the client dialed to it.
 type Daemon struct {
+	// Checkout is this daemon's own pinned checkout, the module root it
+	// deploys from and installs into; no two daemons share one, so their
+	// installs never race. A successor the daemon spawns itself inherits its
+	// environment, so a deploy handover stays within this one checkout.
+	Checkout string
 	// StateDir is the daemon's state root.
 	StateDir string
 	// Addr is the loopback address it serves on, read from daemon.addr.
@@ -746,6 +751,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	sockRoot := ShortTempDir(t)
 
 	d := &Daemon{
+		Checkout:           newDaemonCheckout(t, filepath.Join(root, "checkout")),
 		StateDir:           opts.StateDir,
 		ProfileDir:         opts.ProfileDir,
 		PromptsDir:         LinkPrompts(t, filepath.Join(root, "prompts")),
@@ -868,7 +874,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	// daemon reads comes out of this test's fixture file and the real binary is
 	// never reached.
 	d.Git = World(t)
-	d.Git.tagPinnedCheckout(PinnedCheckout(t))
+	d.Git.tagPinnedCheckout(d.Checkout)
 	InstallFakeGit(t, fakeBin)
 
 	multiRoot := opts.MultiRepoRoot
@@ -998,7 +1004,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	if opts.KeepaliveInterval > 0 {
 		env = append(env, cachelapse.EnvTestKeepaliveInterval+"="+opts.KeepaliveInterval.String())
 	}
-	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
+	env = append(env, BuildIdentityEnv(d.Checkout)...)
 	env = append(env, HostNeutralNamingEnv()...)
 	env = append(env, NoHomeRepositoryEnv()...)
 	env = append(env, NoBuildCacheEnv()...)
