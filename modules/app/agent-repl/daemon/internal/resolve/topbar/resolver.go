@@ -319,18 +319,45 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 // ITS TEXT IS MARKDOWN: each of the agent's plain sentences is one bullet
 // (textline.Bullets), so the agent never writes markdown.
 func title(s *wsState) *frontendv1.TopbarTitle {
+	var out *frontendv1.TopbarTitle
 	switch {
 	case s.summary.Short != "":
-		out := &frontendv1.TopbarTitle{Text: s.summary.Short}
+		out = &frontendv1.TopbarTitle{Text: s.summary.Short}
 		if s.summary.Long != "" {
 			out.Description = &frontendv1.TopbarTitleDescription{Text: textline.Bullets(s.summary.Long)}
 		}
-		return out
 	case s.sessionTitle != "":
-		return &frontendv1.TopbarTitle{Text: s.sessionTitle}
+		out = &frontendv1.TopbarTitle{Text: s.sessionTitle}
 	default:
 		return nil
 	}
+	out.ChildMenu = childMenu(s.closedChildren)
+	return out
+}
+
+// childMenu is the summary's click menu of CHILDREN, the workspace's children
+// that are not open, in the tracker's order: nil with none, so the summary
+// takes no click.
+func childMenu(children []ClosedChild) *frontendv1.TopbarTitleChildMenu {
+	if len(children) == 0 {
+		return nil
+	}
+	menu := &frontendv1.TopbarTitleChildMenu{}
+	for _, child := range children {
+		item := &frontendv1.TopbarTitleChildMenuItem{
+			Name:   &frontendv1.TopbarTitleChildMenuItemName{Text: child.Name},
+			Badge:  &frontendv1.TopbarTitleChildMenuItemBadge{Standing: &frontendv1.TopbarTitleChildMenuItemBadge_Closed{Closed: &frontendv1.TopbarTitleChildMenuItemBadgeClosed{}}},
+			Select: &frontendv1.TopbarTitleChildMenuItemSelect{Target: child.Ref},
+		}
+		if child.Merged {
+			item.Badge.Standing = &frontendv1.TopbarTitleChildMenuItemBadge_Merged{Merged: &frontendv1.TopbarTitleChildMenuItemBadgeMerged{}}
+		}
+		if child.ShortSummary != "" {
+			item.Title = &frontendv1.TopbarTitleChildMenuItemTitle{Text: child.ShortSummary}
+		}
+		menu.Items = append(menu.Items, item)
+	}
+	return menu
 }
 
 // nameLinks resolves what a click on the workspace's name opens: nothing with
@@ -682,6 +709,12 @@ func (r *resolver) SetSummary(ws ids.WorkspaceID, summary wsm.WorkspaceSummary) 
 	r.mutate(ws, "daemon.topbar.set_summary", "the topbar took the workspace summary",
 		dlog.Context{"short_present": summary.Short != "", "long_present": summary.Long != ""},
 		func(s *wsState) { s.summary = summary })
+}
+
+// SetClosedChildren installs PARENT's children that are not open, whole.
+func (r *resolver) SetClosedChildren(parent ids.WorkspaceID, children []ClosedChild) {
+	r.mutate(parent, "daemon.topbar.set_closed_children", "the topbar took the workspace's children that are not open",
+		dlog.Context{"children": len(children)}, func(s *wsState) { s.closedChildren = slices.Clone(children) })
 }
 
 // SetLinks installs the links the workspace name's menu shows. Empty clears

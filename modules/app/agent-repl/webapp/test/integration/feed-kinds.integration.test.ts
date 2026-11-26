@@ -120,6 +120,7 @@ import {
   responseNoticeUnit,
   responseUnit,
   separationRow,
+  childRow,
   skillUnit,
   subagentUnit,
   toolCallDeniedUnit,
@@ -202,6 +203,7 @@ describe("arm coverage", () => {
       "commandPanel",
       "commandRefused",
       "earlierSteps",
+      "child",
     ]);
   });
 
@@ -1169,6 +1171,22 @@ describe("turn ended", () => {
     const row = await drawRow(turnEndedInterruptedRow());
     // Assert
     expect(row.dataset.rowKind).toBe("turnEnded");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A child's bubble
+// ---------------------------------------------------------------------------
+
+describe("a child's bubble", () => {
+  it("draws the child's name and its short summary through the ordinary row path", async () => {
+    // Arrange / Act
+    const row = await drawRow(childRow());
+    // Assert
+    expect([row.querySelector(".feed-child-name")?.textContent, row.querySelector(".feed-child-summary")?.textContent]).toEqual([
+      "fix-flaky",
+      "Fix the flaky test",
+    ]);
   });
 });
 

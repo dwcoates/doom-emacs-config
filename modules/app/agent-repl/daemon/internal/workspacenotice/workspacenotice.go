@@ -240,8 +240,7 @@ type Recipient struct {
 //   - its PARENT (Owner), of its creation only. A one-shot child's landing is
 //     its parent's one update (wsm.ParentFollowedEvents), so the parent is
 //     told that landing there and in no other role here; any other landing
-//     or close reaches it here in its other roles. A MERGE WORKSPACE's parent
-//     is its requester, which follows nothing, so it is told every kind;
+//     or close reaches it here in its other roles;
 //   - the workspace whose branch it lands into (Branch);
 //   - its context source (Context).
 func Recipients(ws wsm.Workspace, kind Kind) []Recipient {
@@ -249,7 +248,7 @@ func Recipients(ws wsm.Workspace, kind Kind) []Recipient {
 	if kind == Adopted {
 		return nil
 	}
-	parentFollows := ws.MergeOf == nil && ws.Parent != nil && kind == Landed && ws.OneShot
+	parentFollows := ws.Parent != nil && kind == Landed && ws.OneShot
 	add := func(id *wsm.WorkspaceID, mark func(*Recipient)) {
 		if id == nil || *id == ws.ID || (ws.RequestedBy != nil && *id == *ws.RequestedBy) || (parentFollows && *id == *ws.Parent) {
 			return
@@ -263,14 +262,10 @@ func Recipients(ws wsm.Workspace, kind Kind) []Recipient {
 		out = append(out, Recipient{Source: *id})
 		mark(&out[len(out)-1])
 	}
-	if ws.MergeOf != nil {
-		add(ws.Parent, func(r *Recipient) { r.Owner, r.Branch = true, true })
-	} else {
-		if kind == Created {
-			add(ws.Parent, func(r *Recipient) { r.Owner = true })
-		}
-		add(ws.LandsInto, func(r *Recipient) { r.Branch = true })
+	if kind == Created {
+		add(ws.Parent, func(r *Recipient) { r.Owner = true })
 	}
+	add(ws.LandsInto, func(r *Recipient) { r.Branch = true })
 	add(ws.ContextFrom, func(r *Recipient) { r.Context = true })
 	return out
 }
@@ -288,7 +283,7 @@ func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 	for _, told := range Recipients(event.Workspace, event.Kind) {
 		s.notify(ctx, prompts, told, event)
 	}
-	if (event.Kind == Created || event.Kind == Adopted) && event.Workspace.Parent != nil && event.Workspace.MergeOf == nil {
+	if (event.Kind == Created || event.Kind == Adopted) && event.Workspace.Parent != nil {
 		s.tellFamily(ctx, prompts, event)
 	}
 }

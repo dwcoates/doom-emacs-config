@@ -270,7 +270,6 @@ func DaemonSubsystem(origin conversationv1.PromptOrigin) (string, bool) {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
@@ -303,8 +302,8 @@ func DaemonSubsystem(origin conversationv1.PromptOrigin) (string, bool) {
 
 // MergeHandbackLabel is a merge handback's badge text: the FIRST LINE of the
 // handback's first text block. The handback brief
-// (prompts/merge-detached-handback.md) leads with exactly that line ("merge of
-// fix-flaky landed"), so the badge states the outcome in the daemon's words
+// (prompts/merge-handback.md) leads with exactly that line ("merge of
+// fix-flaky failed"), so the badge states the outcome in the daemon's words
 // and the rest of the report is the agent's to read.
 func MergeHandbackLabel(said *conversationv1.UserSaid) string {
 	for _, block := range said.GetContent().GetBlocks() {

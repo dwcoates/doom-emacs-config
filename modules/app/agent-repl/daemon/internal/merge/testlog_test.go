@@ -53,26 +53,6 @@ func TestATokenResolvesToItsLogForItsWorkspace(t *testing.T) {
 	}
 }
 
-func TestAnAsyncMergeTokenResolvesInTheRequesterFeedThatDrawsItsBubble(t *testing.T) {
-	// Arrange: an async merge's lease is in the MERGE workspace's ledger, and
-	// its bubble is drawn in the requester's feed (2026-10-30:
-	// shim-stand-down-authority-2 requested by agent-repl-hot-reload).
-	h := newHarness(t)
-	h.registerMergeWorkspaceFor(wsm.MergeOrigin{Requester: theWorkspace}, "feature")
-	token, path := servedLogOf(t, h, theMergeWorkspace, "lease-async", 5)
-
-	// Act.
-	got, err := h.o.TestLogPath(context.Background(), theWorkspace, token)
-
-	// Assert.
-	if err != nil || got != path {
-		t.Fatalf("TestLogPath = (%q, %v), want %q", got, err, path)
-	}
-	if _, warned := h.recordFor("warn", "daemon.merge.test_log"); warned {
-		t.Fatalf("a link the daemon drew was refused: %+v", h.logs.Records())
-	}
-}
-
 func TestATokenIsRefusedWhenItNamesNoLogTheFeedDraws(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -90,17 +70,7 @@ func TestATokenIsRefusedWhenItNamesNoLogTheFeedDraws(t *testing.T) {
 				return token
 			},
 			wantReason: "not_drawn_here",
-			wantFields: dlog.Context{"merge_workspace": "ws-foreign", "drawn_in": "ws-foreign"},
-		},
-		{
-			name: "an async merge another workspace requested",
-			token: func(t *testing.T, h *harness) string {
-				h.registerMergeWorkspaceFor(wsm.MergeOrigin{Requester: "ws-requester"}, "feature")
-				token, _ := servedLogOf(t, h, theMergeWorkspace, "lease-async", 1)
-				return token
-			},
-			wantReason: "not_drawn_here",
-			wantFields: dlog.Context{"merge_workspace": string(theMergeWorkspace), "drawn_in": "ws-requester"},
+			wantFields: dlog.Context{"merge_workspace": "ws-foreign"},
 		},
 	}
 	for _, tt := range tests {

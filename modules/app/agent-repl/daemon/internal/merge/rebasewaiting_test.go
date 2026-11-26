@@ -61,12 +61,6 @@ func (w *waitingWorld) entryOf(t *testing.T, ws ids.WorkspaceID) wsm.MergeQueueE
 	return wsm.MergeQueueEntry{}
 }
 
-// waitGone waits, bounded, for every run the orchestrator started to end.
-func waitGone(t *testing.T, o *orchestrator) {
-	t.Helper()
-	receiveWithin(t, liveGone(o), "the exiting orchestrator's runs ending")
-}
-
 // land lets the head's gate pass, while the merge behind it still waits in
 // line for the test turn on the old tip, and waits for the head to land.
 func (w *waitingWorld) land(t *testing.T) {

@@ -45,7 +45,7 @@ import (
 
 // THE AGENT API'S COMMANDS: seven nouns over the serving daemon's rpcs.
 //
-//	agent-repld workspace    create | async-merge | prompt | set | finished | open | close | kill
+//	agent-repld workspace    create | prompt | set | finished | open | close | kill
 //	                         compact | status | list | subscribe | unsubscribe | gate
 //	                         subsections | place
 //	agent-repld merge-queue  status | dequeue | move-up | move-down | requeue | discard | pause | resume
@@ -166,7 +166,7 @@ func readRoster(ctx context.Context, client agentreplv1connect.AgentReplClient) 
 }
 
 // locateWorkspaces asks the daemon which workspaces REQ names. The registry
-// answers, not the roster, so a hidden merge workspace and an open workspace
+// answers, not the roster, so a backlogged workspace and an open workspace
 // the sidebar does not draw are found (agentrepl.v1.LocateWorkspace).
 func locateWorkspaces(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
 	resp, err := client.LocateWorkspace(ctx, connect.NewRequest(req))
@@ -189,8 +189,7 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":                 {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL [-slack-subscribe " + slackModes + "]] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
-		"async-merge":            {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
+		"create":                 {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-source-branch BRANCH] -context fresh|fork|subagent [-fork WS] [-subagent ID] [-one-shot [-close-after WS] [-cleanup-source-worktree] [-compact-requester-after] [-profile-gate]] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL [-slack-subscribe " + slackModes + "]] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
 		"prompt":                 {usage: "prompt [-as-user] [-slack-forward URL] WS TEXT", run: workspacePrompt},
 		"gather":                 {usage: "gather -workspaces A,B,C -prompt TEXT [-as-user]", run: workspaceGather},
 		"gather-status":          {usage: "gather-status GATHER", run: workspaceGatherStatus},
@@ -244,7 +243,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"move-up":            {usage: "move-up MERGE|here", run: queueMove(true)},
 		"move-down":          {usage: "move-down MERGE|here", run: queueMove(false)},
 		"move":               {usage: "move MERGE|here -placement front|back|behind=MERGE|index=N", run: queueMoveTo},
-		"requeue":            {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
+		"requeue":            {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-model M]", run: queueRequeue},
 		"discard":            {usage: "discard MERGE|here", run: queueDiscard},
 		"pause":              {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
 		"resume":             {usage: "resume -repository here|DIR|all", run: queuePause(false)},
@@ -430,7 +429,7 @@ func (c *cliCall) callerIfAny() (*workspacev1.WorkspaceRef, bool) {
 
 // callingRef answers the calling workspace's ref, nil when the caller is no
 // workspace's, with the working directory. The registry answers (locate), so
-// a hidden merge workspace's own worktree is its caller's.
+// an unrostered workspace's own worktree is its caller's.
 //
 // THE CALLER IS THE WORKSPACE WHOSE OWN WORKTREE IT RUNS IN, never one whose
 // directory merely contains it: a subagent in a separate git worktree nested
@@ -499,8 +498,8 @@ func (c *cliCall) locateOne(req *agentreplv1.LocateWorkspaceRequest, matched str
 }
 
 // named answers the workspace NAME names: `here`, a directory, or a name,
-// which must name exactly one workspace. The registry answers (locate), so a
-// hidden merge workspace is named by its directory or its name.
+// which must name exactly one workspace. The registry answers (locate), so an
+// unrostered workspace is named by its directory or its name.
 func (c *cliCall) named(name string) (*workspacev1.WorkspaceRef, bool) {
 	if name == here {
 		return c.calling()
@@ -704,7 +703,7 @@ func hookFlags(fs *flag.FlagSet) (pre, post *hookList) {
 	return pre, post
 }
 
-// deployHooks are the hooks a create or an async merge names, nil when it
+// deployHooks are the hooks a create names, nil when it
 // names none.
 func deployHooks(pre, post *hookList) *agentreplv1.CreateWorkspaceDeployHooks {
 	if len(pre.hooks) == 0 && len(post.hooks) == 0 {
@@ -796,9 +795,15 @@ func workspaceCreate(c *cliCall, args []string) int {
 	parent := fs.String("parent", "", "the parent that owns and coordinates a child")
 	landsInto := fs.String("lands-into", "", "main, or the workspace whose branch the work is cut from and lands into; unset is the relationship's default")
 	originMaster := fs.Bool("origin-master", false, "cut a workspace landing on main from origin's primary branch, fetched now")
-	contextOrigin := fs.String("context", "", "fresh, or fork of -fork")
+	sourceBranch := fs.String("source-branch", "", "an existing branch the workspace is cut from, in place of its landing target's tip: a snapshot of its tip now")
+	contextOrigin := fs.String("context", "", "fresh, fork of -fork, or subagent of -subagent")
 	fork := fs.String("fork", "", "the workspace whose conversation is forked")
+	subagent := fs.String("subagent", "", "the subagent whose own conversation is forked")
 	oneShot := fs.Bool("one-shot", false, "a one-shot, which lands itself when done")
+	closeAfter := fs.String("close-after", "", "a one-shot's other workspace, closed once the one-shot lands")
+	cleanupSource := fs.Bool("cleanup-source-worktree", false, "remove the -source-branch's worktree once the one-shot lands")
+	compactRequester := fs.Bool("compact-requester-after", false, "compact the calling workspace once the one-shot lands")
+	profileGate := fs.Bool("profile-gate", false, "profile the one-shot's merge test gate: every unit and the production processes its tests start write CPU profiles beside the gate's run log")
 	finish := fs.String("finish", "", "front or back: where the one-shot's finish joins the merge queue, fixed now; unset lets its finish name its own")
 	prompt := fs.String("prompt", "", "the first prompt")
 	name := fs.String("name", "", "the workspace's name; unset derives it from the prompt")
@@ -883,19 +888,43 @@ func workspaceCreate(c *cliCall, args []string) int {
 			return c.usageFailed("a fork names the workspace it forks with -fork")
 		}
 		req.ContextOrigin = &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Fork{Fork: &agentreplv1.WorkspaceContextOriginFork{Workspace: forkRef}}}
+	case "subagent":
+		if *subagent == "" {
+			return c.usageFailed("a subagent fork names the subagent it forks with -subagent")
+		}
+		req.ContextOrigin = &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Subagent{Subagent: &agentreplv1.WorkspaceContextOriginSubagent{AgentId: *subagent}}}
 	default:
-		return c.usageFailed("-context is fresh or fork, not %q", *contextOrigin)
+		return c.usageFailed("-context is fresh, fork or subagent, not %q", *contextOrigin)
 	}
 	if *finish != "" && !*oneShot {
 		return c.usageFailed("-finish fixes a one-shot's finish; name -one-shot")
+	}
+	if !*oneShot && (*closeAfter != "" || *cleanupSource || *compactRequester || *profileGate) {
+		return c.usageFailed("-close-after, -cleanup-source-worktree, -compact-requester-after and -profile-gate act on a one-shot's landing; name -one-shot")
+	}
+	if *cleanupSource && *sourceBranch == "" {
+		return c.usageFailed("-cleanup-source-worktree removes the -source-branch's worktree, which names none")
+	}
+	var source *agentreplv1.WorkspaceSourceBranch
+	if *sourceBranch != "" {
+		source = &agentreplv1.WorkspaceSourceBranch{Branch: *sourceBranch}
 	}
 	if *oneShot {
 		if *prompt == "" {
 			return c.usageFailed("a one-shot names its -prompt")
 		}
-		form := &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Relationship: kind, LandingTarget: landing}
+		form := &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Relationship: kind, LandingTarget: landing,
+			SourceBranch: source, CleanupSourceWorktree: *cleanupSource, CompactRequesterAfter: *compactRequester,
+			DeployHooks: deployHooks(pre, post), ProfileGate: *profileGate}
 		if *name != "" {
 			form.Name = name
+		}
+		if *closeAfter != "" {
+			ref, ok := c.named(*closeAfter)
+			if !ok {
+				return exitFailure
+			}
+			form.CloseAfter = &agentreplv1.CreateWorkspaceCloseAfter{Workspace: ref}
 		}
 		if *finish != "" {
 			if *finish != "front" && *finish != "back" {
@@ -909,7 +938,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 		}
 		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: form}
 	} else {
-		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Relationship: kind, LandingTarget: landing, DeployHooks: deployHooks(pre, post)}
+		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Relationship: kind, LandingTarget: landing, DeployHooks: deployHooks(pre, post), SourceBranch: source}
 		if *name != "" {
 			standard.Name = name
 		}
@@ -991,100 +1020,6 @@ func (c *cliCall) landingTarget(text string, fromOrigin bool) (*agentreplv1.Work
 		return nil, false
 	}
 	return &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Workspace{Workspace: &agentreplv1.WorkspaceLandingTargetWorkspace{Workspace: into}}}, true
-}
-
-func workspaceAsyncMerge(c *cliCall, args []string) int {
-	fs, stateDir := c.flags()
-	name := fs.String("name", "", "the merge workspace's name")
-	branch := fs.String("branch", "", "the branch that lands")
-	maker := fs.String("maker", "", "the workspace whose agent cut the branch")
-	subagent := fs.String("maker-subagent", "", "the subagent that made the branch")
-	contextFork := fs.String("context-fork", "", "the maker, whose conversation the merge workspace forks")
-	target := fs.String("target", "", "primary, or maker")
-	place := fs.String("placement", "", "back, front or behind=MERGE; a finish through the merge queue names one, a direct landing none")
-	instruction := fs.String("instruction", "", "how the merge workspace prepares the branch")
-	closeAfter := fs.String("close-after", "", "a workspace closed once the merge lands")
-	cleanup := fs.Bool("cleanup-worktree", false, "remove the branch's worktree once it lands")
-	compact := fs.Bool("compact-after", false, "compact the calling workspace once it lands")
-	pre, post := hookFlags(fs)
-	part := fs.String("version-part", "", "minor or patch, for a merge onto agent-repl's master")
-	line := fs.String("changelog-line", "", "the version tag's changelog line")
-	profileGate := fs.Bool("profile-gate", false, "profile the merge's test gate: every unit and the production processes its tests start write CPU profiles beside the gate's run log")
-	positionals, ok := c.parse(fs, args)
-	if !ok {
-		return exitFailure
-	}
-	if len(positionals) != 0 || *contextFork == "" || (*maker == "") == (*subagent == "") {
-		return c.usageFailed("exactly one of -maker and -maker-subagent, and -context-fork, are required")
-	}
-	// A FINISH THROUGH THE QUEUE NAMES ITS PLACE, and the daemon refuses one
-	// that does not; a deploy remediation or escalation lands directly and
-	// names none (FinishWorkspaceRequest.placement).
-	var where *agentreplv1.MergeQueuePlacement
-	if *place != "" {
-		var err error
-		if where, err = placement(*place); err != nil {
-			return c.usageFailed("%v", err)
-		}
-	}
-	version, err := versionIncrement(*part, *line)
-	if err != nil {
-		return c.usageFailed("%v", err)
-	}
-	async := &agentreplv1.CreateWorkspaceAsyncMerge{Name: *name, Placement: where, CleanupWorktree: *cleanup, CompactAfter: *compact,
-		DeployHooks: deployHooks(pre, post), VersionIncrement: version, ProfileGate: *profileGate}
-	switch *target {
-	case "primary":
-		async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Primary{Primary: &agentreplv1.CreateWorkspaceAsyncMergeTargetPrimary{}}}
-	case "maker":
-		async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Maker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeTargetMaker{}}}
-	default:
-		return c.usageFailed("-target is primary or maker, not %q", *target)
-	}
-	if *instruction != "" {
-		async.Instruction = instruction
-	}
-	if !c.dial(*stateDir) {
-		return exitFailure
-	}
-	source := &agentreplv1.CreateWorkspaceAsyncMergeSource{Branch: *branch, Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker{}}
-	if *subagent != "" {
-		source.Maker.Maker = &agentreplv1.CreateWorkspaceAsyncMergeMaker_Subagent{Subagent: &agentreplv1.CreateWorkspaceAsyncMergeMakerSubagent{AgentId: *subagent}}
-	} else {
-		makerRef, ok := c.named(*maker)
-		if !ok {
-			return exitFailure
-		}
-		source.Maker.Maker = &agentreplv1.CreateWorkspaceAsyncMergeMaker_Workspace{Workspace: &agentreplv1.CreateWorkspaceAsyncMergeMakerWorkspace{Workspace: makerRef}}
-	}
-	async.Source = source
-	if *closeAfter != "" {
-		ref, ok := c.named(*closeAfter)
-		if !ok {
-			return exitFailure
-		}
-		async.CloseAfter = &agentreplv1.CreateWorkspaceAsyncMergeCloseAfter{Workspace: ref}
-	}
-	forkRef, ok := c.named(*contextFork)
-	if !ok {
-		return exitFailure
-	}
-	repository, ok := c.repository(here)
-	if !ok {
-		return exitFailure
-	}
-	requester, ok := c.requester(false)
-	if !ok {
-		return exitFailure
-	}
-	userOrWorkspace, _ := originatorFlag(originatorUserOrWorkspace)
-	req := &agentreplv1.CreateWorkspaceRequest{Repository: repository, Requester: requester, Originator: userOrWorkspace,
-		ContextOrigin: &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Fork{Fork: &agentreplv1.WorkspaceContextOriginFork{Workspace: forkRef}}},
-		Form:          &agentreplv1.CreateWorkspaceRequest_AsyncMerge{AsyncMerge: async}}
-	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
-	return answerDescribed(c, resp, err, func(msg *agentreplv1.CreateWorkspaceResponse) (string, error) {
-		return describeCreateRefusal(msg.GetError())
-	})
 }
 
 // workspaceArg parses a command of one workspace and answers it.
@@ -2750,11 +2685,9 @@ func queueRecordLanding(c *cliCall, args []string) int {
 // workspace's own merge, or a merge's NAME as the queues list it, which must
 // name exactly one merge across every queue.
 //
-// THE QUEUE NAMES ITS MERGES, NOT THE ROSTER. An async merge runs in a hidden
-// workspace, and the roster leaves backlogged workspaces out, so a verb that read
-// the name off the roster could address no async merge at all (2026-10-22:
-// `merge-queue move-down pt3-sentences` answered "the daemon's roster holds no
-// workspace named" while the queue listed it waiting).
+// THE QUEUE NAMES ITS MERGES, NOT THE ROSTER. The roster leaves backlogged
+// workspaces out, so a verb that read the name off the roster could not
+// address a backlogged workspace's merge.
 func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (string, *workspacev1.WorkspaceRef, []string, bool) {
 	return c.mergeArg(fs, stateDir, args, "in any queue", "in the queues", func(queue *agentreplv1.MergeQueueStatus) []namedMerge {
 		var out []namedMerge
@@ -2824,13 +2757,10 @@ func (c *cliCall) mergeArg(fs *flag.FlagSet, stateDir *string, args []string, no
 }
 
 // queueRequeue puts a merge that left its queue without landing back in line
-// as itself. Its placement defaults to the back; the version increment is
-// only for a merge whose request recorded none (an adopted one).
+// as itself. Its placement defaults to the back.
 func queueRequeue(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	place := fs.String("placement", "back", "back, front or behind=MERGE")
-	part := fs.String("version-part", "", "minor or patch, only for a merge whose request recorded no version increment")
-	line := fs.String("changelog-line", "", "the version tag's changelog line, with -version-part")
 	model := fs.String("model", "", "the model the merge's session resumes under, from its login's catalog")
 	named, ref, rest, ok := c.offQueueArg(fs, stateDir, args)
 	if !ok {
@@ -2843,15 +2773,11 @@ func queueRequeue(c *cliCall, args []string) int {
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	version, err := versionIncrement(*part, *line)
-	if err != nil {
-		return c.usageFailed("%v", err)
-	}
 	requester, ok := c.requester(false)
 	if !ok {
 		return exitFailure
 	}
-	req := &agentreplv1.RequeueMergeRequest{Workspace: ref, Placement: where, Version: version, Requester: requester}
+	req := &agentreplv1.RequeueMergeRequest{Workspace: ref, Placement: where, Requester: requester}
 	if *model != "" {
 		req.Model = &conversationv1.AgentModel{Name: *model}
 	}
@@ -2861,8 +2787,7 @@ func queueRequeue(c *cliCall, args []string) int {
 	})
 }
 
-// queueDiscard ends a merge's request standing off its queue; an async
-// merge's merge workspace closes with it.
+// queueDiscard ends a merge's request standing off its queue.
 func queueDiscard(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	named, ref, rest, ok := c.offQueueArg(fs, stateDir, args)

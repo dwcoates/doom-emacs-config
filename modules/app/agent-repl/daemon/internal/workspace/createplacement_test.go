@@ -197,21 +197,6 @@ func TestCreateRefusesAPlacementItsShapeCannotCarry(t *testing.T) {
 	}
 }
 
-func TestValidatePlacementRefusesAMergeWorkspace(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	spec := placedSpec(t, f)
-	spec.MergeOf = &wsm.MergeOrigin{}
-
-	// Act
-	err := validatePlacement(f.log.logger, spec)
-
-	// Assert
-	if got := refusalOf(t, err); got.Arm != ArmPlacementOnMergeWorkspace {
-		t.Fatalf("refusal arm = %q, want %q", got.Arm, ArmPlacementOnMergeWorkspace)
-	}
-}
-
 func TestValidatePlacementPanicsOnAPlacementNamingBothOrNeither(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -372,8 +357,6 @@ func TestOnlyATopLevelOneShotTheUserDispatchedJoinsTheOneShotsSubsection(t *test
 			change: func(s *CreateSpec) { s.Requester = &requester }},
 		{name: "a child one-shot", originator: lifecycleconfig.OriginatorUserOrWorkspace,
 			change: func(s *CreateSpec) { s.Parent = &parent }},
-		{name: "a merge workspace", originator: lifecycleconfig.OriginatorUserOrWorkspace,
-			change: func(s *CreateSpec) { s.MergeOf = &wsm.MergeOrigin{Requester: requester} }},
 		{name: "the Slack emoji acknowledger's one-shot", originator: lifecycleconfig.OriginatorEmojiAck},
 	}
 	for _, tt := range tests {

@@ -390,7 +390,7 @@ type cliFixture struct {
 	// dialed is every address the command dialed, in order.
 	dialed []string
 	// unrostered are workspaces the registry holds and the roster leaves
-	// out, such as a hidden merge workspace.
+	// out, such as a backlogged workspace.
 	unrostered []*frontendv1.RosterRow
 	// locateErr fails every locate.
 	locateErr error
@@ -865,9 +865,9 @@ func TestAWorkspaceIsNamedByNameDirectoryOrHere(t *testing.T) {
 		{name: "here", arg: here, want: "ws-caller", code: exitSuccess},
 		{name: "a name two workspaces share", arg: "twin", code: exitFailure},
 		{name: "a name nobody has", arg: "ghost", code: exitFailure},
-		{name: "a hidden merge workspace by name", arg: "merge", want: "ws-merge", code: exitSuccess},
-		{name: "a hidden merge workspace by directory", arg: "/wt/merge", want: "ws-merge", code: exitSuccess},
-		{name: "here in a hidden merge workspace's worktree", arg: here, cwd: "/wt/merge/daemon", want: "ws-merge", code: exitSuccess},
+		{name: "an unrostered workspace by name", arg: "merge", want: "ws-merge", code: exitSuccess},
+		{name: "an unrostered workspace by directory", arg: "/wt/merge", want: "ws-merge", code: exitSuccess},
+		{name: "here in an unrostered workspace's worktree", arg: here, cwd: "/wt/merge/daemon", want: "ws-merge", code: exitSuccess},
 		{name: "here outside every worktree", arg: here, cwd: "/elsewhere", code: exitFailure},
 	}
 	for _, tt := range tests {
@@ -1981,39 +1981,13 @@ func TestAMalformedHookFlagIsAUsageFailure(t *testing.T) {
 	}
 }
 
-func TestAsyncMergeSendsItsMakerTargetAndPlacement(t *testing.T) {
-	// Arrange
-	f := newCLIFixture()
-
-	// Act
-	code := f.run(workspaceNoun, "async-merge", "-name", "fix", "-branch", "agent/fix", "-maker-subagent", "a6e95de7",
-		"-context-fork", "here", "-target", "maker", "-placement", "front")
-
-	// Assert
-	if code != exitSuccess {
-		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
-	}
-	async := only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge()
-	if async.GetSource().GetMaker().GetSubagent().GetAgentId() != "a6e95de7" || async.GetTarget().GetMaker() == nil || async.GetPlacement().GetFront() == nil {
-		t.Fatalf("async merge = %v, want the subagent's branch into its maker at the front", async)
-	}
-}
-
-func TestAMergeOrAFinishAsksForItsGateProfiledOnlyWithTheFlag(t *testing.T) {
+func TestAFinishAsksForItsGateProfiledOnlyWithTheFlag(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 		want bool
 		got  func(*testing.T, *cliFixture) bool
 	}{
-		{name: "an async merge asking", args: []string{"async-merge", "-branch", "b", "-maker-subagent", "a1", "-context-fork", "here", "-target", "primary", "-placement", "back", "-profile-gate"}, want: true,
-			got: func(t *testing.T, f *cliFixture) bool {
-				return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate()
-			}},
-		{name: "an async merge not asking", args: []string{"async-merge", "-branch", "b", "-maker-subagent", "a1", "-context-fork", "here", "-target", "primary", "-placement", "back"}, want: false,
-			got: func(t *testing.T, f *cliFixture) bool {
-				return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate()
-			}},
 		{name: "a finish asking", args: []string{"finished", "here", "-placement", "back", "-profile-gate"}, want: true,
 			got: func(t *testing.T, f *cliFixture) bool {
 				return only[*agentreplv1.FinishWorkspaceRequest](t, f).GetProfileGate()
@@ -2557,9 +2531,9 @@ func evicted(req *agentreplv1.UpdateMergeQueueRequest) string {
 func TestAQueueVerbAddressesAMergeByTheNameTheQueueListsItUnder(t *testing.T) {
 	for _, verb := range []string{"dequeue", "move-up", "move-down"} {
 		t.Run(verb, func(t *testing.T) {
-			// Arrange: the async merge's workspace is hidden, so no roster row names it.
+			// Arrange: the merge is listed by its queue name, which no roster row carries.
 			f := newCLIFixture()
-			f.client.queues = queuesListing([2]string{"other", "ws-other"}, [2]string{"pt3-sentences", "ws-hidden-merge"})
+			f.client.queues = queuesListing([2]string{"other", "ws-other"}, [2]string{"pt3-sentences", "ws-evicted"})
 
 			// Act
 			code := f.run(mergeQueueNoun, verb, "pt3-sentences")
@@ -2568,7 +2542,7 @@ func TestAQueueVerbAddressesAMergeByTheNameTheQueueListsItUnder(t *testing.T) {
 			if code != exitSuccess {
 				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 			}
-			if got := evicted(only[*agentreplv1.UpdateMergeQueueRequest](t, f)); got != verb+" ws-hidden-merge" {
+			if got := evicted(only[*agentreplv1.UpdateMergeQueueRequest](t, f)); got != verb+" ws-evicted" {
 				t.Fatalf("update = %q, want %s of the listed merge's workspace", got, verb)
 			}
 		})
@@ -3945,18 +3919,16 @@ func TestRequeueAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
 		args      []string
 		wantFront bool
 		wantModel string
-		wantPart  bool
 	}{
 		{name: "at the back by default", args: []string{"pt3-sentences"}},
 		{name: "at the front", args: []string{"-placement", "front", "pt3-sentences"}, wantFront: true},
 		{name: "on a model", args: []string{"-model", "claude-opus-5-5", "pt3-sentences"}, wantModel: "claude-opus-5-5"},
-		{name: "with an adopted merge's increment", args: []string{"-version-part", "minor", "-changelog-line", "Merges land", "pt3-sentences"}, wantPart: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: the name is listed off a queue, and in no line.
 			f := newCLIFixture()
-			f.client.queues = offQueueListing([2]string{"pt3-sentences", "ws-hidden-merge"})
+			f.client.queues = offQueueListing([2]string{"pt3-sentences", "ws-evicted"})
 
 			// Act
 			code := f.run(mergeQueueNoun, append([]string{"requeue"}, tt.args...)...)
@@ -3966,9 +3938,9 @@ func TestRequeueAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
 				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 			}
 			req := only[*agentreplv1.RequeueMergeRequest](t, f)
-			if req.GetWorkspace().GetId() != "ws-hidden-merge" || (req.GetPlacement().GetFront() != nil) != tt.wantFront ||
-				req.GetModel().GetName() != tt.wantModel || (req.GetVersion() != nil) != tt.wantPart || req.GetRequester() == nil {
-				t.Fatalf("request = %v, want ws-hidden-merge front %v model %q increment %v from the caller", req, tt.wantFront, tt.wantModel, tt.wantPart)
+			if req.GetWorkspace().GetId() != "ws-evicted" || (req.GetPlacement().GetFront() != nil) != tt.wantFront ||
+				req.GetModel().GetName() != tt.wantModel || req.GetRequester() == nil {
+				t.Fatalf("request = %v, want ws-evicted front %v model %q from the caller", req, tt.wantFront, tt.wantModel)
 			}
 		})
 	}
@@ -3977,7 +3949,7 @@ func TestRequeueAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
 func TestDiscardAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
-	f.client.queues = offQueueListing([2]string{"pt3-sentences", "ws-hidden-merge"})
+	f.client.queues = offQueueListing([2]string{"pt3-sentences", "ws-evicted"})
 
 	// Act
 	code := f.run(mergeQueueNoun, "discard", "pt3-sentences")
@@ -3986,8 +3958,8 @@ func TestDiscardAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
 	if code != exitSuccess {
 		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 	}
-	if req := only[*agentreplv1.DiscardMergeRequest](t, f); req.GetWorkspace().GetId() != "ws-hidden-merge" || req.GetRequester() == nil {
-		t.Fatalf("request = %v, want ws-hidden-merge discarded by the caller", req)
+	if req := only[*agentreplv1.DiscardMergeRequest](t, f); req.GetWorkspace().GetId() != "ws-evicted" || req.GetRequester() == nil {
+		t.Fatalf("request = %v, want ws-evicted discarded by the caller", req)
 	}
 }
 
@@ -4611,13 +4583,13 @@ func TestQueueMoveSendsTheMergeAndItsPlaceInOneUpdate(t *testing.T) {
 		ws    string
 		place *agentreplv1.UpdateMergeQueueMove
 	}{
-		{name: "front", args: []string{"pt3-sentences", "-placement", "front"}, ws: "ws-hidden-merge",
+		{name: "front", args: []string{"pt3-sentences", "-placement", "front"}, ws: "ws-evicted",
 			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}}},
-		{name: "back", args: []string{"pt3-sentences", "-placement", "back"}, ws: "ws-hidden-merge",
+		{name: "back", args: []string{"pt3-sentences", "-placement", "back"}, ws: "ws-evicted",
 			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Back{Back: &agentreplv1.UpdateMergeQueueMoveBack{}}}},
-		{name: "behind a merge", args: []string{"pt3-sentences", "-placement", "behind=other"}, ws: "ws-hidden-merge",
+		{name: "behind a merge", args: []string{"pt3-sentences", "-placement", "behind=other"}, ws: "ws-evicted",
 			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Behind{Behind: &agentreplv1.UpdateMergeQueueMoveBehind{Merge: "other"}}}},
-		{name: "a waiting index", args: []string{"pt3-sentences", "-placement", "index=2"}, ws: "ws-hidden-merge",
+		{name: "a waiting index", args: []string{"pt3-sentences", "-placement", "index=2"}, ws: "ws-evicted",
 			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Index{Index: &agentreplv1.UpdateMergeQueueMoveIndex{Index: 2}}}},
 		{name: "the calling workspace's own merge", args: []string{"here", "-placement", "front"}, ws: "ws-caller",
 			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}}},
@@ -4626,7 +4598,7 @@ func TestQueueMoveSendsTheMergeAndItsPlaceInOneUpdate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
-			f.client.queues = queuesListing([2]string{"other", "ws-other"}, [2]string{"pt3-sentences", "ws-hidden-merge"})
+			f.client.queues = queuesListing([2]string{"other", "ws-other"}, [2]string{"pt3-sentences", "ws-evicted"})
 
 			// Act
 			code := f.run(mergeQueueNoun, append([]string{"move"}, tt.args...)...)
@@ -4669,7 +4641,7 @@ func TestQueueMoveRefusesAPlacementItCannotReadAndSendsNothing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
-			f.client.queues = queuesListing([2]string{"pt3-sentences", "ws-hidden-merge"})
+			f.client.queues = queuesListing([2]string{"pt3-sentences", "ws-evicted"})
 
 			// Act
 			code := f.run(mergeQueueNoun, append([]string{"move"}, tt.args...)...)

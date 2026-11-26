@@ -112,9 +112,6 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 	fresh := newWSState(ws, r.deps.Now())
 	rows := 0
 	for key, f := range old.feeds {
-		for _, id := range f.order {
-			r.announceMergeRowRetired(old, old.feedAddrs[key], f.rows[id])
-		}
 		rows += r.emptyFeed(f)
 		fresh.feeds[key] = f
 		fresh.feedAddrs[key] = old.feedAddrs[key]

@@ -955,8 +955,7 @@ type OpenInEditorUnknownMergeTestLog_Malformed struct {
 
 type OpenInEditorUnknownMergeTestLog_NotDrawnHere struct {
 	// The token names a merge whose bubble is not drawn in the asking
-	// workspace's feed: its own merges, and the async merges it requested,
-	// are the bubbles it draws.
+	// workspace's feed: its own merges are the bubbles it draws.
 	NotDrawnHere *OpenInEditorUnknownMergeTestLogNotDrawnHere `protobuf:"bytes,2,opt,name=not_drawn_here,json=notDrawnHere,proto3,oneof"`
 }
 

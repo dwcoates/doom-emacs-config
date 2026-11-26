@@ -40,8 +40,7 @@ type MergeLandingWorkspace struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// Its name when the landing was recorded. An async merge's is the merge's
-	// own name (its merge workspace's).
+	// Its name when the landing was recorded.
 	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -92,13 +91,12 @@ func (x *MergeLandingWorkspace) GetName() string {
 }
 
 // A merge the repository's merge queue ran and landed on its main branch: a
-// workspace's finish, a one-shot's, or an async merge. Its list is the path,
+// workspace's finish or a one-shot's. Its list is the path,
 // so it carries none. A merge the queue landed into a parent workspace's
 // branch landed on no main branch and is never one of these.
 type MergeLandingThroughQueue struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace the merge ran in: the one landing its own branch, or the
-	// async merge's merge workspace. Always set: every queued merge has one.
+	// The workspace the merge ran in, landing its own branch. Always set: every queued merge has one.
 	Workspace *MergeLandingWorkspace `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The branch that landed.
 	Branch string `protobuf:"bytes,2,opt,name=branch,proto3" json:"branch,omitempty"`

@@ -841,20 +841,6 @@ func TestTheOneShotGlyphDrawsOnlyWhileTheOneShotWorks(t *testing.T) {
 	}
 }
 
-func TestTheAsyncMergeMarkIsABreathingPurpleMergeGlyph(t *testing.T) {
-	// Arrange.
-	c := loadColors(t)
-
-	// Act.
-	got := c.AsyncMergeMark
-
-	// Assert.
-	want := AsyncMergeMark{Glyph: "merge", Ink: "purple", Motion: "breathes", TabBracket: "purple"}
-	if got != want {
-		t.Fatalf("async_merge_mark = %+v, want %+v (owner requests, 2026-10-13 and 2026-10-14)", got, want)
-	}
-}
-
 func TestThePausedMergeMarkIsAStillGreyInk(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
@@ -897,27 +883,6 @@ func TestLoadRenderColorsRefusesAMalformedGlyphTable(t *testing.T) {
 		}},
 		{name: "a one-shot arm naming no roster arm", mutate: func(m map[string]any) {
 			m["one_shot_glyph_arms"] = []any{"thinking", "no_such_arm"}
-		}},
-		{name: "an absent async-merge mark", mutate: func(m map[string]any) {
-			delete(m, "async_merge_mark")
-		}},
-		{name: "an async-merge glyph no merge arm draws", mutate: func(m map[string]any) {
-			m["async_merge_mark"].(map[string]any)["glyph"] = "exclaim"
-		}},
-		{name: "an absent async-merge glyph", mutate: func(m map[string]any) {
-			delete(m["async_merge_mark"].(map[string]any), "glyph")
-		}},
-		{name: "an async-merge ink that is not a color", mutate: func(m map[string]any) {
-			m["async_merge_mark"].(map[string]any)["ink"] = "chartreuse"
-		}},
-		{name: "an async-merge ink of none", mutate: func(m map[string]any) {
-			m["async_merge_mark"].(map[string]any)["ink"] = "none"
-		}},
-		{name: "an async-merge motion the rail has no animation for", mutate: func(m map[string]any) {
-			m["async_merge_mark"].(map[string]any)["motion"] = "spins"
-		}},
-		{name: "an async-merge tab bracket that is not a color", mutate: func(m map[string]any) {
-			m["async_merge_mark"].(map[string]any)["tab_bracket"] = "orange"
 		}},
 		{name: "an absent paused-merge mark", mutate: func(m map[string]any) {
 			delete(m, "paused_merge_mark")
@@ -1052,7 +1017,7 @@ func TestCheckMotionTakesEveryMarkMotion(t *testing.T) {
 	for _, motion := range markMotions {
 		t.Run(motion, func(t *testing.T) {
 			// Act, Assert.
-			if err := checkMotion("async_merge_mark", motion); err != nil {
+			if err := checkMotion("paused_merge_mark", motion); err != nil {
 				t.Fatalf("checkMotion(%q) = %v, want nil", motion, err)
 			}
 		})

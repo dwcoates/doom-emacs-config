@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -219,13 +220,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// naming rule never invents free text.
 	workspaceID := wsm.NewWorkspaceID()
 
-	// A MERGE WORKSPACE LANDS WHERE THE QUEUE DECIDED (spec.MergeOf, set by
-	// merge.orchestrator.handOffDetached): its name's holder, its target, the
-	// branch it lands on and its merge actions are all read off the origin,
-	// and nothing is derived from its requester.
-	origin := spec.MergeOf
-
-	branch, release, err := v.branchFor(ctx, global, spec, repoDir, workspaceID, origin)
+	branch, release, err := v.branchFor(ctx, global, spec, repoDir, workspaceID)
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
@@ -246,11 +241,11 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		return wsm.Workspace{}, fmt.Errorf("create %q: default branch: %w", branch, err)
 	}
 	// A CHILD INHERITS ITS PARENT'S PRIORITY. A WORKSPACE IS CUT FROM WHAT IT
-	// MERGES INTO: the tip of the workspace it lands into, or of the primary
-	// branch.
+	// MERGES INTO -- the tip of the workspace it lands into, or of the primary
+	// branch -- unless a source branch names another cut point.
 	parent := spec.Parent
 	priority := spec.Priority
-	baseRef := spec.BaseRef
+	baseRef := ""
 	if parent != nil {
 		parentRecord, err := v.deps.DB.Workspace(ctx, *parent)
 		if err != nil {
@@ -260,23 +255,17 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		// A CHILD IS MADE ONLY UNDER AN OPEN PARENT (wsm/family.go). Asked
 		// before the worktree is materialized, so a refused create leaves
 		// nothing behind; registration checks again in its own transaction,
-		// which is the guarantee. A merge workspace is no open child, so its
-		// requester is not asked.
-		if origin == nil {
-			if err := v.requireOpenParent(ctx, global, opCreate, *parent); err != nil {
-				return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
-			}
+		// which is the guarantee.
+		if err := v.requireOpenParent(ctx, global, opCreate, *parent); err != nil {
+			return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
 		}
-		if priority == nil && origin == nil {
+		if priority == nil {
 			priority = parentRecord.Priority
 		}
 	}
-	var landsInto *wsm.Workspace
-	if origin == nil {
-		landsInto, err = v.landingWorkspace(ctx, global, spec, repoDir)
-		if err != nil {
-			return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
-		}
+	landsInto, err := v.landingWorkspace(ctx, global, spec, repoDir)
+	if err != nil {
+		return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
 	}
 	if landsInto != nil {
 		// A WORKSPACE IS NEVER LANDED INTO WHILE IT IS NOT OPEN (wsm/family.go):
@@ -319,17 +308,37 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	if _, err := v.resolveBase(ctx, global, repoDir, baseRef); err != nil {
 		return wsm.Workspace{}, err
 	}
-
-	// A MERGE WORKSPACE RUNS ONLY THE HOOKS ITS REQUEST NAMED (owner
-	// ruling): never its requester's configured ones.
-	targetDir, actions, parentBranch := "", spec.DeployHooks, baseRef
-	if origin != nil {
-		targetDir, actions, parentBranch = origin.TargetDir, origin.Hooks, origin.ParentBranch
-	} else {
-		targetDir = repoDir
-		if landsInto != nil {
-			targetDir = landsInto.Dir
+	// THE WORKSPACE LANDS ON WHAT IT WOULD HAVE BEEN CUT FROM; A SOURCE BRANCH
+	// MOVES ONLY THE CUT. Its tip is read ONCE, here, and the worktree is cut
+	// at that commit, so commits the source gains afterwards are not this
+	// workspace's: what it lands is fixed now (WorkspaceSourceBranch).
+	parentBranch, materializeAt := baseRef, baseRef
+	effects := spec.Effects
+	if spec.SourceBranch != "" {
+		head, err := v.resolveSourceBranch(ctx, global, repoDir, spec.SourceBranch)
+		if err != nil {
+			return wsm.Workspace{}, err
 		}
+		baseRef, materializeAt = spec.SourceBranch, head
+		if spec.CleanupSourceWorktree {
+			dir, err := v.sourceWorktreeToCleanUp(ctx, global, repoDir, spec)
+			if err != nil {
+				return wsm.Workspace{}, err
+			}
+			withDir := wsm.LandingEffects{CleanupDir: dir}
+			if effects != nil {
+				withDir = *effects
+				withDir.CleanupDir = dir
+			}
+			if !withDir.Zero() {
+				effects = &withDir
+			}
+		}
+	}
+
+	targetDir, actions := repoDir, spec.DeployHooks
+	if landsInto != nil {
+		targetDir = landsInto.Dir
 	}
 
 	jobOrigin := OriginCreateStandard
@@ -378,15 +387,6 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	}()
 	defer trapCreatePanic(&err)
 
-	// A MERGE WORKSPACE IS CUT AT ITS FORK HEAD, never at wherever its
-	// requester's branch has moved to since: the head it records is then
-	// exactly the commit it lands, which is what its requester's landing
-	// names (wsm.Landing). Its base ref stays the branch, which is what the
-	// handback names.
-	materializeAt := baseRef
-	if spec.MergeOf != nil {
-		materializeAt = spec.MergeOf.ForkHead
-	}
 	reportCreateStage(spec, CreateStageCreatingWorktree)
 	// THE WORKTREE STEP IS RECORDED AT BOTH EDGES. It is git, and git runs the
 	// repository's hooks: a create once stood here for good behind a hook
@@ -457,7 +457,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		Parent:        (*wsm.WorkspaceID)(parent),
 		RepoDir:       repoDir,
 		DefaultBranch: defaultBranch,
-		MergeOf:       spec.MergeOf,
+		Effects:       effects,
 		OneShot:       spec.OneShot,
 		LandsInto:     landsIntoID(landsInto),
 		ContextFrom:   (*wsm.WorkspaceID)(spec.ForkFrom),
@@ -561,9 +561,6 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// fork made while the parent's context is the one it was asked of, and an
 	// initial prompt needs its session.
 	switch {
-	case spec.MergeOf != nil:
-		log.Info(opCreate, "created a merge workspace whose session comes up when its merge first needs a turn", dlog.Context{
-			"requester": string(spec.MergeOf.Requester), "maker": string(spec.MergeOf.Maker)})
 	case spec.ForkFrom != nil || strings.TrimSpace(spec.InitialPrompt) != "":
 		cause := shimlife.StartCreate
 		if spec.ForkFrom != nil {
@@ -681,46 +678,50 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		log.Error(opCreate, "a create spec subscribes to a Slack thread it names no thread or no mode for", dlog.Context{"mode": string(spec.SlackSubscribe), "thread_url": spec.SlackThread})
 		return fmt.Errorf("create: a subscription at creation names the Slack thread and a mode, not %q in mode %q", spec.SlackThread, spec.SlackSubscribe)
 	}
-	// A BASE IS A MERGE WORKSPACE'S ALONE: every other workspace is cut from
-	// its source's tip, which no request names.
-	if spec.BaseRef != "" && spec.MergeOf == nil {
-		log.Error(opCreate, "a create spec names a base outside a merge workspace", dlog.Context{"base_ref": spec.BaseRef})
-		return fmt.Errorf("create: only a merge workspace is cut from a named base, and this create is not one (base %q)", spec.BaseRef)
+	// A SOURCE BRANCH'S WORKTREE IS CLEANED UP ONLY FOR A ONE-SHOT CUT FROM
+	// ONE, and only a one-shot carries landing effects: the rpc carries both
+	// inside the one-shot arm, so a spec breaking either is its builder's
+	// defect.
+	if spec.CleanupSourceWorktree && (spec.SourceBranch == "" || !spec.OneShot) {
+		log.Error(opCreate, "a create spec cleans up a source worktree it names no source branch or no one-shot for", dlog.Context{"source_branch": spec.SourceBranch, "one_shot": spec.OneShot})
+		return fmt.Errorf("create: only a one-shot cut from a source branch cleans up that branch's worktree (source %q, one-shot %v)", spec.SourceBranch, spec.OneShot)
 	}
-	// A MERGE WORKSPACE IS ONLY EVER ASKED FOR BY THE DAEMON'S OWN DETACHED
-	// MERGE, so a spec that contradicts itself is a defect in that caller, not
-	// a request to refuse. It nests under its requester and forks its maker.
-	if spec.MergeOf != nil && (spec.ForkFrom == nil || spec.Parent == nil || *spec.Parent != spec.MergeOf.Requester || spec.MergeOf.ForkHead == "" ||
-		spec.OneShot || strings.TrimSpace(spec.InitialPrompt) != "" || strings.TrimSpace(spec.Name) != "") {
-		log.Error(opCreate, "a merge workspace's create spec contradicts itself", dlog.Context{
-			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request), "fork_head": spec.MergeOf.ForkHead,
-			"fork_from": ids.Optional(spec.ForkFrom), "parent": ids.Optional(spec.Parent), "one_shot": spec.OneShot,
-			"has_prompt": strings.TrimSpace(spec.InitialPrompt) != "", "name": spec.Name,
-		})
-		return fmt.Errorf("create: a merge workspace forks from its requester %s and is named, prompted and targeted by the daemon alone", spec.MergeOf.Requester)
+	if (spec.Effects != nil || spec.CleanupSourceWorktree) && !spec.OneShot {
+		log.Error(opCreate, "a create spec carries landing effects outside a one-shot", nil)
+		return errors.New("create: only a one-shot carries landing effects")
 	}
-	// A MERGE WORKSPACE LANDS BY THE LANDING THE QUEUE DECIDED, which always
-	// names a target and a branch: an origin without them is a defect in the
-	// hand-off, never a landing to derive here.
-	if spec.MergeOf != nil && (spec.MergeOf.TargetDir == "" || spec.MergeOf.ParentBranch == "") {
-		log.Error(opCreate, "a merge workspace's origin carries no landing", dlog.Context{
-			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request),
-			"target_dir": spec.MergeOf.TargetDir, "parent_branch": spec.MergeOf.ParentBranch,
-		})
-		return fmt.Errorf("create: the merge workspace of %s for request %s has no landing (target %q, parent branch %q)",
-			spec.MergeOf.Requester, spec.MergeOf.Request, spec.MergeOf.TargetDir, spec.MergeOf.ParentBranch)
+	if spec.Effects != nil && spec.Effects.CleanupDir != "" {
+		log.Error(opCreate, "a create spec supplies the cleanup directory the create resolves itself", dlog.Context{"cleanup_dir": spec.Effects.CleanupDir})
+		return fmt.Errorf("create: the cleanup directory is resolved from the source branch, never supplied (%q)", spec.Effects.CleanupDir)
+	}
+	// A SUBAGENT FORK FORKS ITS SPAWNING WORKSPACE'S SESSION, which the
+	// server resolved: a spec naming a subagent with no spawner is its
+	// builder's defect.
+	if spec.ForkSubagent != "" && spec.ForkFrom == nil {
+		log.Error(opCreate, "a create spec forks a subagent with no spawning workspace", dlog.Context{"agent_id": spec.ForkSubagent})
+		return fmt.Errorf("create: the subagent fork of %q names no spawning workspace", spec.ForkSubagent)
+	}
+	// THE SUBAGENT FORK WAITS ON THE SHIM: the vendor forks a session by its
+	// id, and whether it can fork a subagent's side transcript is unverified
+	// (docs/protobuf-design/2026-11-26-children-replace-async-merges.vetting.md,
+	// item 1). Until the shim forks one, the create fails here rather than
+	// fork the spawner's own conversation in its place.
+	if spec.ForkSubagent != "" {
+		err := fmt.Errorf("create: forking the subagent %q's own conversation is not built yet: the shim forks only whole sessions", spec.ForkSubagent)
+		log.Error(opCreate, "a subagent fork was asked for, which the shim cannot make yet", dlog.WithCause(dlog.Context{"agent_id": spec.ForkSubagent}, err))
+		return err
 	}
 	// AN INTAKE WORKSPACE IS ONLY EVER ASKED FOR BY CreateIntake, so a spec that
 	// contradicts itself is a defect in that caller: it is a named, prompted
 	// peer with a fresh context, and nothing lands from it.
 	if (spec.Intake && (strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.InitialPrompt) == "" || spec.Parent != nil ||
-		spec.ForkFrom != nil || spec.MergeOf != nil || spec.OneShot)) || (spec.IntakeCard != nil && !spec.Intake) {
+		spec.ForkFrom != nil || spec.OneShot)) || (spec.IntakeCard != nil && !spec.Intake) {
 		log.Error(opCreate, "an intake workspace's create spec contradicts itself", dlog.Context{
 			"name": spec.Name, "has_prompt": strings.TrimSpace(spec.InitialPrompt) != "", "parent": ids.Optional(spec.Parent),
-			"fork_from": ids.Optional(spec.ForkFrom), "merge": spec.MergeOf != nil, "one_shot": spec.OneShot,
+			"fork_from": ids.Optional(spec.ForkFrom), "one_shot": spec.OneShot,
 			"intake": spec.Intake, "intake_card": spec.IntakeCard != nil,
 		})
-		return fmt.Errorf("create: an intake workspace %q is a named, prompted peer with a fresh context, never a one-shot, a fork or a merge workspace, and only an intake workspace records an intake card", spec.Name)
+		return fmt.Errorf("create: an intake workspace %q is a named, prompted peer with a fresh context, never a one-shot or a fork, and only an intake workspace records an intake card", spec.Name)
 	}
 	// ONLY A ONE-SHOT NAMES A CONTEXT WORKSPACE: the rpc carries it inside the
 	// one-shot arm, so a spec with one on any other form is a defect in its
@@ -773,13 +774,7 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 // daemon derived is also DISAMBIGUATED against existing branches and
 // workspaces, which a supplied name is not — the user typed that one and is
 // owed git's own refusal if it is taken.
-func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string, minted wsm.WorkspaceID, origin *wsm.MergeOrigin) (string, func(), error) {
-	// A MERGE WORKSPACE IS NAMED BY ITS REQUESTING AGENT, with no naming call
-	// and no disambiguation: its request checked the name and reserved it, so
-	// it is free to this fork and to nothing else.
-	if origin != nil {
-		return v.claimSupplied(ctx, log, repoDir, spec.MergeName, origin.Requester)
-	}
+func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string, minted wsm.WorkspaceID) (string, func(), error) {
 	// A STANDING WORKSPACE IS THE DAEMON'S OWN, named its role's name
 	// (IsStandingName), which the naming rule refuses every other create: so
 	// it skips that rule, and is still refused, typed, when a workspace or a
@@ -788,7 +783,7 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 		if !standingNames[spec.Name] {
 			panic(fmt.Sprintf("workspace: standing create %q is no standing workspace's name", spec.Name))
 		}
-		return v.claimSupplied(ctx, log, repoDir, spec.Name, "")
+		return v.claimSupplied(ctx, log, repoDir, spec.Name)
 	}
 	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: supplied := strings.TrimSpace(spec.Name); supplied != \"\"", dlog.Context{"function": "workspace", "condition": "supplied := strings.TrimSpace(spec.Name); supplied != \"\""})
@@ -808,7 +803,7 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 				return "", nil, err
 			}
 		}
-		return v.claimSupplied(ctx, log, repoDir, supplied, "")
+		return v.claimSupplied(ctx, log, repoDir, supplied)
 	}
 	// A FORK IS NAMED FROM ITS PROMPT PLUS THE CONVERSATION IT CONTINUES (owner
 	// ruling, 2026-09-27), through the same naming call, so a fork whose prompt
@@ -864,36 +859,18 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 	return branch, release, nil
 }
 
-// claimSupplied resolves a SUPPLIED name to its branch and claims it. A name a
-// standing async merge reserved is refused (ArmNameReserved), unless the
-// reservation is HOLDER's own (the fork it was made for); a name another
-// allocation claims is refused the same way, a standard create's name an
-// unlanded workspace holds is refused as ArmNameHeld, and one whose branch
-// already exists with no such workspace holding it as ArmNameBranchExists. A
-// supplied name is otherwise not disambiguated: the user typed it.
-func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, name string, holder wsm.WorkspaceID) (string, func(), error) {
-	if strings.TrimSpace(name) == "" {
-		err := errors.New("create: a merge workspace is named by the request it was forked for, and this one carries no name")
-		log.Error(opCreate, "a merge workspace's create carries no name", dlog.Context{"holder": string(holder)})
-		return "", nil, err
-	}
+// claimSupplied resolves a SUPPLIED name to its branch and claims it. A name
+// another allocation claims is refused (ArmNameReserved), a name an unlanded
+// workspace holds as ArmNameHeld, and one whose branch already exists with no
+// such workspace holding it as ArmNameBranchExists. A supplied name is
+// otherwise not disambiguated: the user typed it.
+func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, name string) (string, func(), error) {
 	branch := suppliedBranch(strings.TrimSpace(name))
 	v.names.mu.Lock()
 	defer v.names.mu.Unlock()
-	reserved, err := v.deps.DB.ReservedMergeNames(ctx)
-	if err != nil {
-		log.Error(opCreate, "could not read the reserved merge names", dlog.Context{"branch": branch, "cause": err.Error()})
-		return "", nil, fmt.Errorf("create %q: %w", branch, err)
-	}
-	for reservedName, reservedBy := range reserved {
-		if suppliedBranch(reservedName) == branch && reservedBy != holder {
-			return "", nil, refuseWith(log, "CreateWorkspace", ArmNameReserved,
-				fmt.Sprintf("the name %q is reserved by a pending async merge", branch), false, map[string]any{"branch": branch})
-		}
-	}
 	if v.names.claimed[branch] {
 		return "", nil, refuseWith(log, "CreateWorkspace", ArmNameReserved,
-			fmt.Sprintf("the name %q is being claimed by another create or async merge", branch), false, map[string]any{"branch": branch})
+			fmt.Sprintf("the name %q is being claimed by another create", branch), false, map[string]any{"branch": branch})
 	}
 	// A NAME AN UNLANDED WORKSPACE HOLDS IS REFUSED HERE, under the lock that
 	// claims names, so "is it already there" and "take it" are one step: two
@@ -901,17 +878,13 @@ func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, nam
 	// is free again once its branch is deleted (landedbranch.Retire), and a
 	// branch that outlived its landing, or one cut by hand, is refused here
 	// too, typed, rather than by `git worktree add -b` (2026-11-03,
-	// `ramdisk-leak-investigation`). A merge workspace (a HOLDER) skips both:
-	// its request already checked the name against every registered
-	// workspace and every branch, and reserved it (ClaimMergeName).
-	if holder == "" {
-		landed, err := v.refuseHeldLocked(ctx, log, branch)
-		if err != nil {
-			return "", nil, err
-		}
-		if err := v.refuseBranchExistsLocked(ctx, log, repoDir, branch, landed); err != nil {
-			return "", nil, err
-		}
+	// `ramdisk-leak-investigation`).
+	landed, err := v.refuseHeldLocked(ctx, log, branch)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := v.refuseBranchExistsLocked(ctx, log, repoDir, branch, landed); err != nil {
+		return "", nil, err
 	}
 	return branch, v.claimLocked(branch), nil
 }
@@ -963,7 +936,7 @@ func (v *verbs) releaseMergedHolder(ctx context.Context, log dlog.Logger, branch
 		log.Error(opReleaseName, "could not resolve the closed holder's repository; it keeps the name", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("create %q: %w", branch, err)
 	}
-	if err := v.retireTree(ctx, log, opReleaseName, record, repoDir, v.now(), "", fields); err != nil {
+	if err := v.retireTree(ctx, log, opReleaseName, record, repoDir, v.now(), fields); err != nil {
 		return false, fmt.Errorf("create %q: %w", branch, err)
 	}
 	log.Info(opReleaseName, "retired the closed workspace holding the supplied name: everything it held was already merged", fields)
@@ -1230,28 +1203,27 @@ func (s CreateSpec) forkRefusalArm() string {
 }
 
 // forkedElsewhere reports whether the conversation is forked from a workspace
-// other than the branch source, which the first message's note names. A merge
-// workspace's own brief says what it is, so it carries no note.
+// other than the branch source, which the first message's note names.
 func (s CreateSpec) forkedElsewhere() bool {
-	return s.MergeOf == nil && s.ForkFrom != nil && (s.Parent == nil || *s.ForkFrom != *s.Parent)
+	return s.ForkFrom != nil && (s.Parent == nil || *s.ForkFrom != *s.Parent)
 }
 
 // filesItself reports whether the created workspace is told to file itself
 // into one of its repository's subsections (BriefSubsectionPlacement). Only a
 // ROOT is: a family never splits across subsections, so a child sits wherever
-// its root does, and placing it would move its whole family; a merge
-// workspace's own brief says what it is. A root the create already files
+// its root does, and placing it would move its whole family. A root the
+// create already files
 // (registerPlacement), by its creator or into the one-shots subsection, is
 // not asked either.
 func (s CreateSpec) filesItself() bool {
-	return s.registerPlacement() == nil && filesItself(s.Parent, s.MergeOf != nil)
+	return s.registerPlacement() == nil && filesItself(s.Parent)
 }
 
 // filesItself is the one rule of which workspace is asked to file itself
-// into a subsection: a ROOT (PARENT nil) that is no merge workspace. A
-// create and a workspace leaving its one-shot state both ask it.
-func filesItself(parent *ids.WorkspaceID, merge bool) bool {
-	return parent == nil && !merge
+// into a subsection: a ROOT (PARENT nil). A create and a workspace leaving
+// its one-shot state both ask it.
+func filesItself(parent *ids.WorkspaceID) bool {
+	return parent == nil
 }
 
 // submitInitialPrompt sends the workspace's first message down the ONE delivery
@@ -1367,65 +1339,6 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 // the name the daemon's ingress paths already code against.
 func SaidText(text string) *conversationv1.UserSaid { return feed.SaidText(text) }
 
-// CreateMergeWorkspace creates the merge workspace a detached merge runs in
-// (CreateSpec.MergeOf), in the requester's own repository.
-func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
-	repoDir, err := v.repoDirOf(ctx, requester)
-	if err != nil {
-		v.deps.Log.Global().Error(opCreate, "could not resolve the repository a merge workspace is forked in", dlog.Context{
-			"requester": string(requester.ID), "request": string(origin.Request), "cause": err.Error(),
-		})
-		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: %w", requester.ID, err)
-	}
-	// THE FORK HEAD IS READ ONCE, HERE, and the worktree is cut at it: a
-	// commit the requester makes after this is not part of the merge.
-	head, err := v.deps.Git.ResolveRef(ctx, repoDir, "refs/heads/"+base)
-	if err != nil {
-		v.deps.Log.Global().Error(opCreate, "could not resolve the branch a merge workspace is forked from", dlog.Context{
-			"requester": string(requester.ID), "request": string(origin.Request), "branch": base, "repo": repoDir, "cause": err.Error(),
-		})
-		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: resolve %s: %w", requester.ID, base, err)
-	}
-	origin.ForkHead = head
-	// THE MERGE WORKSPACE NESTS UNDER ITS REQUESTER and forks its MAKER: the
-	// workspace whose context the work was done in (the subagent's spawning
-	// workspace, or the workspace that cut the branch).
-	if origin.Maker == "" {
-		v.deps.Log.Global().Error(opCreate, "a merge workspace's origin names no maker to fork", dlog.Context{
-			"requester": string(requester.ID), "request": string(origin.Request)})
-		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: its origin names no maker", requester.ID)
-	}
-	parent, maker := requester.ID, origin.Maker
-	// A MERGE WORKSPACE IS THE QUEUE'S, made for a workspace's request.
-	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
-	spec.RepoDir, spec.BaseRef, spec.MergeOf, spec.MergeName = repoDir, base, &origin, name
-	spec.Parent, spec.ForkFrom, spec.Requester = &parent, &maker, &parent
-	return v.Create(ctx, spec)
-}
-
-// StartMergeWorkspace brings up merge workspace WS's session when none is
-// live (Sessions.Start is a no-op on a live one), making the fork it still
-// owes (forking.go). A restart that cut the create short after registration
-// leaves the merge workspace with its fork owed and no session, and the boot
-// brings no backlogged workspace up, so the hand-off that finds it starts it here
-// rather than submitting its pick to a session that does not exist.
-func (v *verbs) StartMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
-	record, log, err := v.owned(ctx, "StartMergeWorkspace", ws)
-	if err != nil {
-		return err
-	}
-	if record.MergeOf == nil {
-		err := fmt.Errorf("start merge workspace %q: it is no merge workspace", ws)
-		log.Error(opCreate, "a merge workspace start named a workspace that is none", dlog.Context{"cause": err.Error()})
-		return err
-	}
-	if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartMerge), ws); err != nil {
-		log.Error(opCreate, "the merge workspace's session did not come up", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("start merge workspace %q: %w", ws, err)
-	}
-	return nil
-}
-
 // BriefForkIntoPrimary is the note a fork into the primary branch opens with:
 // the conversation came from another workspace, the worktree did not.
 const BriefForkIntoPrimary = "workspace-fork-into-primary-preamble"
@@ -1502,7 +1415,7 @@ func (v *verbs) placementOwed(ctx context.Context, log dlog.Logger, record wsm.W
 		}
 	}
 	for _, ws := range arrangement.Workspaces {
-		if ws.Repo == record.Repo && ws.ID != record.ID && ws.Parent == nil && ws.Subsection == nil && !ws.Closed && ws.MergeOf == nil {
+		if ws.Repo == record.Repo && ws.ID != record.ID && ws.Parent == nil && ws.Subsection == nil && !ws.Closed {
 			unsectioned++
 		}
 	}
@@ -1544,7 +1457,7 @@ func (v *verbs) TakeOwedPlacementNote(ctx context.Context, ws ids.WorkspaceID) (
 		log.Error(opSubsectionPlacement, "could not read the workspace whose prompt owes the placement note", dlog.Context{"cause": err.Error()})
 		return "", false, none, fmt.Errorf("read the workspace %q owing the placement note: %w", ws, err)
 	}
-	if !filesItself(record.Parent, record.MergeOf != nil) || record.Subsection != nil {
+	if !filesItself(record.Parent) || record.Subsection != nil {
 		log.Debug(opSubsectionPlacement, "the workspace was filed or given a parent before its first prompt; the owed placement note is retired unsent", dlog.Context{
 			"has_parent": record.Parent != nil, "in_subsection": record.Subsection != nil,
 		})
@@ -1724,12 +1637,8 @@ func (v *verbs) corpusNote(log dlog.Logger, op string, fields dlog.Context, brie
 // the registry does not hold, or whose workspace to land into it does not hold
 // in this repository, before anything is minted,
 // and REOPENS a closed owner that is to arbitrate the child, so the work it
-// must land has a session to land it. A merge workspace's derivation is the
-// queue's, decided at hand-off, and is not re-checked here.
+// must land has a session to land it.
 func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string) error {
-	if spec.MergeOf != nil {
-		return nil
-	}
 	if spec.Requester != nil {
 		if _, err := v.deps.DB.Workspace(ctx, *spec.Requester); err != nil {
 			if errors.Is(err, wsm.ErrNotFound) {
@@ -1812,6 +1721,59 @@ func (v *verbs) resolveBase(ctx context.Context, log dlog.Logger, repoDir, baseR
 		return "", fmt.Errorf("create: the base %q does not resolve in %q: %w", baseRef, repoDir, err)
 	}
 	return commit, nil
+}
+
+// resolveSourceBranch answers the commit SOURCE's tip stands at, in the
+// repository at REPODIR: the commit a create cut from it is cut at
+// (CreateSpec.SourceBranch). A branch that does not exist is refused
+// (ArmUnknownSourceBranch) before anything is recorded or materialized; a
+// branch git cannot read is the create's failure.
+func (v *verbs) resolveSourceBranch(ctx context.Context, log dlog.Logger, repoDir, source string) (string, error) {
+	fields := dlog.Context{"source_branch": source, "repo_dir": repoDir}
+	exists, err := v.deps.Git.BranchExists(ctx, repoDir, source)
+	if err != nil {
+		log.Error(opCreate, "could not read whether the source branch exists", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("create: source branch %q: %w", source, err)
+	}
+	if !exists {
+		return "", refuseWith(log, "CreateWorkspace", ArmUnknownSourceBranch,
+			fmt.Sprintf("no branch %q exists in %s", source, repoDir), true, map[string]any{"branch": source})
+	}
+	head, err := v.deps.Git.ResolveRef(ctx, repoDir, "refs/heads/"+source)
+	if err != nil {
+		log.Error(opCreate, "could not resolve the source branch's tip", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("create: resolve source branch %q: %w", source, err)
+	}
+	log.Info(opCreate, "the workspace is cut from the source branch's tip as it stands now", dlog.Context{"source_branch": source, "head": head})
+	return head, nil
+}
+
+// sourceWorktreeToCleanUp answers the worktree that has SPEC's source branch
+// checked out as the create runs, for its one-shot's landing to remove
+// (wsm.LandingEffects.CleanupDir): empty when none does, or the one that does
+// is never a cleanup's to remove -- the repository's main worktree, the
+// requester's, or any registered workspace's. A read that fails fails the
+// create.
+func (v *verbs) sourceWorktreeToCleanUp(ctx context.Context, log dlog.Logger, repoDir string, spec CreateSpec) (string, error) {
+	fields := dlog.Context{"source_branch": spec.SourceBranch, "repo_dir": repoDir}
+	dir, main, held, err := gitclient.WorktreeHolding(ctx, v.deps.Git, repoDir, spec.SourceBranch)
+	if err != nil {
+		log.Error(opCreate, "could not find the worktree holding the source branch", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("create: the worktree of source branch %q: %w", spec.SourceBranch, err)
+	}
+	if !held || filepath.Clean(dir) == filepath.Clean(main) {
+		log.Info(opCreate, "the source branch's worktree is no cleanup's to remove: none holds it, or the main worktree does", dlog.Context{"source_branch": spec.SourceBranch, "held": held})
+		return "", nil
+	}
+	if _, err := v.deps.DB.WorkspaceByDir(ctx, dir); err == nil {
+		log.Info(opCreate, "the source branch's worktree is a registered workspace's, so the one-shot's landing never removes it", dlog.Context{"source_branch": spec.SourceBranch, "worktree": dir})
+		return "", nil
+	} else if !errors.Is(err, wsm.ErrNotFound) {
+		log.Error(opCreate, "could not read whether the source branch's worktree is a workspace's", dlog.WithCause(dlog.Context{"source_branch": spec.SourceBranch, "worktree": dir}, err))
+		return "", fmt.Errorf("create: is %s a workspace's worktree: %w", dir, err)
+	}
+	log.Info(opCreate, "the one-shot's landing removes the source branch's worktree", dlog.Context{"source_branch": spec.SourceBranch, "worktree": dir})
+	return dir, nil
 }
 
 // DefaultWorktreeBound bounds a create's worktree step: the one `git worktree

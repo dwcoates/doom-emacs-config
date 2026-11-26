@@ -425,8 +425,7 @@ export type OpenInEditorUnknownMergeTestLog = Message<"agentrepl.v1.OpenInEditor
   } | {
     /**
      * The token names a merge whose bubble is not drawn in the asking
-     * workspace's feed: its own merges, and the async merges it requested,
-     * are the bubbles it draws.
+     * workspace's feed: its own merges are the bubbles it draws.
      *
      * @generated from field: agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere not_drawn_here = 2;
      */

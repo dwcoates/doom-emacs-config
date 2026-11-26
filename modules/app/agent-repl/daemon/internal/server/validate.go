@@ -584,6 +584,9 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if err := validateDeployHooks("standard.deploy_hooks", standard.GetDeployHooks()); err != nil {
 			return err
 		}
+		if err := validateWorkspaceSourceBranch("standard.source_branch", standard.SourceBranch); err != nil {
+			return err
+		}
 	}
 	if oneShot := req.GetOneShot(); oneShot != nil {
 		if err := validateCreationPrompt("one_shot.prompt", oneShot.GetPrompt()); err != nil {
@@ -610,37 +613,29 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 				return err
 			}
 		}
+		if err := validateWorkspaceSourceBranch("one_shot.source_branch", oneShot.SourceBranch); err != nil {
+			return err
+		}
+		if after := oneShot.GetCloseAfter(); after != nil {
+			if err := validateWorkspaceRef("one_shot.close_after.workspace", after.GetWorkspace()); err != nil {
+				return err
+			}
+		}
+		if oneShot.GetCleanupSourceWorktree() && oneShot.SourceBranch == nil {
+			return invalid("one_shot.cleanup_source_worktree", "the source branch's worktree is cleaned up only for a one-shot cut from a source branch, which names none")
+		}
+		if oneShot.GetCompactRequesterAfter() && req.GetRequester().GetWorkspace() == nil {
+			return invalid("one_shot.compact_requester_after", "the requester compacted once the one-shot lands is a workspace, and the user asked for this one")
+		}
+		if err := validateDeployHooks("one_shot.deploy_hooks", oneShot.GetDeployHooks()); err != nil {
+			return err
+		}
 	}
 	if err := validateWorkspaceRequester("requester", req.GetRequester()); err != nil {
 		return err
 	}
 	if err := validateWorkspaceContextOrigin("context_origin", req.GetContextOrigin()); err != nil {
 		return err
-	}
-	if async := req.GetAsyncMerge(); async != nil {
-		if err := validateCreateWorkspaceAsyncMerge("async_merge", async); err != nil {
-			return err
-		}
-		if req.GetRequester().GetWorkspace() == nil {
-			return invalid("requester", "an async merge's report and its queue place are its requesting workspace's, so the user cannot request one")
-		}
-		// The merge workspace forks its maker's session as it stands, under the
-		// maker's model and priority, and is gated as its maker is.
-		if req.Model != nil {
-			return invalid("model", "an async merge's workspace runs its maker's model")
-		}
-		if req.Priority != nil {
-			return invalid("priority", "an async merge's workspace is hidden and carries no priority")
-		}
-		if req.AllowUngated != nil {
-			return invalid("allow_ungated", "an async merge's workspace is gated as its maker is")
-		}
-		if req.SlackOrigin != nil {
-			return invalid("slack_origin", "an async merge's workspace is the queue's, and no Slack message started it")
-		}
-		if req.Backlogged != nil {
-			return invalid("backlogged", "an async merge's workspace is hidden by the queue already")
-		}
 	}
 	if req.Placement != nil {
 		switch req.GetPlacement().GetTarget().(type) {
@@ -667,9 +662,6 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 	switch req.GetOriginator().GetOriginator().(type) {
 	case *agentreplv1.WorkspaceOriginator_UserOrWorkspace:
 	case *agentreplv1.WorkspaceOriginator_EmojiAck:
-		if req.GetAsyncMerge() != nil {
-			return invalid("originator.emoji_ack", "an async merge's workspace is the queue's, and the emoji-ack system created none of it")
-		}
 		if req.SlackOrigin == nil {
 			return invalid("originator.emoji_ack", "the emoji-ack system dispatches a workspace for a Slack message, which slack_origin names")
 		}
@@ -702,8 +694,13 @@ func validateWorkspaceContextOrigin(field string, c *agentreplv1.WorkspaceContex
 		return nil
 	case *agentreplv1.WorkspaceContextOrigin_Fork:
 		return validateWorkspaceRef(field+".fork.workspace", origin.Fork.GetWorkspace())
+	case *agentreplv1.WorkspaceContextOrigin_Subagent:
+		if strings.TrimSpace(origin.Subagent.GetAgentId()) == "" {
+			return invalid(field+".subagent.agent_id", "a subagent fork names the subagent")
+		}
+		return nil
 	}
-	return invalid(field, "a context origin arm (fresh or fork) is required")
+	return invalid(field, "a context origin arm (fresh, fork or subagent) is required")
 }
 
 // validateWorkspaceRelationship is WorkspaceRelationship's base function.
@@ -755,45 +752,16 @@ func validateMergeWorkspaceVersionIncrement(field string, v *agentreplv1.MergeWo
 	return nil
 }
 
-// validateCreateWorkspaceAsyncMerge is CreateWorkspaceAsyncMerge's base
-// function.
-func validateCreateWorkspaceAsyncMerge(field string, async *agentreplv1.CreateWorkspaceAsyncMerge) *connect.Error {
-	if strings.TrimSpace(async.GetName()) == "" {
-		return invalid(field+".name", "an async merge names its merge workspace")
+// validateWorkspaceSourceBranch is WorkspaceSourceBranch's base function; an
+// unset source is valid.
+func validateWorkspaceSourceBranch(field string, source *agentreplv1.WorkspaceSourceBranch) *connect.Error {
+	if source == nil {
+		return nil
 	}
-	if strings.TrimSpace(async.GetSource().GetBranch()) == "" {
-		return invalid(field+".source.branch", "an async merge names the branch it lands")
+	if strings.TrimSpace(source.GetBranch()) == "" {
+		return invalid(field+".branch", "a source branch names the branch")
 	}
-	switch maker := async.GetSource().GetMaker().GetMaker().(type) {
-	case *agentreplv1.CreateWorkspaceAsyncMergeMaker_Subagent:
-		if strings.TrimSpace(maker.Subagent.GetAgentId()) == "" {
-			return invalid(field+".source.maker.subagent.agent_id", "a subagent maker names the subagent")
-		}
-	case *agentreplv1.CreateWorkspaceAsyncMergeMaker_Workspace:
-		if err := validateWorkspaceRef(field+".source.maker.workspace.workspace", maker.Workspace.GetWorkspace()); err != nil {
-			return err
-		}
-	default:
-		return invalid(field+".source.maker", "a maker arm (subagent or workspace) is required")
-	}
-	if async.GetTarget().GetTarget() == nil {
-		return invalid(field+".target", "a target arm (primary or maker) is required")
-	}
-	if async.Instruction != nil && strings.TrimSpace(async.GetInstruction()) == "" {
-		return invalid(field+".instruction", "an instruction says how to prepare the branch")
-	}
-	if async.CloseAfter != nil {
-		if err := validateWorkspaceRef(field+".close_after.workspace", async.GetCloseAfter().GetWorkspace()); err != nil {
-			return err
-		}
-	}
-	if err := validateMergeQueuePlacement(field+".placement", async.GetPlacement()); err != nil {
-		return err
-	}
-	if err := validateDeployHooks(field+".deploy_hooks", async.GetDeployHooks()); err != nil {
-		return err
-	}
-	return validateMergeWorkspaceVersionIncrement(field+".version_increment", async.GetVersionIncrement())
+	return nil
 }
 
 // validateDeployHooks holds a request's own deploy hooks to the rules a
@@ -1648,9 +1616,6 @@ func validateRequeueMergeRequest(req *agentreplv1.RequeueMergeRequest) *connect.
 		return err
 	}
 	if err := validateMergeQueuePlacement("placement", req.GetPlacement()); err != nil {
-		return err
-	}
-	if err := validateMergeWorkspaceVersionIncrement("version", req.GetVersion()); err != nil {
 		return err
 	}
 	if req.Model != nil && strings.TrimSpace(req.GetModel().GetName()) == "" {

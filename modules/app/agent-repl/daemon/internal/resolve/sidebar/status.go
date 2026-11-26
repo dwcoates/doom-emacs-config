@@ -44,9 +44,7 @@ import (
 // WITHIN A CLAIM the roster draws the footer's step as its own arm
 // (`projectArm`), except on the idle rung, whose detail is the roster's own
 // ruling (`idleArm`): live detached work draws `idle_async` over an unread
-// turn end, and a read turn end is drawn partial. An async merge of the
-// workspace's own branch is NO ARM: it is the row's `async_merging` marker
-// beside whatever arm this resolves (`asyncMergingMarker`).
+// turn end, and a read turn end is drawn partial.
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, now time.Time, log dlog.Logger) string {
 	return openingOver(s, sessionArm(s, rec, session, status, now, log))
 }
@@ -297,21 +295,6 @@ func idleArm(s *wsState, session *wsm.Session, status *frontendv1.FooterStatus, 
 	}
 }
 
-// asyncMergingMarker answers the row's `async_merging` marker: present
-// exactly while the workspace's own branch has an async merge on a
-// repository's merge queue, on ANY status arm (owner request, 2026-10-13).
-// The arm keeps resolving as for any free workspace, so the row's name keeps
-// its status color; the marker is the one extra fact the surfaces draw.
-func asyncMergingMarker(asyncMerging bool, arm string, log dlog.Logger) *frontendv1.RosterRowAsyncMerging {
-	if !asyncMerging {
-		return nil
-	}
-	log.Debug("daemon.sidebar.async_merging_marker",
-		"the workspace's own branch merges async, so the row carries the async_merging marker beside its status",
-		dlog.Context{"status": arm})
-	return &frontendv1.RosterRowAsyncMerging{}
-}
-
 // idleAsyncUnreadMarker answers the row's `idle_async_unread` marker: present
 // exactly while the row is `idle_async` over a turn end whose result is unread
 // (`frontend.v1.RosterRowIdleAsyncUnread`), naming that turn end by the arm it
@@ -365,24 +348,24 @@ func mergeTurnMarker(facts footer.MergeFacts, arm string, log dlog.Logger) *fron
 
 // ownMergeDrawn reports a row drawing its OWN merge: a `merging` or
 // `merge_queued` arm, or the merge_turn marker (MERGETURN) beside a turn's
-// arm. The async_merging marker is the requester's merge, drawn apart.
+// arm.
 func ownMergeDrawn(arm string, mergeTurn bool) bool {
 	return arm == "merging" || arm == "merge_queued" || mergeTurn
 }
 
 // mergePausedMarker answers the row's `merge_paused` marker: present exactly
-// while a merge indicator the row draws -- its own merge (OWNMERGE,
-// ownMergeDrawn), or its async_merging marker (ASYNC) -- is on a paused
-// repository queue (owner ruling, 2026-10-14). The arm and its color stand;
+// while the merge indicator the row draws -- its own merge (OWNMERGE,
+// ownMergeDrawn) -- is on a paused repository queue (owner ruling,
+// 2026-10-14). The arm and its color stand;
 // the marker changes only how the merge indicator is drawn.
-func mergePausedMarker(state *rosterState, ws ids.WorkspaceID, arm string, ownMerge, async bool, log dlog.Logger) *frontendv1.RosterRowMergePaused {
-	repo, paused := state.pausedMergeQueue(ws, ownMerge, async)
+func mergePausedMarker(state *rosterState, ws ids.WorkspaceID, arm string, ownMerge bool, log dlog.Logger) *frontendv1.RosterRowMergePaused {
+	repo, paused := state.pausedMergeQueue(ws, ownMerge)
 	if !paused {
 		return nil
 	}
 	log.Debug("daemon.sidebar.merge_paused_marker",
 		"the merge the row draws is on a paused queue, so the row carries the merge_paused marker beside its merge indicator",
-		dlog.Context{"status": arm, "own_merge": ownMerge, "async_merging": async, "repo": string(repo)})
+		dlog.Context{"status": arm, "own_merge": ownMerge, "repo": string(repo)})
 	return &frontendv1.RosterRowMergePaused{}
 }
 

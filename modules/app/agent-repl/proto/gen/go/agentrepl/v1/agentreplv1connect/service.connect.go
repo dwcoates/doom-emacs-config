@@ -1192,7 +1192,8 @@ type AgentReplClient interface {
 	// endpoint_find_workspaces.proto.
 	FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error)
 	// Which workspace a name, a directory, or a directory inside a worktree
-	// names, read off the registry so hidden merge workspaces are found. See
+	// names, read off the registry so workspaces the sidebar does not draw are
+	// found. See
 	// endpoint_locate_workspace.proto.
 	LocateWorkspace(context.Context, *connect.Request[v1.LocateWorkspaceRequest]) (*connect.Response[v1.LocateWorkspaceResponse], error)
 	// Tell one workspace's agent when another workspace changes, answering with
@@ -1216,8 +1217,8 @@ type AgentReplClient interface {
 	// Put a merge that left its queue without landing back in line as itself:
 	// the same workspace, branch and request. See endpoint_requeue_merge.proto.
 	RequeueMerge(context.Context, *connect.Request[v1.RequeueMergeRequest]) (*connect.Response[v1.RequeueMergeResponse], error)
-	// End a merge request that stands off its queue; for an async merge, close
-	// its merge workspace. See endpoint_discard_merge.proto.
+	// End a merge request that stands off its queue. See
+	// endpoint_discard_merge.proto.
 	DiscardMerge(context.Context, *connect.Request[v1.DiscardMergeRequest]) (*connect.Response[v1.DiscardMergeResponse], error)
 	// Tell one workspace's agent about a GitHub pull request's activity,
 	// answering with the pull request now. Agents are subscribed by owning a
@@ -3964,7 +3965,8 @@ type AgentReplHandler interface {
 	// endpoint_find_workspaces.proto.
 	FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error)
 	// Which workspace a name, a directory, or a directory inside a worktree
-	// names, read off the registry so hidden merge workspaces are found. See
+	// names, read off the registry so workspaces the sidebar does not draw are
+	// found. See
 	// endpoint_locate_workspace.proto.
 	LocateWorkspace(context.Context, *connect.Request[v1.LocateWorkspaceRequest]) (*connect.Response[v1.LocateWorkspaceResponse], error)
 	// Tell one workspace's agent when another workspace changes, answering with
@@ -3988,8 +3990,8 @@ type AgentReplHandler interface {
 	// Put a merge that left its queue without landing back in line as itself:
 	// the same workspace, branch and request. See endpoint_requeue_merge.proto.
 	RequeueMerge(context.Context, *connect.Request[v1.RequeueMergeRequest]) (*connect.Response[v1.RequeueMergeResponse], error)
-	// End a merge request that stands off its queue; for an async merge, close
-	// its merge workspace. See endpoint_discard_merge.proto.
+	// End a merge request that stands off its queue. See
+	// endpoint_discard_merge.proto.
 	DiscardMerge(context.Context, *connect.Request[v1.DiscardMergeRequest]) (*connect.Response[v1.DiscardMergeResponse], error)
 	// Tell one workspace's agent about a GitHub pull request's activity,
 	// answering with the pull request now. Agents are subscribed by owning a

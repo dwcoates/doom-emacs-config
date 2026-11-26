@@ -95,11 +95,11 @@ func TestStagesOf(t *testing.T) {
 			intervals: []wsm.TabInterval{
 				{Round: 1, Kind: TabCommitting, StartedAt: at(30)},
 				{Round: 1, Kind: TabQueue, StartedAt: at(10), EndedAt: endedAt(20), Outcome: "succeeded"},
-				{Round: 1, Kind: TabPick, StartedAt: at(20), EndedAt: endedAt(30), Outcome: "succeeded"},
+				{Round: 1, Kind: TabRebasing, StartedAt: at(20), EndedAt: endedAt(30), Outcome: "succeeded"},
 			},
 			want: []stageShape{
 				{label: "queue", round: 1, state: "succeeded", started: 10, ended: 20},
-				{label: "resolving", round: 1, state: "succeeded", started: 20, ended: 30},
+				{label: "rebasing", round: 1, state: "succeeded", started: 20, ended: 30},
 				{label: "committing", round: 1, state: "live", started: 30},
 			},
 		},

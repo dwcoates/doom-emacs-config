@@ -6766,7 +6766,7 @@ describe("WatchSession", () => {
       create(shimv1.StartTurnRequestSchema, {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-merge" }),
         said: textSaid("go"),
-        origin: conversationv1.PromptOrigin.MERGE_PICK,
+        origin: conversationv1.PromptOrigin.MERGE_TEST_REPAIR,
       }),
     );
     const usage = { input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 };

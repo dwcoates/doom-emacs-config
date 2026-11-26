@@ -526,11 +526,6 @@ func closed() wsm.Workspace {
 	return wsm.Workspace{ID: theWorkspace, Closed: true, LastWorkAt: lastWorked()}
 }
 
-// mergeWorkspace is a hidden merge workspace.
-func mergeWorkspace() wsm.Workspace {
-	return wsm.Workspace{ID: theWorkspace, MergeOf: &wsm.MergeOrigin{}, LastWorkAt: lastWorked()}
-}
-
 // selectedBacklogged is a backlogged workspace the user is looking at.
 func selectedBacklogged() wsm.Workspace {
 	rec := backlogged()
@@ -1522,74 +1517,6 @@ func TestRunStandsDownABackloggedWorkspaceWhoseSessionParkedAtItsGate(t *testing
 	}
 }
 
-func TestReconcileOfAMergeWorkspace(t *testing.T) {
-	selected := mergeWorkspace()
-	selected.Current = true
-	tests := []struct {
-		name      string
-		rec       wsm.Workspace
-		queued    []ids.WorkspaceID
-		wantStood bool
-		wantArmed bool
-	}{
-		{name: "whose merge left every queue is stood down", rec: mergeWorkspace(), wantStood: true},
-		{name: "whose merge is queued keeps beating", rec: mergeWorkspace(), queued: []ids.WorkspaceID{theWorkspace}, wantArmed: true},
-		{name: "the user is looking at keeps beating", rec: selected, wantArmed: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t, beatable(tt.rec, 10*time.Minute))
-			h.db.queued = tt.queued
-
-			// Act
-			h.keeper.reconcile(context.Background(), theWorkspace, "test")
-
-			// Assert
-			_, armed := h.keeper.beats[theWorkspace]
-			if got := h.stoodDown(); got != tt.wantStood || armed != tt.wantArmed {
-				t.Fatalf("stood down %v with a beat armed %v, want %v with %v", got, armed, tt.wantStood, tt.wantArmed)
-			}
-		})
-	}
-}
-
-func TestReconcileOfAMergeWorkspaceWhoseQueuesCannotBeReadIsAnError(t *testing.T) {
-	// Arrange
-	h := newHarness(t, mergeWorkspace())
-	h.db.queuesErr = errors.New("arranged: the store is gone")
-
-	// Act
-	h.keeper.reconcile(context.Background(), theWorkspace, "test")
-
-	// Assert
-	_, armed := h.keeper.beats[theWorkspace]
-	if h.stoodDown() || armed || !h.found(dlog.RecordQuery{Level: "error", Operation: opMergeEnded}) {
-		t.Fatalf("beat armed %v with records %v, want nothing done and the read failure at error", armed, h.log.Records())
-	}
-}
-
-func TestRunStandsDownAMergeWorkspaceWhoseMergeLeftItsQueue(t *testing.T) {
-	// Arrange
-	h := newHarness(t, mergeWorkspace())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- h.keeper.Run(ctx) }()
-
-	// Act
-	h.keeper.MergeLeftQueue(theWorkspace)
-
-	// Assert
-	if got := <-h.standDowns.stood; got != theWorkspace {
-		t.Fatalf("stood down %q, want %q", got, theWorkspace)
-	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("Run = %v, want nil", err)
-	}
-}
-
 func TestLapseDueKeepsAWorkspaceWithAMergeQueued(t *testing.T) {
 	for _, mk := range []func() wsm.Workspace{backlogged, closed} {
 		// Arrange
@@ -1691,11 +1618,6 @@ func TestEveryWithheldStandDownTheKeeperAsksNamesItsTrigger(t *testing.T) {
 			h.clock.Set(lapseAt)
 			h.keeper.lapseDue(context.Background())
 		}, want: drain.WithheldCacheLapse},
-		{name: "a hidden merge workspace's ended merge", rec: func() wsm.Workspace {
-			return beatable(mergeWorkspace(), 10*time.Minute)
-		}, ask: func(h *harness) {
-			h.keeper.reconcile(context.Background(), theWorkspace, "test")
-		}, want: drain.WithheldMergeEnded},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

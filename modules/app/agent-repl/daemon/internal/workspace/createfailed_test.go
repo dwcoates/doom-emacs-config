@@ -126,23 +126,6 @@ func TestASucceededCreateReportsNothing(t *testing.T) {
 	}
 }
 
-func TestAMergeWorkspacesFailedCreateIsLeftToTheMergeQueue(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	spec := failingCreate(t, f, true)
-	spec.MergeOf = &wsm.MergeOrigin{}
-	v := f.verbs.(*verbs)
-
-	// Act.
-	v.reportCreateFailure(context.Background(), spec, errors.New("the merge workspace's worktree add failed"))
-
-	// Assert.
-	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: opCreateFailedReport})
-	if !ok || !strings.Contains(record.Message, "merge queue") {
-		t.Fatalf("records = %+v, want the debug record that the merge queue hands it back", f.log.logger.Records())
-	}
-}
-
 func TestAHandedOverCreateIsNotReported(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -499,13 +482,13 @@ func TestDescribeCreateRequest(t *testing.T) {
 		{
 			name: "every stated fact, one per line",
 			spec: CreateSpec{
-				Name: "fix-login", OneShot: true, BaseRef: "master", Parent: &parent, ForkFrom: &parent,
+				Name: "fix-login", OneShot: true, SourceBranch: "master", Parent: &parent, ForkFrom: &parent,
 				Model: "opus", PermissionMode: "auto", InitialPrompt: "fix the login bug",
 			},
 			want: strings.Join([]string{
 				"- name: `fix-login`",
 				"- one-shot: yes",
-				"- base ref: `master`",
+				"- source branch: `master`",
 				"- parent workspace id: `ws-parent`",
 				"- forked from workspace id: `ws-parent`",
 				"- model: `opus`",

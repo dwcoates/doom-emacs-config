@@ -153,9 +153,8 @@ func (q repoQueue) listed() bool {
 
 // drawMergeQueue composes one repository's merge queue: the merge at the
 // front of the line as its head, every merge behind the front as waiting,
-// and the pause. EVERY MERGE IS CREDITED AS THE ROSTER CREDITS IT
-// (QueueEntry.Credited), so a hidden merge workspace is never selected here,
-// and an async merge is named by its own name (queueSubject).
+// and the pause. Every merge is a workspace landing its own branch, drawn
+// under its name (queueSubject).
 // Q is listed (repoQueue.listed), so its line holds a merge or a merge
 // stands out of line: the head is drawn only while the line holds one. The
 // merges out of line are drawn as the queue's two repair slots and the
@@ -164,20 +163,14 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 	const op = "daemon.sidebar.merge_queue"
 	out := &frontendv1.RosterRepoMergeQueue{Paused: drawMergeQueuePause(q.pause, q.deployCheck)}
 	subject := func(entry QueueEntry) (*frontendv1.RosterMergeQueueSubject, bool) {
-		credited, ok := r.state.record(entry.Credited)
+		own, ok := r.state.record(entry.Workspace)
 		if !ok {
-			log.Error(op, "a merge in the queue is credited to a workspace the registry does not carry, so it is not drawn", dlog.Context{
-				"workspace_id": string(entry.Workspace), "credited": string(entry.Credited),
-				"invariant_violation": "a merge queue entry is credited to a registered workspace"})
+			log.Error(op, "a merge in the queue names a workspace the registry does not carry, so it is not drawn", dlog.Context{
+				"workspace_id":        string(entry.Workspace),
+				"invariant_violation": "a merge queue entry names a registered workspace"})
 			return nil, false
 		}
-		if entry.Async != (entry.AsyncName != "") {
-			log.Error(op, "a merge in the queue is async without its own name, or named without being async, so it is not drawn", dlog.Context{
-				"workspace_id": string(entry.Workspace), "credited": string(entry.Credited), "async": entry.Async, "async_name": entry.AsyncName,
-				"invariant_violation": "a merge queue entry carries its own name iff it is async"})
-			return nil, false
-		}
-		return queueSubject(*credited, entry), true
+		return queueSubject(*own, entry), true
 	}
 	if m := q.mediation; m != nil {
 		out.Mediation = drawMediation(*m, r.state.record, r.state.turnInFlight(m.Mediator), log)
@@ -190,7 +183,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		drawRepair(out, entry, sub, log)
 	}
 	for _, entry := range q.github {
-		sub, ok := subject(QueueEntry{Workspace: entry.Workspace, Credited: entry.Workspace})
+		sub, ok := subject(QueueEntry{Workspace: entry.Workspace})
 		if !ok {
 			continue
 		}
@@ -201,21 +194,15 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		})
 	}
 	for _, entry := range q.offQueue {
-		own, ok := r.state.record(entry.Workspace)
-		if !ok {
-			log.Error(op, "a merge off its queue names a workspace the registry does not carry, so it is not drawn", dlog.Context{
-				"workspace_id": string(entry.Workspace), "invariant_violation": "a merge off its queue references a registered workspace"})
-			continue
-		}
-		sub, ok := subject(QueueEntry{Workspace: entry.Workspace, Credited: entry.Credited, Async: entry.Async, AsyncName: asyncName(*own, entry.Async)})
+		sub, ok := subject(QueueEntry{Workspace: entry.Workspace})
 		if !ok {
 			continue
 		}
 		out.OffQueue = append(out.OffQueue, &frontendv1.RosterMergeQueueOffQueue{
 			Subject: sub,
 			Cause:   &frontendv1.RosterMergeQueueOffQueueCause{Text: entry.Cause},
-			Requeue: &frontendv1.RosterMergeQueueOffQueueRequeue{Merge: own.Ref()},
-			Discard: &frontendv1.RosterMergeQueueOffQueueDiscard{Merge: own.Ref()},
+			Requeue: &frontendv1.RosterMergeQueueOffQueueRequeue{Merge: sub.GetWorkspace()},
+			Discard: &frontendv1.RosterMergeQueueOffQueueDiscard{Merge: sub.GetWorkspace()},
 		})
 	}
 	// THE LANDED MERGE STILL DEPLOYING IS THE HEAD until its deploy's check
@@ -346,7 +333,7 @@ func drawHeadClock(entry QueueEntry, log dlog.Logger) (*frontendv1.RosterMergeQu
 // a phase its line cannot carry: WANT names the phases it can.
 func clockDefect(entry QueueEntry, want string, log dlog.Logger) {
 	log.Error("daemon.sidebar.merge_queue", "a merge's clock is in a phase its line cannot carry, so it is not drawn", dlog.Context{
-		"workspace_id": string(entry.Workspace), "credited": string(entry.Credited), "repair": entry.Repair.String(),
+		"workspace_id": string(entry.Workspace), "repair": entry.Repair.String(),
 		"clock_phase": entry.Clock.Phase.String(), "want_phase": want, "admitted": entry.Admitted,
 		"invariant_violation": "a merge queue line's clock is in the phase its standing gives it"})
 }
@@ -453,33 +440,11 @@ func drawMediation(m QueueMediation, record func(ids.WorkspaceID) (*wsm.Workspac
 	return nil
 }
 
-// queueSubject is the subject a merge in the queue is drawn as: the name it is
-// drawn under, the workspace it is credited to, where a click on it goes, and
-// how it runs. A sync merge is named by the workspace it is credited to and an
-// async merge by its own name (QueueEntry.AsyncName), so several async merges
-// one workspace asked for are drawn apart; a click on either selects the
-// credited workspace and reveals the merge's own bubble on its root feed. The
-// merge itself is named by its queue entry's workspace, which every ask about
-// it addresses.
-func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMergeQueueSubject {
-	mode := &frontendv1.RosterMergeQueueMode{Mode: &frontendv1.RosterMergeQueueMode_Sync{Sync: &frontendv1.RosterMergeQueueModeSync{}}}
-	name := credited.Name
-	if entry.Async {
-		mode.Mode = &frontendv1.RosterMergeQueueMode_Async{Async: &frontendv1.RosterMergeQueueModeAsync{
-			Requester: &frontendv1.RosterMergeQueueModeAsyncRequester{Name: credited.Name}}}
-		name = entry.AsyncName
-	}
-	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: name, Reveal: entry.Reveal, Mode: mode,
-		Merge: &workspacev1.WorkspaceRef{Id: string(entry.Workspace)}}
-}
-
-// asyncName is the name an async merge off its queue is drawn under: its
-// merge workspace's own, and none for a workspace's own merge.
-func asyncName(own wsm.Workspace, async bool) string {
-	if !async {
-		return ""
-	}
-	return own.Name
+// queueSubject is the subject a merge in the queue is drawn as: the workspace
+// landing its own branch, named by its name, which a click selects and every
+// ask about the merge addresses, and where a click goes.
+func queueSubject(own wsm.Workspace, entry QueueEntry) *frontendv1.RosterMergeQueueSubject {
+	return &frontendv1.RosterMergeQueueSubject{Workspace: own.Ref(), Name: own.Name, Reveal: entry.Reveal}
 }
 
 // repoQueues answers every repository's merge queue, keyed by the repository
@@ -492,9 +457,7 @@ func asyncName(own wsm.Workspace, async bool) string {
 // entry references a registered workspace), recorded loudly here as
 // assertRepositoryInvariant records its own. Nothing is dropped to hide the
 // first: both queues' merges are drawn, in queue-key order. A merge with no
-// record cannot be drawn and is named in the record. A FAILED merge whose
-// workspace has since left the registry (closed and forgotten) is placed by
-// the workspace it is credited to.
+// record cannot be drawn and is named in the record.
 func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 	const op = "daemon.sidebar.queue_lines"
 	keys := make([]wsm.RepoKey, 0, len(r.state.queues))

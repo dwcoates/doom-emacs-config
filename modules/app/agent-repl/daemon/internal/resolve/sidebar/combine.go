@@ -96,6 +96,7 @@ type batchOutcome struct {
 	results       []resultChange
 	viewed        []viewedChange
 	statusChanges []statusChange
+	arms          []armChange
 	visibilities  map[ids.WorkspaceID]wsm.Visibility
 	shimHolds     []ids.WorkspaceID
 }

@@ -208,7 +208,6 @@ func StartsAgentTurn(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,

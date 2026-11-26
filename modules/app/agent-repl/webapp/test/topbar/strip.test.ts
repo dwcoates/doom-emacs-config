@@ -16,6 +16,7 @@ import {
   OpenExternalResponseSchema,
   type OpenExternalRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
+import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import type { AppContext } from "../../src/rpc/context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
@@ -27,6 +28,7 @@ import {
   drawTopbarSessionLine,
   drawTitleDescription,
   drawTopbarTitle,
+  drawTitleChildMenu,
   drawTopbarWorkspaceName,
   BADGED_LINK_CLASS,
   LINK_HEAD_CLASS,
@@ -873,5 +875,74 @@ describe("a summary menu row's owned and subscribed marks and its untinted icon"
     } finally {
       teardown();
     }
+  });
+});
+
+describe("the summary's child menu", () => {
+  const MENU = {
+    items: [
+      { title: { text: "Fix the flaky test" }, name: { text: "fix-flaky" }, badge: { standing: { case: "merged" as const, value: {} } }, select: { target: { id: "ws-merged" } } },
+      { name: { text: "try-idea" }, badge: { standing: { case: "closed" as const, value: {} } }, select: { target: { id: "ws-closed" } } },
+    ],
+  };
+
+  /** The title with MENU, mounted, its menu opened by a click, the selects it asked recorded. */
+  function openMenu(): { host: HTMLElement; title: HTMLElement; asked: string[] } {
+    const asked: string[] = [];
+    const ctx = appContext({
+      selectInEditor: (req) => {
+        asked.push(req.workspace?.id ?? "");
+        return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
+      },
+    });
+    const { host, tc } = topbarContext(ctx);
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "Wire up the backoff", childMenu: MENU }), tc);
+    host.append(title);
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return { host, title, asked };
+  }
+
+  it("opens the menu of the children that are not open on a click of the summary", () => {
+    const { host } = openMenu();
+    const rows = [...(openPanel(host)?.querySelectorAll<HTMLElement>(".topbar-child-option") ?? [])];
+    expect(rows.map((r) => r.getAttribute("data-child"))).toEqual(["ws-merged", "ws-closed"]);
+  });
+
+  it("titles a row by the child's summary over its name, or by its name alone", () => {
+    const { host } = openMenu();
+    const rows = [...(openPanel(host)?.querySelectorAll<HTMLElement>(".topbar-child-option") ?? [])];
+    expect(rows.map((r) => [r.querySelector(`.${LINK_HEAD_CLASS}`)?.textContent, r.querySelector(".topbar-name-link-url")?.textContent ?? null])).toEqual([
+      ["Fix the flaky test", "fix-flaky"],
+      ["try-idea", null],
+    ]);
+  });
+
+  it("badges each row by how the child stands", () => {
+    const { host } = openMenu();
+    const badges = [...(openPanel(host)?.querySelectorAll(".topbar-child-badge") ?? [])];
+    expect(badges.map((b) => b.getAttribute("data-badge"))).toEqual(["merged", "closed"]);
+  });
+
+  it("selects the child a row names and closes the menu", async () => {
+    const { host, asked } = openMenu();
+    openPanel(host)?.querySelector<HTMLElement>('[data-child="ws-closed"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect([asked, openPanel(host)]).toEqual([["ws-closed"], null]);
+  });
+
+  it("takes no click on a summary with no child menu", () => {
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "Wire up the backoff" }), tc);
+    host.append(title);
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect([title.classList.contains("topbar-title-menu"), openPanel(host)]).toEqual([false, null]);
+  });
+
+  it("refuses a row with no select", () => {
+    const { host, tc } = topbarContext();
+    const broken = { items: [{ name: { text: "x" }, badge: { standing: { case: "closed" as const, value: {} } } }] };
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "Wire up the backoff", childMenu: broken }), tc);
+    host.append(title);
+    expect(() => drawTitleChildMenu(create(TopbarTitleSchema, { childMenu: broken }).childMenu!, tc)).toThrow(MalformedView);
   });
 });

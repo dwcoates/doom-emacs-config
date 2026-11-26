@@ -808,7 +808,7 @@ no client ever sends them.")
 (defconst agent-repl-wire-shim-only-prompt-origins
   '("PROMPT_ORIGIN_VENDOR_STARTED" "PROMPT_ORIGIN_LINK_UNRESOLVED"
     "PROMPT_ORIGIN_MERGE_HANDBACK" "PROMPT_ORIGIN_WORKSPACE_RETARGETED"
-    "PROMPT_ORIGIN_MERGE_PICK" "PROMPT_ORIGIN_MERGE_COMPACT_AFTER"
+    "PROMPT_ORIGIN_MERGE_COMPACT_AFTER"
     "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED" "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE"
     "PROMPT_ORIGIN_MERGE_REVERT" "PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE"
     "PROMPT_ORIGIN_OWNER_NOTICE" "PROMPT_ORIGIN_WORKSPACE_NOTICE"
@@ -825,10 +825,9 @@ adopts; an editor submit carrying it would claim the vendor started a
 turn the user in fact sent.  LINK_UNRESOLVED is the daemon's own question
 after a clicked feed link resolved to no file.  MERGE_HANDBACK is the
 daemon's report of how a detached merge ended.  WORKSPACE_RETARGETED is
-the daemon's notice that a workspace's merge target changed.  MERGE_PICK is
-the daemon's pick brief opening an async merge workspace that lands only some
-changes.  MERGE_COMPACT_AFTER is the daemon's /compact of a requester whose
-async merge landed and asked to compact after it.  WORKSPACE_CREATE_FAILED
+the daemon's notice that a workspace's merge target changed.
+MERGE_COMPACT_AFTER is the daemon's /compact of a workspace whose landing
+child landed and asked to compact it after.  WORKSPACE_CREATE_FAILED
 is the daemon's request that a repository's main-worktree workspace analyze
 why a workspace create in it failed.  MERGE_QUEUE_NOTICE is the daemon's
 notice to a merge queue subscriber that the queue changed.  MERGE_REVERT

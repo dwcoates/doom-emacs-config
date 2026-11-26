@@ -13,7 +13,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -77,10 +76,6 @@ func tabWord(kind string) string {
 	switch kind {
 	case TabQueue:
 		return "queue"
-	case TabPick:
-		// The ledger keeps the "pick" kind it always recorded; the tab is
-		// drawn as the resolving turn it is (frontend.v1.FeedMergeTabResolving).
-		return "resolving"
 	case TabRebasing:
 		return "rebasing"
 	case TabConflicts:
@@ -268,97 +263,6 @@ type landedHead struct {
 	version *frontendv1.FeedMergeVersion
 }
 
-// bubble is where one merging workspace's bubble is drawn, and how.
-//
-// THE BUBBLE IS DRAWN IN ONE FEED (frontend.v1.FeedMerge). A sync merge draws
-// it in the merging workspace's own feed, PINNED while the merge is in flight.
-// An ASYNC merge runs in a hidden merge workspace and draws its bubble in the
-// REQUESTER's feed alone, PLACED rather than pinned: the requester's
-// conversation moves on past it, and several async merges never stack at the
-// feed's bottom. The merge workspace's own feed carries no bubble.
-type bubble struct {
-	// ws is the feed the bubble is drawn in.
-	ws ids.WorkspaceID
-	// mergeWS is the merge workspace an async merge runs in, nil for a sync
-	// merge. The head's switch names it once it is visible.
-	mergeWS *workspacev1.WorkspaceRef
-}
-
-// async reports whether the bubble is an async merge's.
-func (b bubble) async() bool { return b.mergeWS != nil }
-
-// mergeOrigin is what a merging workspace's bubble needs of its merge origin:
-// the requester whose feed carries the bubble, and the merge workspace's own
-// ref for the head's switch. Both are fixed at the merge workspace's
-// registration.
-type mergeOrigin struct {
-	requester ids.WorkspaceID
-	self      *workspacev1.WorkspaceRef
-}
-
-// originOf answers WS's merge origin, nil when WS is no merge workspace. The
-// answer never changes once read, so it is cached.
-//
-// A MERGING WORKSPACE WHOSE RECORD CANNOT BE READ is recorded at ERROR and
-// answered as no merge workspace, so its bubble is drawn in its own feed rather
-// than nowhere.
-func (o *orchestrator) originOf(ws ids.WorkspaceID) *mergeOrigin {
-	o.mu.Lock()
-	origin, cached := o.originsOf[ws]
-	o.mu.Unlock()
-	if cached {
-		return origin
-	}
-	record, err := o.deps.DB.Workspace(context.Background(), ws)
-	if err != nil {
-		o.deps.Log.Global().Error("daemon.merge.placement", "could not read whether the merging workspace is a merge workspace; its bubble is drawn in its own feed",
-			dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return nil
-	}
-	if record.MergeOf != nil {
-		origin = &mergeOrigin{requester: record.MergeOf.Requester, self: record.Ref()}
-	}
-	o.mu.Lock()
-	o.originsOf[ws] = origin
-	o.mu.Unlock()
-	return origin
-}
-
-// bubbleOf answers where WS's merge bubble is drawn.
-func (o *orchestrator) bubbleOf(ws ids.WorkspaceID) bubble {
-	if origin := o.originOf(ws); origin != nil {
-		return bubble{ws: origin.requester, mergeWS: origin.self}
-	}
-	return bubble{ws: ws}
-}
-
-// requesterOf answers the requester of merge workspace WS, false when WS is no
-// merge workspace.
-func (o *orchestrator) requesterOf(ws ids.WorkspaceID) (ids.WorkspaceID, bool) {
-	if origin := o.originOf(ws); origin != nil {
-		return origin.requester, true
-	}
-	return "", false
-}
-
-// headSwitchLabel is the bubble head's switch text while the merge workspace
-// exists.
-const headSwitchLabel = "open merge workspace"
-
-// mergeWorkspaceVisible reports whether merge workspace WS is drawn anywhere
-// the user can switch to it: revealed, or landed (a landed merge workspace is
-// an ordinary closed workspace). A record that cannot be read is recorded at
-// ERROR and answered hidden, so the head offers no switch it cannot stand by.
-func (o *orchestrator) mergeWorkspaceVisible(ws ids.WorkspaceID) bool {
-	record, err := o.deps.DB.Workspace(context.Background(), ws)
-	if err != nil {
-		o.deps.Log.Global().Error("daemon.merge.placement", "could not read whether the merge workspace is visible; the bubble head offers no switch to it",
-			dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return false
-	}
-	return !record.MergeHidden()
-}
-
 // headBook orders every publication of every merge head. ONE LOCK, OWNED BY
 // THE HEADS, is held across each publication's decision and its feed upsert,
 // so publications reach the feed in the order they were decided.
@@ -486,16 +390,14 @@ func (o *orchestrator) drawHead(ws ids.WorkspaceID, head headArgs, cause headCau
 		return
 	}
 	o.heads.last[ws] = head
-	at := o.bubbleOf(ws)
 	if headIsLive(head.result) {
-		o.heads.live[head.lease] = at.ws
+		o.heads.live[head.lease] = ws
 	} else {
 		o.heads.resolved[head.lease] = true
 		delete(o.heads.live, head.lease)
 	}
-	row := headRow(at.ws, head.lease, head.line, o.headPullRequest(ws, at, head.line), head.startedMS, head.result)
-	row.GetActivity().GetMerge().Head.Mode = o.headMode(ws, at)
-	pinned := headIsLive(head.result) && !at.async()
+	row := headRow(ws, head.lease, head.line, o.headPullRequest(ws, head.line), head.startedMS, head.result)
+	pinned := headIsLive(head.result)
 	fields["pinned"] = pinned
 	if pinned {
 		o.mu.Lock()
@@ -504,30 +406,11 @@ func (o *orchestrator) drawHead(ws ids.WorkspaceID, head headArgs, cause headCau
 		if offered {
 			row.GetActivity().GetMerge().QueueOffer = queueOffer()
 		}
-		o.deps.Feed.UpsertDurablePinned(at.ws, feedid.Feed{Root: true}, row)
+		o.deps.Feed.UpsertDurablePinned(ws, feedid.Feed{Root: true}, row)
 	} else {
-		o.deps.Feed.UpsertDurable(at.ws, feedid.Feed{Root: true}, row)
+		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, row)
 	}
 	o.log(context.Background(), ws).Debug("daemon.merge.head", "published the merge head", fields)
-}
-
-// headMode is the head's mode for the bubble AT of merging workspace WS: sync,
-// or async with the switch to the merge workspace once that workspace is
-// visible. The mode is what the feed resolver's default fold reads.
-func (o *orchestrator) headMode(ws ids.WorkspaceID, at bubble) *frontendv1.FeedMergeMode {
-	if !at.async() {
-		return &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Sync{Sync: &frontendv1.FeedMergeModeSync{}}}
-	}
-	async := &frontendv1.FeedMergeModeAsync{}
-	if o.mergeWorkspaceVisible(ws) {
-		async.WorkspaceSwitch = &frontendv1.FeedMergeWorkspaceSwitch{
-			Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{Text: headSwitchLabel},
-			Availability: &frontendv1.FeedMergeWorkspaceSwitch_Available{
-				Available: &frontendv1.FeedMergeWorkspaceSwitchAvailable{Target: at.mergeWS},
-			},
-		}
-	}
-	return &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Async{Async: async}}
 }
 
 // publishRoundTab publishes one top-level tab round in the bubble's feed,
@@ -548,8 +431,7 @@ func (o *orchestrator) publishTab(ws ids.WorkspaceID, lease ids.LeaseID, key tab
 // upsertTab writes one drawn tab row, under KEY, in the bubble's feed: the
 // one writer of a tab row, which only publishTab and the republish call.
 func (o *orchestrator) upsertTab(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey, tab *frontendv1.FeedMergeTab) {
-	at := o.bubbleOf(ws)
-	o.deps.Feed.UpsertDurable(at.ws, mergeFeed(lease), tabRow(at.ws, lease, key, tab))
+	o.deps.Feed.UpsertDurable(ws, mergeFeed(lease), tabRow(ws, lease, key, tab))
 }
 
 // branchLine is the head's branch line: what is merged, and where to
@@ -576,10 +458,14 @@ func unreadLine(ws ids.WorkspaceID) branchLine {
 	return branchLine{source: string(ws)}
 }
 
-// text is the line as one string, the way the queued banner names it
-// (footer.BranchLineText).
+// text is the line as one string, the way the queued banner names it: the
+// source, an arrow, then the target ("fix-flaky → master"), or the source
+// alone for a line with no target.
 func (l branchLine) text() string {
-	return footer.BranchLineText(l.view(""))
+	if l.target == "" {
+		return l.source
+	}
+	return l.source + " → " + l.target
 }
 
 // view draws the line, its target opening PULLREQUEST when that is not empty.
@@ -632,7 +518,6 @@ func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, view que
 			}},
 			Label:  &frontendv1.FeedMergeQueueLabel{Text: view.names[entry.Workspace]},
 			Status: view.standings[i].Status,
-			Bubble: view.bubbles[entry.Workspace],
 			Target: queueTarget(view.targets[entry.Workspace]),
 		}
 		switch {

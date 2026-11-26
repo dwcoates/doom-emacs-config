@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/gitclient"
 	"agent-repld/internal/testsclient"
 	"agent-repld/internal/wsm"
 )
@@ -35,14 +34,7 @@ func ruleCheckHarness(t *testing.T) *harness {
 
 // agentFinish asks for the harness workspace's own deploy, as its agent.
 func agentFinish(h *harness) error {
-	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Asker: theWorkspace}))
-}
-
-// agentAsyncMerge asks for the async merge of asyncBranch made by the harness
-// workspace, as its agent.
-func agentAsyncMerge(h *harness) error {
-	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace,
-		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}}))
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Asker: theWorkspace})
 }
 
 // ruleStarts answers every run the rule check started on the test service.
@@ -126,48 +118,6 @@ func TestAFinishWhoseRuleSuitesFailIsRefusedNamingTheFailingCases(t *testing.T) 
 	}
 	if refused := h.recordsFor("info", opRuleCheck, "refused a merge whose branch failed its rule suites"); len(refused) != 1 || refused[0].Context["archive"] != refusal.Fields["log"] {
 		t.Fatalf("refusal records = %v, want one naming the archive", refused)
-	}
-}
-
-func TestAnAsyncMergeRunsItsRuleSuitesInTheWorktreeHoldingItsBranch(t *testing.T) {
-	// Arrange
-	h := ruleCheckHarness(t)
-	h.git.mu.Lock()
-	h.git.worktrees = []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}, {Dir: "/w/agent-fix", Branch: asyncBranch}}
-	h.git.mu.Unlock()
-
-	// Act
-	err := agentAsyncMerge(h)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if starts := h.ruleStarts(); len(starts) != 1 || starts[0].Dir != "/w/agent-fix" {
-		t.Fatalf("rule check runs = %+v, want one in the worktree holding %s", starts, asyncBranch)
-	}
-}
-
-func TestAnAsyncMergeWhoseBranchNoWorktreeHoldsRunsNoRuleCheck(t *testing.T) {
-	// Arrange: the queue makes the branch a worktree when its merge starts,
-	// and the gate checks it there.
-	h := ruleCheckHarness(t)
-	h.git.mu.Lock()
-	h.git.worktrees = []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}}
-	h.git.mu.Unlock()
-
-	// Act
-	err := agentAsyncMerge(h)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Enqueue = %v, want the merge admitted", err)
-	}
-	if starts := h.ruleStarts(); len(starts) != 0 {
-		t.Fatalf("rule check runs = %+v, want none", starts)
-	}
-	if skipped := h.recordsFor("info", opRuleCheck, "no worktree holds the merge's branch, so its rule suites run in the gate alone"); len(skipped) != 1 || skipped[0].Context["branch"] != asyncBranch {
-		t.Fatalf("skip records = %v, want one naming the branch", skipped)
 	}
 }
 

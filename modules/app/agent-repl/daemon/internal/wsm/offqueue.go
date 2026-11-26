@@ -67,9 +67,9 @@ const requestColumnsDDL = `source_kind                INTEGER NOT NULL,
 
 // requestColumns is THE REQUEST: every merge_queue column a merge was asked
 // for with, and nothing of its place in line. Its placement (source_front,
-// source_behind, the wait) and a pick in flight (pick_started_at, pick_turn)
-// are the place's: the exit ended them, and a requeue names its own.
-const requestColumns = adoptedRequestColumns + `, source_profile_gate`
+// source_behind, the wait) is the place's: the exit ended it, and a requeue
+// names its own.
+const requestColumns = `source_kind, source_keep_open, source_workspace, source_branch, source_version_part, source_changelog_line, source_profile_gate`
 
 // adoptedRequestColumns is the request's columns as layout 129 had them,
 // which its adoption step (adoptOffQueueMergesDML) writes: a step runs against
@@ -109,27 +109,24 @@ DELETE FROM off_queue_merges
  WHERE EXISTS (SELECT 1 FROM merge_queue q WHERE q.workspace_id = off_queue_merges.workspace_id);
 `
 
-// MergeLeftAdopted is the cause an adopted record carries: a merge workspace
-// found open with no request standing, its request's values lost.
+// MergeLeftAdopted is the cause an adopted record carried: a merge workspace
+// found open with no request standing, its request's values lost. Only
+// layout 129's adoption step (adoptOffQueueMergesDML) writes it, and layout
+// 222 drops every such record (retiredAsyncMergesDDL).
 const MergeLeftAdopted = "adopted"
 
 // OffQueueMerge is one merge's request standing off its queue.
 type OffQueueMerge struct {
-	// Workspace is the merge's workspace: the one landing its own branch, or
-	// an async merge's merge workspace.
+	// Workspace is the merge's workspace, landing its own branch.
 	Workspace WorkspaceID
 	// Cause is why it left its queue (merge.AbandonCause and the queue's
-	// other causes, or MergeLeftAdopted).
+	// other causes).
 	Cause string
 	// LeftAt is when it left.
 	LeftAt time.Time
 	// RequestedAt is when the request was first put on its queue.
 	RequestedAt time.Time
-	// Adopted reports that the record was adopted with no request values: it
-	// records no version increment, changelog line or hooks of its own.
-	Adopted bool
-	// Source is the request, with no placement: Front, Behind and the pick's
-	// progress are unset.
+	// Source is the request, with no placement: Front and Behind are unset.
 	Source MergeSource
 }
 
@@ -156,8 +153,8 @@ func leaveQueueInTx(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID
 	}
 	if keeps {
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, `+requestColumns+`)
-			 SELECT workspace_id, ?, ?, 0, enqueued_at, `+requestColumns+` FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`+where,
+			`INSERT INTO off_queue_merges (workspace_id, cause, left_at, enqueued_at, `+requestColumns+`)
+			 SELECT workspace_id, ?, ?, enqueued_at, `+requestColumns+` FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`+where,
 			append([]any{cause, nanos(at), key, id}, args...)...)
 		if err != nil {
 			return 0, false, err
@@ -229,7 +226,7 @@ func (s *store) OffQueueMergeOf(ctx context.Context, id WorkspaceID) (OffQueueMe
 
 // scanOffQueue is the one off_queue_merges decoding path, all-or-nothing.
 func scanOffQueue(ctx context.Context, q querier, tail string, args ...any) ([]OffQueueMerge, error) {
-	query := `SELECT workspace_id, cause, left_at, adopted, enqueued_at, ` + requestColumns + ` FROM off_queue_merges ` + tail
+	query := `SELECT workspace_id, cause, left_at, enqueued_at, ` + requestColumns + ` FROM off_queue_merges ` + tail
 	return listRows(ctx, q, query, func(row interface{ Scan(...any) error }) (OffQueueMerge, error) {
 		var (
 			rec      OffQueueMerge
@@ -237,7 +234,7 @@ func scanOffQueue(ctx context.Context, q querier, tail string, args ...any) ([]O
 			enqueued int64
 			req      requestScan
 		)
-		if err := row.Scan(append([]any{&rec.Workspace, &rec.Cause, &left, &rec.Adopted, &enqueued}, req.targets()...)...); err != nil {
+		if err := row.Scan(append([]any{&rec.Workspace, &rec.Cause, &left, &enqueued}, req.targets()...)...); err != nil {
 			return OffQueueMerge{}, err
 		}
 		source, err := req.source("off_queue_merges", string(rec.Workspace))
@@ -257,56 +254,34 @@ type requestScan struct {
 	keepOpen bool
 	sourceWS sql.NullString
 	branch   sql.NullString
-	detach   sql.NullString
-	name     sql.NullString
-	pick     sql.NullString
-	compact  bool
-	closes   sql.NullString
-	cleanup  bool
-	cleanDir sql.NullString
 	verPart  sql.NullInt64
 	verLine  sql.NullString
-	before   string
-	after    string
-	maker    sql.NullString
-	toMaker  bool
 	profile  bool
 	// The PLACE's columns a queue row carries beside its request: set by
 	// scanMergeQueue before source, and zero off the queue, where the exit
 	// ended them.
-	front    bool
-	behind   sql.NullString
-	picked   sql.NullInt64
-	pickTurn sql.NullString
+	front  bool
+	behind sql.NullString
 }
 
 // targets are the scan destinations, in requestColumns order.
 func (r *requestScan) targets() []any {
-	return []any{&r.kind, &r.keepOpen, &r.sourceWS, &r.branch, &r.detach, &r.name, &r.pick, &r.compact, &r.closes, &r.cleanup, &r.cleanDir, &r.verPart, &r.verLine, &r.before, &r.after, &r.maker, &r.toMaker, &r.profile}
+	return []any{&r.kind, &r.keepOpen, &r.sourceWS, &r.branch, &r.verPart, &r.verLine, &r.profile}
 }
 
 // source builds the request's MergeSource with the place's columns (none off
-// the queue), refusing a version, hooks or a source that will not decode. ROW
-// names the row in a DecodeError.
+// the queue), refusing a version or a source that will not decode. ROW names
+// the row in a DecodeError.
 func (r *requestScan) source(table, row string) (MergeSource, error) {
 	src := MergeSource{
 		Kind: MergeSourceKind(r.kind), KeepOpen: r.keepOpen, Workspace: WorkspaceID(r.sourceWS.String), Branch: r.branch.String,
-		Detach: DetachedMergeID(r.detach.String), DetachName: r.name.String, Pick: r.pick.String, CompactAfter: r.compact,
-		CloseOnLanding: WorkspaceID(r.closes.String), CleanupWorktree: r.cleanup, CleanupDir: r.cleanDir.String,
-		DetachMaker: WorkspaceID(r.maker.String), DetachTargetMaker: r.toMaker, ProfileGate: r.profile,
-		Front: r.front, Behind: WorkspaceID(r.behind.String), PickStartedAt: optTime(r.picked), PickTurn: TurnID(r.pickTurn.String),
+		ProfileGate: r.profile, Front: r.front, Behind: WorkspaceID(r.behind.String),
 	}
 	version, err := scanVersion(r.verPart, r.verLine)
 	if err != nil {
 		return MergeSource{}, &DecodeError{Table: table, Row: row, Field: "version", Err: err}
 	}
 	src.Version = version
-	if src.Hooks.PreDeploy, err = decodeHooks(table, row, "source_pre_deploy_hooks", r.before); err != nil {
-		return MergeSource{}, err
-	}
-	if src.Hooks.PostDeploy, err = decodeHooks(table, row, "source_post_deploy_hooks", r.after); err != nil {
-		return MergeSource{}, err
-	}
 	if err := src.validate(); err != nil {
 		return MergeSource{}, &DecodeError{Table: table, Row: row, Field: "source", Err: err}
 	}
@@ -322,29 +297,23 @@ type RequeuePlacement struct {
 	BehindName string
 }
 
-// ErrOffQueueVersionRecorded refuses a requeue that supplies a version
-// increment for a request that recorded its own.
-var ErrOffQueueVersionRecorded = errors.New("wsm: the request recorded its own version increment")
-
 // RequeueOffQueueMerge puts workspace ID's request off its queue back on
 // REPO's queue as itself, REQUESTED (the caller puts it in line with
 // QueueMerge), at PLACE, in ONE transaction: the record is deleted and the
 // request row written in its place (insertRequest), so the request stands in
-// exactly one place at every instant. VERSION, when set, is the increment of
-// an ADOPTED request, which recorded none; supplying one for any other request
-// is ErrOffQueueVersionRecorded. MODEL, when set, is recorded as the session's
+// exactly one place at every instant. MODEL, when set, is recorded as the session's
 // model in the same transaction (SetSessionModel's write), so the session's
 // next start resumes on it; a workspace with no session row refuses it. A
 // workspace with no record is ErrNotFound;
 // one with a queue row already is MergeQueuedError, as a second request is.
 // It answers the request as it was put back.
-func (s *store) RequeueOffQueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place RequeuePlacement, version *VersionIncrement, model string, at time.Time) (MergeSource, error) {
+func (s *store) RequeueOffQueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place RequeuePlacement, model string, at time.Time) (MergeSource, error) {
 	const op = "daemon.wsm.requeue_off_queue_merge"
 	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
 		return MergeSource{}, err
 	}
-	fields := dlog.Context{"repo": string(key), "workspace": string(id), "front": place.Front, "behind": string(place.Behind), "version_supplied": version != nil, "model": model}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "front": place.Front, "behind": string(place.Behind), "model": model}
 	var source MergeSource
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		if err := refuseQueued(ctx, tx, key, id); err != nil {
@@ -359,12 +328,6 @@ func (s *store) RequeueOffQueueMerge(ctx context.Context, repo RepoKey, id Works
 		}
 		rec := loaded[0]
 		source = rec.Source
-		if version != nil {
-			if !rec.Adopted {
-				return ErrOffQueueVersionRecorded
-			}
-			source.Version = version
-		}
 		source.Front, source.Behind, source.BehindName = place.Front, place.Behind, place.BehindName
 		if err := source.validate(); err != nil {
 			return fmt.Errorf("wsm: requeue of workspace %s: %w", id, err)

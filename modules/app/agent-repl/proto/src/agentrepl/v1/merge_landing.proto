@@ -25,20 +25,18 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message MergeLandingWorkspace {
   // The workspace.
   workspace.v1.WorkspaceRef workspace = 1;
-  // Its name when the landing was recorded. An async merge's is the merge's
-  // own name (its merge workspace's).
+  // Its name when the landing was recorded.
   string name = 2;
 }
 
 // ---- A landing through the queue ----
 
 // A merge the repository's merge queue ran and landed on its main branch: a
-// workspace's finish, a one-shot's, or an async merge. Its list is the path,
+// workspace's finish or a one-shot's. Its list is the path,
 // so it carries none. A merge the queue landed into a parent workspace's
 // branch landed on no main branch and is never one of these.
 message MergeLandingThroughQueue {
-  // The workspace the merge ran in: the one landing its own branch, or the
-  // async merge's merge workspace. Always set: every queued merge has one.
+  // The workspace the merge ran in, landing its own branch. Always set: every queued merge has one.
   MergeLandingWorkspace workspace = 1;
   // The branch that landed.
   string branch = 2;

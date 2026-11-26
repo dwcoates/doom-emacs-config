@@ -26,6 +26,7 @@ import (
 	"agent-repld/internal/chat"
 	"agent-repld/internal/checkout"
 	"agent-repld/internal/chessboard"
+	"agent-repld/internal/children"
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/clock"
@@ -57,6 +58,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/landingreports"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
@@ -65,7 +67,6 @@ import (
 	"agent-repld/internal/memorypopup"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/mergenotice"
-	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/netwatch"
 	"agent-repld/internal/opentabs"
@@ -412,6 +413,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	followNotices := workspacesubs.New(workspacesubs.Deps{
 		Notices:     p.Metrics,
 		Subscribers: p.DB,
+		Records:     p.DB,
 		Holds:       holdsRef,
 		Untold:      p.DB,
 		Status:      verbsRef.status,
@@ -627,7 +629,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterViewed(p.DB, p.Surfaces.Global()),
 		rosterStatusChanges(p.DB, p.Surfaces.Global()),
 		rosterVisibility(p.DB, p.Surfaces.Global()))
+	// THE CHILDREN TRACKER draws into the feed resolver built below, so the
+	// roster reaches it late-bound (childrenForwarder).
+	childrenRef := &childrenForwarder{}
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
+		sidebar.WithRegistrySink(childrenRef.SetRegistry),
+		sidebar.WithArmSink(childrenRef.SetArm),
 		sidebar.WithResultSink(rosterDurable.ResultSink()),
 		sidebar.WithViewedSink(rosterDurable.ViewedSink()),
 		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
@@ -884,7 +891,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// durable close, the record the prompt queue's door wrote.
 		TurnCloses:    p.DB.TurnCloses,
 		TurnAddresses: p.DB.TurnAddresses,
-		TurnMirrors:   p.DB.TurnMirrors,
 		TurnSenders:   p.DB.TurnSenders,
 		// A MERGE'S BUBBLE is drawn again by a new daemon from this record.
 		DurableRows: p.DB,
@@ -909,9 +915,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// and only the feed knows that. Called under the feed's lock; the
 		// footer never calls back into the feed (the fault path above already
 		// takes the same feed-then-footer order).
-		EntryPlaced:     footerResolver.OnEntryPlaced,
-		MergeRow:        footerResolver.OnMergeRow,
-		MergeRowRetired: footerResolver.OnMergeRowRetired,
+		EntryPlaced: footerResolver.OnEntryPlaced,
 		// THE REVEAL WINDOW on the main agent's live bubbles, measured from the
 		// gaps between the bursts their streamed fragments arrive in.
 		Pacing: pacer,
@@ -929,6 +933,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the feed resolver: %w", err)
 	}
 	faultSurfaces.attachFeed(feedResolver)
+	childrenRef.bind(children.New(children.Deps{
+		Feed: feedResolver, Footer: footerResolver, Topbar: topbarResolver,
+		Home: paths.Home, Now: time.Now, Log: log,
+	}))
 
 	// ---- the forwarders, and the fleet they let exist first ----
 
@@ -952,7 +960,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// for one from the prompt corpus.
 	summaries := wssummary.New(wssummary.Deps{
 		Store:      p.DB,
-		Topbar:     topbarResolver,
+		Topbar:     summaryFan{topbar: topbarResolver, children: childrenRef},
 		PromptsDir: paths.PromptsDir,
 		Log:        log,
 	})
@@ -1491,7 +1499,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	queuedCreates := &queuedCreatesForwarder{}
 	// THE DETACHED-MERGE SERVICE IS BUILT AFTER THE ROLLOUT AND THE DEPLOY,
 	// which pay the landing reports it owes; both reach it through this.
-	detachedRef := &detachedForwarder{}
+	reportsRef := &reportsForwarder{}
 	// A DEPLOY'S HOT RELOAD is drawn in the deploy mediator's feed of the
 	// repository this daemon is deployed from (hotreload.Tracker). The
 	// deploy, the rollout and the server each tell it what they did.
@@ -1504,7 +1512,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Creates:                 creates,
 		Restarts:                p.Metrics,
 		Reconnects:              p.Reconnects,
-		Reports:                 detachedRef,
+		Reports:                 reportsRef,
 		Merges:                  mergeMover,
 		Moves:                   moves,
 		QueuedCreates:           queuedCreates,
@@ -1622,7 +1630,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SelfExe:        selfExe,
 		Bundle:         shimBundle,
 		Rollout:        rolloutController,
-		Reports:        detachedRef,
+		Reports:        reportsRef,
 		Clients:        clients,
 		Runner:         scripts,
 		Store:          p.Opts.storeSocket,
@@ -1733,7 +1741,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DeployConfig:  deployConfig,
 		Meter:         p.Metrics,
 		QueueEvents:   merge.QueueObservers{queueNotices, edges},
-		Detached:      detachedRef,
+		HandBacks:     reportsRef,
 		Names:         verbsRef,
 		InterruptTurn: verbsRef.interruptTurn,
 		PublishHost:   relay.PublishHostWorkspace,
@@ -1977,34 +1985,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cold-gate backlog: %w", err)
 	}
-	detached := mergeworkspace.New(mergeworkspace.Deps{
-		DB:         p.DB,
-		Workspaces: verbs,
-		Prompts:    handler,
-		Feed:       feedResolver,
-		Briefs:     merge.BriefsFrom(paths.PromptsDir),
-		MintKey:    prompthandler.MintKey,
-		Log:        p.Surfaces,
-		Now:        time.Now,
-		// THE REAPER'S OWN LOCK: a requester is retired only while the
-		// landed-worktree reaper is not sweeping.
-		WorktreeLock: worktreeLockPath(paths.RunDir),
-		// EVERY DEPLOY ENDS IN THE REPORTS' PAYMENT, so that is where each
-		// workspace whose landing the build carries is told of it
+	reportsRef.bind(landingreports.New(landingreports.Deps{
+		DB:      p.DB,
+		Prompts: handler,
+		Briefs:  merge.BriefsFrom(paths.PromptsDir),
+		MintKey: prompthandler.MintKey,
+		Log:     p.Surfaces,
+		// EVERY DEPLOY ENDS IN DeployEnded, so that is where each workspace
+		// whose landing the build carries is told of it
 		// (wsedges.Hub.DeployEnded).
 		Deploys: edges,
-		// A JOINING SUCCESSOR SWEEPS ONLY ONCE IT HAS TAKEN OVER: until then
-		// its handle is read-only.
-		Owned: func() <-chan struct{} {
-			if !rolloutController.Joining() {
-				owned := make(chan struct{})
-				close(owned)
-				return owned
-			}
-			return rolloutController.TookOver()
-		},
-	})
-	detachedRef.bind(detached)
+	}))
 	queuedCreates.bind(verbs)
 	// THE RETARGET pairs the verb that records a new merge target with the
 	// notice queued through the same handler every prompt takes, as one
@@ -2183,14 +2174,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "storage_sweep", Run: storageSweep.Run},
 		{Name: "repo_divergence", Run: divergence.Run},
 		{Name: "selection_follow", Run: selectionFollower.Run},
-		{Name: "merge_workspace_sweep", Run: func(ctx context.Context) error {
-			// HOURLY: a merge workspace goes after 15 calendar days idle, so
-			// an hour's lateness is nothing, and a sweep reads two tables.
-			ticker := time.NewTicker(time.Hour)
-			defer ticker.Stop()
-			detached.Run(ctx, ticker.C)
-			return nil
-		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
 		{Name: "persistent_wifi_lid", Run: wifi.WatchLid},

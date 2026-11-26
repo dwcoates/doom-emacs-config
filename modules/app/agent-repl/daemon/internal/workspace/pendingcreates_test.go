@@ -1198,3 +1198,30 @@ func TestARequestAfterACreatePanickedDoesNotJoinIt(t *testing.T) {
 		t.Fatalf("the later request joined %s, want a fresh create", again.ID())
 	}
 }
+
+func TestATicketNamingNoPendingCreatePanics(t *testing.T) {
+	tests := []struct {
+		name string
+		use  func(*CreateTicket)
+	}{
+		{name: "its ID", use: func(ticket *CreateTicket) { _ = ticket.ID() }},
+		{name: "its run", use: func(ticket *CreateTicket) {
+			_, _ = (&verbs{}).RunCreate(context.Background(), ticket)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a ticket no EnterCreate or NewCreateTicket minted.
+			ticket := &CreateTicket{}
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("a ticket naming no pending create was used without a panic")
+				}
+			}()
+
+			// Act
+			tt.use(ticket)
+		})
+	}
+}

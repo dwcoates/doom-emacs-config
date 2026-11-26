@@ -1,7 +1,6 @@
 package merge
 
 import (
-	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
 	"reflect"
@@ -10,7 +9,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -426,7 +424,6 @@ func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
 	}{
 		{name: "an agent's in-place request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Asker: theWorkspace}, want: []ids.WorkspaceID{theWorkspace}},
 		{name: "an agent's one-shot", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Asker: theWorkspace, OneShot: true}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "flush-async"}}, want: nil},
 		{name: "the user's request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: nil},
 	}
 	for _, tt := range tests {
@@ -436,7 +433,7 @@ func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
 			h.inFlight = "turn-asking"
 
 			// Act.
-			if _, err := h.o.Enqueue(context.Background(), tt.req); err != nil {
+			if err := h.o.Enqueue(context.Background(), tt.req); err != nil {
 				t.Fatalf("Enqueue: %v", err)
 			}
 
@@ -463,41 +460,6 @@ func TestARequestWhoseFlushFailsIsRefusedWithNothingRecorded(t *testing.T) {
 	}
 	if _, ok := h.entryState(); ok {
 		t.Fatal("a request whose flush failed was recorded")
-	}
-}
-
-func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T) {
-	hooks := wsm.DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHookOf("lint")}, PostDeploy: []*repoconfigv1.Hook{scriptHookOf("bin/announce.sh")}}
-	tests := []struct {
-		name             string
-		inName, instruct string
-		compactAfter     bool
-		closeOnLanding   ids.WorkspaceID
-		cleanupWorktree  bool
-		hooks            wsm.DeployHooks
-		maker            ids.WorkspaceID
-		intoMaker        bool
-		want             DetachedRun
-	}{
-		{name: "its maker and its target", inName: "reconnect-fix", maker: "maker", intoMaker: true, want: DetachedRun{Name: "reconnect-fix", Maker: "maker", IntoMaker: true}},
-		{name: "a branch as it is", inName: " reconnect-fix ", want: DetachedRun{Name: "reconnect-fix"}},
-		{name: "an instruction", inName: "reconnect-fix", instruct: "\tthe fix \n", want: DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
-		{name: "a blank instruction", inName: "reconnect-fix", instruct: "   ", want: DetachedRun{Name: "reconnect-fix"}},
-		{name: "compacting after", inName: "reconnect-fix", compactAfter: true, want: DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
-		{name: "closing another workspace", inName: "reconnect-fix", closeOnLanding: "child", want: DetachedRun{Name: "reconnect-fix", CloseOnLanding: "child"}},
-		{name: "cleaning up", inName: "reconnect-fix", cleanupWorktree: true, want: DetachedRun{Name: "reconnect-fix", CleanupWorktree: true}},
-		{name: "its own deploy hooks", inName: "reconnect-fix", hooks: hooks, want: DetachedRun{Name: "reconnect-fix", Hooks: hooks}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.hooks, tt.maker, tt.intoMaker)
-
-			// Assert
-			if got == nil || !reflect.DeepEqual(*got, tt.want) {
-				t.Fatalf("NewDetachedRun = %+v, want %+v", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -534,7 +496,7 @@ func TestAnInPlaceMergeLandsOnlyOnTheAskOfWhoMayLandIt(t *testing.T) {
 			h.db.mu.Unlock()
 
 			// Act
-			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: tt.by, Asker: tt.asker})
+			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: tt.by, Asker: tt.asker})
 
 			// Assert
 			if tt.arm == "" {
@@ -572,7 +534,7 @@ func TestAMergeRequestThatContradictsWhoAskedFailsHard(t *testing.T) {
 			h := newHarness(t)
 
 			// Act
-			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: tt.by, Asker: tt.asker})
+			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: tt.by, Asker: tt.asker})
 
 			// Assert
 			if _, refused := Refused(err); err == nil || refused {
@@ -622,7 +584,6 @@ func TestARequestAsksAboutEveryWorkspaceItsLandingCloses(t *testing.T) {
 		want []ids.WorkspaceID
 	}{
 		{name: "an in-place merge closes its requester", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an async merge closes nothing in place", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "ask-async"}}, want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -631,7 +592,7 @@ func TestARequestAsksAboutEveryWorkspaceItsLandingCloses(t *testing.T) {
 			h.inFlight = "turn-asking"
 
 			// Act.
-			if _, err := h.o.Enqueue(context.Background(), tt.req); err != nil {
+			if err := h.o.Enqueue(context.Background(), tt.req); err != nil {
 				t.Fatalf("Enqueue: %v", err)
 			}
 
@@ -670,7 +631,7 @@ func TestEnqueueResolvesAMergePlacedBehindByItsQueueName(t *testing.T) {
 	queueAnother(t, h, "ws-2", "two")
 
 	// Act.
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser, PlaceBehind: "two"})
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser, PlaceBehind: "two"})
 
 	// Assert.
 	if err != nil {
@@ -688,7 +649,7 @@ func TestEnqueueRefusesAMergePlacedBehindOneNotInLine(t *testing.T) {
 	queueAnother(t, h, "ws-2", "two")
 
 	// Act.
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser, PlaceBehind: "nowhere"})
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser, PlaceBehind: "nowhere"})
 
 	// Assert.
 	refusal, refused := Refused(err)
@@ -711,7 +672,7 @@ func TestEnqueueRefusesAMergePlacedFrontAndBehind(t *testing.T) {
 	front.Front = true
 
 	// Act.
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: front, By: RequestedByUser, PlaceBehind: "two"})
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: front, By: RequestedByUser, PlaceBehind: "two"})
 
 	// Assert.
 	if _, refused := Refused(err); err == nil || refused || !strings.Contains(err.Error(), "placed at the front and behind") {
@@ -886,14 +847,13 @@ func TestAUsersSyncMergeAsksForTheParkAtOnceUnderTheTurnInFlight(t *testing.T) {
 	}
 }
 
-func TestParkQueuedAsksOnlyForAnOwnBranchMergeWithNoPick(t *testing.T) {
+func TestParkQueuedAsksOnlyForAnOwnBranchMerge(t *testing.T) {
 	tests := []struct {
 		name   string
 		source wsm.MergeSource
 		want   int
 	}{
 		{name: "an own-branch merge", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, want: 1},
-		{name: "a merge workspace's merge with a pick", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Pick: "fix it"}},
 		{name: "another workspace's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace}},
 		{name: "a named branch's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "feature"}},
 	}
@@ -913,55 +873,38 @@ func TestParkQueuedAsksOnlyForAnOwnBranchMergeWithNoPick(t *testing.T) {
 	}
 }
 
-func TestWorktreeHoldingFindsTheOneWorktreeWithTheBranch(t *testing.T) {
+// A ONE-SHOT ITS CREATOR ASKED TO PROFILE PROFILES ITS OWN GATE
+// (wsm.LandingEffects.ProfileGate), whether or not its finish asked again.
+func TestAOneShotsProfileGateEffectProfilesItsOwnMerge(t *testing.T) {
 	tests := []struct {
-		name      string
-		worktrees []gitclient.Worktree
-		wantDir   string
-		wantHeld  bool
+		name    string
+		effects *wsm.LandingEffects
+		asked   bool
+		want    bool
 	}{
-		{name: "a worktree has the branch", worktrees: []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}, {Dir: "/w/fix", Branch: "fix"}}, wantDir: "/w/fix", wantHeld: true},
-		{name: "none has it", worktrees: []gitclient.Worktree{{Dir: "/w/other", Branch: "other"}}},
-		{name: "a bare entry never holds it", worktrees: []gitclient.Worktree{{Dir: "/w/repo.git", Branch: "fix", Bare: true}}},
+		{name: "an effect its finish does not repeat", effects: &wsm.LandingEffects{ProfileGate: true}, want: true},
+		{name: "an effect its finish repeats", effects: &wsm.LandingEffects{ProfileGate: true}, asked: true, want: true},
+		{name: "effects that do not profile", effects: &wsm.LandingEffects{CompactRequester: true}},
+		{name: "no effects, and a finish that asks", asked: true, want: true},
+		{name: "no effects, and a finish that does not ask"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			h.git.mu.Lock()
-			h.git.worktrees = tt.worktrees
-			h.git.mu.Unlock()
+			setRecord(h, theWorkspace, func(ws *wsm.Workspace) { ws.Effects = tt.effects })
 
 			// Act
-			dir, main, held, err := worktreeHolding(context.Background(), h.git, theWorkspaceDir(h), "fix")
+			err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, ProfileGate: tt.asked}, RequestedByUser)
 
 			// Assert
-			if err != nil || dir != tt.wantDir || held != tt.wantHeld || main == "" {
-				t.Fatalf("worktreeHolding = %q, %q, %v, %v; want %q, the main worktree, %v", dir, main, held, err, tt.wantDir, tt.wantHeld)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			entry, ok := h.entryOf(theWorkspace)
+			if !ok || entry.Source.ProfileGate != tt.want {
+				t.Fatalf("entry = %+v, %v; want profile_gate %v", entry, ok, tt.want)
 			}
 		})
 	}
-}
-
-func TestWorktreeHoldingFailsWhenTheMainWorktreeCannotBeRead(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.git.mu.Lock()
-	h.git.mainWorktreeErr = errors.New("not a repository")
-	h.git.mu.Unlock()
-
-	// Act
-	_, _, held, err := worktreeHolding(context.Background(), h.git, theWorkspaceDir(h), "fix")
-
-	// Assert
-	if err == nil || held {
-		t.Fatalf("worktreeHolding = %v, %v; want the failure", held, err)
-	}
-}
-
-// theWorkspaceDir answers the harness workspace's worktree.
-func theWorkspaceDir(h *harness) string {
-	h.db.mu.Lock()
-	defer h.db.mu.Unlock()
-	return h.db.workspaces[theWorkspace].Dir
 }

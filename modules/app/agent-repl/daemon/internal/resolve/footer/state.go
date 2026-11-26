@@ -637,8 +637,9 @@ type wsState struct {
 	shells map[string]*shellRow
 	// monitors are the live monitors, by activity id.
 	monitors map[string]*monitorRow
-	// merges are the feed's async merge bubbles in flight (merges.go).
-	merges mergeBubbles
+	// children are the workspace's open children, as the children tracker
+	// last handed them (children.go).
+	children []OpenChild
 	// tasks are the tracker's tasks, by task id.
 	tasks map[string]*taskRow
 	// crons are the scheduled jobs, by job id.
@@ -752,7 +753,6 @@ func newWSState() *wsState {
 		agentModel:      latestmodel.Ledger{},
 		shells:          map[string]*shellRow{},
 		monitors:        map[string]*monitorRow{},
-		merges:          newMergeBubbles(),
 		tasks:           map[string]*taskRow{},
 		crons:           map[string]*cronRow{},
 		bashUnits:       map[string]*shellRow{},

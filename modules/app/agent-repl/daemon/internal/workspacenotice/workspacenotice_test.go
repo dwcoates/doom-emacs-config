@@ -160,11 +160,6 @@ func TestRecipients(t *testing.T) {
 		ws.OneShot = true
 		return ws
 	}
-	merge := func() wsm.Workspace {
-		ws := derived(idp(owner), nil, nil)
-		ws.MergeOf = &wsm.MergeOrigin{Requester: owner}
-		return ws
-	}
 	tests := []struct {
 		name string
 		ws   wsm.Workspace
@@ -192,8 +187,6 @@ func TestRecipients(t *testing.T) {
 			want: []Recipient{{Source: owner, Owner: true}, {Source: into, Branch: true}}},
 		{name: "a child landing into another workspace tells only it of its landing", ws: childInto(), kind: Landed,
 			want: []Recipient{{Source: into, Branch: true}}},
-		{name: "a merge workspace's requester follows nothing, so it is told the landing", ws: merge(), kind: Landed,
-			want: []Recipient{{Source: owner, Owner: true, Branch: true}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

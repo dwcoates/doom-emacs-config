@@ -47,16 +47,13 @@ import type {
   FooterExpanded,
   FooterExpandedAgents,
   FooterExpandedCrons,
-  FooterExpandedMerges,
+  FooterExpandedChildren,
   FooterExpandedMonitors,
   FooterExpandedShells,
   FooterExpandedTasks,
   FooterExpandedTokens,
   FooterJump,
-  FooterMergeRow,
-  FooterMergeRowLabel,
-  FooterMergeRowRuntime,
-  FooterMergeRowStep,
+  FooterChildRow,
   FooterTokensAgent,
   FooterTokensLineContextGrowth,
   FooterMonitorRow,
@@ -81,7 +78,10 @@ import { liveElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { stopTicking } from "../feed/ticking.js";
 import { createLogger } from "../log.js";
+import { jumpToWorkspace, type JumpSite } from "../feed/merge/jump.js";
 import { MERGE_GLYPH } from "../merge-glyph.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { toneClass, wireColor } from "../vocab.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -105,7 +105,7 @@ export type FooterPanel =
   | "shells"
   | "monitors"
   | "crons"
-  | "merges";
+  | "children";
 
 /** The panels a live-work chip opens: every panel but the tokens cell's. */
 export type FooterChipPanel = Exclude<FooterPanel, "tokens">;
@@ -123,7 +123,7 @@ export const CHIP_PANELS: readonly FooterChipPanel[] = [
   "shells",
   "monitors",
   "crons",
-  "merges",
+  "children",
 ];
 
 /** Every panel name, for the suite and for the persisted-selection check. */
@@ -237,8 +237,8 @@ export function panelHasEntries(u: FooterExpanded, panel: FooterPanel, stops: St
       const crons = requireMessage(u.crons, `${path}.crons`);
       return crons.rows.length > 0 || crons.wakeup !== undefined;
     }
-    case "merges":
-      return requireMessage(u.merges, `${path}.merges`).rows.length > 0;
+    case "children":
+      return requireMessage(u.children, `${path}.children`).rows.length > 0;
     default:
       return unreachableArm(`${path}.panel`, panel);
   }
@@ -363,10 +363,10 @@ export function drawFooterExpanded(
         shown,
         drawFooterExpandedCrons(requireMessage(u.crons, `${path}.crons`), deps, `${path}.crons`),
       );
-    case "merges":
+    case "children":
       return panel(
         shown,
-        drawFooterExpandedMerges(requireMessage(u.merges, `${path}.merges`), deps, `${path}.merges`),
+        drawFooterExpandedChildren(requireMessage(u.children, `${path}.children`), deps, `${path}.children`),
       );
     default:
       return unreachableArm(`${path}.selection`, shown);
@@ -925,63 +925,45 @@ export function drawFooterMonitorRowRuntime(
   return runtimeClock(u.startedAtMs, deps, `${path}.started_at_ms`);
 }
 
-// ---- the merges panel -----------------------------------------------------
+// ---- the children panel ---------------------------------------------------
+
+/** Where a child row's jump is recorded and its refusal drawn. */
+const CHILD_JUMP: JumpSite = {
+  describe: "an open child",
+  operation: "footer.children.select",
+  refusalClass: "footer-row-refusal",
+};
 
 /**
- * The async merges in flight. Each is a jump row, exactly as an agent or shell
- * row is: its jump names the merge's bubble head in this feed, which a click
- * centers.
+ * The workspace's OPEN children, in the order they were created. A click on
+ * a row selects the child (`FooterChildRowSelect`), the same switch its
+ * sidebar row makes.
  */
-export function drawFooterExpandedMerges(
-  u: FooterExpandedMerges,
+export function drawFooterExpandedChildren(
+  u: FooterExpandedChildren,
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement[] {
-  return u.rows.map((row, index) => drawFooterMergeRow(row, deps, `${path}.rows[${index}]`));
+  return u.rows.map((row, index) => drawFooterChildRow(row, deps, `${path}.rows[${index}]`));
 }
 
-/** One async merge: ⇄ · branch line · step · (waiting on you) · clock. */
-export function drawFooterMergeRow(
-  u: FooterMergeRow,
-  deps: ExpandedDeps,
-  path: string,
-): HTMLElement {
-  const row = jumpRow("merges", u.work, u.jump, deps, path);
-  row.appendChild(glyph("merges", MERGE_GLYPH));
-  row.appendChild(drawFooterMergeRowLabel(requireMessage(u.label, `${path}.label`)));
-  if (u.step !== undefined) row.appendChild(drawFooterMergeRowStep(u.step));
-  if (u.waitingOnUser !== undefined) row.appendChild(drawFooterMergeRowWaitingOnUser());
-  row.appendChild(
-    rowFigures(
-      drawFooterMergeRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
-      caret(),
-    ),
-  );
-  return finishJumpRow(row);
-}
-
-/** The bubble head's branch line, verbatim. */
-export function drawFooterMergeRowLabel(u: FooterMergeRowLabel): HTMLElement {
-  return rowText("footer-row-label", u.text);
-}
-
-/** The step the merge stands on, verbatim. */
-export function drawFooterMergeRowStep(u: FooterMergeRowStep): HTMLElement {
-  return rowText("footer-row-description", u.text);
-}
-
-/** The waiting-on-you state: the merge workspace's session asked something. */
-export function drawFooterMergeRowWaitingOnUser(): HTMLElement {
-  return rowText("footer-row-state", "waiting on you");
-}
-
-/** The merge's ticking clock, from the bubble head's instant. */
-export function drawFooterMergeRowRuntime(
-  u: FooterMergeRowRuntime,
-  deps: ExpandedDeps,
-  path: string,
-): HTMLElement {
-  return runtimeClock(u.startedAtMs, deps, `${path}.started_at_ms`);
+/** One open child: ⇄ · name · status, in its canonical color · short summary. */
+export function drawFooterChildRow(u: FooterChildRow, deps: ExpandedDeps, path: string): HTMLElement {
+  const target = requireMessage(requireMessage(u.select, `${path}.select`).target, `${path}.select.target`);
+  const status = requireMessage(u.status, `${path}.status`);
+  const row = document.createElement("div");
+  row.className = "footer-row footer-child-row";
+  row.setAttribute("data-child", target.id);
+  row.appendChild(glyph("children", MERGE_GLYPH));
+  row.appendChild(rowText("footer-row-label", requireMessage(u.name, `${path}.name`).text));
+  const state = rowText("footer-row-state", status.text);
+  state.classList.add(toneClass(wireColor(status.tone, `${path}.status.tone`)));
+  row.appendChild(state);
+  if (u.shortSummary !== undefined) row.appendChild(rowText("footer-row-description", u.shortSummary.text));
+  row.addEventListener("click", () => {
+    void guardMalformed(deps.ctx, "footer.children.select", jumpToWorkspace(row, deps.ctx, target, CHILD_JUMP));
+  });
+  return row;
 }
 
 // ---- the crons panel ------------------------------------------------------

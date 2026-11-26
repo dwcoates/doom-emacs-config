@@ -287,7 +287,7 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 func (v *verbs) freeNameAgainst(ctx context.Context, log dlog.Logger, branch string, taken func(candidate string) (bool, error)) (string, func(), error) {
 	v.names.mu.Lock()
 	defer v.names.mu.Unlock()
-	registered, err := v.takenLocked(ctx, "")
+	registered, err := v.takenLocked(ctx)
 	if err != nil {
 		return "", nil, err
 	}

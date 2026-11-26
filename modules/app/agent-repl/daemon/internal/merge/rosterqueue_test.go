@@ -25,95 +25,6 @@ func TestTheOrchestratorWritesThroughTheRosterQueueDB(t *testing.T) {
 	}
 }
 
-func TestAsyncMergesOnTheQueue(t *testing.T) {
-	tests := []struct {
-		name string
-		act  func(t *testing.T, h *harness)
-		want []ids.WorkspaceID
-	}{
-		{
-			name: "a recorded async request names its requester before its hand-off",
-			act: func(t *testing.T, h *harness) {
-				h.inFlight = "turn-1"
-				if err := requestDetached(t, h, RequestedByAgent); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			want: []ids.WorkspaceID{theWorkspace},
-		},
-		{
-			name: "a handed-off async merge names the merge workspace's requester",
-			act: func(t *testing.T, h *harness) {
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			want: []ids.WorkspaceID{theWorkspace},
-		},
-		{
-			name: "a landed async merge names nobody",
-			act: func(t *testing.T, h *harness) {
-				h.emacsRepo()
-				h.landsCleanly("abc123def4567")
-				h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-				h.gatePasses("daemon")
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-				if err := h.admit(context.Background()); err != nil {
-					t.Fatalf("the merge failed: %v", err)
-				}
-			},
-			want: nil,
-		},
-		{
-			name: "an evicted async merge names nobody",
-			act: func(t *testing.T, h *harness) {
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-				if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
-					t.Fatalf("Evict: %v", err)
-				}
-			},
-			want: nil,
-		},
-		{
-			name: "an async request whose fork failed names nobody",
-			act: func(t *testing.T, h *harness) {
-				h.detached.forkErr = errors.New("the worktree could not be made")
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			want: nil,
-		},
-		{
-			name: "a sync merge names nobody",
-			act: func(t *testing.T, h *harness) {
-				if _, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: RequestedByUser}); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			want: nil,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-
-			// Act
-			tc.act(t, h)
-
-			// Assert
-			if got := h.sidebar.queueOf(h.repoKey()).AsyncRequesters; !slices.Equal(got, tc.want) {
-				t.Fatalf("async merges = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestAnUnreadableQueueTellsTheRosterNothingAndIsAnError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -180,30 +91,6 @@ func TestAPauseReadCutByItsContextTellsTheRosterNothingAtInfo(t *testing.T) {
 	rec, ok := h.recordFor(dlog.LevelInfo, "daemon.merge.roster_queue")
 	if !ok || rec.Context["repo"] != string(h.repoKey()) || rec.Context["error"] != context.Canceled.Error() {
 		t.Fatalf("record %+v (found %v), want the cut at INFO with the repo and the cause", rec, ok)
-	}
-}
-
-func TestAnUnreadableQueuedWorkspaceTellsTheRosterNothingAndIsAnError(t *testing.T) {
-	// Arrange: a queue row naming a workspace with no record.
-	h := newHarness(t)
-	h.db.mu.Lock()
-	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: "ws-gone", State: wsm.MergeQueued,
-		Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}}
-	h.db.mu.Unlock()
-
-	// Act
-	h.o.publishRosterQueue(context.Background(), h.repoKey())
-
-	// Assert
-	if told := h.sidebar.toldCount(); told != 0 {
-		t.Fatalf("the roster was told %d queues, want none", told)
-	}
-	rec, ok := h.recordFor(dlog.LevelError, "daemon.merge.roster_queue")
-	if !ok {
-		t.Fatal("the unreadable workspace was not recorded at ERROR")
-	}
-	if rec.Context["repo"] != string(h.repoKey()) || rec.Context["entries"] != 1 || rec.Context["error"] == nil {
-		t.Fatalf("record context = %v, want the repo, the entry count and the cause", rec.Context)
 	}
 }
 
@@ -278,7 +165,7 @@ func TestPausingOneRepositoryTellsTheRosterOnlyThatQueueIsPaused(t *testing.T) {
 	enqueue(t, h)
 	other := wsm.RepoKey("/other/.git")
 	h.db.mu.Lock()
-	h.db.queues[other] = []wsm.MergeQueueEntry{{Repo: other, Workspace: theMergeWorkspace, State: wsm.MergeQueued,
+	h.db.queues[other] = []wsm.MergeQueueEntry{{Repo: other, Workspace: otherWorkspace, State: wsm.MergeQueued,
 		Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}}
 	h.db.mu.Unlock()
 	h.registerRepo("target", h.targetD)
@@ -502,57 +389,6 @@ func TestAFailedLineWriteTellsTheRosterNothing(t *testing.T) {
 	}
 }
 
-func TestTheRosterLineCreditsAndNamesEachMergeAsTheRosterDoes(t *testing.T) {
-	tests := []struct {
-		name          string
-		entry         wsm.MergeQueueEntry
-		wantCredited  ids.WorkspaceID
-		wantAsync     bool
-		wantAsyncName string
-	}{
-		{
-			name:         "a workspace landing its own branch is credited to itself, with no async name",
-			entry:        wsm.MergeQueueEntry{Workspace: "ws-own", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-			wantCredited: "ws-own",
-		},
-		{
-			name:          "a merge workspace is credited to its requester and named by its own name",
-			entry:         wsm.MergeQueueEntry{Workspace: "ws-merge", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-			wantCredited:  "ws-requester",
-			wantAsync:     true,
-			wantAsyncName: "land-requester",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			h.register("ws-own", "own")
-			h.register("ws-requester", "requester")
-			h.register("ws-merge", "land-requester")
-			h.db.mu.Lock()
-			merge := h.db.workspaces["ws-merge"]
-			merge.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester"}
-			h.db.workspaces["ws-merge"] = merge
-			tc.entry.Repo = h.repoKey()
-			h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{tc.entry}
-			h.db.mu.Unlock()
-
-			// Act
-			h.o.publishRosterQueue(context.Background(), h.repoKey())
-
-			// Assert
-			line := h.sidebar.queueOf(h.repoKey()).Line
-			if len(line) != 1 {
-				t.Fatalf("roster line = %v, want one merge", line)
-			}
-			if line[0].Workspace != tc.entry.Workspace || line[0].Credited != tc.wantCredited || line[0].Async != tc.wantAsync || line[0].AsyncName != tc.wantAsyncName {
-				t.Fatalf("roster entry = %+v, want workspace %s credited to %s, async %v named %q", line[0], tc.entry.Workspace, tc.wantCredited, tc.wantAsync, tc.wantAsyncName)
-			}
-		})
-	}
-}
-
 func TestTheRosterLineCarriesEachMergesPlaceInLine(t *testing.T) {
 	// Arrange: the admitted front, and a waiting merge put at the front.
 	h := newHarness(t)
@@ -591,7 +427,6 @@ func TestTheRosterLineRevealsTheBubbleOfEachMergeWithABubbleIdentity(t *testing.
 		wantAt ids.WorkspaceID
 	}{
 		{name: "a sync merge's bubble is on its own feed", ws: "ws-own", lease: "lease-own", wantAt: "ws-own"},
-		{name: "an async merge's bubble is on its requester's feed", ws: "ws-merge", lease: "lease-merge", wantAt: "ws-requester"},
 		{name: "a merge with no bubble identity reveals nothing", ws: "ws-own"},
 	}
 	for _, tc := range tests {
@@ -599,12 +434,7 @@ func TestTheRosterLineRevealsTheBubbleOfEachMergeWithABubbleIdentity(t *testing.
 			// Arrange
 			h := newHarness(t)
 			h.register("ws-own", "own")
-			h.register("ws-requester", "requester")
-			h.register("ws-merge", "land-requester")
 			h.db.mu.Lock()
-			merge := h.db.workspaces["ws-merge"]
-			merge.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester"}
-			h.db.workspaces["ws-merge"] = merge
 			h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: tc.ws, State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}}
 			h.db.mu.Unlock()
 			if tc.lease != "" {

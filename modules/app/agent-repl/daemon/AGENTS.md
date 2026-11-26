@@ -1629,14 +1629,14 @@ gate governor are gone.
 API's nouns. Like every agent API command it is ONE rpc, prints the answer
 as protojson, decides nothing and never runs git. Asking for a merge is not
 this noun's: `agent-repld workspace finished` lands a workspace's own branch
-and `agent-repld workspace async-merge` a named branch.
+and a landing child (`agent-repld workspace create -source-branch BRANCH -one-shot`) a
+named branch.
 
 - `status [-repository here|DIR]` reads `GetMergeQueueStatus`, every queue
   when unset.
 - `dequeue`, `move-up`, `move-down` and `move` take `MERGE|here`: `here` is
   the calling workspace's own merge, and a NAME is matched against the merges
-  the queues list (`queuedArg`), never the roster, because the roster leaves
-  out the hidden workspace an async merge runs in. A name must match exactly
+  the queues list (`queuedArg`), never the roster. A name must match exactly
   one merge across every queue. They send `UpdateMergeQueue`'s `evict`,
   `move_up`, `move_down` and `move`.
 - `move MERGE|here -placement front|back|behind=MERGE|index=N` puts a waiting
@@ -2396,9 +2396,7 @@ merged row a crash left open) brings it back as an ordinary open workspace:
    at ERROR, before any session comes up.
 3. `wsm.Reopen` clears the close AND the merge's settlement in one statement:
    `merged_at`, the landed `commit_count` (back to "never counted"; the next
-   turn close recounts it live), the detached landing (`landed_head`,
-   `landed_at`, which the merge workspace sweep would otherwise retire it
-   again on), and a merge workspace's hiding. AN OPEN WORKSPACE IS NEVER
+   turn close recounts it live), and nothing else. AN OPEN WORKSPACE IS NEVER
    MERGED. A row that is not merged keeps all of those as they stand.
 4. `merge.Orchestrator.RetireConcluded` drops the landed merge's standing
    facts, so the row and the footer stop drawing it merged.
@@ -2929,7 +2927,7 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   the turn several joins wait on ends with them unfolded, the OLDEST stands in
   flight (`standJoinsLocked`, the watcher's `standNextWaitingLocked`) and the
   rest join it, as the vendor runs them all as one prompt batch. The user's
-  own ask and a detached merge never flush.
+  own ask never flushes.
 - **A PROMPT THAT INTERRUPTED THE RUNNING TURN CARRIES A NOTE FOR THE AGENT**
   (`interruptionNote`, `shim.v1.StartTurnRequest.vendor_note`): the vendor
   records the cut as the user rejecting the work, and the note says the work
@@ -3439,129 +3437,88 @@ children are NOT niced: the daemon has no idiom for lowering a child's
 priority (`bin/background.sh` is the test suites'), and git inherits the
 daemon's own.
 
-## An async merge lands where the queue decided, once, at hand-off (`internal/merge`, `internal/workspace`)
+## A landing child lands a branch while its parent stays open (`internal/workspace`, `internal/merge`, `internal/workspacesubs`)
 
-THE LANDING IS DECIDED IN ONE PLACE. `merge.orchestrator.detachedTarget()` is
-the one rule for where an async request lands: the requester's creation-job
-target, or, for a requester with NO creation job, its repository's main
-worktree. Only a main checkout lacks a creation job (it is registered, never
-created), so a jobless requester whose directory is not its main worktree is a
-defect: refused, recorded at ERROR as `daemon.merge.detached_target` with the
-requester, its directory and the resolved main worktree. Both the request's
-version check (`requestTarget()`) and the hand-off (`handOffDetached()`) ask
-it, and `TestBothAsyncLandingSitesDecideByTheOneRule` pins that they do.
+`workspace create ... -source-branch BRANCH -one-shot` is the one way a workspace
+lands a branch it does not stand on. The new workspace's own branch is cut with
+`git worktree add -b` at BRANCH's tip when the create runs
+(`CreateSpec.SourceBranch`), so what lands is fixed then. It is an ordinary
+one-shot child: never hidden, no request record, no name reservation beyond a
+create's own (`name_reserved`), and its merge is the workspace's own finish in
+the queue, which has one entry kind.
 
-- `handOffDetached()` puts the whole landing on the `wsm.MergeOrigin` it forks
-  with: `TargetDir`, the requester's `ParentBranch`, and `Actions`. A landing
-  that cannot be decided drops the request and hands the failure back, as a
-  failed fork does.
-- `workspace.verbs.Create()` lands a merge workspace by those fields and reads
-  nothing off the requester (no requester creation job is read). An origin with
-  an empty `TargetDir` or `ParentBranch` is an invariant violation, refused at
-  ERROR before anything is minted.
-- The three fields are TRANSPORT-ONLY on the origin. The merge workspace's own
-  creation job holds its target and actions durably and its registry row its
-  parent branch, so the stored origin (`workspaces.merge_*`) never carries them.
+ONE-SHOT LANDING EFFECTS RIDE THE CREATE (`wsm.LandingEffects`, the creation
+job's `landing_close_after`, `landing_cleanup_dir`, `landing_compact_requester`
+and `landing_profile_gate`), and each is honored where it belongs:
 
-A MERGE WORKSPACE NEVER INHERITS ITS REQUESTER'S MERGE ACTIONS (owner ruling,
-2026-10-14). It runs exactly the actions its async request named
-(`agentrepl.v1.MergeWorkspaceAsync.merge_actions`), and none when it named none. The
-actions ride the requester's queue row (`merge_queue.source_actions_before`,
-`source_actions_after`, layout 51) until the hand-off, so a restart in between
-keeps them; only a detached request may carry them, and the merge workspace's
-own row never does. One-shot merges and a workspace's own merges keep the
-actions configured at its creation.
+- `-close-after` and `-cleanup-source-worktree` in the merge's terminal
+  (`closeLanded`): the named workspace is closed and the cleanup directory
+  (resolved at the create by `sourceWorktreeToCleanUp`) removed only when it
+  holds no uncommitted changes.
+- `-profile-gate` in `merge.Enqueue`, which profiles that merge's gate.
+- `-compact-requester-after` in `internal/workspacesubs`: the parent's one-line
+  landing notice (`prompts/workspace-child-landed.md`) goes first, then
+  `compactRequester` sends `/compact`.
 
-## A landing is reported only once its deploy has run (`internal/mergeworkspace`, `internal/deploy`, `internal/rollout`)
+Nothing a landing child does is mirrored into its parent: the parent is told
+the one line, and the parent's feed row is the children tracker's bubble.
 
-An async merge that lands in the daemon's OWN checkout tells the deploy
-(`merge.run.selfReload`), and the deploy rolls the landed build out. Its
-report to the requester waits for that deploy, so the requester never hears
-"landed" while the running daemon, or its own shim, still runs the build before
-it (owner request, 2026-10-14).
+## The children tracker draws every child in one place each (`internal/children`)
 
-**One decision.** `merge.run.landingDeploy` decides once per run what the
-landing does about deploying itself (`merge.LandingDeploy`): nothing (it landed
-nothing, or outside the daemon's own checkout), owed (the deploy is told), held
-(the rollouts are held) or unread (the hold could not be read). The report
-carries the decision (`DetachedOutcome.Deploy`) and `selfReload` acts on the
-same one, so the two cannot disagree.
+`children.Tracker` is the ONE reader of which workspaces are a parent's children
+and how each stands. It is fed by the roster's registry
+(`sidebar.WithRegistrySink`), each row's status arm with its canonical color
+(`sidebar.WithArmSink`, the colors of `render-colors.json`) and the summary
+keeper (`summaryFan`), wired late-bound in `graph.go` (`childrenForwarder`). It
+draws a child in:
 
-**Owed, covered, paid.** `mergeworkspace.Service.HandBack` records an owed
-landing's report (`wsm.OwedHandBack`, `owed_handbacks`, layout 50) BEFORE
-`selfReload` tells the deploy, with the idempotency key it will be submitted
-under. `deploy.Deployer.Deploy` COVERS every owed report the instant it commits
-to building the checkout (`CoverOwed`): what it builds carries those landings.
-A report owed after that instant waits for the next deploy. The covered
-reports are PAID (`PayOwed`):
+- the parent's root feed as a `frontend.v1.FeedChild` row (`feedid.KindChild`),
+  one per child, republished whole whenever anything it draws changes;
+- the parent's footer while the child is OPEN (`footer.SetOpenChildren`: the
+  `⇄` chip and panel);
+- the parent's topbar summary menu once it is NOT open
+  (`topbar.SetClosedChildren`), the child that stopped being open most
+  recently first.
 
-- by a deploy that stays, once it has decided every component;
-- by a deploy that failed, saying so ("Its deploy failed (...)");
-- by the successor of a deploy that hands over, at its takeover, once it has
-  judged every adopted shim (`rollout.controller.becomeIncumbent`);
-- by a fresh boot, every report, once its bring-up has run and it has judged
-  every live shim (`rollout.Controller.SettleBoot`).
+A CHILD IS DRAWN IN EXACTLY ONE OF THE FOOTER AND THE MENU, decided by one
+predicate, so they can neither both list it nor both miss it. A child the
+registry stopped carrying keeps its bubble, standing `removed` with no
+`select`, and is in neither. The bubble's border, the footer row and the
+sidebar row take the SAME color name, resolved from the one status ladder, so
+they cannot disagree; a child that is not open has no border. The bubble
+mirrors none of the child's turns, and the fold is the webview's own. A child
+created by the user, with no requesting workspace, has no bubble. The
+target's pull request (`FeedChildTarget.pull_request`) and the merged version
+(`FeedChildStandingMerged.version`) are optional on the wire and not drawn yet.
 
-**The requester's own shim.** Judging the shims first registers the bounce of
-each stale one, and the prompt queue takes a registered bounce before it
-delivers anything queued (`promptqueue` turn end; a submission during a bounce
-is held for the new shim). So the report is delivered on the build that
-carries the landing.
+## A landing is reported only once its deploy has run (`internal/landingreports`, `internal/deploy`, `internal/rollout`)
 
-**Exactly once.** A paid report's row is deleted after its submission; a payer
-that dies between the two submits the same key again, which the prompt handler
-answers with the turn it already made. A held or unread rollout, and a landing
-outside the daemon's own checkout, are reported at once, saying why nothing
-deployed them.
+`internal/landingreports` tells a workspace how its merge ended and every
+workspace whose landing a deploy carries how that deploy ended, the two reports
+a merge owes beyond the merge itself. A MERGE THAT LANDED CLOSED ITS WORKSPACE,
+so it hands nothing back to it: a child's landing reaches its parent as the
+child's one update, once the build that carries it runs
+(`wsm.ParentFollowedEvents`, `wsedges.Hub`).
 
-## A detached merge's requester is retired a day after its merge lands (`internal/mergeworkspace`)
-
-An in-place own merge closes its requester and removes its worktree the moment
-it lands. A DETACHED merge lands from its merge workspace instead, so the
-requester stays open with its worktree, and nothing closes it. The merge
-workspace sweep retires it once it has been idle a day (owner request,
-2026-10-12).
-
-**What landed.** A merge workspace is CUT AT ITS FORK HEAD:
-`workspace.CreateMergeWorkspace` resolves the requester's branch once, and
-`Create` materializes the worktree at that commit, recorded on the row as
-`wsm.MergeOrigin.ForkHead` (`workspaces.merge_fork_head`, layout 41). The
-creation job's base stays the branch, which the handback names. When the merge
-lands, `mergeworkspace.Service.HandBack` stamps the requester with that commit
-and the instant (`wsm.Landing`, `workspaces.landed_head`/`landed_at`, through
-`SetLanded`; INFO `daemon.mergeworkspace` "stamped the requester ..."). A
-merge workspace forked before layout 41 has no fork head, and its requester is
-never stamped (INFO). A failed stamp is ERROR and the handback still goes.
-
-**When.** The hourly `merge_workspace_sweep` asks `Workspaces.RetireLanded` for
-every requester with a landing, no `merged_at`, no merge-queue row, and no
-activity for `mergeworkspace.LandedIdleLimit` (`24h`): its `created_at`,
-`last_activity_at`, `last_selected_at` and its landing. The asks run under the
-landed-worktree reaper's own kernel lock (`worktreeLockPath`, the reaper's
-`worktree-reap.lock`), so the reaper never judges a tree a retirement is
-removing; while the reaper holds it nothing is retired (INFO) and the next
-sweep tries again. `Sweep` answers a `SweepReport` of removals and retirements.
-
-**What is kept** (`workspace.RetireLanded`, each answered as its reason,
-DEBUG `daemon.workspace.retire_landed`): no landing or already merged
-(`not_landed`), an open workspace cut from it by parent or by branch
-(`parent_of_open_workspace`), a turn, live work, a held prompt or a queued
-merge (`not_quiet`, the close verb's own judgement), a missing directory
-(`directory_missing`), a HEAD that is no longer the landed commit
-(`moved_on`, which CLEARS the landing at INFO, since what the branch holds now
-never landed), and modified or untracked content (`dirty`).
-
-**Retirement**, in order: the session is killed (`kill`, as the kill verb
-does, which also closes the row), the worktree is removed through
-`gitclient.RemoveCleanWorktree` (no `--force`: a tree dirtied after it was
-judged is refused by git and kept), and the row is stamped `merged_at` at the
-LANDING's instant, which files it under Recently Merged by when its merge
-landed. The branch is kept, as an in-place merge keeps it. INFO
-`daemon.workspace.retire_landed` names the requester, its head and landing;
-every failed read or write is ERROR there and leaves the requester as it was
-(a removal git refused leaves it closed with its tree; a stamp that failed
-after the removal leaves it closed and unmerged, so an open restores the tree
-from its branch).
+- **The in-place handback.** `HandBack` reports a merge that did NOT land to
+  its own workspace, which stays open: a deferred prompt that never interrupts a
+  running turn, whose first line is the feed's handback badge. A merge a user
+  or the operator released hands nothing back: whoever released it knows.
+- **Cover and end.** `deploy.Deployer.Deploy` calls `CoverLandings` the instant
+  it commits to building the checkout: every landing waiting for its deploy, and
+  every landed merge and remediation finish still deploying, is covered by what
+  it builds. A landing arriving after that instant waits for the next deploy.
+  `DeployEnded` then tells each covered workspace how the deploy ended (a
+  failed one says the running build does not carry the landing), when the deploy
+  stays, fails, or its successor takes over (`rollout`), and for every landing
+  on a fresh boot once its bring-up has judged every live shim.
+- **The deploy decision.** `merge.run.landingDeploy` decides once per run what
+  the landing does about deploying itself (`merge.LandingDeploy`): nothing (it
+  landed nothing, or outside the daemon's own checkout), owed (the deploy is
+  told), held (the rollouts are held) or unread (the hold could not be read).
+  The report carries it and `selfReload` acts on the same one, so the two
+  cannot disagree. A held or unread rollout is reported at once, saying why
+  nothing deployed the landing.
 
 ## The news digest (`internal/newsdigest`)
 
@@ -3754,11 +3711,11 @@ landed, closed, deployed, evicted, cold_gated. Turn events, `needs_input` and
 full read of its context, so they are asked for by name. Every edge has ONE
 origin (`internal/wsedges`) and reaches `internal/workspacesubs`:
 
-- `deployed` is `wsedges.Hub.DeployEnded`, called from `mergeworkspace.Service.PayOwed`
-  with `merge.DeployEnd.Landed`: the merge workspace each paid report names (the
-  landed workspace itself for a merge in place). A failed deploy is told as
-  such, and says the running build does not carry the landing. A landing with
-  no owed report (a landing into a parent workspace) has no deploy to tell.
+- `deployed` is `wsedges.Hub.DeployEnded`, called from `landingreports.Service.DeployEnded`
+  with `merge.DeployEnd.Landed`: each workspace whose landing the deploy
+  covered (`CoverLandings`). A failed deploy is told as such, and says the
+  running build does not carry the landing. A landing into a parent workspace
+  has no deploy to tell.
 - `evicted` is a `merge.QueueChangeFailed` or `QueueChangeDequeued` change,
   whose `Cause` is the reason a follower reads.
 - `cold_gated` is a gate a shim judged just now (`workspace.Deps.ColdGateRaised`

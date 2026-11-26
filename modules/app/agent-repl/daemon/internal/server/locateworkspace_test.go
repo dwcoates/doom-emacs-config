@@ -14,13 +14,13 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// locateHarness is findHarness's registry with a hidden merge workspace the
-// roster draws no row of.
+// locateHarness is findHarness's registry with a backlogged workspace the
+// roster draws no open row of.
 func locateHarness(t *testing.T, opts ...option) *harness {
 	t.Helper()
 	h := findHarness(t, opts...)
 	h.DB.workspaces["ws-merge"] = wsm.Workspace{ID: "ws-merge", Repo: "repo-1", Dir: "/src/merge", Name: "merge-one",
-		Backlogged: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}}
+		Backlogged: true}
 	return h
 }
 
@@ -30,10 +30,10 @@ func TestLocateWorkspaceAnswersTheRegistrysWorkspaces(t *testing.T) {
 		req  *agentreplv1.LocateWorkspaceRequest
 		want []string
 	}{
-		{name: "a hidden merge workspace containing its worktree's subdirectory",
+		{name: "a backlogged workspace containing its worktree's subdirectory",
 			req:  &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Containing{Containing: &agentreplv1.LocateWorkspaceContaining{Dir: "/src/merge/daemon"}}},
 			want: []string{"ws-merge"}},
-		{name: "a hidden merge workspace by name",
+		{name: "a backlogged workspace by name",
 			req:  &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: "merge-one"}}},
 			want: []string{"ws-merge"}},
 		{name: "a merged workspace, in no stream, at its directory",

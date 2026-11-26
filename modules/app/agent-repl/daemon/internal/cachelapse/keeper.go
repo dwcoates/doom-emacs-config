@@ -93,7 +93,6 @@ const (
 	opDrive      = "daemon.cachelapse.drive"
 	opRestore    = "daemon.cachelapse.restore"
 	opLapse      = "daemon.cachelapse.lapse"
-	opMergeEnded = "daemon.cachelapse.merge_ended"
 )
 
 // DB is the slice of the state client the Keeper reads and writes. The
@@ -574,9 +573,8 @@ func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID, judged bool) {
 	k.enqueue(edge{ws: ws, kind: edgeGateRaised, why: "the session parked at its cold gate"})
 }
 
-// MergeLeftQueue is WS's entry leaving its merge queue: a hidden merge
-// workspace whose merge left every queue is stood down, and any other's
-// cadence reconciled, so a backlogged or closed one lets its cache lapse again.
+// MergeLeftQueue is WS's entry leaving its merge queue: its cadence is
+// reconciled, so a backlogged or closed workspace lets its cache lapse again.
 // It never blocks.
 func (k *Keeper) MergeLeftQueue(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "its merge left its queue"})
@@ -855,11 +853,6 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 			k.store(ctx, log, ws, lapse, "the standing cold gate")
 		}
 	}
-	if k.mergeEnded(ctx, log, record) {
-		delete(k.beats, ws)
-		delete(k.restores, ws)
-		return
-	}
 	k.schedule(ctx, ws, why)
 }
 
@@ -875,31 +868,6 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.idleDue, ws)
 	delete(k.early, ws)
 	k.deps.Why.Forget(ws)
-}
-
-// mergeEnded stands RECORD's session down when it is a hidden merge workspace
-// the user is not looking at whose merge has left every queue, and answers
-// whether it did (or could not tell, which is recorded), so no cadence is set
-// on a session being stood down. The drain stands it down never under a turn,
-// and finds nothing to do when no shim serves it.
-func (k *Keeper) mergeEnded(ctx context.Context, log dlog.Logger, record wsm.Workspace) bool {
-	if !record.MergeHidden() || record.Current {
-		return false
-	}
-	queued, err := bringup.MergeQueued(ctx, k.deps.DB, record)
-	if err != nil {
-		if leaving(ctx, log, opMergeEnded, "reading the merge queues", err) {
-			return true
-		}
-		log.Error(opMergeEnded, "could not tell whether the merge workspace still carries its merge; its session is left as it is", dlog.Context{"cause": err.Error()})
-		return true
-	}
-	if queued {
-		return false
-	}
-	log.Info(opMergeEnded, "the merge workspace's merge has left every queue; its session is stood down", nil)
-	k.deps.StandDowns.StandDownWithheld(record.ID, drain.WithheldMergeEnded)
-	return true
 }
 
 // lapseDue takes every lapse that has come: the session is stood down, and

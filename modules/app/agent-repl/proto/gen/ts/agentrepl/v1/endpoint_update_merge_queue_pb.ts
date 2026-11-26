@@ -582,8 +582,8 @@ export const UpdateMergeQueueMoveToSchema: GenMessage<UpdateMergeQueueMoveTo> = 
  */
 export type UpdateMergeQueueMove = Message<"agentrepl.v1.UpdateMergeQueueMove"> & {
   /**
-   * Whose waiting merge to move: the workspace landing its own branch, or an
-   * async merge's merge workspace. The command line resolves the name
+   * Whose waiting merge to move: the workspace landing its own branch. The
+   * command line resolves the name
    * `merge-queue status` lists the merge under to this ref.
    *
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
@@ -1534,17 +1534,15 @@ export const UpdateMergeQueueMoveBlockedByAdmittedSchema: GenMessage<UpdateMerge
  */
 export type UpdateMergeQueueMoveBlocker = Message<"agentrepl.v1.UpdateMergeQueueMoveBlocker"> & {
   /**
-   * The workspace the entry's merge runs in: a merge workspace for an async
-   * merge.
+   * The workspace the entry's merge runs in, landing its own branch.
    *
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * The name `merge-queue status` lists the merge under (an async merge's own
-   * name, otherwise its workspace's), so the refusal names it as the user
-   * reads it.
+   * The name `merge-queue status` lists the merge under, its workspace's,
+   * so the refusal names it as the user reads it.
    *
    * @generated from field: string name = 2;
    */

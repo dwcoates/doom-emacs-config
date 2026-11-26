@@ -11,11 +11,7 @@
 //
 // AGENT WORKSPACES ONLY. A zettel chat thread is a registry row too, but it
 // is the Chat app's, never a piece of work an agent looks for, so it is never
-// answered. A MERGE WORKSPACE (the hidden workspace an async merge runs in)
-// IS answered, marked as one (FoundWorkspace.merge): the agent that asked
-// for an async merge reads the merge workspace it forked, and the agent CLI
-// resolves a merge workspace's own worktree to it, though the roster draws
-// no row of it until it needs the user.
+// answered.
 
 syntax = "proto3";
 
@@ -230,9 +226,11 @@ message FoundWorkspace {
   // (FindWorkspacesRequest.caller), false for every other record and for every
   // record of a request naming no caller.
   bool calling = 12;
-  // SET FOR A MERGE WORKSPACE, the hidden workspace an async merge runs in to
-  // land another workspace's branch; UNSET for every other workspace.
-  optional FoundWorkspaceMerge merge = 13;
+  // Tag 13 (`merge`, the mark of a hidden merge workspace) is RETIRED with
+  // the async merge: a workspace that lands other work is an ordinary child,
+  // found by its parent.
+  reserved 13;
+  reserved "merge";
   // The Claude config dir the workspace's session runs under, as its session
   // last came up. UNSET for a workspace whose session never came up. It is a
   // fact of the session, not what FindWorkspacesRequest.login matches: the
@@ -251,14 +249,6 @@ message FoundWorkspace {
   optional int64 last_turn_at_ms = 15;
 }
 
-// What makes a found workspace a merge workspace.
-message FoundWorkspaceMerge {
-  // The workspace that asked for the async merge, whose session the merge's
-  // handback reaches. UNSET when the registry no longer holds that workspace
-  // (a merge's requester is recorded by id alone, so its row may be
-  // forgotten before the merge workspace's is).
-  optional workspace.v1.WorkspaceRef requester = 1;
-}
 
 // A found workspace as the sidebar roster draws it right now: which section
 // carries its row, and that row's status. An open or backlogged workspace's are

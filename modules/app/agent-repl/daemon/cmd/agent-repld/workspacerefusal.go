@@ -184,7 +184,7 @@ func describeNameRefusal(ws string, e *agentreplv1.SetWorkspaceNameError) (strin
 		case *agentreplv1.SetWorkspaceNameTaken_Workspace:
 			return fmt.Sprintf("the name %s is already the name or branch of the workspace at %s", t.GetName(), h.Workspace.GetDir()), nil
 		case *agentreplv1.SetWorkspaceNameTaken_Pending:
-			return fmt.Sprintf("the name %s is reserved by a pending async merge or claimed by a create in flight", t.GetName()), nil
+			return fmt.Sprintf("the name %s is claimed by a create in flight", t.GetName()), nil
 		}
 	case *agentreplv1.SetWorkspaceNameError_Merging:
 		return fmt.Sprintf("a merge holds or names %s, and its branch and directory cannot move until the merge has landed or left the queue", ws), nil

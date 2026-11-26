@@ -65,7 +65,6 @@ export const RESOLVED_KINDS: readonly string[] = [
  * tabs an agent's conversation is drawn in (owner request, 2026-11-09).
  */
 export const AGENTIC_KINDS: readonly string[] = [
-  "resolving",
   "hookPrompt",
   "conflictResolution",
   "testsRunFixing",

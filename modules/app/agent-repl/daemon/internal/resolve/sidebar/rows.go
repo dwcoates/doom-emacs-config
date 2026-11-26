@@ -121,6 +121,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		if armChanged {
 			r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
 			r.noteStatusChange(rec.ID, s, !mirrored)
+			if r.armChanges != nil {
+				r.pendingArms = append(r.pendingArms, armChange{ws: rec.ID, arm: armName, tone: r.colors.RosterStatus[armName]})
+			}
 			if departureArm(armName) {
 				r.departures = append(r.departures, departure{ws: rec.ID, arm: armName})
 			}
@@ -223,16 +226,13 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if s.opening {
 		out.Opening = &frontendv1.RosterRowOpening{}
 	}
-	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowAsyncMerging` states it:
-	// set while the workspace's own branch merges async, beside any arm.
-	out.AsyncMerging = asyncMergingMarker(r.state.asyncMerging(rec.ID), armName, rowLog)
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowMergeTurn` states it:
 	// set while the workspace's own merge is in flight and its session runs a
 	// turn, which the arm draws.
 	out.MergeTurn = mergeTurnMarker(s.merge, armName, rowLog)
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowMergePaused` states it:
 	// set while a merge indicator the row draws is on a paused queue.
-	out.MergePaused = mergePausedMarker(r.state, rec.ID, armName, ownMergeDrawn(armName, out.MergeTurn != nil), out.AsyncMerging != nil, rowLog)
+	out.MergePaused = mergePausedMarker(r.state, rec.ID, armName, ownMergeDrawn(armName, out.MergeTurn != nil), rowLog)
 	// THE DURABLE SELECTION INSTANT, for ordering only: clients order
 	// most-recently-selected first by it (the landing after a close, the
 	// editor's jump to the most recent workspace), and it survives a restart
@@ -386,20 +386,17 @@ func lastTurnStarted(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontend
 // lastUpdated resolves the row's update recency
 // (frontend.v1.RosterRowLastUpdated): the LATEST of the record's creation, its
 // latest turn start or close, its close record, its backlogged instant, its merge
-// landing, its requester's landing, and its status change -- the durable one
+// landing, and its status change -- the durable one
 // and LIVE, the one this daemon stamped (wsState.statusChangedAt), whichever
 // is later. The selection instant is deliberately not among them: viewing a
 // workspace is not an update to it. Like lastSelected it is never drawn.
 func lastUpdated(rec wsm.Workspace, live *time.Time) *frontendv1.RosterRowLastUpdated {
-	var closedAt, landedAt *time.Time
+	var closedAt *time.Time
 	if rec.Closure != nil {
 		closedAt = &rec.Closure.At
 	}
-	if rec.Landed != nil {
-		landedAt = &rec.Landed.At
-	}
 	latest := rec.CreatedAt
-	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.BackloggedAt, rec.MergedAt, landedAt, rec.StatusChangedAt, live} {
+	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.BackloggedAt, rec.MergedAt, rec.StatusChangedAt, live} {
 		if at != nil && at.After(latest) {
 			latest = *at
 		}
@@ -477,8 +474,7 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 // Both instants are the footer's PUBLISHED ones (footer.Resolver's
 // MergeStartedAt and TurnClock), never state this resolver keeps for itself,
 // so the row and the strip cannot disagree; a clock with a start and an end
-// is the last turn's, frozen, and no turn is running. An async merge's
-// requester is never told its merge, so its row keeps its turn clock.
+// is the last turn's, frozen, and no turn is running.
 func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterClock) *frontendv1.RosterRowWhen {
 	out := &frontendv1.RosterRowWhen{}
 	switch {
@@ -548,13 +544,12 @@ func detail(rec wsm.Workspace, summary string, rc rowContext) *frontendv1.Roster
 // childrenOf answers each workspace's children over the WHOLE registry, in
 // roster order: every workspace whose recorded parent is that workspace,
 // whichever section draws it. Unlike nest, which nests a row only under a
-// parent drawn beside it, the detail panel names every child. A hidden merge
-// workspace is drawn nowhere and is no one's listed child; a workspace
+// parent drawn beside it, the detail panel names every child. A workspace
 // recorded as its own parent is ill-formed and lists nothing.
 func childrenOf(in []wsm.Workspace) map[ids.WorkspaceID][]wsm.Workspace {
 	out := map[ids.WorkspaceID][]wsm.Workspace{}
 	for _, ws := range sortWorkspaces(in) {
-		if ws.MergeHidden() || ws.Parent == nil || *ws.Parent == ws.ID {
+		if ws.Parent == nil || *ws.Parent == ws.ID {
 			continue
 		}
 		out[*ws.Parent] = append(out[*ws.Parent], ws)

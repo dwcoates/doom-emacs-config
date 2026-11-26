@@ -6,10 +6,9 @@
 // could not resume it, a hide at its cold gate -- leaves the merge's request
 // standing OFF ITS QUEUE with the cause it left for: its branch, its version
 // increment and changelog line, its deploy hooks and its cleanup flags all
-// kept, and an async merge's merge workspace kept open under its name.
-// RequeueMerge puts that same request back in line: the same workspace (for
-// an async merge, the same merge workspace), the same branch, the same
-// values, at the placement this request names. Nothing is asked for again and
+// kept. RequeueMerge puts that same request back in line: the same
+// workspace, the same branch, the same values, at the placement this request
+// names. Nothing is asked for again and
 // no workspace is created. Ending a request without landing it is
 // DiscardMerge.
 
@@ -19,8 +18,6 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { MergeWorkspaceVersionIncrement, MergeWorkspaceVersionIncrementRequired, MergeWorkspaceVersionIncrementUnexpected } from "./merge_version_increment_pb";
-import { file_agentrepl_v1_merge_version_increment } from "./merge_version_increment_pb";
 import type { MergeQueuePlacement, MergeQueuePlacementBehindNotInLine, WorkspaceRequester } from "./workspace_topology_pb";
 import { file_agentrepl_v1_workspace_topology } from "./workspace_topology_pb";
 import type { AgentModel } from "../../conversation/v1/api_pb";
@@ -33,16 +30,15 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_requeue_merge.proto.
  */
 export const file_agentrepl_v1_endpoint_requeue_merge: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVxdWV1ZV9tZXJnZS5wcm90bxIMYWdlbnRyZXBsLnYxIroCChNSZXF1ZXVlTWVyZ2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoJcGxhY2VtZW50GAIgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnQSQgoHdmVyc2lvbhgDIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRIAIgBARIzCglyZXF1ZXN0ZXIYBCABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyEi8KBW1vZGVsGAUgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAYgBAUIKCghfdmVyc2lvbkIICgZfbW9kZWwiiAEKFFJlcXVldWVNZXJnZVJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZUVycm9ySABCCAoGcmVzdWx0IjkKE1JlcXVldWVNZXJnZVN1Y2Nlc3MSFQoIcG9zaXRpb24YASABKA1IAIgBAUILCglfcG9zaXRpb24i5wcKEVJlcXVldWVNZXJnZUVycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASPwoNdW5rbm93bl9tZXJnZRgDIAEoCzImLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VVbmtub3duTWVyZ2VIABI9CgxzdGlsbF9xdWV1ZWQYBCABKAsyJS5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlU3RpbGxRdWV1ZWRIABI7CgticmFuY2hfZ29uZRgFIAEoCzIkLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VCcmFuY2hHb25lSAASQQoOYWxyZWFkeV9sYW5kZWQYBiABKAsyJy5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlQWxyZWFkeUxhbmRlZEgAEloKGnZlcnNpb25faW5jcmVtZW50X3JlcXVpcmVkGAcgASgLMjQuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlVmVyc2lvbkluY3JlbWVudFJlcXVpcmVkSAASXgocdmVyc2lvbl9pbmNyZW1lbnRfdW5leHBlY3RlZBgIIAEoCzI2LmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRVbmV4cGVjdGVkSAASVAoYdmVyc2lvbl9hbHJlYWR5X3JlY29yZGVkGAkgASgLMjAuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVZlcnNpb25BbHJlYWR5UmVjb3JkZWRIABJYChxwbGFjZW1lbnRfYmVoaW5kX25vdF9pbl9saW5lGAogASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmROb3RJbkxpbmVIABJFChB3b3Jrc3BhY2VfY2xvc2VkGAsgASgLMikuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVdvcmtzcGFjZUNsb3NlZEgAEkAKDm5vdF9pbl9jYXRhbG9nGAwgASgLMiYuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZU5vdEluQ2F0YWxvZ0gAEjkKCmNvbGRfZ2F0ZWQYDSABKAsyIy5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlQ29sZEdhdGVkSABCBwoFY2F1c2UiHgocUmVxdWV1ZU1lcmdlVW5rbm93bldvcmtzcGFjZSI4CiBSZXF1ZXVlTWVyZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiGgoYUmVxdWV1ZU1lcmdlVW5rbm93bk1lcmdlIhkKF1JlcXVldWVNZXJnZVN0aWxsUXVldWVkIigKFlJlcXVldWVNZXJnZUJyYW5jaEdvbmUSDgoGYnJhbmNoGAEgASgJIhsKGVJlcXVldWVNZXJnZUFscmVhZHlMYW5kZWQiJAoiUmVxdWV1ZU1lcmdlVmVyc2lvbkFscmVhZHlSZWNvcmRlZCIdChtSZXF1ZXVlTWVyZ2VXb3Jrc3BhY2VDbG9zZWQiGgoYUmVxdWV1ZU1lcmdlTm90SW5DYXRhbG9nIhcKFVJlcXVldWVNZXJnZUNvbGRHYXRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_merge_version_increment, file_agentrepl_v1_workspace_topology, file_conversation_v1_api, file_workspace_v1_workspace]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVxdWV1ZV9tZXJnZS5wcm90bxIMYWdlbnRyZXBsLnYxIvkBChNSZXF1ZXVlTWVyZ2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoJcGxhY2VtZW50GAIgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnQSMwoJcmVxdWVzdGVyGAQgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlchIvCgVtb2RlbBgFIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsSACIAQFCCAoGX21vZGVsSgQIAxAEUgd2ZXJzaW9uIogBChRSZXF1ZXVlTWVyZ2VSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VFcnJvckgAQggKBnJlc3VsdCI5ChNSZXF1ZXVlTWVyZ2VTdWNjZXNzEhUKCHBvc2l0aW9uGAEgASgNSACIAQFCCwoJX3Bvc2l0aW9uIrsGChFSZXF1ZXVlTWVyZ2VFcnJvchJHChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIqLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIuLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEj8KDXVua25vd25fbWVyZ2UYAyABKAsyJi5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlVW5rbm93bk1lcmdlSAASPQoMc3RpbGxfcXVldWVkGAQgASgLMiUuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVN0aWxsUXVldWVkSAASOwoLYnJhbmNoX2dvbmUYBSABKAsyJC5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlQnJhbmNoR29uZUgAEkEKDmFscmVhZHlfbGFuZGVkGAYgASgLMicuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZUFscmVhZHlMYW5kZWRIABJYChxwbGFjZW1lbnRfYmVoaW5kX25vdF9pbl9saW5lGAogASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmROb3RJbkxpbmVIABJFChB3b3Jrc3BhY2VfY2xvc2VkGAsgASgLMikuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVdvcmtzcGFjZUNsb3NlZEgAEkAKDm5vdF9pbl9jYXRhbG9nGAwgASgLMiYuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZU5vdEluQ2F0YWxvZ0gAEjkKCmNvbGRfZ2F0ZWQYDSABKAsyIy5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlQ29sZEdhdGVkSABCBwoFY2F1c2VKBAgHEAhKBAgIEAlKBAgJEApSGnZlcnNpb25faW5jcmVtZW50X3JlcXVpcmVkUhx2ZXJzaW9uX2luY3JlbWVudF91bmV4cGVjdGVkUhh2ZXJzaW9uX2FscmVhZHlfcmVjb3JkZWQiHgocUmVxdWV1ZU1lcmdlVW5rbm93bldvcmtzcGFjZSI4CiBSZXF1ZXVlTWVyZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiGgoYUmVxdWV1ZU1lcmdlVW5rbm93bk1lcmdlIhkKF1JlcXVldWVNZXJnZVN0aWxsUXVldWVkIigKFlJlcXVldWVNZXJnZUJyYW5jaEdvbmUSDgoGYnJhbmNoGAEgASgJIhsKGVJlcXVldWVNZXJnZUFscmVhZHlMYW5kZWQiHQobUmVxdWV1ZU1lcmdlV29ya3NwYWNlQ2xvc2VkIhoKGFJlcXVldWVNZXJnZU5vdEluQ2F0YWxvZyIXChVSZXF1ZXVlTWVyZ2VDb2xkR2F0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_workspace_topology, file_conversation_v1_api, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RequeueMergeRequest
  */
 export type RequeueMergeRequest = Message<"agentrepl.v1.RequeueMergeRequest"> & {
   /**
-   * The workspace whose merge off its queue goes back in line: the workspace
-   * landing its own branch, or an async merge's merge workspace. The command
-   * line resolves the name `merge-queue status` lists the merge under
+   * The workspace whose merge off its queue goes back in line, landing its
+   * own branch. The command line resolves the name `merge-queue status` lists the merge under
    * (agentrepl.v1.MergeQueueStatusOffQueue.name) to this ref.
    *
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
@@ -56,21 +52,6 @@ export type RequeueMergeRequest = Message<"agentrepl.v1.RequeueMergeRequest"> & 
    * @generated from field: agentrepl.v1.MergeQueuePlacement placement = 2;
    */
   placement?: MergeQueuePlacement | undefined;
-
-  /**
-   * The version increment and changelog line of a merge whose request
-   * records none BECAUSE ITS VALUES WERE LOST: a request adopted from a merge
-   * workspace left open before requests were kept
-   * (agentrepl.v1.MergeQueueStatusOffQueueCause.adopted). Such a request
-   * landing on a versioned repository's main branch is refused as
-   * `version_increment_required` without one. A request that recorded its
-   * own values keeps them: supplying one for it is refused as
-   * `version_already_recorded`, so a requeue never silently changes what a
-   * merge was asked to land as. UNSET for every other requeue.
-   *
-   * @generated from field: optional agentrepl.v1.MergeWorkspaceVersionIncrement version = 3;
-   */
-  version?: MergeWorkspaceVersionIncrement | undefined;
 
   /**
    * WHO ASKED. REQUIRED: the user (the sidebar) or a workspace's agent
@@ -221,32 +202,6 @@ export type RequeueMergeError = Message<"agentrepl.v1.RequeueMergeError"> & {
     case: "alreadyLanded";
   } | {
     /**
-     * The request lost its values (it was adopted) and lands on a versioned
-     * repository's main branch, so it needs `version`.
-     *
-     * @generated from field: agentrepl.v1.MergeWorkspaceVersionIncrementRequired version_increment_required = 7;
-     */
-    value: MergeWorkspaceVersionIncrementRequired;
-    case: "versionIncrementRequired";
-  } | {
-    /**
-     * `version` was given where the request lands on no versioned main
-     * branch.
-     *
-     * @generated from field: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 8;
-     */
-    value: MergeWorkspaceVersionIncrementUnexpected;
-    case: "versionIncrementUnexpected";
-  } | {
-    /**
-     * `version` was given for a request that recorded its own.
-     *
-     * @generated from field: agentrepl.v1.RequeueMergeVersionAlreadyRecorded version_already_recorded = 9;
-     */
-    value: RequeueMergeVersionAlreadyRecorded;
-    case: "versionAlreadyRecorded";
-  } | {
-    /**
      * `placement` asked to go behind a merge not in the queue.
      *
      * @generated from field: agentrepl.v1.MergeQueuePlacementBehindNotInLine placement_behind_not_in_line = 10;
@@ -394,21 +349,6 @@ export const RequeueMergeAlreadyLandedSchema: GenMessage<RequeueMergeAlreadyLand
   messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 9);
 
 /**
- * The request recorded its own version increment.
- *
- * @generated from message agentrepl.v1.RequeueMergeVersionAlreadyRecorded
- */
-export type RequeueMergeVersionAlreadyRecorded = Message<"agentrepl.v1.RequeueMergeVersionAlreadyRecorded"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.RequeueMergeVersionAlreadyRecorded.
- * Use `create(RequeueMergeVersionAlreadyRecordedSchema)` to create a new message.
- */
-export const RequeueMergeVersionAlreadyRecordedSchema: GenMessage<RequeueMergeVersionAlreadyRecorded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 10);
-
-/**
  * The workspace is closed. No fields: the arm is the fact.
  *
  * @generated from message agentrepl.v1.RequeueMergeWorkspaceClosed
@@ -421,7 +361,7 @@ export type RequeueMergeWorkspaceClosed = Message<"agentrepl.v1.RequeueMergeWork
  * Use `create(RequeueMergeWorkspaceClosedSchema)` to create a new message.
  */
 export const RequeueMergeWorkspaceClosedSchema: GenMessage<RequeueMergeWorkspaceClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 11);
+  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 10);
 
 /**
  * The model is not in the login's catalog. No fields: the catalog is the
@@ -437,7 +377,7 @@ export type RequeueMergeNotInCatalog = Message<"agentrepl.v1.RequeueMergeNotInCa
  * Use `create(RequeueMergeNotInCatalogSchema)` to create a new message.
  */
 export const RequeueMergeNotInCatalogSchema: GenMessage<RequeueMergeNotInCatalog> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 12);
+  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 11);
 
 /**
  * The workspace is parked at its cold gate. No fields: the gate is the
@@ -453,5 +393,5 @@ export type RequeueMergeColdGated = Message<"agentrepl.v1.RequeueMergeColdGated"
  * Use `create(RequeueMergeColdGatedSchema)` to create a new message.
  */
 export const RequeueMergeColdGatedSchema: GenMessage<RequeueMergeColdGated> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 13);
+  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 12);
 

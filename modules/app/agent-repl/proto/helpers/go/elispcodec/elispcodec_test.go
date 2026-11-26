@@ -116,8 +116,8 @@ func TestClaims(t *testing.T) {
 }
 
 func TestMismatch(t *testing.T) {
-	asyncMode := (&frontendv1.RosterMergeQueueModeAsync{}).ProtoReflect().Descriptor()
-	mode := (&frontendv1.RosterMergeQueueMode{}).ProtoReflect().Descriptor()
+	waiting := (&frontendv1.FooterChipChildrenWaitingOnUser{}).ProtoReflect().Descriptor()
+	chip := (&frontendv1.FooterChipChildren{}).ProtoReflect().Descriptor()
 	cases := []struct {
 		name       string
 		claim      Claim
@@ -128,41 +128,41 @@ func TestMismatch(t *testing.T) {
 	}{
 		{
 			name:       "the declared fields match",
-			claim:      Claim{File: "f.el", Message: "RosterMergeQueueMode", Fields: []string{"async", "sync"}},
-			candidates: []protoreflect.MessageDescriptor{mode},
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waitingOnUser"}},
+			candidates: []protoreflect.MessageDescriptor{chip},
 			wantMatch:  true,
 		},
 		{
 			name:       "an empty decode of a message with a field is the 2026-11-19 freeze",
-			claim:      Claim{File: "f.el", Message: "RosterMergeQueueModeAsync", Fields: []string{}},
-			candidates: []protoreflect.MessageDescriptor{asyncMode},
-			wantIn:     "lacks [requester]",
+			claim:      Claim{File: "f.el", Message: "FooterChipChildrenWaitingOnUser", Fields: []string{}},
+			candidates: []protoreflect.MessageDescriptor{waiting},
+			wantIn:     "lacks [count]",
 		},
 		{
 			name:       "a retired field the codec still names is extra",
-			claim:      Claim{File: "f.el", Message: "RosterMergeQueueMode", Fields: []string{"async", "sync", "racing"}},
-			candidates: []protoreflect.MessageDescriptor{mode},
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waitingOnUser", "racing"}},
+			candidates: []protoreflect.MessageDescriptor{chip},
 			wantIn:     "names [racing]",
 		},
 		{
 			name:       "one matching package of several is enough",
-			claim:      Claim{File: "f.el", Message: "RosterMergeQueueMode", Fields: []string{"async", "sync"}},
-			candidates: []protoreflect.MessageDescriptor{asyncMode, mode},
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waitingOnUser"}},
+			candidates: []protoreflect.MessageDescriptor{waiting, chip},
 			wantMatch:  true,
 		},
 		{
 			name:       "a narrowed field the codec leaves out still matches",
-			claim:      Claim{File: "f.el", Message: "RosterMergeQueueMode", Fields: []string{"sync"}},
-			candidates: []protoreflect.MessageDescriptor{mode},
-			narrowed:   map[string]bool{"async": true},
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count"}},
+			candidates: []protoreflect.MessageDescriptor{chip},
+			narrowed:   map[string]bool{"waitingOnUser": true},
 			wantMatch:  true,
 		},
 		{
 			name:       "a narrowing excuses only the field it names",
-			claim:      Claim{File: "f.el", Message: "RosterMergeQueueMode", Fields: []string{}},
-			candidates: []protoreflect.MessageDescriptor{mode},
-			narrowed:   map[string]bool{"async": true},
-			wantIn:     "lacks [sync]",
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{}},
+			candidates: []protoreflect.MessageDescriptor{chip},
+			narrowed:   map[string]bool{"waitingOnUser": true},
+			wantIn:     "lacks [count]",
 		},
 		{
 			name:   "a name no proto declares is a mismatch",

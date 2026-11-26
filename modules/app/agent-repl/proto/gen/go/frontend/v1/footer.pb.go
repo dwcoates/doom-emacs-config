@@ -26,7 +26,7 @@
 //                  context window (`--` with no turn in flight), with two
 //                  glyphs; a click target opening the token panel.
 //   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells ·
-//                  ⇄ async merges in flight — each a click target opening its
+//                  ⇄ open children — each a click target opening its
 //                  panel.
 //
 // THE EXPANDED SECTION opens above the strip when a selectable element (the
@@ -49,6 +49,7 @@
 package frontendv1
 
 import (
+	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -14780,12 +14781,9 @@ type FooterLiveWorkChips struct {
 	// ⏱ — live scheduled jobs (cron/wakeup schedules). Set iff at least one
 	// job is scheduled.
 	Crons *FooterChipCrons `protobuf:"bytes,5,opt,name=crons,proto3,oneof" json:"crons,omitempty"`
-	// ⇄ — the ASYNC merges this workspace requested that are still in flight:
-	// queued or merging in their hidden merge workspaces, each drawn as a
-	// bubble in this workspace's feed. Set iff the merges panel holds at least
-	// one row. A SYNC merge has no chip: it is this workspace's own merge, and
-	// the strip's merging status already narrates it.
-	Merges        *FooterChipMerges `protobuf:"bytes,7,opt,name=merges,proto3,oneof" json:"merges,omitempty"`
+	// ⇄ — this workspace's OPEN children. Set iff the children panel holds at
+	// least one row.
+	Children      *FooterChipChildren `protobuf:"bytes,8,opt,name=children,proto3,oneof" json:"children,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14855,41 +14853,42 @@ func (x *FooterLiveWorkChips) GetCrons() *FooterChipCrons {
 	return nil
 }
 
-func (x *FooterLiveWorkChips) GetMerges() *FooterChipMerges {
+func (x *FooterLiveWorkChips) GetChildren() *FooterChipChildren {
 	if x != nil {
-		return x.Merges
+		return x.Children
 	}
 	return nil
 }
 
-// The merges chip's props.
-type FooterChipMerges struct {
+// The children chip's props.
+type FooterChipChildren struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// How many merge rows the merges panel holds. At least 1 when this chip is
+	// How many rows the children panel holds. At least 1 when this chip is
 	// set (a zero-count chip is expressed by leaving the chip unset).
 	Count uint32 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
 	// The waiting-on-you glyph, drawn beside the count. SET iff at least one
-	// merges-panel row is waiting on the user, so a merge held on a question in
-	// its hidden workspace is visible on the strip without opening the panel.
-	WaitingOnUser *FooterChipMergesWaitingOnUser `protobuf:"bytes,2,opt,name=waiting_on_user,json=waitingOnUser,proto3,oneof" json:"waiting_on_user,omitempty"`
+	// open child is waiting on the user (a permission or a question), so a
+	// child held on a question is visible on the strip without opening the
+	// panel.
+	WaitingOnUser *FooterChipChildrenWaitingOnUser `protobuf:"bytes,2,opt,name=waiting_on_user,json=waitingOnUser,proto3,oneof" json:"waiting_on_user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterChipMerges) Reset() {
-	*x = FooterChipMerges{}
+func (x *FooterChipChildren) Reset() {
+	*x = FooterChipChildren{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterChipMerges) String() string {
+func (x *FooterChipChildren) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterChipMerges) ProtoMessage() {}
+func (*FooterChipChildren) ProtoMessage() {}
 
-func (x *FooterChipMerges) ProtoReflect() protoreflect.Message {
+func (x *FooterChipChildren) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -14901,49 +14900,49 @@ func (x *FooterChipMerges) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterChipMerges.ProtoReflect.Descriptor instead.
-func (*FooterChipMerges) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterChipChildren.ProtoReflect.Descriptor instead.
+func (*FooterChipChildren) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{212}
 }
 
-func (x *FooterChipMerges) GetCount() uint32 {
+func (x *FooterChipChildren) GetCount() uint32 {
 	if x != nil {
 		return x.Count
 	}
 	return 0
 }
 
-func (x *FooterChipMerges) GetWaitingOnUser() *FooterChipMergesWaitingOnUser {
+func (x *FooterChipChildren) GetWaitingOnUser() *FooterChipChildrenWaitingOnUser {
 	if x != nil {
 		return x.WaitingOnUser
 	}
 	return nil
 }
 
-// The merges chip's waiting-on-you glyph.
-type FooterChipMergesWaitingOnUser struct {
+// The children chip's waiting-on-you glyph.
+type FooterChipChildrenWaitingOnUser struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// How many of the panel's rows are waiting on the user. At least 1 when
-	// the glyph is set.
+	// How many open children are waiting on the user. At least 1 when the
+	// glyph is set.
 	Count         uint32 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterChipMergesWaitingOnUser) Reset() {
-	*x = FooterChipMergesWaitingOnUser{}
+func (x *FooterChipChildrenWaitingOnUser) Reset() {
+	*x = FooterChipChildrenWaitingOnUser{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterChipMergesWaitingOnUser) String() string {
+func (x *FooterChipChildrenWaitingOnUser) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterChipMergesWaitingOnUser) ProtoMessage() {}
+func (*FooterChipChildrenWaitingOnUser) ProtoMessage() {}
 
-func (x *FooterChipMergesWaitingOnUser) ProtoReflect() protoreflect.Message {
+func (x *FooterChipChildrenWaitingOnUser) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -14955,12 +14954,12 @@ func (x *FooterChipMergesWaitingOnUser) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterChipMergesWaitingOnUser.ProtoReflect.Descriptor instead.
-func (*FooterChipMergesWaitingOnUser) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterChipChildrenWaitingOnUser.ProtoReflect.Descriptor instead.
+func (*FooterChipChildrenWaitingOnUser) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{213}
 }
 
-func (x *FooterChipMergesWaitingOnUser) GetCount() uint32 {
+func (x *FooterChipChildrenWaitingOnUser) GetCount() uint32 {
 	if x != nil {
 		return x.Count
 	}
@@ -15294,8 +15293,8 @@ type FooterExpanded struct {
 	Monitors *FooterExpandedMonitors `protobuf:"bytes,5,opt,name=monitors,proto3" json:"monitors,omitempty"`
 	// The scheduled jobs — the ⏱ chip's expansion.
 	Crons *FooterExpandedCrons `protobuf:"bytes,6,opt,name=crons,proto3" json:"crons,omitempty"`
-	// The async merges in flight — the ⇄ chip's expansion.
-	Merges        *FooterExpandedMerges `protobuf:"bytes,8,opt,name=merges,proto3" json:"merges,omitempty"`
+	// The open children — the ⇄ chip's expansion.
+	Children      *FooterExpandedChildren `protobuf:"bytes,9,opt,name=children,proto3" json:"children,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -15372,9 +15371,9 @@ func (x *FooterExpanded) GetCrons() *FooterExpandedCrons {
 	return nil
 }
 
-func (x *FooterExpanded) GetMerges() *FooterExpandedMerges {
+func (x *FooterExpanded) GetChildren() *FooterExpandedChildren {
 	if x != nil {
-		return x.Merges
+		return x.Children
 	}
 	return nil
 }
@@ -16142,43 +16141,38 @@ func (x *FooterWakeupRowWakeAt) GetWakeAtMs() int64 {
 	return 0
 }
 
-// The ⇄ panel: one row per ASYNC merge this workspace requested that is still
-// in flight. Each row is a jump row (`FooterJump`) to the merge's bubble head
-// in this workspace's feed. A TRUE LIST, like the agents panel.
-//
-// THE ROWS ARE THE FEED'S MERGE BUBBLES, READ BACK. The daemon resolves them
-// from the very rows the feed draws for each async merge — its head on the
-// root feed and the top-level tabs on its sub-feed (frontend.v1.FeedMerge,
-// frontend.v1.FeedMergeTab) — so the panel and the bubbles can never
-// disagree. A row JOINS when the feed draws an async head still in flight
-// (`frontend.v1.FeedMerge.update`), and LEAVES when that head carries a result
-// (landed, failed or abandoned) or the feed retires it. Nothing here focuses
-// the expanded section (FooterExpandedFocus): a merge is not detached work the
+// The ⇄ panel: one row per OPEN child of this workspace, in the order the
+// children were created, oldest first. A TRUE LIST, like the agents panel.
+// A child joins when it is created or reopened, and leaves the moment it is
+// no longer open (landed, closed or removed); a child that is not open is
+// listed in the topbar summary's children menu instead
+// (frontend.v1.TopbarTitleChildMenu), so every child is in exactly one of
+// the two. A row's click selects the child. Nothing here focuses the
+// expanded section (FooterExpandedFocus): a child is not detached work the
 // agent launched into this turn.
-type FooterExpandedMerges struct {
+type FooterExpandedChildren struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The rows, in the order the feed first drew each merge's head. Empty when
-	// no async merge is in flight — the chip is then unset and the panel
-	// unreachable.
-	Rows          []*FooterMergeRow `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
+	// The rows. Empty when the workspace has no open child — the chip is then
+	// unset and the panel unreachable.
+	Rows          []*FooterChildRow `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterExpandedMerges) Reset() {
-	*x = FooterExpandedMerges{}
+func (x *FooterExpandedChildren) Reset() {
+	*x = FooterExpandedChildren{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[235]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterExpandedMerges) String() string {
+func (x *FooterExpandedChildren) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterExpandedMerges) ProtoMessage() {}
+func (*FooterExpandedChildren) ProtoMessage() {}
 
-func (x *FooterExpandedMerges) ProtoReflect() protoreflect.Message {
+func (x *FooterExpandedChildren) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[235]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -16190,61 +16184,49 @@ func (x *FooterExpandedMerges) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterExpandedMerges.ProtoReflect.Descriptor instead.
-func (*FooterExpandedMerges) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterExpandedChildren.ProtoReflect.Descriptor instead.
+func (*FooterExpandedChildren) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{235}
 }
 
-func (x *FooterExpandedMerges) GetRows() []*FooterMergeRow {
+func (x *FooterExpandedChildren) GetRows() []*FooterChildRow {
 	if x != nil {
 		return x.Rows
 	}
 	return nil
 }
 
-// One async merge's line: ⇄ · branch line · step · (waiting on you) · clock · ▸.
-type FooterMergeRow struct {
+// One open child's line: ⇄ · name · status · short summary.
+type FooterChildRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The bubble head's branch line ("fix-flaky → master"), composed by the
-	// daemon from the head's source and target (frontend.v1.FeedMergeBranchLine)
-	// and drawn verbatim.
-	Label *FooterMergeRowLabel `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
-	// The step the merge stands on: the bubble's CURRENT top-level tab — the
-	// newest one still live, else the newest one drawn. UNSET while the bubble
-	// has drawn no tab yet; the row then draws without a step.
-	Step *FooterMergeRowStep `protobuf:"bytes,2,opt,name=step,proto3,oneof" json:"step,omitempty"`
-	// The row's clock, the bubble head's own (frontend.v1.FeedMergeRuntime):
-	// from the enqueue while the merge waits in the queue, from its admission
-	// once it runs. The client ticks from the instant.
-	Runtime *FooterMergeRowRuntime `protobuf:"bytes,3,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	// Which merge this row is: the merge's ledger id, the key of its bubble's
-	// head row and sub-feed. NOT DRAWN in the footer; see FooterWorkId.
-	Work *FooterWorkId `protobuf:"bytes,4,opt,name=work,proto3" json:"work,omitempty"`
-	// Where a click on the row lands: always the bubble head's `entry`, since
-	// the row is resolved from the head the feed drew. See FooterJump.
-	Jump *FooterJump `protobuf:"bytes,5,opt,name=jump,proto3" json:"jump,omitempty"`
-	// The waiting-on-you marker. PRESENT iff the current tab is drawn waiting
-	// on the user (frontend.v1.FeedMergeTabWaitingOnUser): the merge
-	// workspace's session has a permission ask or a question batch open.
-	WaitingOnUser *FooterMergeRowWaitingOnUser `protobuf:"bytes,6,opt,name=waiting_on_user,json=waitingOnUser,proto3,oneof" json:"waiting_on_user,omitempty"`
+	// The child's name, drawn verbatim in the canonical purple.
+	Name *FooterChildRowName `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The child's status: the same word and canonical color its sidebar row
+	// draws, resolved by the daemon from the one status ladder the roster
+	// projects.
+	Status *FooterChildRowStatus `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	// The child's short summary. UNSET until the child's agent has set one.
+	ShortSummary *FooterChildRowShortSummary `protobuf:"bytes,3,opt,name=short_summary,json=shortSummary,proto3,oneof" json:"short_summary,omitempty"`
+	// What a click on the row does: selects the child.
+	Select        *FooterChildRowSelect `protobuf:"bytes,4,opt,name=select,proto3" json:"select,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterMergeRow) Reset() {
-	*x = FooterMergeRow{}
+func (x *FooterChildRow) Reset() {
+	*x = FooterChildRow{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[236]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterMergeRow) String() string {
+func (x *FooterChildRow) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterMergeRow) ProtoMessage() {}
+func (*FooterChildRow) ProtoMessage() {}
 
-func (x *FooterMergeRow) ProtoReflect() protoreflect.Message {
+func (x *FooterChildRow) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[236]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -16256,76 +16238,62 @@ func (x *FooterMergeRow) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterMergeRow.ProtoReflect.Descriptor instead.
-func (*FooterMergeRow) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterChildRow.ProtoReflect.Descriptor instead.
+func (*FooterChildRow) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{236}
 }
 
-func (x *FooterMergeRow) GetLabel() *FooterMergeRowLabel {
+func (x *FooterChildRow) GetName() *FooterChildRowName {
 	if x != nil {
-		return x.Label
+		return x.Name
 	}
 	return nil
 }
 
-func (x *FooterMergeRow) GetStep() *FooterMergeRowStep {
+func (x *FooterChildRow) GetStatus() *FooterChildRowStatus {
 	if x != nil {
-		return x.Step
+		return x.Status
 	}
 	return nil
 }
 
-func (x *FooterMergeRow) GetRuntime() *FooterMergeRowRuntime {
+func (x *FooterChildRow) GetShortSummary() *FooterChildRowShortSummary {
 	if x != nil {
-		return x.Runtime
+		return x.ShortSummary
 	}
 	return nil
 }
 
-func (x *FooterMergeRow) GetWork() *FooterWorkId {
+func (x *FooterChildRow) GetSelect() *FooterChildRowSelect {
 	if x != nil {
-		return x.Work
+		return x.Select
 	}
 	return nil
 }
 
-func (x *FooterMergeRow) GetJump() *FooterJump {
-	if x != nil {
-		return x.Jump
-	}
-	return nil
-}
-
-func (x *FooterMergeRow) GetWaitingOnUser() *FooterMergeRowWaitingOnUser {
-	if x != nil {
-		return x.WaitingOnUser
-	}
-	return nil
-}
-
-// The row's branch line element.
-type FooterMergeRowLabel struct {
+// The row's name element.
+type FooterChildRowName struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The text, drawn verbatim.
+	// The child's workspace name, drawn verbatim.
 	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterMergeRowLabel) Reset() {
-	*x = FooterMergeRowLabel{}
+func (x *FooterChildRowName) Reset() {
+	*x = FooterChildRowName{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[237]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterMergeRowLabel) String() string {
+func (x *FooterChildRowName) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterMergeRowLabel) ProtoMessage() {}
+func (*FooterChildRowName) ProtoMessage() {}
 
-func (x *FooterMergeRowLabel) ProtoReflect() protoreflect.Message {
+func (x *FooterChildRowName) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[237]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -16337,43 +16305,99 @@ func (x *FooterMergeRowLabel) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterMergeRowLabel.ProtoReflect.Descriptor instead.
-func (*FooterMergeRowLabel) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterChildRowName.ProtoReflect.Descriptor instead.
+func (*FooterChildRowName) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{237}
 }
 
-func (x *FooterMergeRowLabel) GetText() string {
+func (x *FooterChildRowName) GetText() string {
 	if x != nil {
 		return x.Text
 	}
 	return ""
 }
 
-// The row's step element.
-type FooterMergeRowStep struct {
+// The row's status element.
+type FooterChildRowStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The current tab's words with its round, daemon-composed ("queue",
-	// "tests", "committing (2)"), drawn verbatim.
+	// The status word ("working", "idle", "merging"), daemon-composed and
+	// drawn verbatim.
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// A color name from proto/vocab/render-colors.json's `colors` section; the
+	// client paints that color's token and holds no table.
+	Tone          string `protobuf:"bytes,2,opt,name=tone,proto3" json:"tone,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterChildRowStatus) Reset() {
+	*x = FooterChildRowStatus{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[238]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterChildRowStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterChildRowStatus) ProtoMessage() {}
+
+func (x *FooterChildRowStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[238]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterChildRowStatus.ProtoReflect.Descriptor instead.
+func (*FooterChildRowStatus) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{238}
+}
+
+func (x *FooterChildRowStatus) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *FooterChildRowStatus) GetTone() string {
+	if x != nil {
+		return x.Tone
+	}
+	return ""
+}
+
+// The row's short summary element.
+type FooterChildRowShortSummary struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Drawn verbatim.
 	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterMergeRowStep) Reset() {
-	*x = FooterMergeRowStep{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[238]
+func (x *FooterChildRowShortSummary) Reset() {
+	*x = FooterChildRowShortSummary{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[239]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterMergeRowStep) String() string {
+func (x *FooterChildRowShortSummary) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterMergeRowStep) ProtoMessage() {}
+func (*FooterChildRowShortSummary) ProtoMessage() {}
 
-func (x *FooterMergeRowStep) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[238]
+func (x *FooterChildRowShortSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[239]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16384,85 +16408,42 @@ func (x *FooterMergeRowStep) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterMergeRowStep.ProtoReflect.Descriptor instead.
-func (*FooterMergeRowStep) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{238}
+// Deprecated: Use FooterChildRowShortSummary.ProtoReflect.Descriptor instead.
+func (*FooterChildRowShortSummary) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{239}
 }
 
-func (x *FooterMergeRowStep) GetText() string {
+func (x *FooterChildRowShortSummary) GetText() string {
 	if x != nil {
 		return x.Text
 	}
 	return ""
 }
 
-// The row's clock element.
-type FooterMergeRowRuntime struct {
+// A click on the row selects the child: agentrepl.v1.SelectWorkspace with
+// `target`, the same switch the sidebar row makes.
+type FooterChildRowSelect struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The bubble head's clock instant, epoch ms.
-	StartedAtMs   int64 `protobuf:"varint,1,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	// The child, echoed verbatim on the click.
+	Target        *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterMergeRowRuntime) Reset() {
-	*x = FooterMergeRowRuntime{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[239]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FooterMergeRowRuntime) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FooterMergeRowRuntime) ProtoMessage() {}
-
-func (x *FooterMergeRowRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[239]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FooterMergeRowRuntime.ProtoReflect.Descriptor instead.
-func (*FooterMergeRowRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{239}
-}
-
-func (x *FooterMergeRowRuntime) GetStartedAtMs() int64 {
-	if x != nil {
-		return x.StartedAtMs
-	}
-	return 0
-}
-
-// The waiting-on-you marker. Empty: presence is the marker.
-type FooterMergeRowWaitingOnUser struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FooterMergeRowWaitingOnUser) Reset() {
-	*x = FooterMergeRowWaitingOnUser{}
+func (x *FooterChildRowSelect) Reset() {
+	*x = FooterChildRowSelect{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[240]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterMergeRowWaitingOnUser) String() string {
+func (x *FooterChildRowSelect) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterMergeRowWaitingOnUser) ProtoMessage() {}
+func (*FooterChildRowSelect) ProtoMessage() {}
 
-func (x *FooterMergeRowWaitingOnUser) ProtoReflect() protoreflect.Message {
+func (x *FooterChildRowSelect) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[240]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -16474,9 +16455,16 @@ func (x *FooterMergeRowWaitingOnUser) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterMergeRowWaitingOnUser.ProtoReflect.Descriptor instead.
-func (*FooterMergeRowWaitingOnUser) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterChildRowSelect.ProtoReflect.Descriptor instead.
+func (*FooterChildRowSelect) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{240}
+}
+
+func (x *FooterChildRowSelect) GetTarget() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Target
+	}
+	return nil
 }
 
 // The 👁 panel: one row per live monitor.
@@ -19519,7 +19507,7 @@ var File_frontend_v1_footer_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\n" +
-	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cfrontend/v1/token_heat.proto\"\xbc\x01\n" +
+	"\x18frontend/v1/footer.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cfrontend/v1/token_heat.proto\x1a\x1cworkspace/v1/workspace.proto\"\xbc\x01\n" +
 	"\n" +
 	"FooterView\x12.\n" +
 	"\x05strip\x18\x01 \x01(\v2\x18.frontend.v1.FooterStripR\x05strip\x127\n" +
@@ -20264,25 +20252,25 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\averdict\"!\n" +
 	"\x1fFooterTokensCellVerdictComplete\"#\n" +
 	"!FooterTokensCellVerdictIncomplete\" \n" +
-	"\x1eFooterTokensCellVerdictInvalid\"\xd2\x03\n" +
+	"\x1eFooterTokensCellVerdictInvalid\"\xe8\x03\n" +
 	"\x13FooterLiveWorkChips\x12:\n" +
 	"\x06agents\x18\x01 \x01(\v2\x1d.frontend.v1.FooterChipAgentsH\x00R\x06agents\x88\x01\x01\x127\n" +
 	"\x05tasks\x18\x02 \x01(\v2\x1c.frontend.v1.FooterChipTasksH\x01R\x05tasks\x88\x01\x01\x12:\n" +
 	"\x06shells\x18\x03 \x01(\v2\x1d.frontend.v1.FooterChipShellsH\x02R\x06shells\x88\x01\x01\x12@\n" +
 	"\bmonitors\x18\x04 \x01(\v2\x1f.frontend.v1.FooterChipMonitorsH\x03R\bmonitors\x88\x01\x01\x127\n" +
-	"\x05crons\x18\x05 \x01(\v2\x1c.frontend.v1.FooterChipCronsH\x04R\x05crons\x88\x01\x01\x12:\n" +
-	"\x06merges\x18\a \x01(\v2\x1d.frontend.v1.FooterChipMergesH\x05R\x06merges\x88\x01\x01B\t\n" +
+	"\x05crons\x18\x05 \x01(\v2\x1c.frontend.v1.FooterChipCronsH\x04R\x05crons\x88\x01\x01\x12@\n" +
+	"\bchildren\x18\b \x01(\v2\x1f.frontend.v1.FooterChipChildrenH\x05R\bchildren\x88\x01\x01B\t\n" +
 	"\a_agentsB\b\n" +
 	"\x06_tasksB\t\n" +
 	"\a_shellsB\v\n" +
 	"\t_monitorsB\b\n" +
-	"\x06_cronsB\t\n" +
-	"\a_mergesJ\x04\b\x06\x10\aR\vmerge_tests\"\x95\x01\n" +
-	"\x10FooterChipMerges\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\rR\x05count\x12W\n" +
-	"\x0fwaiting_on_user\x18\x02 \x01(\v2*.frontend.v1.FooterChipMergesWaitingOnUserH\x00R\rwaitingOnUser\x88\x01\x01B\x12\n" +
-	"\x10_waiting_on_user\"5\n" +
-	"\x1dFooterChipMergesWaitingOnUser\x12\x14\n" +
+	"\x06_cronsB\v\n" +
+	"\t_childrenJ\x04\b\x06\x10\aJ\x04\b\a\x10\bR\vmerge_testsR\x06merges\"\x99\x01\n" +
+	"\x12FooterChipChildren\x12\x14\n" +
+	"\x05count\x18\x01 \x01(\rR\x05count\x12Y\n" +
+	"\x0fwaiting_on_user\x18\x02 \x01(\v2,.frontend.v1.FooterChipChildrenWaitingOnUserH\x00R\rwaitingOnUser\x88\x01\x01B\x12\n" +
+	"\x10_waiting_on_user\"7\n" +
+	"\x1fFooterChipChildrenWaitingOnUser\x12\x14\n" +
 	"\x05count\x18\x01 \x01(\rR\x05count\"'\n" +
 	"\x0fFooterChipCrons\x12\x14\n" +
 	"\x05count\x18\x01 \x01(\rR\x05count\"*\n" +
@@ -20298,15 +20286,15 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x04done\x18\x01 \x01(\rR\x04done\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\rR\x05total\"(\n" +
 	"\x10FooterChipShells\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\rR\x05count\"\xc0\x03\n" +
+	"\x05count\x18\x01 \x01(\rR\x05count\"\xd4\x03\n" +
 	"\x0eFooterExpanded\x129\n" +
 	"\x06tokens\x18\x01 \x01(\v2!.frontend.v1.FooterExpandedTokensR\x06tokens\x129\n" +
 	"\x06agents\x18\x02 \x01(\v2!.frontend.v1.FooterExpandedAgentsR\x06agents\x126\n" +
 	"\x05tasks\x18\x03 \x01(\v2 .frontend.v1.FooterExpandedTasksR\x05tasks\x129\n" +
 	"\x06shells\x18\x04 \x01(\v2!.frontend.v1.FooterExpandedShellsR\x06shells\x12?\n" +
 	"\bmonitors\x18\x05 \x01(\v2#.frontend.v1.FooterExpandedMonitorsR\bmonitors\x126\n" +
-	"\x05crons\x18\x06 \x01(\v2 .frontend.v1.FooterExpandedCronsR\x05crons\x129\n" +
-	"\x06merges\x18\b \x01(\v2!.frontend.v1.FooterExpandedMergesR\x06mergesJ\x04\b\a\x10\bR\vmerge_tests\"\x85\x02\n" +
+	"\x05crons\x18\x06 \x01(\v2 .frontend.v1.FooterExpandedCronsR\x05crons\x12?\n" +
+	"\bchildren\x18\t \x01(\v2#.frontend.v1.FooterExpandedChildrenR\bchildrenJ\x04\b\a\x10\bJ\x04\b\b\x10\tR\vmerge_testsR\x06merges\"\x85\x02\n" +
 	"\x13FooterExpandedFocus\x128\n" +
 	"\x06agents\x18\x01 \x01(\v2\x1e.frontend.v1.FooterFocusAgentsH\x00R\x06agents\x128\n" +
 	"\x06shells\x18\x02 \x01(\v2\x1e.frontend.v1.FooterFocusShellsH\x00R\x06shells\x12>\n" +
@@ -20353,25 +20341,24 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"5\n" +
 	"\x15FooterWakeupRowWakeAt\x12\x1c\n" +
 	"\n" +
-	"wake_at_ms\x18\x01 \x01(\x03R\bwakeAtMs\"G\n" +
-	"\x14FooterExpandedMerges\x12/\n" +
-	"\x04rows\x18\x01 \x03(\v2\x1b.frontend.v1.FooterMergeRowR\x04rows\"\x90\x03\n" +
-	"\x0eFooterMergeRow\x126\n" +
-	"\x05label\x18\x01 \x01(\v2 .frontend.v1.FooterMergeRowLabelR\x05label\x128\n" +
-	"\x04step\x18\x02 \x01(\v2\x1f.frontend.v1.FooterMergeRowStepH\x00R\x04step\x88\x01\x01\x12<\n" +
-	"\aruntime\x18\x03 \x01(\v2\".frontend.v1.FooterMergeRowRuntimeR\aruntime\x12-\n" +
-	"\x04work\x18\x04 \x01(\v2\x19.frontend.v1.FooterWorkIdR\x04work\x12+\n" +
-	"\x04jump\x18\x05 \x01(\v2\x17.frontend.v1.FooterJumpR\x04jump\x12U\n" +
-	"\x0fwaiting_on_user\x18\x06 \x01(\v2(.frontend.v1.FooterMergeRowWaitingOnUserH\x01R\rwaitingOnUser\x88\x01\x01B\a\n" +
-	"\x05_stepB\x12\n" +
-	"\x10_waiting_on_user\")\n" +
-	"\x13FooterMergeRowLabel\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"(\n" +
-	"\x12FooterMergeRowStep\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\";\n" +
-	"\x15FooterMergeRowRuntime\x12\"\n" +
-	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"\x1d\n" +
-	"\x1bFooterMergeRowWaitingOnUser\"K\n" +
+	"wake_at_ms\x18\x01 \x01(\x03R\bwakeAtMs\"I\n" +
+	"\x16FooterExpandedChildren\x12/\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1b.frontend.v1.FooterChildRowR\x04rows\"\xa0\x02\n" +
+	"\x0eFooterChildRow\x123\n" +
+	"\x04name\x18\x01 \x01(\v2\x1f.frontend.v1.FooterChildRowNameR\x04name\x129\n" +
+	"\x06status\x18\x02 \x01(\v2!.frontend.v1.FooterChildRowStatusR\x06status\x12Q\n" +
+	"\rshort_summary\x18\x03 \x01(\v2'.frontend.v1.FooterChildRowShortSummaryH\x00R\fshortSummary\x88\x01\x01\x129\n" +
+	"\x06select\x18\x04 \x01(\v2!.frontend.v1.FooterChildRowSelectR\x06selectB\x10\n" +
+	"\x0e_short_summary\"(\n" +
+	"\x12FooterChildRowName\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\">\n" +
+	"\x14FooterChildRowStatus\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
+	"\x04tone\x18\x02 \x01(\tR\x04tone\"0\n" +
+	"\x1aFooterChildRowShortSummary\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"J\n" +
+	"\x14FooterChildRowSelect\x122\n" +
+	"\x06target\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06target\"K\n" +
 	"\x16FooterExpandedMonitors\x121\n" +
 	"\x04rows\x18\x01 \x03(\v2\x1d.frontend.v1.FooterMonitorRowR\x04rows\"\xd7\x02\n" +
 	"\x10FooterMonitorRow\x12J\n" +
@@ -20782,8 +20769,8 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterTokensCellVerdictIncomplete)(nil),             // 210: frontend.v1.FooterTokensCellVerdictIncomplete
 	(*FooterTokensCellVerdictInvalid)(nil),                // 211: frontend.v1.FooterTokensCellVerdictInvalid
 	(*FooterLiveWorkChips)(nil),                           // 212: frontend.v1.FooterLiveWorkChips
-	(*FooterChipMerges)(nil),                              // 213: frontend.v1.FooterChipMerges
-	(*FooterChipMergesWaitingOnUser)(nil),                 // 214: frontend.v1.FooterChipMergesWaitingOnUser
+	(*FooterChipChildren)(nil),                            // 213: frontend.v1.FooterChipChildren
+	(*FooterChipChildrenWaitingOnUser)(nil),               // 214: frontend.v1.FooterChipChildrenWaitingOnUser
 	(*FooterChipCrons)(nil),                               // 215: frontend.v1.FooterChipCrons
 	(*FooterChipMonitors)(nil),                            // 216: frontend.v1.FooterChipMonitors
 	(*FooterChipAgents)(nil),                              // 217: frontend.v1.FooterChipAgents
@@ -20805,12 +20792,12 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterWakeupRow)(nil),                               // 233: frontend.v1.FooterWakeupRow
 	(*FooterWakeupRowReason)(nil),                         // 234: frontend.v1.FooterWakeupRowReason
 	(*FooterWakeupRowWakeAt)(nil),                         // 235: frontend.v1.FooterWakeupRowWakeAt
-	(*FooterExpandedMerges)(nil),                          // 236: frontend.v1.FooterExpandedMerges
-	(*FooterMergeRow)(nil),                                // 237: frontend.v1.FooterMergeRow
-	(*FooterMergeRowLabel)(nil),                           // 238: frontend.v1.FooterMergeRowLabel
-	(*FooterMergeRowStep)(nil),                            // 239: frontend.v1.FooterMergeRowStep
-	(*FooterMergeRowRuntime)(nil),                         // 240: frontend.v1.FooterMergeRowRuntime
-	(*FooterMergeRowWaitingOnUser)(nil),                   // 241: frontend.v1.FooterMergeRowWaitingOnUser
+	(*FooterExpandedChildren)(nil),                        // 236: frontend.v1.FooterExpandedChildren
+	(*FooterChildRow)(nil),                                // 237: frontend.v1.FooterChildRow
+	(*FooterChildRowName)(nil),                            // 238: frontend.v1.FooterChildRowName
+	(*FooterChildRowStatus)(nil),                          // 239: frontend.v1.FooterChildRowStatus
+	(*FooterChildRowShortSummary)(nil),                    // 240: frontend.v1.FooterChildRowShortSummary
+	(*FooterChildRowSelect)(nil),                          // 241: frontend.v1.FooterChildRowSelect
 	(*FooterExpandedMonitors)(nil),                        // 242: frontend.v1.FooterExpandedMonitors
 	(*FooterMonitorRow)(nil),                              // 243: frontend.v1.FooterMonitorRow
 	(*FooterMonitorRowDescription)(nil),                   // 244: frontend.v1.FooterMonitorRowDescription
@@ -20863,7 +20850,8 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterStatusActivityNetworkOffline)(nil),            // 291: frontend.v1.FooterStatusActivityNetworkOffline
 	(*FooterStatusActivityNetworkOfflineRetry)(nil),       // 292: frontend.v1.FooterStatusActivityNetworkOfflineRetry
 	(*TokenHeat)(nil),                                     // 293: frontend.v1.TokenHeat
-	(*FeedId)(nil),                                        // 294: frontend.v1.FeedId
+	(*v1.WorkspaceRef)(nil),                               // 294: workspace.v1.WorkspaceRef
+	(*FeedId)(nil),                                        // 295: frontend.v1.FeedId
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	2,   // 0: frontend.v1.FooterView.strip:type_name -> frontend.v1.FooterStrip
@@ -21162,8 +21150,8 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	220, // 293: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
 	216, // 294: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
 	215, // 295: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
-	213, // 296: frontend.v1.FooterLiveWorkChips.merges:type_name -> frontend.v1.FooterChipMerges
-	214, // 297: frontend.v1.FooterChipMerges.waiting_on_user:type_name -> frontend.v1.FooterChipMergesWaitingOnUser
+	213, // 296: frontend.v1.FooterLiveWorkChips.children:type_name -> frontend.v1.FooterChipChildren
+	214, // 297: frontend.v1.FooterChipChildren.waiting_on_user:type_name -> frontend.v1.FooterChipChildrenWaitingOnUser
 	218, // 298: frontend.v1.FooterChipAgents.waiting_for_api:type_name -> frontend.v1.FooterChipAgentsWaitingForApi
 	247, // 299: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
 	262, // 300: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
@@ -21171,7 +21159,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	279, // 302: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
 	242, // 303: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
 	226, // 304: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
-	236, // 305: frontend.v1.FooterExpanded.merges:type_name -> frontend.v1.FooterExpandedMerges
+	236, // 305: frontend.v1.FooterExpanded.children:type_name -> frontend.v1.FooterExpandedChildren
 	223, // 306: frontend.v1.FooterExpandedFocus.agents:type_name -> frontend.v1.FooterFocusAgents
 	224, // 307: frontend.v1.FooterExpandedFocus.shells:type_name -> frontend.v1.FooterFocusShells
 	225, // 308: frontend.v1.FooterExpandedFocus.monitors:type_name -> frontend.v1.FooterFocusMonitors
@@ -21184,76 +21172,75 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	232, // 315: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
 	234, // 316: frontend.v1.FooterWakeupRow.reason:type_name -> frontend.v1.FooterWakeupRowReason
 	235, // 317: frontend.v1.FooterWakeupRow.wake_at:type_name -> frontend.v1.FooterWakeupRowWakeAt
-	237, // 318: frontend.v1.FooterExpandedMerges.rows:type_name -> frontend.v1.FooterMergeRow
-	238, // 319: frontend.v1.FooterMergeRow.label:type_name -> frontend.v1.FooterMergeRowLabel
-	239, // 320: frontend.v1.FooterMergeRow.step:type_name -> frontend.v1.FooterMergeRowStep
-	240, // 321: frontend.v1.FooterMergeRow.runtime:type_name -> frontend.v1.FooterMergeRowRuntime
-	281, // 322: frontend.v1.FooterMergeRow.work:type_name -> frontend.v1.FooterWorkId
-	282, // 323: frontend.v1.FooterMergeRow.jump:type_name -> frontend.v1.FooterJump
-	241, // 324: frontend.v1.FooterMergeRow.waiting_on_user:type_name -> frontend.v1.FooterMergeRowWaitingOnUser
-	243, // 325: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
-	244, // 326: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
-	245, // 327: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
-	246, // 328: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
-	281, // 329: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
-	282, // 330: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
-	251, // 331: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
-	252, // 332: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	253, // 333: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	254, // 334: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
-	255, // 335: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
-	256, // 336: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
-	257, // 337: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
-	258, // 338: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
-	248, // 339: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
-	250, // 340: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
-	249, // 341: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
-	251, // 342: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
-	252, // 343: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	253, // 344: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	254, // 345: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
-	259, // 346: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
-	260, // 347: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
-	261, // 348: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
-	263, // 349: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
-	267, // 350: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
-	268, // 351: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
-	269, // 352: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
-	270, // 353: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
-	281, // 354: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
-	282, // 355: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
-	265, // 356: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
-	266, // 357: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
-	264, // 358: frontend.v1.FooterAgentRow.model:type_name -> frontend.v1.FooterAgentRowModel
-	272, // 359: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
-	274, // 360: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
-	273, // 361: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
-	275, // 362: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
-	276, // 363: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
-	278, // 364: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
-	277, // 365: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
-	280, // 366: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
-	285, // 367: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
-	286, // 368: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
-	281, // 369: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
-	282, // 370: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
-	294, // 371: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
-	283, // 372: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
-	284, // 373: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
-	288, // 374: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
-	289, // 375: frontend.v1.FooterStatusNetworkFault.activity:type_name -> frontend.v1.FooterStatusNetworkFaultActivity
-	290, // 376: frontend.v1.FooterStatusNetworkFaultActivity.salient:type_name -> frontend.v1.FooterStatusNetworkFaultSalient
-	173, // 377: frontend.v1.FooterStatusNetworkFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	162, // 378: frontend.v1.FooterStatusNetworkFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	291, // 379: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
-	115, // 380: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	172, // 381: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	292, // 382: frontend.v1.FooterStatusActivityNetworkOffline.retry:type_name -> frontend.v1.FooterStatusActivityNetworkOfflineRetry
-	383, // [383:383] is the sub-list for method output_type
-	383, // [383:383] is the sub-list for method input_type
-	383, // [383:383] is the sub-list for extension type_name
-	383, // [383:383] is the sub-list for extension extendee
-	0,   // [0:383] is the sub-list for field type_name
+	237, // 318: frontend.v1.FooterExpandedChildren.rows:type_name -> frontend.v1.FooterChildRow
+	238, // 319: frontend.v1.FooterChildRow.name:type_name -> frontend.v1.FooterChildRowName
+	239, // 320: frontend.v1.FooterChildRow.status:type_name -> frontend.v1.FooterChildRowStatus
+	240, // 321: frontend.v1.FooterChildRow.short_summary:type_name -> frontend.v1.FooterChildRowShortSummary
+	241, // 322: frontend.v1.FooterChildRow.select:type_name -> frontend.v1.FooterChildRowSelect
+	294, // 323: frontend.v1.FooterChildRowSelect.target:type_name -> workspace.v1.WorkspaceRef
+	243, // 324: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
+	244, // 325: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
+	245, // 326: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
+	246, // 327: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
+	281, // 328: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
+	282, // 329: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
+	251, // 330: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
+	252, // 331: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	253, // 332: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	254, // 333: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
+	255, // 334: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
+	256, // 335: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
+	257, // 336: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
+	258, // 337: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
+	248, // 338: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
+	250, // 339: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
+	249, // 340: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
+	251, // 341: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
+	252, // 342: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	253, // 343: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	254, // 344: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
+	259, // 345: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
+	260, // 346: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
+	261, // 347: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
+	263, // 348: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
+	267, // 349: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
+	268, // 350: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
+	269, // 351: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
+	270, // 352: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
+	281, // 353: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
+	282, // 354: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
+	265, // 355: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
+	266, // 356: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
+	264, // 357: frontend.v1.FooterAgentRow.model:type_name -> frontend.v1.FooterAgentRowModel
+	272, // 358: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
+	274, // 359: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
+	273, // 360: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
+	275, // 361: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
+	276, // 362: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
+	278, // 363: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
+	277, // 364: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
+	280, // 365: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
+	285, // 366: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
+	286, // 367: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
+	281, // 368: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
+	282, // 369: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
+	295, // 370: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
+	283, // 371: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
+	284, // 372: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
+	288, // 373: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
+	289, // 374: frontend.v1.FooterStatusNetworkFault.activity:type_name -> frontend.v1.FooterStatusNetworkFaultActivity
+	290, // 375: frontend.v1.FooterStatusNetworkFaultActivity.salient:type_name -> frontend.v1.FooterStatusNetworkFaultSalient
+	173, // 376: frontend.v1.FooterStatusNetworkFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	162, // 377: frontend.v1.FooterStatusNetworkFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	291, // 378: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
+	115, // 379: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	172, // 380: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	292, // 381: frontend.v1.FooterStatusActivityNetworkOffline.retry:type_name -> frontend.v1.FooterStatusActivityNetworkOfflineRetry
+	382, // [382:382] is the sub-list for method output_type
+	382, // [382:382] is the sub-list for method input_type
+	382, // [382:382] is the sub-list for extension type_name
+	382, // [382:382] is the sub-list for extension extendee
+	0,   // [0:382] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }

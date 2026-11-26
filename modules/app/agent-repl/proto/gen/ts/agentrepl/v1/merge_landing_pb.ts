@@ -41,8 +41,7 @@ export type MergeLandingWorkspace = Message<"agentrepl.v1.MergeLandingWorkspace"
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * Its name when the landing was recorded. An async merge's is the merge's
-   * own name (its merge workspace's).
+   * Its name when the landing was recorded.
    *
    * @generated from field: string name = 2;
    */
@@ -58,7 +57,7 @@ export const MergeLandingWorkspaceSchema: GenMessage<MergeLandingWorkspace> = /*
 
 /**
  * A merge the repository's merge queue ran and landed on its main branch: a
- * workspace's finish, a one-shot's, or an async merge. Its list is the path,
+ * workspace's finish or a one-shot's. Its list is the path,
  * so it carries none. A merge the queue landed into a parent workspace's
  * branch landed on no main branch and is never one of these.
  *
@@ -66,8 +65,7 @@ export const MergeLandingWorkspaceSchema: GenMessage<MergeLandingWorkspace> = /*
  */
 export type MergeLandingThroughQueue = Message<"agentrepl.v1.MergeLandingThroughQueue"> & {
   /**
-   * The workspace the merge ran in: the one landing its own branch, or the
-   * async merge's merge workspace. Always set: every queued merge has one.
+   * The workspace the merge ran in, landing its own branch. Always set: every queued merge has one.
    *
    * @generated from field: agentrepl.v1.MergeLandingWorkspace workspace = 1;
    */

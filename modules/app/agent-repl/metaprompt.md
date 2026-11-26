@@ -207,7 +207,7 @@
   - Deficiencies include an aspect of the architecture or code organization that could be improved, a missing test or log, a stale or contradictory instruction, and any other flaw I would fix if it were in scope.
   - The harness is the metaprompt, every `AGENTS.md` and `CLAUDE.md`, every skill, and the daemon's prompt briefs.
 - How the fix starts depends on what this workspace may do.
-  - A workspace that may dispatch work dispatches each fix as its own async merge the moment it notices it, per `/agent-repl-merge-queue`: `workspace async-merge -maker here -context-fork here`, its branch cut at the main branch's tip, and its `-instruction` naming the fix and its tests.
+  - A workspace that may dispatch work dispatches each fix as its own one-shot child the moment it notices it, per `/agent-repl-workspaces`: cut from the main branch's tip (`-source-branch` the main branch), its context forked from this workspace, and its prompt naming the fix and its tests.
   - Fixes that are one change go in one merge; every independent fix gets its own.
   - A main workspace, which lands nothing itself, creates a one-shot workspace for the fix instead, per `/agent-repl-workspaces`.
   - A workspace in queue bypass mode fixes it itself, and lands the fix on its own right after the change in progress lands.
@@ -446,7 +446,7 @@
 
 - When a workspace finds all its work landed and nothing outstanding with me, it runs `agent-repld workspace close here` in that same turn, without asking.
   - All its work is landed when nothing of it is unmerged, no merge of its own is queued or running, and no deploy of it is still pending.
-    - Work landed through an async merge of its own branch counts, as does an investigation whose answer it has delivered with no change to make.
+    - Work landed through a landing child of its own branch counts, as does an investigation whose answer it has delivered with no change to make.
   - Nothing is outstanding with me when no question, memory or other proposal, or offer awaits my answer.
   - Its response says it closed itself, and why.
   - It never asks whether to close, such as "say so if you still want it closed".

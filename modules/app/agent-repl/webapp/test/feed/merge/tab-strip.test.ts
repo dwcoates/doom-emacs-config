@@ -104,7 +104,6 @@ describe("readMergeTab: the arms are read from the contract", () => {
     (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
       const waits = [
-        "resolving",
         "rebasing",
         "resolvingConflicts",
         "conflictResolution",

@@ -15,7 +15,7 @@ func TestAOneShotRequestMarksTheRequesterAndRepublishesTheRoster(t *testing.T) {
 	h.inFlight = "turn-announcing"
 
 	// Act.
-	err := h.requestOneShot(t, ownBranch, false)
+	err := h.requestOneShot(t, ownBranch)
 
 	// Assert.
 	if err != nil {
@@ -47,7 +47,7 @@ func TestAOneShotMergeClosesTheRequesterOnceItLands(t *testing.T) {
 	// An agent's merge onto agent-repl's master names its version increment.
 	source := ownBranch
 	source.Version = &wsm.VersionIncrement{Part: semver.Patch, ChangelogLine: "Fix the footer"}
-	if err := h.requestOneShot(t, source, false); err != nil {
+	if err := h.requestOneShot(t, source); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	h.runWait(t)
@@ -67,12 +67,10 @@ func TestAOneShotMergeClosesTheRequesterOnceItLands(t *testing.T) {
 
 func TestAOneShotRequestThatContradictsItselfIsAnErrorAndRecordsNothing(t *testing.T) {
 	tests := []struct {
-		name     string
-		source   wsm.MergeSource
-		detached bool
+		name   string
+		source wsm.MergeSource
 	}{
 		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "detached", source: ownBranch, detached: true},
 		{name: "another branch", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "feature"}},
 	}
 	for _, tt := range tests {
@@ -81,7 +79,7 @@ func TestAOneShotRequestThatContradictsItselfIsAnErrorAndRecordsNothing(t *testi
 			h := newHarness(t)
 
 			// Act.
-			err := h.requestOneShot(t, tt.source, tt.detached)
+			err := h.requestOneShot(t, tt.source)
 
 			// Assert.
 			if _, refused := Refused(err); err == nil || refused {
@@ -108,7 +106,7 @@ func TestARefusedOneShotRequestLeavesTheRequesterUnmarked(t *testing.T) {
 	}
 
 	// Act.
-	err := h.requestOneShot(t, ownBranch, false)
+	err := h.requestOneShot(t, ownBranch)
 
 	// Assert.
 	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmAlreadyQueued {
@@ -125,7 +123,7 @@ func TestAOneShotRequestWhoseRosterRepublishFailsStandsAndSaysSo(t *testing.T) {
 	h.publishErr = errors.New("registry read failed")
 
 	// Act.
-	err := h.requestOneShot(t, ownBranch, false)
+	err := h.requestOneShot(t, ownBranch)
 
 	// Assert.
 	if err != nil {

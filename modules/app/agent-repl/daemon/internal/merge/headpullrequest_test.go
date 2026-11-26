@@ -112,54 +112,20 @@ func TestAnUnreadLineReadsNoLinks(t *testing.T) {
 	}
 }
 
-func TestAnAsyncHeadsTargetOpensTheRequestersPullRequest(t *testing.T) {
-	tests := []struct {
-		name  string
-		owner ids.WorkspaceID
-	}{
-		{name: "stored on the requester", owner: theWorkspace},
-		{name: "stored on the merge workspace", owner: theMergeWorkspace},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
-			h.db.mu.Lock()
-			h.db.links[tt.owner] = []wsm.WorkspaceLink{ownedPR(1, nil)}
-			h.db.mu.Unlock()
-
-			// Act
-			h.o.publishHead(theMergeWorkspace, "lease-1", branchLineOf("feature", "/repo"), 1, headMerging, headRun)
-
-			// Assert
-			if got := headTargetPR(t, h, theWorkspace); got != prURL(1) {
-				t.Fatalf("the target opens %q, want %q", got, prURL(1))
-			}
-		})
-	}
-}
-
 func TestAChangeOfLinksRedrawsTheHeadWithItsPullRequest(t *testing.T) {
 	tests := []struct {
 		name    string
 		merging ids.WorkspaceID
 		changed ids.WorkspaceID
-		async   bool
 		redrawn bool
 	}{
 		{name: "the sync merge's own workspace", merging: theWorkspace, changed: theWorkspace, redrawn: true},
-		{name: "an async merge's requester", merging: theMergeWorkspace, changed: theWorkspace, async: true, redrawn: true},
-		{name: "an async merge's merge workspace", merging: theMergeWorkspace, changed: theMergeWorkspace, async: true, redrawn: true},
 		{name: "an unrelated workspace", merging: theWorkspace, changed: "elsewhere"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: a head drawn before the finish hook stored the pull request.
 			h := newHarness(t)
-			if tt.async {
-				h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
-			}
 			h.o.publishHead(tt.merging, "lease-1", branchLineOf("feature", "/repo"), 1, headMerging, headRun)
 			h.db.mu.Lock()
 			h.db.links[tt.changed] = []wsm.WorkspaceLink{ownedPR(1, nil)}

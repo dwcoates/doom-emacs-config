@@ -108,13 +108,13 @@ const ArmRequesterBypassingQueue = "requester_bypassing_queue"
 
 // bypassReminder is what the refused mark reminds its workspace to do.
 const bypassReminder = "this workspace holds its repository's queue bypass mode, so it lands its own work on the main branch " +
-	"with land-direct.sh and never finishes through the queue; the workspaces it creates and the async merges it asks for land through the queue as usual"
+	"with land-direct.sh and never finishes through the queue; the workspaces it creates, its landing children among them, land through the queue as usual"
 
 // refuseWhileBypassing answers the refusal for WS doing WHAT while WS holds
 // its repository's queue bypass mode, and false when WS holds no such mode:
 // a workspace in the mode lands its own work directly, so it never becomes a
-// one-shot that would finish through the queue. Its dispatches (a create, an
-// async merge) are not refused (owner ruling, 2026-11-14: the queue keeps
+// one-shot that would finish through the queue. Its dispatches (a create, a
+// landing child among them) are not refused (owner ruling, 2026-11-14: the queue keeps
 // running while the mode is held, so they land through it as usual). A
 // failed read of the standing is the rpc's failure.
 func (s *server) refuseWhileBypassing(ctx context.Context, log dlog.Logger, rpc string, resp proto.Message, ws ids.WorkspaceID, what string) (*connect.Error, bool, error) {

@@ -87,6 +87,11 @@ type wsState struct {
 	// vendor's ai-title, and its long summary the title's hover description.
 	// The zero value while none stands; its sole writer is SetSummary.
 	summary wsm.WorkspaceSummary
+	// closedChildren are the workspace's children that are not open, the one
+	// that stopped being open most recently first: the summary's click menu
+	// (frontend.v1.TopbarTitleChildMenu). Its sole writer is
+	// SetClosedChildren.
+	closedChildren []ClosedChild
 
 	// links are the links the workspace name's menu shows, most recently set
 	// first; empty while none is shown. Its sole writer is SetLinks.

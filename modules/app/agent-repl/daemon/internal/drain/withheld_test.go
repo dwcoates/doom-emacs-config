@@ -655,8 +655,6 @@ func TestAWithheldStandDownIsCountedUnderItsTriggersReason(t *testing.T) {
 			trigger: WithheldCollapse, want: shimlife.StandDownFold},
 		{name: "a cache lapse's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
 			trigger: WithheldCacheLapse, want: shimlife.StandDownCacheLapse},
-		{name: "an ended merge's", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.backlogged(t) },
-			trigger: WithheldMergeEnded, want: shimlife.StandDownMergeEnded},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

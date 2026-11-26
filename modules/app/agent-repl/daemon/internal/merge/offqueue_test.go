@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
 
@@ -144,34 +142,6 @@ func TestARequestWhoseOffQueueReadFailsIsARecordedError(t *testing.T) {
 	}
 }
 
-func TestRequeuePutsAnAsyncMergeBackOnItsOwnMergeWorkspace(t *testing.T) {
-	// Arrange: an async merge handed off and evicted.
-	h := newHarness(t)
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
-		t.Fatalf("Evict: %v", err)
-	}
-	branchExists(h, h.db.workspaces[theMergeWorkspace].Branch)
-	forks := len(h.detached.forks)
-
-	// Act
-	_, err := h.o.Requeue(context.Background(), Requeue{Workspace: theMergeWorkspace, By: RequestedByUser})
-
-	// Assert: the same merge workspace stands in line again, and no other
-	// was forked.
-	if err != nil {
-		t.Fatalf("Requeue: %v", err)
-	}
-	if _, ok := h.entryOf(theMergeWorkspace); !ok {
-		t.Fatal("the merge workspace is not back in line")
-	}
-	if len(h.detached.forks) != forks {
-		t.Fatalf("the requeue forked %d new workspaces, want none", len(h.detached.forks)-forks)
-	}
-}
-
 func TestRequeueRecordsTheModelTheSessionResumesUnder(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -210,8 +180,6 @@ func TestRequeueRefusals(t *testing.T) {
 		{name: "a closed workspace", arrange: func(t *testing.T, h *harness) {
 			closeWith(h, wsm.CloseByUser)
 		}, want: ArmWorkspaceClosed},
-		{name: "a version for a request that recorded its own", arrange: func(t *testing.T, h *harness) { evicted(t, h) },
-			req: Requeue{Version: &wsm.VersionIncrement{Part: semver.Patch, ChangelogLine: "another"}}, want: ArmVersionAlreadyRecorded},
 		{name: "a placement behind a merge not in line", arrange: func(t *testing.T, h *harness) { evicted(t, h) },
 			req: Requeue{PlaceBehind: "nobody"}, want: ArmPlacementBehindNotInLine},
 	}
@@ -320,46 +288,6 @@ func closeWith(h *harness, by wsm.CloseCause) {
 	h.db.workspaces[theWorkspace] = w
 }
 
-func TestRequeueOfAnAdoptedMergeOntoAVersionedMainBranch(t *testing.T) {
-	tests := []struct {
-		name    string
-		version *wsm.VersionIncrement
-		want    string
-	}{
-		{name: "without an increment it is refused", want: ArmVersionIncrementRequired},
-		{name: "with one it lands as that increment", version: &wsm.VersionIncrement{Part: semver.Minor, ChangelogLine: "Adopted merges land"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: an adopted record of the harness's branch on agent-repl's
-			// versioned master, asked by an agent.
-			h := newHarness(t)
-			h.emacsRepo()
-			branch := h.db.workspaces[theWorkspace].Branch
-			branchExists(h, branch)
-			h.db.mu.Lock()
-			h.db.offQueue[theWorkspace] = wsm.OffQueueMerge{Workspace: theWorkspace, Cause: wsm.MergeLeftAdopted, Adopted: true,
-				Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: branch}}
-			h.db.mu.Unlock()
-
-			// Act
-			_, err := h.o.Requeue(context.Background(), Requeue{Workspace: theWorkspace, By: RequestedByAgent, Asker: theWorkspace, Version: tt.version})
-
-			// Assert
-			if refusedArm(err) != tt.want {
-				t.Fatalf("Requeue = %v, want arm %q", err, tt.want)
-			}
-			if tt.want != "" {
-				return
-			}
-			entry, ok := h.entryOf(theWorkspace)
-			if !ok || !reflect.DeepEqual(entry.Source.Version, tt.version) {
-				t.Fatalf("queue entry = %+v (%v), want the supplied increment", entry, ok)
-			}
-		})
-	}
-}
-
 func TestRequeueWhoseRecordCannotBeReadIsAnErrorAtError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -382,74 +310,19 @@ func TestDiscardOfAWorkspacesOwnMergeDropsOnlyTheRequest(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	evicted(t, h)
-	closed := false
 
 	// Act
-	discarded, err := h.o.Discard(context.Background(), theWorkspace, func(context.Context) error { closed = true; return nil })
+	err := h.o.Discard(context.Background(), theWorkspace)
 
 	// Assert
-	if err != nil || discarded.Async {
-		t.Fatalf("Discard = %+v, %v; want a workspace's own merge discarded", discarded, err)
+	if err != nil {
+		t.Fatalf("Discard = %v; want a workspace's own merge discarded", err)
 	}
-	if closed || h.db.closed[theWorkspace] {
+	if h.db.closed[theWorkspace] {
 		t.Fatal("discarding a workspace's own merge closed the workspace")
 	}
 	if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); kept {
 		t.Fatal("the discard left the request standing")
-	}
-}
-
-func TestDiscardOfAnAsyncMergeClosesItsMergeWorkspace(t *testing.T) {
-	tests := []struct {
-		name        string
-		clean       bool
-		wantRemoved bool
-	}{
-		{name: "its clean cleanup worktree is removed", clean: true, wantRemoved: true},
-		{name: "its dirty cleanup worktree is kept", clean: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: an evicted async merge whose request cleans up a worktree.
-			h := newHarness(t)
-			if err := requestDetached(t, h, RequestedByUser); err != nil {
-				t.Fatalf("Enqueue: %v", err)
-			}
-			if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
-				t.Fatalf("Evict: %v", err)
-			}
-			cleanup := t.TempDir()
-			h.db.mu.Lock()
-			w := h.db.workspaces[theMergeWorkspace]
-			w.MergeOf.CleanupWorktree, w.MergeOf.CleanupDir = true, cleanup
-			h.db.workspaces[theMergeWorkspace] = w
-			h.db.mu.Unlock()
-			h.git.mu.Lock()
-			h.git.cleanByDir = map[string]bool{cleanup: tt.clean}
-			h.git.mu.Unlock()
-			closes := 0
-			close := func(ctx context.Context) error {
-				closes++
-				return h.db.MarkClosed(ctx, theMergeWorkspace, wsm.Closure{By: wsm.CloseByUser})
-			}
-
-			// Act
-			discarded, err := h.o.Discard(context.Background(), theMergeWorkspace, close)
-
-			// Assert
-			if err != nil || !discarded.Async || discarded.CleanupWorktreeRemoved != tt.wantRemoved {
-				t.Fatalf("Discard = %+v, %v; want async, removed %v", discarded, err, tt.wantRemoved)
-			}
-			if closes != 1 {
-				t.Fatalf("the merge workspace was closed %d times, want once", closes)
-			}
-			if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theMergeWorkspace); kept {
-				t.Fatal("the close left the request standing")
-			}
-			if removed := slices.Contains(h.git.cleanedWorktrees, cleanup); removed != tt.wantRemoved {
-				t.Fatalf("cleanup worktree removed %v, want %v", removed, tt.wantRemoved)
-			}
-		})
 	}
 }
 
@@ -470,64 +343,13 @@ func TestDiscardRefusals(t *testing.T) {
 			tt.arrange(t, h)
 
 			// Act
-			_, err := h.o.Discard(context.Background(), theWorkspace, func(context.Context) error {
-				t.Fatal("a refused discard closed the workspace")
-				return nil
-			})
+			err := h.o.Discard(context.Background(), theWorkspace)
 
 			// Assert
 			if refusedArm(err) != tt.want {
 				t.Fatalf("Discard = %v, want the %s refusal", err, tt.want)
 			}
 		})
-	}
-}
-
-func TestADiscardWhoseCloseFailsKeepsTheRequest(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
-		t.Fatalf("Evict: %v", err)
-	}
-
-	// Act
-	_, err := h.o.Discard(context.Background(), theMergeWorkspace, func(context.Context) error { return errors.New("the shim would not stand down") })
-
-	// Assert
-	if err == nil {
-		t.Fatal("a discard whose close failed succeeded")
-	}
-	if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theMergeWorkspace); !kept {
-		t.Fatal("a failed discard lost the request")
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.discard",
-		Message: "could not close the discarded async merge's merge workspace; the request stands"}); !ok {
-		t.Fatalf("no ERROR record: %v", h.logs.Records())
-	}
-}
-
-func TestAnAsyncMergeUnderANameAMergeOffItsQueueHoldsIsRefused(t *testing.T) {
-	// Arrange: the async merge evicted, its merge workspace open under its name.
-	h := newHarness(t)
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
-		t.Fatalf("Evict: %v", err)
-	}
-	name := h.db.workspaces[theMergeWorkspace].Name
-
-	// Act
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
-		Detached: &DetachedRun{Maker: theWorkspace, Name: name}})
-
-	// Assert: refused naming the merge, so the caller requeues it.
-	refusal, ok := Refused(err)
-	if !ok || refusal.Arm != ArmNameOffQueue || refusal.Fields["name"] != name || refusal.Fields["workspace"] == nil || refusal.Fields["cause"] == nil {
-		t.Fatalf("Enqueue = %v, want the %s refusal naming %q", err, ArmNameOffQueue, name)
 	}
 }
 
@@ -544,7 +366,7 @@ func TestStatusListsTheMergesOffTheQueue(t *testing.T) {
 		t.Fatalf("Status = %+v, %v; want the one merge off the queue", statuses, err)
 	}
 	off := statuses[0].OffQueue[0]
-	if off.Workspace != theWorkspace || off.Cause != string(CauseUserDrop) || off.Requester != "" {
+	if off.Workspace != theWorkspace || off.Cause != string(CauseUserDrop) {
 		t.Fatalf("off-queue member = %+v, want the evicted own merge", off)
 	}
 }
@@ -552,17 +374,15 @@ func TestStatusListsTheMergesOffTheQueue(t *testing.T) {
 func TestTheSidebarIsToldTheMergesOffTheQueue(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
+	enqueue(t, h)
 
 	// Act
-	if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("Evict: %v", err)
 	}
 
-	// Assert: the async merge credited to its requester, in the sidebar's words.
-	want := []sidebar.OffQueueEntry{{Workspace: theMergeWorkspace, Credited: theWorkspace, Async: true, Cause: "evicted"}}
+	// Assert: the merge under its own workspace, in the sidebar's words.
+	want := []sidebar.OffQueueEntry{{Workspace: theWorkspace, Cause: "evicted"}}
 	if got := h.sidebar.offQueueTold(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sidebar told %+v, want %+v", got, want)
 	}
@@ -619,20 +439,16 @@ var exitCauses = map[string]string{
 	"causeFailed":               causeFailed,
 	"causeRestartFailed":        causeRestartFailed,
 	"causeRestartResume":        causeRestartResume,
-	"causePickFailed":           causePickFailed,
-	"causeDetachedForkFailed":   causeDetachedForkFailed,
 	"causeFinishFailed":         causeFinishFailed,
 	"CauseColdGate":             string(CauseColdGate),
 	"CauseBackloggedAtColdGate": string(CauseBackloggedAtColdGate),
 	"CauseColdGateAnswerFailed": string(CauseColdGateAnswerFailed),
 }
 
-// notQueueExits are the causes that never take a queue row off: an async
-// request dropped before it was handed to a merge workspace
-// (wsm.DropAsyncMergeRequest) stood in no queue, and a run taken off at its
-// workspace's cold gate leaves its run only, its entry staying at its place
-// (wsm.RequeueColdGatedMerge).
-var notQueueExits = map[string]bool{causeDetachedForkFailed: true, string(CauseColdGate): true}
+// notQueueExits are the causes that never take a queue row off: a run taken
+// off at its workspace's cold gate leaves its run only, its entry staying at
+// its place (wsm.RequeueColdGatedMerge).
+var notQueueExits = map[string]bool{string(CauseColdGate): true}
 
 // TestEveryExitCauseKeepsOrEndsItsRequest holds every cause a merge leaves its
 // queue for to exactly one fate: it ends the request (wsm.EndsRequest), or it
@@ -877,30 +693,5 @@ func TestADrainWhoseOffQueueJudgementOutlivesItsBoundIsAnError(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.drain",
 		Message: "the judgement of the merges off their queues outlived the drain's bound; the state client closes under it"}); !ok {
 		t.Fatalf("records = %+v, want the overrun recorded at error", h.logs.Records())
-	}
-}
-
-func TestAnAsyncMergeUnderTheSuppliedNameOfAMergeOffItsQueueIsRefused(t *testing.T) {
-	// Arrange: a workspace prefix is set; the async merge evicted, its merge
-	// workspace open under the resolved name.
-	h := newHarness(t)
-	h.names.prefix = "agent"
-	h.detached.byName = true
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	merged := mergeWorkspaceNamed("agent/reconnect-fix")
-	if err := h.o.Evict(context.Background(), merged); err != nil {
-		t.Fatalf("Evict: %v", err)
-	}
-
-	// Act: asked again under the name as supplied, unprefixed.
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
-		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}})
-
-	// Assert
-	refusal, ok := Refused(err)
-	if !ok || refusal.Arm != ArmNameOffQueue || refusal.Fields["name"] != "agent/reconnect-fix" {
-		t.Fatalf("Enqueue = %v, want the %s refusal naming agent/reconnect-fix", err, ArmNameOffQueue)
 	}
 }

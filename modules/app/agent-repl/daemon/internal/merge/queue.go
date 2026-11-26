@@ -216,7 +216,7 @@ func (o *orchestrator) holdForHostFault(ctx context.Context, repo wsm.RepoKey, c
 // drives goes on in its session, test runs and all (2026-10-26: a fixing
 // attempt's full test run went on for minutes after a pause). A hard stop
 // interrupts those turns, and the turn of every waiting merge's background
-// rebase. The turn of any other step (a pick, a deploy-stage prompt) is left
+// rebase. The turn of any other step (a deploy-stage prompt) is left
 // to finish: those steps read an interrupted turn as the user's.
 //
 // A queue already paused is not refused: the hard stop stops what the pause
@@ -505,9 +505,8 @@ const (
 
 // The causes a queue entry leaves its queue for that are NOT abandonments:
 // the durable drop reason RemoveMergeQueueEntry records for a merge that ran
-// to its end, a merge the boot recovery failed or put back in line, and an
-// async merge that could not be handed to its merge workspace or prepared
-// there. Each is spelled once here, so a reader of the cause (the reports of
+// to its end, a merge the boot recovery failed or put back in line, and a
+// deploy whose finish stage failed. Each is spelled once here, so a reader of the cause (the reports of
 // a queue's changes) cannot disagree with the writer.
 const (
 	// causeMerged is a merge that landed.
@@ -520,11 +519,6 @@ const (
 	// causeRestartResume is a merge a restart left unfinished, taken out of
 	// line only to be put straight back in it, at the back, to run again.
 	causeRestartResume = wsm.MergeLeftToReturn
-	// causePickFailed is an async merge whose preparing pick failed.
-	causePickFailed = "pick_failed"
-	// causeDetachedForkFailed is an async request that could not be handed
-	// to a merge workspace.
-	causeDetachedForkFailed = "detached_fork_failed"
 	// causeFinishFailed is a deploy whose finish stage failed before it was
 	// put in line (finish.go).
 	causeFinishFailed = "finish_failed"
@@ -998,15 +992,12 @@ func (o *orchestrator) requeuePendingResume(ctx context.Context, ws ids.Workspac
 // never run, and left on the queue it would block the repository's queue
 // forever on a workspace that is not there; abandoning it records WHY in the
 // bubble instead. Nothing is dropped when the merge has already been admitted:
-// a run in flight ends on its own terminal, not on this one. The workspace's
-// async requests not yet handed off are dropped with it: their fork would hold
-// a conversation that has ended for good.
+// a run in flight ends on its own terminal, not on this one.
 func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID) {
 	const op = "daemon.merge.workspace_closed"
 	// THE CLOSE ENDED ANY REQUEST THE WORKSPACE HELD OFF ITS QUEUE
 	// (wsm.markClosedInTx), so the roster stops drawing it.
 	o.publishOffQueue(ctx)
-	o.dropAsyncRequestsOf(ctx, ws)
 	// A REMEDIATION CLOSED BEFORE ITS FIX DEPLOYS HANDS ITS HOLD BACK.
 	o.remediationClosed(ctx, ws)
 	if _, running := o.runFor(ws); running {
@@ -1368,22 +1359,13 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 
 // queueView is what every drawing of one repository's queue reads: whether
 // the queue is paused, each in-line workspace's name and directory, the
-// worktree its merge lands in, an async merge's bubble, and each entry's
-// standing, all keyed by the entry's own workspace.
-//
-// AN ASYNC MERGE IS NAMED FOR ITSELF AND OPENS ITS BUBBLE (owner ruling,
-// 2026-10-17). Its entry's workspace is the hidden merge workspace the daemon
-// forked to carry it: the entry carries that workspace's own name (the merge's
-// name, `land-...`), and its BUBBLE -- the requester and the merge's head row
-// on the requester's feed -- which is what a click selects and opens, so the
-// hidden merge workspace is never selected or revealed from the queue. A sync
-// merge's entry is the requesting workspace itself and carries no bubble.
+// worktree its merge lands in, and each entry's standing, all keyed by the
+// entry's own workspace.
 type queueView struct {
 	paused    bool
 	names     map[ids.WorkspaceID]string
 	dirs      map[ids.WorkspaceID]string
 	targets   map[ids.WorkspaceID]string
-	bubbles   map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble
 	standings []*frontendv1.FeedMergeQueueEntry
 	// deploying is the landed merge still deploying, drawn ahead of the
 	// line (deployingTabEntry); nil for none.
@@ -1401,7 +1383,6 @@ func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries 
 		names:   map[ids.WorkspaceID]string{},
 		dirs:    map[ids.WorkspaceID]string{},
 		targets: map[ids.WorkspaceID]string{},
-		bubbles: map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble{},
 	}
 	for _, entry := range entries {
 		record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
@@ -1415,14 +1396,6 @@ func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries 
 			return queueView{}, fmt.Errorf("merge: resolve the worktree the merge of %s lands in: %w", entry.Workspace, err)
 		}
 		view.targets[entry.Workspace] = target
-		if record.MergeOf == nil {
-			continue
-		}
-		bubble, err := o.asyncMergeBubble(ctx, entry.Workspace, record.MergeOf.Requester)
-		if err != nil {
-			return queueView{}, err
-		}
-		view.bubbles[entry.Workspace] = bubble
 	}
 	standings, err := o.queueStandings(entries)
 	if err != nil {
@@ -1441,29 +1414,6 @@ func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries 
 		}
 	}
 	return view, nil
-}
-
-// asyncMergeBubble answers where merge workspace WS's bubble stands: its
-// requester, and the bubble's head row on the requester's root feed. A merge
-// with no bubble identity in this daemon (no ledger entry) answers the
-// requester alone, so its click still selects the requester and never the
-// hidden merge workspace; it is recorded, since there is no bubble to open.
-func (o *orchestrator) asyncMergeBubble(ctx context.Context, ws, requester ids.WorkspaceID) (*frontendv1.FeedMergeQueueBubble, error) {
-	record, err := o.deps.DB.Workspace(ctx, requester)
-	if err != nil {
-		return nil, fmt.Errorf("read the requester of merge workspace %s: %w", ws, err)
-	}
-	bubble := &frontendv1.FeedMergeQueueBubble{
-		Requester: record.Ref(),
-	}
-	lease, ok := o.leaseOf(ws)
-	if !ok {
-		o.log(ctx, ws).Info("daemon.merge.queue", "an async merge in line has no bubble identity in this daemon; its queue entry selects the requester and opens no bubble",
-			dlog.Context{"workspace": string(ws), "requester": string(requester)})
-		return bubble, nil
-	}
-	bubble.Row = headFeedID(requester, lease)
-	return bubble, nil
 }
 
 // snapshot is the queue as self sees it.
@@ -1935,25 +1885,6 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		o.deps.Log.Global().Log(dlog.LevelWarn, op, heldElsewhere, dlog.Context{"repo": string(repo)})
 		return "", nil, false, nil
 	}
-	// A MERGE WORKSPACE'S PICK RUNS AT THE HEAD, holding the slot: the merge
-	// has STARTED, so its pick -- and the fork its first turn brings up -- sees
-	// the maker as it stands now. Nothing is admitted until the pick settles:
-	// a pick that succeeds clears itself and kicks the pump, which then admits
-	// the merge; one that fails takes the merge off the queue.
-	if front.Source.Pick != "" {
-		o.mu.Lock()
-		_, picking := o.picks[front.Workspace]
-		o.mu.Unlock()
-		if !picking && front.Source.PickStartedAt == nil {
-			if err := o.startPick(ctx, front.Workspace, repo, front); err != nil {
-				o.releaseRepoLockIfIdle(ctx, repo)
-				return "", nil, false, err
-			}
-		}
-		o.deps.Log.Global().Debug(op, "the queue front is a merge workspace whose pick runs at the head; it is admitted once the pick succeeds",
-			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "picking": picking})
-		return "", nil, false, nil
-	}
 	// THE LEASE GOES FIRST, THE ADMISSION AFTER, as for a merge behind the
 	// head (chain.go): an admitted entry always has a run holding a lease.
 	// A WORKSPACE ANOTHER HOLDER HOLDS (a shim restart, a drain, a
@@ -2191,7 +2122,7 @@ type passReason string
 
 const (
 	// passHeldBehind: it was placed behind a merge still standing in the
-	// queue, and is neither admitted nor picked until that merge leaves.
+	// queue, and is not admitted until that merge leaves.
 	passHeldBehind passReason = "held_behind"
 	// passServedElsewhere: another daemon serves its workspace, or this one
 	// has not adopted it yet.

@@ -12,7 +12,6 @@ import (
 
 	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -606,19 +605,6 @@ func (c *chain) keepMergeTurns() {
 	}
 }
 
-// steppedAside answers a channel closed once ws's step aside begins its
-// take-back (onStepAside).
-func (c *chain) steppedAside(ws ids.WorkspaceID) <-chan struct{} {
-	aside := make(chan struct{})
-	var once sync.Once
-	c.h.o.onStepAside = func(stepped ids.WorkspaceID) {
-		if stepped == ws {
-			once.Do(func() { close(aside) })
-		}
-	}
-	return aside
-}
-
 // settle waits for every goroutine the orchestrator started to end: a step
 // aside's take-back among them.
 func (c *chain) settle(t *testing.T, what string) {
@@ -1090,25 +1076,6 @@ func TestATakeBackOfARemediatingMergeWhoseRecordWaitsOnNoTurnIsRefused(t *testin
 	if armed {
 		t.Fatal("a refused take-back armed a wait")
 	}
-}
-
-// count answers how many rows the feed has been pushed.
-func (f *fakeFeed) count() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.rows)
-}
-
-// lastMergeOf answers the last head row pushed for WS's bubble.
-func (f *fakeFeed) lastMergeOf(ws ids.WorkspaceID) *frontendv1.FeedMerge {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i := len(f.rows) - 1; i >= 0; i-- {
-		if merge := f.rows[i].Row.GetActivity().GetMerge(); merge != nil && f.rows[i].WS == ws {
-			return merge
-		}
-	}
-	return nil
 }
 
 func TestForgettingARemediationCancelsOnlyAnArmedWait(t *testing.T) {

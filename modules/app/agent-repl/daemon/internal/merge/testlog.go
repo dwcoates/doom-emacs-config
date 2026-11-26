@@ -29,11 +29,10 @@ import (
 // so a daemon that restarted -- or a successor that took over -- resolves a
 // token the bubble served before it, for as long as the log is there. A token
 // is resolved FOR ONE WORKSPACE: the FEED THAT DRAWS ITS MERGE'S BUBBLE. The
-// lease's durable ledger names the workspace that ran the merge, and bubbleOf
-// names the feed its bubble is drawn in -- the workspace itself, or for an
-// async merge the workspace that requested it -- so every link the daemon drew
-// opens from where it was drawn, and a token cannot open a log whose bubble the
-// asking feed does not hold.
+// lease's durable ledger names the workspace that ran the merge, whose own
+// feed draws its bubble, so every link the daemon drew opens from where it was
+// drawn, and a token cannot open a log whose bubble the asking feed does not
+// hold.
 
 // mergeLogsDir is where every log the queue writes lives, under the state
 // root.
@@ -170,9 +169,9 @@ func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, toke
 			dlog.Context{"workspace": string(ws), "token": token, "error": err.Error()})
 		return "", err
 	}
-	if drawnIn := o.bubbleOf(ran).ws; drawnIn != ws {
+	if ran != ws {
 		return "", refusal("the token names a merge whose bubble another workspace's feed draws", reasonTestLogNotDrawnHere,
-			dlog.Context{"merge_workspace": string(ran), "drawn_in": string(drawnIn)})
+			dlog.Context{"merge_workspace": string(ran)})
 	}
 	return o.existingTestLog(ctx, ws, token, o.testLog(ids.LeaseID(lease), round).path)
 }

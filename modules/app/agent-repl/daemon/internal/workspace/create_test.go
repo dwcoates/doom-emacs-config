@@ -19,6 +19,7 @@ import (
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
@@ -1753,24 +1754,6 @@ func TestCreateRefusesADerivationItCannotBuild(t *testing.T) {
 	}
 }
 
-func TestCreateRefusesABaseOutsideAMergeWorkspace(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	spec := standardSpec(t, f)
-	spec.BaseRef = "some-branch"
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "only a merge workspace is cut from a named base") {
-		t.Fatalf("Create = %v, want the invariant's failure", err)
-	}
-	if !loggedAtError(f, opCreate) || len(f.git.created) != 0 {
-		t.Fatalf("records %+v, worktrees %v: want the failure logged at error and nothing built", f.log.logger.Records(), f.git.created)
-	}
-}
-
 func TestCreateWithAnUnresolvableSourceTipFailsBeforeBuilding(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -3121,7 +3104,6 @@ func TestCreateAsksToGatherOnlyWithEnoughUnsectionedWorkspaces(t *testing.T) {
 		{name: "a closed one does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Closed = true }}, want: false},
 		{name: "a sectioned one does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Subsection = &sub }}, want: false},
 		{name: "a child does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Parent = &parent }}, want: false},
-		{name: "a merge workspace does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.MergeOf = &wsm.MergeOrigin{} }}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3512,5 +3494,176 @@ func TestCreateFailsHardOnImagesWithoutAPrompt(t *testing.T) {
 	}
 	if len(f.queue.submissions) != 0 {
 		t.Fatalf("submissions = %d, want none", len(f.queue.submissions))
+	}
+}
+
+// sourceBranchSpec is a one-shot cut from the source branch "agent/fix",
+// whose tip is "f1x" and which the worktree /wt/fix has checked out.
+func sourceBranchSpec(t *testing.T, f *fixture) CreateSpec {
+	t.Helper()
+	oneShotBriefs(f)
+	f.git.existingBranches = map[string]bool{"agent/fix": true}
+	if f.git.refs == nil {
+		f.git.refs = map[string]string{}
+	}
+	f.git.refs["refs/heads/agent/fix"] = "f1x"
+	f.git.worktrees = append(f.git.worktrees, gitclient.Worktree{Dir: "/wt/fix", Branch: "agent/fix"})
+	spec := standardSpec(t, f)
+	spec.OneShot = true
+	spec.SourceBranch = "agent/fix"
+	return spec
+}
+
+func TestCreateCutsTheWorkspaceAtTheSourceBranchsTip(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	spec := sourceBranchSpec(t, f)
+
+	// Act
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: a branch of its own, cut at the tip the source stood at.
+	created := f.git.created[0]
+	if created.BaseRef != "f1x" || created.Branch == "agent/fix" {
+		t.Fatalf("created = %+v, want a new branch cut at the source's tip f1x", created)
+	}
+}
+
+func TestCreateRefusesAnUnknownSourceBranchWithNothingBuilt(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	spec := sourceBranchSpec(t, f)
+	f.git.existingBranches = map[string]bool{}
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert
+	refusal := asRefusal(t, err, ArmUnknownSourceBranch)
+	if refusal.Fields["branch"] != "agent/fix" {
+		t.Fatalf("refusal fields = %v, want the branch named", refusal.Fields)
+	}
+	if len(f.git.created) != 0 || len(f.db.registered) != 0 {
+		t.Fatalf("created %v, registered %v; want nothing built", f.git.created, f.db.registered)
+	}
+}
+
+func TestCreateFailsLoudlyWhenTheSourceBranchCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		message string
+	}{
+		{name: "its existence", arrange: func(f *fixture) { f.git.branchExistsErrFor = map[string]error{"agent/fix": errors.New("git gone")} },
+			message: "could not read whether the source branch exists"},
+		{name: "its tip", arrange: func(f *fixture) {
+			f.git.resolveErrFor = map[string]error{"refs/heads/agent/fix": errors.New("bad ref")}
+		},
+			message: "could not resolve the source branch's tip"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			spec := sourceBranchSpec(t, f)
+			tt.arrange(f)
+
+			// Act
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert
+			if err == nil {
+				t.Fatal("Create = nil, want the failure")
+			}
+			if len(operationRecords(f, "error", opCreate)) == 0 || len(f.git.created) != 0 {
+				t.Fatalf("records = %+v, created %v; want the failure at error and nothing built", f.log.logger.Records(), f.git.created)
+			}
+			found := false
+			for _, r := range operationRecords(f, "error", opCreate) {
+				found = found || r.Message == tt.message
+			}
+			if !found {
+				t.Fatalf("records = %+v, want %q", f.log.logger.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestCreateResolvesTheSourceWorktreeItsLandingCleansUp(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		want    string
+	}{
+		{name: "a worktree no workspace owns", arrange: func(*fixture) {}, want: "/wt/fix"},
+		{name: "a registered workspace's worktree", arrange: func(f *fixture) {
+			f.db.with(wsm.Workspace{ID: "ws-fix", Dir: "/wt/fix", Name: "fix", Branch: "agent/fix", Repo: "repo-1"})
+		}},
+		{name: "no worktree holding it", arrange: func(f *fixture) { f.git.worktrees = nil }},
+		{name: "the main worktree", arrange: func(f *fixture) {
+			f.git.worktrees = []gitclient.Worktree{{Dir: f.git.mainWorktree, Branch: "agent/fix"}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			spec := sourceBranchSpec(t, f)
+			spec.CleanupSourceWorktree = true
+			tt.arrange(f)
+
+			// Act
+			if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert
+			facts := f.db.registered[len(f.db.registered)-1]
+			got := ""
+			if facts.Effects != nil {
+				got = facts.Effects.CleanupDir
+			}
+			if got != tt.want {
+				t.Fatalf("cleanup dir = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateRefusesLandingEffectsOutsideAOneShot(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(s *CreateSpec)
+	}{
+		{name: "effects on a standard create", change: func(s *CreateSpec) {
+			s.OneShot = false
+			s.Effects = &wsm.LandingEffects{CompactRequester: true}
+		}},
+		{name: "a cleanup with no source branch", change: func(s *CreateSpec) {
+			s.SourceBranch = ""
+			s.CleanupSourceWorktree = true
+		}},
+		{name: "a supplied cleanup directory", change: func(s *CreateSpec) { s.Effects = &wsm.LandingEffects{CleanupDir: "/wt/x"} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			spec := sourceBranchSpec(t, f)
+			tt.change(&spec)
+
+			// Act
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert: a defect in the spec's builder, failed loudly.
+			if _, refused := AsRefusal(err); err == nil || refused {
+				t.Fatalf("Create = %v, want a defect error", err)
+			}
+			if len(operationRecords(f, "error", opCreate)) == 0 || len(f.git.created) != 0 {
+				t.Fatalf("records = %+v, created %v; want the defect at error and nothing built", f.log.logger.Records(), f.git.created)
+			}
+		})
 	}
 }

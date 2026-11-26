@@ -40,7 +40,6 @@ func TestTheRowStatesTheLatestUpdateItsRecordHolds(t *testing.T) {
 		}, want: *at(3 * time.Minute)},
 		{name: "a hide", edit: func(ws *wsm.Workspace) { ws.Backlogged, ws.BackloggedAt = true, at(4*time.Minute) }, want: *at(4 * time.Minute)},
 		{name: "a merge landing", edit: func(ws *wsm.Workspace) { ws.MergedAt = at(5 * time.Minute) }, want: *at(5 * time.Minute)},
-		{name: "a requester's landing", edit: func(ws *wsm.Workspace) { ws.Landed = &wsm.Landing{Head: "abc", At: *at(6 * time.Minute)} }, want: *at(6 * time.Minute)},
 		{name: "a durable status change", edit: func(ws *wsm.Workspace) { ws.StatusChangedAt = at(7 * time.Minute) }, want: *at(7 * time.Minute)},
 		{name: "the latest of several wins", edit: func(ws *wsm.Workspace) {
 			ws.LastActivityAt, ws.LastTurnEndedAt, ws.StatusChangedAt = at(9*time.Minute), at(8*time.Minute), at(time.Minute)

@@ -12,8 +12,6 @@ import {
   FeedMergeSchema,
   FeedMergeBranchLineTargetPullRequestSchema,
   FeedMergeErrorSchema,
-  FeedMergeModeSchema,
-  FeedMergeWorkspaceSwitchSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { BRANCH_LINE_TARGET_LINK_CLASS, drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText, liveMergeClock, mergeBadge, settledMergeClock } from "../../../src/feed/merge/merge.js";
@@ -335,56 +333,6 @@ describe("drawFeedMerge: a settled head's clocks", () => {
   });
 });
 
-describe("drawFeedMerge: a detached merge's switch", () => {
-  /** Make MSG an async merge whose head carries an available switch. */
-  function withSwitch(msg: FeedMerge): void {
-    msg.head!.mode = create(FeedMergeModeSchema, {
-      mode: {
-        case: "async",
-        value: {
-          workspaceSwitch: create(FeedMergeWorkspaceSwitchSchema, {
-            label: { text: "open merge workspace" },
-            availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
-          }),
-        },
-      },
-    });
-  }
-
-  it("draws the switch to the merge workspace when the head carries one", () => {
-    const msg = mergeHead({ case: "update" });
-    withSwitch(msg);
-    const el = draw(msg);
-    expect(el.querySelector(".merge-workspace-switch-head .merge-workspace-switch-button")?.textContent).toBe(
-      "open merge workspace",
-    );
-  });
-
-  it("keeps the switch on a settled merge", () => {
-    const msg = mergeHead({ case: "success", endedAtMs: 61_000n, commit: "a1b2c3d" });
-    withSwitch(msg);
-    expect(draw(msg).querySelector(".merge-workspace-switch-head")).not.toBeNull();
-  });
-
-  it("draws no switch for an in-place merge", () => {
-    const msg = mergeHead({ case: "update" });
-    msg.head!.mode = create(FeedMergeModeSchema, { mode: { case: "sync", value: {} } });
-    expect(draw(msg).querySelector(".merge-workspace-switch")).toBeNull();
-  });
-
-  it("draws no switch for an async merge whose workspace is hidden", () => {
-    const msg = mergeHead({ case: "update" });
-    msg.head!.mode = create(FeedMergeModeSchema, { mode: { case: "async", value: {} } });
-    expect(draw(msg).querySelector(".merge-workspace-switch")).toBeNull();
-  });
-
-  it("draws no switch for a head recorded before heads carried their mode", () => {
-    expect(draw(mergeHead({ case: "update" })).querySelector(".merge-workspace-switch")).toBeNull();
-  });
-});
-
-// THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11), and THE CLOCK
-// CLOSES THE HEAD'S RIGHT END (owner request, 2026-10-18).
 describe("drawFeedMerge: the badge before the clock", () => {
   it.each([
     ["a running merge", { case: "update" } as const],
@@ -438,21 +386,9 @@ describe("drawFeedMerge: the landed commit", () => {
     expect([el.querySelector(".merge-commit")?.tagName, el.querySelector(".merge-commit-link")]).toEqual(["SPAN", null]);
   });
 
-  it("sits at the head's right end, before the workspace switch and the clock", () => {
-    const msg = landed();
-    msg.head!.mode = create(FeedMergeModeSchema, {
-      mode: {
-        case: "async",
-        value: {
-          workspaceSwitch: create(FeedMergeWorkspaceSwitchSchema, {
-            label: { text: "open merge workspace" },
-            availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
-          }),
-        },
-      },
-    });
-    const end = draw(msg).querySelector(".merge-head-end");
-    expect(Array.from(end?.children ?? [], (c) => c.classList.contains("merge-commit"))).toEqual([true, false, false]);
+  it("sits at the head's right end, before the clock", () => {
+    const end = draw(landed()).querySelector(".merge-head-end");
+    expect(Array.from(end?.children ?? [], (c) => c.classList.contains("merge-commit"))).toEqual([true, false]);
   });
 });
 

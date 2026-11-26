@@ -56,9 +56,6 @@ const (
 	// WithheldCacheLapse: a backlogged or closed workspace's cache lapsed
 	// (cachelapse.Keeper.lapse).
 	WithheldCacheLapse
-	// WithheldMergeEnded: a hidden merge workspace's merge left every queue
-	// (cachelapse.Keeper.mergeEnded).
-	WithheldMergeEnded
 )
 
 // String names the trigger for a record.
@@ -68,8 +65,6 @@ func (t WithheldTrigger) String() string {
 		return "collapse"
 	case WithheldCacheLapse:
 		return "cache_lapse"
-	case WithheldMergeEnded:
-		return "merge_ended"
 	default:
 		return fmt.Sprintf("WithheldTrigger(%d)", int(t))
 	}
@@ -102,7 +97,7 @@ const (
 // lapsed. It
 // returns at once; the attempt runs on the detached lifetime.
 func (c *controller) StandDownWithheld(ws ids.WorkspaceID, trigger WithheldTrigger) {
-	if trigger < WithheldCollapse || trigger > WithheldMergeEnded {
+	if trigger < WithheldCollapse || trigger > WithheldCacheLapse {
 		panic(fmt.Sprintf("drain: a withheld stand-down of %s names no trigger (%s)", ws, trigger))
 	}
 	c.mu.Lock()
@@ -176,8 +171,6 @@ func withheldLife(trigger WithheldTrigger) shimlife.StandDownReason {
 		return shimlife.StandDownFold
 	case WithheldCacheLapse:
 		return shimlife.StandDownCacheLapse
-	case WithheldMergeEnded:
-		return shimlife.StandDownMergeEnded
 	default:
 		panic(fmt.Sprintf("drain: a withheld stand-down names no trigger (%s)", trigger))
 	}

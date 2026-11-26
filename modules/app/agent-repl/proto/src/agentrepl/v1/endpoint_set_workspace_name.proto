@@ -213,7 +213,7 @@ message SetWorkspaceNameNotYetAdopted {
 // The name is already held. Names and branches are one namespace: a
 // workspace's name is refused when any OTHER registered workspace, open or
 // closed, of any repository, has it as its name or as its branch, because a
-// create or an async merge given that name would make it a branch. The
+// create given that name would make it a branch. The
 // renamed workspace's own name and branch are never held against it, so a
 // workspace can always be renamed back to its branch.
 message SetWorkspaceNameTaken {
@@ -223,13 +223,12 @@ message SetWorkspaceNameTaken {
   oneof holder {
     // A registered workspace holds it as its name or its branch.
     workspace.v1.WorkspaceRef workspace = 2;
-    // No workspace holds it yet, but one is about to: a pending async merge
-    // has reserved it for the merge workspace it will create, or a create
-    // in flight has claimed it.
+    // No workspace holds it yet, but one is about to: a create in flight has
+    // claimed it.
     SetWorkspaceNameTakenPending pending = 3;
   }
 }
 
-// The name is reserved by a pending async merge or claimed by a create in
-// flight, so a workspace will be registered under it. DELIBERATELY EMPTY.
+// The name is claimed by a create in flight, so a workspace will be
+// registered under it. DELIBERATELY EMPTY.
 message SetWorkspaceNameTakenPending {}

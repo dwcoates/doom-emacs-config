@@ -27,7 +27,7 @@ func TestIsRetiredMergeTabRow(t *testing.T) {
 		{name: "a fixes tab", raw: func(t *testing.T) []byte { return retiredKindTab(t, 7) }, want: true},
 		{name: "a tab of today's kind", raw: func(t *testing.T) []byte {
 			return marshalled(t, &frontendv1.FeedRow{Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{
-				Kind: &frontendv1.FeedMergeTab_Resolving{Resolving: &frontendv1.FeedMergeTabResolving{}},
+				Kind: &frontendv1.FeedMergeTab_Queue{Queue: &frontendv1.FeedMergeTabQueue{}},
 			}}})
 		}, want: false},
 		{name: "a row that is no merge tab", raw: func(t *testing.T) []byte {

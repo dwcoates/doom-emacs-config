@@ -171,13 +171,17 @@ func (t *CreateTicket) Spec() CreateSpec {
 // Joined reports whether the request joined a create already pending.
 func (t *CreateTicket) Joined() bool { return t.joined }
 
-// ID is the pending create the ticket names; empty for a merge workspace,
-// which is never pending (its name was reserved by its request).
-func (t *CreateTicket) ID() PendingCreateID {
+// ID is the pending create the ticket names.
+func (t *CreateTicket) ID() PendingCreateID { return t.entryOrPanic().id }
+
+// entryOrPanic is the pending create the ticket names. EVERY TICKET NAMES ONE
+// (EnterCreate, NewCreateTicket), so a ticket with none is a defect in
+// whoever minted it.
+func (t *CreateTicket) entryOrPanic() *pendingCreate {
 	if t.entry == nil {
-		return ""
+		panic("workspace: a create ticket names no pending create")
 	}
-	return t.entry.id
+	return t.entry
 }
 
 // pendingCreate is one create in the set.
@@ -228,11 +232,6 @@ func (v *verbs) EnterCreate(spec CreateSpec) *CreateTicket {
 	progress := spec.Progress
 	spec.Progress = nil
 	ticket := &CreateTicket{spec: spec, progress: progress}
-	// A MERGE WORKSPACE IS NEVER PENDING: its request reserved its name, so
-	// two of them are never identical, and it never names itself.
-	if spec.MergeOf != nil {
-		return ticket
-	}
 	key := createKey(spec)
 	v.pending.mu.Lock()
 	defer v.pending.mu.Unlock()
@@ -258,14 +257,7 @@ func (v *verbs) EnterCreate(spec CreateSpec) *CreateTicket {
 // RunCreate runs the create TICKET names to its answer: the workspace, its
 // failure, or a *NetworkWaitError once it is held.
 func (v *verbs) RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Workspace, error) {
-	entry := ticket.entry
-	if entry == nil {
-		created, err := v.attemptCreate(ctx, ticket.spec)
-		if panicked := recordCreatePanic(v.deps.Log.Global().With(dlog.Context{"repo_dir": ticket.spec.RepoDir}), ticket.spec, err); panicked != nil {
-			panic(panicked.Value)
-		}
-		return created, err
-	}
+	entry := ticket.entryOrPanic()
 	log := v.deps.Log.Global().With(dlog.Context{"create_id": string(entry.id), "repo_dir": entry.spec.RepoDir})
 	if ticket.joined {
 		v.pending.mu.Lock()
@@ -774,7 +766,14 @@ func createKey(spec CreateSpec) string {
 		Images     []string `json:",omitempty"`
 		Backlogged bool
 		Placement  *heldPlacement
+		// The one-shot's source and landing effects, omitted when unset, so a
+		// create with none keys as it did before they existed.
+		SourceBranch string       `json:",omitempty"`
+		ForkSubagent string       `json:",omitempty"`
+		Cleanup      bool         `json:",omitempty"`
+		Effects      *heldEffects `json:",omitempty"`
 	}{
+		SourceBranch: spec.SourceBranch, ForkSubagent: spec.ForkSubagent, Cleanup: spec.CleanupSourceWorktree, Effects: heldEffectsOf(spec.Effects),
 		Backlogged: spec.Backlogged, Placement: heldPlacementOf(spec.Placement),
 		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
 		// keys, and is refused by the create's validation rather than here.
@@ -837,7 +836,7 @@ func decodeProtoHexes[M proto.Message](what string, encoded []string, newMsg fun
 
 // heldSpec is a held create's request as its durable row stores it. Every
 // field of CreateSpec a held create can carry is here; a merge workspace is
-// never held, so MergeOf and MergeName are not.
+// never held.
 type heldSpec struct {
 	RepoDir       string `json:"repo_dir"`
 	InitialPrompt string `json:"initial_prompt,omitempty"`
@@ -850,19 +849,26 @@ type heldSpec struct {
 	ContextWorkspace string   `json:"context_workspace,omitempty"`
 	// ContextSelection is the context workspace's selected bubble, absent
 	// when nothing was selected.
-	ContextSelection     *heldSelection `json:"context_selection,omitempty"`
-	BaseRef              string         `json:"base_ref,omitempty"`
-	Parent               string         `json:"parent,omitempty"`
-	ForkFrom             string         `json:"fork_from,omitempty"`
-	Requester            string         `json:"requester,omitempty"`
-	ConsentedUngatedMode string         `json:"consented_ungated_mode,omitempty"`
-	PreDeploy            []string       `json:"pre_deploy,omitempty"`
-	PostDeploy           []string       `json:"post_deploy,omitempty"`
-	Name                 string         `json:"name,omitempty"`
-	Model                string         `json:"model,omitempty"`
-	PermissionMode       string         `json:"permission_mode,omitempty"`
-	Priority             *int           `json:"priority,omitempty"`
-	SlackThread          string         `json:"slack_thread,omitempty"`
+	ContextSelection *heldSelection `json:"context_selection,omitempty"`
+	// SourceBranch, ForkSubagent, CleanupSourceWorktree and Effects are the
+	// create's source branch, subagent fork, and a one-shot's landing
+	// effects; a row written before they existed has none, which is what its
+	// create meant.
+	SourceBranch          string       `json:"source_branch,omitempty"`
+	ForkSubagent          string       `json:"fork_subagent,omitempty"`
+	CleanupSourceWorktree bool         `json:"cleanup_source_worktree,omitempty"`
+	Effects               *heldEffects `json:"effects,omitempty"`
+	Parent                string       `json:"parent,omitempty"`
+	ForkFrom              string       `json:"fork_from,omitempty"`
+	Requester             string       `json:"requester,omitempty"`
+	ConsentedUngatedMode  string       `json:"consented_ungated_mode,omitempty"`
+	PreDeploy             []string     `json:"pre_deploy,omitempty"`
+	PostDeploy            []string     `json:"post_deploy,omitempty"`
+	Name                  string       `json:"name,omitempty"`
+	Model                 string       `json:"model,omitempty"`
+	PermissionMode        string       `json:"permission_mode,omitempty"`
+	Priority              *int         `json:"priority,omitempty"`
+	SlackThread           string       `json:"slack_thread,omitempty"`
 	// SlackSubscribe is the subscription at creation's mode; a row written
 	// before it existed has none, which is what its create meant.
 	SlackSubscribe string `json:"slack_subscribe,omitempty"`
@@ -952,16 +958,38 @@ func landingKey(landing *wsm.LandingChoice) string {
 	return "lands:" + ids.Optional(landing.Into)
 }
 
+// heldEffects is a one-shot's landing effects as a held create records them.
+// The cleanup directory is never held: the create resolves it.
+type heldEffects struct {
+	CloseAfter       string `json:"close_after,omitempty"`
+	CompactRequester bool   `json:"compact_requester,omitempty"`
+	ProfileGate      bool   `json:"profile_gate,omitempty"`
+}
+
+// heldEffectsOf is E as a held create records it, nil for none.
+func heldEffectsOf(e *wsm.LandingEffects) *heldEffects {
+	if e == nil {
+		return nil
+	}
+	return &heldEffects{CloseAfter: string(e.CloseAfter), CompactRequester: e.CompactRequester, ProfileGate: e.ProfileGate}
+}
+
+// effects is the held effects as a spec carries them, nil for none.
+func (h *heldEffects) effects() *wsm.LandingEffects {
+	if h == nil {
+		return nil
+	}
+	return &wsm.LandingEffects{CloseAfter: wsm.WorkspaceID(h.CloseAfter), CompactRequester: h.CompactRequester, ProfileGate: h.ProfileGate}
+}
+
 // encodeHeldSpec encodes SPEC for its durable row.
 func encodeHeldSpec(spec CreateSpec) (string, error) {
-	if spec.MergeOf != nil {
-		panic("workspace: a merge workspace's create is never held")
-	}
 	held := heldSpec{
 		RepoDir: spec.RepoDir, InitialPrompt: spec.InitialPrompt, OneShot: spec.OneShot, FromOrigin: spec.FromOrigin,
 		InitialImages:    protoHexes("an initial image", spec.InitialImages),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ContextSelection: heldSelectionOf(spec.ContextSelection),
-		BaseRef: spec.BaseRef, Parent: ids.Optional(spec.Parent),
+		SourceBranch: spec.SourceBranch, Parent: ids.Optional(spec.Parent),
+		ForkSubagent: spec.ForkSubagent, CleanupSourceWorktree: spec.CleanupSourceWorktree, Effects: heldEffectsOf(spec.Effects),
 		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester),
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
@@ -1011,7 +1039,8 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	spec.RepoDir, spec.InitialPrompt, spec.OneShot, spec.FromOrigin = held.RepoDir, held.InitialPrompt, held.OneShot, held.FromOrigin
 	spec.InitialImages = images
 	spec.ContextWorkspace, spec.ContextSelection = optionalID(held.ContextWorkspace), contextSelectionOf(held.ContextSelection)
-	spec.BaseRef, spec.Parent = held.BaseRef, optionalID(held.Parent)
+	spec.SourceBranch, spec.Parent = held.SourceBranch, optionalID(held.Parent)
+	spec.ForkSubagent, spec.CleanupSourceWorktree, spec.Effects = held.ForkSubagent, held.CleanupSourceWorktree, held.Effects.effects()
 	spec.ForkFrom, spec.Requester = optionalID(held.ForkFrom), optionalID(held.Requester)
 	spec.ConsentedUngatedMode, spec.DeployHooks = held.ConsentedUngatedMode, wsm.DeployHooks{PreDeploy: pre, PostDeploy: post}
 	spec.Name, spec.Model, spec.PermissionMode, spec.SlackThread = held.Name, held.Model, held.PermissionMode, held.SlackThread

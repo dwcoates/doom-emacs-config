@@ -52,10 +52,6 @@ type NewSubsectionPlacement struct {
 // child sits wherever its root does (arrange.go). Nothing is written.
 var ErrPlacementOnChild = errors.New("wsm: a child workspace is never placed; it sits wherever its owner does")
 
-// ErrPlacementOnMerge refuses a placement on a merge workspace, which is
-// drawn nowhere until revealed. Nothing is written.
-var ErrPlacementOnMerge = errors.New("wsm: a merge workspace is never placed")
-
 // UnknownPlacementSubsectionError names the subsection NAME the repository
 // does not carry. Nothing is written.
 type UnknownPlacementSubsectionError struct{ Name string }
@@ -90,7 +86,7 @@ func IsPlacementRefusal(err error) bool {
 	var unknown *UnknownPlacementSubsectionError
 	var gatherUnknown *GatherUnknownError
 	var gatherRefused *GatherRefusedError
-	return errors.Is(err, ErrPlacementOnChild) || errors.Is(err, ErrPlacementOnMerge) || errors.Is(err, ErrBlankSubsectionName) ||
+	return errors.Is(err, ErrPlacementOnChild) || errors.Is(err, ErrBlankSubsectionName) ||
 		errors.As(err, &unknown) || errors.As(err, &gatherUnknown) || errors.As(err, &gatherRefused)
 }
 
@@ -109,7 +105,6 @@ type gatherCandidate struct {
 	closed     bool
 	kind       WorkspaceKind
 	child      bool
-	merge      bool
 	main       bool
 	subsection bool
 }
@@ -124,8 +119,6 @@ func (c gatherCandidate) why() string {
 		return "it is closed"
 	case c.child:
 		return "it is a child, which sits wherever its owner does"
-	case c.merge:
-		return "it is a merge workspace"
 	case c.main:
 		return "it is a main workspace, which is never sorted by an agent"
 	case c.subsection:
@@ -136,14 +129,14 @@ func (c gatherCandidate) why() string {
 
 func scanGatherCandidate(row interface{ Scan(...any) error }) (gatherCandidate, error) {
 	var (
-		c                         gatherCandidate
-		kind                      string
-		parent, merge, subsection sql.NullString
+		c                  gatherCandidate
+		kind               string
+		parent, subsection sql.NullString
 	)
-	if err := row.Scan(&c.id, &kind, &c.closed, &parent, &merge, &subsection, &c.main); err != nil {
+	if err := row.Scan(&c.id, &kind, &c.closed, &parent, &subsection, &c.main); err != nil {
 		return gatherCandidate{}, err
 	}
-	c.kind, c.child, c.merge, c.subsection = WorkspaceKind(kind), parent.Valid, merge.Valid, subsection.Valid
+	c.kind, c.child, c.subsection = WorkspaceKind(kind), parent.Valid, subsection.Valid
 	return c, nil
 }
 
@@ -151,8 +144,8 @@ func scanGatherCandidate(row interface{ Scan(...any) error }) (gatherCandidate, 
 // pre-create refusal (RefusePlacement) and the register's own transaction
 // both run it, so what the first accepts the second accepts unless the store
 // moved between them, and then the second refuses with the same typed error.
-// PARENT and MERGE are the facts of the workspace being placed.
-func checkPlacement(ctx context.Context, q querier, repo RepoID, p RegisterPlacement, parent *WorkspaceID, merge bool) (resolvedPlacement, error) {
+// PARENT is the fact of the workspace being placed.
+func checkPlacement(ctx context.Context, q querier, repo RepoID, p RegisterPlacement, parent *WorkspaceID) (resolvedPlacement, error) {
 	if p.targets() != 1 {
 		panic(fmt.Sprintf("wsm: a placement names exactly one of an existing subsection, a new one and the one-shots one: %+v", p))
 	}
@@ -162,11 +155,8 @@ func checkPlacement(ctx context.Context, q querier, repo RepoID, p RegisterPlace
 	if p.OneShots && p.CreatedBy != "" {
 		panic(fmt.Sprintf("wsm: a placement into the one-shots subsection is the daemon's, and names no creator: %+v", p))
 	}
-	switch {
-	case parent != nil:
+	if parent != nil {
 		return resolvedPlacement{}, ErrPlacementOnChild
-	case merge:
-		return resolvedPlacement{}, ErrPlacementOnMerge
 	}
 	if p.OneShots {
 		sub, found, err := oneShotsSubsection(ctx, q, repo)
@@ -196,7 +186,7 @@ func checkPlacement(ctx context.Context, q querier, repo RepoID, p RegisterPlace
 	seen := map[WorkspaceID]bool{}
 	for _, gathered := range p.New.Gather {
 		// An open workspace of the name outranks a closed one.
-		rows, err := listRows(ctx, q, `SELECT w.id, w.kind, w.closed, w.parent_id, w.merge_of, w.subsection_id, w.dir = r.dir
+		rows, err := listRows(ctx, q, `SELECT w.id, w.kind, w.closed, w.parent_id, w.subsection_id, w.dir = r.dir
 			FROM workspaces AS w JOIN repositories AS r ON r.id = w.repo_id
 			WHERE w.repo_id = ? AND w.name = ? ORDER BY w.closed, w.place`, scanGatherCandidate, repo, gathered)
 		if err != nil {
@@ -220,11 +210,11 @@ func checkPlacement(ctx context.Context, q querier, repo RepoID, p RegisterPlace
 }
 
 // RefusePlacement answers the typed refusal of placing a new workspace
-// (child of PARENT or not, a merge workspace or not) in repository REPODIR,
+// (child of PARENT or not) in repository REPODIR,
 // nil when the placement would be accepted: the create asks before it makes a
 // worktree. It writes nothing. A refusal is the answer, recorded at DEBUG;
 // only a failed read is an error the store records.
-func (s *store) RefusePlacement(ctx context.Context, repoDir string, p RegisterPlacement, parent *WorkspaceID, merge bool) error {
+func (s *store) RefusePlacement(ctx context.Context, repoDir string, p RegisterPlacement, parent *WorkspaceID) error {
 	const op = "daemon.wsm.refuse_placement"
 	normalized, err := normalizeDir(repoDir)
 	if err != nil {
@@ -240,7 +230,7 @@ func (s *store) RefusePlacement(ctx context.Context, repoDir string, p RegisterP
 			}
 			return err
 		}
-		_, refusal = checkPlacement(ctx, s.q(ctx), repo, p, parent, merge)
+		_, refusal = checkPlacement(ctx, s.q(ctx), repo, p, parent)
 		if refusal != nil && !IsPlacementRefusal(refusal) {
 			return refusal
 		}

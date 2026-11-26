@@ -79,6 +79,11 @@ daemon/
     headless/      the ONE exec site for the daemon's own `claude -p` calls:
                    the classifier's routing question and the workspace naming
                    call. Guard, binary resolution, stdin discipline, deadline
+    children/       the children tracker: the ONE reader of each parent's children (fed by the roster's
+                   registry, status arms and summaries); draws each as a feed bubble, a footer row
+                   (open) or a topbar summary-menu row (not open)
+    landingreports/ a merge that did not land, handed back in place; a deploy's cover and end reports
+                   to every workspace whose landing it carries
     merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate at the head, the two repair slots, briefs, ledger,
                    queue-change reports and subscription records)
     gnsclient/     the daemon's one way to Slack: the user's own `gns` CLI (pipe streams, thread reads, posts,
@@ -459,7 +464,7 @@ INFO.
 
 ```go
 type Orchestrator interface {
-  Enqueue(ctx, req Request) (Enqueued, error)    // FinishWorkspace and the async-merge create; the repository's deploy config is read and refused when missing or unusable; the asker is checked (requester_may_not_land); refuses pre-state (no layout facts, deleted session, already queued/merging)
+  Enqueue(ctx, req Request) (Enqueued, error)    // FinishWorkspace (a landing child's merge is its own finish); the repository's deploy config is read and refused when missing or unusable; the asker is checked (requester_may_not_land); refuses pre-state (no layout facts, deleted session, already queued/merging)
   Pause(ctx, scope) error; Unpause(ctx, scope) error
   Evict(ctx, ws) error                           // a waiting merge leaves the queue; a RUNNING or PARKED one is abandoned
   AnswerQueueOffer(ctx, ws, answer) error        // AnswerMergeQueueOffer: evict | prioritize | cancel
@@ -519,12 +524,10 @@ records it in wsm's `durable_feed_rows` at its order key, so a new daemon
 it. A held prompt keeps the requester open past the landing
 (`wsm.bindMergeHold`). Briefs are read
 from `prompts/` at use time (`merge-conflict-resolve.md`,
-`merge-test-failure-resolve.md`, and `merge-pick.md` for an async pick's
-first turn). A merge is SYNC (in the requester, `in_place`) or ASYNC (in a
-hidden merge workspace, `detached`): an async merge workspace's merge turns
-are drawn in its own feed and MIRRORED, re-identified, into the bubble's tab
-in the requester's feed (`feed.Resolver.SetOutputMirror`, `turns.mirror`),
-and the bubble lives only there (docs/protobuf-design/sync-async-merges.md). Post-merge worktree removal after terminal
+`merge-test-failure-resolve.md`). A merge always runs in the workspace that
+asked for it, and its bubble lives in that workspace's feed; a workspace that
+must stay open while a branch lands asks a landing child to land it (see
+"children" below). Post-merge worktree removal after terminal
 publication. A user-requested merge captures the displaced user turn durably
 and resubmits it exactly once at lease release; an agent-requested one waits
 for the turn instead. A landing on the daemon's own checkout tells the deploy
@@ -533,17 +536,43 @@ only after release + terminal, and never waits on the build.
 
 SUBSCRIPTIONS (docs/protobuf-design/merge-queue-subscriptions.md). Every
 write that changes a queue's LINE reports itself through a second DB wrapper
-(`queueEventsDB`, beside `asyncMergesDB`): put in line, requeued after a
+(`queueEventsDB`): put in line, requeued after a
 restart, started, landed, failed, taken off (with its cause), reordered,
 paused, resumed. A started merge's new step is reported from `publish`, which
 names the queue it publishes for. Each change carries the queue as it then
-stands (`merge.QueueSnapshot`: every member front first, name, branch, mode,
+stands (`merge.QueueSnapshot`: every member front first, name, branch,
 started, step; paused). A change is reported by the write that made it,
 never found by diffing two looks, so a change is reported once across a
 handover; the events lock never nests with `o.mu`. Changes go to
 `Deps.QueueEvents` (`internal/mergenotice`), which never blocks the queue.
 Subscriptions are durable (wsm layout 55) and end with the workspace's close
 (`MarkClosed` deletes them in the close's transaction; `Forget` cascades).
+
+### children (`internal/children`) and landingreports (`internal/landingreports`)
+
+```go
+type Tracker struct{ ... }              // New(Deps{Feed, Footer, Topbar, Home, Now, Log})
+func (t *Tracker) SetRegistry(sidebar.Registry)   // sidebar.WithRegistrySink
+// status arms and their canonical colors: sidebar.WithArmSink; summaries: the summary keeper
+```
+
+`children.Tracker` is the ONE tracker of each parent's children. From the
+roster's registry, each row's status arm with its canonical color and the
+summary keeper, it draws a child as a `frontend.v1.FeedChild` row
+(`feedid.KindChild`) in the parent's root feed, in the footer while the child
+is OPEN (`footer.SetOpenChildren`, the `⇄` chip and panel) and in the topbar
+summary's menu once it is NOT open (`topbar.SetClosedChildren`), by ONE
+predicate, so a child is in exactly one of the footer and the menu. It reads
+and re-publishes; it decides nothing about a child's life. Wired late-bound
+in `graph.go` (`childrenForwarder`).
+
+`landingreports.Service` implements `merge.HandBacks`: a merge that did not
+land is handed back, in place, to its own open workspace; `CoverLandings` and
+`DeployEnded` tell every workspace whose landing a deploy carries how that
+deploy ended. A landed merge hands nothing back: its workspace closed, and
+the child's landing reaches its parent as one line
+(`prompts/workspace-child-landed.md`, `internal/workspacesubs`), after which
+a requested `-compact-requester-after` compacts the parent.
 
 ### rollout (`internal/rollout`)
 
@@ -583,7 +612,7 @@ queue + resolvers: `Register`, `RegisterRepository` (a repository ON ITS OWN,
 with no workspace: resolved from ANY path inside it through `RepositoryOf`,
 idempotent by the resolved main-worktree dir, answering whether the registry
 already held it; it republishes the roster so the new repository's EMPTY
-section draws), `Create` (standard + one-shot; slug from the
+section draws), `Create` (standard + one-shot; a one-shot with `SourceBranch` is a LANDING CHILD, its branch cut with `git worktree add -b` at that branch's tip, carrying its `wsm.LandingEffects`; slug from the
 initial prompt via the naming rule; branch; worktree; layout facts recorded;
 registration only after materialization; consent check for ungated modes;
 fork = the create records a pending fork; the bring-up asks the parent's shim
@@ -593,8 +622,7 @@ vendor id and lineage, then StartSession(resume); the fork's feed reads its
 inherited past from the parent's book; a create that FAILS, by any caller,
 opens its repository's main-worktree workspace and queues the
 `workspace-create-failed` brief there, deferred, under
-`PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED`, unless it was a handover or a merge
-workspace, whose failure the merge queue hands back), `Open` (spawn on mount
+`PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED`, unless it was a handover), `Open` (spawn on mount
 semantics), `Close` (requires quiet: no turn, no live work, no held prompts,
 no queued merge; refusal manifests in the footer), `Kill`, `Nuke`, `Forget`
 (registration's undo: the record goes, and its repository's record with it when
@@ -722,7 +750,7 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
 ```go
 type Feed struct{ Root bool; Agent *AgentId; Merge *LeaseID }
 type Ref  struct{ WS WorkspaceID; Feed Feed; Row RowKey }
-type RowKey struct{ Kind RowKind; ID string; Sub string }   // Kind: prompt|activity|turn_ended|permission|question|separation|cold_gate|merge_head|merge_tab|detached_subagent|detached_shell|synth
+type RowKey struct{ Kind RowKind; ID string; Sub string }   // Kind: prompt|activity|turn_ended|permission|question|separation|cold_gate|merge_head|merge_tab|child|detached_subagent|detached_shell|synth
 func Encode(Ref) *frontendv1.FeedId; func Decode(*frontendv1.FeedId) (Ref, error)
 ```
 Encoding is a versioned, delimiter-safe, base64url string; the same input
@@ -1138,8 +1166,7 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
 - **Only visible workspaces run** (`wsm.Workspace.Runs`, read through
   `bringup.OnlyVisible`/`bringup.Judge`): the boot's bring-up, the
   takeover's session-less starts and every open skip a workspace the user hid
-  or whose repository section is collapsed. A hidden MERGE workspace still
-  runs: its async merge withholds it, not the user. A running daemon's
+  or whose repository section is collapsed. A running daemon's
   stand-downs judge by `bringup.Judge`, which takes the visibility and the
   fold from the roster's last render (`sidebar.Resolver.Standing`), never by
   reading the whole arrangement from the store: a fleet's detach once read it

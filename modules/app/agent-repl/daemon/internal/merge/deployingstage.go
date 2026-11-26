@@ -112,7 +112,7 @@ func (r *run) deployingMerge(ctx context.Context, span deployingSpan) (wsm.Deplo
 	if entry.Clock.Phase != wsm.MergeClockActive {
 		return wsm.DeployingMerge{}, fmt.Errorf("merge: the landing merge %s in %s stands on a %s clock, not an active one", r.ws, r.repo, entry.Clock.Phase)
 	}
-	c, err := r.o.creditOf(ctx, r.ws)
+	record, err := r.o.deps.DB.Workspace(ctx, r.ws)
 	if err != nil {
 		return wsm.DeployingMerge{}, err
 	}
@@ -121,7 +121,7 @@ func (r *run) deployingMerge(ctx context.Context, span deployingSpan) (wsm.Deplo
 		since, timed = r.o.deps.Now(), false
 	}
 	return wsm.DeployingMerge{
-		Repo: r.repo, Workspace: r.ws, Lease: r.lease.ID, Credited: c.workspace, Async: c.async, Name: c.name,
+		Repo: r.repo, Workspace: r.ws, Lease: r.lease.ID, Name: record.Name,
 		Branch: r.subject.branch, TargetDir: r.subject.targetDir,
 		ActiveSince: entry.Clock.Since, DeployingSince: since, Timed: timed,
 	}, nil
@@ -228,11 +228,7 @@ func (o *orchestrator) closeDeploying(m wsm.DeployingMerge, outcome string) {
 // deployingMember is M as the queue's status lists it: running, on its
 // deploying step.
 func deployingMember(m wsm.DeployingMerge) QueueMember {
-	out := QueueMember{Workspace: m.Workspace, Name: m.Name, Branch: m.Branch, Started: true, Step: footer.StepDeploying}
-	if m.Async {
-		out.Requester = m.Credited
-	}
-	return out
+	return QueueMember{Workspace: m.Workspace, Name: m.Name, Branch: m.Branch, Started: true, Step: footer.StepDeploying}
 }
 
 // rosterDeploying is M as the roster's queue draws it: its head, being worked
@@ -254,15 +250,10 @@ func (o *orchestrator) rosterDeploying(ctx context.Context, m wsm.DeployingMerge
 	}
 	out := &sidebar.QueueEntry{
 		Workspace: m.Workspace,
-		Credited:  m.Credited,
-		Async:     m.Async,
-		Reveal:    headFeedID(m.Credited, m.Lease),
+		Reveal:    headFeedID(m.Workspace, m.Lease),
 		Admitted:  true,
 		Stages:    stages,
 		Clock:     wsm.MergeClock{Phase: wsm.MergeClockActive, Since: m.ActiveSince},
-	}
-	if m.Async {
-		out.AsyncName = m.Name
 	}
 	return out, nil
 }
@@ -293,13 +284,6 @@ func (o *orchestrator) deployingTabEntry(ctx context.Context, m wsm.DeployingMer
 		Status: &frontendv1.FeedMergeQueueEntry_Merging{Merging: &frontendv1.FeedMergeQueueMerging{
 			ActiveTab: tabLabel(TabDeploy, 1), StageEnteredAtMs: m.DeployingSince.UnixMilli()}},
 		Target: queueTarget(m.TargetDir),
-	}
-	if m.Async {
-		requester, err := o.deps.DB.Workspace(ctx, m.Credited)
-		if err != nil {
-			return nil, err
-		}
-		out.Bubble = &frontendv1.FeedMergeQueueBubble{Requester: requester.Ref(), Row: headFeedID(m.Credited, m.Lease)}
 	}
 	return out, nil
 }

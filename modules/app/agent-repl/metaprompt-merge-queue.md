@@ -12,7 +12,7 @@ This workspace lands its work through its repository's merge queue.
 - A workspace may rerun its own recorded cases at any time (`agent-repld test run -rerun`).
   - The daemon records every case the workspace's runs named and every case a merge gate failed on its branch, so the rerun is the branch's regression set.
   - It runs only those cases, never a suite the record does not itself hold.
-- Asking for a merge (`workspace async-merge`, `workspace finished`) first runs the repository's rule suites on the branch, through the daemon (owner approval, 2026-11-25).
+- Asking for a merge (`workspace finished`) first runs the repository's rule suites on the branch, through the daemon (owner approval, 2026-11-25).
   - They are the repository-wide checks that read its sources (gofmt, the source scans, the byte-compiler, shellcheck), which no targeted run names.
   - A refusal names the failing cases with the command that reruns each group; fix them, commit, and ask again.
   - The contract is `modules/app/agent-repl/AGENTS.md`, "The merge queue's test gate and remediation contract".
@@ -32,13 +32,13 @@ This workspace lands its work through its repository's merge queue.
   - This covers my own workspace's branch and every subagent's branch alike.
   - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
   - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
-- Land every complete change as an async merge into master WITHOUT asking.
+- Land every complete change into master WITHOUT asking, through a landing child: a one-shot child cut from the branch, which lands it while this workspace keeps working, per `/agent-repl-merge-queue`.
   - A complete change is a full feature addition or change, a full fix, or a full addendum to an already-merged change, that is sensible and regresses nothing.
   - Never ask whether to merge or whether to add work to the merge queue; merge it, then report the merge.
   - Only incomplete work waits: a partial feature, or an addendum not yet finished.
-  - A fix or feature is often landed async and then tweaked in later changes, and each later complete change lands the same way.
+  - A fix or feature is often landed through a landing child and then tweaked in later changes, and each later complete change lands the same way.
 - Every offer to merge a workspace or branch MUST name which mode the merge would run in.
   - An offer is made only where the merge is not already prescribed above, such as a one-shot that would close this workspace.
   - A one-shot merge makes the workspace unavailable while the merge runs, and closes the workspace once it lands.
-  - An async merge keeps the workspace open and available, both while the merge runs and after it lands.
+  - A landing child keeps the workspace open and available, both while the child's merge runs and after it lands.
   - Never offer a merge without its mode, because the two modes leave me with different workspaces afterwards.

@@ -172,10 +172,6 @@ type DB interface {
 	// SetCacheLapse records a backlogged workspace's projected cache lapse, and
 	// answers whether it was recorded: a workspace not backlogged takes none.
 	SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLapse) (bool, error)
-	// RevealMergeWorkspace records that a merge workspace has been revealed,
-	// answering whether this call revealed it; a workspace that is no merge
-	// workspace is refused, an unknown one is ErrNotFound.
-	RevealMergeWorkspace(ctx context.Context, id WorkspaceID) (bool, error)
 	// SetParent applies a Retarget: the recorded parent and the merge target
 	// directory, in one transaction (parent.go). A refused retarget answers a
 	// ParentRefusedError or a family refusal; an unknown workspace is
@@ -244,9 +240,6 @@ type DB interface {
 	// SetMergedAt records that the workspace's merge landed and, when commits
 	// is set, the commit count it brought in (see commitcount.go).
 	SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time, commits *uint32) error
-	// SetLanded records, or clears with nil, a requester's record of its
-	// detached merge landing (see landed.go).
-	SetLanded(ctx context.Context, id WorkspaceID, landing *Landing) error
 	// SetLiveCommitCount records a live workspace's branch commit count. It
 	// answers false, writing nothing, once the workspace has merged.
 	SetLiveCommitCount(ctx context.Context, id WorkspaceID, count uint32) (bool, error)
@@ -398,11 +391,6 @@ type DB interface {
 	// workspace never recorded is absent. A feed replay places each turn's rows
 	// by it, so a replayed turn is drawn where it was drawn live.
 	TurnAddresses(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*OutputAddress, error)
-	// TurnMirrors answers the mirror address each named turn of this
-	// workspace was recorded with, for the turns that have one: where else its
-	// rows were drawn (an async merge workspace's merge turn, in the
-	// requester's bubble). A feed replay mirrors each such turn by it.
-	TurnMirrors(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*MirrorAddress, error)
 	// TurnSenders answers the workspace whose agent sent each named turn's
 	// prompt, for the turns that have one (sentby.go). A feed replay heads each
 	// such turn's prompt by it.
@@ -500,18 +488,6 @@ type DB interface {
 	ClaimResumptions(ctx context.Context, ws WorkspaceID, resumedAs TurnID, at time.Time) (int, error)
 	// OwedTurns answers the turns ws is owed a resumption for, unclaimed.
 	OwedTurns(ctx context.Context, ws WorkspaceID) ([]TurnID, error)
-	// OweHandBack records a landed async merge's report as owed until the
-	// build that carries the landing is running (owedhandbacks.go).
-	OweHandBack(ctx context.Context, owed OwedHandBack) error
-	// CoverOwedHandBacks marks every owed report covered by the deploy
-	// committing now, and answers how many it newly covered.
-	CoverOwedHandBacks(ctx context.Context) (int, error)
-	// OwedHandBacks answers the owed reports, oldest first: only the covered
-	// ones when coveredOnly.
-	OwedHandBacks(ctx context.Context, coveredOnly bool) ([]OwedHandBack, error)
-	// PayHandBack deletes mergeWS's owed report once it was submitted, and
-	// answers whether one was there.
-	PayHandBack(ctx context.Context, mergeWS WorkspaceID) (bool, error)
 	// RecordUndeployedLanding records a landing as waiting for the deploy
 	// that carries it (undeployedlandings.go).
 	RecordUndeployedLanding(ctx context.Context, landing UndeployedLanding) error
@@ -660,41 +636,6 @@ type DB interface {
 	// job, in one transaction. Any other source is refused, and so is a
 	// requester with no creation job.
 	RequestOneShotMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error
-	// MergeWorkspaceFor loads the merge workspace forked for one detached
-	// request; false when none is registered for it yet.
-	MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) (Workspace, bool, error)
-	// RequestAsyncMerge records one async merge request of the requester,
-	// asked for in TURN (empty when none was in flight), behind every request
-	// recorded before it (async_merge_requests). A requester holds any number.
-	RequestAsyncMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, turn TurnID, source MergeSource, at time.Time) error
-	// AsyncMergeRequestsOf answers a requester's async requests not yet
-	// handed off, in the order they were asked for.
-	AsyncMergeRequestsOf(ctx context.Context, requester WorkspaceID) ([]AsyncMergeRequest, error)
-	// AllAsyncMergeRequests answers every async request not yet handed off, in
-	// the order they were asked for.
-	AllAsyncMergeRequests(ctx context.Context) ([]AsyncMergeRequest, error)
-	// DropAsyncMergeRequest removes an async request that will never be handed
-	// off, settling every merge placed behind it with CAUSE.
-	DropAsyncMergeRequest(ctx context.Context, repo RepoKey, request DetachedMergeID, cause string) error
-	// HandOffDetachedMerge moves an async request onto the merge workspace
-	// forked for it, in one transaction.
-	HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch, pick string, at time.Time) error
-	// ReservedMergeNames answers every merge workspace name a standing async
-	// request has reserved, mapped to the workspace that reserved it.
-	ReservedMergeNames(ctx context.Context) (map[string]WorkspaceID, error)
-	// StartMergePick records that a merge workspace's pick began as a turn,
-	// with its bubble's ledger identity, before the turn is submitted.
-	StartMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID, turn TurnID, at time.Time) error
-	// ClearMergePick records that a queued merge workspace's begun pick
-	// succeeded: its instruction leaves the row, so its next admission
-	// admits the merge itself.
-	ClearMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) error
-	// RecordMergeWorkspaceRemoved records that the inactivity sweep is
-	// removing a merge workspace, before its records are deleted.
-	RecordMergeWorkspaceRemoved(ctx context.Context, ws WorkspaceID, requester WorkspaceID, at time.Time) error
-	// MergeWorkspaceRemovedAt answers when the sweep removed a merge
-	// workspace; false when no removal is recorded for it.
-	MergeWorkspaceRemovedAt(ctx context.Context, ws WorkspaceID) (time.Time, bool, error)
 	// QueueMerge moves a requested merge into line, at the back, with its
 	// bubble's ledger identity, and returns its one-based place among the
 	// entries in line.
@@ -771,7 +712,7 @@ type DB interface {
 	// RequeueOffQueueMerge puts a request off its queue back on it as
 	// itself, REQUESTED, at PLACE, recording MODEL (when set) as its
 	// session's model, in one transaction.
-	RequeueOffQueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place RequeuePlacement, version *VersionIncrement, model string, at time.Time) (MergeSource, error)
+	RequeueOffQueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place RequeuePlacement, model string, at time.Time) (MergeSource, error)
 	// DiscardOffQueueMerge ends a workspace's own merge's request off its
 	// queue.
 	DiscardOffQueueMerge(ctx context.Context, id WorkspaceID) error
@@ -1057,7 +998,7 @@ type DB interface {
 	CloseRequests(ctx context.Context) ([]WorkspaceID, error)
 	// RefusePlacement answers the typed refusal of placing a new workspace in
 	// a repository, nil when it would be accepted (registerplacement.go).
-	RefusePlacement(ctx context.Context, repoDir string, p RegisterPlacement, parent *WorkspaceID, merge bool) error
+	RefusePlacement(ctx context.Context, repoDir string, p RegisterPlacement, parent *WorkspaceID) error
 	// IsIntake answers whether a workspace is an ephemeral intake workspace.
 	IsIntake(ctx context.Context, id WorkspaceID) (bool, error)
 	// CardAddressees answers what already addresses a feed card's `?`

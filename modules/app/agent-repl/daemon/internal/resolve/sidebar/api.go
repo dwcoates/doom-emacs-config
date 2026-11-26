@@ -110,10 +110,8 @@ type Resolver interface {
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)
 	// SetMergeQueue installs, WHOLE, REPO's merge queue as the roster draws
-	// it: whether it is paused, the workspaces with a row on it, the merges
-	// in line, and the workspaces whose own branch has an async merge on it.
-	// The merge
-	// orchestrator is the one caller, on every change of the queue's rows and
+	// it: whether it is paused, the workspaces with a row on it, and the
+	// merges in line. The merge orchestrator is the one caller, on every change of the queue's rows and
 	// of its pause.
 	SetMergeQueue(repo wsm.RepoKey, queue MergeQueue)
 	// SetGithubQueue installs, WHOLE, every workspace whose owned pull request
@@ -371,11 +369,6 @@ type MergeQueue struct {
 	// repair slots and the merges awaiting each
 	// (frontend.v1.RosterRepoMergeQueue.fixing_tests and its siblings).
 	Remediating []QueueEntry
-	// AsyncRequesters are the workspaces whose own branch has an async merge
-	// on the queue, from the moment the async request is recorded until its
-	// merge leaves the queue. Each row carries the `async_merging` marker
-	// beside its own status arm.
-	AsyncRequesters []ids.WorkspaceID
 	// Mediation is the deploy mediation the queue waits on, nil while no
 	// deploy owes one (frontend.v1.RosterRepoMergeQueue.mediation).
 	Mediation *QueueMediation
@@ -411,15 +404,10 @@ type GithubQueueEntry struct {
 // OffQueueEntry is one merge off its queue, as its repository's Merge Queue
 // group draws it.
 type OffQueueEntry struct {
-	// Workspace is the merge's own workspace (an async merge's merge
-	// workspace): what its requeue and discard controls name, and the
-	// workspace whose repository places it.
+	// Workspace is the merge's own workspace: what its requeue and discard
+	// controls name, what a click on its name selects, and the workspace
+	// whose repository places it.
 	Workspace ids.WorkspaceID
-	// Credited is the workspace a click on its name selects: Workspace for a
-	// workspace's own merge, the requester for an async merge.
-	Credited ids.WorkspaceID
-	// Async reports an async merge, drawn under Workspace's own name.
-	Async bool
 	// Cause is the sidebar's words for why it left
 	// (frontend.v1.RosterMergeQueueOffQueueCause).
 	Cause string
@@ -428,23 +416,10 @@ type OffQueueEntry struct {
 // QueueEntry is one merge in line, as a repository section showing its merge
 // queue draws it.
 type QueueEntry struct {
-	// Workspace is the workspace the merge runs in: an async merge's merge
-	// workspace once it exists. The roster reads its merge facts.
+	// Workspace is the workspace landing its own branch, which a click on the
+	// merge selects. The roster reads its merge facts.
 	Workspace ids.WorkspaceID
-	// Credited is the workspace the roster credits the merge to, which a
-	// click on it selects: Workspace itself for a workspace landing its own
-	// branch, and the requester for an async merge, which is never drawn as
-	// its hidden merge workspace's row.
-	Credited ids.WorkspaceID
-	// Async reports whether the merge is an async merge.
-	Async bool
-	// AsyncName is an async merge's OWN name, which it is drawn under in
-	// place of Credited's (frontend.v1.RosterMergeQueueSubject.name): its
-	// merge workspace's name, or before that workspace is forked, the name
-	// its request reserved for it. Set iff Async is: a sync merge is drawn
-	// under Credited's name.
-	AsyncName string
-	// Reveal is the merge bubble's head row on Credited's root feed, nil when
+	// Reveal is the merge bubble's head row on Workspace's root feed, nil when
 	// the merge has no bubble identity in this daemon.
 	Reveal *frontendv1.FeedId
 	// Admitted reports that the merge's run was admitted: it is being worked
@@ -543,6 +518,16 @@ type ViewedSink func(ws ids.WorkspaceID, arm string)
 // in the same report, and returns at once just as the ResultSink does.
 type StatusChangeSink func(ws ids.WorkspaceID, at time.Time)
 
+// RegistrySink is told every whole registry the roster installs (SetRegistry,
+// SetRegistrySelected), after it is installed and off the resolver's lock.
+type RegistrySink func(reg Registry)
+
+// ArmSink is told every move of a workspace's published status arm, with the
+// arm's canonical color name (render-colors.json's `roster_status`). It is
+// called off the resolver's lock, in the same report as the StatusChangeSink,
+// and returns at once.
+type ArmSink func(ws ids.WorkspaceID, arm, tone string)
+
 // Option adjusts the resolver.
 type Option func(*resolver)
 
@@ -566,6 +551,16 @@ func WithQuiet(g *viewquiet.Gate) Option {
 // WithViewedSink installs the sink the resolver tells its viewed changes.
 func WithViewedSink(sink ViewedSink) Option {
 	return func(r *resolver) { r.viewedChanges = sink }
+}
+
+// WithRegistrySink installs the sink the resolver tells every registry.
+func WithRegistrySink(sink RegistrySink) Option {
+	return func(r *resolver) { r.registries = sink }
+}
+
+// WithArmSink installs the sink the resolver tells every arm move.
+func WithArmSink(sink ArmSink) Option {
+	return func(r *resolver) { r.armChanges = sink }
 }
 
 // WithStatusChangeSink installs the sink the resolver tells its status changes.

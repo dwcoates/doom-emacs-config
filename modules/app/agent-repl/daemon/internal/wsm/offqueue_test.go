@@ -60,7 +60,7 @@ func TestAnExitShortOfALandingKeepsTheRequestOffTheQueue(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("OffQueueMergeOf = %+v, %v, %v; want the request kept", rec, found, err)
 			}
-			if rec.Cause != "evicted" || rec.Adopted || !rec.RequestedAt.Equal(instant) {
+			if rec.Cause != "evicted" || !rec.RequestedAt.Equal(instant) {
 				t.Fatalf("record = %+v, want cause evicted, not adopted, requested at %v", rec, instant)
 			}
 			if !reflect.DeepEqual(rec.Source, fullRequest) {
@@ -279,7 +279,7 @@ func TestRequeueOffQueueMergePutsTheSameRequestBackAsARequest(t *testing.T) {
 	offQueued(t, s, repo, ws.ID)
 
 	// Act
-	source, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, nil, "", instant.Add(time.Hour))
+	source, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, "", instant.Add(time.Hour))
 
 	// Assert: requested again, with every value it was asked for, and its
 	// record gone.
@@ -325,7 +325,7 @@ func TestRequeueOffQueueMergeTakesTheNewPlacement(t *testing.T) {
 			queued(t, s, repo, ahead.ID, instant)
 
 			// Act
-			source, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, tt.place(ahead.ID), nil, "", instant)
+			source, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, tt.place(ahead.ID), "", instant)
 
 			// Assert
 			if err != nil {
@@ -342,7 +342,6 @@ func TestRequeueOffQueueMergeRefusals(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID)
-		version *VersionIncrement
 		want    func(error) bool
 	}{
 		{name: "no request off the queue", arrange: func(*testing.T, *store, RepoKey, WorkspaceID) {},
@@ -350,10 +349,6 @@ func TestRequeueOffQueueMergeRefusals(t *testing.T) {
 		{name: "a merge standing in line", arrange: func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) {
 			queued(t, s, repo, ws, instant)
 		}, want: func(err error) bool { var q *MergeQueuedError; return errors.As(err, &q) }},
-		{name: "a version for a request that recorded its own", arrange: func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) {
-			offQueued(t, s, repo, ws)
-		}, version: &VersionIncrement{Part: semver.Patch, ChangelogLine: "another"},
-			want: func(err error) bool { return errors.Is(err, ErrOffQueueVersionRecorded) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -366,7 +361,7 @@ func TestRequeueOffQueueMergeRefusals(t *testing.T) {
 			recBefore, foundBefore, _ := s.OffQueueMergeOf(context.Background(), ws.ID)
 
 			// Act
-			_, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, tt.version, "", instant)
+			_, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, "", instant)
 
 			// Assert: refused, and nothing changed.
 			if !tt.want(err) {
@@ -475,24 +470,6 @@ func TestTheMigrationEndsARecordBesideAQueueRow(t *testing.T) {
 	}
 }
 
-func TestRequeueOffQueueMergeGivesAnAdoptedRequestTheVersionSupplied(t *testing.T) {
-	// Arrange: an adopted record, as the migration writes one.
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	repo := RepoKey(t.TempDir())
-	corrupt(t, s, `INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, `+adoptedRequestColumns+`)
-		VALUES (?, 'adopted', 1, 1, 1, 0, 0, NULL, 'feature', NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, '[]', '[]', NULL, 0)`, ws.ID)
-	version := &VersionIncrement{Part: semver.Patch, ChangelogLine: "Adopted merges land again"}
-
-	// Act
-	source, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, version, "", instant)
-
-	// Assert
-	if err != nil || !reflect.DeepEqual(source.Version, version) || source.Branch != "feature" {
-		t.Fatalf("RequeueOffQueueMerge = %+v, %v; want the feature branch with the supplied version", source, err)
-	}
-}
-
 func TestDiscardOffQueueMergeEndsTheRequest(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)
@@ -560,12 +537,9 @@ func TestTheMigrationAdoptsOpenMergeWorkspacesNothingReferences(t *testing.T) {
 				execRaw(t, path, tt.arrange)
 			}
 
-			// Act
-			handle, err := Open(context.Background(), path, WithUnsyncedWrites())
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer handle.Close()
+			// Act: layout 129 alone, which adopts; layout 222 retired the
+			// adopted mark with the async merge.
+			execRaw(t, path, migrationTo(t, 129).DDL)
 			adopted := rawScalar[int](t, path, `SELECT count(*) FROM off_queue_merges WHERE workspace_id = ? AND adopted = 1 AND cause = 'adopted' AND source_branch = (SELECT branch FROM workspaces WHERE id = ?)`,
 				string(fixtureWorkspaceID), string(fixtureWorkspaceID))
 
@@ -588,7 +562,7 @@ func TestRequeueOffQueueMergeRecordsTheSessionsModelInTheSameWrite(t *testing.T)
 	offQueued(t, s, repo, ws.ID)
 
 	// Act
-	_, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, nil, "claude-opus-5-5", instant)
+	_, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, "claude-opus-5-5", instant)
 
 	// Assert
 	if err != nil {
@@ -607,7 +581,7 @@ func TestRequeueOffQueueMergeWithAModelAndNoSessionChangesNothing(t *testing.T) 
 	offQueued(t, s, repo, ws.ID)
 
 	// Act
-	_, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, nil, "claude-opus-5-5", instant)
+	_, err := s.RequeueOffQueueMerge(context.Background(), repo, ws.ID, RequeuePlacement{}, "claude-opus-5-5", instant)
 
 	// Assert: refused, the request still off its queue and none in line.
 	if !errors.Is(err, ErrNotFound) {

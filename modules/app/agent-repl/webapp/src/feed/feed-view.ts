@@ -127,6 +127,7 @@ import {
   separationEndsHistory,
 } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
+import { drawFeedChild } from "./child.js";
 import { glideSentPrompt } from "./send-glide.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { childrenMatching, queryAll } from "../dom.js";
@@ -1825,6 +1826,8 @@ export function createFeedController(
         // and dropping it would hide a phase of a real run — so it draws as its
         // own row through the same badge and body the strip uses.
         return drawFeedMergeTabRow(row, arm.value, subfeed, rc);
+      case "child":
+        return drawFeedChild(arm.value, requireMessage(row.id, "FeedRow.id").value, rc);
       case "detachedSubagent":
         throw new MalformedView(
           "FeedRow.row.detached_subagent",

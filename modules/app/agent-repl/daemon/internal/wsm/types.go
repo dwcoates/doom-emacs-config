@@ -274,20 +274,9 @@ type Workspace struct {
 	// end -- a successor after a handover, a restart -- draws the row from
 	// until a turn of its own supersedes it.
 	Result *TurnResult
-	// MergeOf is set on a MERGE WORKSPACE: one the daemon forked from another
-	// workspace to carry that workspace's detached merge. Nil for every other
-	// workspace.
-	MergeOf *MergeOrigin
-	// MergeRevealed reports that a MERGE WORKSPACE has been revealed: it
-	// needed the user (its merge failed or was abandoned, its agent asked
-	// something, the user interrupted it) or the user selected it. An
-	// unrevealed, unmerged merge workspace is drawn in no tab bar and no
-	// sidebar section. Once set it stays set. Always false for every other
-	// workspace.
-	MergeRevealed bool
-	// Landed is set on a REQUESTER whose detached merge landed: the commit of
-	// its own branch that landed, and when (see landed.go). Nil when none has.
-	Landed *Landing
+	// Effects are what a one-shot does once its own branch lands, beyond
+	// landing it (LandingEffects). Nil for every workspace created with none.
+	Effects *LandingEffects
 	// OneShot reports that the workspace was CREATED as a one-shot. It is
 	// READ-ONLY here: the fact is the creation job's (CreationJob.OneShot),
 	// read through the shared select list, so the record and the job can never
@@ -296,9 +285,7 @@ type Workspace struct {
 	OneShot bool
 	// MergePending reports that a merge queue entry stands for the workspace
 	// in ANY state: recorded while its requesting turn runs, waiting in line,
-	// or admitted. A DETACHED merge counts too: once handed off, its entry is
-	// the merge workspace's (the one whose MergeOf names this workspace), and
-	// it still stands for this workspace's merge. READ-ONLY, from the merge queue in the same read, so a
+	// or admitted. READ-ONLY, from the merge queue in the same read, so a
 	// reader that has not seen the merge orchestrator's live facts yet (the
 	// roster at boot, which publishes before merges are recovered) still
 	// knows a merge stands.
@@ -433,9 +420,9 @@ type RegisterFacts struct {
 	// whatever is recorded alone, because "not looked up" is not "no default
 	// branch".
 	DefaultBranch string
-	// MergeOf marks a MERGE WORKSPACE at its creation, nil for every other
-	// workspace. Only the creation path supplies it.
-	MergeOf *MergeOrigin
+	// Effects are a one-shot's landing effects, nil for none. Only the
+	// creation path supplies them.
+	Effects *LandingEffects
 	// ContextFrom and RequestedBy are Workspace's derivation facts, supplied
 	// only by the creation path.
 	ContextFrom *WorkspaceID
@@ -489,7 +476,7 @@ type RegisterFacts struct {
 	Originator string
 	// Placement files a MINTED workspace into a subsection (or a new one) in
 	// the insert's own transaction. Refused for a child or a merge workspace
-	// (ErrPlacementOnChild, ErrPlacementOnMerge), for an unknown subsection
+	// (ErrPlacementOnChild), for an unknown subsection
 	// and for a workspace that cannot be gathered; nothing is written then.
 	Placement *RegisterPlacement
 }
@@ -1101,10 +1088,6 @@ type Turn struct {
 	SentBy *WorkspaceID
 	// Address is where the turn's output lands, nil for the root feed.
 	Address *OutputAddress
-	// Mirror is where the turn is ALSO drawn, in another workspace's feed: an
-	// async merge workspace's merge turn, mirrored into the bubble's agentic
-	// tab in the requester's feed. Nil for every other turn.
-	Mirror *MirrorAddress
 	// Displaced marks a turn captured by a lease holder for exactly-once
 	// resubmission at release.
 	Displaced bool
@@ -1577,52 +1560,6 @@ type MergeSource struct {
 	// the branch checked out in the workspace's worktree when the request was
 	// made for every other arm (empty on a request an earlier build recorded).
 	Branch string
-	// Detach is set on a request that runs ASYNC, in a merge workspace forked
-	// from the requester (agentrepl.v1.MergeWorkspaceAsync): the request's own
-	// identity, which the merge workspace records as its MergeOrigin.Request so
-	// a recovery finds the one workspace forked for THIS request. Empty for an
-	// in-place merge.
-	Detach DetachedMergeID
-	// DetachMaker is the workspace a DETACHED request's merge workspace forks:
-	// the one the merged work was done in (a subagent's spawning workspace,
-	// or the workspace that cut the branch). Set iff Detach is.
-	DetachMaker WorkspaceID
-	// DetachTargetMaker lands a DETACHED request into its maker's branch
-	// instead of on the primary branch. Only a detached request carries it.
-	DetachTargetMaker bool
-	// DetachName is a detached request's merge workspace name, as the
-	// requesting agent supplied it (unprefixed): RESERVED from the moment the
-	// request is recorded until the merge workspace exists under it. Set iff
-	// Detach is.
-	DetachName string
-	// Pick is the requesting agent's instruction for preparing an async
-	// merge's branch before it joins the queue
-	// (agentrepl.v1.MergeWorkspaceAsync.instruction), empty when the branch
-	// lands as it is. It rides the requester's detached request, then
-	// the merge workspace's own request, which carries it until the pick has
-	// run; PickStartedAt says whether it has begun.
-	Pick string
-	// PickStartedAt is when the merge workspace's pick turn began, nil while
-	// it has not. Only a merge workspace's request with a Pick carries it.
-	PickStartedAt *time.Time
-	// PickTurn is the merge workspace's pick turn, set with PickStartedAt.
-	PickTurn TurnID
-	// CompactAfter compacts the requester's conversation once a DETACHED
-	// merge lands (agentrepl.v1.MergeWorkspaceAsync.compact_after).
-	// Only a detached request carries it: the in-place run has no way to ask.
-	CompactAfter bool
-	// CloseOnLanding is the workspace a DETACHED request closes once it lands
-	// (agentrepl.v1.MergeWorkspaceAsync.one_shot), empty when it closes none.
-	// Never the requester.
-	CloseOnLanding WorkspaceID
-	// CleanupWorktree removes, once a DETACHED request lands, the merge
-	// workspace's worktree and CleanupDir
-	// (agentrepl.v1.MergeWorkspaceAsync.cleanup_worktree).
-	CleanupWorktree bool
-	// CleanupDir is the worktree that had the request's branch checked out
-	// when the request was accepted, removed once it lands; empty when none
-	// qualified. Only a request with CleanupWorktree carries one.
-	CleanupDir string
 	// Front puts the merge at the FRONT of its queue when it is put in line
 	// (QueueMerge): ahead of every merge still waiting, never ahead of the one
 	// already running. Any arm may ask for it; a hotfix that must land before
@@ -1646,83 +1583,41 @@ type MergeSource struct {
 	BehindName string
 	// Version is how the merge moves agent-repl's version once it lands
 	// (agentrepl.v1.MergeWorkspaceRequest.version_increment), nil when it
-	// moves none. A detached request's hand-off carries it onto the merge
-	// workspace's own request.
+	// moves none.
 	Version *VersionIncrement
-	// Hooks are the deploy hooks a DETACHED request names
-	// (agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks), run by its merge
-	// workspace and never by the requester; empty when it names none. Only a
-	// detached request carries them: the hand-off moves them onto the merge
-	// workspace's origin (MergeOrigin.Hooks), and from there into its creation
-	// job, so the merge workspace's own request row carries none.
-	Hooks DeployHooks
 	// ProfileGate profiles the merge's test gate
-	// (agentrepl.v1.CreateWorkspaceAsyncMerge.profile_gate,
-	// agentrepl.v1.FinishWorkspaceRequest.profile_gate): the gate runs its
-	// tests with testrun's --profile. A detached request's hand-off carries it
-	// onto the merge workspace's own request, as it carries Version.
+	// (agentrepl.v1.FinishWorkspaceRequest.profile_gate, or a one-shot's own,
+	// LandingEffects.ProfileGate): the gate runs its tests with testrun's
+	// --profile.
 	ProfileGate bool
 }
 
-// DetachedMergeID is one detached merge request's identity, minted when the
-// request is recorded.
-type DetachedMergeID string
-
-// MergeOrigin is what a MERGE WORKSPACE was forked for: the workspace whose
-// detached merge it carries, and that request's identity.
-type MergeOrigin struct {
-	// Requester is the workspace that asked for the detached merge. The roster
-	// nests the merge workspace under it, and the merge's handback is
-	// delivered to its session.
-	Requester WorkspaceID
-	// Request is the detached request the merge workspace was forked for.
-	Request DetachedMergeID
-	// Maker is the workspace whose conversation the merge workspace forks:
-	// the one the merged work was done in (a subagent's spawning workspace,
-	// or the workspace that cut the branch). TRANSPORT-ONLY, like the landing
-	// fields below: the create records it as the merge workspace's
-	// ContextFrom.
-	Maker WorkspaceID
-	// ForkHead is the commit the merge workspace was cut at: the requester's
-	// branch tip when the merge was handed off, which is exactly what the
-	// merge lands. Empty only on a merge workspace forked before layout 41
-	// recorded it.
-	ForkHead string
-	// CompactAfter is the detached request's ask that the requester's
-	// conversation be compacted once this merge workspace's branch lands
-	// (MergeSource.CompactAfter, carried over when the workspace is forked).
-	CompactAfter bool
-	// CloseOnLanding is the workspace this merge workspace's landing closes
-	// (MergeSource.CloseOnLanding, carried over when the workspace is forked).
-	CloseOnLanding WorkspaceID
-	// CleanupWorktree removes this merge workspace's worktree and CleanupDir
-	// once its branch lands (MergeSource.CleanupWorktree).
-	CleanupWorktree bool
-	// CleanupDir is the worktree the landing removes besides this merge
-	// workspace's own (MergeSource.CleanupDir).
+// LandingEffects are what a ONE-SHOT does once its own branch lands, beyond
+// landing it, fixed when it was created (agentrepl.v1.CreateWorkspaceOneShot):
+// its creator decided them, never the one-shot. A workspace created with none
+// records nil.
+type LandingEffects struct {
+	// CloseAfter is another workspace closed once the one-shot lands
+	// (agentrepl.v1.CreateWorkspaceOneShot.close_after), empty for none.
+	// Never the one-shot itself or its requester.
+	CloseAfter WorkspaceID
+	// CleanupDir is the worktree that had the one-shot's source branch checked
+	// out when it was created, removed once the one-shot lands
+	// (agentrepl.v1.CreateWorkspaceOneShot.cleanup_source_worktree); empty
+	// when none was asked for or none qualified (a registered workspace's,
+	// the requester's, the main worktree).
 	CleanupDir string
-
-	// THE LANDING THE QUEUE DECIDED. The merge queue decides where an async
-	// merge lands ONCE, at hand-off (merge.orchestrator.handOffDetached), and
-	// the merge workspace's create lands by exactly these, reading nothing off
-	// the requester. They are TRANSPORT-ONLY: the create records TargetDir and
-	// Hooks in the merge workspace's own creation job and ParentBranch on
-	// its registry row, which is where they live durably, so the stored origin
-	// (workspaces.merge_*) does not carry them and a read of one answers them
-	// empty.
-
-	// TargetDir is the checkout the merge workspace's branch lands in: the
-	// requester's creation-job target, or its repository's main worktree when
-	// the requester is the main checkout.
-	TargetDir string
-	// ParentBranch is the branch the merge workspace lands on: the
-	// requester's own parent branch.
-	ParentBranch string
-	// Hooks are the deploy hooks the async request named (MergeSource.Hooks),
-	// and nothing else: a merge workspace never inherits its requester's
-	// hooks.
-	Hooks DeployHooks
+	// CompactRequester compacts the requesting workspace's conversation once
+	// the one-shot lands
+	// (agentrepl.v1.CreateWorkspaceOneShot.compact_requester_after).
+	CompactRequester bool
+	// ProfileGate profiles the one-shot's merge test gate
+	// (agentrepl.v1.CreateWorkspaceOneShot.profile_gate).
+	ProfileGate bool
 }
+
+// Zero reports whether the effects do nothing beyond the landing.
+func (e LandingEffects) Zero() bool { return e == LandingEffects{} }
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The
 // queue is DURABLE so a restart re-enqueues exactly what was waiting, in the

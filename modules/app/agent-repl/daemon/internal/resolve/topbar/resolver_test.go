@@ -13,6 +13,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gnsurl"
@@ -2150,5 +2151,63 @@ func TestSessionArmNamesTheArmsTheTopbarDrawsNothingFrom(t *testing.T) {
 				t.Fatalf("sessionArm = %q, want %q", arm, tt.want)
 			}
 		})
+	}
+}
+
+func TestTheSummarysMenuListsTheChildrenThatAreNotOpen(t *testing.T) {
+	merged := ClosedChild{Ref: &workspacev1.WorkspaceRef{Id: "ws-merged"}, Name: "fix-flaky", ShortSummary: "Fix the flaky test", Merged: true}
+	closed := ClosedChild{Ref: &workspacev1.WorkspaceRef{Id: "ws-closed"}, Name: "try-idea"}
+	tests := []struct {
+		name     string
+		children []ClosedChild
+		want     []string
+	}{
+		{name: "no child that is not open draws no menu"},
+		{name: "each child in the tracker's order, titled by its summary or its name", children: []ClosedChild{merged, closed},
+			want: []string{"Fix the flaky test|fix-flaky|merged|ws-merged", "|try-idea|closed|ws-closed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
+
+			// Act
+			h.r.SetClosedChildren(testWS, tt.children)
+
+			// Assert
+			menu := h.view(t).GetTitle().GetChildMenu()
+			if (menu != nil) != (len(tt.want) > 0) {
+				t.Fatalf("child menu = %v, want one iff a child is listed", menu)
+			}
+			var got []string
+			for _, item := range menu.GetItems() {
+				badge := "closed"
+				if item.GetBadge().GetMerged() != nil {
+					badge = "merged"
+				}
+				got = append(got, item.GetTitle().GetText()+"|"+item.GetName().GetText()+"|"+badge+"|"+item.GetSelect().GetTarget().GetId())
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("items = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheSummarysMenuIsRetractedWhenNoChildIsLeft(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
+	h.r.SetClosedChildren(testWS, []ClosedChild{{Ref: &workspacev1.WorkspaceRef{Id: "ws-c"}, Name: "c"}})
+
+	// Act
+	h.r.SetClosedChildren(testWS, nil)
+
+	// Assert
+	if menu := h.view(t).GetTitle().GetChildMenu(); menu != nil {
+		t.Fatalf("child menu = %v, want none", menu)
 	}
 }

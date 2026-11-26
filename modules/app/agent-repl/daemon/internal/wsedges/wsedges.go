@@ -188,7 +188,7 @@ func evictionReason(change merge.QueueChange) string {
 	return strings.ReplaceAll(change.Cause, "_", " ")
 }
 
-// DeployEnded is told each deploy's end (mergeworkspace.Service.PayOwed): it
+// DeployEnded is told each deploy's end (landingreports.Service.DeployEnded): it
 // tells every workspace whose landing the deploy's build carries.
 func (h *Hub) DeployEnded(end merge.DeployEnd) {
 	for _, ws := range end.Landed {

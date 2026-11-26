@@ -1174,7 +1174,7 @@ func (x *SetWorkspaceNameNotYetAdopted) GetAddress() string {
 // The name is already held. Names and branches are one namespace: a
 // workspace's name is refused when any OTHER registered workspace, open or
 // closed, of any repository, has it as its name or as its branch, because a
-// create or an async merge given that name would make it a branch. The
+// create given that name would make it a branch. The
 // renamed workspace's own name and branch are never held against it, so a
 // workspace can always be renamed back to its branch.
 type SetWorkspaceNameTaken struct {
@@ -1264,9 +1264,8 @@ type SetWorkspaceNameTaken_Workspace struct {
 }
 
 type SetWorkspaceNameTaken_Pending struct {
-	// No workspace holds it yet, but one is about to: a pending async merge
-	// has reserved it for the merge workspace it will create, or a create
-	// in flight has claimed it.
+	// No workspace holds it yet, but one is about to: a create in flight has
+	// claimed it.
 	Pending *SetWorkspaceNameTakenPending `protobuf:"bytes,3,opt,name=pending,proto3,oneof"`
 }
 
@@ -1274,8 +1273,8 @@ func (*SetWorkspaceNameTaken_Workspace) isSetWorkspaceNameTaken_Holder() {}
 
 func (*SetWorkspaceNameTaken_Pending) isSetWorkspaceNameTaken_Holder() {}
 
-// The name is reserved by a pending async merge or claimed by a create in
-// flight, so a workspace will be registered under it. DELIBERATELY EMPTY.
+// The name is claimed by a create in flight, so a workspace will be
+// registered under it. DELIBERATELY EMPTY.
 type SetWorkspaceNameTakenPending struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields

@@ -550,7 +550,7 @@ type fakeReports struct {
 	buildsAtCover int
 }
 
-func (r *fakeReports) CoverOwed(context.Context) error {
+func (r *fakeReports) CoverLandings(context.Context) error {
 	r.builder.mu.Lock()
 	builds := r.builder.builds
 	r.builder.mu.Unlock()
@@ -561,7 +561,7 @@ func (r *fakeReports) CoverOwed(context.Context) error {
 	return nil
 }
 
-func (r *fakeReports) PayOwed(_ context.Context, coveredOnly bool, deployErr error) {
+func (r *fakeReports) DeployEnded(_ context.Context, coveredOnly bool, deployErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	call := fmt.Sprintf("pay covered_only=%v", coveredOnly)

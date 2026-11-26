@@ -49,7 +49,7 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		Name:        record.Name,
 		Branch:      record.Branch,
 		MergeTarget: target,
-		Backlogged:  record.Backlogged || record.MergeHidden(),
+		Backlogged:  record.Backlogged,
 		OneShot:     record.OneShot,
 		Repository:  &workspacev1.RepositoryRef{Id: string(record.Repo)},
 		Links:       LinksView(links),
@@ -84,25 +84,8 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 
 // mergeTargetOf answers where RECORD's branch lands: the workspace whose
 // worktree its creation job targets (wsm.Workspace.LandsInto), the primary
-// branch otherwise. A merge workspace reads the same way: its target is the
-// one the queue decided at hand-off.
+// branch otherwise.
 func (v *verbs) mergeTargetOf(ctx context.Context, record wsm.Workspace) (*agentreplv1.WorkspaceStatusMergeTarget, error) {
-	// A MERGE WORKSPACE ALWAYS HAS A CREATION JOB: the queue's hand-off
-	// recorded its target there. One without it cannot say where it lands, and
-	// reading it as landing on the primary branch would hide that.
-	if record.MergeOf != nil {
-		fields := dlog.Context{"workspace": string(record.ID)}
-		_, found, err := v.deps.DB.CreationJob(ctx, record.ID)
-		if err != nil {
-			v.deps.Log.Global().Error(opStatus, "could not read a merge workspace's creation job to say where it lands", dlog.WithCause(fields, err))
-			return nil, fmt.Errorf("status: creation job of %q: %w", record.ID, err)
-		}
-		if !found {
-			err := fmt.Errorf("status: merge workspace %q has no creation job", record.ID)
-			v.deps.Log.Global().Error(opStatus, "a merge workspace has no creation job to say where it lands", dlog.WithCause(fields, err))
-			return nil, err
-		}
-	}
 	if record.LandsInto == nil {
 		return &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Primary{Primary: &agentreplv1.WorkspaceStatusMergeTargetPrimary{}}}, nil
 	}

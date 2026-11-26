@@ -5,7 +5,7 @@
  * FIVE SHAPES, ONE FACTORY. RESOLVED tabs (committing, a script hook, and
  * updating main in a bubble recorded before deploys) draw their own row. The
  * QUEUE tab draws its snapshot in place, held while a waiting merge is
- * dragged (`queue.ts`). AGENTIC tabs (the resolving turn, a prompt hook, a
+ * dragged (`queue.ts`). AGENTIC tabs (a prompt hook, a
  * conflict resolution, a fixing attempt) are containers: their content is the
  * sub-feed rows parented to them, drawn through `view.drawRow` — the ordinary
  * row path, chrome included — which is what keeps a merge agent's
@@ -84,7 +84,6 @@ export function mergeTabPanel(tab: MergeTab, view: SubfeedView, rc: RowContext):
       return rowPanel(tab, () => drawFeedMergeTabUpdatingMain(armOf(tab, "updatingMain"), `${PATH}.updating_main`));
     case "hookScript":
       return rowPanel(tab, () => drawFeedMergeTabHookScript(armOf(tab, "hookScript"), `${PATH}.hook_script`));
-    case "resolving":
     case "hookPrompt":
       return agenticPanel(tab, view, rc, () => null);
     case "conflictResolution":

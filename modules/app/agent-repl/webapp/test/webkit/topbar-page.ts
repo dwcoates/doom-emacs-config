@@ -101,7 +101,7 @@ const records = installPageLogger("topbar");
 
 /** The context every drawn cell is handed; nothing here clicks, so no rpc is scripted. */
 function topbarContext(): TopbarContext {
-  return { ctx: appContext(), reveals: mountRevealLayer(host(), pageFocusLeft()), openLogin: () => undefined };
+  return { ctx: appContext(), reveals: mountRevealLayer(host(), pageFocusLeft()), openLogin: () => undefined, jumpTo: async () => undefined };
 }
 
 /**
@@ -193,6 +193,7 @@ window.topbarPage = {
       ctx: appContext(),
       reveals: mountRevealLayer(header, pageFocusLeft()),
       openLogin: () => undefined,
+      jumpTo: async () => undefined,
     };
     strip.append(drawTopbarView(stripView(session, summary), tc));
     const account = header.querySelector(".topbar-account");

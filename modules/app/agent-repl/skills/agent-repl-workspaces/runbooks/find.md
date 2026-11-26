@@ -43,7 +43,7 @@
   `unrecorded` (closed before the daemon recorded how), or `nuked` (a nuke
   whose teardown has not yet forgotten the record). It answers 50 by default; `-limit N`
   or `-all` change that, and a cut answer is a `partial` extent naming how
-  many were omitted. Zettel chat threads and async-merge workspaces are not
+  many were omitted. Zettel chat threads are not
   answered. Use it whenever the agent needs to find the workspace that did
   some piece of work, or what ran in a repository or a timeframe, including
   closed workspaces; `workspace list` answers the same record for just the

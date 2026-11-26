@@ -342,16 +342,16 @@ type StaleCheck struct {
 }
 
 // Deps are the controller's collaborators.
-// OwedReports pays the landing reports owed until a deploy has run
-// (mergeworkspace.Service.PayOwed).
-type OwedReports interface {
-	PayOwed(ctx context.Context, coveredOnly bool, deployErr error)
+// LandingReports tells the workspaces whose landings a deploy carries that it
+// ended (landingreports.Service.DeployEnded).
+type LandingReports interface {
+	DeployEnded(ctx context.Context, coveredOnly bool, deployErr error)
 }
 
 type Deps struct {
 	// Reports pays the landing reports a deploy covered, once the shims this
 	// daemon serves have been judged against the build it installed.
-	Reports OwedReports
+	Reports LandingReports
 	// SelfExe is the daemon binary a successor is spawned from.
 	SelfExe string
 	// SelfAddress is this daemon's own `127.0.0.1:<port>`, handed to the

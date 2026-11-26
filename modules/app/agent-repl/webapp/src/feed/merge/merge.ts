@@ -46,7 +46,6 @@ import type { RowContext } from "../renderers.js";
 import { stopTicking } from "../ticking.js";
 import { drawPausedMark } from "./paused.js";
 import { drawFeedMergeVersion } from "./version.js";
-import { drawMergeWorkspaceSwitch, switchFacts } from "./workspace-switch.js";
 import type {
   FeedMerge,
   FeedMergeError,
@@ -83,25 +82,11 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-head";
   el.append(drawFeedMergeHead(head, rc));
-  // THE HEAD'S RIGHT END: the landed commit, the workspace switch, then the
-  // clock. One box, pushed right by the stylesheet, so they never split the
+  // THE HEAD'S RIGHT END: the landed commit, then the clock. One box, pushed right by the stylesheet, so they never split the
   // line's free space between them. Each arm closes the head with it, so the
   // drawn order is the order read.
   const end = document.createElement("span");
   end.className = "merge-head-end";
-  // A DETACHED MERGE'S BUBBLE CARRIES ITS SWITCH for its whole life: queued,
-  // running and settled alike (workspace-switch.ts). Only the async mode has
-  // one; a head with no mode was recorded before heads carried theirs.
-  const mode = head.mode?.mode;
-  if (mode?.case === "async" && mode.value.workspaceSwitch !== undefined) {
-    end.append(
-      drawMergeWorkspaceSwitch(
-        switchFacts(mode.value.workspaceSwitch, `${PATH}.head.mode.async.workspace_switch`),
-        rc,
-      ),
-    );
-  }
-
   const runtime = requireMessage(head.runtime, `${PATH}.head.runtime`);
   switch (result.case) {
     case "update":

@@ -3,8 +3,7 @@
 - `-originator emoji-ack|user-or-workspace` states who is creating the
   workspace, which decides the kind of workspace it is (`lifecycle-stages.md`). The default is `user-or-workspace`. `emoji-ack` is only for
   the daemon's Slack reaction initiator (an `announced` binding,
-  `slack bind`), requires `-slack-thread URL`, and is refused beside an
-  async merge.
+  `slack bind`), and requires `-slack-thread URL`.
   - `-slack-subscribe listen|respond|interact` (only beside `-slack-thread`)
     subscribes the new workspace to that thread at creation; a subscription
     Slack refuses fails the create (`slack-threads.md`).
@@ -54,5 +53,34 @@
 - The workspaces a new one derives from (its parent, and the one it forks) are
   told when it is created, when it lands and when it closes without landing.
   Nothing needs to be relayed by hand.
-- A named branch, such as a subagent's, is landed through an async merge,
-  not a create: see `/agent-repl-merge-queue`.
+- Usage: `agent-repld workspace create -repository here|DIR -relationship
+  child|peer [-parent WS] [-lands-into WS|main] [-origin-master]
+  [-source-branch BRANCH] -context fresh|fork|subagent [-fork WS]
+  [-subagent ID] [-one-shot [-close-after WS] [-cleanup-source-worktree]
+  [-compact-requester-after] [-profile-gate]] ...`.
+- `-source-branch BRANCH` cuts the new workspace a NEW branch
+  (`git worktree add -b`) at BRANCH's tip as it stands at create time. BRANCH
+  is untouched. An unknown branch is refused `unknown_source_branch`.
+- `-context subagent -subagent AGENT_ID` forks the context of the session that
+  spawned that subagent. It is REFUSED for now, loudly (the shim cannot yet
+  fork a subagent's own transcript); an unknown subagent is refused
+  `unknown_subagent`. Use `-context fork -fork WS` or `fresh` instead.
+- One-shot landing effects, each only with `-one-shot`:
+  - `-close-after WS` closes WS once the one-shot lands. Refused
+    `unknown_close_after` when WS is not open, is another repository's, or is
+    the requester.
+  - `-cleanup-source-worktree` removes the worktree that had the source branch
+    checked out once the one-shot lands; never the main worktree or a
+    registered workspace's. Only with `-source-branch`.
+  - `-compact-requester-after` sends the requesting workspace `/compact` right
+    after the landing's notice. Needs a workspace requester.
+  - `-profile-gate` profiles the one-shot's merge test gate.
+- `name_reserved` means a name another create in flight is claiming.
+- **A LANDING CHILD lands a branch while this workspace stays open**:
+  `workspace create -repository here -relationship child -parent here
+  -lands-into main -source-branch BRANCH -context fork -fork here -one-shot
+  -prompt TEXT`. Its landing reaches the parent as ONE line. Children are
+  never hidden: the parent sees each child as a bubble in its feed (name
+  clickable, summary, a status-colored border while open), its open children
+  in the footer children panel, and its merged or closed children in the
+  topbar summary's click menu.

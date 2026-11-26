@@ -222,7 +222,7 @@ func (v *verbs) TellOwnedPullRequestsMerged(ctx context.Context, ws ids.Workspac
 	if err != nil {
 		return err
 	}
-	if record.Closed || record.MergeOf != nil {
+	if record.Closed {
 		return nil
 	}
 	main, err := isMainWorkspace(ctx, v.deps.DB, record)

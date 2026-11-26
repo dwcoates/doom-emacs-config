@@ -59,11 +59,10 @@ type SelectInEditorRequest struct {
 	// it and marks it (WebWorkspaceRevealRow). Unset reveals nothing. On the
 	// relayed route the daemon asks the page for the reveal as it relays the
 	// click, and a page not yet listening takes it when it attaches; on the
-	// daemon's route it rides the select. A merge queue entry for an async merge
-	// sets it to the merge's bubble in its requester's feed.
+	// daemon's route it rides the select.
 	Reveal *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
 	// THE WORKSPACE WHOSE FEED LINK MADE THE CLICK: a feed's jump to another
-	// workspace (a mention, a merge bubble's switch, a merge step's target)
+	// workspace (a mention, a child bubble's name, a merge step's target)
 	// names the page it was clicked in. The daemon records the click as the
 	// user's interaction with that workspace (the effect of
 	// ReportUserInteraction) before either route switches, so it is viewed and

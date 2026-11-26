@@ -153,13 +153,6 @@ type wsState struct {
 	// (Deps.TurnAddresses). A turn absent from it draws on the root feed and
 	// its agents' sub-feeds. See turnaddress.go.
 	turnAddresses map[ids.TurnID]*sessionwatcher.OutputAddress
-	// mirror is the mirror a lease holder installed, nil when none stands: the
-	// prompt queue records it on a turn the holder starts (turnmirror.go).
-	mirror *wsm.MirrorAddress
-	// turnMirrors is the mirror each mirrored turn is also drawn at, as the
-	// prompt queue recorded it (MirrorTurn) or a replay read it back
-	// (Deps.TurnMirrors). See turnmirror.go.
-	turnMirrors map[ids.TurnID]*wsm.MirrorAddress
 	// turnSenders is the workspace whose agent sent each agent-sent turn's
 	// prompt, as the prompt queue recorded it (SenderTurn) or a replay read it
 	// back (Deps.TurnSenders). See turnsender.go.
@@ -844,7 +837,6 @@ func newWSState(ws ids.WorkspaceID, born time.Time) *wsState {
 		networkFaults:        map[string]bool{},
 		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
 		turnAddresses:        map[ids.TurnID]*sessionwatcher.OutputAddress{},
-		turnMirrors:          map[ids.TurnID]*wsm.MirrorAddress{},
 		turnSenders:          map[ids.TurnID]ids.WorkspaceID{},
 		outlivedReported:     map[ids.TurnID]bool{},
 		endedTurns:           map[ids.TurnID]bool{},
@@ -1251,10 +1243,6 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// this row's own publication (vendorrecovery.go).
 	defer r.settleVendorRecovery(s, at.feed, id)
 	s.noteProduced(snapshot)
-	// A MERGE BUBBLE ROW IS TOLD TO THE FOOTER as it now stands (mergerows.go).
-	r.announceMergeRow(s, at.feed, snapshot)
-	// A ROW OF A MIRRORED TURN IS DRAWN AT THE MIRROR TOO (turnmirror.go).
-	r.mirrorRow(s, snapshot)
 	if !durable {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !durable", dlog.Context{"function": "feed", "condition": "!durable"})
 		f.nonDurable[id] = true
@@ -1499,7 +1487,6 @@ func (r *resolver) retireAs(s *wsState, addr feedid.Feed, id string, removed *fr
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: _, ok := f.rows[id]; !ok", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
 		return false
 	}
-	r.announceMergeRowRetired(s, addr, f.rows[id])
 	// A RETIRED PROMPT WITH ENTRIES, OR A RETIRED RESPONSE WITH A TREE, changes
 	// what the feed's answers are read from: they are restated once the
 	// removal is published (answers.go).

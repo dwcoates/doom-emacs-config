@@ -12,13 +12,12 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/mergetab"
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/wsm"
 )
 
-// conflictHeld starts a merge whose rebase conflicts, ASYNC or SYNC, and holds
-// it in its conflict resolution: the repair turn is submitted and its end is
+// conflictHeld starts a merge whose rebase conflicts and holds it in its
+// conflict resolution: the repair turn is submitted and its end is
 // held until RELEASE is called. It answers the bubble's ledger identity.
-func conflictHeld(t *testing.T, h *harness, async bool) (ids.LeaseID, func()) {
+func conflictHeld(t *testing.T, h *harness) (ids.LeaseID, func()) {
 	t.Helper()
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
@@ -33,20 +32,10 @@ func conflictHeld(t *testing.T, h *harness, async bool) (ids.LeaseID, func()) {
 		default:
 		}
 	}
-	if async {
-		if err := requestDetached(t, h, RequestedByUser); err != nil {
-			t.Fatalf("Enqueue: %v", err)
-		}
-	} else {
-		enqueue(t, h)
-	}
+	enqueue(t, h)
 	done := admitAsync(h, context.Background())
 	<-submitted
-	merging := theWorkspace
-	if async {
-		merging = theMergeWorkspace
-	}
-	lease, ok := h.o.leaseOf(merging)
+	lease, ok := h.o.leaseOf(theWorkspace)
 	if !ok {
 		t.Fatal("the merge holds no ledger identity")
 	}
@@ -56,36 +45,11 @@ func conflictHeld(t *testing.T, h *harness, async bool) (ids.LeaseID, func()) {
 	}
 }
 
-func TestAMergeTabInterruptStopsAnAsyncMergesAgentAndRevealsItsWorkspace(t *testing.T) {
+func TestAMergeTabInterruptStopsTheMergesOwnAgent(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.interruptRunning = true
-	lease, release := conflictHeld(t, h, true)
-	defer release()
-
-	// Act
-	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, resolutionKey(1, 0)))
-
-	// Assert
-	if err != nil || !running {
-		t.Fatalf("InterruptTab = %v, %v; want the running turn stopped", running, err)
-	}
-	h.mu.Lock()
-	interrupted := append([]ids.WorkspaceID(nil), h.interrupted...)
-	h.mu.Unlock()
-	if len(interrupted) != 1 || interrupted[0] != theMergeWorkspace {
-		t.Fatalf("interrupted = %v, want the merge workspace's turn", interrupted)
-	}
-	if revealed := h.detached.revealed(); len(revealed) != 1 || revealed[0] != theMergeWorkspace {
-		t.Fatalf("reveals = %v, want the merge workspace revealed", revealed)
-	}
-}
-
-func TestAMergeTabInterruptStopsASyncMergesOwnAgentAndRevealsNothing(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.interruptRunning = true
-	lease, release := conflictHeld(t, h, false)
+	lease, release := conflictHeld(t, h)
 	defer release()
 
 	// Act
@@ -101,16 +65,13 @@ func TestAMergeTabInterruptStopsASyncMergesOwnAgentAndRevealsNothing(t *testing.
 	if len(interrupted) != 1 || interrupted[0] != theWorkspace {
 		t.Fatalf("interrupted = %v, want the workspace's own turn", interrupted)
 	}
-	if revealed := h.detached.revealed(); len(revealed) != 0 {
-		t.Fatalf("reveals = %v, want none for a sync merge", revealed)
-	}
 }
 
 func TestAMergeTabInterruptThatCannotStopTheTurnIsAnError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.interruptErr = errors.New("the shim refused")
-	lease, release := conflictHeld(t, h, true)
+	lease, release := conflictHeld(t, h)
 	defer release()
 
 	// Act
@@ -123,27 +84,6 @@ func TestAMergeTabInterruptThatCannotStopTheTurnIsAnError(t *testing.T) {
 	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.interrupt_tab"); !ok {
 		t.Fatal("the failed stop was not recorded at ERROR")
 	}
-	if revealed := h.detached.revealed(); len(revealed) != 0 {
-		t.Fatalf("reveals = %v, want none when nothing was stopped", revealed)
-	}
-}
-
-func TestAMergeTabInterruptOfALivePickStopsTheMergeWorkspacesTurn(t *testing.T) {
-	// Arrange
-	h := pickHarness(t)
-	requestPick(t, h)
-	lease, _ := h.o.leaseOf(theMergeWorkspace)
-
-	// Act
-	_, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, roundTabKey(TabPick, 1)))
-
-	// Assert
-	h.mu.Lock()
-	interrupted := append([]ids.WorkspaceID(nil), h.interrupted...)
-	h.mu.Unlock()
-	if err != nil || len(interrupted) != 1 || interrupted[0] != theMergeWorkspace {
-		t.Fatalf("InterruptTab = %v, interrupted = %v; want the pick's turn stopped", err, interrupted)
-	}
 }
 
 func TestAMergeTabInterruptNamingNoLiveAgenticTabIsRefused(t *testing.T) {
@@ -155,7 +95,7 @@ func TestAMergeTabInterruptNamingNoLiveAgenticTabIsRefused(t *testing.T) {
 		{name: "the subtab of the commit whose conflict is live", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, commitKey(1, 0)) }},
 		{name: "a commit whose conflict is not the live one", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, resolutionKey(1, 1)) }},
 		{name: "a fixing row with no fixing live", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, fixingKey(1)) }},
-		{name: "another feed's tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theMergeWorkspace, lease, resolutionKey(1, 0)) }},
+		{name: "another feed's tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(otherWorkspace, lease, resolutionKey(1, 0)) }},
 		{name: "an unknown bubble", tab: func(ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, "lease-unknown", resolutionKey(1, 0)) }},
 		{name: "a head", tab: func(lease ids.LeaseID) feedid.Ref { return headRef(theWorkspace, lease) }},
 	}
@@ -163,7 +103,7 @@ func TestAMergeTabInterruptNamingNoLiveAgenticTabIsRefused(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			lease, release := conflictHeld(t, h, true)
+			lease, release := conflictHeld(t, h)
 			defer release()
 
 			// Act
@@ -186,36 +126,9 @@ func TestAMergeTabInterruptNamingNoLiveAgenticTabIsRefused(t *testing.T) {
 	}
 }
 
-func TestAnAsyncMergesRepairTurnStandsAMirrorIntoTheRequestersTab(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	lease, release := conflictHeld(t, h, true)
-	defer release()
-
-	// Act / Assert: the merge workspace's repair is mirrored into the
-	// requester's conflict resolution subtab, and no address draws it in a
-	// bubble of its own.
-	var mirrored *wsm.MirrorAddress
-	for _, call := range h.feed.mirrorsStood() {
-		if call.ws == theMergeWorkspace && call.mirror != nil {
-			mirrored = call.mirror
-		}
-	}
-	want := tabRef(theWorkspace, lease, resolutionKey(1, 0))
-	if mirrored == nil || mirrored.Workspace != theWorkspace || mirrored.Parent.WS != want.WS || mirrored.Parent.Row != want.Row {
-		t.Fatalf("mirror = %+v, want the requester's conflict resolution subtab", mirrored)
-	}
-	for _, addr := range h.feed.installed() {
-		if addr != nil {
-			t.Fatalf("address = %+v, want none for an async merge's workspace", addr)
-		}
-	}
-}
-
 func TestTheAgenticTabKindsAreTheAgenticArms(t *testing.T) {
 	// Arrange: every tab kind, built by its own builder.
 	built := map[string]*frontendv1.FeedMergeTab{
-		TabPick:           pickTab(tabState{}),
 		rowRebaseCommit:   {Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: &frontendv1.FeedMergeTabRebaseCommit{}}},
 		TabConflicts:      (&parentView{}).conflictsTab(modeRunning),
 		rowTestsRun:       runTab(1, tabState{}, &frontendv1.FeedMergeTestsRunOutput{}),

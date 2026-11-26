@@ -44,7 +44,6 @@ import {
   harness,
   heldPromptItem,
   heldSection,
-  asyncMergeRow,
   mergeRow,
   openSuccess,
   page,
@@ -3568,94 +3567,6 @@ describe("mountFeed: the reader's merge bubble fold", () => {
  * every state; the feed draws it folded on first draw, through every push and
  * after a reload, and a reader's own open outlives every later push.
  */
-describe("mountFeed: an async merge bubble's default fold", () => {
-  /** The merge row's element in HOST. */
-  function mergeRowIn(host: HTMLElement): HTMLElement {
-    const el = host.querySelector<HTMLElement>('[data-feed-row="m1"]');
-    if (el === null) throw new Error("the merge row is not drawn");
-    return el;
-  }
-
-  it("draws an async merge bubble collapsed when it first appears", async () => {
-    // Arrange
-    const { h, channel } = liveRootHarness();
-    const { feed, host } = mount(h);
-    await settle();
-    // Act
-    channel.push(push(asyncMergeRow("m1")));
-    await settle();
-    // Assert
-    expect([mergeRowIn(host).getAttribute("data-expanded"), h.calls.openFeed.map((req) => req.feed?.value)]).toEqual([
-      "false",
-      [undefined],
-    ]);
-    feed.dispose();
-  });
-
-  it("draws a sync merge bubble open when it first appears", async () => {
-    // Arrange
-    const { h, channel } = liveRootHarness();
-    const { feed, host } = mount(h);
-    await settle();
-    // Act
-    channel.push(push(mergeRow("m1", false)));
-    await settle();
-    // Assert
-    expect(mergeRowIn(host).getAttribute("data-expanded")).toBe("true");
-    feed.dispose();
-  });
-
-  it("keeps an async merge bubble collapsed through its progress and its terminal", async () => {
-    // Arrange
-    const { h, channel } = liveRootHarness();
-    const { feed, host } = mount(h);
-    await settle();
-    channel.push(push(asyncMergeRow("m1")));
-    await settle();
-    // Act
-    channel.push(push(asyncMergeRow("m1")));
-    channel.push(push(asyncMergeRow("m1", "failed")));
-    await settle();
-    // Assert
-    expect(mergeRowIn(host).getAttribute("data-expanded")).toBe("false");
-    feed.dispose();
-  });
-
-  it("keeps an async merge bubble the reader opened open through a later push", async () => {
-    // Arrange
-    const { h, channel } = liveRootHarness();
-    const { feed, host } = mount(h);
-    await settle();
-    channel.push(push(asyncMergeRow("m1")));
-    await settle();
-    mergeRowIn(host).querySelector<HTMLElement>(".bubble-head")?.click();
-    await settle();
-    // Act
-    channel.push(push(asyncMergeRow("m1", "success")));
-    await settle();
-    // Assert
-    expect(mergeRowIn(host).getAttribute("data-expanded")).toBe("true");
-    feed.dispose();
-  });
-
-  it("draws an async merge bubble collapsed after a full reload", async () => {
-    // Arrange
-    const h = harness({
-      openFeed: (req) =>
-        openSuccess(page(req.feed === undefined ? [responseRow("r0"), asyncMergeRow("m1")] : []), tokenFor(req)),
-    });
-    const first = mount(h);
-    await settle();
-    first.feed.dispose();
-    // Act
-    const reloaded = mount(h);
-    await settle();
-    // Assert
-    expect(mergeRowIn(reloaded.host).getAttribute("data-expanded")).toBe("false");
-    reloaded.feed.dispose();
-  });
-});
-
 describe("mountFeed: a page the host stops showing", () => {
   /** Mount on a presence the test switches, starting shown. */
   function mountShown() {

@@ -234,11 +234,6 @@ func queuedLedger(t *testing.T, h *harness) wsm.LeaseID {
 	return ""
 }
 
-// headsSince answers the bubble heads pushed after the first n pushes.
-func headsSince(h *harness, n int) []string {
-	return h.feed.headIDs()[n:]
-}
-
 // A queued merge has its bubble, pinned to the feed's bottom (owner ruling,
 // 2026-10-10); a restart and a handover draw it again under the identity it
 // was queued under, still pinned.
@@ -334,7 +329,7 @@ func TestAMergeThatCannotBePutInLineHoldsNoBubble(t *testing.T) {
 	h.db.queueErr = errors.New("disk full")
 
 	// Act.
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
 
 	// Assert.
 	if err == nil {

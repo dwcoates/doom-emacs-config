@@ -29,7 +29,7 @@ func stageGroup(kind string) (group string, collapsed bool, ok bool) {
 		return TabRebasing, true, true
 	case TabTests, TabFixes:
 		return TabTests, true, true
-	case TabQueue, TabPick, TabCommitting, TabPreDeploy, TabDeploy, TabPostDeploy:
+	case TabQueue, TabCommitting, TabPreDeploy, TabDeploy, TabPostDeploy:
 		return kind, false, true
 	}
 	return "", false, false

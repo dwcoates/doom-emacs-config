@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -42,11 +43,11 @@ type subject struct {
 	// the one statement of what a merge closes, which the family rules read
 	// too.
 	closes ids.WorkspaceID
-	// closesAlso is ANOTHER workspace an async merge closes once it lands
-	// (wsm.MergeOrigin.CloseOnLanding), empty when it closes none.
+	// closesAlso is ANOTHER workspace a one-shot closes once it lands
+	// (wsm.LandingEffects.CloseAfter), empty when it closes none.
 	closesAlso ids.WorkspaceID
-	// cleanupDir is the worktree an async merge removes once it lands
-	// (wsm.MergeOrigin.CleanupDir), empty when it removes none.
+	// cleanupDir is the source worktree a one-shot removes once it lands
+	// (wsm.LandingEffects.CleanupDir), empty when it removes none.
 	cleanupDir string
 	// other is another workspace whose worktree the merge works in, empty when
 	// it works in none but the requester's.
@@ -81,14 +82,16 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 			return subject{}, err
 		}
 		s := subject{branch: branch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir}
-		// A MERGE WORKSPACE CARRIES ITS ASYNC REQUEST'S LANDING EFFECTS.
+		// A ONE-SHOT CARRIES THE LANDING EFFECTS ITS CREATOR ASKED FOR
+		// (wsm.LandingEffects): another workspace to close, and the source
+		// branch's worktree to remove.
 		record, err := o.deps.DB.Workspace(ctx, r.ws)
 		if err != nil {
 			return subject{}, fmt.Errorf("merge: reading workspace %s for its landing effects: %w", r.ws, err)
 		}
-		s.closes, s.closesAlso = r.source.LandingCloses(r.ws, record.MergeOf)
-		if origin := record.MergeOf; origin != nil && origin.CleanupWorktree {
-			s.cleanupDir = origin.CleanupDir
+		s.closes, s.closesAlso = r.source.LandingCloses(r.ws, record.Effects)
+		if e := record.Effects; e != nil {
+			s.cleanupDir = e.CleanupDir
 		}
 		return s, nil
 	case wsm.MergeSourceWorkspace:
@@ -162,7 +165,7 @@ func (o *orchestrator) branchSubject(ctx context.Context, r *run) (subject, erro
 	if err != nil {
 		return subject{}, err
 	}
-	dir, main, held, err := worktreeHolding(ctx, r.git, record.Dir, r.source.Branch)
+	dir, main, held, err := gitclient.WorktreeHolding(ctx, r.git, record.Dir, r.source.Branch)
 	if err != nil {
 		return subject{}, err
 	}

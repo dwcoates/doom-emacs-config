@@ -75,7 +75,7 @@ func TestPuttingAMergeInLineReportsItEnqueuedWithItsSnapshot(t *testing.T) {
 
 	// Assert.
 	change := lastChange(t, h)
-	want := QueueMember{Workspace: theWorkspace, Name: "ws-one", Branch: "feature", Mode: modeOf(ownBranch, wsm.Workspace{})}
+	want := QueueMember{Workspace: theWorkspace, Name: "ws-one", Branch: "feature", Mode: modeOf(ownBranch)}
 	if change.Kind != QueueChangeEnqueued || change.Subject != want {
 		t.Fatalf("change = %v about %+v, want enqueued about %+v", change.Kind, change.Subject, want)
 	}
@@ -487,7 +487,7 @@ func TestAChangeWhoseQueueCannotBeReadIsRecordedAndTheWriteStands(t *testing.T) 
 	h.db.pausedReadErr = gone
 
 	// Act.
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
 
 	// Assert: the queue tab's redraw reads the pause too, so the enqueue
 	// answers the unread pause once its write has stood.
@@ -535,7 +535,7 @@ func TestAFailedWriteReportsNothing(t *testing.T) {
 	h.db.queueErr = errors.New("the queue write failed")
 
 	// Act.
-	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
 
 	// Assert.
 	if err == nil {
@@ -554,8 +554,6 @@ func TestLeaveKindClassifiesEachRemovalCause(t *testing.T) {
 		{cause: causeMerged, want: QueueChangeLanded},
 		{cause: causeFailed, want: QueueChangeFailed},
 		{cause: causeRestartFailed, want: QueueChangeFailed},
-		{cause: causePickFailed, want: QueueChangeFailed},
-		{cause: causeDetachedForkFailed, want: QueueChangeFailed},
 		{cause: string(CauseUserDrop), want: QueueChangeDequeued},
 		{cause: string(CauseUserDequeue), want: QueueChangeDequeued},
 		{cause: string(CauseWorkspaceClosed), want: QueueChangeDequeued},
@@ -578,11 +576,8 @@ func TestModeOfNamesHowAMergeWasAskedFor(t *testing.T) {
 	tests := []struct {
 		name   string
 		source wsm.MergeSource
-		record wsm.Workspace
 		want   MergeMode
 	}{
-		{name: "a merge workspace's merge is async", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch},
-			record: wsm.Workspace{MergeOf: &wsm.MergeOrigin{}}, want: MergeModeAsync},
 		{name: "an own branch closing its workspace is a one-shot", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, want: MergeModeOneShot},
 		{name: "an own branch kept open is in place", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, want: MergeModeInPlace},
 		{name: "another workspace's branch is in place", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace}, want: MergeModeInPlace},
@@ -590,7 +585,7 @@ func TestModeOfNamesHowAMergeWasAskedFor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act.
-			got := modeOf(tt.source, tt.record)
+			got := modeOf(tt.source)
 
 			// Assert.
 			if got != tt.want {
@@ -650,7 +645,6 @@ func TestMergeModeNamesEachMode(t *testing.T) {
 		want string
 	}{
 		{MergeModeOneShot, "one-shot"},
-		{MergeModeAsync, "async"},
 		{MergeModeInPlace, "in place"},
 		{MergeMode(0), "MergeMode(0)"},
 	}

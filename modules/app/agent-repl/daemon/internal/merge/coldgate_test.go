@@ -897,7 +897,6 @@ func TestEveryMergeTurnKindPassesAStandingColdGateBeforeItIsHandedOff(t *testing
 		name   string
 		origin conversationv1.PromptOrigin
 	}{
-		{"a pick", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK},
 		{"a configured prompt before an action", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION},
 		{"a configured prompt after an action", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION},
 		{"a deploy hook's prompt", conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK},
@@ -937,7 +936,7 @@ func TestAMergeTurnWithNoColdGateStandingNeverCompacts(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 
 	// Assert
 	if err != nil {
@@ -1019,7 +1018,7 @@ func TestAMergeTurnAtAGateRetiredAfterAFailedAnswerIsAnsweredAgain(t *testing.T)
 	h.o.ColdGateRetired(theWorkspace)
 
 	// Act
-	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 
 	// Assert
 	if err != nil {
@@ -1043,7 +1042,7 @@ func TestAGateRaisedWhileAMergeTurnsAnswerRunsIsNotAnsweredTwice(t *testing.T) {
 	}
 
 	// Act
-	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 
 	// Assert
 	if err != nil {
@@ -1061,7 +1060,7 @@ func TestAMergeTurnsAnswerThatBringsNoSessionUpWithTheGateStandingFailsTheTurn(t
 	h.compactGateAbandoned = true
 
 	// Act
-	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 
 	// Assert
 	if err == nil {
@@ -1110,7 +1109,7 @@ func joinHeldAnswer(t *testing.T, h *harness, ctx context.Context) <-chan error 
 	t.Helper()
 	handedOff := make(chan error, 1)
 	go func() {
-		handedOff <- h.o.handOff(ctx, theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+		handedOff <- h.o.handOff(ctx, theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 	}()
 	if _, err := h.logs.Await(t.Context(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opColdGate, Message: joinedMessage}); err != nil {
 		t.Fatalf("awaiting the join: %v", err)

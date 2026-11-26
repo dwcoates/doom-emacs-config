@@ -93,7 +93,7 @@ func names(w *wsm.Workspace, other ids.WorkspaceID) bool {
 			return true
 		}
 	}
-	return w.MergeOf != nil && (w.MergeOf.Requester == other || w.MergeOf.Maker == other)
+	return false
 }
 
 func prune(m map[ids.WorkspaceID]time.Time, now time.Time) {

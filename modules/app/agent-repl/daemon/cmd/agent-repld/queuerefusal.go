@@ -66,16 +66,6 @@ func describeRequeueRefusal(ws string, e *agentreplv1.RequeueMergeError) (string
 		return fmt.Sprintf("the branch %s that %s's merge lands no longer exists, so the merge could never run; end it with `agent-repld merge-queue discard %s`", r.BranchGone.GetBranch(), ws, ws), nil
 	case *agentreplv1.RequeueMergeError_AlreadyLanded:
 		return fmt.Sprintf("%s's merge already landed, which ended its request and closed its workspace", ws), nil
-	case *agentreplv1.RequeueMergeError_VersionIncrementRequired:
-		return fmt.Sprintf("%s's request lost its values when it was adopted and lands on a versioned main branch; requeue it with -version-part minor or patch and -changelog-line TEXT", ws), nil
-	case *agentreplv1.RequeueMergeError_VersionIncrementUnexpected:
-		why, err := sayVersionUnexpected(r.VersionIncrementUnexpected)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%s's merge takes no version increment, as %s; requeue it without -version-part or -changelog-line", ws, why), nil
-	case *agentreplv1.RequeueMergeError_VersionAlreadyRecorded:
-		return fmt.Sprintf("%s's request recorded its own version increment; requeue it without -version-part or -changelog-line", ws), nil
 	case *agentreplv1.RequeueMergeError_PlacementBehindNotInLine:
 		return sayBehindNotInLine(ws, r.PlacementBehindNotInLine), nil
 	case *agentreplv1.RequeueMergeError_WorkspaceClosed:

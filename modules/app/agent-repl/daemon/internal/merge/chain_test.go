@@ -281,16 +281,6 @@ func (g *chainGit) holdRebase(dir string) (entered, release chan struct{}) {
 	return g.rebaseHolds.arm(dir)
 }
 
-// holdRebaseStubbornly is holdRebase for a rebase that ignores its caller's
-// cancellation until release closes.
-func (g *chainGit) holdRebaseStubbornly(dir string) (entered, release chan struct{}) {
-	entered, release = g.holdRebase(dir)
-	g.cmu.Lock()
-	g.stubborn[dir] = true
-	g.cmu.Unlock()
-	return entered, release
-}
-
 // holdClean parks the next cleanliness read in dir until release closes;
 // entered closes once it is parked. A rebase reads it first, so a held read
 // stands the run after it read the target's tip and before its rebase began.
@@ -516,13 +506,6 @@ func (c *chainRunner) script(dir string, run scriptedRun) {
 	c.results[dir] = append(c.results[dir], run)
 }
 
-// overlapped answers the most runs ever under way at once.
-func (c *chainRunner) overlapped() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.most
-}
-
 func (c *chainRunner) ran(dir string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -626,21 +609,6 @@ func (c *chain) queue(t *testing.T, ws ids.WorkspaceID, patches ...string) {
 	c.h.db.mu.Lock()
 	c.dirs[ws] = c.h.db.workspaces[ws].Dir
 	c.h.db.mu.Unlock()
-}
-
-// awaitIdle waits for ws to go idle with until true of the world.
-func (c *chain) awaitIdle(t *testing.T, ws ids.WorkspaceID, until func() bool) {
-	t.Helper()
-	receiveUntil(t, c.idle, string(ws)+" going idle in the awaited state",
-		func(got ids.WorkspaceID) bool { return got == ws && until() })
-}
-
-// onTip reports whether ws's branch stands on the tip of the branch of ahead.
-func (c *chain) onTip(ws, ahead ids.WorkspaceID) func() bool {
-	return func() bool {
-		ok, _ := c.git.IsAncestor(context.Background(), "", c.git.ref(c.branches[ahead]), c.branches[ws])
-		return ok
-	}
 }
 
 // promote runs the pump once more: the merge behind the landed head is

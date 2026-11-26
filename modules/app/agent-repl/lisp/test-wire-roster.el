@@ -83,7 +83,6 @@ See `agent-repl-test-wire-roster--row-json'."
                    :detached-live nil
                    :one-shot nil
                    :opening nil
-                   :async-merging nil
                    :merge-paused nil
                    :merge-turn nil
                    :open-owned-pull-request nil
@@ -165,25 +164,6 @@ See `agent-repl-test-wire-roster--row-json'."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"oneShot\":{\"failed\":{}}"))
                  '("RosterRowOneShot" failed "unknown field"))))
-
-(ert-deftest agent-repl-test-wire-roster-row-decodes-the-async-merging-marker ()
-  "A row carrying `asyncMerging\=' decodes it as PRESENT, beside its status arm."
-  ;; Act
-  (let ((row (agent-repl-test-wire-roster--decode
-              #'agent-repl-wire-decode-roster-row
-              (agent-repl-test-wire-roster--row "\"thinking\":{}" "\"asyncMerging\":{}"))))
-    ;; Assert
-    (should (eq (plist-get row :async-merging) t))
-    (should (equal (plist-get row :status) '(:arm :thinking :value nil)))))
-
-(ert-deftest agent-repl-test-wire-roster-row-async-merging-marker-carries-no-payload ()
-  "`RosterRowAsyncMerging\=' is EMPTY: a field inside it is an unknown field."
-  ;; Act / Assert
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-row
-                  (agent-repl-test-wire-roster--row
-                   "\"ready\":{}" "\"asyncMerging\":{\"repo\":{}}"))
-                 '("RosterRowAsyncMerging" repo "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-idle-async-unread-marker ()
   "A row carrying `idleAsyncUnread\=' decodes it as the turn end\='s arm keyword."
@@ -642,12 +622,6 @@ arriving as an unknown field on some later push."
   "The turn-died arm decodes to its keyword (owner ruling, 2026-10-06)."
   (should (assq 'turnDied agent-repl-wire-roster-row-status-arms))
   (should (memq :turn-died agent-repl-wire-roster-row-status-keywords)))
-
-(ert-deftest agent-repl-test-wire-roster-async-merging-is-no-status-arm ()
-  "An async merge is a row marker, never a status arm (owner request, 2026-10-13)."
-  ;; Act / Assert
-  (should-not (assq 'asyncMerging agent-repl-wire-roster-row-status-arms))
-  (should-not (memq :async-merging agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-row-unset-status-is-a-breach ()
   "A row with no lifecycle is a contract breach, not a default dot."
@@ -2429,8 +2403,8 @@ carried, KEY's decoded value, and the push revision."
           "\"expanded\":{\"collapsible\":{}}" member "}"))
 
 (defconst agent-repl-test-wire-roster--subject
-  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{\"requester\":{\"name\":\"doom-main\"}}},\"merge\":{\"id\":\"w1-merge\"}}"
-  "A merge queue subject's JSON: w1, named one, revealing b1, async of doom-main, as merge w1-merge.")
+  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"}}"
+  "A merge queue subject's JSON: w1, named one, revealing b1.")
 
 (defun agent-repl-test-wire-roster--merged-section-with (members)
   "Return a Recently Merged section JSON carrying MEMBERS, JSON members or \"\"."
@@ -2453,44 +2427,15 @@ carried, KEY's decoded value, and the push revision."
     (should (equal (list (plist-get (plist-get group :key) :repository)
                          (plist-get (plist-get group :header) :label)
                          (plist-get (plist-get head :subject) :name)
-                         (plist-get (plist-get (plist-get head :subject) :mode) :arm)
                          (plist-get (plist-get (plist-get head :subject) :reveal) :value)
                          (plist-get (car (plist-get head :stages)) :label)
                          (plist-get (plist-get (car (plist-get head :stages)) :state) :value)
                          (plist-get head :standing)
                          (plist-get (car (plist-get queue :waiting)) :clock)
                          (plist-get queue :paused))
-                   '((:id "r1" :dir "/src") (:text "doom") "one" :async "b1" "queue" (:started-at-ms 5)
+                   '((:id "r1" :dir "/src") (:text "doom") "one" "b1" "queue" (:started-at-ms 5)
                      (:arm :merging :value nil) (:waiting-since-ms 9 :waited-before-ms 0)
                      (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-async-decodes-its-requester ()
-  "An async mode carries the requester it runs for, by name."
-  (should (equal (agent-repl-test-wire-roster--decode
-                  #'agent-repl-wire-decode-roster-merge-queue-mode-async
-                  "{\"requester\":{\"name\":\"doom-main\"}}")
-                 '(:requester (:name "doom-main")))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-async-without-its-requester-is-a-breach ()
-  "Tag 1, the requester, is REQUIRED: an async mode without it is a breach."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-mode-async "{}")
-                 '("RosterMergeQueueModeAsync" requester "required message field is absent"))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-async-requester-refuses-an-extra-key ()
-  "A requester carries its name alone: any other key is an unknown field."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-mode-async-requester
-                  "{\"name\":\"doom-main\",\"workspace\":{}}")
-                 '("RosterMergeQueueModeAsyncRequester" workspace "unknown field"))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-decodes-an-async-subject-as-its-arm ()
-  "A subject whose mode is async decodes to the `:async' arm, its requester included on the wire."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-roster-merge-queue-subject
-                             agent-repl-test-wire-roster--subject)
-                            :mode)
-                 '(:arm :async))))
 
 (ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-the-retired-racing-field ()
   "Tag 4, a merge racing behind the head, is retired: a waiting merge
@@ -2850,28 +2795,13 @@ its place and since it joined."
                           agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueHead" standing "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-without-mode-is-a-breach ()
-  "How a merge runs is a required message on its subject."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-subject
-                  "{\"workspace\":{\"id\":\"w1\"},\"name\":\"one\"}")
-                 '("RosterMergeQueueSubject" mode "required message field is absent"))))
-
-(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-decodes-the-merge-itself ()
-  "A subject names the merge its queue holds apart from its credited workspace."
-  (let ((subject (agent-repl-test-wire-roster--decode
-                  #'agent-repl-wire-decode-roster-merge-queue-subject
-                  agent-repl-test-wire-roster--subject)))
-    (should (equal (list (plist-get (plist-get subject :workspace) :id)
-                         (plist-get (plist-get subject :merge) :id))
-                   '("w1" "w1-merge")))))
-
-(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-without-merge-is-a-breach ()
-  "The merge itself is a required message on its subject."
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-refuses-the-retired-mode-and-merge ()
+  "Tags 4 and 5, how a merge ran and the merge an async request stood as,
+are retired with the async merge: a subject carrying either is refused."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merge-queue-subject
                   "{\"workspace\":{\"id\":\"w1\"},\"name\":\"one\",\"mode\":{\"sync\":{}}}")
-                 '("RosterMergeQueueSubject" merge "required message field is absent"))))
+                 '("RosterMergeQueueSubject" mode "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-refuses-a-retired-merge-queue ()
   "A repository section no longer carries a merge queue; one is refused as unknown."

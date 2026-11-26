@@ -30,9 +30,7 @@ import (
 //     closed, or CLOSING (a merge waiting in its queue closes it on landing).
 //
 // A BACKLOGGED CHILD COUNTS AS OPEN: hiding keeps its session, so a family is
-// hidden child first. A HIDDEN MERGE WORKSPACE (Workspace.MergeHidden) is no
-// open child: it is an async merge's machinery, drawn nowhere until revealed,
-// and its requester stays free to be backlogged or closed while it runs.
+// hidden child first.
 //
 // The daemon's own closes (CloseByMerge, CloseByDaemon) are not refused: they
 // record what already happened (a branch landed, a directory vanished). A
@@ -128,14 +126,9 @@ func IsFamilyRefusal(err error) bool {
 	return errors.As(err, &children) || errors.As(err, &parent)
 }
 
-// mergeHiddenSQL is the SQL spelling of Workspace.MergeHidden, over a
-// workspaces row aliased `w`; TestMergeHiddenSQLAgreesWithMergeHidden holds
-// the two spellings together.
-const mergeHiddenSQL = `(w.merge_of IS NOT NULL AND w.merge_revealed = 0 AND w.merged_at IS NULL)`
-
 // openChildSQL is the SQL spelling of an OPEN CHILD, over a workspaces row
-// aliased `w`: not closed, and not a hidden merge workspace.
-const openChildSQL = `w.closed = 0 AND NOT ` + mergeHiddenSQL
+// aliased `w`: not closed.
+const openChildSQL = `w.closed = 0`
 
 // familyRefColumns is the columns every family list selects, over a
 // workspaces row aliased `w`, in the order scanFamilyRef reads them.
@@ -224,21 +217,19 @@ func refuseOpenChildren(ctx context.Context, q familyQuerier, id WorkspaceID) er
 }
 
 // closingSQL is the SQL spelling of MergeSource.Closes over every merge in
-// the queue, in any state, and every async request not yet handed off
-// (async_merge_requests): whether one of them closes the workspace once it
+// the queue, in any state: whether one of them closes the workspace once it
 // lands. Its placeholders are, in order: the workspace, the own-branch kind,
-// the merged-upstream kind, the workspace kind, the workspace, the own-branch
-// kind, the workspace, the workspace (closingArgs).
+// the workspace kind, the workspace, the own-branch kind, the workspace
+// (closingArgs).
 // TestClosingSQLAgreesWithMergeSourceCloses holds the two spellings together.
 const closingSQL = `SELECT EXISTS (SELECT 1 FROM merge_queue q LEFT JOIN workspaces r ON r.id = q.workspace_id WHERE
 		(q.workspace_id = ? AND q.source_kind = ? AND q.source_keep_open = 0)
 		OR (q.source_kind = ? AND q.source_workspace = ?)
-		OR (q.source_kind = ? AND r.merge_close_on_landing = ?))
-	OR EXISTS (SELECT 1 FROM async_merge_requests a WHERE a.close_on_landing = ?)`
+		OR (q.source_kind = ? AND r.landing_close_after = ?))`
 
 // closingArgs binds closingSQL for workspace ID.
 func closingArgs(id WorkspaceID) []any {
-	return []any{id, int(MergeSourceOwnBranch), int(MergeSourceWorkspace), id, int(MergeSourceOwnBranch), id, id}
+	return []any{id, int(MergeSourceOwnBranch), int(MergeSourceWorkspace), id, int(MergeSourceOwnBranch), id}
 }
 
 // isClosing reports whether a merge in the queue, in any state, closes ID
@@ -249,16 +240,16 @@ func isClosing(ctx context.Context, q rowQuerier, id WorkspaceID) (bool, error) 
 	return closing, err
 }
 
-// requireOpenParent answers ParentNotOpenError when PARENT is backlogged (or a
-// hidden merge workspace), closed, or closing, nil when it is open. An unknown
+// requireOpenParent answers ParentNotOpenError when PARENT is backlogged,
+// closed, or closing, nil when it is open. An unknown
 // parent is ErrNotFound.
 func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) error {
 	var (
-		ref                        = FamilyRef{ID: parent}
-		closed, backlogged, merged bool
+		ref                = FamilyRef{ID: parent}
+		closed, backlogged bool
 	)
-	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.backlogged, `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, parent).
-		Scan(&ref.Dir, &ref.Name, &closed, &backlogged, &merged)
+	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.backlogged FROM workspaces w WHERE w.id = ?`, parent).
+		Scan(&ref.Dir, &ref.Name, &closed, &backlogged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("wsm: parent %s: %w", parent, ErrNotFound)
 	}
@@ -268,7 +259,7 @@ func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) er
 	switch {
 	case closed:
 		return &ParentNotOpenError{Parent: ref, State: ParentClosed}
-	case backlogged || merged:
+	case backlogged:
 		return &ParentNotOpenError{Parent: ref, State: ParentBacklogged}
 	}
 	closing, err := isClosing(ctx, q, parent)
@@ -340,32 +331,26 @@ func (s *store) familyRead(ctx context.Context, op string, fields dlog.Context, 
 }
 
 // LandingCloses answers what a merge of this source closes once it lands,
-// REQUESTER being the workspace whose queue entry it is and ORIGIN the
-// requester's own merge origin (nil unless it is a merge workspace):
+// REQUESTER being the workspace whose queue entry it is and EFFECTS the
+// requester's own landing effects (nil for none):
 //
 //   - CLOSES, the workspace the source itself concludes: the requester for an
 //     own-branch merge that does not keep it open and for a branch already
 //     merged upstream, the other workspace for a workspace source, none for a
 //     named branch;
-//   - ALSO, the workspace an async merge's one-shot names
-//     (MergeOrigin.CloseOnLanding), which its merge workspace's own-branch
-//     merge closes as well.
+//   - ALSO, the other workspace a one-shot was created to close once it lands
+//     (LandingEffects.CloseAfter), which its own-branch merge closes as well.
 //
-// A DETACHED REQUEST closes nothing itself: it never lands in place, and the
-// merge workspace it hands off to carries its landing (HandOffDetachedMerge).
 // The merge run reads its subject's closes from here, so the family rules and
 // the landing can never disagree about what a merge closes.
-func (m MergeSource) LandingCloses(requester WorkspaceID, origin *MergeOrigin) (closes, also WorkspaceID) {
-	if m.Detach != "" {
-		return "", ""
-	}
+func (m MergeSource) LandingCloses(requester WorkspaceID, effects *LandingEffects) (closes, also WorkspaceID) {
 	switch m.Kind {
 	case MergeSourceOwnBranch:
 		if !m.KeepOpen {
 			closes = requester
 		}
-		if origin != nil {
-			also = origin.CloseOnLanding
+		if effects != nil {
+			also = effects.CloseAfter
 		}
 	case MergeSourceWorkspace:
 		closes = m.Workspace
@@ -373,15 +358,10 @@ func (m MergeSource) LandingCloses(requester WorkspaceID, origin *MergeOrigin) (
 	return closes, also
 }
 
-// Closes answers every workspace a merge of this source closes once it lands
-// or, for a detached request, once the merge workspace it hands off to lands:
-// LandingCloses's two, and the one-shot a detached request names. Each once,
-// none empty. closingSQL is its SQL spelling.
-func (m MergeSource) Closes(requester WorkspaceID, origin *MergeOrigin) []WorkspaceID {
-	closes, also := m.LandingCloses(requester, origin)
-	if m.Detach != "" {
-		also = m.CloseOnLanding
-	}
+// Closes answers every workspace a merge of this source closes once it lands:
+// LandingCloses's two, each once, none empty. closingSQL is its SQL spelling.
+func (m MergeSource) Closes(requester WorkspaceID, effects *LandingEffects) []WorkspaceID {
+	closes, also := m.LandingCloses(requester, effects)
 	var out []WorkspaceID
 	for _, ws := range []WorkspaceID{closes, also} {
 		if ws != "" && !slices.Contains(out, ws) {
@@ -391,9 +371,9 @@ func (m MergeSource) Closes(requester WorkspaceID, origin *MergeOrigin) []Worksp
 	return out
 }
 
-// mergeOriginOf answers workspace ID's merge origin, nil unless it is a merge
-// workspace. An unknown workspace is ErrNotFound.
-func mergeOriginOf(ctx context.Context, tx *sql.Tx, id WorkspaceID) (*MergeOrigin, error) {
+// landingEffectsOf answers workspace ID's landing effects, nil for none. An
+// unknown workspace is ErrNotFound.
+func landingEffectsOf(ctx context.Context, tx *sql.Tx, id WorkspaceID) (*LandingEffects, error) {
 	ws, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
@@ -401,5 +381,5 @@ func mergeOriginOf(ctx context.Context, tx *sql.Tx, id WorkspaceID) (*MergeOrigi
 	if err != nil {
 		return nil, err
 	}
-	return ws.MergeOf, nil
+	return ws.Effects, nil
 }

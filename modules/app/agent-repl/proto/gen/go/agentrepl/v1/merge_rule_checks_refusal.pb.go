@@ -1,13 +1,11 @@
-// merge_rule_checks_refusal.proto — the refusals both ways an agent asks for
-// a merge share when the branch's repository-wide rule checks do not pass: a
-// workspace finishing (FinishWorkspace) and an async merge
-// (CreateWorkspaceAsyncMerge). Before an agent's merge is admitted to the
+// merge_rule_checks_refusal.proto — the refusal an agent's merge request gets
+// when the branch's repository-wide rule checks do not pass: a workspace
+// finishing (FinishWorkspace). Before an agent's merge is admitted to the
 // queue, the daemon runs the repository's rule suites (testrun's roster
 // suites marked Rules: the checks that read the module's sources, such as
 // gofmt, the source scans, the byte-compiler and shellcheck) on the branch's
-// worktree, in the maker's name, through the test service. An async merge's
-// branch that no worktree holds is not checked: the queue makes it a
-// worktree when its merge starts, and the gate checks it there. No targeted run of
+// worktree, in the finishing workspace's name, through the test service. No
+// targeted run of
 // a workspace ever names them, so before this check they first ran in the
 // merge gate, where they failed merge after merge. A refused merge records
 // nothing: the maker fixes what failed and asks again.

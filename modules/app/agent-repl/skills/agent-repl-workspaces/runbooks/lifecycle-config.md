@@ -3,8 +3,8 @@
 - **What happens at each point of a workspace's life is its repository's,
   never the caller's.** The repository commits `.agent-repl/lifecycle.yaml`
   at its main checkout root. `.agent-repl/deploy.yaml` is no longer read.
-  - A repository with no such file refuses `workspace finished` and
-    `workspace async-merge` (`no_deploy_config`, naming lifecycle.yaml). A
+  - A repository with no such file refuses `workspace finished`
+    (`no_deploy_config`, naming lifecycle.yaml). A
     create there is fine and runs only the built-in defaults.
   - A file that does not parse or leaves a required field unset is refused
     naming the field: `deploy_config_invalid` for a deploy, and

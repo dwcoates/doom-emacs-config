@@ -6,10 +6,9 @@
 // could not resume it, a hide at its cold gate -- leaves the merge's request
 // standing OFF ITS QUEUE with the cause it left for: its branch, its version
 // increment and changelog line, its deploy hooks and its cleanup flags all
-// kept, and an async merge's merge workspace kept open under its name.
-// RequeueMerge puts that same request back in line: the same workspace (for
-// an async merge, the same merge workspace), the same branch, the same
-// values, at the placement this request names. Nothing is asked for again and
+// kept. RequeueMerge puts that same request back in line: the same
+// workspace, the same branch, the same values, at the placement this request
+// names. Nothing is asked for again and
 // no workspace is created. Ending a request without landing it is
 // DiscardMerge.
 
@@ -17,7 +16,6 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/merge_version_increment.proto";
 import "agentrepl/v1/workspace_topology.proto";
 import "conversation/v1/api.proto";
 import "workspace/v1/workspace.proto";
@@ -25,24 +23,17 @@ import "workspace/v1/workspace.proto";
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message RequeueMergeRequest {
-  // The workspace whose merge off its queue goes back in line: the workspace
-  // landing its own branch, or an async merge's merge workspace. The command
-  // line resolves the name `merge-queue status` lists the merge under
+  // The workspace whose merge off its queue goes back in line, landing its
+  // own branch. The command line resolves the name `merge-queue status` lists the merge under
   // (agentrepl.v1.MergeQueueStatusOffQueue.name) to this ref.
   workspace.v1.WorkspaceRef workspace = 1;
   // Where the merge joins its queue. REQUIRED: no placement is implied, as
   // for every merge put in line.
   MergeQueuePlacement placement = 2;
-  // The version increment and changelog line of a merge whose request
-  // records none BECAUSE ITS VALUES WERE LOST: a request adopted from a merge
-  // workspace left open before requests were kept
-  // (agentrepl.v1.MergeQueueStatusOffQueueCause.adopted). Such a request
-  // landing on a versioned repository's main branch is refused as
-  // `version_increment_required` without one. A request that recorded its
-  // own values keeps them: supplying one for it is refused as
-  // `version_already_recorded`, so a requeue never silently changes what a
-  // merge was asked to land as. UNSET for every other requeue.
-  optional MergeWorkspaceVersionIncrement version = 3;
+  // Tag 3 (`version`, the increment an adopted async merge request lacked)
+  // is RETIRED with the async merge: every request records its own values.
+  reserved 3;
+  reserved "version";
   // WHO ASKED. REQUIRED: the user (the sidebar) or a workspace's agent
   // (`agent-repld merge-queue requeue`).
   WorkspaceRequester requester = 4;
@@ -92,14 +83,6 @@ message RequeueMergeError {
     // The workspace's merge already landed: its request ended with the
     // landing, and its workspace was closed by it.
     RequeueMergeAlreadyLanded already_landed = 6;
-    // The request lost its values (it was adopted) and lands on a versioned
-    // repository's main branch, so it needs `version`.
-    MergeWorkspaceVersionIncrementRequired version_increment_required = 7;
-    // `version` was given where the request lands on no versioned main
-    // branch.
-    MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 8;
-    // `version` was given for a request that recorded its own.
-    RequeueMergeVersionAlreadyRecorded version_already_recorded = 9;
     // `placement` asked to go behind a merge not in the queue.
     MergeQueuePlacementBehindNotInLine placement_behind_not_in_line = 10;
     // The merge's workspace is closed (a request never outlives its
@@ -117,6 +100,10 @@ message RequeueMergeError {
     // built before the change still decodes it.
     RequeueMergeColdGated cold_gated = 13;
   }
+  // Tags 7-9 (`version_increment_required`, `version_increment_unexpected`,
+  // `version_already_recorded`) are RETIRED with RequeueMergeRequest.version.
+  reserved 7, 8, 9;
+  reserved "version_increment_required", "version_increment_unexpected", "version_already_recorded";
 }
 message RequeueMergeUnknownWorkspace {}
 message RequeueMergeWorkspaceRefMismatch {
@@ -134,8 +121,6 @@ message RequeueMergeBranchGone {
 }
 // The merge landed. No fields: the arm is the fact.
 message RequeueMergeAlreadyLanded {}
-// The request recorded its own version increment.
-message RequeueMergeVersionAlreadyRecorded {}
 // The workspace is closed. No fields: the arm is the fact.
 message RequeueMergeWorkspaceClosed {}
 // The model is not in the login's catalog. No fields: the catalog is the

@@ -1584,7 +1584,6 @@ type fakeMerge struct {
 	requeued   merge.Requeued
 	requeueErr error
 	discards   []ids.WorkspaceID
-	discarded  merge.Discarded
 	discardErr error
 	// moves records every move Move was asked for.
 	moves []fakeMove
@@ -1595,9 +1594,6 @@ type fakeMerge struct {
 	// logPaths answers TestLogPath by token; logErr refuses every one.
 	logPaths map[string]string
 	logErr   error
-	// reveals records every RevealMergeWorkspace; revealErr fails it.
-	reveals   []ids.WorkspaceID
-	revealErr error
 	// tabInterrupts records every InterruptTab's tab; tabRunning and tabErr
 	// answer it.
 	tabInterrupts []feedid.Ref
@@ -1654,26 +1650,15 @@ func (f *fakeMerge) Unsubscribe(_ context.Context, ws ids.WorkspaceID, scope *me
 	return f.unsubscribeErr
 }
 
-func (f *fakeMerge) RevealMergeWorkspace(_ context.Context, ws ids.WorkspaceID, _ string) error {
-	f.reveals = append(f.reveals, ws)
-	return f.revealErr
-}
-
 func (f *fakeMerge) InterruptTab(_ context.Context, _ ids.WorkspaceID, tab feedid.Ref) (bool, error) {
 	f.tabInterrupts = append(f.tabInterrupts, tab)
 	return f.tabRunning, f.tabErr
 }
 
-func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {
+func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
 	f.enqueuedBy = append(f.enqueuedBy, req.By)
 	f.requests = append(f.requests, req)
-	if f.enqueueErr != nil {
-		return merge.Enqueued{}, f.enqueueErr
-	}
-	if req.Detached != nil {
-		return merge.Enqueued{MergeBranch: "agent/" + req.Detached.Name}, nil
-	}
-	return merge.Enqueued{}, nil
+	return f.enqueueErr
 }
 
 func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path string, _ *uint32) error {
@@ -1727,17 +1712,9 @@ func (f *fakeMerge) Requeue(_ context.Context, req merge.Requeue) (merge.Requeue
 	return f.requeued, f.requeueErr
 }
 
-func (f *fakeMerge) Discard(ctx context.Context, ws ids.WorkspaceID, close func(context.Context) error) (merge.Discarded, error) {
+func (f *fakeMerge) Discard(_ context.Context, ws ids.WorkspaceID) error {
 	f.discards = append(f.discards, ws)
-	if f.discardErr != nil {
-		return merge.Discarded{}, f.discardErr
-	}
-	if f.discarded.Async {
-		if err := close(ctx); err != nil {
-			return merge.Discarded{}, err
-		}
-	}
-	return f.discarded, nil
+	return f.discardErr
 }
 
 func (f *fakeMerge) GiveUp(_ context.Context, ws ids.WorkspaceID, reason string) error {

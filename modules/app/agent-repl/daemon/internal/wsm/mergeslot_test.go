@@ -490,12 +490,12 @@ func TestTheMigrationLetsEveryConflictedMergeResolveAtOnce(t *testing.T) {
 	if n := scalar[int](t, s, `SELECT count(*) FROM merge_queue WHERE slot = 5`); n != 2 {
 		t.Fatalf("%d merges resolve conflicts, want both", n)
 	}
-	if _, err := s.db().ExecContext(context.Background(), `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, aside, slot, slot_since, source_pre_deploy_hooks, source_post_deploy_hooks)
-		VALUES ('/tmp/repo-1', 'ws-3', 3, ?, 7, ?, 5, 1, '[]', '[]')`, int(MergeRemediating), int(MergeAsideConflicts)); err != nil {
+	if _, err := s.db().ExecContext(context.Background(), `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, aside, slot, slot_since)
+		VALUES ('/tmp/repo-1', 'ws-3', 3, ?, 7, ?, 5, 1)`, int(MergeRemediating), int(MergeAsideConflicts)); err != nil {
 		t.Fatalf("a third merge resolving conflicts was refused: %v", err)
 	}
-	if _, err := s.db().ExecContext(context.Background(), `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, aside, slot, slot_since, source_pre_deploy_hooks, source_post_deploy_hooks)
-		VALUES ('/tmp/repo-1', 'ws-4', 4, ?, 7, ?, 4, 1, '[]', '[]'), ('/tmp/repo-1', 'ws-5', 5, ?, 7, ?, 4, 1, '[]', '[]')`,
+	if _, err := s.db().ExecContext(context.Background(), `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, aside, slot, slot_since)
+		VALUES ('/tmp/repo-1', 'ws-4', 4, ?, 7, ?, 4, 1), ('/tmp/repo-1', 'ws-5', 5, ?, 7, ?, 4, 1)`,
 		int(MergeRemediating), int(MergeAsideTests), int(MergeRemediating), int(MergeAsideTests)); err == nil {
 		t.Fatal("two holders of the fixing-tests slot were accepted")
 	}

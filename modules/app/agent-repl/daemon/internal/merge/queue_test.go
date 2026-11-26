@@ -17,7 +17,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/wsm"
@@ -452,7 +451,7 @@ func TestClosingAWorkspaceWithNoQueuedMergeAbandonsNothing(t *testing.T) {
 func queueAnother(t *testing.T, h *harness, ws wsm.WorkspaceID, name string) {
 	t.Helper()
 	h.registerOther(ws, name, "b-"+name)
-	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: ws, Source: ownBranch, By: RequestedByUser}); err != nil {
+	if err := h.o.Enqueue(context.Background(), Request{Workspace: ws, Source: ownBranch, By: RequestedByUser}); err != nil {
 		t.Fatalf("Enqueue %s: %v", ws, err)
 	}
 }
@@ -1819,91 +1818,6 @@ func TestAMergeTakenBackWithNoLeaseRecordedIsADefect(t *testing.T) {
 	_ = h.o.dropPendingResume(context.Background(), theWorkspace, doc, CauseUserDrop)
 }
 
-// TestTheQueueTabNamesAnAsyncMergeForItselfAndOpensItsBubble covers the queue
-// view: a sync merge's entry is its own workspace and carries no bubble; an
-// async merge's is the hidden merge workspace, named for itself, and carries
-// its bubble -- the requester and the head row on the requester's feed --
-// which is what its click selects and opens.
-func TestTheQueueTabNamesAnAsyncMergeForItselfAndOpensItsBubble(t *testing.T) {
-	tests := []struct {
-		name     string
-		ws       ids.WorkspaceID
-		ledgered bool
-		observe  func(*frontendv1.FeedMergeQueueEntry) any
-		want     func(merge wsm.Workspace) any
-	}{
-		{name: "a sync merge names its own workspace", ws: theWorkspace,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetLabel().GetText() },
-			want:    func(wsm.Workspace) any { return "requester" }},
-		{name: "a sync merge carries no bubble", ws: theWorkspace,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble() == nil },
-			want:    func(wsm.Workspace) any { return true }},
-		{name: "an async merge names its merge for itself", ws: theMergeWorkspace, ledgered: true,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetLabel().GetText() },
-			want:    func(m wsm.Workspace) any { return m.Name }},
-		{name: "an async merge's entry is its own workspace", ws: theMergeWorkspace, ledgered: true,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetWorkspace().GetRef().GetId() },
-			want:    func(wsm.Workspace) any { return string(theMergeWorkspace) }},
-		{name: "an async merge's bubble stands in its requester", ws: theMergeWorkspace, ledgered: true,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRequester().GetId() },
-			want:    func(wsm.Workspace) any { return string(theWorkspace) }},
-		{name: "an async merge's bubble is its head row on the requester's feed", ws: theMergeWorkspace, ledgered: true,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRow().GetValue() },
-			want: func(wsm.Workspace) any {
-				return feedid.Encode(headRef(theWorkspace, "lease-1")).GetValue()
-			}},
-		{name: "an async merge with no bubble identity still names its requester", ws: theMergeWorkspace,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRequester().GetId() },
-			want:    func(wsm.Workspace) any { return string(theWorkspace) }},
-		{name: "an async merge with no bubble identity opens no row", ws: theMergeWorkspace,
-			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRow() == nil },
-			want:    func(wsm.Workspace) any { return true }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: the requester, and the merge workspace forked for its async merge.
-			h := newHarness(t)
-			h.register(theWorkspace, "requester")
-			merge := h.registerMergeWorkspace(theWorkspace, "req-1", "feature")
-			if tt.ledgered {
-				h.o.mu.Lock()
-				h.o.ledgerOf[theMergeWorkspace] = "lease-1"
-				h.o.mu.Unlock()
-			}
-			entries := []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: tt.ws, Position: 1, EnqueuedAt: h.clock()}}
-
-			// Act.
-			view, err := h.o.viewQueue(context.Background(), h.repoKey(), entries)
-
-			// Assert.
-			if err != nil {
-				t.Fatalf("viewQueue: %v", err)
-			}
-			if got, want := tt.observe(view.snapshot(entries, tt.ws).GetCurrent()), tt.want(merge); got != want {
-				t.Fatalf("got %v, want %v", got, want)
-			}
-		})
-	}
-}
-
-// TestTheQueueTabIsNotDrawnWhenAnAsyncMergesRequesterCannotBeRead covers the
-// failure: a requester the store cannot answer fails the drawing, rather than
-// drawing an entry whose click would select the hidden merge workspace.
-func TestTheQueueTabIsNotDrawnWhenAnAsyncMergesRequesterCannotBeRead(t *testing.T) {
-	// Arrange: a merge workspace whose requester is not registered.
-	h := newHarness(t)
-	h.registerMergeWorkspace("ws-gone", "req-1", "feature")
-	entries := []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: theMergeWorkspace, Position: 1, EnqueuedAt: h.clock()}}
-
-	// Act.
-	_, err := h.o.viewQueue(context.Background(), h.repoKey(), entries)
-
-	// Assert.
-	if err == nil {
-		t.Fatal("viewQueue drew a merge whose requester could not be read")
-	}
-}
-
 // TestADequeueDecidesAgainstASuspensionUnderOneLock covers every way an
 // abandonment meets a suspension: decided first it ends the run; after a
 // suspension this daemon takes back, it waits for that take-back; after one
@@ -2452,25 +2366,6 @@ func TestAHardStopLeavesATurnThatEndedAlone(t *testing.T) {
 	}
 }
 
-func TestAHardStopLeavesAPickTurnToFinish(t *testing.T) {
-	// Arrange: a step that reads an interrupt as the user's.
-	h := newHarness(t)
-	atPick := func(d *progressDoc) {
-		atStep(TabPick, 1)(d)
-		d.Turn = string(deadTurn)
-	}
-
-	// Act.
-	if err := hardStopAt(t, h, atPick, nil); err != nil {
-		t.Fatalf("HardStop: %v", err)
-	}
-
-	// Assert.
-	if got := interruptedWorkspaces(h); len(got) != 0 {
-		t.Fatalf("interrupted = %v, want the pick's turn left to finish", got)
-	}
-}
-
 func TestAHardStopOfAPausedQueueIsNotRefused(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -2551,66 +2446,6 @@ func TestAHardStopInterruptsAWaitingMergesBackgroundRebase(t *testing.T) {
 	}
 }
 
-// markMergeWorkspace records theWorkspace as a merge workspace forked for
-// REQUESTER, registered as its requester.
-func markMergeWorkspace(h *harness, requester ids.WorkspaceID) {
-	h.registerOther(requester, "ws-two", "b")
-	h.db.mu.Lock()
-	defer h.db.mu.Unlock()
-	w := h.db.workspaces[theWorkspace]
-	w.MergeOf = &wsm.MergeOrigin{Requester: requester}
-	h.db.workspaces[theWorkspace] = w
-}
-
-// An eviction is no end of an async merge: its request stands off the queue
-// to be requeued, so its merge workspace stays open. A dequeue IS its end
-// (2026-11-23), which closes the hidden merge workspace and with it the
-// request.
-func TestAReleasedQueuedMergeKeepsItsMergeWorkspaceOnlyWhenEvicted(t *testing.T) {
-	tests := []struct {
-		name       string
-		release    func(h *harness) error
-		cause      AbandonCause
-		wantClosed bool
-	}{
-		{name: "evicted", release: func(h *harness) error { return h.o.Evict(context.Background(), theMergeWorkspace) }, cause: CauseUserDrop},
-		{name: "dequeued", release: func(h *harness) error {
-			return h.o.dequeue(context.Background(), theMergeWorkspace, CauseUserDequeue)
-		}, cause: CauseUserDequeue, wantClosed: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: an async request handed off and waiting in line.
-			h := newHarness(t)
-			if err := requestDetached(t, h, RequestedByUser); err != nil {
-				t.Fatalf("Enqueue: %v", err)
-			}
-
-			// Act.
-			err := tt.release(h)
-
-			// Assert: off the queue; an eviction keeps the request under its
-			// cause and the workspace open, a dequeue closes both.
-			if err != nil {
-				t.Fatalf("the release: %v", err)
-			}
-			if _, ok := h.entryOf(theMergeWorkspace); ok {
-				t.Fatal("the released merge is still queued")
-			}
-			rec, kept, _ := h.db.OffQueueMergeOf(context.Background(), theMergeWorkspace)
-			if kept == tt.wantClosed || (kept && rec.Cause != string(tt.cause)) {
-				t.Fatalf("the kept request = %+v (kept %v), want kept %v for %q", rec, kept, !tt.wantClosed, tt.cause)
-			}
-			h.db.mu.Lock()
-			closed := h.db.closed[theMergeWorkspace]
-			h.db.mu.Unlock()
-			if closed != tt.wantClosed {
-				t.Fatalf("the merge workspace closed = %v, want %v", closed, tt.wantClosed)
-			}
-		})
-	}
-}
-
 func TestAKilledWorkspacesQueuedMergeKeepsNoRequest(t *testing.T) {
 	// Arrange: a kill marks the workspace closed before its merge is dropped.
 	h := newHarness(t)
@@ -2631,38 +2466,16 @@ func TestAKilledWorkspacesQueuedMergeKeepsNoRequest(t *testing.T) {
 	}
 }
 
-func TestEvictingAMergeWorkspaceTakenBackButNotResumedKeepsItsRequest(t *testing.T) {
-	// Arrange.
-	h := pendingResume(t)
-	markMergeWorkspace(h, otherWorkspace)
-
-	// Act.
-	err := h.o.Evict(context.Background(), theWorkspace)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Evict: %v", err)
-	}
-	if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); !kept {
-		t.Fatal("the dropped merge's request was not kept off the queue")
-	}
-	h.db.mu.Lock()
-	closed := h.db.closed[theWorkspace]
-	h.db.mu.Unlock()
-	if closed {
-		t.Fatal("the drop closed the merge workspace")
-	}
-}
-
 // aheadWorkspace is the merge a held merge was placed behind.
 const aheadWorkspace = ids.WorkspaceID("ws-ahead")
 
-// requestHeldPick asks for the harness's async pick with its merge workspace
-// placed behind the merge "ahead-merge", which still stands in the queue: the
-// shape `merge-queue-verb-docs` had on 2026-11-12, placed behind
+// requestHeld asks for the harness workspace's merge placed behind the merge
+// "ahead-merge", which still stands in the queue: the shape
+// `merge-queue-verb-docs` had on 2026-11-12, placed behind
 // `three-slots-landing` while that merge stood out of line.
-func requestHeldPick(t *testing.T, h *harness) {
+func requestHeld(t *testing.T, h *harness) {
 	t.Helper()
+	landing(h, 1)
 	repo := h.repoKey()
 	h.db.mu.Lock()
 	h.db.queues[repo] = append(h.db.queues[repo], wsm.MergeQueueEntry{
@@ -2670,16 +2483,10 @@ func requestHeldPick(t *testing.T, h *harness) {
 	})
 	h.db.renumber(repo)
 	h.db.mu.Unlock()
-	_, err := h.o.Enqueue(context.Background(), Request{
-		Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
-		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Pick: "the reconnect fix"},
-	})
-	if err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
+	enqueue(t, h)
 	h.db.mu.Lock()
 	for i, entry := range h.db.queues[repo] {
-		if entry.Workspace == theMergeWorkspace {
+		if entry.Workspace == theWorkspace {
 			h.db.queues[repo][i].WaitsOn, h.db.queues[repo][i].WaitsOnName = aheadWorkspace, "ahead-merge"
 		}
 	}
@@ -2695,18 +2502,10 @@ func aheadLeaves(t *testing.T, h *harness, cause string) {
 	}
 }
 
-// picking reports whether the merge workspace's pick has begun.
-func picking(h *harness) bool {
-	h.o.mu.Lock()
-	defer h.o.mu.Unlock()
-	_, begun := h.o.picks[theMergeWorkspace]
-	return begun
-}
-
-func TestAMergePlacedBehindAMergeStillInTheQueueIsNeitherPickedNorAdmitted(t *testing.T) {
+func TestAMergePlacedBehindAMergeStillInTheQueueIsNotAdmitted(t *testing.T) {
 	// Arrange
-	h := pickHarness(t)
-	requestHeldPick(t, h)
+	h := newHarness(t)
+	requestHeld(t, h)
 
 	// Act
 	admitted, err := h.o.pumpOnce(context.Background(), h.repoKey())
@@ -2715,34 +2514,28 @@ func TestAMergePlacedBehindAMergeStillInTheQueueIsNeitherPickedNorAdmitted(t *te
 	if err != nil {
 		t.Fatalf("pumpOnce: %v", err)
 	}
-	if admitted || picking(h) || len(h.queue.submissions) != 0 {
-		t.Fatalf("admitted %v, picking %v, submissions %d; want the merge held behind the merge ahead", admitted, picking(h), len(h.queue.submissions))
+	if admitted || len(h.queue.submissions) != 0 {
+		t.Fatalf("admitted %v, submissions %d; want the merge held behind the merge ahead", admitted, len(h.queue.submissions))
 	}
 	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.behind",
 		Message: "a merge in line is passed over: it waits for the merge it was placed behind to leave the queue, and the merges behind it are admitted past it"})
-	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["behind_name"] != "ahead-merge" {
+	if !ok || record.Context["workspace"] != string(theWorkspace) || record.Context["behind_name"] != "ahead-merge" {
 		t.Fatalf("hold record = %+v, %v; want it naming the held merge and the merge ahead", record, ok)
 	}
 }
 
-func TestAMergePlacedBehindAnotherIsPickedOnceThatMergeLands(t *testing.T) {
+func TestAMergePlacedBehindAnotherRunsOnceThatMergeLands(t *testing.T) {
 	// Arrange
-	h := pickHarness(t)
-	requestHeldPick(t, h)
+	h := newHarness(t)
+	requestHeld(t, h)
 	aheadLeaves(t, h, causeMerged)
 
 	// Act
-	_, err := h.o.pumpOnce(context.Background(), h.repoKey())
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
 
 	// Assert
-	if err != nil {
-		t.Fatalf("pumpOnce: %v", err)
-	}
-	if !picking(h) {
-		t.Fatal("the pick did not begin once the merge ahead landed")
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.pick", Message: "an async merge's pick begins in its merge workspace"}); !ok {
-		t.Fatalf("no pick-begins record: %+v", h.logs.Records())
+	if !ran {
+		t.Fatalf("pumpOnce = %v, %v; want the merge run once the merge ahead landed", ran, err)
 	}
 }
 
@@ -2758,8 +2551,8 @@ func TestAMergePlacedBehindAnotherFailsWhenThatMergeLeavesWithoutLanding(t *test
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := pickHarness(t)
-			requestHeldPick(t, h)
+			h := newHarness(t)
+			requestHeld(t, h)
 			aheadLeaves(t, h, tt.cause)
 
 			// Act
@@ -2769,10 +2562,10 @@ func TestAMergePlacedBehindAnotherFailsWhenThatMergeLeavesWithoutLanding(t *test
 			if err != nil {
 				t.Fatalf("pumpOnce: %v", err)
 			}
-			if _, queued := h.entryOf(theMergeWorkspace); queued || picking(h) {
-				t.Fatalf("queued %v, picking %v; want the merge failed off its queue unpicked", queued, picking(h))
+			if _, queued := h.entryOf(theWorkspace); queued || len(h.queue.submissions) != 0 {
+				t.Fatalf("queued %v, submissions %d; want the merge failed off its queue unrun", queued, len(h.queue.submissions))
 			}
-			if !slices.Contains(h.db.dropped, string(theMergeWorkspace)+":"+string(CauseAheadDidNotLand)) {
+			if !slices.Contains(h.db.dropped, string(theWorkspace)+":"+string(CauseAheadDidNotLand)) {
 				t.Fatalf("dropped = %v, want the merge dropped for its merge ahead", h.db.dropped)
 			}
 			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.behind",
@@ -2790,24 +2583,21 @@ func TestAMergePlacedBehindAnotherFailsWhenThatMergeLeavesWithoutLanding(t *test
 
 func TestARestartKeepsAMergeHeldBehindTheMergeItWasPlacedBehind(t *testing.T) {
 	// Arrange: the wait is on the merge's durable row, which the next boot reads.
-	h := pickHarness(t)
-	requestHeldPick(t, h)
+	h := newHarness(t)
+	requestHeld(t, h)
 	h.restart(t)
 
 	// Act
 	held, err := h.o.pumpOnce(context.Background(), h.repoKey())
 	aheadLeaves(t, h, causeMerged)
-	released, releaseErr := h.o.pumpOnce(context.Background(), h.repoKey())
+	released, _ := h.o.pumpOnce(context.Background(), h.repoKey())
 
 	// Assert
-	if err != nil || releaseErr != nil {
-		t.Fatalf("pumpOnce: %v, %v", err, releaseErr)
+	if err != nil {
+		t.Fatalf("pumpOnce while held: %v", err)
 	}
-	if held || released {
-		t.Fatalf("admitted while held %v, at release %v; want the pick to hold the head, not an admission", held, released)
-	}
-	if !picking(h) {
-		t.Fatal("the restarted daemon did not begin the pick once the merge ahead landed")
+	if held || !released {
+		t.Fatalf("admitted while held %v, at release %v; want it held, then run", held, released)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.behind"}); !ok {
 		t.Fatalf("no hold record after the restart: %+v", h.logs.Records())
@@ -2815,13 +2605,13 @@ func TestARestartKeepsAMergeHeldBehindTheMergeItWasPlacedBehind(t *testing.T) {
 }
 
 func TestEnqueueRecordsTheWaitOnTheMergeARequestIsPlacedBehind(t *testing.T) {
-	// Arrange
-	h := pickHarness(t)
-	requestPick(t, h)
+	// Arrange: another workspace's merge stands in line under its name.
+	h := newHarness(t)
+	queueAnother(t, h, otherWorkspace, "feature")
 
 	// Act
-	_, err := h.o.Enqueue(context.Background(), Request{
-		Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, By: RequestedByUser, PlaceBehind: "feature-merge",
+	err := h.o.Enqueue(context.Background(), Request{
+		Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, By: RequestedByUser, PlaceBehind: "feature",
 	})
 
 	// Assert
@@ -2829,7 +2619,7 @@ func TestEnqueueRecordsTheWaitOnTheMergeARequestIsPlacedBehind(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	entry, ok := h.entryOf(theWorkspace)
-	if !ok || entry.WaitsOn != theMergeWorkspace || entry.WaitsOnName != "feature-merge" || !entry.HeldBehind() {
+	if !ok || entry.WaitsOn != otherWorkspace || entry.WaitsOnName != "feature" || !entry.HeldBehind() {
 		t.Fatalf("entry = %+v, %v; want it waiting on the merge it was placed behind", entry, ok)
 	}
 }
@@ -3410,7 +3200,7 @@ func TestEveryBehindRefusalSharesOneShape(t *testing.T) {
 		ask  func(h *harness) error
 	}{
 		{name: "a request", ask: func(h *harness) error {
-			_, err := h.o.Enqueue(context.Background(), Request{Workspace: "ws-3", Source: ownBranch, By: RequestedByUser, PlaceBehind: "nowhere"})
+			err := h.o.Enqueue(context.Background(), Request{Workspace: "ws-3", Source: ownBranch, By: RequestedByUser, PlaceBehind: "nowhere"})
 			return err
 		}},
 		{name: "a move", ask: func(h *harness) error {

@@ -40,7 +40,7 @@ import { MERGE_GLYPH } from "../merge-glyph.js";
 import type {
   FooterChipAgents,
   FooterChipCrons,
-  FooterChipMerges,
+  FooterChipChildren,
   FooterChipMonitors,
   FooterChipShells,
   FooterChipTasks,
@@ -686,7 +686,7 @@ const LIVE_WORK_CHIPS: Readonly<
   monitors: (u, deps) =>
     u.monitors === undefined ? null : drawFooterChipMonitors(u.monitors, deps),
   crons: (u, deps) => (u.crons === undefined ? null : drawFooterChipCrons(u.crons, deps)),
-  merges: (u, deps) => (u.merges === undefined ? null : drawFooterChipMerges(u.merges, deps)),
+  children: (u, deps) => (u.children === undefined ? null : drawFooterChipChildren(u.children, deps)),
 };
 
 /**
@@ -708,7 +708,7 @@ export function drawFooterChipAgents(u: FooterChipAgents, deps: StripDeps): HTML
 /**
  * A chip's waiting figure: " <glyph> N", tooltipped with what the N rows wait
  * for, and stamped `data-<name in kebab case>` with the count. The agents
- * chip's waiting-for-the-API figure and the merges chip's waiting-on-you
+ * chip's waiting-for-the-API figure and the children chip's waiting-on-you
  * figure are both drawn by it.
  */
 export function chipWaiting(name: string, glyph: string, count: number, waitsFor: string): HTMLElement {
@@ -747,12 +747,12 @@ export function drawFooterChipMonitors(u: FooterChipMonitors, deps: StripDeps): 
 }
 
 /**
- * ⇄ N — the async merges in flight, and, while any of them waits on the user,
- * the waiting glyph with ITS count beside it: "⇄ 2 ? 1". Both counts are the
- * daemon's.
+ * ⇄ N — the workspace's open children, and, while any of them waits on the
+ * user, the waiting glyph with ITS count beside it: "⇄ 2 ? 1". Both counts
+ * are the daemon's.
  */
-export function drawFooterChipMerges(u: FooterChipMerges, deps: StripDeps): HTMLElement {
-  const el = chip("merges", MERGE_GLYPH, String(u.count), deps);
+export function drawFooterChipChildren(u: FooterChipChildren, deps: StripDeps): HTMLElement {
+  const el = chip("children", MERGE_GLYPH, String(u.count), deps);
   if (u.waitingOnUser === undefined) return el;
   el.appendChild(chipWaiting("waitingOnUser", WAITING_ON_USER_GLYPH, u.waitingOnUser.count, "waiting on you"));
   return el;
@@ -779,7 +779,7 @@ export const CHIP_TOOLTIPS: Readonly<Record<FooterChipPanel, string>> = {
   shells: "Background shells",
   monitors: "Background monitors",
   crons: "Scheduled jobs",
-  merges: "Async merges",
+  children: "Open children",
 };
 
 /** One chip: glyph, count, tooltip, and the click that opens its panel. */

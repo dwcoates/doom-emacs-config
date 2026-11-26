@@ -108,7 +108,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.concluded(MergeFacts{State: StateMerged, Detail: fmt.Sprintf("already on %s; nothing to merge", out.alreadyOn)})
 		// Nothing landed, so the count its turns last recorded stands.
 		r.stampClosed(ctx, log, op, nil)
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("the branch was already on %s; nothing needed merging", out.alreadyOn)})
+		r.o.ended(ctx, r.ws, Ending{Kind: EndingLanded, Summary: fmt.Sprintf("the branch was already on %s; nothing needed merging", out.alreadyOn)})
 		log.Info(op, "a merge concluded with its branch already on the target", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "target": out.alreadyOn, "tip": out.landed})
 	default:
@@ -120,7 +120,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		if deploy == LandingDeployOwed {
 			r.recordUndeployed(ctx, log, out)
 		}
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: landedSummary(out), MergedInto: out.target, Deploy: deploy})
+		r.o.ended(ctx, r.ws, Ending{Kind: EndingLanded, Summary: landedSummary(out), MergedInto: out.target, Deploy: deploy})
 		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
@@ -186,7 +186,7 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 	// prompt's own records), so this record is INFO whatever the area.
 	r.o.log(ctx, r.ws).Info("daemon.merge.abort", "a merge failed and the workspace is handed back", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary, "area": string(area)})
-	r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
+	r.o.ended(ctx, r.ws, Ending{Kind: EndingFailed, Summary: summary})
 }
 
 // ended is EVERY MERGE'S RESOLUTION, however it left the queue for good:
@@ -195,7 +195,7 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 // merge's second and last desktop banner, on the workspace the merge ran in
 // (tellThenRaise). Every terminal goes through it, so no resolution goes unannounced and none is
 // announced twice.
-func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out Ending) {
 	// THE BUBBLE'S HOLD IS NO LONGER REDRAWN: its merge is out of the queue.
 	if lease, ok := o.leaseOf(ws); ok {
 		o.bubbleTabs.forget(lease)
@@ -205,100 +205,17 @@ func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out Detach
 	o.tellThenRaise(ws, out, func() { o.settle(ctx, ws, out) })
 }
 
-// settle is EVERY ENDED MERGE'S ACCOUNT TO ITS WORKSPACES, and the one path
-// that reaches them: it hands the outcome back (handBack) and then closes an
-// async merge's hidden merge workspace when the end is terminal
-// (closeEnded). ended and a merge never put in line (publishAbandonedWith)
-// both settle through it, and nothing else hands a merge's end back, so no
-// terminal end can leave its merge workspace open and hidden (2026-11-23:
-// 22 such records found, each a failed, dropped or refused merge's).
-func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
-	record, async := o.handBack(ctx, ws, out)
-	if async {
-		o.closeEnded(ctx, record, out)
-	}
+// settle is EVERY ENDED MERGE'S ACCOUNT TO ITS WORKSPACE, and the one path
+// that reaches it: it hands the outcome back (handBackInPlace). ended and a
+// merge never put in line (publishAbandonedWith) both settle through it, and
+// nothing else hands a merge's end back.
+func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out Ending) {
+	o.handBackInPlace(ctx, ws, out)
 }
-
-// closeEnded closes RECORD, the merge workspace of an async merge that ended
-// as OUT, when that end is terminal and the workspace is still hidden: its
-// merge is over, and a hidden workspace nobody can see would otherwise stand
-// open forever. It is called once per end, from settle alone, and records
-// what it did under opCloseEnded, whichever way it went:
-//
-//   - A LANDING closed it already, in its own teardown (stampClosed, which
-//     stamps merged_at in the same step), before the terminal was published.
-//   - AN EVICTION IS NO END OF ITS MERGE: its request stands off the queue to
-//     be requeued as itself, so its workspace stays until a requeue, or a
-//     discard, which closes it (Discard). A merge put back in line at its
-//     cold gate never reaches here at all (abandonTerminal).
-//   - A workspace the user revealed is the user's, and stays open.
-//
-// Every other end (a failure, a dequeue, a merge dropped behind one that did
-// not land, given up, or backlogged at its cold gate) closes it, with the daemon
-// as its closer. Closing ends its request off the queue in the same write
-// (wsm.markClosedInTx), and keeps its worktree and branch, which the
-// handback names.
-//
-// EVERY END THAT DID NOT LAND ENDS THE MERGE'S SESSION FIRST (endSession),
-// an eviction's and a closed workspace's included, unless the user revealed
-// the workspace: the merge's agent has no work left, and the withheld
-// stand-down waits for its turn to end. A given-up merge's agent, forked from
-// its maker's conversation, once kept acting for three and a half minutes
-// after its merge ended, in its maker's worktree and on its maker's branches
-// (2026-11-24, deploy-check-admission-race).
-func (o *orchestrator) closeEnded(ctx context.Context, record wsm.Workspace, out DetachedOutcome) {
-	log := o.log(ctx, record.ID)
-	fields := dlog.Context{"workspace": string(record.ID), "name": record.Name, "outcome": out.Kind.String(), "cause": string(out.Cause)}
-	switch {
-	case out.Kind == DetachedLanded:
-		log.Debug(opCloseEnded, "the landed merge's workspace was closed by its landing", withField(fields, "closed", record.Closed))
-		return
-	case !record.Closed && !record.MergeHidden():
-		log.Info(opCloseEnded, "the ended merge's workspace was revealed to the user, and stays open for them", fields)
-		return
-	}
-	o.endSession(ctx, log, record.ID, fields)
-	switch {
-	case out.Cause == CauseUserDrop:
-		log.Info(opCloseEnded, "the evicted merge may still be requeued; its merge workspace stays until it is requeued or discarded", fields)
-	case record.Closed:
-		log.Info(opCloseEnded, "the ended merge's workspace is closed already", fields)
-	default:
-		if err := o.deps.DB.MarkClosed(ctx, record.ID, wsm.Closure{At: o.deps.Now(), By: wsm.CloseByDaemon}); err != nil {
-			log.Error(opCloseEnded, "could not close the hidden workspace of a merge that ended without landing; it stays open and hidden", withField(fields, "error", err.Error()))
-			return
-		}
-		log.Info(opCloseEnded, "closed the hidden workspace of a merge that ended without landing", fields)
-		// THE ROSTER'S DURABLE HALF MOVED, as a landing's close moves it
-		// (stampClosed): nothing else republishes it.
-		o.republishRoster(ctx, log, opCloseEnded, logsite.Msg("could not republish the roster after closing an ended merge's workspace"), fields)
-	}
-}
-
-// endSession ends WS's session at once, the merge's agent's running turn with
-// it, for a merge that ended without landing, and records it under
-// opEndSession with FIELDS. Its starts are held across the stop, so no
-// relaunch in flight brings the agent back. The stop runs on a context its
-// caller's cancellation does not reach: an abandonment cancels the run whose
-// teardown settles here. A failed stop is an ERROR, and the close that
-// follows stands.
-func (o *orchestrator) endSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context) {
-	release := o.deps.HoldStarts(ws)
-	defer release()
-	if err := o.stopSessionForced(context.WithoutCancel(ctx), ws, shimlife.StandDownMergeEnded); err != nil {
-		log.Error(opEndSession, "could not end the session of a merge that ended without landing; its agent may still be acting", withField(fields, "error", err.Error()))
-		return
-	}
-	log.Info(opEndSession, "ended the session of a merge that ended without landing, interrupting any turn it ran", fields)
-}
-
-// opEndSession is every record of endSession.
-const opEndSession = "daemon.merge.end_session"
 
 // stopSessionForced ends WS's session at once, whatever turn it runs, stating
 // REASON as its stand-down. It is the package's ONE forced session stop: a
-// landed workspace's before its worktree goes (retireLandedWorktree), and an
-// unlanded merge's (endSession).
+// landed workspace's before its worktree goes (retireLandedWorktree).
 func (o *orchestrator) stopSessionForced(ctx context.Context, ws ids.WorkspaceID, reason shimlife.StandDownReason) error {
 	return o.deps.StopSession(shimlife.WithStandDown(ctx, reason), ws, true)
 }
@@ -317,25 +234,22 @@ func (o *orchestrator) republishRoster(ctx context.Context, log dlog.Logger, op 
 	}
 }
 
-// opCloseEnded is every record of closeEnded.
-const opCloseEnded = "daemon.merge.close_ended"
-
 // tellThenRaise is EVERY RESOLUTION'S ORDER: TELL reports the outcome to the
 // workspaces it is handed back to, and the resolved desktop banner and its
 // chime are raised on ws just after, in the same routine. A workspace is
 // told of a merge's end before the banner announces it, never after.
-func (o *orchestrator) tellThenRaise(ws ids.WorkspaceID, out DetachedOutcome, tell func()) {
+func (o *orchestrator) tellThenRaise(ws ids.WorkspaceID, out Ending, tell func()) {
 	tell()
 	o.raiseResolved(ws, out)
 }
 
 // raiseResolved raises the resolved desktop banner of a merge's outcome on ws.
 // It is the ONE place a resolved banner is raised from, so every end words it
-// the same way (DetachedOutcome.bannerLine).
+// the same way (Ending.bannerLine).
 //
-// A RELEASED MERGE RAISES NONE (DetachedOutcome.Released): the user or the
+// A RELEASED MERGE RAISES NONE (Ending.Released): the user or the
 // operator who released it is the one the banner would tell.
-func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
+func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out Ending) {
 	if out.Released() {
 		o.deps.Log.Global().Info("daemon.merge.ended", "a released merge raises no resolved banner: whoever released it already knows",
 			dlog.Context{"workspace": string(ws), "outcome": out.Kind.String(), "cause": string(out.Cause)})
@@ -344,55 +258,21 @@ func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
 	o.deps.Banners.Resolved(ws, out.Kind.mergeEnd(), out.bannerLine())
 }
 
-// handBack reports how a merge ended to the workspace whose feed carries the
-// bubble: an ASYNC merge's requester however it ended, and a SYNC merge's own
-// workspace when it did not land (one that landed closed it).
+// handBackInPlace reports a merge that did not land to its own workspace's
+// conversation, which stays open after it: a failure, or an abandonment, an
+// eviction included. A landing closed the workspace, so it is not reported;
+// the workspace's parent, if it has one, is told of it as the child's one
+// update (wsm.ParentFollowedEvents).
 //
 // A MERGE THE USER OR THE OPERATOR RELEASED (an evict, a dequeue) IS NOT
-// REPORTED BACK (owner ruling, 2026-11-17, superseding 2026-11-10's): whoever
-// released it already knows, and its bubble shows the abandoned terminal, so
-// the report only sat queued in the requester as noise. Its owner
-// (DetachedMerges.HandBack) skips it on DetachedOutcome.Released. Every other
-// abandonment is reported, as a landing or a failure is. The
-// bubble's own "open merge workspace" button (SelectWorkspace's own reveal,
-// internal/server/workspaces.go) is the one way in from here, by owner
-// ruling (2026-10-20): a merge workspace is never auto-revealed in the tab
-// bar or sidebar on its own, on any outcome.
+// REPORTED BACK (owner ruling, 2026-11-17): whoever released it already
+// knows, and its bubble shows the abandoned terminal. Its owner
+// (HandBacks.HandBack) skips it on Ending.Released.
 //
-// THE HANDBACK'S OWN FAILURE IS RECORDED BY ITS OWNER (DetachedMerges.HandBack);
+// THE HANDBACK'S OWN FAILURE IS RECORDED BY ITS OWNER (HandBacks.HandBack);
 // the merge's terminal stands either way, so it is only noted here.
-//
-// IT ANSWERS the merge workspace's record and true for an async merge whose
-// record it read, which settle closes by; false for a sync merge, or a record
-// that could not be read (recorded here at ERROR: neither told nor closed).
-func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) (wsm.Workspace, bool) {
-	requester, async := o.requesterOf(ws)
-	if !async {
-		o.handBackInPlace(ctx, ws, out)
-		return wsm.Workspace{}, false
-	}
-	record, err := o.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		o.log(ctx, ws).Error("daemon.merge.detached", "could not read the merge workspace whose merge ended; its requester is not told, and it is not closed", dlog.Context{
-			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "error": err.Error()})
-		return wsm.Workspace{}, false
-	}
-	// THE MERGE IS NAMED BY ITS MERGE WORKSPACE, whose name the requesting
-	// agent chose for what it merges.
-	out.Branch = record.Name
-	if err := o.deps.Detached.HandBack(ctx, requester, record, out); err != nil {
-		o.log(ctx, ws).Debug("daemon.merge.detached", "the handback of an async merge failed; its owner recorded why", dlog.Context{
-			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "error": err.Error()})
-	}
-	return record, true
-}
-
-// handBackInPlace reports a SYNC merge that did not land to its own
-// workspace's conversation, which stays open after it: a failure, or an
-// abandonment, an eviction included. A landing closed the workspace, so it is
-// not reported.
-func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
-	if out.Kind == DetachedLanded {
+func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, out Ending) {
+	if out.Kind == EndingLanded {
 		return
 	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
@@ -401,9 +281,8 @@ func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, 
 			"workspace": string(ws), "outcome": out.Kind.String(), "error": err.Error()})
 		return
 	}
-	out.InPlace = true
 	out.Branch = record.Branch
-	if err := o.deps.Detached.HandBack(ctx, ws, record, out); err != nil {
+	if err := o.deps.HandBacks.HandBack(ctx, ws, record, out); err != nil {
 		o.log(ctx, ws).Debug("daemon.merge.handback", "the handback of an in-place merge failed; its owner recorded why", dlog.Context{
 			"workspace": string(ws), "outcome": out.Kind.String(), "error": err.Error()})
 	}
@@ -503,12 +382,12 @@ func (r *run) readClosings(ctx context.Context, log dlog.Logger) []ids.Workspace
 	record, err := r.o.deps.DB.Workspace(ctx, also)
 	switch {
 	case err != nil:
-		log.Error("daemon.merge.teardown", "could not read the workspace an async merge's one-shot closes; it is kept open", dlog.Context{
-			"workspace": string(r.ws), "one_shot": string(also), "error": err.Error()})
+		log.Error("daemon.merge.teardown", "could not read the workspace a one-shot closes once it lands; it is kept open", dlog.Context{
+			"workspace": string(r.ws), "close_after": string(also), "error": err.Error()})
 		return out
 	case record.Closed:
-		log.Info("daemon.merge.teardown", "the workspace an async merge's one-shot closes is already closed", dlog.Context{
-			"workspace": string(r.ws), "one_shot": string(also)})
+		log.Info("daemon.merge.teardown", "the workspace a one-shot closes once it lands is already closed", dlog.Context{
+			"workspace": string(r.ws), "close_after": string(also)})
 		return out
 	}
 	return append(out, also)
@@ -787,18 +666,16 @@ func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger
 	// refuses every later create of the same name. Retire records its own
 	// outcome and failure; a branch it cannot judge is kept.
 	//
-	// ANCESTRY IS THIS LANDING'S OWN FACT, so no landed head is passed: an
-	// in-place merge rebases the branch itself, in its own worktree, and the
-	// merge commit's second parent is the branch's tip. Only a detached
-	// merge lands rebased copies the branch never points at, and its
-	// requester's retirement passes the head it recorded (RetireLanded).
+	// ANCESTRY IS THIS LANDING'S OWN FACT: a merge rebases the branch
+	// itself, in its own worktree, and the merge commit's second parent is
+	// the branch's tip.
 	_, _ = landedbranch.Retire(ctx, git, log, op, targetDir, branch, landedbranch.Landing{Into: "HEAD"},
 		dlog.Context{"workspace": string(ws)})
 	return nil
 }
 
-// cleanupLanded removes the worktree a landed async merge asked to clean up
-// (wsm.MergeOrigin.CleanupDir) through git's clean door, never forced: a
+// cleanupLanded removes the source worktree a landed one-shot was created to
+// clean up (wsm.LandingEffects.CleanupDir) through git's clean door, never forced: a
 // worktree that holds uncommitted changes is kept, and says so. The branch is
 // never deleted.
 func (r *run) cleanupLanded(ctx context.Context, log dlog.Logger) {
@@ -814,14 +691,14 @@ func (r *run) cleanupLanded(ctx context.Context, log dlog.Logger) {
 		return
 	}
 	if !clean {
-		log.Info(op, "kept the worktree an async merge asked to clean up: it holds uncommitted changes", fields)
+		log.Info(op, "kept the source worktree a one-shot was created to clean up: it holds uncommitted changes", fields)
 		return
 	}
 	if err := r.git.RemoveCleanWorktree(ctx, string(r.repo), dir); err != nil {
-		log.Error(op, "could not remove the worktree an async merge asked to clean up", withField(fields, "error", err.Error()))
+		log.Error(op, "could not remove the source worktree a one-shot was created to clean up", withField(fields, "error", err.Error()))
 		return
 	}
-	log.Info(op, "removed the worktree an async merge asked to clean up", fields)
+	log.Info(op, "removed the source worktree a one-shot was created to clean up", fields)
 }
 
 // TerminalDrainBound is how long the orderly exit gives the merge runs that
@@ -1362,7 +1239,7 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 	if ledger != "" && !o.endAbandonedBubble(ctx, ws, ledger, entry, cause, summary) {
 		return
 	}
-	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause}
+	out := Ending{Kind: EndingAbandoned, Summary: summary, Cause: cause}
 	if ledger != "" {
 		o.ended(ctx, ws, out)
 	} else {
@@ -1454,11 +1331,6 @@ func (o *orchestrator) OnInterrupt(ctx context.Context, ws ids.WorkspaceID) bool
 			log.Error(op, "could not tell whether the interrupted workspace has a queued merge",
 				dlog.Context{"workspace": string(ws), "error": err.Error()})
 		}
-		return false
-	}
-	if o.bubbleOf(ws).async() {
-		log.Debug(op, "the interrupted workspace's merge is async; its bubble is not pinned, so no question is raised",
-			dlog.Context{"workspace": string(ws)})
 		return false
 	}
 	drawn, live := o.restateLiveHead(ws, headOffer, func() {
@@ -1626,7 +1498,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 		// A MERGE PUT BACK IN LINE HAS NOT ENDED: its requester is told
 		// nothing until it does.
 		if !cause.requeues() {
-			r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause})
+			r.o.ended(ctx, r.ws, Ending{Kind: EndingAbandoned, Summary: summary, Cause: cause})
 		}
 	})
 	if cause.requeues() {
@@ -1670,12 +1542,11 @@ func (o *orchestrator) closeReleasedBubble(ctx context.Context, ws ids.Workspace
 	if !cause.releases() && !cause.requeues() {
 		return
 	}
-	at := o.bubbleOf(ws)
-	if !o.deps.Feed.SetMergeFold(at.ws, headFeedID(at.ws, lease), true) {
+	if !o.deps.Feed.SetMergeFold(ws, headFeedID(ws, lease), true) {
 		o.log(ctx, ws).Error(op, "a released merge's bubble could not be closed: its head is not in the feed", dlog.Context{
-			"workspace": string(ws), "bubble_workspace": string(at.ws), "lease": string(lease), "cause": string(cause)})
+			"workspace": string(ws), "lease": string(lease), "cause": string(cause)})
 		return
 	}
 	o.log(ctx, ws).Info(op, "closed the released merge's bubble", dlog.Context{
-		"workspace": string(ws), "bubble_workspace": string(at.ws), "lease": string(lease), "cause": string(cause)})
+		"workspace": string(ws), "lease": string(lease), "cause": string(cause)})
 }

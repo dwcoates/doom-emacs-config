@@ -164,6 +164,7 @@ var rowKinds = map[feedid.RowKind]struct{}{
 	feedid.KindSynth:            {},
 	feedid.KindFixGate:          {},
 	feedid.KindHotReload:        {},
+	feedid.KindChild:            {},
 }
 
 // knownRowKind reports whether kind is one of feedid's declared kinds.

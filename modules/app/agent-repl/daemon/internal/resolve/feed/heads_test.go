@@ -366,28 +366,6 @@ func TestACatchUpPagesTurnHeadsAreNotDrawn(t *testing.T) {
 	}
 }
 
-func TestAGapRowOfAMirroredTurnIsNotMirrored(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	lease := ids.LeaseID("lease-7")
-	mirroredTurn(h, "turn-1", pickMirror(lease))
-	h.headsBook()
-
-	// Act.
-	h.openPage(rootFeed(), "reader-1")
-
-	// Assert: the turn's own rows stand in the mirror, its fold does not.
-	mirrored := rowsOf(h.resolver, requesterWorkspace, feedid.Feed{Merge: &lease})
-	if len(mirrored) == 0 {
-		t.Fatal("the mirror holds no row of the turn; the case proves nothing")
-	}
-	for _, row := range mirrored {
-		if row.GetEarlierSteps() != nil {
-			t.Fatalf("the mirror holds the earlier-steps row %v", row.GetId())
-		}
-	}
-}
-
 func TestReadNewestHoldsThePageForTheNextOpening(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

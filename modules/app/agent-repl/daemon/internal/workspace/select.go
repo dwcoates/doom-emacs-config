@@ -276,33 +276,17 @@ func (v *verbs) RecordInteraction(ctx context.Context, ws ids.WorkspaceID, kind 
 // nothing by itself; the editor asks with OpenTabs. HIDING THE WORKSPACE THE
 // USER STANDS ON LANDS THEM on the workspace they selected before it
 // (landAfterHiding). Asking for the place it already holds is success.
-//
-// A SHOW ENDS WITH THE WORKSPACE DRAWN, OR IT IS AN ERROR. Two separate facts
-// keep a workspace out of the Open section: the backlogged flag, and a merge
-// workspace's unrevealed standing (wsm.Workspace.MergeHidden). A show clears
-// both (revealMergeHidden, whose reveal answers an error unless the workspace
-// ends drawable, then the flag), so it never answers success over a workspace
-// the sidebar still draws nowhere (2026-11-21: a show of a backlogged
-// merge workspace wrote only the flag and left it undrawn).
-//
-// A REVEAL IS ONE-WAY, SO HIDING A REVEALED MERGE WORKSPACE IS AN ORDINARY
-// HIDE: it writes the backlogged flag and the workspace is listed in the backlog
-// like any other, where the user can see it and show it again. It
-// never goes back to being drawn nowhere, which only its async merge does to
-// it, before anyone has asked to see it.
 func (v *verbs) SetBacklogged(ctx context.Context, ws ids.WorkspaceID, backlogged bool) error {
-	record, log, err := v.owned(ctx, "SetWorkspaceBacklogged", ws)
+	_, log, err := v.owned(ctx, "SetWorkspaceBacklogged", ws)
 	if err != nil {
 		return err
 	}
-	if !backlogged {
-		if err := v.revealMergeHidden(ctx, record); err != nil {
+	if backlogged {
+		if _, err := v.interruptBeforeLeaving(ctx, log, ws, opSetBacklogged, "backlog"); err != nil {
+			// A RUNNING TURN IS INTERRUPTED AHEAD OF THE BACKLOG (owner ruling,
+			// 2026-11-24): its page unloads and its shim parks.
 			return err
 		}
-	} else if _, err := v.interruptBeforeLeaving(ctx, log, ws, opSetBacklogged, "backlog"); err != nil {
-		// A RUNNING TURN IS INTERRUPTED AHEAD OF THE BACKLOG (owner ruling,
-		// 2026-11-24): its page unloads and its shim parks.
-		return err
 	}
 	if err := v.recordBacklogged(ctx, log, ws, backlogged); err != nil {
 		return err
@@ -314,22 +298,6 @@ func (v *verbs) SetBacklogged(ctx context.Context, ws ids.WorkspaceID, backlogge
 	// 2026-11-11): a merge kept at its place at the gate leaves its queue.
 	v.deps.Merge.OnBacklogged(ws)
 	return v.landAfterHiding(ctx, log, ws)
-}
-
-// revealMergeHidden is a show's reveal of a hidden merge workspace, through
-// the same reveal a select makes (merge.Orchestrator.RevealMergeWorkspace), so
-// the requester's bubble head gains its switch either way. Any other workspace
-// is left as it is. The orchestrator owns the reveal's guarantee and its
-// records: it answers an error, recorded at ERROR, unless the workspace ends
-// drawable, and that error refuses the show before the flag is written.
-func (v *verbs) revealMergeHidden(ctx context.Context, record wsm.Workspace) error {
-	if !record.MergeHidden() {
-		return nil
-	}
-	if err := v.deps.Merge.RevealMergeWorkspace(ctx, record.ID, "it was shown"); err != nil {
-		return fmt.Errorf("show %q: %w", record.ID, err)
-	}
-	return nil
 }
 
 // recordBacklogged is THE ONE WRITE of a workspace's backlogged flag: the row, the
@@ -453,24 +421,6 @@ func asShown(reg sidebar.Registry, ws ids.WorkspaceID) sidebar.Registry {
 		}
 	}
 	return reg
-}
-
-// RevealMergeWorkspace draws a hidden merge workspace in the tab bar and the
-// sidebar from now on (Verbs). It answers whether this call revealed it; a
-// merge workspace already revealed is no change.
-func (v *verbs) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-	log := v.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
-	revealed, err := v.deps.DB.RevealMergeWorkspace(ctx, ws)
-	if err != nil {
-		log.Error(opRevealMergeWorkspace, "could not record that the merge workspace is revealed", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("reveal merge workspace %q: %w", ws, err)
-	}
-	if !revealed {
-		return false, nil
-	}
-	log.Info(opRevealMergeWorkspace, "revealed the merge workspace: it is drawn in the tab bar and the sidebar from now on", nil)
-	v.republishRegistry(ctx, log, opRevealMergeWorkspace)
-	return true, nil
 }
 
 // SetPriority sets or clears the roster's priority. Setting one moves the

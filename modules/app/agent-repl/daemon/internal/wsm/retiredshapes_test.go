@@ -41,7 +41,6 @@ func marshalled(t *testing.T, m proto.Message) []byte {
 
 func TestCarryRetiredShape(t *testing.T) {
 	log := dlog.NewTestLogger()
-	sw := &frontendv1.FeedMergeWorkspaceSwitch{Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{}}
 	identity := &frontendv1.FeedMergeRebaseCommitIdentity{ShortSha: "abc1234", Subject: "fix the thing"}
 	tests := []struct {
 		name string
@@ -69,9 +68,9 @@ func TestCarryRetiredShape(t *testing.T) {
 			want: &frontendv1.FeedResponseNotice{Marker: feedmarker.Neutral(feedmarker.VendorNoticeLabel, "")},
 		},
 		{
-			name: "a merge head's retired workspace switch becomes its async mode",
-			in:   withRetiredBytes(&frontendv1.FeedMergeHead{}, retiredHeadWorkspaceSwitch, marshalledOrPanic(sw)),
-			want: &frontendv1.FeedMergeHead{Mode: &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Async{Async: &frontendv1.FeedMergeModeAsync{WorkspaceSwitch: sw}}}},
+			name: "a merge head's retired workspace switch is dropped with the async merge",
+			in:   withRetiredBytes(&frontendv1.FeedMergeHead{}, retiredHeadWorkspaceSwitch, []byte{0xff}),
+			want: &frontendv1.FeedMergeHead{},
 		},
 		{
 			name: "a rebase commit tab's retired commit becomes its commit label",
@@ -153,15 +152,6 @@ func TestCarryRetiredShapeRefuses(t *testing.T) {
 			name: "a heading beside its marker",
 			in: withRetiredBytes(&frontendv1.FeedResponseNotice{Marker: feedmarker.Neutral(feedmarker.VendorNoticeLabel, "")},
 				retiredNoticeHeadingTag, []byte("Notice")),
-		},
-		{
-			name: "a workspace switch beside a mode",
-			in: withRetiredBytes(&frontendv1.FeedMergeHead{Mode: &frontendv1.FeedMergeMode{}},
-				retiredHeadWorkspaceSwitch, nil),
-		},
-		{
-			name: "a workspace switch that does not decode",
-			in:   withRetiredBytes(&frontendv1.FeedMergeHead{}, retiredHeadWorkspaceSwitch, []byte{0xff}),
 		},
 		{
 			name: "a rebase commit beside a commit label",

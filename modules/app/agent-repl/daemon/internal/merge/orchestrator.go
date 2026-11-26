@@ -49,7 +49,6 @@ const (
 // kinds, so a replayed ledger names the same step a live bubble drew.
 const (
 	TabQueue      = "queue"
-	TabPick       = "pick"
 	TabRebasing   = "rebasing"
 	TabConflicts  = "conflicts"
 	TabTests      = "tests"
@@ -190,12 +189,6 @@ type orchestrator struct {
 	runsByWorkspace map[ids.WorkspaceID]*run
 	// requested are the requests waiting for their requesting turn to end.
 	requested map[ids.WorkspaceID]*requestWait
-	// asyncWaits are the requesters' waits to hand off their async requests
-	// (asyncrequests.go), one per requester.
-	asyncWaits map[ids.WorkspaceID]*asyncWait
-	// handOffLocks serialize each requester's hand-offs, so its async
-	// requests join the line in the order they were asked for.
-	handOffLocks keyedmutex.Set[ids.WorkspaceID]
 	// dropLocks serialize each workspace's drops of its waiting merge
 	// (dropQueued), so two exits asking at once (a cold gate raised twice,
 	// an eviction beside it) never both act on one entry: the second reads
@@ -219,17 +212,9 @@ type orchestrator struct {
 	// later acquired under, so the queued bubble and the admitted one are one
 	// bubble.
 	ledgerOf map[ids.WorkspaceID]ids.LeaseID
-	// originsOf caches, per merging workspace, its merge origin: set
-	// (non-nil) for a merge workspace, nil for every other. A workspace's
-	// merge origin and dir are fixed at its registration, so the answer never
-	// changes once read.
-	originsOf map[ids.WorkspaceID]*mergeOrigin
 	// heads orders every head publication (headBook). It is its own lock,
 	// taken BEFORE mu and never under it.
 	heads headBook
-	// picks are the async picks running now, keyed by merge workspace, so an
-	// ask change redraws the live pick tab.
-	picks map[ids.WorkspaceID]*pick
 	// resumes are the merges the boot recovery found a progress record for,
 	// keyed by workspace: the admission pump runs each from its record, ahead
 	// of anything waiting in its repository's line (Recover, startResumed).
@@ -417,11 +402,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		runsByWorkspace:    map[ids.WorkspaceID]*run{},
 		requested:          map[ids.WorkspaceID]*requestWait{},
 		requestingTurns:    map[ids.WorkspaceID]ids.TurnID{},
-		asyncWaits:         map[ids.WorkspaceID]*asyncWait{},
 		ledgerOf:           map[ids.WorkspaceID]ids.LeaseID{},
-		originsOf:          map[ids.WorkspaceID]*mergeOrigin{},
 		heads:              newHeadBook(),
-		picks:              map[ids.WorkspaceID]*pick{},
 		resumes:            map[ids.WorkspaceID]progressDoc{},
 		remediating:        map[ids.WorkspaceID]*remediation{},
 		takenAway:          map[ids.WorkspaceID]suspension{},
@@ -451,23 +433,11 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 }
 
 // askChanged hands a workspace's change of open asks to its run in flight, if
-// any: a pick, conflict-resolution or fixing tab standing live is redrawn
+// any: a conflict-resolution or fixing tab standing live is redrawn
 // waiting on the user, or live again. A workspace with no run in flight has no
 // tab to draw it on; the ask set keeps the fact for a run that reaches such a
 // tab.
-//
-// AN ASK OPENED IN A HIDDEN MERGE WORKSPACE REVEALS IT (owner ruling,
-// 2026-10-11): the agent needs the user, so its workspace is drawn from now
-// on.
 func (o *orchestrator) askChanged(ws ids.WorkspaceID, waiting bool) {
-	if waiting {
-		if _, async := o.requesterOf(ws); async {
-			o.reveal(context.Background(), ws, "its agent asked the user something")
-		}
-	}
-	if o.redrawPick(ws, waiting) {
-		return
-	}
 	r, ok := o.runFor(ws)
 	if !ok {
 		return
@@ -621,82 +591,9 @@ func (o *orchestrator) forget(ws ids.WorkspaceID) {
 	o.publishHost(ws)
 }
 
-// footerSetMerge hands a merge's facts to WS's footer, except a merge
-// workspace's: its footer shows the ordinary statuses of a workspace (owner
-// ruling, 2026-10-11), and the merge is read in the requester's bubble.
+// footerSetMerge hands a merge's facts to WS's footer.
 func (o *orchestrator) footerSetMerge(ws ids.WorkspaceID, facts MergeFacts) {
-	if _, async := o.requesterOf(ws); async {
-		return
-	}
 	o.deps.Footer.SetMerge(ws, facts)
-}
-
-// reveal draws hidden merge workspace WS in the tab bar and the sidebar from
-// now on, CAUSE naming why, and restates its bubble's head with the switch to
-// it. It is the reveal a merge makes for itself (it failed, its agent asks):
-// revealOrFail records a failure at ERROR, and the merge goes on with the
-// workspace hidden until a later reveal succeeds.
-func (o *orchestrator) reveal(ctx context.Context, ws ids.WorkspaceID, cause string) {
-	_ = o.revealOrFail(ctx, ws, cause)
-}
-
-// revealOrFail is THE ONE REVEAL: every reveal of a merge workspace, the
-// merge's own and a caller's, runs it. A reveal that fails is recorded here at
-// ERROR, once, and answered as the error.
-func (o *orchestrator) revealOrFail(ctx context.Context, ws ids.WorkspaceID, cause string) error {
-	const op = "daemon.merge.reveal"
-	revealed, err := o.deps.Detached.Reveal(ctx, ws)
-	if err != nil {
-		o.log(ctx, ws).Error(op, "could not reveal the merge workspace; it stays hidden", dlog.Context{
-			"workspace": string(ws), "cause": cause, "error": err.Error()})
-		return fmt.Errorf("merge: reveal merge workspace %q (%s): %w", ws, cause, err)
-	}
-	if !revealed {
-		return nil
-	}
-	o.log(ctx, ws).Info(op, "revealed the merge workspace: it needs the user", dlog.Context{"workspace": string(ws), "cause": cause})
-	o.restateHead(ws, headReveal)
-	return nil
-}
-
-// RevealMergeWorkspace reveals hidden merge workspace WS (Orchestrator). A
-// CALLER'S REVEAL ENDS WITH THE WORKSPACE DRAWABLE, OR IT IS THE CALLER'S
-// ERROR: a select or a show that asked for it must not answer success over a
-// workspace still drawn nowhere. So the workspace's standing is read from the
-// store before the reveal and read back after it, never taken from the cached
-// origin, and a reveal that answered success over a workspace still hidden is
-// recorded at ERROR and answered as an error.
-func (o *orchestrator) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error {
-	hidden, err := o.mergeHidden(ctx, ws, cause, "before its reveal")
-	if err != nil || !hidden {
-		return err
-	}
-	if err := o.revealOrFail(ctx, ws, cause); err != nil {
-		return err
-	}
-	hidden, err = o.mergeHidden(ctx, ws, cause, "after its reveal")
-	if err != nil {
-		return err
-	}
-	if hidden {
-		o.log(ctx, ws).Error("daemon.merge.reveal", "the reveal answered success but the merge workspace is still hidden", dlog.Context{
-			"workspace": string(ws), "cause": cause})
-		return fmt.Errorf("merge: reveal merge workspace %q (%s): the reveal left it hidden", ws, cause)
-	}
-	return nil
-}
-
-// mergeHidden reads whether WS is a merge workspace its async merge still
-// withholds (wsm.Workspace.MergeHidden), WHEN naming the read in its record. A
-// record that cannot be read is recorded at ERROR and answered as the error.
-func (o *orchestrator) mergeHidden(ctx context.Context, ws ids.WorkspaceID, cause, when string) (bool, error) {
-	record, err := o.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		o.log(ctx, ws).Error("daemon.merge.reveal", "could not read whether the merge workspace is hidden", dlog.Context{
-			"workspace": string(ws), "cause": cause, "read": when, "error": err.Error()})
-		return false, fmt.Errorf("merge: reveal merge workspace %q (%s): read it %s: %w", ws, cause, when, err)
-	}
-	return record.MergeHidden(), nil
 }
 
 // runFor addresses one workspace's in-flight run.

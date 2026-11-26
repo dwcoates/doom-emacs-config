@@ -1,7 +1,6 @@
 // Package landedbranch deletes a LANDED workspace's branch: the one way every
-// landing path (the merge queue's teardown, the retirement of a requester
-// whose detached merge landed, and the reaper's healing sweep) lets a merged
-// branch go.
+// landing path (the merge queue's teardown, a create releasing a landed name,
+// and the reaper's healing sweep) lets a merged branch go.
 //
 // A LANDED BRANCH LEFT BEHIND IS A NAME NOBODY CAN USE AGAIN. A create that
 // supplies a name hands its branch to git unchecked, so a branch that outlived
@@ -12,15 +11,9 @@
 // NOTHING THAT DID NOT LAND IS EVER DELETED. The branch goes only when all of
 // these hold, each read from git as it stands:
 //
-//   - it LANDED, judged by one of two facts (Landing): its tip is the head the
-//     daemon recorded its landing at (Landing.Head), or its tip is reachable
-//     from the ref it landed into (Landing.Into). The recorded head is the
-//     fact a REBASED landing leaves: a detached merge lands rebased copies of
-//     the branch's commits, so its tip is never an ancestor of the target,
-//     and ancestry alone kept every such branch (2026-11-03:
-//     `ramdisk-leak-investigation`, whose tip was the very head its landing
-//     recorded, survived its retirement and refused the next create of its
-//     name);
+//   - it LANDED: its tip is reachable from the ref it landed into
+//     (Landing.Into). Every merge rebases the branch itself, in its own
+//     worktree, so a landed tip is always an ancestor of its target;
 //   - no worktree has it checked out (`update-ref -d` does not refuse a
 //     checked-out branch, so this package does);
 //   - it still points at the tip that was judged: the deletion is git's
@@ -79,18 +72,7 @@ type Landing struct {
 	// the default branch or the parent workspace's branch. Required: a tip
 	// inside it has landed whatever the daemon recorded.
 	Into string
-	// Head is the commit of the branch the daemon recorded landing, rebased or
-	// not (wsm.Landing.Head), empty when the landing recorded none. A tip that
-	// IS this commit has landed even when no commit of it is an ancestor of
-	// Into.
-	Head string
 }
-
-// How Retire judged a deleted branch landed, recorded as its `judged_by`.
-const (
-	judgedByRecordedHead = "recorded_head"
-	judgedByAncestry     = "ancestry"
-)
 
 // Retire deletes BRANCH of the repository at REPODIR when it has landed, as
 // LANDING judges it. OP and FIELDS are the caller's operation and context:
@@ -99,7 +81,7 @@ const (
 // not answer or act at ERROR, once, here, except a git the daemon stopped,
 // at INFO. An error leaves the branch as it was.
 func Retire(ctx context.Context, git Git, log dlog.Logger, op, repoDir, branch string, landing Landing, fields dlog.Context) (Outcome, error) {
-	record := dlog.Context{"repo": repoDir, "branch": branch, "into": landing.Into, "landed_head": landing.Head}
+	record := dlog.Context{"repo": repoDir, "branch": branch, "into": landing.Into}
 	maps.Copy(record, fields)
 	refuse := func(err error) (Outcome, error) {
 		log.Error(op, "could not retire the landed branch: check the request; the branch is kept", dlog.WithCause(record, err))
@@ -143,19 +125,14 @@ func Retire(ctx context.Context, git Git, log dlog.Logger, op, repoDir, branch s
 		return fail("resolve the branch", err)
 	}
 	record["head"] = head
-	judgedBy := judgedByRecordedHead
-	if landing.Head == "" || head != landing.Head {
-		landed, err := git.IsAncestor(ctx, repoDir, head, landing.Into)
-		if err != nil {
-			return fail("read whether the branch landed", err)
-		}
-		if !landed {
-			log.Info(op, "kept the branch: its tip is neither the head its landing recorded nor inside the ref it landed into", record)
-			return KeptNotLanded, nil
-		}
-		judgedBy = judgedByAncestry
+	landed, err := git.IsAncestor(ctx, repoDir, head, landing.Into)
+	if err != nil {
+		return fail("read whether the branch landed", err)
 	}
-	record["judged_by"] = judgedBy
+	if !landed {
+		log.Info(op, "kept the branch: its tip is not inside the ref it landed into", record)
+		return KeptNotLanded, nil
+	}
 	if err := git.DeleteBranchAt(ctx, repoDir, branch, head); err != nil {
 		return fail("delete the branch at the judged head", err)
 	}

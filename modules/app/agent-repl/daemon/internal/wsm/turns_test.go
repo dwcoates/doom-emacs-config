@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	zettelv1 "agentrepl/proto/zettel/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 )
 
@@ -1860,4 +1861,14 @@ func TestClaimDisplacedTurnRecordsTheResubmission(t *testing.T) {
 	if got, _ := s.SucceedingTurn(ctx, turn.ID); got != "again" {
 		t.Fatalf("SucceedingTurn = %q, want the resubmission", got)
 	}
+}
+
+// loggedAt reports whether LOG holds an ERROR record of OPERATION.
+func loggedAt(log *dlog.TestLogger, operation string) bool {
+	for _, record := range log.Records() {
+		if record.Operation == operation && record.Level == "error" {
+			return true
+		}
+	}
+	return false
 }

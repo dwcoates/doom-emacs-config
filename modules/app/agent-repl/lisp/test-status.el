@@ -201,40 +201,6 @@ They can no more act on the workspace than during the merge itself."
   (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-async-merge-paints-the-bracket-purple ()
-  "An async merge paints the [N] run with the merge purple (owner request,
-2026-10-13)."
-  ;; Act / Assert
-  (should (equal agent-repl--color-merging-purple
-                 (plist-get (agent-repl--tab-spec-async-merge
-                             (agent-repl--tab-spec :done nil))
-                            :bracket-bg))))
-
-(ert-deftest agent-repl-test-tab-spec-async-merge-keeps-the-name-ground ()
-  "An async merge leaves the name\='s ground on the workspace\='s own status."
-  ;; Act / Assert
-  (should (equal agent-repl--color-done-green
-                 (plist-get (agent-repl--tab-spec-async-merge
-                             (agent-repl--tab-spec :done nil))
-                            :bg))))
-
-(ert-deftest agent-repl-test-tab-spec-async-merge-overrides-a-selected-bracket ()
-  "A selected tab\='s bracket, which keeps its status color, takes the purple."
-  ;; Act / Assert
-  (should (equal agent-repl--color-merging-purple
-                 (plist-get (agent-repl--tab-spec-async-merge
-                             (agent-repl--tab-spec :thinking t))
-                            :bracket-bg))))
-
-(ert-deftest agent-repl-test-tab-spec-async-merge-bracket-clears-the-floor ()
-  "The purple bracket\='s numeral clears `agent-repl-tab-contrast-floor\='."
-  ;; Arrange
-  (let ((spec (agent-repl--tab-spec-async-merge (agent-repl--tab-spec :done nil))))
-    ;; Act / Assert
-    (should (>= (agent-repl-color-contrast-ratio
-                 (plist-get spec :bracket-fg) (plist-get spec :bracket-bg))
-                agent-repl-tab-contrast-floor))))
-
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-turquoise ()
   "A vendor-blocked tab paints TURQUOISE: a vendor fault leaves the
 workspace usable (owner ruling, 2026-10-02)."
@@ -1285,67 +1251,12 @@ name carries the selection grey (owner ruling, 2026-10-01, replacing the
     (should (equal agent-repl--color-selected-bg
                    (plist-get (nth 1 name-face) :background)))))
 
-(defmacro agent-repl-test-status--with-entry (state async-merging &rest body)
-  "Run BODY with tab \"ws1\" drawing STATE, ASYNC-MERGING saying whether its
-row carries the async-merging marker."
-  (declare (indent 2))
-  `(cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) ,state))
-             ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) ,async-merging))
-             ((symbol-function 'agent-repl--tab-badge-str) (lambda (&rest _) nil)))
-     ,@body))
-
-(ert-deftest agent-repl-test-render-tab-entry-async-merge-paints-only-the-bracket ()
-  "An async-merging tab reads `[N] name\=' with `[N]\=' purple, the gap on the
-bar, and `name\=' on its own status ground (owner requests, 2026-10-13 and
-2026-10-18)."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-entry :done t
-      ;; Act
-      (let* ((result (agent-repl--render-tab-entry "ws1" "other" 1))
-             (bracket-pos (string-match "\\[" result))
-             (gap-pos (1+ (string-match "\\]" result)))
-             (name-pos (string-match "ws1" result)))
-        ;; Assert
-        (should (equal (plist-get (get-text-property bracket-pos 'face result) :background)
-                       agent-repl--color-merging-purple))
-        (should (eq (plist-get (get-text-property gap-pos 'face result) :background)
-                    'unspecified))
-        (should (eq (get-text-property name-pos 'face result)
-                    (agent-repl--tab-face :done nil)))))))
-
-(ert-deftest agent-repl-test-render-tab-entry-without-async-merge-keeps-the-status-bracket ()
-  "A tab with no async merge keeps its bracket on its status color."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-entry :done nil
-      ;; Act
-      (let* ((result (agent-repl--render-tab-entry "ws1" "other" 1))
-             (bracket-pos (string-match "\\[" result)))
-        ;; Assert
-        (should (equal (plist-get (get-text-property bracket-pos 'face result) :background)
-                       agent-repl--color-done-green))))))
-
-(ert-deftest agent-repl-test-render-tab-entry-async-merge-draws-no-glyph ()
-  "An async merge adds no glyph: the tab\='s text is `[N] name\=' alone."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) :done))
-              ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) t))
-              ((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_) nil))
-              ((symbol-function 'agent-repl-status-attention-visible-p) (lambda (_) nil)))
-      ;; Act
-      (let ((result (agent-repl--render-tab-entry "ws1" "other" 1)))
-        ;; Assert
-        (should (equal (string-trim (substring-no-properties result)) "[1] ws1"))))))
-
 (defmacro agent-repl-test-status--with-unread-entry (state unread-end &rest body)
   "Run BODY with tab \"ws1\" drawing STATE, its row carrying UNREAD-END as the
 unread-turn-end marker's turn end (nil for no marker)."
   (declare (indent 2))
   `(cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) ,state))
              ((symbol-function 'agent-repl--ws-bracket-state) (lambda (_) :idle-async))
-             ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) nil))
              ((symbol-function 'agent-repl-roster-idle-async-unread-for-ws) (lambda (_) ,unread-end))
              ((symbol-function 'agent-repl--tab-badge-str) (lambda (&rest _) nil)))
      ,@body))
@@ -1794,7 +1705,6 @@ splitter can find the whole entry again after packing."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) :done))
-              ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) nil))
               ((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_) nil))
               ((symbol-function 'agent-repl-status-attention-visible-p) (lambda (_) nil)))
       ;; Act
@@ -3198,30 +3108,6 @@ The buffer and the prior window configuration are both restored after."
       ;; Assert
       (should (equal (car logged) "elisp.status.tab-state: ws=alpha arm=:done")))))
 
-(ert-deftest agent-repl-test-status-tab-async-merging-reads-the-marker ()
-  "A tab is async-merging exactly while its roster row carries the marker."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-roster-async-merging-for-ws)
-               (lambda (name) (equal name "alpha"))))
-      ;; Act / Assert
-      (should (eq (agent-repl-status-tab-async-merging "alpha") t))
-      (should-not (agent-repl-status-tab-async-merging "beta")))))
-
-(ert-deftest agent-repl-test-status-tab-async-merging-is-recorded-once ()
-  "Every redisplay reads the marker; only a change is recorded."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--emit-log)
-                 (agent-repl-test--record-into logged))
-                ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) t)))
-        ;; Act
-        (agent-repl-status-tab-async-merging "alpha")
-        (agent-repl-status-tab-async-merging "alpha"))
-      ;; Assert
-      (should (equal logged '("elisp.status.tab-async-merging: ws=alpha async-merging=t"))))))
-
 (ert-deftest agent-repl-test-status-tab-state-is-nil-before-the-first-push ()
   "A workspace the roster has not spoken about is drawn uncoloured."
   ;; Arrange
@@ -4049,11 +3935,18 @@ workspace's pending steps rather than running beside them."
         ;; Assert
         (should (= repaints 1))))))
 
+(defmacro agent-repl-test-status--with-entry (state &rest body)
+  "Run BODY with tab \"ws1\" drawing STATE and no badge."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) ,state))
+             ((symbol-function 'agent-repl--tab-badge-str) (lambda (&rest _) nil)))
+     ,@body))
+
 (ert-deftest agent-repl-test-render-tab-entry-draws-the-flashed-workspace-unselected ()
   "The selected entry being flashed renders exactly as it would unselected."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-entry :done nil
+    (agent-repl-test-status--with-entry :done
       (let ((unselected (let ((agent-repl-status--switch-flash-ws nil))
                           (agent-repl--render-tab-entry "ws1" "ws2" 1)))
             (agent-repl-status--switch-flash-ws "ws1"))
@@ -4066,7 +3959,7 @@ workspace's pending steps rather than running beside them."
   "The selected entry renders selected while another workspace is flashed."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-entry :done nil
+    (agent-repl-test-status--with-entry :done
       (let ((selected (let ((agent-repl-status--switch-flash-ws nil))
                         (agent-repl--render-tab-entry "ws1" "ws1" 1)))
             (agent-repl-status--switch-flash-ws "ws2"))
@@ -4080,7 +3973,7 @@ workspace's pending steps rather than running beside them."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl-status--switch-flash-ws nil))
-      (agent-repl-test-status--with-entry :done nil
+      (agent-repl-test-status--with-entry :done
         ;; Act
         (let ((selected (agent-repl--render-tab-entry "ws1" "ws1" 1))
               (unselected (agent-repl--render-tab-entry "ws1" "ws2" 1)))

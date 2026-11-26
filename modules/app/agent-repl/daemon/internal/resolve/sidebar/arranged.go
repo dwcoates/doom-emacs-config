@@ -35,13 +35,12 @@ type ArrangedWorkspace struct {
 // Arranged answers the registry's arrangement for an agent: every repository
 // and subsection in the order arrange() gives the sidebar and the tab bar,
 // each run's families nested exactly as the sidebar nests them (nest), with
-// every workspace that is neither closed, merged nor a hidden merge
-// workspace. A backlogged one keeps its place. A closed workspace is left out and
+// every workspace that is neither closed nor merged. A backlogged one keeps its place. A closed workspace is left out and
 // its open children take its place, as the sidebar hoists them.
 func Arranged(reg Registry, log dlog.Logger) []ArrangedRepository {
 	var listed []wsm.Workspace
 	for _, ws := range reg.Workspaces {
-		if !ws.MergeHidden() && ws.MergedAt == nil {
+		if ws.MergedAt == nil {
 			listed = append(listed, ws)
 		}
 	}

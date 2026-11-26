@@ -35,8 +35,8 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	// THE DURABLE TURN RECORDS ARE READ BEFORE THE LOCK IS TAKEN, from the
 	// workspace that recorded the page's turns: this one, or — for a page of
 	// a fork's inherited past — the ancestor it was inherited from. An
-	// inherited page draws on the root feed, so it reads no output addresses
-	// or mirrors: they name tabs of the ancestor, which this workspace does
+	// inherited page draws on the root feed, so it reads no output addresses:
+	// they name tabs of the ancestor, which this workspace does
 	// not hold. A READER'S LOAD DRAWS THE PAGE'S TURN HEADS FIRST (heads.go):
 	// they are part of what the page draws, so every read taken before the
 	// lock knows their turns too.
@@ -52,10 +52,7 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	all, own := withHeads(page, load)
 	whole := headsPage(page, all)
 	closes := r.recordedCloses(records, whole)
-	var (
-		addresses map[ids.TurnID]*wsm.OutputAddress
-		mirrors   map[ids.TurnID]*wsm.MirrorAddress
-	)
+	var addresses map[ids.TurnID]*wsm.OutputAddress
 	// A PROMPT'S SENDER IS READ FROM THE WORKSPACE THAT RECORDED THE TURN, on
 	// both planes: it names no tab, so an inherited turn is headed by the
 	// workspace that sent it to the ancestor.
@@ -72,12 +69,6 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	if plane == planeHistory {
 		turns := entryTurns(whole)
 		addresses = r.recordedAddresses(ws, turns)
-		mirrors = r.recordedMirrors(ws, turns)
-		// A RECORDED MIRROR DRAWS IN ITS OWN WORKSPACE, which is primed here,
-		// off the lock, before the replay draws there (prime.go).
-		for _, m := range mirrors {
-			r.prime(mirrorWorkspace(m))
-		}
 	}
 	r.since(phase(phases, recordsOf), records0)
 
@@ -128,9 +119,6 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	s.replayCloses = closes
 	for turn, addr := range addresses {
 		s.addressTurn(turn, addr)
-	}
-	for turn, m := range mirrors {
-		s.mirrorTurn(turn, m)
 	}
 	for turn, sender := range senders {
 		s.senderTurn(turn, &sender)

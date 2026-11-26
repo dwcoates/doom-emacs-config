@@ -2004,7 +2004,8 @@ export const AgentRepl: GenService<{
   },
   /**
    * Which workspace a name, a directory, or a directory inside a worktree
-   * names, read off the registry so hidden merge workspaces are found. See
+   * names, read off the registry so workspaces the sidebar does not draw are
+   * found. See
    * endpoint_locate_workspace.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.LocateWorkspace
@@ -2092,8 +2093,8 @@ export const AgentRepl: GenService<{
     output: typeof RequeueMergeResponseSchema;
   },
   /**
-   * End a merge request that stands off its queue; for an async merge, close
-   * its merge workspace. See endpoint_discard_merge.proto.
+   * End a merge request that stands off its queue. See
+   * endpoint_discard_merge.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.DiscardMerge
    */

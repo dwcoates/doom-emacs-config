@@ -1,7 +1,6 @@
 // merge_version_increment.proto — how a deploy into a VERSIONED repository
 // moves its version, and the refusals about it. Shared by every way a deploy is
-// asked for: a workspace finishing (FinishWorkspace) and an async merge
-// (CreateWorkspaceAsyncMerge).
+// asked for: a workspace finishing (FinishWorkspace).
 //
 // WHICH DEPLOYS CARRY ONE. A repository is versioned when its deploy config
 // (repoconfig.v1.DeployLocalMerge.version_tag) says so. A deploy that lands on

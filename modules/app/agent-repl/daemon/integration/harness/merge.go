@@ -124,64 +124,6 @@ func AtFront() FinishEdit {
 	return func(req *agentreplv1.FinishWorkspaceRequest) { req.Placement = Front() }
 }
 
-// AsyncMerge is an async merge in REPOSITORY of BRANCH, asked by REQUESTER's
-// agent, which made the branch: its conversation is forked, the branch lands
-// on the primary branch from the back of the queue, in a merge workspace
-// named NAME, shaped further by EDITS.
-func AsyncMerge(repository *workspacev1.RepositoryRef, requester *workspacev1.WorkspaceRef, name, branch string, edits ...func(*agentreplv1.CreateWorkspaceAsyncMerge)) *agentreplv1.CreateWorkspaceRequest {
-	async := &agentreplv1.CreateWorkspaceAsyncMerge{
-		Name: name,
-		Source: &agentreplv1.CreateWorkspaceAsyncMergeSource{Branch: branch, Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker{
-			Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker_Workspace{Workspace: &agentreplv1.CreateWorkspaceAsyncMergeMakerWorkspace{Workspace: requester}}}},
-		Target:    &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Primary{Primary: &agentreplv1.CreateWorkspaceAsyncMergeTargetPrimary{}}},
-		Placement: Back(),
-	}
-	for _, edit := range edits {
-		edit(async)
-	}
-	return &agentreplv1.CreateWorkspaceRequest{Repository: repository, Requester: AskedBy(requester), ContextOrigin: Fork(requester),
-		Originator: UserOrWorkspace(), Form: &agentreplv1.CreateWorkspaceRequest_AsyncMerge{AsyncMerge: async}}
-}
-
-// WithInstruction gives an async merge its resolving instruction.
-func WithInstruction(instruction string) func(*agentreplv1.CreateWorkspaceAsyncMerge) {
-	return func(async *agentreplv1.CreateWorkspaceAsyncMerge) { async.Instruction = &instruction }
-}
-
-// ClosingOnLanding names the workspace an async merge closes once it lands.
-func ClosingOnLanding(ws *workspacev1.WorkspaceRef) func(*agentreplv1.CreateWorkspaceAsyncMerge) {
-	return func(async *agentreplv1.CreateWorkspaceAsyncMerge) {
-		async.CloseAfter = &agentreplv1.CreateWorkspaceAsyncMergeCloseAfter{Workspace: ws}
-	}
-}
-
-// CleaningUp asks an async merge to remove the branch's worktree once it lands.
-func CleaningUp() func(*agentreplv1.CreateWorkspaceAsyncMerge) {
-	return func(async *agentreplv1.CreateWorkspaceAsyncMerge) { async.CleanupWorktree = true }
-}
-
-// IntoMaker lands an async merge into its maker's branch.
-func IntoMaker() func(*agentreplv1.CreateWorkspaceAsyncMerge) {
-	return func(async *agentreplv1.CreateWorkspaceAsyncMerge) {
-		async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Maker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeTargetMaker{}}}
-	}
-}
-
-// AsyncPatch has an async merge move agent-repl's version by a patch, with
-// LINE as the tag's changelog line: what an agent's merge onto agent-repl's
-// own master must carry.
-func AsyncPatch(line string) func(*agentreplv1.CreateWorkspaceAsyncMerge) {
-	return func(async *agentreplv1.CreateWorkspaceAsyncMerge) {
-		async.VersionIncrement = &agentreplv1.MergeWorkspaceVersionIncrement{ChangelogLine: line,
-			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Patch{Patch: &agentreplv1.MergeWorkspaceVersionIncrementPatch{}}}
-	}
-}
-
-// AsyncAtFront places an async merge at the front of its queue.
-func AsyncAtFront() func(*agentreplv1.CreateWorkspaceAsyncMerge) {
-	return func(async *agentreplv1.CreateWorkspaceAsyncMerge) { async.Placement = Front() }
-}
-
 // IsLandingDeployed reports whether a run-log record is the ONE deploy a
 // landing in the daemon's own checkout runs, reported done.
 func IsLandingDeployed(r LogRecord) bool {

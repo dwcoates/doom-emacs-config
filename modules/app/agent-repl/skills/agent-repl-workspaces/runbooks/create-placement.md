@@ -9,7 +9,7 @@
     that also gathers the named open, unsectioned, top-level workspaces of the
     repository (never a main workspace). `-gather` is optional.
   - A placement is refused for a child, for a create asked for by the user
-    (`-as-user`) and beside an async merge, and for a subsection or a gathered
+    (`-as-user`), and for a subsection or a gathered
     workspace the repository does not have. Nothing is created then, and the
     refusal names the arm (`placement_on_child`, `unknown_placement_subsection`,
     `gather_unknown_workspace`, `gather_not_gatherable`, and the others).

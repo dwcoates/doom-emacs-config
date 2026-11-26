@@ -777,8 +777,8 @@ func TestAnOwedCheckRecordsWhenItsLandingBegan(t *testing.T) {
 					lease, string(ws.ID), nanos(instant.Add(-merge.opened))); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := s.db().ExecContext(ctx, `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, ledger_id, source_pre_deploy_hooks, source_post_deploy_hooks)
-					VALUES (?, ?, ?, ?, 1, ?, '[]', '[]')`, string(key), string(ws.ID), i+1, int(merge.state), lease); err != nil {
+				if _, err := s.db().ExecContext(ctx, `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, ledger_id)
+					VALUES (?, ?, ?, ?, 1, ?)`, string(key), string(ws.ID), i+1, int(merge.state), lease); err != nil {
 					t.Fatal(err)
 				}
 			}

@@ -67,24 +67,3 @@ func validCreate(edit func(*agentreplv1.CreateWorkspaceRequest)) *agentreplv1.Cr
 	}
 	return req
 }
-
-// validAsyncMerge is a well-formed async merge asked by the harness
-// workspace of its own hand-cut branch, onto the primary branch, changed by
-// EDIT.
-func validAsyncMerge(edit func(*agentreplv1.CreateWorkspaceAsyncMerge)) *agentreplv1.CreateWorkspaceRequest {
-	async := &agentreplv1.CreateWorkspaceAsyncMerge{
-		Name: "reconnect-fix",
-		Source: &agentreplv1.CreateWorkspaceAsyncMergeSource{Branch: "agent-1/fix", Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker{
-			Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker_Workspace{Workspace: &agentreplv1.CreateWorkspaceAsyncMergeMakerWorkspace{Workspace: ref()}}}},
-		Target:    &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Primary{Primary: &agentreplv1.CreateWorkspaceAsyncMergeTargetPrimary{}}},
-		Placement: backPlacement(),
-	}
-	if edit != nil {
-		edit(async)
-	}
-	return validCreate(func(req *agentreplv1.CreateWorkspaceRequest) {
-		req.Form = &agentreplv1.CreateWorkspaceRequest_AsyncMerge{AsyncMerge: async}
-		req.Requester = workspaceRequester(ref())
-		req.ContextOrigin = forkContext(ref())
-	})
-}

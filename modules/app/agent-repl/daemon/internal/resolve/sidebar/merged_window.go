@@ -103,8 +103,7 @@ func (e *UnknownRepositoryError) Error() string {
 // in (taborder.go). OPEN is neither closed nor backlogged, whatever its merge
 // time (OPEN BEATS MERGED: a merged workspace that was reopened is open);
 // BACKLOGGED is open but backlogged; MERGED is merged AND closed; CLOSED is closed
-// and never merged. A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it needs
-// the user (owner ruling, 2026-10-11): not even in the backlog. A RETIRED
+// and never merged. A RETIRED
 // INTAKE WORKSPACE (closed, wsm.Workspace.Intake) is listed nowhere either:
 // its worktree and branch were destroyed on purpose, so no list offers to
 // reopen it and no mention links to it. A CHAT THREAD is listed only in the
@@ -126,7 +125,6 @@ func partitionOf(workspaces []wsm.Workspace) partition {
 		switch {
 		case ws.IsThread():
 			out.threads = append(out.threads, ws)
-		case ws.MergeHidden():
 		case ws.Closed && ws.Intake:
 		case ws.InMergedBand():
 			out.merged = append(out.merged, ws)

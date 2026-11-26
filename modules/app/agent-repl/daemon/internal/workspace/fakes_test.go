@@ -63,14 +63,12 @@ type fakeDB struct {
 	wsm.DB
 	// owedMoves are the moves renames owe, by workspace; renameMoveErr fails
 	// a rename that owes one, markMovingErr MarkMoving and completeMoveErr
-	// CompleteMove. lease is what Lease answers, and asyncRequests what
-	// AllAsyncMergeRequests does.
+	// CompleteMove. lease is what Lease answers.
 	owedMoves       map[ids.WorkspaceID]wsm.OwedMove
 	renameMoveErr   error
 	markMovingErr   error
 	completeMoveErr error
 	lease           *wsm.Lease
-	asyncRequests   []wsm.AsyncMergeRequest
 	// compactable is each workspace with a conversation to compact
 	// (OweCompaction), and oweCompactionErr fails every one.
 	compactable      map[ids.WorkspaceID]bool
@@ -186,13 +184,6 @@ type fakeDB struct {
 
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	byDir      map[string]wsm.Workspace
-	// reserved are the merge names standing async requests reserved, by
-	// name; reservedErr fails their read.
-	reserved    map[string]ids.WorkspaceID
-	reservedErr error
-	// revealErr fails RevealMergeWorkspace; reveals records each reveal.
-	revealErr error
-	reveals   []ids.WorkspaceID
 	// listWorkspacesErr fails the roster read, for the tests about what a
 	// republish does with a state client that would not answer.
 	listWorkspacesErr error
@@ -266,9 +257,6 @@ type fakeDB struct {
 	tasksErr error
 	jobs     map[ids.WorkspaceID]wsm.CreationJob
 	held     map[ids.WorkspaceID][]wsm.HeldPrompt
-	// landedWrites is every SetLanded, in order; setLandedErr fails it.
-	landedWrites []*wsm.Landing
-	setLandedErr error
 	// setMergedErr fails SetMergedAt.
 	setMergedErr error
 
@@ -696,40 +684,6 @@ func newFakeDB() *fakeDB {
 		taskChanges: map[ids.TaskID]wsm.TaskChange{},
 		assignments: map[ids.WorkspaceID]*ids.TaskID{},
 	}
-}
-
-// with records one workspace in the fake registry, keyed both ways.
-func (d *fakeDB) ReservedMergeNames(context.Context) (map[string]ids.WorkspaceID, error) {
-	if d.reservedErr != nil {
-		return nil, d.reservedErr
-	}
-	out := map[string]ids.WorkspaceID{}
-	for name, ws := range d.reserved {
-		out[name] = ws
-	}
-	return out, nil
-}
-
-// RevealMergeWorkspace stands for the durable reveal: a merge workspace's
-// flag is set once, and any other workspace is refused.
-func (d *fakeDB) RevealMergeWorkspace(_ context.Context, id ids.WorkspaceID) (bool, error) {
-	if d.revealErr != nil {
-		return false, d.revealErr
-	}
-	ws, ok := d.workspaces[id]
-	if !ok {
-		return false, wsm.ErrNotFound
-	}
-	if ws.MergeOf == nil {
-		return false, errors.New("fakeDB: the workspace is no merge workspace")
-	}
-	d.reveals = append(d.reveals, id)
-	if ws.MergeRevealed {
-		return false, nil
-	}
-	ws.MergeRevealed = true
-	d.with(ws)
-	return true, nil
 }
 
 func (d *fakeDB) with(ws wsm.Workspace) *fakeDB {
@@ -1267,11 +1221,6 @@ func (d *fakeDB) Lease(context.Context, ids.WorkspaceID) (wsm.Lease, bool, error
 	return *d.lease, true, nil
 }
 
-// AllAsyncMergeRequests answers the fake's async requests.
-func (d *fakeDB) AllAsyncMergeRequests(context.Context) ([]wsm.AsyncMergeRequest, error) {
-	return d.asyncRequests, nil
-}
-
 // RequestClose registers the fake's record's close request.
 func (d *fakeDB) RequestClose(_ context.Context, id ids.WorkspaceID, request wsm.CloseRequest) error {
 	if d.requestCloseErr != nil {
@@ -1319,7 +1268,7 @@ func (d *fakeDB) CloseRequests(context.Context) ([]ids.WorkspaceID, error) {
 
 // RefusePlacement records the placement asked about and answers the scripted
 // refusal.
-func (d *fakeDB) RefusePlacement(_ context.Context, _ string, p wsm.RegisterPlacement, _ *ids.WorkspaceID, _ bool) error {
+func (d *fakeDB) RefusePlacement(_ context.Context, _ string, p wsm.RegisterPlacement, _ *ids.WorkspaceID) error {
 	d.placementChecks = append(d.placementChecks, p)
 	return d.refusePlacementErr
 }
@@ -1827,19 +1776,6 @@ func (d *fakeDB) PutPendingFork(_ context.Context, fork wsm.PendingFork) error {
 		d.pendingForks = map[ids.WorkspaceID]wsm.PendingFork{}
 	}
 	d.pendingForks[fork.Workspace] = fork
-	return nil
-}
-
-// SetLanded records a requester's landing on its record, as the store's
-// columns do; setLandedErr fails it.
-func (d *fakeDB) SetLanded(_ context.Context, id ids.WorkspaceID, landing *wsm.Landing) error {
-	if d.setLandedErr != nil {
-		return d.setLandedErr
-	}
-	d.landedWrites = append(d.landedWrites, landing)
-	ws := d.workspaces[id]
-	ws.Landed = landing
-	d.with(ws)
 	return nil
 }
 
@@ -2659,13 +2595,6 @@ type fakeMerge struct {
 	closed []ids.WorkspaceID
 	// backlogged are the workspaces OnBacklogged was told of, in order.
 	backlogged []ids.WorkspaceID
-	// reveals are the workspaces RevealMergeWorkspace was asked to reveal, in
-	// order, and revealCauses the cause each named. reveal, when set, stands
-	// for the orchestrator's reveal and answers it; unset, a reveal answers
-	// success and changes nothing.
-	reveals      []ids.WorkspaceID
-	revealCauses []string
-	reveal       func(context.Context, ids.WorkspaceID) error
 	// linksChanged records every WorkspaceLinksChanged.
 	linksChanged []ids.WorkspaceID
 	enqueued     []ids.WorkspaceID
@@ -2782,23 +2711,13 @@ func (m *fakeMerge) OnBacklogged(ws ids.WorkspaceID) {
 	m.backlogged = append(m.backlogged, ws)
 }
 
-// RevealMergeWorkspace records the reveal and answers the scripted one.
-func (m *fakeMerge) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error {
-	m.reveals = append(m.reveals, ws)
-	m.revealCauses = append(m.revealCauses, cause)
-	if m.reveal == nil {
-		return nil
-	}
-	return m.reveal(ctx, ws)
-}
-
-func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {
+func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
 	ws := req.Workspace
 	if m.enqueueErr != nil {
-		return merge.Enqueued{}, m.enqueueErr
+		return m.enqueueErr
 	}
 	m.enqueued = append(m.enqueued, ws)
-	return merge.Enqueued{}, nil
+	return nil
 }
 
 // fakeRollout is a rollout.Controller.
@@ -5102,7 +5021,7 @@ func (f *fakeDB) OpenChildren(_ context.Context, parent ids.WorkspaceID) ([]wsm.
 	}
 	var children []wsm.Workspace
 	for _, ws := range f.workspaces {
-		if ws.Parent != nil && *ws.Parent == parent && ws.ID != parent && !ws.Closed && !ws.MergeHidden() {
+		if ws.Parent != nil && *ws.Parent == parent && ws.ID != parent && !ws.Closed {
 			children = append(children, ws)
 		}
 	}
@@ -5614,4 +5533,16 @@ type fakeStandingCloses struct{ reconsidered []ids.WorkspaceID }
 // Reconsider implements CloseRequestReporter.
 func (f *fakeStandingCloses) Reconsider(ws ids.WorkspaceID) {
 	f.reconsidered = append(f.reconsidered, ws)
+}
+
+// operationRecords answers the records under OPERATION at LEVEL, leaving out
+// the roster republish's own record.
+func operationRecords(f *fixture, level, operation string) []dlog.Record {
+	var out []dlog.Record
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == operation && r.Level == level && r.Message != "republished the roster registry" {
+			out = append(out, r)
+		}
+	}
+	return out
 }

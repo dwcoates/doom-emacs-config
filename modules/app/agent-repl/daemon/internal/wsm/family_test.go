@@ -187,21 +187,6 @@ func TestMarkClosedClosesAParentWhoseChildrenAreClosed(t *testing.T) {
 	}
 }
 
-func TestMarkClosedIgnoresAHiddenMergeWorkspace(t *testing.T) {
-	// Arrange -- an async merge's workspace is its machinery, drawn nowhere.
-	s, _ := testStore(t)
-	requester := testWorkspace(t, s)
-	registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-
-	// Act
-	err := s.MarkClosed(context.Background(), requester.ID, Closure{At: time.Unix(10, 0), By: CloseByUser})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("MarkClosed: %v", err)
-	}
-}
-
 func TestMarkClosedRestampsAClosedParentOverALegacyOpenChild(t *testing.T) {
 	// Arrange -- a closed row is no close at all, so it is not refused.
 	f := newFamily(t)
@@ -379,21 +364,6 @@ func TestRegisterWorkspaceRefusesAChildOfAParentThatIsNotOpen(t *testing.T) {
 	}
 }
 
-func TestRegisterWorkspaceForksAMergeWorkspaceUnderABackloggedRequester(t *testing.T) {
-	// Arrange -- a merge workspace is drawn nowhere, so it is no open child.
-	s, _ := testStore(t)
-	requester := testWorkspace(t, s)
-	mustHide(t, s, requester.ID)
-
-	// Act
-	ws := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-
-	// Assert
-	if ws.Parent == nil || *ws.Parent != requester.ID {
-		t.Fatalf("merge workspace parent = %v, want %s", ws.Parent, requester.ID)
-	}
-}
-
 func TestSetParentRefusesAParentThatIsNotOpen(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -415,36 +385,15 @@ func TestSetParentRefusesAParentThatIsNotOpen(t *testing.T) {
 func TestRequestMergeRefusesAMergeThatClosesAParentWithOpenChildren(t *testing.T) {
 	// Arrange
 	f := newFamily(t)
-	other := registerIn(t, f.s, f.repoDir, "other", nil)
 	repo := RepoKey(t.TempDir())
-	tests := []struct {
-		name      string
-		requester WorkspaceID
-		source    MergeSource
-	}{
-		{name: "the parent's own in-place merge", requester: f.parent.ID, source: MergeSource{Kind: MergeSourceOwnBranch}},
-		{name: "an async merge whose one-shot is the parent", requester: other.ID, source: MergeSource{
-			Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "m", CloseOnLanding: f.parent.ID}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			var err error
-			if tt.source.Detach != "" {
-				err = f.s.RequestAsyncMerge(context.Background(), repo, tt.requester, "", tt.source, time.Unix(10, 0))
-			} else {
-				err = f.s.RequestMerge(context.Background(), repo, tt.requester, tt.source, time.Unix(10, 0))
-			}
 
-			// Assert
-			requireHasOpenChildren(t, err, f.parent, f.child)
-			if queue, _ := f.s.MergeQueue(context.Background(), repo); len(queue) != 0 {
-				t.Fatalf("queue = %+v after a refused request, want it empty", queue)
-			}
-			if requests, _ := f.s.AllAsyncMergeRequests(context.Background()); len(requests) != 0 {
-				t.Fatalf("async requests = %+v after a refused request, want none", requests)
-			}
-		})
+	// Act
+	err := f.s.RequestMerge(context.Background(), repo, f.parent.ID, MergeSource{Kind: MergeSourceOwnBranch}, time.Unix(10, 0))
+
+	// Assert
+	requireHasOpenChildren(t, err, f.parent, f.child)
+	if queue, _ := f.s.MergeQueue(context.Background(), repo); len(queue) != 0 {
+		t.Fatalf("queue = %+v after a refused request, want it empty", queue)
 	}
 }
 
@@ -501,24 +450,24 @@ func TestRequireOpenParentRefusesAnUnknownParent(t *testing.T) {
 }
 
 func TestMergeSourceLandingCloses(t *testing.T) {
-	origin := &MergeOrigin{Requester: "req", Request: "r1", CloseOnLanding: "one-shot"}
+	effects := &LandingEffects{CloseAfter: "one-shot"}
 	tests := []struct {
 		name         string
 		source       MergeSource
-		origin       *MergeOrigin
+		effects      *LandingEffects
 		closes, also WorkspaceID
 	}{
 		{name: "an own-branch merge closes its requester", source: MergeSource{Kind: MergeSourceOwnBranch}, closes: "ws"},
 		{name: "an own-branch merge kept open closes nothing", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "a merge workspace's merge closes its one-shot too", source: MergeSource{Kind: MergeSourceOwnBranch}, origin: origin, closes: "ws", also: "one-shot"},
+		{name: "a one-shot's merge closes the workspace its effects name too", source: MergeSource{Kind: MergeSourceOwnBranch}, effects: effects, closes: "ws", also: "one-shot"},
+		{name: "a one-shot kept open still closes the workspace its effects name", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}, effects: effects, also: "one-shot"},
 		{name: "a workspace source closes that workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "other"}, closes: "other"},
 		{name: "a named branch closes nothing", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
-		{name: "a detached request closes nothing in place", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "m", CloseOnLanding: "x"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			closes, also := tt.source.LandingCloses("ws", tt.origin)
+			closes, also := tt.source.LandingCloses("ws", tt.effects)
 
 			// Assert
 			if closes != tt.closes || also != tt.also {
@@ -528,22 +477,12 @@ func TestMergeSourceLandingCloses(t *testing.T) {
 	}
 }
 
-func TestMergeSourceClosesNamesADetachedRequestsOneShot(t *testing.T) {
-	// Arrange
-	source := MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "m", CloseOnLanding: "x"}
-
-	// Act / Assert
-	if got := source.Closes("ws", nil); !slices.Equal(got, []WorkspaceID{"x"}) {
-		t.Fatalf("Closes = %v, want [x]", got)
-	}
-}
-
 func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 	// Arrange -- every source shape the queue stores, each in its own store.
 	tests := []struct {
-		name   string
-		source func(other, oneShot WorkspaceID) MergeSource
-		merge  bool
+		name    string
+		source  func(other, oneShot WorkspaceID) MergeSource
+		oneShot bool
 	}{
 		{name: "own branch", source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceOwnBranch} }},
 		{name: "own branch kept open", source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true} }},
@@ -551,10 +490,7 @@ func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 			return MergeSource{Kind: MergeSourceWorkspace, Workspace: other}
 		}},
 		{name: "branch", source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceBranch, Branch: "b"} }},
-		{name: "detached with a one-shot", source: func(_, oneShot WorkspaceID) MergeSource {
-			return MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "m", CloseOnLanding: oneShot}
-		}},
-		{name: "a merge workspace's own branch", merge: true, source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceOwnBranch} }},
+		{name: "a one-shot whose effects close another", oneShot: true, source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceOwnBranch} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -564,11 +500,11 @@ func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 			requester := registerIn(t, s, repoDir, "requester", nil)
 			other := registerIn(t, s, repoDir, "other", nil)
 			oneShot := registerIn(t, s, repoDir, "one-shot", nil)
-			if tt.merge {
+			if tt.oneShot {
 				dir := t.TempDir()
 				ws, _, err := s.RegisterWorkspace(ctx, dir, RegisterFacts{
 					Name: "m", Branch: "m", ParentBranch: "master", Parent: &other.ID, RepoDir: repoDir,
-					MergeOf: &MergeOrigin{Requester: other.ID, Request: NewDetachedMergeID(), CloseOnLanding: oneShot.ID},
+					OneShot: true, Effects: &LandingEffects{CloseAfter: oneShot.ID},
 				})
 				if err != nil {
 					t.Fatalf("RegisterWorkspace: %v", err)
@@ -576,16 +512,10 @@ func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 				requester = ws
 			}
 			source := tt.source(other.ID, oneShot.ID)
-			record := s.RequestMerge
-			if source.Detach != "" {
-				record = func(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
-					return s.RequestAsyncMerge(ctx, repo, id, "", source, at)
-				}
-			}
-			if err := record(ctx, RepoKey(t.TempDir()), requester.ID, source, time.Unix(10, 0)); err != nil {
+			if err := s.RequestMerge(ctx, RepoKey(t.TempDir()), requester.ID, source, time.Unix(10, 0)); err != nil {
 				t.Fatalf("record the request: %v", err)
 			}
-			want := source.Closes(requester.ID, requester.MergeOf)
+			want := source.Closes(requester.ID, requester.Effects)
 
 			for _, ws := range []Workspace{requester, other, oneShot} {
 				// Act
@@ -600,34 +530,6 @@ func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestMergeHiddenSQLAgreesWithMergeHidden(t *testing.T) {
-	// Arrange -- a merge workspace hidden, revealed and landed, and an ordinary one.
-	s, _ := testStore(t)
-	ctx := context.Background()
-	requester := testWorkspace(t, s)
-	hidden := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-	revealed := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-	if _, err := s.RevealMergeWorkspace(ctx, revealed.ID); err != nil {
-		t.Fatalf("RevealMergeWorkspace: %v", err)
-	}
-	landed := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-	if err := s.SetMergedAt(ctx, landed.ID, time.Unix(10, 0), nil); err != nil {
-		t.Fatalf("SetMergedAt: %v", err)
-	}
-	for _, ws := range []Workspace{requester, hidden, revealed, landed} {
-		// Act
-		var got bool
-		if err := s.db().QueryRow(`SELECT `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, ws.ID).Scan(&got); err != nil {
-			t.Fatalf("mergeHiddenSQL(%s): %v", ws.ID, err)
-		}
-
-		// Assert
-		if want := workspaceNow(t, s, ws.ID).MergeHidden(); got != want {
-			t.Fatalf("mergeHiddenSQL(%s) = %v, want %v", ws.ID, got, want)
-		}
 	}
 }
 

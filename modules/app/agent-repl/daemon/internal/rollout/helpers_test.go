@@ -618,7 +618,7 @@ type reportPayment struct {
 	bouncesAsked int
 }
 
-func (r *fakeReports) PayOwed(_ context.Context, coveredOnly bool, deployErr error) {
+func (r *fakeReports) DeployEnded(_ context.Context, coveredOnly bool, deployErr error) {
 	asked := len(r.registry.Requests())
 	r.mu.Lock()
 	defer r.mu.Unlock()

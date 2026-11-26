@@ -184,22 +184,12 @@ func TestReopenRetiresAMergesSettlement(t *testing.T) {
 		{name: "commit_count", read: func(t *testing.T, s *store, ws Workspace) any {
 			return scalar[*int64](t, s, `SELECT commit_count FROM workspaces WHERE id = ?`, ws.ID)
 		}},
-		{name: "landed_head", read: func(t *testing.T, s *store, ws Workspace) any {
-			return scalar[*string](t, s, `SELECT landed_head FROM workspaces WHERE id = ?`, ws.ID)
-		}},
-		{name: "landed_at", read: func(t *testing.T, s *store, ws Workspace) any {
-			return scalar[*int64](t, s, `SELECT landed_at FROM workspaces WHERE id = ?`, ws.ID)
-		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: a requester retired after its detached merge landed
-			// carries a landing as well as merged_at.
+			// Arrange
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
-			if err := s.SetLanded(context.Background(), ws.ID, &Landing{Head: "f00d", At: firstClose}); err != nil {
-				t.Fatalf("SetLanded: %v", err)
-			}
 			mergedAndClosed(t, s, ws)
 
 			// Act
@@ -233,56 +223,6 @@ func TestReopenOpensAMergedWorkspace(t *testing.T) {
 	}
 	if got.Closed || got.Closure != nil || got.MergedAt != nil {
 		t.Fatalf("closed = %v, closure = %v, merged_at = %v, want an open, unmerged row", got.Closed, got.Closure, got.MergedAt)
-	}
-}
-
-func TestReopenRevealsAMergedMergeWorkspace(t *testing.T) {
-	// Arrange: a merge workspace that landed without ever being revealed.
-	s, _ := testStore(t)
-	requester := testWorkspace(t, s)
-	ws := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-	mergedAndClosed(t, s, ws)
-
-	// Act
-	if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
-		t.Fatalf("Reopen: %v", err)
-	}
-
-	// Assert
-	got, err := s.Workspace(context.Background(), ws.ID)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	if got.MergeHidden() {
-		t.Fatalf("the reopened merge workspace is hidden (revealed = %v), want it drawn", got.MergeRevealed)
-	}
-}
-
-func TestReopenKeepsTheLandingOfAWorkspaceThatIsNotMerged(t *testing.T) {
-	// Arrange: a requester whose detached merge landed keeps its worktree and
-	// is never stamped merged; the sweep still owes it its retirement.
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	landing := Landing{Head: "f00d", At: firstClose}
-	if err := s.SetLanded(context.Background(), ws.ID, &landing); err != nil {
-		t.Fatalf("SetLanded: %v", err)
-	}
-	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: firstClose, By: CloseByUser}); err != nil {
-		t.Fatalf("MarkClosed: %v", err)
-	}
-
-	// Act
-	if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
-		t.Fatalf("Reopen: %v", err)
-	}
-
-	// Assert
-	got, err := s.Workspace(context.Background(), ws.ID)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	if got.Landed == nil || got.Landed.Head != landing.Head {
-		t.Fatalf("landed = %+v, want the landing %+v kept", got.Landed, landing)
 	}
 }
 

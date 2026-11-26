@@ -1296,7 +1296,7 @@ func TestAMergeTurnRefusedByItsColdGateAfterTheGateWasPassedIsAnInvariantViolati
 	h.queue.mu.Unlock()
 
 	// Act
-	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 
 	// Assert
 	if !errors.Is(err, promptqueue.ErrColdGate) || !strings.Contains(err.Error(), "invariant violated") {

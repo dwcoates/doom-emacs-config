@@ -31,6 +31,7 @@ package workspacesubs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -57,6 +58,11 @@ const op = "daemon.workspacesubs"
 // notice's headline.
 const BriefNotice = "workspace-notice"
 
+// BriefChildLanded is the brief a one-shot child's landing is told its parent
+// by: ONE LINE (owner ruling, 2026-11-26: landing reports are brief), as the
+// child's own feed and its bubble in the parent's feed say the rest.
+const BriefChildLanded = "workspace-child-landed"
+
 // Origin is every notice's prompt origin.
 const Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE
 
@@ -75,10 +81,19 @@ type Untold interface {
 	RecordUntoldWorkspaceNotice(ctx context.Context, n wsm.UntoldWorkspaceNotice) error
 }
 
+// Records reads a followed workspace's registry record: a landed one-shot's
+// landing effects (wsm.LandingEffects).
+type Records interface {
+	Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error)
+}
+
 // Deps are the service's collaborators: everything but the prompt handler,
 // which is handed to Run.
 type Deps struct {
 	Subscribers Subscribers
+	// Records reads the landed workspace's record, for the compaction its
+	// requester asked for.
+	Records Records
 	// Holds retires a notice a newer one supersedes.
 	Holds untoldnotice.Holds
 	// Untold keeps each subscriber's untold notice across restarts.
@@ -184,8 +199,18 @@ func (s *Service) Run(ctx context.Context, prompts prompthandler.Submitter) {
 	s.loop.Run(ctx, func(ctx context.Context, e edge) { s.deliver(ctx, prompts, e) })
 }
 
-// deliver tells E to every subscriber of its workspace that asked for it.
+// deliver tells E to every subscriber of its workspace that asked for it, and
+// then, for a landing, compacts the requester that asked for it
+// (compactRequester): behind any notice the landing gave it.
 func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, e edge) {
+	s.tell(ctx, prompts, e)
+	if e.event == wsm.WorkspaceEventLanded {
+		s.compactRequester(ctx, prompts, e.ws)
+	}
+}
+
+// tell tells E to every subscriber of its workspace that asked for it.
+func (s *Service) tell(ctx context.Context, prompts prompthandler.Submitter, e edge) {
 	log := s.deps.Log.Global()
 	fields := edgeFields(e)
 	subs, err := s.deps.Subscribers.WorkspaceSubscribers(ctx, e.ws)
@@ -245,8 +270,12 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 // workspace standing STATUS, and submits it to SUBSCRIBER, answering the turn
 // it was submitted as, or the record a failure is written with and why.
 func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, e edge, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, logsite.Message, error) {
+	brief, values := BriefNotice, NoticeValues(e.event, e.detail, sentences, status, sub.ParentFollows)
+	if sub.ParentFollows && e.event == wsm.WorkspaceEventLanded {
+		brief, values = BriefChildLanded, map[string]string{"child": status.GetName()}
+	}
 	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
-		Submit(ctx, prompts, sub.Subscriber, BriefNotice, NoticeValues(e.event, e.detail, sentences, status, sub.ParentFollows), "workspace-notice", Origin)
+		Submit(ctx, prompts, sub.Subscriber, brief, values, "workspace-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
 		return "", logsite.Msg("could not compose a workspace notice; the subscriber is not told of the edge"), err
@@ -482,3 +511,41 @@ var storeEvents = func() map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent
 	}
 	return out
 }()
+
+// compactRequester sends the requester of landed workspace WS its /compact
+// when WS's creator asked for it (wsm.LandingEffects.CompactRequester),
+// through the one compaction path (prompthandler.SubmitCompaction): deferred
+// behind the landing notice's turn. Every failure
+// is recorded here and ends the compaction; the landing stands.
+func (s *Service) compactRequester(ctx context.Context, prompts prompthandler.Submitter, ws ids.WorkspaceID) {
+	log := s.deps.Log.Global()
+	fields := dlog.Context{"workspace": string(ws)}
+	record, err := s.deps.Records.Workspace(ctx, ws)
+	if err != nil {
+		log.Error(op, "could not read the landed workspace's record; a compaction its requester asked for is not sent", dlog.WithCause(fields, err))
+		return
+	}
+	if record.Effects == nil || !record.Effects.CompactRequester {
+		return
+	}
+	// THE CREATE REFUSES A COMPACTION WITH NO WORKSPACE TO COMPACT
+	// (server.validateCreateWorkspaceRequest), so a landed one-shot asking
+	// for one with no requester is a defect in what recorded it.
+	if record.RequestedBy == nil {
+		log.Error(op, "a landed one-shot asks to compact its requester but records none", fields)
+		panic(fmt.Sprintf("workspacesubs: %s asks to compact a requester it does not record", ws))
+	}
+	fields["requester"] = string(*record.RequestedBy)
+	outcome, err := prompthandler.SubmitCompaction(ctx, prompts, *record.RequestedBy, "",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, s.deps.MintKey, "compact-requester")
+	if errors.Is(err, prompthandler.ErrCompactionKey) {
+		log.Error(op, "could not mint the idempotency key of a landed one-shot's compaction; its requester is not compacted", dlog.WithCause(fields, err))
+		return
+	}
+	if err != nil {
+		log.Error(op, "could not submit the compaction a landed one-shot asked for; its requester is not compacted", dlog.WithCause(fields, err))
+		return
+	}
+	fields["turn"] = string(outcome.Turn)
+	log.Info(op, "submitted the compaction a landed one-shot asked for to its requester", fields)
+}

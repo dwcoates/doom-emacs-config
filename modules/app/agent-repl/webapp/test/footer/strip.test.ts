@@ -597,31 +597,31 @@ describe("drawFooterChipAgents: the waiting-for-the-API glyph", () => {
   });
 });
 
-describe("drawFooterChipMerges: the waiting-on-you glyph", () => {
-  it("draws no waiting glyph while no merge waits on the user", () => {
-    const { row } = drawStrip({ liveWork: { merges: { count: 2 } } });
+describe("drawFooterChipChildren: the waiting-on-you glyph", () => {
+  it("draws no waiting glyph while no child waits on the user", () => {
+    const { row } = drawStrip({ liveWork: { children: { count: 2 } } });
     expect(row.querySelector('[data-glyph="waitingOnUser"]')).toBeNull();
   });
 
   it("draws the waiting glyph with its count beside the chip's count", () => {
-    const { row } = drawStrip({ liveWork: { merges: { count: 2, waitingOnUser: { count: 1 } } } });
-    expect(row.querySelector('[data-chip="merges"]')?.textContent).toBe(`⇄ 2 ${WAITING_ON_USER_GLYPH} 1`);
+    const { row } = drawStrip({ liveWork: { children: { count: 2, waitingOnUser: { count: 1 } } } });
+    expect(row.querySelector('[data-chip="children"]')?.textContent).toBe(`⇄ 2 ${WAITING_ON_USER_GLYPH} 1`);
   });
 
   it("carries the waiting count on the glyph's holder", () => {
-    const { row } = drawStrip({ liveWork: { merges: { count: 2, waitingOnUser: { count: 1 } } } });
+    const { row } = drawStrip({ liveWork: { children: { count: 2, waitingOnUser: { count: 1 } } } });
     expect(row.querySelector(".footer-chip-waiting")?.getAttribute("data-waiting-on-user")).toBe("1");
   });
 
   it("says what the glyph counts on hover", () => {
-    const { row } = drawStrip({ liveWork: { merges: { count: 2, waitingOnUser: { count: 1 } } } });
+    const { row } = drawStrip({ liveWork: { children: { count: 2, waitingOnUser: { count: 1 } } } });
     expect(row.querySelector(".footer-chip-waiting")?.getAttribute(TOOLTIP_TEXT_ATTR)).toBe("1 waiting on you");
   });
 
-  it("opens the merges panel when clicked", () => {
-    const { row, selected } = drawStrip({ liveWork: { merges: { count: 1 } } });
-    row.querySelector<HTMLElement>('[data-chip="merges"]')?.dispatchEvent(new MouseEvent("click"));
-    expect(selected).toEqual(["merges"]);
+  it("opens the children panel when clicked", () => {
+    const { row, selected } = drawStrip({ liveWork: { children: { count: 1 } } });
+    row.querySelector<HTMLElement>('[data-chip="children"]')?.dispatchEvent(new MouseEvent("click"));
+    expect(selected).toEqual(["children"]);
   });
 });
 
@@ -632,7 +632,7 @@ describe("the chips' tooltips", () => {
     shells: { count: 1 },
     monitors: { count: 1 },
     crons: { count: 1 },
-    merges: { count: 1 },
+    children: { count: 1 },
   };
 
   it.each([
@@ -641,7 +641,7 @@ describe("the chips' tooltips", () => {
     ["shells", "Background shells"],
     ["monitors", "Background monitors"],
     ["crons", "Scheduled jobs"],
-    ["merges", "Async merges"],
+    ["children", "Open children"],
   ])("tooltips the %s chip with what it is for", (chip, text) => {
     // Arrange / Act
     const { row } = drawStrip({ liveWork: ALL_CHIPS });
@@ -693,7 +693,7 @@ describe("chipWaiting", () => {
 
   it.each([
     ["agents", { agents: { count: 3, waitingForApi: { count: 1 } } }],
-    ["merges", { merges: { count: 3, waitingOnUser: { count: 1 } } }],
+    ["children", { children: { count: 3, waitingOnUser: { count: 1 } } }],
   ])("is the one shape the %s chip's waiting figure takes", (chip, liveWork) => {
     const { row } = drawStrip({ liveWork });
     const drawn = row.querySelector(`[data-chip="${chip}"] .footer-chip-waiting`);
@@ -730,7 +730,7 @@ describe("drawFooterLiveWorkChips", () => {
     ["shells", { shells: { count: 1 } }],
     ["monitors", { monitors: { count: 1 } }],
     ["crons", { crons: { count: 1 } }],
-    ["merges", { merges: { count: 1 } }],
+    ["children", { children: { count: 1 } }],
   ])("draws the chips cell when the %s chip alone is set", (_chip, liveWork) => {
     const { row } = drawStrip({ liveWork });
     expect(row.querySelector(".footer-chips")).not.toBeNull();
@@ -741,7 +741,7 @@ describe("drawFooterLiveWorkChips", () => {
     ["shells", { shells: { count: 2 } }, "2"],
     ["monitors", { monitors: { count: 1 } }, "1"],
     ["crons", { crons: { count: 4 } }, "4"],
-    ["merges", { merges: { count: 2 } }, "2"],
+    ["children", { children: { count: 2 } }, "2"],
   ])("draws the %s chip's count verbatim", (chip, liveWork, expected) => {
     const { row } = drawStrip({ liveWork });
     expect(row.querySelector(`[data-chip="${chip}"]`)?.textContent).toContain(expected);
@@ -758,7 +758,7 @@ describe("drawFooterLiveWorkChips", () => {
     ["shells", { shells: { count: 1 } }],
     ["monitors", { monitors: { count: 1 } }],
     ["crons", { crons: { count: 1 } }],
-    ["merges", { merges: { count: 1 } }],
+    ["children", { children: { count: 1 } }],
   ])("gives the %s chip a glyph rather than a bare number", (chip, liveWork) => {
     const { row } = drawStrip({ liveWork });
     expect(row.querySelector(`[data-chip="${chip}"] [data-glyph]`)?.textContent).not.toBe("");
@@ -772,7 +772,7 @@ describe("drawFooterLiveWorkChips", () => {
   it("draws every chip in CHIP_PANELS order, the chip panels' one precedence", () => {
     const { row } = drawStrip({
       liveWork: {
-        merges: { count: 1 },
+        children: { count: 1 },
         crons: { count: 1 },
         monitors: { count: 1 },
         shells: { count: 1 },

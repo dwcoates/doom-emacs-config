@@ -33,11 +33,8 @@ type SelectWorkspaceRequest struct {
 	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// A ROW OF THE SELECTED WORKSPACE'S ROOT FEED TO REVEAL once it is
 	// selected: its page brings the row on screen, opens it and marks it
-	// (WebWorkspaceRevealRow). Unset selects and reveals nothing. A merge queue
-	// entry for an async merge names the merge's bubble in its requester's feed
-	// (FeedMergeQueueBubble), so the click opens that bubble rather than the
-	// hidden merge workspace (owner ruling, 2026-10-17); a page's click carries
-	// it on SelectInEditorRequest.reveal, never here.
+	// (WebWorkspaceRevealRow). Unset selects and reveals nothing. A page's
+	// click carries it on SelectInEditorRequest.reveal, never here.
 	Reveal *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
 	// A STEP OF A WALK THROUGH THE SELECTION HISTORY, not a choice: the daemon
 	// stamps `current` but leaves the row's last-selected instant as it stands.

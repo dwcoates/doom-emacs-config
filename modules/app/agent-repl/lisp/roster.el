@@ -452,19 +452,6 @@ not a one-shot.  The tab bar draws its glyph from it while the one-shot
 works \(`agent-repl-status-tab-glyph')."
   (agent-repl-roster--for-ws ws #'agent-repl-roster-row-one-shot))
 
-(defun agent-repl-roster-row-async-merging (row)
-  "Return non-nil when ROW carries the async-merging marker.
-The marker (`RosterRowAsyncMerging\=') is presence alone: the workspace\='s
-own branch merges async in a hidden merge workspace."
-  (plist-get row :async-merging))
-
-(defun agent-repl-roster-async-merging-for-ws (ws)
-  "Return non-nil when WS\='s current roster row carries the async-merging marker.
-Nil before any push has carried a row for WS, and while no async merge of
-its branch is in flight.  The tab bar paints its [N] run purple from it
-\(`agent-repl--tab-spec-async-merge\=')."
-  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-async-merging))
-
 ;;;; ---- The walk ---------------------------------------------------------
 
 (defun agent-repl-roster--walk-rows (rows label section acc collapsed)

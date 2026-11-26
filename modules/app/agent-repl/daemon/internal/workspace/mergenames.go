@@ -6,22 +6,17 @@ import (
 	"strings"
 	"sync"
 
-	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 )
 
-// This file is the ONE place a workspace name is HANDED OUT, so a name an async
-// merge reserves can never be taken before its merge workspace is created
-// under it (docs/protobuf-design/sync-async-merges.md).
+// This file is the ONE place a workspace name is HANDED OUT.
 //
-// A name is taken when it is a registered workspace's name or branch, a branch of the
-// repository, a standing async request's reservation (durable, on its queue
-// row), an occupied worktree directory (worktreeOccupied), or CLAIMED in this
-// process: a create holds a claim on the name it
-// chose from the moment it chose it until it is registered or failed, and an
-// async request holds one from its check until its reservation is written.
-// Choosing and claiming happen under one lock, so two allocations can never
-// both hand out one name.
+// A name is taken when it is a registered workspace's name or branch, a branch
+// of the repository, an occupied worktree directory (worktreeOccupied), or
+// CLAIMED in this process: a create holds a claim on the name it chose from
+// the moment it chose it until it is registered or failed. Choosing and
+// claiming happen under one lock, so two allocations can never both hand out
+// one name.
 
 // nameClaims is the process's claimed names, by branch.
 type nameClaims struct {
@@ -29,15 +24,13 @@ type nameClaims struct {
 	claimed map[string]bool
 }
 
-// MergeBranch is the name an async merge's SUPPLIED name resolves to: the
-// branch, and the registry name, its merge workspace is created under
-// (merge.Names). It is the one resolution, so the name a request reserves and
-// draws is the name its merge workspace stands under after the fork.
+// MergeBranch is the name a SUPPLIED name resolves to: the branch, and the
+// registry name, it stands under, with the prefix applied (merge.Names). It
+// claims nothing; the merge queue matches a merge named either way by it.
 func MergeBranch(name string) string { return suppliedBranch(name) }
 
 // suppliedBranch is the branch a SUPPLIED name resolves to: taken as it stands
-// when it already carries a prefix component, prefixed otherwise. A create's
-// supplied name and an async merge's name resolve alike.
+// when it already carries a prefix component, prefixed otherwise.
 func suppliedBranch(name string) string {
 	if strings.Contains(name, "/") {
 		return name
@@ -63,34 +56,21 @@ func (v *verbs) claimLocked(branch string) func() {
 }
 
 // nameHolder is what holds a taken name: a registered workspace, or, when
-// Workspace is empty, a standing reservation or a claim whose workspace is
-// not registered yet.
+// Workspace is empty, a claim whose workspace is not registered yet.
 type nameHolder struct {
 	Workspace ids.WorkspaceID
 }
 
 // holdersLocked answers every branch name that is taken without asking git,
 // and what holds it: the registered workspaces' names and branches
-// (registeredHolders), the standing reservations, and the claims. EXCEPT
-// names a reservation the given workspace itself holds, which is free to the
-// fork that reservation was made for. A registered holder outranks a pending
-// one for the same name. The caller holds v.names.mu.
-func (v *verbs) holdersLocked(ctx context.Context, except ids.WorkspaceID) (map[string]nameHolder, error) {
+// (registeredHolders), and the claims. A registered holder outranks a claim
+// for the same name. The caller holds v.names.mu.
+func (v *verbs) holdersLocked(ctx context.Context) (map[string]nameHolder, error) {
 	registered, err := v.registeredHolders(ctx)
 	if err != nil {
 		return nil, err
 	}
-	reserved, err := v.deps.DB.ReservedMergeNames(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read the reserved merge names: %w", err)
-	}
-	held := make(map[string]nameHolder, len(registered)+len(reserved)+len(v.names.claimed))
-	for name, holder := range reserved {
-		if except != "" && holder == except {
-			continue
-		}
-		held[suppliedBranch(name)] = nameHolder{}
-	}
+	held := make(map[string]nameHolder, len(registered)+len(v.names.claimed))
 	for branch := range v.names.claimed {
 		held[branch] = nameHolder{}
 	}
@@ -102,8 +82,8 @@ func (v *verbs) holdersLocked(ctx context.Context, except ids.WorkspaceID) (map[
 
 // takenLocked answers holdersLocked's names, for the allocations that need
 // only whether a name is taken. The caller holds v.names.mu.
-func (v *verbs) takenLocked(ctx context.Context, except ids.WorkspaceID) (map[string]bool, error) {
-	held, err := v.holdersLocked(ctx, except)
+func (v *verbs) takenLocked(ctx context.Context) (map[string]bool, error) {
+	held, err := v.holdersLocked(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -114,66 +94,16 @@ func (v *verbs) takenLocked(ctx context.Context, except ids.WorkspaceID) (map[st
 	return taken, nil
 }
 
-// ClaimMergeName checks an async merge's name and claims it (merge.Names).
-func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (string, func(), bool, error) {
-	log := v.deps.Log.Global()
-	branch := suppliedBranch(name)
-	fields := dlog.Context{"name": name, "branch": branch, "repo_dir": repoDir}
-	// A STANDING WORKSPACE'S NAME IS NEVER AN ASYNC MERGE'S (IsStandingName):
-	// it is answered taken, so only the standing workspace holds it.
-	if IsStandingName(branch) {
-		log.Info(opNaming, "an async merge's name ends in a standing workspace's name", fields)
-		return branch, nil, true, nil
-	}
-	v.names.mu.Lock()
-	defer v.names.mu.Unlock()
-	taken, err := v.takenLocked(ctx, "")
-	if err != nil {
-		log.Error(opNaming, "could not read the names already taken; the async merge's name is not checked", dlog.WithCause(fields, err))
-		return "", nil, false, err
-	}
-	if taken[branch] {
-		log.Info(opNaming, "an async merge's name is already taken", fields)
-		return branch, nil, true, nil
-	}
-	exists, err := v.deps.Git.BranchExists(ctx, repoDir, branch)
-	if err != nil {
-		log.Error(opNaming, "could not ask whether the async merge's branch exists", dlog.WithCause(fields, err))
-		return "", nil, false, fmt.Errorf("probe the branch %q: %w", branch, err)
-	}
-	if exists {
-		log.Info(opNaming, "an async merge's name is already a branch", fields)
-		return branch, nil, true, nil
-	}
-	main, err := v.deps.Git.MainWorktree(ctx, repoDir)
-	if err != nil {
-		log.Error(opNaming, "could not resolve the repository the async merge's worktree would be cut in", dlog.WithCause(fields, err))
-		return "", nil, false, fmt.Errorf("resolve the main worktree of %q: %w", repoDir, err)
-	}
-	occupied, dir, err := v.worktreeOccupied(ctx, main, branch)
-	if err != nil {
-		log.Error(opNaming, "could not ask whether the async merge's worktree directory is free", dlog.WithCause(fields, err))
-		return "", nil, false, err
-	}
-	if occupied {
-		log.Info(opNaming, "an async merge's name is already an occupied worktree directory", dlog.Merge(fields, dlog.Context{"worktree_dir": dir}))
-		return branch, nil, true, nil
-	}
-	log.Debug(opNaming, "claimed an async merge's name until its request is recorded", fields)
-	return branch, v.claimLocked(branch), false, nil
-}
-
 // worktreeOccupied answers whether the directory BRANCH's worktree would be
 // materialized at in the repository REPODIR names (WorktreeDir, the same
 // derivation Create materializes by) is already taken, and that directory:
 // on disk, or by a rename's move owed to go there (wsm.OwedMove), which
 // stands there once the workspace falls free.
 //
-// The directory is a fact apart from the branch: an async merge named after a
-// branch whose worktree still stood passed every branch check, was recorded,
-// and then failed `git worktree add` at the fork after the requesting turn had
-// ended (2026-10-20). Asked when the name is chosen, the name is refused, or
-// passed over, before anything is recorded.
+// The directory is a fact apart from the branch: a name whose branch is free
+// can still name a worktree directory that stands, which `git worktree add`
+// refuses (2026-10-20). Asked when the name is chosen, the name is refused,
+// or passed over, before anything is recorded.
 func (v *verbs) worktreeOccupied(ctx context.Context, repoDir, branch string) (bool, string, error) {
 	dir, err := WorktreeDir(repoDir, branch)
 	if err != nil {

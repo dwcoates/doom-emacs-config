@@ -391,6 +391,10 @@ type Submission struct {
 // Resolver is the footer's whole surface.
 type Resolver interface {
 	sessionwatcher.FooterSink
+	// SetOpenChildren installs PARENT's open children WHOLE, in the order
+	// they were created (children.go). Its sole producer is the children
+	// tracker (internal/children).
+	SetOpenChildren(parent ids.WorkspaceID, children []OpenChild)
 	// Sink is the ONE entry point a deploy's progress reaches the footer
 	// through: the update line, stood on every workspace's strip (update.go).
 	deployprogress.Sink
@@ -491,8 +495,7 @@ type Resolver interface {
 	// merging, nil while none is. A turn the merge runs is drawn as the turn,
 	// so this, never the drawn arm, is what says a merge is in flight. The
 	// roster's when-column counts a sync merge from it, and the workspace
-	// status reports the merge by it. A merge workspace's footer is never
-	// told its merge (an async merge runs there), so it answers nil there.
+	// status reports the merge by it.
 	MergeStartedAt(ws ids.WorkspaceID) *int64
 	// TurnClock answers the turn clock the workspace's strip shows. The
 	// roster's when-column counts from its start, so each change of it is
@@ -564,13 +567,6 @@ type Resolver interface {
 	// id). It is the feed resolver's Deps.EntryPlaced, and it is what a jump
 	// row names: FooterJump.entry, never an address the footer guessed.
 	OnEntryPlaced(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
-	// OnMergeRow takes one merge bubble row the feed now holds for merge
-	// LEASE, its head or one of its tabs, and OnMergeRowRetired the feed's
-	// retirement of one. They are the feed resolver's Deps.MergeRow and
-	// Deps.MergeRowRetired, and they are the ⇄ chip's and panel's whole
-	// source (merges.go).
-	OnMergeRow(ws ids.WorkspaceID, lease ids.LeaseID, row *frontendv1.FeedRow)
-	OnMergeRowRetired(ws ids.WorkspaceID, lease ids.LeaseID, id string)
 }
 
 // Option adjusts the resolver's injectable knobs. The defaults are the

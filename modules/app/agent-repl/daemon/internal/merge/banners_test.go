@@ -2,7 +2,6 @@ package merge
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -148,13 +147,13 @@ func TestALandedMergeRaisesTheLandedBannerNamingItsTarget(t *testing.T) {
 func TestDetachedOutcomeBannerLine(t *testing.T) {
 	tests := []struct {
 		name string
-		out  DetachedOutcome
+		out  Ending
 		want string
 	}{
-		{name: "a landing names its target", out: DetachedOutcome{Kind: DetachedLanded, Summary: "it landed as commit abc", MergedInto: "master"}, want: "Merged into master"},
-		{name: "a branch already on its target keeps its summary", out: DetachedOutcome{Kind: DetachedLanded, Summary: "the branch was already on master; nothing needed merging"}, want: "the branch was already on master; nothing needed merging"},
-		{name: "a failure keeps its summary", out: DetachedOutcome{Kind: DetachedFailed, Summary: "the tests failed"}, want: "the tests failed"},
-		{name: "an abandonment keeps its summary", out: DetachedOutcome{Kind: DetachedAbandoned, Summary: "taken off the queue"}, want: "taken off the queue"},
+		{name: "a landing names its target", out: Ending{Kind: EndingLanded, Summary: "it landed as commit abc", MergedInto: "master"}, want: "Merged into master"},
+		{name: "a branch already on its target keeps its summary", out: Ending{Kind: EndingLanded, Summary: "the branch was already on master; nothing needed merging"}, want: "the branch was already on master; nothing needed merging"},
+		{name: "a failure keeps its summary", out: Ending{Kind: EndingFailed, Summary: "the tests failed"}, want: "the tests failed"},
+		{name: "an abandonment keeps its summary", out: Ending{Kind: EndingAbandoned, Summary: "taken off the queue"}, want: "taken off the queue"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -199,46 +198,6 @@ func TestARequestDroppedBeforeItWasInLineRaisesNoBanner(t *testing.T) {
 	// Assert
 	if got := h.banners.seen(); len(got) != 0 {
 		t.Fatalf("banners = %+v, want none for a merge never put in line", got)
-	}
-}
-
-func TestADetachedMergeRaisesItsBannersOnTheMergeWorkspace(t *testing.T) {
-	// Arrange: a detached request handed off and in line.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-
-	// Act
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
-
-	// Assert
-	want := []raisedBanner{{ws: theMergeWorkspace, kind: "landed"}}
-	if got := h.banners.kinds(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("banners = %+v, want %+v", got, want)
-	}
-}
-
-func TestAForkThatFailsRaisesTheRequestersAbandonedBanner(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.detached.forkErr = errors.New("the worktree could not be made")
-
-	// Act
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-
-	// Assert
-	got := h.banners.seen()
-	if len(got) != 1 || got[0].ws != theWorkspace || got[0].kind != "abandoned" || !strings.Contains(got[0].text, "the worktree could not be made") {
-		t.Fatalf("banners = %+v, want the requester's abandoned banner naming the fork's failure", got)
 	}
 }
 
@@ -306,12 +265,12 @@ func TestQueueRequestWithNoRecordedRequestIsAnError(t *testing.T) {
 
 func TestDetachedOutcomeKindMergeEnd(t *testing.T) {
 	cases := []struct {
-		kind DetachedOutcomeKind
+		kind EndingKind
 		want desktopnotify.MergeEnd
 	}{
-		{kind: DetachedLanded, want: desktopnotify.MergeLanded},
-		{kind: DetachedFailed, want: desktopnotify.MergeFailed},
-		{kind: DetachedAbandoned, want: desktopnotify.MergeAbandoned},
+		{kind: EndingLanded, want: desktopnotify.MergeLanded},
+		{kind: EndingFailed, want: desktopnotify.MergeFailed},
+		{kind: EndingAbandoned, want: desktopnotify.MergeAbandoned},
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind.String(), func(t *testing.T) {
@@ -337,24 +296,6 @@ func TestAMergesEndIsHandedBackBeforeItsResolvedBanner(t *testing.T) {
 		end     string
 	}{
 		{
-			name: "an async merge that landed",
-			arrange: func(t *testing.T, h *harness) {
-				h.emacsRepo()
-				h.landsCleanly("abc123def4567")
-				h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-				h.gatePasses("daemon")
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			act: func(t *testing.T, h *harness) {
-				if err := h.admit(context.Background()); err != nil {
-					t.Fatalf("the merge failed: %v", err)
-				}
-			},
-			end: "landed",
-		},
-		{
 			name: "a sync merge that failed",
 			arrange: func(t *testing.T, h *harness) {
 				h.emacsRepo()
@@ -367,18 +308,6 @@ func TestAMergesEndIsHandedBackBeforeItsResolvedBanner(t *testing.T) {
 				_ = h.admit(context.Background())
 			},
 			end: "failed",
-		},
-		{
-			name: "an async request whose fork failed",
-			arrange: func(t *testing.T, h *harness) {
-				h.detached.forkErr = errors.New("the worktree could not be made")
-			},
-			act: func(t *testing.T, h *harness) {
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			end: "abandoned",
 		},
 	}
 	for _, tt := range tests {
@@ -414,7 +343,7 @@ func TestTellThenRaiseTellsBeforeItRaisesTheResolvedBanner(t *testing.T) {
 	}
 
 	// Act
-	h.o.tellThenRaise(theWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "the tests failed"}, tell)
+	h.o.tellThenRaise(theWorkspace, Ending{Kind: EndingFailed, Summary: "the tests failed"}, tell)
 
 	// Assert
 	if !reflect.DeepEqual(order, []string{"told"}) {
@@ -435,7 +364,7 @@ func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 	}()
 
 	// Act
-	DetachedOutcomeKind(9).mergeEnd()
+	EndingKind(9).mergeEnd()
 }
 
 // bannerRaised reports whether the harness raised a banner of KIND.

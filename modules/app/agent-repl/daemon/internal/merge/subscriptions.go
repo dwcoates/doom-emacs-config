@@ -104,9 +104,6 @@ const (
 	// MergeModeOneShot is a workspace's own branch merged in place, closing
 	// the workspace once it lands.
 	MergeModeOneShot MergeMode = iota + 1
-	// MergeModeAsync is a branch merged in a hidden merge workspace forked
-	// from the workspace that asked, which stays free.
-	MergeModeAsync
 	// MergeModeInPlace is any other merge run in the workspace that asked,
 	// which stays open once it lands.
 	MergeModeInPlace
@@ -117,8 +114,6 @@ func (m MergeMode) String() string {
 	switch m {
 	case MergeModeOneShot:
 		return "one-shot"
-	case MergeModeAsync:
-		return "async"
 	case MergeModeInPlace:
 		return "in place"
 	}
@@ -142,9 +137,6 @@ type QueueMember struct {
 	Started bool
 	// Front reports that the merge asked to be put at the front of its queue.
 	Front bool
-	// Requester is the workspace that asked for an ASYNC merge, empty for
-	// every other mode.
-	Requester ids.WorkspaceID
 	// Step is a started merge's step, empty while it waits and before its
 	// first step is published.
 	Step footer.MergeStep
@@ -422,7 +414,7 @@ func leaveKind(cause string) QueueChangeKind {
 	switch cause {
 	case causeMerged:
 		return QueueChangeLanded
-	case causeFailed, causeRestartFailed, causePickFailed, causeDetachedForkFailed:
+	case causeFailed, causeRestartFailed:
 		return QueueChangeFailed
 	}
 	return QueueChangeDequeued
@@ -593,24 +585,17 @@ func memberOf(entry wsm.MergeQueueEntry, record wsm.Workspace) QueueMember {
 		Workspace: entry.Workspace,
 		Name:      record.Name,
 		Branch:    branch,
-		Mode:      modeOf(entry.Source, record),
+		Mode:      modeOf(entry.Source),
 		Started:   entry.State != wsm.MergeQueued,
 		Front:     entry.Source.Front,
-	}
-	if record.MergeOf != nil {
-		member.Requester = record.MergeOf.Requester
 	}
 	return member
 }
 
-// modeOf names how a merge in line was asked for: async when it runs in a
-// merge workspace, a one-shot when it lands the workspace's own branch and
-// closes it, and in place otherwise.
-func modeOf(source wsm.MergeSource, record wsm.Workspace) MergeMode {
-	switch {
-	case record.MergeOf != nil:
-		return MergeModeAsync
-	case source.Kind.ClosesRequester() && !source.KeepOpen:
+// modeOf names how a merge in line was asked for: a one-shot when it lands
+// the workspace's own branch and closes it, and in place otherwise.
+func modeOf(source wsm.MergeSource) MergeMode {
+	if source.Kind.ClosesRequester() && !source.KeepOpen {
 		return MergeModeOneShot
 	}
 	return MergeModeInPlace

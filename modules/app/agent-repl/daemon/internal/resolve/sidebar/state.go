@@ -555,8 +555,6 @@ type mergeQueue struct {
 	deployCheck *DeployCheckHold
 	// members are the workspaces with a row on the queue.
 	members map[ids.WorkspaceID]struct{}
-	// async are the workspaces whose own branch has an async merge on it.
-	async map[ids.WorkspaceID]struct{}
 	// line is the merges in line, front first (MergeQueue.Line).
 	line []QueueEntry
 	// remediating are the merges remediating out of line
@@ -571,7 +569,7 @@ type mergeQueue struct {
 
 // newMergeQueue indexes one stated queue.
 func newMergeQueue(q MergeQueue) mergeQueue {
-	return mergeQueue{pause: q.Pause, deployCheck: q.DeployCheck, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, remediating: q.Remediating, mediation: q.Mediation, deploying: q.Deploying}
+	return mergeQueue{pause: q.Pause, deployCheck: q.DeployCheck, members: setOf(q.Workspaces), line: q.Line, remediating: q.Remediating, mediation: q.Mediation, deploying: q.Deploying}
 }
 
 // brokenHold names a broken hold: the landed merge still deploying, which
@@ -603,7 +601,7 @@ func setOf(ws []ids.WorkspaceID) map[ids.WorkspaceID]struct{} {
 // empty reports whether the queue says nothing the roster could draw: not
 // paused, and no workspace on it.
 func (q mergeQueue) empty() bool {
-	return q.pause == nil && q.deployCheck == nil && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0 && len(q.remediating) == 0 && q.mediation == nil && q.deploying == nil
+	return q.pause == nil && q.deployCheck == nil && len(q.members) == 0 && len(q.line) == 0 && len(q.remediating) == 0 && q.mediation == nil && q.deploying == nil
 }
 
 // newRosterState builds an empty roster accumulation.
@@ -617,36 +615,20 @@ func newRosterState() *rosterState {
 	}
 }
 
-// asyncMerging reports whether WS's own branch has an async merge on any
-// repository's merge queue.
-func (r *rosterState) asyncMerging(ws ids.WorkspaceID) bool {
-	for _, q := range r.queues {
-		if _, ok := q.async[ws]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 // paused reports whether the queue draws as paused: a standing pause, or its
 // deploy check's hold.
 func (q mergeQueue) paused() bool { return q.pause != nil || q.deployCheck != nil }
 
 // pausedMergeQueue answers the paused repository queue that holds a merge the
 // row of WS draws, and false when none does. The row draws its own merge
-// (OWNMERGE, ownMergeDrawn), which is on the queue WS has a row on, and an
-// async merge of its branch when it carries the async_merging marker (ASYNC),
-// which is the queue that names WS as a requester. A row drawing neither
-// draws no merge for a pause to change.
-func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, ownMerge, async bool) (wsm.RepoKey, bool) {
+// (OWNMERGE, ownMergeDrawn), which is on the queue WS has a row on. A row
+// drawing none draws no merge for a pause to change.
+func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, ownMerge bool) (wsm.RepoKey, bool) {
 	for repo, q := range r.queues {
 		if !q.paused() {
 			continue
 		}
 		if _, on := q.members[ws]; ownMerge && on {
-			return repo, true
-		}
-		if _, on := q.async[ws]; async && on {
 			return repo, true
 		}
 	}

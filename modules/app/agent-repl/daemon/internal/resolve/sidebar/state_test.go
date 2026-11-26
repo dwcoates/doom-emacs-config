@@ -64,9 +64,9 @@ func TestTurnEndArmReadsTheLadder(t *testing.T) {
 // A queue holds a broken hold exactly when a landed merge is still deploying
 // and the front of its line is admitted.
 func TestBrokenHoldNamesTheDeployingMergeAndTheAdmittedFront(t *testing.T) {
-	deploying := &QueueEntry{Workspace: "w-landed", Credited: "w-landed", Admitted: true}
-	admitted := QueueEntry{Workspace: "w2", Credited: "w2", Admitted: true}
-	waiting := QueueEntry{Workspace: "w2", Credited: "w2"}
+	deploying := &QueueEntry{Workspace: "w-landed", Admitted: true}
+	admitted := QueueEntry{Workspace: "w2", Admitted: true}
+	waiting := QueueEntry{Workspace: "w2"}
 	cases := []struct {
 		name   string
 		queue  MergeQueue

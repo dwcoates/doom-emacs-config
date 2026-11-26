@@ -76,10 +76,10 @@ func TestRefusalCarriesItsReason(t *testing.T) {
 func TestLogRefusalRecordsAtInfoWithTheRefusal(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	refusal := refuse(ArmNameTaken, theWorkspace, "the name is taken")
+	refusal := refuse(ArmStillQueued, theWorkspace, "the merge stands in line")
 
 	// Act
-	logRefusal(log, "daemon.merge.enqueue", logsite.Msg("refused an async merge whose name is taken"), dlog.Context{"workspace": "w1"}, refusal)
+	logRefusal(log, "daemon.merge.enqueue", logsite.Msg("refused a merge that stands in line"), dlog.Context{"workspace": "w1"}, refusal)
 
 	// Assert
 	record, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.enqueue"})

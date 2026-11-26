@@ -1533,12 +1533,12 @@ func TestAConflictResolutionThatGivesUpHandsTheWorkspaceBackInPlace(t *testing.T
 
 	// Assert: the failure is handed to the workspace itself, in place, and
 	// its lease is let go, so its next prompt runs as an ordinary turn.
-	sent := h.detached.sent()
-	if len(sent) != 1 || sent[0].requester != theWorkspace || sent[0].mergeWS != theWorkspace {
+	sent := h.handBacks.sent()
+	if len(sent) != 1 || sent[0].ws != theWorkspace {
 		t.Fatalf("handbacks = %+v, want one to the workspace itself", sent)
 	}
-	if out := sent[0].outcome; out.Kind != DetachedFailed || !out.InPlace {
-		t.Fatalf("outcome = %+v, want an in-place failure", out)
+	if out := sent[0].outcome; out.Kind != EndingFailed {
+		t.Fatalf("outcome = %+v, want a failure", out)
 	}
 	if h.leaseHeld() {
 		t.Fatal("the lease is still held after the merge gave up")
@@ -3187,20 +3187,14 @@ func TestEveryFixingAttemptsBriefRunsTheWorkspacesRecordedCases(t *testing.T) {
 }
 
 // BOTH REPAIR BRIEFS SAY WHAT A GIVE-UP LEAVES THEIR AGENT, through the one
-// sentence afterGiveUp composes: an async merge's agent that its work ends
-// with its session and never moves to its maker's branch or worktree, and a
-// merge in place's that its workspace is handed back.
+// sentence afterGiveUp composes: its workspace is handed back.
 func TestEveryRepairBriefSaysWhatAGiveUpLeavesItsAgent(t *testing.T) {
 	tests := []struct {
 		name  string
-		async bool
 		brief string
-		want  string
 	}{
-		{name: "a conflict resolution in a merge workspace", async: true, brief: BriefConflictResolve, want: afterGiveUpAsync},
-		{name: "a fixing attempt in a merge workspace", async: true, brief: BriefTestFailureResolve, want: afterGiveUpAsync},
-		{name: "a conflict resolution in place", brief: BriefConflictResolve, want: afterGiveUpInPlace},
-		{name: "a fixing attempt in place", brief: BriefTestFailureResolve, want: afterGiveUpInPlace},
+		{name: "a conflict resolution", brief: BriefConflictResolve},
+		{name: "a fixing attempt", brief: BriefTestFailureResolve},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3212,10 +3206,6 @@ func TestEveryRepairBriefSaysWhatAGiveUpLeavesItsAgent(t *testing.T) {
 			}
 			h.o.deps.Briefs = func(_ string, values map[string]string) (string, error) { return brief.Splice(values) }
 			r := failingTestsRun(t, h)
-			if tt.async {
-				h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
-				r.ws = theMergeWorkspace
-			}
 
 			// Act
 			var text string
@@ -3226,11 +3216,8 @@ func TestEveryRepairBriefSaysWhatAGiveUpLeavesItsAgent(t *testing.T) {
 			}
 
 			// Assert
-			if err != nil || !strings.Contains(text, tt.want) {
-				t.Fatalf("brief (%v):\n%s\nwant it to say %q", err, text, tt.want)
-			}
-			if other := map[string]string{afterGiveUpAsync: afterGiveUpInPlace, afterGiveUpInPlace: afterGiveUpAsync}[tt.want]; strings.Contains(text, other) {
-				t.Fatalf("brief:\n%s\nalso says %q", text, other)
+			if err != nil || !strings.Contains(text, afterGiveUpInPlace) {
+				t.Fatalf("brief (%v):\n%s\nwant it to say %q", err, text, afterGiveUpInPlace)
 			}
 		})
 	}

@@ -926,8 +926,8 @@ message RosterRowOpenOwnedPullRequest {}
 //
 // THE DAEMON DECIDES IT (wsm.Workspace.Visibility), keeps it in its store,
 // and states it on every row; no other layer works it out. A workspace is
-// visible when it is OPEN (the Open section's rows: never a backlogged, closed or
-// hidden merge workspace, nor a thread) and either no fold covers it (a
+// visible when it is OPEN (the Open section's rows: never a backlogged or closed
+// workspace, nor a thread) and either no fold covers it (a
 // repository section's, a subsection's, or any ancestor's children fold), or
 // it is WORKING (a turn or detached work runs, or it asks the user something),
 // or UNVIEWED (a turn-end row the user has not interacted with since its
@@ -978,31 +978,6 @@ message RosterRowContextHeat {
   double window_fill = 1;
 }
 
-// The ASYNC-MERGING marker: the workspace's OWN BRANCH is merging async, in a
-// hidden merge workspace forked from it. Empty: presence is the fact.
-//
-// PRESENT from the moment the async request is recorded on the repository's
-// merge queue until it leaves the queue -- landed, failed or taken off -- and
-// absent otherwise, whatever the row's status arm says. A SYNC merge, which
-// runs in the workspace itself, never raises it: that merge is the row's own
-// `merge_queued` or `merging` arm.
-//
-// WHY A MARKER AND NOT A STATUS ARM: the workspace itself is free while its
-// branch merges elsewhere. It takes prompts, runs turns and raises gates, so
-// its status arm keeps resolving exactly as for any other workspace (the
-// footer's projection), and the row's NAME keeps that status's color. The
-// marker is the one extra fact both surfaces draw beside it:
-//
-//   - the sidebar inks the row's PLAIN status dot purple, breathing, in place
-//     of the arm's own color. Any other mark the row draws in the dot's place
-//     outranks it: a gate's glyph, the one-shot glyph, a merge glyph, or a
-//     dot with an ink of its own (`render-colors.json#glyph_inks`, e.g. the
-//     compacting orange). Which marks are plain is the shared vocabulary's
-//     `async_merge_mark` section.
-//   - the Emacs tab bar paints the tab's `[N]` bracket with the merge purple
-//     background, and the space after it and the workspace name keep the
-//     status background.
-message RosterRowAsyncMerging {}
 
 // The MERGE-TURN marker: the workspace's OWN MERGE is in flight (queued or
 // running a step) and its session runs a turn, so the row's status arm is the
@@ -1011,8 +986,7 @@ message RosterRowAsyncMerging {}
 // PRESENT exactly while BOTH hold, and absent otherwise:
 //
 //   - the merge orchestrator holds a merge in flight (queued or merging) for
-//     this workspace: a SYNC merge running in it, or, for a hidden merge
-//     workspace, the async merge running there;
+//     this workspace, running in it;
 //   - the row's status arm stands on the ladder's THINKING rung
 //     (`submitting`, `thinking`, `vendor_silent`, `clearing`,
 //     `compacting`): the session runs a turn.
@@ -1039,8 +1013,7 @@ message RosterRowMergeTurn {}
 // PRESENT exactly while BOTH hold, and absent otherwise:
 //
 //   - the row draws a MERGE INDICATOR: its status is `merging` or
-//     `merge_queued`, or it carries the `merge_turn` or `async_merging`
-//     marker;
+//     `merge_queued`, or it carries the `merge_turn` marker;
 //   - the merge queue of the repository THAT merge is on is paused, its
 //     deploy check's hold included (RosterMergeQueuePauserDeployCheck).
 //
@@ -1059,14 +1032,11 @@ message RosterRowMergeTurn {}
 // ruling, 2026-10-14):
 //
 //   - every merge indicator's INK is that section's ink: the merge glyph of
-//     a `merging` or `merge_queued` row, the merge-turn mark, and the
-//     async-merge mark;
+//     a `merging` or `merge_queued` row, and the merge-turn mark;
 //   - the breath the merge gave the row's NAME stops, and the name keeps its
-//     color. A `merging` row's name holds still. A row breathing only for its
-//     async-merge mark holds still. A row whose own status arm breathes (a turn
-//     in flight while its branch merges async, or the merge's own turn under
-//     the merge-turn mark) keeps that breath, which is the turn's, not the
-//     merge's.
+//     color. A `merging` row's name holds still. A row whose own status arm
+//     breathes (the merge's own turn under the merge-turn mark) keeps that
+//     breath, which is the turn's, not the merge's.
 //
 // The Emacs tab bar draws nothing for it.
 message RosterRowMergePaused {}
@@ -1300,18 +1270,8 @@ message RosterRepoSection {
 // line agentrepl.v1.MergeQueueStatus.entries reads. A merge only REQUESTED,
 // its asking turn still running, is in no line and is not listed.
 //
-// EVERY MERGE IS CREDITED AS THE REST OF THE ROSTER CREDITS IT: to the
-// workspace landing its own branch, or, for an async merge, to the workspace
-// that asked for it, which carries the `async_merging` marker in the
-// workspaces view (RosterRow.async_merging). A hidden merge workspace is never
-// drawn as a row or selected here.
-//
-// EVERY MERGE IS NAMED BY WHAT IT IS (owner request, 2026-11-09): a workspace
-// landing its own branch (a `workspace finished` included) by the landing
-// workspace's name, and an async merge by ITS OWN NAME (the `-name` given to
-// `agent-repld workspace async-merge`, its merge workspace's name), never its
-// requester's: one workspace may have many async merges in flight, and each
-// must be told apart in the queue (RosterMergeQueueSubject.name).
+// EVERY MERGE IS A WORKSPACE LANDING ITS OWN BRANCH, credited to that
+// workspace and named by its name (RosterMergeQueueSubject.name).
 //
 // A queue whose line holds no merge and that remediates nothing is not drawn:
 // its repository has no group in the Merge Queue section, paused or not.
@@ -1488,7 +1448,7 @@ message RosterMergeQueueOffQueue {
   RosterMergeQueueOffQueueDiscard discard = 4;
 }
 // Why the merge left its queue, in the sidebar's words ("evicted", "failed",
-// "restart failed", "adopted"), drawn verbatim and resolved by the daemon
+// "restart failed"), drawn verbatim and resolved by the daemon
 // from agentrepl.v1.MergeQueueStatusOffQueueCause.
 message RosterMergeQueueOffQueueCause {
   string text = 1;
@@ -1496,12 +1456,11 @@ message RosterMergeQueueOffQueueCause {
 // The requeue control: a click sends agentrepl.v1.RequeueMerge for `merge`,
 // placed at the back, asked by the user.
 message RosterMergeQueueOffQueueRequeue {
-  // The merge's own workspace (an async merge's merge workspace, never the
-  // requester the subject credits), echoed verbatim in the request.
+  // The merge's own workspace, echoed verbatim in the request.
   workspace.v1.WorkspaceRef merge = 1;
 }
 // The discard control: a click sends agentrepl.v1.DiscardMerge for `merge`,
-// asked by the user. An async merge's discard closes its merge workspace.
+// asked by the user.
 message RosterMergeQueueOffQueueDiscard {
   // The merge's own workspace, echoed verbatim in the request.
   workspace.v1.WorkspaceRef merge = 1;
@@ -1693,63 +1652,25 @@ message RosterMergeQueuePauserWorkspace {
 // The name a merge in the queue is drawn under, which workspace it is
 // credited to, and where a click on it goes.
 message RosterMergeQueueSubject {
-  // The workspace the merge is credited to (see RosterRepoMergeQueue). A
-  // click selects it: for an async merge that is its REQUESTER, whose root
-  // feed draws the merge's bubble, never the hidden merge workspace, which a
-  // click would otherwise have to reveal for good.
+  // The workspace landing its own branch (see RosterRepoMergeQueue). A click
+  // selects it.
   workspace.v1.WorkspaceRef workspace = 1;
-  // The merge's name, drawn verbatim. A sync merge (a workspace landing its
-  // own branch, a `workspace finished` included) is named by the credited
-  // workspace's name. An ASYNC merge is named by its own name, never its
-  // requester's: its merge workspace's name, and before that workspace is
-  // forked, the name its request reserved for it (the `-name` given to
-  // `agent-repld workspace async-merge`), so several async merges from one
-  // requester are drawn apart.
+  // The merge's name, drawn verbatim: the landing workspace's name.
   string name = 2;
   // The merge bubble's head row on the credited workspace's root feed, which
   // a click brings on screen and opens once that workspace is selected
-  // (agentrepl.v1.SelectWorkspaceRequest.reveal). For an async merge the
-  // bubble is the one its requester's feed draws for that very merge, so a
-  // click lands on the merge named, not just on its requester. UNSET for a
+  // (agentrepl.v1.SelectWorkspaceRequest.reveal). UNSET for a
   // merge this daemon holds no bubble identity for; a click then only
   // selects.
   optional FeedId reveal = 3;
-  // How the merge runs: in place, or in a hidden merge workspace.
-  RosterMergeQueueMode mode = 4;
-  // THE MERGE ITSELF, as its queue holds it: the workspace its queue entry
-  // stands under. For a sync merge that is `workspace`; for an async merge
-  // it is its hidden merge workspace, never its requester, so one of several
-  // async merges one workspace asked for can be told apart. Every ask the
-  // sidebar makes about this merge (agentrepl.v1.UpdateMergeQueueMoveTo, its
-  // anchor included) names it; a click still selects `workspace`.
-  workspace.v1.WorkspaceRef merge = 5;
+  // Tags 4 (`mode`, sync or async) and 5 (`merge`, the hidden merge
+  // workspace an async merge stood under) are RETIRED with the async merge:
+  // every merge is `workspace` landing its own branch, which every ask the
+  // sidebar makes about it names.
+  reserved 4, 5;
+  reserved "mode", "merge";
 }
 
-// How a merge in the queue runs. THE ARM IS THE MODE.
-message RosterMergeQueueMode {
-  oneof mode {
-    // The workspace landing its own branch in place.
-    RosterMergeQueueModeSync sync = 1;
-    // An async merge, run in a hidden merge workspace.
-    RosterMergeQueueModeAsync async = 2;
-  }
-}
-// In place. No fields.
-message RosterMergeQueueModeSync {}
-// Async: the merge runs in a hidden merge workspace for its requester.
-message RosterMergeQueueModeAsync {
-  // REQUIRED. The requester the merge runs for, drawn after the merge's name
-  // as a quieter "(<name>)", so an async merge reads as whose it is
-  // and a click's landing on the requester is expected.
-  RosterMergeQueueModeAsyncRequester requester = 1;
-}
-// The requester an async merge runs for, drawn "(<name>)": cut with
-// an ellipsis when the line is short of room, its whole text on a hover of
-// the line.
-message RosterMergeQueueModeAsyncRequester {
-  // The requester workspace's name, verbatim.
-  string name = 1;
-}
 
 // THE HEAD OF THE QUEUE, drawn as a small merge bubble: who it is, the stages
 // it has been through, and where it stands.
@@ -2569,10 +2490,11 @@ message RosterRow {
   // contract.
   optional RosterRowOpening opening = 62;
 
-  // The row's ASYNC-MERGING marker: present while the workspace's own branch
-  // merges async in a hidden merge workspace, on ANY status arm. See
-  // RosterRowAsyncMerging, which carries the marker's whole contract.
-  optional RosterRowAsyncMerging async_merging = 64;
+  // Tag 64 (`async_merging`, the marker of a branch merging in a hidden merge
+  // workspace) is RETIRED with the async merge: a workspace's work lands
+  // through its children, each drawn as a row of its own.
+  reserved 64;
+  reserved "async_merging";
 
   // The row's MERGE-PAUSED marker: present while the row draws a merge
   // indicator and the merge queue that merge is on is paused. See
@@ -2799,8 +2721,8 @@ message RosterRow {
   // Tags 57 (`merge_waiting`) and 60 (`opening`) are RETIRED (owner ruling,
   // 2026-10-13): a merge that waits to start is `merge_queued`, and a
   // workspace being opened is `inactive` with the row's `opening` marker.
-  // Tag 63 is RETIRED: an async merge of the workspace's own branch is the
-  // row's `async_merging` marker beside its real status, never a status.
+  // Tag 63 is RETIRED: it named an async merge of the workspace's own branch,
+  // which no longer exists.
   reserved 19, 22, 57, 60, 63;
   reserved "merge_enqueuing", "merge_conflict", "merge_waiting";
 
@@ -3134,9 +3056,6 @@ message RosterRowWhenNoTurnRunning {
 // queue's durable record, so a daemon restart does not reset the count. The
 // client ticks the elapsed time from it with the footer clock's own
 // formatter, exactly as for TURN_RUNNING.
-//
-// SYNC ONLY: a workspace whose branch merges ASYNC is free while it merges
-// (frontend.v1.RosterRowAsyncMerging), so its row keeps its turn clock.
 message RosterRowWhenSyncMerging {
   int64 started_at_ms = 1;
 }
@@ -3156,8 +3075,7 @@ message RosterRowDetail {
   optional RosterRowDetailCommits commits = 4;
 
   // Every workspace whose recorded parent is this one, in roster order,
-  // whichever section draws it (or none, for a merge past the band). A hidden
-  // merge workspace is drawn nowhere and is not listed here either. EMPTY when
+  // whichever section draws it (or none, for a merge past the band). EMPTY when
   // the workspace has no children: the panel then draws no children block at
   // all.
   repeated RosterRowDetailChild children = 5;

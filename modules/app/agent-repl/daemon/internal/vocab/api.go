@@ -10,15 +10,14 @@ package vocab
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -75,9 +74,6 @@ type RenderColors struct {
 	// OneShotGlyphArms are the RosterRow.status arms on which a one-shot's
 	// glyph replaces the status mark, and the only ones.
 	OneShotGlyphArms []string
-	// AsyncMergeMark is how both surfaces draw RosterRowAsyncMerging: the
-	// workspace's own branch merging async while the row keeps its status.
-	AsyncMergeMark AsyncMergeMark
 	// PausedMergeMark is how the sidebar draws RosterRowMergePaused: the
 	// merge indicators of a row whose merge's queue is paused.
 	PausedMergeMark PausedMergeMark
@@ -103,18 +99,6 @@ type RenderColors struct {
 	// FailureSides maps each failure side (machinery, vendor, client_local) to
 	// its color.
 	FailureSides map[string]string
-}
-
-// AsyncMergeMark is the shared drawing of an async merge of the workspace's
-// own branch (frontend.v1.RosterRowAsyncMerging): the merge glyph, ink and
-// motion the sidebar draws in place of its plain status dot, and the
-// background of the Emacs tab's [N] run. Every renderer reads it here, so no
-// surface picks its own purple.
-type AsyncMergeMark struct {
-	Glyph      string `json:"glyph"`
-	Ink        string `json:"ink"`
-	Motion     string `json:"motion"`
-	TabBracket string `json:"tab_bracket"`
 }
 
 // PausedMergeMark is the shared drawing of a row whose merge's queue is
@@ -144,7 +128,6 @@ type renderColorsJSON struct {
 	GlyphInks               map[string]string            `json:"glyph_inks"`
 	GlyphOnlyColors         []string                     `json:"glyph_only_colors"`
 	OneShotGlyphArms        []string                     `json:"one_shot_glyph_arms"`
-	AsyncMergeMark          AsyncMergeMark               `json:"async_merge_mark"`
 	PausedMergeMark         PausedMergeMark              `json:"paused_merge_mark"`
 	FooterStatus            map[string]string            `json:"footer_status"`
 	ComposerClosedColors    []string                     `json:"composer_closed_colors"`
@@ -364,18 +347,6 @@ func (c RenderColors) validate() error {
 		if _, ok := c.RosterStatus[arm]; !ok {
 			return fmt.Errorf("one_shot_glyph_arms names %q, which is no roster_status arm", arm)
 		}
-	}
-	if m := c.AsyncMergeMark; !slices.Contains(slices.Collect(maps.Values(c.MergeGlyphs)), m.Glyph) {
-		return fmt.Errorf("async_merge_mark.glyph = %q, which no merge_glyphs arm draws", m.Glyph)
-	}
-	if m := c.AsyncMergeMark; m.Ink == ColorNone || !contains(c.Colors, m.Ink) {
-		return fmt.Errorf("async_merge_mark.ink = %q, which is not a color", m.Ink)
-	}
-	if err := checkMotion("async_merge_mark", c.AsyncMergeMark.Motion); err != nil {
-		return err
-	}
-	if m := c.AsyncMergeMark; m.TabBracket == ColorNone || !contains(c.Colors, m.TabBracket) {
-		return fmt.Errorf("async_merge_mark.tab_bracket = %q, which is not a color", m.TabBracket)
 	}
 	if m := c.PausedMergeMark; !c.inkColor(m.Ink) {
 		return fmt.Errorf("paused_merge_mark.ink = %q, which is neither a color nor a glyph-only color", m.Ink)

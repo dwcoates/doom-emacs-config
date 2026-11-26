@@ -324,9 +324,6 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		wait.cancel()
 		log.Info(op, "a merge request waiting for its turn to end moves with the workspace; the successor re-arms it", fields)
 	}
-	if o.withdrawAsync(ws) {
-		log.Info(op, "the async merge requests waiting for their turn to end move with the workspace; the successor re-arms them", fields)
-	}
 	if !running {
 		o.forgetMoved(ws)
 		log.Debug(op, "the workspace has no merge running here; nothing to suspend", fields)
@@ -517,13 +514,6 @@ func (o *orchestrator) adoptWorkspace(ctx context.Context, ws ids.WorkspaceID) e
 		}
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i] < repos[j] })
-	requests, err := o.deps.DB.AsyncMergeRequestsOf(ctx, ws)
-	if err != nil {
-		o.deps.Log.Global().Error(op, "could not read the workspace's async merge requests to take them", dlog.Context{
-			"workspace": string(ws), "error": err.Error()})
-		return fmt.Errorf("merge: adopt the async merge requests of %q: %w", ws, err)
-	}
-	o.rearmAsyncRequests(requests, nil)
 	// THE MARK CLEARS WITH THE ABANDONMENT IT HELD, in one lock and only once
 	// the merges are back: a dequeue either saw the mark and left its
 	// abandonment here, or finds the merge as it stands now -- resuming, or

@@ -73,8 +73,7 @@ type CreateSpec struct {
 	// Landing is where the workspace is cut from and lands
 	// (agentrepl.v1.WorkspaceLandingTarget), nil for its relationship's
 	// default: into Parent when Parent is of the create's repository, the
-	// primary branch otherwise. Never set on a merge workspace, whose target
-	// is the queue's (MergeOf).
+	// primary branch otherwise.
 	Landing *wsm.LandingChoice
 	// ContextWorkspace, set only on a one-shot, is the registered workspace
 	// the commission is about: the one-shot's first message opens with the
@@ -88,11 +87,27 @@ type CreateSpec struct {
 	// part of that workspace's view the commission most likely cites. Nil when
 	// nothing was selected.
 	ContextSelection *ContextSelection
-	// BaseRef is the base a MERGE WORKSPACE is cut from (its branch), set only
-	// with MergeOf. Every other workspace is cut from its source's tip: the
-	// parent's branch for a child, the repository's default branch otherwise
-	// (agentrepl.v1.WorkspaceLandingTarget), so no request names a base.
-	BaseRef string
+	// SourceBranch is an existing branch the workspace is cut from, in place
+	// of its landing target's tip (agentrepl.v1.WorkspaceSourceBranch): its
+	// own branch is cut at the source's tip as the create runs, a snapshot,
+	// and it lands into its landing target like any workspace. Empty cuts it
+	// from its landing target's tip.
+	SourceBranch string
+	// Effects are what a one-shot does once it lands beyond landing
+	// (wsm.LandingEffects), as its creator asked: nil for none, and set only
+	// on a one-shot. Its CleanupDir is resolved here, from SourceBranch, when
+	// CleanupSourceWorktree asks for one, and never supplied.
+	Effects *wsm.LandingEffects
+	// CleanupSourceWorktree asks that the worktree that has SourceBranch
+	// checked out as the create runs be removed once the one-shot lands
+	// (agentrepl.v1.CreateWorkspaceOneShot.cleanup_source_worktree). Set only
+	// beside SourceBranch on a one-shot.
+	CleanupSourceWorktree bool
+	// ForkSubagent, when set, is the subagent whose OWN conversation is forked
+	// into this workspace (agentrepl.v1.WorkspaceContextOriginSubagent), and
+	// ForkFrom is the workspace whose session spawned it, which the server
+	// resolved from disk.
+	ForkSubagent string
 	// Parent, when set, makes the workspace a CHILD of it
 	// (agentrepl.v1.WorkspaceRelationshipChild): the parent is its OWNER,
 	// coordinates it, follows its edges, and the roster nests it there. Nil
@@ -151,21 +166,6 @@ type CreateSpec struct {
 	// caller relaying them to a client. Nil for the legacy synchronous create,
 	// which emits nothing; the verb never assumes it is set.
 	Progress CreateProgress
-	// MergeOf, when set, makes this create a MERGE WORKSPACE: a hidden fork of
-	// MergeOf.Requester made to carry that workspace's async merge. The spec
-	// must then fork from the requester (ForkFrom) and name nothing else the
-	// daemon derives here: the name is MergeName, which the request reserved;
-	// the merge target, the branch it lands on and the merge actions are the
-	// ones the merge queue decided at hand-off (MergeOf.TargetDir,
-	// .ParentBranch, .Actions), read off nothing else, so a requester with no
-	// creation job (the main checkout) is forked from like any other and the
-	// merge workspace runs only the actions its request named; and the roster
-	// nests it under the requester once it is revealed.
-	MergeOf *wsm.MergeOrigin
-	// MergeName is a merge workspace's name as its requesting agent chose it,
-	// unprefixed, set exactly when MergeOf is. It was checked and reserved when
-	// the request was recorded, so it is taken as it stands.
-	MergeName string
 	// Intake makes this create an EPHEMERAL INTAKE WORKSPACE (intake.go): it
 	// is recorded as one and backlogged before its session starts, it runs no
 	// creation stage, and the daemon retires it when a turn of it ends. Only
@@ -183,7 +183,7 @@ type CreateSpec struct {
 	// Placement files the workspace into a subsection in the insert's own
 	// transaction (agentrepl.v1.CreateWorkspaceRequest.placement), nil for
 	// none. It needs a Requester, the creator of a new subsection, and is
-	// refused beside Parent and MergeOf. A create with one adds no filing note
+	// refused beside Parent. A create with one adds no filing note
 	// to the first message: the creator already filed the workspace.
 	Placement *CreatePlacement
 }
@@ -437,11 +437,6 @@ type Verbs interface {
 	// question and brings its session up (thread.go); the caller submits the
 	// question.
 	CreateThread(ctx context.Context, question string) (wsm.Workspace, error)
-	// CreateMergeWorkspace creates the hidden MERGE WORKSPACE an async merge
-	// runs in: a fork of REQUESTER's conversation named NAME, in a worktree of
-	// its own on BASE as it stands now, recorded as forked for ORIGIN's
-	// request.
-	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
 	// CreateMediator makes the standing mediator of ROLE of the repository at
 	// REPODIR, named the role's name (wsm.MediatorRole.Name), on AGENT's model, unprompted and in remote control
 	// (deploychecks.go).
@@ -453,16 +448,6 @@ type Verbs interface {
 	// a one-shot landing on the main branch at the front of the queue, on
 	// opus, named NAME and commissioned with PROMPT (productionchildren.go).
 	CreateProductionChild(ctx context.Context, repoDir string, mediator ids.WorkspaceID, name, prompt string) (wsm.Workspace, error)
-	// StartMergeWorkspace brings up merge workspace WS's session when none is
-	// live, making the fork it still owes: what a hand-off that finds the
-	// merge workspace a restart left behind needs before its pick can run.
-	StartMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) error
-	// RevealMergeWorkspace draws a hidden merge workspace in the tab bar and
-	// the sidebar from now on, answering whether this call revealed it.
-	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (bool, error)
-	// ClaimMergeName checks an async merge's name and claims it until the
-	// request carrying it is recorded (merge.Names).
-	ClaimMergeName(ctx context.Context, repoDir, name string) (branch string, release func(), taken bool, err error)
 	// RequestCommandSupport composes the add-support brief from
 	// prompts/add-support-slash-command.md — LOUD when the brief is absent —
 	// and creates a support workspace through the ordinary standard form with
@@ -574,11 +559,6 @@ type Verbs interface {
 	Nuke(ctx context.Context, ws ids.WorkspaceID) error
 	// BeginNuke is a nuke's fast half, as BeginKill is a kill's.
 	BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, error)
-	// RetireLanded retires a requester whose detached merge landed: its
-	// session stopped, its worktree removed, the workspace closed and stamped
-	// merged. It answers why it kept the workspace instead (the RetireKept
-	// reasons), empty when it retired it.
-	RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, error)
 	// Forget removes a CLOSED workspace's registry record, and its repository
 	// record when no other workspace references that repository. It destroys
 	// no files: the directory survives and re-registering it mints a fresh
@@ -659,8 +639,7 @@ type Verbs interface {
 	// answering the summary the workspace now has.
 	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) (wsm.WorkspaceSummary, error)
 	// SetBacklogged moves the workspace into the roster's backlog, or back
-	// out of it, and republishes the roster. A show also reveals a hidden
-	// merge workspace, so it ends with the workspace drawn or with an error.
+	// out of it, and republishes the roster.
 	SetBacklogged(ctx context.Context, ws ids.WorkspaceID, backlogged bool) error
 	// BacklogColdGate moves a shown workspace whose cold gate, lapsed at
 	// gateLapsedAt, has stood too long into the backlog, once per gate
@@ -770,7 +749,7 @@ type Verbs interface {
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error
 	// RequireCatalogModel refuses MODEL as not_in_catalog unless the catalog
 	// the session's login last served offers it: the check a model a session
-	// will START under passes, which needs no live selector (a hidden merge
+	// will START under passes, which needs no live selector (a backlogged
 	// workspace serves none).
 	RequireCatalogModel(ctx context.Context, ws ids.WorkspaceID, model string) error
 	// SetEffort switches the session's reasoning effort to a level the

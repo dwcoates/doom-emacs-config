@@ -1,8 +1,7 @@
 // lifecycle_config_refusal.proto — the refusals every way of asking for a
 // deploy or a create shares when the target repository's
 // `.agent-repl/lifecycle.yaml` (repoconfig.v1.LifecycleConfig) is missing or
-// unusable: a workspace finishing (FinishWorkspace), an async merge
-// (CreateWorkspaceAsyncMerge), and a create reading its creation stage
+// unusable: a workspace finishing (FinishWorkspace), and a create reading its creation stage
 // (CreateWorkspace). The file is read when the deploy or the create is asked
 // for, so a request into a repository that states no usable config records
 // nothing.

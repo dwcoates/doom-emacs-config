@@ -109,14 +109,14 @@ names its requester and placement as well, so the request tests read
   ;; A third element, when present, is the arm set this codec decodes instead of
   ;; the usual two: CreateWorkspaceResponse carries the option-B `accepted' ack
   ;; beside success and error.
-  ;; CreateWorkspaceResponse's `async_merge_accepted' answers only an async
-  ;; merge, and its `waiting_for_requester_turn' answers only a workspace
-  ;; forking itself, both an agent's request and never the editor's, and its
-  ;; `waiting_for_network' answers a synchronous create held for the network.
+  ;; CreateWorkspaceResponse's `waiting_for_requester_turn' answers only a
+  ;; workspace forking itself, an agent's request and never the editor's, and
+  ;; its `waiting_for_network' answers a synchronous create held for the
+  ;; network.
   ;; RestartWorkspaceResponse's `scheduled' answers only a `when_idle'
   ;; restart, which is an agent's request and never the editor's.
   '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
-     ("accepted" "asyncMergeAccepted" "error" "success" "waitingForNetwork"
+     ("accepted" "error" "success" "waitingForNetwork"
       "waitingForRequesterTurn"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
     ("agentrepl/v1/endpoint_list_workspace_transcripts.pb.go" "ListWorkspaceTranscriptsResponse")
@@ -2164,13 +2164,12 @@ logging rung returns normally, and the typed signal follows it."
                      (sort (copy-sequence want) #'string<))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-form-arms-pinned ()
-  "CreateWorkspaceRequest's form oneof is the two arms encoded here and the
-async merge, which is an agent\='s request and never the editor\='s."
+  "CreateWorkspaceRequest's form oneof is exactly the two arms encoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go"
                         "CreateWorkspaceRequest")
                        #'string<)
-                 '("asyncMerge" "oneShot" "standard"))))
+                 '("oneShot" "standard"))))
 
 (ert-deftest agent-repl-test-wire-verbs-one-shot-has-no-oneof-at-all ()
   "CreateWorkspaceOneShot carries no oneof: the finish choice is retired, so
@@ -2382,7 +2381,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "nameBranchExists" "invalidName" "unknownContextWorkspace" "unknownOwner" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeNameOffQueue" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown" "lifecycleConfigInvalid" "creationHookFailed" "placementOnChild" "placementOnMergeWorkspace" "placementRequiresWorkspace" "unknownPlacementSubsection" "blankPlacementSubsectionName" "gatherUnknownWorkspace" "gatherNotGatherable" "requestedByDeployMediator" "requestedByProductionMediator" "asyncMergeRuleChecksFailed")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "nameBranchExists" "invalidName" "unknownContextWorkspace" "unknownOwner" "unknownRequester" "unknownSourceBranch" "unknownSubagent" "unknownCloseAfter" "parentNotOpen" "originFetchFailed" "transferringAway" "standingDown" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown" "lifecycleConfigInvalid" "creationHookFailed" "placementOnChild" "placementRequiresWorkspace" "unknownPlacementSubsection" "blankPlacementSubsectionName" "gatherUnknownWorkspace" "gatherNotGatherable" "requestedByDeployMediator" "requestedByProductionMediator")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-model-not-in-catalog-arm ()
@@ -2466,11 +2465,12 @@ ref it names."
                      "{\"unknownRequester\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
                    '(:cause (:arm :unknown-requester :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-error-async-merge-arm-is-a-breach ()
-  "No editor create is an async merge, so an async-merge refusal is a breach."
+(ert-deftest agent-repl-test-wire-verbs-create-error-landing-child-arm-is-a-breach ()
+  "No editor create cuts a landing child from a source branch, so that
+refusal is a breach."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-create-workspace-error
-                   (agent-repl-test-wire-verbs--parse "{\"asyncMergeNameTaken\":{\"name\":\"x\"}}"))
+                   (agent-repl-test-wire-verbs--parse "{\"unknownSourceBranch\":{\"branch\":\"x\"}}"))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-invalid-name-slug-arm ()

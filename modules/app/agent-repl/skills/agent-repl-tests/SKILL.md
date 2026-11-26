@@ -43,7 +43,7 @@ language's rule suite (roster `Rules: true`): the daemon's in
 `reposcans/internal/sourcescan`), the elisp's in `lisp/test-rules-*.el`
 (`ert-rules`), the webapp's in `webapp/rules/` (`webapp-rules`); a scan in
 each fails a source-reading test anywhere else. An agent's
-`workspace finished` or `workspace async-merge` runs every rule suite on the
+`workspace finished` runs every rule suite on the
 branch first and refuses the merge with the failing cases named
 (AGENTS.md, "The merge queue's test gate and remediation contract").
 Measured 2026-11-25 with nothing reused: 86 CPU-seconds of units, 6m48s of
@@ -171,7 +171,6 @@ test code and in the production code its tests run. Off by default.
 - A reused unit does not run, so it writes no profile. Profiling a whole suite
   with nothing reused is `-no-reuse -as-user`, the user's alone.
 - A merge gate profiles only when its merge asks:
-  `agent-repld workspace async-merge ... -profile-gate` or
   `agent-repld workspace finished ... -profile-gate`. Its profiles land beside
   the gate run's log, which the gate's archived output names.
 - Reading the profiles:

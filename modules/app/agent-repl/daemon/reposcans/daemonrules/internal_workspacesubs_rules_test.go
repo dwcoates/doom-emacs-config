@@ -34,3 +34,29 @@ func TestBothNotifiersShareOneSupersession(t *testing.T) {
 		t.Fatalf("untoldnotice.Carried calls = %d, want one per notifier", calls)
 	}
 }
+
+// TestEveryCompactionGoesThroughSubmitCompaction holds the daemon's own
+// compactions to their one path: the notifier and the CompactWorkspace rpc
+// both call prompthandler.SubmitCompaction, and neither spells the command or
+// submits it by hand.
+func TestEveryCompactionGoesThroughSubmitCompaction(t *testing.T) {
+	sourcescan.InPackage(t, internalWorkspacesubsDir)
+	for _, path := range []string{"workspacesubs.go", "../server/compact.go"} {
+		t.Run(path, func(t *testing.T) {
+			// Arrange
+			src, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			source := string(src)
+
+			// Assert
+			if !strings.Contains(source, "prompthandler.SubmitCompaction(") {
+				t.Errorf("%s does not compact through prompthandler.SubmitCompaction", path)
+			}
+			if strings.Contains(source, "SESSION_COMMAND_COMPACT") || strings.Contains(source, `"/compact"`) {
+				t.Errorf("%s spells the compaction by hand", path)
+			}
+		})
+	}
+}

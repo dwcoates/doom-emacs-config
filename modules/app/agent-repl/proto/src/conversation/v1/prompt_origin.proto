@@ -126,12 +126,11 @@ enum PromptOrigin {
   // arrival (see the enum's header): it joins a running turn without
   // interrupting it.
   PROMPT_ORIGIN_LINK_UNRESOLVED = 30 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
-  // The daemon's report to a workspace's session that a merge it asked for
-  // has ended: an ASYNC merge (agentrepl.v1.CreateWorkspaceAsyncMerge) that landed
-  // or failed, or a ONE-SHOT (agentrepl.v1.MergeWorkspaceOneShot) that
-  // failed — a one-shot that lands closes the workspace and is not reported.
-  // It says that the branch landed, or what failed and where the user
-  // finishes it. Delivered on arrival (see the enum's header): it joins a
+  // The daemon's report to a workspace's session that its own ONE-SHOT merge
+  // (agentrepl.v1.MergeWorkspaceOneShot) failed: what failed and where the
+  // user finishes it. A one-shot that lands closes the workspace and is not
+  // reported to it; its parent is told instead, as a child's one update
+  // (agentrepl.v1.WorkspaceRelationshipChild). Delivered on arrival (see the enum's header): it joins a
   // running turn rather than waiting for its end. The feed draws it as the
   // FeedRow.merge_handback marker, never as a prompt bubble: the words are
   // the daemon's, and the merge itself is read in its bubble.
@@ -143,20 +142,16 @@ enum PromptOrigin {
   // on arrival (see the enum's header): it joins a running turn and wakes
   // an idle agent. Drawn as an ordinary prompt bubble.
   PROMPT_ORIGIN_WORKSPACE_RETARGETED = 32 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
-  // The daemon's resolving brief: the first turn of an ASYNC merge workspace
-  // whose request carries an instruction
-  // (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction). It carries the requesting
-  // agent's instruction, wrapped in the brief that tells the merge agent its
-  // worktree is on the merge's branch and has it prepare that branch as the
-  // instruction says. The turn is the merge's own: its rows draw under the
-  // bubble's resolving tab (frontend.v1.FeedMergeTabResolving), and the merge
-  // joins the queue once it ends.
-  PROMPT_ORIGIN_MERGE_PICK = 33 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
-  // The daemon's `/compact` of a requester whose ASYNC merge landed and asked
-  // to compact after it
-  // (agentrepl.v1.CreateWorkspaceAsyncMerge.compact_after).
-  // Submitted through the prompt queue right after the landed handback, so it
-  // runs behind the handback's turn. It is a context cut like any `/compact`:
+  // Value 33 (PROMPT_ORIGIN_MERGE_PICK, an async merge workspace's resolving
+  // brief) is RETIRED with the async merge: a one-shot's commission is its
+  // own prompt.
+  reserved 33;
+  reserved "PROMPT_ORIGIN_MERGE_PICK";
+  // The daemon's `/compact` of a requester whose ONE-SHOT child landed and
+  // was created to compact it afterwards
+  // (agentrepl.v1.CreateWorkspaceOneShot.compact_requester_after).
+  // Submitted through the prompt queue right after the requester is told of
+  // the landing, so it runs behind that notice's turn. It is a context cut like any `/compact`:
   // no prompt bubble, and the compaction's status, footer and separator drawn
   // as for one the user typed.
   PROMPT_ORIGIN_MERGE_COMPACT_AFTER = 34 [(spend_cause) = VENDOR_CALL_CAUSE_COMPACTION];
@@ -169,9 +164,7 @@ enum PromptOrigin {
   // failure's cause, and asks the agent to analyze the failure without
   // changing anything until the user answers. Delivered on arrival (see the
   // enum's header): it joins a running turn and wakes an idle agent. Drawn
-  // as an ordinary prompt bubble. A merge's own
-  // workspace (the hidden one an async merge runs in) is not reported here:
-  // the merge queue hands its failure back to the requester.
+  // as an ordinary prompt bubble.
   PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED = 35 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // The daemon's notice to a workspace's session that a merge queue it
   // subscribed to changed (agentrepl.v1.UpdateMergeQueueSubscribe): it names

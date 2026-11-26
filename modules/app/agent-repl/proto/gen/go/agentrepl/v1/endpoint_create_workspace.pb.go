@@ -6,22 +6,22 @@
 // exists. Callers learn the identity from the response; everything else
 // (roster row, status) arrives on the roster stream.
 //
-// THREE CREATION FORMS, one request: the form arm IS the kind of create.
+// TWO CREATION FORMS, one request: the form arm IS the kind of create.
 //   - A STANDARD create is the ordinary workspace; it lands when it, its
 //     owner or the user asks (MergeWorkspace).
 //   - A ONE-SHOT is a fire-and-forget workspace that lands itself when its
 //     work is done: the daemon appends the repository's own completion
-//     directive to the commission, and the agent carries it out.
-//   - An ASYNC MERGE lands a branch no workspace owns -- a subagent's, or one
-//     an agent cut by hand -- through a hidden merge workspace the queue
-//     creates when the merge starts.
+//     directive to the commission, and the agent carries it out. A one-shot
+//     cut from an existing branch (WorkspaceSourceBranch) is how a workspace
+//     lands work it already has, such as a subagent's branch, as a child.
 //
 // NOTHING IS IMPLIED BUT THE RELATIONSHIP'S LANDING DEFAULT. Every standard and
 // one-shot form names its relationship to its creator's work (child or peer,
 // WorkspaceRelationship); every request names its context origin and its
 // requester. Where a workspace lands defaults by its relationship (a child into
 // its parent, a peer on the primary branch) and is otherwise named
-// (WorkspaceLandingTarget); an async merge names its own source and target.
+// (WorkspaceLandingTarget), and where it is cut from is its landing target's
+// tip unless a source branch is named (WorkspaceSourceBranch).
 //
 // THE WORKSPACES A CREATE DERIVES FROM ARE TOLD. When a workspace is created
 // from another's branch, or with another's conversation forked, each such
@@ -68,24 +68,18 @@ type CreateWorkspaceRequest struct {
 	//
 	//	*CreateWorkspaceRequest_Standard
 	//	*CreateWorkspaceRequest_OneShot
-	//	*CreateWorkspaceRequest_AsyncMerge
 	Form isCreateWorkspaceRequest_Form `protobuf_oneof:"form"`
-	// Who asked. Notices about the new workspace and an async merge's report go
-	// to a requesting workspace, never to the user. REQUIRED. An async merge's
-	// requester is a workspace: the merge waits in that workspace's queue row
-	// until its turn ends, and its report goes to that workspace, so a user
-	// requester beside `async_merge` is refused as invalid.
+	// Who asked. Notices about the new workspace go to a requesting workspace,
+	// never to the user, and a requesting workspace is the new workspace's
+	// ORIGINATOR: its feed draws the new child's bubble (frontend.v1.FeedChild).
+	// REQUIRED.
 	Requester *WorkspaceRequester `protobuf:"bytes,11,opt,name=requester,proto3" json:"requester,omitempty"`
 	// The conversation the new workspace starts with. REQUIRED: a fresh one, or
-	// a fork of a workspace of this repository. An async merge's context is
-	// forked when its merge STARTS, not when it is requested, so it carries every
-	// landing that happened while the merge waited; an async merge must fork the
-	// workspace its branch was made by (`async_merge_context_not_maker`).
+	// a fork of a workspace of this repository, or a fork of a subagent's own
+	// conversation (WorkspaceContextOriginSubagent).
 	ContextOrigin *WorkspaceContextOrigin `protobuf:"bytes,12,opt,name=context_origin,json=contextOrigin,proto3" json:"context_origin,omitempty"`
 	// The session model at creation. UNSET = the daemon's default; presence,
-	// never an empty-string sentinel. Refused as invalid beside `async_merge`,
-	// whose workspace forks its maker's session under the maker's model;
-	// `priority` and `allow_ungated` are refused beside it likewise.
+	// never an empty-string sentinel.
 	//
 	// ONLY A MODEL THE CREATING LOGIN KNOWS IS ACCEPTED: the name must be one of
 	// the options' `model.name` in the catalog ListCreationModels serves for
@@ -115,13 +109,11 @@ type CreateWorkspaceRequest struct {
 	// no progress pushed. The pre-detach refusals (validation, an unknown
 	// repository) are answered synchronously on `error` in BOTH forms; only the
 	// outcomes that can arrive after the ack — naming, worktree, spawn, and
-	// success — ride progress. Refused beside `async_merge`, whose workspace is
-	// created later by the queue (`op_id_with_async_merge`).
+	// success — ride progress.
 	OpId *string `protobuf:"bytes,8,opt,name=op_id,json=opId,proto3,oneof" json:"op_id,omitempty"`
 	// The Slack message the workspace was created to act on, when a Slack
 	// message started it (a bound emoji the user typed or reacted with). UNSET
-	// for every other create. Refused as invalid beside `async_merge`, whose
-	// workspace the queue creates.
+	// for every other create.
 	SlackOrigin *CreateWorkspaceSlackOrigin `protobuf:"bytes,13,opt,name=slack_origin,json=slackOrigin,proto3,oneof" json:"slack_origin,omitempty"`
 	// WHO CREATED THE WORKSPACE, stated by the creator and recorded on the
 	// workspace for its life: it decides which kind's hooks every stage of the
@@ -136,8 +128,7 @@ type CreateWorkspaceRequest struct {
 	// draws it visible (a backlogged workspace is the user's to reveal). UNSET =
 	// born visible. An intake workspace (a card's `?` question, a Slack emoji
 	// ack) is made this way: hiding it after it exists flashes it in the
-	// sidebar for as long as the second write takes. Refused as invalid beside
-	// `async_merge`, whose merge workspace is born hidden by the queue.
+	// sidebar for as long as the second write takes.
 	Backlogged *bool `protobuf:"varint,15,opt,name=backlogged,proto3,oneof" json:"backlogged,omitempty"`
 	// WHERE THE WORKSPACE IS FILED, decided by the creator and written in the
 	// insert's own transaction, so the workspace is born in its subsection and
@@ -146,9 +137,8 @@ type CreateWorkspaceRequest struct {
 	// PRESENT = the creator did the filing, so the daemon adds no filing note
 	// to the workspace's first message. Placing is an agent's act: the
 	// requester must be a workspace (`placement_requires_workspace`), and a
-	// placement on a child (`placement_on_child`) or beside `async_merge`
-	// (`placement_on_merge_workspace`) is refused, because a child sits
-	// wherever its owner does and a merge workspace is drawn nowhere.
+	// placement on a child (`placement_on_child`) is refused, because a child
+	// sits wherever its owner does.
 	Placement     *CreateWorkspacePlacement `protobuf:"bytes,16,opt,name=placement,proto3,oneof" json:"placement,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -211,15 +201,6 @@ func (x *CreateWorkspaceRequest) GetOneShot() *CreateWorkspaceOneShot {
 	if x != nil {
 		if x, ok := x.Form.(*CreateWorkspaceRequest_OneShot); ok {
 			return x.OneShot
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceRequest) GetAsyncMerge() *CreateWorkspaceAsyncMerge {
-	if x != nil {
-		if x, ok := x.Form.(*CreateWorkspaceRequest_AsyncMerge); ok {
-			return x.AsyncMerge
 		}
 	}
 	return nil
@@ -307,15 +288,9 @@ type CreateWorkspaceRequest_OneShot struct {
 	OneShot *CreateWorkspaceOneShot `protobuf:"bytes,3,opt,name=one_shot,json=oneShot,proto3,oneof"`
 }
 
-type CreateWorkspaceRequest_AsyncMerge struct {
-	AsyncMerge *CreateWorkspaceAsyncMerge `protobuf:"bytes,10,opt,name=async_merge,json=asyncMerge,proto3,oneof"`
-}
-
 func (*CreateWorkspaceRequest_Standard) isCreateWorkspaceRequest_Form() {}
 
 func (*CreateWorkspaceRequest_OneShot) isCreateWorkspaceRequest_Form() {}
-
-func (*CreateWorkspaceRequest_AsyncMerge) isCreateWorkspaceRequest_Form() {}
 
 // Where a created workspace is filed (CreateWorkspaceRequest.placement).
 type CreateWorkspacePlacement struct {
@@ -540,7 +515,7 @@ type isWorkspaceOriginator_Originator interface {
 type WorkspaceOriginator_EmojiAck struct {
 	// The Slack emoji-ack reaction system (gns-sockets' dispatch of a bound
 	// emoji). REQUIRES `slack_origin`, the message it was dispatched for, and
-	// is refused beside `async_merge` (Connect InvalidArgument for both).
+	// a create without it is refused (Connect InvalidArgument).
 	EmojiAck *WorkspaceOriginatorEmojiAck `protobuf:"bytes,1,opt,name=emoji_ack,json=emojiAck,proto3,oneof"`
 }
 
@@ -716,7 +691,11 @@ type CreateWorkspaceStandard struct {
 	Name *string `protobuf:"bytes,3,opt,name=name,proto3,oneof" json:"name,omitempty"`
 	// Deploy hooks recorded at creation and run by EVERY deploy of this
 	// workspace, in place of its repository's hooks for the same stage.
-	DeployHooks   *CreateWorkspaceDeployHooks `protobuf:"bytes,6,opt,name=deploy_hooks,json=deployHooks,proto3,oneof" json:"deploy_hooks,omitempty"`
+	DeployHooks *CreateWorkspaceDeployHooks `protobuf:"bytes,6,opt,name=deploy_hooks,json=deployHooks,proto3,oneof" json:"deploy_hooks,omitempty"`
+	// The existing branch the workspace is cut from, in place of its landing
+	// target's tip (WorkspaceSourceBranch). UNSET: cut from the landing
+	// target's tip.
+	SourceBranch  *WorkspaceSourceBranch `protobuf:"bytes,10,opt,name=source_branch,json=sourceBranch,proto3,oneof" json:"source_branch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -786,6 +765,13 @@ func (x *CreateWorkspaceStandard) GetDeployHooks() *CreateWorkspaceDeployHooks {
 	return nil
 }
 
+func (x *CreateWorkspaceStandard) GetSourceBranch() *WorkspaceSourceBranch {
+	if x != nil {
+		return x.SourceBranch
+	}
+	return nil
+}
+
 // A one-shot: repo-pinned, off the repo's default branch, named by the caller or the daemon —
 // the caller supplies the prompt and optionally a name (and the shared facts outside the
 // form arm); the daemon owns decoration.
@@ -835,8 +821,44 @@ type CreateWorkspaceOneShot struct {
 	// UNSET: every finish names its own placement, as before. A production
 	// mediator's children are always created with `front`.
 	FinishPlacement *MergeQueuePlacement `protobuf:"bytes,9,opt,name=finish_placement,json=finishPlacement,proto3,oneof" json:"finish_placement,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The existing branch the one-shot is cut from, in place of its landing
+	// target's tip (WorkspaceSourceBranch): how a workspace lands work it
+	// already has, such as its own branch while it keeps working, or a
+	// subagent's branch, as a one-shot child whose commission says what to do
+	// with it. UNSET: cut from the landing target's tip.
+	SourceBranch *WorkspaceSourceBranch `protobuf:"bytes,10,opt,name=source_branch,json=sourceBranch,proto3,oneof" json:"source_branch,omitempty"`
+	// Another workspace to CLOSE once this one-shot lands, such as the
+	// workspace whose branch it was cut from when that workspace is done once
+	// its work lands. It must be open, in the create's repository, and neither
+	// the requester nor the one-shot; otherwise refused
+	// (`unknown_close_after`). A one-shot that closes without landing closes
+	// nothing. UNSET: no other workspace is closed.
+	CloseAfter *CreateWorkspaceCloseAfter `protobuf:"bytes,11,opt,name=close_after,json=closeAfter,proto3,oneof" json:"close_after,omitempty"`
+	// TRUE removes, once the one-shot lands, the worktree that had
+	// `source_branch` checked out when the create ran, to keep disk use
+	// bounded. Never removed: the requester's worktree, the repository's main
+	// worktree, any registered workspace's worktree, or a worktree with
+	// uncommitted changes (git's own refusal stands and is logged). No branch
+	// is ever deleted. Refused as invalid without `source_branch`. A one-shot
+	// that closes without landing removes nothing.
+	CleanupSourceWorktree bool `protobuf:"varint,12,opt,name=cleanup_source_worktree,json=cleanupSourceWorktree,proto3" json:"cleanup_source_worktree,omitempty"`
+	// TRUE compacts the REQUESTER's conversation once the one-shot lands, right
+	// after the requester is told of the landing, through the prompt queue
+	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). Refused
+	// as invalid when the requester is the user. A one-shot that closes without
+	// landing compacts nothing.
+	CompactRequesterAfter bool `protobuf:"varint,13,opt,name=compact_requester_after,json=compactRequesterAfter,proto3" json:"compact_requester_after,omitempty"`
+	// Deploy hooks recorded at creation and run by the one-shot's deploy, in
+	// place of its repository's hooks for the same stage. UNSET, or a stage
+	// left empty: that stage runs the repository's own hooks.
+	DeployHooks *CreateWorkspaceDeployHooks `protobuf:"bytes,14,opt,name=deploy_hooks,json=deployHooks,proto3,oneof" json:"deploy_hooks,omitempty"`
+	// Profile the one-shot's merge test gate (testrun.v1.TestRunRequest
+	// .profile): every unit the gate runs, and the production processes its
+	// tests start, write CPU profiles beside the gate's run log. Off by
+	// default; a gate profiles only when its workspace's creator asks.
+	ProfileGate   bool `protobuf:"varint,15,opt,name=profile_gate,json=profileGate,proto3" json:"profile_gate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateWorkspaceOneShot) Reset() {
@@ -911,6 +933,94 @@ func (x *CreateWorkspaceOneShot) GetFinishPlacement() *MergeQueuePlacement {
 	return nil
 }
 
+func (x *CreateWorkspaceOneShot) GetSourceBranch() *WorkspaceSourceBranch {
+	if x != nil {
+		return x.SourceBranch
+	}
+	return nil
+}
+
+func (x *CreateWorkspaceOneShot) GetCloseAfter() *CreateWorkspaceCloseAfter {
+	if x != nil {
+		return x.CloseAfter
+	}
+	return nil
+}
+
+func (x *CreateWorkspaceOneShot) GetCleanupSourceWorktree() bool {
+	if x != nil {
+		return x.CleanupSourceWorktree
+	}
+	return false
+}
+
+func (x *CreateWorkspaceOneShot) GetCompactRequesterAfter() bool {
+	if x != nil {
+		return x.CompactRequesterAfter
+	}
+	return false
+}
+
+func (x *CreateWorkspaceOneShot) GetDeployHooks() *CreateWorkspaceDeployHooks {
+	if x != nil {
+		return x.DeployHooks
+	}
+	return nil
+}
+
+func (x *CreateWorkspaceOneShot) GetProfileGate() bool {
+	if x != nil {
+		return x.ProfileGate
+	}
+	return false
+}
+
+// The workspace a one-shot closes once it lands.
+type CreateWorkspaceCloseAfter struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace to close, as the roster served it.
+	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateWorkspaceCloseAfter) Reset() {
+	*x = CreateWorkspaceCloseAfter{}
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateWorkspaceCloseAfter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateWorkspaceCloseAfter) ProtoMessage() {}
+
+func (x *CreateWorkspaceCloseAfter) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateWorkspaceCloseAfter.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceCloseAfter) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreateWorkspaceCloseAfter) GetWorkspace() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
 // The workspace a one-shot's commission concerns.
 type CreateWorkspaceOneShotContext struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -925,7 +1035,7 @@ type CreateWorkspaceOneShotContext struct {
 
 func (x *CreateWorkspaceOneShotContext) Reset() {
 	*x = CreateWorkspaceOneShotContext{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +1047,7 @@ func (x *CreateWorkspaceOneShotContext) String() string {
 func (*CreateWorkspaceOneShotContext) ProtoMessage() {}
 
 func (x *CreateWorkspaceOneShotContext) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +1060,7 @@ func (x *CreateWorkspaceOneShotContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceOneShotContext.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceOneShotContext) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CreateWorkspaceOneShotContext) GetWorkspace() *v1.WorkspaceRef {
@@ -969,7 +1079,7 @@ type CreateWorkspaceUngatedConsent struct {
 
 func (x *CreateWorkspaceUngatedConsent) Reset() {
 	*x = CreateWorkspaceUngatedConsent{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +1091,7 @@ func (x *CreateWorkspaceUngatedConsent) String() string {
 func (*CreateWorkspaceUngatedConsent) ProtoMessage() {}
 
 func (x *CreateWorkspaceUngatedConsent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,648 +1104,7 @@ func (x *CreateWorkspaceUngatedConsent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceUngatedConsent.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUngatedConsent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{10}
-}
-
-// AN ASYNC MERGE: land a NAMED BRANCH -- a subagent's, one an agent cut by
-// hand, or any workspace's, the requester's own included -- without holding
-// the requester. When the requesting
-// turn ends the merge is put in line; when it STARTS, the queue creates a
-// HIDDEN MERGE WORKSPACE cut from the branch's tip, with the maker's
-// conversation forked as it then stands, runs `instruction` as its first
-// turn (drawn as the bubble's resolving tab), and lands it. The merge's
-// bubble is placed in the requester's feed, its turns stream into the
-// bubble's agentic tabs, and how it ended -- landed or failed -- is handed
-// back to the requester's conversation
-// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). The merge
-// workspace stays hidden until it needs the user: revealed when its merge
-// fails, when its agent asks a permission or a question, when the user
-// interrupts it from the bubble, or when the user selects it.
-//
-// WHO OWNS THE BRANCH IS NEVER A GROUND FOR REFUSAL (owner ruling,
-// 2026-11-10): a workspace can always queue a branch, whichever workspace has
-// it checked out, open or closed. No two merges ever work one git branch even
-// so: the merge runs on its merge workspace's own branch, cut from this one's
-// tip, and the queue holds one entry per workspace.
-type CreateWorkspaceAsyncMerge struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The merge workspace's name, chosen by the calling agent: a short slug
-	// naming what is merged ("reconnect-fix"). Prefixed and validated as a
-	// supplied workspace name is, and RESERVED from acceptance until the merge
-	// workspace exists; a taken name is refused as `async_merge_name_taken`.
-	// REQUIRED: blank is refused as invalid.
-	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// The branch that lands, and who made it. REQUIRED.
-	Source *CreateWorkspaceAsyncMergeSource `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
-	// Where it lands. REQUIRED.
-	Target *CreateWorkspaceAsyncMergeTarget `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
-	// How the merge workspace prepares the branch before it joins the queue, in
-	// free text written by the requesting agent: anything from "rebase onto the
-	// target, dropping every commit the requester's branch shares with it" to
-	// "fail the merge if you cannot tell which commits are the fix". The merge
-	// joins the queue once that turn settles succeeded, and a failed turn fails
-	// the merge. UNSET: the branch lands as it is, with no resolving turn.
-	Instruction *string `protobuf:"bytes,4,opt,name=instruction,proto3,oneof" json:"instruction,omitempty"`
-	// Another workspace to CLOSE once this merge lands. It must be open, in the
-	// requester's repository, and not the requester; otherwise refused as
-	// `async_merge_unknown_close_after`. A merge that fails closes nothing.
-	// UNSET: no workspace is closed.
-	CloseAfter *CreateWorkspaceAsyncMergeCloseAfter `protobuf:"bytes,5,opt,name=close_after,json=closeAfter,proto3,oneof" json:"close_after,omitempty"`
-	// TRUE removes worktrees once the merge lands, to keep disk use bounded:
-	// the merge workspace's own worktree, and the worktree that had the branch
-	// checked out when the request was accepted. Never removed: the requester's
-	// worktree, the repository's main worktree, any registered workspace's
-	// worktree, or a worktree with uncommitted changes (git's own refusal
-	// stands and is logged). Branches are never deleted. A merge that fails
-	// removes nothing.
-	CleanupWorktree bool `protobuf:"varint,6,opt,name=cleanup_worktree,json=cleanupWorktree,proto3" json:"cleanup_worktree,omitempty"`
-	// TRUE compacts the REQUESTER's conversation once the branch lands, right
-	// after the landed handback, through the prompt queue
-	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
-	// that fails compacts nothing.
-	CompactAfter bool `protobuf:"varint,7,opt,name=compact_after,json=compactAfter,proto3" json:"compact_after,omitempty"`
-	// Deploy hooks THIS deploy runs, in place of its repository's hooks for the
-	// same stage, in the MERGE WORKSPACE under its lease -- never in the
-	// requester. UNSET, or a stage left empty: that stage runs the repository's
-	// own hooks.
-	DeployHooks *CreateWorkspaceDeployHooks `protobuf:"bytes,11,opt,name=deploy_hooks,json=deployHooks,proto3,oneof" json:"deploy_hooks,omitempty"`
-	// Where the merge joins its queue once it is put in line. REQUIRED.
-	Placement *MergeQueuePlacement `protobuf:"bytes,9,opt,name=placement,proto3" json:"placement,omitempty"`
-	// How this merge moves agent-repl's version, and its changelog line; see
-	// merge_version_increment.proto for which merges must, may, and must not
-	// carry one (`version_increment_required`, `version_increment_unexpected`).
-	VersionIncrement *MergeWorkspaceVersionIncrement `protobuf:"bytes,10,opt,name=version_increment,json=versionIncrement,proto3,oneof" json:"version_increment,omitempty"`
-	// Profile the merge's test gate (testrun.v1.TestRunRequest.profile): every
-	// unit the gate runs, and the production processes its tests start, write
-	// CPU profiles beside the gate's run log. Off by default; a gate profiles
-	// only when its merge asks.
-	ProfileGate   bool `protobuf:"varint,12,opt,name=profile_gate,json=profileGate,proto3" json:"profile_gate,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMerge) Reset() {
-	*x = CreateWorkspaceAsyncMerge{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMerge) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMerge) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMerge.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMerge) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetSource() *CreateWorkspaceAsyncMergeSource {
-	if x != nil {
-		return x.Source
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetTarget() *CreateWorkspaceAsyncMergeTarget {
-	if x != nil {
-		return x.Target
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetInstruction() string {
-	if x != nil && x.Instruction != nil {
-		return *x.Instruction
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetCloseAfter() *CreateWorkspaceAsyncMergeCloseAfter {
-	if x != nil {
-		return x.CloseAfter
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetCleanupWorktree() bool {
-	if x != nil {
-		return x.CleanupWorktree
-	}
-	return false
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetCompactAfter() bool {
-	if x != nil {
-		return x.CompactAfter
-	}
-	return false
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetDeployHooks() *CreateWorkspaceDeployHooks {
-	if x != nil {
-		return x.DeployHooks
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetPlacement() *MergeQueuePlacement {
-	if x != nil {
-		return x.Placement
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetVersionIncrement() *MergeWorkspaceVersionIncrement {
-	if x != nil {
-		return x.VersionIncrement
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMerge) GetProfileGate() bool {
-	if x != nil {
-		return x.ProfileGate
-	}
-	return false
-}
-
-// The branch an async merge lands, and who made it. The maker matters
-// because it holds the context the work was done in: the merge workspace
-// forks the maker's conversation, and the maker's branch is the one target
-// besides the primary branch the work may land in.
-type CreateWorkspaceAsyncMergeSource struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The branch, as git spells it in the requester's repository. REQUIRED:
-	// blank is refused as invalid; a branch that does not exist is
-	// `async_merge_unknown_branch`. Any existing branch is admitted, whichever
-	// workspace owns it.
-	Branch string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
-	// Who made the branch. REQUIRED.
-	Maker         *CreateWorkspaceAsyncMergeMaker `protobuf:"bytes,2,opt,name=maker,proto3" json:"maker,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeSource) Reset() {
-	*x = CreateWorkspaceAsyncMergeSource{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeSource) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeSource) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeSource) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeSource.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeSource) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *CreateWorkspaceAsyncMergeSource) GetBranch() string {
-	if x != nil {
-		return x.Branch
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceAsyncMergeSource) GetMaker() *CreateWorkspaceAsyncMergeMaker {
-	if x != nil {
-		return x.Maker
-	}
-	return nil
-}
-
-// Who made an async merge's branch.
-type CreateWorkspaceAsyncMergeMaker struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// THE ARM IS THE MAKER.
-	//
-	// Types that are valid to be assigned to Maker:
-	//
-	//	*CreateWorkspaceAsyncMergeMaker_Subagent
-	//	*CreateWorkspaceAsyncMergeMaker_Workspace
-	Maker         isCreateWorkspaceAsyncMergeMaker_Maker `protobuf_oneof:"maker"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeMaker) Reset() {
-	*x = CreateWorkspaceAsyncMergeMaker{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeMaker) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeMaker) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeMaker) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeMaker.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeMaker) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *CreateWorkspaceAsyncMergeMaker) GetMaker() isCreateWorkspaceAsyncMergeMaker_Maker {
-	if x != nil {
-		return x.Maker
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMergeMaker) GetSubagent() *CreateWorkspaceAsyncMergeMakerSubagent {
-	if x != nil {
-		if x, ok := x.Maker.(*CreateWorkspaceAsyncMergeMaker_Subagent); ok {
-			return x.Subagent
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMergeMaker) GetWorkspace() *CreateWorkspaceAsyncMergeMakerWorkspace {
-	if x != nil {
-		if x, ok := x.Maker.(*CreateWorkspaceAsyncMergeMaker_Workspace); ok {
-			return x.Workspace
-		}
-	}
-	return nil
-}
-
-type isCreateWorkspaceAsyncMergeMaker_Maker interface {
-	isCreateWorkspaceAsyncMergeMaker_Maker()
-}
-
-type CreateWorkspaceAsyncMergeMaker_Subagent struct {
-	// A subagent: the daemon finds the workspace that spawned it by locating
-	// the subagent's transcript under that workspace's session, so the
-	// spawning workspace is a fact read from disk, never stated a second time.
-	// A subagent found under no workspace's session is
-	// `async_merge_unknown_subagent`.
-	Subagent *CreateWorkspaceAsyncMergeMakerSubagent `protobuf:"bytes,1,opt,name=subagent,proto3,oneof"`
-}
-
-type CreateWorkspaceAsyncMergeMaker_Workspace struct {
-	// A workspace's own agent, which cut the branch by hand (to land a
-	// tangential fix while its own branch carries other work). Asserted by
-	// the request; the daemon checks only that the workspace is registered in
-	// the repository.
-	Workspace *CreateWorkspaceAsyncMergeMakerWorkspace `protobuf:"bytes,2,opt,name=workspace,proto3,oneof"`
-}
-
-func (*CreateWorkspaceAsyncMergeMaker_Subagent) isCreateWorkspaceAsyncMergeMaker_Maker() {}
-
-func (*CreateWorkspaceAsyncMergeMaker_Workspace) isCreateWorkspaceAsyncMergeMaker_Maker() {}
-
-// The subagent that made the branch.
-type CreateWorkspaceAsyncMergeMakerSubagent struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vendor's id for the subagent, as its spawning session reported it
-	// ("a6e95de73147f1ce5"). Opaque. REQUIRED: blank is refused as invalid.
-	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeMakerSubagent) Reset() {
-	*x = CreateWorkspaceAsyncMergeMakerSubagent{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeMakerSubagent) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeMakerSubagent) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeMakerSubagent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeMakerSubagent.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeMakerSubagent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *CreateWorkspaceAsyncMergeMakerSubagent) GetAgentId() string {
-	if x != nil {
-		return x.AgentId
-	}
-	return ""
-}
-
-// The workspace whose agent made the branch.
-type CreateWorkspaceAsyncMergeMakerWorkspace struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The maker, as the roster served it.
-	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeMakerWorkspace) Reset() {
-	*x = CreateWorkspaceAsyncMergeMakerWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeMakerWorkspace) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeMakerWorkspace) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeMakerWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeMakerWorkspace.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeMakerWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *CreateWorkspaceAsyncMergeMakerWorkspace) GetWorkspace() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Workspace
-	}
-	return nil
-}
-
-// Where an async merge lands.
-type CreateWorkspaceAsyncMergeTarget struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// THE ARM IS THE TARGET.
-	//
-	// Types that are valid to be assigned to Target:
-	//
-	//	*CreateWorkspaceAsyncMergeTarget_Primary
-	//	*CreateWorkspaceAsyncMergeTarget_Maker
-	Target        isCreateWorkspaceAsyncMergeTarget_Target `protobuf_oneof:"target"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeTarget) Reset() {
-	*x = CreateWorkspaceAsyncMergeTarget{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeTarget) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeTarget) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeTarget.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeTarget) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *CreateWorkspaceAsyncMergeTarget) GetTarget() isCreateWorkspaceAsyncMergeTarget_Target {
-	if x != nil {
-		return x.Target
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMergeTarget) GetPrimary() *CreateWorkspaceAsyncMergeTargetPrimary {
-	if x != nil {
-		if x, ok := x.Target.(*CreateWorkspaceAsyncMergeTarget_Primary); ok {
-			return x.Primary
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMergeTarget) GetMaker() *CreateWorkspaceAsyncMergeTargetMaker {
-	if x != nil {
-		if x, ok := x.Target.(*CreateWorkspaceAsyncMergeTarget_Maker); ok {
-			return x.Maker
-		}
-	}
-	return nil
-}
-
-type isCreateWorkspaceAsyncMergeTarget_Target interface {
-	isCreateWorkspaceAsyncMergeTarget_Target()
-}
-
-type CreateWorkspaceAsyncMergeTarget_Primary struct {
-	// The repository's primary branch, in its main worktree.
-	Primary *CreateWorkspaceAsyncMergeTargetPrimary `protobuf:"bytes,1,opt,name=primary,proto3,oneof"`
-}
-
-type CreateWorkspaceAsyncMergeTarget_Maker struct {
-	// The maker's own branch, in the maker's worktree: subagents' pieces of a
-	// workspace's work landing into it as each finishes. For a subagent the
-	// maker is the workspace that spawned it.
-	Maker *CreateWorkspaceAsyncMergeTargetMaker `protobuf:"bytes,2,opt,name=maker,proto3,oneof"`
-}
-
-func (*CreateWorkspaceAsyncMergeTarget_Primary) isCreateWorkspaceAsyncMergeTarget_Target() {}
-
-func (*CreateWorkspaceAsyncMergeTarget_Maker) isCreateWorkspaceAsyncMergeTarget_Target() {}
-
-// Onto the primary branch. No fields.
-type CreateWorkspaceAsyncMergeTargetPrimary struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeTargetPrimary) Reset() {
-	*x = CreateWorkspaceAsyncMergeTargetPrimary{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeTargetPrimary) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeTargetPrimary) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeTargetPrimary) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeTargetPrimary.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeTargetPrimary) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{17}
-}
-
-// Into the maker's branch. No fields: the source names the maker.
-type CreateWorkspaceAsyncMergeTargetMaker struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeTargetMaker) Reset() {
-	*x = CreateWorkspaceAsyncMergeTargetMaker{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeTargetMaker) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeTargetMaker) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeTargetMaker) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeTargetMaker.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeTargetMaker) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{18}
-}
-
-// The workspace an async merge closes once it lands.
-type CreateWorkspaceAsyncMergeCloseAfter struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace to close.
-	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeCloseAfter) Reset() {
-	*x = CreateWorkspaceAsyncMergeCloseAfter{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeCloseAfter) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeCloseAfter) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeCloseAfter) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeCloseAfter.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeCloseAfter) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *CreateWorkspaceAsyncMergeCloseAfter) GetWorkspace() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Workspace
-	}
-	return nil
 }
 
 // Deploy hooks a request supplies. A stage given here REPLACES the
@@ -1659,7 +1128,7 @@ type CreateWorkspaceDeployHooks struct {
 
 func (x *CreateWorkspaceDeployHooks) Reset() {
 	*x = CreateWorkspaceDeployHooks{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1671,7 +1140,7 @@ func (x *CreateWorkspaceDeployHooks) String() string {
 func (*CreateWorkspaceDeployHooks) ProtoMessage() {}
 
 func (x *CreateWorkspaceDeployHooks) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1684,7 +1153,7 @@ func (x *CreateWorkspaceDeployHooks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceDeployHooks.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceDeployHooks) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CreateWorkspaceDeployHooks) GetPreDeploy() []*v12.Hook {
@@ -1709,7 +1178,6 @@ type CreateWorkspaceResponse struct {
 	//	*CreateWorkspaceResponse_Success
 	//	*CreateWorkspaceResponse_Error
 	//	*CreateWorkspaceResponse_Accepted
-	//	*CreateWorkspaceResponse_AsyncMergeAccepted
 	//	*CreateWorkspaceResponse_WaitingForNetwork
 	//	*CreateWorkspaceResponse_WaitingForRequesterTurn
 	Result        isCreateWorkspaceResponse_Result `protobuf_oneof:"result"`
@@ -1719,7 +1187,7 @@ type CreateWorkspaceResponse struct {
 
 func (x *CreateWorkspaceResponse) Reset() {
 	*x = CreateWorkspaceResponse{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1731,7 +1199,7 @@ func (x *CreateWorkspaceResponse) String() string {
 func (*CreateWorkspaceResponse) ProtoMessage() {}
 
 func (x *CreateWorkspaceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1744,7 +1212,7 @@ func (x *CreateWorkspaceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceResponse.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CreateWorkspaceResponse) GetResult() isCreateWorkspaceResponse_Result {
@@ -1776,15 +1244,6 @@ func (x *CreateWorkspaceResponse) GetAccepted() *CreateWorkspaceAccepted {
 	if x != nil {
 		if x, ok := x.Result.(*CreateWorkspaceResponse_Accepted); ok {
 			return x.Accepted
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceResponse) GetAsyncMergeAccepted() *CreateWorkspaceAsyncMergeAccepted {
-	if x != nil {
-		if x, ok := x.Result.(*CreateWorkspaceResponse_AsyncMergeAccepted); ok {
-			return x.AsyncMergeAccepted
 		}
 	}
 	return nil
@@ -1830,14 +1289,6 @@ type CreateWorkspaceResponse_Accepted struct {
 	Accepted *CreateWorkspaceAccepted `protobuf:"bytes,3,opt,name=accepted,proto3,oneof"`
 }
 
-type CreateWorkspaceResponse_AsyncMergeAccepted struct {
-	// THE ASYNC MERGE IS ACCEPTED. Answered -- instead of `success` -- for
-	// every `async_merge` the daemon accepts: the merge is put in line once
-	// the requesting turn ends, and its merge workspace does not exist until
-	// the merge starts, so there is no workspace identity to return.
-	AsyncMergeAccepted *CreateWorkspaceAsyncMergeAccepted `protobuf:"bytes,4,opt,name=async_merge_accepted,json=asyncMergeAccepted,proto3,oneof"`
-}
-
 type CreateWorkspaceResponse_WaitingForNetwork struct {
 	// THE CREATE WAITS FOR THE NETWORK. Answered -- instead of `success` or
 	// `error` -- by the synchronous form when the create's naming call could
@@ -1866,8 +1317,6 @@ func (*CreateWorkspaceResponse_Error) isCreateWorkspaceResponse_Result() {}
 
 func (*CreateWorkspaceResponse_Accepted) isCreateWorkspaceResponse_Result() {}
 
-func (*CreateWorkspaceResponse_AsyncMergeAccepted) isCreateWorkspaceResponse_Result() {}
-
 func (*CreateWorkspaceResponse_WaitingForNetwork) isCreateWorkspaceResponse_Result() {}
 
 func (*CreateWorkspaceResponse_WaitingForRequesterTurn) isCreateWorkspaceResponse_Result() {}
@@ -1886,7 +1335,7 @@ type CreateWorkspaceWaitingForRequesterTurn struct {
 
 func (x *CreateWorkspaceWaitingForRequesterTurn) Reset() {
 	*x = CreateWorkspaceWaitingForRequesterTurn{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1898,7 +1347,7 @@ func (x *CreateWorkspaceWaitingForRequesterTurn) String() string {
 func (*CreateWorkspaceWaitingForRequesterTurn) ProtoMessage() {}
 
 func (x *CreateWorkspaceWaitingForRequesterTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1911,7 +1360,7 @@ func (x *CreateWorkspaceWaitingForRequesterTurn) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use CreateWorkspaceWaitingForRequesterTurn.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceWaitingForRequesterTurn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CreateWorkspaceWaitingForRequesterTurn) GetCreate() *PendingCreateRef {
@@ -1936,7 +1385,7 @@ type PendingCreateRef struct {
 
 func (x *PendingCreateRef) Reset() {
 	*x = PendingCreateRef{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1948,7 +1397,7 @@ func (x *PendingCreateRef) String() string {
 func (*PendingCreateRef) ProtoMessage() {}
 
 func (x *PendingCreateRef) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1961,7 +1410,7 @@ func (x *PendingCreateRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingCreateRef.ProtoReflect.Descriptor instead.
 func (*PendingCreateRef) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PendingCreateRef) GetId() string {
@@ -1985,7 +1434,7 @@ type CreateWorkspaceWaitingForNetwork struct {
 
 func (x *CreateWorkspaceWaitingForNetwork) Reset() {
 	*x = CreateWorkspaceWaitingForNetwork{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1997,7 +1446,7 @@ func (x *CreateWorkspaceWaitingForNetwork) String() string {
 func (*CreateWorkspaceWaitingForNetwork) ProtoMessage() {}
 
 func (x *CreateWorkspaceWaitingForNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2010,7 +1459,7 @@ func (x *CreateWorkspaceWaitingForNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceWaitingForNetwork.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceWaitingForNetwork) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CreateWorkspaceWaitingForNetwork) GetCreate() *PendingCreateRef {
@@ -2034,7 +1483,7 @@ type CreateWorkspaceJoined struct {
 
 func (x *CreateWorkspaceJoined) Reset() {
 	*x = CreateWorkspaceJoined{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2046,7 +1495,7 @@ func (x *CreateWorkspaceJoined) String() string {
 func (*CreateWorkspaceJoined) ProtoMessage() {}
 
 func (x *CreateWorkspaceJoined) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2059,7 +1508,7 @@ func (x *CreateWorkspaceJoined) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceJoined.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceJoined) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CreateWorkspaceJoined) GetCreate() *PendingCreateRef {
@@ -2067,53 +1516,6 @@ func (x *CreateWorkspaceJoined) GetCreate() *PendingCreateRef {
 		return x.Create
 	}
 	return nil
-}
-
-// An accepted async merge, named as its merge workspace will be.
-type CreateWorkspaceAsyncMergeAccepted struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The branch the merge workspace's name resolves to once prefixed, which is
-	// the name its bubble and its eventual merge workspace carry.
-	MergeWorkspaceBranch string `protobuf:"bytes,1,opt,name=merge_workspace_branch,json=mergeWorkspaceBranch,proto3" json:"merge_workspace_branch,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeAccepted) Reset() {
-	*x = CreateWorkspaceAsyncMergeAccepted{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeAccepted) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeAccepted) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeAccepted.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeAccepted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *CreateWorkspaceAsyncMergeAccepted) GetMergeWorkspaceBranch() string {
-	if x != nil {
-		return x.MergeWorkspaceBranch
-	}
-	return ""
 }
 
 // The option-B acknowledgement: the create was accepted and detached to the
@@ -2135,7 +1537,7 @@ type CreateWorkspaceAccepted struct {
 
 func (x *CreateWorkspaceAccepted) Reset() {
 	*x = CreateWorkspaceAccepted{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2147,7 +1549,7 @@ func (x *CreateWorkspaceAccepted) String() string {
 func (*CreateWorkspaceAccepted) ProtoMessage() {}
 
 func (x *CreateWorkspaceAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2160,7 +1562,7 @@ func (x *CreateWorkspaceAccepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceAccepted.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceAccepted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{27}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CreateWorkspaceAccepted) GetOpId() string {
@@ -2194,7 +1596,7 @@ type CreateWorkspaceSuccess struct {
 
 func (x *CreateWorkspaceSuccess) Reset() {
 	*x = CreateWorkspaceSuccess{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2206,7 +1608,7 @@ func (x *CreateWorkspaceSuccess) String() string {
 func (*CreateWorkspaceSuccess) ProtoMessage() {}
 
 func (x *CreateWorkspaceSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2219,7 +1621,7 @@ func (x *CreateWorkspaceSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceSuccess.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{28}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CreateWorkspaceSuccess) GetWorkspace() *v1.WorkspaceRef {
@@ -2248,7 +1650,7 @@ type CreateWorkspaceHeldAtColdGate struct {
 
 func (x *CreateWorkspaceHeldAtColdGate) Reset() {
 	*x = CreateWorkspaceHeldAtColdGate{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2260,7 +1662,7 @@ func (x *CreateWorkspaceHeldAtColdGate) String() string {
 func (*CreateWorkspaceHeldAtColdGate) ProtoMessage() {}
 
 func (x *CreateWorkspaceHeldAtColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2273,7 +1675,7 @@ func (x *CreateWorkspaceHeldAtColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceHeldAtColdGate.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceHeldAtColdGate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{29}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CreateWorkspaceHeldAtColdGate) GetContextTokens() uint64 {
@@ -2310,23 +1712,10 @@ type CreateWorkspaceError struct {
 	//	*CreateWorkspaceError_UnknownOwner
 	//	*CreateWorkspaceError_UnknownLandingTarget
 	//	*CreateWorkspaceError_UnknownRequester
-	//	*CreateWorkspaceError_AsyncMergeUnknownBranch
-	//	*CreateWorkspaceError_AsyncMergeUnknownSubagent
-	//	*CreateWorkspaceError_AsyncMergeUnknownMaker
-	//	*CreateWorkspaceError_AsyncMergeContextNotMaker
-	//	*CreateWorkspaceError_AsyncMergeNameTaken
-	//	*CreateWorkspaceError_AsyncMergeNameOffQueue
-	//	*CreateWorkspaceError_PlacementBehindNotInLine
-	//	*CreateWorkspaceError_AsyncMergeUnknownCloseAfter
-	//	*CreateWorkspaceError_OpIdWithAsyncMerge
-	//	*CreateWorkspaceError_VersionIncrementRequired
-	//	*CreateWorkspaceError_VersionIncrementUnexpected
-	//	*CreateWorkspaceError_AsyncMergeRequesterMerging
-	//	*CreateWorkspaceError_AsyncMergeRequesterSessionDeleted
+	//	*CreateWorkspaceError_UnknownSourceBranch
+	//	*CreateWorkspaceError_UnknownSubagent
+	//	*CreateWorkspaceError_UnknownCloseAfter
 	//	*CreateWorkspaceError_OriginFetchFailed
-	//	*CreateWorkspaceError_AsyncMergeNoDeployConfig
-	//	*CreateWorkspaceError_AsyncMergeDeployConfigInvalid
-	//	*CreateWorkspaceError_AsyncMergeRuleChecksFailed
 	//	*CreateWorkspaceError_TransferringAway
 	//	*CreateWorkspaceError_StandingDown
 	//	*CreateWorkspaceError_ModelNotInCatalog
@@ -2334,7 +1723,6 @@ type CreateWorkspaceError struct {
 	//	*CreateWorkspaceError_LifecycleConfigInvalid
 	//	*CreateWorkspaceError_CreationHookFailed
 	//	*CreateWorkspaceError_PlacementOnChild
-	//	*CreateWorkspaceError_PlacementOnMergeWorkspace
 	//	*CreateWorkspaceError_PlacementRequiresWorkspace
 	//	*CreateWorkspaceError_UnknownPlacementSubsection
 	//	*CreateWorkspaceError_BlankPlacementSubsectionName
@@ -2349,7 +1737,7 @@ type CreateWorkspaceError struct {
 
 func (x *CreateWorkspaceError) Reset() {
 	*x = CreateWorkspaceError{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2361,7 +1749,7 @@ func (x *CreateWorkspaceError) String() string {
 func (*CreateWorkspaceError) ProtoMessage() {}
 
 func (x *CreateWorkspaceError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2374,7 +1762,7 @@ func (x *CreateWorkspaceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceError.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{30}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CreateWorkspaceError) GetCause() isCreateWorkspaceError_Cause {
@@ -2573,118 +1961,28 @@ func (x *CreateWorkspaceError) GetUnknownRequester() *CreateWorkspaceUnknownRequ
 	return nil
 }
 
-func (x *CreateWorkspaceError) GetAsyncMergeUnknownBranch() *CreateWorkspaceAsyncMergeUnknownBranch {
+func (x *CreateWorkspaceError) GetUnknownSourceBranch() *CreateWorkspaceUnknownSourceBranch {
 	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeUnknownBranch); ok {
-			return x.AsyncMergeUnknownBranch
+		if x, ok := x.Cause.(*CreateWorkspaceError_UnknownSourceBranch); ok {
+			return x.UnknownSourceBranch
 		}
 	}
 	return nil
 }
 
-func (x *CreateWorkspaceError) GetAsyncMergeUnknownSubagent() *CreateWorkspaceAsyncMergeUnknownSubagent {
+func (x *CreateWorkspaceError) GetUnknownSubagent() *CreateWorkspaceUnknownSubagent {
 	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeUnknownSubagent); ok {
-			return x.AsyncMergeUnknownSubagent
+		if x, ok := x.Cause.(*CreateWorkspaceError_UnknownSubagent); ok {
+			return x.UnknownSubagent
 		}
 	}
 	return nil
 }
 
-func (x *CreateWorkspaceError) GetAsyncMergeUnknownMaker() *CreateWorkspaceAsyncMergeUnknownMaker {
+func (x *CreateWorkspaceError) GetUnknownCloseAfter() *CreateWorkspaceUnknownCloseAfter {
 	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeUnknownMaker); ok {
-			return x.AsyncMergeUnknownMaker
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeContextNotMaker() *CreateWorkspaceAsyncMergeContextNotMaker {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeContextNotMaker); ok {
-			return x.AsyncMergeContextNotMaker
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeNameTaken() *CreateWorkspaceAsyncMergeNameTaken {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeNameTaken); ok {
-			return x.AsyncMergeNameTaken
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeNameOffQueue() *CreateWorkspaceAsyncMergeNameOffQueue {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeNameOffQueue); ok {
-			return x.AsyncMergeNameOffQueue
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetPlacementBehindNotInLine() *MergeQueuePlacementBehindNotInLine {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_PlacementBehindNotInLine); ok {
-			return x.PlacementBehindNotInLine
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeUnknownCloseAfter() *CreateWorkspaceAsyncMergeUnknownCloseAfter {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeUnknownCloseAfter); ok {
-			return x.AsyncMergeUnknownCloseAfter
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetOpIdWithAsyncMerge() *CreateWorkspaceOpIdWithAsyncMerge {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_OpIdWithAsyncMerge); ok {
-			return x.OpIdWithAsyncMerge
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetVersionIncrementRequired() *MergeWorkspaceVersionIncrementRequired {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_VersionIncrementRequired); ok {
-			return x.VersionIncrementRequired
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetVersionIncrementUnexpected() *MergeWorkspaceVersionIncrementUnexpected {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_VersionIncrementUnexpected); ok {
-			return x.VersionIncrementUnexpected
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeRequesterMerging() *CreateWorkspaceAsyncMergeRequesterMerging {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeRequesterMerging); ok {
-			return x.AsyncMergeRequesterMerging
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeRequesterSessionDeleted() *CreateWorkspaceAsyncMergeRequesterSessionDeleted {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeRequesterSessionDeleted); ok {
-			return x.AsyncMergeRequesterSessionDeleted
+		if x, ok := x.Cause.(*CreateWorkspaceError_UnknownCloseAfter); ok {
+			return x.UnknownCloseAfter
 		}
 	}
 	return nil
@@ -2694,33 +1992,6 @@ func (x *CreateWorkspaceError) GetOriginFetchFailed() *CreateWorkspaceOriginFetc
 	if x != nil {
 		if x, ok := x.Cause.(*CreateWorkspaceError_OriginFetchFailed); ok {
 			return x.OriginFetchFailed
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeNoDeployConfig() *LifecycleConfigMissing {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeNoDeployConfig); ok {
-			return x.AsyncMergeNoDeployConfig
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeDeployConfigInvalid() *LifecycleConfigInvalid {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeDeployConfigInvalid); ok {
-			return x.AsyncMergeDeployConfigInvalid
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetAsyncMergeRuleChecksFailed() *MergeRuleChecksFailed {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeRuleChecksFailed); ok {
-			return x.AsyncMergeRuleChecksFailed
 		}
 	}
 	return nil
@@ -2784,15 +2055,6 @@ func (x *CreateWorkspaceError) GetPlacementOnChild() *CreateWorkspacePlacementOn
 	if x != nil {
 		if x, ok := x.Cause.(*CreateWorkspaceError_PlacementOnChild); ok {
 			return x.PlacementOnChild
-		}
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceError) GetPlacementOnMergeWorkspace() *CreateWorkspacePlacementOnMergeWorkspace {
-	if x != nil {
-		if x, ok := x.Cause.(*CreateWorkspaceError_PlacementOnMergeWorkspace); ok {
-			return x.PlacementOnMergeWorkspace
 		}
 	}
 	return nil
@@ -2940,9 +2202,9 @@ type CreateWorkspaceError_ForkSourceHasNoFinishedTurn struct {
 }
 
 type CreateWorkspaceError_NameReserved struct {
-	// The supplied name is reserved by a pending async merge, whose merge
-	// workspace will be created under it when the merge starts
-	// (agentrepl.v1.CreateWorkspaceAsyncMerge.name).
+	// The supplied name is being claimed by another create in flight, which
+	// registers under it. Nothing was named or built; the caller asks again
+	// with another name, or once that create has ended.
 	NameReserved *CreateWorkspaceNameReserved `protobuf:"bytes,18,opt,name=name_reserved,json=nameReserved,proto3,oneof"`
 }
 
@@ -3000,106 +2262,29 @@ type CreateWorkspaceError_UnknownRequester struct {
 	UnknownRequester *CreateWorkspaceUnknownRequester `protobuf:"bytes,25,opt,name=unknown_requester,json=unknownRequester,proto3,oneof"`
 }
 
-type CreateWorkspaceError_AsyncMergeUnknownBranch struct {
-	// The async merge's branch does not exist in the repository.
-	AsyncMergeUnknownBranch *CreateWorkspaceAsyncMergeUnknownBranch `protobuf:"bytes,26,opt,name=async_merge_unknown_branch,json=asyncMergeUnknownBranch,proto3,oneof"`
+type CreateWorkspaceError_UnknownSourceBranch struct {
+	// The source branch (WorkspaceSourceBranch) does not exist in the
+	// repository. Nothing was named or built.
+	UnknownSourceBranch *CreateWorkspaceUnknownSourceBranch `protobuf:"bytes,66,opt,name=unknown_source_branch,json=unknownSourceBranch,proto3,oneof"`
 }
 
-type CreateWorkspaceError_AsyncMergeUnknownSubagent struct {
-	// No workspace's session holds the named subagent.
-	AsyncMergeUnknownSubagent *CreateWorkspaceAsyncMergeUnknownSubagent `protobuf:"bytes,28,opt,name=async_merge_unknown_subagent,json=asyncMergeUnknownSubagent,proto3,oneof"`
+type CreateWorkspaceError_UnknownSubagent struct {
+	// No workspace's session of the repository holds the subagent the
+	// context origin forks (WorkspaceContextOriginSubagent). Nothing was
+	// named or built.
+	UnknownSubagent *CreateWorkspaceUnknownSubagent `protobuf:"bytes,67,opt,name=unknown_subagent,json=unknownSubagent,proto3,oneof"`
 }
 
-type CreateWorkspaceError_AsyncMergeUnknownMaker struct {
-	// The maker workspace is not in the daemon's registry, or is in another
-	// repository.
-	AsyncMergeUnknownMaker *CreateWorkspaceAsyncMergeUnknownMaker `protobuf:"bytes,29,opt,name=async_merge_unknown_maker,json=asyncMergeUnknownMaker,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeContextNotMaker struct {
-	// The async merge's context origin is not a fork of its maker.
-	AsyncMergeContextNotMaker *CreateWorkspaceAsyncMergeContextNotMaker `protobuf:"bytes,30,opt,name=async_merge_context_not_maker,json=asyncMergeContextNotMaker,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeNameTaken struct {
-	// The async merge's name is already a workspace, a branch, or another
-	// pending async merge's reservation. Nothing was recorded; the caller
-	// retries with another name.
-	AsyncMergeNameTaken *CreateWorkspaceAsyncMergeNameTaken `protobuf:"bytes,31,opt,name=async_merge_name_taken,json=asyncMergeNameTaken,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeNameOffQueue struct {
-	// The async merge's name is held by a merge that left its queue without
-	// landing and whose request still stands (agentrepl.v1
-	// .MergeQueueStatusOffQueue): that merge is put back in line as itself
-	// with `agent-repld merge-queue requeue NAME`, never asked for again.
-	// Nothing was recorded.
-	AsyncMergeNameOffQueue *CreateWorkspaceAsyncMergeNameOffQueue `protobuf:"bytes,62,opt,name=async_merge_name_off_queue,json=asyncMergeNameOffQueue,proto3,oneof"`
-}
-
-type CreateWorkspaceError_PlacementBehindNotInLine struct {
-	// The async merge asked to go behind a merge not in its queue.
-	PlacementBehindNotInLine *MergeQueuePlacementBehindNotInLine `protobuf:"bytes,45,opt,name=placement_behind_not_in_line,json=placementBehindNotInLine,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeUnknownCloseAfter struct {
-	// The async merge's close-after workspace is not open, is in another
-	// repository, or is the requester itself.
-	AsyncMergeUnknownCloseAfter *CreateWorkspaceAsyncMergeUnknownCloseAfter `protobuf:"bytes,32,opt,name=async_merge_unknown_close_after,json=asyncMergeUnknownCloseAfter,proto3,oneof"`
-}
-
-type CreateWorkspaceError_OpIdWithAsyncMerge struct {
-	// An `op_id` beside an async merge, whose workspace the queue creates
-	// later and whose progress therefore never rides this create's channel.
-	OpIdWithAsyncMerge *CreateWorkspaceOpIdWithAsyncMerge `protobuf:"bytes,33,opt,name=op_id_with_async_merge,json=opIdWithAsyncMerge,proto3,oneof"`
-}
-
-type CreateWorkspaceError_VersionIncrementRequired struct {
-	// The merge lands on agent-repl's master, was asked for by an agent, and
-	// carries no version increment. Nothing was recorded.
-	VersionIncrementRequired *MergeWorkspaceVersionIncrementRequired `protobuf:"bytes,34,opt,name=version_increment_required,json=versionIncrementRequired,proto3,oneof"`
-}
-
-type CreateWorkspaceError_VersionIncrementUnexpected struct {
-	// The merge carries a version increment but does not land on agent-repl's
-	// master. Nothing was recorded.
-	VersionIncrementUnexpected *MergeWorkspaceVersionIncrementUnexpected `protobuf:"bytes,35,opt,name=version_increment_unexpected,json=versionIncrementUnexpected,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeRequesterMerging struct {
-	// The requester's own merge is running. Nothing was recorded.
-	AsyncMergeRequesterMerging *CreateWorkspaceAsyncMergeRequesterMerging `protobuf:"bytes,37,opt,name=async_merge_requester_merging,json=asyncMergeRequesterMerging,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeRequesterSessionDeleted struct {
-	// The requester's session was deleted, so the merge's report could never
-	// reach it. Nothing was recorded.
-	AsyncMergeRequesterSessionDeleted *CreateWorkspaceAsyncMergeRequesterSessionDeleted `protobuf:"bytes,38,opt,name=async_merge_requester_session_deleted,json=asyncMergeRequesterSessionDeleted,proto3,oneof"`
+type CreateWorkspaceError_UnknownCloseAfter struct {
+	// The one-shot's close-after workspace is not open, is in another
+	// repository, or is the requester itself. Nothing was named or built.
+	UnknownCloseAfter *CreateWorkspaceUnknownCloseAfter `protobuf:"bytes,68,opt,name=unknown_close_after,json=unknownCloseAfter,proto3,oneof"`
 }
 
 type CreateWorkspaceError_OriginFetchFailed struct {
 	// A primary create cut from origin (WorkspaceLandingTargetPrimary.from_origin)
 	// could not fetch origin's primary branch. Nothing was created.
 	OriginFetchFailed *CreateWorkspaceOriginFetchFailed `protobuf:"bytes,39,opt,name=origin_fetch_failed,json=originFetchFailed,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeNoDeployConfig struct {
-	// The async merge's repository has no `.agent-repl/lifecycle.yaml`, so
-	// nothing says what its deploy does. Nothing was recorded.
-	AsyncMergeNoDeployConfig *LifecycleConfigMissing `protobuf:"bytes,40,opt,name=async_merge_no_deploy_config,json=asyncMergeNoDeployConfig,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeDeployConfigInvalid struct {
-	// The async merge's repository's `.agent-repl/lifecycle.yaml` is unusable.
-	// Nothing was recorded.
-	AsyncMergeDeployConfigInvalid *LifecycleConfigInvalid `protobuf:"bytes,41,opt,name=async_merge_deploy_config_invalid,json=asyncMergeDeployConfigInvalid,proto3,oneof"`
-}
-
-type CreateWorkspaceError_AsyncMergeRuleChecksFailed struct {
-	// The async merge's branch failed its repository's rule suites, run in
-	// the worktree it is checked out in before the merge is admitted to the
-	// queue. Nothing was recorded.
-	AsyncMergeRuleChecksFailed *MergeRuleChecksFailed `protobuf:"bytes,65,opt,name=async_merge_rule_checks_failed,json=asyncMergeRuleChecksFailed,proto3,oneof"`
 }
 
 type CreateWorkspaceError_TransferringAway struct {
@@ -3152,12 +2337,6 @@ type CreateWorkspaceError_PlacementOnChild struct {
 	PlacementOnChild *CreateWorkspacePlacementOnChild `protobuf:"bytes,55,opt,name=placement_on_child,json=placementOnChild,proto3,oneof"`
 }
 
-type CreateWorkspaceError_PlacementOnMergeWorkspace struct {
-	// The placement came beside `async_merge`: a merge workspace is drawn
-	// nowhere until revealed. Nothing was created.
-	PlacementOnMergeWorkspace *CreateWorkspacePlacementOnMergeWorkspace `protobuf:"bytes,56,opt,name=placement_on_merge_workspace,json=placementOnMergeWorkspace,proto3,oneof"`
-}
-
 type CreateWorkspaceError_PlacementRequiresWorkspace struct {
 	// The placement's requester is the user, not a workspace. Nothing was
 	// created.
@@ -3181,7 +2360,7 @@ type CreateWorkspaceError_GatherUnknownWorkspace struct {
 
 type CreateWorkspaceError_GatherNotGatherable struct {
 	// A workspace the placement gathers is known but cannot be gathered: it
-	// is closed, a child, a main workspace, a merge workspace, already in a
+	// is closed, a child, a main workspace, already in a
 	// subsection, of another repository, or named twice.
 	GatherNotGatherable *CreateWorkspaceGatherNotGatherable `protobuf:"bytes,61,opt,name=gather_not_gatherable,json=gatherNotGatherable,proto3,oneof"`
 }
@@ -3244,39 +2423,13 @@ func (*CreateWorkspaceError_UnknownLandingTarget) isCreateWorkspaceError_Cause()
 
 func (*CreateWorkspaceError_UnknownRequester) isCreateWorkspaceError_Cause() {}
 
-func (*CreateWorkspaceError_AsyncMergeUnknownBranch) isCreateWorkspaceError_Cause() {}
+func (*CreateWorkspaceError_UnknownSourceBranch) isCreateWorkspaceError_Cause() {}
 
-func (*CreateWorkspaceError_AsyncMergeUnknownSubagent) isCreateWorkspaceError_Cause() {}
+func (*CreateWorkspaceError_UnknownSubagent) isCreateWorkspaceError_Cause() {}
 
-func (*CreateWorkspaceError_AsyncMergeUnknownMaker) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeContextNotMaker) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeNameTaken) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeNameOffQueue) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_PlacementBehindNotInLine) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeUnknownCloseAfter) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_OpIdWithAsyncMerge) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_VersionIncrementRequired) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_VersionIncrementUnexpected) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeRequesterMerging) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeRequesterSessionDeleted) isCreateWorkspaceError_Cause() {}
+func (*CreateWorkspaceError_UnknownCloseAfter) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_OriginFetchFailed) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeNoDeployConfig) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeDeployConfigInvalid) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_AsyncMergeRuleChecksFailed) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_TransferringAway) isCreateWorkspaceError_Cause() {}
 
@@ -3291,8 +2444,6 @@ func (*CreateWorkspaceError_LifecycleConfigInvalid) isCreateWorkspaceError_Cause
 func (*CreateWorkspaceError_CreationHookFailed) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_PlacementOnChild) isCreateWorkspaceError_Cause() {}
-
-func (*CreateWorkspaceError_PlacementOnMergeWorkspace) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_PlacementRequiresWorkspace) isCreateWorkspaceError_Cause() {}
 
@@ -3319,7 +2470,7 @@ type CreateWorkspacePlacementOnChild struct {
 
 func (x *CreateWorkspacePlacementOnChild) Reset() {
 	*x = CreateWorkspacePlacementOnChild{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3331,7 +2482,7 @@ func (x *CreateWorkspacePlacementOnChild) String() string {
 func (*CreateWorkspacePlacementOnChild) ProtoMessage() {}
 
 func (x *CreateWorkspacePlacementOnChild) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3344,55 +2495,10 @@ func (x *CreateWorkspacePlacementOnChild) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspacePlacementOnChild.ProtoReflect.Descriptor instead.
 func (*CreateWorkspacePlacementOnChild) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{31}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CreateWorkspacePlacementOnChild) GetDetail() string {
-	if x != nil {
-		return x.Detail
-	}
-	return ""
-}
-
-// A placement beside an async merge.
-type CreateWorkspacePlacementOnMergeWorkspace struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Detail        string                 `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspacePlacementOnMergeWorkspace) Reset() {
-	*x = CreateWorkspacePlacementOnMergeWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[32]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspacePlacementOnMergeWorkspace) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspacePlacementOnMergeWorkspace) ProtoMessage() {}
-
-func (x *CreateWorkspacePlacementOnMergeWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[32]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspacePlacementOnMergeWorkspace.ProtoReflect.Descriptor instead.
-func (*CreateWorkspacePlacementOnMergeWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{32}
-}
-
-func (x *CreateWorkspacePlacementOnMergeWorkspace) GetDetail() string {
 	if x != nil {
 		return x.Detail
 	}
@@ -3409,7 +2515,7 @@ type CreateWorkspacePlacementRequiresWorkspace struct {
 
 func (x *CreateWorkspacePlacementRequiresWorkspace) Reset() {
 	*x = CreateWorkspacePlacementRequiresWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[33]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3421,7 +2527,7 @@ func (x *CreateWorkspacePlacementRequiresWorkspace) String() string {
 func (*CreateWorkspacePlacementRequiresWorkspace) ProtoMessage() {}
 
 func (x *CreateWorkspacePlacementRequiresWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[33]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3434,7 +2540,7 @@ func (x *CreateWorkspacePlacementRequiresWorkspace) ProtoReflect() protoreflect.
 
 // Deprecated: Use CreateWorkspacePlacementRequiresWorkspace.ProtoReflect.Descriptor instead.
 func (*CreateWorkspacePlacementRequiresWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{33}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CreateWorkspacePlacementRequiresWorkspace) GetDetail() string {
@@ -3455,7 +2561,7 @@ type CreateWorkspaceUnknownPlacementSubsection struct {
 
 func (x *CreateWorkspaceUnknownPlacementSubsection) Reset() {
 	*x = CreateWorkspaceUnknownPlacementSubsection{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[34]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3467,7 +2573,7 @@ func (x *CreateWorkspaceUnknownPlacementSubsection) String() string {
 func (*CreateWorkspaceUnknownPlacementSubsection) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownPlacementSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[34]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3480,7 +2586,7 @@ func (x *CreateWorkspaceUnknownPlacementSubsection) ProtoReflect() protoreflect.
 
 // Deprecated: Use CreateWorkspaceUnknownPlacementSubsection.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownPlacementSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{34}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CreateWorkspaceUnknownPlacementSubsection) GetName() string {
@@ -3500,7 +2606,7 @@ type CreateWorkspaceBlankPlacementSubsectionName struct {
 
 func (x *CreateWorkspaceBlankPlacementSubsectionName) Reset() {
 	*x = CreateWorkspaceBlankPlacementSubsectionName{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[35]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3512,7 +2618,7 @@ func (x *CreateWorkspaceBlankPlacementSubsectionName) String() string {
 func (*CreateWorkspaceBlankPlacementSubsectionName) ProtoMessage() {}
 
 func (x *CreateWorkspaceBlankPlacementSubsectionName) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[35]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3525,7 +2631,7 @@ func (x *CreateWorkspaceBlankPlacementSubsectionName) ProtoReflect() protoreflec
 
 // Deprecated: Use CreateWorkspaceBlankPlacementSubsectionName.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceBlankPlacementSubsectionName) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{35}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *CreateWorkspaceBlankPlacementSubsectionName) GetDetail() string {
@@ -3546,7 +2652,7 @@ type CreateWorkspaceGatherUnknownWorkspace struct {
 
 func (x *CreateWorkspaceGatherUnknownWorkspace) Reset() {
 	*x = CreateWorkspaceGatherUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[36]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3558,7 +2664,7 @@ func (x *CreateWorkspaceGatherUnknownWorkspace) String() string {
 func (*CreateWorkspaceGatherUnknownWorkspace) ProtoMessage() {}
 
 func (x *CreateWorkspaceGatherUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[36]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3571,7 +2677,7 @@ func (x *CreateWorkspaceGatherUnknownWorkspace) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use CreateWorkspaceGatherUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceGatherUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{36}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CreateWorkspaceGatherUnknownWorkspace) GetName() string {
@@ -3594,7 +2700,7 @@ type CreateWorkspaceGatherNotGatherable struct {
 
 func (x *CreateWorkspaceGatherNotGatherable) Reset() {
 	*x = CreateWorkspaceGatherNotGatherable{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[37]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3606,7 +2712,7 @@ func (x *CreateWorkspaceGatherNotGatherable) String() string {
 func (*CreateWorkspaceGatherNotGatherable) ProtoMessage() {}
 
 func (x *CreateWorkspaceGatherNotGatherable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[37]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3619,7 +2725,7 @@ func (x *CreateWorkspaceGatherNotGatherable) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use CreateWorkspaceGatherNotGatherable.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceGatherNotGatherable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{37}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CreateWorkspaceGatherNotGatherable) GetWorkspace() *v1.WorkspaceRef {
@@ -3654,7 +2760,7 @@ type CreateWorkspaceRequestedByDeployMediator struct {
 
 func (x *CreateWorkspaceRequestedByDeployMediator) Reset() {
 	*x = CreateWorkspaceRequestedByDeployMediator{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[38]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3666,7 +2772,7 @@ func (x *CreateWorkspaceRequestedByDeployMediator) String() string {
 func (*CreateWorkspaceRequestedByDeployMediator) ProtoMessage() {}
 
 func (x *CreateWorkspaceRequestedByDeployMediator) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[38]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3679,7 +2785,7 @@ func (x *CreateWorkspaceRequestedByDeployMediator) ProtoReflect() protoreflect.M
 
 // Deprecated: Use CreateWorkspaceRequestedByDeployMediator.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceRequestedByDeployMediator) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{38}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CreateWorkspaceRequestedByDeployMediator) GetWorkspace() *v1.WorkspaceRef {
@@ -3711,7 +2817,7 @@ type CreateWorkspaceRequestedByProductionMediator struct {
 
 func (x *CreateWorkspaceRequestedByProductionMediator) Reset() {
 	*x = CreateWorkspaceRequestedByProductionMediator{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[39]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3723,7 +2829,7 @@ func (x *CreateWorkspaceRequestedByProductionMediator) String() string {
 func (*CreateWorkspaceRequestedByProductionMediator) ProtoMessage() {}
 
 func (x *CreateWorkspaceRequestedByProductionMediator) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[39]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3736,7 +2842,7 @@ func (x *CreateWorkspaceRequestedByProductionMediator) ProtoReflect() protorefle
 
 // Deprecated: Use CreateWorkspaceRequestedByProductionMediator.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceRequestedByProductionMediator) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{39}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CreateWorkspaceRequestedByProductionMediator) GetWorkspace() *v1.WorkspaceRef {
@@ -3768,7 +2874,7 @@ type CreateWorkspaceModelNotInCatalog struct {
 
 func (x *CreateWorkspaceModelNotInCatalog) Reset() {
 	*x = CreateWorkspaceModelNotInCatalog{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[40]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3780,7 +2886,7 @@ func (x *CreateWorkspaceModelNotInCatalog) String() string {
 func (*CreateWorkspaceModelNotInCatalog) ProtoMessage() {}
 
 func (x *CreateWorkspaceModelNotInCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[40]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3793,7 +2899,7 @@ func (x *CreateWorkspaceModelNotInCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceModelNotInCatalog.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceModelNotInCatalog) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{40}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *CreateWorkspaceModelNotInCatalog) GetModel() string {
@@ -3830,7 +2936,7 @@ type CreateWorkspaceModelCatalogUnknown struct {
 
 func (x *CreateWorkspaceModelCatalogUnknown) Reset() {
 	*x = CreateWorkspaceModelCatalogUnknown{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[41]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3842,7 +2948,7 @@ func (x *CreateWorkspaceModelCatalogUnknown) String() string {
 func (*CreateWorkspaceModelCatalogUnknown) ProtoMessage() {}
 
 func (x *CreateWorkspaceModelCatalogUnknown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[41]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3855,7 +2961,7 @@ func (x *CreateWorkspaceModelCatalogUnknown) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use CreateWorkspaceModelCatalogUnknown.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceModelCatalogUnknown) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{41}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *CreateWorkspaceModelCatalogUnknown) GetModel() string {
@@ -3885,7 +2991,7 @@ type CreateWorkspaceTransferringAway struct {
 
 func (x *CreateWorkspaceTransferringAway) Reset() {
 	*x = CreateWorkspaceTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[42]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3897,7 +3003,7 @@ func (x *CreateWorkspaceTransferringAway) String() string {
 func (*CreateWorkspaceTransferringAway) ProtoMessage() {}
 
 func (x *CreateWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[42]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3910,7 +3016,7 @@ func (x *CreateWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{42}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *CreateWorkspaceTransferringAway) GetAddress() string {
@@ -3930,7 +3036,7 @@ type CreateWorkspaceStandingDown struct {
 
 func (x *CreateWorkspaceStandingDown) Reset() {
 	*x = CreateWorkspaceStandingDown{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[43]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3942,7 +3048,7 @@ func (x *CreateWorkspaceStandingDown) String() string {
 func (*CreateWorkspaceStandingDown) ProtoMessage() {}
 
 func (x *CreateWorkspaceStandingDown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[43]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3955,7 +3061,7 @@ func (x *CreateWorkspaceStandingDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceStandingDown.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceStandingDown) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{43}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{33}
 }
 
 type CreateWorkspaceUngatedWithoutConsent struct {
@@ -3966,7 +3072,7 @@ type CreateWorkspaceUngatedWithoutConsent struct {
 
 func (x *CreateWorkspaceUngatedWithoutConsent) Reset() {
 	*x = CreateWorkspaceUngatedWithoutConsent{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[44]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3978,7 +3084,7 @@ func (x *CreateWorkspaceUngatedWithoutConsent) String() string {
 func (*CreateWorkspaceUngatedWithoutConsent) ProtoMessage() {}
 
 func (x *CreateWorkspaceUngatedWithoutConsent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[44]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3991,7 +3097,7 @@ func (x *CreateWorkspaceUngatedWithoutConsent) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use CreateWorkspaceUngatedWithoutConsent.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUngatedWithoutConsent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{44}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{34}
 }
 
 type CreateWorkspaceNoSlug struct {
@@ -4002,7 +3108,7 @@ type CreateWorkspaceNoSlug struct {
 
 func (x *CreateWorkspaceNoSlug) Reset() {
 	*x = CreateWorkspaceNoSlug{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[45]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4014,7 +3120,7 @@ func (x *CreateWorkspaceNoSlug) String() string {
 func (*CreateWorkspaceNoSlug) ProtoMessage() {}
 
 func (x *CreateWorkspaceNoSlug) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[45]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4027,7 +3133,7 @@ func (x *CreateWorkspaceNoSlug) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceNoSlug.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceNoSlug) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{45}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{35}
 }
 
 type CreateWorkspaceBriefMissing struct {
@@ -4040,7 +3146,7 @@ type CreateWorkspaceBriefMissing struct {
 
 func (x *CreateWorkspaceBriefMissing) Reset() {
 	*x = CreateWorkspaceBriefMissing{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[46]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4052,7 +3158,7 @@ func (x *CreateWorkspaceBriefMissing) String() string {
 func (*CreateWorkspaceBriefMissing) ProtoMessage() {}
 
 func (x *CreateWorkspaceBriefMissing) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[46]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4065,7 +3171,7 @@ func (x *CreateWorkspaceBriefMissing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceBriefMissing.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceBriefMissing) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{46}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *CreateWorkspaceBriefMissing) GetName() string {
@@ -4083,7 +3189,7 @@ type CreateWorkspaceUnknownRepository struct {
 
 func (x *CreateWorkspaceUnknownRepository) Reset() {
 	*x = CreateWorkspaceUnknownRepository{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[47]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4095,7 +3201,7 @@ func (x *CreateWorkspaceUnknownRepository) String() string {
 func (*CreateWorkspaceUnknownRepository) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[47]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4108,7 +3214,7 @@ func (x *CreateWorkspaceUnknownRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceUnknownRepository.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{47}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{37}
 }
 
 // The directory lies inside a temporary directory (owner ruling,
@@ -4128,7 +3234,7 @@ type CreateWorkspaceInsideTemporaryDirectory struct {
 
 func (x *CreateWorkspaceInsideTemporaryDirectory) Reset() {
 	*x = CreateWorkspaceInsideTemporaryDirectory{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[48]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4140,7 +3246,7 @@ func (x *CreateWorkspaceInsideTemporaryDirectory) String() string {
 func (*CreateWorkspaceInsideTemporaryDirectory) ProtoMessage() {}
 
 func (x *CreateWorkspaceInsideTemporaryDirectory) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[48]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4153,7 +3259,7 @@ func (x *CreateWorkspaceInsideTemporaryDirectory) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use CreateWorkspaceInsideTemporaryDirectory.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceInsideTemporaryDirectory) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{48}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *CreateWorkspaceInsideTemporaryDirectory) GetDir() string {
@@ -4180,7 +3286,7 @@ type CreateWorkspaceUnknownForkSource struct {
 
 func (x *CreateWorkspaceUnknownForkSource) Reset() {
 	*x = CreateWorkspaceUnknownForkSource{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[49]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4192,7 +3298,7 @@ func (x *CreateWorkspaceUnknownForkSource) String() string {
 func (*CreateWorkspaceUnknownForkSource) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownForkSource) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[49]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4205,7 +3311,7 @@ func (x *CreateWorkspaceUnknownForkSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceUnknownForkSource.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownForkSource) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{49}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *CreateWorkspaceUnknownForkSource) GetWorkspace() *v1.WorkspaceRef {
@@ -4225,7 +3331,7 @@ type CreateWorkspaceForkSourceHasNoConversation struct {
 
 func (x *CreateWorkspaceForkSourceHasNoConversation) Reset() {
 	*x = CreateWorkspaceForkSourceHasNoConversation{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[50]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4237,7 +3343,7 @@ func (x *CreateWorkspaceForkSourceHasNoConversation) String() string {
 func (*CreateWorkspaceForkSourceHasNoConversation) ProtoMessage() {}
 
 func (x *CreateWorkspaceForkSourceHasNoConversation) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[50]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4250,7 +3356,7 @@ func (x *CreateWorkspaceForkSourceHasNoConversation) ProtoReflect() protoreflect
 
 // Deprecated: Use CreateWorkspaceForkSourceHasNoConversation.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceForkSourceHasNoConversation) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{50}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *CreateWorkspaceForkSourceHasNoConversation) GetWorkspace() *v1.WorkspaceRef {
@@ -4270,7 +3376,7 @@ type CreateWorkspaceForkSourceHasNoFinishedTurn struct {
 
 func (x *CreateWorkspaceForkSourceHasNoFinishedTurn) Reset() {
 	*x = CreateWorkspaceForkSourceHasNoFinishedTurn{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[51]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4282,7 +3388,7 @@ func (x *CreateWorkspaceForkSourceHasNoFinishedTurn) String() string {
 func (*CreateWorkspaceForkSourceHasNoFinishedTurn) ProtoMessage() {}
 
 func (x *CreateWorkspaceForkSourceHasNoFinishedTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[51]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4295,7 +3401,7 @@ func (x *CreateWorkspaceForkSourceHasNoFinishedTurn) ProtoReflect() protoreflect
 
 // Deprecated: Use CreateWorkspaceForkSourceHasNoFinishedTurn.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceForkSourceHasNoFinishedTurn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{51}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *CreateWorkspaceForkSourceHasNoFinishedTurn) GetWorkspace() *v1.WorkspaceRef {
@@ -4317,7 +3423,7 @@ type CreateWorkspaceUnknownContextWorkspace struct {
 
 func (x *CreateWorkspaceUnknownContextWorkspace) Reset() {
 	*x = CreateWorkspaceUnknownContextWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[52]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4329,7 +3435,7 @@ func (x *CreateWorkspaceUnknownContextWorkspace) String() string {
 func (*CreateWorkspaceUnknownContextWorkspace) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownContextWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[52]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4342,7 +3448,7 @@ func (x *CreateWorkspaceUnknownContextWorkspace) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use CreateWorkspaceUnknownContextWorkspace.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownContextWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{52}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CreateWorkspaceUnknownContextWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -4350,54 +3456,6 @@ func (x *CreateWorkspaceUnknownContextWorkspace) GetWorkspace() *v1.WorkspaceRef
 		return x.Workspace
 	}
 	return nil
-}
-
-// Names the reserved branch. A supplied name skips the disambiguation a
-// derived name gets, so the reservation is checked here instead; without the
-// refusal a create could take the name and the reserving merge could not.
-type CreateWorkspaceNameReserved struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The branch the supplied name resolves to.
-	Branch        string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceNameReserved) Reset() {
-	*x = CreateWorkspaceNameReserved{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[53]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceNameReserved) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceNameReserved) ProtoMessage() {}
-
-func (x *CreateWorkspaceNameReserved) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[53]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceNameReserved.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceNameReserved) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{53}
-}
-
-func (x *CreateWorkspaceNameReserved) GetBranch() string {
-	if x != nil {
-		return x.Branch
-	}
-	return ""
 }
 
 // A supplied name a registered workspace that has NOT LANDED already holds,
@@ -4420,7 +3478,7 @@ type CreateWorkspaceNameHeld struct {
 
 func (x *CreateWorkspaceNameHeld) Reset() {
 	*x = CreateWorkspaceNameHeld{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[54]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4432,7 +3490,7 @@ func (x *CreateWorkspaceNameHeld) String() string {
 func (*CreateWorkspaceNameHeld) ProtoMessage() {}
 
 func (x *CreateWorkspaceNameHeld) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[54]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4445,7 +3503,7 @@ func (x *CreateWorkspaceNameHeld) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceNameHeld.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceNameHeld) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{54}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *CreateWorkspaceNameHeld) GetBranch() string {
@@ -4499,7 +3557,7 @@ type CreateWorkspaceNameBranchExists struct {
 
 func (x *CreateWorkspaceNameBranchExists) Reset() {
 	*x = CreateWorkspaceNameBranchExists{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[55]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4511,7 +3569,7 @@ func (x *CreateWorkspaceNameBranchExists) String() string {
 func (*CreateWorkspaceNameBranchExists) ProtoMessage() {}
 
 func (x *CreateWorkspaceNameBranchExists) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[55]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4524,7 +3582,7 @@ func (x *CreateWorkspaceNameBranchExists) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceNameBranchExists.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceNameBranchExists) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{55}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *CreateWorkspaceNameBranchExists) GetBranch() string {
@@ -4584,7 +3642,7 @@ type CreateWorkspaceInvalidName struct {
 
 func (x *CreateWorkspaceInvalidName) Reset() {
 	*x = CreateWorkspaceInvalidName{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[56]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4596,7 +3654,7 @@ func (x *CreateWorkspaceInvalidName) String() string {
 func (*CreateWorkspaceInvalidName) ProtoMessage() {}
 
 func (x *CreateWorkspaceInvalidName) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[56]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4609,7 +3667,7 @@ func (x *CreateWorkspaceInvalidName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceInvalidName.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceInvalidName) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{56}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *CreateWorkspaceInvalidName) GetName() string {
@@ -4696,7 +3754,7 @@ type CreateWorkspaceInvalidNameSlug struct {
 
 func (x *CreateWorkspaceInvalidNameSlug) Reset() {
 	*x = CreateWorkspaceInvalidNameSlug{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[57]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4708,7 +3766,7 @@ func (x *CreateWorkspaceInvalidNameSlug) String() string {
 func (*CreateWorkspaceInvalidNameSlug) ProtoMessage() {}
 
 func (x *CreateWorkspaceInvalidNameSlug) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[57]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4721,7 +3779,7 @@ func (x *CreateWorkspaceInvalidNameSlug) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceInvalidNameSlug.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceInvalidNameSlug) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{57}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{46}
 }
 
 // A prefix component of the name is empty, or is not ASCII letters and digits
@@ -4734,7 +3792,7 @@ type CreateWorkspaceInvalidNamePrefix struct {
 
 func (x *CreateWorkspaceInvalidNamePrefix) Reset() {
 	*x = CreateWorkspaceInvalidNamePrefix{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[58]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4746,7 +3804,7 @@ func (x *CreateWorkspaceInvalidNamePrefix) String() string {
 func (*CreateWorkspaceInvalidNamePrefix) ProtoMessage() {}
 
 func (x *CreateWorkspaceInvalidNamePrefix) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[58]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4759,13 +3817,13 @@ func (x *CreateWorkspaceInvalidNamePrefix) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceInvalidNamePrefix.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceInvalidNamePrefix) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{58}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{47}
 }
 
 // The name's last component is a standing workspace's name, one the daemon
 // keeps for a workspace it makes and owns itself (a repository's mediators,
-// `deploy-mediator` and `prod-mediator`). No create, rename or async
-// merge name outside the daemon may end in one, so the branch and the
+// `deploy-mediator` and `prod-mediator`). No create or rename name outside
+// the daemon may end in one, so the branch and the
 // worktree directory the daemon makes for itself can never collide with one
 // a person or an agent made.
 type CreateWorkspaceInvalidNameReserved struct {
@@ -4776,7 +3834,7 @@ type CreateWorkspaceInvalidNameReserved struct {
 
 func (x *CreateWorkspaceInvalidNameReserved) Reset() {
 	*x = CreateWorkspaceInvalidNameReserved{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[59]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4788,7 +3846,7 @@ func (x *CreateWorkspaceInvalidNameReserved) String() string {
 func (*CreateWorkspaceInvalidNameReserved) ProtoMessage() {}
 
 func (x *CreateWorkspaceInvalidNameReserved) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[59]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4801,7 +3859,7 @@ func (x *CreateWorkspaceInvalidNameReserved) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use CreateWorkspaceInvalidNameReserved.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceInvalidNameReserved) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{59}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{48}
 }
 
 // Names the parent the registry does not hold.
@@ -4815,7 +3873,7 @@ type CreateWorkspaceUnknownOwner struct {
 
 func (x *CreateWorkspaceUnknownOwner) Reset() {
 	*x = CreateWorkspaceUnknownOwner{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[60]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4827,7 +3885,7 @@ func (x *CreateWorkspaceUnknownOwner) String() string {
 func (*CreateWorkspaceUnknownOwner) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownOwner) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[60]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4840,7 +3898,7 @@ func (x *CreateWorkspaceUnknownOwner) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceUnknownOwner.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownOwner) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{60}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *CreateWorkspaceUnknownOwner) GetOwner() *v1.WorkspaceRef {
@@ -4862,7 +3920,7 @@ type CreateWorkspaceUnknownLandingTarget struct {
 
 func (x *CreateWorkspaceUnknownLandingTarget) Reset() {
 	*x = CreateWorkspaceUnknownLandingTarget{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[61]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4874,7 +3932,7 @@ func (x *CreateWorkspaceUnknownLandingTarget) String() string {
 func (*CreateWorkspaceUnknownLandingTarget) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownLandingTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[61]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4887,10 +3945,194 @@ func (x *CreateWorkspaceUnknownLandingTarget) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use CreateWorkspaceUnknownLandingTarget.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownLandingTarget) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{61}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *CreateWorkspaceUnknownLandingTarget) GetWorkspace() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
+// The name another create in flight claims.
+type CreateWorkspaceNameReserved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The branch the supplied name resolves to.
+	Branch        string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateWorkspaceNameReserved) Reset() {
+	*x = CreateWorkspaceNameReserved{}
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateWorkspaceNameReserved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateWorkspaceNameReserved) ProtoMessage() {}
+
+func (x *CreateWorkspaceNameReserved) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateWorkspaceNameReserved.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceNameReserved) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *CreateWorkspaceNameReserved) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+// Names the source branch that does not exist.
+type CreateWorkspaceUnknownSourceBranch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The branch as the request named it.
+	Branch        string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateWorkspaceUnknownSourceBranch) Reset() {
+	*x = CreateWorkspaceUnknownSourceBranch{}
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateWorkspaceUnknownSourceBranch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateWorkspaceUnknownSourceBranch) ProtoMessage() {}
+
+func (x *CreateWorkspaceUnknownSourceBranch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateWorkspaceUnknownSourceBranch.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceUnknownSourceBranch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *CreateWorkspaceUnknownSourceBranch) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+// Names the subagent no workspace's session holds.
+type CreateWorkspaceUnknownSubagent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The subagent id as the request named it.
+	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateWorkspaceUnknownSubagent) Reset() {
+	*x = CreateWorkspaceUnknownSubagent{}
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateWorkspaceUnknownSubagent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateWorkspaceUnknownSubagent) ProtoMessage() {}
+
+func (x *CreateWorkspaceUnknownSubagent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateWorkspaceUnknownSubagent.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceUnknownSubagent) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *CreateWorkspaceUnknownSubagent) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+// Names the close-after workspace the one-shot cannot close.
+type CreateWorkspaceUnknownCloseAfter struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace as the request named it.
+	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateWorkspaceUnknownCloseAfter) Reset() {
+	*x = CreateWorkspaceUnknownCloseAfter{}
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateWorkspaceUnknownCloseAfter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateWorkspaceUnknownCloseAfter) ProtoMessage() {}
+
+func (x *CreateWorkspaceUnknownCloseAfter) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateWorkspaceUnknownCloseAfter.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceUnknownCloseAfter) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *CreateWorkspaceUnknownCloseAfter) GetWorkspace() *v1.WorkspaceRef {
 	if x != nil {
 		return x.Workspace
 	}
@@ -4908,7 +4150,7 @@ type CreateWorkspaceUnknownRequester struct {
 
 func (x *CreateWorkspaceUnknownRequester) Reset() {
 	*x = CreateWorkspaceUnknownRequester{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[62]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4920,7 +4162,7 @@ func (x *CreateWorkspaceUnknownRequester) String() string {
 func (*CreateWorkspaceUnknownRequester) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownRequester) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[62]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4933,7 +4175,7 @@ func (x *CreateWorkspaceUnknownRequester) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceUnknownRequester.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownRequester) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{62}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *CreateWorkspaceUnknownRequester) GetWorkspace() *v1.WorkspaceRef {
@@ -4941,447 +4183,6 @@ func (x *CreateWorkspaceUnknownRequester) GetWorkspace() *v1.WorkspaceRef {
 		return x.Workspace
 	}
 	return nil
-}
-
-// Names the async merge branch that does not exist.
-type CreateWorkspaceAsyncMergeUnknownBranch struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The branch as the request named it.
-	Branch        string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownBranch) Reset() {
-	*x = CreateWorkspaceAsyncMergeUnknownBranch{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[63]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownBranch) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeUnknownBranch) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeUnknownBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[63]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeUnknownBranch.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeUnknownBranch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{63}
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownBranch) GetBranch() string {
-	if x != nil {
-		return x.Branch
-	}
-	return ""
-}
-
-// Names the subagent no workspace's session holds.
-type CreateWorkspaceAsyncMergeUnknownSubagent struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The subagent id as the request named it.
-	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownSubagent) Reset() {
-	*x = CreateWorkspaceAsyncMergeUnknownSubagent{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[64]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownSubagent) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeUnknownSubagent) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeUnknownSubagent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[64]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeUnknownSubagent.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeUnknownSubagent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{64}
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownSubagent) GetAgentId() string {
-	if x != nil {
-		return x.AgentId
-	}
-	return ""
-}
-
-// Names the maker workspace the registry does not hold for this repository.
-type CreateWorkspaceAsyncMergeUnknownMaker struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The maker as the request named it.
-	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownMaker) Reset() {
-	*x = CreateWorkspaceAsyncMergeUnknownMaker{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[65]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownMaker) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeUnknownMaker) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeUnknownMaker) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[65]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeUnknownMaker.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeUnknownMaker) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{65}
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownMaker) GetWorkspace() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Workspace
-	}
-	return nil
-}
-
-// Names the maker the async merge's context must fork.
-type CreateWorkspaceAsyncMergeContextNotMaker struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The maker: the subagent's spawning workspace, or the named maker
-	// workspace.
-	Maker         *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=maker,proto3" json:"maker,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeContextNotMaker) Reset() {
-	*x = CreateWorkspaceAsyncMergeContextNotMaker{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[66]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeContextNotMaker) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeContextNotMaker) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeContextNotMaker) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[66]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeContextNotMaker.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeContextNotMaker) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{66}
-}
-
-func (x *CreateWorkspaceAsyncMergeContextNotMaker) GetMaker() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Maker
-	}
-	return nil
-}
-
-// The refused name, as the branch it resolves to once prefixed.
-type CreateWorkspaceAsyncMergeNameTaken struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The branch the name resolves to ("agent-1a2b/reconnect-fix").
-	Branch        string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeNameTaken) Reset() {
-	*x = CreateWorkspaceAsyncMergeNameTaken{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[67]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeNameTaken) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeNameTaken) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeNameTaken) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[67]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeNameTaken.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeNameTaken) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{67}
-}
-
-func (x *CreateWorkspaceAsyncMergeNameTaken) GetBranch() string {
-	if x != nil {
-		return x.Branch
-	}
-	return ""
-}
-
-// The merge off its queue that holds the async merge's name.
-type CreateWorkspaceAsyncMergeNameOffQueue struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The merge's workspace: its merge workspace, which RequeueMerge takes.
-	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The merge's name, which `merge-queue requeue` takes.
-	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	// Why it left its queue.
-	Cause         *MergeQueueStatusOffQueueCause `protobuf:"bytes,3,opt,name=cause,proto3" json:"cause,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeNameOffQueue) Reset() {
-	*x = CreateWorkspaceAsyncMergeNameOffQueue{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[68]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeNameOffQueue) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeNameOffQueue) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeNameOffQueue) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[68]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeNameOffQueue.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeNameOffQueue) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{68}
-}
-
-func (x *CreateWorkspaceAsyncMergeNameOffQueue) GetWorkspace() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Workspace
-	}
-	return nil
-}
-
-func (x *CreateWorkspaceAsyncMergeNameOffQueue) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *CreateWorkspaceAsyncMergeNameOffQueue) GetCause() *MergeQueueStatusOffQueueCause {
-	if x != nil {
-		return x.Cause
-	}
-	return nil
-}
-
-// The async merge's close-after workspace cannot be closed by this merge.
-type CreateWorkspaceAsyncMergeUnknownCloseAfter struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownCloseAfter) Reset() {
-	*x = CreateWorkspaceAsyncMergeUnknownCloseAfter{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[69]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeUnknownCloseAfter) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeUnknownCloseAfter) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeUnknownCloseAfter) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[69]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeUnknownCloseAfter.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeUnknownCloseAfter) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{69}
-}
-
-type CreateWorkspaceAsyncMergeRequesterMerging struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeRequesterMerging) Reset() {
-	*x = CreateWorkspaceAsyncMergeRequesterMerging{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[70]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeRequesterMerging) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeRequesterMerging) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeRequesterMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[70]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeRequesterMerging.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeRequesterMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{70}
-}
-
-type CreateWorkspaceAsyncMergeRequesterSessionDeleted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceAsyncMergeRequesterSessionDeleted) Reset() {
-	*x = CreateWorkspaceAsyncMergeRequesterSessionDeleted{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[71]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceAsyncMergeRequesterSessionDeleted) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceAsyncMergeRequesterSessionDeleted) ProtoMessage() {}
-
-func (x *CreateWorkspaceAsyncMergeRequesterSessionDeleted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[71]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceAsyncMergeRequesterSessionDeleted.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceAsyncMergeRequesterSessionDeleted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{71}
-}
-
-// An op id was set beside an async merge.
-type CreateWorkspaceOpIdWithAsyncMerge struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CreateWorkspaceOpIdWithAsyncMerge) Reset() {
-	*x = CreateWorkspaceOpIdWithAsyncMerge{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[72]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CreateWorkspaceOpIdWithAsyncMerge) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateWorkspaceOpIdWithAsyncMerge) ProtoMessage() {}
-
-func (x *CreateWorkspaceOpIdWithAsyncMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[72]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateWorkspaceOpIdWithAsyncMerge.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceOpIdWithAsyncMerge) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{72}
 }
 
 type CreateWorkspaceWorktreeCreationFailed struct {
@@ -5394,7 +4195,7 @@ type CreateWorkspaceWorktreeCreationFailed struct {
 
 func (x *CreateWorkspaceWorktreeCreationFailed) Reset() {
 	*x = CreateWorkspaceWorktreeCreationFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[73]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5406,7 +4207,7 @@ func (x *CreateWorkspaceWorktreeCreationFailed) String() string {
 func (*CreateWorkspaceWorktreeCreationFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceWorktreeCreationFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[73]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5419,7 +4220,7 @@ func (x *CreateWorkspaceWorktreeCreationFailed) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use CreateWorkspaceWorktreeCreationFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceWorktreeCreationFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{73}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *CreateWorkspaceWorktreeCreationFailed) GetDetail() string {
@@ -5443,7 +4244,7 @@ type CreateWorkspaceSpawnFailed struct {
 
 func (x *CreateWorkspaceSpawnFailed) Reset() {
 	*x = CreateWorkspaceSpawnFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[74]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5455,7 +4256,7 @@ func (x *CreateWorkspaceSpawnFailed) String() string {
 func (*CreateWorkspaceSpawnFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceSpawnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[74]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5468,7 +4269,7 @@ func (x *CreateWorkspaceSpawnFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceSpawnFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceSpawnFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{74}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *CreateWorkspaceSpawnFailed) GetDetail() string {
@@ -5503,7 +4304,7 @@ type CreateWorkspaceOneShotPolicyMissing struct {
 
 func (x *CreateWorkspaceOneShotPolicyMissing) Reset() {
 	*x = CreateWorkspaceOneShotPolicyMissing{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[75]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5515,7 +4316,7 @@ func (x *CreateWorkspaceOneShotPolicyMissing) String() string {
 func (*CreateWorkspaceOneShotPolicyMissing) ProtoMessage() {}
 
 func (x *CreateWorkspaceOneShotPolicyMissing) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[75]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5528,7 +4329,7 @@ func (x *CreateWorkspaceOneShotPolicyMissing) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use CreateWorkspaceOneShotPolicyMissing.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceOneShotPolicyMissing) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{75}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *CreateWorkspaceOneShotPolicyMissing) GetRepositoryRoot() string {
@@ -5576,7 +4377,7 @@ type CreateWorkspaceNamingFailed struct {
 
 func (x *CreateWorkspaceNamingFailed) Reset() {
 	*x = CreateWorkspaceNamingFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[76]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5588,7 +4389,7 @@ func (x *CreateWorkspaceNamingFailed) String() string {
 func (*CreateWorkspaceNamingFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceNamingFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[76]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5601,7 +4402,7 @@ func (x *CreateWorkspaceNamingFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceNamingFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceNamingFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{76}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *CreateWorkspaceNamingFailed) GetModel() string {
@@ -5643,7 +4444,7 @@ type CreateWorkspaceOriginFetchFailed struct {
 
 func (x *CreateWorkspaceOriginFetchFailed) Reset() {
 	*x = CreateWorkspaceOriginFetchFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[77]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5655,7 +4456,7 @@ func (x *CreateWorkspaceOriginFetchFailed) String() string {
 func (*CreateWorkspaceOriginFetchFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceOriginFetchFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[77]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5668,7 +4469,7 @@ func (x *CreateWorkspaceOriginFetchFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceOriginFetchFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceOriginFetchFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{77}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *CreateWorkspaceOriginFetchFailed) GetDetail() string {
@@ -5698,7 +4499,7 @@ type CreateWorkspaceCreationHookFailed struct {
 
 func (x *CreateWorkspaceCreationHookFailed) Reset() {
 	*x = CreateWorkspaceCreationHookFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[78]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5710,7 +4511,7 @@ func (x *CreateWorkspaceCreationHookFailed) String() string {
 func (*CreateWorkspaceCreationHookFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceCreationHookFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[78]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5723,7 +4524,7 @@ func (x *CreateWorkspaceCreationHookFailed) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use CreateWorkspaceCreationHookFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceCreationHookFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{78}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *CreateWorkspaceCreationHookFailed) GetPath() string {
@@ -5751,16 +4552,13 @@ var File_agentrepl_v1_endpoint_create_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/slack_thread.proto\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a,agentrepl/v1/merge_rule_checks_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1aconversation/v1/user.proto\x1a$repoconfig/v1/lifecycle_config.proto\x1a\x1cworkspace/v1/workspace.proto\"\x93\b\n" +
+	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/slack_thread.proto\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1aconversation/v1/user.proto\x1a$repoconfig/v1/lifecycle_config.proto\x1a\x1cworkspace/v1/workspace.proto\"\xda\a\n" +
 	"\x16CreateWorkspaceRequest\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
 	"repository\x12C\n" +
 	"\bstandard\x18\x02 \x01(\v2%.agentrepl.v1.CreateWorkspaceStandardH\x00R\bstandard\x12A\n" +
-	"\bone_shot\x18\x03 \x01(\v2$.agentrepl.v1.CreateWorkspaceOneShotH\x00R\aoneShot\x12J\n" +
-	"\vasync_merge\x18\n" +
-	" \x01(\v2'.agentrepl.v1.CreateWorkspaceAsyncMergeH\x00R\n" +
-	"asyncMerge\x12>\n" +
+	"\bone_shot\x18\x03 \x01(\v2$.agentrepl.v1.CreateWorkspaceOneShotH\x00R\aoneShot\x12>\n" +
 	"\trequester\x18\v \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequester\x12K\n" +
 	"\x0econtext_origin\x18\f \x01(\v2$.agentrepl.v1.WorkspaceContextOriginR\rcontextOrigin\x12\x19\n" +
 	"\x05model\x18\x05 \x01(\tH\x01R\x05model\x88\x01\x01\x12@\n" +
@@ -5783,8 +4581,9 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\r_slack_originB\r\n" +
 	"\v_backloggedB\f\n" +
 	"\n" +
-	"_placementJ\x04\b\x04\x10\x05J\x04\b\t\x10\n" +
-	"R\x06parentR\vfork_source\"\x9b\x01\n" +
+	"_placementJ\x04\b\n" +
+	"\x10\vJ\x04\b\x04\x10\x05J\x04\b\t\x10\n" +
+	"R\vasync_mergeR\x06parentR\vfork_source\"\x9b\x01\n" +
 	"\x18CreateWorkspacePlacement\x12 \n" +
 	"\n" +
 	"subsection\x18\x01 \x01(\tH\x00R\n" +
@@ -5806,81 +4605,59 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"thread_url\x18\x01 \x01(\tR\tthreadUrl\x12@\n" +
 	"\tsubscribe\x18\x02 \x01(\v2\x1d.agentrepl.v1.SlackThreadModeH\x00R\tsubscribe\x88\x01\x01B\f\n" +
 	"\n" +
-	"_subscribe\"\xef\x03\n" +
+	"_subscribe\"\xd0\x04\n" +
 	"\x17CreateWorkspaceStandard\x12E\n" +
 	"\x0einitial_prompt\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\rinitialPrompt\x88\x01\x01\x12G\n" +
 	"\frelationship\x18\a \x01(\v2#.agentrepl.v1.WorkspaceRelationshipR\frelationship\x12P\n" +
 	"\x0elanding_target\x18\b \x01(\v2$.agentrepl.v1.WorkspaceLandingTargetH\x01R\rlandingTarget\x88\x01\x01\x12\x17\n" +
 	"\x04name\x18\x03 \x01(\tH\x02R\x04name\x88\x01\x01\x12P\n" +
-	"\fdeploy_hooks\x18\x06 \x01(\v2(.agentrepl.v1.CreateWorkspaceDeployHooksH\x03R\vdeployHooks\x88\x01\x01B\x11\n" +
+	"\fdeploy_hooks\x18\x06 \x01(\v2(.agentrepl.v1.CreateWorkspaceDeployHooksH\x03R\vdeployHooks\x88\x01\x01\x12M\n" +
+	"\rsource_branch\x18\n" +
+	" \x01(\v2#.agentrepl.v1.WorkspaceSourceBranchH\x04R\fsourceBranch\x88\x01\x01B\x11\n" +
 	"\x0f_initial_promptB\x11\n" +
 	"\x0f_landing_targetB\a\n" +
 	"\x05_nameB\x0f\n" +
-	"\r_deploy_hooksJ\x04\b\t\x10\n" +
-	"J\x04\b\x05\x10\x06J\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\fowner_noticeR\btopologyR\bbase_refR\rmerge_actions\"\x8c\x04\n" +
+	"\r_deploy_hooksB\x10\n" +
+	"\x0e_source_branchJ\x04\b\t\x10\n" +
+	"J\x04\b\x05\x10\x06J\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\fowner_noticeR\btopologyR\bbase_refR\rmerge_actions\"\xc2\a\n" +
 	"\x16CreateWorkspaceOneShot\x121\n" +
 	"\x06prompt\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x06prompt\x12G\n" +
 	"\frelationship\x18\x06 \x01(\v2#.agentrepl.v1.WorkspaceRelationshipR\frelationship\x12P\n" +
 	"\x0elanding_target\x18\a \x01(\v2$.agentrepl.v1.WorkspaceLandingTargetH\x00R\rlandingTarget\x88\x01\x01\x12J\n" +
 	"\acontext\x18\x04 \x01(\v2+.agentrepl.v1.CreateWorkspaceOneShotContextH\x01R\acontext\x88\x01\x01\x12\x17\n" +
 	"\x04name\x18\b \x01(\tH\x02R\x04name\x88\x01\x01\x12Q\n" +
-	"\x10finish_placement\x18\t \x01(\v2!.agentrepl.v1.MergeQueuePlacementH\x03R\x0ffinishPlacement\x88\x01\x01B\x11\n" +
+	"\x10finish_placement\x18\t \x01(\v2!.agentrepl.v1.MergeQueuePlacementH\x03R\x0ffinishPlacement\x88\x01\x01\x12M\n" +
+	"\rsource_branch\x18\n" +
+	" \x01(\v2#.agentrepl.v1.WorkspaceSourceBranchH\x04R\fsourceBranch\x88\x01\x01\x12M\n" +
+	"\vclose_after\x18\v \x01(\v2'.agentrepl.v1.CreateWorkspaceCloseAfterH\x05R\n" +
+	"closeAfter\x88\x01\x01\x126\n" +
+	"\x17cleanup_source_worktree\x18\f \x01(\bR\x15cleanupSourceWorktree\x126\n" +
+	"\x17compact_requester_after\x18\r \x01(\bR\x15compactRequesterAfter\x12P\n" +
+	"\fdeploy_hooks\x18\x0e \x01(\v2(.agentrepl.v1.CreateWorkspaceDeployHooksH\x06R\vdeployHooks\x88\x01\x01\x12!\n" +
+	"\fprofile_gate\x18\x0f \x01(\bR\vprofileGateB\x11\n" +
 	"\x0f_landing_targetB\n" +
 	"\n" +
 	"\b_contextB\a\n" +
 	"\x05_nameB\x13\n" +
-	"\x11_finish_placementJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\n" +
-	"self_mergeR\aopen_prR\btopology\"Y\n" +
+	"\x11_finish_placementB\x10\n" +
+	"\x0e_source_branchB\x0e\n" +
+	"\f_close_afterB\x0f\n" +
+	"\r_deploy_hooksJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\n" +
+	"self_mergeR\aopen_prR\btopology\"U\n" +
+	"\x19CreateWorkspaceCloseAfter\x128\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"Y\n" +
 	"\x1dCreateWorkspaceOneShotContext\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x1f\n" +
-	"\x1dCreateWorkspaceUngatedConsent\"\xff\x05\n" +
-	"\x19CreateWorkspaceAsyncMerge\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12E\n" +
-	"\x06source\x18\x02 \x01(\v2-.agentrepl.v1.CreateWorkspaceAsyncMergeSourceR\x06source\x12E\n" +
-	"\x06target\x18\x03 \x01(\v2-.agentrepl.v1.CreateWorkspaceAsyncMergeTargetR\x06target\x12%\n" +
-	"\vinstruction\x18\x04 \x01(\tH\x00R\vinstruction\x88\x01\x01\x12W\n" +
-	"\vclose_after\x18\x05 \x01(\v21.agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfterH\x01R\n" +
-	"closeAfter\x88\x01\x01\x12)\n" +
-	"\x10cleanup_worktree\x18\x06 \x01(\bR\x0fcleanupWorktree\x12#\n" +
-	"\rcompact_after\x18\a \x01(\bR\fcompactAfter\x12P\n" +
-	"\fdeploy_hooks\x18\v \x01(\v2(.agentrepl.v1.CreateWorkspaceDeployHooksH\x02R\vdeployHooks\x88\x01\x01\x12?\n" +
-	"\tplacement\x18\t \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\tplacement\x12^\n" +
-	"\x11version_increment\x18\n" +
-	" \x01(\v2,.agentrepl.v1.MergeWorkspaceVersionIncrementH\x03R\x10versionIncrement\x88\x01\x01\x12!\n" +
-	"\fprofile_gate\x18\f \x01(\bR\vprofileGateB\x0e\n" +
-	"\f_instructionB\x0e\n" +
-	"\f_close_afterB\x0f\n" +
-	"\r_deploy_hooksB\x14\n" +
-	"\x12_version_incrementJ\x04\b\b\x10\tR\rmerge_actions\"}\n" +
-	"\x1fCreateWorkspaceAsyncMergeSource\x12\x16\n" +
-	"\x06branch\x18\x01 \x01(\tR\x06branch\x12B\n" +
-	"\x05maker\x18\x02 \x01(\v2,.agentrepl.v1.CreateWorkspaceAsyncMergeMakerR\x05maker\"\xd4\x01\n" +
-	"\x1eCreateWorkspaceAsyncMergeMaker\x12R\n" +
-	"\bsubagent\x18\x01 \x01(\v24.agentrepl.v1.CreateWorkspaceAsyncMergeMakerSubagentH\x00R\bsubagent\x12U\n" +
-	"\tworkspace\x18\x02 \x01(\v25.agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspaceH\x00R\tworkspaceB\a\n" +
-	"\x05maker\"C\n" +
-	"&CreateWorkspaceAsyncMergeMakerSubagent\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\tR\aagentId\"c\n" +
-	"'CreateWorkspaceAsyncMergeMakerWorkspace\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xc9\x01\n" +
-	"\x1fCreateWorkspaceAsyncMergeTarget\x12P\n" +
-	"\aprimary\x18\x01 \x01(\v24.agentrepl.v1.CreateWorkspaceAsyncMergeTargetPrimaryH\x00R\aprimary\x12J\n" +
-	"\x05maker\x18\x02 \x01(\v22.agentrepl.v1.CreateWorkspaceAsyncMergeTargetMakerH\x00R\x05makerB\b\n" +
-	"\x06target\"(\n" +
-	"&CreateWorkspaceAsyncMergeTargetPrimary\"&\n" +
-	"$CreateWorkspaceAsyncMergeTargetMaker\"_\n" +
-	"#CreateWorkspaceAsyncMergeCloseAfter\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x86\x01\n" +
+	"\x1dCreateWorkspaceUngatedConsent\"\x86\x01\n" +
 	"\x1aCreateWorkspaceDeployHooks\x122\n" +
 	"\n" +
 	"pre_deploy\x18\x01 \x03(\v2\x13.repoconfig.v1.HookR\tpreDeploy\x124\n" +
 	"\vpost_deploy\x18\x02 \x03(\v2\x13.repoconfig.v1.HookR\n" +
-	"postDeploy\"\xa2\x04\n" +
+	"postDeploy\"\xbd\x03\n" +
 	"\x17CreateWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.CreateWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.CreateWorkspaceErrorH\x00R\x05error\x12C\n" +
-	"\baccepted\x18\x03 \x01(\v2%.agentrepl.v1.CreateWorkspaceAcceptedH\x00R\baccepted\x12c\n" +
-	"\x14async_merge_accepted\x18\x04 \x01(\v2/.agentrepl.v1.CreateWorkspaceAsyncMergeAcceptedH\x00R\x12asyncMergeAccepted\x12`\n" +
+	"\baccepted\x18\x03 \x01(\v2%.agentrepl.v1.CreateWorkspaceAcceptedH\x00R\baccepted\x12`\n" +
 	"\x13waiting_for_network\x18\x05 \x01(\v2..agentrepl.v1.CreateWorkspaceWaitingForNetworkH\x00R\x11waitingForNetwork\x12s\n" +
 	"\x1awaiting_for_requester_turn\x18\x06 \x01(\v24.agentrepl.v1.CreateWorkspaceWaitingForRequesterTurnH\x00R\x17waitingForRequesterTurnB\b\n" +
 	"\x06result\"`\n" +
@@ -5891,9 +4668,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	" CreateWorkspaceWaitingForNetwork\x126\n" +
 	"\x06create\x18\x01 \x01(\v2\x1e.agentrepl.v1.PendingCreateRefR\x06create\"O\n" +
 	"\x15CreateWorkspaceJoined\x126\n" +
-	"\x06create\x18\x01 \x01(\v2\x1e.agentrepl.v1.PendingCreateRefR\x06create\"Y\n" +
-	"!CreateWorkspaceAsyncMergeAccepted\x124\n" +
-	"\x16merge_workspace_branch\x18\x01 \x01(\tR\x14mergeWorkspaceBranch\"{\n" +
+	"\x06create\x18\x01 \x01(\v2\x1e.agentrepl.v1.PendingCreateRefR\x06create\"{\n" +
 	"\x17CreateWorkspaceAccepted\x12\x13\n" +
 	"\x05op_id\x18\x01 \x01(\tR\x04opId\x12@\n" +
 	"\x06joined\x18\x02 \x01(\v2#.agentrepl.v1.CreateWorkspaceJoinedH\x00R\x06joined\x88\x01\x01B\t\n" +
@@ -5902,7 +4677,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12V\n" +
 	"\x11held_at_cold_gate\x18\x02 \x01(\v2+.agentrepl.v1.CreateWorkspaceHeldAtColdGateR\x0eheldAtColdGate\"F\n" +
 	"\x1dCreateWorkspaceHeldAtColdGate\x12%\n" +
-	"\x0econtext_tokens\x18\x01 \x01(\x04R\rcontextTokens\"\xa8/\n" +
+	"\x0econtext_tokens\x18\x01 \x01(\x04R\rcontextTokens\"\xd4&\n" +
 	"\x14CreateWorkspaceError\x12l\n" +
 	"\x17ungated_without_consent\x18\x01 \x01(\v22.agentrepl.v1.CreateWorkspaceUngatedWithoutConsentH\x00R\x15ungatedWithoutConsent\x12>\n" +
 	"\ano_slug\x18\x02 \x01(\v2#.agentrepl.v1.CreateWorkspaceNoSlugH\x00R\x06noSlug\x12P\n" +
@@ -5925,32 +4700,18 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x0fparent_not_open\x18\x14 \x01(\v2$.agentrepl.v1.WorkspaceParentNotOpenH\x00R\rparentNotOpen\x12P\n" +
 	"\runknown_owner\x18\x15 \x01(\v2).agentrepl.v1.CreateWorkspaceUnknownOwnerH\x00R\funknownOwner\x12i\n" +
 	"\x16unknown_landing_target\x18. \x01(\v21.agentrepl.v1.CreateWorkspaceUnknownLandingTargetH\x00R\x14unknownLandingTarget\x12\\\n" +
-	"\x11unknown_requester\x18\x19 \x01(\v2-.agentrepl.v1.CreateWorkspaceUnknownRequesterH\x00R\x10unknownRequester\x12s\n" +
-	"\x1aasync_merge_unknown_branch\x18\x1a \x01(\v24.agentrepl.v1.CreateWorkspaceAsyncMergeUnknownBranchH\x00R\x17asyncMergeUnknownBranch\x12y\n" +
-	"\x1casync_merge_unknown_subagent\x18\x1c \x01(\v26.agentrepl.v1.CreateWorkspaceAsyncMergeUnknownSubagentH\x00R\x19asyncMergeUnknownSubagent\x12p\n" +
-	"\x19async_merge_unknown_maker\x18\x1d \x01(\v23.agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMakerH\x00R\x16asyncMergeUnknownMaker\x12z\n" +
-	"\x1dasync_merge_context_not_maker\x18\x1e \x01(\v26.agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMakerH\x00R\x19asyncMergeContextNotMaker\x12g\n" +
-	"\x16async_merge_name_taken\x18\x1f \x01(\v20.agentrepl.v1.CreateWorkspaceAsyncMergeNameTakenH\x00R\x13asyncMergeNameTaken\x12q\n" +
-	"\x1aasync_merge_name_off_queue\x18> \x01(\v23.agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueueH\x00R\x16asyncMergeNameOffQueue\x12r\n" +
-	"\x1cplacement_behind_not_in_line\x18- \x01(\v20.agentrepl.v1.MergeQueuePlacementBehindNotInLineH\x00R\x18placementBehindNotInLine\x12\x80\x01\n" +
-	"\x1fasync_merge_unknown_close_after\x18  \x01(\v28.agentrepl.v1.CreateWorkspaceAsyncMergeUnknownCloseAfterH\x00R\x1basyncMergeUnknownCloseAfter\x12e\n" +
-	"\x16op_id_with_async_merge\x18! \x01(\v2/.agentrepl.v1.CreateWorkspaceOpIdWithAsyncMergeH\x00R\x12opIdWithAsyncMerge\x12t\n" +
-	"\x1aversion_increment_required\x18\" \x01(\v24.agentrepl.v1.MergeWorkspaceVersionIncrementRequiredH\x00R\x18versionIncrementRequired\x12z\n" +
-	"\x1cversion_increment_unexpected\x18# \x01(\v26.agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedH\x00R\x1aversionIncrementUnexpected\x12|\n" +
-	"\x1dasync_merge_requester_merging\x18% \x01(\v27.agentrepl.v1.CreateWorkspaceAsyncMergeRequesterMergingH\x00R\x1aasyncMergeRequesterMerging\x12\x92\x01\n" +
-	"%async_merge_requester_session_deleted\x18& \x01(\v2>.agentrepl.v1.CreateWorkspaceAsyncMergeRequesterSessionDeletedH\x00R!asyncMergeRequesterSessionDeleted\x12`\n" +
-	"\x13origin_fetch_failed\x18' \x01(\v2..agentrepl.v1.CreateWorkspaceOriginFetchFailedH\x00R\x11originFetchFailed\x12f\n" +
-	"\x1casync_merge_no_deploy_config\x18( \x01(\v2$.agentrepl.v1.LifecycleConfigMissingH\x00R\x18asyncMergeNoDeployConfig\x12p\n" +
-	"!async_merge_deploy_config_invalid\x18) \x01(\v2$.agentrepl.v1.LifecycleConfigInvalidH\x00R\x1dasyncMergeDeployConfigInvalid\x12i\n" +
-	"\x1easync_merge_rule_checks_failed\x18A \x01(\v2#.agentrepl.v1.MergeRuleChecksFailedH\x00R\x1aasyncMergeRuleChecksFailed\x12\\\n" +
+	"\x11unknown_requester\x18\x19 \x01(\v2-.agentrepl.v1.CreateWorkspaceUnknownRequesterH\x00R\x10unknownRequester\x12f\n" +
+	"\x15unknown_source_branch\x18B \x01(\v20.agentrepl.v1.CreateWorkspaceUnknownSourceBranchH\x00R\x13unknownSourceBranch\x12Y\n" +
+	"\x10unknown_subagent\x18C \x01(\v2,.agentrepl.v1.CreateWorkspaceUnknownSubagentH\x00R\x0funknownSubagent\x12`\n" +
+	"\x13unknown_close_after\x18D \x01(\v2..agentrepl.v1.CreateWorkspaceUnknownCloseAfterH\x00R\x11unknownCloseAfter\x12`\n" +
+	"\x13origin_fetch_failed\x18' \x01(\v2..agentrepl.v1.CreateWorkspaceOriginFetchFailedH\x00R\x11originFetchFailed\x12\\\n" +
 	"\x11transferring_away\x18+ \x01(\v2-.agentrepl.v1.CreateWorkspaceTransferringAwayH\x00R\x10transferringAway\x12P\n" +
 	"\rstanding_down\x18, \x01(\v2).agentrepl.v1.CreateWorkspaceStandingDownH\x00R\fstandingDown\x12a\n" +
 	"\x14model_not_in_catalog\x181 \x01(\v2..agentrepl.v1.CreateWorkspaceModelNotInCatalogH\x00R\x11modelNotInCatalog\x12f\n" +
 	"\x15model_catalog_unknown\x182 \x01(\v20.agentrepl.v1.CreateWorkspaceModelCatalogUnknownH\x00R\x13modelCatalogUnknown\x12`\n" +
 	"\x18lifecycle_config_invalid\x184 \x01(\v2$.agentrepl.v1.LifecycleConfigInvalidH\x00R\x16lifecycleConfigInvalid\x12c\n" +
 	"\x14creation_hook_failed\x185 \x01(\v2/.agentrepl.v1.CreateWorkspaceCreationHookFailedH\x00R\x12creationHookFailed\x12]\n" +
-	"\x12placement_on_child\x187 \x01(\v2-.agentrepl.v1.CreateWorkspacePlacementOnChildH\x00R\x10placementOnChild\x12y\n" +
-	"\x1cplacement_on_merge_workspace\x188 \x01(\v26.agentrepl.v1.CreateWorkspacePlacementOnMergeWorkspaceH\x00R\x19placementOnMergeWorkspace\x12{\n" +
+	"\x12placement_on_child\x187 \x01(\v2-.agentrepl.v1.CreateWorkspacePlacementOnChildH\x00R\x10placementOnChild\x12{\n" +
 	"\x1cplacement_requires_workspace\x189 \x01(\v27.agentrepl.v1.CreateWorkspacePlacementRequiresWorkspaceH\x00R\x1aplacementRequiresWorkspace\x12{\n" +
 	"\x1cunknown_placement_subsection\x18: \x01(\v27.agentrepl.v1.CreateWorkspaceUnknownPlacementSubsectionH\x00R\x1aunknownPlacementSubsection\x12\x82\x01\n" +
 	"\x1fblank_placement_subsection_name\x18; \x01(\v29.agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionNameH\x00R\x1cblankPlacementSubsectionName\x12o\n" +
@@ -5959,10 +4720,8 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x1crequested_by_deploy_mediator\x18? \x01(\v26.agentrepl.v1.CreateWorkspaceRequestedByDeployMediatorH\x00R\x19requestedByDeployMediator\x12\x85\x01\n" +
 	" requested_by_production_mediator\x18@ \x01(\v2:.agentrepl.v1.CreateWorkspaceRequestedByProductionMediatorH\x00R\x1drequestedByProductionMediatorB\a\n" +
 	"\x05causeJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\b\x10\tJ\x04\b\t\x10\n" +
-	"J\x04\b\x0f\x10\x10J\x04\b\x16\x10\x17J\x04\b\x17\x10\x18J\x04\b\x18\x10\x19J\x04\b\x1b\x10\x1cJ\x04\b$\x10%J\x04\b6\x107R\x0ffinish_requiredR\x13finish_not_one_shotR\x1ffork_parent_has_no_conversationR\x0eunknown_parentR\x13base_ref_unresolvedR\x1bbase_ref_off_primary_branchR\x14one_shot_owner_landsR\x15owner_notice_requiredR\x17owner_notice_unexpectedR\x18async_merge_branch_ownedR\x1casync_merge_requester_queuedR\x19requester_bypassing_queue\"9\n" +
+	"J\x04\b\x0f\x10\x10J\x04\b\x16\x10\x17J\x04\b\x17\x10\x18J\x04\b\x18\x10\x19J\x04\b\x1a\x10\x1bJ\x04\b\x1b\x10\x1cJ\x04\b\x1c\x10\x1dJ\x04\b\x1d\x10\x1eJ\x04\b\x1e\x10\x1fJ\x04\b\x1f\x10 J\x04\b \x10!J\x04\b!\x10\"J\x04\b\"\x10#J\x04\b#\x10$J\x04\b$\x10%J\x04\b%\x10&J\x04\b&\x10'J\x04\b(\x10)J\x04\b)\x10*J\x04\b-\x10.J\x04\b6\x107J\x04\b8\x109J\x04\b>\x10?J\x04\bA\x10BR\x0ffinish_requiredR\x13finish_not_one_shotR\x1ffork_parent_has_no_conversationR\x0eunknown_parentR\x13base_ref_unresolvedR\x1bbase_ref_off_primary_branchR\x14one_shot_owner_landsR\x15owner_notice_requiredR\x17owner_notice_unexpectedR\x18async_merge_branch_ownedR\x1casync_merge_requester_queuedR\x19requester_bypassing_queueR\x1aasync_merge_unknown_branchR\x1casync_merge_unknown_subagentR\x19async_merge_unknown_makerR\x1dasync_merge_context_not_makerR\x16async_merge_name_takenR\x1fasync_merge_unknown_close_afterR\x16op_id_with_async_mergeR\x1aversion_increment_requiredR\x1cversion_increment_unexpectedR\x1dasync_merge_requester_mergingR%async_merge_requester_session_deletedR\x1casync_merge_no_deploy_configR!async_merge_deploy_config_invalidR\x1cplacement_behind_not_in_lineR\x1cplacement_on_merge_workspaceR\x1aasync_merge_name_off_queueR\x1easync_merge_rule_checks_failed\"9\n" +
 	"\x1fCreateWorkspacePlacementOnChild\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"B\n" +
-	"(CreateWorkspacePlacementOnMergeWorkspace\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"C\n" +
 	")CreateWorkspacePlacementRequiresWorkspace\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"?\n" +
@@ -6008,9 +4767,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"*CreateWorkspaceForkSourceHasNoFinishedTurn\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"b\n" +
 	"&CreateWorkspaceUnknownContextWorkspace\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"5\n" +
-	"\x1bCreateWorkspaceNameReserved\x12\x16\n" +
-	"\x06branch\x18\x01 \x01(\tR\x06branch\"\x7f\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x7f\n" +
 	"\x17CreateWorkspaceNameHeld\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x128\n" +
 	"\tworkspace\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
@@ -6032,27 +4789,17 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x1bCreateWorkspaceUnknownOwner\x120\n" +
 	"\x05owner\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\"_\n" +
 	"#CreateWorkspaceUnknownLandingTarget\x128\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"5\n" +
+	"\x1bCreateWorkspaceNameReserved\x12\x16\n" +
+	"\x06branch\x18\x01 \x01(\tR\x06branch\"<\n" +
+	"\"CreateWorkspaceUnknownSourceBranch\x12\x16\n" +
+	"\x06branch\x18\x01 \x01(\tR\x06branch\";\n" +
+	"\x1eCreateWorkspaceUnknownSubagent\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\"\\\n" +
+	" CreateWorkspaceUnknownCloseAfter\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"[\n" +
 	"\x1fCreateWorkspaceUnknownRequester\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"@\n" +
-	"&CreateWorkspaceAsyncMergeUnknownBranch\x12\x16\n" +
-	"\x06branch\x18\x01 \x01(\tR\x06branch\"E\n" +
-	"(CreateWorkspaceAsyncMergeUnknownSubagent\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\tR\aagentId\"a\n" +
-	"%CreateWorkspaceAsyncMergeUnknownMaker\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\\\n" +
-	"(CreateWorkspaceAsyncMergeContextNotMaker\x120\n" +
-	"\x05maker\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05maker\"<\n" +
-	"\"CreateWorkspaceAsyncMergeNameTaken\x12\x16\n" +
-	"\x06branch\x18\x01 \x01(\tR\x06branch\"\xb8\x01\n" +
-	"%CreateWorkspaceAsyncMergeNameOffQueue\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12A\n" +
-	"\x05cause\x18\x03 \x01(\v2+.agentrepl.v1.MergeQueueStatusOffQueueCauseR\x05cause\",\n" +
-	"*CreateWorkspaceAsyncMergeUnknownCloseAfter\"+\n" +
-	")CreateWorkspaceAsyncMergeRequesterMerging\"2\n" +
-	"0CreateWorkspaceAsyncMergeRequesterSessionDeleted\"#\n" +
-	"!CreateWorkspaceOpIdWithAsyncMerge\"?\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"?\n" +
 	"%CreateWorkspaceWorktreeCreationFailed\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"4\n" +
 	"\x1aCreateWorkspaceSpawnFailed\x12\x16\n" +
@@ -6086,240 +4833,190 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 79)
+var file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
 var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
-	(*CreateWorkspaceRequest)(nil),                           // 0: agentrepl.v1.CreateWorkspaceRequest
-	(*CreateWorkspacePlacement)(nil),                         // 1: agentrepl.v1.CreateWorkspacePlacement
-	(*CreateWorkspaceNewSubsection)(nil),                     // 2: agentrepl.v1.CreateWorkspaceNewSubsection
-	(*WorkspaceOriginator)(nil),                              // 3: agentrepl.v1.WorkspaceOriginator
-	(*WorkspaceOriginatorEmojiAck)(nil),                      // 4: agentrepl.v1.WorkspaceOriginatorEmojiAck
-	(*WorkspaceOriginatorUserOrWorkspace)(nil),               // 5: agentrepl.v1.WorkspaceOriginatorUserOrWorkspace
-	(*CreateWorkspaceSlackOrigin)(nil),                       // 6: agentrepl.v1.CreateWorkspaceSlackOrigin
-	(*CreateWorkspaceStandard)(nil),                          // 7: agentrepl.v1.CreateWorkspaceStandard
-	(*CreateWorkspaceOneShot)(nil),                           // 8: agentrepl.v1.CreateWorkspaceOneShot
-	(*CreateWorkspaceOneShotContext)(nil),                    // 9: agentrepl.v1.CreateWorkspaceOneShotContext
-	(*CreateWorkspaceUngatedConsent)(nil),                    // 10: agentrepl.v1.CreateWorkspaceUngatedConsent
-	(*CreateWorkspaceAsyncMerge)(nil),                        // 11: agentrepl.v1.CreateWorkspaceAsyncMerge
-	(*CreateWorkspaceAsyncMergeSource)(nil),                  // 12: agentrepl.v1.CreateWorkspaceAsyncMergeSource
-	(*CreateWorkspaceAsyncMergeMaker)(nil),                   // 13: agentrepl.v1.CreateWorkspaceAsyncMergeMaker
-	(*CreateWorkspaceAsyncMergeMakerSubagent)(nil),           // 14: agentrepl.v1.CreateWorkspaceAsyncMergeMakerSubagent
-	(*CreateWorkspaceAsyncMergeMakerWorkspace)(nil),          // 15: agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspace
-	(*CreateWorkspaceAsyncMergeTarget)(nil),                  // 16: agentrepl.v1.CreateWorkspaceAsyncMergeTarget
-	(*CreateWorkspaceAsyncMergeTargetPrimary)(nil),           // 17: agentrepl.v1.CreateWorkspaceAsyncMergeTargetPrimary
-	(*CreateWorkspaceAsyncMergeTargetMaker)(nil),             // 18: agentrepl.v1.CreateWorkspaceAsyncMergeTargetMaker
-	(*CreateWorkspaceAsyncMergeCloseAfter)(nil),              // 19: agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter
-	(*CreateWorkspaceDeployHooks)(nil),                       // 20: agentrepl.v1.CreateWorkspaceDeployHooks
-	(*CreateWorkspaceResponse)(nil),                          // 21: agentrepl.v1.CreateWorkspaceResponse
-	(*CreateWorkspaceWaitingForRequesterTurn)(nil),           // 22: agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
-	(*PendingCreateRef)(nil),                                 // 23: agentrepl.v1.PendingCreateRef
-	(*CreateWorkspaceWaitingForNetwork)(nil),                 // 24: agentrepl.v1.CreateWorkspaceWaitingForNetwork
-	(*CreateWorkspaceJoined)(nil),                            // 25: agentrepl.v1.CreateWorkspaceJoined
-	(*CreateWorkspaceAsyncMergeAccepted)(nil),                // 26: agentrepl.v1.CreateWorkspaceAsyncMergeAccepted
-	(*CreateWorkspaceAccepted)(nil),                          // 27: agentrepl.v1.CreateWorkspaceAccepted
-	(*CreateWorkspaceSuccess)(nil),                           // 28: agentrepl.v1.CreateWorkspaceSuccess
-	(*CreateWorkspaceHeldAtColdGate)(nil),                    // 29: agentrepl.v1.CreateWorkspaceHeldAtColdGate
-	(*CreateWorkspaceError)(nil),                             // 30: agentrepl.v1.CreateWorkspaceError
-	(*CreateWorkspacePlacementOnChild)(nil),                  // 31: agentrepl.v1.CreateWorkspacePlacementOnChild
-	(*CreateWorkspacePlacementOnMergeWorkspace)(nil),         // 32: agentrepl.v1.CreateWorkspacePlacementOnMergeWorkspace
-	(*CreateWorkspacePlacementRequiresWorkspace)(nil),        // 33: agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
-	(*CreateWorkspaceUnknownPlacementSubsection)(nil),        // 34: agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
-	(*CreateWorkspaceBlankPlacementSubsectionName)(nil),      // 35: agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
-	(*CreateWorkspaceGatherUnknownWorkspace)(nil),            // 36: agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
-	(*CreateWorkspaceGatherNotGatherable)(nil),               // 37: agentrepl.v1.CreateWorkspaceGatherNotGatherable
-	(*CreateWorkspaceRequestedByDeployMediator)(nil),         // 38: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
-	(*CreateWorkspaceRequestedByProductionMediator)(nil),     // 39: agentrepl.v1.CreateWorkspaceRequestedByProductionMediator
-	(*CreateWorkspaceModelNotInCatalog)(nil),                 // 40: agentrepl.v1.CreateWorkspaceModelNotInCatalog
-	(*CreateWorkspaceModelCatalogUnknown)(nil),               // 41: agentrepl.v1.CreateWorkspaceModelCatalogUnknown
-	(*CreateWorkspaceTransferringAway)(nil),                  // 42: agentrepl.v1.CreateWorkspaceTransferringAway
-	(*CreateWorkspaceStandingDown)(nil),                      // 43: agentrepl.v1.CreateWorkspaceStandingDown
-	(*CreateWorkspaceUngatedWithoutConsent)(nil),             // 44: agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
-	(*CreateWorkspaceNoSlug)(nil),                            // 45: agentrepl.v1.CreateWorkspaceNoSlug
-	(*CreateWorkspaceBriefMissing)(nil),                      // 46: agentrepl.v1.CreateWorkspaceBriefMissing
-	(*CreateWorkspaceUnknownRepository)(nil),                 // 47: agentrepl.v1.CreateWorkspaceUnknownRepository
-	(*CreateWorkspaceInsideTemporaryDirectory)(nil),          // 48: agentrepl.v1.CreateWorkspaceInsideTemporaryDirectory
-	(*CreateWorkspaceUnknownForkSource)(nil),                 // 49: agentrepl.v1.CreateWorkspaceUnknownForkSource
-	(*CreateWorkspaceForkSourceHasNoConversation)(nil),       // 50: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
-	(*CreateWorkspaceForkSourceHasNoFinishedTurn)(nil),       // 51: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn
-	(*CreateWorkspaceUnknownContextWorkspace)(nil),           // 52: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
-	(*CreateWorkspaceNameReserved)(nil),                      // 53: agentrepl.v1.CreateWorkspaceNameReserved
-	(*CreateWorkspaceNameHeld)(nil),                          // 54: agentrepl.v1.CreateWorkspaceNameHeld
-	(*CreateWorkspaceNameBranchExists)(nil),                  // 55: agentrepl.v1.CreateWorkspaceNameBranchExists
-	(*CreateWorkspaceInvalidName)(nil),                       // 56: agentrepl.v1.CreateWorkspaceInvalidName
-	(*CreateWorkspaceInvalidNameSlug)(nil),                   // 57: agentrepl.v1.CreateWorkspaceInvalidNameSlug
-	(*CreateWorkspaceInvalidNamePrefix)(nil),                 // 58: agentrepl.v1.CreateWorkspaceInvalidNamePrefix
-	(*CreateWorkspaceInvalidNameReserved)(nil),               // 59: agentrepl.v1.CreateWorkspaceInvalidNameReserved
-	(*CreateWorkspaceUnknownOwner)(nil),                      // 60: agentrepl.v1.CreateWorkspaceUnknownOwner
-	(*CreateWorkspaceUnknownLandingTarget)(nil),              // 61: agentrepl.v1.CreateWorkspaceUnknownLandingTarget
-	(*CreateWorkspaceUnknownRequester)(nil),                  // 62: agentrepl.v1.CreateWorkspaceUnknownRequester
-	(*CreateWorkspaceAsyncMergeUnknownBranch)(nil),           // 63: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownBranch
-	(*CreateWorkspaceAsyncMergeUnknownSubagent)(nil),         // 64: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownSubagent
-	(*CreateWorkspaceAsyncMergeUnknownMaker)(nil),            // 65: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker
-	(*CreateWorkspaceAsyncMergeContextNotMaker)(nil),         // 66: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker
-	(*CreateWorkspaceAsyncMergeNameTaken)(nil),               // 67: agentrepl.v1.CreateWorkspaceAsyncMergeNameTaken
-	(*CreateWorkspaceAsyncMergeNameOffQueue)(nil),            // 68: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue
-	(*CreateWorkspaceAsyncMergeUnknownCloseAfter)(nil),       // 69: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownCloseAfter
-	(*CreateWorkspaceAsyncMergeRequesterMerging)(nil),        // 70: agentrepl.v1.CreateWorkspaceAsyncMergeRequesterMerging
-	(*CreateWorkspaceAsyncMergeRequesterSessionDeleted)(nil), // 71: agentrepl.v1.CreateWorkspaceAsyncMergeRequesterSessionDeleted
-	(*CreateWorkspaceOpIdWithAsyncMerge)(nil),                // 72: agentrepl.v1.CreateWorkspaceOpIdWithAsyncMerge
-	(*CreateWorkspaceWorktreeCreationFailed)(nil),            // 73: agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
-	(*CreateWorkspaceSpawnFailed)(nil),                       // 74: agentrepl.v1.CreateWorkspaceSpawnFailed
-	(*CreateWorkspaceOneShotPolicyMissing)(nil),              // 75: agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
-	(*CreateWorkspaceNamingFailed)(nil),                      // 76: agentrepl.v1.CreateWorkspaceNamingFailed
-	(*CreateWorkspaceOriginFetchFailed)(nil),                 // 77: agentrepl.v1.CreateWorkspaceOriginFetchFailed
-	(*CreateWorkspaceCreationHookFailed)(nil),                // 78: agentrepl.v1.CreateWorkspaceCreationHookFailed
-	(*v1.RepositoryRef)(nil),                                 // 79: workspace.v1.RepositoryRef
-	(*WorkspaceRequester)(nil),                               // 80: agentrepl.v1.WorkspaceRequester
-	(*WorkspaceContextOrigin)(nil),                           // 81: agentrepl.v1.WorkspaceContextOrigin
-	(*WorkspacePriority)(nil),                                // 82: agentrepl.v1.WorkspacePriority
-	(*SlackThreadMode)(nil),                                  // 83: agentrepl.v1.SlackThreadMode
-	(*v11.UserSaid)(nil),                                     // 84: conversation.v1.UserSaid
-	(*WorkspaceRelationship)(nil),                            // 85: agentrepl.v1.WorkspaceRelationship
-	(*WorkspaceLandingTarget)(nil),                           // 86: agentrepl.v1.WorkspaceLandingTarget
-	(*MergeQueuePlacement)(nil),                              // 87: agentrepl.v1.MergeQueuePlacement
-	(*v1.WorkspaceRef)(nil),                                  // 88: workspace.v1.WorkspaceRef
-	(*MergeWorkspaceVersionIncrement)(nil),                   // 89: agentrepl.v1.MergeWorkspaceVersionIncrement
-	(*v12.Hook)(nil),                                         // 90: repoconfig.v1.Hook
-	(*WorkspaceParentNotOpen)(nil),                           // 91: agentrepl.v1.WorkspaceParentNotOpen
-	(*MergeQueuePlacementBehindNotInLine)(nil),               // 92: agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	(*MergeWorkspaceVersionIncrementRequired)(nil),           // 93: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	(*MergeWorkspaceVersionIncrementUnexpected)(nil),         // 94: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	(*LifecycleConfigMissing)(nil),                           // 95: agentrepl.v1.LifecycleConfigMissing
-	(*LifecycleConfigInvalid)(nil),                           // 96: agentrepl.v1.LifecycleConfigInvalid
-	(*MergeRuleChecksFailed)(nil),                            // 97: agentrepl.v1.MergeRuleChecksFailed
-	(*v11.ModelOption)(nil),                                  // 98: conversation.v1.ModelOption
-	(*MergeQueueStatusOffQueueCause)(nil),                    // 99: agentrepl.v1.MergeQueueStatusOffQueueCause
+	(*CreateWorkspaceRequest)(nil),                       // 0: agentrepl.v1.CreateWorkspaceRequest
+	(*CreateWorkspacePlacement)(nil),                     // 1: agentrepl.v1.CreateWorkspacePlacement
+	(*CreateWorkspaceNewSubsection)(nil),                 // 2: agentrepl.v1.CreateWorkspaceNewSubsection
+	(*WorkspaceOriginator)(nil),                          // 3: agentrepl.v1.WorkspaceOriginator
+	(*WorkspaceOriginatorEmojiAck)(nil),                  // 4: agentrepl.v1.WorkspaceOriginatorEmojiAck
+	(*WorkspaceOriginatorUserOrWorkspace)(nil),           // 5: agentrepl.v1.WorkspaceOriginatorUserOrWorkspace
+	(*CreateWorkspaceSlackOrigin)(nil),                   // 6: agentrepl.v1.CreateWorkspaceSlackOrigin
+	(*CreateWorkspaceStandard)(nil),                      // 7: agentrepl.v1.CreateWorkspaceStandard
+	(*CreateWorkspaceOneShot)(nil),                       // 8: agentrepl.v1.CreateWorkspaceOneShot
+	(*CreateWorkspaceCloseAfter)(nil),                    // 9: agentrepl.v1.CreateWorkspaceCloseAfter
+	(*CreateWorkspaceOneShotContext)(nil),                // 10: agentrepl.v1.CreateWorkspaceOneShotContext
+	(*CreateWorkspaceUngatedConsent)(nil),                // 11: agentrepl.v1.CreateWorkspaceUngatedConsent
+	(*CreateWorkspaceDeployHooks)(nil),                   // 12: agentrepl.v1.CreateWorkspaceDeployHooks
+	(*CreateWorkspaceResponse)(nil),                      // 13: agentrepl.v1.CreateWorkspaceResponse
+	(*CreateWorkspaceWaitingForRequesterTurn)(nil),       // 14: agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
+	(*PendingCreateRef)(nil),                             // 15: agentrepl.v1.PendingCreateRef
+	(*CreateWorkspaceWaitingForNetwork)(nil),             // 16: agentrepl.v1.CreateWorkspaceWaitingForNetwork
+	(*CreateWorkspaceJoined)(nil),                        // 17: agentrepl.v1.CreateWorkspaceJoined
+	(*CreateWorkspaceAccepted)(nil),                      // 18: agentrepl.v1.CreateWorkspaceAccepted
+	(*CreateWorkspaceSuccess)(nil),                       // 19: agentrepl.v1.CreateWorkspaceSuccess
+	(*CreateWorkspaceHeldAtColdGate)(nil),                // 20: agentrepl.v1.CreateWorkspaceHeldAtColdGate
+	(*CreateWorkspaceError)(nil),                         // 21: agentrepl.v1.CreateWorkspaceError
+	(*CreateWorkspacePlacementOnChild)(nil),              // 22: agentrepl.v1.CreateWorkspacePlacementOnChild
+	(*CreateWorkspacePlacementRequiresWorkspace)(nil),    // 23: agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
+	(*CreateWorkspaceUnknownPlacementSubsection)(nil),    // 24: agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
+	(*CreateWorkspaceBlankPlacementSubsectionName)(nil),  // 25: agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
+	(*CreateWorkspaceGatherUnknownWorkspace)(nil),        // 26: agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
+	(*CreateWorkspaceGatherNotGatherable)(nil),           // 27: agentrepl.v1.CreateWorkspaceGatherNotGatherable
+	(*CreateWorkspaceRequestedByDeployMediator)(nil),     // 28: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
+	(*CreateWorkspaceRequestedByProductionMediator)(nil), // 29: agentrepl.v1.CreateWorkspaceRequestedByProductionMediator
+	(*CreateWorkspaceModelNotInCatalog)(nil),             // 30: agentrepl.v1.CreateWorkspaceModelNotInCatalog
+	(*CreateWorkspaceModelCatalogUnknown)(nil),           // 31: agentrepl.v1.CreateWorkspaceModelCatalogUnknown
+	(*CreateWorkspaceTransferringAway)(nil),              // 32: agentrepl.v1.CreateWorkspaceTransferringAway
+	(*CreateWorkspaceStandingDown)(nil),                  // 33: agentrepl.v1.CreateWorkspaceStandingDown
+	(*CreateWorkspaceUngatedWithoutConsent)(nil),         // 34: agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
+	(*CreateWorkspaceNoSlug)(nil),                        // 35: agentrepl.v1.CreateWorkspaceNoSlug
+	(*CreateWorkspaceBriefMissing)(nil),                  // 36: agentrepl.v1.CreateWorkspaceBriefMissing
+	(*CreateWorkspaceUnknownRepository)(nil),             // 37: agentrepl.v1.CreateWorkspaceUnknownRepository
+	(*CreateWorkspaceInsideTemporaryDirectory)(nil),      // 38: agentrepl.v1.CreateWorkspaceInsideTemporaryDirectory
+	(*CreateWorkspaceUnknownForkSource)(nil),             // 39: agentrepl.v1.CreateWorkspaceUnknownForkSource
+	(*CreateWorkspaceForkSourceHasNoConversation)(nil),   // 40: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
+	(*CreateWorkspaceForkSourceHasNoFinishedTurn)(nil),   // 41: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn
+	(*CreateWorkspaceUnknownContextWorkspace)(nil),       // 42: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
+	(*CreateWorkspaceNameHeld)(nil),                      // 43: agentrepl.v1.CreateWorkspaceNameHeld
+	(*CreateWorkspaceNameBranchExists)(nil),              // 44: agentrepl.v1.CreateWorkspaceNameBranchExists
+	(*CreateWorkspaceInvalidName)(nil),                   // 45: agentrepl.v1.CreateWorkspaceInvalidName
+	(*CreateWorkspaceInvalidNameSlug)(nil),               // 46: agentrepl.v1.CreateWorkspaceInvalidNameSlug
+	(*CreateWorkspaceInvalidNamePrefix)(nil),             // 47: agentrepl.v1.CreateWorkspaceInvalidNamePrefix
+	(*CreateWorkspaceInvalidNameReserved)(nil),           // 48: agentrepl.v1.CreateWorkspaceInvalidNameReserved
+	(*CreateWorkspaceUnknownOwner)(nil),                  // 49: agentrepl.v1.CreateWorkspaceUnknownOwner
+	(*CreateWorkspaceUnknownLandingTarget)(nil),          // 50: agentrepl.v1.CreateWorkspaceUnknownLandingTarget
+	(*CreateWorkspaceNameReserved)(nil),                  // 51: agentrepl.v1.CreateWorkspaceNameReserved
+	(*CreateWorkspaceUnknownSourceBranch)(nil),           // 52: agentrepl.v1.CreateWorkspaceUnknownSourceBranch
+	(*CreateWorkspaceUnknownSubagent)(nil),               // 53: agentrepl.v1.CreateWorkspaceUnknownSubagent
+	(*CreateWorkspaceUnknownCloseAfter)(nil),             // 54: agentrepl.v1.CreateWorkspaceUnknownCloseAfter
+	(*CreateWorkspaceUnknownRequester)(nil),              // 55: agentrepl.v1.CreateWorkspaceUnknownRequester
+	(*CreateWorkspaceWorktreeCreationFailed)(nil),        // 56: agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
+	(*CreateWorkspaceSpawnFailed)(nil),                   // 57: agentrepl.v1.CreateWorkspaceSpawnFailed
+	(*CreateWorkspaceOneShotPolicyMissing)(nil),          // 58: agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
+	(*CreateWorkspaceNamingFailed)(nil),                  // 59: agentrepl.v1.CreateWorkspaceNamingFailed
+	(*CreateWorkspaceOriginFetchFailed)(nil),             // 60: agentrepl.v1.CreateWorkspaceOriginFetchFailed
+	(*CreateWorkspaceCreationHookFailed)(nil),            // 61: agentrepl.v1.CreateWorkspaceCreationHookFailed
+	(*v1.RepositoryRef)(nil),                             // 62: workspace.v1.RepositoryRef
+	(*WorkspaceRequester)(nil),                           // 63: agentrepl.v1.WorkspaceRequester
+	(*WorkspaceContextOrigin)(nil),                       // 64: agentrepl.v1.WorkspaceContextOrigin
+	(*WorkspacePriority)(nil),                            // 65: agentrepl.v1.WorkspacePriority
+	(*SlackThreadMode)(nil),                              // 66: agentrepl.v1.SlackThreadMode
+	(*v11.UserSaid)(nil),                                 // 67: conversation.v1.UserSaid
+	(*WorkspaceRelationship)(nil),                        // 68: agentrepl.v1.WorkspaceRelationship
+	(*WorkspaceLandingTarget)(nil),                       // 69: agentrepl.v1.WorkspaceLandingTarget
+	(*WorkspaceSourceBranch)(nil),                        // 70: agentrepl.v1.WorkspaceSourceBranch
+	(*MergeQueuePlacement)(nil),                          // 71: agentrepl.v1.MergeQueuePlacement
+	(*v1.WorkspaceRef)(nil),                              // 72: workspace.v1.WorkspaceRef
+	(*v12.Hook)(nil),                                     // 73: repoconfig.v1.Hook
+	(*WorkspaceParentNotOpen)(nil),                       // 74: agentrepl.v1.WorkspaceParentNotOpen
+	(*LifecycleConfigInvalid)(nil),                       // 75: agentrepl.v1.LifecycleConfigInvalid
+	(*v11.ModelOption)(nil),                              // 76: conversation.v1.ModelOption
 }
 var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
-	79,  // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
-	7,   // 1: agentrepl.v1.CreateWorkspaceRequest.standard:type_name -> agentrepl.v1.CreateWorkspaceStandard
-	8,   // 2: agentrepl.v1.CreateWorkspaceRequest.one_shot:type_name -> agentrepl.v1.CreateWorkspaceOneShot
-	11,  // 3: agentrepl.v1.CreateWorkspaceRequest.async_merge:type_name -> agentrepl.v1.CreateWorkspaceAsyncMerge
-	80,  // 4: agentrepl.v1.CreateWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
-	81,  // 5: agentrepl.v1.CreateWorkspaceRequest.context_origin:type_name -> agentrepl.v1.WorkspaceContextOrigin
-	82,  // 6: agentrepl.v1.CreateWorkspaceRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
-	10,  // 7: agentrepl.v1.CreateWorkspaceRequest.allow_ungated:type_name -> agentrepl.v1.CreateWorkspaceUngatedConsent
-	6,   // 8: agentrepl.v1.CreateWorkspaceRequest.slack_origin:type_name -> agentrepl.v1.CreateWorkspaceSlackOrigin
-	3,   // 9: agentrepl.v1.CreateWorkspaceRequest.originator:type_name -> agentrepl.v1.WorkspaceOriginator
-	1,   // 10: agentrepl.v1.CreateWorkspaceRequest.placement:type_name -> agentrepl.v1.CreateWorkspacePlacement
-	2,   // 11: agentrepl.v1.CreateWorkspacePlacement.new_subsection:type_name -> agentrepl.v1.CreateWorkspaceNewSubsection
-	4,   // 12: agentrepl.v1.WorkspaceOriginator.emoji_ack:type_name -> agentrepl.v1.WorkspaceOriginatorEmojiAck
-	5,   // 13: agentrepl.v1.WorkspaceOriginator.user_or_workspace:type_name -> agentrepl.v1.WorkspaceOriginatorUserOrWorkspace
-	83,  // 14: agentrepl.v1.CreateWorkspaceSlackOrigin.subscribe:type_name -> agentrepl.v1.SlackThreadMode
-	84,  // 15: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
-	85,  // 16: agentrepl.v1.CreateWorkspaceStandard.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
-	86,  // 17: agentrepl.v1.CreateWorkspaceStandard.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
-	20,  // 18: agentrepl.v1.CreateWorkspaceStandard.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
-	84,  // 19: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
-	85,  // 20: agentrepl.v1.CreateWorkspaceOneShot.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
-	86,  // 21: agentrepl.v1.CreateWorkspaceOneShot.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
-	9,   // 22: agentrepl.v1.CreateWorkspaceOneShot.context:type_name -> agentrepl.v1.CreateWorkspaceOneShotContext
-	87,  // 23: agentrepl.v1.CreateWorkspaceOneShot.finish_placement:type_name -> agentrepl.v1.MergeQueuePlacement
-	88,  // 24: agentrepl.v1.CreateWorkspaceOneShotContext.workspace:type_name -> workspace.v1.WorkspaceRef
-	12,  // 25: agentrepl.v1.CreateWorkspaceAsyncMerge.source:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeSource
-	16,  // 26: agentrepl.v1.CreateWorkspaceAsyncMerge.target:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTarget
-	19,  // 27: agentrepl.v1.CreateWorkspaceAsyncMerge.close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter
-	20,  // 28: agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
-	87,  // 29: agentrepl.v1.CreateWorkspaceAsyncMerge.placement:type_name -> agentrepl.v1.MergeQueuePlacement
-	89,  // 30: agentrepl.v1.CreateWorkspaceAsyncMerge.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
-	13,  // 31: agentrepl.v1.CreateWorkspaceAsyncMergeSource.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMaker
-	14,  // 32: agentrepl.v1.CreateWorkspaceAsyncMergeMaker.subagent:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMakerSubagent
-	15,  // 33: agentrepl.v1.CreateWorkspaceAsyncMergeMaker.workspace:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspace
-	88,  // 34: agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	17,  // 35: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.primary:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetPrimary
-	18,  // 36: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetMaker
-	88,  // 37: agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter.workspace:type_name -> workspace.v1.WorkspaceRef
-	90,  // 38: agentrepl.v1.CreateWorkspaceDeployHooks.pre_deploy:type_name -> repoconfig.v1.Hook
-	90,  // 39: agentrepl.v1.CreateWorkspaceDeployHooks.post_deploy:type_name -> repoconfig.v1.Hook
-	28,  // 40: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
-	30,  // 41: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
-	27,  // 42: agentrepl.v1.CreateWorkspaceResponse.accepted:type_name -> agentrepl.v1.CreateWorkspaceAccepted
-	26,  // 43: agentrepl.v1.CreateWorkspaceResponse.async_merge_accepted:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeAccepted
-	24,  // 44: agentrepl.v1.CreateWorkspaceResponse.waiting_for_network:type_name -> agentrepl.v1.CreateWorkspaceWaitingForNetwork
-	22,  // 45: agentrepl.v1.CreateWorkspaceResponse.waiting_for_requester_turn:type_name -> agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
-	23,  // 46: agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn.create:type_name -> agentrepl.v1.PendingCreateRef
-	23,  // 47: agentrepl.v1.CreateWorkspaceWaitingForNetwork.create:type_name -> agentrepl.v1.PendingCreateRef
-	23,  // 48: agentrepl.v1.CreateWorkspaceJoined.create:type_name -> agentrepl.v1.PendingCreateRef
-	25,  // 49: agentrepl.v1.CreateWorkspaceAccepted.joined:type_name -> agentrepl.v1.CreateWorkspaceJoined
-	88,  // 50: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
-	29,  // 51: agentrepl.v1.CreateWorkspaceSuccess.held_at_cold_gate:type_name -> agentrepl.v1.CreateWorkspaceHeldAtColdGate
-	44,  // 52: agentrepl.v1.CreateWorkspaceError.ungated_without_consent:type_name -> agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
-	45,  // 53: agentrepl.v1.CreateWorkspaceError.no_slug:type_name -> agentrepl.v1.CreateWorkspaceNoSlug
-	46,  // 54: agentrepl.v1.CreateWorkspaceError.brief_missing:type_name -> agentrepl.v1.CreateWorkspaceBriefMissing
-	47,  // 55: agentrepl.v1.CreateWorkspaceError.unknown_repository:type_name -> agentrepl.v1.CreateWorkspaceUnknownRepository
-	73,  // 56: agentrepl.v1.CreateWorkspaceError.worktree_creation_failed:type_name -> agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
-	74,  // 57: agentrepl.v1.CreateWorkspaceError.spawn_failed:type_name -> agentrepl.v1.CreateWorkspaceSpawnFailed
-	75,  // 58: agentrepl.v1.CreateWorkspaceError.one_shot_policy_missing:type_name -> agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
-	76,  // 59: agentrepl.v1.CreateWorkspaceError.naming_failed:type_name -> agentrepl.v1.CreateWorkspaceNamingFailed
-	48,  // 60: agentrepl.v1.CreateWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.CreateWorkspaceInsideTemporaryDirectory
-	49,  // 61: agentrepl.v1.CreateWorkspaceError.unknown_fork_source:type_name -> agentrepl.v1.CreateWorkspaceUnknownForkSource
-	50,  // 62: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
-	51,  // 63: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_finished_turn:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn
-	53,  // 64: agentrepl.v1.CreateWorkspaceError.name_reserved:type_name -> agentrepl.v1.CreateWorkspaceNameReserved
-	54,  // 65: agentrepl.v1.CreateWorkspaceError.name_held:type_name -> agentrepl.v1.CreateWorkspaceNameHeld
-	55,  // 66: agentrepl.v1.CreateWorkspaceError.name_branch_exists:type_name -> agentrepl.v1.CreateWorkspaceNameBranchExists
-	56,  // 67: agentrepl.v1.CreateWorkspaceError.invalid_name:type_name -> agentrepl.v1.CreateWorkspaceInvalidName
-	52,  // 68: agentrepl.v1.CreateWorkspaceError.unknown_context_workspace:type_name -> agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
-	91,  // 69: agentrepl.v1.CreateWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
-	60,  // 70: agentrepl.v1.CreateWorkspaceError.unknown_owner:type_name -> agentrepl.v1.CreateWorkspaceUnknownOwner
-	61,  // 71: agentrepl.v1.CreateWorkspaceError.unknown_landing_target:type_name -> agentrepl.v1.CreateWorkspaceUnknownLandingTarget
-	62,  // 72: agentrepl.v1.CreateWorkspaceError.unknown_requester:type_name -> agentrepl.v1.CreateWorkspaceUnknownRequester
-	63,  // 73: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_branch:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownBranch
-	64,  // 74: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_subagent:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownSubagent
-	65,  // 75: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker
-	66,  // 76: agentrepl.v1.CreateWorkspaceError.async_merge_context_not_maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker
-	67,  // 77: agentrepl.v1.CreateWorkspaceError.async_merge_name_taken:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeNameTaken
-	68,  // 78: agentrepl.v1.CreateWorkspaceError.async_merge_name_off_queue:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue
-	92,  // 79: agentrepl.v1.CreateWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	69,  // 80: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownCloseAfter
-	72,  // 81: agentrepl.v1.CreateWorkspaceError.op_id_with_async_merge:type_name -> agentrepl.v1.CreateWorkspaceOpIdWithAsyncMerge
-	93,  // 82: agentrepl.v1.CreateWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	94,  // 83: agentrepl.v1.CreateWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	70,  // 84: agentrepl.v1.CreateWorkspaceError.async_merge_requester_merging:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterMerging
-	71,  // 85: agentrepl.v1.CreateWorkspaceError.async_merge_requester_session_deleted:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterSessionDeleted
-	77,  // 86: agentrepl.v1.CreateWorkspaceError.origin_fetch_failed:type_name -> agentrepl.v1.CreateWorkspaceOriginFetchFailed
-	95,  // 87: agentrepl.v1.CreateWorkspaceError.async_merge_no_deploy_config:type_name -> agentrepl.v1.LifecycleConfigMissing
-	96,  // 88: agentrepl.v1.CreateWorkspaceError.async_merge_deploy_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
-	97,  // 89: agentrepl.v1.CreateWorkspaceError.async_merge_rule_checks_failed:type_name -> agentrepl.v1.MergeRuleChecksFailed
-	42,  // 90: agentrepl.v1.CreateWorkspaceError.transferring_away:type_name -> agentrepl.v1.CreateWorkspaceTransferringAway
-	43,  // 91: agentrepl.v1.CreateWorkspaceError.standing_down:type_name -> agentrepl.v1.CreateWorkspaceStandingDown
-	40,  // 92: agentrepl.v1.CreateWorkspaceError.model_not_in_catalog:type_name -> agentrepl.v1.CreateWorkspaceModelNotInCatalog
-	41,  // 93: agentrepl.v1.CreateWorkspaceError.model_catalog_unknown:type_name -> agentrepl.v1.CreateWorkspaceModelCatalogUnknown
-	96,  // 94: agentrepl.v1.CreateWorkspaceError.lifecycle_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
-	78,  // 95: agentrepl.v1.CreateWorkspaceError.creation_hook_failed:type_name -> agentrepl.v1.CreateWorkspaceCreationHookFailed
-	31,  // 96: agentrepl.v1.CreateWorkspaceError.placement_on_child:type_name -> agentrepl.v1.CreateWorkspacePlacementOnChild
-	32,  // 97: agentrepl.v1.CreateWorkspaceError.placement_on_merge_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementOnMergeWorkspace
-	33,  // 98: agentrepl.v1.CreateWorkspaceError.placement_requires_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
-	34,  // 99: agentrepl.v1.CreateWorkspaceError.unknown_placement_subsection:type_name -> agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
-	35,  // 100: agentrepl.v1.CreateWorkspaceError.blank_placement_subsection_name:type_name -> agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
-	36,  // 101: agentrepl.v1.CreateWorkspaceError.gather_unknown_workspace:type_name -> agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
-	37,  // 102: agentrepl.v1.CreateWorkspaceError.gather_not_gatherable:type_name -> agentrepl.v1.CreateWorkspaceGatherNotGatherable
-	38,  // 103: agentrepl.v1.CreateWorkspaceError.requested_by_deploy_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
-	39,  // 104: agentrepl.v1.CreateWorkspaceError.requested_by_production_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByProductionMediator
-	88,  // 105: agentrepl.v1.CreateWorkspaceGatherNotGatherable.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 106: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 107: agentrepl.v1.CreateWorkspaceRequestedByProductionMediator.workspace:type_name -> workspace.v1.WorkspaceRef
-	98,  // 108: agentrepl.v1.CreateWorkspaceModelNotInCatalog.options:type_name -> conversation.v1.ModelOption
-	88,  // 109: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 110: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 111: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 112: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 113: agentrepl.v1.CreateWorkspaceNameHeld.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 114: agentrepl.v1.CreateWorkspaceNameBranchExists.landed_workspace:type_name -> workspace.v1.WorkspaceRef
-	57,  // 115: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
-	58,  // 116: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
-	59,  // 117: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
-	88,  // 118: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
-	88,  // 119: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 120: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 121: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 122: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
-	88,  // 123: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.workspace:type_name -> workspace.v1.WorkspaceRef
-	99,  // 124: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
-	125, // [125:125] is the sub-list for method output_type
-	125, // [125:125] is the sub-list for method input_type
-	125, // [125:125] is the sub-list for extension type_name
-	125, // [125:125] is the sub-list for extension extendee
-	0,   // [0:125] is the sub-list for field type_name
+	62, // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
+	7,  // 1: agentrepl.v1.CreateWorkspaceRequest.standard:type_name -> agentrepl.v1.CreateWorkspaceStandard
+	8,  // 2: agentrepl.v1.CreateWorkspaceRequest.one_shot:type_name -> agentrepl.v1.CreateWorkspaceOneShot
+	63, // 3: agentrepl.v1.CreateWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	64, // 4: agentrepl.v1.CreateWorkspaceRequest.context_origin:type_name -> agentrepl.v1.WorkspaceContextOrigin
+	65, // 5: agentrepl.v1.CreateWorkspaceRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
+	11, // 6: agentrepl.v1.CreateWorkspaceRequest.allow_ungated:type_name -> agentrepl.v1.CreateWorkspaceUngatedConsent
+	6,  // 7: agentrepl.v1.CreateWorkspaceRequest.slack_origin:type_name -> agentrepl.v1.CreateWorkspaceSlackOrigin
+	3,  // 8: agentrepl.v1.CreateWorkspaceRequest.originator:type_name -> agentrepl.v1.WorkspaceOriginator
+	1,  // 9: agentrepl.v1.CreateWorkspaceRequest.placement:type_name -> agentrepl.v1.CreateWorkspacePlacement
+	2,  // 10: agentrepl.v1.CreateWorkspacePlacement.new_subsection:type_name -> agentrepl.v1.CreateWorkspaceNewSubsection
+	4,  // 11: agentrepl.v1.WorkspaceOriginator.emoji_ack:type_name -> agentrepl.v1.WorkspaceOriginatorEmojiAck
+	5,  // 12: agentrepl.v1.WorkspaceOriginator.user_or_workspace:type_name -> agentrepl.v1.WorkspaceOriginatorUserOrWorkspace
+	66, // 13: agentrepl.v1.CreateWorkspaceSlackOrigin.subscribe:type_name -> agentrepl.v1.SlackThreadMode
+	67, // 14: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
+	68, // 15: agentrepl.v1.CreateWorkspaceStandard.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
+	69, // 16: agentrepl.v1.CreateWorkspaceStandard.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
+	12, // 17: agentrepl.v1.CreateWorkspaceStandard.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
+	70, // 18: agentrepl.v1.CreateWorkspaceStandard.source_branch:type_name -> agentrepl.v1.WorkspaceSourceBranch
+	67, // 19: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
+	68, // 20: agentrepl.v1.CreateWorkspaceOneShot.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
+	69, // 21: agentrepl.v1.CreateWorkspaceOneShot.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
+	10, // 22: agentrepl.v1.CreateWorkspaceOneShot.context:type_name -> agentrepl.v1.CreateWorkspaceOneShotContext
+	71, // 23: agentrepl.v1.CreateWorkspaceOneShot.finish_placement:type_name -> agentrepl.v1.MergeQueuePlacement
+	70, // 24: agentrepl.v1.CreateWorkspaceOneShot.source_branch:type_name -> agentrepl.v1.WorkspaceSourceBranch
+	9,  // 25: agentrepl.v1.CreateWorkspaceOneShot.close_after:type_name -> agentrepl.v1.CreateWorkspaceCloseAfter
+	12, // 26: agentrepl.v1.CreateWorkspaceOneShot.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
+	72, // 27: agentrepl.v1.CreateWorkspaceCloseAfter.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 28: agentrepl.v1.CreateWorkspaceOneShotContext.workspace:type_name -> workspace.v1.WorkspaceRef
+	73, // 29: agentrepl.v1.CreateWorkspaceDeployHooks.pre_deploy:type_name -> repoconfig.v1.Hook
+	73, // 30: agentrepl.v1.CreateWorkspaceDeployHooks.post_deploy:type_name -> repoconfig.v1.Hook
+	19, // 31: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
+	21, // 32: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
+	18, // 33: agentrepl.v1.CreateWorkspaceResponse.accepted:type_name -> agentrepl.v1.CreateWorkspaceAccepted
+	16, // 34: agentrepl.v1.CreateWorkspaceResponse.waiting_for_network:type_name -> agentrepl.v1.CreateWorkspaceWaitingForNetwork
+	14, // 35: agentrepl.v1.CreateWorkspaceResponse.waiting_for_requester_turn:type_name -> agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
+	15, // 36: agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn.create:type_name -> agentrepl.v1.PendingCreateRef
+	15, // 37: agentrepl.v1.CreateWorkspaceWaitingForNetwork.create:type_name -> agentrepl.v1.PendingCreateRef
+	15, // 38: agentrepl.v1.CreateWorkspaceJoined.create:type_name -> agentrepl.v1.PendingCreateRef
+	17, // 39: agentrepl.v1.CreateWorkspaceAccepted.joined:type_name -> agentrepl.v1.CreateWorkspaceJoined
+	72, // 40: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	20, // 41: agentrepl.v1.CreateWorkspaceSuccess.held_at_cold_gate:type_name -> agentrepl.v1.CreateWorkspaceHeldAtColdGate
+	34, // 42: agentrepl.v1.CreateWorkspaceError.ungated_without_consent:type_name -> agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
+	35, // 43: agentrepl.v1.CreateWorkspaceError.no_slug:type_name -> agentrepl.v1.CreateWorkspaceNoSlug
+	36, // 44: agentrepl.v1.CreateWorkspaceError.brief_missing:type_name -> agentrepl.v1.CreateWorkspaceBriefMissing
+	37, // 45: agentrepl.v1.CreateWorkspaceError.unknown_repository:type_name -> agentrepl.v1.CreateWorkspaceUnknownRepository
+	56, // 46: agentrepl.v1.CreateWorkspaceError.worktree_creation_failed:type_name -> agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
+	57, // 47: agentrepl.v1.CreateWorkspaceError.spawn_failed:type_name -> agentrepl.v1.CreateWorkspaceSpawnFailed
+	58, // 48: agentrepl.v1.CreateWorkspaceError.one_shot_policy_missing:type_name -> agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
+	59, // 49: agentrepl.v1.CreateWorkspaceError.naming_failed:type_name -> agentrepl.v1.CreateWorkspaceNamingFailed
+	38, // 50: agentrepl.v1.CreateWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.CreateWorkspaceInsideTemporaryDirectory
+	39, // 51: agentrepl.v1.CreateWorkspaceError.unknown_fork_source:type_name -> agentrepl.v1.CreateWorkspaceUnknownForkSource
+	40, // 52: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
+	41, // 53: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_finished_turn:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn
+	51, // 54: agentrepl.v1.CreateWorkspaceError.name_reserved:type_name -> agentrepl.v1.CreateWorkspaceNameReserved
+	43, // 55: agentrepl.v1.CreateWorkspaceError.name_held:type_name -> agentrepl.v1.CreateWorkspaceNameHeld
+	44, // 56: agentrepl.v1.CreateWorkspaceError.name_branch_exists:type_name -> agentrepl.v1.CreateWorkspaceNameBranchExists
+	45, // 57: agentrepl.v1.CreateWorkspaceError.invalid_name:type_name -> agentrepl.v1.CreateWorkspaceInvalidName
+	42, // 58: agentrepl.v1.CreateWorkspaceError.unknown_context_workspace:type_name -> agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
+	74, // 59: agentrepl.v1.CreateWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	49, // 60: agentrepl.v1.CreateWorkspaceError.unknown_owner:type_name -> agentrepl.v1.CreateWorkspaceUnknownOwner
+	50, // 61: agentrepl.v1.CreateWorkspaceError.unknown_landing_target:type_name -> agentrepl.v1.CreateWorkspaceUnknownLandingTarget
+	55, // 62: agentrepl.v1.CreateWorkspaceError.unknown_requester:type_name -> agentrepl.v1.CreateWorkspaceUnknownRequester
+	52, // 63: agentrepl.v1.CreateWorkspaceError.unknown_source_branch:type_name -> agentrepl.v1.CreateWorkspaceUnknownSourceBranch
+	53, // 64: agentrepl.v1.CreateWorkspaceError.unknown_subagent:type_name -> agentrepl.v1.CreateWorkspaceUnknownSubagent
+	54, // 65: agentrepl.v1.CreateWorkspaceError.unknown_close_after:type_name -> agentrepl.v1.CreateWorkspaceUnknownCloseAfter
+	60, // 66: agentrepl.v1.CreateWorkspaceError.origin_fetch_failed:type_name -> agentrepl.v1.CreateWorkspaceOriginFetchFailed
+	32, // 67: agentrepl.v1.CreateWorkspaceError.transferring_away:type_name -> agentrepl.v1.CreateWorkspaceTransferringAway
+	33, // 68: agentrepl.v1.CreateWorkspaceError.standing_down:type_name -> agentrepl.v1.CreateWorkspaceStandingDown
+	30, // 69: agentrepl.v1.CreateWorkspaceError.model_not_in_catalog:type_name -> agentrepl.v1.CreateWorkspaceModelNotInCatalog
+	31, // 70: agentrepl.v1.CreateWorkspaceError.model_catalog_unknown:type_name -> agentrepl.v1.CreateWorkspaceModelCatalogUnknown
+	75, // 71: agentrepl.v1.CreateWorkspaceError.lifecycle_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
+	61, // 72: agentrepl.v1.CreateWorkspaceError.creation_hook_failed:type_name -> agentrepl.v1.CreateWorkspaceCreationHookFailed
+	22, // 73: agentrepl.v1.CreateWorkspaceError.placement_on_child:type_name -> agentrepl.v1.CreateWorkspacePlacementOnChild
+	23, // 74: agentrepl.v1.CreateWorkspaceError.placement_requires_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
+	24, // 75: agentrepl.v1.CreateWorkspaceError.unknown_placement_subsection:type_name -> agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
+	25, // 76: agentrepl.v1.CreateWorkspaceError.blank_placement_subsection_name:type_name -> agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
+	26, // 77: agentrepl.v1.CreateWorkspaceError.gather_unknown_workspace:type_name -> agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
+	27, // 78: agentrepl.v1.CreateWorkspaceError.gather_not_gatherable:type_name -> agentrepl.v1.CreateWorkspaceGatherNotGatherable
+	28, // 79: agentrepl.v1.CreateWorkspaceError.requested_by_deploy_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
+	29, // 80: agentrepl.v1.CreateWorkspaceError.requested_by_production_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByProductionMediator
+	72, // 81: agentrepl.v1.CreateWorkspaceGatherNotGatherable.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 82: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 83: agentrepl.v1.CreateWorkspaceRequestedByProductionMediator.workspace:type_name -> workspace.v1.WorkspaceRef
+	76, // 84: agentrepl.v1.CreateWorkspaceModelNotInCatalog.options:type_name -> conversation.v1.ModelOption
+	72, // 85: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 86: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 87: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 88: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 89: agentrepl.v1.CreateWorkspaceNameHeld.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 90: agentrepl.v1.CreateWorkspaceNameBranchExists.landed_workspace:type_name -> workspace.v1.WorkspaceRef
+	46, // 91: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
+	47, // 92: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
+	48, // 93: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
+	72, // 94: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
+	72, // 95: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 96: agentrepl.v1.CreateWorkspaceUnknownCloseAfter.workspace:type_name -> workspace.v1.WorkspaceRef
+	72, // 97: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
+	98, // [98:98] is the sub-list for method output_type
+	98, // [98:98] is the sub-list for method input_type
+	98, // [98:98] is the sub-list for extension type_name
+	98, // [98:98] is the sub-list for extension extendee
+	0,  // [0:98] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
@@ -6329,16 +5026,12 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 	}
 	file_agentrepl_v1_slack_thread_proto_init()
 	file_agentrepl_v1_lifecycle_config_refusal_proto_init()
-	file_agentrepl_v1_merge_rule_checks_refusal_proto_init()
 	file_agentrepl_v1_family_proto_init()
-	file_agentrepl_v1_merge_queue_status_proto_init()
-	file_agentrepl_v1_merge_version_increment_proto_init()
 	file_agentrepl_v1_workspace_priority_proto_init()
 	file_agentrepl_v1_workspace_topology_proto_init()
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[0].OneofWrappers = []any{
 		(*CreateWorkspaceRequest_Standard)(nil),
 		(*CreateWorkspaceRequest_OneShot)(nil),
-		(*CreateWorkspaceRequest_AsyncMerge)(nil),
 	}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*CreateWorkspacePlacement_Subsection)(nil),
@@ -6351,25 +5044,15 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[6].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[7].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[8].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13].OneofWrappers = []any{
-		(*CreateWorkspaceAsyncMergeMaker_Subagent)(nil),
-		(*CreateWorkspaceAsyncMergeMaker_Workspace)(nil),
-	}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16].OneofWrappers = []any{
-		(*CreateWorkspaceAsyncMergeTarget_Primary)(nil),
-		(*CreateWorkspaceAsyncMergeTarget_Maker)(nil),
-	}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21].OneofWrappers = []any{
 		(*CreateWorkspaceResponse_Success)(nil),
 		(*CreateWorkspaceResponse_Error)(nil),
 		(*CreateWorkspaceResponse_Accepted)(nil),
-		(*CreateWorkspaceResponse_AsyncMergeAccepted)(nil),
 		(*CreateWorkspaceResponse_WaitingForNetwork)(nil),
 		(*CreateWorkspaceResponse_WaitingForRequesterTurn)(nil),
 	}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[27].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[30].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21].OneofWrappers = []any{
 		(*CreateWorkspaceError_UngatedWithoutConsent)(nil),
 		(*CreateWorkspaceError_NoSlug)(nil),
 		(*CreateWorkspaceError_BriefMissing)(nil),
@@ -6391,23 +5074,10 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceError_UnknownOwner)(nil),
 		(*CreateWorkspaceError_UnknownLandingTarget)(nil),
 		(*CreateWorkspaceError_UnknownRequester)(nil),
-		(*CreateWorkspaceError_AsyncMergeUnknownBranch)(nil),
-		(*CreateWorkspaceError_AsyncMergeUnknownSubagent)(nil),
-		(*CreateWorkspaceError_AsyncMergeUnknownMaker)(nil),
-		(*CreateWorkspaceError_AsyncMergeContextNotMaker)(nil),
-		(*CreateWorkspaceError_AsyncMergeNameTaken)(nil),
-		(*CreateWorkspaceError_AsyncMergeNameOffQueue)(nil),
-		(*CreateWorkspaceError_PlacementBehindNotInLine)(nil),
-		(*CreateWorkspaceError_AsyncMergeUnknownCloseAfter)(nil),
-		(*CreateWorkspaceError_OpIdWithAsyncMerge)(nil),
-		(*CreateWorkspaceError_VersionIncrementRequired)(nil),
-		(*CreateWorkspaceError_VersionIncrementUnexpected)(nil),
-		(*CreateWorkspaceError_AsyncMergeRequesterMerging)(nil),
-		(*CreateWorkspaceError_AsyncMergeRequesterSessionDeleted)(nil),
+		(*CreateWorkspaceError_UnknownSourceBranch)(nil),
+		(*CreateWorkspaceError_UnknownSubagent)(nil),
+		(*CreateWorkspaceError_UnknownCloseAfter)(nil),
 		(*CreateWorkspaceError_OriginFetchFailed)(nil),
-		(*CreateWorkspaceError_AsyncMergeNoDeployConfig)(nil),
-		(*CreateWorkspaceError_AsyncMergeDeployConfigInvalid)(nil),
-		(*CreateWorkspaceError_AsyncMergeRuleChecksFailed)(nil),
 		(*CreateWorkspaceError_TransferringAway)(nil),
 		(*CreateWorkspaceError_StandingDown)(nil),
 		(*CreateWorkspaceError_ModelNotInCatalog)(nil),
@@ -6415,7 +5085,6 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceError_LifecycleConfigInvalid)(nil),
 		(*CreateWorkspaceError_CreationHookFailed)(nil),
 		(*CreateWorkspaceError_PlacementOnChild)(nil),
-		(*CreateWorkspaceError_PlacementOnMergeWorkspace)(nil),
 		(*CreateWorkspaceError_PlacementRequiresWorkspace)(nil),
 		(*CreateWorkspaceError_UnknownPlacementSubsection)(nil),
 		(*CreateWorkspaceError_BlankPlacementSubsectionName)(nil),
@@ -6424,7 +5093,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceError_RequestedByDeployMediator)(nil),
 		(*CreateWorkspaceError_RequestedByProductionMediator)(nil),
 	}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[56].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[45].OneofWrappers = []any{
 		(*CreateWorkspaceInvalidName_Slug)(nil),
 		(*CreateWorkspaceInvalidName_Prefix)(nil),
 		(*CreateWorkspaceInvalidName_Reserved)(nil),
@@ -6435,7 +5104,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   79,
+			NumMessages:   62,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

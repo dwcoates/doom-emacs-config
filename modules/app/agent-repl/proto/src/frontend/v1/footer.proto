@@ -26,7 +26,7 @@
 //                  context window (`--` with no turn in flight), with two
 //                  glyphs; a click target opening the token panel.
 //   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells ·
-//                  ⇄ async merges in flight — each a click target opening its
+//                  ⇄ open children — each a click target opening its
 //                  panel.
 //
 // THE EXPANDED SECTION opens above the strip when a selectable element (the
@@ -46,6 +46,7 @@ package frontend.v1;
 
 import "frontend/v1/feed.proto";
 import "frontend/v1/token_heat.proto";
+import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -2739,27 +2740,30 @@ message FooterLiveWorkChips {
   // bubble's tests tab carries the test gate's suites.
   reserved 6;
   reserved "merge_tests";
-  // ⇄ — the ASYNC merges this workspace requested that are still in flight:
-  // queued or merging in their hidden merge workspaces, each drawn as a
-  // bubble in this workspace's feed. Set iff the merges panel holds at least
-  // one row. A SYNC merge has no chip: it is this workspace's own merge, and
-  // the strip's merging status already narrates it.
-  optional FooterChipMerges merges = 7;
+  // Tag 7 (`merges`, the ⇄ chip of async merges in flight) is RETIRED with
+  // the async merge: a workspace lands work it already has through a child,
+  // which the children chip counts.
+  reserved 7;
+  reserved "merges";
+  // ⇄ — this workspace's OPEN children. Set iff the children panel holds at
+  // least one row.
+  optional FooterChipChildren children = 8;
 }
-// The merges chip's props.
-message FooterChipMerges {
-  // How many merge rows the merges panel holds. At least 1 when this chip is
+// The children chip's props.
+message FooterChipChildren {
+  // How many rows the children panel holds. At least 1 when this chip is
   // set (a zero-count chip is expressed by leaving the chip unset).
   uint32 count = 1;
   // The waiting-on-you glyph, drawn beside the count. SET iff at least one
-  // merges-panel row is waiting on the user, so a merge held on a question in
-  // its hidden workspace is visible on the strip without opening the panel.
-  optional FooterChipMergesWaitingOnUser waiting_on_user = 2;
+  // open child is waiting on the user (a permission or a question), so a
+  // child held on a question is visible on the strip without opening the
+  // panel.
+  optional FooterChipChildrenWaitingOnUser waiting_on_user = 2;
 }
-// The merges chip's waiting-on-you glyph.
-message FooterChipMergesWaitingOnUser {
-  // How many of the panel's rows are waiting on the user. At least 1 when
-  // the glyph is set.
+// The children chip's waiting-on-you glyph.
+message FooterChipChildrenWaitingOnUser {
+  // How many open children are waiting on the user. At least 1 when the
+  // glyph is set.
   uint32 count = 1;
 }
 // The crons chip's props.
@@ -2839,8 +2843,12 @@ message FooterExpanded {
   // and activity line are unchanged.
   reserved 7;
   reserved "merge_tests";
-  // The async merges in flight — the ⇄ chip's expansion.
-  FooterExpandedMerges merges = 8;
+  // Tag 8 (`merges`, the async merges panel) is RETIRED with the async
+  // merge.
+  reserved 8;
+  reserved "merges";
+  // The open children — the ⇄ chip's expansion.
+  FooterExpandedChildren children = 9;
 }
 
 // ---- The daemon's focus ----------------------------------------------------
@@ -2974,71 +2982,63 @@ message FooterWakeupRowWakeAt {
   int64 wake_at_ms = 1;
 }
 
-// ---- The merges panel ------------------------------------------------------
+// ---- The children panel ----------------------------------------------------
 
-// The ⇄ panel: one row per ASYNC merge this workspace requested that is still
-// in flight. Each row is a jump row (`FooterJump`) to the merge's bubble head
-// in this workspace's feed. A TRUE LIST, like the agents panel.
-//
-// THE ROWS ARE THE FEED'S MERGE BUBBLES, READ BACK. The daemon resolves them
-// from the very rows the feed draws for each async merge — its head on the
-// root feed and the top-level tabs on its sub-feed (frontend.v1.FeedMerge,
-// frontend.v1.FeedMergeTab) — so the panel and the bubbles can never
-// disagree. A row JOINS when the feed draws an async head still in flight
-// (`frontend.v1.FeedMerge.update`), and LEAVES when that head carries a result
-// (landed, failed or abandoned) or the feed retires it. Nothing here focuses
-// the expanded section (FooterExpandedFocus): a merge is not detached work the
+// The ⇄ panel: one row per OPEN child of this workspace, in the order the
+// children were created, oldest first. A TRUE LIST, like the agents panel.
+// A child joins when it is created or reopened, and leaves the moment it is
+// no longer open (landed, closed or removed); a child that is not open is
+// listed in the topbar summary's children menu instead
+// (frontend.v1.TopbarTitleChildMenu), so every child is in exactly one of
+// the two. A row's click selects the child. Nothing here focuses the
+// expanded section (FooterExpandedFocus): a child is not detached work the
 // agent launched into this turn.
-message FooterExpandedMerges {
-  // The rows, in the order the feed first drew each merge's head. Empty when
-  // no async merge is in flight — the chip is then unset and the panel
-  // unreachable.
-  repeated FooterMergeRow rows = 1;
+message FooterExpandedChildren {
+  // The rows. Empty when the workspace has no open child — the chip is then
+  // unset and the panel unreachable.
+  repeated FooterChildRow rows = 1;
 }
 
-// One async merge's line: ⇄ · branch line · step · (waiting on you) · clock · ▸.
-message FooterMergeRow {
-  // The bubble head's branch line ("fix-flaky → master"), composed by the
-  // daemon from the head's source and target (frontend.v1.FeedMergeBranchLine)
-  // and drawn verbatim.
-  FooterMergeRowLabel label = 1;
-  // The step the merge stands on: the bubble's CURRENT top-level tab — the
-  // newest one still live, else the newest one drawn. UNSET while the bubble
-  // has drawn no tab yet; the row then draws without a step.
-  optional FooterMergeRowStep step = 2;
-  // The row's clock, the bubble head's own (frontend.v1.FeedMergeRuntime):
-  // from the enqueue while the merge waits in the queue, from its admission
-  // once it runs. The client ticks from the instant.
-  FooterMergeRowRuntime runtime = 3;
-  // Which merge this row is: the merge's ledger id, the key of its bubble's
-  // head row and sub-feed. NOT DRAWN in the footer; see FooterWorkId.
-  FooterWorkId work = 4;
-  // Where a click on the row lands: always the bubble head's `entry`, since
-  // the row is resolved from the head the feed drew. See FooterJump.
-  FooterJump jump = 5;
-  // The waiting-on-you marker. PRESENT iff the current tab is drawn waiting
-  // on the user (frontend.v1.FeedMergeTabWaitingOnUser): the merge
-  // workspace's session has a permission ask or a question batch open.
-  optional FooterMergeRowWaitingOnUser waiting_on_user = 6;
+// One open child's line: ⇄ · name · status · short summary.
+message FooterChildRow {
+  // The child's name, drawn verbatim in the canonical purple.
+  FooterChildRowName name = 1;
+  // The child's status: the same word and canonical color its sidebar row
+  // draws, resolved by the daemon from the one status ladder the roster
+  // projects.
+  FooterChildRowStatus status = 2;
+  // The child's short summary. UNSET until the child's agent has set one.
+  optional FooterChildRowShortSummary short_summary = 3;
+  // What a click on the row does: selects the child.
+  FooterChildRowSelect select = 4;
 }
-// The row's branch line element.
-message FooterMergeRowLabel {
-  // The text, drawn verbatim.
+// The row's name element.
+message FooterChildRowName {
+  // The child's workspace name, drawn verbatim.
   string text = 1;
 }
-// The row's step element.
-message FooterMergeRowStep {
-  // The current tab's words with its round, daemon-composed ("queue",
-  // "tests", "committing (2)"), drawn verbatim.
+// The row's status element.
+message FooterChildRowStatus {
+  // The status word ("working", "idle", "merging"), daemon-composed and
+  // drawn verbatim.
+  string text = 1;
+  // A color name from proto/vocab/render-colors.json's `colors` section; the
+  // client paints that color's token and holds no table.
+  string tone = 2;
+}
+// The row's short summary element.
+message FooterChildRowShortSummary {
+  // Drawn verbatim.
   string text = 1;
 }
-// The row's clock element.
-message FooterMergeRowRuntime {
-  // The bubble head's clock instant, epoch ms.
-  int64 started_at_ms = 1;
+// A click on the row selects the child: agentrepl.v1.SelectWorkspace with
+// `target`, the same switch the sidebar row makes.
+message FooterChildRowSelect {
+  // The child, echoed verbatim on the click.
+  workspace.v1.WorkspaceRef target = 1;
 }
-// The waiting-on-you marker. Empty: presence is the marker.
-message FooterMergeRowWaitingOnUser {}
+
+
 
 // ---- The monitors panel ----------------------------------------------------
 

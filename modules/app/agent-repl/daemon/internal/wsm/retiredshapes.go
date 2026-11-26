@@ -36,7 +36,7 @@ const (
 	retiredResponseMarkdownTag  protowire.Number = 1 // FeedResponseProse.markdown -> prose
 	retiredAddressTextTag       protowire.Number = 1 // FeedAgentPromptAddress.text -> name, direction
 	retiredNoticeHeadingTag     protowire.Number = 1 // FeedResponseNotice.heading -> marker
-	retiredHeadWorkspaceSwitch  protowire.Number = 5 // FeedMergeHead.workspace_switch -> mode.async
+	retiredHeadWorkspaceSwitch  protowire.Number = 5 // FeedMergeHead.workspace_switch: dropped with the async merge
 	retiredRebaseCommitTag      protowire.Number = 5 // FeedMergeTabRebaseCommit.commit -> FeedMergeTab.label.commit
 	retiredTestsSuitesTag       protowire.Number = 3 // FeedMergeTabTests.suites: a run's own subtab now
 	retiredTestsLogTag          protowire.Number = 4 // FeedMergeTabTests.log: a run's own subtab now
@@ -82,16 +82,9 @@ func carryRetiredShape(log dlog.Logger, m protoreflect.Message) (bool, error) {
 			return nil
 		})
 	case *frontendv1.FeedMergeHead:
-		return carryUnknown(m, retiredHeadWorkspaceSwitch, msg.GetMode() != nil, func(v []byte) error {
-			// THE SWITCH EXISTED ONLY FOR AN ASYNC MERGE, so it names the
-			// mode the head was drawn in, and its bytes are today's arm's.
-			sw := &frontendv1.FeedMergeWorkspaceSwitch{}
-			if err := proto.Unmarshal(v, sw); err != nil {
-				return fmt.Errorf("a merge head's retired workspace switch does not decode: %w", err)
-			}
-			msg.Mode = &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Async{Async: &frontendv1.FeedMergeModeAsync{WorkspaceSwitch: sw}}}
-			return nil
-		})
+		// THE SWITCH EXISTED ONLY FOR AN ASYNC MERGE, whose mode layout 221
+		// retires as well (retiredasyncmerges.go): dropped, not carried.
+		return dropRetired(m, retiredHeadWorkspaceSwitch)
 	case *frontendv1.FeedMergeTab:
 		return carryRebaseCommit(msg)
 	case *frontendv1.FeedMergeTabTests:

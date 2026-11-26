@@ -107,17 +107,11 @@ func (s DeployingStage) String() string {
 type DeployingMerge struct {
 	// Repo is the queue's key.
 	Repo RepoKey
-	// Workspace is the workspace the merge ran in: an async merge's merge
-	// workspace.
+	// Workspace is the workspace the merge ran in, landing its own branch.
 	Workspace WorkspaceID
 	// Lease is the merge's ledger, which its bubble and its stages are read
 	// under.
 	Lease LeaseID
-	// Credited is the workspace the merge is credited to: the requester of
-	// an async merge, Workspace itself otherwise.
-	Credited WorkspaceID
-	// Async reports whether the merge is an async merge.
-	Async bool
 	// Name is Workspace's name.
 	Name string
 	// Branch is the branch it landed.
@@ -162,12 +156,12 @@ func (s *store) RecordDeployingMerge(ctx context.Context, m DeployingMerge) (*De
 		}
 		replaced = prior
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO deploying_merges (repo_key, workspace, lease, credited, async, name, branch, target_dir, active_since, deploying_since, timed, stage)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(repo_key) DO UPDATE SET workspace = excluded.workspace, lease = excluded.lease, credited = excluded.credited,
-			   async = excluded.async, name = excluded.name, branch = excluded.branch, target_dir = excluded.target_dir,
+			`INSERT INTO deploying_merges (repo_key, workspace, lease, name, branch, target_dir, active_since, deploying_since, timed, stage)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(repo_key) DO UPDATE SET workspace = excluded.workspace, lease = excluded.lease,
+			   name = excluded.name, branch = excluded.branch, target_dir = excluded.target_dir,
 			   active_since = excluded.active_since, deploying_since = excluded.deploying_since, timed = excluded.timed, stage = excluded.stage`,
-			string(key), string(m.Workspace), string(m.Lease), string(m.Credited), m.Async, m.Name, m.Branch, m.TargetDir,
+			string(key), string(m.Workspace), string(m.Lease), m.Name, m.Branch, m.TargetDir,
 			nanos(m.ActiveSince), nanos(m.DeployingSince), m.Timed, int(m.Stage))
 		return err
 	})
@@ -286,7 +280,7 @@ func checkDeployingMergeInTx(ctx context.Context, tx *sql.Tx, key RepoKey) error
 }
 
 // deployingMergeColumns are a deploying merge's columns, in scan order.
-const deployingMergeColumns = `repo_key, workspace, lease, credited, async, name, branch, target_dir, active_since, deploying_since, timed, stage`
+const deployingMergeColumns = `repo_key, workspace, lease, name, branch, target_dir, active_since, deploying_since, timed, stage`
 
 // deployingMergeQuery reads deploying merges; a caller appends its WHERE.
 const deployingMergeQuery = `SELECT ` + deployingMergeColumns + ` FROM deploying_merges`
@@ -308,15 +302,15 @@ func scanDeployingMerge(row *sql.Row) (*DeployingMerge, error) {
 // one decoding path.
 func scanDeployingMergeRow(row interface{ Scan(...any) error }) (DeployingMerge, error) {
 	var (
-		m                       DeployingMerge
-		repo, ws, lease, credit string
-		active, deploying       int64
-		stage                   int
+		m                 DeployingMerge
+		repo, ws, lease   string
+		active, deploying int64
+		stage             int
 	)
-	if err := row.Scan(&repo, &ws, &lease, &credit, &m.Async, &m.Name, &m.Branch, &m.TargetDir, &active, &deploying, &m.Timed, &stage); err != nil {
+	if err := row.Scan(&repo, &ws, &lease, &m.Name, &m.Branch, &m.TargetDir, &active, &deploying, &m.Timed, &stage); err != nil {
 		return DeployingMerge{}, err
 	}
-	m.Repo, m.Workspace, m.Lease, m.Credited = RepoKey(repo), WorkspaceID(ws), LeaseID(lease), WorkspaceID(credit)
+	m.Repo, m.Workspace, m.Lease = RepoKey(repo), WorkspaceID(ws), LeaseID(lease)
 	m.ActiveSince, m.DeployingSince, m.Stage = fromNanos(active), fromNanos(deploying), DeployingStage(stage)
 	return m, nil
 }

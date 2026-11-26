@@ -107,9 +107,6 @@ const (
 	// section or subsection, or a parent's folded children), stood down once
 	// the fold's delay ended.
 	StandDownFold StandDownReason = "fold"
-	// StandDownMergeEnded is a hidden merge workspace whose merge left every
-	// queue.
-	StandDownMergeEnded StandDownReason = "merge_ended"
 	// StandDownColdGate is a shim whose session stands at its cold gate.
 	StandDownColdGate StandDownReason = "cold_gate"
 	// StandDownKill is the kill verb, or a workspace closed or deleted.

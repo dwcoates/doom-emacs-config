@@ -23,7 +23,6 @@ import (
 // its subtab of the fixing-tests tab. Each row's tab is an agentic arm
 // mergetab.Agentic names, which interrupttab_test.go holds them to.
 var agenticTabs = map[string]bool{
-	TabPick:               true,
 	TabPreDeploy:          true,
 	rowConflictResolution: true,
 	rowTestsRunFixing:     true,
@@ -50,9 +49,6 @@ func (o *orchestrator) InterruptTab(ctx context.Context, requester ids.Workspace
 		return false, err
 	}
 	log.Info(op, "the user stopped the agent a merge tab draws", withField(fields, "running", running))
-	if _, async := o.requesterOf(ws); async {
-		o.reveal(ctx, ws, "the user interrupted its agent from the bubble")
-	}
 	return running, nil
 }
 
@@ -73,14 +69,9 @@ func (o *orchestrator) liveAgenticTab(requester ids.WorkspaceID, tab feedid.Ref)
 			break
 		}
 	}
-	p, picking := o.picks[ws]
 	o.mu.Unlock()
-	if ws == "" || o.bubbleOf(ws).ws != requester {
+	if ws == "" || ws != requester {
 		return "", false
-	}
-	if picking {
-		pickKey := roundTabKey(TabPick, 1)
-		return ws, tab.Row.ID == pickKey.id && tab.Row.Sub == pickKey.sub && p.ledger == lease
 	}
 	r, running := o.runFor(ws)
 	if !running {

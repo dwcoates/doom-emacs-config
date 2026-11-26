@@ -133,7 +133,6 @@ func mergeHeadRow(label string) *frontendv1.FeedRow {
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{
 				Head: &frontendv1.FeedMergeHead{
 					BranchLine: &frontendv1.FeedMergeBranchLine{Source: &frontendv1.FeedMergeBranchLineSource{Text: label}},
-					Mode:       &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Sync{Sync: &frontendv1.FeedMergeModeSync{}}},
 				},
 			}},
 		}},

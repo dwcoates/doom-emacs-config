@@ -300,15 +300,6 @@ its glyph is the shared vocabulary's `one_shot_glyph_arms'."
   (agent-repl-wire--decode-empty "RosterRowOneShot" value)
   t)
 
-(defun agent-repl-wire-decode-roster-row-async-merging (value)
-  "Decode VALUE as `RosterRowAsyncMerging' and return t.
-The ASYNC-MERGING marker: the workspace\='s own branch merges async in a
-hidden merge workspace, on whatever status arm the row stands.  EMPTY,
-and PRESENCE IS THE FACT, as for the markers above.  The tab bar paints
-its [N] run with the shared vocabulary\='s `async_merge_mark\='."
-  (agent-repl-wire--decode-empty "RosterRowAsyncMerging" value)
-  t)
-
 (defun agent-repl-wire-decode-roster-row-merge-paused (value)
   "Decode VALUE as `RosterRowMergePaused' and return t.
 The MERGE-PAUSED marker: the merge queue holding the row\='s merge is
@@ -960,7 +951,7 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention viewed idleAsyncUnread reviving page detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest contextHeat visibility lastSelected lastInteracted lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention viewed idleAsyncUnread reviving page detachedLive oneShot opening mergePaused mergeTurn openOwnedPullRequest contextHeat visibility lastSelected lastInteracted lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -968,7 +959,7 @@ unknown field by the row's key check."
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :viewed V
 :idle-async-unread IU :reviving R :page PAGE
-:detached-live DL :one-shot OS :opening O :async-merging AM
+:detached-live DL :one-shot OS :opening O
 :merge-paused MP :merge-turn MT :open-owned-pull-request OP
 :context-heat CH :visibility VIS
 :last-selected L :last-interacted LI :last-turn-ended LT
@@ -1011,9 +1002,6 @@ nests its rows in its own row type (`RosterOpenRow', `RosterBacklogRow')."
            :opening (agent-repl-wire--decode-optional-message
                      "RosterRow" 'opening object
                      #'agent-repl-wire-decode-roster-row-opening)
-           :async-merging (agent-repl-wire--decode-optional-message
-                           "RosterRow" 'asyncMerging object
-                           #'agent-repl-wire-decode-roster-row-async-merging)
            :merge-paused (agent-repl-wire--decode-optional-message
                           "RosterRow" 'mergePaused object
                           #'agent-repl-wire-decode-roster-row-merge-paused)
@@ -1599,62 +1587,19 @@ open row in no subsection, or `:subsection'.  It is never unset."
 ;; but the codec refuses unknown fields, so it is decoded and validated
 ;; whole.
 
-(defun agent-repl-wire-decode-roster-merge-queue-mode-async-requester (value)
-  "Decode VALUE as `RosterMergeQueueModeAsyncRequester', a plist `(:name NAME)'.
-NAME is the requester workspace's name, verbatim."
-  (let ((object (agent-repl-wire--object "RosterMergeQueueModeAsyncRequester" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueModeAsyncRequester" object '(name))
-    (agent-repl-wire--decoded
-     "RosterMergeQueueModeAsyncRequester"
-     (list :name (agent-repl-wire--decode-string
-                  "RosterMergeQueueModeAsyncRequester" 'name object)))))
-
-(defun agent-repl-wire-decode-roster-merge-queue-mode-async (value)
-  "Decode VALUE as `RosterMergeQueueModeAsync', a plist `(:requester REQUESTER)'.
-REQUESTER is the workspace the merge runs for
-\(`agent-repl-wire-decode-roster-merge-queue-mode-async-requester'); it is
-required."
-  (let ((object (agent-repl-wire--object "RosterMergeQueueModeAsync" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueModeAsync" object '(requester))
-    (agent-repl-wire--decoded
-     "RosterMergeQueueModeAsync"
-     (list :requester (agent-repl-wire--decode-message
-                       "RosterMergeQueueModeAsync" 'requester object
-                       #'agent-repl-wire-decode-roster-merge-queue-mode-async-requester)))))
-
-(defun agent-repl-wire-decode-roster-merge-queue-mode (value)
-  "Decode VALUE as `RosterMergeQueueMode', a plist `(:arm ARM)'.
-ARM is `:sync' or `:async'.  It is never unset."
-  (let ((object (agent-repl-wire--object "RosterMergeQueueMode" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueMode" object '(sync async))
-    (agent-repl-wire--decoded
-     "RosterMergeQueueMode"
-     (list :arm (plist-get
-                 (agent-repl-wire--decode-oneof
-                  "RosterMergeQueueMode" 'mode object
-                  `((sync :sync ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueModeSync" v)))
-                    (async :async agent-repl-wire-decode-roster-merge-queue-mode-async)))
-                 :arm)))))
-
 (defun agent-repl-wire-decode-roster-merge-queue-subject (value)
   "Decode VALUE as `RosterMergeQueueSubject'.
-A plist `(:workspace REF :name NAME :reveal FEED-ID :mode MODE :merge
-MERGE)': the workspace the merge is credited to, its name, the bubble a
-click reveals \(nil when none), how the merge runs, and the merge itself
-as its queue holds it (an async merge's merge workspace)."
+A plist `(:workspace REF :name NAME :reveal FEED-ID)': the workspace whose
+merge it is, its name, and the bubble a click reveals \(nil when none)."
   (let ((object (agent-repl-wire--object "RosterMergeQueueSubject" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueSubject" object '(workspace name reveal mode merge))
+    (agent-repl-wire--check-keys "RosterMergeQueueSubject" object '(workspace name reveal))
     (agent-repl-wire--decoded
      "RosterMergeQueueSubject"
      (list :workspace (agent-repl-wire--decode-message
                        "RosterMergeQueueSubject" 'workspace object #'agent-repl-wire-decode-workspace-ref)
            :name (agent-repl-wire--decode-string "RosterMergeQueueSubject" 'name object)
            :reveal (agent-repl-wire--decode-optional-message
-                    "RosterMergeQueueSubject" 'reveal object #'agent-repl-wire-decode-feed-id)
-           :mode (agent-repl-wire--decode-message
-                  "RosterMergeQueueSubject" 'mode object #'agent-repl-wire-decode-roster-merge-queue-mode)
-           :merge (agent-repl-wire--decode-message
-                   "RosterMergeQueueSubject" 'merge object #'agent-repl-wire-decode-workspace-ref)))))
+                    "RosterMergeQueueSubject" 'reveal object #'agent-repl-wire-decode-feed-id)))))
 
 (defconst agent-repl-wire--roster-merge-queue-instants
   '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (heldSinceMs . :held-since-ms))

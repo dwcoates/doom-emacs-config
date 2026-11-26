@@ -366,17 +366,15 @@ func (k MergeSourceKind) valid() bool {
 // IsOneShot reports whether the source is a ONE-SHOT merge's: the requester's
 // own branch, merged in place, closing the requester once it lands.
 func (m MergeSource) IsOneShot() bool {
-	return m.Kind == MergeSourceOwnBranch && !m.KeepOpen && m.Detach == ""
+	return m.Kind == MergeSourceOwnBranch && !m.KeepOpen
 }
 
 // ParksWhileQueued reports whether the source's wait in line parks the
-// requester's session: the requester's own branch with no pick. A merge
-// workspace's merge with a pick runs that pick on the session at the head of
-// the line, and every other source runs off the requester's session. The
-// park (merge parkQueued) and its hand-back (merge returnSession) both read
-// it.
+// requester's session: the requester's own branch. Every other source runs
+// off the requester's session. The park (merge parkQueued) and its hand-back
+// (merge returnSession) both read it.
 func (m MergeSource) ParksWhileQueued() bool {
-	return m.Kind == MergeSourceOwnBranch && m.Pick == ""
+	return m.Kind == MergeSourceOwnBranch
 }
 
 // validate refuses a source whose fields contradict its arm: each arm carries
@@ -394,50 +392,6 @@ func (m MergeSource) validate() error {
 	}
 	if m.KeepOpen && !m.Kind.ClosesRequester() {
 		return fmt.Errorf("a %s source cannot keep the requester open", m.Kind)
-	}
-	// A DETACHED MERGE NEVER CLOSES ITS REQUESTER, so keeping it open means
-	// nothing, and it merges a named branch. A request recorded at layout 44
-	// or earlier named the requester's own branch, which still runs: its
-	// recorded Branch is what the merge workspace is forked onto.
-	if m.Detach != "" && (m.Kind != MergeSourceBranch && m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
-		return fmt.Errorf("a detached merge merges a named branch and never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
-	}
-	// AN ASYNC MERGE'S LANDING EFFECTS ride a detached request alone, and a
-	// cleanup directory is recorded only for a request that cleans up.
-	if m.Detach == "" && (m.CloseOnLanding != "" || m.CleanupWorktree) {
-		return fmt.Errorf("closing another workspace or cleaning up worktrees on landing is an async merge's ask, not a %s source's that runs in place", m.Kind)
-	}
-	if m.CleanupDir != "" && !m.CleanupWorktree {
-		return fmt.Errorf("a cleanup directory %q is recorded only for a request that cleans up", m.CleanupDir)
-	}
-	// A DETACHED MERGE NAMES ITS MAKER, and only a detached merge has one or
-	// lands into it.
-	if (m.Detach != "") != (m.DetachMaker != "") || (m.DetachTargetMaker && m.Detach == "") {
-		return fmt.Errorf("a detached merge names the workspace it forks and only a detached merge does (detach %q, maker %q, into maker %v)", m.Detach, m.DetachMaker, m.DetachTargetMaker)
-	}
-	// A DETACHED MERGE IS NAMED by its requesting agent, and only a detached
-	// merge reserves a name.
-	if (m.Detach != "") != (m.DetachName != "") {
-		return fmt.Errorf("a detached merge carries its merge workspace's name and only a detached merge does (detach %q, name %q)", m.Detach, m.DetachName)
-	}
-	// AN INSTRUCTION (the pick) rides the requester's detached request, and
-	// then the merge workspace's own-branch request until its turn has run.
-	if m.Pick != "" && (m.Detach == "" && m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
-		return fmt.Errorf("an instruction rides a detached request or a merge workspace's own-branch request, never kept open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
-	}
-	// COMPACT AFTER rides a detached request alone: only an async merge
-	// leaves its requester open and free to compact once it lands.
-	if m.CompactAfter && m.Detach == "" {
-		return fmt.Errorf("compact_after is a detached merge's ask, not a %s source's that runs in place", m.Kind)
-	}
-	// A REQUEST'S OWN DEPLOY HOOKS ride a detached request alone: every other
-	// deploy runs the hooks its workspace was created with.
-	if m.Detach == "" && !m.Hooks.Empty() {
-		return fmt.Errorf("deploy hooks on the request are an async merge's ask, not a %s source's that runs in place", m.Kind)
-	}
-	// A PICK THAT BEGAN names its turn, and only a pick begins.
-	if (m.PickStartedAt != nil) != (m.PickTurn != "") || (m.PickStartedAt != nil && m.Pick == "") {
-		return fmt.Errorf("a begun pick records both when it began and its turn, and only a pick begins (pick %v, started %v, turn %q)", m.Pick != "", m.PickStartedAt != nil, m.PickTurn)
 	}
 	if (m.Workspace != "") != (m.Kind == MergeSourceWorkspace) {
 		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
