@@ -570,6 +570,13 @@ failing a send."
         (spelled (sort (mapcar #'cdr agent-repl-wire-prompt-origins) #'string<)))
     (should (equal spelled declared))))
 
+(ert-deftest agent-repl-test-wire-common-prompt-origin-shim-only-values-are-declared ()
+  "Every shim-only value is one the checked-in Go bindings still declare, so
+a value the proto retires cannot linger on the list."
+  (should-not (seq-difference agent-repl-wire-shim-only-prompt-origins
+                              (agent-repl-test--generated-enum-names
+                               "conversation/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_"))))
+
 ;;;; ---- The user message Emacs produces ----
 
 (ert-deftest agent-repl-test-wire-common-text-block-encodes-its-text ()
