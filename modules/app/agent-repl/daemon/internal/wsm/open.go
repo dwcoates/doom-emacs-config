@@ -142,6 +142,10 @@ type store struct {
 	// record, latest per workspace, written at the promotion
 	// (SetVisibilities), under heldMu as heldStatusChanges are.
 	heldVisibilities map[WorkspaceID]Visibility
+	// heldDurableRows are the durable feed rows a READ-ONLY handle was asked
+	// to record, latest per row (a held settle kept), written at the
+	// promotion (PutDurableFeedRow), under heldMu as heldVisibilities are.
+	heldDurableRows map[heldRowKey]DurableFeedRow
 
 	// conns accounts for every operation's use of the one connection
 	// (conn.go); now is its clock, time.Now outside a test.
@@ -612,6 +616,7 @@ func (s *store) Promote(ctx context.Context) error {
 	s.writeHeldUsageLocked(ctx)
 	s.writeHeldStatusChangesLocked(ctx)
 	s.writeHeldVisibilitiesLocked(ctx)
+	s.writeHeldDurableRowsLocked(ctx)
 	return nil
 }
 

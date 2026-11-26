@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"testing"
+
+	"agent-repld/internal/dlog"
 )
 
 // durableRow is one durable row of a workspace.
@@ -347,5 +350,157 @@ func TestMatchDurableFeedRows(t *testing.T) {
 				t.Fatalf("matched %v, want %v", drawn, tc.want)
 			}
 		})
+	}
+}
+
+// readOnlyDurableStore is a READ-ONLY handle on a file holding one workspace
+// and the rows SEED records, as a joining successor opens it, with a logger
+// the test reads.
+func readOnlyDurableStore(t *testing.T, seed ...DurableFeedRow) (DB, WorkspaceID, *dlog.TestLogger) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ws := testWorkspace(t, handle.(*store))
+	for _, row := range seed {
+		row.Workspace = ws.ID
+		if err := handle.PutDurableFeedRow(context.Background(), row); err != nil {
+			t.Fatalf("PutDurableFeedRow: %v", err)
+		}
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	log := dlog.NewTestLogger()
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+	return ro, ws.ID, log
+}
+
+func TestPutDurableFeedRowOnAReadOnlyHandleIsHeldNotRefused(t *testing.T) {
+	// Arrange
+	ro, ws, log := readOnlyDurableStore(t)
+
+	// Act
+	err := ro.PutDurableFeedRow(context.Background(), durableRow(ws, "row-1", "2.a", "bubble"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PutDurableFeedRow on a read-only handle = %v, want nil: the joining successor's row is held, not refused", err)
+	}
+	if got, err := ro.DurableFeedRows(context.Background(), ws); err != nil || len(got) != 0 {
+		t.Fatalf("rows before the promotion = %+v, %v; want none recorded", got, err)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" {
+			t.Fatalf("a held durable row recorded an ERROR: %+v", r)
+		}
+	}
+}
+
+func TestPutDurableFeedRowHeldOnAReadOnlyHandleIsWrittenAtThePromotion(t *testing.T) {
+	// Arrange
+	ro, ws, _ := readOnlyDurableStore(t)
+	want := durableRow(ws, "row-1", "2.a", "bubble")
+	if err := ro.PutDurableFeedRow(context.Background(), want); err != nil {
+		t.Fatalf("PutDurableFeedRow: %v", err)
+	}
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Assert
+	got, err := ro.DurableFeedRows(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("DurableFeedRows: %v", err)
+	}
+	if len(got) != 1 || got[0].RowID != want.RowID || got[0].Plane != want.Plane || got[0].OrderKey != want.OrderKey || !bytes.Equal(got[0].Row, want.Row) {
+		t.Fatalf("rows after the promotion = %+v, want [%+v]", got, want)
+	}
+}
+
+func TestPutDurableFeedRowHeldTwiceWritesTheLatest(t *testing.T) {
+	// Arrange
+	ro, ws, _ := readOnlyDurableStore(t)
+	for _, row := range []DurableFeedRow{durableRow(ws, "row-1", "2.a", "running"), durableRow(ws, "row-1", "2.a", "landed")} {
+		if err := ro.PutDurableFeedRow(context.Background(), row); err != nil {
+			t.Fatalf("PutDurableFeedRow: %v", err)
+		}
+	}
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Assert
+	got, _ := ro.DurableFeedRows(context.Background(), ws)
+	if len(got) != 1 || string(got[0].Row) != "landed" {
+		t.Fatalf("rows after the promotion = %+v, want the one row as last held", got)
+	}
+}
+
+func TestPutDurableFeedRowHeldSettleKeepsItsPinKeyThroughARestatement(t *testing.T) {
+	// Arrange: the incumbent recorded the row at its pin key; the successor
+	// settles it, then restates it at the settled key, while read-only.
+	ro, ws, log := readOnlyDurableStore(t, durableRow("", "row-1", "~a", "running"))
+	settle := durableRow(ws, "row-1", "2.b", "landed")
+	settle.SettledFrom = "~a"
+	for _, row := range []DurableFeedRow{settle, durableRow(ws, "row-1", "2.b", "landed again")} {
+		if err := ro.PutDurableFeedRow(context.Background(), row); err != nil {
+			t.Fatalf("PutDurableFeedRow: %v", err)
+		}
+	}
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Assert
+	got, _ := ro.DurableFeedRows(context.Background(), ws)
+	if len(got) != 1 || got[0].OrderKey != "2.b" || string(got[0].Row) != "landed again" {
+		t.Fatalf("rows after the promotion = %+v, want the row at its settled key as last held", got)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" {
+			t.Fatalf("the held settle's write recorded an ERROR: %+v", r)
+		}
+	}
+}
+
+func TestPutDurableFeedRowHeldPinAndSettleLandAtTheSettledKey(t *testing.T) {
+	// Arrange: nothing is recorded; the successor draws a pinned row and then
+	// settles it, both while read-only, so the pin key is never written.
+	ro, ws, log := readOnlyDurableStore(t)
+	settle := durableRow(ws, "row-1", "2.b", "landed")
+	settle.SettledFrom = "~a"
+	for _, row := range []DurableFeedRow{durableRow(ws, "row-1", "~a", "running"), settle} {
+		if err := ro.PutDurableFeedRow(context.Background(), row); err != nil {
+			t.Fatalf("PutDurableFeedRow: %v", err)
+		}
+	}
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Assert
+	got, _ := ro.DurableFeedRows(context.Background(), ws)
+	if len(got) != 1 || got[0].OrderKey != "2.b" || string(got[0].Row) != "landed" {
+		t.Fatalf("rows after the promotion = %+v, want the row recorded once at its settled key", got)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" {
+			t.Fatalf("the held settle's write recorded an ERROR: %+v", r)
+		}
 	}
 }
