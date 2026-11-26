@@ -12,6 +12,7 @@ import { FRAME_TONE_ATTRIBUTE } from "../../src/feed/bubble-frame.js";
 import { BRANCH_LINE_TARGET_LINK_CLASS } from "../../src/feed/merge/merge.js";
 import { cascadedValue, inDocument } from "../stylesheet.js";
 import { scriptedAppContext } from "../rpc/app-context.js";
+import { childHeadInit } from "./child-init.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "./harness.js";
 
 beforeEach(() => {
@@ -26,13 +27,7 @@ afterEach(() => {
 /** An open child, its head as the daemon draws one, edited by INIT. */
 function child(init: { summary?: undefined; border?: { tone: string } | undefined } = {}): FeedChild {
   return create(FeedChildSchema, {
-    head: {
-      glyph: { icon: "merge" },
-      name: { text: "fix-flaky", select: { target: { id: "ws-child", dir: "/w/child" } } },
-      target: { text: "~/.config/doom" },
-      standing: { standing: { case: "open", value: {} } },
-      runtime: { startedAtMs: 940_000n },
-    },
+    head: childHeadInit(940_000n),
     border: "border" in init ? init.border : { tone: "red" },
     summary: "summary" in init ? undefined : { shortSummary: { text: "Fix the flaky test" }, longSummary: { markdown: "- It fixes the test.\n- It pins the backoff." } },
   });

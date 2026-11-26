@@ -7,6 +7,7 @@
  * the same four verbs the same way, and so a row fixture is built once from the
  * generated schemas rather than a dozen times by hand.
  */
+import { childHeadInit } from "./child-init.js";
 import { drawFeedChild } from "../../src/feed/child.js";
 import { branchLineInit } from "./branch-line.js";
 import type { EditorIngressEntry } from "../../src/held/editor-ingress.js";
@@ -873,13 +874,7 @@ export function childRow(id: string): FeedRow {
     row: {
       case: "child",
       value: {
-        head: {
-          glyph: { icon: "merge" },
-          name: { text: "fix-flaky", select: { target: { id: "ws-child", dir: "/w/child" } } },
-          target: { text: "~/.config/doom" },
-          standing: { standing: { case: "open", value: {} } },
-          runtime: { startedAtMs: 0n },
-        },
+        head: childHeadInit(0n),
         summary: { shortSummary: { text: "Fix the flaky test" }, longSummary: { markdown: "- It fixes the test." } },
         border: { tone: "red" },
       },
