@@ -3,6 +3,7 @@ package tempdirstest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/tempdirs"
@@ -76,3 +77,60 @@ func TestShortBase(t *testing.T) {
 		})
 	}
 }
+
+func TestShortDirIsAShortDirectoryInTheShortBaseRemovedWhenTheTestEnds(t *testing.T) {
+	// Arrange
+	var made string
+	t.Run("a test that makes one", func(t *testing.T) {
+		// Act
+		made = ShortDir(t, "sd")
+
+		// Assert: a directory under the base, short enough for a unix socket path.
+		info, err := os.Stat(made)
+		if err != nil || !info.IsDir() {
+			t.Fatalf("ShortDir() = %q, stat %v: want an existing directory", made, err)
+		}
+		base, err := ShortBase(os.Getenv)
+		if err != nil {
+			t.Fatalf("ShortBase: %v", err)
+		}
+		if !strings.HasPrefix(made, base+"/sd") {
+			t.Fatalf("ShortDir() = %q, want it under %s named for its prefix", made, base)
+		}
+		if limit := 104 - len("/some-long-socket-name.sock"); len(made) > limit {
+			t.Fatalf("ShortDir() = %q (%d bytes), too long for a socket path beside a name", made, len(made))
+		}
+	})
+
+	// Assert: the subtest's end removed it.
+	if _, err := os.Stat(made); !os.IsNotExist(err) {
+		t.Fatalf("after the test the directory %q stands (stat %v), want it removed", made, err)
+	}
+}
+
+func TestShortDirFailsTheTestWhenTheShortBaseIsRefused(t *testing.T) {
+	// Arrange: a base that is not beneath /tmp, which ShortBase refuses.
+	t.Setenv(EnvShortBase, "/var/not-tmp")
+	rec := &recordingT{TB: t}
+
+	// Act
+	func() {
+		defer func() { _ = recover() }()
+		ShortDir(rec, "sd")
+	}()
+
+	// Assert
+	if !rec.failed {
+		t.Fatal("ShortDir() accepted a short base beneath nothing under /tmp")
+	}
+}
+
+// recordingT is a testing.TB that records a Fatalf instead of ending the test.
+type recordingT struct {
+	testing.TB
+	failed bool
+}
+
+func (r *recordingT) Fatalf(string, ...any) { r.failed = true; panic("fatal") }
+func (r *recordingT) Helper()               {}
+func (r *recordingT) Cleanup(func())        {}

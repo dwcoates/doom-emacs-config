@@ -4,9 +4,9 @@
 package h2ctest
 
 import (
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -19,11 +19,7 @@ import (
 // capped near 104 bytes) and removed, with the server, when the test ends.
 func ServeUnix(t *testing.T, path string, handler http.Handler) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "h2c")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := tempdirstest.ShortDir(t, "h2c")
 	sock := filepath.Join(dir, "s.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {

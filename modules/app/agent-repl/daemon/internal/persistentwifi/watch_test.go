@@ -1,9 +1,9 @@
 package persistentwifi
 
 import (
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,11 +15,7 @@ import (
 // (or closing it at once when end is set). It answers the socket's path.
 func lineServer(t *testing.T, lines string, end bool) (path string, hold chan struct{}) {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "pwl")
-	if err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := tempdirstest.ShortDir(t, "pwl")
 	path = filepath.Join(dir, "lid")
 	ln, err := net.Listen("unix", path)
 	if err != nil {

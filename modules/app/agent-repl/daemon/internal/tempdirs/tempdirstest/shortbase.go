@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 )
 
 // EnvShortBase is the scheduled test run's RAM disk mount (testrun's ramdisk
@@ -38,4 +39,22 @@ func ShortBase(getenv func(string) string) (string, error) {
 		return "", fmt.Errorf("tempdirstest: %s=%q is not a directory", EnvShortBase, base)
 	}
 	return base, nil
+}
+
+// ShortDir makes a temporary directory whose path is short enough for a unix
+// socket (macOS caps sun_path at 104 bytes and a test's own t.TempDir is
+// nowhere near short enough), in the run's short base (ShortBase), and removes
+// it when the test ends. PREFIX names it for a reader of a leftover.
+func ShortDir(t testing.TB, prefix string) string {
+	t.Helper()
+	base, err := ShortBase(os.Getenv)
+	if err != nil {
+		t.Fatalf("tempdirstest: the short base: %v", err)
+	}
+	dir, err := os.MkdirTemp(base, prefix)
+	if err != nil {
+		t.Fatalf("tempdirstest: make a short directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }

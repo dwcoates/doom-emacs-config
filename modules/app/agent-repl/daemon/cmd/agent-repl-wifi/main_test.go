@@ -12,19 +12,11 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/stateroot"
+	"agent-repld/internal/tempdirs/tempdirstest"
 )
 
-// shortDir is a directory whose path fits a unix socket's length limit, which
-// the runner's own temporary directories exceed.
-func shortDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "wf")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
+// shortDir is a directory whose path fits a unix socket's length limit.
+func shortDir(t *testing.T) string { return tempdirstest.ShortDir(t, "wf") }
 
 func records(log *dlog.TestLogger, level, op string) []dlog.Record {
 	return dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: level, Operation: op})

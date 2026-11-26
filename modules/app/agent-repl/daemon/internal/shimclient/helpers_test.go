@@ -198,20 +198,7 @@ func testBackoff() Option { return WithBackoff(time.Millisecond, 5*time.Millisec
 
 // shortDir is a temp directory whose path is short enough for a unix socket:
 // macOS caps sun_path at 104 bytes and $TMPDIR is nowhere near short enough.
-func shortDir(t *testing.T) string {
-	t.Helper()
-
-	base, err := tempdirstest.ShortBase(os.Getenv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(base, "sc")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
+func shortDir(t *testing.T) string { return tempdirstest.ShortDir(t, "sc") }
 
 // helperSink is the read end of the pipe the child's fd 3 writes to. Reading it
 // BLOCKS until the child has reported itself, so no test ever polls.

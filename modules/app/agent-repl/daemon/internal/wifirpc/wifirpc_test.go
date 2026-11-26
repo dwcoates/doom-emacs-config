@@ -22,6 +22,7 @@ import (
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/tempdirs/tempdirstest"
 )
 
 // fakeController answers every Update with response and records each request.
@@ -63,17 +64,8 @@ func dialRPC(socket string) persistentwifiv1connect.PersistentWifiClient {
 	return rpc
 }
 
-// shortDir is a directory whose path fits a unix socket's length limit, which
-// the runner's own temporary directories exceed.
-func shortDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "wr")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
+// shortDir is a directory whose path fits a unix socket's length limit.
+func shortDir(t *testing.T) string { return tempdirstest.ShortDir(t, "wr") }
 
 // heldListener is a unix listener a server's Shutdown stops accepting on
 // without closing it, as a socket holder keeps its sockets open across a

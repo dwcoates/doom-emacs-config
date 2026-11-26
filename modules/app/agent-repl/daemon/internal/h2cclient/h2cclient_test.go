@@ -1,10 +1,10 @@
 package h2cclient
 
 import (
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -14,11 +14,7 @@ import (
 
 func serveHello(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "uh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := tempdirstest.ShortDir(t, "uh")
 	sock := filepath.Join(dir, "s.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
