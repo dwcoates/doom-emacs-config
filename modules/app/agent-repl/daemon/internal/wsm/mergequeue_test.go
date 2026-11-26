@@ -1454,7 +1454,6 @@ func TestRequestOneShotMergeRefusesASourceThatIsNoOneShot(t *testing.T) {
 		source MergeSource
 	}{
 		{name: "kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID(), DetachMaker: "maker"}},
 		{name: "another branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
 	}
 	for _, tt := range tests {
@@ -1527,7 +1526,7 @@ func TestRequestOneShotMergeRefusesADuplicateAndLeavesTheRequesterUnmarked(t *te
 	}
 }
 
-func TestIsOneShotAcceptsOnlyAnInPlaceOwnBranchThatClosesTheRequester(t *testing.T) {
+func TestIsOneShotAcceptsOnlyAnOwnBranchThatClosesTheRequester(t *testing.T) {
 	tests := []struct {
 		name   string
 		source MergeSource
@@ -1535,7 +1534,6 @@ func TestIsOneShotAcceptsOnlyAnInPlaceOwnBranchThatClosesTheRequester(t *testing
 	}{
 		{name: "own branch", source: ownBranch, want: true},
 		{name: "own branch kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "own branch detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: "d", DetachMaker: "maker"}},
 		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w"}},
 		{name: "a branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
 	}
@@ -3640,7 +3638,7 @@ func TestPlaceMergeRefusesAnUndeclaredPlaceAndMovesNothing(t *testing.T) {
 	}
 }
 
-func TestParksWhileQueuedAcceptsOnlyAnOwnBranchWithNoPick(t *testing.T) {
+func TestParksWhileQueuedAcceptsOnlyAnOwnBranch(t *testing.T) {
 	tests := []struct {
 		name   string
 		source MergeSource
@@ -3648,7 +3646,6 @@ func TestParksWhileQueuedAcceptsOnlyAnOwnBranchWithNoPick(t *testing.T) {
 	}{
 		{name: "an own-branch merge", source: MergeSource{Kind: MergeSourceOwnBranch}, want: true},
 		{name: "an own-branch merge kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}, want: true},
-		{name: "a merge workspace's merge with a pick", source: MergeSource{Kind: MergeSourceOwnBranch, Pick: "fix it"}},
 		{name: "another workspace's merge", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "other"}},
 		{name: "a named branch's merge", source: MergeSource{Kind: MergeSourceBranch, Branch: "feature"}},
 	}

@@ -236,28 +236,6 @@ func TestReopenOpensAMergedWorkspace(t *testing.T) {
 	}
 }
 
-func TestReopenRevealsAMergedMergeWorkspace(t *testing.T) {
-	// Arrange: a merge workspace that landed without ever being revealed.
-	s, _ := testStore(t)
-	requester := testWorkspace(t, s)
-	ws := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-	mergedAndClosed(t, s, ws)
-
-	// Act
-	if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
-		t.Fatalf("Reopen: %v", err)
-	}
-
-	// Assert
-	got, err := s.Workspace(context.Background(), ws.ID)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	if got.MergeHidden() {
-		t.Fatalf("the reopened merge workspace is hidden (revealed = %v), want it drawn", got.MergeRevealed)
-	}
-}
-
 func TestReopenKeepsTheLandingOfAWorkspaceThatIsNotMerged(t *testing.T) {
 	// Arrange: a requester whose detached merge landed keeps its worktree and
 	// is never stamped merged; the sweep still owes it its retirement.

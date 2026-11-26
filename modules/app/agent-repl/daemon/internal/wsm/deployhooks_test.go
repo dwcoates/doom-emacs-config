@@ -1,6 +1,7 @@
 package wsm
 
 import (
+	"agent-repld/internal/lifecycleconfig"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -332,4 +333,14 @@ func TestTheMigrationCarriesSuspendedMergesIntoTheDeployQueue(t *testing.T) {
 	if doc != `{"rollout_requested":true,"step":"post_deploy"}` {
 		t.Fatalf("the post-prompt record = %s, want it at the post-deploy stage with its rollout requested", doc)
 	}
+}
+
+// promptHook is a prompt hook of TEXT.
+func promptHook(text string) *repoconfigv1.Hook {
+	return lifecycleconfig.PromptHook(text)
+}
+
+// scriptHook is a script hook of PATH bounded at SECONDS.
+func scriptHook(path string, seconds uint32) *repoconfigv1.Hook {
+	return lifecycleconfig.ScriptHook(path, seconds)
 }

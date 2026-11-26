@@ -43,32 +43,6 @@ func TestARequestKeepsItsVersionIncrementInTheQueue(t *testing.T) {
 	}
 }
 
-func TestHandOffDetachedMergeCarriesTheVersionIncrementToTheMergeWorkspace(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	requester := testWorkspace(t, s)
-	repo := RepoKey(t.TempDir())
-	request := NewDetachedMergeID()
-	version := &VersionIncrement{Part: semver.Minor, ChangelogLine: "Merges record a version"}
-	asyncRequest(t, s, repo, requester.ID, MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: request, DetachMaker: "maker", DetachName: "sample-merge", Version: version})
-	forked := registerMergeWorkspace(t, s, requester.ID, request)
-
-	// Act
-	err := s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", "", time.Unix(200, 0))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("HandOffDetachedMerge: %v", err)
-	}
-	queue, err := s.MergeQueue(context.Background(), repo)
-	if err != nil || len(queue) != 1 || queue[0].Workspace != forked.ID {
-		t.Fatalf("MergeQueue = %+v, %v; want the merge workspace's entry", queue, err)
-	}
-	if got := queue[0].Source.Version; got == nil || *got != *version {
-		t.Fatalf("Version = %+v, want %+v carried over", got, version)
-	}
-}
-
 func TestAVersionIncrementThatContradictsItsSourceIsInvalid(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -13,7 +13,7 @@ import (
 // still deploying since second AT.
 func deployingMergeOf(repo RepoKey, ws WorkspaceID, at int64) DeployingMerge {
 	return DeployingMerge{
-		Repo: repo, Workspace: ws, Lease: LeaseID("lease-" + ws), Credited: "requester", Async: true, Name: string(ws) + "-name",
+		Repo: repo, Workspace: ws, Lease: LeaseID("lease-" + ws),  Name: string(ws) + "-name",
 		Branch: "feature", TargetDir: "/w/doom", ActiveSince: time.Unix(at-60, 0).UTC(), DeployingSince: time.Unix(at, 0).UTC(), Timed: true,
 	}
 }

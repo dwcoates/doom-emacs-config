@@ -96,7 +96,6 @@ func TestInMergedBand(t *testing.T) {
 		{name: "a reopened merged workspace is not", ws: Workspace{MergedAt: &merged}, want: false},
 		{name: "a closed workspace that never merged is not", ws: Workspace{Closed: true}, want: false},
 		{name: "a settled chat thread is not", ws: Workspace{Kind: WorkspaceKindThread, Closed: true, MergedAt: &merged}, want: false},
-		{name: "a landed merge workspace is", ws: Workspace{MergeOf: &MergeOrigin{Requester: "requester"}, Closed: true, MergedAt: &merged}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -161,18 +160,14 @@ func TestTheBacklogIsOneStatement(t *testing.T) {
 // persisted visibility: over every combination of the facts Runs reads, a
 // visible workspace runs.
 func TestEveryVisibleWorkspaceRuns(t *testing.T) {
-	of := MergeOrigin{}
 	merged := time.Unix(100, 0)
-	for mask := 0; mask < 1<<7; mask++ {
+	for mask := 0; mask < 1<<6; mask++ {
 		bit := func(i int) bool { return mask&(1<<i) != 0 }
 		ws := Workspace{Backlogged: bit(0), Closed: bit(1), Current: bit(2), OneShot: bit(3)}
 		if bit(4) {
 			ws.Mediator = MediatorDeploy
 		}
 		if bit(5) {
-			ws.MergeOf = &of
-		}
-		if bit(6) {
 			ws.MergedAt = &merged
 		}
 		for _, v := range []Visibility{UnselectedVisible, Selected} {
@@ -188,7 +183,6 @@ func TestEveryVisibleWorkspaceRuns(t *testing.T) {
 }
 
 func TestRuns(t *testing.T) {
-	of := MergeOrigin{}
 	cases := []struct {
 		name        string
 		ws          Workspace
@@ -201,9 +195,6 @@ func TestRuns(t *testing.T) {
 		{name: "a backlogged selection runs", ws: Workspace{Backlogged: true, Visibility: Selected}, want: true},
 		{name: "a workspace that is not visible does not run", ws: Workspace{}, want: false},
 		{name: "a collapsed workspace that is not visible does not run", ws: Workspace{}, repoFolded: true, want: false},
-		{name: "a hidden merge workspace runs in a collapsed section", ws: Workspace{MergeOf: &of}, repoFolded: true, mergeQueued: true, want: true},
-		{name: "a hidden merge workspace whose merge left every queue does not run", ws: Workspace{MergeOf: &of}, want: false},
-		{name: "a selected hidden merge workspace whose merge left every queue runs", ws: Workspace{MergeOf: &of, Visibility: Selected}, want: true},
 		{name: "a backlogged workspace with a merge queued runs", ws: Workspace{Backlogged: true}, mergeQueued: true, want: true},
 		{name: "a closed workspace with a merge queued runs", ws: Workspace{Closed: true}, mergeQueued: true, want: true},
 		{name: "a collapsed one-shot runs, as the fold spares it", ws: Workspace{OneShot: true}, repoFolded: true, want: true},
@@ -301,7 +292,6 @@ func TestKeptWarmIgnoresCollapsingAndKeepsABacklogForItsLastBeat(t *testing.T) {
 	}{
 		{name: "a drawn workspace is kept warm", ws: Workspace{ID: "w"}, want: true},
 		{name: "a backlogged workspace is kept warm for its last beat, which the keeper spends", ws: Workspace{ID: "w", Backlogged: true, BackloggedAt: &backloggedAt}, want: true},
-		{name: "a hidden merge workspace is not kept warm", ws: Workspace{ID: "w", MergeOf: &MergeOrigin{}}},
 		{name: "a backlogged workspace the user is looking at is kept warm", ws: Workspace{ID: "w", Backlogged: true, BackloggedAt: &backloggedAt, Current: true}, want: true},
 		{name: "a backlogged workspace with a merge queued is kept warm", ws: Workspace{ID: "w", Backlogged: true, BackloggedAt: &backloggedAt}, queued: true, want: true},
 	}

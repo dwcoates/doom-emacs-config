@@ -21,8 +21,6 @@ func TestSiblings(t *testing.T) {
 			all: []Workspace{me, {ID: "a", Parent: &q}}},
 		{name: "a closed child is no sibling", ws: me,
 			all: []Workspace{me, {ID: "a", Parent: &p, Closed: true}}},
-		{name: "a merge workspace is no sibling", ws: me,
-			all: []Workspace{me, {ID: "a", Parent: &p, MergeOf: &MergeOrigin{}}}},
 		{name: "a top-level workspace has no siblings", ws: Workspace{ID: "top"},
 			all: []Workspace{{ID: "x"}, {ID: "y"}}},
 		{name: "a top-level workspace is no one's sibling", ws: me,

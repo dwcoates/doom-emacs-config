@@ -190,9 +190,6 @@ func refusalCases() []placementRefusalCase {
 			parent := creator.ID
 			return RegisterFacts{Parent: &parent, Placement: &RegisterPlacement{OneShots: true}}, ErrPlacementOnChild
 		}, check: func(t *testing.T, err error) {}},
-		{name: "a merge workspace", arrange: func(t *testing.T, s *store, repoDir string, creator Workspace) (RegisterFacts, error) {
-			return RegisterFacts{MergeOf: &MergeOrigin{Requester: creator.ID, Request: NewDetachedMergeID()}, Placement: newWith(creator, "x")}, ErrPlacementOnMerge
-		}, check: func(t *testing.T, err error) {}},
 		{name: "an unknown subsection", arrange: func(t *testing.T, s *store, repoDir string, creator Workspace) (RegisterFacts, error) {
 			return RegisterFacts{Placement: &RegisterPlacement{Into: "nowhere", CreatedBy: creator.ID}}, nil
 		}, check: func(t *testing.T, err error) {
@@ -312,7 +309,7 @@ func TestRefusePlacementAnswersTheSameRefusalsBeforeAnythingIsMade(t *testing.T)
 			facts, wantErr := tt.arrange(t, s, repoDir, creator)
 
 			// Act
-			err := s.RefusePlacement(context.Background(), repoDir, *facts.Placement, facts.Parent, facts.MergeOf != nil)
+			err := s.RefusePlacement(context.Background(), repoDir, *facts.Placement, facts.Parent)
 
 			// Assert
 			if err == nil || !IsPlacementRefusal(err) || (wantErr != nil && !errors.Is(err, wantErr)) {
@@ -334,7 +331,7 @@ func TestRefusePlacementAcceptsAGatherableCreate(t *testing.T) {
 	registerIn(t, s, repoDir, "mate", nil)
 
 	// Act
-	err := s.RefusePlacement(context.Background(), repoDir, RegisterPlacement{New: &NewSubsectionPlacement{Name: "x", Gather: []string{"mate"}}, CreatedBy: creator.ID}, nil, false)
+	err := s.RefusePlacement(context.Background(), repoDir, RegisterPlacement{New: &NewSubsectionPlacement{Name: "x", Gather: []string{"mate"}}, CreatedBy: creator.ID}, nil)
 
 	// Assert
 	if err != nil {
@@ -350,7 +347,7 @@ func TestRefusePlacementFailsOnAnUnknownRepository(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	err := s.RefusePlacement(context.Background(), arrangeRepo(t, "nowhere"), RegisterPlacement{Into: "x"}, nil, false)
+	err := s.RefusePlacement(context.Background(), arrangeRepo(t, "nowhere"), RegisterPlacement{Into: "x"}, nil)
 
 	// Assert
 	if !errors.Is(err, ErrUnknownRepository) {
@@ -380,7 +377,7 @@ func TestAPlacementNamingBothOrNeitherTargetPanics(t *testing.T) {
 			}()
 
 			// Act
-			_, _ = checkPlacement(context.Background(), nil, "repo", tt.placement, nil, false)
+			_, _ = checkPlacement(context.Background(), nil, "repo", tt.placement, nil)
 		})
 	}
 }

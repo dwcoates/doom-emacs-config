@@ -3,67 +3,9 @@ package wsm
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 )
-
-func TestRegisterWorkspaceRecordsAMergeWorkspacesForkHead(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	requester := testWorkspace(t, s)
-	dir := t.TempDir()
-	origin := MergeOrigin{Requester: requester.ID, Request: NewDetachedMergeID(), ForkHead: "f00d"}
-
-	// Act
-	ws, _, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{
-		Name: "sample-merge", Branch: "sample-merge", ParentBranch: "master", Parent: &requester.ID, RepoDir: dir,
-		MergeOf: &origin,
-	})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace: %v", err)
-	}
-	loaded, err := s.Workspace(context.Background(), ws.ID)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	if loaded.MergeOf == nil || !reflect.DeepEqual(*loaded.MergeOf, origin) {
-		t.Fatalf("MergeOf = %+v, want %+v", loaded.MergeOf, origin)
-	}
-}
-
-func TestAMergeWorkspaceForkedBeforeForkHeadsWereRecordedReadsAnEmptyForkHead(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	requester := testWorkspace(t, s)
-
-	// Act
-	ws := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
-	got := scalar[*string](t, s, `SELECT merge_fork_head FROM workspaces WHERE id = ?`, ws.ID)
-
-	// Assert
-	if got != nil {
-		t.Fatalf("merge_fork_head = %q, want NULL", *got)
-	}
-}
-
-func TestAForkHeadOnARowThatIsNoMergeWorkspaceIsRefused(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	corrupt(t, s, `UPDATE workspaces SET merge_fork_head = 'f00d' WHERE id = ?`, ws.ID)
-
-	// Act
-	_, err := s.Workspace(context.Background(), ws.ID)
-
-	// Assert
-	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "merge_fork_head" {
-		t.Fatalf("Workspace = %v, want a merge_fork_head DecodeError", err)
-	}
-}
 
 func TestAWorkspaceHasNoLandingUntilOneIsRecorded(t *testing.T) {
 	// Arrange
